@@ -1,0 +1,21 @@
+# dependencies
+node_modules/
+
+# build outputs
+dist/
+out/
+.next/
+
+# dashboard build bundled into relay
+packages/relay/public/
+
+# local work logs (not for contributors)
+.work/
+
+# env
+.env
+.env.local
+.env.*.local
+
+# os
+.DS_Store

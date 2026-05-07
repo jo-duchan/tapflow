@@ -1,0 +1,20 @@
+{
+  "name": "@tapflow/playground",
+  "version": "0.0.0",
+  "private": true,
+  "scripts": {
+    "relay": "tsx relay.ts",
+    "ios-agent": "tsx ios-agent.ts",
+    "android-agent": "tsx android-agent.ts"
+  },
+  "dependencies": {
+    "@tapflow/agent-core": "*",
+    "@tapflow/ios-agent": "*",
+    "@tapflow/android-agent": "*",
+    "@tapflow/relay": "*"
+  },
+  "devDependencies": {
+    "tsx": "^4.0.0",
+    "typescript": "^5.0.0"
+  }
+}

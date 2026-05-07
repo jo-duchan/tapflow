@@ -1,0 +1,13 @@
+{
+  "name": "@tapflow/agent-core",
+  "version": "0.1.0",
+  "description": "DeviceAgent interface and AgentRegistry",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "license": "MIT",
+  "scripts": {
+    "build": "tsc",
+    "test": "vitest run",
+    "lint": "eslint src"
+  }
+}

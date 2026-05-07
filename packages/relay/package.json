@@ -1,0 +1,22 @@
+{
+  "name": "@tapflow/relay",
+  "version": "0.1.0",
+  "description": "WebSocket relay server with bundled dashboard — NAT traversal, session routing, JWT auth",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "license": "MIT",
+  "files": [
+    "dist",
+    "public",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "tsc",
+    "start": "node dist/index.js",
+    "test": "vitest run",
+    "lint": "eslint src"
+  },
+  "dependencies": {
+    "ws": "^8.0.0"
+  }
+}
