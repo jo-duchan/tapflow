@@ -137,6 +137,10 @@ POST http://localhost:8100/session/{id}/actions
 ]}]}
 ```
 
+> **WDA 실행 전제 조건 (Phase 1)**  
+> Phase 1에서는 WDA가 이미 실행 중인 상태(`localhost:8100`)를 가정한다.  
+> Phase 2에서 `npx tapflow ios setup` 커맨드로 설치·빌드·실행을 자동화한다.
+
 ### 4.3 AndroidAgent
 
 **에뮬레이터 제어**
@@ -230,12 +234,19 @@ npx tapflow agent start --relay wss://relay.myteam.tapflow.dev
 # 3. QA팀 초대
 npx tapflow invite qa@company.com
 
-# 4. 앱 빌드 업로드 (개발자 — CI/CD 또는 수동)
+# 4. iOS 환경 초기 세팅 (Mac Agent 머신에서 1회)
+npx tapflow ios setup
+  > Downloading WebDriverAgent...
+  > ? Apple Team ID (found: AUG3P9AA8U): [enter]
+  > Building WDA for simulator... (~2분)
+  > ✓ WDA ready — localhost:8100 will auto-start with agent
+
+# 5. 앱 빌드 업로드 (개발자 — CI/CD 또는 수동)
 npx tapflow upload MyApp.ipa --name "v1.2.3-staging"
   > ✓ Uploaded to iOS Agent (12.3 MB)
   > ✓ Version registered: v1.2.3-staging
 
-# 5. 상태 확인
+# 6. 상태 확인
 npx tapflow status
 ```
 
@@ -295,6 +306,10 @@ await agent.boot(selectedDeviceId)
 목표: QA팀이 실제로 쓸 수 있는 수준
 
 - CLI: `npx tapflow deploy` (fly.io 먼저)
+- CLI: `npx tapflow ios setup` — WDA 자동 설치·빌드·실행
+  - `appium-webdriveragent` npm 패키지 다운로드
+  - `xcodebuild`로 시뮬레이터용 빌드 (Team ID 1회 입력)
+  - 이후 `agent start` 시 WDA 자동 시작
 - JWT 인증 + 팀 초대 시스템
 - 세션 녹화 + 재생
 - 스크린샷 + 버그 리포트
