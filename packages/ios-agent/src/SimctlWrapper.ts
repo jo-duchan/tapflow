@@ -65,8 +65,6 @@ export class SimctlWrapper {
   }
 
   async screenshot(): Promise<Buffer> {
-    // stdout returns PNG binary when target is '-'
-    const output = await this.runner.exec('io', 'booted', 'screenshot', '-', '--type=png')
-    return Buffer.from(output, 'binary')
+    return this.runner.execBinary('io', 'booted', 'screenshot', '-', '--type=png')
   }
 }

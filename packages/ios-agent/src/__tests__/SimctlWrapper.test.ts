@@ -15,6 +15,7 @@ const SIMCTL_LIST_OUTPUT = JSON.stringify({
 function mockRunner(outputs: Record<string, string> = {}): SimctlRunner {
   return {
     exec: vi.fn(async (...args: string[]) => outputs[args[0]] ?? ''),
+    execBinary: vi.fn().mockResolvedValue(Buffer.alloc(0)),
   }
 }
 
@@ -98,14 +99,16 @@ describe('SimctlWrapper', () => {
   })
 
   describe('screenshot', () => {
-    it('calls simctl io booted screenshot and returns a buffer', async () => {
+    it('calls execBinary for binary-safe PNG capture', async () => {
+      const pngMagic = Buffer.from([0x89, 0x50, 0x4e, 0x47])
       const runner: SimctlRunner = {
         exec: vi.fn().mockResolvedValue(''),
+        execBinary: vi.fn().mockResolvedValue(pngMagic),
       }
       const wrapper = new SimctlWrapper(runner)
       const buf = await wrapper.screenshot()
-      expect(runner.exec).toHaveBeenCalledWith('io', 'booted', 'screenshot', '-', '--type=png')
-      expect(buf).toBeInstanceOf(Buffer)
+      expect(runner.execBinary).toHaveBeenCalledWith('io', 'booted', 'screenshot', '-', '--type=png')
+      expect(buf).toEqual(pngMagic)
     })
   })
 })
