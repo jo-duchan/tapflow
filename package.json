@@ -1,0 +1,15 @@
+{
+  "name": "tapflow",
+  "version": "0.0.1",
+  "description": "Self-hosted QA device streaming and remote control toolkit.",
+  "license": "MIT",
+  "private": false,
+  "bin": {
+    "tapflow": "./bin/tapflow.js"
+  },
+  "files": [
+    "bin",
+    "README.md",
+    "LICENSE"
+  ]
+}
