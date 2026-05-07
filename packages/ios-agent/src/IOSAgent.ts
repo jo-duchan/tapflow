@@ -31,8 +31,17 @@ export class IOSAgent implements DeviceAgent {
     return new Promise((resolve, reject) => {
       const ws = new WebSocket(relayUrl)
 
-      ws.once('open', () => {
-        ws.send(JSON.stringify({ type: 'agent:register' }))
+      ws.once('open', async () => {
+        const devices = await this.simctl.listDevices()
+        ws.send(JSON.stringify({
+          type: 'agent:register',
+          devices: devices.map((d) => ({
+            id: d.id,
+            name: d.name,
+            platform: d.platform,
+            status: d.status,
+          })),
+        }))
       })
 
       ws.once('message', (data) => {

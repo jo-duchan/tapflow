@@ -66,4 +66,26 @@ describe('SessionManager', () => {
     const sm = new SessionManager()
     expect(sm.getBySocket(mockSocket())).toBeUndefined()
   })
+
+  it('stores devices when creating a session', () => {
+    const sm = new SessionManager()
+    const devices = [{ id: 'd1', name: 'iPhone 15', platform: 'ios', status: 'shutdown' }]
+    const id = sm.create(mockSocket(), devices)
+    expect(sm.get(id)?.devices).toEqual(devices)
+  })
+
+  it('list() returns all sessions with their devices', () => {
+    const sm = new SessionManager()
+    const devices = [{ id: 'd1', name: 'iPhone 15', platform: 'ios', status: 'booted' }]
+    const id = sm.create(mockSocket(), devices)
+    const listed = sm.list()
+    expect(listed).toHaveLength(1)
+    expect(listed[0].sessionId).toBe(id)
+    expect(listed[0].devices).toEqual(devices)
+  })
+
+  it('list() returns empty array when no sessions', () => {
+    const sm = new SessionManager()
+    expect(sm.list()).toEqual([])
+  })
 })

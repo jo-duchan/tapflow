@@ -1,18 +1,20 @@
 import { randomUUID } from 'crypto'
 import type { WebSocket } from 'ws'
+import type { DeviceInfo, SessionInfo } from './types'
 
 export interface Session {
   id: string
   agentSocket: WebSocket
   browserSocket: WebSocket | null
+  devices: DeviceInfo[]
 }
 
 export class SessionManager {
   private sessions = new Map<string, Session>()
 
-  create(agentSocket: WebSocket): string {
+  create(agentSocket: WebSocket, devices: DeviceInfo[] = []): string {
     const id = randomUUID()
-    this.sessions.set(id, { id, agentSocket, browserSocket: null })
+    this.sessions.set(id, { id, agentSocket, browserSocket: null, devices })
     return id
   }
 
@@ -37,5 +39,12 @@ export class SessionManager {
       }
     }
     return undefined
+  }
+
+  list(): SessionInfo[] {
+    return Array.from(this.sessions.values()).map((s) => ({
+      sessionId: s.id,
+      devices: s.devices,
+    }))
   }
 }

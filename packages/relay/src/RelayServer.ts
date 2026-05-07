@@ -64,8 +64,14 @@ export class RelayServer {
   private route(ws: WebSocket, msg: RelayMessage): void {
     switch (msg.type) {
       case 'agent:register': {
-        const sessionId = this.sessions.create(ws)
+        const sessionId = this.sessions.create(ws, msg.devices ?? [])
         ws.send(JSON.stringify({ type: 'agent:registered', sessionId }))
+        break
+      }
+
+      case 'agents:list': {
+        const sessions = this.sessions.list()
+        ws.send(JSON.stringify({ type: 'agents:listed', sessions }))
         break
       }
 

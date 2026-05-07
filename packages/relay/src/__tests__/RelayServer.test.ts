@@ -108,4 +108,24 @@ describe('RelayServer', () => {
     expect(msg.type).toBe('error')
     browser.close()
   })
+
+  it('returns agents list with devices', async () => {
+    const devices = [{ id: 'd1', name: 'iPhone 15', platform: 'ios', status: 'shutdown' }]
+    const agent = new WebSocket(`ws://localhost:${port}`)
+    await waitForOpen(agent)
+    agent.send(JSON.stringify({ type: 'agent:register', devices }))
+    await waitForMessage(agent)
+
+    const browser = new WebSocket(`ws://localhost:${port}`)
+    await waitForOpen(browser)
+    browser.send(JSON.stringify({ type: 'agents:list' }))
+    const msg = await waitForMessage(browser)
+
+    expect(msg.type).toBe('agents:listed')
+    expect(msg.sessions).toHaveLength(1)
+    expect(msg.sessions![0].devices).toEqual(devices)
+
+    agent.close()
+    browser.close()
+  })
 })
