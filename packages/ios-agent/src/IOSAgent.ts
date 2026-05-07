@@ -2,21 +2,25 @@ import { WebSocket } from 'ws'
 import type { Device, DeviceAgent, Point } from '@tapflow/agent-core'
 import { SimctlWrapper } from './SimctlWrapper'
 import { MjpegStreamer } from './MjpegStreamer'
+import { WdaClient } from './WdaClient'
 
 export interface IOSAgentOptions {
   intervalMs?: number
+  wdaUrl?: string
 }
 
 export class IOSAgent implements DeviceAgent {
   private readonly simctl: SimctlWrapper
   private readonly streamer: MjpegStreamer
+  private readonly wda: WdaClient
   private ws: WebSocket | null = null
   private _sessionId: string | null = null
   private streamReader: ReadableStreamDefaultReader<Buffer> | null = null
 
-  constructor(options: IOSAgentOptions = {}, simctl?: SimctlWrapper) {
+  constructor(options: IOSAgentOptions = {}, simctl?: SimctlWrapper, wda?: WdaClient) {
     this.simctl = simctl ?? new SimctlWrapper()
     this.streamer = new MjpegStreamer(this.simctl, options.intervalMs)
+    this.wda = wda ?? new WdaClient(options.wdaUrl)
   }
 
   get sessionId(): string | null {
@@ -89,8 +93,7 @@ export class IOSAgent implements DeviceAgent {
   screenshot(): Promise<Buffer> { return this.simctl.screenshot() }
   stream(): ReadableStream { return this.streamer.start() }
 
-  // WDA stubs — implemented in Phase 2
-  async tap(_x: number, _y: number): Promise<void> {}
-  async swipe(_from: Point, _to: Point): Promise<void> {}
-  async type(_text: string): Promise<void> {}
+  tap(x: number, y: number): Promise<void> { return this.wda.tap(x, y) }
+  swipe(from: Point, to: Point): Promise<void> { return this.wda.swipe(from, to) }
+  type(text: string): Promise<void> { return this.wda.type(text) }
 }
