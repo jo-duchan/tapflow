@@ -6,6 +6,16 @@ const SRC_DIR = join(__dirname, '..', 'src')
 const SWIFT_SRC = join(SRC_DIR, 'screencapture-helper.swift')
 const BINARY = join(SRC_DIR, 'screencapture-helper')
 
+// All values in DeviceKit composite PDF points (1x)
+export interface ChromeGeometry {
+  compositeWidth: number
+  compositeHeight: number
+  screenX: number
+  screenY: number
+  screenWidth: number
+  screenHeight: number
+}
+
 function ensureCompiled(): void {
   if (existsSync(BINARY)) return
   console.error('[ScreenCaptureStreamer] compiling screencapture-helper...')
@@ -22,15 +32,19 @@ function ensureCompiled(): void {
 export class ScreenCaptureStreamer {
   constructor(
     private readonly fps: number = 30,
-    private readonly iosScreenSize?: { width: number; height: number },
+    private readonly geometry: ChromeGeometry,
   ) {}
 
   start(): ReadableStream<Buffer> {
     ensureCompiled()
 
-    const args = this.iosScreenSize
-      ? [String(this.fps), String(this.iosScreenSize.width), String(this.iosScreenSize.height)]
-      : [String(this.fps), '393', '852']
+    const g = this.geometry
+    const args = [
+      String(this.fps),
+      String(g.compositeWidth), String(g.compositeHeight),
+      String(g.screenX), String(g.screenY),
+      String(g.screenWidth), String(g.screenHeight),
+    ]
 
     const proc = spawn(BINARY, args, { stdio: ['ignore', 'pipe', 'pipe'] })
 

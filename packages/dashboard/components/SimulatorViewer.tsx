@@ -114,10 +114,10 @@ export function SimulatorViewer({ sessionId, onBack }: Props) {
 
       {chrome ? (
         /* Bezel mode: device frame image with canvas positioned inside screen area */
-        <div className="relative inline-block max-h-[80vh]">
+        <div className="relative inline-block" style={{ width: chrome.physicalWidthPx }}>
           <img
             src={`data:image/png;base64,${chrome.bezelPng}`}
-            className="block h-full w-auto max-h-[80vh] select-none"
+            className="block w-full select-none"
             draggable={false}
             alt="device frame"
           />

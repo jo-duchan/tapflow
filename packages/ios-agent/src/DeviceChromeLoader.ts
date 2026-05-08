@@ -26,6 +26,8 @@ export interface ChromeData {
   bezelWidth: number
   bezelHeight: number
   screenRect: ChromeRect
+  /** CSS pixel width of the full device at physical (real-world) size on a 96-DPI display */
+  physicalWidthPx: number
   buttons: ChromeButton[]
 }
 
@@ -49,7 +51,7 @@ export class DeviceChromeLoader {
 
       const profile = readPlistAsJson(
         join(simdevicetypePath, 'Contents', 'Resources', 'profile.plist'),
-      ) as { modelIdentifier: string }
+      ) as { modelIdentifier: string; mainScreenWidth: number; mainScreenWidthDPI: number }
 
       const chromeMap = readPlistAsJson(CHROME_MAP_PATH) as Record<string, { ChromeIdentifier: string }>
       const entry = chromeMap[profile.modelIdentifier]
@@ -102,11 +104,16 @@ export class DeviceChromeLoader {
         },
       }))
 
+      // Physical CSS width: screen inches × 96 CSS-DPI, scaled up to full composite width
+      const screenWidthCssPx = (profile.mainScreenWidth / profile.mainScreenWidthDPI) * 96
+      const physicalWidthPx = Math.round(screenWidthCssPx * (pdfSize.width / (pdfSize.width - leftWidth - rightWidth)))
+
       return {
         bezelPng: readFileSync(pngPath).toString('base64'),
         bezelWidth: pngSize.width,
         bezelHeight: pngSize.height,
         screenRect,
+        physicalWidthPx,
         buttons,
       }
     } catch {

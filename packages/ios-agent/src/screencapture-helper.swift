@@ -3,19 +3,24 @@
 // Writes length-prefixed JPEG frames to stdout.
 //
 // Frame format: [4 bytes big-endian uint32 = JPEG byte length][JPEG bytes]
-// Usage: screencapture-helper <fps> <ios_width> <ios_height>
+// Usage: screencapture-helper <fps> <compositeW> <compositeH> <screenX> <screenY> <screenW> <screenH>
+//   All dimensions are in DeviceKit composite PDF points (1x).
 
 import ScreenCaptureKit
 import AppKit
 import Foundation
 import ImageIO
 
-guard CommandLine.arguments.count == 4,
-      let fps       = Double(CommandLine.arguments[1]),
-      let iosWidth  = Double(CommandLine.arguments[2]),
-      let iosHeight = Double(CommandLine.arguments[3])
+guard CommandLine.arguments.count == 8,
+      let fps        = Double(CommandLine.arguments[1]),
+      let compositeW = Double(CommandLine.arguments[2]),
+      let compositeH = Double(CommandLine.arguments[3]),
+      let screenX    = Double(CommandLine.arguments[4]),
+      let screenY    = Double(CommandLine.arguments[5]),
+      let screenW    = Double(CommandLine.arguments[6]),
+      let screenH    = Double(CommandLine.arguments[7])
 else {
-    fputs("usage: screencapture-helper <fps> <ios_width> <ios_height>\n", stderr)
+    fputs("usage: screencapture-helper <fps> <compositeW> <compositeH> <screenX> <screenY> <screenW> <screenH>\n", stderr)
     exit(1)
 }
 
@@ -51,23 +56,26 @@ SCShareableContent.getExcludingDesktopWindows(false, onScreenWindowsOnly: false)
     let winW = window.frame.width
     let winH = window.frame.height
 
-    // Calculate the iOS screen rect within the Simulator window.
-    // The device bezel is symmetric left/right and bottom; top also has the Simulator toolbar.
-    let hInset = (winW - iosWidth) / 2          // horizontal bezel width
-    let bInset = hInset                          // bottom bezel ≈ horizontal bezel
-    let tInset = winH - iosHeight - bInset       // top chrome (titlebar + device top)
-    let screenRect = CGRect(x: hInset, y: tInset, width: iosWidth, height: iosHeight)
+    // S = Simulator zoom scale factor (window width = composite PDF width × S)
+    // Works correctly at any zoom level (Point Accurate, Fit to Screen, Pixel Accurate, etc.)
+    let S = winW / compositeW
+    let macOSChromeH = winH - compositeH * S   // macOS title bar + Simulator toolbar height
 
-    fputs("info: window=\(Int(winW))x\(Int(winH)) ios=\(Int(iosWidth))x\(Int(iosHeight)) crop=\(screenRect) at \(Int(fps))fps\n", stderr)
+    let cropX = screenX * S
+    let cropY = macOSChromeH + screenY * S
+    let cropW = screenW * S
+    let cropH = screenH * S
+    let screenRect = CGRect(x: cropX, y: cropY, width: cropW, height: cropH)
+
+    fputs("info: window=\(Int(winW))x\(Int(winH)) S=\(String(format: "%.3f", S)) macOSChrome=\(Int(macOSChromeH)) crop=\(screenRect) at \(Int(fps))fps\n", stderr)
 
     sharedFilter = SCContentFilter(desktopIndependentWindow: window)
     let config = SCStreamConfiguration()
     config.showsCursor = false
-    // sourceRect crops the capture to just the iOS screen area
     config.sourceRect = screenRect
-    // Output at 2x logical resolution for retina quality
-    config.width  = Int(iosWidth)  * 2
-    config.height = Int(iosHeight) * 2
+    // Capture at 2x for retina quality
+    config.width  = Int(screenW) * 2
+    config.height = Int(screenH) * 2
     sharedConfig = config
 }
 setupSema.wait()
