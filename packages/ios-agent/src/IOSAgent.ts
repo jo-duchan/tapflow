@@ -1,25 +1,27 @@
 import { WebSocket } from 'ws'
 import type { Device, DeviceAgent, Point } from '@tapflow/agent-core'
 import { SimctlWrapper } from './SimctlWrapper'
-import { MjpegStreamer } from './MjpegStreamer'
+import { ScreenCaptureStreamer } from './ScreenCaptureStreamer'
 import { WdaClient } from './WdaClient'
 
 export interface IOSAgentOptions {
-  intervalMs?: number
+  fps?: number
   wdaUrl?: string
 }
 
 export class IOSAgent implements DeviceAgent {
   private readonly simctl: SimctlWrapper
-  private readonly streamer: MjpegStreamer
+  private readonly streamer: ScreenCaptureStreamer
   private readonly wda: WdaClient
+  private readonly fps: number
   private ws: WebSocket | null = null
   private _sessionId: string | null = null
   private streamReader: ReadableStreamDefaultReader<Buffer> | null = null
 
   constructor(options: IOSAgentOptions = {}, simctl?: SimctlWrapper, wda?: WdaClient) {
     this.simctl = simctl ?? new SimctlWrapper()
-    this.streamer = new MjpegStreamer(this.simctl, options.intervalMs)
+    this.fps = options.fps ?? 30
+    this.streamer = new ScreenCaptureStreamer(this.fps)
     this.wda = wda ?? new WdaClient(options.wdaUrl)
   }
 
@@ -69,8 +71,10 @@ export class IOSAgent implements DeviceAgent {
     this._sessionId = null
   }
 
-  private startStreaming(): void {
-    const stream = this.streamer.start()
+  private async startStreaming(): Promise<void> {
+    const iosScreenSize = await this.wda.getWindowSize().catch(() => undefined)
+    const streamer = new ScreenCaptureStreamer(this.fps, iosScreenSize)
+    const stream = streamer.start()
     const reader = stream.getReader()
     this.streamReader = reader
 
@@ -128,7 +132,7 @@ export class IOSAgent implements DeviceAgent {
   installApp(path: string): Promise<void> { return this.simctl.installApp(path) }
   launchApp(bundleId: string): Promise<void> { return this.simctl.launchApp(bundleId) }
   screenshot(): Promise<Buffer> { return this.simctl.screenshot() }
-  stream(): ReadableStream { return this.streamer.start() }
+  stream(): ReadableStream<Buffer> { return this.streamer.start() }
 
   tap(x: number, y: number): Promise<void> { return this.wda.tap(x, y) }
   swipe(from: Point, to: Point): Promise<void> { return this.wda.swipe(from, to) }
