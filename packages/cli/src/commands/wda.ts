@@ -1,10 +1,11 @@
 import { execSync, spawn } from 'node:child_process'
-import { existsSync, copyFileSync, readdirSync } from 'node:fs'
+import { existsSync, copyFileSync, readdirSync, cpSync } from 'node:fs'
 import { join } from 'node:path'
 import * as readline from 'node:readline/promises'
 import { stdin as input, stdout as output } from 'node:process'
 import {
   ensureTapflowDir,
+  WDA_DIR,
   WDA_SOURCE_DIR,
   WDA_BUILD_DIR,
   WDA_XCTESTRUN_CACHE,
@@ -125,7 +126,15 @@ async function buildWda(sourcePath: string): Promise<void> {
     process.exit(1)
   }
 
+  // xctestrun uses __TESTROOT__ (its own directory) to resolve test bundle paths.
+  // Copy xctestrun + all sibling directories (Debug-iphonesimulator/ etc.) so they
+  // land next to each other in WDA_DIR and the paths resolve correctly.
   copyFileSync(join(productsDir, xctestrunFiles[0]!), WDA_XCTESTRUN_CACHE)
+  for (const entry of readdirSync(productsDir)) {
+    if (entry.endsWith('.xctestrun')) continue
+    cpSync(join(productsDir, entry), join(WDA_DIR, entry), { recursive: true, force: true })
+  }
+
   banner('success', 'BUILD SUCCEEDED', [
     `Installed: ${WDA_XCTESTRUN_CACHE}`,
     'Run `tapflow start` to connect.',

@@ -4,17 +4,32 @@ const DIM = '\x1b[2m'
 const GREEN = '\x1b[32m'
 const RED = '\x1b[31m'
 
+const MAX_WIDTH = 72
+
+function wrap(line: string, maxWidth: number): string[] {
+  if (line.length <= maxWidth) return [line]
+  const chunks: string[] = []
+  for (let i = 0; i < line.length; i += maxWidth) {
+    chunks.push(line.slice(i, i + maxWidth))
+  }
+  return chunks
+}
+
 export function banner(type: 'success' | 'error', title: string, lines: string[] = []): void {
   const color = type === 'success' ? GREEN : RED
   const icon = type === 'success' ? '✓' : '✗'
-  const contentWidth = Math.max(title.length + 5, ...lines.map((l) => l.length + 2), 40)
+  const wrappedLines = lines.flatMap((l) => wrap(l, MAX_WIDTH))
+  const contentWidth = Math.min(
+    MAX_WIDTH,
+    Math.max(title.length + 5, ...wrappedLines.map((l) => l.length + 2), 40),
+  )
   const bar = '─'.repeat(contentWidth)
 
   console.log()
   console.log(`${color}${BOLD}  ┌${bar}┐${R}`)
   console.log(`${color}${BOLD}  │  ${icon}  ${title.padEnd(contentWidth - 5)}│${R}`)
   console.log(`${color}${BOLD}  └${bar}┘${R}`)
-  for (const line of lines) {
+  for (const line of wrappedLines) {
     console.log(`${DIM}     ${line}${R}`)
   }
   console.log()
