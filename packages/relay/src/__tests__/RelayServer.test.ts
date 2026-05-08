@@ -130,6 +130,77 @@ describe('RelayServer', () => {
     browser.close()
   })
 
+  it('routes webrtc:offer from agent to browser', async () => {
+    const agent = new WebSocket(`ws://localhost:${port}`)
+    await waitForOpen(agent)
+    agent.send(JSON.stringify({ type: 'agent:register' }))
+    const { sessionId } = await waitForMessage(agent)
+
+    const browser = new WebSocket(`ws://localhost:${port}`)
+    await waitForOpen(browser)
+    browser.send(JSON.stringify({ type: 'session:start', sessionId }))
+    await waitForMessage(browser) // session:joined
+
+    const offerPromise = waitForMessage(browser)
+    agent.send(JSON.stringify({ type: 'webrtc:offer', payload: { sdp: 'offer-sdp', type: 'offer' } }))
+    const offer = await offerPromise
+    expect(offer.type).toBe('webrtc:offer')
+    expect((offer.payload as { sdp: string }).sdp).toBe('offer-sdp')
+
+    agent.close()
+    browser.close()
+  })
+
+  it('routes webrtc:answer from browser to agent', async () => {
+    const agent = new WebSocket(`ws://localhost:${port}`)
+    await waitForOpen(agent)
+    agent.send(JSON.stringify({ type: 'agent:register' }))
+    const { sessionId } = await waitForMessage(agent)
+
+    const browser = new WebSocket(`ws://localhost:${port}`)
+    await waitForOpen(browser)
+    browser.send(JSON.stringify({ type: 'session:start', sessionId }))
+    await waitForMessage(browser)
+
+    const answerPromise = waitForMessage(agent)
+    browser.send(JSON.stringify({ type: 'webrtc:answer', sessionId, payload: { sdp: 'answer-sdp', type: 'answer' } }))
+    const answer = await answerPromise
+    expect(answer.type).toBe('webrtc:answer')
+    expect((answer.payload as { sdp: string }).sdp).toBe('answer-sdp')
+
+    agent.close()
+    browser.close()
+  })
+
+  it('routes webrtc:ice bidirectionally', async () => {
+    const agent = new WebSocket(`ws://localhost:${port}`)
+    await waitForOpen(agent)
+    agent.send(JSON.stringify({ type: 'agent:register' }))
+    const { sessionId } = await waitForMessage(agent)
+
+    const browser = new WebSocket(`ws://localhost:${port}`)
+    await waitForOpen(browser)
+    browser.send(JSON.stringify({ type: 'session:start', sessionId }))
+    await waitForMessage(browser)
+
+    // agent → browser
+    const iceFromAgentPromise = waitForMessage(browser)
+    agent.send(JSON.stringify({ type: 'webrtc:ice', payload: { candidate: 'agent-ice' } }))
+    const iceFromAgent = await iceFromAgentPromise
+    expect(iceFromAgent.type).toBe('webrtc:ice')
+    expect((iceFromAgent.payload as { candidate: string }).candidate).toBe('agent-ice')
+
+    // browser → agent
+    const iceFromBrowserPromise = waitForMessage(agent)
+    browser.send(JSON.stringify({ type: 'webrtc:ice', payload: { candidate: 'browser-ice' } }))
+    const iceFromBrowser = await iceFromBrowserPromise
+    expect(iceFromBrowser.type).toBe('webrtc:ice')
+    expect((iceFromBrowser.payload as { candidate: string }).candidate).toBe('browser-ice')
+
+    agent.close()
+    browser.close()
+  })
+
   it('returns agents list with devices', async () => {
     const devices = [{ id: 'd1', name: 'iPhone 15', platform: 'ios', status: 'shutdown' }]
     const agent = new WebSocket(`ws://localhost:${port}`)

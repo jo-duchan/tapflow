@@ -44,4 +44,6 @@ export type RelayMessage =
   | { type: 'session:chrome'; payload: ChromeData }
   | { type: 'stream:frame'; payload: string; mimeType?: string }
   | { type: 'input:button'; sessionId: string; payload: { name: string } }
+  | { type: 'webrtc:offer'; payload: { type: 'offer'; sdp: string } }
+  | { type: 'webrtc:ice'; payload: RTCIceCandidateInit }
   | { type: 'error'; message: string }
