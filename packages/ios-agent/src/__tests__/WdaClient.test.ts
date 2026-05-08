@@ -80,6 +80,29 @@ describe('WdaClient', () => {
     })
   })
 
+  describe('pressButton', () => {
+    it('calls wda pressButton endpoint with mapped button name', async () => {
+      mockFetch
+        .mockResolvedValueOnce(new Response(JSON.stringify({ sessionId: 'sid-1' }), { status: 200 }))
+        .mockResolvedValueOnce(okResponse())
+      const client = new WdaClient()
+      await client.pressButton('leftButtonSideVolumeUp')
+      const [url, init] = mockFetch.mock.calls[1]
+      expect(url).toBe('http://localhost:8100/session/sid-1/wda/pressButton')
+      expect(JSON.parse(init.body)).toEqual({ name: 'volumeUp' })
+    })
+
+    it('passes unknown button names through unchanged', async () => {
+      mockFetch
+        .mockResolvedValueOnce(new Response(JSON.stringify({ sessionId: 'sid-1' }), { status: 200 }))
+        .mockResolvedValueOnce(okResponse())
+      const client = new WdaClient()
+      await client.pressButton('customButton')
+      const [, init] = mockFetch.mock.calls[1]
+      expect(JSON.parse(init.body)).toEqual({ name: 'customButton' })
+    })
+  })
+
   it('reuses cached sessionId across calls', async () => {
     mockFetch
       .mockResolvedValueOnce(new Response(JSON.stringify({ sessionId: 'cached' }), { status: 200 }))

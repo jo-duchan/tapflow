@@ -9,6 +9,7 @@ interface SimctlDevice {
   name: string
   state: string
   isAvailable: boolean
+  deviceTypeIdentifier?: string
 }
 
 interface SimctlListOutput {
@@ -37,6 +38,7 @@ export class SimctlWrapper {
           name: d.name,
           platform: 'ios',
           status: toDeviceStatus(d.state),
+          typeId: d.deviceTypeIdentifier,
         })
       }
     }

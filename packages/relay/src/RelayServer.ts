@@ -123,7 +123,8 @@ export class RelayServer {
 
       case 'input:tap':
       case 'input:swipe':
-      case 'input:type': {
+      case 'input:type':
+      case 'input:button': {
         // browser → agent
         const session = this.sessions.get(msg.sessionId!)
 if (session?.agentSocket.readyState === WebSocket.OPEN) {
