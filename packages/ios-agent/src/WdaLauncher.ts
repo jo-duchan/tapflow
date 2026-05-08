@@ -78,7 +78,10 @@ export class WdaLauncher {
     return candidates.find((p): p is string => !!p && existsSync(p)) ?? null
   }
 
+  private stderrLines: string[] = []
+
   private spawnXcodebuild(xctestrunPath: string): void {
+    this.stderrLines = []
     this.process = spawn(
       'xcodebuild',
       [
@@ -91,6 +94,7 @@ export class WdaLauncher {
 
     this.process.stderr?.on('data', (chunk: Buffer) => {
       const text = chunk.toString()
+      this.stderrLines.push(...text.split('\n').filter(Boolean))
       for (const [pattern, msg] of XCODEBUILD_ERROR_MAP) {
         if (pattern.test(text)) {
           console.error(`[wda] ${msg}`)
@@ -107,7 +111,22 @@ export class WdaLauncher {
       await new Promise((r) => setTimeout(r, 500))
     }
     this.stop()
-    throw new Error(`WDA did not respond within ${timeoutMs / 1000}s`)
+
+    const hint = this.extractHint()
+    const msg = hint
+      ? `WDA did not respond within ${timeoutMs / 1000}s\n  Hint: ${hint}`
+      : `WDA did not respond within ${timeoutMs / 1000}s\n  Run \`tapflow wda install\` to rebuild, or check \`xcodebuild\` output manually.`
+    throw new Error(msg)
+  }
+
+  private extractHint(): string | null {
+    // Check known patterns first
+    for (const [pattern, msg] of XCODEBUILD_ERROR_MAP) {
+      if (this.stderrLines.some((l) => pattern.test(l))) return msg
+    }
+    // Surface the first error-looking line from stderr
+    const errorLine = this.stderrLines.find((l) => /error:|failed|cannot/.test(l.toLowerCase()))
+    return errorLine?.trim() ?? null
   }
 
   private writePid(): void {
