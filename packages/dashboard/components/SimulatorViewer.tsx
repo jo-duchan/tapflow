@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useRelay } from '@/hooks/useRelay'
+import { useWebRTC } from '@/hooks/useWebRTC'
 import type { ChromeData, RelayMessage } from '@/lib/types'
 import { Button } from '@/components/ui/button'
 
@@ -12,11 +13,26 @@ interface Props {
 
 export function SimulatorViewer({ sessionId, onBack }: Props) {
   const canvasRef    = useRef<HTMLCanvasElement>(null)
+  const videoRef     = useRef<HTMLVideoElement>(null)
   const containerRef = useRef<HTMLDivElement>(null)
   const [joined, setJoined] = useState(false)
   const [fps, setFps] = useState(0)
   const [chrome, setChrome] = useState<ChromeData | null>(null)
+  const [webrtcActive, setWebrtcActive] = useState(false)
   const frameCount = useRef(0)
+  const sendRef = useRef<(msg: object) => void>(() => {})
+
+  const { handleOffer, addIceCandidate } = useWebRTC({
+    onTrack: (stream) => {
+      if (videoRef.current) {
+        videoRef.current.srcObject = stream
+        videoRef.current.play().catch(() => {})
+        setWebrtcActive(true)
+      }
+    },
+    send: (msg) => sendRef.current(msg),
+    sessionId,
+  })
 
   const handleMessage = useCallback((msg: RelayMessage) => {
     if (msg.type === 'session:joined') {
@@ -25,6 +41,16 @@ export function SimulatorViewer({ sessionId, onBack }: Props) {
 
     if (msg.type === 'session:chrome') {
       setChrome(msg.payload)
+    }
+
+    if (msg.type === 'webrtc:offer') {
+      handleOffer(msg.payload).catch(() => {})
+      return
+    }
+
+    if (msg.type === 'webrtc:ice') {
+      addIceCandidate(msg.payload).catch(() => {})
+      return
     }
 
     if (msg.type === 'stream:frame' && canvasRef.current) {
@@ -42,9 +68,10 @@ export function SimulatorViewer({ sessionId, onBack }: Props) {
       img.src = `data:${msg.mimeType ?? 'image/jpeg'};base64,${msg.payload}`
       frameCount.current += 1
     }
-  }, [])
+  }, [handleOffer, addIceCandidate])
 
   const { send, connected } = useRelay(handleMessage)
+  sendRef.current = send
 
   useEffect(() => {
     if (connected) send({ type: 'session:start', sessionId })
@@ -57,6 +84,20 @@ export function SimulatorViewer({ sessionId, onBack }: Props) {
     }, 1000)
     return () => clearInterval(timer)
   }, [])
+
+  // WebRTC fps counting via requestVideoFrameCallback
+  useEffect(() => {
+    const video = videoRef.current
+    if (!video || !webrtcActive) return
+
+    let rafId: number
+    const countFrame = () => {
+      frameCount.current += 1
+      rafId = video.requestVideoFrameCallback(countFrame)
+    }
+    rafId = video.requestVideoFrameCallback(countFrame)
+    return () => video.cancelVideoFrameCallback(rafId)
+  }, [webrtcActive])
 
   const dragStart     = useRef<{ x: number; y: number } | null>(null)
   const pressedButton = useRef<string | null>(null)
@@ -206,28 +247,54 @@ export function SimulatorViewer({ sessionId, onBack }: Props) {
             draggable={false}
             alt=""
           />
-          {/* Screen content — on top of device frame; positioned over the screen hole */}
+          {/* Screen content — WebRTC video or MJPEG canvas; positioned over the screen hole */}
+          <video
+            ref={videoRef}
+            muted
+            playsInline
+            style={{
+              position: 'absolute',
+              left:        `${screenPctLeft}%`,
+              top:         `${screenPctTop}%`,
+              width:       `${screenPctW}%`,
+              height:      `${screenPctH}%`,
+              borderRadius: cssCornerRadius > 0 ? `${cssCornerRadius}px` : undefined,
+              display:      webrtcActive ? 'block' : 'none',
+            }}
+          />
           <canvas
             ref={canvasRef}
             style={{
               position: 'absolute',
-              left:   `${screenPctLeft}%`,
-              top:    `${screenPctTop}%`,
-              width:  `${screenPctW}%`,
-              height: `${screenPctH}%`,
+              left:        `${screenPctLeft}%`,
+              top:         `${screenPctTop}%`,
+              width:       `${screenPctW}%`,
+              height:      `${screenPctH}%`,
               borderRadius: cssCornerRadius > 0 ? `${cssCornerRadius}px` : undefined,
+              display:      webrtcActive ? 'none' : 'block',
             }}
           />
         </div>
       ) : (
         /* Fallback — no chrome data yet */
-        <canvas
-          ref={canvasRef}
-          className="block max-w-full cursor-crosshair"
-          style={{ borderRadius: '10%' }}
-          onMouseDown={handleMouseDown}
-          onMouseUp={handleMouseUp}
-        />
+        <>
+          <video
+            ref={videoRef}
+            muted
+            playsInline
+            className="block max-w-full"
+            style={{ borderRadius: '10%', display: webrtcActive ? 'block' : 'none' }}
+            onMouseDown={handleMouseDown}
+            onMouseUp={handleMouseUp}
+          />
+          <canvas
+            ref={canvasRef}
+            className="block max-w-full cursor-crosshair"
+            style={{ borderRadius: '10%', display: webrtcActive ? 'none' : 'block' }}
+            onMouseDown={handleMouseDown}
+            onMouseUp={handleMouseUp}
+          />
+        </>
       )}
 
       {joined && fps === 0 && (

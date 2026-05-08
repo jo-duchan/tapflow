@@ -42,6 +42,19 @@ export class ScreenCaptureStreamer {
     return new ReadableStream<Buffer>({
       start(controller) {
         let buf = Buffer.alloc(0)
+        let closed = false
+
+        const safeClose = () => {
+          if (closed) return
+          closed = true
+          controller.close()
+        }
+
+        const safeError = (e: Error) => {
+          if (closed) return
+          closed = true
+          controller.error(e)
+        }
 
         proc.stdout.on('data', (chunk: Buffer) => {
           buf = Buffer.concat([buf, chunk])
@@ -53,11 +66,11 @@ export class ScreenCaptureStreamer {
           }
         })
 
-        proc.stdout.on('end', () => controller.close())
-        proc.on('error', (e) => controller.error(e))
+        proc.stdout.on('end', safeClose)
+        proc.on('error', safeError)
         proc.on('exit', (code) => {
           if (code !== null && code !== 0)
-            controller.error(new Error(`[ScreenCaptureStreamer] exited with code ${code}`))
+            safeError(new Error(`[ScreenCaptureStreamer] exited with code ${code}`))
         })
       },
       cancel() {

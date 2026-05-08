@@ -127,7 +127,28 @@ export class RelayServer {
       case 'input:button': {
         // browser → agent
         const session = this.sessions.get(msg.sessionId!)
-if (session?.agentSocket.readyState === WebSocket.OPEN) {
+        if (session?.agentSocket.readyState === WebSocket.OPEN) {
+          session.agentSocket.send(JSON.stringify(msg))
+        }
+        break
+      }
+
+      case 'webrtc:offer':
+      case 'webrtc:ice': {
+        // bidirectional: forward to the other side
+        const session = this.sessions.getBySocket(ws)
+        if (!session) break
+        const target = session.agentSocket === ws ? session.browserSocket : session.agentSocket
+        if (target?.readyState === WebSocket.OPEN) {
+          target.send(JSON.stringify(msg))
+        }
+        break
+      }
+
+      case 'webrtc:answer': {
+        // browser → agent only
+        const session = this.sessions.get(msg.sessionId!)
+        if (session?.agentSocket.readyState === WebSocket.OPEN) {
           session.agentSocket.send(JSON.stringify(msg))
         }
         break

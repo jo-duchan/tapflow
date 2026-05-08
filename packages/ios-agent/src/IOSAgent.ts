@@ -5,6 +5,7 @@ import { ScreenCaptureStreamer } from './ScreenCaptureStreamer'
 import { MjpegStreamer } from './MjpegStreamer'
 import { WdaClient } from './WdaClient'
 import { DeviceChromeLoader, type ChromeData } from './DeviceChromeLoader'
+import { WebRTCStreamer } from './WebRTCStreamer'
 
 export interface IOSAgentOptions {
   fps?: number
@@ -24,6 +25,7 @@ export class IOSAgent implements DeviceAgent {
   private _sessionId: string | null = null
   private streamReader: ReadableStreamDefaultReader<Buffer> | null = null
   private streamMimeType: string = 'image/jpeg'
+  private webrtc: WebRTCStreamer | null = null
 
   constructor(options: IOSAgentOptions = {}, simctl?: SimctlWrapper, wda?: WdaClient) {
     this.simctl = simctl ?? new SimctlWrapper()
@@ -75,6 +77,8 @@ export class IOSAgent implements DeviceAgent {
   disconnect(): void {
     this.streamReader?.cancel()
     this.streamReader = null
+    this.webrtc?.close()
+    this.webrtc = null
     this.ws?.close()
     this.ws = null
     this._sessionId = null
@@ -90,6 +94,88 @@ export class IOSAgent implements DeviceAgent {
   }
 
   private async startStreaming(): Promise<void> {
+    if (this.intervalMs === undefined) {
+      const negotiated = await this.tryStartWebRTC()
+      if (negotiated) return
+    }
+    this.startMjpegFallback()
+  }
+
+  private async tryStartWebRTC(): Promise<boolean> {
+    if (!this.ws) return false
+
+    return new Promise<boolean>((resolve) => {
+      const NEGOTIATION_TIMEOUT_MS = 3000
+      let resolved = false
+
+      const settle = (success: boolean) => {
+        if (resolved) return
+        resolved = true
+        clearTimeout(timer)
+        resolve(success)
+      }
+
+      const timer = setTimeout(() => settle(false), NEGOTIATION_TIMEOUT_MS)
+
+      const webrtc = new WebRTCStreamer({
+        onOffer: (offer) => {
+          this.ws?.send(JSON.stringify({ type: 'webrtc:offer', payload: offer }))
+        },
+        onIceCandidate: (candidate) => {
+          this.ws?.send(JSON.stringify({ type: 'webrtc:ice', payload: candidate }))
+        },
+      })
+      this.webrtc = webrtc
+
+      const originalHandler = this.ws.listeners('message') as Array<(data: Buffer) => void>
+
+      const signalingHandler = (data: Buffer) => {
+        try {
+          const msg = JSON.parse(data.toString()) as { type: string; payload?: unknown }
+          if (msg.type === 'webrtc:answer') {
+            webrtc.setAnswer(msg.payload as { type: 'answer'; sdp: string })
+              .then(() => {
+                this.ws?.off('message', signalingHandler)
+                this.ws?.on('message', (d) => this.handleRelayMessage(JSON.parse(d.toString())))
+                settle(true)
+                this.pumpWebRTC()
+              })
+              .catch(() => settle(false))
+          } else if (msg.type === 'webrtc:ice') {
+            webrtc.addIceCandidate(msg.payload as RTCIceCandidateInit).catch(() => {})
+          } else {
+            // not a webrtc message — re-dispatch to existing handlers
+            for (const h of originalHandler) h(data)
+          }
+        } catch { /* ignore malformed */ }
+      }
+
+      this.ws.on('message', signalingHandler)
+      webrtc.start().catch(() => settle(false))
+    })
+  }
+
+  private pumpWebRTC(): void {
+    const stream = new ScreenCaptureStreamer(this.fps, this.bootedDeviceId ?? 'booted').start()
+    const reader = stream.getReader()
+    this.streamReader = reader
+
+    const pump = async () => {
+      try {
+        while (true) {
+          const { value, done } = await reader.read()
+          if (done) break
+          await this.webrtc?.pushFrame(value)
+        }
+      } catch {
+        // stream cancelled or webrtc closed — expected on disconnect
+      }
+    }
+
+    pump()
+  }
+
+  private startMjpegFallback(): void {
     let stream: ReadableStream<Buffer>
     if (this.intervalMs !== undefined) {
       stream = new MjpegStreamer(this.simctl, this.intervalMs).start()
@@ -150,6 +236,10 @@ export class IOSAgent implements DeviceAgent {
       case 'input:button': {
         const { name } = msg.payload as { name: string }
         this.wda.pressButton(name).catch((e) => console.error('[agent] button failed:', e))
+        break
+      }
+      case 'webrtc:ice': {
+        this.webrtc?.addIceCandidate(msg.payload as RTCIceCandidateInit).catch(() => {})
         break
       }
     }

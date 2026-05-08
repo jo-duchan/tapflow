@@ -12,6 +12,9 @@ export type MessageType =
   | 'input:swipe'
   | 'input:type'
   | 'input:button'
+  | 'webrtc:offer'
+  | 'webrtc:answer'
+  | 'webrtc:ice'
   | 'error'
 
 export interface DeviceInfo {
