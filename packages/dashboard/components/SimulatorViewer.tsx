@@ -52,15 +52,37 @@ export function SimulatorViewer({ sessionId, onBack }: Props) {
     return () => clearInterval(timer)
   }, [])
 
-  const handleCanvasClick = useCallback(
+  const dragStart = useRef<{ x: number; y: number } | null>(null)
+
+  const toNorm = (e: React.MouseEvent<HTMLCanvasElement>) => {
+    const rect = canvasRef.current!.getBoundingClientRect()
+    return {
+      x: (e.clientX - rect.left) / rect.width,
+      y: (e.clientY - rect.top) / rect.height,
+    }
+  }
+
+  const handleMouseDown = useCallback((e: React.MouseEvent<HTMLCanvasElement>) => {
+    if (!canvasRef.current) return
+    dragStart.current = toNorm(e)
+  }, [])
+
+  const handleMouseUp = useCallback(
     (e: React.MouseEvent<HTMLCanvasElement>) => {
-      if (!canvasRef.current) return
-      const rect = canvasRef.current.getBoundingClientRect()
-      const scaleX = canvasRef.current.width / rect.width
-      const scaleY = canvasRef.current.height / rect.height
-      const x = Math.round((e.clientX - rect.left) * scaleX)
-      const y = Math.round((e.clientY - rect.top) * scaleY)
-      send({ type: 'input:tap', sessionId, payload: { x, y } })
+      if (!canvasRef.current || !dragStart.current) return
+      const from = dragStart.current
+      const to = toNorm(e)
+      dragStart.current = null
+
+      const dx = to.x - from.x
+      const dy = to.y - from.y
+      const dist = Math.sqrt(dx * dx + dy * dy)
+
+      if (dist < 0.02) {
+        send({ type: 'input:tap', sessionId, payload: from })
+      } else {
+        send({ type: 'input:swipe', sessionId, payload: { from, to } })
+      }
     },
     [send, sessionId]
   )
@@ -83,7 +105,8 @@ export function SimulatorViewer({ sessionId, onBack }: Props) {
       <canvas
         ref={canvasRef}
         className="max-w-full cursor-crosshair rounded-lg border border-border"
-        onClick={handleCanvasClick}
+        onMouseDown={handleMouseDown}
+        onMouseUp={handleMouseUp}
       />
 
       {joined && fps === 0 && (

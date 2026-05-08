@@ -111,7 +111,7 @@ export class RelayServer {
       case 'input:type': {
         // browser → agent
         const session = this.sessions.get(msg.sessionId!)
-        if (session?.agentSocket.readyState === WebSocket.OPEN) {
+if (session?.agentSocket.readyState === WebSocket.OPEN) {
           session.agentSocket.send(JSON.stringify(msg))
         }
         break

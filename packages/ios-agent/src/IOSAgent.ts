@@ -50,6 +50,7 @@ export class IOSAgent implements DeviceAgent {
           this.ws = ws
           this._sessionId = msg.sessionId
           this.startStreaming()
+          ws.on('message', (d) => this.handleRelayMessage(JSON.parse(d.toString())))
           resolve()
         } else {
           reject(new Error(`Unexpected message during handshake: ${msg.type}`))
@@ -91,6 +92,33 @@ export class IOSAgent implements DeviceAgent {
     }
 
     pump()
+  }
+
+  private handleRelayMessage(msg: { type: string; payload?: unknown }): void {
+    switch (msg.type) {
+      case 'input:tap': {
+        const { x, y } = msg.payload as { x: number; y: number }
+        this.wda.getWindowSize().then((size) =>
+          this.wda.tap(Math.round(x * size.width), Math.round(y * size.height))
+        ).catch((e) => console.error('[agent] tap failed:', e))
+        break
+      }
+      case 'input:swipe': {
+        const { from, to } = msg.payload as { from: { x: number; y: number }; to: { x: number; y: number } }
+        this.wda.getWindowSize().then((size) =>
+          this.wda.swipe(
+            { x: Math.round(from.x * size.width), y: Math.round(from.y * size.height) },
+            { x: Math.round(to.x * size.width), y: Math.round(to.y * size.height) },
+          )
+        ).catch((e) => console.error('[agent] swipe failed:', e))
+        break
+      }
+      case 'input:type': {
+        const { text } = msg.payload as { text: string }
+        this.wda.type(text).catch((e) => console.error('[agent] type failed:', e))
+        break
+      }
+    }
   }
 
   // DeviceAgent interface — delegate to SimctlWrapper
