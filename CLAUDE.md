@@ -56,6 +56,36 @@ write test → implement → run test → fix → repeat
 
 **4. Compound** — 테스트 + 코드 + 프롬프트를 묶어 템플릿화한다. 반복 작업을 자산으로 축적한다. (`type: compound`)
 
+### 커밋 메시지 (Conventional Commits)
+
+```
+<type>(<scope>): <subject>
+```
+
+**type**
+
+| type | 용도 |
+|------|------|
+| `feat` | 새 기능 |
+| `fix` | 버그 수정 |
+| `test` | 테스트 추가·수정 |
+| `refactor` | 동작 변경 없는 코드 개선 |
+| `docs` | 문서 변경 |
+| `chore` | 빌드·의존성·설정 변경 |
+| `perf` | 성능 개선 |
+
+**scope** — 변경된 패키지명을 사용한다.
+`agent-core` · `ios-agent` · `android-agent` · `relay` · `dashboard` · `cli` · `playground`
+
+**예시**
+```
+feat(agent-core): add DeviceAgent interface and AgentRegistry
+feat(ios-agent): implement xcrun simctl listDevices
+fix(relay): handle agent disconnection gracefully
+test(ios-agent): add unit tests for boot command
+chore(deps): update ws to v8.18
+```
+
 ### 코드 규칙
 - 주석은 WHY가 명확히 비자명한 경우에만 한 줄 작성.
 - 인터페이스 변경 시 `agent-core`를 먼저 수정하고 구현체를 맞춘다.

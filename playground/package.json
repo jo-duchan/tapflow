@@ -2,6 +2,7 @@
   "name": "@tapflow/playground",
   "version": "0.0.0",
   "private": true,
+  "type": "module",
   "scripts": {
     "relay": "tsx relay.ts",
     "ios-agent": "tsx ios-agent.ts",

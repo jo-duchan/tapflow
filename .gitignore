@@ -19,3 +19,7 @@ packages/relay/public/
 
 # os
 .DS_Store
+
+# playwright mcp artifacts
+.playwright-mcp/
+*.png
