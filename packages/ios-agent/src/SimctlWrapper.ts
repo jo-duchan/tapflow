@@ -1,3 +1,6 @@
+import { randomUUID } from 'crypto'
+import { promises as fs } from 'fs'
+import { tmpdir } from 'os'
 import type { Device, DeviceStatus } from '@tapflow/agent-core'
 import { defaultRunner, type SimctlRunner } from './simctl'
 
@@ -65,6 +68,12 @@ export class SimctlWrapper {
   }
 
   async screenshot(): Promise<Buffer> {
-    return this.runner.execBinary('io', 'booted', 'screenshot', '-', '--type=png')
+    const tmpPath = `${tmpdir()}/tapflow-${randomUUID()}.png`
+    try {
+      await this.runner.exec('io', 'booted', 'screenshot', tmpPath)
+      return await fs.readFile(tmpPath)
+    } finally {
+      await fs.unlink(tmpPath).catch(() => {})
+    }
   }
 }

@@ -1,6 +1,18 @@
-import { describe, it, expect, vi } from 'vitest'
+import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { SimctlWrapper } from '../SimctlWrapper'
 import type { SimctlRunner } from '../simctl'
+
+vi.mock('fs', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('fs')>()
+  return {
+    ...actual,
+    promises: {
+      ...actual.promises,
+      readFile: vi.fn(),
+      unlink: vi.fn().mockResolvedValue(undefined),
+    },
+  }
+})
 
 const SIMCTL_LIST_OUTPUT = JSON.stringify({
   devices: {
@@ -99,15 +111,24 @@ describe('SimctlWrapper', () => {
   })
 
   describe('screenshot', () => {
-    it('calls execBinary for binary-safe PNG capture', async () => {
+    beforeEach(() => vi.clearAllMocks())
+
+    it('saves to temp file and returns PNG buffer', async () => {
+      const { promises: fsMock } = await import('fs')
       const pngMagic = Buffer.from([0x89, 0x50, 0x4e, 0x47])
+      vi.mocked(fsMock.readFile as (path: string) => Promise<Buffer>).mockResolvedValue(pngMagic)
+
       const runner: SimctlRunner = {
         exec: vi.fn().mockResolvedValue(''),
-        execBinary: vi.fn().mockResolvedValue(pngMagic),
+        execBinary: vi.fn(),
       }
       const wrapper = new SimctlWrapper(runner)
       const buf = await wrapper.screenshot()
-      expect(runner.execBinary).toHaveBeenCalledWith('io', 'booted', 'screenshot', '-', '--type=png')
+
+      expect(runner.exec).toHaveBeenCalledWith(
+        'io', 'booted', 'screenshot',
+        expect.stringMatching(/tapflow-.+\.png$/)
+      )
       expect(buf).toEqual(pngMagic)
     })
   })

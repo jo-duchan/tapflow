@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import type { RelayMessage } from '@/lib/types'
 
 const RELAY_URL = process.env.NEXT_PUBLIC_RELAY_URL ?? 'ws://localhost:3000'
+const RECONNECT_DELAY = 2000
 
 export function useRelay(onMessage: (msg: RelayMessage) => void) {
   const ws = useRef<WebSocket | null>(null)
@@ -12,18 +13,34 @@ export function useRelay(onMessage: (msg: RelayMessage) => void) {
   onMessageRef.current = onMessage
 
   useEffect(() => {
-    const socket = new WebSocket(RELAY_URL)
-    ws.current = socket
+    let cancelled = false
 
-    socket.onopen = () => setConnected(true)
-    socket.onclose = () => setConnected(false)
-    socket.onmessage = (e) => {
-      try {
-        onMessageRef.current(JSON.parse(e.data))
-      } catch { /* ignore malformed */ }
+    const connect = () => {
+      if (cancelled) return
+
+      const socket = new WebSocket(RELAY_URL)
+      ws.current = socket
+
+      socket.onopen = () => setConnected(true)
+
+      socket.onclose = () => {
+        setConnected(false)
+        if (!cancelled) setTimeout(connect, RECONNECT_DELAY)
+      }
+
+      socket.onmessage = (e) => {
+        try {
+          onMessageRef.current(JSON.parse(e.data))
+        } catch { /* ignore malformed */ }
+      }
     }
 
-    return () => socket.close()
+    connect()
+
+    return () => {
+      cancelled = true
+      ws.current?.close()
+    }
   }, [])
 
   const send = useCallback((msg: object) => {

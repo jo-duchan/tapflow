@@ -57,7 +57,12 @@ export class RelayServer {
 
     ws.on('close', () => {
       const session = this.sessions.getBySocket(ws)
-      if (session) this.sessions.remove(session.id)
+      if (!session) return
+      if (session.agentSocket === ws) {
+        this.sessions.remove(session.id)
+      } else {
+        this.sessions.clearBrowser(session.id)
+      }
     })
   }
 

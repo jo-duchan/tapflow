@@ -1,8 +1,8 @@
-import { createRelayServer } from '@tapflow/relay'
+import { RelayServer } from '@tapflow/relay'
 
 const PORT = Number(process.env.PORT ?? 3000)
 
-const server = createRelayServer({ port: PORT })
+const server = new RelayServer({ port: PORT })
 server.start()
 
 console.log(`Relay  →  ws://localhost:${PORT}`)

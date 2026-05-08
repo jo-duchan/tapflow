@@ -32,6 +32,11 @@ export class SessionManager {
     this.sessions.delete(sessionId)
   }
 
+  clearBrowser(sessionId: string): void {
+    const session = this.sessions.get(sessionId)
+    if (session) session.browserSocket = null
+  }
+
   getBySocket(socket: WebSocket): Session | undefined {
     for (const session of this.sessions.values()) {
       if (session.agentSocket === socket || session.browserSocket === socket) {
