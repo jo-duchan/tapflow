@@ -5,6 +5,7 @@ export type MessageType =
   | 'agents:listed'
   | 'session:start'
   | 'session:joined'
+  | 'session:chrome'
   | 'session:end'
   | 'stream:frame'
   | 'input:tap'

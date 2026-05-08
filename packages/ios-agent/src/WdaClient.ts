@@ -3,6 +3,7 @@ import type { Point } from '@tapflow/agent-core'
 export class WdaClient {
   private readonly baseUrl: string
   private cachedSessionId: string | null = null
+  private cachedWindowSize: { width: number; height: number } | null = null
 
   constructor(baseUrl = 'http://localhost:8100') {
     this.baseUrl = baseUrl
@@ -25,6 +26,15 @@ export class WdaClient {
     const data = (await res.json()) as { sessionId: string }
     this.cachedSessionId = data.sessionId
     return this.cachedSessionId
+  }
+
+  async getWindowSize(): Promise<{ width: number; height: number }> {
+    if (this.cachedWindowSize) return this.cachedWindowSize
+    const sessionId = await this.getSessionId()
+    const res = await fetch(`${this.baseUrl}/session/${sessionId}/window/size`)
+    const data = (await res.json()) as { value: { width: number; height: number } }
+    this.cachedWindowSize = data.value
+    return this.cachedWindowSize
   }
 
   async tap(x: number, y: number): Promise<void> {
