@@ -41,20 +41,35 @@ docs/PRD.md      # 제품 요구사항 문서
 - Node.js ≥ 20. `ws` for WebSocket, `next` for dashboard.
 - 테스트: vitest.
 
+### 브랜치 전략
+
+```
+main          ← 항상 배포 가능한 상태. 직접 커밋 금지.
+└── feature/{topic}   ← 모든 작업은 feature 브랜치에서 시작
+    └── PR → main merge
+```
+
+- 브랜치명: `feature/{topic}` (예: `feature/60fps-streaming`)
+- PR 없이 main에 직접 push하지 않는다.
+- dev 브랜치는 더 이상 사용하지 않는다.
+
 ### 워크플로우 (Plan → Work → Review → Compound)
 
 각 작업은 `.work/`에 기록한다. 컨벤션: [.work/CLAUDE.md](./.work/CLAUDE.md).
 
 **1. Plan** — 작업 시작 전 요구사항과 테스트 케이스를 먼저 정의한다. (`type: plan`)
 
-**2. Work** — 테스트를 먼저 작성하고, 테스트가 통과할 때까지 구현을 반복한다.
+**2. Work** — feature 브랜치에서 테스트를 먼저 작성하고, 테스트가 통과할 때까지 구현을 반복한다.
 ```
+git checkout -b feature/{topic}
 write test → implement → run test → fix → repeat
 ```
 
-**3. Review** — 엣지 케이스 테스트를 추가하고 실제 데이터로 검증한다. (`type: review`)
+**3. Review** — 엣지 케이스 테스트를 추가하고 실제 데이터로 검증한다. PR을 열어 리뷰 후 main에 merge한다. (`type: review`)
 
 **4. Compound** — 테스트 + 코드 + 프롬프트를 묶어 템플릿화한다. 반복 작업을 자산으로 축적한다. (`type: compound`)
+
+커스텀 커맨드: `/work-plan {topic}` (Opus로 plan 문서 생성) · `/compound` (기존 문서 또는 CLAUDE.md에 패턴 추가)
 
 ### 커밋 메시지 (Conventional Commits)
 
@@ -95,7 +110,6 @@ chore(deps): update ws to v8.18
 
 ## HOW NOT
 
-- Pulumi 내부 구현을 CLI 유저에게 노출하지 않는다.
 - 앱 데이터·스트림을 외부 서비스로 전송하는 코드를 작성하지 않는다.
 - 로드맵에 없는 기능을 선제적으로 추가하지 않는다.
 - `agent-core` 인터페이스를 플랫폼 특화 로직으로 오염시키지 않는다.
