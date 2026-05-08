@@ -106,6 +106,13 @@ chore(deps): update ws to v8.18
 - 인터페이스 변경 시 `agent-core`를 먼저 수정하고 구현체를 맞춘다.
 - 새 플랫폼은 `AgentRegistry.register()`만으로 추가한다. 릴레이/대시보드 코드를 건드리지 않는다.
 
+### 설계 원칙 (SOLID 중 우선 적용)
+확장 가능하고 교체 가능한 구조를 위해 아래 세 원칙을 우선 준수한다.
+
+- **OCP** (Open/Closed): 새 플랫폼·기능은 기존 코드 수정 없이 추가한다. `AgentRegistry.register()`가 대표 사례.
+- **ISP** (Interface Segregation): `DeviceAgent` 인터페이스는 모든 플랫폼이 구현 가능한 메서드만 포함한다. 플랫폼 특화 기능은 별도 인터페이스로 분리한다.
+- **DIP** (Dependency Inversion): 의존성은 생성자 주입으로 받는다. 구현체가 아닌 인터페이스에 의존해 테스트 시 mock 교체가 가능하게 한다.
+
 ---
 
 ## HOW NOT
