@@ -11,7 +11,9 @@
     "lint": "eslint src"
   },
   "dependencies": {
-    "@tapflow/agent-core": "*"
+    "@roamhq/wrtc": "^0.10.0",
+    "@tapflow/agent-core": "*",
+    "sharp": "^0.34.5"
   },
   "devDependencies": {
     "@tapflow/relay": "*",
@@ -21,6 +23,8 @@
     "vitest": "^2.0.0"
   },
   "engines": {
-    "os": ["darwin"]
+    "os": [
+      "darwin"
+    ]
   }
 }

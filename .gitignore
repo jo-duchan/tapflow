@@ -29,3 +29,9 @@ packages/ios-agent/src/screencapture-helper
 
 # vscode
 .vscode
+
+# typescript build cache
+*.tsbuildinfo
+
+# claude code personal commands
+.claude/

@@ -51,7 +51,25 @@ main          ← 항상 배포 가능한 상태. 직접 커밋 금지.
 
 - 브랜치명: `feature/{topic}` (예: `feature/60fps-streaming`)
 - PR 없이 main에 직접 push하지 않는다.
-- dev 브랜치는 더 이상 사용하지 않는다.
+- dev 브랜치는 사용하지 않는다.
+
+### 릴리즈 정책 (Semver + GitHub Releases)
+
+사용자는 npm 태그 버전을 설치한다. main의 중간 상태가 외부에 노출되지 않도록 **태그 기준으로만 배포**한다.
+
+```
+# 릴리즈 준비 완료 시
+git tag v0.1.0
+git push origin v0.1.0
+# → GitHub Release 생성 + npm publish
+```
+
+- 버전은 [Semantic Versioning](https://semver.org/)을 따른다.
+  - `patch` (0.0.x): 버그 수정
+  - `minor` (0.x.0): 하위 호환 새 기능
+  - `major` (x.0.0): breaking change
+- `v1.0.0` 이전은 public API가 안정화되지 않은 상태로 간주한다 — minor 버전에서 breaking change가 있을 수 있다.
+- main에 머지됐다고 자동 배포되지 않는다. 태그를 찍기 전까지는 내부 상태다.
 
 ### 워크플로우 (Plan → Work → Review → Compound)
 
@@ -105,6 +123,13 @@ chore(deps): update ws to v8.18
 - 주석은 WHY가 명확히 비자명한 경우에만 한 줄 작성.
 - 인터페이스 변경 시 `agent-core`를 먼저 수정하고 구현체를 맞춘다.
 - 새 플랫폼은 `AgentRegistry.register()`만으로 추가한다. 릴레이/대시보드 코드를 건드리지 않는다.
+
+### 설계 원칙 (SOLID 중 우선 적용)
+확장 가능하고 교체 가능한 구조를 위해 아래 세 원칙을 우선 준수한다.
+
+- **OCP** (Open/Closed): 새 플랫폼·기능은 기존 코드 수정 없이 추가한다. `AgentRegistry.register()`가 대표 사례.
+- **ISP** (Interface Segregation): `DeviceAgent` 인터페이스는 모든 플랫폼이 구현 가능한 메서드만 포함한다. 플랫폼 특화 기능은 별도 인터페이스로 분리한다.
+- **DIP** (Dependency Inversion): 의존성은 생성자 주입으로 받는다. 구현체가 아닌 인터페이스에 의존해 테스트 시 mock 교체가 가능하게 한다.
 
 ---
 
