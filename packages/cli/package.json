@@ -1,7 +1,7 @@
 {
   "name": "@tapflow/cli",
   "version": "0.1.0",
-  "description": "tapflow CLI — deploy relay, manage agents and teams",
+  "description": "tapflow CLI — setup, agent management, and playground utilities",
   "bin": {
     "tapflow": "./bin/tapflow.js"
   },
@@ -10,10 +10,22 @@
   "license": "MIT",
   "scripts": {
     "build": "tsc",
+    "dev": "tsx src/index.ts",
     "test": "vitest run",
     "lint": "eslint src"
   },
   "dependencies": {
-    "@tapflow/agent-core": "*"
+    "@tapflow/agent-core": "*",
+    "@tapflow/ios-agent": "*",
+    "@tapflow/relay": "*",
+    "cac": "^6.7.14",
+    "ws": "^8.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "@types/ws": "^8.0.0",
+    "tsx": "^4.0.0",
+    "typescript": "^5.0.0",
+    "vitest": "^2.0.0"
   }
 }

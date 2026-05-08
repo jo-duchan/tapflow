@@ -39,24 +39,26 @@ export class ScreenCaptureStreamer {
 
     proc.stderr.on('data', (d: Buffer) => process.stderr.write(d))
 
+    // done is hoisted so both start() and cancel() share the same flag
+    let done = false
+
     return new ReadableStream<Buffer>({
       start(controller) {
         let buf = Buffer.alloc(0)
-        let closed = false
 
-        const safeClose = () => {
-          if (closed) return
-          closed = true
+        const close = () => {
+          if (done) return
+          done = true
           controller.close()
         }
-
-        const safeError = (e: Error) => {
-          if (closed) return
-          closed = true
+        const error = (e: Error) => {
+          if (done) return
+          done = true
           controller.error(e)
         }
 
         proc.stdout.on('data', (chunk: Buffer) => {
+          if (done) return
           buf = Buffer.concat([buf, chunk])
           while (buf.length >= 4) {
             const frameLen = buf.readUInt32BE(0)
@@ -66,14 +68,17 @@ export class ScreenCaptureStreamer {
           }
         })
 
-        proc.stdout.on('end', safeClose)
-        proc.on('error', safeError)
+        proc.stdout.on('end', close)
+        proc.on('error', error)
         proc.on('exit', (code) => {
           if (code !== null && code !== 0)
-            safeError(new Error(`[ScreenCaptureStreamer] exited with code ${code}`))
+            error(new Error(`[ScreenCaptureStreamer] exited with code ${code}`))
+          else
+            close()
         })
       },
       cancel() {
+        done = true
         proc.kill()
       },
     })

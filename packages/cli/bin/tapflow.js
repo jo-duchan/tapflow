@@ -1,1 +1,2 @@
-console.log('Tapflow is coming soon.');
+#!/usr/bin/env node
+require('../dist/index.js')
