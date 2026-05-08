@@ -651,8 +651,8 @@ export class DeviceChromeLoader {
       const expandedW = compositeW + btnM.left + btnM.right
       const expandedH = compositeH + btnM.top  + btnM.bottom
 
-      // Cache keyed by chrome name + screen dimensions
-      const framePath = join(tmpdir(), `tapflow-frame-nineslice-${chromeName}-${screenW}x${screenH}.png`)
+      // Cache keyed by chrome name + screen dimensions + canvas dimensions (canvas size can change after code fixes)
+      const framePath = join(tmpdir(), `tapflow-frame-nineslice-${chromeName}-${screenW}x${screenH}-c${Math.round(expandedW)}x${Math.round(expandedH)}.png`)
       const needsRender = !existsSync(framePath)
         || statSync(slicePaths.topLeft).mtimeMs > statSync(framePath).mtimeMs
 
