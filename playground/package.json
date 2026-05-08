@@ -6,15 +6,20 @@
   "scripts": {
     "relay": "tsx relay.ts",
     "ios-agent": "tsx ios-agent.ts",
-    "android-agent": "tsx android-agent.ts"
+    "android-agent": "tsx android-agent.ts",
+    "dev:doctor": "tsx ../packages/cli/src/index.ts doctor",
+    "dev:reset": "tsx ../packages/cli/src/index.ts reset",
+    "dev:up": "concurrently -n relay,agent -c cyan,green \"npm run relay\" \"npm run ios-agent\""
   },
   "dependencies": {
     "@tapflow/agent-core": "*",
     "@tapflow/ios-agent": "*",
     "@tapflow/android-agent": "*",
-    "@tapflow/relay": "*"
+    "@tapflow/relay": "*",
+    "@tapflow/cli": "*"
   },
   "devDependencies": {
+    "concurrently": "^9.0.0",
     "tsx": "^4.0.0",
     "typescript": "^5.0.0"
   }

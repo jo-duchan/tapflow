@@ -4,12 +4,23 @@ import { SimctlWrapper } from './SimctlWrapper'
 import { ScreenCaptureStreamer } from './ScreenCaptureStreamer'
 import { MjpegStreamer } from './MjpegStreamer'
 import { WdaClient } from './WdaClient'
+import { WdaLauncher } from './WdaLauncher'
 import { DeviceChromeLoader, type ChromeData } from './DeviceChromeLoader'
+
+export interface WdaOptions {
+  /** Auto-launch WDA if not running. Defaults to false. */
+  autoStart?: boolean
+  /** WDA HTTP port. Defaults to 8100. */
+  port?: number
+  /** Path to a pre-built .xctestrun file. Takes priority over WDA_PATH env and cache. */
+  xctestrunPath?: string
+}
 
 export interface IOSAgentOptions {
   fps?: number
   intervalMs?: number  // when set, uses MjpegStreamer (simctl screenshot polling) instead of ScreenCaptureStreamer
   wdaUrl?: string
+  wda?: WdaOptions
 }
 
 export class IOSAgent implements DeviceAgent {
@@ -17,7 +28,9 @@ export class IOSAgent implements DeviceAgent {
   private readonly wda: WdaClient
   private readonly fps: number
   private readonly intervalMs: number | undefined
+  private readonly wdaOptions: WdaOptions
   private readonly chromeLoader: DeviceChromeLoader
+  private wdaLauncher: WdaLauncher | null = null
   private loadedChrome: ChromeData | null = null
   private bootedDeviceId: string | null = null
   private ws: WebSocket | null = null
@@ -25,11 +38,14 @@ export class IOSAgent implements DeviceAgent {
   private streamReader: ReadableStreamDefaultReader<Buffer> | null = null
   private streamMimeType: string = 'image/jpeg'
 
-  constructor(options: IOSAgentOptions = {}, simctl?: SimctlWrapper, wda?: WdaClient) {
+  constructor(options: IOSAgentOptions = {}, simctl?: SimctlWrapper, wdaClient?: WdaClient) {
     this.simctl = simctl ?? new SimctlWrapper()
     this.fps = options.fps ?? 30
     this.intervalMs = options.intervalMs
-    this.wda = wda ?? new WdaClient(options.wdaUrl)
+    this.wdaOptions = options.wda ?? {}
+    const wdaPort = options.wda?.port ?? 8100
+    const wdaBase = options.wdaUrl ?? `http://localhost:${wdaPort}`
+    this.wda = wdaClient ?? new WdaClient(wdaBase)
     this.chromeLoader = new DeviceChromeLoader()
   }
 
@@ -39,6 +55,17 @@ export class IOSAgent implements DeviceAgent {
 
   async connect(relayUrl: string): Promise<void> {
     const devices = await this.simctl.listDevices()
+    const booted = devices.find((d) => d.status === 'booted')
+
+    if (booted && this.wdaOptions.autoStart) {
+      this.wdaLauncher = new WdaLauncher({
+        udid: booted.id,
+        port: this.wdaOptions.port ?? 8100,
+        xctestrunPath: this.wdaOptions.xctestrunPath,
+      })
+      await this.wdaLauncher.ensureRunning()
+    }
+
     return new Promise((resolve, reject) => {
       const ws = new WebSocket(relayUrl)
 
@@ -75,6 +102,8 @@ export class IOSAgent implements DeviceAgent {
   disconnect(): void {
     this.streamReader?.cancel()
     this.streamReader = null
+    this.wdaLauncher?.stop()
+    this.wdaLauncher = null
     this.ws?.close()
     this.ws = null
     this._sessionId = null
