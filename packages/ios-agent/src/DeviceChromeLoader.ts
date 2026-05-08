@@ -311,10 +311,10 @@ function renderNineSlicePng(
     bottomRight: string; bottom: string; bottomLeft: string; left: string
   },
   outPath: string,
-  screenW: number,
-  screenH: number,
-  cornerW: number,
-  cornerH: number,
+  leftWidth: number, rightWidth: number,
+  topHeight: number, bottomHeight: number,
+  cornerW: number, cornerH: number,
+  screenW: number, screenH: number,
   margins: { left: number; top: number; right: number; bottom: number },
   buttons: ButtonDrawData[],
 ): void {
@@ -330,10 +330,15 @@ import Foundation
 import CoreGraphics
 import ImageIO
 
-let screenW: CGFloat = ${screenW}
-let screenH: CGFloat = ${screenH}
+// Device body dims (bezel + screen hole) in 1× pts
+let leftW:   CGFloat = ${leftWidth}
+let rightW:  CGFloat = ${rightWidth}
+let topH:    CGFloat = ${topHeight}
+let botH:    CGFloat = ${bottomHeight}
 let cornerW: CGFloat = ${cornerW}
 let cornerH: CGFloat = ${cornerH}
+let screenW: CGFloat = ${screenW}
+let screenH: CGFloat = ${screenH}
 let mL: CGFloat = ${margins.left}
 let mT: CGFloat = ${margins.top}
 let mR: CGFloat = ${margins.right}
@@ -341,9 +346,17 @@ let mB: CGFloat = ${margins.bottom}
 let scale: CGFloat = 2
 let dst = CommandLine.arguments[1]
 
-// Canvas size in pixels
-let canW = Int((mL + cornerW + screenW + cornerW + mR) * scale)
-let canH = Int((mT + cornerH + screenH + cornerH + mB) * scale)
+// Device body (bezel + screen area)
+let bodyW = leftW + screenW + rightW   // = leftWidth + screenW + rightWidth
+let bodyH = topH  + screenH + botH
+
+// Middle section (area between corners, where edge strips stretch)
+let midW = bodyW - cornerW * 2
+let midH = bodyH - cornerH * 2
+
+// Total canvas including button margins
+let canW = Int((mL + bodyW + mR) * scale)
+let canH = Int((mT + bodyH + mB) * scale)
 
 let ctx = CGContext(
   data: nil, width: canW, height: canH,
@@ -352,8 +365,8 @@ let ctx = CGContext(
   bitmapInfo: CGBitmapInfo(rawValue: CGImageAlphaInfo.premultipliedLast.rawValue).rawValue
 )!
 
-// Rasterize PDF to CGImage at 2× — used for bitmap-based stretching of slice pieces.
-// drawPDFPage cannot non-uniformly scale PDF pages, so we rasterize first then use ctx.draw().
+// Rasterize PDF to CGImage at 2×.
+// drawPDFPage cannot non-uniformly scale PDF pages; rasterize first, then ctx.draw() stretches.
 func rasterize(_ path: String) -> CGImage? {
   guard let doc = CGPDFDocument(URL(fileURLWithPath: path) as CFURL),
         let page = doc.page(at: 1) else { return nil }
@@ -371,8 +384,7 @@ func rasterize(_ path: String) -> CGImage? {
   return rc.makeImage()
 }
 
-// Draw bitmap image into target rect (1× pts, top-left origin).
-// CGContext uses bottom-left origin, so Y is flipped.
+// Draw bitmap at (tlX, tlY) in 1× top-left pts, stretched to (w, h).
 func drawImg(_ img: CGImage, tlX: CGFloat, tlY: CGFloat, w: CGFloat, h: CGFloat) {
   ctx.draw(img, in: CGRect(
     x: tlX * scale,
@@ -382,7 +394,7 @@ func drawImg(_ img: CGImage, tlX: CGFloat, tlY: CGFloat, w: CGFloat, h: CGFloat)
   ))
 }
 
-// Draw a PDF at top-left (1× pts) — used for buttons which don't need stretching.
+// Draw PDF at (tlX, tlY) in 1× pts — used for buttons (no stretching needed).
 func drawPDF(_ path: String, tlX: CGFloat, tlY: CGFloat) {
   guard let doc = CGPDFDocument(URL(fileURLWithPath: path) as CFURL),
         let page = doc.page(at: 1) else { return }
@@ -394,26 +406,15 @@ func drawPDF(_ path: String, tlX: CGFloat, tlY: CGFloat) {
   ctx.restoreGState()
 }
 
-// Slice image paths
-let pathTL  = ${JSON.stringify(slicePaths.topLeft)}
-let pathT   = ${JSON.stringify(slicePaths.top)}
-let pathTR  = ${JSON.stringify(slicePaths.topRight)}
-let pathR   = ${JSON.stringify(slicePaths.right)}
-let pathBR  = ${JSON.stringify(slicePaths.bottomRight)}
-let pathB   = ${JSON.stringify(slicePaths.bottom)}
-let pathBL  = ${JSON.stringify(slicePaths.bottomLeft)}
-let pathL   = ${JSON.stringify(slicePaths.left)}
+let imgTL = rasterize(${JSON.stringify(slicePaths.topLeft)})
+let imgT  = rasterize(${JSON.stringify(slicePaths.top)})
+let imgTR = rasterize(${JSON.stringify(slicePaths.topRight)})
+let imgR  = rasterize(${JSON.stringify(slicePaths.right)})
+let imgBR = rasterize(${JSON.stringify(slicePaths.bottomRight)})
+let imgB  = rasterize(${JSON.stringify(slicePaths.bottom)})
+let imgBL = rasterize(${JSON.stringify(slicePaths.bottomLeft)})
+let imgL  = rasterize(${JSON.stringify(slicePaths.left)})
 
-let imgTL = rasterize(pathTL)
-let imgT  = rasterize(pathT)
-let imgTR = rasterize(pathTR)
-let imgR  = rasterize(pathR)
-let imgBR = rasterize(pathBR)
-let imgB  = rasterize(pathB)
-let imgBL = rasterize(pathBL)
-let imgL  = rasterize(pathL)
-
-// Button specs baked into script
 let behindBtns: [(path: String, x: CGFloat, y: CGFloat)] = [
   ${behind.map(btnLiteral).join(',\n  ')}
 ]
@@ -421,28 +422,27 @@ let onTopBtns: [(path: String, x: CGFloat, y: CGFloat)] = [
   ${onTop.map(btnLiteral).join(',\n  ')}
 ]
 
-// Draw behind-buttons first
 for btn in behindBtns { drawPDF(btn.path, tlX: btn.x, tlY: btn.y) }
 
-// Nine-slice composition — device body starts at (mL, mT) in the expanded canvas
-let bx = mL
-let by = mT
+// Device body starts at (mL, mT) in expanded canvas.
+// Corners are at natural size; edge strips are stretched to fill the gap between corners.
+// Screen hole (mL+leftW, mT+topH, screenW, screenH) is left transparent.
+let bx = mL; let by = mT
 
 // Top row
-if let img = imgTL { drawImg(img, tlX: bx,                   tlY: by,                    w: cornerW, h: cornerH) }
-if let img = imgT  { drawImg(img, tlX: bx + cornerW,         tlY: by,                    w: screenW, h: cornerH) }
-if let img = imgTR { drawImg(img, tlX: bx + cornerW + screenW, tlY: by,                  w: cornerW, h: cornerH) }
+if let img = imgTL { drawImg(img, tlX: bx,                 tlY: by,                w: cornerW, h: cornerH) }
+if let img = imgT  { drawImg(img, tlX: bx + cornerW,       tlY: by,                w: midW,    h: cornerH) }
+if let img = imgTR { drawImg(img, tlX: bx + bodyW - cornerW, tlY: by,              w: cornerW, h: cornerH) }
 
-// Middle row (screen hole at bx+cornerW, by+cornerH — left transparent)
-if let img = imgL  { drawImg(img, tlX: bx,                   tlY: by + cornerH,          w: cornerW, h: screenH) }
-if let img = imgR  { drawImg(img, tlX: bx + cornerW + screenW, tlY: by + cornerH,        w: cornerW, h: screenH) }
+// Middle row — corners overlap the screen area but their inner zone is transparent
+if let img = imgL  { drawImg(img, tlX: bx,                 tlY: by + cornerH,      w: cornerW, h: midH) }
+if let img = imgR  { drawImg(img, tlX: bx + bodyW - cornerW, tlY: by + cornerH,    w: cornerW, h: midH) }
 
 // Bottom row
-if let img = imgBL { drawImg(img, tlX: bx,                   tlY: by + cornerH + screenH, w: cornerW, h: cornerH) }
-if let img = imgB  { drawImg(img, tlX: bx + cornerW,         tlY: by + cornerH + screenH, w: screenW, h: cornerH) }
-if let img = imgBR { drawImg(img, tlX: bx + cornerW + screenW, tlY: by + cornerH + screenH, w: cornerW, h: cornerH) }
+if let img = imgBL { drawImg(img, tlX: bx,                 tlY: by + bodyH - cornerH, w: cornerW, h: cornerH) }
+if let img = imgB  { drawImg(img, tlX: bx + cornerW,       tlY: by + bodyH - cornerH, w: midW,    h: cornerH) }
+if let img = imgBR { drawImg(img, tlX: bx + bodyW - cornerW, tlY: by + bodyH - cornerH, w: cornerW, h: cornerH) }
 
-// On-top buttons (e.g. home button drawn over bezel)
 for btn in onTopBtns { drawPDF(btn.path, tlX: btn.x, tlY: btn.y) }
 
 let outImg = ctx.makeImage()!
@@ -637,9 +637,9 @@ export class DeviceChromeLoader {
       const screenW = screenSize.width
       const screenH = screenSize.height
 
-      // Device body size = corners + screen (nine-slice composition)
-      const compositeW = cornerW + screenW + cornerW
-      const compositeH = cornerH + screenH + cornerH
+      // Device body = bezel insets + screen (baguette: canvasSize = insets + innerSize)
+      const compositeW = leftWidth  + screenW + rightWidth
+      const compositeH = topHeight  + screenH + bottomHeight
 
       const bezelInset        = Math.max(leftWidth, topHeight)
       const screenCornerRadius1x = Math.max(0, outerRadius - bezelInset)
@@ -657,13 +657,18 @@ export class DeviceChromeLoader {
         || statSync(slicePaths.topLeft).mtimeMs > statSync(framePath).mtimeMs
 
       if (needsRender) {
-        renderNineSlicePng(slicePaths, framePath, screenW, screenH, cornerW, cornerH, btnM, drawData)
+        renderNineSlicePng(
+          slicePaths, framePath,
+          leftWidth, rightWidth, topHeight, bottomHeight,
+          cornerW, cornerH, screenW, screenH,
+          btnM, drawData,
+        )
       }
 
-      // Screen hole position in expanded composite (screen starts after corner + left margin)
+      // Screen hole: starts at sizing insets within the device body
       const screenRect: ChromeRect = {
-        x:      Math.round((btnM.left + cornerW) * scale),
-        y:      Math.round((btnM.top  + cornerH) * scale),
+        x:      Math.round((btnM.left + leftWidth)  * scale),
+        y:      Math.round((btnM.top  + topHeight)  * scale),
         width:  Math.round(screenW * scale),
         height: Math.round(screenH * scale),
       }
