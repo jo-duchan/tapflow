@@ -1,6 +1,13 @@
 import type { Point } from '@tapflow/agent-core'
 
 export class WdaClient {
+  private static readonly BUTTON_MAP: Record<string, string> = {
+    leftButtonSideVolumeUp:   'volumeUp',
+    leftButtonSideVolumeDown: 'volumeDown',
+    rightButtonSide:          'power',
+    home:                     'home',
+  }
+
   private readonly baseUrl: string
   private cachedSessionId: string | null = null
   private cachedWindowSize: { width: number; height: number } | null = null
@@ -94,6 +101,16 @@ export class WdaClient {
           ]),
         }],
       }),
+    })
+  }
+
+  async pressButton(chromeName: string): Promise<void> {
+    const sessionId = await this.getSessionId()
+    const name = WdaClient.BUTTON_MAP[chromeName] ?? chromeName
+    await fetch(`${this.baseUrl}/session/${sessionId}/wda/pressButton`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name }),
     })
   }
 }

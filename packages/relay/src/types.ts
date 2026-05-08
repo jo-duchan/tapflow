@@ -11,6 +11,7 @@ export type MessageType =
   | 'input:tap'
   | 'input:swipe'
   | 'input:type'
+  | 'input:button'
   | 'error'
 
 export interface DeviceInfo {
@@ -30,6 +31,7 @@ export interface RelayMessage {
   sessionId?: string
   payload?: unknown
   message?: string
+  mimeType?: string
   devices?: DeviceInfo[]
   sessions?: SessionInfo[]
 }

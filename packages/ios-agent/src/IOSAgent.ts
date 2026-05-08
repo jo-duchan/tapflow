@@ -2,12 +2,13 @@ import { WebSocket } from 'ws'
 import type { Device, DeviceAgent, Point } from '@tapflow/agent-core'
 import { SimctlWrapper } from './SimctlWrapper'
 import { ScreenCaptureStreamer } from './ScreenCaptureStreamer'
+import { MjpegStreamer } from './MjpegStreamer'
 import { WdaClient } from './WdaClient'
 import { DeviceChromeLoader, type ChromeData } from './DeviceChromeLoader'
-import type { ChromeGeometry } from './ScreenCaptureStreamer'
 
 export interface IOSAgentOptions {
   fps?: number
+  intervalMs?: number  // when set, uses MjpegStreamer (simctl screenshot polling) instead of ScreenCaptureStreamer
   wdaUrl?: string
 }
 
@@ -15,15 +16,19 @@ export class IOSAgent implements DeviceAgent {
   private readonly simctl: SimctlWrapper
   private readonly wda: WdaClient
   private readonly fps: number
+  private readonly intervalMs: number | undefined
   private readonly chromeLoader: DeviceChromeLoader
   private loadedChrome: ChromeData | null = null
+  private bootedDeviceId: string | null = null
   private ws: WebSocket | null = null
   private _sessionId: string | null = null
   private streamReader: ReadableStreamDefaultReader<Buffer> | null = null
+  private streamMimeType: string = 'image/jpeg'
 
   constructor(options: IOSAgentOptions = {}, simctl?: SimctlWrapper, wda?: WdaClient) {
     this.simctl = simctl ?? new SimctlWrapper()
     this.fps = options.fps ?? 30
+    this.intervalMs = options.intervalMs
     this.wda = wda ?? new WdaClient(options.wdaUrl)
     this.chromeLoader = new DeviceChromeLoader()
   }
@@ -55,7 +60,7 @@ export class IOSAgent implements DeviceAgent {
           this.ws = ws
           this._sessionId = msg.sessionId
           this.sendChromeData(devices)
-          this.startStreaming()
+          this.startStreaming().catch((e) => console.error('[agent] startStreaming failed:', e))
           ws.on('message', (d) => this.handleRelayMessage(JSON.parse(d.toString())))
           resolve()
         } else {
@@ -78,41 +83,22 @@ export class IOSAgent implements DeviceAgent {
   private sendChromeData(devices: Device[]): void {
     const booted = devices.find((d) => d.status === 'booted')
     if (!booted || !this.ws) return
-    this.loadedChrome = this.chromeLoader.load(booted.name)
+    this.bootedDeviceId = booted.id
+    this.loadedChrome = this.chromeLoader.load(booted.typeId ?? booted.name)
     if (!this.loadedChrome) return
     this.ws.send(JSON.stringify({ type: 'session:chrome', payload: this.loadedChrome }))
   }
 
-  private chromeToGeometry(chrome: ChromeData): ChromeGeometry {
-    // chromeData dimensions are at 2x (rasterized from PDF); divide by 2 for PDF points
-    const scale = 2
-    return {
-      compositeWidth:  chrome.bezelWidth  / scale,
-      compositeHeight: chrome.bezelHeight / scale,
-      screenX:         chrome.screenRect.x      / scale,
-      screenY:         chrome.screenRect.y      / scale,
-      screenWidth:     chrome.screenRect.width  / scale,
-      screenHeight:    chrome.screenRect.height / scale,
-    }
-  }
-
   private async startStreaming(): Promise<void> {
-    let geometry: ChromeGeometry
-    if (this.loadedChrome) {
-      geometry = this.chromeToGeometry(this.loadedChrome)
+    let stream: ReadableStream<Buffer>
+    if (this.intervalMs !== undefined) {
+      stream = new MjpegStreamer(this.simctl, this.intervalMs).start()
+      this.streamMimeType = 'image/png'
     } else {
-      // fallback: derive composite geometry from WDA screen size (assumes symmetric 21pt bezel)
-      const screen = await this.wda.getWindowSize().catch(() => ({ width: 393, height: 852 }))
-      const bezel = 21
-      geometry = {
-        compositeWidth:  screen.width  + bezel * 2,
-        compositeHeight: screen.height + bezel * 2,
-        screenX: bezel, screenY: bezel,
-        screenWidth: screen.width, screenHeight: screen.height,
-      }
+      stream = new ScreenCaptureStreamer(this.fps, this.bootedDeviceId ?? 'booted').start()
+      this.streamMimeType = 'image/jpeg'
     }
-    const streamer = new ScreenCaptureStreamer(this.fps, geometry)
-    const stream = streamer.start()
+
     const reader = stream.getReader()
     this.streamReader = reader
 
@@ -125,6 +111,7 @@ export class IOSAgent implements DeviceAgent {
             this.ws.send(JSON.stringify({
               type: 'stream:frame',
               payload: value.toString('base64'),
+              mimeType: this.streamMimeType,
             }))
           }
         }
@@ -160,6 +147,11 @@ export class IOSAgent implements DeviceAgent {
         this.wda.type(text).catch((e) => console.error('[agent] type failed:', e))
         break
       }
+      case 'input:button': {
+        const { name } = msg.payload as { name: string }
+        this.wda.pressButton(name).catch((e) => console.error('[agent] button failed:', e))
+        break
+      }
     }
   }
 
@@ -171,8 +163,8 @@ export class IOSAgent implements DeviceAgent {
   launchApp(bundleId: string): Promise<void> { return this.simctl.launchApp(bundleId) }
   screenshot(): Promise<Buffer> { return this.simctl.screenshot() }
   stream(): ReadableStream<Buffer> {
-    if (!this.loadedChrome) throw new Error('chrome data not loaded — call connect() first')
-    return new ScreenCaptureStreamer(this.fps, this.chromeToGeometry(this.loadedChrome)).start()
+    if (!this.bootedDeviceId) throw new Error('no booted device — call connect() first')
+    return new ScreenCaptureStreamer(this.fps, this.bootedDeviceId).start()
   }
 
   tap(x: number, y: number): Promise<void> { return this.wda.tap(x, y) }

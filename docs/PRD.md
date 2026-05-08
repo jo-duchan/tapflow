@@ -125,7 +125,7 @@ xcrun simctl launch booted com.example.app
 
 | 단계 | 방식 | FPS | 구현 난이도 |
 |-----|------|-----|-----------|
-| Phase 1 | MJPEG (xcrun simctl io screenshot 루프) | ~10fps | ⭐ |
+| Phase 1 | SimulatorKit IOSurface 콜백 + DispatchSourceTimer → JPEG | ~30fps | ⭐⭐ |
 | Phase 2 | WebRTC (AVFoundation 캡처) | ~60fps | ⭐⭐⭐⭐ |
 
 **터치 인젝션 (WebDriverAgent)**
@@ -366,7 +366,7 @@ await agent.boot(selectedDeviceId)
 | 릴레이 서버 | Node.js + ws | 경량, WebSocket 특화 |
 | 인프라 배포 | Pulumi (TypeScript) | 멀티 클라우드, 코드로 관리 |
 | Web Dashboard | Next.js + TypeScript | 팀 선호 스택 |
-| 스트리밍 v1 | MJPEG | 빠른 구현, ~10fps |
+| 스트리밍 v1 | SimulatorKit IOSurface → JPEG | Private API, geometry 불필요, ~30fps |
 | 스트리밍 v2 | WebRTC (H.264) | 저지연, ~60fps |
 | iOS 터치 | WebDriverAgent | 오픈소스, Appium 검증 |
 | Android 터치 | ADB shell input | 표준 도구, 별도 설치 불필요 |

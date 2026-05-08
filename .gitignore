@@ -26,3 +26,6 @@ packages/ios-agent/src/screencapture-helper
 # playwright mcp artifacts
 .playwright-mcp/
 *.png
+
+# vscode
+.vscode

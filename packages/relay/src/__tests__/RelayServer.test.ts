@@ -79,6 +79,27 @@ describe('RelayServer', () => {
     browser.close()
   })
 
+  it('routes input:button from browser to agent', async () => {
+    const agent = new WebSocket(`ws://localhost:${port}`)
+    await waitForOpen(agent)
+    agent.send(JSON.stringify({ type: 'agent:register' }))
+    const { sessionId } = await waitForMessage(agent)
+
+    const browser = new WebSocket(`ws://localhost:${port}`)
+    await waitForOpen(browser)
+    browser.send(JSON.stringify({ type: 'session:start', sessionId }))
+    await waitForMessage(browser)
+
+    const buttonPromise = waitForMessage(agent)
+    browser.send(JSON.stringify({ type: 'input:button', sessionId, payload: { name: 'leftButtonSideVolumeUp' } }))
+    const btn = await buttonPromise
+    expect(btn.type).toBe('input:button')
+    expect(btn.payload).toEqual({ name: 'leftButtonSideVolumeUp' })
+
+    agent.close()
+    browser.close()
+  })
+
   it('routes stream:frame from agent to browser', async () => {
     const agent = new WebSocket(`ws://localhost:${port}`)
     await waitForOpen(agent)
