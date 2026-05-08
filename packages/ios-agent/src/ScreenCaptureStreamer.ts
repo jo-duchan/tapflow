@@ -6,16 +6,6 @@ const SRC_DIR = join(__dirname, '..', 'src')
 const SWIFT_SRC = join(SRC_DIR, 'screencapture-helper.swift')
 const BINARY = join(SRC_DIR, 'screencapture-helper')
 
-// All values in DeviceKit composite PDF points (1x)
-export interface ChromeGeometry {
-  compositeWidth: number
-  compositeHeight: number
-  screenX: number
-  screenY: number
-  screenWidth: number
-  screenHeight: number
-}
-
 function ensureCompiled(): void {
   if (existsSync(BINARY)) {
     const srcMtime = statSync(SWIFT_SRC).mtimeMs
@@ -28,8 +18,7 @@ function ensureCompiled(): void {
   execFileSync('swiftc', [
     SWIFT_SRC,
     '-o', BINARY,
-    '-framework', 'ScreenCaptureKit',
-    '-framework', 'AppKit',
+    '-framework', 'CoreVideo',
     '-framework', 'ImageIO',
   ], { stdio: ['ignore', 'ignore', 'inherit'] })
   console.error('[ScreenCaptureStreamer] compiled OK')
@@ -38,21 +27,15 @@ function ensureCompiled(): void {
 export class ScreenCaptureStreamer {
   constructor(
     private readonly fps: number = 30,
-    private readonly geometry: ChromeGeometry,
+    private readonly udid: string = 'booted',
   ) {}
 
   start(): ReadableStream<Buffer> {
     ensureCompiled()
 
-    const g = this.geometry
-    const args = [
-      String(this.fps),
-      String(g.compositeWidth), String(g.compositeHeight),
-      String(g.screenX), String(g.screenY),
-      String(g.screenWidth), String(g.screenHeight),
-    ]
-
-    const proc = spawn(BINARY, args, { stdio: ['ignore', 'pipe', 'pipe'] })
+    const proc = spawn(BINARY, [String(this.fps), this.udid], {
+      stdio: ['ignore', 'pipe', 'pipe'],
+    })
 
     proc.stderr.on('data', (d: Buffer) => process.stderr.write(d))
 
@@ -62,7 +45,6 @@ export class ScreenCaptureStreamer {
 
         proc.stdout.on('data', (chunk: Buffer) => {
           buf = Buffer.concat([buf, chunk])
-
           while (buf.length >= 4) {
             const frameLen = buf.readUInt32BE(0)
             if (buf.length < 4 + frameLen) break
@@ -73,6 +55,10 @@ export class ScreenCaptureStreamer {
 
         proc.stdout.on('end', () => controller.close())
         proc.on('error', (e) => controller.error(e))
+        proc.on('exit', (code) => {
+          if (code !== null && code !== 0)
+            controller.error(new Error(`[ScreenCaptureStreamer] exited with code ${code}`))
+        })
       },
       cancel() {
         proc.kill()
