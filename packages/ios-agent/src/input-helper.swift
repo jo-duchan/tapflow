@@ -10,6 +10,17 @@
 // normX/normY are normalized 0-1 coordinates within the screen area.
 
 import Cocoa
+import ApplicationServices
+
+// Check Accessibility permission — required for CGEvent injection.
+// If not trusted, prompt the user via the macOS system dialog (one-time).
+let trusted = AXIsProcessTrustedWithOptions([kAXTrustedCheckOptionPrompt.takeUnretainedValue(): true] as CFDictionary)
+if !trusted {
+    fputs("error: Accessibility permission required for touch injection.\n" +
+          "  → System Settings > Privacy & Security > Accessibility → add Terminal\n" +
+          "  Then retry. This is a one-time setup.\n", stderr)
+    exit(1)
+}
 
 guard CommandLine.arguments.count >= 10,
       let compositeW = Double(CommandLine.arguments[2]),
