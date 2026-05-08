@@ -234,19 +234,33 @@ npx tapflow agent start --relay wss://relay.myteam.tapflow.dev
 # 3. QA팀 초대
 npx tapflow invite qa@company.com
 
-# 4. iOS 환경 초기 세팅 (Mac Agent 머신에서 1회)
+# 4. 환경 진단 (문제 발생 시)
+npx tapflow doctor
+  > ✓ Node.js 24.x
+  > ✓ Xcode 26.4.1
+  > ✗ iOS Simulator Runtime
+  >     Xcode SDK: iOS 26.4  |  설치된 런타임: iOS 18.5 (불일치)
+  >     → npx tapflow ios setup --fix 으로 자동 수정
+  > ✗ WebDriverAgent
+  >     localhost:8100 응답 없음
+  >     → npx tapflow ios setup 으로 WDA 설치
+
+# 5. iOS 환경 초기 세팅 (Mac Agent 머신에서 1회)
 npx tapflow ios setup
+  > Detecting Xcode SDK... iOS 26.4
+  > Checking simulator runtimes... iOS 18.5 (mismatch)
+  > Downloading iOS 26.4 Simulator Runtime... (~3GB)
   > Downloading WebDriverAgent...
   > ? Apple Team ID (found: AUG3P9AA8U): [enter]
   > Building WDA for simulator... (~2분)
   > ✓ WDA ready — localhost:8100 will auto-start with agent
 
-# 5. 앱 빌드 업로드 (개발자 — CI/CD 또는 수동)
+# 6. 앱 빌드 업로드 (개발자 — CI/CD 또는 수동)
 npx tapflow upload MyApp.ipa --name "v1.2.3-staging"
   > ✓ Uploaded to iOS Agent (12.3 MB)
   > ✓ Version registered: v1.2.3-staging
 
-# 6. 상태 확인
+# 7. 상태 확인
 npx tapflow status
 ```
 
@@ -306,7 +320,15 @@ await agent.boot(selectedDeviceId)
 목표: QA팀이 실제로 쓸 수 있는 수준
 
 - CLI: `npx tapflow deploy` (fly.io 먼저)
+- CLI: `npx tapflow doctor` — 환경 진단 및 수정 가이드
+  - Xcode 버전 확인
+  - iOS Simulator Runtime 버전과 Xcode SDK 버전 일치 여부 검사
+  - WDA 실행 상태 확인 (`localhost:8100`)
+  - Node.js 버전 확인
+  - 문제 항목마다 수정 커맨드 안내
 - CLI: `npx tapflow ios setup` — WDA 자동 설치·빌드·실행
+  - Xcode SDK 버전 자동 감지 (`xcodebuild -showsdks`)
+  - 일치하는 iOS Simulator Runtime 없으면 자동 다운로드 (`xcodebuild -downloadPlatform iOS`)
   - `appium-webdriveragent` npm 패키지 다운로드
   - `xcodebuild`로 시뮬레이터용 빌드 (Team ID 1회 입력)
   - 이후 `agent start` 시 WDA 자동 시작
