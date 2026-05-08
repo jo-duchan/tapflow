@@ -51,7 +51,25 @@ main          ← 항상 배포 가능한 상태. 직접 커밋 금지.
 
 - 브랜치명: `feature/{topic}` (예: `feature/60fps-streaming`)
 - PR 없이 main에 직접 push하지 않는다.
-- dev 브랜치는 더 이상 사용하지 않는다.
+- dev 브랜치는 사용하지 않는다.
+
+### 릴리즈 정책 (Semver + GitHub Releases)
+
+사용자는 npm 태그 버전을 설치한다. main의 중간 상태가 외부에 노출되지 않도록 **태그 기준으로만 배포**한다.
+
+```
+# 릴리즈 준비 완료 시
+git tag v0.1.0
+git push origin v0.1.0
+# → GitHub Release 생성 + npm publish
+```
+
+- 버전은 [Semantic Versioning](https://semver.org/)을 따른다.
+  - `patch` (0.0.x): 버그 수정
+  - `minor` (0.x.0): 하위 호환 새 기능
+  - `major` (x.0.0): breaking change
+- `v1.0.0` 이전은 public API가 안정화되지 않은 상태로 간주한다 — minor 버전에서 breaking change가 있을 수 있다.
+- main에 머지됐다고 자동 배포되지 않는다. 태그를 찍기 전까지는 내부 상태다.
 
 ### 워크플로우 (Plan → Work → Review → Compound)
 
