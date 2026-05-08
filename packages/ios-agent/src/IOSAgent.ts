@@ -4,6 +4,7 @@ import { SimctlWrapper } from './SimctlWrapper'
 import { ScreenCaptureStreamer } from './ScreenCaptureStreamer'
 import { WdaClient } from './WdaClient'
 import { DeviceChromeLoader, type ChromeData } from './DeviceChromeLoader'
+import { SimulatorInputClient } from './SimulatorInputClient'
 import type { ChromeGeometry } from './ScreenCaptureStreamer'
 
 export interface IOSAgentOptions {
@@ -17,6 +18,7 @@ export class IOSAgent implements DeviceAgent {
   private readonly fps: number
   private readonly chromeLoader: DeviceChromeLoader
   private loadedChrome: ChromeData | null = null
+  private simInput: SimulatorInputClient | null = null
   private ws: WebSocket | null = null
   private _sessionId: string | null = null
   private streamReader: ReadableStreamDefaultReader<Buffer> | null = null
@@ -81,6 +83,7 @@ export class IOSAgent implements DeviceAgent {
     this.loadedChrome = this.chromeLoader.load(booted.name)
     if (!this.loadedChrome) return
     this.ws.send(JSON.stringify({ type: 'session:chrome', payload: this.loadedChrome }))
+    this.simInput = new SimulatorInputClient(this.chromeToGeometry(this.loadedChrome))
   }
 
   private chromeToGeometry(chrome: ChromeData): ChromeGeometry {
@@ -140,19 +143,27 @@ export class IOSAgent implements DeviceAgent {
     switch (msg.type) {
       case 'input:tap': {
         const { x, y } = msg.payload as { x: number; y: number }
-        this.wda.getWindowSize().then((size) =>
-          this.wda.tap(Math.round(x * size.width), Math.round(y * size.height))
-        ).catch((e) => console.error('[agent] tap failed:', e))
+        if (this.simInput) {
+          this.simInput.tap(x, y)
+        } else {
+          this.wda.getWindowSize()
+            .then((size) => this.wda.tap(Math.round(x * size.width), Math.round(y * size.height)))
+            .catch((e) => console.error('[agent] tap failed:', e))
+        }
         break
       }
       case 'input:swipe': {
         const { from, to } = msg.payload as { from: { x: number; y: number }; to: { x: number; y: number } }
-        this.wda.getWindowSize().then((size) =>
-          this.wda.swipe(
-            { x: Math.round(from.x * size.width), y: Math.round(from.y * size.height) },
-            { x: Math.round(to.x * size.width), y: Math.round(to.y * size.height) },
-          )
-        ).catch((e) => console.error('[agent] swipe failed:', e))
+        if (this.simInput) {
+          this.simInput.swipe(from.x, from.y, to.x, to.y)
+        } else {
+          this.wda.getWindowSize()
+            .then((size) => this.wda.swipe(
+              { x: Math.round(from.x * size.width), y: Math.round(from.y * size.height) },
+              { x: Math.round(to.x * size.width), y: Math.round(to.y * size.height) },
+            ))
+            .catch((e) => console.error('[agent] swipe failed:', e))
+        }
         break
       }
       case 'input:type': {
