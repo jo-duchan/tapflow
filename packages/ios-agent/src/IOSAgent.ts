@@ -3,6 +3,7 @@ import type { Device, DeviceAgent, Point } from '@tapflow/agent-core'
 import { SimctlWrapper } from './SimctlWrapper'
 import { ScreenCaptureStreamer } from './ScreenCaptureStreamer'
 import { WdaClient } from './WdaClient'
+import { DeviceChromeLoader } from './DeviceChromeLoader'
 
 export interface IOSAgentOptions {
   fps?: number
@@ -14,6 +15,7 @@ export class IOSAgent implements DeviceAgent {
   private readonly streamer: ScreenCaptureStreamer
   private readonly wda: WdaClient
   private readonly fps: number
+  private readonly chromeLoader: DeviceChromeLoader
   private ws: WebSocket | null = null
   private _sessionId: string | null = null
   private streamReader: ReadableStreamDefaultReader<Buffer> | null = null
@@ -23,6 +25,7 @@ export class IOSAgent implements DeviceAgent {
     this.fps = options.fps ?? 30
     this.streamer = new ScreenCaptureStreamer(this.fps)
     this.wda = wda ?? new WdaClient(options.wdaUrl)
+    this.chromeLoader = new DeviceChromeLoader()
   }
 
   get sessionId(): string | null {
@@ -30,11 +33,11 @@ export class IOSAgent implements DeviceAgent {
   }
 
   async connect(relayUrl: string): Promise<void> {
+    const devices = await this.simctl.listDevices()
     return new Promise((resolve, reject) => {
       const ws = new WebSocket(relayUrl)
 
-      ws.once('open', async () => {
-        const devices = await this.simctl.listDevices()
+      ws.once('open', () => {
         ws.send(JSON.stringify({
           type: 'agent:register',
           devices: devices.map((d) => ({
@@ -51,6 +54,7 @@ export class IOSAgent implements DeviceAgent {
         if (msg.type === 'agent:registered') {
           this.ws = ws
           this._sessionId = msg.sessionId
+          this.sendChromeData(devices)
           this.startStreaming()
           ws.on('message', (d) => this.handleRelayMessage(JSON.parse(d.toString())))
           resolve()
@@ -69,6 +73,14 @@ export class IOSAgent implements DeviceAgent {
     this.ws?.close()
     this.ws = null
     this._sessionId = null
+  }
+
+  private sendChromeData(devices: Device[]): void {
+    const booted = devices.find((d) => d.status === 'booted')
+    if (!booted || !this.ws) return
+    const chrome = this.chromeLoader.load(booted.name)
+    if (!chrome) return
+    this.ws.send(JSON.stringify({ type: 'session:chrome', payload: chrome }))
   }
 
   private async startStreaming(): Promise<void> {

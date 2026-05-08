@@ -62,6 +62,7 @@ SCShareableContent.getExcludingDesktopWindows(false, onScreenWindowsOnly: false)
 
     sharedFilter = SCContentFilter(desktopIndependentWindow: window)
     let config = SCStreamConfiguration()
+    config.showsCursor = false
     // sourceRect crops the capture to just the iOS screen area
     config.sourceRect = screenRect
     // Output at 2x logical resolution for retina quality

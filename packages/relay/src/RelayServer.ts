@@ -88,6 +88,21 @@ export class RelayServer {
         }
         this.sessions.join(msg.sessionId!, ws)
         ws.send(JSON.stringify({ type: 'session:joined', sessionId: msg.sessionId }))
+        // send cached chrome data if already received from agent
+        if (session.chromeData) {
+          ws.send(JSON.stringify({ type: 'session:chrome', payload: session.chromeData }))
+        }
+        break
+      }
+
+      case 'session:chrome': {
+        // agent → cache + forward to browser if already joined
+        const session = this.sessions.getBySocket(ws)
+        if (!session) break
+        this.sessions.setChromeData(session.id, msg.payload)
+        if (session.browserSocket?.readyState === WebSocket.OPEN) {
+          session.browserSocket.send(JSON.stringify(msg))
+        }
         break
       }
 

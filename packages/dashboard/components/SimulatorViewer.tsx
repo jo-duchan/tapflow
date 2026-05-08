@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useRelay } from '@/hooks/useRelay'
-import type { RelayMessage } from '@/lib/types'
+import type { ChromeData, RelayMessage } from '@/lib/types'
 import { Button } from '@/components/ui/button'
 
 interface Props {
@@ -14,11 +14,16 @@ export function SimulatorViewer({ sessionId, onBack }: Props) {
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const [joined, setJoined] = useState(false)
   const [fps, setFps] = useState(0)
+  const [chrome, setChrome] = useState<ChromeData | null>(null)
   const frameCount = useRef(0)
 
   const handleMessage = useCallback((msg: RelayMessage) => {
     if (msg.type === 'session:joined') {
       setJoined(true)
+    }
+
+    if (msg.type === 'session:chrome') {
+      setChrome(msg.payload)
     }
 
     if (msg.type === 'stream:frame' && canvasRef.current) {
@@ -33,7 +38,7 @@ export function SimulatorViewer({ sessionId, onBack }: Props) {
           ctx.drawImage(img, 0, 0)
         }
       }
-      img.src = `data:image/png;base64,${msg.payload}`
+      img.src = `data:image/jpeg;base64,${msg.payload}`
       frameCount.current += 1
     }
   }, [])
@@ -93,6 +98,11 @@ export function SimulatorViewer({ sessionId, onBack }: Props) {
       ? 'Joining session...'
       : `Live · ${fps} fps`
 
+  const screenPctLeft = chrome ? (chrome.screenRect.x / chrome.bezelWidth) * 100 : 0
+  const screenPctTop = chrome ? (chrome.screenRect.y / chrome.bezelHeight) * 100 : 0
+  const screenPctW = chrome ? (chrome.screenRect.width / chrome.bezelWidth) * 100 : 100
+  const screenPctH = chrome ? (chrome.screenRect.height / chrome.bezelHeight) * 100 : 100
+
   return (
     <div className="flex flex-col items-center gap-3">
       <div className="flex w-full items-center gap-4">
@@ -102,12 +112,42 @@ export function SimulatorViewer({ sessionId, onBack }: Props) {
         <span className="text-sm text-muted-foreground">{statusText}</span>
       </div>
 
-      <canvas
-        ref={canvasRef}
-        className="max-w-full cursor-crosshair rounded-lg border border-border"
-        onMouseDown={handleMouseDown}
-        onMouseUp={handleMouseUp}
-      />
+      {chrome ? (
+        /* Bezel mode: device frame image with canvas positioned inside screen area */
+        <div className="relative inline-block max-h-[80vh]">
+          <img
+            src={`data:image/png;base64,${chrome.bezelPng}`}
+            className="block h-full w-auto max-h-[80vh] select-none"
+            draggable={false}
+            alt="device frame"
+          />
+          <canvas
+            ref={canvasRef}
+            className="absolute cursor-crosshair"
+            style={{
+              left: `${screenPctLeft}%`,
+              top: `${screenPctTop}%`,
+              width: `${screenPctW}%`,
+              height: `${screenPctH}%`,
+            }}
+            onMouseDown={handleMouseDown}
+            onMouseUp={handleMouseUp}
+          />
+        </div>
+      ) : (
+        /* Fallback: plain canvas before chrome data arrives */
+        <div
+          className="overflow-hidden shadow-lg"
+          style={{ borderRadius: '11.2% / 5.16%' }}
+        >
+          <canvas
+            ref={canvasRef}
+            className="block max-w-full cursor-crosshair"
+            onMouseDown={handleMouseDown}
+            onMouseUp={handleMouseUp}
+          />
+        </div>
+      )}
 
       {joined && fps === 0 && (
         <p className="text-sm text-muted-foreground">Waiting for first frame...</p>
