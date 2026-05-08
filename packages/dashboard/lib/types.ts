@@ -29,6 +29,8 @@ export interface ChromeData {
   bezelWidth: number
   bezelHeight: number
   screenRect: ChromeRect
+  logicalWidth: number
+  logicalHeight: number
   buttons: ChromeButton[]
 }
 

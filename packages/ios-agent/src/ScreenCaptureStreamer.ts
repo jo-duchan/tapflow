@@ -1,5 +1,5 @@
 import { spawn, execFileSync } from 'child_process'
-import { existsSync } from 'fs'
+import { existsSync, statSync, unlinkSync } from 'fs'
 import { join } from 'path'
 
 const SRC_DIR = join(__dirname, '..', 'src')
@@ -17,7 +17,13 @@ export interface ChromeGeometry {
 }
 
 function ensureCompiled(): void {
-  if (existsSync(BINARY)) return
+  if (existsSync(BINARY)) {
+    const srcMtime = statSync(SWIFT_SRC).mtimeMs
+    const binMtime = statSync(BINARY).mtimeMs
+    if (binMtime >= srcMtime) return
+    console.error('[ScreenCaptureStreamer] Swift source changed, recompiling...')
+    unlinkSync(BINARY)
+  }
   console.error('[ScreenCaptureStreamer] compiling screencapture-helper...')
   execFileSync('swiftc', [
     SWIFT_SRC,

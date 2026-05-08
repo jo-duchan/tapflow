@@ -98,14 +98,14 @@ export function SimulatorViewer({ sessionId, onBack }: Props) {
       ? 'Joining session...'
       : `Live · ${fps} fps`
 
-  // Display at CSS logical size (bezelWidth/2 = PDF points = iOS logical pixels)
-  // iPhone 15: 870/2 = 435px wide, 1788/2 = 894px tall
+  // bezelWidth/2 = PDF points = CSS logical pixels (iPhone 15: 870/2 = 435px)
   const bezelDisplayW = chrome ? chrome.bezelWidth / 2 : 0
   const bezelDisplayH = chrome ? chrome.bezelHeight / 2 : 0
-  const canvasLeft   = chrome ? (chrome.screenRect.x      / chrome.bezelWidth)  * bezelDisplayW : 0
-  const canvasTop    = chrome ? (chrome.screenRect.y      / chrome.bezelHeight) * bezelDisplayH : 0
-  const canvasWidth  = chrome ? (chrome.screenRect.width  / chrome.bezelWidth)  * bezelDisplayW : 0
-  const canvasHeight = chrome ? (chrome.screenRect.height / chrome.bezelHeight) * bezelDisplayH : 0
+  // canvas CSS size comes directly from agent — no derived calculation
+  const canvasWidth  = chrome ? chrome.logicalWidth : 0
+  const canvasHeight = chrome ? chrome.logicalHeight : 0
+  const canvasLeft   = chrome ? (bezelDisplayW - canvasWidth)  / 2 : 0
+  const canvasTop    = chrome ? (chrome.screenRect.y / chrome.bezelHeight) * bezelDisplayH : 0
 
   return (
     <div className="flex flex-col items-center gap-3">

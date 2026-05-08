@@ -26,6 +26,8 @@ export interface ChromeData {
   bezelWidth: number
   bezelHeight: number
   screenRect: ChromeRect
+  logicalWidth: number   // screen width in iOS logical pixels (pt)
+  logicalHeight: number  // screen height in iOS logical pixels (pt)
   buttons: ChromeButton[]
 }
 
@@ -107,6 +109,8 @@ export class DeviceChromeLoader {
         bezelWidth: pngSize.width,
         bezelHeight: pngSize.height,
         screenRect,
+        logicalWidth:  Math.round(pdfSize.width  - leftWidth  - rightWidth),
+        logicalHeight: Math.round(pdfSize.height - topHeight  - bottomHeight),
         buttons,
       }
     } catch {
