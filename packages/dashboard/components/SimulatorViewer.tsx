@@ -98,10 +98,14 @@ export function SimulatorViewer({ sessionId, onBack }: Props) {
       ? 'Joining session...'
       : `Live · ${fps} fps`
 
-  const screenPctLeft = chrome ? (chrome.screenRect.x / chrome.bezelWidth) * 100 : 0
-  const screenPctTop = chrome ? (chrome.screenRect.y / chrome.bezelHeight) * 100 : 0
-  const screenPctW = chrome ? (chrome.screenRect.width / chrome.bezelWidth) * 100 : 100
-  const screenPctH = chrome ? (chrome.screenRect.height / chrome.bezelHeight) * 100 : 100
+  // Display at CSS logical size (bezelWidth/2 = PDF points = iOS logical pixels)
+  // iPhone 15: 870/2 = 435px wide, 1788/2 = 894px tall
+  const bezelDisplayW = chrome ? chrome.bezelWidth / 2 : 0
+  const bezelDisplayH = chrome ? chrome.bezelHeight / 2 : 0
+  const canvasLeft   = chrome ? (chrome.screenRect.x      / chrome.bezelWidth)  * bezelDisplayW : 0
+  const canvasTop    = chrome ? (chrome.screenRect.y      / chrome.bezelHeight) * bezelDisplayH : 0
+  const canvasWidth  = chrome ? (chrome.screenRect.width  / chrome.bezelWidth)  * bezelDisplayW : 0
+  const canvasHeight = chrome ? (chrome.screenRect.height / chrome.bezelHeight) * bezelDisplayH : 0
 
   return (
     <div className="flex flex-col items-center gap-3">
@@ -113,22 +117,23 @@ export function SimulatorViewer({ sessionId, onBack }: Props) {
       </div>
 
       {chrome ? (
-        /* Bezel mode: device frame image with canvas positioned inside screen area */
-        <div className="relative inline-block" style={{ width: chrome.physicalWidthPx }}>
+        /* Bezel mode: device frame image with canvas overlaid at exact screen coordinates */
+        <div className="relative" style={{ width: bezelDisplayW, height: bezelDisplayH }}>
           <img
             src={`data:image/png;base64,${chrome.bezelPng}`}
-            className="block w-full select-none"
+            className="absolute inset-0 h-full w-full select-none"
+            style={{ pointerEvents: 'none' }}
             draggable={false}
-            alt="device frame"
+            alt=""
           />
           <canvas
             ref={canvasRef}
             className="absolute cursor-crosshair"
             style={{
-              left: `${screenPctLeft}%`,
-              top: `${screenPctTop}%`,
-              width: `${screenPctW}%`,
-              height: `${screenPctH}%`,
+              left: canvasLeft,
+              top: canvasTop,
+              width: canvasWidth,
+              height: canvasHeight,
             }}
             onMouseDown={handleMouseDown}
             onMouseUp={handleMouseUp}
