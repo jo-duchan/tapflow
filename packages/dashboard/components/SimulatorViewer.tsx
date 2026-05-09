@@ -105,6 +105,7 @@ export function SimulatorViewer({ sessionId, onBack }: Props) {
     return () => video.cancelVideoFrameCallback(rafId)
   }, [webrtcActive])
 
+  const [isLandscape, setIsLandscape] = useState(false)
   const [flashedButton, setFlashedButton] = useState<string | null>(null)
   const [hoveredButton, setHoveredButton] = useState<string | null>(null)
   const pressedButton   = useRef<string | null>(null)
@@ -114,20 +115,32 @@ export function SimulatorViewer({ sessionId, onBack }: Props) {
   const DRAG_THRESHOLD   = 0.02
 
   // Map a pointer event to normalized screen [0,1].
-  // Chrome mode: maps composite-sized container coords through screenRect.
-  // Fallback mode (chrome null): the canvas itself is the full screen.
+  // Portrait chrome: maps composite container coords through screenRect.
+  // Landscape chrome: container is rotated 90° CW → invert (u,v) to portrait composite coords.
+  // No chrome: canvas rect directly.
   const toNormScreen = useCallback(
     (e: { clientX: number; clientY: number }) => {
       if (chrome && containerRef.current) {
         const rect = containerRef.current.getBoundingClientRect()
         const cw = chrome.compositeWidth  / 2
         const ch = chrome.compositeHeight / 2
-        const cx = (e.clientX - rect.left) * (cw / rect.width)
-        const cy = (e.clientY - rect.top)  * (ch / rect.height)
         const sx = chrome.screenRect.x      / 2
         const sy = chrome.screenRect.y      / 2
         const sw = chrome.screenRect.width  / 2
         const sh = chrome.screenRect.height / 2
+        let cx: number, cy: number
+        if (isLandscape) {
+          // getBoundingClientRect() returns the rotated (landscape) bounding box.
+          // u,v are 0-1 in visible landscape space.
+          // 90° CW inverse: portrait_x = v, portrait_y = 1 - u
+          const u = (e.clientX - rect.left) / rect.width
+          const v = (e.clientY - rect.top)  / rect.height
+          cx = v * cw
+          cy = (1 - u) * ch
+        } else {
+          cx = (e.clientX - rect.left) * (cw / rect.width)
+          cy = (e.clientY - rect.top)  * (ch / rect.height)
+        }
         if (cx < sx || cx > sx + sw || cy < sy || cy > sy + sh) return null
         return { x: (cx - sx) / sw, y: (cy - sy) / sh }
       }
@@ -140,7 +153,7 @@ export function SimulatorViewer({ sessionId, onBack }: Props) {
       }
       return null
     },
-    [chrome],
+    [chrome, isLandscape],
   )
 
   const BUTTON_HIT_RADIUS = 100  // 2× composite px (~25 CSS px at typical display scale)
@@ -148,7 +161,7 @@ export function SimulatorViewer({ sessionId, onBack }: Props) {
   // Hit-test physical button positions (normalOffset is in 2× composite pixel space).
   const toButton = useCallback(
     (e: { clientX: number; clientY: number }): string | null => {
-      if (!containerRef.current || !chrome) return null
+      if (!containerRef.current || !chrome || isLandscape) return null
       const rect = containerRef.current.getBoundingClientRect()
       const cx = (e.clientX - rect.left) * (chrome.compositeWidth  / rect.width)
       const cy = (e.clientY - rect.top)  * (chrome.compositeHeight / rect.height)
@@ -257,6 +270,7 @@ export function SimulatorViewer({ sessionId, onBack }: Props) {
 
   const handleRotate = useCallback(() => {
     send({ type: 'input:rotate', sessionId })
+    setIsLandscape((prev) => !prev)
   }, [send, sessionId])
 
   const handleSoftHome = useCallback(() => {
@@ -301,11 +315,29 @@ export function SimulatorViewer({ sessionId, onBack }: Props) {
 
       {chrome ? (
         /* Overlay mode: screen canvas inside device frame image.
-           Container is composite-sized so button hit areas align with the frame art. */
+           In landscape the outer wrapper holds landscape dimensions; the inner container
+           is rotated 90° CW so the chrome frame, canvas, and buttons rotate together.
+           Touch coordinates are inverse-mapped in toNormScreen when isLandscape. */
+        <div style={{
+          width:  isLandscape ? displayH : displayW,
+          height: isLandscape ? displayW : displayH,
+          position: 'relative',
+          flexShrink: 0,
+        }}>
         <div
           ref={containerRef}
           className="relative cursor-crosshair"
-          style={{ width: displayW, height: displayH }}
+          style={{
+            width: displayW,
+            height: displayH,
+            ...(isLandscape ? {
+              position: 'absolute',
+              top:  (displayW - displayH) / 2,
+              left: (displayH - displayW) / 2,
+              transform: 'rotate(90deg)',
+              transformOrigin: 'center center',
+            } : {}),
+          }}
           onPointerDown={handlePointerDown}
           onPointerMove={handlePointerMove}
           onPointerUp={handlePointerUp}
@@ -340,6 +372,7 @@ export function SimulatorViewer({ sessionId, onBack }: Props) {
               height:      `${screenPctH}%`,
               borderRadius: cssCornerRadius > 0 ? `${cssCornerRadius}px` : undefined,
               display:      webrtcActive ? 'block' : 'none',
+              objectFit:    isLandscape ? 'fill' : undefined,
             }}
           />
           <canvas
@@ -449,6 +482,7 @@ export function SimulatorViewer({ sessionId, onBack }: Props) {
             )
           })}
         </div>
+        </div>
       ) : (
         /* Fallback — no chrome data yet */
         <>
@@ -483,7 +517,7 @@ export function SimulatorViewer({ sessionId, onBack }: Props) {
       {joined && (
         <div
           className="flex items-center justify-between rounded-lg border border-border bg-muted/40 px-3 py-1.5"
-          style={{ width: chrome ? displayW : '100%', minWidth: 200 }}
+          style={{ width: chrome ? (isLandscape ? displayH : displayW) : '100%', minWidth: 200 }}
         >
           <span className="text-xs text-muted-foreground truncate">
             {deviceInfo
