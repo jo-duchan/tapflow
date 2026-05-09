@@ -66,7 +66,7 @@ guard let skHandle = dlopen(simkitPath, RTLD_NOW | RTLD_GLOBAL) else {
     exit(1)
 }
 
-// MARK: - IndigoHID function pointer
+// MARK: - IndigoHID function pointers
 
 // IndigoHIDMessageForMouseNSEvent(p1, p2, target, eventType, size, edge) -> IndigoHIDMessageStruct*
 // C signature: (CGPoint*, CGPoint*, IndigoHIDTarget, NSEventType, NSSize, IndigoHIDEdge)
@@ -80,6 +80,10 @@ typealias IndigoMouseFn = @convention(c) (
     UnsafePointer<CGPoint>, UnsafePointer<CGPoint>, UInt32, UInt, CGSize, UInt32
 ) -> UnsafeMutableRawPointer?
 
+// IndigoHIDMessageForHIDArbitrary(usagePage, usage, isKeyDown) -> IndigoHIDMessageStruct*
+// Used for hardware button injection (volume, power, home, action, mute).
+typealias IndigoHIDArbitraryFn = @convention(c) (UInt32, UInt32, Bool) -> UnsafeMutableRawPointer?
+
 func requireSym<T>(_ handle: UnsafeMutableRawPointer?, _ name: String) -> T {
     guard let sym = dlsym(handle, name) else {
         fputs("error: symbol not found: \(name)\n", stderr)
@@ -89,6 +93,14 @@ func requireSym<T>(_ handle: UnsafeMutableRawPointer?, _ name: String) -> T {
 }
 
 let indigoMouse: IndigoMouseFn = requireSym(skHandle, "IndigoHIDMessageForMouseNSEvent")
+
+let indigoArbitrary: IndigoHIDArbitraryFn? = {
+    guard let sym = dlsym(skHandle, "IndigoHIDMessageForHIDArbitrary") else {
+        fputs("warn: IndigoHIDMessageForHIDArbitrary not found — button HID injection disabled\n", stderr)
+        return nil
+    }
+    return unsafeBitCast(sym, to: IndigoHIDArbitraryFn.self)
+}()
 
 // MARK: - ObjC runtime helpers
 
@@ -198,6 +210,22 @@ func inject(x: Double, y: Double, eventType: UInt) {
     sendMsg(hidClient, sendSel, msgPtr, true, nil, nil)
 }
 
+// MARK: - Button injection
+
+func pressButton(usagePage: UInt32, usage: UInt32) {
+    guard let indigoArb = indigoArbitrary else {
+        fputs("warn: button HID unavailable (usagePage=\(usagePage) usage=\(usage))\n", stderr)
+        return
+    }
+    if let msgDown = indigoArb(usagePage, usage, true) {
+        sendMsg(hidClient, sendSel, msgDown, true, nil, nil)
+    }
+    Thread.sleep(forTimeInterval: 0.05)
+    if let msgUp = indigoArb(usagePage, usage, false) {
+        sendMsg(hidClient, sendSel, msgUp, true, nil, nil)
+    }
+}
+
 // MARK: - Stdin read loop
 
 var lastX: Double = 0
@@ -225,6 +253,11 @@ DispatchQueue.global(qos: .userInteractive).async {
             inject(x: x, y: y, eventType: kNSLeftMouseDragged)
         case 3:
             inject(x: lastX, y: lastY, eventType: kNSLeftMouseUp)
+        case 4:
+            // Button press: bytes 1-4 = usagePage (uint32BE), bytes 5-8 = usage (uint32BE)
+            let usagePage = data.subdata(in: 1..<5).withUnsafeBytes { $0.load(as: UInt32.self).bigEndian }
+            let usage     = data.subdata(in: 5..<9).withUnsafeBytes { $0.load(as: UInt32.self).bigEndian }
+            pressButton(usagePage: usagePage, usage: usage)
         default: break
         }
     }

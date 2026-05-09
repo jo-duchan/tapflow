@@ -54,7 +54,7 @@ describe('WdaClient', () => {
         .mockResolvedValueOnce(new Response(JSON.stringify({ sessionId: 'sid-1' }), { status: 200 }))
         .mockResolvedValueOnce(okResponse())
       const client = new WdaClient()
-      await client.pressButton('leftButtonSideVolumeUp')
+      await client.pressButton('volume-up')
       const [url, init] = mockFetch.mock.calls[1]
       expect(url).toBe('http://localhost:8100/session/sid-1/wda/pressButton')
       expect(JSON.parse(init.body)).toEqual({ name: 'volumeUp' })

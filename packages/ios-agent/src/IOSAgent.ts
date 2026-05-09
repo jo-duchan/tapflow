@@ -270,7 +270,12 @@ export class IOSAgent implements DeviceAgent {
       }
       case 'input:button': {
         const { name } = msg.payload as { name: string }
-        this.wda.pressButton(name).catch((e) => console.error('[agent] button failed:', e))
+        const btn = this.loadedChrome?.buttons.find((b) => b.name === name)
+        if (this.touchHelper && btn && btn.usagePage > 0 && btn.usage > 0) {
+          this.touchHelper.pressButton(btn.usagePage, btn.usage)
+        } else {
+          this.wda.pressButton(name).catch((e) => console.error('[agent] button wda fallback failed:', e))
+        }
         break
       }
       case 'webrtc:ice': {

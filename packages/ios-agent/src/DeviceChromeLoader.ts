@@ -25,6 +25,8 @@ export interface ChromeButton {
   rolloverOffset: { x: number; y: number } // button center at rollover (extended/hover) position
   buttonW: number                           // button width in 2× composite px
   buttonH: number                           // button height in 2× composite px
+  usagePage: number                         // HID usage page for SimulatorKit injection (0 = unknown)
+  usage: number                             // HID usage code (0 = unknown)
   buttonPng?: string                        // base64 PNG of button at 2× (for CSS-animated overlay)
   pressedPng?: string                       // base64 PNG of pressed state (imageDown asset)
   pressedRect?: ChromeRect                  // position + size in expanded composite 2× px
@@ -73,6 +75,8 @@ interface RawInput {
   imageDown?: string        // pressed state PDF name (without .pdf)
   imageDownDrawMode?: string
   onTop?: boolean
+  usagePage?: number        // HID usage page for SimulatorKit button injection
+  usage?: number            // HID usage code
   offsets?: {
     normal: { x: number; y: number }
     rollover?: { x: number; y: number }
@@ -252,6 +256,8 @@ function computeButtonLayout(
       },
       buttonW: Math.round(w * scale),
       buttonH: Math.round(h * scale),
+      usagePage: inp.usagePage ?? 0,
+      usage: inp.usage ?? 0,
     })
   }
 

@@ -26,6 +26,8 @@ export interface ChromeButton {
   rolloverOffset: { x: number; y: number } // button center at extended/hover position in 2× composite px
   buttonW: number                           // button width in 2× composite px
   buttonH: number                           // button height in 2× composite px
+  usagePage: number                         // HID usage page for SimulatorKit injection (0 = unknown)
+  usage: number                             // HID usage code (0 = unknown)
   buttonPng?: string                        // base64 PNG of button at 2× (for CSS-animated overlay)
   pressedPng?: string                       // base64 PNG of pressed state (imageDown asset)
   pressedRect?: ChromeRect
