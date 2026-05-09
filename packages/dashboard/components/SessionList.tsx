@@ -8,7 +8,7 @@ import { Card, CardContent } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 
 interface Props {
-  onSelect: (sessionId: string) => void
+  onSelect: (sessionId: string, deviceId: string) => void
 }
 
 type BootingState = Record<string, 'booting' | 'error'>
@@ -21,13 +21,12 @@ export function SessionList({ onSelect }: Props) {
     if (msg.type === 'agents:listed') {
       setSessions(msg.sessions)
     } else if (msg.type === 'device:ready') {
-      const { deviceId } = msg.payload;
+      const { deviceId } = msg.payload
       setBooting((prev) => {
         const next = { ...prev }
         delete next[deviceId]
         return next
       })
-      // update device status to booted in local state
       setSessions((prev) =>
         prev.map((s) => ({
           ...s,
@@ -49,6 +48,8 @@ export function SessionList({ onSelect }: Props) {
 
   const handleBoot = (session: SessionInfo, deviceId: string) => {
     setBooting((prev) => ({ ...prev, [deviceId]: 'booting' }))
+    // Join session first so relay can forward device:ready back to this browser
+    send({ type: 'session:start', sessionId: session.sessionId })
     send({ type: 'device:boot', sessionId: session.sessionId, payload: { deviceId } })
   }
 
@@ -101,7 +102,7 @@ export function SessionList({ onSelect }: Props) {
                   )}
 
                   {isBooted && !isBusy && (
-                    <Button size="sm" onClick={() => onSelect(s.sessionId)}>
+                    <Button size="sm" onClick={() => onSelect(s.sessionId, d.id)}>
                       Connect
                     </Button>
                   )}

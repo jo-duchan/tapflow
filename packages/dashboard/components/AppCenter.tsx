@@ -9,7 +9,7 @@ import { Card, CardContent } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 
 interface Props {
-  onSelect: (sessionId: string) => void
+  onSelect: (sessionId: string, deviceId: string) => void
 }
 
 type BootingState = Record<string, 'booting' | 'error'>
@@ -50,6 +50,7 @@ export function AppCenter({ onSelect }: Props) {
 
   const handleBoot = (session: SessionInfo, deviceId: string) => {
     setBooting((prev) => ({ ...prev, [deviceId]: 'booting' }))
+    send({ type: 'session:start', sessionId: session.sessionId })
     send({ type: 'device:boot', sessionId: session.sessionId, payload: { deviceId } })
   }
 
@@ -122,7 +123,7 @@ export function AppCenter({ onSelect }: Props) {
                         )}
 
                         {isBooted && !isBusy && (
-                          <Button size="sm" onClick={() => onSelect(s.sessionId)}>
+                          <Button size="sm" onClick={() => onSelect(s.sessionId, d.id)}>
                             Connect
                           </Button>
                         )}

@@ -9,14 +9,16 @@ import { Button } from '@/components/ui/button';
 
 interface Props {
   sessionId: string;
+  deviceId: string;
   onBack: () => void;
 }
 
-export function SimulatorViewer({ sessionId, onBack }: Props) {
+export function SimulatorViewer({ sessionId, deviceId, onBack }: Props) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const [joined, setJoined] = useState(false);
+  const [deviceReady, setDeviceReady] = useState(false);
   const [fps, setFps] = useState(0);
   const [chrome, setChrome] = useState<ChromeData | null>(null);
   const [deviceInfo, setDeviceInfo] = useState<DeviceInfo | null>(null);
@@ -40,6 +42,11 @@ export function SimulatorViewer({ sessionId, onBack }: Props) {
     (msg: RelayMessage) => {
       if (msg.type === 'session:joined') {
         setJoined(true);
+        sendRef.current({ type: 'device:boot', sessionId, payload: { deviceId } });
+      }
+
+      if (msg.type === 'device:ready') {
+        setDeviceReady(true);
       }
 
       if (msg.type === 'session:chrome') {
@@ -76,7 +83,7 @@ export function SimulatorViewer({ sessionId, onBack }: Props) {
         frameCount.current += 1;
       }
     },
-    [handleOffer, addIceCandidate],
+    [handleOffer, addIceCandidate, sessionId, deviceId],
   );
 
   const { send, connected } = useRelay(handleMessage);
@@ -354,7 +361,9 @@ export function SimulatorViewer({ sessionId, onBack }: Props) {
     ? 'Connecting...'
     : !joined
       ? 'Joining session...'
-      : `Live · ${fps} fps`;
+      : !deviceReady
+        ? 'Starting device...'
+        : `Live · ${fps} fps`;
 
   // Container is composite-sized so the device frame image aligns with button positions.
   // Scale down to fit within ~80vh.

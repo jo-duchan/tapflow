@@ -6,15 +6,20 @@ import { SimulatorViewer } from '@/components/SimulatorViewer'
 import { AppCenter } from '@/components/AppCenter'
 
 type Tab = 'devices' | 'app-center'
+type SelectedSession = { sessionId: string; deviceId: string } | null
 
 export default function Home() {
-  const [sessionId, setSessionId] = useState<string | null>(null)
+  const [selected, setSelected] = useState<SelectedSession>(null)
   const [activeTab, setActiveTab] = useState<Tab>('devices')
 
-  if (sessionId) {
+  if (selected) {
     return (
       <main className="mx-auto max-w-2xl px-6 py-8">
-        <SimulatorViewer sessionId={sessionId} onBack={() => setSessionId(null)} />
+        <SimulatorViewer
+          sessionId={selected.sessionId}
+          deviceId={selected.deviceId}
+          onBack={() => setSelected(null)}
+        />
       </main>
     )
   }
@@ -48,8 +53,12 @@ export default function Home() {
         </button>
       </div>
 
-      {activeTab === 'devices' && <SessionList onSelect={setSessionId} />}
-      {activeTab === 'app-center' && <AppCenter onSelect={setSessionId} />}
+      {activeTab === 'devices' && (
+        <SessionList onSelect={(sessionId, deviceId) => setSelected({ sessionId, deviceId })} />
+      )}
+      {activeTab === 'app-center' && (
+        <AppCenter onSelect={(sessionId, deviceId) => setSelected({ sessionId, deviceId })} />
+      )}
     </main>
   )
 }
