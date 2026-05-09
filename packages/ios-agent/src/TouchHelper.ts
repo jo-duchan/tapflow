@@ -67,6 +67,29 @@ export class TouchHelper {
     this.proc.stdin.write(buf)
   }
 
+  pinchStart(x1: number, y1: number, x2: number, y2: number): void {
+    this.writeTwoFinger(6, x1, y1, x2, y2)
+  }
+
+  pinchMove(x1: number, y1: number, x2: number, y2: number): void {
+    this.writeTwoFinger(7, x1, y1, x2, y2)
+  }
+
+  pinchEnd(): void {
+    this.writeTwoFinger(8, 0, 0, 0, 0)
+  }
+
+  private writeTwoFinger(type: number, x1: number, y1: number, x2: number, y2: number): void {
+    if (!this.proc?.stdin?.writable) return
+    const buf = Buffer.allocUnsafe(17)
+    buf.writeUInt8(type, 0)
+    buf.writeFloatBE(x1, 1)
+    buf.writeFloatBE(y1, 5)
+    buf.writeFloatBE(x2, 9)
+    buf.writeFloatBE(y2, 13)
+    this.proc.stdin.write(buf)
+  }
+
   private write(type: number, x: number, y: number): void {
     if (!this.proc?.stdin?.writable) return
     const buf = Buffer.allocUnsafe(9)

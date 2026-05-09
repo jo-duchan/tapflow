@@ -271,6 +271,23 @@ export class IOSAgent implements DeviceAgent {
         this.touchEnd().catch(() => {})
         break
       }
+      case 'input:pinch:start': {
+        if (!this.touchHelper) break
+        const { f0, f1 } = msg.payload as { f0: { x: number; y: number }; f1: { x: number; y: number } }
+        this.touchHelper.pinchStart(f0.x, f0.y, f1.x, f1.y)
+        break
+      }
+      case 'input:pinch:move': {
+        if (!this.touchHelper) break
+        const { f0, f1 } = msg.payload as { f0: { x: number; y: number }; f1: { x: number; y: number } }
+        this.touchHelper.pinchMove(f0.x, f0.y, f1.x, f1.y)
+        break
+      }
+      case 'input:pinch:end': {
+        if (!this.touchHelper) break
+        this.touchHelper.pinchEnd()
+        break
+      }
       case 'input:rotate': {
         if (!this.bootedDeviceId) break
         this.orientation = this.orientation === 'portrait' ? 'landscapeRight' : 'portrait'

@@ -1,5 +1,20 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 
+vi.mock('../TouchHelper', () => ({
+  TouchHelper: vi.fn(() => ({
+    start: vi.fn(),
+    stop: vi.fn(),
+    touchStart: vi.fn(),
+    touchMove: vi.fn(),
+    touchEnd: vi.fn(),
+    pressButton: vi.fn(),
+    pressLegacyButton: vi.fn(),
+    pinchStart: vi.fn(),
+    pinchMove: vi.fn(),
+    pinchEnd: vi.fn(),
+  })),
+}))
+
 vi.mock('@roamhq/wrtc', () => ({
   RTCPeerConnection: vi.fn(() => ({
     addTrack: vi.fn(),
@@ -19,6 +34,10 @@ import { WebSocket } from 'ws'
 import { RelayServer } from '@tapflow/relay'
 import { IOSAgent } from '../IOSAgent'
 import { SimctlWrapper } from '../SimctlWrapper'
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
+import { TouchHelper } from '../TouchHelper'
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const MockTouchHelper = TouchHelper as any
 
 const waitForOpen = (ws: WebSocket) =>
   new Promise<void>((r) => ws.once('open', r))
@@ -28,10 +47,10 @@ const waitForMessage = (ws: WebSocket) =>
     ws.once('message', (d) => r(JSON.parse(d.toString())))
   )
 
-function mockSimctl(): SimctlWrapper {
+function mockSimctl(booted = false): SimctlWrapper {
   return {
     listDevices: vi.fn().mockResolvedValue([
-      { id: 'dev-1', name: 'iPhone 15', platform: 'ios', status: 'shutdown' },
+      { id: 'dev-1', name: 'iPhone 15', platform: 'ios', status: booted ? 'booted' : 'shutdown' },
     ]),
     boot: vi.fn().mockResolvedValue(undefined),
     shutdown: vi.fn().mockResolvedValue(undefined),
@@ -90,6 +109,59 @@ describe('IOSAgent', () => {
       const agent = new IOSAgent({}, simctl)
       await agent.launchApp('com.example.app')
       expect(simctl.launchApp).toHaveBeenCalledWith('com.example.app')
+    })
+  })
+
+  describe('pinch relay messages', () => {
+    beforeEach(() => { MockTouchHelper.mockClear() })
+
+    async function setupPinchSession() {
+      const browser = new WebSocket(`ws://localhost:${port}`)
+      await waitForOpen(browser)
+
+      const agent = new IOSAgent({ intervalMs: 50 }, mockSimctl(true))
+      await agent.connect(`ws://localhost:${port}`)
+
+      browser.send(JSON.stringify({ type: 'session:start', sessionId: agent.sessionId }))
+      await waitForMessage(browser) // session:joined
+
+      const thInstance = MockTouchHelper.mock.results[0].value
+      return { browser, agent, thInstance }
+    }
+
+    it('input:pinch:start calls touchHelper.pinchStart', async () => {
+      const { browser, agent, thInstance } = await setupPinchSession()
+      browser.send(JSON.stringify({
+        type: 'input:pinch:start',
+        sessionId: agent.sessionId,
+        payload: { f0: { x: 0.3, y: 0.5 }, f1: { x: 0.7, y: 0.5 } },
+      }))
+      await new Promise((r) => setTimeout(r, 50))
+      expect(thInstance.pinchStart).toHaveBeenCalledWith(0.3, 0.5, 0.7, 0.5)
+      agent.disconnect()
+      browser.close()
+    })
+
+    it('input:pinch:move calls touchHelper.pinchMove', async () => {
+      const { browser, agent, thInstance } = await setupPinchSession()
+      browser.send(JSON.stringify({
+        type: 'input:pinch:move',
+        sessionId: agent.sessionId,
+        payload: { f0: { x: 0.2, y: 0.5 }, f1: { x: 0.8, y: 0.5 } },
+      }))
+      await new Promise((r) => setTimeout(r, 50))
+      expect(thInstance.pinchMove).toHaveBeenCalledWith(0.2, 0.5, 0.8, 0.5)
+      agent.disconnect()
+      browser.close()
+    })
+
+    it('input:pinch:end calls touchHelper.pinchEnd', async () => {
+      const { browser, agent, thInstance } = await setupPinchSession()
+      browser.send(JSON.stringify({ type: 'input:pinch:end', sessionId: agent.sessionId }))
+      await new Promise((r) => setTimeout(r, 50))
+      expect(thInstance.pinchEnd).toHaveBeenCalled()
+      agent.disconnect()
+      browser.close()
     })
   })
 

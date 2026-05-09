@@ -61,6 +61,9 @@ export type RelayMessage =
   | { type: 'input:touch:start'; sessionId: string; payload: { x: number; y: number } }
   | { type: 'input:touch:move'; sessionId: string; payload: { x: number; y: number } }
   | { type: 'input:touch:end'; sessionId: string }
+  | { type: 'input:pinch:start'; sessionId: string; payload: { f0: { x: number; y: number }; f1: { x: number; y: number } } }
+  | { type: 'input:pinch:move'; sessionId: string; payload: { f0: { x: number; y: number }; f1: { x: number; y: number } } }
+  | { type: 'input:pinch:end'; sessionId: string }
   | { type: 'input:button'; sessionId: string; payload: { name: string } }
   | { type: 'input:rotate'; sessionId: string }
   | { type: 'webrtc:offer'; payload: { type: 'offer'; sdp: string } }

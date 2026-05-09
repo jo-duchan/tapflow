@@ -108,11 +108,23 @@ export function SimulatorViewer({ sessionId, onBack }: Props) {
   const [isLandscape, setIsLandscape] = useState(false)
   const [flashedButton, setFlashedButton] = useState<string | null>(null)
   const [hoveredButton, setHoveredButton] = useState<string | null>(null)
+  const [pinchHint, setPinchHint] = useState<{ f0: { x: number; y: number }; f1: { x: number; y: number } } | null>(null)
   const pressedButton   = useRef<string | null>(null)
   const touchStartPos   = useRef<{ x: number; y: number } | null>(null)
+  const isPinchMode     = useRef(false)
+  const isOptionHeld    = useRef(false)
   const lastMoveSentAt  = useRef(0)
   const MOVE_THROTTLE_MS = 16
   const DRAG_THRESHOLD   = 0.02
+
+  // Track Option/Alt key for pinch mode
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => { if (e.key === 'Alt') isOptionHeld.current = true }
+    const onKeyUp   = (e: KeyboardEvent) => { if (e.key === 'Alt') { isOptionHeld.current = false; setPinchHint(null) } }
+    window.addEventListener('keydown', onKeyDown)
+    window.addEventListener('keyup',   onKeyUp)
+    return () => { window.removeEventListener('keydown', onKeyDown); window.removeEventListener('keyup', onKeyUp) }
+  }, [])
 
   // Map a pointer event to normalized screen [0,1].
   // Portrait chrome: maps composite container coords through screenRect.
@@ -156,6 +168,17 @@ export function SimulatorViewer({ sessionId, onBack }: Props) {
     [chrome, isLandscape],
   )
 
+  // Compute pinch finger positions: f1 = cursor, f0 = screen-center mirror (Xcode style).
+  const toPinchFingers = useCallback(
+    (e: { clientX: number; clientY: number }) => {
+      const f1 = toNormScreen(e)
+      if (!f1) return null
+      const f0 = { x: 1 - f1.x, y: 1 - f1.y }
+      return { f0, f1 }
+    },
+    [toNormScreen],
+  )
+
   const BUTTON_HIT_RADIUS = 100  // 2× composite px (~25 CSS px at typical display scale)
 
   // Hit-test physical button positions (normalOffset is in 2× composite pixel space).
@@ -177,6 +200,15 @@ export function SimulatorViewer({ sessionId, onBack }: Props) {
 
   const handlePointerDown = useCallback(
     (e: React.PointerEvent) => {
+      if (isOptionHeld.current) {
+        const fingers = toPinchFingers(e)
+        if (!fingers) return
+        isPinchMode.current = true
+        ;(e.target as Element).setPointerCapture(e.pointerId)
+        setPinchHint(fingers)
+        send({ type: 'input:pinch:start', sessionId, payload: fingers })
+        return
+      }
       const btn = toButton(e)
       if (btn) {
         pressedButton.current = btn
@@ -189,13 +221,26 @@ export function SimulatorViewer({ sessionId, onBack }: Props) {
       ;(e.target as Element).setPointerCapture(e.pointerId)
       send({ type: 'input:touch:start', sessionId, payload: pos })
     },
-    [toButton, toNormScreen, send, sessionId],
+    [toButton, toNormScreen, toPinchFingers, send, sessionId],
   )
 
   const handlePointerMove = useCallback(
     (e: React.PointerEvent) => {
       if (e.buttons === 0) {
+        // Hover: update button highlight and pinch preview circles
         setHoveredButton(toButton(e))
+        if (isOptionHeld.current) setPinchHint(toPinchFingers(e))
+        else setPinchHint(null)
+        return
+      }
+      if (isPinchMode.current) {
+        const fingers = toPinchFingers(e)
+        if (!fingers) return
+        const now = performance.now()
+        if (now - lastMoveSentAt.current < MOVE_THROTTLE_MS) return
+        lastMoveSentAt.current = now
+        setPinchHint(fingers)
+        send({ type: 'input:pinch:move', sessionId, payload: fingers })
         return
       }
       if (pressedButton.current) return
@@ -210,15 +255,22 @@ export function SimulatorViewer({ sessionId, onBack }: Props) {
       lastMoveSentAt.current = now
       send({ type: 'input:touch:move', sessionId, payload: pos })
     },
-    [toButton, toNormScreen, send, sessionId],
+    [toButton, toNormScreen, toPinchFingers, send, sessionId],
   )
 
   const handlePointerLeave = useCallback(() => {
     setHoveredButton(null)
+    setPinchHint(null)
   }, [])
 
   const handlePointerUp = useCallback(
     () => {
+      if (isPinchMode.current) {
+        isPinchMode.current = false
+        setPinchHint(null)
+        send({ type: 'input:pinch:end', sessionId })
+        return
+      }
       touchStartPos.current = null
       if (pressedButton.current) {
         send({ type: 'input:button', sessionId, payload: { name: pressedButton.current } })
@@ -233,6 +285,12 @@ export function SimulatorViewer({ sessionId, onBack }: Props) {
 
   const handlePointerCancel = useCallback(
     () => {
+      if (isPinchMode.current) {
+        isPinchMode.current = false
+        setPinchHint(null)
+        send({ type: 'input:pinch:end', sessionId })
+        return
+      }
       touchStartPos.current = null
       if (pressedButton.current) {
         pressedButton.current = null
@@ -388,6 +446,34 @@ export function SimulatorViewer({ sessionId, onBack }: Props) {
               display:      webrtcActive ? 'none' : 'block',
             }}
           />
+          {/* Pinch finger hints — two semi-transparent circles at f0/f1 positions */}
+          {pinchHint && (() => {
+            const screenLeft = screenPctLeft / 100
+            const screenTop  = screenPctTop  / 100
+            const screenW    = screenPctW    / 100
+            const screenH    = screenPctH    / 100
+            const toCSS = (nx: number, ny: number) => ({
+              left: `${(screenLeft + nx * screenW) * 100}%`,
+              top:  `${(screenTop  + ny * screenH) * 100}%`,
+            })
+            return (
+              <>
+                {([pinchHint.f0, pinchHint.f1] as const).map((f, i) => (
+                  <div key={i} style={{
+                    position: 'absolute',
+                    zIndex: 10,
+                    width: 28, height: 28,
+                    borderRadius: '50%',
+                    background: 'rgba(255,255,255,0.45)',
+                    border: '2px solid rgba(255,255,255,0.85)',
+                    transform: 'translate(-50%, -50%)',
+                    pointerEvents: 'none',
+                    ...toCSS(f.x, f.y),
+                  }} />
+                ))}
+              </>
+            )
+          })()}
           {/* Physical button overlays — CSS-animated between retracted (default) and extended (hover) */}
           {chrome.buttons.map((btn) => {
             const isFlashed = flashedButton === btn.name

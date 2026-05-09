@@ -135,6 +135,9 @@ export class RelayServer {
       case 'input:touch:start':
       case 'input:touch:move':
       case 'input:touch:end':
+      case 'input:pinch:start':
+      case 'input:pinch:move':
+      case 'input:pinch:end':
       case 'input:type':
       case 'input:button':
       case 'input:rotate': {

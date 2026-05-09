@@ -3,14 +3,22 @@
 //
 // Usage: touch-helper <udid|booted>
 //
-// Stdin protocol: 9-byte frames
-//   byte  0   : event type — 1=start · 2=move · 3=end
-//   bytes 1–4 : x as float32 big-endian (normalized 0.0–1.0)
-//   bytes 5–8 : y as float32 big-endian (normalized 0.0–1.0)
+// Stdin protocol: variable-length frames
+//   Types 1–5  : 9 bytes  — [type:u8][a:f32BE][b:f32BE]
+//   Types 6–8  : 17 bytes — [type:u8][x1:f32BE][y1:f32BE][x2:f32BE][y2:f32BE]
 //
-// Architecture (Xcode 26+):
-//   IndigoHIDMessageForMouseNSEvent(position, delta, target=0x32, NSEventType, size, edge)
-//   → SimDeviceLegacyHIDClient.sendWithMessage:freeWhenDone:completionQueue:completion:
+//   type 1 = touch start   (x, y normalized 0–1)
+//   type 2 = touch move    (x, y)
+//   type 3 = touch end     (x, y unused — last saved coords used)
+//   type 4 = HID button    (a=usagePage u32BE, b=usage u32BE)
+//   type 5 = legacy button (a=code u32BE)
+//   type 6 = pinch start   (x1,y1 = finger0, x2,y2 = finger1, normalized 0–1)
+//   type 7 = pinch move    (x1,y1, x2,y2)
+//   type 8 = pinch end     (coords unused — last saved coords used)
+//
+// Single-touch: IndigoHIDMessageForMouseNSEvent(p, delta=0, target=0x32, NSEventType, size, edge)
+// Two-finger:   IndigoHIDMessageForMouseNSEvent(p1, p2, target, eventType, direction, 1.0,1.0,1.0,1.0)
+//               (9-arg form — baguette tddworks/baguette analysis)
 //
 // Reference: baguette (tddworks/baguette), SimulatorKit _hidEventFilterCallback analysis.
 
@@ -80,6 +88,15 @@ typealias IndigoMouseFn = @convention(c) (
     UnsafePointer<CGPoint>, UnsafePointer<CGPoint>, UInt32, UInt, CGSize, UInt32
 ) -> UnsafeMutableRawPointer?
 
+// 9-arg form for two-finger touch (baguette pattern).
+// p1/p2 = normalized 0–1 positions of each finger.
+// direction: 1=down, 0=move, 2=up (separate from NSEventType).
+// The four trailing Doubles fill float registers d0–d3; 1.0,1.0 are unused, last two are size.
+typealias IndigoMouseTwoFingerFn = @convention(c) (
+    UnsafePointer<CGPoint>, UnsafePointer<CGPoint>, UInt32, UInt32, UInt32,
+    Double, Double, Double, Double
+) -> UnsafeMutableRawPointer?
+
 // IndigoHIDMessageForHIDArbitrary(target, usagePage, usage, op) -> IndigoHIDMessageStruct*
 // Used for hardware button injection (volume, power, action, mute).
 // op: 1=down, 2=up. target: 0x32 (same digitizer target as touch).
@@ -99,6 +116,7 @@ func requireSym<T>(_ handle: UnsafeMutableRawPointer?, _ name: String) -> T {
 }
 
 let indigoMouse: IndigoMouseFn = requireSym(skHandle, "IndigoHIDMessageForMouseNSEvent")
+let indigoMouseTwoFinger: IndigoMouseTwoFingerFn = requireSym(skHandle, "IndigoHIDMessageForMouseNSEvent")
 
 let indigoArbitrary: IndigoHIDArbitraryFn? = {
     guard let sym = dlsym(skHandle, "IndigoHIDMessageForHIDArbitrary") else {
@@ -206,6 +224,11 @@ let kNSLeftMouseDown: UInt    = 1
 let kNSLeftMouseUp: UInt      = 2
 let kNSLeftMouseDragged: UInt = 6
 
+// Direction values for the 9-arg two-finger form
+let kDirDown: UInt32 = 1
+let kDirMove: UInt32 = 0
+let kDirUp:   UInt32 = 2
+
 // IndigoHIDTarget for digitizer/touch (from SimulatorKit + baguette analysis)
 let kIndigoHIDTargetDigitizer: UInt32 = 0x32
 
@@ -222,6 +245,28 @@ func inject(x: Double, y: Double, eventType: UInt) {
     }
     // freeWhenDone:YES — SimulatorKit owns and frees the message buffer
     sendMsg(hidClient, sendSel, msgPtr, true, nil, nil)
+}
+
+func injectTwoFinger(x1: Double, y1: Double, x2: Double, y2: Double, direction: UInt32) {
+    let eventType: UInt32 = direction == kDirDown ? UInt32(kNSLeftMouseDown)
+                          : direction == kDirUp   ? UInt32(kNSLeftMouseUp)
+                          :                         UInt32(kNSLeftMouseDragged)
+    var p1 = CGPoint(x: x1, y: y1)
+    var p2 = CGPoint(x: x2, y: y2)
+    // The function may return nil for ~60 ms after a two-finger down while
+    // SimulatorKit settles the multi-touch state — retry up to 12× (baguette pattern).
+    var msgPtr: UnsafeMutableRawPointer? = nil
+    for _ in 0..<12 {
+        msgPtr = indigoMouseTwoFinger(&p1, &p2, kIndigoHIDTargetDigitizer,
+                                     eventType, direction, 1.0, 1.0, 1.0, 1.0)
+        if msgPtr != nil { break }
+        Thread.sleep(forTimeInterval: 0.005)
+    }
+    guard let ptr = msgPtr else {
+        fputs("warn: two-finger IndigoHIDMessageForMouseNSEvent returned nil\n", stderr)
+        return
+    }
+    sendMsg(hidClient, sendSel, ptr, true, nil, nil)
 }
 
 // MARK: - Button injection
@@ -264,39 +309,77 @@ func pressLegacyButton(code: UInt32) {
 
 var lastX: Double = 0
 var lastY: Double = 0
+var pinchLastX1: Double = 0
+var pinchLastY1: Double = 0
+var pinchLastX2: Double = 0
+var pinchLastY2: Double = 0
 
 let stdinFH = FileHandle.standardInput
 
+func readExact(length: Int) -> Data? {
+    let d = stdinFH.readData(ofLength: length)
+    return d.count == length ? d : nil
+}
+
+func f32BE(_ data: Data, offset: Int) -> Double {
+    let bits = data.subdata(in: offset..<offset+4).withUnsafeBytes { $0.load(as: UInt32.self).bigEndian }
+    return Double(Float(bitPattern: bits))
+}
+
+func u32BE(_ data: Data, offset: Int) -> UInt32 {
+    return data.subdata(in: offset..<offset+4).withUnsafeBytes { $0.load(as: UInt32.self).bigEndian }
+}
+
 DispatchQueue.global(qos: .userInteractive).async {
     while true {
-        let data = stdinFH.readData(ofLength: 9)
-        guard data.count == 9 else { exit(0) }
-
-        let type = data[0]
-        let xBits = data.subdata(in: 1..<5).withUnsafeBytes { $0.load(as: UInt32.self).bigEndian }
-        let yBits = data.subdata(in: 5..<9).withUnsafeBytes { $0.load(as: UInt32.self).bigEndian }
-        let x = Double(Float(bitPattern: xBits))
-        let y = Double(Float(bitPattern: yBits))
+        guard let header = readExact(length: 1) else { exit(0) }
+        let type = header[0]
 
         switch type {
-        case 1:
-            lastX = x; lastY = y
-            inject(x: x, y: y, eventType: kNSLeftMouseDown)
-        case 2:
-            lastX = x; lastY = y
-            inject(x: x, y: y, eventType: kNSLeftMouseDragged)
-        case 3:
-            inject(x: lastX, y: lastY, eventType: kNSLeftMouseUp)
-        case 4:
-            // HIDArbitrary button: bytes 1-4 = usagePage, bytes 5-8 = usage (both uint32BE)
-            let usagePage = data.subdata(in: 1..<5).withUnsafeBytes { $0.load(as: UInt32.self).bigEndian }
-            let usage     = data.subdata(in: 5..<9).withUnsafeBytes { $0.load(as: UInt32.self).bigEndian }
-            pressButton(usagePage: usagePage, usage: usage)
-        case 5:
-            // Legacy button: bytes 1-4 = button code (uint32BE); home=0, lock=1
-            let code = data.subdata(in: 1..<5).withUnsafeBytes { $0.load(as: UInt32.self).bigEndian }
-            pressLegacyButton(code: code)
-        default: break
+        case 6, 7, 8:
+            // Two-finger frame: 16 bytes — x1,y1,x2,y2 as float32BE
+            guard let rest = readExact(length: 16) else { exit(0) }
+            let x1 = f32BE(rest, offset: 0)
+            let y1 = f32BE(rest, offset: 4)
+            let x2 = f32BE(rest, offset: 8)
+            let y2 = f32BE(rest, offset: 12)
+            switch type {
+            case 6:
+                pinchLastX1 = x1; pinchLastY1 = y1
+                pinchLastX2 = x2; pinchLastY2 = y2
+                injectTwoFinger(x1: x1, y1: y1, x2: x2, y2: y2, direction: kDirDown)
+            case 7:
+                pinchLastX1 = x1; pinchLastY1 = y1
+                pinchLastX2 = x2; pinchLastY2 = y2
+                injectTwoFinger(x1: x1, y1: y1, x2: x2, y2: y2, direction: kDirMove)
+            case 8:
+                injectTwoFinger(x1: pinchLastX1, y1: pinchLastY1,
+                                x2: pinchLastX2, y2: pinchLastY2, direction: kDirUp)
+            default: break
+            }
+        default:
+            // Single-finger / button frame: 8 bytes
+            guard let rest = readExact(length: 8) else { exit(0) }
+            let x = f32BE(rest, offset: 0)
+            let y = f32BE(rest, offset: 4)
+            switch type {
+            case 1:
+                lastX = x; lastY = y
+                inject(x: x, y: y, eventType: kNSLeftMouseDown)
+            case 2:
+                lastX = x; lastY = y
+                inject(x: x, y: y, eventType: kNSLeftMouseDragged)
+            case 3:
+                inject(x: lastX, y: lastY, eventType: kNSLeftMouseUp)
+            case 4:
+                let usagePage = u32BE(rest, offset: 0)
+                let usage     = u32BE(rest, offset: 4)
+                pressButton(usagePage: usagePage, usage: usage)
+            case 5:
+                let code = u32BE(rest, offset: 0)
+                pressLegacyButton(code: code)
+            default: break
+            }
         }
     }
 }
