@@ -1,9 +1,9 @@
 export class WdaClient {
   private static readonly BUTTON_MAP: Record<string, string> = {
-    leftButtonSideVolumeUp:   'volumeUp',
-    leftButtonSideVolumeDown: 'volumeDown',
-    rightButtonSide:          'power',
-    home:                     'home',
+    'volume-up':   'volumeUp',
+    'volume-down': 'volumeDown',
+    'power':       'power',
+    'home':        'home',
   }
 
   private readonly baseUrl: string
