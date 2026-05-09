@@ -21,6 +21,7 @@ export interface ChromeButton {
   name: string
   accessibilityTitle: string
   anchor: string
+  onTop: boolean                            // true = button is above device frame (e.g. home button)
   normalOffset: { x: number; y: number }   // button center at retracted/default position in 2× composite px
   rolloverOffset: { x: number; y: number } // button center at extended/hover position in 2× composite px
   buttonW: number                           // button width in 2× composite px

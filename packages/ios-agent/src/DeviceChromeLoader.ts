@@ -20,6 +20,7 @@ export interface ChromeButton {
   name: string
   accessibilityTitle: string
   anchor: string
+  onTop: boolean                            // true = button is above device frame (e.g. home button)
   normalOffset: { x: number; y: number }   // button center in expanded composite 2× px (retracted/default)
   rolloverOffset: { x: number; y: number } // button center at rollover (extended/hover) position
   buttonW: number                           // button width in 2× composite px
@@ -238,6 +239,7 @@ function computeButtonLayout(
       name: inp.name,
       accessibilityTitle: inp.accessibilityTitle ?? inp.name,
       anchor: inp.anchor ?? 'left',
+      onTop: inp.onTop ?? false,
       normalOffset: {
         x: Math.round(normalCX * scale),
         y: Math.round(normalCY * scale),

@@ -342,21 +342,26 @@ export function SimulatorViewer({ sessionId, onBack }: Props) {
               ? ((btn.normalOffset.y - btn.buttonH / 2) / chrome.compositeHeight) * 100
               : (btn.normalOffset.y / chrome.compositeHeight) * 100
 
+            // onTop buttons (e.g. home) sit above the device frame.
+            // Side buttons sit behind the frame so the bezel masks their inner edge.
+            // imageDownDrawMode "compositeUnder": pressedPng renders below buttonPng
+            // so the highlight bleeds through the semi-transparent ring.
+            const btnZ     = btn.onTop ? 4 : 1
+            const pressedZ = btn.onTop ? 3 : 1   // compositeUnder for home, overlay for side
+
             return (
               <Fragment key={btn.name}>
-                {/* Button PNG — zIndex:1, behind framePng (bezel masks the inner portion).
-                     hover: pops further out; click: no extra movement */}
-                {btn.buttonPng && (
+                {/* pressedPng first (compositeUnder for onTop buttons: shows through buttonPng) */}
+                {isFlashed && btn.pressedPng && btn.pressedRect && (
                   <img
-                    src={`data:image/png;base64,${btn.buttonPng}`}
+                    src={`data:image/png;base64,${btn.pressedPng}`}
                     style={{
                       position: 'absolute',
-                      zIndex:   1,
-                      top:    `${imgTopPct}%`,
+                      zIndex:   pressedZ,
                       left:   `${isHovered ? hoverLeftPct : rolloverLeftPct}%`,
-                      width:  `${imgWPct}%`,
-                      height: `${imgHPct}%`,
-                      transition: 'left 0.15s ease',
+                      top:    `${(btn.pressedRect.y / chrome.compositeHeight) * 100}%`,
+                      width:  `${(btn.pressedRect.width  / chrome.compositeWidth)  * 100}%`,
+                      height: `${(btn.pressedRect.height / chrome.compositeHeight) * 100}%`,
                       pointerEvents: 'none',
                       userSelect: 'none',
                     }}
@@ -364,17 +369,18 @@ export function SimulatorViewer({ sessionId, onBack }: Props) {
                     alt=""
                   />
                 )}
-                {/* Pressed state — zIndex:1, behind framePng so bezel masks the inner portion */}
-                {isFlashed && btn.pressedPng && btn.pressedRect && (
+                {/* buttonPng on top of pressedPng; side buttons behind framePng, home button above */}
+                {btn.buttonPng && (
                   <img
-                    src={`data:image/png;base64,${btn.pressedPng}`}
+                    src={`data:image/png;base64,${btn.buttonPng}`}
                     style={{
                       position: 'absolute',
-                      zIndex:   1,
+                      zIndex:   btnZ,
+                      top:    `${imgTopPct}%`,
                       left:   `${isHovered ? hoverLeftPct : rolloverLeftPct}%`,
-                      top:    `${(btn.pressedRect.y / chrome.compositeHeight) * 100}%`,
-                      width:  `${(btn.pressedRect.width  / chrome.compositeWidth)  * 100}%`,
-                      height: `${(btn.pressedRect.height / chrome.compositeHeight) * 100}%`,
+                      width:  `${imgWPct}%`,
+                      height: `${imgHPct}%`,
+                      transition: 'left 0.15s ease',
                       pointerEvents: 'none',
                       userSelect: 'none',
                     }}
