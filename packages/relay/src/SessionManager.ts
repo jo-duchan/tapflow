@@ -8,6 +8,7 @@ export interface Session {
   browserSocket: WebSocket | null
   devices: DeviceInfo[]
   chromeData?: unknown
+  deviceInfo?: { deviceName: string; osVersion: string }
 }
 
 export class SessionManager {
@@ -41,6 +42,11 @@ export class SessionManager {
   setChromeData(sessionId: string, data: unknown): void {
     const session = this.sessions.get(sessionId)
     if (session) session.chromeData = data
+  }
+
+  setDeviceInfo(sessionId: string, info: { deviceName: string; osVersion: string }): void {
+    const session = this.sessions.get(sessionId)
+    if (session) session.deviceInfo = info
   }
 
   getBySocket(socket: WebSocket): Session | undefined {

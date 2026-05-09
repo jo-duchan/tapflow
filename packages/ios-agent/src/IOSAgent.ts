@@ -36,6 +36,7 @@ export class IOSAgent implements DeviceAgent {
   private touchHelper: TouchHelper | null = null
   private loadedChrome: ChromeData | null = null
   private bootedDeviceId: string | null = null
+  private orientation: 'portrait' | 'landscapeRight' = 'portrait'
   private ws: WebSocket | null = null
   private _sessionId: string | null = null
   private streamReader: ReadableStreamDefaultReader<Buffer> | null = null
@@ -126,6 +127,13 @@ export class IOSAgent implements DeviceAgent {
     this.loadedChrome = this.chromeLoader.load(booted.typeId ?? booted.name)
     if (!this.loadedChrome) return
     this.ws.send(JSON.stringify({ type: 'session:chrome', payload: this.loadedChrome }))
+    this.ws.send(JSON.stringify({
+      type: 'session:deviceInfo',
+      payload: {
+        deviceName: booted.name,
+        osVersion: booted.osVersion ?? '',
+      },
+    }))
   }
 
   private async startStreaming(): Promise<void> {
@@ -261,6 +269,13 @@ export class IOSAgent implements DeviceAgent {
       }
       case 'input:touch:end': {
         this.touchEnd().catch(() => {})
+        break
+      }
+      case 'input:rotate': {
+        if (!this.bootedDeviceId) break
+        this.orientation = this.orientation === 'portrait' ? 'landscapeRight' : 'portrait'
+        this.simctl.rotate(this.bootedDeviceId, this.orientation)
+          .catch((e) => console.error('[agent] rotate failed:', e))
         break
       }
       case 'input:type': {

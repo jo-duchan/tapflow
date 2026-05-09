@@ -88,18 +88,29 @@ export class RelayServer {
         }
         this.sessions.join(msg.sessionId!, ws)
         ws.send(JSON.stringify({ type: 'session:joined', sessionId: msg.sessionId }))
-        // send cached chrome data if already received from agent
         if (session.chromeData) {
           ws.send(JSON.stringify({ type: 'session:chrome', payload: session.chromeData }))
+        }
+        if (session.deviceInfo) {
+          ws.send(JSON.stringify({ type: 'session:deviceInfo', payload: session.deviceInfo }))
         }
         break
       }
 
       case 'session:chrome': {
-        // agent → cache + forward to browser if already joined
         const session = this.sessions.getBySocket(ws)
         if (!session) break
         this.sessions.setChromeData(session.id, msg.payload)
+        if (session.browserSocket?.readyState === WebSocket.OPEN) {
+          session.browserSocket.send(JSON.stringify(msg))
+        }
+        break
+      }
+
+      case 'session:deviceInfo': {
+        const session = this.sessions.getBySocket(ws)
+        if (!session) break
+        this.sessions.setDeviceInfo(session.id, msg.payload as { deviceName: string; osVersion: string })
         if (session.browserSocket?.readyState === WebSocket.OPEN) {
           session.browserSocket.send(JSON.stringify(msg))
         }
@@ -125,7 +136,8 @@ export class RelayServer {
       case 'input:touch:move':
       case 'input:touch:end':
       case 'input:type':
-      case 'input:button': {
+      case 'input:button':
+      case 'input:rotate': {
         // browser → agent
         const session = this.sessions.get(msg.sessionId!)
         if (session?.agentSocket.readyState === WebSocket.OPEN) {

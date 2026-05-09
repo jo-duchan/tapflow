@@ -1,9 +1,10 @@
 'use client'
 
 import { useCallback, useEffect, useRef, useState, Fragment } from 'react'
+import { Home, Camera, RotateCw } from 'lucide-react'
 import { useRelay } from '@/hooks/useRelay'
 import { useWebRTC } from '@/hooks/useWebRTC'
-import type { ChromeData, RelayMessage } from '@/lib/types'
+import type { ChromeData, DeviceInfo, RelayMessage } from '@/lib/types'
 import { Button } from '@/components/ui/button'
 
 interface Props {
@@ -18,6 +19,7 @@ export function SimulatorViewer({ sessionId, onBack }: Props) {
   const [joined, setJoined] = useState(false)
   const [fps, setFps] = useState(0)
   const [chrome, setChrome] = useState<ChromeData | null>(null)
+  const [deviceInfo, setDeviceInfo] = useState<DeviceInfo | null>(null)
   const [webrtcActive, setWebrtcActive] = useState(false)
   const frameCount = useRef(0)
   const sendRef = useRef<(msg: object) => void>(() => {})
@@ -41,6 +43,10 @@ export function SimulatorViewer({ sessionId, onBack }: Props) {
 
     if (msg.type === 'session:chrome') {
       setChrome(msg.payload)
+    }
+
+    if (msg.type === 'session:deviceInfo') {
+      setDeviceInfo(msg.payload)
     }
 
     if (msg.type === 'webrtc:offer') {
@@ -224,6 +230,38 @@ export function SimulatorViewer({ sessionId, onBack }: Props) {
     },
     [send, sessionId],
   )
+
+  const handleScreenshot = useCallback(() => {
+    const canvas = document.createElement('canvas')
+    const ctx = canvas.getContext('2d')
+    if (!ctx) return
+    if (webrtcActive && videoRef.current) {
+      canvas.width  = videoRef.current.videoWidth
+      canvas.height = videoRef.current.videoHeight
+      ctx.drawImage(videoRef.current, 0, 0)
+    } else if (canvasRef.current) {
+      canvas.width  = canvasRef.current.width
+      canvas.height = canvasRef.current.height
+      ctx.drawImage(canvasRef.current, 0, 0)
+    } else return
+    canvas.toBlob((blob) => {
+      if (!blob) return
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = `tapflow-${Date.now()}.png`
+      a.click()
+      URL.revokeObjectURL(url)
+    }, 'image/png')
+  }, [webrtcActive])
+
+  const handleRotate = useCallback(() => {
+    send({ type: 'input:rotate', sessionId })
+  }, [send, sessionId])
+
+  const handleSoftHome = useCallback(() => {
+    send({ type: 'input:button', sessionId, payload: { name: 'home' } })
+  }, [send, sessionId])
 
   const statusText = !connected
     ? 'Connecting...'
@@ -439,6 +477,31 @@ export function SimulatorViewer({ sessionId, onBack }: Props) {
 
       {joined && fps === 0 && (
         <p className="text-sm text-muted-foreground">Waiting for first frame...</p>
+      )}
+
+      {/* Control bar */}
+      {joined && (
+        <div
+          className="flex items-center justify-between rounded-lg border border-border bg-muted/40 px-3 py-1.5"
+          style={{ width: chrome ? displayW : '100%', minWidth: 200 }}
+        >
+          <span className="text-xs text-muted-foreground truncate">
+            {deviceInfo
+              ? `${deviceInfo.deviceName}${deviceInfo.osVersion ? ` · ${deviceInfo.osVersion}` : ''}`
+              : '—'}
+          </span>
+          <div className="flex items-center gap-1">
+            <Button variant="ghost" size="icon" className="h-7 w-7" title="Home" onClick={handleSoftHome}>
+              <Home className="h-3.5 w-3.5" />
+            </Button>
+            <Button variant="ghost" size="icon" className="h-7 w-7" title="Screenshot" onClick={handleScreenshot}>
+              <Camera className="h-3.5 w-3.5" />
+            </Button>
+            <Button variant="ghost" size="icon" className="h-7 w-7" title="Rotate" onClick={handleRotate}>
+              <RotateCw className="h-3.5 w-3.5" />
+            </Button>
+          </div>
+        </div>
       )}
     </div>
   )

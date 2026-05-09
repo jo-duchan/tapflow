@@ -7,7 +7,8 @@ export interface Device {
   name: string
   platform: Platform
   status: DeviceStatus
-  typeId?: string  // platform device type identifier (iOS: com.apple.CoreSimulator.SimDeviceType.*)
+  typeId?: string     // platform device type identifier (iOS: com.apple.CoreSimulator.SimDeviceType.*)
+  osVersion?: string  // e.g. "iOS 18.3"
 }
 
 export interface Point {

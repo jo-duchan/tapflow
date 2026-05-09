@@ -22,6 +22,13 @@ function toDeviceStatus(state: string): DeviceStatus {
   return 'unknown'
 }
 
+// "com.apple.CoreSimulator.SimRuntime.iOS-18-3" → "iOS 18.3"
+function parseOsVersion(runtimeKey: string): string | undefined {
+  const m = runtimeKey.match(/\.([A-Za-z]+)-(\d+(?:-\d+)*)$/)
+  if (!m) return undefined
+  return `${m[1]} ${m[2].replace(/-/g, '.')}`
+}
+
 export class SimctlWrapper {
   constructor(private readonly runner: SimctlRunner = defaultRunner) {}
 
@@ -30,7 +37,8 @@ export class SimctlWrapper {
     const parsed: SimctlListOutput = JSON.parse(output)
     const devices: Device[] = []
 
-    for (const runtimeDevices of Object.values(parsed.devices)) {
+    for (const [runtimeKey, runtimeDevices] of Object.entries(parsed.devices)) {
+      const osVersion = parseOsVersion(runtimeKey)
       for (const d of runtimeDevices) {
         if (!d.isAvailable) continue
         devices.push({
@@ -39,6 +47,7 @@ export class SimctlWrapper {
           platform: 'ios',
           status: toDeviceStatus(d.state),
           typeId: d.deviceTypeIdentifier,
+          osVersion,
         })
       }
     }
@@ -77,5 +86,9 @@ export class SimctlWrapper {
     } finally {
       await fs.unlink(tmpPath).catch(() => {})
     }
+  }
+
+  async rotate(udid: string, orientation: 'portrait' | 'landscapeLeft' | 'landscapeRight' | 'portraitUpsideDown'): Promise<void> {
+    await this.runner.exec('io', udid, 'rotate', orientation)
   }
 }
