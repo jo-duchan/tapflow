@@ -1,11 +1,9 @@
-import type { Point } from '@tapflow/agent-core'
-
 export class WdaClient {
   private static readonly BUTTON_MAP: Record<string, string> = {
-    leftButtonSideVolumeUp:   'volumeUp',
-    leftButtonSideVolumeDown: 'volumeDown',
-    rightButtonSide:          'power',
-    home:                     'home',
+    'volume-up':   'volumeUp',
+    'volume-down': 'volumeDown',
+    'power':       'power',
+    'home':        'home',
   }
 
   private readonly baseUrl: string
@@ -42,48 +40,6 @@ export class WdaClient {
     const data = (await res.json()) as { value: { width: number; height: number } }
     this.cachedWindowSize = data.value
     return this.cachedWindowSize
-  }
-
-  async tap(x: number, y: number): Promise<void> {
-    const sessionId = await this.getSessionId()
-    await fetch(`${this.baseUrl}/session/${sessionId}/actions`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        actions: [{
-          type: 'pointer',
-          id: 'finger',
-          parameters: { pointerType: 'touch' },
-          actions: [
-            { type: 'pointerMove', duration: 0, x, y },
-            { type: 'pointerDown', button: 0 },
-            { type: 'pause', duration: 50 },
-            { type: 'pointerUp', button: 0 },
-          ],
-        }],
-      }),
-    })
-  }
-
-  async swipe(from: Point, to: Point, duration = 300): Promise<void> {
-    const sessionId = await this.getSessionId()
-    await fetch(`${this.baseUrl}/session/${sessionId}/actions`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        actions: [{
-          type: 'pointer',
-          id: 'finger',
-          parameters: { pointerType: 'touch' },
-          actions: [
-            { type: 'pointerMove', duration: 0, x: from.x, y: from.y },
-            { type: 'pointerDown', button: 0 },
-            { type: 'pointerMove', duration, x: to.x, y: to.y },
-            { type: 'pointerUp', button: 0 },
-          ],
-        }],
-      }),
-    })
   }
 
   async type(text: string): Promise<void> {

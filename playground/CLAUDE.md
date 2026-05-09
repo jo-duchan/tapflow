@@ -10,23 +10,46 @@
 
 ## HOW
 
-터미널 두 개로 전체 스택을 실행한다.
+### 가장 빠른 시작 (CLI)
+
+> **주의**: CLI는 아직 npm에 배포되지 않았다. `tapflow` 커맨드를 쓰려면 먼저 빌드해야 한다.
+> 빌드 없이 실행하려면 `tsx ../packages/cli/src/index.ts <command>` 를 사용한다.
 
 ```bash
-# 터미널 1 — 릴레이 + 대시보드
-npm run dev:relay
+# 빌드 후 사용
+npm run build --workspace=@tapflow/cli
+tapflow start                           # relay + WDA + agent 한 번에 기동
+tapflow start --device "iPhone 16"     # 디바이스 지정
+tapflow start --relay ws://remote:3000  # 외부 relay 사용
 
-# 터미널 2 — Agent (플랫폼에 맞게 선택)
-npm run dev:ios-agent
-npm run dev:android-agent
-
+# 빌드 없이 소스에서 직접 실행
+tsx ../packages/cli/src/index.ts start
+tsx ../packages/cli/src/index.ts start --device "iPhone 16"
 # 브라우저 → http://localhost:3000
+```
+
+### Playground 스크립트 (개발·디버깅용)
+
+```bash
+npm run dev:up        # relay + ios-agent를 concurrently로 기동
+
+npm run relay                              # 릴레이 단독
+npm run ios-agent                          # 첫 번째 booted 시뮬레이터
+npm run ios-agent -- --device "iPhone 16" # 디바이스 지정
+npm run android-agent
+```
+
+### 진단 · 초기화
+
+```bash
+npm run dev:doctor    # 시스템 상태 점검 (tapflow doctor와 동일)
+npm run dev:reset     # WDA 종료 + 시뮬레이터 전체 shutdown (tapflow reset과 동일)
 ```
 
 환경변수로 포트·릴레이 URL 오버라이드 가능.
 ```bash
-PORT=4000 npm run dev:relay
-RELAY_URL=ws://localhost:4000 npm run dev:ios-agent
+PORT=4000 npm run relay
+RELAY_URL=ws://localhost:4000 npm run ios-agent
 ```
 
 ## HOW NOT

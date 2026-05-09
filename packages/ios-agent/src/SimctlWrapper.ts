@@ -1,6 +1,10 @@
 import { randomUUID } from 'crypto'
+import { execFile } from 'child_process'
+import { promisify } from 'util'
 import { promises as fs } from 'fs'
 import { tmpdir } from 'os'
+
+const execFileAsync = promisify(execFile)
 import type { Device, DeviceStatus } from '@tapflow/agent-core'
 import { defaultRunner, type SimctlRunner } from './simctl'
 
@@ -22,6 +26,13 @@ function toDeviceStatus(state: string): DeviceStatus {
   return 'unknown'
 }
 
+// "com.apple.CoreSimulator.SimRuntime.iOS-18-3" → "iOS 18.3"
+function parseOsVersion(runtimeKey: string): string | undefined {
+  const m = runtimeKey.match(/\.([A-Za-z]+)-(\d+(?:-\d+)*)$/)
+  if (!m) return undefined
+  return `${m[1]} ${m[2].replace(/-/g, '.')}`
+}
+
 export class SimctlWrapper {
   constructor(private readonly runner: SimctlRunner = defaultRunner) {}
 
@@ -30,7 +41,8 @@ export class SimctlWrapper {
     const parsed: SimctlListOutput = JSON.parse(output)
     const devices: Device[] = []
 
-    for (const runtimeDevices of Object.values(parsed.devices)) {
+    for (const [runtimeKey, runtimeDevices] of Object.entries(parsed.devices)) {
+      const osVersion = parseOsVersion(runtimeKey)
       for (const d of runtimeDevices) {
         if (!d.isAvailable) continue
         devices.push({
@@ -39,6 +51,7 @@ export class SimctlWrapper {
           platform: 'ios',
           status: toDeviceStatus(d.state),
           typeId: d.deviceTypeIdentifier,
+          osVersion,
         })
       }
     }
@@ -77,5 +90,15 @@ export class SimctlWrapper {
     } finally {
       await fs.unlink(tmpPath).catch(() => {})
     }
+  }
+
+  async rotate(_udid: string, orientation: 'portrait' | 'landscapeLeft' | 'landscapeRight' | 'portraitUpsideDown'): Promise<void> {
+    // xcrun simctl io does not support rotate; use Simulator.app keyboard shortcut via AppleScript
+    const goClockwise = orientation === 'landscapeRight' || orientation === 'portraitUpsideDown'
+    const keyCode = goClockwise ? 124 : 123   // 124=Right Arrow, 123=Left Arrow
+    await execFileAsync('osascript', [
+      '-e', 'tell application "Simulator" to activate',
+      '-e', `tell application "System Events" to key code ${keyCode} using {command down}`,
+    ])
   }
 }

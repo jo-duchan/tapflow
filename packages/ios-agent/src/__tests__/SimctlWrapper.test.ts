@@ -2,6 +2,13 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { SimctlWrapper } from '../SimctlWrapper'
 import type { SimctlRunner } from '../simctl'
 
+vi.mock('child_process', () => ({
+  execFile: vi.fn((_cmd: string, _args: string[], cb: (err: null, stdout: string, stderr: string) => void) => {
+    cb(null, '', '')
+    return { on: vi.fn() }
+  }),
+}))
+
 vi.mock('fs', async (importOriginal) => {
   const actual = await importOriginal<typeof import('fs')>()
   return {
@@ -107,6 +114,30 @@ describe('SimctlWrapper', () => {
       const wrapper = new SimctlWrapper(runner)
       await wrapper.launchApp('com.example.app')
       expect(runner.exec).toHaveBeenCalledWith('launch', 'booted', 'com.example.app')
+    })
+  })
+
+  describe('rotate', () => {
+    it('calls osascript with Cmd+Right for landscapeRight', async () => {
+      const { execFile } = await import('child_process')
+      const wrapper = new SimctlWrapper()
+      await wrapper.rotate('device-1', 'landscapeRight')
+      expect(vi.mocked(execFile)).toHaveBeenCalledWith(
+        'osascript',
+        expect.arrayContaining([expect.stringContaining('key code 124')]),
+        expect.any(Function),
+      )
+    })
+
+    it('calls osascript with Cmd+Left for portrait', async () => {
+      const { execFile } = await import('child_process')
+      const wrapper = new SimctlWrapper()
+      await wrapper.rotate('device-1', 'portrait')
+      expect(vi.mocked(execFile)).toHaveBeenCalledWith(
+        'osascript',
+        expect.arrayContaining([expect.stringContaining('key code 123')]),
+        expect.any(Function),
+      )
     })
   })
 

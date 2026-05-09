@@ -20,7 +20,16 @@ export interface ChromeButton {
   name: string
   accessibilityTitle: string
   anchor: string
-  normalOffset: { x: number; y: number }  // button center in expanded composite 2× px
+  onTop: boolean                            // true = button is above device frame (e.g. home button)
+  normalOffset: { x: number; y: number }   // button center in expanded composite 2× px (retracted/default)
+  rolloverOffset: { x: number; y: number } // button center at rollover (extended/hover) position
+  buttonW: number                           // button width in 2× composite px
+  buttonH: number                           // button height in 2× composite px
+  usagePage: number                         // HID usage page for SimulatorKit injection (0 = unknown)
+  usage: number                             // HID usage code (0 = unknown)
+  buttonPng?: string                        // base64 PNG of button at 2× (for CSS-animated overlay)
+  pressedPng?: string                       // base64 PNG of pressed state (imageDown asset)
+  pressedRect?: ChromeRect                  // position + size in expanded composite 2× px
 }
 
 export interface ChromeData {
@@ -63,7 +72,11 @@ interface RawInput {
   anchor?: string
   align?: string
   image: string
+  imageDown?: string        // pressed state PDF name (without .pdf)
+  imageDownDrawMode?: string
   onTop?: boolean
+  usagePage?: number        // HID usage page for SimulatorKit button injection
+  usage?: number            // HID usage code
   offsets?: {
     normal: { x: number; y: number }
     rollover?: { x: number; y: number }
@@ -77,10 +90,19 @@ interface ButtonDrawData {
   onTop: boolean
 }
 
+interface PressedData {
+  pdfPath: string
+  topLeftX: number  // 1× pts, same coordinate space as ButtonDrawData
+  topLeftY: number
+  pdfW: number      // 1× pts (natural PDF size)
+  pdfH: number
+}
+
 interface ButtonLayout {
   margins: { left: number; top: number; right: number; bottom: number }
   drawData: ButtonDrawData[]
   buttons: ChromeButton[]
+  pressedData: (PressedData | null)[]  // parallel to buttons[]
 }
 
 // Mirrors baguette's LiveChromes.computeMargins + buttonTopLeft.
@@ -124,6 +146,7 @@ function computeButtonLayout(
   // Pass 2 — button top-left positions and normalOffset centers (baguette's buttonTopLeft)
   const drawData: ButtonDrawData[] = []
   const buttons: ChromeButton[] = []
+  const pressedData: (PressedData | null)[] = []
 
   for (const { input: inp, w, h, roll } of infos) {
     const mL = margins.left
@@ -163,12 +186,33 @@ function computeButtonLayout(
         topY    = mT + roll.y
     }
 
+    const btnTopLeftX = centerX - w / 2
+    const btnTopLeftY = topY
     drawData.push({
       pdfPath:  join(resourcesDir, `${inp.image}.pdf`),
-      topLeftX: centerX - w / 2,
-      topLeftY: topY,
+      topLeftX: btnTopLeftX,
+      topLeftY: btnTopLeftY,
       onTop:    inp.onTop ?? false,
     })
+
+    // imageDown: pressed state PDF at the same position as the normal button
+    let pressed: PressedData | null = null
+    if (inp.imageDown) {
+      const downPath = join(resourcesDir, `${inp.imageDown}.pdf`)
+      if (existsSync(downPath)) {
+        try {
+          const downSize = getSipsSize(downPath)
+          pressed = {
+            pdfPath:  downPath,
+            topLeftX: btnTopLeftX,
+            topLeftY: btnTopLeftY,
+            pdfW:     downSize.width,
+            pdfH:     downSize.height,
+          }
+        } catch { /* skip unmeasurable pressed asset */ }
+      }
+    }
+    pressedData.push(pressed)
 
     // normalOffset: button center in expanded 2× composite px for hit-testing
     const nx = inp.offsets!.normal.x
@@ -199,14 +243,65 @@ function computeButtonLayout(
       name: inp.name,
       accessibilityTitle: inp.accessibilityTitle ?? inp.name,
       anchor: inp.anchor ?? 'left',
+      onTop: inp.onTop ?? false,
       normalOffset: {
         x: Math.round(normalCX * scale),
         y: Math.round(normalCY * scale),
       },
+      // rolloverOffset.x = centerX (already computed from roll offsets above)
+      // rolloverOffset.y = normalCY (Y doesn't change between normal and rollover states)
+      rolloverOffset: {
+        x: Math.round(centerX * scale),
+        y: Math.round(normalCY * scale),
+      },
+      buttonW: Math.round(w * scale),
+      buttonH: Math.round(h * scale),
+      usagePage: inp.usagePage ?? 0,
+      usage: inp.usage ?? 0,
     })
   }
 
-  return { margins, drawData, buttons }
+  return { margins, drawData, buttons, pressedData }
+}
+
+// ---------------------------------------------------------------------------
+// Single PDF → PNG at 2× (used for pressed-state button images)
+// ---------------------------------------------------------------------------
+
+function renderPdfToPng(pdfPath: string, outPath: string): void {
+  const SCRIPT = `
+import Foundation
+import CoreGraphics
+import ImageIO
+
+let src = CommandLine.arguments[1]
+let dst = CommandLine.arguments[2]
+let scale: CGFloat = 2
+
+guard let doc = CGPDFDocument(URL(fileURLWithPath: src) as CFURL),
+      let page = doc.page(at: 1) else { exit(1) }
+
+let box = page.getBoxRect(.mediaBox)
+let w = max(1, Int(ceil(box.width  * scale)))
+let h = max(1, Int(ceil(box.height * scale)))
+
+let ctx = CGContext(
+  data: nil, width: w, height: h,
+  bitsPerComponent: 8, bytesPerRow: 0,
+  space: CGColorSpaceCreateDeviceRGB(),
+  bitmapInfo: CGBitmapInfo(rawValue: CGImageAlphaInfo.premultipliedLast.rawValue).rawValue
+)!
+ctx.scaleBy(x: scale, y: scale)
+ctx.drawPDFPage(page)
+
+let img  = ctx.makeImage()!
+let dest = CGImageDestinationCreateWithURL(URL(fileURLWithPath: dst) as CFURL, "public.png" as CFString, 1, nil)!
+CGImageDestinationAddImage(dest, img, nil)
+CGImageDestinationFinalize(dest)
+`
+  const scriptPath = join(tmpdir(), 'tapflow-pdf-to-png.swift')
+  writeFileSync(scriptPath, SCRIPT)
+  execFileSync('swift', [scriptPath, pdfPath, outPath])
 }
 
 // ---------------------------------------------------------------------------
@@ -504,6 +599,61 @@ function loadProfileScreenSize(typeIdentifier: string): { width: number; height:
 }
 
 // ---------------------------------------------------------------------------
+// Button PNG attachment — renders each button's normal PDF separately for CSS overlay
+// ---------------------------------------------------------------------------
+
+function attachButtonPngs(
+  buttons: ChromeButton[],
+  drawData: ButtonDrawData[],
+  chromeName: string,
+): void {
+  for (let i = 0; i < buttons.length; i++) {
+    if (i >= drawData.length) continue
+    const pdfPath = drawData[i].pdfPath
+    const cacheKey = `tapflow-btn-normal-${chromeName}-${i}.png`
+    const outPath = join(tmpdir(), cacheKey)
+    try {
+      if (!existsSync(outPath) || statSync(pdfPath).mtimeMs > statSync(outPath).mtimeMs) {
+        renderPdfToPng(pdfPath, outPath)
+      }
+      buttons[i].buttonPng = readFileSync(outPath).toString('base64')
+    } catch { /* skip if rendering fails */ }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Pressed PNG attachment — renders imageDown PDFs and attaches to buttons[]
+// ---------------------------------------------------------------------------
+
+function attachPressedPngs(
+  buttons: ChromeButton[],
+  pressedData: (PressedData | null)[],
+  chromeName: string,
+  scale: number,
+): void {
+  for (let i = 0; i < buttons.length; i++) {
+    const pd = pressedData[i]
+    if (!pd) continue
+
+    const cacheKey = `tapflow-btn-pressed-${chromeName}-${i}.png`
+    const outPath  = join(tmpdir(), cacheKey)
+
+    try {
+      if (!existsSync(outPath) || statSync(pd.pdfPath).mtimeMs > statSync(outPath).mtimeMs) {
+        renderPdfToPng(pd.pdfPath, outPath)
+      }
+      buttons[i].pressedPng  = readFileSync(outPath).toString('base64')
+      buttons[i].pressedRect = {
+        x:      Math.round(pd.topLeftX * scale),
+        y:      Math.round(pd.topLeftY * scale),
+        width:  Math.round(pd.pdfW    * scale),
+        height: Math.round(pd.pdfH    * scale),
+      }
+    } catch { /* skip if rendering fails */ }
+  }
+}
+
+// ---------------------------------------------------------------------------
 // DeviceChromeLoader
 // ---------------------------------------------------------------------------
 
@@ -561,17 +711,21 @@ export class DeviceChromeLoader {
         const bezelInset        = Math.max(leftWidth, topHeight)
         const screenCornerRadius1x = Math.max(0, outerRadius - bezelInset)
 
-        const { margins: btnM, drawData, buttons } = computeButtonLayout(
+        const { margins: btnM, drawData, buttons, pressedData } = computeButtonLayout(
           rawInputs, resourcesDir, pdfSize.width, pdfSize.height, scale,
         )
 
         const expandedW = pdfSize.width  + btnM.left + btnM.right
         const expandedH = pdfSize.height + btnM.top  + btnM.bottom
 
-        const framePath = join(tmpdir(), `tapflow-frame-v2-${chromeName}.png`)
+        // v3: buttons excluded from framePng — rendered separately as CSS-animated overlays
+        const framePath = join(tmpdir(), `tapflow-frame-v3-${chromeName}.png`)
         if (!existsSync(framePath) || statSync(compositePdf).mtimeMs > statSync(framePath).mtimeMs) {
-          renderFramePng(compositePdf, framePath, btnM, drawData)
+          renderFramePng(compositePdf, framePath, btnM, [])
         }
+
+        attachButtonPngs(buttons, drawData, chromeName)
+        attachPressedPngs(buttons, pressedData, chromeName, scale)
 
         const screenRect: ChromeRect = {
           x:      Math.round((leftWidth + btnM.left) * scale),
@@ -644,15 +798,15 @@ export class DeviceChromeLoader {
       const bezelInset        = Math.max(leftWidth, topHeight)
       const screenCornerRadius1x = Math.max(0, outerRadius - bezelInset)
 
-      const { margins: btnM, drawData, buttons } = computeButtonLayout(
+      const { margins: btnM, drawData, buttons, pressedData } = computeButtonLayout(
         rawInputs, resourcesDir, compositeW, compositeH, scale,
       )
 
       const expandedW = compositeW + btnM.left + btnM.right
       const expandedH = compositeH + btnM.top  + btnM.bottom
 
-      // Cache keyed by chrome name + screen dimensions + canvas dimensions (canvas size can change after code fixes)
-      const framePath = join(tmpdir(), `tapflow-frame-nineslice-${chromeName}-${screenW}x${screenH}-c${Math.round(expandedW)}x${Math.round(expandedH)}.png`)
+      // nb = no-buttons: buttons excluded from framePng, rendered separately as CSS-animated overlays
+      const framePath = join(tmpdir(), `tapflow-frame-nineslice-nb-${chromeName}-${screenW}x${screenH}-c${Math.round(expandedW)}x${Math.round(expandedH)}.png`)
       const needsRender = !existsSync(framePath)
         || statSync(slicePaths.topLeft).mtimeMs > statSync(framePath).mtimeMs
 
@@ -661,9 +815,12 @@ export class DeviceChromeLoader {
           slicePaths, framePath,
           leftWidth, rightWidth, topHeight, bottomHeight,
           cornerW, cornerH, screenW, screenH,
-          btnM, drawData,
+          btnM, [],
         )
       }
+
+      attachButtonPngs(buttons, drawData, chromeName)
+      attachPressedPngs(buttons, pressedData, chromeName, scale)
 
       // Screen hole: starts at sizing insets within the device body
       const screenRect: ChromeRect = {

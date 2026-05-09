@@ -26,6 +26,50 @@
 
 ## Compound
 
+### touch-helper 인터페이스
+
+```
+touch-helper <udid|booted>
+```
+
+`SimDeviceLegacyHIDClient` + IOHIDEvent 계층으로 iOS Simulator에 직접 HID 터치 이벤트를 주입한다.
+WDA W3C Actions API 대신 사용 — 요청 직렬화 없이 실시간 스트리밍 가능.
+WDA는 물리 버튼(`pressButton`)과 키보드(`type`)에 계속 사용된다.
+
+stdin 프로토콜: `[type:uint8][x:float32BE][y:float32BE]` (9바이트/이벤트)
+- type 1 = start, 2 = move, 3 = end
+- x, y: **정규화 좌표 (0.0–1.0)** — WDA getWindowSize 불필요
+
+**내부 동작 (Xcode 26+):**
+```
+IndigoHIDMessageForMouseNSEvent(
+    position=(x,y),   ← 정규화 0-1
+    delta=zero,
+    target=0x32,      ← digitizer IndigoHIDTarget
+    NSEventType,      ← 1=down, 6=drag, 2=up
+    size=(1.0,1.0),   ← 정규화 좌표 공간 선언
+    edge=0
+)
+→ SimDeviceLegacyHIDClient.sendWithMessage:freeWhenDone:YES:
+```
+
+- `target=0x32` — `0x35`(trackpad)는 `IndigoHIDMessageForTrackpadEventFromHIDEventRef`용이고,
+  이 함수는 IOHIDEvent 자식 타입 0xB를 처리하지 않아 nil 반환 → 리스프링
+- `SimDeviceLegacyHIDClient`는 `initWithDevice:error:`로 직접 생성
+- baguette (tddworks/baguette) 분석에서 확인한 패턴
+
+컴파일:
+```bash
+cd packages/ios-agent/src
+swiftc touch-helper.swift -o touch-helper
+```
+
+Swift 소스 변경 시 **반드시 두 곳을 동시에** 수정한다:
+1. `src/touch-helper.swift` — stdin 프로토콜 변경
+2. `src/TouchHelper.ts` — `write()` 메서드의 byte layout 변경
+
+---
+
 ### screencapture-helper 인터페이스
 
 ```

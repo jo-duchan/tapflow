@@ -58,7 +58,7 @@ describe('RelayServer', () => {
     browser.close()
   })
 
-  it('routes input:tap from browser to agent', async () => {
+  it('routes input:touch:start from browser to agent', async () => {
     const agent = new WebSocket(`ws://localhost:${port}`)
     await waitForOpen(agent)
     agent.send(JSON.stringify({ type: 'agent:register' }))
@@ -69,11 +69,11 @@ describe('RelayServer', () => {
     browser.send(JSON.stringify({ type: 'session:start', sessionId }))
     await waitForMessage(browser)
 
-    const tapPromise = waitForMessage(agent)
-    browser.send(JSON.stringify({ type: 'input:tap', sessionId, payload: { x: 10, y: 20 } }))
-    const tap = await tapPromise
-    expect(tap.type).toBe('input:tap')
-    expect(tap.payload).toEqual({ x: 10, y: 20 })
+    const touchPromise = waitForMessage(agent)
+    browser.send(JSON.stringify({ type: 'input:touch:start', sessionId, payload: { x: 0.5, y: 0.5 } }))
+    const touch = await touchPromise
+    expect(touch.type).toBe('input:touch:start')
+    expect(touch.payload).toEqual({ x: 0.5, y: 0.5 })
 
     agent.close()
     browser.close()
