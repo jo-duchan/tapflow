@@ -57,6 +57,16 @@ export class TouchHelper {
     this.proc.stdin.write(buf)
   }
 
+  // Legacy path for home (code=0) and lock (code=1) buttons
+  pressLegacyButton(code: number): void {
+    if (!this.proc?.stdin?.writable) return
+    const buf = Buffer.allocUnsafe(9)
+    buf.writeUInt8(5, 0)
+    buf.writeUInt32BE(code, 1)
+    buf.writeUInt32BE(0, 5)
+    this.proc.stdin.write(buf)
+  }
+
   private write(type: number, x: number, y: number): void {
     if (!this.proc?.stdin?.writable) return
     const buf = Buffer.allocUnsafe(9)

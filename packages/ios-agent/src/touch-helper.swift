@@ -80,9 +80,15 @@ typealias IndigoMouseFn = @convention(c) (
     UnsafePointer<CGPoint>, UnsafePointer<CGPoint>, UInt32, UInt, CGSize, UInt32
 ) -> UnsafeMutableRawPointer?
 
-// IndigoHIDMessageForHIDArbitrary(usagePage, usage, isKeyDown) -> IndigoHIDMessageStruct*
-// Used for hardware button injection (volume, power, home, action, mute).
-typealias IndigoHIDArbitraryFn = @convention(c) (UInt32, UInt32, Bool) -> UnsafeMutableRawPointer?
+// IndigoHIDMessageForHIDArbitrary(target, usagePage, usage, op) -> IndigoHIDMessageStruct*
+// Used for hardware button injection (volume, power, action, mute).
+// op: 1=down, 2=up. target: 0x32 (same digitizer target as touch).
+typealias IndigoHIDArbitraryFn = @convention(c) (UInt32, UInt32, UInt32, UInt32) -> UnsafeMutableRawPointer?
+
+// IndigoHIDMessageForButton(buttonCode, op, target) -> IndigoHIDMessageStruct*
+// Legacy button path — used for home (code=0) and lock (code=1) buttons.
+// op: 1=down, 2=up. target: 0x33.
+typealias IndigoHIDButtonFn = @convention(c) (UInt32, UInt32, UInt32) -> UnsafeMutableRawPointer?
 
 func requireSym<T>(_ handle: UnsafeMutableRawPointer?, _ name: String) -> T {
     guard let sym = dlsym(handle, name) else {
@@ -96,10 +102,18 @@ let indigoMouse: IndigoMouseFn = requireSym(skHandle, "IndigoHIDMessageForMouseN
 
 let indigoArbitrary: IndigoHIDArbitraryFn? = {
     guard let sym = dlsym(skHandle, "IndigoHIDMessageForHIDArbitrary") else {
-        fputs("warn: IndigoHIDMessageForHIDArbitrary not found — button HID injection disabled\n", stderr)
+        fputs("warn: IndigoHIDMessageForHIDArbitrary not found — HID button injection disabled\n", stderr)
         return nil
     }
     return unsafeBitCast(sym, to: IndigoHIDArbitraryFn.self)
+}()
+
+let indigoButton: IndigoHIDButtonFn? = {
+    guard let sym = dlsym(skHandle, "IndigoHIDMessageForButton") else {
+        fputs("warn: IndigoHIDMessageForButton not found — legacy button injection disabled\n", stderr)
+        return nil
+    }
+    return unsafeBitCast(sym, to: IndigoHIDButtonFn.self)
 }()
 
 // MARK: - ObjC runtime helpers
@@ -212,16 +226,36 @@ func inject(x: Double, y: Double, eventType: UInt) {
 
 // MARK: - Button injection
 
+let kIndigoHIDTargetButton: UInt32 = 0x33  // legacy button service target
+let kHIDOpDown: UInt32 = 1
+let kHIDOpUp:   UInt32 = 2
+
+// HIDArbitrary: for volume, power, action, mute — uses usagePage+usage from chrome.json
 func pressButton(usagePage: UInt32, usage: UInt32) {
     guard let indigoArb = indigoArbitrary else {
-        fputs("warn: button HID unavailable (usagePage=\(usagePage) usage=\(usage))\n", stderr)
+        fputs("warn: HID button unavailable (page=\(usagePage) usage=\(usage))\n", stderr)
         return
     }
-    if let msgDown = indigoArb(usagePage, usage, true) {
+    if let msgDown = indigoArb(kIndigoHIDTargetDigitizer, usagePage, usage, kHIDOpDown) {
         sendMsg(hidClient, sendSel, msgDown, true, nil, nil)
     }
     Thread.sleep(forTimeInterval: 0.05)
-    if let msgUp = indigoArb(usagePage, usage, false) {
+    if let msgUp = indigoArb(kIndigoHIDTargetDigitizer, usagePage, usage, kHIDOpUp) {
+        sendMsg(hidClient, sendSel, msgUp, true, nil, nil)
+    }
+}
+
+// Legacy button: for home (code=0) and lock (code=1)
+func pressLegacyButton(code: UInt32) {
+    guard let indigoBtn = indigoButton else {
+        fputs("warn: legacy button unavailable (code=\(code))\n", stderr)
+        return
+    }
+    if let msgDown = indigoBtn(code, kHIDOpDown, kIndigoHIDTargetButton) {
+        sendMsg(hidClient, sendSel, msgDown, true, nil, nil)
+    }
+    Thread.sleep(forTimeInterval: 0.05)
+    if let msgUp = indigoBtn(code, kHIDOpUp, kIndigoHIDTargetButton) {
         sendMsg(hidClient, sendSel, msgUp, true, nil, nil)
     }
 }
@@ -254,10 +288,14 @@ DispatchQueue.global(qos: .userInteractive).async {
         case 3:
             inject(x: lastX, y: lastY, eventType: kNSLeftMouseUp)
         case 4:
-            // Button press: bytes 1-4 = usagePage (uint32BE), bytes 5-8 = usage (uint32BE)
+            // HIDArbitrary button: bytes 1-4 = usagePage, bytes 5-8 = usage (both uint32BE)
             let usagePage = data.subdata(in: 1..<5).withUnsafeBytes { $0.load(as: UInt32.self).bigEndian }
             let usage     = data.subdata(in: 5..<9).withUnsafeBytes { $0.load(as: UInt32.self).bigEndian }
             pressButton(usagePage: usagePage, usage: usage)
+        case 5:
+            // Legacy button: bytes 1-4 = button code (uint32BE); home=0, lock=1
+            let code = data.subdata(in: 1..<5).withUnsafeBytes { $0.load(as: UInt32.self).bigEndian }
+            pressLegacyButton(code: code)
         default: break
         }
     }
