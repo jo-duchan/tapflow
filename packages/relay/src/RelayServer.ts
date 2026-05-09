@@ -69,7 +69,7 @@ export class RelayServer {
   private route(ws: WebSocket, msg: RelayMessage): void {
     switch (msg.type) {
       case 'agent:register': {
-        const sessionId = this.sessions.create(ws, msg.devices ?? [])
+        const sessionId = this.sessions.create(ws, msg.devices ?? [], msg.agentName)
         ws.send(JSON.stringify({ type: 'agent:registered', sessionId }))
         break
       }
@@ -124,6 +124,26 @@ export class RelayServer {
       }
 
       case 'stream:frame': {
+        // agent → browser
+        const session = this.sessions.getBySocket(ws)
+        if (session?.browserSocket?.readyState === WebSocket.OPEN) {
+          session.browserSocket.send(JSON.stringify(msg))
+        }
+        break
+      }
+
+      case 'device:boot': {
+        // browser → agent
+        const session = this.sessions.get(msg.sessionId!)
+        if (session?.agentSocket.readyState === WebSocket.OPEN) {
+          session.agentSocket.send(JSON.stringify(msg))
+        }
+        break
+      }
+
+      case 'device:booting':
+      case 'device:ready':
+      case 'device:boot-error': {
         // agent → browser
         const session = this.sessions.getBySocket(ws)
         if (session?.browserSocket?.readyState === WebSocket.OPEN) {

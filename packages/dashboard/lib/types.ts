@@ -7,6 +7,8 @@ export interface AgentDevice {
 
 export interface SessionInfo {
   sessionId: string
+  agentName?: string
+  busy: boolean
   devices: AgentDevice[]
 }
 
@@ -58,6 +60,10 @@ export type RelayMessage =
   | { type: 'session:chrome'; payload: ChromeData }
   | { type: 'session:deviceInfo'; payload: DeviceInfo }
   | { type: 'stream:frame'; payload: string; mimeType?: string }
+  | { type: 'device:boot'; sessionId: string; payload: { deviceId: string } }
+  | { type: 'device:booting' }
+  | { type: 'device:ready'; payload: { deviceId: string } }
+  | { type: 'device:boot-error'; message: string }
   | { type: 'input:touch:start'; sessionId: string; payload: { x: number; y: number } }
   | { type: 'input:touch:move'; sessionId: string; payload: { x: number; y: number } }
   | { type: 'input:touch:end'; sessionId: string }

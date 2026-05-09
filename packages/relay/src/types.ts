@@ -9,6 +9,10 @@ export type MessageType =
   | 'session:deviceInfo'
   | 'session:end'
   | 'stream:frame'
+  | 'device:boot'
+  | 'device:booting'
+  | 'device:ready'
+  | 'device:boot-error'
   | 'input:touch:start'
   | 'input:touch:move'
   | 'input:touch:end'
@@ -32,6 +36,8 @@ export interface DeviceInfo {
 
 export interface SessionInfo {
   sessionId: string
+  agentName?: string
+  busy: boolean
   devices: DeviceInfo[]
 }
 
@@ -41,6 +47,7 @@ export interface RelayMessage {
   payload?: unknown
   message?: string
   mimeType?: string
+  agentName?: string
   devices?: DeviceInfo[]
   sessions?: SessionInfo[]
 }

@@ -47,6 +47,18 @@ const waitForMessage = (ws: WebSocket) =>
     ws.once('message', (d) => r(JSON.parse(d.toString())))
   )
 
+const waitForType = (ws: WebSocket, type: string) =>
+  new Promise<Record<string, unknown>>((r) => {
+    const listener = (d: Buffer) => {
+      const msg = JSON.parse(d.toString())
+      if (msg.type === type) {
+        ws.off('message', listener)
+        r(msg)
+      }
+    }
+    ws.on('message', listener)
+  })
+
 function mockSimctl(booted = false): SimctlWrapper {
   return {
     listDevices: vi.fn().mockResolvedValue([
@@ -160,6 +172,50 @@ describe('IOSAgent', () => {
       browser.send(JSON.stringify({ type: 'input:pinch:end', sessionId: agent.sessionId }))
       await new Promise((r) => setTimeout(r, 50))
       expect(thInstance.pinchEnd).toHaveBeenCalled()
+      agent.disconnect()
+      browser.close()
+    })
+  })
+
+  describe('device:boot handler', () => {
+    it('sends device:booting then device:ready for a shutdown device', async () => {
+      const simctl = mockSimctl(false) // device is shutdown
+      const agent = new IOSAgent({ intervalMs: 50 }, simctl)
+      await agent.connect(`ws://localhost:${port}`)
+
+      const browser = new WebSocket(`ws://localhost:${port}`)
+      await waitForOpen(browser)
+      browser.send(JSON.stringify({ type: 'session:start', sessionId: agent.sessionId }))
+      await waitForType(browser, 'session:joined')
+
+      const bootingPromise = waitForType(browser, 'device:booting')
+      const readyPromise = waitForType(browser, 'device:ready')
+      browser.send(JSON.stringify({ type: 'device:boot', sessionId: agent.sessionId, payload: { deviceId: 'dev-1' } }))
+
+      await bootingPromise
+      const ready = await readyPromise
+      expect((ready.payload as { deviceId: string }).deviceId).toBe('dev-1')
+      expect(simctl.boot).toHaveBeenCalledWith('dev-1')
+
+      agent.disconnect()
+      browser.close()
+    })
+
+    it('skips boot call for already-booted device', async () => {
+      const simctl = mockSimctl(true) // already booted
+      const agent = new IOSAgent({ intervalMs: 50 }, simctl)
+      await agent.connect(`ws://localhost:${port}`)
+
+      const browser = new WebSocket(`ws://localhost:${port}`)
+      await waitForOpen(browser)
+      browser.send(JSON.stringify({ type: 'session:start', sessionId: agent.sessionId }))
+      await waitForType(browser, 'session:joined')
+
+      const readyPromise = waitForType(browser, 'device:ready')
+      browser.send(JSON.stringify({ type: 'device:boot', sessionId: agent.sessionId, payload: { deviceId: 'dev-1' } }))
+      await readyPromise
+      expect(simctl.boot).not.toHaveBeenCalled()
+
       agent.disconnect()
       browser.close()
     })

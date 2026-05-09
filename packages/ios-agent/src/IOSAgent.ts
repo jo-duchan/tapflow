@@ -1,3 +1,4 @@
+import os from 'os'
 import { WebSocket } from 'ws'
 import type { Device, DeviceAgent } from '@tapflow/agent-core'
 import { SimctlWrapper } from './SimctlWrapper'
@@ -77,6 +78,7 @@ export class IOSAgent implements DeviceAgent {
       ws.once('open', () => {
         ws.send(JSON.stringify({
           type: 'agent:register',
+          agentName: os.hostname(),
           devices: devices.map((d) => ({
             id: d.id,
             name: d.name,
@@ -253,8 +255,45 @@ export class IOSAgent implements DeviceAgent {
     pump()
   }
 
+  private async handleDeviceBoot(deviceId: string): Promise<void> {
+    if (!this.ws) return
+    this.ws.send(JSON.stringify({ type: 'device:booting' }))
+
+    this.streamReader?.cancel()
+    this.streamReader = null
+    this.touchHelper?.stop()
+    this.touchHelper = null
+
+    try {
+      const devices = await this.simctl.listDevices()
+      const target = devices.find((d) => d.id === deviceId)
+      if (!target) throw new Error(`Device not found: ${deviceId}`)
+
+      if (target.status !== 'booted') {
+        await this.simctl.boot(deviceId)
+      }
+
+      const refreshed = await this.simctl.listDevices()
+      // Force only the target device as booted so sendChromeData streams from the right device
+      this.sendChromeData(refreshed.map((d) => ({
+        ...d,
+        status: (d.id === deviceId ? 'booted' : 'shutdown') as Device['status'],
+      })))
+      this.startStreaming().catch((e) => console.error('[agent] startStreaming failed:', e))
+      this.ws?.send(JSON.stringify({ type: 'device:ready', payload: { deviceId } }))
+    } catch (e) {
+      const message = e instanceof Error ? e.message : String(e)
+      this.ws?.send(JSON.stringify({ type: 'device:boot-error', message }))
+    }
+  }
+
   private handleRelayMessage(msg: { type: string; payload?: unknown }): void {
     switch (msg.type) {
+      case 'device:boot': {
+        const { deviceId } = msg.payload as { deviceId: string }
+        this.handleDeviceBoot(deviceId).catch((e) => console.error('[agent] handleDeviceBoot failed:', e))
+        break
+      }
       case 'input:touch:start': {
         if (!this.touchHelper) { console.error('[agent] touch:start — touchHelper not ready'); break }
         const { x, y } = msg.payload as { x: number; y: number }
