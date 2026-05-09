@@ -21,7 +21,13 @@ export interface ChromeButton {
   name: string
   accessibilityTitle: string
   anchor: string
-  normalOffset: { x: number; y: number }
+  normalOffset: { x: number; y: number }   // button center at retracted/default position in 2× composite px
+  rolloverOffset: { x: number; y: number } // button center at extended/hover position in 2× composite px
+  buttonW: number                           // button width in 2× composite px
+  buttonH: number                           // button height in 2× composite px
+  buttonPng?: string                        // base64 PNG of button at 2× (for CSS-animated overlay)
+  pressedPng?: string                       // base64 PNG of pressed state (imageDown asset)
+  pressedRect?: ChromeRect
 }
 
 export interface ChromeData {

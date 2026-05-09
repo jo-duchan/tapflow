@@ -1,6 +1,6 @@
 'use client'
 
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState, Fragment } from 'react'
 import { useRelay } from '@/hooks/useRelay'
 import { useWebRTC } from '@/hooks/useWebRTC'
 import type { ChromeData, RelayMessage } from '@/lib/types'
@@ -99,6 +99,8 @@ export function SimulatorViewer({ sessionId, onBack }: Props) {
     return () => video.cancelVideoFrameCallback(rafId)
   }, [webrtcActive])
 
+  const [flashedButton, setFlashedButton] = useState<string | null>(null)
+  const [hoveredButton, setHoveredButton] = useState<string | null>(null)
   const pressedButton   = useRef<string | null>(null)
   const touchStartPos   = useRef<{ x: number; y: number } | null>(null)
   const lastMoveSentAt  = useRef(0)
@@ -135,7 +137,7 @@ export function SimulatorViewer({ sessionId, onBack }: Props) {
     [chrome],
   )
 
-  const BUTTON_HIT_RADIUS = 30  // 2× px
+  const BUTTON_HIT_RADIUS = 100  // 2× composite px (~25 CSS px at typical display scale)
 
   // Hit-test physical button positions (normalOffset is in 2× composite pixel space).
   const toButton = useCallback(
@@ -159,6 +161,7 @@ export function SimulatorViewer({ sessionId, onBack }: Props) {
       const btn = toButton(e)
       if (btn) {
         pressedButton.current = btn
+        setFlashedButton(btn)
         return
       }
       const pos = toNormScreen(e)
@@ -172,7 +175,10 @@ export function SimulatorViewer({ sessionId, onBack }: Props) {
 
   const handlePointerMove = useCallback(
     (e: React.PointerEvent) => {
-      if (e.buttons === 0) return
+      if (e.buttons === 0) {
+        setHoveredButton(toButton(e))
+        return
+      }
       if (pressedButton.current) return
       if (!touchStartPos.current) return
       const pos = toNormScreen(e)
@@ -185,8 +191,12 @@ export function SimulatorViewer({ sessionId, onBack }: Props) {
       lastMoveSentAt.current = now
       send({ type: 'input:touch:move', sessionId, payload: pos })
     },
-    [toNormScreen, send, sessionId],
+    [toButton, toNormScreen, send, sessionId],
   )
+
+  const handlePointerLeave = useCallback(() => {
+    setHoveredButton(null)
+  }, [])
 
   const handlePointerUp = useCallback(
     () => {
@@ -194,6 +204,7 @@ export function SimulatorViewer({ sessionId, onBack }: Props) {
       if (pressedButton.current) {
         send({ type: 'input:button', sessionId, payload: { name: pressedButton.current } })
         pressedButton.current = null
+        setTimeout(() => setFlashedButton(null), 100)
         return
       }
       send({ type: 'input:touch:end', sessionId })
@@ -206,6 +217,7 @@ export function SimulatorViewer({ sessionId, onBack }: Props) {
       touchStartPos.current = null
       if (pressedButton.current) {
         pressedButton.current = null
+        setFlashedButton(null)
         return
       }
       send({ type: 'input:touch:end', sessionId })
@@ -260,12 +272,14 @@ export function SimulatorViewer({ sessionId, onBack }: Props) {
           onPointerMove={handlePointerMove}
           onPointerUp={handlePointerUp}
           onPointerCancel={handlePointerCancel}
+          onPointerLeave={handlePointerLeave}
         >
-          {/* Device frame — behind screen canvas; bezel art is outside the screen rect */}
+          {/* Device frame — zIndex:2, above buttons (masks inner button portion) but below screen content */}
           <img
             src={`data:image/png;base64,${chrome.framePng}`}
             style={{
               position: 'absolute', top: 0, left: 0,
+              zIndex: 2,
               width: '100%', height: '100%',
               display: 'block',
               pointerEvents: 'none',
@@ -274,13 +288,14 @@ export function SimulatorViewer({ sessionId, onBack }: Props) {
             draggable={false}
             alt=""
           />
-          {/* Screen content — WebRTC video or MJPEG canvas; positioned over the screen hole */}
+          {/* Screen content — zIndex:3, above framePng so screen is always visible */}
           <video
             ref={videoRef}
             muted
             playsInline
             style={{
               position: 'absolute',
+              zIndex: 3,
               left:        `${screenPctLeft}%`,
               top:         `${screenPctTop}%`,
               width:       `${screenPctW}%`,
@@ -293,6 +308,7 @@ export function SimulatorViewer({ sessionId, onBack }: Props) {
             ref={canvasRef}
             style={{
               position: 'absolute',
+              zIndex: 3,
               left:        `${screenPctLeft}%`,
               top:         `${screenPctTop}%`,
               width:       `${screenPctW}%`,
@@ -301,6 +317,93 @@ export function SimulatorViewer({ sessionId, onBack }: Props) {
               display:      webrtcActive ? 'none' : 'block',
             }}
           />
+          {/* Physical button overlays — CSS-animated between retracted (default) and extended (hover) */}
+          {chrome.buttons.map((btn) => {
+            const isFlashed = flashedButton === btn.name
+            const isHovered = hoveredButton === btn.name
+
+            // For bottom-anchor buttons normalOffset.y is center Y; for all others it's top-edge Y.
+            const isBottomAnchor = btn.anchor === 'bottom'
+            const imgTopPct = isBottomAnchor
+              ? ((btn.normalOffset.y - btn.buttonH / 2) / chrome.compositeHeight) * 100
+              : (btn.normalOffset.y / chrome.compositeHeight) * 100
+            const imgHPct  = (btn.buttonH / chrome.compositeHeight) * 100
+            const imgWPct  = (btn.buttonW / chrome.compositeWidth)  * 100
+            // Default: rolloverOffset (extended, matches baked frame position).
+            // Hover: extend further by the same delta so button pops out visibly.
+            //   hoverX = 2*rollover - normal  (mirrors normal→rollover delta beyond rollover)
+            const halfW = btn.buttonW / 2
+            const rolloverLeftPct = ((btn.rolloverOffset.x - halfW) / chrome.compositeWidth) * 100
+            const hoverLeftPct    = ((2 * btn.rolloverOffset.x - btn.normalOffset.x - halfW) / chrome.compositeWidth) * 100
+
+            // Tooltip position: at rollover center
+            const tooltipLeftPct = (btn.rolloverOffset.x / chrome.compositeWidth) * 100
+            const tooltipTopPct  = isBottomAnchor
+              ? ((btn.normalOffset.y - btn.buttonH / 2) / chrome.compositeHeight) * 100
+              : (btn.normalOffset.y / chrome.compositeHeight) * 100
+
+            return (
+              <Fragment key={btn.name}>
+                {/* Button PNG — zIndex:1, behind framePng (bezel masks the inner portion).
+                     hover: pops further out; click: no extra movement */}
+                {btn.buttonPng && (
+                  <img
+                    src={`data:image/png;base64,${btn.buttonPng}`}
+                    style={{
+                      position: 'absolute',
+                      zIndex:   1,
+                      top:    `${imgTopPct}%`,
+                      left:   `${isHovered ? hoverLeftPct : rolloverLeftPct}%`,
+                      width:  `${imgWPct}%`,
+                      height: `${imgHPct}%`,
+                      transition: 'left 0.15s ease',
+                      pointerEvents: 'none',
+                      userSelect: 'none',
+                    }}
+                    draggable={false}
+                    alt=""
+                  />
+                )}
+                {/* Pressed state — zIndex:1, behind framePng so bezel masks the inner portion */}
+                {isFlashed && btn.pressedPng && btn.pressedRect && (
+                  <img
+                    src={`data:image/png;base64,${btn.pressedPng}`}
+                    style={{
+                      position: 'absolute',
+                      zIndex:   1,
+                      left:   `${isHovered ? hoverLeftPct : rolloverLeftPct}%`,
+                      top:    `${(btn.pressedRect.y / chrome.compositeHeight) * 100}%`,
+                      width:  `${(btn.pressedRect.width  / chrome.compositeWidth)  * 100}%`,
+                      height: `${(btn.pressedRect.height / chrome.compositeHeight) * 100}%`,
+                      pointerEvents: 'none',
+                      userSelect: 'none',
+                    }}
+                    draggable={false}
+                    alt=""
+                  />
+                )}
+                {/* Hover tooltip */}
+                {isHovered && (
+                  <div style={{
+                    position: 'absolute',
+                    zIndex:   5,
+                    left: `${tooltipLeftPct}%`,
+                    top:  `${tooltipTopPct}%`,
+                    transform: 'translate(-50%, calc(-100% - 8px))',
+                    background: 'rgba(0,0,0,0.72)',
+                    color: '#fff',
+                    fontSize: 11,
+                    padding: '2px 7px',
+                    borderRadius: 4,
+                    whiteSpace: 'nowrap',
+                    pointerEvents: 'none',
+                  }}>
+                    {btn.accessibilityTitle}
+                  </div>
+                )}
+              </Fragment>
+            )
+          })}
         </div>
       ) : (
         /* Fallback — no chrome data yet */
