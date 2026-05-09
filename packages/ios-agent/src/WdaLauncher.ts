@@ -15,10 +15,10 @@ export class WdaNotInstalledError extends Error {
 }
 
 const XCODEBUILD_ERROR_MAP: Array<[RegExp, string]> = [
-  [/Code signing is required/, 'code signing 오류: 시뮬레이터는 서명이 필요 없습니다. CODE_SIGN_IDENTITY="" 확인.'],
-  [/No such scheme/, 'scheme을 찾을 수 없습니다. WebDriverAgentRunner scheme이 존재하는지 확인하세요.'],
-  [/No provisioning profile/, '프로비저닝 프로파일 오류: 시뮬레이터 빌드에서는 불필요합니다.'],
-  [/xcode-select/, 'Xcode 커맨드라인 도구 미설치. `xcode-select --install`을 실행하세요.'],
+  [/Code signing is required/, 'Code signing error: not required for simulator builds. Check CODE_SIGN_IDENTITY="".'],
+  [/No such scheme/, 'Scheme not found. Make sure the WebDriverAgentRunner scheme exists in your project.'],
+  [/No provisioning profile/, 'Provisioning profile error: not required for simulator builds.'],
+  [/xcode-select/, 'Xcode command-line tools not installed. Run `xcode-select --install`.'],
 ]
 
 export interface WdaLaunchOptions {
