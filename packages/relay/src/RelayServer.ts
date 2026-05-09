@@ -121,8 +121,9 @@ export class RelayServer {
         break
       }
 
-      case 'input:tap':
-      case 'input:swipe':
+      case 'input:touch:start':
+      case 'input:touch:move':
+      case 'input:touch:end':
       case 'input:type':
       case 'input:button': {
         // browser → agent

@@ -99,14 +99,17 @@ export function SimulatorViewer({ sessionId, onBack }: Props) {
     return () => video.cancelVideoFrameCallback(rafId)
   }, [webrtcActive])
 
-  const dragStart     = useRef<{ x: number; y: number } | null>(null)
-  const pressedButton = useRef<string | null>(null)
+  const pressedButton   = useRef<string | null>(null)
+  const touchStartPos   = useRef<{ x: number; y: number } | null>(null)
+  const lastMoveSentAt  = useRef(0)
+  const MOVE_THROTTLE_MS = 16
+  const DRAG_THRESHOLD   = 0.02
 
-  // Map a mouse event to normalized screen [0,1].
+  // Map a pointer event to normalized screen [0,1].
   // Chrome mode: maps composite-sized container coords through screenRect.
   // Fallback mode (chrome null): the canvas itself is the full screen.
   const toNormScreen = useCallback(
-    (e: React.MouseEvent) => {
+    (e: { clientX: number; clientY: number }) => {
       if (chrome && containerRef.current) {
         const rect = containerRef.current.getBoundingClientRect()
         const cw = chrome.compositeWidth  / 2
@@ -136,7 +139,7 @@ export function SimulatorViewer({ sessionId, onBack }: Props) {
 
   // Hit-test physical button positions (normalOffset is in 2× composite pixel space).
   const toButton = useCallback(
-    (e: React.MouseEvent): string | null => {
+    (e: { clientX: number; clientY: number }): string | null => {
       if (!containerRef.current || !chrome) return null
       const rect = containerRef.current.getBoundingClientRect()
       const cx = (e.clientX - rect.left) * (chrome.compositeWidth  / rect.width)
@@ -151,41 +154,63 @@ export function SimulatorViewer({ sessionId, onBack }: Props) {
     [chrome],
   )
 
-  const handleMouseDown = useCallback(
-    (e: React.MouseEvent) => {
+  const handlePointerDown = useCallback(
+    (e: React.PointerEvent) => {
       const btn = toButton(e)
       if (btn) {
         pressedButton.current = btn
         return
       }
       const pos = toNormScreen(e)
-      if (pos) dragStart.current = pos
+      if (!pos) return
+      touchStartPos.current = pos
+      ;(e.target as Element).setPointerCapture(e.pointerId)
+      send({ type: 'input:touch:start', sessionId, payload: pos })
     },
-    [toButton, toNormScreen],
+    [toButton, toNormScreen, send, sessionId],
   )
 
-  const handleMouseUp = useCallback(
-    (e: React.MouseEvent) => {
+  const handlePointerMove = useCallback(
+    (e: React.PointerEvent) => {
+      if (e.buttons === 0) return
+      if (pressedButton.current) return
+      if (!touchStartPos.current) return
+      const pos = toNormScreen(e)
+      if (!pos) return
+      const dx = pos.x - touchStartPos.current.x
+      const dy = pos.y - touchStartPos.current.y
+      if (Math.sqrt(dx * dx + dy * dy) < DRAG_THRESHOLD) return
+      const now = performance.now()
+      if (now - lastMoveSentAt.current < MOVE_THROTTLE_MS) return
+      lastMoveSentAt.current = now
+      send({ type: 'input:touch:move', sessionId, payload: pos })
+    },
+    [toNormScreen, send, sessionId],
+  )
+
+  const handlePointerUp = useCallback(
+    () => {
+      touchStartPos.current = null
       if (pressedButton.current) {
         send({ type: 'input:button', sessionId, payload: { name: pressedButton.current } })
         pressedButton.current = null
         return
       }
-      if (!dragStart.current) return
-      const from = dragStart.current
-      const to = toNormScreen(e)
-      dragStart.current = null
-      if (!to) return
-
-      const dx = to.x - from.x
-      const dy = to.y - from.y
-      if (Math.sqrt(dx * dx + dy * dy) < 0.02) {
-        send({ type: 'input:tap', sessionId, payload: from })
-      } else {
-        send({ type: 'input:swipe', sessionId, payload: { from, to } })
-      }
+      send({ type: 'input:touch:end', sessionId })
     },
-    [send, sessionId, toNormScreen],
+    [send, sessionId],
+  )
+
+  const handlePointerCancel = useCallback(
+    () => {
+      touchStartPos.current = null
+      if (pressedButton.current) {
+        pressedButton.current = null
+        return
+      }
+      send({ type: 'input:touch:end', sessionId })
+    },
+    [send, sessionId],
   )
 
   const statusText = !connected
@@ -231,8 +256,10 @@ export function SimulatorViewer({ sessionId, onBack }: Props) {
           ref={containerRef}
           className="relative cursor-crosshair"
           style={{ width: displayW, height: displayH }}
-          onMouseDown={handleMouseDown}
-          onMouseUp={handleMouseUp}
+          onPointerDown={handlePointerDown}
+          onPointerMove={handlePointerMove}
+          onPointerUp={handlePointerUp}
+          onPointerCancel={handlePointerCancel}
         >
           {/* Device frame — behind screen canvas; bezel art is outside the screen rect */}
           <img
@@ -284,15 +311,19 @@ export function SimulatorViewer({ sessionId, onBack }: Props) {
             playsInline
             className="block max-w-full"
             style={{ borderRadius: '10%', display: webrtcActive ? 'block' : 'none' }}
-            onMouseDown={handleMouseDown}
-            onMouseUp={handleMouseUp}
+            onPointerDown={handlePointerDown}
+            onPointerMove={handlePointerMove}
+            onPointerUp={handlePointerUp}
+            onPointerCancel={handlePointerCancel}
           />
           <canvas
             ref={canvasRef}
             className="block max-w-full cursor-crosshair"
             style={{ borderRadius: '10%', display: webrtcActive ? 'none' : 'block' }}
-            onMouseDown={handleMouseDown}
-            onMouseUp={handleMouseUp}
+            onPointerDown={handlePointerDown}
+            onPointerMove={handlePointerMove}
+            onPointerUp={handlePointerUp}
+            onPointerCancel={handlePointerCancel}
           />
         </>
       )}

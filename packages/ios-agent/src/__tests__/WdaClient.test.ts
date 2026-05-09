@@ -34,38 +34,6 @@ describe('WdaClient', () => {
     })
   })
 
-  describe('tap', () => {
-    it('posts pointer action to WDA session', async () => {
-      mockFetch
-        .mockResolvedValueOnce(new Response(JSON.stringify({ sessionId: 'sid-1' }), { status: 200 }))
-        .mockResolvedValueOnce(okResponse())
-      const client = new WdaClient()
-      await client.tap(100, 200)
-      const [url, init] = mockFetch.mock.calls[1]
-      expect(url).toBe('http://localhost:8100/session/sid-1/actions')
-      const body = JSON.parse(init.body)
-      const action = body.actions[0].actions
-      expect(action).toContainEqual(expect.objectContaining({ type: 'pointerMove', x: 100, y: 200 }))
-      expect(action).toContainEqual(expect.objectContaining({ type: 'pointerDown' }))
-      expect(action).toContainEqual(expect.objectContaining({ type: 'pointerUp' }))
-    })
-  })
-
-  describe('swipe', () => {
-    it('posts swipe pointer action to WDA session', async () => {
-      mockFetch
-        .mockResolvedValueOnce(new Response(JSON.stringify({ sessionId: 'sid-1' }), { status: 200 }))
-        .mockResolvedValueOnce(okResponse())
-      const client = new WdaClient()
-      await client.swipe({ x: 100, y: 500 }, { x: 100, y: 200 })
-      const [, init] = mockFetch.mock.calls[1]
-      const body = JSON.parse(init.body)
-      const action = body.actions[0].actions
-      expect(action[0]).toMatchObject({ type: 'pointerMove', x: 100, y: 500 })
-      expect(action[action.length - 1]).toMatchObject({ type: 'pointerUp' })
-    })
-  })
-
   describe('type', () => {
     it('posts keyboard actions to WDA session', async () => {
       mockFetch
@@ -108,9 +76,9 @@ describe('WdaClient', () => {
       .mockResolvedValueOnce(new Response(JSON.stringify({ sessionId: 'cached' }), { status: 200 }))
       .mockResolvedValue(okResponse())
     const client = new WdaClient()
-    await client.tap(0, 0)
-    await client.tap(0, 0)
-    // session fetch called only once
+    await client.type('a')
+    await client.type('b')
+    // session fetch called only once across multiple calls
     expect(mockFetch).toHaveBeenCalledTimes(3)
   })
 })

@@ -6,5 +6,5 @@ const server = new RelayServer({ port: PORT })
 server.start()
 
 console.log(`Relay  →  ws://localhost:${PORT}`)
-console.log(`Dashboard  →  http://localhost:${PORT}`)
+console.log(`Dashboard  →  http://localhost:${PORT}  (dev: http://localhost:3001)`)
 console.log('\nWaiting for agents...')

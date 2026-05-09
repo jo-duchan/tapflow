@@ -1,4 +1,4 @@
-import type { Device, Point } from './types'
+import type { Device } from './types'
 
 export interface DeviceAgent {
   listDevices(): Promise<Device[]>
@@ -8,8 +8,9 @@ export interface DeviceAgent {
   launchApp(bundleId: string): Promise<void>
   screenshot(): Promise<Buffer>
   stream(): ReadableStream
-  tap(x: number, y: number): Promise<void>
-  swipe(from: Point, to: Point): Promise<void>
+  touchStart(x: number, y: number): void
+  touchMove(x: number, y: number): Promise<void>
+  touchEnd(): Promise<void>
   type(text: string): Promise<void>
 }
 

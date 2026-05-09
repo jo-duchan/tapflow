@@ -1,4 +1,20 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
+
+vi.mock('@roamhq/wrtc', () => ({
+  RTCPeerConnection: vi.fn(() => ({
+    addTrack: vi.fn(),
+    onicecandidate: null,
+    createOffer: vi.fn(async () => ({ type: 'offer', sdp: 'mock-sdp' })),
+    setLocalDescription: vi.fn(),
+    setRemoteDescription: vi.fn(),
+    addIceCandidate: vi.fn(),
+    close: vi.fn(),
+  })),
+  RTCSessionDescription: vi.fn((init: RTCSessionDescriptionInit) => init),
+  nonstandard: {
+    RTCVideoSource: vi.fn(() => ({ onFrame: vi.fn(), createTrack: vi.fn(() => ({})) })),
+  },
+}))
 import { WebSocket } from 'ws'
 import { RelayServer } from '@tapflow/relay'
 import { IOSAgent } from '../IOSAgent'

@@ -1,10 +1,11 @@
 import { WebSocket } from 'ws'
-import type { Device, DeviceAgent, Point } from '@tapflow/agent-core'
+import type { Device, DeviceAgent } from '@tapflow/agent-core'
 import { SimctlWrapper } from './SimctlWrapper'
 import { ScreenCaptureStreamer } from './ScreenCaptureStreamer'
 import { MjpegStreamer } from './MjpegStreamer'
 import { WdaClient } from './WdaClient'
 import { WdaLauncher } from './WdaLauncher'
+import { TouchHelper } from './TouchHelper'
 import { DeviceChromeLoader, type ChromeData } from './DeviceChromeLoader'
 import { WebRTCStreamer } from './WebRTCStreamer'
 
@@ -32,6 +33,7 @@ export class IOSAgent implements DeviceAgent {
   private readonly wdaOptions: WdaOptions
   private readonly chromeLoader: DeviceChromeLoader
   private wdaLauncher: WdaLauncher | null = null
+  private touchHelper: TouchHelper | null = null
   private loadedChrome: ChromeData | null = null
   private bootedDeviceId: string | null = null
   private ws: WebSocket | null = null
@@ -104,6 +106,8 @@ export class IOSAgent implements DeviceAgent {
   disconnect(): void {
     this.streamReader?.cancel()
     this.streamReader = null
+    this.touchHelper?.stop()
+    this.touchHelper = null
     this.wdaLauncher?.stop()
     this.wdaLauncher = null
     this.webrtc?.close()
@@ -117,6 +121,8 @@ export class IOSAgent implements DeviceAgent {
     const booted = devices.find((d) => d.status === 'booted')
     if (!booted || !this.ws) return
     this.bootedDeviceId = booted.id
+    this.touchHelper = new TouchHelper(booted.id)
+    this.touchHelper.start()
     this.loadedChrome = this.chromeLoader.load(booted.typeId ?? booted.name)
     if (!this.loadedChrome) return
     this.ws.send(JSON.stringify({ type: 'session:chrome', payload: this.loadedChrome }))
@@ -241,21 +247,20 @@ export class IOSAgent implements DeviceAgent {
 
   private handleRelayMessage(msg: { type: string; payload?: unknown }): void {
     switch (msg.type) {
-      case 'input:tap': {
+      case 'input:touch:start': {
+        if (!this.touchHelper) { console.error('[agent] touch:start — touchHelper not ready'); break }
         const { x, y } = msg.payload as { x: number; y: number }
-        this.wda.getWindowSize()
-          .then((size) => this.wda.tap(Math.round(x * size.width), Math.round(y * size.height)))
-          .catch((e) => console.error('[agent] tap failed:', e))
+        this.touchStart(x, y)
         break
       }
-      case 'input:swipe': {
-        const { from, to } = msg.payload as { from: { x: number; y: number }; to: { x: number; y: number } }
-        this.wda.getWindowSize()
-          .then((size) => this.wda.swipe(
-            { x: Math.round(from.x * size.width), y: Math.round(from.y * size.height) },
-            { x: Math.round(to.x * size.width), y: Math.round(to.y * size.height) },
-          ))
-          .catch((e) => console.error('[agent] swipe failed:', e))
+      case 'input:touch:move': {
+        if (!this.touchHelper) break
+        const { x, y } = msg.payload as { x: number; y: number }
+        this.touchMove(x, y)
+        break
+      }
+      case 'input:touch:end': {
+        this.touchEnd().catch(() => {})
         break
       }
       case 'input:type': {
@@ -287,7 +292,14 @@ export class IOSAgent implements DeviceAgent {
     return new ScreenCaptureStreamer(this.fps, this.bootedDeviceId).start()
   }
 
-  tap(x: number, y: number): Promise<void> { return this.wda.tap(x, y) }
-  swipe(from: Point, to: Point): Promise<void> { return this.wda.swipe(from, to) }
+  touchStart(x: number, y: number): void { this.touchHelper?.touchStart(x, y) }
+  touchMove(x: number, y: number): Promise<void> {
+    this.touchHelper?.touchMove(x, y)
+    return Promise.resolve()
+  }
+  touchEnd(): Promise<void> {
+    this.touchHelper?.touchEnd()
+    return Promise.resolve()
+  }
   type(text: string): Promise<void> { return this.wda.type(text) }
 }
