@@ -1,4 +1,4 @@
-export interface DeviceInfo {
+export interface AgentDevice {
   id: string
   name: string
   platform: string
@@ -7,7 +7,7 @@ export interface DeviceInfo {
 
 export interface SessionInfo {
   sessionId: string
-  devices: DeviceInfo[]
+  devices: AgentDevice[]
 }
 
 export interface ChromeRect {

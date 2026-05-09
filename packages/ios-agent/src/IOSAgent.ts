@@ -124,9 +124,6 @@ export class IOSAgent implements DeviceAgent {
     this.bootedDeviceId = booted.id
     this.touchHelper = new TouchHelper(booted.id)
     this.touchHelper.start()
-    this.loadedChrome = this.chromeLoader.load(booted.typeId ?? booted.name)
-    if (!this.loadedChrome) return
-    this.ws.send(JSON.stringify({ type: 'session:chrome', payload: this.loadedChrome }))
     this.ws.send(JSON.stringify({
       type: 'session:deviceInfo',
       payload: {
@@ -134,6 +131,9 @@ export class IOSAgent implements DeviceAgent {
         osVersion: booted.osVersion ?? '',
       },
     }))
+    this.loadedChrome = this.chromeLoader.load(booted.typeId ?? booted.name)
+    if (!this.loadedChrome) return
+    this.ws.send(JSON.stringify({ type: 'session:chrome', payload: this.loadedChrome }))
   }
 
   private async startStreaming(): Promise<void> {
