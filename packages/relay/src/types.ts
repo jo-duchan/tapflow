@@ -14,6 +14,12 @@ export type MessageType =
   | 'device:boot-error'
   | 'device:shutdown'
   | 'device:shutdown-done'
+  | 'app:install'
+  | 'app:install-done'
+  | 'app:install-error'
+  | 'app:launch'
+  | 'app:launch-done'
+  | 'app:launch-error'
   | 'input:touch:start'
   | 'input:touch:move'
   | 'input:touch:end'
@@ -47,4 +53,5 @@ export interface RelayMessage {
   agentName?: string
   devices?: DeviceInfo[]
   sessions?: SessionInfo[]
+  buildId?: number
 }

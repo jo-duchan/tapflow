@@ -1,4 +1,4 @@
-import { Outlet, Navigate } from 'react-router-dom'
+import { Outlet, Navigate, useLocation } from 'react-router-dom'
 import { SidebarInset, SidebarProvider, SidebarTrigger } from '@/components/ui/sidebar'
 import { AppSidebar } from '@/components/app-sidebar'
 import { ThemeToggle } from '@/components/theme-toggle'
@@ -7,9 +7,21 @@ import { useAuth } from '@/hooks/useAuth'
 
 export function DashboardLayout() {
   const { user, loading } = useAuth()
+  const location = useLocation()
 
   if (loading) return null
   if (!user) return <Navigate to="/login" replace />
+
+  if (location.pathname.startsWith('/settings') && user.role !== 'Admin') {
+    return (
+      <div className="flex h-screen items-center justify-center">
+        <div className="text-center space-y-2">
+          <p className="text-lg font-semibold">Access Denied</p>
+          <p className="text-sm text-muted-foreground">Settings are only accessible to Admins.</p>
+        </div>
+      </div>
+    )
+  }
 
   return (
     <SidebarProvider>

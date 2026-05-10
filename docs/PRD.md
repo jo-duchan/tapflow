@@ -206,27 +206,49 @@ Agent → (outbound) → Relay ← (inbound) ← Browser
 
 ### 5.2 메시지 프로토콜
 
+**WebSocket 제어 메시지** (JSON)
+
 | 메시지 타입 | 방향 | 설명 |
 |-----------|------|------|
-| stream:frame | Agent → Browser | MJPEG 프레임 (base64) |
-| webrtc:offer/answer/ice | 양방향 | WebRTC 시그널링 |
-| session:chrome | Agent → Browser | 디바이스 프레임 PNG + screenRect + 버튼 레이아웃 |
-| session:deviceInfo | Agent → Browser | 기기명 + iOS 버전 |
-| input:touch:start | Browser → Agent | 터치 시작 (정규화 좌표 0~1) |
-| input:touch:move | Browser → Agent | 터치 이동 (정규화 좌표 0~1, 16ms throttle) |
-| input:touch:end | Browser → Agent | 터치 종료 |
-| input:button | Browser → Agent | 물리 버튼 (볼륨·전원·홈 등) |
-| input:rotate | Browser → Agent | 화면 회전 (portrait ↔ landscapeRight) |
-| input:type | Browser → Agent | 텍스트 입력 |
-| session:start | Browser → Relay | 세션 참가 요청 |
-| session:end | Browser → Relay | 세션 종료 |
-| app:upload | Browser/CLI → Relay | 앱 빌드 파일(.ipa/.apk) 업로드 |
-| app:deliver | Relay → Agent | 파일 전달 + 로컬 저장 지시 |
-| app:install | Browser → Relay → Agent | 특정 버전 시뮬레이터에 설치 |
-| app:list | Browser → Relay | 등록된 버전 목록 요청 |
-| comment:create | Browser → Relay | 코멘트 생성 (build_id, body, attachment?) |
-| comment:update | Browser → Relay | 코멘트 수정 |
-| comment:delete | Browser → Relay | 코멘트 삭제 |
+| `agent:register` | Agent → Relay | Agent 등록 (agentName, devices[]) |
+| `agent:registered` | Relay → Agent | 등록 확인 (sessionId 포함) |
+| `agents:list` | Browser → Relay | 연결된 Agent 목록 요청 |
+| `agents:listed` | Relay → Browser | Agent·디바이스 목록 응답 |
+| `session:start` | Browser → Relay | 세션 참가 요청 (sessionId, deviceId) |
+| `session:joined` | Relay → Browser | 참가 확인 |
+| `session:chrome` | Agent → Relay → Browser | 디바이스 프레임 PNG + screenRect + 버튼 레이아웃 |
+| `session:deviceInfo` | Agent → Relay → Browser | 기기명 + iOS 버전 |
+| `session:end` | Browser → Relay | 세션 종료 |
+| `device:boot` | Browser → Relay → Agent | 시뮬레이터 부팅 요청 (deviceId) |
+| `device:booting` | Agent → Relay → Browser | 부팅 시작 알림 |
+| `device:ready` | Agent → Relay → Browser | 부팅 완료 (deviceId) |
+| `device:boot-error` | Agent → Relay → Browser | 부팅 실패 (message) |
+| `device:shutdown` | Browser → Relay → Agent | 시뮬레이터 종료 요청 (deviceId) |
+| `device:shutdown-done` | Agent → Relay → Browser | 종료 완료 (deviceId) |
+| `app:install` | Browser → Relay → Agent | 빌드 설치 요청 (buildId). Relay가 DB에서 file_path 조회 후 Agent에 전달 |
+| `app:install-done` | Agent → Relay → Browser | 설치 완료 |
+| `app:install-error` | Agent → Relay → Browser | 설치 실패 (message) |
+| `app:launch` | Browser → Relay → Agent | 앱 실행 요청 (buildId). Relay가 DB에서 bundle_id 조회 후 Agent에 전달 |
+| `app:launch-done` | Agent → Relay → Browser | 앱 실행 완료 |
+| `app:launch-error` | Agent → Relay → Browser | 앱 실행 실패 (message) |
+| `input:touch:start` | Browser → Relay → Agent | 터치 시작 (정규화 좌표 0~1) |
+| `input:touch:move` | Browser → Relay → Agent | 터치 이동 (정규화 좌표 0~1, 16ms throttle) |
+| `input:touch:end` | Browser → Relay → Agent | 터치 종료 |
+| `input:pinch:start` | Browser → Relay → Agent | 핀치 시작 (f0, f1 정규화 좌표) |
+| `input:pinch:move` | Browser → Relay → Agent | 핀치 이동 |
+| `input:pinch:end` | Browser → Relay → Agent | 핀치 종료 |
+| `input:button` | Browser → Relay → Agent | 물리 버튼 (볼륨·전원·홈 등) |
+| `input:rotate` | Browser → Relay → Agent | 화면 회전 (portrait ↔ landscapeRight) |
+| `input:type` | Browser → Relay → Agent | 텍스트 입력 |
+| `error` | Relay → Browser | 오류 메시지 |
+
+**Binary 프레임** (WebSocket binary)
+
+Agent가 JPEG 프레임을 바이너리로 직접 전송한다. Relay는 내용을 파싱하지 않고 즉시 포워딩한다.
+
+**코멘트 API** (HTTP REST — WebSocket 아님)
+
+코멘트 CRUD는 `GET/POST/DELETE /api/v1/comments` HTTP 엔드포인트를 사용한다. WebSocket broadcast는 Phase 3 이후 예정이다.
 
 ### 5.3 데이터 저장 (SQLite)
 
@@ -309,7 +331,7 @@ npx tapflow ios setup
   > ✓ WDA ready — localhost:8100 will auto-start with agent
 
 # 6. 앱 빌드 업로드 (개발자 — CI/CD 또는 수동)
-npx tapflow upload MyApp.ipa --label "v1.2.3-staging" --status "In Progress" --token <pat>
+npx tapflow upload MyApp.ipa --version-label "v1.2.3-staging" --status "In Progress" --token <pat>
   > ✓ Uploaded to relay (12.3 MB)
   > ✓ Build registered: v1.2.3-staging [In Progress]
 
@@ -340,17 +362,19 @@ Content-Type: multipart/form-data
 Authorization: Bearer tflw_pat_<token>
 
 Fields:
-  file           required  .ipa 또는 .apk 파일
-  label          optional  버전 레이블 (예: "v1.2.3-staging")
+  file           required  .ipa 또는 .apk 파일 (최대 500MB)
+  version_label  optional  버전 레이블 (예: "v1.2.3-staging")
   status         optional  Backlog | In Progress | Done | Rejected
   platform       optional  ios | android (파일 확장자로 자동 감지)
 
 Response:
-  201  { id, name, version_label, status_label, platform, uploadedAt }
+  201  { id, name, bundle_id, version_label, status_label, platform, uploaded_at }
   400  Bad Request (파일 없음 또는 형식 오류)
   401  Unauthorized (PAT 누락 또는 만료)
   403  Forbidden (scope 불일치)
 ```
+
+> **bundle_id 자동 추출**: `.ipa` 업로드 시 Relay가 `unzip + plutil`로 `Info.plist`에서 `CFBundleIdentifier`를 추출해 DB에 저장한다. 추출 실패 시 `null`로 저장되며, `app:launch` 요청 시 오류를 반환한다. macOS 전용 동작이다.
 
 **PAT 형식**: `tflw_pat_<random-64>`. SHA-256 hash만 DB에 저장. 발급 시 평문 1회 노출.  
 **scope**: `builds:write` — 현 단계에서 API 배포에 필요한 유일한 scope.
@@ -361,27 +385,30 @@ Response:
 
 ### 7.1 주요 화면
 
-| 화면 | 설명 |
-|-----|------|
-| Login | email/password 로그인, 초대 링크 기반 가입 |
-| App Center | 빌드 리스트 (정렬·필터·검색·페이지네이션), 수동/API 업로드, 상태·버전 태그 |
-| QA Session | OS·OS 버전·Device 선택 → 부팅, 시뮬레이터 뷰어, 코멘트(이미지 첨부·deep-link 공유) |
-| Settings > Default | 로고 업로드, 팀 이름 변경 |
-| Settings > Team | 멤버 초대·권한 변경·삭제 |
-| Settings > Tokens | PAT 발급·철회 |
-| 이벤트 로그 | 실시간 네트워크 요청·앱 이벤트 스트림 (Phase 2 후속) |
-| 세션 녹화/재생 | QA 세션 녹화, 버그 재현용 재생 (Phase 2 후속) |
+| 화면 | 경로 | 설명 |
+|-----|------|------|
+| Login | `/login` | email/password 로그인 |
+| Invite | `/invite?token=` | 초대 토큰 검증 → 비밀번호 설정 → 가입 |
+| App Center | `/app-center` | 빌드 리스트 (정렬·필터·검색·페이지네이션), 수동/API 업로드, 상태·버전 태그 |
+| QA Session | `/app-center/build?id=` | OS·OS 버전·Device 선택 → 부팅 → .ipa 자동 설치, 시뮬레이터 뷰어 + 터치, 코멘트(이미지 첨부·deep-link 공유) |
+| Settings > Default | `/settings/default` | 팀 로고 업로드 (png·jpg, ≤2MB), 팀 이름 변경 (Admin 전용) |
+| Settings > Team | `/settings/team` | 멤버 초대(email+role)·권한 변경·삭제 (Admin 전용) |
+| Settings > Tokens | `/settings/tokens` | PAT 발급·철회 (Admin 전용) |
+| 이벤트 로그 | — | Phase 3 예정 |
+| 세션 녹화/재생 | — | Phase 3 예정 |
 
 ### 7.2 역할별 대시보드 뷰
 
-역할에 따라 노출 탭이 달라진다.
+역할에 따라 접근 권한이 달라진다.
 
-| 역할 | 접근 가능 화면 | 빌드 상태 변경 | 코멘트 작성 | PAT 발급 | Settings |
-|-----|--------------|-------------|-----------|---------|---------|
-| Admin | 전체 | ✅ | ✅ | ✅ | ✅ (전체) |
-| Developer | App Center, QA Session, 이벤트 로그 | ✅ | ✅ | ❌ | ❌ |
-| QA | App Center, QA Session, 세션 녹화 | ✅ | ✅ | ❌ | ❌ |
-| Viewer | QA Session (읽기 전용) | ❌ | ❌ | ❌ | ❌ |
+| 역할 | 접근 가능 화면 | 빌드 상태 변경 | 코멘트 작성 | 수동 업로드 | PAT 발급 | 팀 설정 |
+|-----|--------------|-------------|-----------|------------|---------|---------|
+| Admin | 전체 | ✅ | ✅ | ✅ | ✅ | ✅ |
+| Developer | App Center, QA Session | ✅ | ✅ | ✅ | ❌ | ❌ |
+| QA | App Center, QA Session | ✅ | ✅ | ✅ | ❌ | ❌ |
+| Viewer | App Center (읽기), QA Session (읽기) | ❌ | ❌ | ❌ | ❌ | ❌ |
+
+> Settings(`/settings/*`) 경로는 Admin 전용이다. 다른 역할이 직접 URL로 진입하면 "Access Denied" 화면을 표시한다.
 
 ### 7.3 플랫폼 전환 UX
 
@@ -470,7 +497,7 @@ await agent.boot(selectedDeviceId)
 | 릴레이 서버 | Node.js + ws | 경량, WebSocket 특화 |
 | DB | SQLite (better-sqlite3) | 외부 DB 서버 불필요, 셀프호스팅 친화적, 팀이 데이터 소유 |
 | 인프라 배포 | Pulumi (TypeScript) | 멀티 클라우드, 코드로 관리 |
-| Web Dashboard | Next.js + TypeScript + Shadcn/ui + Tailwind CSS + next-themes | 팀 선호 스택, 라이트/다크 테마 |
+| Web Dashboard | Vite + React 19 + TypeScript + React Router v7 + Shadcn/ui + Tailwind CSS + next-themes | relay가 직접 서빙하는 SPA, 라이트/다크 테마 |
 | 스트리밍 v1 | SimulatorKit IOSurface → JPEG | Private API, geometry 불필요, ~30fps |
 | 스트리밍 v2 | WebRTC (H.264) | 저지연, ~60fps |
 | iOS 터치 | IOHIDDigitizerDispatch (SimulatorKit, Swift) | 저지연 HID 스트리밍; WDA는 물리 버튼·키보드에만 유지 |

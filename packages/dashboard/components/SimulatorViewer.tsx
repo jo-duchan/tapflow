@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState, Fragment } from 'react';
-import { Home, Camera, RotateCw } from 'lucide-react';
+import { Home, Camera, RotateCw, Play } from 'lucide-react';
 import { useRelay } from '@/hooks/useRelay';
 import type { ChromeData, DeviceInfo, RelayMessage } from '@/lib/types';
 import { Button } from '@/components/ui/button';
@@ -10,9 +10,10 @@ interface Props {
   sessionId: string;
   deviceId: string;
   onBack: () => void;
+  buildId?: number;
 }
 
-export function SimulatorViewer({ sessionId, deviceId, onBack }: Props) {
+export function SimulatorViewer({ sessionId, deviceId, onBack, buildId }: Props) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const [joined, setJoined] = useState(false);
@@ -23,6 +24,10 @@ export function SimulatorViewer({ sessionId, deviceId, onBack }: Props) {
   const frameCount = useRef(0);
   const sendRef = useRef<(msg: object) => void>(() => {});
   const deviceSeq = useRef(0);
+  const [installing, setInstalling] = useState(false);
+  const [installed, setInstalled] = useState(false);
+  const [installError, setInstallError] = useState<string | null>(null);
+  const [launching, setLaunching] = useState(false);
 
   const drawToCanvas = useCallback((data: ArrayBuffer) => {
     const seq = deviceSeq.current;
@@ -53,6 +58,9 @@ export function SimulatorViewer({ sessionId, deviceId, onBack }: Props) {
 
       if (msg.type === 'device:booting') {
         setDeviceReady(false);
+        setInstalling(false);
+        setInstalled(false);
+        setInstallError(null);
         deviceSeq.current += 1;
         const canvas = canvasRef.current;
         if (canvas) {
@@ -63,6 +71,28 @@ export function SimulatorViewer({ sessionId, deviceId, onBack }: Props) {
 
       if (msg.type === 'device:ready') {
         setDeviceReady(true);
+        if (buildId) {
+          setInstalling(true);
+          sendRef.current({ type: 'app:install', sessionId, buildId });
+        }
+      }
+
+      if (msg.type === 'app:install-done') {
+        setInstalling(false);
+        setInstalled(true);
+      }
+
+      if (msg.type === 'app:install-error') {
+        setInstalling(false);
+        setInstallError(msg.message);
+      }
+
+      if (msg.type === 'app:launch-done') {
+        setLaunching(false);
+      }
+
+      if (msg.type === 'app:launch-error') {
+        setLaunching(false);
       }
 
       if (msg.type === 'session:chrome') {
@@ -74,7 +104,7 @@ export function SimulatorViewer({ sessionId, deviceId, onBack }: Props) {
       }
 
     },
-    [drawToCanvas, sessionId, deviceId],
+    [drawToCanvas, sessionId, deviceId, buildId],
   );
 
   const handleBinaryFrame = useCallback((data: ArrayBuffer) => {
@@ -339,7 +369,11 @@ export function SimulatorViewer({ sessionId, deviceId, onBack }: Props) {
       ? 'Joining session...'
       : !deviceReady
         ? 'Starting device...'
-        : `Live · ${fps} fps`;
+        : installing
+          ? 'Installing app…'
+          : installError
+            ? `Install failed: ${installError}`
+            : `Live · ${fps} fps`;
 
   // Container is composite-sized so the device frame image aligns with button positions.
   // Scale down to fit within ~80vh.
@@ -601,6 +635,22 @@ export function SimulatorViewer({ sessionId, deviceId, onBack }: Props) {
               : '—'}
           </span>
           <div className="flex items-center gap-1">
+            {installed && buildId && (
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-7 px-2 text-xs"
+                title="Launch app"
+                disabled={launching}
+                onClick={() => {
+                  setLaunching(true);
+                  sendRef.current({ type: 'app:launch', sessionId, buildId });
+                }}
+              >
+                <Play className="h-3 w-3 mr-1" />
+                {launching ? 'Launching…' : 'Launch'}
+              </Button>
+            )}
             <Button
               variant="ghost"
               size="icon"

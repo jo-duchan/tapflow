@@ -5,6 +5,7 @@ import { WebSocketServer, WebSocket } from 'ws'
 import { SessionManager } from './SessionManager'
 import type { RelayMessage } from './types'
 import { Router } from './router'
+import { getDb } from './db'
 import { handleLogin, handleLogout, handleMe } from './api/auth'
 import { handleVerify, handleAccept } from './api/invitations'
 import { handleListBuilds, handleGetBuild, handleUpdateBuild, handleUploadBuild } from './api/builds'
@@ -254,6 +255,66 @@ export class RelayServer {
         const { deviceId } = (msg as { type: string; payload: { deviceId: string } }).payload
         this.sessions.updateDeviceStatus(session.id, deviceId, 'booted')
         if (session.browserSocket?.readyState === WebSocket.OPEN) {
+          session.browserSocket.send(JSON.stringify(msg))
+        }
+        break
+      }
+
+      case 'app:install': {
+        // browser → agent: relay looks up file_path from DB and enriches
+        const session = this.sessions.get(msg.sessionId!)
+        if (!session) {
+          ws.send(JSON.stringify({ type: 'error', message: 'Session not found' }))
+          break
+        }
+        const build = getDb()
+          .prepare('SELECT file_path FROM apps WHERE id = ?')
+          .get(msg.buildId!) as { file_path: string } | undefined
+        if (!build) {
+          ws.send(JSON.stringify({ type: 'app:install-error', message: 'Build not found' }))
+          break
+        }
+        if (session.agentSocket.readyState === WebSocket.OPEN) {
+          session.agentSocket.send(JSON.stringify({ type: 'app:install', payload: { filePath: build.file_path } }))
+        }
+        break
+      }
+
+      case 'app:install-done':
+      case 'app:install-error': {
+        // agent → browser
+        const session = this.sessions.getBySocket(ws)
+        if (session?.browserSocket?.readyState === WebSocket.OPEN) {
+          session.browserSocket.send(JSON.stringify(msg))
+        }
+        break
+      }
+
+      case 'app:launch': {
+        // browser → agent: relay looks up bundle_id from DB
+        const session = this.sessions.get(msg.sessionId!)
+        if (!session) {
+          ws.send(JSON.stringify({ type: 'error', message: 'Session not found' }))
+          break
+        }
+        const build = getDb()
+          .prepare('SELECT bundle_id FROM apps WHERE id = ?')
+          .get(msg.buildId!) as { bundle_id: string | null } | undefined
+        if (!build?.bundle_id) {
+          ws.send(JSON.stringify({ type: 'app:launch-error', message: 'Bundle ID not available for this build' }))
+          break
+        }
+        if (session.agentSocket.readyState === WebSocket.OPEN) {
+          session.agentSocket.send(JSON.stringify({ type: 'app:launch', payload: { bundleId: build.bundle_id } }))
+        }
+        break
+      }
+
+      case 'app:launch-done':
+      case 'app:launch-error': {
+        // agent → browser
+        const session = this.sessions.getBySocket(ws)
+        if (session?.browserSocket?.readyState === WebSocket.OPEN) {
           session.browserSocket.send(JSON.stringify(msg))
         }
         break

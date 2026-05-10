@@ -1,10 +1,33 @@
 import http from 'http'
 import fs from 'fs'
 import path from 'path'
+import { spawnSync } from 'child_process'
 import busboy from 'busboy'
 import { getDb } from '../db'
 import { requireAuth, verifyPat } from '../middleware/auth'
 import { json, readJson } from '../router'
+
+function extractBundleId(ipaPath: string): string | null {
+  try {
+    const list = spawnSync('unzip', ['-l', ipaPath], { encoding: 'utf8' })
+    if (list.status !== 0) return null
+    const match = list.stdout.match(/Payload\/[^/\s]+\.app\/Info\.plist/)
+    if (!match) return null
+    const plistEntry = match[0].trim()
+
+    const extract = spawnSync('unzip', ['-p', ipaPath, plistEntry])
+    if (extract.status !== 0) return null
+
+    const plutil = spawnSync('plutil', ['-extract', 'CFBundleIdentifier', 'raw', '-o', '-', '-'], {
+      input: extract.stdout as Buffer,
+      encoding: 'utf8',
+    })
+    if (plutil.status !== 0) return null
+    return (plutil.stdout as string).trim() || null
+  } catch {
+    return null
+  }
+}
 
 export function handleListBuilds(req: http.IncomingMessage, res: http.ServerResponse): void {
   const auth = requireAuth(req, res)
@@ -111,6 +134,7 @@ export function handleUploadBuild(
   let savedPath = ''
   let originalName = ''
   let fileError = ''
+  let writePromise: Promise<void> = Promise.resolve()
 
   bb.on('field', (name, val) => { fields[name] = val })
 
@@ -125,22 +149,30 @@ export function handleUploadBuild(
     const fileName = `${Date.now()}_${path.basename(originalName)}`
     savedPath = path.join(uploadsDir, 'apps', fileName)
     fs.mkdirSync(path.dirname(savedPath), { recursive: true })
-    stream.pipe(fs.createWriteStream(savedPath))
+    const ws = fs.createWriteStream(savedPath)
+    writePromise = new Promise((resolve, reject) => {
+      ws.on('finish', resolve)
+      ws.on('error', reject)
+    })
+    stream.pipe(ws)
   })
 
-  bb.on('finish', () => {
+  bb.on('finish', async () => {
     if (fileError) return json(res, 400, { error: fileError })
     if (!savedPath) return json(res, 400, { error: 'File required' })
+
+    await writePromise
 
     const ext = path.extname(originalName).toLowerCase()
     const platform = fields.platform ?? (ext === '.ipa' ? 'ios' : 'android')
     const status = ['Backlog', 'In Progress', 'Done', 'Rejected'].includes(fields.status)
       ? fields.status : null
+    const bundleId = ext === '.ipa' ? extractBundleId(savedPath) : null
 
     const db = getDb()
     const result = db.prepare(`
-      INSERT INTO apps (name, platform, file_path, label, version_label, status_label, uploader_id)
-      VALUES (?, ?, ?, ?, ?, ?, ?)
+      INSERT INTO apps (name, platform, file_path, label, version_label, status_label, bundle_id, uploader_id)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
       path.basename(originalName, path.extname(originalName)),
       platform,
@@ -148,6 +180,7 @@ export function handleUploadBuild(
       fields.label ?? null,
       fields.label ?? null,
       status,
+      bundleId,
       auth.userId
     )
 
