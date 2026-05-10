@@ -12,7 +12,7 @@
 
 - macOS에서만 실행됨을 가정한다. 비 macOS 환경에서는 명확한 오류를 던진다.
 - xcrun/WDA 호출은 모두 래핑 함수로 분리해 테스트 시 목(mock) 교체가 가능하게 한다.
-- SimulatorKit IOSurface로 화면을 캡처해 JPEG 프레임으로 스트리밍한다 (≤30fps). WebRTC는 Phase 2 이후다.
+- SimulatorKit IOSurface로 화면을 캡처해 JPEG 프레임을 WebSocket Binary로 스트리밍한다 (≤30fps).
 
 ## HOW NOT
 
@@ -21,6 +21,7 @@
 - `DeviceAgent` 인터페이스에 없는 iOS 전용 메서드를 public API로 노출하지 않는다.
 - fallback 값으로 디바이스 해상도를 하드코딩하지 않는다 — WDA나 simctl로 실제 값을 읽는다.
 - SCStream/ScreenCaptureKit을 다시 도입하지 않는다 — geometry 좌표계 불일치로 이중 프레임 문제가 발생한다.
+- WebRTC DataChannel로 JPEG 프레임을 스트리밍하지 않는다 — 대용량 메시지(~200KB+)에서 채널이 조용히 닫히며, relay-intermediary 구조에서는 P2P 이점도 없다. WebRTC Video Track은 별도로 검토할 수 있다.
 
 ---
 
@@ -159,6 +160,39 @@ right-anchor: centerX = margin.left + compositeWidth + rollover.x
 
 렌더링 순서: `behindBtns → composite → onTopBtns`
 캐시 키: `tapflow-frame-v2-{chromeName}.png` (v2: 버튼 포함 버전 구분)
+
+---
+
+### WebSocket Binary MJPEG — 스트리밍 프로토콜 선택 기준
+
+**언제**: 화면 스트리밍 전송 방식을 결정할 때
+
+**방법**: `ws.send(Buffer)` → Relay → `ws.send(data, { binary: true })` → Browser `e.data instanceof ArrayBuffer`
+
+**이유**:
+1. **DataChannel 불안정**: `@roamhq/wrtc`의 RTCDataChannel은 ~236KB 이상 메시지에서 채널을 조용히 닫는다. 브라우저 측 `onclose`가 발화하지 않아 fallback 없이 화면이 첫 프레임에서 멈춘다.
+2. **GPU 이점 없음**: WebRTC 하드웨어 인코딩은 Video Track + H.264/VP9에만 적용된다. DataChannel + JPEG는 `createImageBitmap`이 CPU 기반이어서 WebRTC로 바꿔도 GPU 이점이 없다.
+3. **P2P 이점 없음**: tapflow는 relay-always-intermediary 구조다. Agent → Relay → Browser 경로가 고정이므로 WebRTC의 P2P 지연 이점을 얻을 수 없다.
+4. **상용 서비스도 동일**: Appetize, BrowserStack 등 모두 WebSocket Binary 기반이다.
+
+---
+
+### IOSAgent 테스트 — 스트리밍 시작 전제조건
+
+**언제**: `IOSAgent`의 스트리밍 관련 동작을 테스트할 때
+
+**방법**:
+```typescript
+// 스트리밍은 device:boot 핸들러 안에서만 시작된다
+browser.send(JSON.stringify({ type: 'session:start', sessionId: agent.sessionId }))
+await waitForType(browser, 'session:joined')
+browser.send(JSON.stringify({ type: 'device:boot', sessionId: agent.sessionId, payload: { deviceId: 'dev-1' } }))
+await waitForType(browser, 'device:ready')
+// 이제부터 바이너리 프레임이 온다
+```
+`mockSimctl(true)` (booted=true)를 쓰면 `device:booting` 없이 즉시 `device:ready`가 온다.
+
+**이유**: `startBinaryStream()`은 `handleDeviceBoot()` 내부에서만 호출된다. 세션 연결만으로는 스트리밍이 시작되지 않는다. `MockTouchHelper.mock.results[0]`도 마찬가지로 `device:boot` 이후에야 생성된다.
 
 ---
 
