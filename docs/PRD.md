@@ -1,7 +1,7 @@
 # tapflow
 
 **Product Requirements & Technical Design**  
-버전 0.3 · 2026-05-09 · Draft
+버전 0.4 · 2026-05-10 · Draft
 
 ---
 
@@ -224,6 +224,9 @@ Agent → (outbound) → Relay ← (inbound) ← Browser
 | app:deliver | Relay → Agent | 파일 전달 + 로컬 저장 지시 |
 | app:install | Browser → Relay → Agent | 특정 버전 시뮬레이터에 설치 |
 | app:list | Browser → Relay | 등록된 버전 목록 요청 |
+| comment:create | Browser → Relay | 코멘트 생성 (build_id, body, attachment?) |
+| comment:update | Browser → Relay | 코멘트 수정 |
+| comment:delete | Browser → Relay | 코멘트 삭제 |
 
 ### 5.3 데이터 저장 (SQLite)
 
@@ -234,17 +237,22 @@ relay 서버 디스크
   ├── tapflow.db           ← SQLite (메타데이터)
   └── uploads/
       ├── apps/            ← .ipa / .apk 바이너리
-      └── screenshots/     ← 버그 리포트 첨부 이미지
+      ├── comments/        ← 코멘트 첨부 이미지 (png · jpg · webp)
+      └── team/            ← 팀 로고
 ```
 
 | 테이블 | Phase | 내용 |
 |--------|-------|------|
-| `apps` | 2 | 번들 메타데이터 (name, version, bundleId, platform, filePath, label, uploadedAt) |
+| `apps` | 2 | 번들 메타데이터 (name, version, bundleId, platform, filePath, label, **status_label**, **version_label**, **uploader_id**, uploadedAt) |
+| `users` | 2 | 팀 멤버 (email, **password_hash**, **display_name**, role, joinedAt) |
+| `invitations` | 2 | 초대 링크 (token, expiresAt, role) |
+| `comments` | 2 | 빌드별 QA 코멘트 (build_id, author_id, body, parent_id, created_at) |
+| `comment_attachments` | 2 | 코멘트 첨부 이미지 (comment_id, file_path, mime, size) |
+| `personal_access_tokens` | 2 | API 배포용 PAT (user_id, name, token_hash, scope, expires_at) |
+| `team_settings` | 2 | 팀 설정 singleton (team_name, logo_path) |
 | `sessions` | 2 | 세션 녹화 기록 (deviceId, startedAt, duration, recordingPath) |
 | `bug_reports` | 2 | 스크린샷 경로 + 메모 + 재현 스텝 |
 | `test_cases` | 2 | 테스트 스텝 + 실행 결과 |
-| `users` | 2 | 팀 멤버 (email, role, joinedAt) |
-| `invitations` | 2 | 초대 링크 (token, expiresAt, role) |
 
 ### 5.4 릴레이 서버 스펙
 
@@ -301,9 +309,9 @@ npx tapflow ios setup
   > ✓ WDA ready — localhost:8100 will auto-start with agent
 
 # 6. 앱 빌드 업로드 (개발자 — CI/CD 또는 수동)
-npx tapflow upload MyApp.ipa --name "v1.2.3-staging"
-  > ✓ Uploaded to iOS Agent (12.3 MB)
-  > ✓ Version registered: v1.2.3-staging
+npx tapflow upload MyApp.ipa --label "v1.2.3-staging" --status "In Progress" --token <pat>
+  > ✓ Uploaded to relay (12.3 MB)
+  > ✓ Build registered: v1.2.3-staging [In Progress]
 
 # 7. 상태 확인
 npx tapflow status
@@ -322,6 +330,31 @@ const sg = new aws.ec2.SecurityGroup('tapflow-sg', {
 })
 ```
 
+### 6.3 API 엔드포인트 (PAT 인증)
+
+CI/CD 파이프라인이 `Authorization: Bearer <pat>` 헤더로 빌드를 업로드한다.
+
+```
+POST /api/v1/builds
+Content-Type: multipart/form-data
+Authorization: Bearer tflw_pat_<token>
+
+Fields:
+  file           required  .ipa 또는 .apk 파일
+  label          optional  버전 레이블 (예: "v1.2.3-staging")
+  status         optional  Backlog | In Progress | Done | Rejected
+  platform       optional  ios | android (파일 확장자로 자동 감지)
+
+Response:
+  201  { id, name, version_label, status_label, platform, uploadedAt }
+  400  Bad Request (파일 없음 또는 형식 오류)
+  401  Unauthorized (PAT 누락 또는 만료)
+  403  Forbidden (scope 불일치)
+```
+
+**PAT 형식**: `tflw_pat_<random-64>`. SHA-256 hash만 DB에 저장. 발급 시 평문 1회 노출.  
+**scope**: `builds:write` — 현 단계에서 API 배포에 필요한 유일한 scope.
+
 ---
 
 ## 7. Web Dashboard
@@ -330,25 +363,25 @@ const sg = new aws.ec2.SecurityGroup('tapflow-sg', {
 
 | 화면 | 설명 |
 |-----|------|
-| 디바이스 목록 | 연결된 iOS/Android 디바이스 및 상태 표시 |
-| 시뮬레이터 뷰어 | 실시간 스트림 + 터치 인터랙션 + Deep Link 실행 패널 |
-| App Center | .ipa/.apk 버전 목록, 디바이스에 설치, 업로드 이력 |
-| 세션 녹화/재생 | QA 세션 녹화, 버그 재현용 재생 |
-| 버그 리포트 | 스크린샷 + 메모 + 재현 스텝 자동 첨부 |
-| 테스트 케이스 | 테스트 스텝 작성, 실행, 결과 기록 |
-| 이벤트 로그 | 실시간 네트워크 요청·앱 이벤트 스트림 |
-| 팀 관리 | 멤버 초대, 역할별 권한 설정 |
+| Login | email/password 로그인, 초대 링크 기반 가입 |
+| App Center | 빌드 리스트 (정렬·필터·검색·페이지네이션), 수동/API 업로드, 상태·버전 태그 |
+| QA Session | OS·OS 버전·Device 선택 → 부팅, 시뮬레이터 뷰어, 코멘트(이미지 첨부·deep-link 공유) |
+| Settings > Default | 로고 업로드, 팀 이름 변경 |
+| Settings > Team | 멤버 초대·권한 변경·삭제 |
+| Settings > Tokens | PAT 발급·철회 |
+| 이벤트 로그 | 실시간 네트워크 요청·앱 이벤트 스트림 (Phase 2 후속) |
+| 세션 녹화/재생 | QA 세션 녹화, 버그 재현용 재생 (Phase 2 후속) |
 
 ### 7.2 역할별 대시보드 뷰
 
 역할에 따라 노출 탭이 달라진다.
 
-| 역할 | 접근 가능 화면 |
-|-----|--------------|
-| Admin | 전체 |
-| Developer | 디바이스 뷰어, App Center, 이벤트 로그, Deep Link |
-| QA | 디바이스 뷰어, App Center, 버그 리포트, 테스트 케이스, 세션 녹화 |
-| Viewer | 디바이스 뷰어 (읽기 전용) |
+| 역할 | 접근 가능 화면 | 빌드 상태 변경 | 코멘트 작성 | PAT 발급 | Settings |
+|-----|--------------|-------------|-----------|---------|---------|
+| Admin | 전체 | ✅ | ✅ | ✅ | ✅ (전체) |
+| Developer | App Center, QA Session, 이벤트 로그 | ✅ | ✅ | ❌ | ❌ |
+| QA | App Center, QA Session, 세션 녹화 | ✅ | ✅ | ❌ | ❌ |
+| Viewer | QA Session (읽기 전용) | ❌ | ❌ | ❌ | ❌ |
 
 ### 7.3 플랫폼 전환 UX
 
@@ -437,12 +470,12 @@ await agent.boot(selectedDeviceId)
 | 릴레이 서버 | Node.js + ws | 경량, WebSocket 특화 |
 | DB | SQLite (better-sqlite3) | 외부 DB 서버 불필요, 셀프호스팅 친화적, 팀이 데이터 소유 |
 | 인프라 배포 | Pulumi (TypeScript) | 멀티 클라우드, 코드로 관리 |
-| Web Dashboard | Next.js + TypeScript | 팀 선호 스택 |
+| Web Dashboard | Next.js + TypeScript + Shadcn/ui + Tailwind CSS + next-themes | 팀 선호 스택, 라이트/다크 테마 |
 | 스트리밍 v1 | SimulatorKit IOSurface → JPEG | Private API, geometry 불필요, ~30fps |
 | 스트리밍 v2 | WebRTC (H.264) | 저지연, ~60fps |
 | iOS 터치 | IOHIDDigitizerDispatch (SimulatorKit, Swift) | 저지연 HID 스트리밍; WDA는 물리 버튼·키보드에만 유지 |
 | Android 터치 | ADB shell input | 표준 도구, 별도 설치 불필요 (Phase 3) |
-| 인증 | JWT + 초대 링크 | 단순, 충분 |
+| 인증 | 자체 JWT + 초대 링크 + PAT (API 배포용) | 외부 의존 없음, 셀프호스팅 친화적 |
 
 ---
 

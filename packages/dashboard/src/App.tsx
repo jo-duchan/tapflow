@@ -1,0 +1,29 @@
+import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
+import { DashboardLayout } from './layouts/DashboardLayout'
+import { Login } from './pages/Login'
+import { Invite } from './pages/Invite'
+import { AppCenter } from './pages/AppCenter'
+import { QASession } from './pages/QASession'
+import { DefaultSettings } from './pages/settings/Default'
+import { TeamSettings } from './pages/settings/Team'
+import { TokenSettings } from './pages/settings/Tokens'
+
+export function App() {
+  return (
+    <BrowserRouter>
+      <Routes>
+        <Route path="/login" element={<Login />} />
+        <Route path="/invite" element={<Invite />} />
+        <Route element={<DashboardLayout />}>
+          <Route index element={<Navigate to="/app-center" replace />} />
+          <Route path="/app-center" element={<AppCenter />} />
+          <Route path="/app-center/build" element={<QASession />} />
+          <Route path="/settings/default" element={<DefaultSettings />} />
+          <Route path="/settings/team" element={<TeamSettings />} />
+          <Route path="/settings/tokens" element={<TokenSettings />} />
+          <Route path="*" element={<Navigate to="/app-center" replace />} />
+        </Route>
+      </Routes>
+    </BrowserRouter>
+  )
+}

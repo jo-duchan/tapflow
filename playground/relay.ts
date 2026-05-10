@@ -1,8 +1,16 @@
-import { RelayServer } from '@tapflow/relay'
+import path from 'path'
+import { RelayServer, initDb } from '@tapflow/relay'
 
-const PORT = Number(process.env.PORT ?? 3000)
+const PORT = Number(process.env.PORT ?? 4000)
+const dataDir = path.join(import.meta.dirname, '.tapflow')
 
-const server = new RelayServer({ port: PORT })
+initDb(path.join(dataDir, 'tapflow.db'))
+
+const server = new RelayServer({
+  port: PORT,
+  uploadsDir: path.join(dataDir, 'uploads'),
+})
+
 server.start()
 
 console.log(`Relay  →  ws://localhost:${PORT}`)

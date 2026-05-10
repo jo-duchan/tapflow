@@ -5,6 +5,7 @@
   "type": "module",
   "scripts": {
     "relay": "tsx relay.ts",
+    "seed": "tsx seed.ts",
     "ios-agent": "tsx ios-agent.ts",
     "android-agent": "tsx android-agent.ts",
     "dev:doctor": "tsx ../packages/cli/src/index.ts doctor",

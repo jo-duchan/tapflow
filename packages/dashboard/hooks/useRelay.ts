@@ -1,9 +1,7 @@
-'use client'
-
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { RelayMessage } from '@/lib/types'
 
-const RELAY_URL = process.env.NEXT_PUBLIC_RELAY_URL ?? 'ws://localhost:3000'
+const RELAY_URL = import.meta.env.VITE_RELAY_URL ?? `ws://${location.host}`
 const RECONNECT_DELAY = 2000
 
 export function useRelay(

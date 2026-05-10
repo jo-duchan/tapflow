@@ -11,15 +11,21 @@
     "README.md"
   ],
   "scripts": {
-    "build": "tsc",
-    "start": "node dist/index.js",
+    "build": "tsc && cp -r src/migrations dist/migrations",
+    "start": "node dist/server.js",
     "test": "vitest run",
     "lint": "eslint src"
   },
   "dependencies": {
+    "better-sqlite3": "^12.9.0",
+    "busboy": "^1.6.0",
+    "jsonwebtoken": "^9.0.3",
     "ws": "^8.0.0"
   },
   "devDependencies": {
+    "@types/better-sqlite3": "^7.6.13",
+    "@types/busboy": "^1.5.4",
+    "@types/jsonwebtoken": "^9.0.10",
     "@types/node": "^20.0.0",
     "@types/ws": "^8.0.0",
     "typescript": "^5.0.0",

@@ -12,15 +12,12 @@
     "build": "npm run build --workspace=@tapflow/agent-core && npm run build --workspace=@tapflow/dashboard && npm run build --workspace=@tapflow/relay && npm run build --workspace=@tapflow/ios-agent && npm run build --workspace=@tapflow/android-agent && npm run build --workspace=@tapflow/cli",
     "test": "npm run test --workspaces --if-present",
     "lint": "npm run lint --workspaces --if-present",
-    "dev": "concurrently -n relay,agent,dashboard,tsc:core,tsc:relay,tsc:agent -c cyan,green,blue,gray,gray,gray \"npm run dev:relay\" \"npm run dev:ios-agent\" \"npm run dev --workspace=@tapflow/dashboard\" \"tsc -w -p packages/agent-core/tsconfig.json\" \"tsc -w -p packages/relay/tsconfig.json\" \"tsc -w -p packages/ios-agent/tsconfig.json\"",
+    "dev": "concurrently -n relay,dashboard,ios -c cyan,magenta,green \"npm run dev:relay\" \"npm run dev --workspace=@tapflow/dashboard\" \"npm run dev:ios-agent\"",
     "dev:relay": "npm run relay --workspace=@tapflow/playground",
     "dev:ios-agent": "npm run ios-agent --workspace=@tapflow/playground",
     "dev:android-agent": "npm run android-agent --workspace=@tapflow/playground"
   },
   "engines": {
     "node": ">=20"
-  },
-  "devDependencies": {
-    "concurrently": "^9.2.1"
   }
 }

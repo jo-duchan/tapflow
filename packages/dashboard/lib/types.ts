@@ -3,6 +3,21 @@ export interface AgentDevice {
   name: string
   platform: string
   status: string
+  osVersion?: string
+}
+
+export interface Comment {
+  id: number
+  author: string
+  body: string
+  created_at: string
+  attachments: CommentAttachment[]
+}
+
+export interface CommentAttachment {
+  id: number
+  file_path: string
+  mime: string
 }
 
 export interface SessionInfo {
