@@ -596,9 +596,7 @@ export function SimulatorViewer({ sessionId, deviceId, onBack, buildId }: Props)
                         zIndex: 5,
                         left: `${tooltipLeftPct}%`,
                         top: `${tooltipTopPct}%`,
-                        transform: isTopAnchor
-                          ? 'translate(-50%, calc(100% + 8px))'
-                          : 'translate(-50%, calc(-100% - 8px))',
+                        transform: 'translate(-50%, calc(-100% - 8px))',
                         background: 'rgba(0,0,0,0.72)',
                         color: '#fff',
                         fontSize: 11,
