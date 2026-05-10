@@ -187,7 +187,9 @@ function computeButtonLayout(
     }
 
     const btnTopLeftX = centerX - w / 2
-    const btnTopLeftY = topY
+    // 'top' anchor: roll.y is center Y (button protrudes above device top); convert to top-left.
+    // Other anchors: roll.y is already the top-left Y.
+    const btnTopLeftY = (inp.anchor === 'top') ? topY - h / 2 : topY
     drawData.push({
       pdfPath:  join(resourcesDir, `${inp.image}.pdf`),
       topLeftX: btnTopLeftX,
@@ -234,7 +236,17 @@ function computeButtonLayout(
         normalCY = mT + compositeH + ny + h / 2
         break
       }
-      default: // left / top / fallback — use convention from baguette (x=center, y=top edge)
+      case 'top': {
+        // 'top' anchor: ny is center Y; convert to top-edge for normalOffset (same convention as left/right).
+        // nx must be align-aware (trailing = right edge of device body).
+        const align = inp.align ?? 'leading'
+        normalCX = align === 'center'   ? mL + compositeW / 2 + nx
+                 : align === 'trailing' ? mL + compositeW + nx
+                 :                        mL + nx
+        normalCY = mT + ny - h / 2
+        break
+      }
+      default: // left / fallback — y is top edge
         normalCX = mL + nx
         normalCY = mT + ny
     }

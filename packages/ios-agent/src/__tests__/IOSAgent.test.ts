@@ -42,7 +42,7 @@ const waitForType = (ws: WebSocket, type: string) =>
 function mockSimctl(booted = false): SimctlWrapper {
   return {
     listDevices: vi.fn().mockResolvedValue([
-      { id: 'dev-1', name: 'iPhone 15', platform: 'ios', status: booted ? 'booted' : 'shutdown' },
+      { id: 'dev-1', name: 'iPhone 15', platform: 'ios', status: booted ? 'booted' : 'shutdown', osVersion: 'iOS 18.3' },
     ]),
     boot: vi.fn().mockResolvedValue(undefined),
     shutdown: vi.fn().mockResolvedValue(undefined),
@@ -198,6 +198,26 @@ describe('IOSAgent', () => {
       browser.send(JSON.stringify({ type: 'device:boot', sessionId: agent.sessionId, payload: { deviceId: 'dev-1' } }))
       await readyPromise
       expect(simctl.boot).not.toHaveBeenCalled()
+
+      agent.disconnect()
+      browser.close()
+    })
+  })
+
+  describe('agent:register', () => {
+    it('includes osVersion in register payload', async () => {
+      const agent = new IOSAgent({}, mockSimctl())
+      await agent.connect(`ws://localhost:${port}`)
+
+      const browser = new WebSocket(`ws://localhost:${port}`)
+      await waitForOpen(browser)
+
+      const agentsListedPromise = waitForType(browser, 'agents:listed')
+      browser.send(JSON.stringify({ type: 'agents:list' }))
+      const listed = await agentsListedPromise
+
+      const sessions = listed.sessions as Array<{ devices: Array<{ osVersion?: string }> }>
+      expect(sessions[0]?.devices[0]?.osVersion).toBe('iOS 18.3')
 
       agent.disconnect()
       browser.close()

@@ -36,6 +36,7 @@ export interface DeviceInfo {
   name: string
   platform: string
   status: string
+  osVersion?: string
 }
 
 export interface SessionInfo {

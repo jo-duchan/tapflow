@@ -82,6 +82,7 @@ export class IOSAgent implements DeviceAgent {
             name: d.name,
             platform: d.platform,
             status: d.status,
+            osVersion: d.osVersion,
           })),
         }))
       })
