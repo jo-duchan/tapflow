@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState, Fragment } from 'react';
-import { Home, Camera, RotateCw } from 'lucide-react';
+import { Home, Camera, RotateCw, Play } from 'lucide-react';
 import { useRelay } from '@/hooks/useRelay';
 import type { ChromeData, DeviceInfo, RelayMessage } from '@/lib/types';
 import { Button } from '@/components/ui/button';
@@ -10,9 +10,10 @@ interface Props {
   sessionId: string;
   deviceId: string;
   onBack: () => void;
+  buildId?: number;
 }
 
-export function SimulatorViewer({ sessionId, deviceId, onBack }: Props) {
+export function SimulatorViewer({ sessionId, deviceId, onBack, buildId }: Props) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const [joined, setJoined] = useState(false);
@@ -23,6 +24,10 @@ export function SimulatorViewer({ sessionId, deviceId, onBack }: Props) {
   const frameCount = useRef(0);
   const sendRef = useRef<(msg: object) => void>(() => {});
   const deviceSeq = useRef(0);
+  const [installing, setInstalling] = useState(false);
+  const [installed, setInstalled] = useState(false);
+  const [installError, setInstallError] = useState<string | null>(null);
+  const [launching, setLaunching] = useState(false);
 
   const drawToCanvas = useCallback((data: ArrayBuffer) => {
     const seq = deviceSeq.current;
@@ -53,6 +58,9 @@ export function SimulatorViewer({ sessionId, deviceId, onBack }: Props) {
 
       if (msg.type === 'device:booting') {
         setDeviceReady(false);
+        setInstalling(false);
+        setInstalled(false);
+        setInstallError(null);
         deviceSeq.current += 1;
         const canvas = canvasRef.current;
         if (canvas) {
@@ -63,6 +71,28 @@ export function SimulatorViewer({ sessionId, deviceId, onBack }: Props) {
 
       if (msg.type === 'device:ready') {
         setDeviceReady(true);
+        if (buildId) {
+          setInstalling(true);
+          sendRef.current({ type: 'app:install', sessionId, buildId });
+        }
+      }
+
+      if (msg.type === 'app:install-done') {
+        setInstalling(false);
+        setInstalled(true);
+      }
+
+      if (msg.type === 'app:install-error') {
+        setInstalling(false);
+        setInstallError(msg.message);
+      }
+
+      if (msg.type === 'app:launch-done') {
+        setLaunching(false);
+      }
+
+      if (msg.type === 'app:launch-error') {
+        setLaunching(false);
       }
 
       if (msg.type === 'session:chrome') {
@@ -74,7 +104,7 @@ export function SimulatorViewer({ sessionId, deviceId, onBack }: Props) {
       }
 
     },
-    [drawToCanvas, sessionId, deviceId],
+    [drawToCanvas, sessionId, deviceId, buildId],
   );
 
   const handleBinaryFrame = useCallback((data: ArrayBuffer) => {
@@ -339,7 +369,11 @@ export function SimulatorViewer({ sessionId, deviceId, onBack }: Props) {
       ? 'Joining session...'
       : !deviceReady
         ? 'Starting device...'
-        : `Live · ${fps} fps`;
+        : installing
+          ? 'Installing app…'
+          : installError
+            ? `Install failed: ${installError}`
+            : `Live · ${fps} fps`;
 
   // Container is composite-sized so the device frame image aligns with button positions.
   // Scale down to fit within ~80vh.
@@ -475,10 +509,15 @@ export function SimulatorViewer({ sessionId, deviceId, onBack }: Props) {
               const isHovered = hoveredButton === btn.name;
 
               // For bottom-anchor buttons normalOffset.y is center Y; for all others it's top-edge Y.
+              // For top-anchor buttons use rolloverOffset.y (the rollover top-edge, = btnTopLeftY*scale)
+              // so the CSS overlay aligns with the baked frame's button draw position.
               const isBottomAnchor = btn.anchor === 'bottom';
+              const isTopAnchor = btn.anchor === 'top';
               const imgTopPct = isBottomAnchor
                 ? ((btn.normalOffset.y - btn.buttonH / 2) / chrome.compositeHeight) * 100
-                : (btn.normalOffset.y / chrome.compositeHeight) * 100;
+                : isTopAnchor
+                  ? (btn.rolloverOffset.y / chrome.compositeHeight) * 100
+                  : (btn.normalOffset.y / chrome.compositeHeight) * 100;
               const imgHPct = (btn.buttonH / chrome.compositeHeight) * 100;
               const imgWPct = (btn.buttonW / chrome.compositeWidth) * 100;
               // Default: rolloverOffset (extended, matches baked frame position).
@@ -495,29 +534,34 @@ export function SimulatorViewer({ sessionId, deviceId, onBack }: Props) {
               const tooltipLeftPct = (btn.rolloverOffset.x / chrome.compositeWidth) * 100;
               const tooltipTopPct = isBottomAnchor
                 ? ((btn.normalOffset.y - btn.buttonH / 2) / chrome.compositeHeight) * 100
-                : (btn.normalOffset.y / chrome.compositeHeight) * 100;
+                : isTopAnchor
+                  ? (btn.rolloverOffset.y / chrome.compositeHeight) * 100
+                  : (btn.normalOffset.y / chrome.compositeHeight) * 100;
 
-              // onTop (home) button: above framePng. Side buttons: behind framePng.
-              // compositeUnder for home: pressedPng at z-index 3, buttonPng at z-index 4
-              //   → pressedPng shows through the semi-transparent ring of buttonPng.
-              // Side buttons: both at z-index 1; pressedPng renders AFTER buttonPng in DOM
-              //   → DOM order makes pressedPng appear on top.
+              // top-anchor hover: button slides UP (top CSS) instead of sideways.
+              // hoverTop = 2*rollover.y - normal.y  (same delta-doubling as hoverLeftPct).
+              const hoverTopPct = isTopAnchor
+                ? ((2 * btn.rolloverOffset.y - btn.normalOffset.y) / chrome.compositeHeight) * 100
+                : 0;
+
+              // z-index:
+              //   onTop (home): 4 — above everything
+              //   all others: 1 — behind frame, visible as tabs protruding above/around the bezel
               const btnZ = btn.onTop ? 4 : 1;
 
               return (
                 <Fragment key={btn.name}>
-                  {/* buttonPng — rendered first so side button pressedPng (below) can overlay via DOM order */}
                   {btn.buttonPng && (
                     <img
                       src={`data:image/png;base64,${btn.buttonPng}`}
                       style={{
                         position: 'absolute',
                         zIndex: btnZ,
-                        top: `${imgTopPct}%`,
-                        left: `${isHovered ? hoverLeftPct : rolloverLeftPct}%`,
+                        top: `${isTopAnchor ? (isHovered ? hoverTopPct : imgTopPct) : imgTopPct}%`,
+                        left: `${isTopAnchor ? rolloverLeftPct : (isHovered ? hoverLeftPct : rolloverLeftPct)}%`,
                         width: `${imgWPct}%`,
                         height: `${imgHPct}%`,
-                        transition: 'left 0.15s ease',
+                        transition: isTopAnchor ? 'top 0.15s ease' : 'left 0.15s ease',
                         pointerEvents: 'none',
                         userSelect: 'none',
                       }}
@@ -525,15 +569,16 @@ export function SimulatorViewer({ sessionId, deviceId, onBack }: Props) {
                       alt=""
                     />
                   )}
-                  {/* pressedPng — side: z-index 1 after buttonPng (DOM on top); home: z-index 3 below buttonPng (compositeUnder) */}
                   {isFlashed && btn.pressedPng && btn.pressedRect && (
                     <img
                       src={`data:image/png;base64,${btn.pressedPng}`}
                       style={{
                         position: 'absolute',
                         zIndex: btn.onTop ? 3 : 1,
-                        left: `${isHovered ? hoverLeftPct : rolloverLeftPct}%`,
-                        top: `${(btn.pressedRect.y / chrome.compositeHeight) * 100}%`,
+                        left: `${isTopAnchor ? rolloverLeftPct : (isHovered ? hoverLeftPct : rolloverLeftPct)}%`,
+                        top: `${isTopAnchor
+                          ? (isHovered ? hoverTopPct : imgTopPct)
+                          : (btn.pressedRect.y / chrome.compositeHeight) * 100}%`,
                         width: `${(btn.pressedRect.width / chrome.compositeWidth) * 100}%`,
                         height: `${(btn.pressedRect.height / chrome.compositeHeight) * 100}%`,
                         pointerEvents: 'none',
@@ -543,7 +588,7 @@ export function SimulatorViewer({ sessionId, deviceId, onBack }: Props) {
                       alt=""
                     />
                   )}
-                  {/* Hover tooltip */}
+                  {/* Hover tooltip — top-anchor: show below button; others: show above */}
                   {isHovered && (
                     <div
                       style={{
@@ -601,6 +646,22 @@ export function SimulatorViewer({ sessionId, deviceId, onBack }: Props) {
               : '—'}
           </span>
           <div className="flex items-center gap-1">
+            {installed && buildId && (
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-7 px-2 text-xs"
+                title="Launch app"
+                disabled={launching}
+                onClick={() => {
+                  setLaunching(true);
+                  sendRef.current({ type: 'app:launch', sessionId, buildId });
+                }}
+              >
+                <Play className="h-3 w-3 mr-1" />
+                {launching ? 'Launching…' : 'Launch'}
+              </Button>
+            )}
             <Button
               variant="ghost"
               size="icon"

@@ -3,6 +3,21 @@ export interface AgentDevice {
   name: string
   platform: string
   status: string
+  osVersion?: string
+}
+
+export interface Comment {
+  id: number
+  author: string
+  body: string
+  created_at: string
+  attachments: CommentAttachment[]
+}
+
+export interface CommentAttachment {
+  id: number
+  file_path: string
+  mime: string
 }
 
 export interface SessionInfo {
@@ -73,4 +88,8 @@ export type RelayMessage =
   | { type: 'input:pinch:end'; sessionId: string }
   | { type: 'input:button'; sessionId: string; payload: { name: string } }
   | { type: 'input:rotate'; sessionId: string }
+  | { type: 'app:install-done' }
+  | { type: 'app:install-error'; message: string }
+  | { type: 'app:launch-done' }
+  | { type: 'app:launch-error'; message: string }
   | { type: 'error'; message: string }

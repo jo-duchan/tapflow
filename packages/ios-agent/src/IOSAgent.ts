@@ -82,6 +82,7 @@ export class IOSAgent implements DeviceAgent {
             name: d.name,
             platform: d.platform,
             status: d.status,
+            osVersion: d.osVersion,
           })),
         }))
       })
@@ -228,6 +229,26 @@ export class IOSAgent implements DeviceAgent {
       case 'device:shutdown': {
         const { deviceId } = msg.payload as { deviceId: string }
         this.handleDeviceShutdown(deviceId).catch((e) => console.error('[agent] handleDeviceShutdown failed:', e))
+        break
+      }
+      case 'app:install': {
+        const { filePath } = msg.payload as { filePath: string }
+        this.simctl.installApp(filePath)
+          .then(() => this.ws?.send(JSON.stringify({ type: 'app:install-done' })))
+          .catch((e: unknown) => {
+            const message = e instanceof Error ? e.message : String(e)
+            this.ws?.send(JSON.stringify({ type: 'app:install-error', message }))
+          })
+        break
+      }
+      case 'app:launch': {
+        const { bundleId } = msg.payload as { bundleId: string }
+        this.simctl.launchApp(bundleId)
+          .then(() => this.ws?.send(JSON.stringify({ type: 'app:launch-done' })))
+          .catch((e: unknown) => {
+            const message = e instanceof Error ? e.message : String(e)
+            this.ws?.send(JSON.stringify({ type: 'app:launch-error', message }))
+          })
         break
       }
       case 'input:touch:start': {

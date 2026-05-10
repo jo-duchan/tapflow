@@ -52,6 +52,11 @@ main          ← 항상 배포 가능한 상태. 직접 커밋 금지.
 - 브랜치명: `feature/{topic}` (예: `feature/60fps-streaming`)
 - PR 없이 main에 직접 push하지 않는다.
 - dev 브랜치는 사용하지 않는다.
+- 새 브랜치는 반드시 최신 `origin/main` 기준으로 생성한다. 로컬 `main`이 뒤처져 있을 수 있으므로 로컬 `main`에서 분기하지 않는다:
+  ```bash
+  git fetch origin
+  git checkout -b feature/{topic} origin/main
+  ```
 
 ### 릴리즈 정책 (Semver + GitHub Releases)
 

@@ -108,13 +108,18 @@ interface ButtonLayout {
 // Mirrors baguette's LiveChromes.computeMargins + buttonTopLeft.
 // compositeW/H = device body dimensions in 1× PDF pts (before button margin expansion).
 // For composite PDF: pdfSize.width / pdfSize.height.
-// For nine-slice: cornerW*2+screenW / cornerH*2+screenH.
+// For nine-slice: leftWidth+screenW+rightWidth / topHeight+screenH+bottomHeight.
+// leftWidth/rightWidth: bezel sizes; top/bottom-anchor x offsets are measured from
+//   the screen edge (after bezel), so we add leftWidth for leading and subtract
+//   rightWidth for trailing to convert to canvas coordinates.
 function computeButtonLayout(
   inputs: RawInput[],
   resourcesDir: string,
   compositeW: number,
   compositeH: number,
   scale = 2,
+  leftWidth = 0,
+  rightWidth = 0,
 ): ButtonLayout {
   const margins = { left: 0, top: 0, right: 0, bottom: 0 }
 
@@ -164,20 +169,18 @@ function computeButtonLayout(
         topY    = mT + roll.y
         break
       case 'bottom': {
-        // centerX: relative to device body center for center-aligned buttons (e.g. home)
         const align = inp.align ?? 'leading'
         centerX = align === 'center'   ? mL + compositeW / 2 + roll.x
                 : align === 'trailing' ? mL + compositeW + roll.x
                 :                        mL + roll.x
-        // topY: measured from the BOTTOM of the device body downward (offset is negative = inside)
         topY = mT + compositeH + roll.y
         break
       }
       case 'top': {
         const align = inp.align ?? 'leading'
         centerX = align === 'center'   ? mL + compositeW / 2 + roll.x
-                : align === 'trailing' ? mL + compositeW + roll.x
-                :                        mL + roll.x
+                : align === 'trailing' ? mL + (compositeW - rightWidth) + roll.x
+                :                        mL + leftWidth + roll.x - w / 2
         topY = mT + roll.y
         break
       }
@@ -187,7 +190,9 @@ function computeButtonLayout(
     }
 
     const btnTopLeftX = centerX - w / 2
-    const btnTopLeftY = topY
+    // 'top' anchor: roll.y is center Y (button protrudes above device top); convert to top-left.
+    // Other anchors: roll.y is already the top-left Y.
+    const btnTopLeftY = (inp.anchor === 'top') ? topY - h / 2 : topY
     drawData.push({
       pdfPath:  join(resourcesDir, `${inp.image}.pdf`),
       topLeftX: btnTopLeftX,
@@ -230,11 +235,18 @@ function computeButtonLayout(
         normalCX = align === 'center'   ? mL + compositeW / 2 + nx
                  : align === 'trailing' ? mL + compositeW + nx
                  :                        mL + nx
-        // center Y: bottom of body + offset (negative) + half height
         normalCY = mT + compositeH + ny + h / 2
         break
       }
-      default: // left / top / fallback — use convention from baguette (x=center, y=top edge)
+      case 'top': {
+        const align = inp.align ?? 'leading'
+        normalCX = align === 'center'   ? mL + compositeW / 2 + nx
+                 : align === 'trailing' ? mL + (compositeW - rightWidth) + nx
+                 :                        mL + leftWidth + nx - w / 2
+        normalCY = mT + ny - h / 2
+        break
+      }
+      default: // left / fallback — y is top edge
         normalCX = mL + nx
         normalCY = mT + ny
     }
@@ -248,11 +260,13 @@ function computeButtonLayout(
         x: Math.round(normalCX * scale),
         y: Math.round(normalCY * scale),
       },
-      // rolloverOffset.x = centerX (already computed from roll offsets above)
-      // rolloverOffset.y = normalCY (Y doesn't change between normal and rollover states)
+      // rolloverOffset.x = centerX (from roll offsets).
+      // rolloverOffset.y: for top anchor, rollover extends the button further above the frame,
+      //   so store the rollover top-edge Y (= btnTopLeftY) not the normal top-edge Y.
+      //   For left/right/bottom anchors Y is the same at normal and rollover positions.
       rolloverOffset: {
         x: Math.round(centerX * scale),
-        y: Math.round(normalCY * scale),
+        y: Math.round(((inp.anchor === 'top') ? btnTopLeftY : normalCY) * scale),
       },
       buttonW: Math.round(w * scale),
       buttonH: Math.round(h * scale),
@@ -712,7 +726,7 @@ export class DeviceChromeLoader {
         const screenCornerRadius1x = Math.max(0, outerRadius - bezelInset)
 
         const { margins: btnM, drawData, buttons, pressedData } = computeButtonLayout(
-          rawInputs, resourcesDir, pdfSize.width, pdfSize.height, scale,
+          rawInputs, resourcesDir, pdfSize.width, pdfSize.height, scale, leftWidth, rightWidth,
         )
 
         const expandedW = pdfSize.width  + btnM.left + btnM.right
@@ -799,7 +813,7 @@ export class DeviceChromeLoader {
       const screenCornerRadius1x = Math.max(0, outerRadius - bezelInset)
 
       const { margins: btnM, drawData, buttons, pressedData } = computeButtonLayout(
-        rawInputs, resourcesDir, compositeW, compositeH, scale,
+        rawInputs, resourcesDir, compositeW, compositeH, scale, leftWidth, rightWidth,
       )
 
       const expandedW = compositeW + btnM.left + btnM.right

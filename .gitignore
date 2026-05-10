@@ -35,3 +35,7 @@ packages/ios-agent/src/screencapture-helper
 
 # claude code personal commands
 .claude/
+
+# sqlite wal/shm temp files
+*.db-shm
+*.db-wal

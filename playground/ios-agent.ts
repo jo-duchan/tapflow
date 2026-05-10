@@ -1,6 +1,6 @@
 import { IOSAgent } from '@tapflow/ios-agent'
 
-const RELAY = process.env['RELAY_URL'] ?? 'ws://localhost:3000'
+const RELAY = process.env['RELAY_URL'] ?? 'ws://localhost:4000'
 
 // Accept --device <name|udid> argument
 const deviceArgIdx = process.argv.indexOf('--device')
@@ -9,7 +9,7 @@ const deviceArg = deviceArgIdx >= 0 ? process.argv[deviceArgIdx + 1] : undefined
 const agent = new IOSAgent()
 
 const devices = await agent.listDevices()
-console.log('Available simulators:')
+console.log(`Found ${devices.length} simulators`)
 devices.forEach((d) => console.log(` · [${d.status}] ${d.name} (${d.id})`))
 
 let target = deviceArg

@@ -4,6 +4,15 @@ import path from 'path'
 import { WebSocketServer, WebSocket } from 'ws'
 import { SessionManager } from './SessionManager'
 import type { RelayMessage } from './types'
+import { Router } from './router'
+import { getDb } from './db'
+import { handleLogin, handleLogout, handleMe } from './api/auth'
+import { handleVerify, handleAccept } from './api/invitations'
+import { handleListBuilds, handleGetBuild, handleUpdateBuild, handleUploadBuild } from './api/builds'
+import { handleListComments, handleCreateComment, handleDeleteComment } from './api/comments'
+import { handleListMembers, handleInvite, handleUpdateMember, handleDeleteMember } from './api/team'
+import { handleListTokens, handleCreateToken, handleRevokeToken } from './api/tokens'
+import { handleGetSettings, handleUpdateSettings } from './api/settings'
 
 const MIME_TYPES: Record<string, string> = {
   '.html': 'text/html',
@@ -11,7 +20,13 @@ const MIME_TYPES: Record<string, string> = {
   '.css': 'text/css',
   '.json': 'application/json',
   '.png': 'image/png',
+  '.jpg': 'image/jpeg',
+  '.jpeg': 'image/jpeg',
+  '.webp': 'image/webp',
   '.svg': 'image/svg+xml',
+  '.ico': 'image/x-icon',
+  '.woff2': 'font/woff2',
+  '.woff': 'font/woff',
 }
 
 export class RelayServer {
@@ -19,17 +34,71 @@ export class RelayServer {
   private wss: WebSocketServer
   private sessions: SessionManager
   private publicDir: string
+  private uploadsDir: string
+  private router: Router
 
-  constructor(private readonly options: { port: number; publicDir?: string }) {
+  constructor(private readonly options: { port: number; publicDir?: string; uploadsDir?: string }) {
     this.sessions = new SessionManager()
     this.publicDir = options.publicDir ?? path.join(__dirname, '../public')
-    this.httpServer = http.createServer((req, res) => this.serveStatic(req, res))
+    this.uploadsDir = options.uploadsDir ?? path.join(__dirname, '../uploads')
+    this.router = new Router()
+    this.registerRoutes()
+    this.httpServer = http.createServer((req, res) => this.handleRequest(req, res))
     this.wss = new WebSocketServer({ server: this.httpServer })
     this.wss.on('connection', (ws) => this.handleConnection(ws))
+    this.wss.on('error', () => { /* propagated from httpServer */ })
+  }
+
+  private registerRoutes(): void {
+    const u = this.uploadsDir
+
+    // auth
+    this.router.get('/api/v1/auth/me', handleMe)
+    this.router.post('/api/v1/auth/login', handleLogin)
+    this.router.post('/api/v1/auth/logout', handleLogout)
+
+    // invitations
+    this.router.get('/api/v1/invitations/verify', handleVerify)
+    this.router.post('/api/v1/invitations/accept', handleAccept)
+
+    // builds
+    this.router.get('/api/v1/builds', handleListBuilds)
+    this.router.get('/api/v1/builds/:id', handleGetBuild)
+    this.router.patch('/api/v1/builds/:id', handleUpdateBuild)
+    this.router.post('/api/v1/builds', (req, res) => handleUploadBuild(req, res, u))
+
+    // comments
+    this.router.get('/api/v1/comments', handleListComments)
+    this.router.post('/api/v1/comments', (req, res) => handleCreateComment(req, res, u))
+    this.router.delete('/api/v1/comments/:id', handleDeleteComment)
+
+    // team
+    this.router.get('/api/v1/team/members', handleListMembers)
+    this.router.post('/api/v1/team/invite', handleInvite)
+    this.router.patch('/api/v1/team/members/:id', handleUpdateMember)
+    this.router.delete('/api/v1/team/members/:id', handleDeleteMember)
+
+    // tokens
+    this.router.get('/api/v1/tokens', handleListTokens)
+    this.router.post('/api/v1/tokens', handleCreateToken)
+    this.router.delete('/api/v1/tokens/:id', handleRevokeToken)
+
+    // settings
+    this.router.get('/api/v1/settings', handleGetSettings)
+    this.router.patch('/api/v1/settings', (req, res) => handleUpdateSettings(req, res, u))
   }
 
   start(): Promise<void> {
-    return new Promise((resolve) => this.httpServer.listen(this.options.port, resolve))
+    return new Promise((resolve, reject) => {
+      this.httpServer.once('error', (err: NodeJS.ErrnoException) => {
+        if (err.code === 'EADDRINUSE') {
+          reject(new Error(`Port ${this.options.port} is already in use. Stop the existing process and try again.`))
+        } else {
+          reject(err)
+        }
+      })
+      this.httpServer.listen(this.options.port, resolve)
+    })
   }
 
   stop(): Promise<void> {
@@ -191,6 +260,66 @@ export class RelayServer {
         break
       }
 
+      case 'app:install': {
+        // browser → agent: relay looks up file_path from DB and enriches
+        const session = this.sessions.get(msg.sessionId!)
+        if (!session) {
+          ws.send(JSON.stringify({ type: 'error', message: 'Session not found' }))
+          break
+        }
+        const build = getDb()
+          .prepare('SELECT file_path FROM apps WHERE id = ?')
+          .get(msg.buildId!) as { file_path: string } | undefined
+        if (!build) {
+          ws.send(JSON.stringify({ type: 'app:install-error', message: 'Build not found' }))
+          break
+        }
+        if (session.agentSocket.readyState === WebSocket.OPEN) {
+          session.agentSocket.send(JSON.stringify({ type: 'app:install', payload: { filePath: build.file_path } }))
+        }
+        break
+      }
+
+      case 'app:install-done':
+      case 'app:install-error': {
+        // agent → browser
+        const session = this.sessions.getBySocket(ws)
+        if (session?.browserSocket?.readyState === WebSocket.OPEN) {
+          session.browserSocket.send(JSON.stringify(msg))
+        }
+        break
+      }
+
+      case 'app:launch': {
+        // browser → agent: relay looks up bundle_id from DB
+        const session = this.sessions.get(msg.sessionId!)
+        if (!session) {
+          ws.send(JSON.stringify({ type: 'error', message: 'Session not found' }))
+          break
+        }
+        const build = getDb()
+          .prepare('SELECT bundle_id FROM apps WHERE id = ?')
+          .get(msg.buildId!) as { bundle_id: string | null } | undefined
+        if (!build?.bundle_id) {
+          ws.send(JSON.stringify({ type: 'app:launch-error', message: 'Bundle ID not available for this build' }))
+          break
+        }
+        if (session.agentSocket.readyState === WebSocket.OPEN) {
+          session.agentSocket.send(JSON.stringify({ type: 'app:launch', payload: { bundleId: build.bundle_id } }))
+        }
+        break
+      }
+
+      case 'app:launch-done':
+      case 'app:launch-error': {
+        // agent → browser
+        const session = this.sessions.getBySocket(ws)
+        if (session?.browserSocket?.readyState === WebSocket.OPEN) {
+          session.browserSocket.send(JSON.stringify(msg))
+        }
+        break
+      }
+
       case 'input:touch:start':
       case 'input:touch:move':
       case 'input:touch:end':
@@ -211,17 +340,62 @@ export class RelayServer {
     }
   }
 
-  private serveStatic(req: http.IncomingMessage, res: http.ServerResponse): void {
-    const urlPath = req.url === '/' ? '/index.html' : (req.url ?? '/')
-    const filePath = path.join(this.publicDir, urlPath)
+  private async handleRequest(req: http.IncomingMessage, res: http.ServerResponse): Promise<void> {
+    res.setHeader('Access-Control-Allow-Origin', '*')
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization')
 
-    if (!fs.existsSync(filePath)) {
-      res.writeHead(404)
-      res.end('Not found')
+    if (req.method === 'OPTIONS') {
+      res.writeHead(204)
+      res.end()
       return
     }
 
+    // uploads — serve uploaded files
+    const url = req.url ?? '/'
+    if (url.startsWith('/uploads/')) {
+      this.serveUpload(req, res)
+      return
+    }
+
+    // API routes
+    const handled = await this.router.handle(req, res)
+    if (handled) return
+
+    // SPA static fallback
+    this.serveStatic(req, res)
+  }
+
+  private serveUpload(req: http.IncomingMessage, res: http.ServerResponse): void {
+    const urlPath = (req.url ?? '/').split('?')[0]
+    const filePath = path.join(this.uploadsDir, urlPath.replace('/uploads/', ''))
+    if (!fs.existsSync(filePath)) {
+      res.writeHead(404); res.end('Not found'); return
+    }
     const contentType = MIME_TYPES[path.extname(filePath)] ?? 'application/octet-stream'
+    res.writeHead(200, { 'Content-Type': contentType })
+    fs.createReadStream(filePath).pipe(res)
+  }
+
+  private serveStatic(req: http.IncomingMessage, res: http.ServerResponse): void {
+    const urlPath = (req.url ?? '/').split('?')[0]
+    let filePath = path.join(this.publicDir, urlPath === '/' ? '/index.html' : urlPath)
+
+    // Next.js static export: try exact path, then path/index.html (trailingSlash)
+    if (!fs.existsSync(filePath)) {
+      const withIndex = path.join(filePath, 'index.html')
+      if (fs.existsSync(withIndex)) {
+        filePath = withIndex
+      } else {
+        // SPA fallback → index.html
+        filePath = path.join(this.publicDir, 'index.html')
+      }
+    }
+
+    if (!fs.existsSync(filePath)) {
+      res.writeHead(404); res.end('Not found'); return
+    }
+
+    const contentType = MIME_TYPES[path.extname(filePath)] ?? 'text/html'
     res.writeHead(200, { 'Content-Type': contentType })
     fs.createReadStream(filePath).pipe(res)
   }
