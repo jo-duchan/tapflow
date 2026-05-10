@@ -509,10 +509,15 @@ export function SimulatorViewer({ sessionId, deviceId, onBack, buildId }: Props)
               const isHovered = hoveredButton === btn.name;
 
               // For bottom-anchor buttons normalOffset.y is center Y; for all others it's top-edge Y.
+              // For top-anchor buttons use rolloverOffset.y (the rollover top-edge, = btnTopLeftY*scale)
+              // so the CSS overlay aligns with the baked frame's button draw position.
               const isBottomAnchor = btn.anchor === 'bottom';
+              const isTopAnchor = btn.anchor === 'top';
               const imgTopPct = isBottomAnchor
                 ? ((btn.normalOffset.y - btn.buttonH / 2) / chrome.compositeHeight) * 100
-                : (btn.normalOffset.y / chrome.compositeHeight) * 100;
+                : isTopAnchor
+                  ? (btn.rolloverOffset.y / chrome.compositeHeight) * 100
+                  : (btn.normalOffset.y / chrome.compositeHeight) * 100;
               const imgHPct = (btn.buttonH / chrome.compositeHeight) * 100;
               const imgWPct = (btn.buttonW / chrome.compositeWidth) * 100;
               // Default: rolloverOffset (extended, matches baked frame position).
@@ -529,7 +534,9 @@ export function SimulatorViewer({ sessionId, deviceId, onBack, buildId }: Props)
               const tooltipLeftPct = (btn.rolloverOffset.x / chrome.compositeWidth) * 100;
               const tooltipTopPct = isBottomAnchor
                 ? ((btn.normalOffset.y - btn.buttonH / 2) / chrome.compositeHeight) * 100
-                : (btn.normalOffset.y / chrome.compositeHeight) * 100;
+                : isTopAnchor
+                  ? (btn.rolloverOffset.y / chrome.compositeHeight) * 100
+                  : (btn.normalOffset.y / chrome.compositeHeight) * 100;
 
               // onTop (home) button: above framePng. Side buttons: behind framePng.
               // compositeUnder for home: pressedPng at z-index 3, buttonPng at z-index 4

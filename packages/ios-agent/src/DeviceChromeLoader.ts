@@ -260,11 +260,13 @@ function computeButtonLayout(
         x: Math.round(normalCX * scale),
         y: Math.round(normalCY * scale),
       },
-      // rolloverOffset.x = centerX (already computed from roll offsets above)
-      // rolloverOffset.y = normalCY (Y doesn't change between normal and rollover states)
+      // rolloverOffset.x = centerX (from roll offsets).
+      // rolloverOffset.y: for top anchor, rollover extends the button further above the frame,
+      //   so store the rollover top-edge Y (= btnTopLeftY) not the normal top-edge Y.
+      //   For left/right/bottom anchors Y is the same at normal and rollover positions.
       rolloverOffset: {
         x: Math.round(centerX * scale),
-        y: Math.round(normalCY * scale),
+        y: Math.round(((inp.anchor === 'top') ? btnTopLeftY : normalCY) * scale),
       },
       buttonW: Math.round(w * scale),
       buttonH: Math.round(h * scale),
