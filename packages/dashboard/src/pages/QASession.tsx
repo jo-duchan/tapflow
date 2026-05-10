@@ -92,7 +92,6 @@ export function QASession() {
     if (!selectedDevice || !deviceId) return;
     setBooting(true);
     setStatus('Booting…');
-    send({ type: 'session:start', sessionId: selectedDevice.sessionId, deviceId });
     setActiveSessionId(selectedDevice.sessionId);
   }
 
@@ -101,6 +100,8 @@ export function QASession() {
       send({ type: 'device:shutdown', sessionId: activeSessionId, payload: { deviceId } });
     }
     setActiveSessionId(null);
+    setBooting(false);
+    setStatus('');
   }
 
   return (
