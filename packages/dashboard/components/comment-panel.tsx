@@ -6,6 +6,13 @@ import { Separator } from '@/components/ui/separator'
 import { Link2, ImagePlus } from 'lucide-react'
 import type { Comment } from '@/lib/types'
 
+// SQLite datetime('now') returns "YYYY-MM-DD HH:MM:SS" (UTC, no timezone marker).
+// Normalize to unambiguous ISO 8601 UTC so all browsers parse it correctly.
+function parseUTCDate(ts: string): Date {
+  if (/[Zz]|[+-]\d{2}/.test(ts)) return new Date(ts)
+  return new Date(ts.replace(' ', 'T') + 'Z')
+}
+
 const MAX_SIZE_BYTES = 5 * 1024 * 1024
 const ALLOWED_TYPES = ['image/png', 'image/jpeg', 'image/webp']
 
@@ -84,7 +91,7 @@ export function CommentPanel({ buildId }: Props) {
                   <span className="text-xs font-medium">{c.author}</span>
                   <div className="flex items-center gap-1">
                     <span className="text-xs text-muted-foreground">
-                      {new Date(c.created_at).toLocaleString()}
+                      {parseUTCDate(c.created_at).toLocaleString()}
                     </span>
                     <Button variant="ghost" size="icon" className="h-5 w-5" onClick={() => copyLink(c.id)}>
                       <Link2 className="h-3 w-3" />
