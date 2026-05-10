@@ -174,17 +174,17 @@ export function QASession() {
                   <div className="grid gap-1.5">
                     <span className="text-sm font-medium">OS version</span>
                     <Select
-                      value={osVersion}
+                      value={osVersion || '__all__'}
                       onValueChange={(v) => {
-                        setOsVersion(v);
+                        setOsVersion(v === '__all__' ? '' : v);
                         setDeviceId('');
                       }}
                     >
                       <SelectTrigger>
-                        <SelectValue placeholder="Any version" />
+                        <SelectValue />
                       </SelectTrigger>
                       <SelectContent>
-                        <SelectItem value="">Any version</SelectItem>
+                        <SelectItem value="__all__">Any version</SelectItem>
                         {osVersions.map((v) => (
                           <SelectItem key={v} value={v}>
                             {v}
