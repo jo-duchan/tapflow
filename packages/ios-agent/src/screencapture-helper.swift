@@ -139,7 +139,7 @@ func encodeJPEG(_ surface: IOSurface) -> Data? {
     guard let dest = CGImageDestinationCreateWithData(out, "public.jpeg" as CFString, 1, nil)
     else { return nil }
     CGImageDestinationAddImage(dest, image,
-        [kCGImageDestinationLossyCompressionQuality: 0.85] as CFDictionary)
+        [kCGImageDestinationLossyCompressionQuality: 0.95] as CFDictionary)
     return CGImageDestinationFinalize(dest) ? (out as Data) : nil
 }
 
@@ -163,15 +163,32 @@ guard let device = resolveDevice(udid: targetUDID) else {
     exit(1)
 }
 
-guard let io = device.perform(NSSelectorFromString("io"))?.takeUnretainedValue() as? NSObject else {
+// Retry acquiring device.io — it may not be available immediately when multiple
+// simulators are booting simultaneously (e.g. iOS 17.x + iOS 18+ co-boot)
+var io: NSObject?
+for attempt in 1...10 {
+    io = device.perform(NSSelectorFromString("io"))?.takeUnretainedValue() as? NSObject
+    if io != nil { break }
+    fputs("info: device.io not ready (attempt \(attempt)/10), retrying in 300ms...\n", stderr)
+    Thread.sleep(forTimeInterval: 0.3)
+}
+guard let io else {
     fputs("error: device.io unavailable — is the simulator fully booted?\n", stderr)
     exit(1)
 }
 
-io.perform(NSSelectorFromString("updateIOPorts"))
-
-guard let ports = io.value(forKey: "deviceIOPorts") as? [NSObject], !ports.isEmpty else {
-    fputs("error: deviceIOPorts not available\n", stderr)
+// Retry updateIOPorts — older runtimes (iOS 17.x) may need multiple calls
+// before deviceIOPorts is populated when another simulator is already active
+var ports: [NSObject] = []
+for attempt in 1...15 {
+    io.perform(NSSelectorFromString("updateIOPorts"))
+    ports = (io.value(forKey: "deviceIOPorts") as? [NSObject]) ?? []
+    if !ports.isEmpty { break }
+    fputs("info: deviceIOPorts empty (attempt \(attempt)/15), retrying in 500ms...\n", stderr)
+    Thread.sleep(forTimeInterval: 0.5)
+}
+guard !ports.isEmpty else {
+    fputs("error: deviceIOPorts not available after retries\n", stderr)
     exit(1)
 }
 
@@ -238,14 +255,35 @@ for desc in descriptors where desc.responds(to: regSel) {
         onFrame as AnyObject, onSurfaces as AnyObject, onProps as AnyObject)
 }
 
-// Seed latestSurface with the current framebuffer before the timer starts
-captureQueue.sync { updateLatestSurface() }
+// Seed latestSurface — retry for older runtimes where the surface may not be
+// readable immediately after port enumeration (iOS 17.x co-boot scenario)
+captureQueue.sync {
+    for attempt in 1...10 {
+        updateLatestSurface()
+        if latestSurface != nil { break }
+        fputs("info: framebufferSurface nil (attempt \(attempt)/10), retrying in 300ms...\n", stderr)
+        Thread.sleep(forTimeInterval: 0.3)
+    }
+}
+if latestSurface == nil {
+    fputs("warning: initial framebufferSurface seed failed — relying on callbacks\n", stderr)
+}
+
+// Watchdog: exit(1) if no frames produced within 8 seconds of startup.
+// This lets ScreenCaptureStreamer surface the error so the agent can clean up.
+var firstFrameSent = false
+DispatchQueue.global().asyncAfter(deadline: .now() + 8) {
+    guard !firstFrameSent else { return }
+    fputs("error: no frames produced within 8s — framebuffer may be unavailable\n", stderr)
+    exit(1)
+}
 
 // Timer-driven emission: fires at the target FPS and encodes the latest surface
 let timer = DispatchSource.makeTimerSource(queue: captureQueue)
 timer.schedule(deadline: .now(), repeating: 1.0 / fps)
 timer.setEventHandler {
     guard let surf = latestSurface, let jpeg = encodeJPEG(surf) else { return }
+    firstFrameSent = true
     writeFrame(jpeg)
 }
 timer.resume()

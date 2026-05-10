@@ -220,4 +220,81 @@ describe('RelayServer', () => {
     agent.close()
     browser.close()
   })
+
+  it('includes agentName and busy in agents:listed', async () => {
+    const devices = [{ id: 'd1', name: 'iPhone 15', platform: 'ios', status: 'shutdown' }]
+    const agent = new WebSocket(`ws://localhost:${port}`)
+    await waitForOpen(agent)
+    agent.send(JSON.stringify({ type: 'agent:register', agentName: 'MyMac', devices }))
+    const { sessionId } = await waitForMessage(agent)
+
+    // not busy yet
+    const browser = new WebSocket(`ws://localhost:${port}`)
+    await waitForOpen(browser)
+    browser.send(JSON.stringify({ type: 'agents:list' }))
+    const listed = await waitForMessage(browser)
+    expect(listed.sessions![0].agentName).toBe('MyMac')
+    expect(listed.sessions![0].busy).toBe(false)
+
+    // join → becomes busy
+    browser.send(JSON.stringify({ type: 'session:start', sessionId }))
+    await waitForMessage(browser) // session:joined
+
+    const browser2 = new WebSocket(`ws://localhost:${port}`)
+    await waitForOpen(browser2)
+    browser2.send(JSON.stringify({ type: 'agents:list' }))
+    const listed2 = await waitForMessage(browser2)
+    expect(listed2.sessions![0].busy).toBe(true)
+
+    agent.close()
+    browser.close()
+    browser2.close()
+  })
+
+  it('routes device:boot from browser to agent', async () => {
+    const agent = new WebSocket(`ws://localhost:${port}`)
+    await waitForOpen(agent)
+    agent.send(JSON.stringify({ type: 'agent:register' }))
+    const { sessionId } = await waitForMessage(agent)
+
+    const browser = new WebSocket(`ws://localhost:${port}`)
+    await waitForOpen(browser)
+    browser.send(JSON.stringify({ type: 'session:start', sessionId }))
+    await waitForMessage(browser)
+
+    const bootPromise = waitForMessage(agent)
+    browser.send(JSON.stringify({ type: 'device:boot', sessionId, payload: { deviceId: 'dev-1' } }))
+    const boot = await bootPromise
+    expect(boot.type).toBe('device:boot')
+    expect((boot.payload as { deviceId: string }).deviceId).toBe('dev-1')
+
+    agent.close()
+    browser.close()
+  })
+
+  it('routes device:booting and device:ready from agent to browser', async () => {
+    const agent = new WebSocket(`ws://localhost:${port}`)
+    await waitForOpen(agent)
+    agent.send(JSON.stringify({ type: 'agent:register' }))
+    const { sessionId } = await waitForMessage(agent)
+
+    const browser = new WebSocket(`ws://localhost:${port}`)
+    await waitForOpen(browser)
+    browser.send(JSON.stringify({ type: 'session:start', sessionId }))
+    await waitForMessage(browser)
+
+    const bootingPromise = waitForMessage(browser)
+    agent.send(JSON.stringify({ type: 'device:booting' }))
+    const booting = await bootingPromise
+    expect(booting.type).toBe('device:booting')
+
+    const readyPromise = waitForMessage(browser)
+    agent.send(JSON.stringify({ type: 'device:ready', payload: { deviceId: 'dev-1' } }))
+    const ready = await readyPromise
+    expect(ready.type).toBe('device:ready')
+    expect((ready.payload as { deviceId: string }).deviceId).toBe('dev-1')
+
+    agent.close()
+    browser.close()
+  })
 })

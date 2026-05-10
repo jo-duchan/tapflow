@@ -6,11 +6,16 @@ import type { RelayMessage } from '@/lib/types'
 const RELAY_URL = process.env.NEXT_PUBLIC_RELAY_URL ?? 'ws://localhost:3000'
 const RECONNECT_DELAY = 2000
 
-export function useRelay(onMessage: (msg: RelayMessage) => void) {
+export function useRelay(
+  onMessage: (msg: RelayMessage) => void,
+  onBinaryFrame?: (data: ArrayBuffer) => void,
+) {
   const ws = useRef<WebSocket | null>(null)
   const [connected, setConnected] = useState(false)
   const onMessageRef = useRef(onMessage)
   onMessageRef.current = onMessage
+  const onBinaryFrameRef = useRef(onBinaryFrame)
+  onBinaryFrameRef.current = onBinaryFrame
 
   useEffect(() => {
     let cancelled = false
@@ -19,6 +24,7 @@ export function useRelay(onMessage: (msg: RelayMessage) => void) {
       if (cancelled) return
 
       const socket = new WebSocket(RELAY_URL)
+      socket.binaryType = 'arraybuffer'
       ws.current = socket
 
       socket.onopen = () => setConnected(true)
@@ -29,6 +35,10 @@ export function useRelay(onMessage: (msg: RelayMessage) => void) {
       }
 
       socket.onmessage = (e) => {
+        if (e.data instanceof ArrayBuffer) {
+          onBinaryFrameRef.current?.(e.data)
+          return
+        }
         try {
           onMessageRef.current(JSON.parse(e.data))
         } catch { /* ignore malformed */ }

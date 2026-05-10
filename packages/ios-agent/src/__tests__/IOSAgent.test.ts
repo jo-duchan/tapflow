@@ -15,21 +15,6 @@ vi.mock('../TouchHelper', () => ({
   })),
 }))
 
-vi.mock('@roamhq/wrtc', () => ({
-  RTCPeerConnection: vi.fn(() => ({
-    addTrack: vi.fn(),
-    onicecandidate: null,
-    createOffer: vi.fn(async () => ({ type: 'offer', sdp: 'mock-sdp' })),
-    setLocalDescription: vi.fn(),
-    setRemoteDescription: vi.fn(),
-    addIceCandidate: vi.fn(),
-    close: vi.fn(),
-  })),
-  RTCSessionDescription: vi.fn((init: RTCSessionDescriptionInit) => init),
-  nonstandard: {
-    RTCVideoSource: vi.fn(() => ({ onFrame: vi.fn(), createTrack: vi.fn(() => ({})) })),
-  },
-}))
 import { WebSocket } from 'ws'
 import { RelayServer } from '@tapflow/relay'
 import { IOSAgent } from '../IOSAgent'
@@ -42,10 +27,17 @@ const MockTouchHelper = TouchHelper as any
 const waitForOpen = (ws: WebSocket) =>
   new Promise<void>((r) => ws.once('open', r))
 
-const waitForMessage = (ws: WebSocket) =>
-  new Promise<Record<string, unknown>>((r) =>
-    ws.once('message', (d) => r(JSON.parse(d.toString())))
-  )
+const waitForType = (ws: WebSocket, type: string) =>
+  new Promise<Record<string, unknown>>((r) => {
+    const listener = (d: Buffer) => {
+      const msg = JSON.parse(d.toString())
+      if (msg.type === type) {
+        ws.off('message', listener)
+        r(msg)
+      }
+    }
+    ws.on('message', listener)
+  })
 
 function mockSimctl(booted = false): SimctlWrapper {
   return {
@@ -123,7 +115,10 @@ describe('IOSAgent', () => {
       await agent.connect(`ws://localhost:${port}`)
 
       browser.send(JSON.stringify({ type: 'session:start', sessionId: agent.sessionId }))
-      await waitForMessage(browser) // session:joined
+      await waitForType(browser, 'session:joined')
+
+      browser.send(JSON.stringify({ type: 'device:boot', sessionId: agent.sessionId, payload: { deviceId: 'dev-1' } }))
+      await waitForType(browser, 'device:ready')
 
       const thInstance = MockTouchHelper.mock.results[0].value
       return { browser, agent, thInstance }
@@ -165,6 +160,50 @@ describe('IOSAgent', () => {
     })
   })
 
+  describe('device:boot handler', () => {
+    it('sends device:booting then device:ready for a shutdown device', async () => {
+      const simctl = mockSimctl(false) // device is shutdown
+      const agent = new IOSAgent({ intervalMs: 50 }, simctl)
+      await agent.connect(`ws://localhost:${port}`)
+
+      const browser = new WebSocket(`ws://localhost:${port}`)
+      await waitForOpen(browser)
+      browser.send(JSON.stringify({ type: 'session:start', sessionId: agent.sessionId }))
+      await waitForType(browser, 'session:joined')
+
+      const bootingPromise = waitForType(browser, 'device:booting')
+      const readyPromise = waitForType(browser, 'device:ready')
+      browser.send(JSON.stringify({ type: 'device:boot', sessionId: agent.sessionId, payload: { deviceId: 'dev-1' } }))
+
+      await bootingPromise
+      const ready = await readyPromise
+      expect((ready.payload as { deviceId: string }).deviceId).toBe('dev-1')
+      expect(simctl.boot).toHaveBeenCalledWith('dev-1')
+
+      agent.disconnect()
+      browser.close()
+    })
+
+    it('skips boot call for already-booted device', async () => {
+      const simctl = mockSimctl(true) // already booted
+      const agent = new IOSAgent({ intervalMs: 50 }, simctl)
+      await agent.connect(`ws://localhost:${port}`)
+
+      const browser = new WebSocket(`ws://localhost:${port}`)
+      await waitForOpen(browser)
+      browser.send(JSON.stringify({ type: 'session:start', sessionId: agent.sessionId }))
+      await waitForType(browser, 'session:joined')
+
+      const readyPromise = waitForType(browser, 'device:ready')
+      browser.send(JSON.stringify({ type: 'device:boot', sessionId: agent.sessionId, payload: { deviceId: 'dev-1' } }))
+      await readyPromise
+      expect(simctl.boot).not.toHaveBeenCalled()
+
+      agent.disconnect()
+      browser.close()
+    })
+  })
+
   describe('relay connection', () => {
     it('connects to relay and receives a sessionId', async () => {
       const agent = new IOSAgent({}, mockSimctl())
@@ -173,20 +212,24 @@ describe('IOSAgent', () => {
       agent.disconnect()
     })
 
-    it('sends stream:frame to relay after connecting', async () => {
+    it('forwards binary frame to browser after connecting', async () => {
       const browser = new WebSocket(`ws://localhost:${port}`)
+      browser.binaryType = 'nodebuffer'
       await waitForOpen(browser)
 
-      const agent = new IOSAgent({ intervalMs: 50 }, mockSimctl())
+      const agent = new IOSAgent({ intervalMs: 50 }, mockSimctl(true))
       await agent.connect(`ws://localhost:${port}`)
 
-      // browser joins the agent's session
       browser.send(JSON.stringify({ type: 'session:start', sessionId: agent.sessionId }))
-      await waitForMessage(browser) // session:joined
+      await waitForType(browser, 'session:joined')
 
-      const frame = await waitForMessage(browser)
-      expect(frame.type).toBe('stream:frame')
-      expect(typeof frame.payload).toBe('string') // base64
+      browser.send(JSON.stringify({ type: 'device:boot', sessionId: agent.sessionId, payload: { deviceId: 'dev-1' } }))
+      await waitForType(browser, 'device:ready')
+
+      const frame = await new Promise<Buffer>((r) =>
+        browser.once('message', (d, isBinary) => { if (isBinary) r(d as Buffer) })
+      )
+      expect(frame.length).toBeGreaterThan(0)
 
       agent.disconnect()
       browser.close()

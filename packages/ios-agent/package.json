@@ -11,9 +11,7 @@
     "lint": "eslint src"
   },
   "dependencies": {
-    "@roamhq/wrtc": "^0.10.0",
-    "@tapflow/agent-core": "*",
-    "sharp": "^0.34.5"
+    "@tapflow/agent-core": "*"
   },
   "devDependencies": {
     "@tapflow/relay": "*",

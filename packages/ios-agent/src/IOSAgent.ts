@@ -1,3 +1,4 @@
+import os from 'os'
 import { WebSocket } from 'ws'
 import type { Device, DeviceAgent } from '@tapflow/agent-core'
 import { SimctlWrapper } from './SimctlWrapper'
@@ -7,7 +8,6 @@ import { WdaClient } from './WdaClient'
 import { WdaLauncher } from './WdaLauncher'
 import { TouchHelper } from './TouchHelper'
 import { DeviceChromeLoader, type ChromeData } from './DeviceChromeLoader'
-import { WebRTCStreamer } from './WebRTCStreamer'
 
 export interface WdaOptions {
   /** Auto-launch WDA if not running. Defaults to false. */
@@ -36,16 +36,15 @@ export class IOSAgent implements DeviceAgent {
   private touchHelper: TouchHelper | null = null
   private loadedChrome: ChromeData | null = null
   private bootedDeviceId: string | null = null
+  private bootSeq = 0
   private orientation: 'portrait' | 'landscapeRight' = 'portrait'
   private ws: WebSocket | null = null
   private _sessionId: string | null = null
   private streamReader: ReadableStreamDefaultReader<Buffer> | null = null
-  private streamMimeType: string = 'image/jpeg'
-  private webrtc: WebRTCStreamer | null = null
 
   constructor(options: IOSAgentOptions = {}, simctl?: SimctlWrapper, wdaClient?: WdaClient) {
     this.simctl = simctl ?? new SimctlWrapper()
-    this.fps = options.fps ?? 30
+    this.fps = options.fps ?? 60
     this.intervalMs = options.intervalMs
     this.wdaOptions = options.wda ?? {}
     const wdaPort = options.wda?.port ?? 8100
@@ -77,6 +76,7 @@ export class IOSAgent implements DeviceAgent {
       ws.once('open', () => {
         ws.send(JSON.stringify({
           type: 'agent:register',
+          agentName: os.hostname(),
           devices: devices.map((d) => ({
             id: d.id,
             name: d.name,
@@ -91,9 +91,9 @@ export class IOSAgent implements DeviceAgent {
         if (msg.type === 'agent:registered') {
           this.ws = ws
           this._sessionId = msg.sessionId
-          this.sendChromeData(devices)
-          this.startStreaming().catch((e) => console.error('[agent] startStreaming failed:', e))
-          ws.on('message', (d) => this.handleRelayMessage(JSON.parse(d.toString())))
+          ws.on('message', (d) => {
+            try { this.handleRelayMessage(JSON.parse(d.toString())) } catch { /* ignore malformed */ }
+          })
           resolve()
         } else {
           reject(new Error(`Unexpected message during handshake: ${msg.type}`))
@@ -111,8 +111,6 @@ export class IOSAgent implements DeviceAgent {
     this.touchHelper = null
     this.wdaLauncher?.stop()
     this.wdaLauncher = null
-    this.webrtc?.close()
-    this.webrtc = null
     this.ws?.close()
     this.ws = null
     this._sessionId = null
@@ -136,98 +134,10 @@ export class IOSAgent implements DeviceAgent {
     this.ws.send(JSON.stringify({ type: 'session:chrome', payload: this.loadedChrome }))
   }
 
-  private async startStreaming(): Promise<void> {
-    if (this.intervalMs === undefined) {
-      const negotiated = await this.tryStartWebRTC()
-      if (negotiated) return
-    }
-    this.startMjpegFallback()
-  }
-
-  private async tryStartWebRTC(): Promise<boolean> {
-    const ws = this.ws
-    if (!ws) return false
-
-    return new Promise<boolean>((resolve) => {
-      const NEGOTIATION_TIMEOUT_MS = 3000
-      let resolved = false
-
-      const settle = (success: boolean) => {
-        if (resolved) return
-        resolved = true
-        clearTimeout(timer)
-        resolve(success)
-      }
-
-      const timer = setTimeout(() => settle(false), NEGOTIATION_TIMEOUT_MS)
-
-      const webrtc = new WebRTCStreamer({
-        onOffer: (offer) => {
-          this.ws?.send(JSON.stringify({ type: 'webrtc:offer', payload: offer }))
-        },
-        onIceCandidate: (candidate) => {
-          this.ws?.send(JSON.stringify({ type: 'webrtc:ice', payload: candidate }))
-        },
-      })
-      this.webrtc = webrtc
-
-      const originalHandler = ws.listeners('message') as Array<(data: Buffer) => void>
-
-      const signalingHandler = (data: Buffer) => {
-        try {
-          const msg = JSON.parse(data.toString()) as { type: string; payload?: unknown }
-          if (msg.type === 'webrtc:answer') {
-            webrtc.setAnswer(msg.payload as { type: 'answer'; sdp: string })
-              .then(() => {
-                this.ws?.off('message', signalingHandler)
-                this.ws?.on('message', (d) => this.handleRelayMessage(JSON.parse(d.toString())))
-                settle(true)
-                this.pumpWebRTC()
-              })
-              .catch(() => settle(false))
-          } else if (msg.type === 'webrtc:ice') {
-            webrtc.addIceCandidate(msg.payload as RTCIceCandidateInit).catch(() => {})
-          } else {
-            // not a webrtc message — re-dispatch to existing handlers
-            for (const h of originalHandler) h(data)
-          }
-        } catch { /* ignore malformed */ }
-      }
-
-      ws.on('message', signalingHandler)
-      webrtc.start().catch(() => settle(false))
-    })
-  }
-
-  private pumpWebRTC(): void {
-    const stream = new ScreenCaptureStreamer(this.fps, this.bootedDeviceId ?? 'booted').start()
-    const reader = stream.getReader()
-    this.streamReader = reader
-
-    const pump = async () => {
-      try {
-        while (true) {
-          const { value, done } = await reader.read()
-          if (done) break
-          await this.webrtc?.pushFrame(value)
-        }
-      } catch {
-        // stream cancelled or webrtc closed — expected on disconnect
-      }
-    }
-
-    pump()
-  }
-
-  private startMjpegFallback(): void {
-    let stream: ReadableStream<Buffer>
-    if (this.intervalMs !== undefined) {
-      stream = new MjpegStreamer(this.simctl, this.intervalMs).start()
-      this.streamMimeType = 'image/png'
-    } else {
-      stream = new ScreenCaptureStreamer(this.fps, this.bootedDeviceId ?? 'booted').start()
-      this.streamMimeType = 'image/jpeg'
-    }
+  private startBinaryStream(): void {
+    const stream = this.intervalMs !== undefined
+      ? new MjpegStreamer(this.simctl, this.intervalMs).start()
+      : new ScreenCaptureStreamer(this.fps, this.bootedDeviceId ?? 'booted').start()
 
     const reader = stream.getReader()
     this.streamReader = reader
@@ -238,23 +148,88 @@ export class IOSAgent implements DeviceAgent {
           const { value, done } = await reader.read()
           if (done) break
           if (this.ws?.readyState === WebSocket.OPEN) {
-            this.ws.send(JSON.stringify({
-              type: 'stream:frame',
-              payload: value.toString('base64'),
-              mimeType: this.streamMimeType,
-            }))
+            this.ws.send(value)
           }
         }
       } catch {
-        // stream cancelled or connection closed — expected on disconnect
+        // stream cancelled or ws closed — expected on disconnect
+      }
+      // auto-restart if still connected (e.g. screencapture-helper exited unexpectedly)
+      if (this.streamReader === reader && this.ws?.readyState === WebSocket.OPEN) {
+        this.startBinaryStream()
       }
     }
 
     pump()
   }
 
+  private async handleDeviceBoot(deviceId: string): Promise<void> {
+    const seq = ++this.bootSeq
+
+    this.streamReader?.cancel()
+    this.streamReader = null
+    this.touchHelper?.stop()
+    this.touchHelper = null
+
+    if (!this.ws) return
+    this.ws.send(JSON.stringify({ type: 'device:booting' }))
+
+    try {
+      const devices = await this.simctl.listDevices()
+      if (seq !== this.bootSeq) return
+
+      const target = devices.find((d) => d.id === deviceId)
+      if (!target) throw new Error(`Device not found: ${deviceId}`)
+
+      if (target.status !== 'booted') {
+        await this.simctl.boot(deviceId)
+      }
+
+      if (seq !== this.bootSeq) return
+
+      const refreshed = await this.simctl.listDevices()
+      this.sendChromeData(refreshed.map((d) => ({
+        ...d,
+        status: (d.id === deviceId ? 'booted' : 'shutdown') as Device['status'],
+      })))
+      this.startBinaryStream()
+      this.ws?.send(JSON.stringify({ type: 'device:ready', payload: { deviceId } }))
+    } catch (e) {
+      if (seq !== this.bootSeq) return
+      const message = e instanceof Error ? e.message : String(e)
+      this.ws?.send(JSON.stringify({ type: 'device:boot-error', message }))
+    }
+  }
+
+  private async handleDeviceShutdown(deviceId: string): Promise<void> {
+    this.bootSeq++
+    this.streamReader?.cancel()
+    this.streamReader = null
+    this.touchHelper?.stop()
+    this.touchHelper = null
+    this.bootedDeviceId = null
+
+    try {
+      await this.simctl.shutdown(deviceId)
+      this.ws?.send(JSON.stringify({ type: 'device:shutdown-done', payload: { deviceId } }))
+    } catch (e) {
+      const message = e instanceof Error ? e.message : String(e)
+      console.error('[agent] shutdown failed:', message)
+    }
+  }
+
   private handleRelayMessage(msg: { type: string; payload?: unknown }): void {
     switch (msg.type) {
+      case 'device:boot': {
+        const { deviceId } = msg.payload as { deviceId: string }
+        this.handleDeviceBoot(deviceId).catch((e) => console.error('[agent] handleDeviceBoot failed:', e))
+        break
+      }
+      case 'device:shutdown': {
+        const { deviceId } = msg.payload as { deviceId: string }
+        this.handleDeviceShutdown(deviceId).catch((e) => console.error('[agent] handleDeviceShutdown failed:', e))
+        break
+      }
       case 'input:touch:start': {
         if (!this.touchHelper) { console.error('[agent] touch:start — touchHelper not ready'); break }
         const { x, y } = msg.payload as { x: number; y: number }
@@ -304,7 +279,6 @@ export class IOSAgent implements DeviceAgent {
         const { name } = msg.payload as { name: string }
         if (this.touchHelper) {
           if (name === 'home') {
-            // Home uses the legacy IndigoHIDMessageForButton path (code=0)
             this.touchHelper.pressLegacyButton(0)
           } else {
             const btn = this.loadedChrome?.buttons.find((b) => b.name === name)
@@ -315,10 +289,6 @@ export class IOSAgent implements DeviceAgent {
             }
           }
         }
-        break
-      }
-      case 'webrtc:ice': {
-        this.webrtc?.addIceCandidate(msg.payload as RTCIceCandidateInit).catch(() => {})
         break
       }
     }

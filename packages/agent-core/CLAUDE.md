@@ -11,7 +11,7 @@
 
 ## HOW
 
-- 인터페이스에는 플랫폼 중립 메서드만 포함한다: `boot`, `shutdown`, `installApp`, `launchApp`, `screenshot`, `stream`, `tap`, `swipe`, `type`, `listDevices`.
+- 인터페이스에는 플랫폼 중립 메서드만 포함한다: `listDevices`, `boot`, `shutdown`, `installApp`, `launchApp`, `screenshot`, `stream`, `touchStart`, `touchMove`, `touchEnd`, `type`.
 - `AgentRegistry`는 `register(platform, AgentClass)` / `get(platform)` 두 메서드만 노출한다.
 - 인터페이스 변경은 모든 구현체 패키지의 테스트 통과를 확인 후 머지한다.
 

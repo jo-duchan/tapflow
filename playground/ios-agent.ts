@@ -21,18 +21,15 @@ if (deviceArg && !target) {
   process.exit(1)
 }
 
-if (!target) {
-  console.log('\nNo booted simulator found. Boot one first:')
-  console.log('  xcrun simctl boot <device-id>')
-  console.log('  or: npm run dev:ios-agent -- --device "iPhone 16"')
-  process.exit(1)
-}
-
-if (target.status !== 'booted') {
+if (target && target.status !== 'booted') {
   console.log(`\nBooting ${target.name}…`)
   await agent.boot(target.id)
 }
 
+if (!target) {
+  console.log('\nNo booted simulator — waiting for boot request from dashboard.')
+}
+
 console.log(`\nConnecting to relay: ${RELAY}`)
 await agent.connect(RELAY)
-console.log(`iOS Agent connected — streaming ${target.name}`)
+console.log(`iOS Agent connected${target ? ` — streaming ${target.name}` : ' — awaiting boot request'}`)
