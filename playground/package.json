@@ -4,6 +4,7 @@
   "private": true,
   "type": "module",
   "scripts": {
+    "test": "echo 'No tests for playground'",
     "relay": "tsx relay.ts",
     "seed": "tsx seed.ts",
     "ios-agent": "tsx ios-agent.ts",
