@@ -86,15 +86,14 @@ export function QASession() {
     ? filteredDevices.filter((d) => d.osVersion === osVersion)
     : filteredDevices;
 
-  const selectedSession = sessions.find((s) => s.devices.some((d) => d.id === deviceId));
   const selectedDevice = allDevices.find((d) => d.id === deviceId);
 
   function handleBoot() {
-    if (!selectedSession || !deviceId) return;
+    if (!selectedDevice || !deviceId) return;
     setBooting(true);
     setStatus('Booting…');
-    send({ type: 'session:start', sessionId: selectedSession.sessionId, deviceId });
-    setActiveSessionId(selectedSession.sessionId);
+    send({ type: 'session:start', sessionId: selectedDevice.sessionId, deviceId });
+    setActiveSessionId(selectedDevice.sessionId);
   }
 
   function handleBack() {

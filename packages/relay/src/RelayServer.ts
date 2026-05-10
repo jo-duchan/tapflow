@@ -117,7 +117,8 @@ export class RelayServer {
   private handleConnection(ws: WebSocket): void {
     ws.on('message', (data, isBinary) => {
       if (isBinary) {
-        const session = this.sessions.getBySocket(ws)
+        // Binary frames arrive on the dedicated stream WS, route to the session's browser
+        const session = this.sessions.getByStreamSocket(ws)
         if (session?.browserSocket?.readyState === WebSocket.OPEN) {
           session.browserSocket.send(data, { binary: true })
         }
@@ -132,12 +133,24 @@ export class RelayServer {
     })
 
     ws.on('close', () => {
-      const session = this.sessions.getBySocket(ws)
-      if (!session) return
-      if (session.agentSocket === ws) {
-        this.sessions.remove(session.id)
-      } else {
-        this.sessions.clearBrowser(session.id)
+      // Agent main socket disconnected → remove all device sessions for this agent
+      const agentSessions = this.sessions.getAllByAgentSocket(ws)
+      if (agentSessions.length > 0) {
+        for (const s of agentSessions) this.sessions.remove(s.id)
+        return
+      }
+
+      // Stream socket disconnected → clear the streamSocket reference
+      const streamSession = this.sessions.getByStreamSocket(ws)
+      if (streamSession) {
+        streamSession.streamSocket = null
+        return
+      }
+
+      // Browser socket disconnected → clear browserSocket so session becomes available again
+      const browserSession = this.sessions.getByBrowserSocket(ws)
+      if (browserSession) {
+        this.sessions.clearBrowser(browserSession.id)
       }
     })
   }
@@ -145,8 +158,12 @@ export class RelayServer {
   private route(ws: WebSocket, msg: RelayMessage): void {
     switch (msg.type) {
       case 'agent:register': {
-        const sessionId = this.sessions.create(ws, msg.devices ?? [], msg.agentName)
-        ws.send(JSON.stringify({ type: 'agent:registered', sessionId }))
+        const sessionIds = this.sessions.create(ws, msg.devices ?? [], msg.agentName)
+        const registeredSessions = (msg.devices ?? []).map((d, i) => ({
+          deviceId: d.id,
+          sessionId: sessionIds[i],
+        }))
+        ws.send(JSON.stringify({ type: 'agent:registered', registeredSessions }))
         break
       }
 
@@ -162,7 +179,12 @@ export class RelayServer {
           ws.send(JSON.stringify({ type: 'error', message: 'Session not found' }))
           return
         }
-        this.sessions.join(msg.sessionId!, ws)
+        try {
+          this.sessions.join(msg.sessionId!, ws)
+        } catch {
+          ws.send(JSON.stringify({ type: 'error', message: 'Session busy' }))
+          return
+        }
         ws.send(JSON.stringify({ type: 'session:joined', sessionId: msg.sessionId }))
         if (session.chromeData) {
           ws.send(JSON.stringify({ type: 'session:chrome', payload: session.chromeData }))
@@ -170,17 +192,15 @@ export class RelayServer {
         if (session.deviceInfo) {
           ws.send(JSON.stringify({ type: 'session:deviceInfo', payload: session.deviceInfo }))
         }
-        // If a device is already booted (e.g. browser reconnected after a brief WS blip),
-        // replay device:ready so deviceReadyRef is set and frames start drawing immediately.
-        const bootedDevice = session.devices.find((d) => d.status === 'booted')
-        if (bootedDevice) {
-          ws.send(JSON.stringify({ type: 'device:ready', payload: { deviceId: bootedDevice.id } }))
+        // Replay device:ready if the device is already booted (browser WS blip reconnect)
+        if (session.deviceStatus === 'booted') {
+          ws.send(JSON.stringify({ type: 'device:ready', payload: { deviceId: session.deviceId } }))
         }
         break
       }
 
       case 'session:chrome': {
-        const session = this.sessions.getBySocket(ws)
+        const session = this.sessions.get(msg.sessionId!)
         if (!session) break
         this.sessions.setChromeData(session.id, msg.payload)
         if (session.browserSocket?.readyState === WebSocket.OPEN) {
@@ -190,7 +210,7 @@ export class RelayServer {
       }
 
       case 'session:deviceInfo': {
-        const session = this.sessions.getBySocket(ws)
+        const session = this.sessions.get(msg.sessionId!)
         if (!session) break
         this.sessions.setDeviceInfo(session.id, msg.payload as { deviceName: string; osVersion: string })
         if (session.browserSocket?.readyState === WebSocket.OPEN) {
@@ -200,8 +220,17 @@ export class RelayServer {
       }
 
       case 'session:end': {
-        const session = this.sessions.getBySocket(ws)
-        if (session) this.sessions.remove(session.id)
+        if (msg.sessionId) this.sessions.remove(msg.sessionId)
+        break
+      }
+
+      case 'stream:register': {
+        // Dedicated stream WS from agent: register it and ack so agent knows it's safe to send frames
+        const session = this.sessions.get(msg.sessionId!)
+        if (session) {
+          this.sessions.setStreamSocket(session.id, ws)
+          ws.send(JSON.stringify({ type: 'stream:registered' }))
+        }
         break
       }
 
@@ -216,9 +245,8 @@ export class RelayServer {
       }
 
       case 'device:booting': {
-        // agent → browser; clear cached device data so the next session:start
-        // doesn't replay stale chrome/deviceInfo/device:ready from the old device.
-        const session = this.sessions.getBySocket(ws)
+        // agent → browser; clear cached device data so reconnecting browser doesn't get stale chrome
+        const session = this.sessions.get(msg.sessionId!)
         if (!session) break
         this.sessions.clearDeviceCache(session.id)
         if (session.browserSocket?.readyState === WebSocket.OPEN) {
@@ -229,7 +257,7 @@ export class RelayServer {
 
       case 'device:boot-error': {
         // agent → browser
-        const session = this.sessions.getBySocket(ws)
+        const session = this.sessions.get(msg.sessionId!)
         if (session?.browserSocket?.readyState === WebSocket.OPEN) {
           session.browserSocket.send(JSON.stringify(msg))
         }
@@ -237,11 +265,10 @@ export class RelayServer {
       }
 
       case 'device:shutdown-done': {
-        // agent → browser + persist status so agents:list reflects shutdown state
-        const session = this.sessions.getBySocket(ws)
+        // agent → browser + persist shutdown status
+        const session = this.sessions.get(msg.sessionId!)
         if (!session) break
-        const { deviceId } = (msg as { type: string; payload: { deviceId: string } }).payload
-        this.sessions.updateDeviceStatus(session.id, deviceId, 'shutdown')
+        this.sessions.updateDeviceStatus(session.id, 'shutdown')
         if (session.browserSocket?.readyState === WebSocket.OPEN) {
           session.browserSocket.send(JSON.stringify(msg))
         }
@@ -249,11 +276,10 @@ export class RelayServer {
       }
 
       case 'device:ready': {
-        // agent → browser + persist status so agents:list reflects booted state
-        const session = this.sessions.getBySocket(ws)
+        // agent → browser + persist booted status
+        const session = this.sessions.get(msg.sessionId!)
         if (!session) break
-        const { deviceId } = (msg as { type: string; payload: { deviceId: string } }).payload
-        this.sessions.updateDeviceStatus(session.id, deviceId, 'booted')
+        this.sessions.updateDeviceStatus(session.id, 'booted')
         if (session.browserSocket?.readyState === WebSocket.OPEN) {
           session.browserSocket.send(JSON.stringify(msg))
         }
@@ -261,7 +287,7 @@ export class RelayServer {
       }
 
       case 'app:install': {
-        // browser → agent: relay looks up file_path from DB and enriches
+        // browser → agent: relay looks up file_path from DB and enriches; includes sessionId for response routing
         const session = this.sessions.get(msg.sessionId!)
         if (!session) {
           ws.send(JSON.stringify({ type: 'error', message: 'Session not found' }))
@@ -275,7 +301,11 @@ export class RelayServer {
           break
         }
         if (session.agentSocket.readyState === WebSocket.OPEN) {
-          session.agentSocket.send(JSON.stringify({ type: 'app:install', payload: { filePath: build.file_path } }))
+          session.agentSocket.send(JSON.stringify({
+            type: 'app:install',
+            sessionId: msg.sessionId,
+            payload: { filePath: build.file_path },
+          }))
         }
         break
       }
@@ -283,7 +313,7 @@ export class RelayServer {
       case 'app:install-done':
       case 'app:install-error': {
         // agent → browser
-        const session = this.sessions.getBySocket(ws)
+        const session = this.sessions.get(msg.sessionId!)
         if (session?.browserSocket?.readyState === WebSocket.OPEN) {
           session.browserSocket.send(JSON.stringify(msg))
         }
@@ -291,7 +321,7 @@ export class RelayServer {
       }
 
       case 'app:launch': {
-        // browser → agent: relay looks up bundle_id from DB
+        // browser → agent: relay looks up bundle_id from DB; includes sessionId for response routing
         const session = this.sessions.get(msg.sessionId!)
         if (!session) {
           ws.send(JSON.stringify({ type: 'error', message: 'Session not found' }))
@@ -305,7 +335,11 @@ export class RelayServer {
           break
         }
         if (session.agentSocket.readyState === WebSocket.OPEN) {
-          session.agentSocket.send(JSON.stringify({ type: 'app:launch', payload: { bundleId: build.bundle_id } }))
+          session.agentSocket.send(JSON.stringify({
+            type: 'app:launch',
+            sessionId: msg.sessionId,
+            payload: { bundleId: build.bundle_id },
+          }))
         }
         break
       }
@@ -313,7 +347,7 @@ export class RelayServer {
       case 'app:launch-done':
       case 'app:launch-error': {
         // agent → browser
-        const session = this.sessions.getBySocket(ws)
+        const session = this.sessions.get(msg.sessionId!)
         if (session?.browserSocket?.readyState === WebSocket.OPEN) {
           session.browserSocket.send(JSON.stringify(msg))
         }
@@ -336,7 +370,6 @@ export class RelayServer {
         }
         break
       }
-
     }
   }
 

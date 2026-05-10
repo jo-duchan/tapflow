@@ -1,33 +1,74 @@
 import { randomUUID } from 'crypto'
 import type { WebSocket } from 'ws'
-import type { DeviceInfo, SessionInfo } from './types'
+import type { SessionInfo } from './types'
 
 export interface Session {
   id: string
   agentName?: string
   agentSocket: WebSocket
   browserSocket: WebSocket | null
-  devices: DeviceInfo[]
+  streamSocket: WebSocket | null
+  deviceId: string
+  deviceName: string
+  devicePlatform: string
+  deviceStatus: string
+  deviceOsVersion?: string
   chromeData?: unknown
   deviceInfo?: { deviceName: string; osVersion: string }
 }
 
+type RawDevice = { id: string; name: string; platform: string; status: string; osVersion?: string }
+
 export class SessionManager {
   private sessions = new Map<string, Session>()
 
-  create(agentSocket: WebSocket, devices: DeviceInfo[] = [], agentName?: string): string {
-    const id = randomUUID()
-    this.sessions.set(id, { id, agentName, agentSocket, browserSocket: null, devices })
-    return id
+  create(agentSocket: WebSocket, devices: RawDevice[] = [], agentName?: string): string[] {
+    return devices.map((d) => {
+      const id = randomUUID()
+      this.sessions.set(id, {
+        id,
+        agentName,
+        agentSocket,
+        browserSocket: null,
+        streamSocket: null,
+        deviceId: d.id,
+        deviceName: d.name,
+        devicePlatform: d.platform,
+        deviceStatus: d.status,
+        deviceOsVersion: d.osVersion,
+      })
+      return id
+    })
   }
 
   get(sessionId: string): Session | undefined {
     return this.sessions.get(sessionId)
   }
 
+  getAllByAgentSocket(ws: WebSocket): Session[] {
+    return Array.from(this.sessions.values()).filter((s) => s.agentSocket === ws)
+  }
+
+  getByStreamSocket(ws: WebSocket): Session | undefined {
+    for (const session of this.sessions.values()) {
+      if (session.streamSocket === ws) return session
+    }
+    return undefined
+  }
+
+  getByBrowserSocket(ws: WebSocket): Session | undefined {
+    for (const session of this.sessions.values()) {
+      if (session.browserSocket === ws) return session
+    }
+    return undefined
+  }
+
   join(sessionId: string, browserSocket: WebSocket): void {
     const session = this.sessions.get(sessionId)
     if (!session) throw new Error(`Session not found: ${sessionId}`)
+    if (session.browserSocket?.readyState === 1 /* OPEN */) {
+      throw new Error(`Session busy: ${sessionId}`)
+    }
     session.browserSocket = browserSocket
   }
 
@@ -39,9 +80,6 @@ export class SessionManager {
     const session = this.sessions.get(sessionId)
     if (!session) return
     session.browserSocket = null
-    // Keep chromeData / deviceInfo / device status — cleared in clearDeviceCache (device:booting).
-    // Preserving them lets a reconnecting browser (e.g. React StrictMode WS blip) pick up
-    // the cached state from session:start without waiting for a new device:boot cycle.
   }
 
   clearDeviceCache(sessionId: string): void {
@@ -49,7 +87,12 @@ export class SessionManager {
     if (!session) return
     session.chromeData = undefined
     session.deviceInfo = undefined
-    session.devices = session.devices.map((d) => ({ ...d, status: 'shutdown' as const }))
+    session.deviceStatus = 'shutdown'
+  }
+
+  setStreamSocket(sessionId: string, ws: WebSocket): void {
+    const session = this.sessions.get(sessionId)
+    if (session) session.streamSocket = ws
   }
 
   setChromeData(sessionId: string, data: unknown): void {
@@ -62,29 +105,31 @@ export class SessionManager {
     if (session) session.deviceInfo = info
   }
 
-  getBySocket(socket: WebSocket): Session | undefined {
-    for (const session of this.sessions.values()) {
-      if (session.agentSocket === socket || session.browserSocket === socket) {
-        return session
-      }
-    }
-    return undefined
-  }
-
-  updateDeviceStatus(sessionId: string, deviceId: string, status: string): void {
+  updateDeviceStatus(sessionId: string, status: string): void {
     const session = this.sessions.get(sessionId)
-    if (!session) return
-    session.devices = session.devices.map((d) =>
-      d.id === deviceId ? { ...d, status: status as DeviceInfo['status'] } : d
-    )
+    if (session) session.deviceStatus = status
   }
 
   list(): SessionInfo[] {
-    return Array.from(this.sessions.values()).map((s) => ({
-      sessionId: s.id,
-      agentName: s.agentName,
-      busy: s.browserSocket !== null,
-      devices: s.devices,
+    // Group sessions by agentSocket
+    const agentMap = new Map<WebSocket, Session[]>()
+    for (const session of this.sessions.values()) {
+      const group = agentMap.get(session.agentSocket) ?? []
+      group.push(session)
+      agentMap.set(session.agentSocket, group)
+    }
+
+    return Array.from(agentMap.values()).map((group) => ({
+      agentName: group[0].agentName,
+      devices: group.map((s) => ({
+        id: s.deviceId,
+        name: s.deviceName,
+        platform: s.devicePlatform,
+        status: s.deviceStatus,
+        osVersion: s.deviceOsVersion,
+        sessionId: s.id,
+        busy: s.browserSocket !== null,
+      })),
     }))
   }
 }

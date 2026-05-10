@@ -162,7 +162,7 @@ describe('IOSAgent', () => {
 
   describe('device:boot handler', () => {
     it('sends device:booting then device:ready for a shutdown device', async () => {
-      const simctl = mockSimctl(false) // device is shutdown
+      const simctl = mockSimctl(false)
       const agent = new IOSAgent({ intervalMs: 50 }, simctl)
       await agent.connect(`ws://localhost:${port}`)
 
@@ -185,7 +185,7 @@ describe('IOSAgent', () => {
     })
 
     it('skips boot call for already-booted device', async () => {
-      const simctl = mockSimctl(true) // already booted
+      const simctl = mockSimctl(true)
       const agent = new IOSAgent({ intervalMs: 50 }, simctl)
       await agent.connect(`ws://localhost:${port}`)
 
@@ -222,6 +222,23 @@ describe('IOSAgent', () => {
       agent.disconnect()
       browser.close()
     })
+
+    it('agents:listed includes sessionId per device', async () => {
+      const agent = new IOSAgent({}, mockSimctl())
+      await agent.connect(`ws://localhost:${port}`)
+
+      const browser = new WebSocket(`ws://localhost:${port}`)
+      await waitForOpen(browser)
+      browser.send(JSON.stringify({ type: 'agents:list' }))
+      const listed = await waitForType(browser, 'agents:listed')
+
+      const sessions = listed.sessions as Array<{ devices: Array<{ sessionId?: string }> }>
+      expect(typeof sessions[0]?.devices[0]?.sessionId).toBe('string')
+      expect(sessions[0].devices[0].sessionId).toBe(agent.sessionId)
+
+      agent.disconnect()
+      browser.close()
+    })
   })
 
   describe('relay connection', () => {
@@ -232,7 +249,7 @@ describe('IOSAgent', () => {
       agent.disconnect()
     })
 
-    it('forwards binary frame to browser after connecting', async () => {
+    it('forwards binary frame to browser via stream WS after connecting', async () => {
       const browser = new WebSocket(`ws://localhost:${port}`)
       browser.binaryType = 'nodebuffer'
       await waitForOpen(browser)
