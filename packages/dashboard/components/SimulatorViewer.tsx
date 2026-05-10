@@ -3,7 +3,6 @@
 import { useCallback, useEffect, useRef, useState, Fragment } from 'react';
 import { Home, Camera, RotateCw } from 'lucide-react';
 import { useRelay } from '@/hooks/useRelay';
-import { useWebRTC } from '@/hooks/useWebRTC';
 import type { ChromeData, DeviceInfo, RelayMessage } from '@/lib/types';
 import { Button } from '@/components/ui/button';
 
@@ -15,34 +14,51 @@ interface Props {
 
 export function SimulatorViewer({ sessionId, deviceId, onBack }: Props) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  const videoRef = useRef<HTMLVideoElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const [joined, setJoined] = useState(false);
   const [deviceReady, setDeviceReady] = useState(false);
   const [fps, setFps] = useState(0);
   const [chrome, setChrome] = useState<ChromeData | null>(null);
   const [deviceInfo, setDeviceInfo] = useState<DeviceInfo | null>(null);
-  const [webrtcActive, setWebrtcActive] = useState(false);
   const frameCount = useRef(0);
   const sendRef = useRef<(msg: object) => void>(() => {});
+  const deviceSeq = useRef(0);
 
-  const { handleOffer, addIceCandidate } = useWebRTC({
-    onTrack: (stream) => {
-      if (videoRef.current) {
-        videoRef.current.srcObject = stream;
-        videoRef.current.play().catch(() => {});
-        setWebrtcActive(true);
-      }
-    },
-    send: (msg) => sendRef.current(msg),
-    sessionId,
-  });
+  const drawToCanvas = useCallback((data: ArrayBuffer) => {
+    const seq = deviceSeq.current;
+    createImageBitmap(new Blob([data], { type: 'image/jpeg' }))
+      .then((bitmap) => {
+        if (deviceSeq.current !== seq) { bitmap.close(); return; }
+        const canvas = canvasRef.current;
+        const ctx = canvas?.getContext('2d');
+        if (canvas && ctx) {
+          if (canvas.width !== bitmap.width || canvas.height !== bitmap.height) {
+            canvas.width = bitmap.width;
+            canvas.height = bitmap.height;
+          }
+          ctx.drawImage(bitmap, 0, 0);
+          frameCount.current += 1;
+        }
+        bitmap.close();
+      })
+      .catch(() => {});
+  }, []);
 
   const handleMessage = useCallback(
     (msg: RelayMessage) => {
       if (msg.type === 'session:joined') {
         setJoined(true);
         sendRef.current({ type: 'device:boot', sessionId, payload: { deviceId } });
+      }
+
+      if (msg.type === 'device:booting') {
+        setDeviceReady(false);
+        deviceSeq.current += 1;
+        const canvas = canvasRef.current;
+        if (canvas) {
+          const ctx = canvas.getContext('2d');
+          ctx?.clearRect(0, 0, canvas.width, canvas.height);
+        }
       }
 
       if (msg.type === 'device:ready') {
@@ -57,36 +73,15 @@ export function SimulatorViewer({ sessionId, deviceId, onBack }: Props) {
         setDeviceInfo(msg.payload);
       }
 
-      if (msg.type === 'webrtc:offer') {
-        handleOffer(msg.payload).catch(() => {});
-        return;
-      }
-
-      if (msg.type === 'webrtc:ice') {
-        addIceCandidate(msg.payload).catch(() => {});
-        return;
-      }
-
-      if (msg.type === 'stream:frame' && canvasRef.current) {
-        const ctx = canvasRef.current.getContext('2d');
-        if (!ctx) return;
-
-        const img = new Image();
-        img.onload = () => {
-          if (canvasRef.current) {
-            canvasRef.current.width = img.width;
-            canvasRef.current.height = img.height;
-            ctx.drawImage(img, 0, 0);
-          }
-        };
-        img.src = `data:${msg.mimeType ?? 'image/jpeg'};base64,${msg.payload}`;
-        frameCount.current += 1;
-      }
     },
-    [handleOffer, addIceCandidate, sessionId, deviceId],
+    [drawToCanvas, sessionId, deviceId],
   );
 
-  const { send, connected } = useRelay(handleMessage);
+  const handleBinaryFrame = useCallback((data: ArrayBuffer) => {
+    drawToCanvas(data);
+  }, [drawToCanvas]);
+
+  const { send, connected } = useRelay(handleMessage, handleBinaryFrame);
   sendRef.current = send;
 
   useEffect(() => {
@@ -100,20 +95,6 @@ export function SimulatorViewer({ sessionId, deviceId, onBack }: Props) {
     }, 1000);
     return () => clearInterval(timer);
   }, []);
-
-  // WebRTC fps counting via requestVideoFrameCallback
-  useEffect(() => {
-    const video = videoRef.current;
-    if (!video || !webrtcActive) return;
-
-    let rafId: number;
-    const countFrame = () => {
-      frameCount.current += 1;
-      rafId = video.requestVideoFrameCallback(countFrame);
-    };
-    rafId = video.requestVideoFrameCallback(countFrame);
-    return () => video.cancelVideoFrameCallback(rafId);
-  }, [webrtcActive]);
 
   const [isLandscape, setIsLandscape] = useState(false);
   const [flashedButton, setFlashedButton] = useState<string | null>(null);
@@ -210,8 +191,7 @@ export function SimulatorViewer({ sessionId, deviceId, onBack }: Props) {
       if (!containerRef.current || !chrome || isLandscape) return null;
       const rect = containerRef.current.getBoundingClientRect();
       const cx = (e.clientX - rect.left) * (chrome.compositeWidth / rect.width);
-      const cy =
-        (e.clientY - rect.top) * (chrome.compositeHeight / rect.height);
+      const cy = (e.clientY - rect.top) * (chrome.compositeHeight / rect.height);
       for (const btn of chrome.buttons) {
         const dx = cx - btn.normalOffset.x;
         const dy = cy - btn.normalOffset.y;
@@ -325,18 +305,14 @@ export function SimulatorViewer({ sessionId, deviceId, onBack }: Props) {
   }, [send, sessionId]);
 
   const handleScreenshot = useCallback(() => {
+    const src = canvasRef.current;
+    if (!src) return;
     const canvas = document.createElement('canvas');
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
-    if (webrtcActive && videoRef.current) {
-      canvas.width = videoRef.current.videoWidth;
-      canvas.height = videoRef.current.videoHeight;
-      ctx.drawImage(videoRef.current, 0, 0);
-    } else if (canvasRef.current) {
-      canvas.width = canvasRef.current.width;
-      canvas.height = canvasRef.current.height;
-      ctx.drawImage(canvasRef.current, 0, 0);
-    } else return;
+    canvas.width = src.width;
+    canvas.height = src.height;
+    ctx.drawImage(src, 0, 0);
     canvas.toBlob((blob) => {
       if (!blob) return;
       const url = URL.createObjectURL(blob);
@@ -346,7 +322,7 @@ export function SimulatorViewer({ sessionId, deviceId, onBack }: Props) {
       a.click();
       URL.revokeObjectURL(url);
     }, 'image/png');
-  }, [webrtcActive]);
+  }, []);
 
   const handleRotate = useCallback(() => {
     send({ type: 'input:rotate', sessionId });
@@ -370,32 +346,21 @@ export function SimulatorViewer({ sessionId, deviceId, onBack }: Props) {
   const compositeLogicalW = chrome ? chrome.compositeWidth / 2 : 0;
   const compositeLogicalH = chrome ? chrome.compositeHeight / 2 : 0;
   const MAX_DISPLAY_H = 750;
-  const displayScale =
-    compositeLogicalH > 0 ? Math.min(1, MAX_DISPLAY_H / compositeLogicalH) : 1;
+  const displayScale = compositeLogicalH > 0 ? Math.min(1, MAX_DISPLAY_H / compositeLogicalH) : 1;
   const displayW = Math.round(compositeLogicalW * displayScale);
   const displayH = Math.round(compositeLogicalH * displayScale);
 
   // Screen rect as % of composite — positions canvas inside device frame image
-  const screenPctLeft = chrome
-    ? (chrome.screenRect.x / chrome.compositeWidth) * 100
-    : 0;
-  const screenPctTop = chrome
-    ? (chrome.screenRect.y / chrome.compositeHeight) * 100
-    : 0;
-  const screenPctW = chrome
-    ? (chrome.screenRect.width / chrome.compositeWidth) * 100
-    : 100;
-  const screenPctH = chrome
-    ? (chrome.screenRect.height / chrome.compositeHeight) * 100
-    : 100;
+  const screenPctLeft = chrome ? (chrome.screenRect.x / chrome.compositeWidth) * 100 : 0;
+  const screenPctTop = chrome ? (chrome.screenRect.y / chrome.compositeHeight) * 100 : 0;
+  const screenPctW = chrome ? (chrome.screenRect.width / chrome.compositeWidth) * 100 : 100;
+  const screenPctH = chrome ? (chrome.screenRect.height / chrome.compositeHeight) * 100 : 100;
 
   // Corner radius: screenCornerRadius is in 2× composite px; scale down to CSS display px.
   // canvas CSS display width = compositeLogicalW * displayScale * (screenRect.width / compositeWidth)
   //                          = screenRect.width * displayScale / 2
   // So 2× composite px → CSS px factor = displayScale / 2
-  const cssCornerRadius = chrome
-    ? Math.round((chrome.screenCornerRadius / 2) * displayScale)
-    : 0;
+  const cssCornerRadius = chrome ? Math.round((chrome.screenCornerRadius / 2) * displayScale) : 0;
 
   return (
     <div className="flex flex-col items-center gap-3">
@@ -459,23 +424,6 @@ export function SimulatorViewer({ sessionId, deviceId, onBack }: Props) {
               alt=""
             />
             {/* Screen content — zIndex:3, above framePng so screen is always visible */}
-            <video
-              ref={videoRef}
-              muted
-              playsInline
-              style={{
-                position: 'absolute',
-                zIndex: 3,
-                left: `${screenPctLeft}%`,
-                top: `${screenPctTop}%`,
-                width: `${screenPctW}%`,
-                height: `${screenPctH}%`,
-                borderRadius:
-                  cssCornerRadius > 0 ? `${cssCornerRadius}px` : undefined,
-                display: webrtcActive ? 'block' : 'none',
-                objectFit: isLandscape ? 'fill' : undefined,
-              }}
-            />
             <canvas
               ref={canvasRef}
               style={{
@@ -485,9 +433,7 @@ export function SimulatorViewer({ sessionId, deviceId, onBack }: Props) {
                 top: `${screenPctTop}%`,
                 width: `${screenPctW}%`,
                 height: `${screenPctH}%`,
-                borderRadius:
-                  cssCornerRadius > 0 ? `${cssCornerRadius}px` : undefined,
-                display: webrtcActive ? 'none' : 'block',
+                borderRadius: cssCornerRadius > 0 ? `${cssCornerRadius}px` : undefined,
               }}
             />
             {/* Pinch finger hints — two semi-transparent circles at f0/f1 positions */}
@@ -531,9 +477,7 @@ export function SimulatorViewer({ sessionId, deviceId, onBack }: Props) {
               // For bottom-anchor buttons normalOffset.y is center Y; for all others it's top-edge Y.
               const isBottomAnchor = btn.anchor === 'bottom';
               const imgTopPct = isBottomAnchor
-                ? ((btn.normalOffset.y - btn.buttonH / 2) /
-                    chrome.compositeHeight) *
-                  100
+                ? ((btn.normalOffset.y - btn.buttonH / 2) / chrome.compositeHeight) * 100
                 : (btn.normalOffset.y / chrome.compositeHeight) * 100;
               const imgHPct = (btn.buttonH / chrome.compositeHeight) * 100;
               const imgWPct = (btn.buttonW / chrome.compositeWidth) * 100;
@@ -544,17 +488,13 @@ export function SimulatorViewer({ sessionId, deviceId, onBack }: Props) {
               const rolloverLeftPct =
                 ((btn.rolloverOffset.x - halfW) / chrome.compositeWidth) * 100;
               const hoverLeftPct =
-                ((2 * btn.rolloverOffset.x - btn.normalOffset.x - halfW) /
-                  chrome.compositeWidth) *
+                ((2 * btn.rolloverOffset.x - btn.normalOffset.x - halfW) / chrome.compositeWidth) *
                 100;
 
               // Tooltip position: at rollover center
-              const tooltipLeftPct =
-                (btn.rolloverOffset.x / chrome.compositeWidth) * 100;
+              const tooltipLeftPct = (btn.rolloverOffset.x / chrome.compositeWidth) * 100;
               const tooltipTopPct = isBottomAnchor
-                ? ((btn.normalOffset.y - btn.buttonH / 2) /
-                    chrome.compositeHeight) *
-                  100
+                ? ((btn.normalOffset.y - btn.buttonH / 2) / chrome.compositeHeight) * 100
                 : (btn.normalOffset.y / chrome.compositeHeight) * 100;
 
               // onTop (home) button: above framePng. Side buttons: behind framePng.
@@ -631,40 +571,19 @@ export function SimulatorViewer({ sessionId, deviceId, onBack }: Props) {
         </div>
       ) : (
         /* Fallback — no chrome data yet */
-        <>
-          <video
-            ref={videoRef}
-            muted
-            playsInline
-            className="block max-w-full"
-            style={{
-              borderRadius: '10%',
-              display: webrtcActive ? 'block' : 'none',
-            }}
-            onPointerDown={handlePointerDown}
-            onPointerMove={handlePointerMove}
-            onPointerUp={handlePointerUp}
-            onPointerCancel={handlePointerCancel}
-          />
-          <canvas
-            ref={canvasRef}
-            className="block max-w-full cursor-crosshair"
-            style={{
-              borderRadius: '10%',
-              display: webrtcActive ? 'none' : 'block',
-            }}
-            onPointerDown={handlePointerDown}
-            onPointerMove={handlePointerMove}
-            onPointerUp={handlePointerUp}
-            onPointerCancel={handlePointerCancel}
-          />
-        </>
+        <canvas
+          ref={canvasRef}
+          className="block max-w-full cursor-crosshair"
+          style={{ borderRadius: '10%' }}
+          onPointerDown={handlePointerDown}
+          onPointerMove={handlePointerMove}
+          onPointerUp={handlePointerUp}
+          onPointerCancel={handlePointerCancel}
+        />
       )}
 
       {joined && fps === 0 && (
-        <p className="text-sm text-muted-foreground">
-          Waiting for first frame...
-        </p>
+        <p className="text-sm text-muted-foreground">Waiting for first frame...</p>
       )}
 
       {/* Control bar */}

@@ -59,11 +59,12 @@ export type RelayMessage =
   | { type: 'session:joined'; sessionId: string }
   | { type: 'session:chrome'; payload: ChromeData }
   | { type: 'session:deviceInfo'; payload: DeviceInfo }
-  | { type: 'stream:frame'; payload: string; mimeType?: string }
   | { type: 'device:boot'; sessionId: string; payload: { deviceId: string } }
   | { type: 'device:booting' }
   | { type: 'device:ready'; payload: { deviceId: string } }
   | { type: 'device:boot-error'; message: string }
+  | { type: 'device:shutdown'; sessionId: string; payload: { deviceId: string } }
+  | { type: 'device:shutdown-done'; payload: { deviceId: string } }
   | { type: 'input:touch:start'; sessionId: string; payload: { x: number; y: number } }
   | { type: 'input:touch:move'; sessionId: string; payload: { x: number; y: number } }
   | { type: 'input:touch:end'; sessionId: string }
@@ -72,6 +73,4 @@ export type RelayMessage =
   | { type: 'input:pinch:end'; sessionId: string }
   | { type: 'input:button'; sessionId: string; payload: { name: string } }
   | { type: 'input:rotate'; sessionId: string }
-  | { type: 'webrtc:offer'; payload: { type: 'offer'; sdp: string } }
-  | { type: 'webrtc:ice'; payload: RTCIceCandidateInit }
   | { type: 'error'; message: string }

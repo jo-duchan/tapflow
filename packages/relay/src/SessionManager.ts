@@ -37,7 +37,19 @@ export class SessionManager {
 
   clearBrowser(sessionId: string): void {
     const session = this.sessions.get(sessionId)
-    if (session) session.browserSocket = null
+    if (!session) return
+    session.browserSocket = null
+    // Keep chromeData / deviceInfo / device status — cleared in clearDeviceCache (device:booting).
+    // Preserving them lets a reconnecting browser (e.g. React StrictMode WS blip) pick up
+    // the cached state from session:start without waiting for a new device:boot cycle.
+  }
+
+  clearDeviceCache(sessionId: string): void {
+    const session = this.sessions.get(sessionId)
+    if (!session) return
+    session.chromeData = undefined
+    session.deviceInfo = undefined
+    session.devices = session.devices.map((d) => ({ ...d, status: 'shutdown' as const }))
   }
 
   setChromeData(sessionId: string, data: unknown): void {
@@ -57,6 +69,14 @@ export class SessionManager {
       }
     }
     return undefined
+  }
+
+  updateDeviceStatus(sessionId: string, deviceId: string, status: string): void {
+    const session = this.sessions.get(sessionId)
+    if (!session) return
+    session.devices = session.devices.map((d) =>
+      d.id === deviceId ? { ...d, status: status as DeviceInfo['status'] } : d
+    )
   }
 
   list(): SessionInfo[] {

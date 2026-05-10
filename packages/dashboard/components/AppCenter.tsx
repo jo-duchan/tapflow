@@ -49,9 +49,7 @@ export function AppCenter({ onSelect }: Props) {
   }, [connected, send])
 
   const handleBoot = (session: SessionInfo, deviceId: string) => {
-    setBooting((prev) => ({ ...prev, [deviceId]: 'booting' }))
-    send({ type: 'session:start', sessionId: session.sessionId })
-    send({ type: 'device:boot', sessionId: session.sessionId, payload: { deviceId } })
+    onSelect(session.sessionId, deviceId)
   }
 
   const platformIcon = (platform: 'ios' | 'android') => (platform === 'ios' ? '󰀄' : '')

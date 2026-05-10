@@ -79,7 +79,7 @@ export class ScreenCaptureStreamer {
       },
       cancel() {
         done = true
-        proc.kill()
+        proc.kill('SIGKILL')
       },
     })
   }

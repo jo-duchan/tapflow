@@ -46,7 +46,14 @@ export class RelayServer {
   }
 
   private handleConnection(ws: WebSocket): void {
-    ws.on('message', (data) => {
+    ws.on('message', (data, isBinary) => {
+      if (isBinary) {
+        const session = this.sessions.getBySocket(ws)
+        if (session?.browserSocket?.readyState === WebSocket.OPEN) {
+          session.browserSocket.send(data, { binary: true })
+        }
+        return
+      }
       try {
         const msg: RelayMessage = JSON.parse(data.toString())
         this.route(ws, msg)
@@ -94,6 +101,12 @@ export class RelayServer {
         if (session.deviceInfo) {
           ws.send(JSON.stringify({ type: 'session:deviceInfo', payload: session.deviceInfo }))
         }
+        // If a device is already booted (e.g. browser reconnected after a brief WS blip),
+        // replay device:ready so deviceReadyRef is set and frames start drawing immediately.
+        const bootedDevice = session.devices.find((d) => d.status === 'booted')
+        if (bootedDevice) {
+          ws.send(JSON.stringify({ type: 'device:ready', payload: { deviceId: bootedDevice.id } }))
+        }
         break
       }
 
@@ -123,16 +136,8 @@ export class RelayServer {
         break
       }
 
-      case 'stream:frame': {
-        // agent → browser
-        const session = this.sessions.getBySocket(ws)
-        if (session?.browserSocket?.readyState === WebSocket.OPEN) {
-          session.browserSocket.send(JSON.stringify(msg))
-        }
-        break
-      }
-
-      case 'device:boot': {
+      case 'device:boot':
+      case 'device:shutdown': {
         // browser → agent
         const session = this.sessions.get(msg.sessionId!)
         if (session?.agentSocket.readyState === WebSocket.OPEN) {
@@ -141,12 +146,46 @@ export class RelayServer {
         break
       }
 
-      case 'device:booting':
-      case 'device:ready':
+      case 'device:booting': {
+        // agent → browser; clear cached device data so the next session:start
+        // doesn't replay stale chrome/deviceInfo/device:ready from the old device.
+        const session = this.sessions.getBySocket(ws)
+        if (!session) break
+        this.sessions.clearDeviceCache(session.id)
+        if (session.browserSocket?.readyState === WebSocket.OPEN) {
+          session.browserSocket.send(JSON.stringify(msg))
+        }
+        break
+      }
+
       case 'device:boot-error': {
         // agent → browser
         const session = this.sessions.getBySocket(ws)
         if (session?.browserSocket?.readyState === WebSocket.OPEN) {
+          session.browserSocket.send(JSON.stringify(msg))
+        }
+        break
+      }
+
+      case 'device:shutdown-done': {
+        // agent → browser + persist status so agents:list reflects shutdown state
+        const session = this.sessions.getBySocket(ws)
+        if (!session) break
+        const { deviceId } = (msg as { type: string; payload: { deviceId: string } }).payload
+        this.sessions.updateDeviceStatus(session.id, deviceId, 'shutdown')
+        if (session.browserSocket?.readyState === WebSocket.OPEN) {
+          session.browserSocket.send(JSON.stringify(msg))
+        }
+        break
+      }
+
+      case 'device:ready': {
+        // agent → browser + persist status so agents:list reflects booted state
+        const session = this.sessions.getBySocket(ws)
+        if (!session) break
+        const { deviceId } = (msg as { type: string; payload: { deviceId: string } }).payload
+        this.sessions.updateDeviceStatus(session.id, deviceId, 'booted')
+        if (session.browserSocket?.readyState === WebSocket.OPEN) {
           session.browserSocket.send(JSON.stringify(msg))
         }
         break
@@ -169,26 +208,6 @@ export class RelayServer {
         break
       }
 
-      case 'webrtc:offer':
-      case 'webrtc:ice': {
-        // bidirectional: forward to the other side
-        const session = this.sessions.getBySocket(ws)
-        if (!session) break
-        const target = session.agentSocket === ws ? session.browserSocket : session.agentSocket
-        if (target?.readyState === WebSocket.OPEN) {
-          target.send(JSON.stringify(msg))
-        }
-        break
-      }
-
-      case 'webrtc:answer': {
-        // browser → agent only
-        const session = this.sessions.get(msg.sessionId!)
-        if (session?.agentSocket.readyState === WebSocket.OPEN) {
-          session.agentSocket.send(JSON.stringify(msg))
-        }
-        break
-      }
     }
   }
 
