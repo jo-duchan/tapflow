@@ -538,27 +538,30 @@ export function SimulatorViewer({ sessionId, deviceId, onBack, buildId }: Props)
                   ? (btn.rolloverOffset.y / chrome.compositeHeight) * 100
                   : (btn.normalOffset.y / chrome.compositeHeight) * 100;
 
-              // onTop (home) button: above framePng. Side buttons: behind framePng.
-              // compositeUnder for home: pressedPng at z-index 3, buttonPng at z-index 4
-              //   → pressedPng shows through the semi-transparent ring of buttonPng.
-              // Side buttons: both at z-index 1; pressedPng renders AFTER buttonPng in DOM
-              //   → DOM order makes pressedPng appear on top.
+              // top-anchor hover: button slides UP (top CSS) instead of sideways.
+              // hoverTop = 2*rollover.y - normal.y  (same delta-doubling as hoverLeftPct).
+              const hoverTopPct = isTopAnchor
+                ? ((2 * btn.rolloverOffset.y - btn.normalOffset.y) / chrome.compositeHeight) * 100
+                : 0;
+
+              // z-index:
+              //   onTop (home): 4 — above everything
+              //   all others: 1 — behind frame, visible as tabs protruding above/around the bezel
               const btnZ = btn.onTop ? 4 : 1;
 
               return (
                 <Fragment key={btn.name}>
-                  {/* buttonPng — rendered first so side button pressedPng (below) can overlay via DOM order */}
                   {btn.buttonPng && (
                     <img
                       src={`data:image/png;base64,${btn.buttonPng}`}
                       style={{
                         position: 'absolute',
                         zIndex: btnZ,
-                        top: `${imgTopPct}%`,
-                        left: `${isHovered ? hoverLeftPct : rolloverLeftPct}%`,
+                        top: `${isTopAnchor ? (isHovered ? hoverTopPct : imgTopPct) : imgTopPct}%`,
+                        left: `${isTopAnchor ? rolloverLeftPct : (isHovered ? hoverLeftPct : rolloverLeftPct)}%`,
                         width: `${imgWPct}%`,
                         height: `${imgHPct}%`,
-                        transition: 'left 0.15s ease',
+                        transition: isTopAnchor ? 'top 0.15s ease' : 'left 0.15s ease',
                         pointerEvents: 'none',
                         userSelect: 'none',
                       }}
@@ -566,15 +569,16 @@ export function SimulatorViewer({ sessionId, deviceId, onBack, buildId }: Props)
                       alt=""
                     />
                   )}
-                  {/* pressedPng — side: z-index 1 after buttonPng (DOM on top); home: z-index 3 below buttonPng (compositeUnder) */}
                   {isFlashed && btn.pressedPng && btn.pressedRect && (
                     <img
                       src={`data:image/png;base64,${btn.pressedPng}`}
                       style={{
                         position: 'absolute',
                         zIndex: btn.onTop ? 3 : 1,
-                        left: `${isHovered ? hoverLeftPct : rolloverLeftPct}%`,
-                        top: `${(btn.pressedRect.y / chrome.compositeHeight) * 100}%`,
+                        left: `${isTopAnchor ? rolloverLeftPct : (isHovered ? hoverLeftPct : rolloverLeftPct)}%`,
+                        top: `${isTopAnchor
+                          ? (isHovered ? hoverTopPct : imgTopPct)
+                          : (btn.pressedRect.y / chrome.compositeHeight) * 100}%`,
                         width: `${(btn.pressedRect.width / chrome.compositeWidth) * 100}%`,
                         height: `${(btn.pressedRect.height / chrome.compositeHeight) * 100}%`,
                         pointerEvents: 'none',
@@ -584,7 +588,7 @@ export function SimulatorViewer({ sessionId, deviceId, onBack, buildId }: Props)
                       alt=""
                     />
                   )}
-                  {/* Hover tooltip */}
+                  {/* Hover tooltip — top-anchor: show below button; others: show above */}
                   {isHovered && (
                     <div
                       style={{
@@ -592,7 +596,9 @@ export function SimulatorViewer({ sessionId, deviceId, onBack, buildId }: Props)
                         zIndex: 5,
                         left: `${tooltipLeftPct}%`,
                         top: `${tooltipTopPct}%`,
-                        transform: 'translate(-50%, calc(-100% - 8px))',
+                        transform: isTopAnchor
+                          ? 'translate(-50%, calc(100% + 8px))'
+                          : 'translate(-50%, calc(-100% - 8px))',
                         background: 'rgba(0,0,0,0.72)',
                         color: '#fff',
                         fontSize: 11,

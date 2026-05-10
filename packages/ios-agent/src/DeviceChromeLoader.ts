@@ -164,12 +164,10 @@ function computeButtonLayout(
         topY    = mT + roll.y
         break
       case 'bottom': {
-        // centerX: relative to device body center for center-aligned buttons (e.g. home)
         const align = inp.align ?? 'leading'
         centerX = align === 'center'   ? mL + compositeW / 2 + roll.x
                 : align === 'trailing' ? mL + compositeW + roll.x
                 :                        mL + roll.x
-        // topY: measured from the BOTTOM of the device body downward (offset is negative = inside)
         topY = mT + compositeH + roll.y
         break
       }
@@ -232,13 +230,10 @@ function computeButtonLayout(
         normalCX = align === 'center'   ? mL + compositeW / 2 + nx
                  : align === 'trailing' ? mL + compositeW + nx
                  :                        mL + nx
-        // center Y: bottom of body + offset (negative) + half height
         normalCY = mT + compositeH + ny + h / 2
         break
       }
       case 'top': {
-        // 'top' anchor: ny is center Y; convert to top-edge for normalOffset (same convention as left/right).
-        // nx must be align-aware (trailing = right edge of device body).
         const align = inp.align ?? 'leading'
         normalCX = align === 'center'   ? mL + compositeW / 2 + nx
                  : align === 'trailing' ? mL + compositeW + nx
