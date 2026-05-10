@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useState, type FormEvent } from 'react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -30,7 +30,7 @@ export function TeamSettings() {
 
   useEffect(() => { load() }, [])
 
-  async function handleInvite(e: React.FormEvent) {
+  async function handleInvite(e: FormEvent) {
     e.preventDefault()
     setInviting(true)
     const res = await fetch('/api/v1/team/invite', {

@@ -91,7 +91,7 @@ export function handleCreateComment(
 
     const db = getDb()
     const commentResult = db.prepare(
-      'INSERT INTO comments (build_id, author_id, body) VALUES (?, ?, ?)'
+      "INSERT INTO comments (build_id, author_id, body, created_at) VALUES (?, ?, ?, strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))"
     ).run(fields.build_id, auth.userId, fields.body.trim())
 
     const commentId = commentResult.lastInsertRowid as number

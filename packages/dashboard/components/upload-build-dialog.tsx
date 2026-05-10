@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react'
+import { useRef, useState, type FormEvent } from 'react'
 import { Button } from '@/components/ui/button'
 import {
   Dialog,
@@ -29,7 +29,7 @@ export function UploadBuildDialog({ onSuccess }: Props) {
   const [uploading, setUploading] = useState(false)
   const inputRef = useRef<HTMLInputElement>(null)
 
-  async function handleUpload(e: React.FormEvent) {
+  async function handleUpload(e: FormEvent) {
     e.preventDefault()
     if (!file) return
     setError('')

@@ -8,6 +8,8 @@ export type MessageType =
   | 'session:chrome'
   | 'session:deviceInfo'
   | 'session:end'
+  | 'stream:register'
+  | 'stream:registered'
   | 'device:boot'
   | 'device:booting'
   | 'device:ready'
@@ -37,12 +39,13 @@ export interface DeviceInfo {
   platform: string
   status: string
   osVersion?: string
+  sessionId: string
+  busy: boolean
 }
 
+// agents:listed response groups devices by agent machine
 export interface SessionInfo {
-  sessionId: string
   agentName?: string
-  busy: boolean
   devices: DeviceInfo[]
 }
 
@@ -52,7 +55,11 @@ export interface RelayMessage {
   payload?: unknown
   message?: string
   agentName?: string
-  devices?: DeviceInfo[]
+  // agent:register: raw device list (without sessionId/busy — added by relay)
+  devices?: Array<{ id: string; name: string; platform: string; status: string; osVersion?: string }>
+  // agents:listed: grouped by agent
   sessions?: SessionInfo[]
+  // agent:registered: per-device sessionId assignments
+  registeredSessions?: Array<{ deviceId: string; sessionId: string }>
   buildId?: number
 }

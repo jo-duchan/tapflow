@@ -61,14 +61,14 @@ export function SessionList({ onSelect }: Props) {
     if (connected) send({ type: 'agents:list' })
   }, [connected, send])
 
-  const handleBoot = (session: SessionInfo, deviceId: string) => {
-    onSelect(session.sessionId, deviceId)
+  const handleBoot = (_session: SessionInfo, deviceId: string, sessionId: string) => {
+    onSelect(sessionId, deviceId)
   }
 
-  const handleShutdown = (session: SessionInfo, deviceId: string) => {
+  const handleShutdown = (deviceId: string, sessionId: string) => {
     setShutting((prev) => ({ ...prev, [deviceId]: true }))
-    send({ type: 'session:start', sessionId: session.sessionId })
-    send({ type: 'device:shutdown', sessionId: session.sessionId, payload: { deviceId } })
+    send({ type: 'session:start', sessionId })
+    send({ type: 'device:shutdown', sessionId, payload: { deviceId } })
   }
 
   if (!connected) {
@@ -99,11 +99,11 @@ export function SessionList({ onSelect }: Props) {
           const isBooting = booting[d.id] === 'booting'
           const isError = booting[d.id] === 'error'
           const isShutting = shutting[d.id] === true
-          const isBusy = s.busy
+          const isBusy = d.busy
           const isBooted = d.status === 'booted'
 
           return (
-            <li key={`${s.sessionId}-${d.id}`}>
+            <li key={`${d.sessionId}-${d.id}`}>
               <Card>
                 <CardContent className="flex items-center gap-4 p-5">
                   <div className="flex-1">
@@ -122,7 +122,7 @@ export function SessionList({ onSelect }: Props) {
                   )}
 
                   {isBooted && !isBusy && !isShutting && (
-                    <Button size="sm" onClick={() => onSelect(s.sessionId, d.id)}>
+                    <Button size="sm" onClick={() => onSelect(d.sessionId, d.id)}>
                       Connect
                     </Button>
                   )}
@@ -130,18 +130,18 @@ export function SessionList({ onSelect }: Props) {
                     <Button
                       size="sm"
                       variant="outline"
-                      onClick={() => handleShutdown(s, d.id)}
+                      onClick={() => handleShutdown(d.id, d.sessionId)}
                     >
                       Shutdown
                     </Button>
                   )}
                   {!isBooted && !isBooting && !isError && !isShutting && (
-                    <Button size="sm" variant="outline" onClick={() => handleBoot(s, d.id)}>
+                    <Button size="sm" variant="outline" onClick={() => handleBoot(s, d.id, d.sessionId)}>
                       Boot
                     </Button>
                   )}
                   {isError && (
-                    <Button size="sm" variant="outline" onClick={() => handleBoot(s, d.id)}>
+                    <Button size="sm" variant="outline" onClick={() => handleBoot(s, d.id, d.sessionId)}>
                       Retry
                     </Button>
                   )}

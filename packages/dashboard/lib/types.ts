@@ -4,6 +4,8 @@ export interface AgentDevice {
   platform: string
   status: string
   osVersion?: string
+  sessionId: string
+  busy: boolean
 }
 
 export interface Comment {
@@ -21,9 +23,7 @@ export interface CommentAttachment {
 }
 
 export interface SessionInfo {
-  sessionId: string
   agentName?: string
-  busy: boolean
   devices: AgentDevice[]
 }
 
