@@ -33,10 +33,6 @@ export type MessageType =
   | 'input:button'
   | 'input:rotate'
   | 'input:keyboard:toggle'
-  | 'record:start'
-  | 'record:stop'
-  | 'record:done'
-  | 'record:error'
   | 'error'
 
 export interface DeviceInfo {

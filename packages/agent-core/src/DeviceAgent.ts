@@ -13,8 +13,6 @@ export interface DeviceAgent {
   touchEnd(): Promise<void>
   type(text: string): Promise<void>
   pressKey(key: string): Promise<void>
-  startRecording(deviceId: string): Promise<void>
-  stopRecording(deviceId: string): Promise<string>
 }
 
 export type DeviceAgentConstructor = new () => DeviceAgent

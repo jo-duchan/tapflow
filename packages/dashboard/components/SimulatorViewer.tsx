@@ -11,11 +11,15 @@ interface Props {
   deviceId: string;
   onBack: () => void;
   buildId?: number;
+  onRecordingUploaded?: () => void;
 }
 
-export function SimulatorViewer({ sessionId, deviceId, onBack, buildId }: Props) {
+export function SimulatorViewer({ sessionId, deviceId, onBack, buildId, onRecordingUploaded }: Props) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
+  // off-screen canvas: source for MediaRecorder (composite of framebuffer + chrome + overlays)
+  const recordCanvasRef = useRef<HTMLCanvasElement>(null);
+
   const [joined, setJoined] = useState(false);
   const [deviceReady, setDeviceReady] = useState(false);
   const [fps, setFps] = useState(0);
@@ -29,20 +33,50 @@ export function SimulatorViewer({ sessionId, deviceId, onBack, buildId }: Props)
   const [installError, setInstallError] = useState<string | null>(null);
   const [launching, setLaunching] = useState(false);
 
+  // ── recording state ───────────────────────────────────────────────────────
+  const [recordState, setRecordState] = useState<'idle' | 'recording' | 'uploading' | 'done'>('idle');
+  const recordingRef = useRef(false);
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const recordChunksRef = useRef<Blob[]>([]);
+  const recordMimeRef = useRef('');
+  const rafIdRef = useRef(0);
+
+  // chrome image cache for drawImage in rAF loop (avoid re-decoding base64 every frame)
+  const chromeImgRef = useRef<HTMLImageElement | null>(null);
+  const chromeRef = useRef<ChromeData | null>(null);
+  useEffect(() => { chromeRef.current = chrome; }, [chrome]);
+
+  useEffect(() => {
+    if (!chrome) { chromeImgRef.current = null; return; }
+    const img = new Image();
+    img.onload = () => { chromeImgRef.current = img; };
+    img.src = `data:image/png;base64,${chrome.framePng}`;
+  }, [chrome]);
+
+  // cursor overlay state (refs to avoid stale closures in rAF)
+  const cursorPosRef = useRef<{ x: number; y: number } | null>(null);
+  const cursorStateRef = useRef<'idle' | 'down' | 'release'>('idle');
+  const releaseAnimRef = useRef<{ startTime: number } | null>(null);
+
+  // pinch hint mirror for rAF (state → ref)
+  const pinchHintRef = useRef<{ f0: { x: number; y: number }; f1: { x: number; y: number } } | null>(null);
+
   const drawToCanvas = useCallback((data: ArrayBuffer) => {
     const seq = deviceSeq.current;
     createImageBitmap(new Blob([data], { type: 'image/jpeg' }))
       .then((bitmap) => {
-        if (deviceSeq.current !== seq) {
-          bitmap.close();
-          return;
-        }
+        if (deviceSeq.current !== seq) { bitmap.close(); return; }
         const canvas = canvasRef.current;
         const ctx = canvas?.getContext('2d');
         if (canvas && ctx) {
           if (canvas.width !== bitmap.width || canvas.height !== bitmap.height) {
             canvas.width = bitmap.width;
             canvas.height = bitmap.height;
+            // sync record canvas size when no chrome
+            if (!chromeRef.current) {
+              const rc = recordCanvasRef.current;
+              if (rc) { rc.width = bitmap.width; rc.height = bitmap.height; }
+            }
           }
           ctx.drawImage(bitmap, 0, 0);
           frameCount.current += 1;
@@ -58,7 +92,6 @@ export function SimulatorViewer({ sessionId, deviceId, onBack, buildId }: Props)
         setJoined(true);
         sendRef.current({ type: 'device:boot', sessionId, payload: { deviceId } });
       }
-
       if (msg.type === 'device:booting') {
         setDeviceReady(false);
         setInstalling(false);
@@ -66,70 +99,23 @@ export function SimulatorViewer({ sessionId, deviceId, onBack, buildId }: Props)
         setInstallError(null);
         deviceSeq.current += 1;
         const canvas = canvasRef.current;
-        if (canvas) {
-          const ctx = canvas.getContext('2d');
-          ctx?.clearRect(0, 0, canvas.width, canvas.height);
-        }
+        if (canvas) { const ctx = canvas.getContext('2d'); ctx?.clearRect(0, 0, canvas.width, canvas.height); }
       }
-
       if (msg.type === 'device:ready') {
         setDeviceReady(true);
-        if (buildId) {
-          setInstalling(true);
-          sendRef.current({ type: 'app:install', sessionId, buildId });
-        }
+        if (buildId) { setInstalling(true); sendRef.current({ type: 'app:install', sessionId, buildId }); }
       }
-
-      if (msg.type === 'app:install-done') {
-        setInstalling(false);
-        setInstalled(true);
-      }
-
-      if (msg.type === 'app:install-error') {
-        setInstalling(false);
-        setInstallError(msg.message);
-      }
-
-      if (msg.type === 'app:launch-done') {
-        setLaunching(false);
-      }
-
-      if (msg.type === 'app:launch-error') {
-        setLaunching(false);
-      }
-
-      if (msg.type === 'session:chrome') {
-        setChrome(msg.payload);
-      }
-
-      if (msg.type === 'session:deviceInfo') {
-        setDeviceInfo(msg.payload);
-      }
-
-      if (msg.type === 'record:done') {
-        setRecordState('done');
-        const { downloadUrl } = msg.payload as { downloadUrl: string };
-        const a = document.createElement('a');
-        a.href = downloadUrl;
-        a.download = '';
-        a.click();
-        setTimeout(() => setRecordState('idle'), 2000);
-      }
-
-      if (msg.type === 'record:error') {
-        setRecordState('idle');
-        console.error('[record]', msg.message);
-      }
+      if (msg.type === 'app:install-done') { setInstalling(false); setInstalled(true); }
+      if (msg.type === 'app:install-error') { setInstalling(false); setInstallError(msg.message); }
+      if (msg.type === 'app:launch-done') { setLaunching(false); }
+      if (msg.type === 'app:launch-error') { setLaunching(false); }
+      if (msg.type === 'session:chrome') { setChrome(msg.payload); }
+      if (msg.type === 'session:deviceInfo') { setDeviceInfo(msg.payload); }
     },
     [drawToCanvas, sessionId, deviceId, buildId],
   );
 
-  const handleBinaryFrame = useCallback(
-    (data: ArrayBuffer) => {
-      drawToCanvas(data);
-    },
-    [drawToCanvas],
-  );
+  const handleBinaryFrame = useCallback((data: ArrayBuffer) => { drawToCanvas(data); }, [drawToCanvas]);
 
   const { send, connected } = useRelay(handleMessage, handleBinaryFrame);
   sendRef.current = send;
@@ -139,18 +125,188 @@ export function SimulatorViewer({ sessionId, deviceId, onBack, buildId }: Props)
   }, [connected, send, sessionId]);
 
   useEffect(() => {
-    const timer = setInterval(() => {
-      setFps(frameCount.current);
-      frameCount.current = 0;
-    }, 1000);
+    const timer = setInterval(() => { setFps(frameCount.current); frameCount.current = 0; }, 1000);
     return () => clearInterval(timer);
   }, []);
 
+  // sync record canvas size when chrome arrives
+  useEffect(() => {
+    if (!chrome) return;
+    const rc = recordCanvasRef.current;
+    if (rc) { rc.width = chrome.compositeWidth / 2; rc.height = chrome.compositeHeight / 2; }
+  }, [chrome]);
+
+  // ── rAF compose loop ──────────────────────────────────────────────────────
+  const composeFrame = useCallback(() => {
+    if (!recordingRef.current) return;
+
+    const rc = recordCanvasRef.current;
+    const fc = canvasRef.current;
+    if (!rc || !fc) { rafIdRef.current = requestAnimationFrame(composeFrame); return; }
+
+    const ctx = rc.getContext('2d');
+    if (!ctx) { rafIdRef.current = requestAnimationFrame(composeFrame); return; }
+
+    const ch = chromeRef.current;
+    ctx.clearRect(0, 0, rc.width, rc.height);
+
+    if (ch) {
+      // 1. framebuffer in screen area
+      const sx = ch.screenRect.x / 2;
+      const sy = ch.screenRect.y / 2;
+      const sw = ch.screenRect.width / 2;
+      const sh = ch.screenRect.height / 2;
+      ctx.drawImage(fc, sx, sy, sw, sh);
+      // 2. chrome frame on top
+      if (chromeImgRef.current) ctx.drawImage(chromeImgRef.current, 0, 0, rc.width, rc.height);
+    } else {
+      ctx.drawImage(fc, 0, 0, rc.width, rc.height);
+    }
+
+    // 3. pinch hint
+    const ph = pinchHintRef.current;
+    if (ph) {
+      for (const f of [ph.f0, ph.f1]) {
+        let cx: number, cy: number;
+        if (ch) {
+          cx = ch.screenRect.x / 2 + f.x * ch.screenRect.width / 2;
+          cy = ch.screenRect.y / 2 + f.y * ch.screenRect.height / 2;
+        } else {
+          cx = f.x * rc.width;
+          cy = f.y * rc.height;
+        }
+        ctx.beginPath();
+        ctx.arc(cx, cy, 17, 0, Math.PI * 2);
+        ctx.fillStyle = 'rgba(30,140,243,0.20)';
+        ctx.fill();
+        ctx.strokeStyle = 'rgba(30,140,243,0.60)';
+        ctx.lineWidth = 1.5;
+        ctx.stroke();
+      }
+    }
+
+    // 4. cursor
+    const cp = cursorPosRef.current;
+    if (cp) {
+      const state = cursorStateRef.current;
+      const ra = releaseAnimRef.current;
+      ctx.save();
+      if (state === 'down') {
+        ctx.beginPath();
+        ctx.arc(cp.x, cp.y, 16, 0, Math.PI * 2);
+        ctx.fillStyle = 'rgba(220,38,38,0.4)';
+        ctx.fill();
+        ctx.strokeStyle = 'rgb(220,38,38)';
+        ctx.lineWidth = 3;
+        ctx.stroke();
+      } else if (state === 'release' && ra) {
+        const t = Math.min((performance.now() - ra.startTime) / 300, 1);
+        ctx.beginPath();
+        ctx.arc(cp.x, cp.y, 16 + 16 * t, 0, Math.PI * 2);
+        ctx.strokeStyle = `rgba(220,38,38,${(1 - t) * 0.8})`;
+        ctx.lineWidth = 3;
+        ctx.stroke();
+        if (t >= 1) { cursorStateRef.current = 'idle'; releaseAnimRef.current = null; }
+      } else {
+        ctx.beginPath();
+        ctx.arc(cp.x, cp.y, 12, 0, Math.PI * 2);
+        ctx.fillStyle = 'rgba(255,255,255,0.5)';
+        ctx.fill();
+        ctx.strokeStyle = 'rgba(255,255,255,0.9)';
+        ctx.lineWidth = 2;
+        ctx.stroke();
+      }
+      ctx.restore();
+    }
+
+    rafIdRef.current = requestAnimationFrame(composeFrame);
+  }, []);
+
+  // ── client recording ──────────────────────────────────────────────────────
+  const startClientRecording = useCallback(() => {
+    const rc = recordCanvasRef.current;
+    if (!rc) return;
+
+    // ensure size when chrome not yet loaded
+    if (rc.width === 0 || rc.height === 0) {
+      const fc = canvasRef.current;
+      if (fc && fc.width > 0) { rc.width = fc.width; rc.height = fc.height; }
+      else return;
+    }
+
+    const types = ['video/mp4;codecs=avc1', 'video/webm;codecs=vp9', 'video/webm;codecs=vp8', 'video/webm'];
+    const mime = types.find((t) => MediaRecorder.isTypeSupported(t)) ?? '';
+    if (!mime) { console.error('[record] no supported codec'); return; }
+
+    recordMimeRef.current = mime;
+    recordChunksRef.current = [];
+
+    const mr = new MediaRecorder(rc.captureStream(30), { mimeType: mime });
+    mr.ondataavailable = (e) => { if (e.data.size > 0) recordChunksRef.current.push(e.data); };
+    mediaRecorderRef.current = mr;
+    mr.start(1000);
+
+    recordingRef.current = true;
+    rafIdRef.current = requestAnimationFrame(composeFrame);
+    setRecordState('recording');
+  }, [composeFrame]);
+
+  const stopClientRecording = useCallback(async () => {
+    setRecordState('uploading');
+    recordingRef.current = false;
+    cancelAnimationFrame(rafIdRef.current);
+
+    const mr = mediaRecorderRef.current;
+    if (!mr) return;
+    await new Promise<void>((resolve) => { mr.onstop = () => resolve(); mr.stop(); });
+    mediaRecorderRef.current = null;
+
+    const mime = recordMimeRef.current;
+    const ext = mime.includes('mp4') ? '.mp4' : '.webm';
+    const blob = new Blob(recordChunksRef.current, { type: mime });
+    recordChunksRef.current = [];
+
+    const formData = new FormData();
+    formData.append('file', blob, `tapflow-${Date.now()}${ext}`);
+
+    try {
+      const res = await fetch(`/api/v1/recordings/upload?sessionId=${sessionId}`, {
+        method: 'POST',
+        credentials: 'include',
+        body: formData,
+      });
+      const json = await res.json() as { url?: string };
+      if (res.ok && json.url) {
+        const a = document.createElement('a');
+        a.href = json.url;
+        a.download = '';
+        a.click();
+        onRecordingUploaded?.();
+        setRecordState('done');
+        setTimeout(() => setRecordState('idle'), 2000);
+      } else {
+        console.error('[record] upload failed', res.status);
+        setRecordState('idle');
+      }
+    } catch (e) {
+      console.error('[record] upload error', e);
+      setRecordState('idle');
+    }
+  }, [sessionId, onRecordingUploaded]);
+
+  // stop recording when tab becomes hidden
+  useEffect(() => {
+    if (recordState !== 'recording') return;
+    const onVisibility = () => {
+      if (document.visibilityState === 'hidden') stopClientRecording();
+    };
+    document.addEventListener('visibilitychange', onVisibility);
+    return () => document.removeEventListener('visibilitychange', onVisibility);
+  }, [recordState, stopClientRecording]);
+
+  // ── interaction ───────────────────────────────────────────────────────────
   const [isLandscape, setIsLandscape] = useState(false);
   const [keyboardActive, setKeyboardActive] = useState(false);
-  const [recordState, setRecordState] = useState<'idle' | 'recording' | 'uploading' | 'done'>(
-    'idle',
-  );
   const [flashedButton, setFlashedButton] = useState<string | null>(null);
   const [hoveredButton, setHoveredButton] = useState<string | null>(null);
   const [pinchHint, setPinchHint] = useState<{
@@ -165,62 +321,38 @@ export function SimulatorViewer({ sessionId, deviceId, onBack, buildId }: Props)
   const MOVE_THROTTLE_MS = 16;
   const DRAG_THRESHOLD = 0.02;
 
-  // Keyboard forwarding: send physical key code (KeyboardEvent.code) via HID.
-  // Alt/Option is reserved for pinch mode — excluded from key forwarding.
-  // Modifier keys (Shift/Ctrl/Meta) are encoded as a bitmap in the modifiers field.
-  // Korean and other IME input is handled by the simulator's own input source.
+  useEffect(() => { pinchHintRef.current = pinchHint; }, [pinchHint]);
+
+  // Keyboard forwarding: send physical key code via HID.
+  // Alt/Option reserved for pinch mode. Modifiers encoded as bitmap.
   useEffect(() => {
-    const MODIFIER_CODES = new Set([
-      'ShiftLeft',
-      'ShiftRight',
-      'ControlLeft',
-      'ControlRight',
-      'MetaLeft',
-      'MetaRight',
-    ]);
+    const MODIFIER_CODES = new Set(['ShiftLeft', 'ShiftRight', 'ControlLeft', 'ControlRight', 'MetaLeft', 'MetaRight']);
     const onKeyDown = (e: KeyboardEvent) => {
-      if (e.code === 'AltLeft' || e.code === 'AltRight') {
-        isOptionHeld.current = true;
-        return;
-      }
+      if (e.code === 'AltLeft' || e.code === 'AltRight') { isOptionHeld.current = true; return; }
       if (!keyboardActive) return;
-      // Skip standalone modifier key presses — included as bitmap in main key events
       if (MODIFIER_CODES.has(e.code)) return;
       e.preventDefault();
       const modifiers = (e.shiftKey ? 0x02 : 0) | (e.ctrlKey ? 0x01 : 0) | (e.metaKey ? 0x08 : 0);
       send({ type: 'input:key', sessionId, payload: { code: e.code, modifiers } });
     };
     const onKeyUp = (e: KeyboardEvent) => {
-      if (e.code === 'AltLeft' || e.code === 'AltRight') {
-        isOptionHeld.current = false;
-        setPinchHint(null);
-      }
+      if (e.code === 'AltLeft' || e.code === 'AltRight') { isOptionHeld.current = false; setPinchHint(null); }
     };
     window.addEventListener('keydown', onKeyDown);
     window.addEventListener('keyup', onKeyUp);
-    return () => {
-      window.removeEventListener('keydown', onKeyDown);
-      window.removeEventListener('keyup', onKeyUp);
-    };
+    return () => { window.removeEventListener('keydown', onKeyDown); window.removeEventListener('keyup', onKeyUp); };
   }, [keyboardActive, send, sessionId]);
 
-  // Deactivate keyboard when clicking outside the simulator area
   useEffect(() => {
     if (!keyboardActive) return;
     const onDocPointerDown = (e: PointerEvent) => {
       const area = containerRef.current ?? canvasRef.current;
-      if (area && !area.contains(e.target as Node)) {
-        setKeyboardActive(false);
-      }
+      if (area && !area.contains(e.target as Node)) setKeyboardActive(false);
     };
     document.addEventListener('pointerdown', onDocPointerDown);
     return () => document.removeEventListener('pointerdown', onDocPointerDown);
   }, [keyboardActive]);
 
-  // Map a pointer event to normalized screen [0,1].
-  // Portrait chrome: maps composite container coords through screenRect.
-  // Landscape chrome: container is rotated 90° CW → invert (u,v) to portrait composite coords.
-  // No chrome: canvas rect directly.
   const toNormScreen = useCallback(
     (e: { clientX: number; clientY: number }) => {
       if (chrome && containerRef.current) {
@@ -233,13 +365,9 @@ export function SimulatorViewer({ sessionId, deviceId, onBack, buildId }: Props)
         const sh = chrome.screenRect.height / 2;
         let cx: number, cy: number;
         if (isLandscape) {
-          // getBoundingClientRect() returns the rotated (landscape) bounding box.
-          // u,v are 0-1 in visible landscape space.
-          // 90° CW inverse: portrait_x = v, portrait_y = 1 - u
           const u = (e.clientX - rect.left) / rect.width;
           const v = (e.clientY - rect.top) / rect.height;
-          cx = v * cw;
-          cy = (1 - u) * ch;
+          cx = v * cw; cy = (1 - u) * ch;
         } else {
           cx = (e.clientX - rect.left) * (cw / rect.width);
           cy = (e.clientY - rect.top) * (ch / rect.height);
@@ -259,20 +387,17 @@ export function SimulatorViewer({ sessionId, deviceId, onBack, buildId }: Props)
     [chrome, isLandscape],
   );
 
-  // Compute pinch finger positions: f1 = cursor, f0 = screen-center mirror (Xcode style).
   const toPinchFingers = useCallback(
     (e: { clientX: number; clientY: number }) => {
       const f1 = toNormScreen(e);
       if (!f1) return null;
-      const f0 = { x: 1 - f1.x, y: 1 - f1.y };
-      return { f0, f1 };
+      return { f0: { x: 1 - f1.x, y: 1 - f1.y }, f1 };
     },
     [toNormScreen],
   );
 
-  const BUTTON_HIT_RADIUS = 100; // 2× composite px (~25 CSS px at typical display scale)
+  const BUTTON_HIT_RADIUS = 100;
 
-  // Hit-test physical button positions (normalOffset is in 2× composite pixel space).
   const toButton = useCallback(
     (e: { clientX: number; clientY: number }): string | null => {
       if (!containerRef.current || !chrome || isLandscape) return null;
@@ -289,6 +414,22 @@ export function SimulatorViewer({ sessionId, deviceId, onBack, buildId }: Props)
     [chrome],
   );
 
+  // convert normalized screen coord → record canvas coord
+  const normToRecordCanvas = useCallback(
+    (norm: { x: number; y: number }): { x: number; y: number } => {
+      const ch = chromeRef.current;
+      const rc = recordCanvasRef.current;
+      if (ch) {
+        return {
+          x: ch.screenRect.x / 2 + norm.x * ch.screenRect.width / 2,
+          y: ch.screenRect.y / 2 + norm.y * ch.screenRect.height / 2,
+        };
+      }
+      return { x: norm.x * (rc?.width ?? 1), y: norm.y * (rc?.height ?? 1) };
+    },
+    [],
+  );
+
   const handlePointerDown = useCallback(
     (e: React.PointerEvent) => {
       setKeyboardActive(true);
@@ -302,27 +443,29 @@ export function SimulatorViewer({ sessionId, deviceId, onBack, buildId }: Props)
         return;
       }
       const btn = toButton(e);
-      if (btn) {
-        pressedButton.current = btn;
-        setFlashedButton(btn);
-        return;
-      }
+      if (btn) { pressedButton.current = btn; setFlashedButton(btn); return; }
       const pos = toNormScreen(e);
       if (!pos) return;
       touchStartPos.current = pos;
       (e.target as Element).setPointerCapture(e.pointerId);
+      cursorPosRef.current = normToRecordCanvas(pos);
+      cursorStateRef.current = 'down';
+      releaseAnimRef.current = null;
       send({ type: 'input:touch:start', sessionId, payload: pos });
     },
-    [toButton, toNormScreen, toPinchFingers, send, sessionId],
+    [toButton, toNormScreen, toPinchFingers, normToRecordCanvas, send, sessionId],
   );
 
   const handlePointerMove = useCallback(
     (e: React.PointerEvent) => {
       if (e.buttons === 0) {
-        // Hover: update button highlight and pinch preview circles
         setHoveredButton(toButton(e));
         if (isOptionHeld.current) setPinchHint(toPinchFingers(e));
         else setPinchHint(null);
+        // update cursor position for idle hover
+        const norm = toNormScreen(e);
+        cursorPosRef.current = norm ? normToRecordCanvas(norm) : null;
+        if (cursorStateRef.current !== 'down') cursorStateRef.current = 'idle';
         return;
       }
       if (isPinchMode.current) {
@@ -345,25 +488,17 @@ export function SimulatorViewer({ sessionId, deviceId, onBack, buildId }: Props)
       const now = performance.now();
       if (now - lastMoveSentAt.current < MOVE_THROTTLE_MS) return;
       lastMoveSentAt.current = now;
+      cursorPosRef.current = normToRecordCanvas(pos);
       send({ type: 'input:touch:move', sessionId, payload: pos });
     },
-    [toButton, toNormScreen, toPinchFingers, send, sessionId],
+    [toButton, toNormScreen, toPinchFingers, normToRecordCanvas, send, sessionId],
   );
 
   const handlePointerLeave = useCallback(() => {
     setHoveredButton(null);
     setPinchHint(null);
+    cursorPosRef.current = null;
   }, []);
-
-  const handleRecordToggle = useCallback(() => {
-    if (recordState === 'idle') {
-      setRecordState('recording');
-      send({ type: 'record:start', sessionId });
-    } else if (recordState === 'recording') {
-      setRecordState('uploading');
-      send({ type: 'record:stop', sessionId });
-    }
-  }, [recordState, send, sessionId]);
 
   const handlePointerUp = useCallback(() => {
     if (isPinchMode.current) {
@@ -374,15 +509,13 @@ export function SimulatorViewer({ sessionId, deviceId, onBack, buildId }: Props)
     }
     touchStartPos.current = null;
     if (pressedButton.current) {
-      send({
-        type: 'input:button',
-        sessionId,
-        payload: { name: pressedButton.current },
-      });
+      send({ type: 'input:button', sessionId, payload: { name: pressedButton.current } });
       pressedButton.current = null;
       setTimeout(() => setFlashedButton(null), 100);
       return;
     }
+    cursorStateRef.current = 'release';
+    releaseAnimRef.current = { startTime: performance.now() };
     send({ type: 'input:touch:end', sessionId });
   }, [send, sessionId]);
 
@@ -394,13 +527,16 @@ export function SimulatorViewer({ sessionId, deviceId, onBack, buildId }: Props)
       return;
     }
     touchStartPos.current = null;
-    if (pressedButton.current) {
-      pressedButton.current = null;
-      setFlashedButton(null);
-      return;
-    }
+    if (pressedButton.current) { pressedButton.current = null; setFlashedButton(null); return; }
+    cursorStateRef.current = 'release';
+    releaseAnimRef.current = { startTime: performance.now() };
     send({ type: 'input:touch:end', sessionId });
   }, [send, sessionId]);
+
+  const handleRecordToggle = useCallback(() => {
+    if (recordState === 'idle') startClientRecording();
+    else if (recordState === 'recording') stopClientRecording();
+  }, [recordState, startClientRecording, stopClientRecording]);
 
   const handleScreenshot = useCallback(() => {
     const src = canvasRef.current;
@@ -408,16 +544,13 @@ export function SimulatorViewer({ sessionId, deviceId, onBack, buildId }: Props)
     const canvas = document.createElement('canvas');
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
-    canvas.width = src.width;
-    canvas.height = src.height;
+    canvas.width = src.width; canvas.height = src.height;
     ctx.drawImage(src, 0, 0);
     canvas.toBlob((blob) => {
       if (!blob) return;
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
-      a.href = url;
-      a.download = `tapflow-${Date.now()}.png`;
-      a.click();
+      a.href = url; a.download = `tapflow-${Date.now()}.png`; a.click();
       URL.revokeObjectURL(url);
     }, 'image/png');
   }, []);
@@ -435,6 +568,7 @@ export function SimulatorViewer({ sessionId, deviceId, onBack, buildId }: Props)
     send({ type: 'input:button', sessionId, payload: { name: 'home' } });
   }, [send, sessionId]);
 
+  // ── layout ────────────────────────────────────────────────────────────────
   const statusText = !connected
     ? 'Connecting...'
     : !joined
@@ -447,8 +581,6 @@ export function SimulatorViewer({ sessionId, deviceId, onBack, buildId }: Props)
             ? `Install failed: ${installError}`
             : `Live · ${fps} fps`;
 
-  // Container is composite-sized so the device frame image aligns with button positions.
-  // Scale down to fit within ~80vh.
   const compositeLogicalW = chrome ? chrome.compositeWidth / 2 : 0;
   const compositeLogicalH = chrome ? chrome.compositeHeight / 2 : 0;
   const MAX_DISPLAY_H = 750;
@@ -456,61 +588,37 @@ export function SimulatorViewer({ sessionId, deviceId, onBack, buildId }: Props)
   const displayW = Math.round(compositeLogicalW * displayScale);
   const displayH = Math.round(compositeLogicalH * displayScale);
 
-  // Screen rect as % of composite — positions canvas inside device frame image
   const screenPctLeft = chrome ? (chrome.screenRect.x / chrome.compositeWidth) * 100 : 0;
   const screenPctTop = chrome ? (chrome.screenRect.y / chrome.compositeHeight) * 100 : 0;
   const screenPctW = chrome ? (chrome.screenRect.width / chrome.compositeWidth) * 100 : 100;
   const screenPctH = chrome ? (chrome.screenRect.height / chrome.compositeHeight) * 100 : 100;
 
-  // Corner radius: screenCornerRadius is in 2× composite px; scale down to CSS display px.
-  // canvas CSS display width = compositeLogicalW * displayScale * (screenRect.width / compositeWidth)
-  //                          = screenRect.width * displayScale / 2
-  // So 2× composite px → CSS px factor = displayScale / 2
   const cssCornerRadius = chrome ? Math.round((chrome.screenCornerRadius / 2) * displayScale) : 0;
 
   return (
     <div className="flex flex-col items-center gap-3">
+      {/* hidden off-screen record canvas — source for MediaRecorder */}
+      <canvas ref={recordCanvasRef} style={{ display: 'none' }} />
+
       <div className="flex w-full items-center gap-3">
-        <Button variant="ghost" size="sm" onClick={onBack}>
-          ← Back
-        </Button>
+        <Button variant="ghost" size="sm" onClick={onBack}>← Back</Button>
         <span className="text-sm text-muted-foreground">{statusText}</span>
         {deviceInfo && (
           <span className="text-sm text-muted-foreground/60">
-            {deviceInfo.deviceName}
-            {deviceInfo.osVersion ? ` · ${deviceInfo.osVersion}` : ''}
+            {deviceInfo.deviceName}{deviceInfo.osVersion ? ` · ${deviceInfo.osVersion}` : ''}
           </span>
         )}
       </div>
 
       {chrome ? (
-        /* Overlay mode: screen canvas inside device frame image.
-           In landscape the outer wrapper holds landscape dimensions; the inner container
-           is rotated 90° CW so the chrome frame, canvas, and buttons rotate together.
-           Touch coordinates are inverse-mapped in toNormScreen when isLandscape. */
-        <div
-          style={{
-            width: isLandscape ? displayH : displayW,
-            height: isLandscape ? displayW : displayH,
-            position: 'relative',
-            flexShrink: 0,
-          }}
-        >
+        <div style={{ width: isLandscape ? displayH : displayW, height: isLandscape ? displayW : displayH, position: 'relative', flexShrink: 0 }}>
           <div
             ref={containerRef}
             className="relative cursor-crosshair"
             style={{
               width: displayW,
               height: displayH,
-              ...(isLandscape
-                ? {
-                    position: 'absolute',
-                    top: (displayW - displayH) / 2,
-                    left: (displayH - displayW) / 2,
-                    transform: 'rotate(90deg)',
-                    transformOrigin: 'center center',
-                  }
-                : {}),
+              ...(isLandscape ? { position: 'absolute', top: (displayW - displayH) / 2, left: (displayH - displayW) / 2, transform: 'rotate(90deg)', transformOrigin: 'center center' } : {}),
             }}
             onPointerDown={handlePointerDown}
             onPointerMove={handlePointerMove}
@@ -518,177 +626,92 @@ export function SimulatorViewer({ sessionId, deviceId, onBack, buildId }: Props)
             onPointerCancel={handlePointerCancel}
             onPointerLeave={handlePointerLeave}
           >
-            {/* Device frame — zIndex:2, above buttons (masks inner button portion) but below screen content */}
             <img
               src={`data:image/png;base64,${chrome.framePng}`}
-              style={{
-                position: 'absolute',
-                top: 0,
-                left: 0,
-                zIndex: 2,
-                width: '100%',
-                height: '100%',
-                display: 'block',
-                pointerEvents: 'none',
-                userSelect: 'none',
-              }}
+              style={{ position: 'absolute', top: 0, left: 0, zIndex: 2, width: '100%', height: '100%', display: 'block', pointerEvents: 'none', userSelect: 'none' }}
               draggable={false}
               alt=""
             />
-            {/* Screen content — zIndex:3, above framePng so screen is always visible */}
             <canvas
               ref={canvasRef}
               style={{
-                position: 'absolute',
-                zIndex: 3,
-                left: `${screenPctLeft}%`,
-                top: `${screenPctTop}%`,
-                width: `${screenPctW}%`,
-                height: `${screenPctH}%`,
+                position: 'absolute', zIndex: 3,
+                left: `${screenPctLeft}%`, top: `${screenPctTop}%`,
+                width: `${screenPctW}%`, height: `${screenPctH}%`,
                 borderRadius: cssCornerRadius > 0 ? `${cssCornerRadius}px` : undefined,
                 backgroundColor: '#010101',
               }}
             />
-            {/* Pinch finger hints — two semi-transparent circles at f0/f1 positions */}
-            {pinchHint &&
-              (() => {
-                const screenLeft = screenPctLeft / 100;
-                const screenTop = screenPctTop / 100;
-                const screenW = screenPctW / 100;
-                const screenH = screenPctH / 100;
-                const toCSS = (nx: number, ny: number) => ({
-                  left: `${(screenLeft + nx * screenW) * 100}%`,
-                  top: `${(screenTop + ny * screenH) * 100}%`,
-                });
-                return (
-                  <>
-                    {([pinchHint.f0, pinchHint.f1] as const).map((f, i) => (
-                      <div
-                        key={i}
-                        style={{
-                          position: 'absolute',
-                          zIndex: 10,
-                          width: 34,
-                          height: 34,
-                          borderRadius: '50%',
-                          background: 'rgba(30,140,243,0.20)',
-                          border: '1.5px solid rgba(30,140,243,0.60)',
-                          transform: 'translate(-50%, -50%)',
-                          pointerEvents: 'none',
-                          ...toCSS(f.x, f.y),
-                        }}
-                      />
-                    ))}
-                  </>
-                );
-              })()}
-            {/* Physical button overlays — CSS-animated between retracted (default) and extended (hover) */}
+            {pinchHint && (() => {
+              const screenLeft = screenPctLeft / 100;
+              const screenTop = screenPctTop / 100;
+              const screenW = screenPctW / 100;
+              const screenH = screenPctH / 100;
+              const toCSS = (nx: number, ny: number) => ({
+                left: `${(screenLeft + nx * screenW) * 100}%`,
+                top: `${(screenTop + ny * screenH) * 100}%`,
+              });
+              return (
+                <>
+                  {([pinchHint.f0, pinchHint.f1] as const).map((f, i) => (
+                    <div key={i} style={{ position: 'absolute', zIndex: 10, width: 34, height: 34, borderRadius: '50%', background: 'rgba(30,140,243,0.20)', border: '1.5px solid rgba(30,140,243,0.60)', transform: 'translate(-50%, -50%)', pointerEvents: 'none', ...toCSS(f.x, f.y) }} />
+                  ))}
+                </>
+              );
+            })()}
             {chrome.buttons.map((btn) => {
               const isFlashed = flashedButton === btn.name;
               const isHovered = hoveredButton === btn.name;
-
-              // For bottom-anchor buttons normalOffset.y is center Y; for all others it's top-edge Y.
-              // For top-anchor buttons use rolloverOffset.y (the rollover top-edge, = btnTopLeftY*scale)
-              // so the CSS overlay aligns with the baked frame's button draw position.
               const isBottomAnchor = btn.anchor === 'bottom';
               const isTopAnchor = btn.anchor === 'top';
               const imgTopPct = isBottomAnchor
                 ? ((btn.normalOffset.y - btn.buttonH / 2) / chrome.compositeHeight) * 100
-                : isTopAnchor
-                  ? (btn.rolloverOffset.y / chrome.compositeHeight) * 100
-                  : (btn.normalOffset.y / chrome.compositeHeight) * 100;
+                : isTopAnchor ? (btn.rolloverOffset.y / chrome.compositeHeight) * 100
+                : (btn.normalOffset.y / chrome.compositeHeight) * 100;
               const imgHPct = (btn.buttonH / chrome.compositeHeight) * 100;
               const imgWPct = (btn.buttonW / chrome.compositeWidth) * 100;
-              // Default: rolloverOffset (extended, matches baked frame position).
-              // Hover: extend further by the same delta so button pops out visibly.
-              //   hoverX = 2*rollover - normal  (mirrors normal→rollover delta beyond rollover)
               const halfW = btn.buttonW / 2;
-              const rolloverLeftPct =
-                ((btn.rolloverOffset.x - halfW) / chrome.compositeWidth) * 100;
-              const hoverLeftPct =
-                ((2 * btn.rolloverOffset.x - btn.normalOffset.x - halfW) / chrome.compositeWidth) *
-                100;
-
-              // Tooltip position: at rollover center
+              const rolloverLeftPct = ((btn.rolloverOffset.x - halfW) / chrome.compositeWidth) * 100;
+              const hoverLeftPct = ((2 * btn.rolloverOffset.x - btn.normalOffset.x - halfW) / chrome.compositeWidth) * 100;
               const tooltipLeftPct = (btn.rolloverOffset.x / chrome.compositeWidth) * 100;
               const tooltipTopPct = isBottomAnchor
                 ? ((btn.normalOffset.y - btn.buttonH / 2) / chrome.compositeHeight) * 100
-                : isTopAnchor
-                  ? (btn.rolloverOffset.y / chrome.compositeHeight) * 100
-                  : (btn.normalOffset.y / chrome.compositeHeight) * 100;
-
-              // top-anchor hover: button slides UP (top CSS) instead of sideways.
-              // hoverTop = 2*rollover.y - normal.y  (same delta-doubling as hoverLeftPct).
-              const hoverTopPct = isTopAnchor
-                ? ((2 * btn.rolloverOffset.y - btn.normalOffset.y) / chrome.compositeHeight) * 100
-                : 0;
-
-              // z-index:
-              //   onTop (home): 4 — above everything
-              //   all others: 1 — behind frame, visible as tabs protruding above/around the bezel
+                : isTopAnchor ? (btn.rolloverOffset.y / chrome.compositeHeight) * 100
+                : (btn.normalOffset.y / chrome.compositeHeight) * 100;
+              const hoverTopPct = isTopAnchor ? ((2 * btn.rolloverOffset.y - btn.normalOffset.y) / chrome.compositeHeight) * 100 : 0;
               const btnZ = btn.onTop ? 4 : 1;
-
               return (
                 <Fragment key={btn.name}>
                   {btn.buttonPng && (
                     <img
                       src={`data:image/png;base64,${btn.buttonPng}`}
                       style={{
-                        position: 'absolute',
-                        zIndex: btnZ,
+                        position: 'absolute', zIndex: btnZ,
                         top: `${isTopAnchor ? (isHovered ? hoverTopPct : imgTopPct) : imgTopPct}%`,
                         left: `${isTopAnchor ? rolloverLeftPct : isHovered ? hoverLeftPct : rolloverLeftPct}%`,
-                        width: `${imgWPct}%`,
-                        height: `${imgHPct}%`,
+                        width: `${imgWPct}%`, height: `${imgHPct}%`,
                         transition: isTopAnchor ? 'top 0.15s ease' : 'left 0.15s ease',
-                        pointerEvents: 'none',
-                        userSelect: 'none',
+                        pointerEvents: 'none', userSelect: 'none',
                       }}
-                      draggable={false}
-                      alt=""
+                      draggable={false} alt=""
                     />
                   )}
                   {isFlashed && btn.pressedPng && btn.pressedRect && (
                     <img
                       src={`data:image/png;base64,${btn.pressedPng}`}
                       style={{
-                        position: 'absolute',
-                        zIndex: btn.onTop ? 3 : 1,
+                        position: 'absolute', zIndex: btn.onTop ? 3 : 1,
                         left: `${isTopAnchor ? rolloverLeftPct : isHovered ? hoverLeftPct : rolloverLeftPct}%`,
-                        top: `${
-                          isTopAnchor
-                            ? isHovered
-                              ? hoverTopPct
-                              : imgTopPct
-                            : (btn.pressedRect.y / chrome.compositeHeight) * 100
-                        }%`,
+                        top: `${isTopAnchor ? (isHovered ? hoverTopPct : imgTopPct) : (btn.pressedRect.y / chrome.compositeHeight) * 100}%`,
                         width: `${(btn.pressedRect.width / chrome.compositeWidth) * 100}%`,
                         height: `${(btn.pressedRect.height / chrome.compositeHeight) * 100}%`,
-                        pointerEvents: 'none',
-                        userSelect: 'none',
+                        pointerEvents: 'none', userSelect: 'none',
                       }}
-                      draggable={false}
-                      alt=""
+                      draggable={false} alt=""
                     />
                   )}
-                  {/* Hover tooltip — top-anchor: show below button; others: show above */}
                   {isHovered && (
-                    <div
-                      style={{
-                        position: 'absolute',
-                        zIndex: 5,
-                        left: `${tooltipLeftPct}%`,
-                        top: `${tooltipTopPct}%`,
-                        transform: 'translate(-50%, calc(-100% - 8px))',
-                        background: 'rgba(0,0,0,0.72)',
-                        color: '#fff',
-                        fontSize: 11,
-                        padding: '2px 7px',
-                        borderRadius: 4,
-                        whiteSpace: 'nowrap',
-                        pointerEvents: 'none',
-                      }}
-                    >
+                    <div style={{ position: 'absolute', zIndex: 5, left: `${tooltipLeftPct}%`, top: `${tooltipTopPct}%`, transform: 'translate(-50%, calc(-100% - 8px))', background: 'rgba(0,0,0,0.72)', color: '#fff', fontSize: 11, padding: '2px 7px', borderRadius: 4, whiteSpace: 'nowrap', pointerEvents: 'none' }}>
                       {btn.accessibilityTitle}
                     </div>
                   )}
@@ -698,7 +721,6 @@ export function SimulatorViewer({ sessionId, deviceId, onBack, buildId }: Props)
           </div>
         </div>
       ) : (
-        /* Fallback — no chrome data yet */
         <canvas
           ref={canvasRef}
           className="block max-w-full cursor-crosshair"
@@ -710,93 +732,43 @@ export function SimulatorViewer({ sessionId, deviceId, onBack, buildId }: Props)
         />
       )}
 
-      {joined && fps === 0 && (
-        <p className="text-sm text-muted-foreground">Waiting for first frame...</p>
-      )}
+      {joined && fps === 0 && <p className="text-sm text-muted-foreground">Waiting for first frame...</p>}
 
-      {/* Control bar */}
       {joined && (
         <div
           className="flex items-center justify-end rounded-lg border border-border bg-muted/40 px-3 py-1.5"
-          style={{
-            width: chrome ? (isLandscape ? displayH : displayW) : '100%',
-            minWidth: 200,
-          }}
+          style={{ width: chrome ? (isLandscape ? displayH : displayW) : '100%', minWidth: 200 }}
         >
           <div className="flex items-center gap-1">
             {keyboardActive && <span className="text-xs text-muted-foreground px-1">⌨</span>}
-            <Button
-              variant="ghost"
-              size="icon"
-              className="h-7 w-7"
-              title="Toggle Software Keyboard"
-              onClick={handleKeyboardToggle}
-            >
+            <Button variant="ghost" size="icon" className="h-7 w-7" title="Toggle Software Keyboard" onClick={handleKeyboardToggle}>
               <Keyboard className="h-3.5 w-3.5" />
             </Button>
             {installed && buildId && (
-              <Button
-                variant="ghost"
-                size="sm"
-                className="h-7 px-2 text-xs"
-                title="Launch app"
-                disabled={launching}
-                onClick={() => {
-                  setLaunching(true);
-                  sendRef.current({ type: 'app:launch', sessionId, buildId });
-                }}
-              >
+              <Button variant="ghost" size="sm" className="h-7 px-2 text-xs" title="Launch app" disabled={launching}
+                onClick={() => { setLaunching(true); sendRef.current({ type: 'app:launch', sessionId, buildId }); }}>
                 <Play className="h-3 w-3 mr-1" />
                 {launching ? 'Launching…' : 'Launch'}
               </Button>
             )}
-            <Button
-              variant="ghost"
-              size="icon"
-              className="h-7 w-7"
-              title="Home"
-              onClick={handleSoftHome}
-            >
+            <Button variant="ghost" size="icon" className="h-7 w-7" title="Home" onClick={handleSoftHome}>
               <Home className="h-3.5 w-3.5" />
             </Button>
-            <Button
-              variant="ghost"
-              size="icon"
-              className="h-7 w-7"
-              title="Screenshot"
-              onClick={handleScreenshot}
-            >
+            <Button variant="ghost" size="icon" className="h-7 w-7" title="Screenshot" onClick={handleScreenshot}>
               <Camera className="h-3.5 w-3.5" />
             </Button>
             <Button
-              variant="ghost"
-              size="icon"
+              variant="ghost" size="icon"
               className={`h-7 w-7 ${recordState === 'recording' ? 'text-red-500' : ''}`}
-              title={
-                recordState === 'idle'
-                  ? 'Start recording'
-                  : recordState === 'recording'
-                    ? 'Stop recording'
-                    : 'Processing…'
-              }
+              title={recordState === 'idle' ? 'Start recording' : recordState === 'recording' ? 'Stop recording' : 'Processing…'}
               disabled={recordState === 'uploading' || recordState === 'done'}
               onClick={handleRecordToggle}
             >
-              {recordState === 'uploading' ? (
-                <Loader2 className="h-3.5 w-3.5 animate-spin" />
-              ) : recordState === 'recording' ? (
-                <Square className="h-3.5 w-3.5 fill-current" />
-              ) : (
-                <Circle className="h-3.5 w-3.5" />
-              )}
+              {recordState === 'uploading' ? <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                : recordState === 'recording' ? <Square className="h-3.5 w-3.5 fill-current" />
+                : <Circle className="h-3.5 w-3.5" />}
             </Button>
-            <Button
-              variant="ghost"
-              size="icon"
-              className="h-7 w-7"
-              title="Rotate"
-              onClick={handleRotate}
-            >
+            <Button variant="ghost" size="icon" className="h-7 w-7" title="Rotate" onClick={handleRotate}>
               <RotateCw className="h-3.5 w-3.5" />
             </Button>
           </div>

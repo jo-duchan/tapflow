@@ -1,8 +1,4 @@
 import os from 'os'
-import fs from 'fs'
-import path from 'path'
-import http from 'http'
-import { Readable } from 'stream'
 import { WebSocket } from 'ws'
 import type { Device, DeviceAgent } from '@tapflow/agent-core'
 import { SimctlWrapper } from './SimctlWrapper.js'
@@ -10,7 +6,6 @@ import { ScreenCaptureStreamer } from './ScreenCaptureStreamer.js'
 import { MjpegStreamer } from './MjpegStreamer.js'
 import { TouchHelper } from './TouchHelper.js'
 import { DeviceChromeLoader, type ChromeData } from './DeviceChromeLoader.js'
-import { SimctlRecorder } from './SimctlRecorder.js'
 import { KEY_CODE_MAP } from './KeyCodeMap.js'
 
 export interface IOSAgentOptions {
@@ -27,7 +22,6 @@ interface DeviceState {
   bootSeq: number
   orientation: 'portrait' | 'landscapeRight'
   loadedChrome: ChromeData | null
-  recorder: SimctlRecorder
   // tracks whether the software keyboard is currently visible so we can send ⌘K
   // in the correct direction. reset to false on any hardware key event because
   // iOS auto-hides the software keyboard whenever a hardware key is pressed.
@@ -109,7 +103,6 @@ export class IOSAgent implements DeviceAgent {
         bootSeq: 0,
         orientation: 'portrait',
         loadedChrome: null,
-        recorder: new SimctlRecorder(),
         softKeyboardVisible: false,
       })
     })
@@ -132,7 +125,6 @@ export class IOSAgent implements DeviceAgent {
     state.touchHelper = null
     state.streamWs?.close()
     state.streamWs = null
-    state.recorder.cleanup()
   }
 
   private sendChromeData(state: DeviceState, device: Device): void {
@@ -398,34 +390,6 @@ export class IOSAgent implements DeviceAgent {
         }
         break
       }
-      case 'record:start': {
-        const state = this.deviceStates.get(msg.sessionId!)
-        if (!state) break
-        if (state.recorder.isRecording()) {
-          this.ws?.send(JSON.stringify({ type: 'record:error', sessionId: msg.sessionId, message: 'Recording already in progress' }))
-          break
-        }
-        try {
-          state.recorder.start(state.deviceId)
-        } catch (e) {
-          this.ws?.send(JSON.stringify({ type: 'record:error', sessionId: msg.sessionId, message: String(e) }))
-        }
-        break
-      }
-      case 'record:stop': {
-        const state = this.deviceStates.get(msg.sessionId!)
-        if (!state) break
-        if (!state.recorder.isRecording()) {
-          this.ws?.send(JSON.stringify({ type: 'record:error', sessionId: msg.sessionId, message: 'No recording in progress' }))
-          break
-        }
-        state.recorder.stop()
-          .then((filePath) => this.uploadRecording(filePath, msg.sessionId!))
-          .catch((e) => {
-            this.ws?.send(JSON.stringify({ type: 'record:error', sessionId: msg.sessionId, message: String(e) }))
-          })
-        break
-      }
       case 'input:button': {
         const state = this.deviceStates.get(msg.sessionId!)
         if (!state?.touchHelper) break
@@ -441,50 +405,6 @@ export class IOSAgent implements DeviceAgent {
         break
       }
     }
-  }
-
-  private async uploadRecording(filePath: string, sessionId: string): Promise<void> {
-    if (!this.relayUrl) return
-    const httpBase = this.relayUrl.replace(/^ws/, 'http')
-    const url = `${httpBase}/api/v1/recordings/upload?sessionId=${sessionId}`
-    const boundary = `----TapflowBoundary${Date.now()}`
-    const filename = path.basename(filePath)
-    const fileSize = fs.statSync(filePath).size
-    const prefix = Buffer.from(
-      `--${boundary}\r\nContent-Disposition: form-data; name="file"; filename="${filename}"\r\nContent-Type: video/quicktime\r\n\r\n`,
-    )
-    const suffix = Buffer.from(`\r\n--${boundary}--\r\n`)
-
-    const bodyStream = Readable.from(async function* () {
-      yield prefix
-      for await (const chunk of fs.createReadStream(filePath)) yield chunk
-      yield suffix
-    }())
-
-    await new Promise<void>((resolve, reject) => {
-      const req = http.request(url, {
-        method: 'POST',
-        headers: {
-          'Content-Type': `multipart/form-data; boundary=${boundary}`,
-          'Content-Length': prefix.length + fileSize + suffix.length,
-        },
-      }, (res) => {
-        let body = ''
-        res.on('data', (chunk: Buffer) => { body += chunk.toString() })
-        res.on('end', () => {
-          if (res.statusCode === 200) {
-            const { url: downloadUrl } = JSON.parse(body) as { url: string }
-            this.ws?.send(JSON.stringify({ type: 'record:done', sessionId, payload: { downloadUrl } }))
-            fs.unlink(filePath, () => {})
-            resolve()
-          } else {
-            reject(new Error(`Upload failed: ${res.statusCode}`))
-          }
-        })
-      })
-      req.on('error', reject)
-      bodyStream.pipe(req)
-    })
   }
 
   // DeviceAgent interface — delegate to SimctlWrapper
@@ -516,17 +436,4 @@ export class IOSAgent implements DeviceAgent {
   }
   type(_text: string): Promise<void> { return Promise.resolve() }
   pressKey(_key: string): Promise<void> { return Promise.resolve() }
-
-  startRecording(deviceId: string): Promise<void> {
-    const state = [...this.deviceStates.values()].find((s) => s.deviceId === deviceId)
-    if (!state) return Promise.reject(new Error('Device not found'))
-    state.recorder.start(deviceId)
-    return Promise.resolve()
-  }
-
-  stopRecording(deviceId: string): Promise<string> {
-    const state = [...this.deviceStates.values()].find((s) => s.deviceId === deviceId)
-    if (!state) return Promise.reject(new Error('Device not found'))
-    return state.recorder.stop()
-  }
 }

@@ -16,27 +16,14 @@ vi.mock('../TouchHelper', () => ({
   })),
 }))
 
-vi.mock('../SimctlRecorder', () => ({
-  SimctlRecorder: vi.fn(() => ({
-    start: vi.fn(),
-    stop: vi.fn().mockResolvedValue('/tmp/tapflow-recordings/test.mov'),
-    cleanup: vi.fn(),
-    isRecording: vi.fn().mockReturnValue(false),
-  })),
-}))
-
 import { WebSocket } from 'ws'
 import { RelayServer } from '@tapflow/relay'
 import { IOSAgent } from '../IOSAgent'
 import { SimctlWrapper } from '../SimctlWrapper'
 // eslint-disable-next-line @typescript-eslint/no-unused-vars
 import { TouchHelper } from '../TouchHelper'
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
-import { SimctlRecorder } from '../SimctlRecorder'
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const MockTouchHelper = TouchHelper as any
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-const MockSimctlRecorder = SimctlRecorder as any
 
 // HID usage codes from KeyCodeMap (duplicated here so tests are self-contained)
 const HID_BACKSPACE = 0x2A
@@ -347,39 +334,4 @@ describe('IOSAgent', () => {
     })
   })
 
-  describe('record:start / record:stop handler', () => {
-    async function setupRecordSession() {
-      MockSimctlRecorder.mockClear()
-      const browser = new WebSocket(`ws://localhost:${port}`)
-      await waitForOpen(browser)
-      const agent = new IOSAgent({ intervalMs: 50 }, mockSimctl(true))
-      await agent.connect(`ws://localhost:${port}`)
-      browser.send(JSON.stringify({ type: 'session:start', sessionId: agent.sessionId }))
-      await waitForType(browser, 'session:joined')
-      browser.send(JSON.stringify({ type: 'device:boot', sessionId: agent.sessionId, payload: { deviceId: 'dev-1' } }))
-      await waitForType(browser, 'device:ready')
-      const recInstance = MockSimctlRecorder.mock.results[0].value
-      return { browser, agent, recInstance }
-    }
-
-    it('record:start calls recorder.start with deviceId', async () => {
-      const { browser, agent, recInstance } = await setupRecordSession()
-      browser.send(JSON.stringify({ type: 'record:start', sessionId: agent.sessionId }))
-      await new Promise((r) => setTimeout(r, 50))
-      expect(recInstance.start).toHaveBeenCalledWith('dev-1')
-      agent.disconnect()
-      browser.close()
-    })
-
-    it('record:start when already recording sends record:error', async () => {
-      const { browser, agent, recInstance } = await setupRecordSession()
-      recInstance.isRecording.mockReturnValue(true)
-      const errorPromise = waitForType(browser, 'record:error')
-      browser.send(JSON.stringify({ type: 'record:start', sessionId: agent.sessionId }))
-      const err = await errorPromise
-      expect(err.type).toBe('record:error')
-      agent.disconnect()
-      browser.close()
-    })
-  })
 })

@@ -3,6 +3,7 @@ import { useSearchParams, useNavigate } from 'react-router-dom';
 import { useRelay } from '@/hooks/useRelay';
 import { SimulatorViewer } from '@/components/SimulatorViewer';
 import { CommentPanel } from '@/components/comment-panel';
+import { RecordingsList } from '@/components/RecordingsList';
 import { Button } from '@/components/ui/button';
 import {
   Select,
@@ -36,6 +37,7 @@ export function QASession() {
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
   const [booting, setBooting] = useState(false);
   const [status, setStatus] = useState('');
+  const [recordingsKey, setRecordingsKey] = useState(0);
 
   useEffect(() => {
     if (!buildId) return;
@@ -134,7 +136,9 @@ export function QASession() {
               deviceId={deviceId}
               onBack={handleBack}
               buildId={build?.id}
+              onRecordingUploaded={() => setRecordingsKey((k) => k + 1)}
             />
+            <RecordingsList sessionId={activeSessionId} refreshKey={recordingsKey} />
           </>
         ) : (
           <div className="flex flex-col gap-6 max-w-lg">

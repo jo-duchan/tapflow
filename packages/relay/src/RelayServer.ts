@@ -13,7 +13,7 @@ import { handleListComments, handleCreateComment, handleDeleteComment } from './
 import { handleListMembers, handleInvite, handleUpdateMember, handleDeleteMember } from './api/team.js'
 import { handleListTokens, handleCreateToken, handleRevokeToken } from './api/tokens.js'
 import { handleGetSettings, handleUpdateSettings } from './api/settings.js'
-import { handleUploadRecording, handleDownloadRecording, purgeExpiredRecordings } from './api/recordings.js'
+import { handleUploadRecording, handleListRecordings, handleDownloadRecording, purgeExpiredRecordings } from './api/recordings.js'
 
 const MIME_TYPES: Record<string, string> = {
   '.html': 'text/html',
@@ -91,7 +91,9 @@ export class RelayServer {
     // recordings
     const recordingsDir = path.join(u, '../recordings')
     purgeExpiredRecordings(recordingsDir)
-    this.router.post('/api/v1/recordings/upload', (req, res) => handleUploadRecording(req, res, recordingsDir, this.sessions))
+    setInterval(() => purgeExpiredRecordings(recordingsDir), 24 * 60 * 60 * 1000).unref()
+    this.router.post('/api/v1/recordings/upload', (req, res) => handleUploadRecording(req, res, recordingsDir))
+    this.router.get('/api/v1/recordings', (req, res) => handleListRecordings(req, res))
     this.router.get('/api/v1/recordings/:filename', (req, res) => handleDownloadRecording(req, res, recordingsDir))
   }
 
@@ -371,23 +373,11 @@ export class RelayServer {
       case 'input:type':
       case 'input:button':
       case 'input:rotate':
-      case 'input:keyboard:toggle':
-      case 'record:start':
-      case 'record:stop': {
+      case 'input:keyboard:toggle': {
         // browser → agent
         const session = this.sessions.get(msg.sessionId!)
         if (session?.agentSocket.readyState === WebSocket.OPEN) {
           session.agentSocket.send(JSON.stringify(msg))
-        }
-        break
-      }
-
-      case 'record:done':
-      case 'record:error': {
-        // agent → browser
-        const session = this.sessions.get(msg.sessionId!)
-        if (session?.browserSocket?.readyState === WebSocket.OPEN) {
-          session.browserSocket.send(JSON.stringify(msg))
         }
         break
       }
