@@ -1,8 +1,8 @@
 import http from 'http'
 import crypto from 'crypto'
-import { getDb } from '../db'
-import { requireAuth, hashPat } from '../middleware/auth'
-import { json, readJson } from '../router'
+import { getDb } from '../db.js'
+import { requireAuth, hashPat } from '../middleware/auth.js'
+import { json, readJson } from '../router.js'
 
 export function handleListTokens(req: http.IncomingMessage, res: http.ServerResponse): void {
   const auth = requireAuth(req, res)

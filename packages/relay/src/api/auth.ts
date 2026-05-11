@@ -1,8 +1,8 @@
 import http from 'http'
 import crypto from 'crypto'
-import { getDb } from '../db'
-import { signJwt, requireAuth } from '../middleware/auth'
-import { json, readJson } from '../router'
+import { getDb } from '../db.js'
+import { signJwt, requireAuth } from '../middleware/auth.js'
+import { json, readJson } from '../router.js'
 
 function hashPassword(password: string, salt: string): string {
   return crypto.pbkdf2Sync(password, salt, 100_000, 64, 'sha512').toString('hex')

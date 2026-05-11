@@ -1,10 +1,9 @@
-import cac from 'cac'
-import { cmdDoctor } from './commands/doctor'
-import { cmdDevices } from './commands/devices'
-import { cmdBoot } from './commands/boot'
-import { cmdWda } from './commands/wda'
-import { cmdStart } from './commands/start'
-import { cmdReset } from './commands/reset'
+import { cac } from 'cac'
+import { cmdDoctor } from './commands/doctor.js'
+import { cmdDevices } from './commands/devices.js'
+import { cmdBoot } from './commands/boot.js'
+import { cmdStart } from './commands/start.js'
+import { cmdReset } from './commands/reset.js'
 
 const cli = cac('tapflow')
 
@@ -21,17 +20,13 @@ cli
   .action((name: string) => cmdBoot(name))
 
 cli
-  .command('wda [action]', 'Manage WebDriverAgent (install|start|stop|status)')
-  .action((action?: string) => cmdWda(action))
-
-cli
   .command('start', 'Start relay + iOS agent (one-command setup)')
   .option('--device <name>', 'Simulator name or UDID to use')
   .option('--relay <url>', 'Relay WebSocket URL (skips local relay spawn)')
   .action((opts: { device?: string; relay?: string }) => cmdStart(opts))
 
 cli
-  .command('reset', 'Stop WDA and shut down all simulators')
+  .command('reset', 'Shut down all simulators')
   .action(() => cmdReset())
 
 cli.help()

@@ -1,6 +1,7 @@
 import http from 'http'
+import crypto from 'crypto'
 import jwt from 'jsonwebtoken'
-import { getDb } from '../db'
+import { getDb } from '../db.js'
 
 export interface AuthContext {
   userId: number
@@ -76,6 +77,5 @@ export function verifyPat(req: http.IncomingMessage): { userId: number; scope: s
 }
 
 export function hashPat(token: string): string {
-  const crypto = require('crypto') as typeof import('crypto')
   return crypto.createHash('sha256').update(token).digest('hex')
 }

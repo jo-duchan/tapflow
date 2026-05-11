@@ -3,6 +3,7 @@ import { useSearchParams, useNavigate } from 'react-router-dom';
 import { useRelay } from '@/hooks/useRelay';
 import { SimulatorViewer } from '@/components/SimulatorViewer';
 import { CommentPanel } from '@/components/comment-panel';
+import { RecordingsList } from '@/components/RecordingsList';
 import { Button } from '@/components/ui/button';
 import {
   Select,
@@ -36,6 +37,7 @@ export function QASession() {
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
   const [booting, setBooting] = useState(false);
   const [status, setStatus] = useState('');
+  const [recordingsKey, setRecordingsKey] = useState(0);
 
   useEffect(() => {
     if (!buildId) return;
@@ -79,7 +81,15 @@ export function QASession() {
 
   const osVersions = [
     ...new Set(filteredDevices.map((d) => d.osVersion).filter(Boolean)),
-  ] as string[];
+  ].sort((a, b) => {
+    const parts = (s: string) => s.replace(/^[^\d]*/, '').split('.').map(Number)
+    const [aParts, bParts] = [parts(a as string), parts(b as string)]
+    for (let i = 0; i < Math.max(aParts.length, bParts.length); i++) {
+      const diff = (bParts[i] ?? 0) - (aParts[i] ?? 0)
+      if (diff !== 0) return diff
+    }
+    return 0
+  }) as string[];
   const [osVersion, setOsVersion] = useState<string>('');
 
   const versionedDevices = osVersion
@@ -126,7 +136,9 @@ export function QASession() {
               deviceId={deviceId}
               onBack={handleBack}
               buildId={build?.id}
+              onRecordingUploaded={() => setRecordingsKey((k) => k + 1)}
             />
+            <RecordingsList sessionId={activeSessionId} refreshKey={recordingsKey} />
           </>
         ) : (
           <div className="flex flex-col gap-6 max-w-lg">

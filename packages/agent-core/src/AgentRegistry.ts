@@ -1,4 +1,4 @@
-import type { DeviceAgent, DeviceAgentConstructor } from './DeviceAgent'
+import type { DeviceAgent, DeviceAgentConstructor } from './DeviceAgent.js'
 
 const constructors = new Map<string, DeviceAgentConstructor>()
 const instances = new Map<string, DeviceAgent>()

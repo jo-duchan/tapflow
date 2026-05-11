@@ -5,12 +5,12 @@
   "type": "module",
   "scripts": {
     "test": "echo 'No tests for playground'",
-    "relay": "tsx relay.ts",
-    "seed": "tsx seed.ts",
-    "ios-agent": "tsx ios-agent.ts",
-    "android-agent": "tsx android-agent.ts",
-    "dev:doctor": "tsx ../packages/cli/src/index.ts doctor",
-    "dev:reset": "tsx ../packages/cli/src/index.ts reset",
+    "relay": "tsx --conditions=source relay.ts",
+    "seed": "tsx --conditions=source seed.ts",
+    "ios-agent": "tsx --conditions=source ios-agent.ts",
+    "android-agent": "tsx --conditions=source android-agent.ts",
+    "dev:doctor": "tsx --conditions=source ../packages/cli/src/index.ts doctor",
+    "dev:reset": "tsx --conditions=source ../packages/cli/src/index.ts reset",
     "dev:up": "concurrently -n relay,agent -c cyan,green \"npm run relay\" \"npm run ios-agent\""
   },
   "dependencies": {

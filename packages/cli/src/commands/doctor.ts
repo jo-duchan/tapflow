@@ -1,4 +1,4 @@
-import { runDoctorChecks } from '../lib/doctor'
+import { runDoctorChecks } from '../lib/doctor.js'
 
 const GREEN = '\x1b[32m'
 const RED = '\x1b[31m'

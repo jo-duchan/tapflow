@@ -28,9 +28,11 @@ export type MessageType =
   | 'input:pinch:start'
   | 'input:pinch:move'
   | 'input:pinch:end'
+  | 'input:key'
   | 'input:type'
   | 'input:button'
   | 'input:rotate'
+  | 'input:keyboard:toggle'
   | 'error'
 
 export interface DeviceInfo {

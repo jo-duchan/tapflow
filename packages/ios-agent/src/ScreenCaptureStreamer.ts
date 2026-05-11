@@ -2,7 +2,7 @@ import { spawn, execFileSync } from 'child_process'
 import { existsSync, statSync, unlinkSync } from 'fs'
 import { join } from 'path'
 
-const SRC_DIR = join(__dirname, '..', 'src')
+const SRC_DIR = join(import.meta.dirname, '..', 'src')
 const SWIFT_SRC = join(SRC_DIR, 'screencapture-helper.swift')
 const BINARY = join(SRC_DIR, 'screencapture-helper')
 

@@ -27,7 +27,7 @@ function runMigrations(): void {
     )
   `)
 
-  const migrationsDir = path.join(__dirname, 'migrations')
+  const migrationsDir = path.join(import.meta.dirname, 'migrations')
   const files = fs.readdirSync(migrationsDir).filter((f) => f.endsWith('.sql')).sort()
 
   const ran = new Set(

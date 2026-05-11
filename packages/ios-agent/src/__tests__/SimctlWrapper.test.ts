@@ -141,6 +141,66 @@ describe('SimctlWrapper', () => {
     })
   })
 
+  describe('syncKeyboardsFromLanguages', () => {
+    it('writes AppleKeyboards with hw=Automatic entries matching AppleLanguages', async () => {
+      const runner: SimctlRunner = {
+        exec: vi.fn()
+          .mockResolvedValueOnce('(\n    "ko-KR",\n    "en-US"\n)')  // defaults read
+          .mockResolvedValue(''),                                       // write + kickstart
+        execBinary: vi.fn(),
+      }
+      const wrapper = new SimctlWrapper(runner)
+      await wrapper.syncKeyboardsFromLanguages('device-1')
+
+      expect(runner.exec).toHaveBeenCalledWith(
+        'spawn', 'device-1', 'defaults', 'write', '-g', 'AppleKeyboards', '-array',
+        'ko_KR@sw=Korean;hw=Automatic',
+        'en_US@sw=QWERTY;hw=Automatic',
+        'emoji@sw=Emoji',
+      )
+    })
+
+    it('appends en_US fallback when English is not in AppleLanguages', async () => {
+      const runner: SimctlRunner = {
+        exec: vi.fn()
+          .mockResolvedValueOnce('(\n    "ko-KR"\n)')
+          .mockResolvedValue(''),
+        execBinary: vi.fn(),
+      }
+      const wrapper = new SimctlWrapper(runner)
+      await wrapper.syncKeyboardsFromLanguages('device-1')
+
+      const writeCall = (runner.exec as ReturnType<typeof vi.fn>).mock.calls.find(
+        (c: string[]) => c[2] === 'defaults' && c[3] === 'write',
+      ) as string[]
+      expect(writeCall).toContain('en_US@sw=QWERTY;hw=Automatic')
+    })
+
+    it('does nothing when AppleLanguages is empty or unset', async () => {
+      const runner: SimctlRunner = {
+        exec: vi.fn().mockRejectedValue(new Error('Domain does not exist')),
+        execBinary: vi.fn(),
+      }
+      const wrapper = new SimctlWrapper(runner)
+      await wrapper.syncKeyboardsFromLanguages('device-1')
+
+      // No write call should have been made
+      expect(runner.exec).toHaveBeenCalledTimes(1)
+    })
+
+    it('ignores kickstart failure gracefully', async () => {
+      const runner: SimctlRunner = {
+        exec: vi.fn()
+          .mockResolvedValueOnce('(\n    "en-US"\n)')  // read
+          .mockResolvedValueOnce('')                    // write
+          .mockRejectedValueOnce(new Error('kbd not found')), // kickstart fails
+        execBinary: vi.fn(),
+      }
+      const wrapper = new SimctlWrapper(runner)
+      await expect(wrapper.syncKeyboardsFromLanguages('device-1')).resolves.toBeUndefined()
+    })
+  })
+
   describe('screenshot', () => {
     beforeEach(() => vi.clearAllMocks())
 

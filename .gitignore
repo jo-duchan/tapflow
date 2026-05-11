@@ -39,3 +39,6 @@ packages/ios-agent/src/screencapture-helper
 # sqlite wal/shm temp files
 *.db-shm
 *.db-wal
+
+# playground runtime data (recordings, uploads, db)
+playground/.tapflow/

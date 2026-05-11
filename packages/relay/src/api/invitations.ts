@@ -1,9 +1,9 @@
 import http from 'http'
 import crypto from 'crypto'
-import { getDb } from '../db'
-import { signJwt } from '../middleware/auth'
-import { makePasswordHash } from './auth'
-import { json, readJson } from '../router'
+import { getDb } from '../db.js'
+import { signJwt } from '../middleware/auth.js'
+import { makePasswordHash } from './auth.js'
+import { json, readJson } from '../router.js'
 
 export function handleVerify(req: http.IncomingMessage, res: http.ServerResponse): void {
   const token = new URL(req.url ?? '/', 'http://x').searchParams.get('token')

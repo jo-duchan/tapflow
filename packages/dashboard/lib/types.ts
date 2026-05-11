@@ -69,6 +69,16 @@ export interface DeviceInfo {
   osVersion: string
 }
 
+export interface Recording {
+  id: number
+  url: string
+  sessionId: string | null
+  fileSize: number
+  mime: string
+  createdAt: string
+  expiresAt: string
+}
+
 export type RelayMessage =
   | { type: 'agents:listed'; sessions: SessionInfo[] }
   | { type: 'session:joined'; sessionId: string }
@@ -86,8 +96,11 @@ export type RelayMessage =
   | { type: 'input:pinch:start'; sessionId: string; payload: { f0: { x: number; y: number }; f1: { x: number; y: number } } }
   | { type: 'input:pinch:move'; sessionId: string; payload: { f0: { x: number; y: number }; f1: { x: number; y: number } } }
   | { type: 'input:pinch:end'; sessionId: string }
+  | { type: 'input:key'; sessionId: string; payload: { key: string } }
+  | { type: 'input:type'; sessionId: string; payload: { text: string } }
   | { type: 'input:button'; sessionId: string; payload: { name: string } }
   | { type: 'input:rotate'; sessionId: string }
+  | { type: 'input:keyboard:toggle'; sessionId: string }
   | { type: 'app:install-done' }
   | { type: 'app:install-error'; message: string }
   | { type: 'app:launch-done' }

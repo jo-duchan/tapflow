@@ -12,6 +12,7 @@ vi.mock('../TouchHelper', () => ({
     pinchStart: vi.fn(),
     pinchMove: vi.fn(),
     pinchEnd: vi.fn(),
+    sendKey: vi.fn(),
   })),
 }))
 
@@ -24,17 +25,23 @@ import { TouchHelper } from '../TouchHelper'
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const MockTouchHelper = TouchHelper as any
 
+// HID usage codes from KeyCodeMap (duplicated here so tests are self-contained)
+const HID_BACKSPACE = 0x2A
+const HID_KEY_A = 0x04
+
 const waitForOpen = (ws: WebSocket) =>
   new Promise<void>((r) => ws.once('open', r))
 
 const waitForType = (ws: WebSocket, type: string) =>
   new Promise<Record<string, unknown>>((r) => {
     const listener = (d: Buffer) => {
-      const msg = JSON.parse(d.toString())
-      if (msg.type === type) {
-        ws.off('message', listener)
-        r(msg)
-      }
+      try {
+        const msg = JSON.parse(d.toString())
+        if (msg.type === type) {
+          ws.off('message', listener)
+          r(msg)
+        }
+      } catch { /* binary frame — ignore */ }
     }
     ws.on('message', listener)
   })
@@ -49,6 +56,7 @@ function mockSimctl(booted = false): SimctlWrapper {
     installApp: vi.fn().mockResolvedValue(undefined),
     launchApp: vi.fn().mockResolvedValue(undefined),
     screenshot: vi.fn().mockResolvedValue(Buffer.from('png')),
+    syncKeyboardsFromLanguages: vi.fn().mockResolvedValue(undefined),
   } as unknown as SimctlWrapper
 }
 
@@ -272,4 +280,58 @@ describe('IOSAgent', () => {
       browser.close()
     })
   })
+
+  describe('input:key handler', () => {
+    beforeEach(() => { MockTouchHelper.mockClear() })
+
+    async function setupSession() {
+      const browser = new WebSocket(`ws://localhost:${port}`)
+      await waitForOpen(browser)
+      const agent = new IOSAgent({ intervalMs: 50 }, mockSimctl(true))
+      await agent.connect(`ws://localhost:${port}`)
+      browser.send(JSON.stringify({ type: 'session:start', sessionId: agent.sessionId }))
+      await waitForType(browser, 'session:joined')
+      browser.send(JSON.stringify({ type: 'device:boot', sessionId: agent.sessionId, payload: { deviceId: 'dev-1' } }))
+      await waitForType(browser, 'device:ready')
+      const thInstance = MockTouchHelper.mock.results[0].value
+      return { browser, agent, thInstance }
+    }
+
+    it('input:key Backspace calls touchHelper.sendKey with HID usage 0x2A', async () => {
+      const { browser, agent, thInstance } = await setupSession()
+      browser.send(JSON.stringify({ type: 'input:key', sessionId: agent.sessionId, payload: { code: 'Backspace', modifiers: 0 } }))
+      await new Promise((r) => setTimeout(r, 50))
+      expect(thInstance.sendKey).toHaveBeenCalledWith(HID_BACKSPACE, 0)
+      agent.disconnect()
+      browser.close()
+    })
+
+    it('input:key KeyA calls touchHelper.sendKey with HID usage 0x04', async () => {
+      const { browser, agent, thInstance } = await setupSession()
+      browser.send(JSON.stringify({ type: 'input:key', sessionId: agent.sessionId, payload: { code: 'KeyA', modifiers: 0 } }))
+      await new Promise((r) => setTimeout(r, 50))
+      expect(thInstance.sendKey).toHaveBeenCalledWith(HID_KEY_A, 0)
+      agent.disconnect()
+      browser.close()
+    })
+
+    it('input:key with Shift modifier forwards modifier bits', async () => {
+      const { browser, agent, thInstance } = await setupSession()
+      browser.send(JSON.stringify({ type: 'input:key', sessionId: agent.sessionId, payload: { code: 'KeyA', modifiers: 0x02 } }))
+      await new Promise((r) => setTimeout(r, 50))
+      expect(thInstance.sendKey).toHaveBeenCalledWith(HID_KEY_A, 0x02)
+      agent.disconnect()
+      browser.close()
+    })
+
+    it('input:key unknown code is silently dropped', async () => {
+      const { browser, agent, thInstance } = await setupSession()
+      browser.send(JSON.stringify({ type: 'input:key', sessionId: agent.sessionId, payload: { code: 'UnknownKey', modifiers: 0 } }))
+      await new Promise((r) => setTimeout(r, 50))
+      expect(thInstance.sendKey).not.toHaveBeenCalled()
+      agent.disconnect()
+      browser.close()
+    })
+  })
+
 })
