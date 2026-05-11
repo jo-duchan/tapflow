@@ -385,6 +385,10 @@ export class RelayServer {
 
     // uploads — serve uploaded files
     const url = req.url ?? '/'
+
+    if (url.startsWith('/api/')) {
+      res.setHeader('Cache-Control', 'no-store')
+    }
     if (url.startsWith('/uploads/')) {
       this.serveUpload(req, res)
       return
