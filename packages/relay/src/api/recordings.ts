@@ -71,13 +71,13 @@ export function handleListRecordings(
     ? db.prepare(`
         SELECT id, filename, session_id, file_size, mime, created_at, expires_at
         FROM recordings
-        WHERE status = 'ready' AND session_id = ?
+        WHERE expires_at > datetime('now') AND session_id = ?
         ORDER BY created_at DESC
       `).all(sessionId)
     : db.prepare(`
         SELECT id, filename, session_id, file_size, mime, created_at, expires_at
         FROM recordings
-        WHERE status = 'ready'
+        WHERE expires_at > datetime('now')
         ORDER BY created_at DESC
       `).all()
 
@@ -124,16 +124,14 @@ export function handleDownloadRecording(
   if (!row) { res.writeHead(404); res.end('Not found'); return }
 
   if (row.status === 'expired' || new Date(row.expires_at).getTime() < Date.now()) {
-    if (row.status !== 'expired') {
-      db.prepare(`UPDATE recordings SET status = 'expired' WHERE filename = ?`).run(filename)
-      fs.unlink(path.join(recordingsDir, filename), () => {})
-    }
+    db.prepare(`DELETE FROM recordings WHERE filename = ?`).run(filename)
+    fs.unlink(path.join(recordingsDir, filename), () => {})
     res.writeHead(404); res.end('Expired'); return
   }
 
   const filePath = path.join(recordingsDir, filename)
   if (!fs.existsSync(filePath)) {
-    db.prepare(`UPDATE recordings SET status = 'expired' WHERE filename = ?`).run(filename)
+    db.prepare(`DELETE FROM recordings WHERE filename = ?`).run(filename)
     res.writeHead(404); res.end('Not found'); return
   }
 
@@ -158,7 +156,10 @@ export function purgeExpiredRecordings(recordingsDir: string): void {
 
     for (const { filename } of expired) {
       fs.unlink(path.join(recordingsDir, filename), () => {})
-      db.prepare(`UPDATE recordings SET status = 'expired' WHERE filename = ?`).run(filename)
+    }
+    if (expired.length > 0) {
+      const placeholders = expired.map(() => '?').join(',')
+      db.prepare(`DELETE FROM recordings WHERE filename IN (${placeholders})`).run(...expired.map((r) => r.filename))
     }
 
     // orphan 파일 정리 (DB row 없는 파일)
