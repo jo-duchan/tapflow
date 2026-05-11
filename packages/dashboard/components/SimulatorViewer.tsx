@@ -132,11 +132,12 @@ export function SimulatorViewer({ sessionId, deviceId, onBack, buildId, onRecord
     return () => clearInterval(timer);
   }, []);
 
-  // sync record canvas size when chrome arrives — use bezel bounds, not expanded composite
+  // sync record canvas size to container (display) dimensions when chrome arrives
   useEffect(() => {
     if (!chrome) return;
     const rc = recordCanvasRef.current;
-    if (rc) { rc.width = chrome.bezelWidth / 2; rc.height = chrome.bezelHeight / 2; }
+    const container = containerRef.current;
+    if (rc && container) { rc.width = container.clientWidth; rc.height = container.clientHeight; }
   }, [chrome]);
 
   // ── rAF compose loop ──────────────────────────────────────────────────────
@@ -153,18 +154,30 @@ export function SimulatorViewer({ sessionId, deviceId, onBack, buildId, onRecord
     const ch = chromeRef.current;
     ctx.clearRect(0, 0, rc.width, rc.height);
 
+    // Use CSS layout coordinates: fc.offsetLeft/Top/clientWidth/Height are relative
+    // to containerRef (position:relative), matching the live view exactly.
     if (ch) {
-      // record canvas is in bezel space (padding stripped); offset all coords accordingly
-      const ox = ch.padding.left / 2;
-      const oy = ch.padding.top / 2;
-      // 1. framebuffer in screen area (bezel-relative coords)
-      const sx = ch.screenRect.x / 2 - ox;
-      const sy = ch.screenRect.y / 2 - oy;
-      const sw = ch.screenRect.width / 2;
-      const sh = ch.screenRect.height / 2;
-      ctx.drawImage(fc, sx, sy, sw, sh);
-      // 2. chrome frame on top — drawn at negative padding offset so bezel body aligns at (0,0)
-      if (chromeImgRef.current) ctx.drawImage(chromeImgRef.current, -ox, -oy, ch.compositeWidth / 2, ch.compositeHeight / 2);
+      const fLeft = fc.offsetLeft;
+      const fTop  = fc.offsetTop;
+      const fW    = fc.clientWidth;
+      const fH    = fc.clientHeight;
+      // Mirror live view z-order: chrome (z-index 2) below screen canvas (z-index 3).
+      // framePng has no transparent screen hole — screen canvas renders on top in the live view,
+      // so recording must follow the same order: chrome first, then framebuffer clipped on top.
+      // 1. chrome frame (includes opaque screen area as placeholder)
+      if (chromeImgRef.current) ctx.drawImage(chromeImgRef.current, 0, 0, rc.width, rc.height);
+      // 2. framebuffer clipped to screen area with corner radius (matches canvas borderRadius in live view)
+      const r = Math.round((ch.screenCornerRadius / 2) * (rc.height / (ch.compositeHeight / 2)));
+      ctx.save();
+      ctx.beginPath();
+      if (r > 0) {
+        (ctx as CanvasRenderingContext2D & { roundRect: (x: number, y: number, w: number, h: number, r: number) => void }).roundRect(fLeft, fTop, fW, fH, r);
+      } else {
+        ctx.rect(fLeft, fTop, fW, fH);
+      }
+      ctx.clip();
+      ctx.drawImage(fc, fLeft, fTop, fW, fH);
+      ctx.restore();
     } else {
       ctx.drawImage(fc, 0, 0, rc.width, rc.height);
     }
@@ -175,10 +188,8 @@ export function SimulatorViewer({ sessionId, deviceId, onBack, buildId, onRecord
       for (const f of [ph.f0, ph.f1]) {
         let cx: number, cy: number;
         if (ch) {
-          const ox2 = ch.padding.left / 2;
-          const oy2 = ch.padding.top / 2;
-          cx = ch.screenRect.x / 2 - ox2 + f.x * ch.screenRect.width / 2;
-          cy = ch.screenRect.y / 2 - oy2 + f.y * ch.screenRect.height / 2;
+          cx = fc.offsetLeft + f.x * fc.clientWidth;
+          cy = fc.offsetTop  + f.y * fc.clientHeight;
         } else {
           cx = f.x * rc.width;
           cy = f.y * rc.height;
@@ -239,17 +250,22 @@ export function SimulatorViewer({ sessionId, deviceId, onBack, buildId, onRecord
     const rc = recordCanvasRef.current;
     if (!rc) return;
 
-    // ensure size when chrome not yet loaded
-    if (rc.width === 0 || rc.height === 0) {
-      const ch = chromeRef.current;
-      if (ch) {
-        rc.width = ch.bezelWidth / 2; rc.height = ch.bezelHeight / 2;
-      } else {
-        const fc = canvasRef.current;
-        if (fc && fc.width > 0) { rc.width = fc.width; rc.height = fc.height; }
-        else return;
-      }
+    // Always force canvas to display dimensions before captureStream.
+    // Canvas default is 300×150 (not 0), so the old guard `=== 0` never fired,
+    // causing captureStream to lock the video track at 300×150.
+    const container = containerRef.current;
+    if (container && container.clientWidth > 0) {
+      rc.width = container.clientWidth;
+      rc.height = container.clientHeight;
+    } else {
+      const fc = canvasRef.current;
+      if (fc && fc.width > 0) { rc.width = fc.width; rc.height = fc.height; }
+      else return;
     }
+
+    // Draw one black frame so the encoder (SPS/PPS) initializes at the correct resolution.
+    const ctx0 = rc.getContext('2d');
+    if (ctx0) { ctx0.fillStyle = '#000'; ctx0.fillRect(0, 0, rc.width, rc.height); }
 
     const types = ['video/mp4;codecs=avc1', 'video/webm;codecs=vp9', 'video/webm;codecs=vp8', 'video/webm'];
     const mime = types.find((t) => MediaRecorder.isTypeSupported(t)) ?? '';
@@ -431,15 +447,15 @@ export function SimulatorViewer({ sessionId, deviceId, onBack, buildId, onRecord
     [chrome],
   );
 
-  // convert normalized screen coord → record canvas coord
+  // convert normalized screen coord → record canvas coord (CSS display coordinates)
   const normToRecordCanvas = useCallback(
     (norm: { x: number; y: number }): { x: number; y: number } => {
-      const ch = chromeRef.current;
+      const fc = canvasRef.current;
       const rc = recordCanvasRef.current;
-      if (ch) {
+      if (fc && fc.clientWidth > 0) {
         return {
-          x: (ch.screenRect.x - ch.padding.left) / 2 + norm.x * ch.screenRect.width / 2,
-          y: (ch.screenRect.y - ch.padding.top)  / 2 + norm.y * ch.screenRect.height / 2,
+          x: fc.offsetLeft + norm.x * fc.clientWidth,
+          y: fc.offsetTop  + norm.y * fc.clientHeight,
         };
       }
       return { x: norm.x * (rc?.width ?? 1), y: norm.y * (rc?.height ?? 1) };
@@ -487,24 +503,29 @@ export function SimulatorViewer({ sessionId, deviceId, onBack, buildId, onRecord
     (e: React.PointerEvent) => {
       if (e.buttons === 0) {
         setHoveredButton(toButton(e));
-        if (isOptionHeld.current) setPinchHint(toPinchFingers(e));
-        else setPinchHint(null);
-        // update cursor position for idle hover
-        const norm = toNormScreen(e);
-        cursorPosRef.current = norm ? normToRecordCanvas(norm) : null;
-        if (cursorStateRef.current !== 'down') cursorStateRef.current = 'idle';
-        const _lc2 = liveCursorRef.current;
-        if (_lc2) {
-          if (norm) {
-            const _r2 = (e.currentTarget as Element).getBoundingClientRect();
-            _lc2.style.display = 'block';
-            _lc2.style.left = `${e.clientX - _r2.left}px`;
-            _lc2.style.top = `${e.clientY - _r2.top}px`;
-            _lc2.style.width = '24px'; _lc2.style.height = '24px';
-            _lc2.style.background = 'rgba(255,255,255,0.25)';
-            _lc2.style.border = '2px solid rgba(255,255,255,0.85)';
-          } else {
-            _lc2.style.display = 'none';
+        if (isOptionHeld.current) {
+          setPinchHint(toPinchFingers(e));
+          cursorPosRef.current = null;
+          const _lc2 = liveCursorRef.current;
+          if (_lc2) _lc2.style.display = 'none';
+        } else {
+          setPinchHint(null);
+          const norm = toNormScreen(e);
+          cursorPosRef.current = norm ? normToRecordCanvas(norm) : null;
+          if (cursorStateRef.current !== 'down') cursorStateRef.current = 'idle';
+          const _lc2 = liveCursorRef.current;
+          if (_lc2) {
+            if (norm) {
+              const _r2 = (e.currentTarget as Element).getBoundingClientRect();
+              _lc2.style.display = 'block';
+              _lc2.style.left = `${e.clientX - _r2.left}px`;
+              _lc2.style.top = `${e.clientY - _r2.top}px`;
+              _lc2.style.width = '24px'; _lc2.style.height = '24px';
+              _lc2.style.background = 'rgba(255,255,255,0.25)';
+              _lc2.style.border = '2px solid rgba(255,255,255,0.85)';
+            } else {
+              _lc2.style.display = 'none';
+            }
           }
         }
         return;
@@ -669,7 +690,7 @@ export function SimulatorViewer({ sessionId, deviceId, onBack, buildId, onRecord
         <div style={{ width: isLandscape ? displayH : displayW, height: isLandscape ? displayW : displayH, position: 'relative', flexShrink: 0 }}>
           <div
             ref={containerRef}
-            className="relative cursor-crosshair"
+            className="relative cursor-none"
             style={{
               width: displayW,
               height: displayH,
