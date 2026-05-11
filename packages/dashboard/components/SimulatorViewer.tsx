@@ -61,6 +61,9 @@ export function SimulatorViewer({ sessionId, deviceId, onBack, buildId, onRecord
   // pinch hint mirror for rAF (state → ref)
   const pinchHintRef = useRef<{ f0: { x: number; y: number }; f1: { x: number; y: number } } | null>(null);
 
+  // live view cursor overlay (imperative — avoids re-renders on every mousemove)
+  const liveCursorRef = useRef<HTMLDivElement>(null);
+
   const drawToCanvas = useCallback((data: ArrayBuffer) => {
     const seq = deviceSeq.current;
     createImageBitmap(new Blob([data], { type: 'image/jpeg' }))
@@ -212,6 +215,10 @@ export function SimulatorViewer({ sessionId, deviceId, onBack, buildId, onRecord
         ctx.arc(cp.x, cp.y, 12, 0, Math.PI * 2);
         ctx.fillStyle = 'rgba(255,255,255,0.5)';
         ctx.fill();
+        // dark outline first (wider), then white ring on top — visible on any background
+        ctx.strokeStyle = 'rgba(0,0,0,0.55)';
+        ctx.lineWidth = 4;
+        ctx.stroke();
         ctx.strokeStyle = 'rgba(255,255,255,0.9)';
         ctx.lineWidth = 2;
         ctx.stroke();
@@ -451,6 +458,16 @@ export function SimulatorViewer({ sessionId, deviceId, onBack, buildId, onRecord
       cursorPosRef.current = normToRecordCanvas(pos);
       cursorStateRef.current = 'down';
       releaseAnimRef.current = null;
+      const _rect = (e.currentTarget as Element).getBoundingClientRect();
+      const _lc = liveCursorRef.current;
+      if (_lc) {
+        _lc.style.display = 'block';
+        _lc.style.left = `${e.clientX - _rect.left}px`;
+        _lc.style.top = `${e.clientY - _rect.top}px`;
+        _lc.style.width = '32px'; _lc.style.height = '32px';
+        _lc.style.background = 'rgba(220,38,38,0.3)';
+        _lc.style.border = '3px solid rgb(220,38,38)';
+      }
       send({ type: 'input:touch:start', sessionId, payload: pos });
     },
     [toButton, toNormScreen, toPinchFingers, normToRecordCanvas, send, sessionId],
@@ -466,6 +483,20 @@ export function SimulatorViewer({ sessionId, deviceId, onBack, buildId, onRecord
         const norm = toNormScreen(e);
         cursorPosRef.current = norm ? normToRecordCanvas(norm) : null;
         if (cursorStateRef.current !== 'down') cursorStateRef.current = 'idle';
+        const _lc2 = liveCursorRef.current;
+        if (_lc2) {
+          if (norm) {
+            const _r2 = (e.currentTarget as Element).getBoundingClientRect();
+            _lc2.style.display = 'block';
+            _lc2.style.left = `${e.clientX - _r2.left}px`;
+            _lc2.style.top = `${e.clientY - _r2.top}px`;
+            _lc2.style.width = '24px'; _lc2.style.height = '24px';
+            _lc2.style.background = 'rgba(255,255,255,0.25)';
+            _lc2.style.border = '2px solid rgba(255,255,255,0.85)';
+          } else {
+            _lc2.style.display = 'none';
+          }
+        }
         return;
       }
       if (isPinchMode.current) {
@@ -489,6 +520,12 @@ export function SimulatorViewer({ sessionId, deviceId, onBack, buildId, onRecord
       if (now - lastMoveSentAt.current < MOVE_THROTTLE_MS) return;
       lastMoveSentAt.current = now;
       cursorPosRef.current = normToRecordCanvas(pos);
+      const _lc3 = liveCursorRef.current;
+      if (_lc3 && _lc3.style.display !== 'none') {
+        const _r3 = (e.currentTarget as Element).getBoundingClientRect();
+        _lc3.style.left = `${e.clientX - _r3.left}px`;
+        _lc3.style.top = `${e.clientY - _r3.top}px`;
+      }
       send({ type: 'input:touch:move', sessionId, payload: pos });
     },
     [toButton, toNormScreen, toPinchFingers, normToRecordCanvas, send, sessionId],
@@ -498,6 +535,8 @@ export function SimulatorViewer({ sessionId, deviceId, onBack, buildId, onRecord
     setHoveredButton(null);
     setPinchHint(null);
     cursorPosRef.current = null;
+    const _lc = liveCursorRef.current;
+    if (_lc) _lc.style.display = 'none';
   }, []);
 
   const handlePointerUp = useCallback(() => {
@@ -516,6 +555,12 @@ export function SimulatorViewer({ sessionId, deviceId, onBack, buildId, onRecord
     }
     cursorStateRef.current = 'release';
     releaseAnimRef.current = { startTime: performance.now() };
+    const _lc = liveCursorRef.current;
+    if (_lc) {
+      _lc.style.width = '24px'; _lc.style.height = '24px';
+      _lc.style.background = 'rgba(255,255,255,0.25)';
+      _lc.style.border = '2px solid rgba(255,255,255,0.85)';
+    }
     send({ type: 'input:touch:end', sessionId });
   }, [send, sessionId]);
 
@@ -640,6 +685,20 @@ export function SimulatorViewer({ sessionId, deviceId, onBack, buildId, onRecord
                 width: `${screenPctW}%`, height: `${screenPctH}%`,
                 borderRadius: cssCornerRadius > 0 ? `${cssCornerRadius}px` : undefined,
                 backgroundColor: '#010101',
+              }}
+            />
+            {/* live cursor overlay — imperative position updates via liveCursorRef */}
+            <div
+              ref={liveCursorRef}
+              style={{
+                display: 'none',
+                position: 'absolute',
+                zIndex: 20,
+                borderRadius: '50%',
+                transform: 'translate(-50%, -50%)',
+                pointerEvents: 'none',
+                outline: '1.5px solid rgba(0,0,0,0.35)',
+                transition: 'width 0.08s, height 0.08s, background 0.08s',
               }}
             />
             {pinchHint && (() => {

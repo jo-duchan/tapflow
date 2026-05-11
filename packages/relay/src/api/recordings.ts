@@ -118,12 +118,12 @@ export function handleDownloadRecording(
 
   const db = getDb()
   const row = db.prepare(`
-    SELECT status, expires_at FROM recordings WHERE filename = ?
-  `).get(filename) as { status: string; expires_at: string } | undefined
+    SELECT expires_at, mime FROM recordings WHERE filename = ?
+  `).get(filename) as { expires_at: string; mime: string } | undefined
 
   if (!row) { res.writeHead(404); res.end('Not found'); return }
 
-  if (row.status === 'expired' || new Date(row.expires_at).getTime() < Date.now()) {
+  if (new Date(row.expires_at).getTime() < Date.now()) {
     db.prepare(`DELETE FROM recordings WHERE filename = ?`).run(filename)
     fs.unlink(path.join(recordingsDir, filename), () => {})
     res.writeHead(404); res.end('Expired'); return
@@ -137,7 +137,7 @@ export function handleDownloadRecording(
 
   const stat = fs.statSync(filePath)
   res.writeHead(200, {
-    'Content-Type': row.status === 'ready' ? 'video/webm' : 'application/octet-stream',
+    'Content-Type': row.mime,
     'Content-Length': stat.size,
     'Content-Disposition': `attachment; filename="${filename}"`,
   })
@@ -151,7 +151,7 @@ export function purgeExpiredRecordings(recordingsDir: string): void {
     const db = getDb()
     const expired = db.prepare(`
       SELECT filename FROM recordings
-      WHERE status = 'ready' AND expires_at < datetime('now')
+      WHERE expires_at < datetime('now')
     `).all() as { filename: string }[]
 
     for (const { filename } of expired) {
