@@ -6,7 +6,7 @@
 
 ## WHAT
 
-`IOSAgent`: `xcrun simctl`로 iOS 시뮬레이터를 제어하고, SimulatorKit IOSurface 콜백 기반으로 화면을 스트리밍하며, SimDeviceLegacyHIDClient로 터치·키보드·버튼을 직접 주입한다.
+`IOSAgent`: `xcrun simctl`로 iOS 시뮬레이터를 제어하고, SimulatorKit IOSurface 콜백 기반으로 화면을 스트리밍하며, SimDeviceLegacyHIDClient로 터치·키보드·버튼을 직접 주입한다. WebDriverAgent는 사용하지 않는다.
 
 ## HOW
 

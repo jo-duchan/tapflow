@@ -13,8 +13,8 @@
 | ios-agent | [packages/ios-agent/CLAUDE.md](./packages/ios-agent/CLAUDE.md) | macOS 전용 시뮬레이터 제어 규칙 |
 | android-agent | [packages/android-agent/CLAUDE.md](./packages/android-agent/CLAUDE.md) | ADB 기반 에뮬레이터 제어 규칙 |
 | relay | [packages/relay/CLAUDE.md](./packages/relay/CLAUDE.md) | WebSocket 릴레이 서버 규칙 |
-| dashboard | [packages/dashboard/CLAUDE.md](./packages/dashboard/CLAUDE.md) | Next.js 대시보드 UI 규칙 |
-| cli | [packages/cli/CLAUDE.md](./packages/cli/CLAUDE.md) | CLI UX 및 Pulumi 추상화 규칙 |
+| dashboard | [packages/dashboard/CLAUDE.md](./packages/dashboard/CLAUDE.md) | Vite + React SPA UI 규칙 |
+| cli | [packages/cli/CLAUDE.md](./packages/cli/CLAUDE.md) | CLI UX 규칙 |
 
 ## 로컬 전용
 
@@ -23,13 +23,21 @@
 | playground | [playground/CLAUDE.md](./playground/CLAUDE.md) | 전체 스택 로컬 실행 및 통합 테스트 |
 | .work | [.work/CLAUDE.md](./.work/CLAUDE.md) | 로컬 작업 로그 컨벤션 (plan/review/compound) |
 
+## 문서
+
+| 파일 | 내용 |
+|------|------|
+| [docs/PRD.md](./docs/PRD.md) | 제품 요구사항 |
+| [docs/simkit-internals.md](./docs/simkit-internals.md) | SimulatorKit HID 분석 |
+| [CONTRIBUTING.md](./CONTRIBUTING.md) | 브랜치·릴리즈·커밋 컨벤션 |
+
 ---
 
 ## 계층 구조
 
 ```
-CLAUDE.md (공통 규칙 — WHAT/WHY/WHERE/HOW/HOW NOT + 워크플로우)
-└── INDEX.md (이 파일 — 패키지별 CLAUDE.md 참조)
+CLAUDE.md (공통 규칙 — WHAT/WHY/HOW/HOW NOT)
+└── INDEX.md (이 파일 — 패키지·문서 참조 인덱스)
     ├── packages/agent-core/CLAUDE.md
     ├── packages/ios-agent/CLAUDE.md
     ├── packages/android-agent/CLAUDE.md
@@ -37,5 +45,6 @@ CLAUDE.md (공통 규칙 — WHAT/WHY/WHERE/HOW/HOW NOT + 워크플로우)
     ├── packages/dashboard/CLAUDE.md
     ├── packages/cli/CLAUDE.md
     ├── playground/CLAUDE.md
-    └── .work/CLAUDE.md
+    ├── .work/CLAUDE.md
+    └── CONTRIBUTING.md
 ```

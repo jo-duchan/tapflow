@@ -9,8 +9,6 @@
 tapflow는 QA팀이 iOS/Android 시뮬레이터·에뮬레이터를 브라우저에서 직접 조작할 수 있게 해주는 **오픈소스 셀프호스팅 라이브러리**다.
 외부 클라우드 의존 없이 팀의 Mac/Linux를 그대로 서버로 쓴다.
 
----
-
 ## WHY
 
 - Appetize·BrowserStack은 비싸고 앱 데이터가 외부로 나간다.
@@ -19,18 +17,41 @@ tapflow는 QA팀이 iOS/Android 시뮬레이터·에뮬레이터를 브라우저
 
 ---
 
-## WHERE
+## 핵심 원칙
 
-```
-packages/
-  agent-core/    # DeviceAgent 인터페이스 + AgentRegistry
-  ios-agent/     # xcrun simctl + WebDriverAgent
-  android-agent/ # ADB 래퍼
-  relay/         # WebSocket 릴레이 서버
-  dashboard/     # Next.js QA 대시보드
-  cli/           # npx tapflow CLI
-docs/PRD.md      # 제품 요구사항 문서
-```
+작업을 시작하기 전에 매번 이 네 가지를 점검한다. 어김으로써 발생한 비용(잘못된 수정, 되돌리기, 재작업)이 이를 지킬 때의 비용보다 항상 크다.
+
+### 1. 추측 금지 — 근거 기반
+
+코드·로그·테스트로 사실을 확인하기 전에 원인을 단정하지 않는다.
+
+- 버그 원인을 **추정**하지 않고 재현 → 진단 로그 → 가설 검증 → 수정 순으로 진행한다.
+- 패키지 동작·API 시그니처가 의심되면 `package.json`·소스 코드·런타임 출력을 직접 읽는다.
+- "아마 이래서 그럴 것" 이라는 문장이 떠오르면 멈추고 확인 단계를 먼저 한다.
+- 가설을 세웠으면 검증 방법을 함께 제시한다 (`console.log`, 단위 테스트, `git log`, 직접 호출 등).
+
+### 2. 최소 변경 — 요청 범위 안에서만
+
+요청된 변경에 직접 연결되는 라인만 건드린다.
+
+- 인접 코드·주석·포맷팅을 "개선"하지 않는다.
+- 기존 스타일과 다르더라도 그 파일의 컨벤션을 따른다.
+- 변경으로 인해 발생한 미사용 import·함수만 정리한다. 기존 dead code는 언급만 하고 두는다.
+
+### 3. 가설 → 검증 가능한 목표
+
+작업 시작 전에 "성공 여부를 어떻게 확인할 것인가"를 한 문장으로 정의한다.
+
+- "버그 수정" → "재현 테스트 작성 → 통과 확인"
+- "리팩터" → "변경 전/후 동일 테스트 통과 확인"
+- 다단계 작업은 단계마다 검증 방식을 함께 명시한다.
+
+### 4. 위험한 행동 전에 멈춤
+
+되돌리기 어려운 작업은 사용자 확인을 먼저 받는다.
+
+- `git push --force`, `git reset --hard`, 외부 시스템 메시지 전송, DB drop 등.
+- 커밋·PR 생성은 사용자가 명시적으로 요청한 경우에만 한다.
 
 ---
 
@@ -38,103 +59,33 @@ docs/PRD.md      # 제품 요구사항 문서
 
 ### 언어·스택
 - 전 패키지 TypeScript. `any` 사용 금지.
-- Node.js ≥ 20. `ws` for WebSocket, `next` for dashboard.
-- 테스트: vitest.
+- Node.js ≥ 20.
+- WebSocket: `ws`. Dashboard: Vite + React 19 + React Router v7. 테스트: vitest.
 
-### 브랜치 전략
-
-```
-main          ← 항상 배포 가능한 상태. 직접 커밋 금지.
-└── feature/{topic}   ← 모든 작업은 feature 브랜치에서 시작
-    └── PR → main merge
-```
-
-- 브랜치명: `feature/{topic}` (예: `feature/60fps-streaming`)
-- PR 없이 main에 직접 push하지 않는다.
-- dev 브랜치는 사용하지 않는다.
-- 새 브랜치는 반드시 최신 `origin/main` 기준으로 생성한다. 로컬 `main`이 뒤처져 있을 수 있으므로 로컬 `main`에서 분기하지 않는다:
-  ```bash
-  git fetch origin
-  git checkout -b feature/{topic} origin/main
-  ```
-
-### 릴리즈 정책 (Semver + GitHub Releases)
-
-사용자는 npm 태그 버전을 설치한다. main의 중간 상태가 외부에 노출되지 않도록 **태그 기준으로만 배포**한다.
-
-```
-# 릴리즈 준비 완료 시
-git tag v0.1.0
-git push origin v0.1.0
-# → GitHub Release 생성 + npm publish
-```
-
-- 버전은 [Semantic Versioning](https://semver.org/)을 따른다.
-  - `patch` (0.0.x): 버그 수정
-  - `minor` (0.x.0): 하위 호환 새 기능
-  - `major` (x.0.0): breaking change
-- `v1.0.0` 이전은 public API가 안정화되지 않은 상태로 간주한다 — minor 버전에서 breaking change가 있을 수 있다.
-- main에 머지됐다고 자동 배포되지 않는다. 태그를 찍기 전까지는 내부 상태다.
+### 브랜치·커밋·릴리즈
+→ [CONTRIBUTING.md](./CONTRIBUTING.md)
 
 ### 워크플로우 (Plan → Work → Review → Compound)
 
-각 작업은 `.work/`에 기록한다. 컨벤션: [.work/CLAUDE.md](./.work/CLAUDE.md).
+작업 기록은 `.work/`에 남긴다. 컨벤션: [.work/CLAUDE.md](./.work/CLAUDE.md).
 
-**1. Plan** — 작업 시작 전 요구사항과 테스트 케이스를 먼저 정의한다. (`type: plan`)
+1. **Plan** — 요구사항 + 테스트 케이스를 먼저 정의 (`type: plan`).
+2. **Work** — 테스트 먼저, 통과할 때까지 구현.
+3. **Review** — 엣지 케이스 + 실제 데이터 검증 → PR (`type: review`).
+4. **Compound** — 반복 패턴을 테스트+코드+프롬프트 묶음으로 자산화 (`type: compound`).
 
-**2. Work** — feature 브랜치에서 테스트를 먼저 작성하고, 테스트가 통과할 때까지 구현을 반복한다.
-```
-git checkout -b feature/{topic}
-write test → implement → run test → fix → repeat
-```
-
-**3. Review** — 엣지 케이스 테스트를 추가하고 실제 데이터로 검증한다. PR을 열어 리뷰 후 main에 merge한다. (`type: review`)
-
-**4. Compound** — 테스트 + 코드 + 프롬프트를 묶어 템플릿화한다. 반복 작업을 자산으로 축적한다. (`type: compound`)
-
-커스텀 커맨드: `/work-plan {topic}` (Opus로 plan 문서 생성) · `/compound` (기존 문서 또는 CLAUDE.md에 패턴 추가)
-
-### 커밋 메시지 (Conventional Commits)
-
-```
-<type>(<scope>): <subject>
-```
-
-**type**
-
-| type | 용도 |
-|------|------|
-| `feat` | 새 기능 |
-| `fix` | 버그 수정 |
-| `test` | 테스트 추가·수정 |
-| `refactor` | 동작 변경 없는 코드 개선 |
-| `docs` | 문서 변경 |
-| `chore` | 빌드·의존성·설정 변경 |
-| `perf` | 성능 개선 |
-
-**scope** — 변경된 패키지명을 사용한다.
-`agent-core` · `ios-agent` · `android-agent` · `relay` · `dashboard` · `cli` · `playground`
-
-**예시**
-```
-feat(agent-core): add DeviceAgent interface and AgentRegistry
-feat(ios-agent): implement xcrun simctl listDevices
-fix(relay): handle agent disconnection gracefully
-test(ios-agent): add unit tests for boot command
-chore(deps): update ws to v8.18
-```
-
-### 코드 규칙
-- 주석은 WHY가 명확히 비자명한 경우에만 한 줄 작성.
-- 인터페이스 변경 시 `agent-core`를 먼저 수정하고 구현체를 맞춘다.
-- 새 플랫폼은 `AgentRegistry.register()`만으로 추가한다. 릴레이/대시보드 코드를 건드리지 않는다.
+커스텀 커맨드: `/work-plan {topic}` · `/compound`.
 
 ### 설계 원칙 (SOLID 중 우선 적용)
-확장 가능하고 교체 가능한 구조를 위해 아래 세 원칙을 우선 준수한다.
 
-- **OCP** (Open/Closed): 새 플랫폼·기능은 기존 코드 수정 없이 추가한다. `AgentRegistry.register()`가 대표 사례.
-- **ISP** (Interface Segregation): `DeviceAgent` 인터페이스는 모든 플랫폼이 구현 가능한 메서드만 포함한다. 플랫폼 특화 기능은 별도 인터페이스로 분리한다.
-- **DIP** (Dependency Inversion): 의존성은 생성자 주입으로 받는다. 구현체가 아닌 인터페이스에 의존해 테스트 시 mock 교체가 가능하게 한다.
+- **OCP**: 새 플랫폼·기능은 기존 코드 수정 없이 추가. `AgentRegistry.register()` 사례.
+- **ISP**: `DeviceAgent`는 모든 플랫폼이 구현 가능한 메서드만. 플랫폼 특화는 별도 인터페이스.
+- **DIP**: 의존성은 생성자 주입. 구현체가 아닌 인터페이스에 의존.
+
+### 코드 규칙
+- 주석은 WHY가 비자명한 경우에만 한 줄.
+- 인터페이스 변경 시 `agent-core`를 먼저 수정하고 구현체를 맞춘다.
+- 새 플랫폼은 `AgentRegistry.register()`만으로 추가. 릴레이/대시보드 코드 무수정.
 
 ---
 
@@ -144,3 +95,4 @@ chore(deps): update ws to v8.18
 - 로드맵에 없는 기능을 선제적으로 추가하지 않는다.
 - `agent-core` 인터페이스를 플랫폼 특화 로직으로 오염시키지 않는다.
 - 테스트 없이 구현 코드를 먼저 작성하지 않는다.
+- 추측으로 수정하지 않는다 — 근거 없이 "아마 이게 원인" 이라는 가설로 코드를 바꾸지 않는다.
