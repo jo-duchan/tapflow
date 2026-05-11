@@ -10,6 +10,5 @@ CREATE TABLE IF NOT EXISTS recordings (
   mime        TEXT NOT NULL,
   created_at  TEXT NOT NULL DEFAULT (datetime('now')),
   expires_at  TEXT NOT NULL,
-  status      TEXT NOT NULL DEFAULT 'ready' CHECK (status IN ('ready', 'expired')),
   events_path TEXT
 );
