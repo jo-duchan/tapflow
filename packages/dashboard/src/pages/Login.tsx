@@ -1,5 +1,6 @@
 import { useState, type FormEvent } from 'react'
 import { useNavigate } from 'react-router-dom'
+import { api } from '@/lib/api'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -17,12 +18,8 @@ export function Login() {
     setError('')
     setLoading(true)
     try {
-      const res = await fetch('/api/v1/auth/login', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email, password }),
-      })
-      if (!res.ok) { setError('Invalid email or password'); return }
+      const { status } = await api.post('/api/v1/auth/login', { email, password })
+      if (status !== 200) { setError('Invalid email or password'); return }
       navigate('/app-center', { replace: true })
     } catch {
       setError('Network error. Please try again.')

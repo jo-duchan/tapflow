@@ -19,13 +19,17 @@ export function useAuth(): AuthState {
   const navigate = useNavigate()
 
   useEffect(() => {
+    let cancelled = false
     api.get<AuthUser>('/api/v1/auth/me').then(({ data, status }) => {
+      if (cancelled) return
       if (status === 401 || !data) {
+        setState({ user: null, loading: false })
         navigate('/login', { replace: true })
       } else {
         setState({ user: data, loading: false })
       }
     })
+    return () => { cancelled = true }
   }, [navigate])
 
   return state
