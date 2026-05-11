@@ -132,11 +132,11 @@ export function SimulatorViewer({ sessionId, deviceId, onBack, buildId, onRecord
     return () => clearInterval(timer);
   }, []);
 
-  // sync record canvas size when chrome arrives
+  // sync record canvas size when chrome arrives — use bezel bounds, not expanded composite
   useEffect(() => {
     if (!chrome) return;
     const rc = recordCanvasRef.current;
-    if (rc) { rc.width = chrome.compositeWidth / 2; rc.height = chrome.compositeHeight / 2; }
+    if (rc) { rc.width = chrome.bezelWidth / 2; rc.height = chrome.bezelHeight / 2; }
   }, [chrome]);
 
   // ── rAF compose loop ──────────────────────────────────────────────────────
@@ -154,14 +154,17 @@ export function SimulatorViewer({ sessionId, deviceId, onBack, buildId, onRecord
     ctx.clearRect(0, 0, rc.width, rc.height);
 
     if (ch) {
-      // 1. framebuffer in screen area
-      const sx = ch.screenRect.x / 2;
-      const sy = ch.screenRect.y / 2;
+      // record canvas is in bezel space (padding stripped); offset all coords accordingly
+      const ox = ch.padding.left / 2;
+      const oy = ch.padding.top / 2;
+      // 1. framebuffer in screen area (bezel-relative coords)
+      const sx = ch.screenRect.x / 2 - ox;
+      const sy = ch.screenRect.y / 2 - oy;
       const sw = ch.screenRect.width / 2;
       const sh = ch.screenRect.height / 2;
       ctx.drawImage(fc, sx, sy, sw, sh);
-      // 2. chrome frame on top
-      if (chromeImgRef.current) ctx.drawImage(chromeImgRef.current, 0, 0, rc.width, rc.height);
+      // 2. chrome frame on top — drawn at negative padding offset so bezel body aligns at (0,0)
+      if (chromeImgRef.current) ctx.drawImage(chromeImgRef.current, -ox, -oy, ch.compositeWidth / 2, ch.compositeHeight / 2);
     } else {
       ctx.drawImage(fc, 0, 0, rc.width, rc.height);
     }
@@ -172,8 +175,10 @@ export function SimulatorViewer({ sessionId, deviceId, onBack, buildId, onRecord
       for (const f of [ph.f0, ph.f1]) {
         let cx: number, cy: number;
         if (ch) {
-          cx = ch.screenRect.x / 2 + f.x * ch.screenRect.width / 2;
-          cy = ch.screenRect.y / 2 + f.y * ch.screenRect.height / 2;
+          const ox2 = ch.padding.left / 2;
+          const oy2 = ch.padding.top / 2;
+          cx = ch.screenRect.x / 2 - ox2 + f.x * ch.screenRect.width / 2;
+          cy = ch.screenRect.y / 2 - oy2 + f.y * ch.screenRect.height / 2;
         } else {
           cx = f.x * rc.width;
           cy = f.y * rc.height;
@@ -236,9 +241,14 @@ export function SimulatorViewer({ sessionId, deviceId, onBack, buildId, onRecord
 
     // ensure size when chrome not yet loaded
     if (rc.width === 0 || rc.height === 0) {
-      const fc = canvasRef.current;
-      if (fc && fc.width > 0) { rc.width = fc.width; rc.height = fc.height; }
-      else return;
+      const ch = chromeRef.current;
+      if (ch) {
+        rc.width = ch.bezelWidth / 2; rc.height = ch.bezelHeight / 2;
+      } else {
+        const fc = canvasRef.current;
+        if (fc && fc.width > 0) { rc.width = fc.width; rc.height = fc.height; }
+        else return;
+      }
     }
 
     const types = ['video/mp4;codecs=avc1', 'video/webm;codecs=vp9', 'video/webm;codecs=vp8', 'video/webm'];
@@ -428,8 +438,8 @@ export function SimulatorViewer({ sessionId, deviceId, onBack, buildId, onRecord
       const rc = recordCanvasRef.current;
       if (ch) {
         return {
-          x: ch.screenRect.x / 2 + norm.x * ch.screenRect.width / 2,
-          y: ch.screenRect.y / 2 + norm.y * ch.screenRect.height / 2,
+          x: (ch.screenRect.x - ch.padding.left) / 2 + norm.x * ch.screenRect.width / 2,
+          y: (ch.screenRect.y - ch.padding.top)  / 2 + norm.y * ch.screenRect.height / 2,
         };
       }
       return { x: norm.x * (rc?.width ?? 1), y: norm.y * (rc?.height ?? 1) };
