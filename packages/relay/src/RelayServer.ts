@@ -371,6 +371,7 @@ export class RelayServer {
       case 'input:type':
       case 'input:button':
       case 'input:rotate':
+      case 'input:keyboard:toggle':
       case 'record:start':
       case 'record:stop': {
         // browser → agent

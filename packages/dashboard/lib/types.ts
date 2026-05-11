@@ -90,6 +90,7 @@ export type RelayMessage =
   | { type: 'input:type'; sessionId: string; payload: { text: string } }
   | { type: 'input:button'; sessionId: string; payload: { name: string } }
   | { type: 'input:rotate'; sessionId: string }
+  | { type: 'input:keyboard:toggle'; sessionId: string }
   | { type: 'record:start'; sessionId: string }
   | { type: 'record:stop'; sessionId: string }
   | { type: 'record:done'; payload: { downloadUrl: string } }

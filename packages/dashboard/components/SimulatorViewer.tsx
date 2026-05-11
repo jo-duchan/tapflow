@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState, Fragment } from 'react';
-import { Home, Camera, RotateCw, Play, Circle, Square, Loader2 } from 'lucide-react';
+import { Home, Camera, RotateCw, Play, Circle, Square, Loader2, Keyboard } from 'lucide-react';
 import { useRelay } from '@/hooks/useRelay';
 import type { ChromeData, DeviceInfo, RelayMessage } from '@/lib/types';
 import { Button } from '@/components/ui/button';
@@ -33,7 +33,10 @@ export function SimulatorViewer({ sessionId, deviceId, onBack, buildId }: Props)
     const seq = deviceSeq.current;
     createImageBitmap(new Blob([data], { type: 'image/jpeg' }))
       .then((bitmap) => {
-        if (deviceSeq.current !== seq) { bitmap.close(); return; }
+        if (deviceSeq.current !== seq) {
+          bitmap.close();
+          return;
+        }
         const canvas = canvasRef.current;
         const ctx = canvas?.getContext('2d');
         if (canvas && ctx) {
@@ -121,9 +124,12 @@ export function SimulatorViewer({ sessionId, deviceId, onBack, buildId }: Props)
     [drawToCanvas, sessionId, deviceId, buildId],
   );
 
-  const handleBinaryFrame = useCallback((data: ArrayBuffer) => {
-    drawToCanvas(data);
-  }, [drawToCanvas]);
+  const handleBinaryFrame = useCallback(
+    (data: ArrayBuffer) => {
+      drawToCanvas(data);
+    },
+    [drawToCanvas],
+  );
 
   const { send, connected } = useRelay(handleMessage, handleBinaryFrame);
   sendRef.current = send;
@@ -142,7 +148,9 @@ export function SimulatorViewer({ sessionId, deviceId, onBack, buildId }: Props)
 
   const [isLandscape, setIsLandscape] = useState(false);
   const [keyboardActive, setKeyboardActive] = useState(false);
-  const [recordState, setRecordState] = useState<'idle' | 'recording' | 'uploading' | 'done'>('idle');
+  const [recordState, setRecordState] = useState<'idle' | 'recording' | 'uploading' | 'done'>(
+    'idle',
+  );
   const [flashedButton, setFlashedButton] = useState<string | null>(null);
   const [hoveredButton, setHoveredButton] = useState<string | null>(null);
   const [pinchHint, setPinchHint] = useState<{
@@ -163,8 +171,12 @@ export function SimulatorViewer({ sessionId, deviceId, onBack, buildId }: Props)
   // Korean and other IME input is handled by the simulator's own input source.
   useEffect(() => {
     const MODIFIER_CODES = new Set([
-      'ShiftLeft', 'ShiftRight', 'ControlLeft', 'ControlRight',
-      'MetaLeft', 'MetaRight',
+      'ShiftLeft',
+      'ShiftRight',
+      'ControlLeft',
+      'ControlRight',
+      'MetaLeft',
+      'MetaRight',
     ]);
     const onKeyDown = (e: KeyboardEvent) => {
       if (e.code === 'AltLeft' || e.code === 'AltRight') {
@@ -175,10 +187,7 @@ export function SimulatorViewer({ sessionId, deviceId, onBack, buildId }: Props)
       // Skip standalone modifier key presses — included as bitmap in main key events
       if (MODIFIER_CODES.has(e.code)) return;
       e.preventDefault();
-      const modifiers =
-        (e.shiftKey ? 0x02 : 0) |
-        (e.ctrlKey  ? 0x01 : 0) |
-        (e.metaKey  ? 0x08 : 0);
+      const modifiers = (e.shiftKey ? 0x02 : 0) | (e.ctrlKey ? 0x01 : 0) | (e.metaKey ? 0x08 : 0);
       send({ type: 'input:key', sessionId, payload: { code: e.code, modifiers } });
     };
     const onKeyUp = (e: KeyboardEvent) => {
@@ -418,6 +427,10 @@ export function SimulatorViewer({ sessionId, deviceId, onBack, buildId }: Props)
     setIsLandscape((prev) => !prev);
   }, [send, sessionId]);
 
+  const handleKeyboardToggle = useCallback(() => {
+    send({ type: 'input:keyboard:toggle', sessionId });
+  }, [send, sessionId]);
+
   const handleSoftHome = useCallback(() => {
     send({ type: 'input:button', sessionId, payload: { name: 'home' } });
   }, [send, sessionId]);
@@ -457,11 +470,17 @@ export function SimulatorViewer({ sessionId, deviceId, onBack, buildId }: Props)
 
   return (
     <div className="flex flex-col items-center gap-3">
-      <div className="flex w-full items-center gap-4">
+      <div className="flex w-full items-center gap-3">
         <Button variant="ghost" size="sm" onClick={onBack}>
           ← Back
         </Button>
         <span className="text-sm text-muted-foreground">{statusText}</span>
+        {deviceInfo && (
+          <span className="text-sm text-muted-foreground/60">
+            {deviceInfo.deviceName}
+            {deviceInfo.osVersion ? ` · ${deviceInfo.osVersion}` : ''}
+          </span>
+        )}
       </div>
 
       {chrome ? (
@@ -527,6 +546,7 @@ export function SimulatorViewer({ sessionId, deviceId, onBack, buildId }: Props)
                 width: `${screenPctW}%`,
                 height: `${screenPctH}%`,
                 borderRadius: cssCornerRadius > 0 ? `${cssCornerRadius}px` : undefined,
+                backgroundColor: '#010101',
               }}
             />
             {/* Pinch finger hints — two semi-transparent circles at f0/f1 positions */}
@@ -617,7 +637,7 @@ export function SimulatorViewer({ sessionId, deviceId, onBack, buildId }: Props)
                         position: 'absolute',
                         zIndex: btnZ,
                         top: `${isTopAnchor ? (isHovered ? hoverTopPct : imgTopPct) : imgTopPct}%`,
-                        left: `${isTopAnchor ? rolloverLeftPct : (isHovered ? hoverLeftPct : rolloverLeftPct)}%`,
+                        left: `${isTopAnchor ? rolloverLeftPct : isHovered ? hoverLeftPct : rolloverLeftPct}%`,
                         width: `${imgWPct}%`,
                         height: `${imgHPct}%`,
                         transition: isTopAnchor ? 'top 0.15s ease' : 'left 0.15s ease',
@@ -634,10 +654,14 @@ export function SimulatorViewer({ sessionId, deviceId, onBack, buildId }: Props)
                       style={{
                         position: 'absolute',
                         zIndex: btn.onTop ? 3 : 1,
-                        left: `${isTopAnchor ? rolloverLeftPct : (isHovered ? hoverLeftPct : rolloverLeftPct)}%`,
-                        top: `${isTopAnchor
-                          ? (isHovered ? hoverTopPct : imgTopPct)
-                          : (btn.pressedRect.y / chrome.compositeHeight) * 100}%`,
+                        left: `${isTopAnchor ? rolloverLeftPct : isHovered ? hoverLeftPct : rolloverLeftPct}%`,
+                        top: `${
+                          isTopAnchor
+                            ? isHovered
+                              ? hoverTopPct
+                              : imgTopPct
+                            : (btn.pressedRect.y / chrome.compositeHeight) * 100
+                        }%`,
                         width: `${(btn.pressedRect.width / chrome.compositeWidth) * 100}%`,
                         height: `${(btn.pressedRect.height / chrome.compositeHeight) * 100}%`,
                         pointerEvents: 'none',
@@ -693,21 +717,23 @@ export function SimulatorViewer({ sessionId, deviceId, onBack, buildId }: Props)
       {/* Control bar */}
       {joined && (
         <div
-          className="flex items-center justify-between rounded-lg border border-border bg-muted/40 px-3 py-1.5"
+          className="flex items-center justify-end rounded-lg border border-border bg-muted/40 px-3 py-1.5"
           style={{
             width: chrome ? (isLandscape ? displayH : displayW) : '100%',
             minWidth: 200,
           }}
         >
-          <span className="text-xs text-muted-foreground truncate">
-            {deviceInfo
-              ? `${deviceInfo.deviceName}${deviceInfo.osVersion ? ` · ${deviceInfo.osVersion}` : ''}`
-              : '—'}
-          </span>
           <div className="flex items-center gap-1">
-            {keyboardActive && (
-              <span className="text-xs text-muted-foreground px-1">⌨</span>
-            )}
+            {keyboardActive && <span className="text-xs text-muted-foreground px-1">⌨</span>}
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-7 w-7"
+              title="Toggle Software Keyboard"
+              onClick={handleKeyboardToggle}
+            >
+              <Keyboard className="h-3.5 w-3.5" />
+            </Button>
             {installed && buildId && (
               <Button
                 variant="ghost"
@@ -746,7 +772,13 @@ export function SimulatorViewer({ sessionId, deviceId, onBack, buildId }: Props)
               variant="ghost"
               size="icon"
               className={`h-7 w-7 ${recordState === 'recording' ? 'text-red-500' : ''}`}
-              title={recordState === 'idle' ? 'Start recording' : recordState === 'recording' ? 'Stop recording' : 'Processing…'}
+              title={
+                recordState === 'idle'
+                  ? 'Start recording'
+                  : recordState === 'recording'
+                    ? 'Stop recording'
+                    : 'Processing…'
+              }
               disabled={recordState === 'uploading' || recordState === 'done'}
               onClick={handleRecordToggle}
             >

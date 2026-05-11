@@ -28,6 +28,10 @@ interface DeviceState {
   orientation: 'portrait' | 'landscapeRight'
   loadedChrome: ChromeData | null
   recorder: SimctlRecorder
+  // tracks whether the software keyboard is currently visible so we can send ⌘K
+  // in the correct direction. reset to false on any hardware key event because
+  // iOS auto-hides the software keyboard whenever a hardware key is pressed.
+  softKeyboardVisible: boolean
 }
 
 export class IOSAgent implements DeviceAgent {
@@ -106,6 +110,7 @@ export class IOSAgent implements DeviceAgent {
         orientation: 'portrait',
         loadedChrome: null,
         recorder: new SimctlRecorder(),
+        softKeyboardVisible: false,
       })
     })
   }
@@ -243,6 +248,13 @@ export class IOSAgent implements DeviceAgent {
 
       this.startBinaryStream(state, streamWs)
       this.ws?.send(JSON.stringify({ type: 'device:ready', sessionId, payload: { deviceId } }))
+
+      // Sync AppleKeyboards after ready — fire-and-forget so streaming isn't delayed.
+      // hw=Automatic lets the hardware layout follow the active input source on LANG1/CapsLock.
+      // By the time the user navigates to a text field the sync has already completed.
+      this.simctl.syncKeyboardsFromLanguages(deviceId).catch((e) => {
+        console.error('[agent] syncKeyboardsFromLanguages failed:', e)
+      })
     } catch (e) {
       if (seq !== state.bootSeq) return
       const message = e instanceof Error ? e.message : String(e)
@@ -360,9 +372,25 @@ export class IOSAgent implements DeviceAgent {
           .catch((e) => console.error('[agent] rotate failed:', e))
         break
       }
+      case 'input:keyboard:toggle': {
+        const state = this.deviceStates.get(msg.sessionId!)
+        if (!state) break
+        if (!state.softKeyboardVisible) {
+          state.softKeyboardVisible = true
+          this.simctl.showSoftwareKeyboard(state.deviceId)
+            .catch((e: unknown) => console.error('[agent] showSoftwareKeyboard failed:', e))
+        } else {
+          state.softKeyboardVisible = false
+          this.simctl.hideSoftwareKeyboard(state.deviceId)
+            .catch((e: unknown) => console.error('[agent] hideSoftwareKeyboard failed:', e))
+        }
+        break
+      }
       case 'input:key': {
         const state = this.deviceStates.get(msg.sessionId!)
         if (!state?.touchHelper) break
+        // iOS auto-hides the software keyboard on hardware key input.
+        if (state.softKeyboardVisible) state.softKeyboardVisible = false
         const { code, modifiers } = msg.payload as { code: string; modifiers?: number }
         const usage = KEY_CODE_MAP[code]
         if (usage !== undefined) {

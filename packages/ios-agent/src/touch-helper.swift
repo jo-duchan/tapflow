@@ -135,6 +135,21 @@ let indigoButton: IndigoHIDButtonFn? = {
     return unsafeBitCast(sym, to: IndigoHIDButtonFn.self)
 }()
 
+// IndigoHIDMessageForKeyboardArbitrary(usageCode, op) -> IndigoHIDMessageStruct*
+// Keyboard-specific variant: uses the hardware keyboard service target internally.
+// Unlike IndigoHIDMessageForHIDArbitrary(target=0x32,...) which routes through the digitizer path,
+// this routes through the real keyboard HID service — iOS recognises events as hardware keyboard input,
+// enabling input-source-aware character translation and CapsLock / language-toggle HUD.
+typealias IndigoKeyboardArbitraryFn = @convention(c) (UInt32, UInt32) -> UnsafeMutableRawPointer?
+
+let indigoKeyboard: IndigoKeyboardArbitraryFn? = {
+    guard let sym = dlsym(skHandle, "IndigoHIDMessageForKeyboardArbitrary") else {
+        fputs("warn: IndigoHIDMessageForKeyboardArbitrary not found — keyboard uses HIDArbitrary fallback\n", stderr)
+        return nil
+    }
+    return unsafeBitCast(sym, to: IndigoKeyboardArbitraryFn.self)
+}()
+
 // MARK: - ObjC runtime helpers
 
 func classInvoke(_ cls: AnyClass, _ sel: Selector, _ arg: AnyObject,
@@ -291,16 +306,13 @@ func pressButton(usagePage: UInt32, usage: UInt32) {
     }
 }
 
-// Keyboard: HID usage page 0x07 (Keyboard/Keypad), via IndigoHIDMessageForHIDArbitrary.
+// Keyboard: HID usage page 0x07 (Keyboard/Keypad).
 // modifiers: USB HID modifier bitmap — bit0=LeftCtrl, bit1=LeftShift, bit2=LeftAlt, bit3=LeftGUI, …
 // Sends modifier-down → key-down → key-up → modifier-up sequence.
-// NOTE: target=kIndigoHIDTargetDigitizer (0x32) works for arbitrary HID pages on observed Xcode versions.
+// Primary path: IndigoHIDMessageForKeyboardArbitrary — uses the hardware keyboard service target
+// so iOS treats events as real hardware keyboard input (enables input-source switching and CapsLock HUD).
+// Fallback: IndigoHIDMessageForHIDArbitrary(digitizer target) for older Xcode versions.
 func sendKey(modifiers: UInt8, usage: UInt32) {
-    guard let indigoArb = indigoArbitrary else {
-        fputs("warn: HID keyboard unavailable\n", stderr)
-        return
-    }
-    let kHIDPageKeyboard: UInt32 = 0x07
     let modifierMap: [(bit: UInt8, usage: UInt32)] = [
         (0x01, 0xE0), // LeftCtrl
         (0x02, 0xE1), // LeftShift
@@ -311,25 +323,28 @@ func sendKey(modifiers: UInt8, usage: UInt32) {
         (0x40, 0xE6), // RightAlt
         (0x80, 0xE7), // RightMeta
     ]
-    for (bit, modUsage) in modifierMap where modifiers & bit != 0 {
-        if let msg = indigoArb(kIndigoHIDTargetDigitizer, kHIDPageKeyboard, modUsage, kHIDOpDown) {
-            sendMsg(hidClient, sendSel, msg, true, nil, nil)
+
+    func kbdMsg(_ u: UInt32, _ op: UInt32) {
+        let ptr: UnsafeMutableRawPointer?
+        if let fn = indigoKeyboard {
+            ptr = fn(u, op)
+        } else if let fn = indigoArbitrary {
+            ptr = fn(kIndigoHIDTargetDigitizer, 0x07, u, op)
+        } else {
+            fputs("warn: no keyboard HID function available\n", stderr)
+            return
         }
+        if let p = ptr { sendMsg(hidClient, sendSel, p, true, nil, nil) }
     }
-    if let msgDown = indigoArb(kIndigoHIDTargetDigitizer, kHIDPageKeyboard, usage, kHIDOpDown) {
-        sendMsg(hidClient, sendSel, msgDown, true, nil, nil)
-    }
-    if let msgUp = indigoArb(kIndigoHIDTargetDigitizer, kHIDPageKeyboard, usage, kHIDOpUp) {
-        sendMsg(hidClient, sendSel, msgUp, true, nil, nil)
-    }
-    for (bit, modUsage) in modifierMap.reversed() where modifiers & bit != 0 {
-        if let msg = indigoArb(kIndigoHIDTargetDigitizer, kHIDPageKeyboard, modUsage, kHIDOpUp) {
-            sendMsg(hidClient, sendSel, msg, true, nil, nil)
-        }
-    }
+
+    for (bit, modUsage) in modifierMap where modifiers & bit != 0 { kbdMsg(modUsage, kHIDOpDown) }
+    kbdMsg(usage, kHIDOpDown)
+    kbdMsg(usage, kHIDOpUp)
+    for (bit, modUsage) in modifierMap.reversed() where modifiers & bit != 0 { kbdMsg(modUsage, kHIDOpUp) }
 }
 
-// Legacy button: for home (code=0) and lock (code=1)
+// MARK: - Legacy button injection
+
 func pressLegacyButton(code: UInt32) {
     guard let indigoBtn = indigoButton else {
         fputs("warn: legacy button unavailable (code=\(code))\n", stderr)

@@ -32,6 +32,7 @@ export type MessageType =
   | 'input:type'
   | 'input:button'
   | 'input:rotate'
+  | 'input:keyboard:toggle'
   | 'record:start'
   | 'record:stop'
   | 'record:done'
