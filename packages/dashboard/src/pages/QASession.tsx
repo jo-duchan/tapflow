@@ -79,7 +79,15 @@ export function QASession() {
 
   const osVersions = [
     ...new Set(filteredDevices.map((d) => d.osVersion).filter(Boolean)),
-  ] as string[];
+  ].sort((a, b) => {
+    const parts = (s: string) => s.replace(/^[^\d]*/, '').split('.').map(Number)
+    const [aParts, bParts] = [parts(a as string), parts(b as string)]
+    for (let i = 0; i < Math.max(aParts.length, bParts.length); i++) {
+      const diff = (bParts[i] ?? 0) - (aParts[i] ?? 0)
+      if (diff !== 0) return diff
+    }
+    return 0
+  }) as string[];
   const [osVersion, setOsVersion] = useState<string>('');
 
   const versionedDevices = osVersion
