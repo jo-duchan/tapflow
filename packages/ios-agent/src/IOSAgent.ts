@@ -1,71 +1,51 @@
 import os from 'os'
+import fs from 'fs'
+import path from 'path'
+import http from 'http'
+import { Readable } from 'stream'
 import { WebSocket } from 'ws'
 import type { Device, DeviceAgent } from '@tapflow/agent-core'
-import { SimctlWrapper } from './SimctlWrapper'
-import { ScreenCaptureStreamer } from './ScreenCaptureStreamer'
-import { MjpegStreamer } from './MjpegStreamer'
-import { WdaClient } from './WdaClient'
-import { WdaLauncher } from './WdaLauncher'
-import { TouchHelper } from './TouchHelper'
-import { DeviceChromeLoader, type ChromeData } from './DeviceChromeLoader'
-
-export interface WdaOptions {
-  /** Auto-launch WDA if not running. Defaults to false. */
-  autoStart?: boolean
-  /** WDA HTTP port for the first device. Defaults to 8100. Additional devices increment from here. */
-  port?: number
-  /** Path to a pre-built .xctestrun file. Takes priority over WDA_PATH env and cache. */
-  xctestrunPath?: string
-}
+import { SimctlWrapper } from './SimctlWrapper.js'
+import { ScreenCaptureStreamer } from './ScreenCaptureStreamer.js'
+import { MjpegStreamer } from './MjpegStreamer.js'
+import { TouchHelper } from './TouchHelper.js'
+import { DeviceChromeLoader, type ChromeData } from './DeviceChromeLoader.js'
+import { SimctlRecorder } from './SimctlRecorder.js'
+import { KEY_CODE_MAP } from './KeyCodeMap.js'
 
 export interface IOSAgentOptions {
   fps?: number
-  intervalMs?: number  // when set, uses MjpegStreamer (simctl screenshot polling) instead of ScreenCaptureStreamer
-  wdaUrl?: string
-  wda?: WdaOptions
+  intervalMs?: number
 }
 
 interface DeviceState {
   sessionId: string
   deviceId: string
   touchHelper: TouchHelper | null
-  wdaLauncher: WdaLauncher | null
-  wdaClient: WdaClient
-  wdaPort: number
   streamWs: WebSocket | null
   streamReader: ReadableStreamDefaultReader<Buffer> | null
   bootSeq: number
   orientation: 'portrait' | 'landscapeRight'
   loadedChrome: ChromeData | null
+  recorder: SimctlRecorder
 }
 
 export class IOSAgent implements DeviceAgent {
   private readonly simctl: SimctlWrapper
   private readonly fps: number
   private readonly intervalMs: number | undefined
-  private readonly wdaOptions: WdaOptions
   private readonly chromeLoader: DeviceChromeLoader
   private ws: WebSocket | null = null
-  // keyed by sessionId
   private deviceStates = new Map<string, DeviceState>()
   private relayUrl: string | null = null
 
-  constructor(options: IOSAgentOptions = {}, simctl?: SimctlWrapper, wdaClient?: WdaClient) {
+  constructor(options: IOSAgentOptions = {}, simctl?: SimctlWrapper) {
     this.simctl = simctl ?? new SimctlWrapper()
     this.fps = options.fps ?? 60
     this.intervalMs = options.intervalMs
-    this.wdaOptions = options.wda ?? {}
     this.chromeLoader = new DeviceChromeLoader()
-    // wdaClient injection is kept for single-device backward compat in unit tests
-    if (wdaClient) {
-      // will be overridden per-device after connect()
-      this._injectedWdaClient = wdaClient
-    }
   }
 
-  private _injectedWdaClient: WdaClient | null = null
-
-  /** Returns the sessionId of the first registered device. Useful in single-device scenarios. */
   get sessionId(): string | null {
     const first = this.deviceStates.values().next().value
     return first?.sessionId ?? null
@@ -74,16 +54,6 @@ export class IOSAgent implements DeviceAgent {
   async connect(relayUrl: string): Promise<void> {
     this.relayUrl = relayUrl
     const devices = await this.simctl.listDevices()
-    const booted = devices.find((d) => d.status === 'booted')
-
-    if (booted && this.wdaOptions.autoStart) {
-      const launcher = new WdaLauncher({
-        udid: booted.id,
-        port: this.wdaOptions.port ?? 8100,
-        xctestrunPath: this.wdaOptions.xctestrunPath,
-      })
-      await launcher.ensureRunning()
-    }
 
     return new Promise((resolve, reject) => {
       const ws = new WebSocket(relayUrl)
@@ -108,7 +78,6 @@ export class IOSAgent implements DeviceAgent {
           this.ws = ws
           this.initDeviceStates(
             msg.registeredSessions as Array<{ deviceId: string; sessionId: string }>,
-            devices,
           )
           ws.on('message', (d) => {
             try { this.handleRelayMessage(JSON.parse(d.toString())) } catch { /* ignore malformed */ }
@@ -125,30 +94,19 @@ export class IOSAgent implements DeviceAgent {
 
   private initDeviceStates(
     registeredSessions: Array<{ deviceId: string; sessionId: string }>,
-    devices: Device[],
   ): void {
-    const basePort = this.wdaOptions.port ?? 8100
-    registeredSessions.forEach(({ deviceId, sessionId }, index) => {
-      const wdaPort = basePort + index
-      const wdaClient = this._injectedWdaClient ?? new WdaClient(`http://localhost:${wdaPort}`)
-      const device = devices.find((d) => d.id === deviceId)
+    registeredSessions.forEach(({ deviceId, sessionId }) => {
       this.deviceStates.set(sessionId, {
         sessionId,
         deviceId,
         touchHelper: null,
-        wdaLauncher: null,
-        wdaClient,
-        wdaPort,
         streamWs: null,
         streamReader: null,
         bootSeq: 0,
         orientation: 'portrait',
         loadedChrome: null,
+        recorder: new SimctlRecorder(),
       })
-      // If this device was already booted at connect time and autoStart is set, WDA is running
-      if (device?.status === 'booted' && this.wdaOptions.autoStart) {
-        // wdaLauncher already started above in connect(); store state reference if needed
-      }
     })
   }
 
@@ -167,10 +125,9 @@ export class IOSAgent implements DeviceAgent {
     state.streamReader = null
     state.touchHelper?.stop()
     state.touchHelper = null
-    state.wdaLauncher?.stop()
-    state.wdaLauncher = null
     state.streamWs?.close()
     state.streamWs = null
+    state.recorder.cleanup()
   }
 
   private sendChromeData(state: DeviceState, device: Device): void {
@@ -214,7 +171,6 @@ export class IOSAgent implements DeviceAgent {
       } catch {
         // stream cancelled or ws closed — expected on disconnect
       }
-      // auto-restart if still connected
       if (state.streamReader === reader && streamWs.readyState === WebSocket.OPEN) {
         this.startBinaryStream(state, streamWs)
       }
@@ -250,7 +206,6 @@ export class IOSAgent implements DeviceAgent {
 
     const seq = ++state.bootSeq
 
-    // Tear down previous stream for this device if re-booting
     state.streamReader?.cancel()
     state.streamReader = null
     state.touchHelper?.stop()
@@ -280,7 +235,6 @@ export class IOSAgent implements DeviceAgent {
         status: 'booted',
       } as Device)
 
-      // Open dedicated stream WS and wait for relay to confirm before sending device:ready
       const streamWs = await this.openStreamWs(state)
       if (seq !== state.bootSeq) {
         streamWs.close()
@@ -363,7 +317,7 @@ export class IOSAgent implements DeviceAgent {
         const state = this.deviceStates.get(msg.sessionId!)
         if (!state?.touchHelper) { console.error('[agent] touch:start — touchHelper not ready'); break }
         const { x, y } = msg.payload as { x: number; y: number }
-        this.touchStartForState(state, x, y)
+        state.touchHelper.touchStart(x, y)
         break
       }
       case 'input:touch:move': {
@@ -406,11 +360,42 @@ export class IOSAgent implements DeviceAgent {
           .catch((e) => console.error('[agent] rotate failed:', e))
         break
       }
-      case 'input:type': {
+      case 'input:key': {
+        const state = this.deviceStates.get(msg.sessionId!)
+        if (!state?.touchHelper) break
+        const { code, modifiers } = msg.payload as { code: string; modifiers?: number }
+        const usage = KEY_CODE_MAP[code]
+        if (usage !== undefined) {
+          state.touchHelper.sendKey(usage, modifiers ?? 0)
+        }
+        break
+      }
+      case 'record:start': {
         const state = this.deviceStates.get(msg.sessionId!)
         if (!state) break
-        const { text } = msg.payload as { text: string }
-        state.wdaClient.type(text).catch((e) => console.error('[agent] type failed:', e))
+        if (state.recorder.isRecording()) {
+          this.ws?.send(JSON.stringify({ type: 'record:error', sessionId: msg.sessionId, message: 'Recording already in progress' }))
+          break
+        }
+        try {
+          state.recorder.start(state.deviceId)
+        } catch (e) {
+          this.ws?.send(JSON.stringify({ type: 'record:error', sessionId: msg.sessionId, message: String(e) }))
+        }
+        break
+      }
+      case 'record:stop': {
+        const state = this.deviceStates.get(msg.sessionId!)
+        if (!state) break
+        if (!state.recorder.isRecording()) {
+          this.ws?.send(JSON.stringify({ type: 'record:error', sessionId: msg.sessionId, message: 'No recording in progress' }))
+          break
+        }
+        state.recorder.stop()
+          .then((filePath) => this.uploadRecording(filePath, msg.sessionId!))
+          .catch((e) => {
+            this.ws?.send(JSON.stringify({ type: 'record:error', sessionId: msg.sessionId, message: String(e) }))
+          })
         break
       }
       case 'input:button': {
@@ -423,8 +408,6 @@ export class IOSAgent implements DeviceAgent {
           const btn = state.loadedChrome?.buttons.find((b) => b.name === name)
           if (btn && btn.usagePage > 0 && btn.usage > 0) {
             state.touchHelper.pressButton(btn.usagePage, btn.usage)
-          } else {
-            state.wdaClient.pressButton(name).catch((e) => console.error('[agent] button wda fallback failed:', e))
           }
         }
         break
@@ -432,8 +415,48 @@ export class IOSAgent implements DeviceAgent {
     }
   }
 
-  private touchStartForState(state: DeviceState, x: number, y: number): void {
-    state.touchHelper?.touchStart(x, y)
+  private async uploadRecording(filePath: string, sessionId: string): Promise<void> {
+    if (!this.relayUrl) return
+    const httpBase = this.relayUrl.replace(/^ws/, 'http')
+    const url = `${httpBase}/api/v1/recordings/upload?sessionId=${sessionId}`
+    const boundary = `----TapflowBoundary${Date.now()}`
+    const filename = path.basename(filePath)
+    const fileSize = fs.statSync(filePath).size
+    const prefix = Buffer.from(
+      `--${boundary}\r\nContent-Disposition: form-data; name="file"; filename="${filename}"\r\nContent-Type: video/quicktime\r\n\r\n`,
+    )
+    const suffix = Buffer.from(`\r\n--${boundary}--\r\n`)
+
+    const bodyStream = Readable.from(async function* () {
+      yield prefix
+      for await (const chunk of fs.createReadStream(filePath)) yield chunk
+      yield suffix
+    }())
+
+    await new Promise<void>((resolve, reject) => {
+      const req = http.request(url, {
+        method: 'POST',
+        headers: {
+          'Content-Type': `multipart/form-data; boundary=${boundary}`,
+          'Content-Length': prefix.length + fileSize + suffix.length,
+        },
+      }, (res) => {
+        let body = ''
+        res.on('data', (chunk: Buffer) => { body += chunk.toString() })
+        res.on('end', () => {
+          if (res.statusCode === 200) {
+            const { url: downloadUrl } = JSON.parse(body) as { url: string }
+            this.ws?.send(JSON.stringify({ type: 'record:done', sessionId, payload: { downloadUrl } }))
+            fs.unlink(filePath, () => {})
+            resolve()
+          } else {
+            reject(new Error(`Upload failed: ${res.statusCode}`))
+          }
+        })
+      })
+      req.on('error', reject)
+      bodyStream.pipe(req)
+    })
   }
 
   // DeviceAgent interface — delegate to SimctlWrapper
@@ -463,8 +486,19 @@ export class IOSAgent implements DeviceAgent {
     first?.touchHelper?.touchEnd()
     return Promise.resolve()
   }
-  type(text: string): Promise<void> {
-    const first = this.deviceStates.values().next().value
-    return first?.wdaClient.type(text) ?? Promise.resolve()
+  type(_text: string): Promise<void> { return Promise.resolve() }
+  pressKey(_key: string): Promise<void> { return Promise.resolve() }
+
+  startRecording(deviceId: string): Promise<void> {
+    const state = [...this.deviceStates.values()].find((s) => s.deviceId === deviceId)
+    if (!state) return Promise.reject(new Error('Device not found'))
+    state.recorder.start(deviceId)
+    return Promise.resolve()
+  }
+
+  stopRecording(deviceId: string): Promise<string> {
+    const state = [...this.deviceStates.values()].find((s) => s.deviceId === deviceId)
+    if (!state) return Promise.reject(new Error('Device not found'))
+    return state.recorder.stop()
   }
 }

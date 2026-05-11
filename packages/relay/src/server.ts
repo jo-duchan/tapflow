@@ -1,6 +1,6 @@
 import path from 'path'
-import { initDb } from './db'
-import { RelayServer } from './RelayServer'
+import { initDb } from './db.js'
+import { RelayServer } from './RelayServer.js'
 
 const port = Number(process.env.TAPFLOW_PORT ?? 4000)
 const dataDir = process.env.TAPFLOW_DATA_DIR ?? path.join(process.cwd(), '.tapflow')

@@ -86,8 +86,14 @@ export type RelayMessage =
   | { type: 'input:pinch:start'; sessionId: string; payload: { f0: { x: number; y: number }; f1: { x: number; y: number } } }
   | { type: 'input:pinch:move'; sessionId: string; payload: { f0: { x: number; y: number }; f1: { x: number; y: number } } }
   | { type: 'input:pinch:end'; sessionId: string }
+  | { type: 'input:key'; sessionId: string; payload: { key: string } }
+  | { type: 'input:type'; sessionId: string; payload: { text: string } }
   | { type: 'input:button'; sessionId: string; payload: { name: string } }
   | { type: 'input:rotate'; sessionId: string }
+  | { type: 'record:start'; sessionId: string }
+  | { type: 'record:stop'; sessionId: string }
+  | { type: 'record:done'; payload: { downloadUrl: string } }
+  | { type: 'record:error'; message: string }
   | { type: 'app:install-done' }
   | { type: 'app:install-error'; message: string }
   | { type: 'app:launch-done' }

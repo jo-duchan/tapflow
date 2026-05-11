@@ -2,17 +2,18 @@ import http from 'http'
 import fs from 'fs'
 import path from 'path'
 import { WebSocketServer, WebSocket } from 'ws'
-import { SessionManager } from './SessionManager'
-import type { RelayMessage } from './types'
-import { Router } from './router'
-import { getDb } from './db'
-import { handleLogin, handleLogout, handleMe } from './api/auth'
-import { handleVerify, handleAccept } from './api/invitations'
-import { handleListBuilds, handleGetBuild, handleUpdateBuild, handleUploadBuild } from './api/builds'
-import { handleListComments, handleCreateComment, handleDeleteComment } from './api/comments'
-import { handleListMembers, handleInvite, handleUpdateMember, handleDeleteMember } from './api/team'
-import { handleListTokens, handleCreateToken, handleRevokeToken } from './api/tokens'
-import { handleGetSettings, handleUpdateSettings } from './api/settings'
+import { SessionManager } from './SessionManager.js'
+import type { RelayMessage } from './types.js'
+import { Router } from './router.js'
+import { getDb } from './db.js'
+import { handleLogin, handleLogout, handleMe } from './api/auth.js'
+import { handleVerify, handleAccept } from './api/invitations.js'
+import { handleListBuilds, handleGetBuild, handleUpdateBuild, handleUploadBuild } from './api/builds.js'
+import { handleListComments, handleCreateComment, handleDeleteComment } from './api/comments.js'
+import { handleListMembers, handleInvite, handleUpdateMember, handleDeleteMember } from './api/team.js'
+import { handleListTokens, handleCreateToken, handleRevokeToken } from './api/tokens.js'
+import { handleGetSettings, handleUpdateSettings } from './api/settings.js'
+import { handleUploadRecording, handleDownloadRecording, purgeExpiredRecordings } from './api/recordings.js'
 
 const MIME_TYPES: Record<string, string> = {
   '.html': 'text/html',
@@ -39,8 +40,8 @@ export class RelayServer {
 
   constructor(private readonly options: { port: number; publicDir?: string; uploadsDir?: string }) {
     this.sessions = new SessionManager()
-    this.publicDir = options.publicDir ?? path.join(__dirname, '../public')
-    this.uploadsDir = options.uploadsDir ?? path.join(__dirname, '../uploads')
+    this.publicDir = options.publicDir ?? path.join(import.meta.dirname, '../public')
+    this.uploadsDir = options.uploadsDir ?? path.join(import.meta.dirname, '../uploads')
     this.router = new Router()
     this.registerRoutes()
     this.httpServer = http.createServer((req, res) => this.handleRequest(req, res))
@@ -86,6 +87,12 @@ export class RelayServer {
     // settings
     this.router.get('/api/v1/settings', handleGetSettings)
     this.router.patch('/api/v1/settings', (req, res) => handleUpdateSettings(req, res, u))
+
+    // recordings
+    const recordingsDir = path.join(u, '../recordings')
+    purgeExpiredRecordings(recordingsDir)
+    this.router.post('/api/v1/recordings/upload', (req, res) => handleUploadRecording(req, res, recordingsDir, this.sessions))
+    this.router.get('/api/v1/recordings/:filename', (req, res) => handleDownloadRecording(req, res, recordingsDir))
   }
 
   start(): Promise<void> {
@@ -360,13 +367,26 @@ export class RelayServer {
       case 'input:pinch:start':
       case 'input:pinch:move':
       case 'input:pinch:end':
+      case 'input:key':
       case 'input:type':
       case 'input:button':
-      case 'input:rotate': {
+      case 'input:rotate':
+      case 'record:start':
+      case 'record:stop': {
         // browser → agent
         const session = this.sessions.get(msg.sessionId!)
         if (session?.agentSocket.readyState === WebSocket.OPEN) {
           session.agentSocket.send(JSON.stringify(msg))
+        }
+        break
+      }
+
+      case 'record:done':
+      case 'record:error': {
+        // agent → browser
+        const session = this.sessions.get(msg.sessionId!)
+        if (session?.browserSocket?.readyState === WebSocket.OPEN) {
+          session.browserSocket.send(JSON.stringify(msg))
         }
         break
       }

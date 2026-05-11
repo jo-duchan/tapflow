@@ -1,6 +1,4 @@
 import { execSync } from 'node:child_process'
-import { existsSync, readFileSync } from 'node:fs'
-import { WDA_XCTESTRUN_CACHE, WDA_PID_FILE } from './tapflow-dir'
 
 export interface DoctorCheck {
   label: string
@@ -9,14 +7,13 @@ export interface DoctorCheck {
 }
 
 export async function runDoctorChecks(): Promise<DoctorCheck[]> {
-  return Promise.all([
+  return [
     checkMacOS(),
     checkXcode(),
     checkSimctl(),
     checkBootedSimulator(),
-    checkWda(),
     checkNodeVersion(),
-  ])
+  ]
 }
 
 function checkMacOS(): DoctorCheck {
@@ -75,23 +72,6 @@ function checkBootedSimulator(): DoctorCheck {
   }
 }
 
-async function checkWda(): Promise<DoctorCheck> {
-  try {
-    const res = await fetch('http://localhost:8100/status', { signal: AbortSignal.timeout(1_000) })
-    if (res.ok) return { label: 'WebDriverAgent (running on :8100)', ok: true }
-  } catch { /* not running */ }
-
-  if (existsSync(WDA_XCTESTRUN_CACHE)) {
-    return { label: 'WebDriverAgent (installed, not running)', ok: true }
-  }
-
-  return {
-    label: 'WebDriverAgent',
-    ok: false,
-    detail: 'Run `tapflow wda install` to set it up.',
-  }
-}
-
 function checkNodeVersion(): DoctorCheck {
   const version = process.version
   const [, major] = version.match(/^v(\d+)/) ?? []
@@ -100,16 +80,5 @@ function checkNodeVersion(): DoctorCheck {
     label: `Node ${version}`,
     ok,
     detail: ok ? undefined : 'Node ≥ 20 required.',
-  }
-}
-
-export function checkWdaProcess(): { running: boolean; pid?: number } {
-  if (!existsSync(WDA_PID_FILE)) return { running: false }
-  try {
-    const pid = Number(readFileSync(WDA_PID_FILE, 'utf8').trim())
-    process.kill(pid, 0) // throws if process does not exist
-    return { running: true, pid }
-  } catch {
-    return { running: false }
   }
 }

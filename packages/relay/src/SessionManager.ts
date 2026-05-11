@@ -1,6 +1,6 @@
 import { randomUUID } from 'crypto'
 import type { WebSocket } from 'ws'
-import type { SessionInfo } from './types'
+import type { SessionInfo } from './types.js'
 
 export interface Session {
   id: string

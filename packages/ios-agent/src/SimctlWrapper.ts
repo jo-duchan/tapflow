@@ -6,7 +6,7 @@ import { tmpdir } from 'os'
 
 const execFileAsync = promisify(execFile)
 import type { Device, DeviceStatus } from '@tapflow/agent-core'
-import { defaultRunner, type SimctlRunner } from './simctl'
+import { defaultRunner, type SimctlRunner } from './simctl.js'
 
 interface SimctlDevice {
   udid: string

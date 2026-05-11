@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState, Fragment } from 'react';
-import { Home, Camera, RotateCw, Play } from 'lucide-react';
+import { Home, Camera, RotateCw, Play, Circle, Square, Loader2 } from 'lucide-react';
 import { useRelay } from '@/hooks/useRelay';
 import type { ChromeData, DeviceInfo, RelayMessage } from '@/lib/types';
 import { Button } from '@/components/ui/button';
@@ -103,6 +103,20 @@ export function SimulatorViewer({ sessionId, deviceId, onBack, buildId }: Props)
         setDeviceInfo(msg.payload);
       }
 
+      if (msg.type === 'record:done') {
+        setRecordState('done');
+        const { downloadUrl } = msg.payload as { downloadUrl: string };
+        const a = document.createElement('a');
+        a.href = downloadUrl;
+        a.download = '';
+        a.click();
+        setTimeout(() => setRecordState('idle'), 2000);
+      }
+
+      if (msg.type === 'record:error') {
+        setRecordState('idle');
+        console.error('[record]', msg.message);
+      }
     },
     [drawToCanvas, sessionId, deviceId, buildId],
   );
@@ -127,6 +141,8 @@ export function SimulatorViewer({ sessionId, deviceId, onBack, buildId }: Props)
   }, []);
 
   const [isLandscape, setIsLandscape] = useState(false);
+  const [keyboardActive, setKeyboardActive] = useState(false);
+  const [recordState, setRecordState] = useState<'idle' | 'recording' | 'uploading' | 'done'>('idle');
   const [flashedButton, setFlashedButton] = useState<string | null>(null);
   const [hoveredButton, setHoveredButton] = useState<string | null>(null);
   const [pinchHint, setPinchHint] = useState<{
@@ -141,13 +157,32 @@ export function SimulatorViewer({ sessionId, deviceId, onBack, buildId }: Props)
   const MOVE_THROTTLE_MS = 16;
   const DRAG_THRESHOLD = 0.02;
 
-  // Track Option/Alt key for pinch mode
+  // Keyboard forwarding: send physical key code (KeyboardEvent.code) via HID.
+  // Alt/Option is reserved for pinch mode — excluded from key forwarding.
+  // Modifier keys (Shift/Ctrl/Meta) are encoded as a bitmap in the modifiers field.
+  // Korean and other IME input is handled by the simulator's own input source.
   useEffect(() => {
+    const MODIFIER_CODES = new Set([
+      'ShiftLeft', 'ShiftRight', 'ControlLeft', 'ControlRight',
+      'MetaLeft', 'MetaRight',
+    ]);
     const onKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Alt') isOptionHeld.current = true;
+      if (e.code === 'AltLeft' || e.code === 'AltRight') {
+        isOptionHeld.current = true;
+        return;
+      }
+      if (!keyboardActive) return;
+      // Skip standalone modifier key presses — included as bitmap in main key events
+      if (MODIFIER_CODES.has(e.code)) return;
+      e.preventDefault();
+      const modifiers =
+        (e.shiftKey ? 0x02 : 0) |
+        (e.ctrlKey  ? 0x01 : 0) |
+        (e.metaKey  ? 0x08 : 0);
+      send({ type: 'input:key', sessionId, payload: { code: e.code, modifiers } });
     };
     const onKeyUp = (e: KeyboardEvent) => {
-      if (e.key === 'Alt') {
+      if (e.code === 'AltLeft' || e.code === 'AltRight') {
         isOptionHeld.current = false;
         setPinchHint(null);
       }
@@ -158,7 +193,20 @@ export function SimulatorViewer({ sessionId, deviceId, onBack, buildId }: Props)
       window.removeEventListener('keydown', onKeyDown);
       window.removeEventListener('keyup', onKeyUp);
     };
-  }, []);
+  }, [keyboardActive, send, sessionId]);
+
+  // Deactivate keyboard when clicking outside the simulator area
+  useEffect(() => {
+    if (!keyboardActive) return;
+    const onDocPointerDown = (e: PointerEvent) => {
+      const area = containerRef.current ?? canvasRef.current;
+      if (area && !area.contains(e.target as Node)) {
+        setKeyboardActive(false);
+      }
+    };
+    document.addEventListener('pointerdown', onDocPointerDown);
+    return () => document.removeEventListener('pointerdown', onDocPointerDown);
+  }, [keyboardActive]);
 
   // Map a pointer event to normalized screen [0,1].
   // Portrait chrome: maps composite container coords through screenRect.
@@ -234,6 +282,7 @@ export function SimulatorViewer({ sessionId, deviceId, onBack, buildId }: Props)
 
   const handlePointerDown = useCallback(
     (e: React.PointerEvent) => {
+      setKeyboardActive(true);
       if (isOptionHeld.current) {
         const fingers = toPinchFingers(e);
         if (!fingers) return;
@@ -296,6 +345,16 @@ export function SimulatorViewer({ sessionId, deviceId, onBack, buildId }: Props)
     setHoveredButton(null);
     setPinchHint(null);
   }, []);
+
+  const handleRecordToggle = useCallback(() => {
+    if (recordState === 'idle') {
+      setRecordState('recording');
+      send({ type: 'record:start', sessionId });
+    } else if (recordState === 'recording') {
+      setRecordState('uploading');
+      send({ type: 'record:stop', sessionId });
+    }
+  }, [recordState, send, sessionId]);
 
   const handlePointerUp = useCallback(() => {
     if (isPinchMode.current) {
@@ -646,6 +705,9 @@ export function SimulatorViewer({ sessionId, deviceId, onBack, buildId }: Props)
               : '—'}
           </span>
           <div className="flex items-center gap-1">
+            {keyboardActive && (
+              <span className="text-xs text-muted-foreground px-1">⌨</span>
+            )}
             {installed && buildId && (
               <Button
                 variant="ghost"
@@ -679,6 +741,22 @@ export function SimulatorViewer({ sessionId, deviceId, onBack, buildId }: Props)
               onClick={handleScreenshot}
             >
               <Camera className="h-3.5 w-3.5" />
+            </Button>
+            <Button
+              variant="ghost"
+              size="icon"
+              className={`h-7 w-7 ${recordState === 'recording' ? 'text-red-500' : ''}`}
+              title={recordState === 'idle' ? 'Start recording' : recordState === 'recording' ? 'Stop recording' : 'Processing…'}
+              disabled={recordState === 'uploading' || recordState === 'done'}
+              onClick={handleRecordToggle}
+            >
+              {recordState === 'uploading' ? (
+                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+              ) : recordState === 'recording' ? (
+                <Square className="h-3.5 w-3.5 fill-current" />
+              ) : (
+                <Circle className="h-3.5 w-3.5" />
+              )}
             </Button>
             <Button
               variant="ghost"

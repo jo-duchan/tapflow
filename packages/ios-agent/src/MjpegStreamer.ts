@@ -1,4 +1,4 @@
-import type { SimctlWrapper } from './SimctlWrapper'
+import type { SimctlWrapper } from './SimctlWrapper.js'
 
 type Screenshottable = Pick<SimctlWrapper, 'screenshot'>
 

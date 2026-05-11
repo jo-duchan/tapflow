@@ -2,8 +2,17 @@
   "name": "@tapflow/ios-agent",
   "version": "0.1.0",
   "description": "iOS simulator agent using xcrun simctl and WebDriverAgent",
+  "type": "module",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "source": "./src/index.ts",
+      "tsx": "./src/index.ts",
+      "import": "./dist/index.js",
+      "default": "./dist/index.js"
+    }
+  },
   "license": "MIT",
   "scripts": {
     "build": "tsc",

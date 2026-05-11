@@ -3,9 +3,9 @@ import fs from 'fs'
 import path from 'path'
 import { spawnSync } from 'child_process'
 import busboy from 'busboy'
-import { getDb } from '../db'
-import { requireAuth, verifyPat } from '../middleware/auth'
-import { json, readJson } from '../router'
+import { getDb } from '../db.js'
+import { requireAuth, verifyPat } from '../middleware/auth.js'
+import { json, readJson } from '../router.js'
 
 function extractBundleId(ipaPath: string): string | null {
   try {

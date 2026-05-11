@@ -1,4 +1,4 @@
-import type { Device } from './types'
+import type { Device } from './types.js'
 
 export interface DeviceAgent {
   listDevices(): Promise<Device[]>
@@ -12,6 +12,9 @@ export interface DeviceAgent {
   touchMove(x: number, y: number): Promise<void>
   touchEnd(): Promise<void>
   type(text: string): Promise<void>
+  pressKey(key: string): Promise<void>
+  startRecording(deviceId: string): Promise<void>
+  stopRecording(deviceId: string): Promise<string>
 }
 
 export type DeviceAgentConstructor = new () => DeviceAgent

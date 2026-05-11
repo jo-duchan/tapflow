@@ -2,9 +2,9 @@ import http from 'http'
 import fs from 'fs'
 import path from 'path'
 import busboy from 'busboy'
-import { getDb } from '../db'
-import { requireRole, requireAuth } from '../middleware/auth'
-import { json } from '../router'
+import { getDb } from '../db.js'
+import { requireRole, requireAuth } from '../middleware/auth.js'
+import { json } from '../router.js'
 
 export function handleGetSettings(req: http.IncomingMessage, res: http.ServerResponse): void {
   const auth = requireAuth(req, res)

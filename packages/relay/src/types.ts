@@ -28,9 +28,14 @@ export type MessageType =
   | 'input:pinch:start'
   | 'input:pinch:move'
   | 'input:pinch:end'
+  | 'input:key'
   | 'input:type'
   | 'input:button'
   | 'input:rotate'
+  | 'record:start'
+  | 'record:stop'
+  | 'record:done'
+  | 'record:error'
   | 'error'
 
 export interface DeviceInfo {

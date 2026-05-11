@@ -2,7 +2,7 @@ import { spawn, type ChildProcess } from 'child_process'
 import { join } from 'path'
 
 // Binary lives in src/, not dist/ — same convention as ScreenCaptureStreamer
-const BINARY = join(__dirname, '..', 'src', 'touch-helper')
+const BINARY = join(import.meta.dirname, '..', 'src', 'touch-helper')
 
 export class TouchHelper {
   private proc: ChildProcess | null = null
@@ -77,6 +77,21 @@ export class TouchHelper {
 
   pinchEnd(): void {
     this.writeTwoFinger(8, 0, 0, 0, 0)
+  }
+
+  // HID keyboard — type 9 frame: [9][modifiers][pad x3][usage:u32BE]
+  // modifiers: USB HID modifier bitmap (0x01=LeftCtrl, 0x02=LeftShift, 0x04=LeftAlt, 0x08=LeftMeta, …)
+  // usage: keyboard usage code from HID Keyboard/Keypad page (0x07)
+  sendKey(usage: number, modifiers = 0): void {
+    if (!this.proc?.stdin?.writable) return
+    const buf = Buffer.allocUnsafe(9)
+    buf.writeUInt8(9, 0)
+    buf.writeUInt8(modifiers, 1)
+    buf.writeUInt8(0, 2)
+    buf.writeUInt8(0, 3)
+    buf.writeUInt8(0, 4)
+    buf.writeUInt32BE(usage, 5)
+    this.proc.stdin.write(buf)
   }
 
   private writeTwoFinger(type: number, x1: number, y1: number, x2: number, y2: number): void {
