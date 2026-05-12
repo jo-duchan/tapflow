@@ -9,6 +9,15 @@
 React SPA QA 대시보드: 시뮬레이터 뷰어, 버그 리포트, 팀 초대 화면을 제공한다.
 **독립 배포 없음** — `vite build`로 `dist/`에 번들링하고, relay 패키지의 `public/`에 복사되어 릴레이 서버가 직접 서빙한다.
 
+### App Center 구조
+
+`/app-center` 경로. 좌측 App 목록 사이드바 + 중앙 Release Accordion + Build 카드 구성.
+
+- **App 사이드바**: `GET /api/v1/apps` → 앱 선택 시 `?appId=N` URL 파라미터로 상태 관리.
+- **Release Accordion**: `GET /api/v1/builds?app_id=N` → `version_name` 기준 그룹핑 (`groupByRelease()`). 정식 `releases` 테이블 없음 — `version_name` 메타데이터로 UI 그룹핑.
+- **Build 카드**: `build_number`, `platform`, `status_label`, uploader, `uploaded_at` 표시. status 드롭다운 인라인 변경. **"Start QA" CTA** → `/app-center/build?id={build_id}`.
+- **업로드**: `UploadBuildDialog` — iOS `.app.zip` / Android `.apk`. `version_name`/`build_number`는 plist에서 자동 추출되므로 입력 필드 없음.
+
 ## HOW
 
 - **스택**: Vite + React 19 + React Router v7 + Shadcn/Tailwind + next-themes
