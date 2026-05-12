@@ -1,5 +1,5 @@
-import { Link, useLocation } from 'react-router-dom'
-import { LayoutGrid, Settings, Users, KeyRound } from 'lucide-react'
+import { Link, useLocation, useNavigate } from 'react-router-dom'
+import { LayoutGrid, LogOut, Settings, Users, KeyRound } from 'lucide-react'
 import {
   Sidebar,
   SidebarContent,
@@ -12,6 +12,13 @@ import {
   SidebarMenuButton,
   SidebarMenuItem,
 } from '@/components/ui/sidebar'
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu'
 import { useAuth } from '@/hooks/useAuth'
 import { UserAvatar } from '@/components/user-avatar'
 
@@ -27,8 +34,14 @@ const settingsItems = [
 
 export function AppSidebar() {
   const { pathname } = useLocation()
+  const navigate = useNavigate()
   const { user } = useAuth()
   const isAdmin = user?.role === 'Admin'
+
+  async function handleLogout() {
+    await fetch('/api/v1/auth/logout', { method: 'POST', credentials: 'include' })
+    navigate('/login', { replace: true })
+  }
 
   return (
     <Sidebar>
@@ -75,13 +88,30 @@ export function AppSidebar() {
 
       {user && (
         <SidebarFooter className="px-3 py-3 border-t">
-          <div className="flex items-center gap-2.5">
-            <UserAvatar name={user.displayName ?? ''} avatarUrl={user.avatarUrl} size={28} />
-            <div className="flex flex-col min-w-0">
-              <span className="text-sm font-medium truncate">{user.displayName}</span>
-              <span className="text-xs text-muted-foreground truncate">{user.email}</span>
-            </div>
-          </div>
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <button className="flex w-full items-center gap-2.5 rounded-md px-1 py-1 text-left hover:bg-sidebar-accent transition-colors">
+                <UserAvatar name={user.displayName ?? ''} avatarUrl={user.avatarUrl} size={28} />
+                <div className="flex flex-col min-w-0 flex-1">
+                  <span className="text-sm font-medium truncate">{user.displayName}</span>
+                  <span className="text-xs text-muted-foreground truncate">{user.email}</span>
+                </div>
+              </button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent side="top" align="start" className="w-56">
+              <DropdownMenuItem asChild>
+                <Link to="/settings/default">
+                  <Settings className="mr-2 h-4 w-4" />
+                  Settings
+                </Link>
+              </DropdownMenuItem>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem onClick={handleLogout} className="text-destructive focus:text-destructive">
+                <LogOut className="mr-2 h-4 w-4" />
+                Log out
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
         </SidebarFooter>
       )}
     </Sidebar>
