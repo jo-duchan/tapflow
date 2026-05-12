@@ -147,8 +147,10 @@ export function AppCenter() {
           <button
             key={app.id}
             onClick={() => {
-              setBuilds([])
-              setOpenReleases(new Set())
+              if (app.id !== selectedAppId) {
+                setBuilds([])
+                setOpenReleases(new Set())
+              }
               setSearchParams({ appId: String(app.id) })
             }}
             className={[

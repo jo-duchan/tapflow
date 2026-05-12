@@ -417,7 +417,7 @@ export class IOSAgent implements DeviceAgent {
    * install 완료 후 임시 디렉토리를 정리한다.
    */
   private async installBuild(filePath: string): Promise<void> {
-    if (!filePath.endsWith('.app.zip')) {
+    if (!filePath.endsWith('.zip')) {
       return this.simctl.installApp(filePath)
     }
 
