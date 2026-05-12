@@ -42,3 +42,6 @@ packages/ios-agent/src/screencapture-helper
 
 # playground runtime data (recordings, uploads, db)
 playground/.tapflow/
+
+# playground test builds
+playground/test-builds/
