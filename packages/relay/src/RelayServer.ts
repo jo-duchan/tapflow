@@ -9,6 +9,7 @@ import { getDb } from './db.js'
 import { handleLogin, handleLogout, handleMe } from './api/auth.js'
 import { handleVerify, handleAccept } from './api/invitations.js'
 import { handleListBuilds, handleGetBuild, handleUpdateBuild, handleUploadBuild } from './api/builds.js'
+import { handleListApps, handleUpdateApp } from './api/apps.js'
 import { handleListComments, handleCreateComment, handleDeleteComment } from './api/comments.js'
 import { handleListMembers, handleInvite, handleUpdateMember, handleDeleteMember } from './api/team.js'
 import { handleListTokens, handleCreateToken, handleRevokeToken } from './api/tokens.js'
@@ -61,6 +62,10 @@ export class RelayServer {
     // invitations
     this.router.get('/api/v1/invitations/verify', handleVerify)
     this.router.post('/api/v1/invitations/accept', handleAccept)
+
+    // apps
+    this.router.get('/api/v1/apps', handleListApps)
+    this.router.patch('/api/v1/apps/:id', handleUpdateApp)
 
     // builds
     this.router.get('/api/v1/builds', handleListBuilds)
@@ -303,7 +308,7 @@ export class RelayServer {
           break
         }
         const build = getDb()
-          .prepare('SELECT file_path FROM apps WHERE id = ?')
+          .prepare('SELECT file_path FROM builds WHERE id = ?')
           .get(msg.buildId!) as { file_path: string } | undefined
         if (!build) {
           ws.send(JSON.stringify({ type: 'app:install-error', message: 'Build not found' }))
@@ -337,7 +342,7 @@ export class RelayServer {
           break
         }
         const build = getDb()
-          .prepare('SELECT bundle_id FROM apps WHERE id = ?')
+          .prepare('SELECT bundle_id FROM builds WHERE id = ?')
           .get(msg.buildId!) as { bundle_id: string | null } | undefined
         if (!build?.bundle_id) {
           ws.send(JSON.stringify({ type: 'app:launch-error', message: 'Bundle ID not available for this build' }))

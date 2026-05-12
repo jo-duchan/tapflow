@@ -100,8 +100,8 @@ describe('IOSAgent', () => {
     it('installApp delegates to SimctlWrapper', async () => {
       const simctl = mockSimctl()
       const agent = new IOSAgent({}, simctl)
-      await agent.installApp('/path/App.ipa')
-      expect(simctl.installApp).toHaveBeenCalledWith('/path/App.ipa')
+      await agent.installApp('/path/MyApp.app')
+      expect(simctl.installApp).toHaveBeenCalledWith('/path/MyApp.app')
     })
 
     it('launchApp delegates to SimctlWrapper', async () => {
