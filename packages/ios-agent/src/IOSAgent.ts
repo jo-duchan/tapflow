@@ -1,4 +1,9 @@
 import os from 'os'
+import fs from 'fs'
+import path from 'path'
+import { tmpdir } from 'os'
+import { randomUUID } from 'crypto'
+import { spawnSync } from 'child_process'
 import { WebSocket } from 'ws'
 import type { Device, DeviceAgent } from '@tapflow/agent-core'
 import { SimctlWrapper } from './SimctlWrapper.js'
@@ -296,9 +301,9 @@ export class IOSAgent implements DeviceAgent {
         break
       }
       case 'app:install': {
-        const { filePath } = msg.payload as { filePath: string }
+        const { filePath, bundleId } = msg.payload as { filePath: string; bundleId?: string }
         const sessionId = msg.sessionId
-        this.simctl.installApp(filePath)
+        this.installBuild(filePath, bundleId)
           .then(() => this.ws?.send(JSON.stringify({ type: 'app:install-done', sessionId })))
           .catch((e: unknown) => {
             const message = e instanceof Error ? e.message : String(e)
@@ -407,11 +412,44 @@ export class IOSAgent implements DeviceAgent {
     }
   }
 
+  /**
+   * .app.zip 이면 임시 디렉토리에 풀어 .app 경로로 설치, .apk 이면 직접 설치.
+   * install 완료 후 임시 디렉토리를 정리한다.
+   */
+  private async installBuild(filePath: string, bundleId?: string): Promise<void> {
+    if (bundleId) {
+      await this.simctl.uninstallApp(bundleId).catch(() => { /* 미설치 상태면 무시 */ })
+    }
+
+    if (!filePath.endsWith('.zip')) {
+      return this.simctl.installApp(filePath)
+    }
+
+    const tmpDir = path.join(tmpdir(), `tapflow-install-${randomUUID()}`)
+    fs.mkdirSync(tmpDir, { recursive: true })
+    try {
+      const result = spawnSync('unzip', ['-o', filePath, '-d', tmpDir])
+      if (result.status !== 0) {
+        throw new Error(`zip 압축 해제 실패 — 시뮬레이터용 .app.zip 파일인지 확인하세요.`)
+      }
+
+      const entries = fs.readdirSync(tmpDir)
+      const appDir = entries.find(e => e.endsWith('.app') && fs.statSync(path.join(tmpDir, e)).isDirectory())
+      if (!appDir) {
+        throw new Error('.app 디렉토리를 찾을 수 없습니다. xcodebuild -sdk iphonesimulator 로 빌드한 .app 을 zip 압축해 업로드하세요.')
+      }
+
+      await this.simctl.installApp(path.join(tmpDir, appDir))
+    } finally {
+      fs.rmSync(tmpDir, { recursive: true, force: true })
+    }
+  }
+
   // DeviceAgent interface — delegate to SimctlWrapper
   listDevices(): Promise<Device[]> { return this.simctl.listDevices() }
   boot(deviceId: string): Promise<void> { return this.simctl.boot(deviceId) }
   shutdown(deviceId: string): Promise<void> { return this.simctl.shutdown(deviceId) }
-  installApp(path: string): Promise<void> { return this.simctl.installApp(path) }
+  installApp(appPath: string): Promise<void> { return this.simctl.installApp(appPath) }
   launchApp(bundleId: string): Promise<void> { return this.simctl.launchApp(bundleId) }
   screenshot(): Promise<Buffer> { return this.simctl.screenshot() }
   stream(): ReadableStream<Buffer> {

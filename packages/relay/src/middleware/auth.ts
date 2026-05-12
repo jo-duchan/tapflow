@@ -2,6 +2,7 @@ import http from 'http'
 import crypto from 'crypto'
 import jwt from 'jsonwebtoken'
 import { getDb } from '../db.js'
+import { config } from '../lib/config.js'
 
 export interface AuthContext {
   userId: number
@@ -9,16 +10,15 @@ export interface AuthContext {
   role: string
 }
 
-const JWT_SECRET = process.env.JWT_SECRET ?? 'tapflow-dev-secret-change-in-production'
 const JWT_EXPIRES = '7d'
 
 export function signJwt(payload: AuthContext): string {
-  return jwt.sign(payload, JWT_SECRET, { expiresIn: JWT_EXPIRES })
+  return jwt.sign(payload, config.server.jwtSecret, { expiresIn: JWT_EXPIRES })
 }
 
 export function verifyJwt(token: string): AuthContext | null {
   try {
-    return jwt.verify(token, JWT_SECRET) as AuthContext
+    return jwt.verify(token, config.server.jwtSecret) as AuthContext
   } catch {
     return null
   }

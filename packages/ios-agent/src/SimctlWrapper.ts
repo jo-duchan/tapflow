@@ -97,6 +97,10 @@ export class SimctlWrapper {
     await this.runner.exec('shutdown', deviceId)
   }
 
+  async uninstallApp(bundleId: string): Promise<void> {
+    await this.runner.exec('uninstall', 'booted', bundleId)
+  }
+
   async installApp(appPath: string): Promise<void> {
     await this.runner.exec('install', 'booted', appPath)
   }

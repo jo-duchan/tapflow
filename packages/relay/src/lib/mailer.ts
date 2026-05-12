@@ -1,0 +1,26 @@
+import nodemailer from 'nodemailer'
+import { config } from './config.js'
+
+function createTransport() {
+  if (!config.smtp.host) return null
+  return nodemailer.createTransport({
+    host: config.smtp.host,
+    port: config.smtp.port,
+    secure: config.smtp.secure,
+    auth: config.smtp.user
+      ? { user: config.smtp.user, pass: config.smtp.pass }
+      : undefined,
+  })
+}
+
+export async function sendMail(to: string, subject: string, html: string): Promise<boolean> {
+  const transport = createTransport()
+  if (!transport) return false
+  try {
+    await transport.sendMail({ from: config.smtp.from, to, subject, html })
+    return true
+  } catch (err) {
+    console.error('[mailer] send failed:', err)
+    return false
+  }
+}

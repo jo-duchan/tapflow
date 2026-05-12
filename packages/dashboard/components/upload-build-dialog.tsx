@@ -23,7 +23,6 @@ type Props = { onSuccess: () => void }
 export function UploadBuildDialog({ onSuccess }: Props) {
   const [open, setOpen] = useState(false)
   const [file, setFile] = useState<File | null>(null)
-  const [versionLabel, setVersionLabel] = useState('')
   const [statusLabel, setStatusLabel] = useState('none')
   const [error, setError] = useState('')
   const [uploading, setUploading] = useState(false)
@@ -37,14 +36,12 @@ export function UploadBuildDialog({ onSuccess }: Props) {
     try {
       const form = new FormData()
       form.append('file', file)
-      if (versionLabel) form.append('label', versionLabel)
       if (statusLabel !== 'none') form.append('status', statusLabel)
 
       const res = await fetch('/api/v1/builds', { method: 'POST', credentials: 'include', body: form })
       if (!res.ok) { setError('Upload failed. Check the file format.'); return }
       setOpen(false)
       setFile(null)
-      setVersionLabel('')
       setStatusLabel('none')
       onSuccess()
     } catch {
@@ -65,7 +62,7 @@ export function UploadBuildDialog({ onSuccess }: Props) {
         </DialogHeader>
         <form onSubmit={handleUpload} className="flex flex-col gap-4 pt-2">
           <div className="grid gap-2">
-            <Label>File (.ipa or .apk)</Label>
+            <Label>File</Label>
             <div
               className="flex h-24 cursor-pointer items-center justify-center rounded-md border-2 border-dashed text-sm text-muted-foreground hover:border-primary"
               onClick={() => inputRef.current?.click()}
@@ -77,14 +74,14 @@ export function UploadBuildDialog({ onSuccess }: Props) {
             <input
               ref={inputRef}
               type="file"
-              accept=".ipa,.apk"
+              accept=".zip,.apk"
               className="hidden"
               onChange={(e) => setFile(e.target.files?.[0] ?? null)}
             />
-          </div>
-          <div className="grid gap-2">
-            <Label htmlFor="version">Version label <span className="text-muted-foreground">(optional)</span></Label>
-            <Input id="version" placeholder="e.g. v1.2.3-staging" value={versionLabel} onChange={(e) => setVersionLabel(e.target.value)} />
+            <p className="text-xs text-muted-foreground">
+              iOS: <code>.app.zip</code> (xcodebuild -sdk iphonesimulator 빌드 후 .app 폴더를 zip 압축)
+              &nbsp;·&nbsp;Android: <code>.apk</code>
+            </p>
           </div>
           <div className="grid gap-2">
             <Label>Status <span className="text-muted-foreground">(optional)</span></Label>

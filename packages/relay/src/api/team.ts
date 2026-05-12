@@ -3,6 +3,7 @@ import crypto from 'crypto'
 import { getDb } from '../db.js'
 import { requireRole } from '../middleware/auth.js'
 import { json, readJson } from '../router.js'
+import { sendMail } from '../lib/mailer.js'
 
 export function handleListMembers(req: http.IncomingMessage, res: http.ServerResponse): void {
   const auth = requireRole(req, res, ['Admin'])
@@ -31,7 +32,17 @@ export async function handleInvite(req: http.IncomingMessage, res: http.ServerRe
   db.prepare('INSERT INTO invitations (token, email, role, expires_at) VALUES (?, ?, ?, ?)')
     .run(token, body.email ?? null, role, expiresAt)
 
-  json(res, 201, { token })
+  let emailSent = false
+  if (body.email) {
+    const proto = (req.headers['x-forwarded-proto'] as string | undefined) ?? 'http'
+    const inviteUrl = `${proto}://${req.headers.host}/invite?token=${token}`
+    const html = `<p>You've been invited to join tapflow as <strong>${role}</strong>.</p>
+<p><a href="${inviteUrl}">Accept invitation</a></p>
+<p>This link expires in 7 days.</p>`
+    emailSent = await sendMail(body.email, 'You have been invited to tapflow', html)
+  }
+
+  json(res, 201, { token, emailSent })
 }
 
 export async function handleUpdateMember(

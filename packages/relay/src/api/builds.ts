@@ -1,81 +1,179 @@
 import http from 'http'
 import fs from 'fs'
 import path from 'path'
+import { tmpdir } from 'os'
+import { randomUUID } from 'crypto'
 import { spawnSync } from 'child_process'
 import busboy from 'busboy'
 import { getDb } from '../db.js'
 import { requireAuth, verifyPat } from '../middleware/auth.js'
 import { json, readJson } from '../router.js'
 
-function extractBundleId(ipaPath: string): string | null {
-  try {
-    const list = spawnSync('unzip', ['-l', ipaPath], { encoding: 'utf8' })
-    if (list.status !== 0) return null
-    const match = list.stdout.match(/Payload\/[^/\s]+\.app\/Info\.plist/)
-    if (!match) return null
-    const plistEntry = match[0].trim()
+// ── zip / plist helpers ────────────────────────────────────────────────────
 
-    const extract = spawnSync('unzip', ['-p', ipaPath, plistEntry])
-    if (extract.status !== 0) return null
+function parseXmlPlist(xml: string): Record<string, string> {
+  const result: Record<string, string> = {}
+  const re = /<key>([^<]+)<\/key>\s*<string>([^<]*)<\/string>/g
+  let m: RegExpExecArray | null
+  while ((m = re.exec(xml)) !== null) result[m[1]] = m[2]
+  return result
+}
 
-    const plutil = spawnSync('plutil', ['-extract', 'CFBundleIdentifier', 'raw', '-o', '-', '-'], {
-      input: extract.stdout as Buffer,
+/** zip 내 루트 수준 *.app 디렉토리 이름을 찾는다. 없으면 null. */
+function findAppDirInZip(zipPath: string): string | null {
+  const list = spawnSync('unzip', ['-l', zipPath], { encoding: 'utf8' })
+  if (list.status !== 0) return null
+  // "  12345  2024-01-01 00:00:00  MyApp.app/"  형태를 매칭
+  const re = /\s(\S+\.app)\/\s*$/m
+  const m = re.exec(list.stdout as string)
+  if (!m) return null
+  // 루트 레벨만 (슬래시 미포함)
+  const candidate = m[1]
+  return candidate.includes('/') ? null : candidate
+}
+
+/** .app.zip에서 앱 메타데이터를 추출한다. 구조 오류 시 null. */
+export function extractAppZipInfo(zipPath: string): {
+  bundleId: string | null
+  versionName: string | null
+  buildNumber: string | null
+  appName: string | null
+} | null {
+  const appDir = findAppDirInZip(zipPath)
+  if (!appDir) return null
+
+  const extract = spawnSync('unzip', ['-p', zipPath, `${appDir}/Info.plist`])
+  if (extract.status !== 0 || !extract.stdout) return null
+
+  const plistBuf = extract.stdout as Buffer
+  let parsed: Record<string, string>
+
+  if (plistBuf.subarray(0, 6).toString() === 'bplist') {
+    // binary plist — plutil 시도 (macOS only; 없으면 빈 결과)
+    const plutil = spawnSync('plutil', ['-convert', 'xml1', '-o', '-', '-'], {
+      input: plistBuf,
       encoding: 'utf8',
     })
-    if (plutil.status !== 0) return null
-    return (plutil.stdout as string).trim() || null
-  } catch {
-    return null
+    if (plutil.status !== 0) return { bundleId: null, versionName: null, buildNumber: null, appName: null }
+    parsed = parseXmlPlist(plutil.stdout as string)
+  } else {
+    parsed = parseXmlPlist(plistBuf.toString('utf8'))
+  }
+
+  return {
+    bundleId: parsed['CFBundleIdentifier'] ?? null,
+    versionName: parsed['CFBundleShortVersionString'] ?? null,
+    buildNumber: parsed['CFBundleVersion'] ?? null,
+    appName: parsed['CFBundleDisplayName'] ?? parsed['CFBundleName'] ?? null,
   }
 }
+
+/**
+ * lipo로 시뮬레이터 슬라이스 존재를 확인한다.
+ * lipo 미설치(Linux relay) 시 null 반환 → 검증 skip.
+ */
+function hasSimulatorSlice(zipPath: string, appDir: string): boolean | null {
+  const binaryName = path.basename(appDir, '.app')
+  const extract = spawnSync('unzip', ['-p', zipPath, `${appDir}/${binaryName}`])
+  if (extract.status !== 0 || !extract.stdout?.length) return null
+
+  const tmpBin = path.join(tmpdir(), `tapflow-lipo-${randomUUID()}`)
+  fs.writeFileSync(tmpBin, extract.stdout as Buffer)
+  try {
+    const lipo = spawnSync('lipo', ['-info', tmpBin], { encoding: 'utf8' })
+    if (lipo.status !== 0) return null // lipo 없음 → skip
+    const out = (lipo.stdout as string).toLowerCase()
+    // x86_64 = Intel 시뮬레이터, arm64 = Apple Silicon 시뮬레이터 또는 device
+    // arm64만 있는 경우는 구분 불가 → 통과 허용 (install 단계에서 실패 시 명확한 에러)
+    return out.includes('x86_64') || out.includes('arm64')
+  } finally {
+    try { fs.unlinkSync(tmpBin) } catch { /* ignore */ }
+  }
+}
+
+// ── app 자동 생성 / 조회 ──────────────────────────────────────────────────
+
+function upsertApp(name: string, bundleIdKey: string, platform: string): number {
+  const db = getDb()
+  const existing = db.prepare(
+    'SELECT id FROM apps WHERE bundle_id_key = ? AND platform = ?'
+  ).get(bundleIdKey, platform) as { id: number } | undefined
+
+  if (existing) return existing.id
+
+  const result = db.prepare(
+    'INSERT INTO apps (name, bundle_id_key, platform) VALUES (?, ?, ?)'
+  ).run(name, bundleIdKey, platform)
+  return result.lastInsertRowid as number
+}
+
+// ── handlers ──────────────────────────────────────────────────────────────
 
 export function handleListBuilds(req: http.IncomingMessage, res: http.ServerResponse): void {
   const auth = requireAuth(req, res)
   if (!auth) return
 
   const u = new URL(req.url ?? '/', 'http://x')
-  const page = Math.max(0, Number(u.searchParams.get('page') ?? 0))
-  const limit = Math.min(100, Math.max(1, Number(u.searchParams.get('limit') ?? 20)))
-  const q = u.searchParams.get('q') ?? ''
+  const page    = Math.max(0, Number(u.searchParams.get('page') ?? 0))
+  const limit   = Math.min(100, Math.max(1, Number(u.searchParams.get('limit') ?? 20)))
+  const q       = u.searchParams.get('q') ?? ''
   const platform = u.searchParams.get('platform') ?? ''
-  const status = u.searchParams.get('status') ?? ''
-  const sortKey = ['uploaded_at', 'version_label', 'status_label'].includes(u.searchParams.get('sort') ?? '')
-    ? u.searchParams.get('sort')!
-    : 'uploaded_at'
+  const status  = u.searchParams.get('status') ?? ''
+  const appId   = u.searchParams.get('app_id') ?? ''
+  const sortKey = ['uploaded_at', 'version_name', 'status_label'].includes(u.searchParams.get('sort') ?? '')
+    ? u.searchParams.get('sort')! : 'uploaded_at'
   const sortDir = u.searchParams.get('dir') === 'asc' ? 'ASC' : 'DESC'
 
   const db = getDb()
-  const conditions: string[] = []
+  const conds: string[] = []
   const params: unknown[] = []
 
-  if (q) { conditions.push(`(a.name LIKE ? OR a.version_label LIKE ?)`); params.push(`%${q}%`, `%${q}%`) }
-  if (platform) { conditions.push(`a.platform = ?`); params.push(platform) }
-  if (status) { conditions.push(`a.status_label = ?`); params.push(status) }
+  if (q)        { conds.push('(a.name LIKE ? OR b.version_name LIKE ?)'); params.push(`%${q}%`, `%${q}%`) }
+  if (platform) { conds.push('ap.platform = ?'); params.push(platform) }
+  if (status)   { conds.push('b.status_label = ?'); params.push(status) }
+  if (appId)    { conds.push('b.app_id = ?'); params.push(Number(appId)) }
 
-  const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : ''
+  const where = conds.length ? `WHERE ${conds.join(' AND ')}` : ''
+  // alias 'a' for build name fallback via app name
+  const baseFrom = `
+    FROM builds b
+    LEFT JOIN apps ap ON ap.id = b.app_id
+    LEFT JOIN users u  ON u.id  = b.uploader_id
+  `
 
-  const total = (db.prepare(`SELECT COUNT(*) as n FROM apps a ${where}`).get(...params) as { n: number }).n
+  const total = (db.prepare(
+    `SELECT COUNT(*) as n ${baseFrom} ${where}`.replace('a.name', 'ap.name')
+  ).get(...params) as { n: number }).n
+
   const items = db.prepare(`
-    SELECT a.id, a.name, a.version_label, a.status_label, a.platform,
-           a.uploaded_at, u.display_name as uploader
-    FROM apps a
-    LEFT JOIN users u ON u.id = a.uploader_id
-    ${where}
-    ORDER BY a.${sortKey} ${sortDir}
+    SELECT b.id, b.app_id, ap.name, b.version_name, b.build_number,
+           b.version_label, b.status_label, ap.platform,
+           b.bundle_id, b.uploaded_at,
+           COALESCE(u.display_name, substr(u.email, 1, instr(u.email, '@') - 1)) as uploader
+    ${baseFrom}
+    ${where.replace('a.name', 'ap.name')}
+    ORDER BY b.${sortKey} ${sortDir}
     LIMIT ? OFFSET ?
   `).all(...params, limit, page * limit)
 
   json(res, 200, { items, total })
 }
 
-export function handleGetBuild(req: http.IncomingMessage, res: http.ServerResponse, params: Record<string, string>): void {
+export function handleGetBuild(
+  req: http.IncomingMessage,
+  res: http.ServerResponse,
+  params: Record<string, string>
+): void {
   const auth = requireAuth(req, res)
   if (!auth) return
 
-  const db = getDb()
-  const build = db.prepare(
-    'SELECT id, name, version_label, status_label, platform, bundle_id, uploaded_at FROM apps WHERE id = ?'
-  ).get(params.id)
+  const build = getDb().prepare(`
+    SELECT b.id, b.app_id, ap.name, b.version_name, b.build_number,
+           b.version_label, b.status_label, ap.platform, b.bundle_id, b.uploaded_at
+    FROM builds b
+    LEFT JOIN apps ap ON ap.id = b.app_id
+    WHERE b.id = ?
+  `).get(params.id)
 
   if (!build) return json(res, 404, { error: 'Build not found' })
   json(res, 200, build)
@@ -90,7 +188,6 @@ export async function handleUpdateBuild(
   if (!auth) return
 
   const body = await readJson<{ status_label?: string | null; version_label?: string | null }>(req)
-
   const VALID_STATUS = ['Backlog', 'In Progress', 'Done', 'Rejected']
   const updates: string[] = []
   const values: unknown[] = []
@@ -102,7 +199,6 @@ export async function handleUpdateBuild(
     updates.push('status_label = ?')
     values.push(body.status_label ?? null)
   }
-
   if ('version_label' in body) {
     updates.push('version_label = ?')
     values.push(body.version_label ?? null)
@@ -110,8 +206,7 @@ export async function handleUpdateBuild(
 
   if (updates.length === 0) return json(res, 400, { error: 'Nothing to update' })
 
-  const db = getDb()
-  const result = db.prepare(`UPDATE apps SET ${updates.join(', ')} WHERE id = ?`).run(...values, params.id)
+  const result = getDb().prepare(`UPDATE builds SET ${updates.join(', ')} WHERE id = ?`).run(...values, params.id)
   if (result.changes === 0) return json(res, 404, { error: 'Build not found' })
   json(res, 200, { ok: true })
 }
@@ -121,7 +216,7 @@ export function handleUploadBuild(
   res: http.ServerResponse,
   uploadsDir: string
 ): void {
-  const pat = verifyPat(req)
+  const pat  = verifyPat(req)
   const auth = pat ? { userId: pat.userId } : requireAuth(req, res)
   if (!auth) return
 
@@ -141,13 +236,20 @@ export function handleUploadBuild(
   bb.on('file', (_field, stream, info) => {
     originalName = info.filename
     const ext = path.extname(originalName).toLowerCase()
-    if (!['.ipa', '.apk'].includes(ext)) {
-      fileError = 'Only .ipa or .apk files allowed'
+
+    if (ext === '.ipa') {
+      fileError = 'iOS 시뮬레이터용 빌드는 .app.zip 형식이어야 합니다. xcodebuild -sdk iphonesimulator 로 빌드한 .app 디렉토리를 zip 압축해 업로드하세요.'
       stream.resume()
       return
     }
+    if (!['.zip', '.apk'].includes(ext)) {
+      fileError = 'Only .app.zip (iOS) or .apk (Android) files allowed'
+      stream.resume()
+      return
+    }
+
     const fileName = `${Date.now()}_${path.basename(originalName)}`
-    savedPath = path.join(uploadsDir, 'apps', fileName)
+    savedPath = path.join(uploadsDir, 'builds', fileName)
     fs.mkdirSync(path.dirname(savedPath), { recursive: true })
     const ws = fs.createWriteStream(savedPath)
     writePromise = new Promise((resolve, reject) => {
@@ -164,27 +266,59 @@ export function handleUploadBuild(
     await writePromise
 
     const ext = path.extname(originalName).toLowerCase()
-    const platform = fields.platform ?? (ext === '.ipa' ? 'ios' : 'android')
+    const isIos = ext === '.zip'
+    const platform = fields.platform ?? (isIos ? 'ios' : 'android')
     const status = ['Backlog', 'In Progress', 'Done', 'Rejected'].includes(fields.status)
       ? fields.status : null
-    const bundleId = ext === '.ipa' ? extractBundleId(savedPath) : null
 
-    const db = getDb()
+    let bundleId: string | null = null
+    let versionName: string | null = null
+    let buildNumber: string | null = null
+    let resolvedAppName: string | null = null
+
+    if (isIos) {
+      const info = extractAppZipInfo(savedPath)
+      if (info === null) {
+        fs.unlinkSync(savedPath)
+        return json(res, 400, { error: 'zip 안에서 .app 디렉토리를 찾을 수 없습니다. .app 디렉토리를 포함한 zip 파일을 업로드하세요.' })
+      }
+
+      // lipo 슬라이스 검증 (macOS only; Linux에서는 null → skip)
+      const appDir = findAppDirInZip(savedPath)
+      if (appDir) {
+        const sliceOk = hasSimulatorSlice(savedPath, appDir)
+        if (sliceOk === false) {
+          fs.unlinkSync(savedPath)
+          return json(res, 400, { error: '디바이스용 슬라이스만 포함된 빌드입니다. xcodebuild -sdk iphonesimulator 로 빌드해 시뮬레이터 슬라이스를 포함하세요.' })
+        }
+      }
+
+      bundleId     = info.bundleId
+      versionName  = info.versionName
+      buildNumber  = info.buildNumber
+      resolvedAppName = info.appName
+    } else {
+      bundleId = null // Android: bundle_id 추출 생략 (Phase 3 본작업에서 처리)
+    }
+
+    const bundleIdKey = bundleId ?? '__unknown__'
+    const appName     = resolvedAppName ?? fields.label ?? path.basename(originalName, ext)
+
+    const db    = getDb()
+    const appId = upsertApp(appName, bundleIdKey, platform)
+
     const result = db.prepare(`
-      INSERT INTO apps (name, platform, file_path, label, version_label, status_label, bundle_id, uploader_id)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-    `).run(
-      path.basename(originalName, path.extname(originalName)),
-      platform,
-      savedPath,
-      fields.label ?? null,
-      fields.label ?? null,
-      status,
-      bundleId,
-      auth.userId
-    )
+      INSERT INTO builds (app_id, version_name, build_number, bundle_id, status_label, file_path, label, version_label, uploader_id)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(appId, versionName, buildNumber, bundleId, status, savedPath, fields.label ?? null, fields.label ?? null, auth.userId)
 
-    const build = db.prepare('SELECT * FROM apps WHERE id = ?').get(result.lastInsertRowid)
+    const build = db.prepare(`
+      SELECT b.id, b.app_id, ap.name, b.version_name, b.build_number,
+             b.bundle_id, b.status_label, ap.platform, b.uploaded_at
+      FROM builds b LEFT JOIN apps ap ON ap.id = b.app_id
+      WHERE b.id = ?
+    `).get(result.lastInsertRowid)
+
     json(res, 201, build)
   })
 

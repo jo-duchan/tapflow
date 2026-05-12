@@ -11,6 +11,7 @@ export interface AgentDevice {
 export interface Comment {
   id: number
   author: string
+  authorAvatarUrl: string | null
   body: string
   created_at: string
   attachments: CommentAttachment[]

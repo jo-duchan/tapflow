@@ -1,5 +1,5 @@
-import { Link, useLocation } from 'react-router-dom'
-import { LayoutGrid, Settings, Users, KeyRound } from 'lucide-react'
+import { Link, useLocation, useNavigate } from 'react-router-dom'
+import { LayoutGrid, LogOut, Settings, Users, KeyRound } from 'lucide-react'
 import {
   Sidebar,
   SidebarContent,
@@ -12,19 +12,36 @@ import {
   SidebarMenuButton,
   SidebarMenuItem,
 } from '@/components/ui/sidebar'
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu'
+import { useAuth } from '@/hooks/useAuth'
+import { UserAvatar } from '@/components/user-avatar'
 
 const navItems = [
   { label: 'App Center', href: '/app-center', icon: LayoutGrid },
 ]
 
 const settingsItems = [
-  { label: 'Default', href: '/settings/default', icon: Settings },
-  { label: 'Team', href: '/settings/team', icon: Users },
-  { label: 'Tokens', href: '/settings/tokens', icon: KeyRound },
+  { label: 'Default', href: '/settings/default', icon: Settings, adminOnly: false },
+  { label: 'Team', href: '/settings/team', icon: Users, adminOnly: true },
+  { label: 'Tokens', href: '/settings/tokens', icon: KeyRound, adminOnly: true },
 ]
 
 export function AppSidebar() {
   const { pathname } = useLocation()
+  const navigate = useNavigate()
+  const { user } = useAuth()
+  const isAdmin = user?.role === 'Admin'
+
+  async function handleLogout() {
+    await fetch('/api/v1/auth/logout', { method: 'POST', credentials: 'include' })
+    navigate('/login', { replace: true })
+  }
 
   return (
     <Sidebar>
@@ -54,7 +71,7 @@ export function AppSidebar() {
           <SidebarGroupLabel>Settings</SidebarGroupLabel>
           <SidebarGroupContent>
             <SidebarMenu>
-              {settingsItems.map((item) => (
+              {settingsItems.filter((item) => !item.adminOnly || isAdmin).map((item) => (
                 <SidebarMenuItem key={item.href}>
                   <SidebarMenuButton asChild isActive={pathname === item.href}>
                     <Link to={item.href}>
@@ -69,7 +86,34 @@ export function AppSidebar() {
         </SidebarGroup>
       </SidebarContent>
 
-      <SidebarFooter />
+      {user && (
+        <SidebarFooter className="px-3 py-3 border-t">
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <button className="flex w-full items-center gap-2.5 rounded-md px-1 py-1 text-left hover:bg-sidebar-accent transition-colors">
+                <UserAvatar name={user.displayName ?? ''} avatarUrl={user.avatarUrl} size={28} />
+                <div className="flex flex-col min-w-0 flex-1">
+                  <span className="text-sm font-medium truncate">{user.displayName}</span>
+                  <span className="text-xs text-muted-foreground truncate">{user.email}</span>
+                </div>
+              </button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent side="top" align="start" className="w-56">
+              <DropdownMenuItem asChild>
+                <Link to="/settings/default">
+                  <Settings className="mr-2 h-4 w-4" />
+                  Settings
+                </Link>
+              </DropdownMenuItem>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem onClick={handleLogout} className="text-destructive focus:text-destructive">
+                <LogOut className="mr-2 h-4 w-4" />
+                Log out
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+        </SidebarFooter>
+      )}
     </Sidebar>
   )
 }

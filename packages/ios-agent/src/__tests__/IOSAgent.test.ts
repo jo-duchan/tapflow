@@ -53,6 +53,7 @@ function mockSimctl(booted = false): SimctlWrapper {
     ]),
     boot: vi.fn().mockResolvedValue(undefined),
     shutdown: vi.fn().mockResolvedValue(undefined),
+    uninstallApp: vi.fn().mockResolvedValue(undefined),
     installApp: vi.fn().mockResolvedValue(undefined),
     launchApp: vi.fn().mockResolvedValue(undefined),
     screenshot: vi.fn().mockResolvedValue(Buffer.from('png')),
@@ -100,8 +101,8 @@ describe('IOSAgent', () => {
     it('installApp delegates to SimctlWrapper', async () => {
       const simctl = mockSimctl()
       const agent = new IOSAgent({}, simctl)
-      await agent.installApp('/path/App.ipa')
-      expect(simctl.installApp).toHaveBeenCalledWith('/path/App.ipa')
+      await agent.installApp('/path/MyApp.app')
+      expect(simctl.installApp).toHaveBeenCalledWith('/path/MyApp.app')
     })
 
     it('launchApp delegates to SimctlWrapper', async () => {

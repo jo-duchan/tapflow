@@ -32,7 +32,6 @@ export function QASession() {
 
   const [build, setBuild] = useState<Build | null>(null);
   const [sessions, setSessions] = useState<SessionInfo[]>([]);
-  const [os, setOs] = useState<string>('ios');
   const [deviceId, setDeviceId] = useState<string>('');
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
   const [booting, setBooting] = useState(false);
@@ -52,10 +51,7 @@ export function QASession() {
         setSessions(msg.sessions);
         if (!deviceId && msg.sessions.length > 0) {
           const first = msg.sessions[0].devices[0];
-          if (first) {
-            setOs(first.platform);
-            setDeviceId(first.id);
-          }
+          if (first) setDeviceId(first.id);
         }
       }
       if (msg.type === 'session:joined') {
@@ -76,6 +72,7 @@ export function QASession() {
     if (connected) send({ type: 'agents:list' });
   }, [connected, send]);
 
+  const os = build?.platform ?? 'ios';
   const allDevices = sessions.flatMap((s) => s.devices);
   const filteredDevices = allDevices.filter((d) => d.platform === os);
 
@@ -162,26 +159,6 @@ export function QASession() {
               </h2>
 
               <div className="flex flex-col gap-3">
-                <div className="grid gap-1.5">
-                  <span className="text-sm font-medium">OS</span>
-                  <Select
-                    value={os}
-                    onValueChange={(v) => {
-                      setOs(v);
-                      setDeviceId('');
-                      setOsVersion('');
-                    }}
-                  >
-                    <SelectTrigger>
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="ios">iOS</SelectItem>
-                      <SelectItem value="android">Android</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-
                 {osVersions.length > 0 && (
                   <div className="grid gap-1.5">
                     <span className="text-sm font-medium">OS version</span>

@@ -12,12 +12,13 @@ import {
 import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from '@/components/ui/table'
-import { Trash2, UserPlus } from 'lucide-react'
+import { KeyRound, Trash2, UserPlus } from 'lucide-react'
 
 type Member = { id: number; email: string; display_name: string; role: string; joined_at: string }
 
 export function TeamSettings() {
   const [members, setMembers] = useState<Member[]>([])
+  const [resetSent, setResetSent] = useState<Record<number, string>>({})
   const [inviteEmail, setInviteEmail] = useState('')
   const [inviteRole, setInviteRole] = useState('QA')
   const [inviteLink, setInviteLink] = useState('')
@@ -54,6 +55,14 @@ export function TeamSettings() {
       body: JSON.stringify({ role }),
     })
     load()
+  }
+
+  async function handleSendReset(id: number) {
+    const res = await fetch(`/api/v1/team/members/${id}/send-reset`, { method: 'POST', credentials: 'include' })
+    const data = await res.json()
+    const msg = data.emailSent ? 'Sent' : 'No SMTP'
+    setResetSent((p) => ({ ...p, [id]: msg }))
+    setTimeout(() => setResetSent((p) => { const n = { ...p }; delete n[id]; return n }), 3000)
   }
 
   async function handleDelete(id: number) {
@@ -137,9 +146,24 @@ export function TeamSettings() {
                     {new Date(m.joined_at).toLocaleDateString()}
                   </TableCell>
                   <TableCell>
-                    <Button variant="ghost" size="icon" className="h-7 w-7 text-destructive" onClick={() => handleDelete(m.id)}>
-                      <Trash2 className="h-4 w-4" />
-                    </Button>
+                    <div className="flex items-center gap-1">
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-7 w-7"
+                        title="Send password reset email"
+                        onClick={() => handleSendReset(m.id)}
+                      >
+                        {resetSent[m.id] ? (
+                          <span className="text-xs">{resetSent[m.id]}</span>
+                        ) : (
+                          <KeyRound className="h-4 w-4" />
+                        )}
+                      </Button>
+                      <Button variant="ghost" size="icon" className="h-7 w-7 text-destructive" onClick={() => handleDelete(m.id)}>
+                        <Trash2 className="h-4 w-4" />
+                      </Button>
+                    </div>
                   </TableCell>
                 </TableRow>
               ))}

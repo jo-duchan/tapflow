@@ -46,11 +46,29 @@ export function handleMe(req: http.IncomingMessage, res: http.ServerResponse): v
   if (!auth) return
 
   const db = getDb()
-  const user = db.prepare('SELECT id, email, display_name, role FROM users WHERE id = ?').get(auth.userId) as
-    { id: number; email: string; display_name: string | null; role: string } | undefined
+  const user = db.prepare('SELECT id, email, display_name, avatar_url, role FROM users WHERE id = ?').get(auth.userId) as
+    { id: number; email: string; display_name: string | null; avatar_url: string | null; role: string } | undefined
 
   if (!user) return json(res, 404, { error: 'User not found' })
-  json(res, 200, { id: user.id, email: user.email, displayName: user.display_name, role: user.role })
+  const displayName = user.display_name ?? user.email.split('@')[0]
+  json(res, 200, { id: user.id, email: user.email, displayName, avatarUrl: user.avatar_url, role: user.role })
+}
+
+export async function handleChangePassword(req: http.IncomingMessage, res: http.ServerResponse): Promise<void> {
+  const auth = requireAuth(req, res)
+  if (!auth) return
+
+  const body = await readJson<{ currentPassword: string; newPassword: string }>(req)
+  if (!body.currentPassword || !body.newPassword) return json(res, 400, { error: 'currentPassword and newPassword required' })
+  if (body.newPassword.length < 8) return json(res, 400, { error: 'Password must be at least 8 characters' })
+
+  const db = getDb()
+  const user = db.prepare('SELECT password_hash FROM users WHERE id = ?').get(auth.userId) as { password_hash: string | null } | undefined
+  if (!user?.password_hash) return json(res, 400, { error: 'No password set' })
+  if (!verifyPassword(body.currentPassword, user.password_hash)) return json(res, 401, { error: 'Incorrect current password' })
+
+  db.prepare('UPDATE users SET password_hash = ? WHERE id = ?').run(makePasswordHash(body.newPassword), auth.userId)
+  json(res, 200, { ok: true })
 }
 
 export function handleLogout(_req: http.IncomingMessage, res: http.ServerResponse): void {

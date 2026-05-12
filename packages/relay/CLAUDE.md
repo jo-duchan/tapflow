@@ -9,6 +9,20 @@
 WebSocket 릴레이 서버 + 대시보드 서빙: NAT 통과, 세션 라우팅, JWT 인증을 처리하며, `public/`의 대시보드 static 파일을 HTTP로 함께 서빙한다.
 단일 프로세스, 단일 포트(443)로 WebSocket과 HTTP static serving을 모두 처리한다.
 
+## 도메인 구조 — apps / builds 분리 (migration 004~)
+
+`apps` 와 `builds` 는 별도 엔티티다.
+
+- **apps**: 앱 고유 식별자. `UNIQUE(bundle_id_key, platform)`. iOS/Android 동일 bundle_id는 별도 row.
+- **builds**: 빌드 산출물. `app_id FK → apps.id`. `version_name`, `build_number`, `file_path` 포함.
+- `bundle_id_key`로 `apps` 자동 조회/생성 → 동일 앱 재업로드 시 새 `builds` row만 추가.
+
+빌드 파일 저장 경로: `uploads/builds/` (legacy `uploads/apps/`는 보존).
+
+iOS 빌드 포맷: `.app.zip` (시뮬레이터용). `.ipa` 업로드 시 400 반환.
+- `*.app/Info.plist`에서 `CFBundleIdentifier`, `CFBundleShortVersionString`, `CFBundleVersion`, `CFBundleDisplayName`/`CFBundleName` 자동 추출.
+- `lipo -info` 로 시뮬레이터 슬라이스 검증. **Linux 환경(lipo 미설치)이면 skip — install 단계에서 에러**.
+
 ## HOW
 
 - Agent는 outbound WebSocket으로 릴레이에 먼저 연결한다 (NAT 통과의 핵심).
@@ -18,6 +32,17 @@ WebSocket 릴레이 서버 + 대시보드 서빙: NAT 통과, 세션 라우팅, 
 - `public/` 디렉토리를 HTTP static 파일로 서빙한다 (dashboard build output).
 - 릴레이는 스트림 데이터를 버퍼링하지 않는다 — 도착 즉시 포워딩한다.
 - WebSocket 업그레이드 요청과 일반 HTTP 요청을 동일 포트에서 분기 처리한다.
+
+### API 엔드포인트 (빌드/앱 관련)
+
+| 메서드 | 경로 | 설명 |
+|--------|------|------|
+| `GET` | `/api/v1/apps` | 앱 목록 (latest_build 요약 포함) |
+| `PATCH` | `/api/v1/apps/:id` | 앱 이름 수동 변경 (Admin/Developer) |
+| `POST` | `/api/v1/builds` | 빌드 업로드 (`.app.zip` / `.apk`) |
+| `GET` | `/api/v1/builds` | 빌드 목록 (`app_id` 필터 가능) |
+| `GET` | `/api/v1/builds/:id` | 빌드 단건 조회 |
+| `PATCH` | `/api/v1/builds/:id` | status_label 변경 |
 
 ## HOW NOT
 

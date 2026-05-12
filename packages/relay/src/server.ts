@@ -1,18 +1,15 @@
 import path from 'path'
 import { initDb } from './db.js'
 import { RelayServer } from './RelayServer.js'
+import { config } from './lib/config.js'
 
-const port = Number(process.env.TAPFLOW_PORT ?? 4000)
-const dataDir = process.env.TAPFLOW_DATA_DIR ?? path.join(process.cwd(), '.tapflow')
+const { port, dataDir } = config.server
 const dbPath = path.join(dataDir, 'tapflow.db')
 const uploadsDir = path.join(dataDir, 'uploads')
 
 initDb(dbPath)
 
-const server = new RelayServer({
-  port,
-  uploadsDir,
-})
+const server = new RelayServer({ port, uploadsDir })
 
 server.start().then(() => {
   console.log(`tapflow relay running on port ${port}`)

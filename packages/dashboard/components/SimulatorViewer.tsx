@@ -690,7 +690,7 @@ export function SimulatorViewer({ sessionId, deviceId, onBack, buildId, onRecord
         <div style={{ width: isLandscape ? displayH : displayW, height: isLandscape ? displayW : displayH, position: 'relative', flexShrink: 0 }}>
           <div
             ref={containerRef}
-            className="relative cursor-none"
+            className={`relative ${hoveredButton ? 'cursor-pointer' : 'cursor-default'}`}
             style={{
               width: displayW,
               height: displayH,
@@ -716,6 +716,7 @@ export function SimulatorViewer({ sessionId, deviceId, onBack, buildId, onRecord
                 width: `${screenPctW}%`, height: `${screenPctH}%`,
                 borderRadius: cssCornerRadius > 0 ? `${cssCornerRadius}px` : undefined,
                 backgroundColor: '#010101',
+                cursor: 'none',
               }}
             />
             {/* live cursor overlay — imperative position updates via liveCursorRef */}

@@ -6,13 +6,16 @@ import { SessionManager } from './SessionManager.js'
 import type { RelayMessage } from './types.js'
 import { Router } from './router.js'
 import { getDb } from './db.js'
-import { handleLogin, handleLogout, handleMe } from './api/auth.js'
+import { handleLogin, handleLogout, handleMe, handleChangePassword } from './api/auth.js'
 import { handleVerify, handleAccept } from './api/invitations.js'
+import { handleVerifyReset, handleDoReset, handleSendMemberReset } from './api/passwordReset.js'
 import { handleListBuilds, handleGetBuild, handleUpdateBuild, handleUploadBuild } from './api/builds.js'
+import { handleListApps, handleUpdateApp } from './api/apps.js'
 import { handleListComments, handleCreateComment, handleDeleteComment } from './api/comments.js'
 import { handleListMembers, handleInvite, handleUpdateMember, handleDeleteMember } from './api/team.js'
 import { handleListTokens, handleCreateToken, handleRevokeToken } from './api/tokens.js'
 import { handleGetSettings, handleUpdateSettings } from './api/settings.js'
+import { handleUpdateProfile } from './api/profile.js'
 import { handleUploadRecording, handleListRecordings, handleDownloadRecording, purgeExpiredRecordings } from './api/recordings.js'
 
 const MIME_TYPES: Record<string, string> = {
@@ -57,10 +60,17 @@ export class RelayServer {
     this.router.get('/api/v1/auth/me', handleMe)
     this.router.post('/api/v1/auth/login', handleLogin)
     this.router.post('/api/v1/auth/logout', handleLogout)
+    this.router.post('/api/v1/auth/change-password', handleChangePassword)
+    this.router.get('/api/v1/auth/reset-password/verify', handleVerifyReset)
+    this.router.post('/api/v1/auth/reset-password', handleDoReset)
 
     // invitations
     this.router.get('/api/v1/invitations/verify', handleVerify)
-    this.router.post('/api/v1/invitations/accept', handleAccept)
+    this.router.post('/api/v1/invitations/accept', (req, res) => handleAccept(req, res, u))
+
+    // apps
+    this.router.get('/api/v1/apps', handleListApps)
+    this.router.patch('/api/v1/apps/:id', handleUpdateApp)
 
     // builds
     this.router.get('/api/v1/builds', handleListBuilds)
@@ -78,6 +88,7 @@ export class RelayServer {
     this.router.post('/api/v1/team/invite', handleInvite)
     this.router.patch('/api/v1/team/members/:id', handleUpdateMember)
     this.router.delete('/api/v1/team/members/:id', handleDeleteMember)
+    this.router.post('/api/v1/team/members/:id/send-reset', handleSendMemberReset)
 
     // tokens
     this.router.get('/api/v1/tokens', handleListTokens)
@@ -87,6 +98,7 @@ export class RelayServer {
     // settings
     this.router.get('/api/v1/settings', handleGetSettings)
     this.router.patch('/api/v1/settings', (req, res) => handleUpdateSettings(req, res, u))
+    this.router.patch('/api/v1/profile', (req, res) => handleUpdateProfile(req, res, u))
 
     // recordings
     const recordingsDir = path.join(u, '../recordings')
@@ -303,8 +315,8 @@ export class RelayServer {
           break
         }
         const build = getDb()
-          .prepare('SELECT file_path FROM apps WHERE id = ?')
-          .get(msg.buildId!) as { file_path: string } | undefined
+          .prepare('SELECT file_path, bundle_id FROM builds WHERE id = ?')
+          .get(msg.buildId!) as { file_path: string; bundle_id: string | null } | undefined
         if (!build) {
           ws.send(JSON.stringify({ type: 'app:install-error', message: 'Build not found' }))
           break
@@ -313,7 +325,7 @@ export class RelayServer {
           session.agentSocket.send(JSON.stringify({
             type: 'app:install',
             sessionId: msg.sessionId,
-            payload: { filePath: build.file_path },
+            payload: { filePath: build.file_path, bundleId: build.bundle_id },
           }))
         }
         break
@@ -337,7 +349,7 @@ export class RelayServer {
           break
         }
         const build = getDb()
-          .prepare('SELECT bundle_id FROM apps WHERE id = ?')
+          .prepare('SELECT bundle_id FROM builds WHERE id = ?')
           .get(msg.buildId!) as { bundle_id: string | null } | undefined
         if (!build?.bundle_id) {
           ws.send(JSON.stringify({ type: 'app:launch-error', message: 'Bundle ID not available for this build' }))
