@@ -46,11 +46,11 @@ export function handleMe(req: http.IncomingMessage, res: http.ServerResponse): v
   if (!auth) return
 
   const db = getDb()
-  const user = db.prepare('SELECT id, email, display_name, role FROM users WHERE id = ?').get(auth.userId) as
-    { id: number; email: string; display_name: string | null; role: string } | undefined
+  const user = db.prepare('SELECT id, email, display_name, avatar_url, role FROM users WHERE id = ?').get(auth.userId) as
+    { id: number; email: string; display_name: string | null; avatar_url: string | null; role: string } | undefined
 
   if (!user) return json(res, 404, { error: 'User not found' })
-  json(res, 200, { id: user.id, email: user.email, displayName: user.display_name, role: user.role })
+  json(res, 200, { id: user.id, email: user.email, displayName: user.display_name, avatarUrl: user.avatar_url, role: user.role })
 }
 
 export function handleLogout(_req: http.IncomingMessage, res: http.ServerResponse): void {

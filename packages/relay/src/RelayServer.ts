@@ -14,6 +14,7 @@ import { handleListComments, handleCreateComment, handleDeleteComment } from './
 import { handleListMembers, handleInvite, handleUpdateMember, handleDeleteMember } from './api/team.js'
 import { handleListTokens, handleCreateToken, handleRevokeToken } from './api/tokens.js'
 import { handleGetSettings, handleUpdateSettings } from './api/settings.js'
+import { handleUpdateProfile } from './api/profile.js'
 import { handleUploadRecording, handleListRecordings, handleDownloadRecording, purgeExpiredRecordings } from './api/recordings.js'
 
 const MIME_TYPES: Record<string, string> = {
@@ -92,6 +93,7 @@ export class RelayServer {
     // settings
     this.router.get('/api/v1/settings', handleGetSettings)
     this.router.patch('/api/v1/settings', (req, res) => handleUpdateSettings(req, res, u))
+    this.router.patch('/api/v1/profile', (req, res) => handleUpdateProfile(req, res, u))
 
     // recordings
     const recordingsDir = path.join(u, '../recordings')
