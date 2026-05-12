@@ -66,6 +66,41 @@ export function DefaultSettings() {
     setTimeout(() => setProfileSaved(false), 2000)
   }
 
+  // ── Password (everyone) ──────────────────────────────────────────────────
+  const [currentPassword, setCurrentPassword] = useState('')
+  const [newPassword, setNewPassword] = useState('')
+  const [confirmPassword, setConfirmPassword] = useState('')
+  const [passwordError, setPasswordError] = useState('')
+  const [passwordSaving, setPasswordSaving] = useState(false)
+  const [passwordSaved, setPasswordSaved] = useState(false)
+
+  async function handlePasswordChange(e: { preventDefault(): void }) {
+    e.preventDefault()
+    if (newPassword !== confirmPassword) { setPasswordError('Passwords do not match'); return }
+    setPasswordError('')
+    setPasswordSaving(true)
+    try {
+      const res = await fetch('/api/v1/auth/change-password', {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ currentPassword, newPassword }),
+      })
+      if (!res.ok) {
+        const d = await res.json()
+        setPasswordError(d.error ?? 'Failed to change password')
+        return
+      }
+      setCurrentPassword('')
+      setNewPassword('')
+      setConfirmPassword('')
+      setPasswordSaved(true)
+      setTimeout(() => setPasswordSaved(false), 2000)
+    } finally {
+      setPasswordSaving(false)
+    }
+  }
+
   // ── Apps (Admin + Developer) ──────────────────────────────────────────────
   const [apps, setApps] = useState<App[]>([])
   const [appNames, setAppNames] = useState<Record<number, string>>({})
@@ -172,6 +207,33 @@ export function DefaultSettings() {
             <div className="flex justify-end">
               <Button type="submit" disabled={profileSaving}>
                 {profileSaved ? 'Saved!' : profileSaving ? 'Saving…' : 'Save changes'}
+              </Button>
+            </div>
+          </form>
+        </CardContent>
+      </Card>
+
+      {/* Password — everyone */}
+      <Card>
+        <CardHeader><CardTitle>Password</CardTitle></CardHeader>
+        <CardContent>
+          <form onSubmit={handlePasswordChange} className="flex flex-col gap-4">
+            <div className="grid gap-2">
+              <Label htmlFor="current-password">Current password</Label>
+              <Input id="current-password" type="password" value={currentPassword} onChange={(e) => setCurrentPassword(e.target.value)} required />
+            </div>
+            <div className="grid gap-2">
+              <Label htmlFor="new-password">New password</Label>
+              <Input id="new-password" type="password" value={newPassword} onChange={(e) => setNewPassword(e.target.value)} required minLength={8} />
+            </div>
+            <div className="grid gap-2">
+              <Label htmlFor="confirm-password">Confirm new password</Label>
+              <Input id="confirm-password" type="password" value={confirmPassword} onChange={(e) => setConfirmPassword(e.target.value)} required minLength={8} />
+            </div>
+            {passwordError && <p className="text-sm text-destructive">{passwordError}</p>}
+            <div className="flex justify-end">
+              <Button type="submit" disabled={passwordSaving}>
+                {passwordSaved ? 'Saved!' : passwordSaving ? 'Saving…' : 'Change password'}
               </Button>
             </div>
           </form>

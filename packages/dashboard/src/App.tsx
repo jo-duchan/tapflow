@@ -2,6 +2,7 @@ import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
 import { DashboardLayout } from './layouts/DashboardLayout'
 import { Login } from './pages/Login'
 import { Invite } from './pages/Invite'
+import { ResetPassword } from './pages/ResetPassword'
 import { AppCenter } from './pages/AppCenter'
 import { QASession } from './pages/QASession'
 import { DefaultSettings } from './pages/settings/Default'
@@ -14,6 +15,7 @@ export function App() {
       <Routes>
         <Route path="/login" element={<Login />} />
         <Route path="/invite" element={<Invite />} />
+        <Route path="/reset-password" element={<ResetPassword />} />
         <Route element={<DashboardLayout />}>
           <Route index element={<Navigate to="/app-center" replace />} />
           <Route path="/app-center" element={<AppCenter />} />
