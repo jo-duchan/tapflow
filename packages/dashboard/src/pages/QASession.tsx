@@ -5,6 +5,7 @@ import { SimulatorViewer } from '@/components/SimulatorViewer';
 import { CommentPanel } from '@/components/comment-panel';
 import { RecordingsList } from '@/components/RecordingsList';
 import { Button } from '@/components/ui/button';
+import { Card } from '@/components/ui/card';
 import {
   Select,
   SelectContent,
@@ -15,15 +16,8 @@ import {
 import { Badge } from '@/components/ui/badge';
 import { Separator } from '@/components/ui/separator';
 import { ArrowLeft } from 'lucide-react';
-import type { AgentDevice, RelayMessage, SessionInfo } from '@/lib/types';
-
-type Build = {
-  id: number;
-  name: string;
-  version_label: string | null;
-  status_label: string | null;
-  platform: string;
-};
+import { getBuild } from '@/lib/queries';
+import type { AgentDevice, Build, RelayMessage, SessionInfo } from '@/lib/types';
 
 export function QASession() {
   const [searchParams] = useSearchParams();
@@ -40,9 +34,7 @@ export function QASession() {
 
   useEffect(() => {
     if (!buildId) return;
-    fetch(`/api/v1/builds/${buildId}`, { credentials: 'include' })
-      .then((r) => (r.ok ? r.json() : null))
-      .then(setBuild);
+    getBuild(buildId).then(setBuild);
   }, [buildId]);
 
   const handleMessage = useCallback(
@@ -153,8 +145,9 @@ export function QASession() {
               )}
             </div>
 
+            <Card className="p-6">
             <div className="flex flex-col gap-4">
-              <h2 className="text-sm font-medium text-muted-foreground uppercase tracking-wider">
+              <h2 className="font-mono text-xs font-medium text-muted-foreground uppercase tracking-wider">
                 Select device
               </h2>
 
@@ -224,6 +217,7 @@ export function QASession() {
                     : 'Boot & Connect'}
               </Button>
             </div>
+            </Card>
           </div>
         )}
       </div>

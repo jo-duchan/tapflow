@@ -59,8 +59,8 @@ export function Invite() {
 
   if (status === 'invalid') {
     return (
-      <div className="flex min-h-svh items-center justify-center p-4">
-        <Card className="w-full max-w-sm text-center">
+      <div className="bg-mesh-gradient flex min-h-svh items-center justify-center overflow-hidden p-4">
+        <Card level={4} className="w-full max-w-sm text-center">
           <CardHeader>
             <CardTitle>Invitation expired</CardTitle>
             <CardDescription>This invite link is invalid or has expired. Ask your admin for a new one.</CardDescription>
@@ -71,8 +71,8 @@ export function Invite() {
   }
 
   return (
-    <div className="flex min-h-svh items-center justify-center p-4">
-      <Card className="w-full max-w-sm">
+    <div className="bg-mesh-gradient flex min-h-svh items-center justify-center overflow-hidden p-4">
+      <Card level={4} className="w-full max-w-sm">
         <CardHeader className="text-center">
           <CardTitle>Set up your account</CardTitle>
           <CardDescription>You&apos;re joining as <strong>{inviteRole}</strong></CardDescription>

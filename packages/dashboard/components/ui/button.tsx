@@ -24,6 +24,10 @@ const buttonVariants = cva(
         sm: "h-9 rounded-md px-3",
         lg: "h-11 rounded-md px-8",
         icon: "h-10 w-10",
+        /** 48px 마케팅 스케일 pill — rounded-pill(100px) 오버라이드 */
+        pill: "h-12 px-6 rounded-pill",
+        /** 28px nav 스케일 — rounded-md(6px) 유지 */
+        nav: "h-7 px-3 text-xs",
       },
     },
     defaultVariants: {

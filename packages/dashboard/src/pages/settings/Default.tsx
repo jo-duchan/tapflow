@@ -135,7 +135,7 @@ export function DefaultSettings() {
 
   return (
     <div className="flex flex-col gap-6 max-w-lg">
-      <h1 className="text-xl font-semibold">Settings</h1>
+      <h1 className="text-xl font-semibold tracking-display-sm">Settings</h1>
 
       {/* Workspace — Admin only */}
       {isAdmin && (
