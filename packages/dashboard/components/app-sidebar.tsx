@@ -20,14 +20,15 @@ const navItems = [
 ]
 
 const settingsItems = [
-  { label: 'Default', href: '/settings/default', icon: Settings },
-  { label: 'Team', href: '/settings/team', icon: Users },
-  { label: 'Tokens', href: '/settings/tokens', icon: KeyRound },
+  { label: 'Default', href: '/settings/default', icon: Settings, adminOnly: false },
+  { label: 'Team', href: '/settings/team', icon: Users, adminOnly: true },
+  { label: 'Tokens', href: '/settings/tokens', icon: KeyRound, adminOnly: true },
 ]
 
 export function AppSidebar() {
   const { pathname } = useLocation()
   const { user } = useAuth()
+  const isAdmin = user?.role === 'Admin'
 
   return (
     <Sidebar>
@@ -57,7 +58,7 @@ export function AppSidebar() {
           <SidebarGroupLabel>Settings</SidebarGroupLabel>
           <SidebarGroupContent>
             <SidebarMenu>
-              {settingsItems.map((item) => (
+              {settingsItems.filter((item) => !item.adminOnly || isAdmin).map((item) => (
                 <SidebarMenuItem key={item.href}>
                   <SidebarMenuButton asChild isActive={pathname === item.href}>
                     <Link to={item.href}>

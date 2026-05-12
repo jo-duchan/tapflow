@@ -12,12 +12,13 @@ export function DashboardLayout() {
   if (loading) return null
   if (!user) return <Navigate to="/login" replace />
 
-  if (location.pathname.startsWith('/settings') && user.role !== 'Admin') {
+  const adminOnlyPaths = ['/settings/team', '/settings/tokens']
+  if (adminOnlyPaths.some((p) => location.pathname.startsWith(p)) && user.role !== 'Admin') {
     return (
       <div className="flex h-screen items-center justify-center">
         <div className="text-center space-y-2">
           <p className="text-lg font-semibold">Access Denied</p>
-          <p className="text-sm text-muted-foreground">Settings are only accessible to Admins.</p>
+          <p className="text-sm text-muted-foreground">This page is only accessible to Admins.</p>
         </div>
       </div>
     )
