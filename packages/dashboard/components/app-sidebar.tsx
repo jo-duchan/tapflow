@@ -12,6 +12,8 @@ import {
   SidebarMenuButton,
   SidebarMenuItem,
 } from '@/components/ui/sidebar'
+import { useAuth } from '@/hooks/useAuth'
+import { UserAvatar } from '@/components/user-avatar'
 
 const navItems = [
   { label: 'App Center', href: '/app-center', icon: LayoutGrid },
@@ -25,6 +27,7 @@ const settingsItems = [
 
 export function AppSidebar() {
   const { pathname } = useLocation()
+  const { user } = useAuth()
 
   return (
     <Sidebar>
@@ -69,7 +72,17 @@ export function AppSidebar() {
         </SidebarGroup>
       </SidebarContent>
 
-      <SidebarFooter />
+      {user && (
+        <SidebarFooter className="px-3 py-3 border-t">
+          <div className="flex items-center gap-2.5">
+            <UserAvatar name={user.displayName ?? ''} avatarUrl={user.avatarUrl} size={28} />
+            <div className="flex flex-col min-w-0">
+              <span className="text-sm font-medium truncate">{user.displayName}</span>
+              <span className="text-xs text-muted-foreground truncate">{user.email}</span>
+            </div>
+          </div>
+        </SidebarFooter>
+      )}
     </Sidebar>
   )
 }

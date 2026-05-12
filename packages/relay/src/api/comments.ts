@@ -15,8 +15,9 @@ export function handleListComments(req: http.IncomingMessage, res: http.ServerRe
 
   const db = getDb()
   const comments = db.prepare(`
-    SELECT c.id, c.body, c.created_at, u.display_name as author,
-           u.email
+    SELECT c.id, c.body, c.created_at,
+           COALESCE(u.display_name, substr(u.email, 1, instr(u.email, '@') - 1)) as author,
+           u.avatar_url as authorAvatarUrl
     FROM comments c
     JOIN users u ON u.id = c.author_id
     WHERE c.build_id = ?
@@ -36,10 +37,9 @@ export function handleListComments(req: http.IncomingMessage, res: http.ServerRe
     attachMap.get(a.comment_id)!.push(a)
   }
 
-  const result = (comments as { id: number; body: string; created_at: string; author: string; email: string }[])
+  const result = (comments as { id: number; body: string; created_at: string; author: string; authorAvatarUrl: string | null }[])
     .map((c) => ({
       ...c,
-      author: c.author || c.email,
       attachments: (attachMap.get(c.id) ?? []).map((a) => ({
         id: a.id,
         file_path: `/uploads/comments/${path.basename(a.file_path)}`,

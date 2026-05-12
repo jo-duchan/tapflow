@@ -5,6 +5,7 @@ import { ScrollArea } from '@/components/ui/scroll-area'
 import { Separator } from '@/components/ui/separator'
 import { Link2, ImagePlus } from 'lucide-react'
 import type { Comment } from '@/lib/types'
+import { UserAvatar } from '@/components/user-avatar'
 
 // SQLite datetime('now') returns "YYYY-MM-DD HH:MM:SS" (UTC, no timezone marker).
 // Normalize to unambiguous ISO 8601 UTC so all browsers parse it correctly.
@@ -88,7 +89,10 @@ export function CommentPanel({ buildId }: Props) {
                 className="flex flex-col gap-1 rounded-md transition-all"
               >
                 <div className="flex items-center justify-between">
-                  <span className="text-xs font-medium">{c.author}</span>
+                  <div className="flex items-center gap-1.5">
+                    <UserAvatar name={c.author} avatarUrl={c.authorAvatarUrl} size={20} />
+                    <span className="text-xs font-medium">{c.author}</span>
+                  </div>
                   <div className="flex items-center gap-1">
                     <span className="text-xs text-muted-foreground">
                       {parseUTCDate(c.created_at).toLocaleString()}

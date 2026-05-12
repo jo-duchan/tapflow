@@ -148,7 +148,8 @@ export function handleListBuilds(req: http.IncomingMessage, res: http.ServerResp
   const items = db.prepare(`
     SELECT b.id, b.app_id, ap.name, b.version_name, b.build_number,
            b.version_label, b.status_label, ap.platform,
-           b.bundle_id, b.uploaded_at, u.display_name as uploader
+           b.bundle_id, b.uploaded_at,
+           COALESCE(u.display_name, substr(u.email, 1, instr(u.email, '@') - 1)) as uploader
     ${baseFrom}
     ${where.replace('a.name', 'ap.name')}
     ORDER BY b.${sortKey} ${sortDir}

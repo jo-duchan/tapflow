@@ -50,7 +50,8 @@ export function handleMe(req: http.IncomingMessage, res: http.ServerResponse): v
     { id: number; email: string; display_name: string | null; avatar_url: string | null; role: string } | undefined
 
   if (!user) return json(res, 404, { error: 'User not found' })
-  json(res, 200, { id: user.id, email: user.email, displayName: user.display_name, avatarUrl: user.avatar_url, role: user.role })
+  const displayName = user.display_name ?? user.email.split('@')[0]
+  json(res, 200, { id: user.id, email: user.email, displayName, avatarUrl: user.avatar_url, role: user.role })
 }
 
 export function handleLogout(_req: http.IncomingMessage, res: http.ServerResponse): void {
