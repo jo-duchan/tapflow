@@ -308,8 +308,8 @@ export class RelayServer {
           break
         }
         const build = getDb()
-          .prepare('SELECT file_path FROM builds WHERE id = ?')
-          .get(msg.buildId!) as { file_path: string } | undefined
+          .prepare('SELECT file_path, bundle_id FROM builds WHERE id = ?')
+          .get(msg.buildId!) as { file_path: string; bundle_id: string | null } | undefined
         if (!build) {
           ws.send(JSON.stringify({ type: 'app:install-error', message: 'Build not found' }))
           break
@@ -318,7 +318,7 @@ export class RelayServer {
           session.agentSocket.send(JSON.stringify({
             type: 'app:install',
             sessionId: msg.sessionId,
-            payload: { filePath: build.file_path },
+            payload: { filePath: build.file_path, bundleId: build.bundle_id },
           }))
         }
         break

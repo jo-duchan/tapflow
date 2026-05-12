@@ -53,6 +53,7 @@ function mockSimctl(booted = false): SimctlWrapper {
     ]),
     boot: vi.fn().mockResolvedValue(undefined),
     shutdown: vi.fn().mockResolvedValue(undefined),
+    uninstallApp: vi.fn().mockResolvedValue(undefined),
     installApp: vi.fn().mockResolvedValue(undefined),
     launchApp: vi.fn().mockResolvedValue(undefined),
     screenshot: vi.fn().mockResolvedValue(Buffer.from('png')),
