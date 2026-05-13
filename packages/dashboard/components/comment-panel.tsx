@@ -74,8 +74,6 @@ export function CommentPanel({ buildId }: Props) {
 
   return (
     <div className="flex h-full flex-col gap-3">
-      <h2 className="text-sm font-semibold">Comments</h2>
-
       <ScrollArea className="flex-1 rounded-md border p-3">
         {comments.length === 0 ? (
           <p className="text-sm text-muted-foreground text-center py-8">No comments yet.</p>

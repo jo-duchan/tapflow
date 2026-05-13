@@ -2,8 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { useSearchParams, useNavigate } from 'react-router-dom';
 import { useRelay } from '@/hooks/useRelay';
 import { SimulatorViewer } from '@/components/SimulatorViewer';
-import { CommentPanel } from '@/components/comment-panel';
-import { RecordingsList } from '@/components/RecordingsList';
+import { SessionPanel } from '@/components/session-panel';
 import {
   Select,
   SelectContent,
@@ -160,7 +159,6 @@ export function QASession() {
               buildId={build?.id}
               onRecordingUploaded={() => setRecordingsKey((k) => k + 1)}
             />
-            <RecordingsList sessionId={activeSessionId} refreshKey={recordingsKey} />
           </>
         ) : (
           <div className="flex flex-col gap-6">
@@ -268,8 +266,12 @@ export function QASession() {
       {buildId && (
         <>
           <Separator orientation="vertical" className="h-auto" />
-          <div className="w-80 shrink-0">
-            <CommentPanel buildId={Number(buildId)} />
+          <div className="w-80 shrink-0 h-full">
+            <SessionPanel
+              buildId={Number(buildId)}
+              sessionId={activeSessionId}
+              recordingsRefreshKey={recordingsKey}
+            />
           </div>
         </>
       )}
