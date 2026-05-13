@@ -11,7 +11,7 @@ interface Props {
 
 export function AppSidebar({ apps, selectedAppId, onSelect, onAdd }: Props) {
   return (
-    <aside className="w-52 shrink-0 border-r flex flex-col gap-1 p-3 overflow-y-auto">
+    <aside className="w-64 shrink-0 border-r flex flex-col gap-1 p-3 overflow-y-auto">
       <span className="px-2 pb-1 font-mono text-xs font-medium text-muted-foreground uppercase tracking-wider">
         Apps
       </span>
