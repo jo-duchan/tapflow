@@ -275,7 +275,7 @@ export function DefaultSettings() {
                     value={appNames[app.id] ?? ''}
                     onChange={(e) => setAppNames((p) => ({ ...p, [app.id]: e.target.value }))}
                   />
-                  <div className="flex items-center justify-between mt-1">
+                  <div className="flex flex-col gap-1.5 mt-1">
                     <div className="flex items-center gap-2">
                       <span className="text-xs text-muted-foreground font-mono">{app.bundle_id_key}</span>
                       <Badge
@@ -286,7 +286,7 @@ export function DefaultSettings() {
                         {app.platform}
                       </Badge>
                     </div>
-                    <div className="flex items-center gap-2">
+                    <div className="flex items-center justify-end gap-2">
                       <Button
                         size="sm"
                         variant="outline"
