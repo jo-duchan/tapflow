@@ -12,7 +12,7 @@ import {
 import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from '@/components/ui/table'
-import { KeyRound, Trash2, UserPlus } from 'lucide-react'
+import { UserPlus } from 'lucide-react'
 
 type Member = { id: number; email: string; display_name: string; role: string; joined_at: string }
 
@@ -145,22 +145,16 @@ export function TeamSettings() {
                     {new Date(m.joined_at).toLocaleDateString()}
                   </TableCell>
                   <TableCell>
-                    <div className="flex items-center gap-1">
+                    <div className="flex items-center gap-2">
                       <Button
                         variant="secondary"
-                        size="icon"
-                        className="h-7 w-7"
-                        title="Send password reset email"
+                        size="nav"
                         onClick={() => handleSendReset(m.id)}
                       >
-                        {resetSent[m.id] ? (
-                          <span className="text-xs">{resetSent[m.id]}</span>
-                        ) : (
-                          <KeyRound className="h-4 w-4" />
-                        )}
+                        {resetSent[m.id] ?? 'Reset pwd'}
                       </Button>
-                      <Button variant="destructive" size="icon" className="h-7 w-7" onClick={() => handleDelete(m.id)}>
-                        <Trash2 className="h-4 w-4" />
+                      <Button variant="destructive" size="nav" onClick={() => handleDelete(m.id)}>
+                        Remove
                       </Button>
                     </div>
                   </TableCell>
