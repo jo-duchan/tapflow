@@ -25,7 +25,6 @@ interface DeviceState {
   displayHeight: number
   lastTouchPx: { x: number; y: number }
   bootSeq: number
-  orientation: 'portrait' | 'landscape'
 }
 
 export interface AndroidAgentOptions {
@@ -105,7 +104,6 @@ export class AndroidAgent implements DeviceAgent {
         displayHeight: 0,
         lastTouchPx: { x: 0, y: 0 },
         bootSeq: 0,
-        orientation: 'portrait',
       })
     })
   }
@@ -407,14 +405,10 @@ export class AndroidAgent implements DeviceAgent {
         if (!state) break
         const serial = this.adb.getSerial(state.deviceId)
         if (!serial) break
-        const newOrientation = state.orientation === 'portrait' ? 'landscape' : 'portrait'
-        state.orientation = newOrientation
-        // Swap dimensions so subsequent touch events map correctly to the rotated screen
         ;[state.displayWidth, state.displayHeight] = [state.displayHeight, state.displayWidth]
         state.scrcpySession?.control.updateScreenSize(state.displayWidth, state.displayHeight)
-        this.adb.setRotation(serial, newOrientation === 'landscape').catch((e) => {
-          console.error('[android-agent] rotation failed:', (e as Error).message)
-        })
+        this.adb.enableAutoRotate(serial).catch(() => {})
+        this.adb.emuRotate(serial).catch(() => {})
         break
       }
       case 'input:button': {

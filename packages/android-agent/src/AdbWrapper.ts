@@ -129,12 +129,12 @@ export class AdbWrapper {
     return this.runner.execBinary('-s', serial, 'exec-out', 'screencap', '-p')
   }
 
-  async setRotation(serial: string, landscape: boolean): Promise<void> {
-    await this.runner.exec('-s', serial, 'shell', 'settings', 'put', 'system', 'accelerometer_rotation', '0')
-    await this.runner.exec(
-      '-s', serial, 'shell', 'settings', 'put', 'system', 'user_rotation',
-      landscape ? '1' : '0',
-    )
+  async enableAutoRotate(serial: string): Promise<void> {
+    await this.runner.exec('-s', serial, 'shell', 'settings', 'put', 'system', 'accelerometer_rotation', '1')
+  }
+
+  async emuRotate(serial: string): Promise<void> {
+    await this.runner.exec('-s', serial, 'emu', 'rotate')
   }
 
   async sendInput(serial: string, ...args: string[]): Promise<void> {

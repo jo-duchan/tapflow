@@ -120,7 +120,7 @@ export class ScrcpySession {
 
   private connectTcp(port: number): Promise<net.Socket> {
     return new Promise((resolve, reject) => {
-      const socket = net.connect(port, '127.0.0.1', () => resolve(socket))
+      const socket: net.Socket = net.connect(port, '127.0.0.1', () => resolve(socket))
       socket.once('error', reject)
     })
   }
