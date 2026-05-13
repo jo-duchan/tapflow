@@ -270,8 +270,13 @@ export function DefaultSettings() {
               {apps.map((app) => (
                 <div key={app.id} className="flex items-end gap-2">
                   <div className="flex-1 grid gap-1.5">
+                    <Input
+                      id={`app-${app.id}`}
+                      value={appNames[app.id] ?? ''}
+                      onChange={(e) => setAppNames((p) => ({ ...p, [app.id]: e.target.value }))}
+                    />
                     <div className="flex items-center gap-2">
-                      <Label htmlFor={`app-${app.id}`}>{app.bundle_id_key}</Label>
+                      <Label htmlFor={`app-${app.id}`} className="text-xs text-muted-foreground font-normal">{app.bundle_id_key}</Label>
                       <Badge
                         tone={app.platform === 'ios' ? 'ios' : app.platform === 'android' ? 'android' : undefined}
                         variant={app.platform === 'both' ? 'secondary' : undefined}
@@ -280,11 +285,6 @@ export function DefaultSettings() {
                         {app.platform}
                       </Badge>
                     </div>
-                    <Input
-                      id={`app-${app.id}`}
-                      value={appNames[app.id] ?? ''}
-                      onChange={(e) => setAppNames((p) => ({ ...p, [app.id]: e.target.value }))}
-                    />
                   </div>
                   <Button
                     size="sm"
