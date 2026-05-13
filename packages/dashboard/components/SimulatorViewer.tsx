@@ -33,6 +33,8 @@ export function SimulatorViewer({ sessionId, deviceId, buildId, onRecordingUploa
   const [installError, setInstallError] = useState<string | null>(null);
   const [launching, setLaunching] = useState(false);
 
+  const [canvasReady, setCanvasReady] = useState(false);
+
   // ── recording state ───────────────────────────────────────────────────────
   const [recordState, setRecordState] = useState<'idle' | 'recording' | 'uploading' | 'done'>('idle');
   const recordingRef = useRef(false);
@@ -82,6 +84,7 @@ export function SimulatorViewer({ sessionId, deviceId, buildId, onRecordingUploa
             }
           }
           ctx.drawImage(bitmap, 0, 0);
+          setCanvasReady(true);
           frameCount.current += 1;
         }
         bitmap.close();
@@ -100,6 +103,7 @@ export function SimulatorViewer({ sessionId, deviceId, buildId, onRecordingUploa
         setInstalling(false);
         setInstalled(false);
         setInstallError(null);
+        setCanvasReady(false);
         deviceSeq.current += 1;
         const canvas = canvasRef.current;
         if (canvas) { const ctx = canvas.getContext('2d'); ctx?.clearRect(0, 0, canvas.width, canvas.height); }
@@ -793,8 +797,20 @@ export function SimulatorViewer({ sessionId, deviceId, buildId, onRecordingUploa
                 borderRadius: cssCornerRadius > 0 ? `${cssCornerRadius}px` : undefined,
                 backgroundColor: '#010101',
                 cursor: 'none',
+                visibility: canvasReady ? 'visible' : 'hidden',
               }}
             />
+            {!canvasReady && (
+              <div
+                className="absolute animate-pulse bg-zinc-800"
+                style={{
+                  zIndex: 3,
+                  left: `${screenPctLeft}%`, top: `${screenPctTop}%`,
+                  width: `${screenPctW}%`, height: `${screenPctH}%`,
+                  borderRadius: cssCornerRadius > 0 ? `${cssCornerRadius}px` : undefined,
+                }}
+              />
+            )}
             {/* live cursor overlay — imperative position updates via liveCursorRef */}
             <div
               ref={liveCursorRef}
@@ -903,13 +919,16 @@ export function SimulatorViewer({ sessionId, deviceId, buildId, onRecordingUploa
           <canvas
             ref={canvasRef}
             className="block w-full h-full cursor-crosshair"
-            style={{ borderRadius: '10%' }}
+            style={{ borderRadius: '10%', visibility: canvasReady ? 'visible' : 'hidden' }}
             onPointerDown={handlePointerDown}
             onPointerMove={handlePointerMove}
             onPointerUp={handlePointerUp}
             onPointerCancel={handlePointerCancel}
           />
-          {joined && fps === 0 && (
+          {!canvasReady && (
+            <div className="absolute inset-0 animate-pulse bg-zinc-900/60" style={{ borderRadius: '10%' }} />
+          )}
+          {joined && fps === 0 && canvasReady && (
             <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
               <span style={{ color: 'white', fontSize: '0.875rem' }}>Waiting for first frame...</span>
             </div>
