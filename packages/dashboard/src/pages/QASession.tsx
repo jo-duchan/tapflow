@@ -124,8 +124,8 @@ export function QASession() {
   }, [send]);
 
   return (
-    <div className="flex h-full gap-6 p-6">
-      <div className="flex flex-col gap-3 flex-1 min-w-0">
+    <div className="flex h-full min-h-0 gap-6 p-6">
+      <div className="flex flex-col gap-3 flex-1 min-w-0 min-h-0 overflow-y-auto">
         {activeSessionId ? (
           <>
             <div className="flex w-full items-center gap-2">
