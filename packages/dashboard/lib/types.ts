@@ -84,7 +84,7 @@ export interface App {
   id: number
   name: string
   bundle_id_key: string
-  platform: 'ios' | 'android'
+  platform: 'ios' | 'android' | 'both'
   latest_build_id: number | null
   version_name: string | null
   build_number: string | null

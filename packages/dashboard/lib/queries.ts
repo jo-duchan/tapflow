@@ -30,6 +30,22 @@ export async function getBuilds({
   return data.items
 }
 
+export async function createApp(data: {
+  name: string
+  bundle_id_key: string
+  platform: 'ios' | 'android' | 'both'
+}): Promise<{ id: number } | { error: string } | null> {
+  const res = await fetch('/api/v1/apps', {
+    method: 'POST',
+    credentials: 'include',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(data),
+  })
+  if (res.status === 409) return { error: 'App with this bundle ID and platform already exists' }
+  if (!res.ok) return null
+  return res.json()
+}
+
 export async function updateBuildStatus(
   id: number,
   status: string | null,

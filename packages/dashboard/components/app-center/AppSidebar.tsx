@@ -1,13 +1,15 @@
 import { TechLabel } from '@/components/ui/tech-label'
+import { AddAppDialog } from '@/components/app-center/AddAppDialog'
 import type { App } from '@/lib/types'
 
 interface Props {
   apps: App[]
   selectedAppId: number | null
   onSelect: (id: number) => void
+  onAdd: () => void
 }
 
-export function AppSidebar({ apps, selectedAppId, onSelect }: Props) {
+export function AppSidebar({ apps, selectedAppId, onSelect, onAdd }: Props) {
   return (
     <aside className="w-52 shrink-0 border-r flex flex-col gap-1 p-3 overflow-y-auto">
       <span className="px-2 pb-1 font-mono text-xs font-medium text-muted-foreground uppercase tracking-wider">
@@ -29,6 +31,9 @@ export function AppSidebar({ apps, selectedAppId, onSelect }: Props) {
           <TechLabel className="text-muted-foreground truncate">{app.bundle_id_key}</TechLabel>
         </button>
       ))}
+      <div className="mt-1 border-t pt-1">
+        <AddAppDialog onSuccess={onAdd} />
+      </div>
     </aside>
   )
 }

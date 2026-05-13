@@ -80,6 +80,7 @@ export function AppCenter() {
         apps={apps}
         selectedAppId={selectedAppId}
         onSelect={handleAppSelect}
+        onAdd={fetchApps}
       />
 
       <main className="flex-1 flex flex-col gap-4 p-4 overflow-y-auto min-w-0">
@@ -87,7 +88,7 @@ export function AppCenter() {
           <h1 className="text-xl font-semibold tracking-display-sm">
             {selectedApp ? selectedApp.name : 'App Center'}
           </h1>
-          <UploadBuildDialog onSuccess={() => { fetchApps(); fetchBuilds() }} />
+          <UploadBuildDialog onSuccess={() => { fetchApps(); fetchBuilds() }} appId={selectedAppId} />
         </div>
 
         <div className="flex flex-wrap gap-2">

@@ -95,9 +95,11 @@ function hasSimulatorSlice(zipPath: string, appDir: string): boolean | null {
 
 function upsertApp(name: string, bundleIdKey: string, platform: string): number {
   const db = getDb()
+  // 정확히 일치하는 플랫폼 우선, 없으면 'both' 앱 검색
   const existing = db.prepare(
-    'SELECT id FROM apps WHERE bundle_id_key = ? AND platform = ?'
-  ).get(bundleIdKey, platform) as { id: number } | undefined
+    `SELECT id FROM apps WHERE bundle_id_key = ? AND (platform = ? OR platform = 'both')
+     ORDER BY CASE platform WHEN ? THEN 0 ELSE 1 END LIMIT 1`
+  ).get(bundleIdKey, platform, platform) as { id: number } | undefined
 
   if (existing) return existing.id
 
@@ -147,7 +149,7 @@ export function handleListBuilds(req: http.IncomingMessage, res: http.ServerResp
 
   const items = db.prepare(`
     SELECT b.id, b.app_id, ap.name, b.version_name, b.build_number,
-           b.version_label, b.status_label, ap.platform,
+           b.version_label, b.status_label, b.platform,
            b.bundle_id, b.uploaded_at,
            COALESCE(u.display_name, substr(u.email, 1, instr(u.email, '@') - 1)) as uploader
     ${baseFrom}
@@ -169,7 +171,7 @@ export function handleGetBuild(
 
   const build = getDb().prepare(`
     SELECT b.id, b.app_id, ap.name, b.version_name, b.build_number,
-           b.version_label, b.status_label, ap.platform, b.bundle_id, b.uploaded_at
+           b.version_label, b.status_label, b.platform, b.bundle_id, b.uploaded_at
     FROM builds b
     LEFT JOIN apps ap ON ap.id = b.app_id
     WHERE b.id = ?
@@ -304,17 +306,36 @@ export function handleUploadBuild(
     const bundleIdKey = bundleId ?? '__unknown__'
     const appName     = resolvedAppName ?? fields.label ?? path.basename(originalName, ext)
 
-    const db    = getDb()
-    const appId = upsertApp(appName, bundleIdKey, platform)
+    const db = getDb()
+    let appId: number
+
+    if (fields.app_id) {
+      appId = Number(fields.app_id)
+      const app = db.prepare('SELECT id, bundle_id_key, platform FROM apps WHERE id = ?')
+        .get(appId) as { id: number; bundle_id_key: string | null; platform: string } | undefined
+      if (!app) {
+        fs.unlinkSync(savedPath)
+        return json(res, 404, { error: 'App not found' })
+      }
+      if (app.platform !== 'both' && app.platform !== platform) {
+        fs.unlinkSync(savedPath)
+        return json(res, 400, { error: `App platform is '${app.platform}' but build is '${platform}'` })
+      }
+      if (!app.bundle_id_key && bundleId) {
+        db.prepare('UPDATE apps SET bundle_id_key = ? WHERE id = ?').run(bundleId, appId)
+      }
+    } else {
+      appId = upsertApp(appName, bundleIdKey, platform)
+    }
 
     const result = db.prepare(`
-      INSERT INTO builds (app_id, version_name, build_number, bundle_id, status_label, file_path, label, version_label, uploader_id)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `).run(appId, versionName, buildNumber, bundleId, status, savedPath, fields.label ?? null, fields.label ?? null, auth.userId)
+      INSERT INTO builds (app_id, version_name, build_number, bundle_id, status_label, file_path, label, version_label, uploader_id, platform)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(appId, versionName, buildNumber, bundleId, status, savedPath, fields.label ?? null, fields.label ?? null, auth.userId, platform)
 
     const build = db.prepare(`
       SELECT b.id, b.app_id, ap.name, b.version_name, b.build_number,
-             b.bundle_id, b.status_label, ap.platform, b.uploaded_at
+             b.bundle_id, b.status_label, b.platform, b.uploaded_at
       FROM builds b LEFT JOIN apps ap ON ap.id = b.app_id
       WHERE b.id = ?
     `).get(result.lastInsertRowid)

@@ -18,9 +18,9 @@ import {
 } from '@/components/ui/select'
 import { Upload } from 'lucide-react'
 
-type Props = { onSuccess: () => void }
+type Props = { onSuccess: () => void; appId?: number | null }
 
-export function UploadBuildDialog({ onSuccess }: Props) {
+export function UploadBuildDialog({ onSuccess, appId }: Props) {
   const [open, setOpen] = useState(false)
   const [file, setFile] = useState<File | null>(null)
   const [statusLabel, setStatusLabel] = useState('none')
@@ -37,6 +37,7 @@ export function UploadBuildDialog({ onSuccess }: Props) {
       const form = new FormData()
       form.append('file', file)
       if (statusLabel !== 'none') form.append('status', statusLabel)
+      if (appId) form.append('app_id', String(appId))
 
       const res = await fetch('/api/v1/builds', { method: 'POST', credentials: 'include', body: form })
       if (!res.ok) { setError('Upload failed. Check the file format.'); return }

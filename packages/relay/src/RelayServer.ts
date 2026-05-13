@@ -10,7 +10,7 @@ import { handleLogin, handleLogout, handleMe, handleChangePassword } from './api
 import { handleVerify, handleAccept } from './api/invitations.js'
 import { handleVerifyReset, handleDoReset, handleSendMemberReset } from './api/passwordReset.js'
 import { handleListBuilds, handleGetBuild, handleUpdateBuild, handleUploadBuild } from './api/builds.js'
-import { handleListApps, handleUpdateApp } from './api/apps.js'
+import { handleListApps, handleCreateApp, handleUpdateApp } from './api/apps.js'
 import { handleListComments, handleCreateComment, handleDeleteComment } from './api/comments.js'
 import { handleListMembers, handleInvite, handleUpdateMember, handleDeleteMember } from './api/team.js'
 import { handleListTokens, handleCreateToken, handleRevokeToken } from './api/tokens.js'
@@ -70,6 +70,7 @@ export class RelayServer {
 
     // apps
     this.router.get('/api/v1/apps', handleListApps)
+    this.router.post('/api/v1/apps', handleCreateApp)
     this.router.patch('/api/v1/apps/:id', handleUpdateApp)
 
     // builds
