@@ -1,5 +1,6 @@
 import { useEffect, useState, useCallback } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
+import { Search } from 'lucide-react'
 import { Input } from '@/components/ui/input'
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
@@ -92,12 +93,15 @@ export function AppCenter() {
         </div>
 
         <div className="flex flex-wrap gap-2">
-          <Input
-            placeholder="Search version…"
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            className="h-8 w-48"
-          />
+          <div className="relative">
+            <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground pointer-events-none" />
+            <Input
+              placeholder="Search version…"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              className="h-8 w-48 pl-8"
+            />
+          </div>
           <Select value={statusFilter} onValueChange={setStatusFilter}>
             <SelectTrigger className="h-8 w-36"><SelectValue placeholder="Status" /></SelectTrigger>
             <SelectContent>

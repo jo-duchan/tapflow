@@ -5,7 +5,6 @@ import { SimulatorViewer } from '@/components/SimulatorViewer';
 import { CommentPanel } from '@/components/comment-panel';
 import { RecordingsList } from '@/components/RecordingsList';
 import { Button } from '@/components/ui/button';
-import { Card } from '@/components/ui/card';
 import {
   Select,
   SelectContent,
@@ -15,8 +14,10 @@ import {
 } from '@/components/ui/select';
 import { Badge } from '@/components/ui/badge';
 import { Separator } from '@/components/ui/separator';
-import { ArrowLeft } from 'lucide-react';
+import { ArrowLeft, Search } from 'lucide-react';
 import { getBuild } from '@/lib/queries';
+import { cn } from '@/lib/utils';
+import { Input } from '@/components/ui/input';
 import type { AgentDevice, Build, RelayMessage, SessionInfo } from '@/lib/types';
 
 export function QASession() {
@@ -80,19 +81,12 @@ export function QASession() {
     return 0
   }) as string[];
   const [osVersion, setOsVersion] = useState<string>('');
+  const [deviceSearch, setDeviceSearch] = useState('');
 
-  const versionedDevices = osVersion
+  const versionedDevices = (osVersion
     ? filteredDevices.filter((d) => d.osVersion === osVersion)
-    : filteredDevices;
-
-  const selectedDevice = allDevices.find((d) => d.id === deviceId);
-
-  function handleBoot() {
-    if (!selectedDevice || !deviceId) return;
-    setBooting(true);
-    setStatus('Booting…');
-    setActiveSessionId(selectedDevice.sessionId);
-  }
+    : filteredDevices
+  ).filter((d) => !deviceSearch || d.name.toLowerCase().includes(deviceSearch.toLowerCase()));
 
   function handleBack() {
     if (activeSessionId && deviceId) {
@@ -104,7 +98,7 @@ export function QASession() {
   }
 
   return (
-    <div className="flex h-full gap-6">
+    <div className="flex h-full gap-6 p-6">
       <div className="flex flex-col gap-3 flex-1 min-w-0">
         {activeSessionId ? (
           <>
@@ -130,7 +124,7 @@ export function QASession() {
             <RecordingsList sessionId={activeSessionId} refreshKey={recordingsKey} />
           </>
         ) : (
-          <div className="flex flex-col gap-6 max-w-lg">
+          <div className="flex flex-col gap-6">
             <div className="flex items-center gap-3">
               <Button variant="ghost" size="sm" onClick={() => navigate(-1)}>
                 <ArrowLeft className="mr-1 h-4 w-4" />
@@ -145,79 +139,86 @@ export function QASession() {
               )}
             </div>
 
-            <Card className="p-6">
-            <div className="flex flex-col gap-4">
-              <h2 className="font-mono text-xs font-medium text-muted-foreground uppercase tracking-wider">
-                Select device
-              </h2>
+            <div className="flex flex-col gap-5">
+              <h1 className="text-xl font-semibold tracking-tight">Select device</h1>
 
-              <div className="flex flex-col gap-3">
-                {osVersions.length > 0 && (
-                  <div className="grid gap-1.5">
-                    <span className="text-sm font-medium">OS version</span>
-                    <Select
-                      value={osVersion || '__all__'}
-                      onValueChange={(v) => {
-                        setOsVersion(v === '__all__' ? '' : v);
-                        setDeviceId('');
-                      }}
-                    >
-                      <SelectTrigger>
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="__all__">Any version</SelectItem>
-                        {osVersions.map((v) => (
-                          <SelectItem key={v} value={v}>
-                            {v}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
-                )}
-
-                <div className="grid gap-1.5">
-                  <span className="text-sm font-medium">Device</span>
-                  {versionedDevices.length === 0 ? (
-                    <p className="text-sm text-muted-foreground">
-                      {connected ? 'No devices available for this OS.' : 'Connecting to relay…'}
-                    </p>
-                  ) : (
-                    <Select value={deviceId} onValueChange={setDeviceId}>
-                      <SelectTrigger>
-                        <SelectValue placeholder="Select a device" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {versionedDevices.map((d: AgentDevice) => (
-                          <SelectItem key={d.id} value={d.id}>
-                            {d.name}
-                            {d.status === 'booted' && (
-                              <span className="ml-1 text-xs text-muted-foreground">(booted)</span>
-                            )}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  )}
+              <div className="flex gap-2">
+                <div className="relative">
+                  <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground pointer-events-none" />
+                  <Input
+                    placeholder="Search device…"
+                    value={deviceSearch}
+                    onChange={(e) => setDeviceSearch(e.target.value)}
+                    className="h-8 w-48 pl-8"
+                  />
                 </div>
+                {osVersions.length > 0 && (
+                  <Select
+                    value={osVersion || '__all__'}
+                    onValueChange={(v) => {
+                      setOsVersion(v === '__all__' ? '' : v);
+                      setDeviceId('');
+                    }}
+                  >
+                    <SelectTrigger className="h-8 w-36 shrink-0">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="__all__">Any version</SelectItem>
+                      {osVersions.map((v) => (
+                        <SelectItem key={v} value={v}>{v}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                )}
               </div>
 
-              {status && <p className="text-sm text-muted-foreground">{status}</p>}
+              {versionedDevices.length === 0 ? (
+                <p className="text-sm text-muted-foreground">
+                  {connected ? 'No devices available for this OS.' : 'Connecting to relay…'}
+                </p>
+              ) : (
+                <div className="grid grid-cols-2 gap-2">
+                  {versionedDevices.map((d: AgentDevice) => {
+                    const isBooted = d.status === 'booted'
+                    const isBusy = d.busy
+                    const statusLabel = isBusy ? 'In use' : isBooted ? 'Booted' : 'Available'
+                    const statusDot = isBusy
+                      ? 'bg-amber-400'
+                      : isBooted
+                        ? 'bg-emerald-400'
+                        : 'bg-muted-foreground/40'
+                    return (
+                      <button
+                        key={d.id}
+                        disabled={isBusy || booting || !connected}
+                        onClick={() => {
+                          setDeviceId(d.id)
+                          setBooting(true)
+                          setStatus('Booting…')
+                          setActiveSessionId(d.sessionId)
+                        }}
+                        className={cn(
+                          'flex flex-col gap-3 rounded-lg border p-3 text-left transition-colors',
+                          'hover:bg-accent disabled:cursor-not-allowed disabled:opacity-50',
+                        )}
+                      >
+                        <span className="text-sm font-medium leading-tight">{d.name}</span>
+                        {d.osVersion && (
+                          <span className="font-mono text-xs text-muted-foreground">{d.osVersion}</span>
+                        )}
+                        <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                          <span className={cn('inline-block h-1.5 w-1.5 rounded-full', statusDot)} />
+                          {statusLabel}
+                        </span>
+                      </button>
+                    )
+                  })}
+                </div>
+              )}
 
-              <Button
-                onClick={handleBoot}
-                disabled={!deviceId || booting || !connected}
-                className="w-full"
-              >
-                {booting
-                  ? 'Booting…'
-                  : selectedDevice?.status === 'booted'
-                    ? 'Connect'
-                    : 'Boot & Connect'}
-              </Button>
+              {status && <p className="text-sm text-muted-foreground">{status}</p>}
             </div>
-            </Card>
           </div>
         )}
       </div>
