@@ -49,6 +49,27 @@ export async function handleCreateApp(
   json(res, 201, { id: result.lastInsertRowid, ok: true })
 }
 
+export function handleDeleteApp(
+  req: http.IncomingMessage,
+  res: http.ServerResponse,
+  params: Record<string, string>
+): void {
+  const auth = requireAuth(req, res)
+  if (!auth) return
+
+  if (!['Admin', 'Developer'].includes(auth.role)) {
+    return json(res, 403, { error: 'Forbidden' })
+  }
+
+  const db = getDb()
+  // builds → comments는 ON DELETE CASCADE로 처리됨
+  db.prepare('DELETE FROM builds WHERE app_id = ?').run(params.id)
+  const result = db.prepare('DELETE FROM apps WHERE id = ?').run(params.id)
+
+  if (result.changes === 0) return json(res, 404, { error: 'App not found' })
+  json(res, 200, { ok: true })
+}
+
 export async function handleUpdateApp(
   req: http.IncomingMessage,
   res: http.ServerResponse,

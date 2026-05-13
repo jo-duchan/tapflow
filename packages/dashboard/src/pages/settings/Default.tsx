@@ -4,6 +4,17 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Separator } from '@/components/ui/separator'
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from '@/components/ui/alert-dialog'
 import { useAuth } from '@/hooks/useAuth'
 
 type App = { id: number; name: string; bundle_id_key: string; platform: string }
@@ -106,6 +117,7 @@ export function DefaultSettings() {
   const [appNames, setAppNames] = useState<Record<number, string>>({})
   const [appsSaving, setAppsSaving] = useState<Record<number, boolean>>({})
   const [appsSaved, setAppsSaved] = useState<Record<number, boolean>>({})
+  const [appsDeleting, setAppsDeleting] = useState<Record<number, boolean>>({})
 
   useEffect(() => {
     if (!canEditApps) return
@@ -119,6 +131,13 @@ export function DefaultSettings() {
         setAppNames(names)
       })
   }, [canEditApps])
+
+  async function handleAppDelete(appId: number) {
+    setAppsDeleting((p) => ({ ...p, [appId]: true }))
+    await fetch(`/api/v1/apps/${appId}`, { method: 'DELETE', credentials: 'include' })
+    setApps((p) => p.filter((a) => a.id !== appId))
+    setAppsDeleting((p) => ({ ...p, [appId]: false }))
+  }
 
   async function handleAppNameSave(appId: number) {
     setAppsSaving((p) => ({ ...p, [appId]: true }))
@@ -267,6 +286,30 @@ export function DefaultSettings() {
                   >
                     {appsSaved[app.id] ? 'Saved!' : appsSaving[app.id] ? 'Saving…' : 'Save'}
                   </Button>
+                  <AlertDialog>
+                    <AlertDialogTrigger asChild>
+                      <Button size="sm" variant="destructive" disabled={appsDeleting[app.id]}>
+                        {appsDeleting[app.id] ? 'Deleting…' : 'Delete'}
+                      </Button>
+                    </AlertDialogTrigger>
+                    <AlertDialogContent>
+                      <AlertDialogHeader>
+                        <AlertDialogTitle>Delete app?</AlertDialogTitle>
+                        <AlertDialogDescription>
+                          This will permanently delete <strong>{app.name}</strong> and all its builds. This action cannot be undone.
+                        </AlertDialogDescription>
+                      </AlertDialogHeader>
+                      <AlertDialogFooter>
+                        <AlertDialogCancel>Cancel</AlertDialogCancel>
+                        <AlertDialogAction
+                          className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                          onClick={() => handleAppDelete(app.id)}
+                        >
+                          Delete
+                        </AlertDialogAction>
+                      </AlertDialogFooter>
+                    </AlertDialogContent>
+                  </AlertDialog>
                 </div>
               ))}
             </div>
