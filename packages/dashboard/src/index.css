@@ -39,6 +39,14 @@
     --ring: 0 0% 9%;
     --radius: 0.5rem;                /* 8px — marketing card     */
 
+    /* avatar palette — 6 hue slots (light: vibrant pastel)       */
+    --avatar-1-bg: 353 90% 82%;  --avatar-1-fg: 353 80% 28%;
+    --avatar-2-bg: 25 100% 76%;  --avatar-2-fg: 25 90% 25%;
+    --avatar-3-bg: 48 100% 72%;  --avatar-3-fg: 31 85% 25%;
+    --avatar-4-bg: 151 70% 70%;  --avatar-4-fg: 151 80% 18%;
+    --avatar-5-bg: 216 90% 78%;  --avatar-5-fg: 216 85% 25%;
+    --avatar-6-bg: 278 75% 84%;  --avatar-6-fg: 278 75% 28%;
+
     /* sidebar                                                    */
     --sidebar-background: 0 0% 98%;
     --sidebar-foreground: 0 0% 30%;  /* body text    #4d4d4d     */
@@ -70,6 +78,13 @@
     --border: 0 0% 18%;
     --input: 0 0% 18%;
     --ring: 0 0% 98%;
+    /* avatar palette — 6 hue slots (dark: muted, low-lightness)  */
+    --avatar-1-bg: 353 40% 32%;  --avatar-1-fg: 353 60% 78%;
+    --avatar-2-bg: 25 42% 32%;   --avatar-2-fg: 25 65% 78%;
+    --avatar-3-bg: 48 42% 32%;   --avatar-3-fg: 48 65% 78%;
+    --avatar-4-bg: 151 36% 28%;  --avatar-4-fg: 151 50% 72%;
+    --avatar-5-bg: 216 42% 32%;  --avatar-5-fg: 216 60% 78%;
+    --avatar-6-bg: 278 38% 32%;  --avatar-6-fg: 278 55% 78%;
     --sidebar-background: 0 0% 7%;
     --sidebar-foreground: 0 0% 80%;
     --sidebar-primary: 0 0% 98%;
@@ -91,6 +106,19 @@
     font-feature-settings: 'ss01', 'ss02';
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
+  }
+}
+
+@layer base {
+  button:not([aria-haspopup]):not(:disabled),
+  [role="button"]:not([aria-haspopup]):not(:disabled) {
+    transition-property: color, background-color, border-color, transform;
+    transition-timing-function: cubic-bezier(0.4, 0, 0.2, 1);
+    transition-duration: 120ms;
+  }
+  button:active:not([aria-haspopup]):not(:disabled),
+  [role="button"]:active:not([aria-haspopup]):not(:disabled) {
+    transform: translateY(1px);
   }
 }
 

@@ -1,34 +1,17 @@
-const PALETTE = [
-  {
-    bg: '#FF6476',
-    text: '#6E0000',
-  },
-  {
-    bg: '#FF7138',
-    text: '#6A0000',
-  },
-  {
-    bg: '#FFD200',
-    text: '#723C00',
-  },
-  {
-    bg: '#00C866',
-    text: '#003100',
-  },
-  {
-    bg: '#68ACFF',
-    text: '#00166F',
-  },
-  {
-    bg: '#CF8DFF',
-    text: '#34006D',
-  },
-];
+const PALETTE_SIZE = 6;
 
-function colorFromName(name: string): { bg: string; text: string } {
+function hashName(name: string): number {
   let hash = 0;
   for (const c of name) hash = (hash * 31 + c.charCodeAt(0)) & 0xffffffff;
-  return PALETTE[Math.abs(hash) % PALETTE.length];
+  return Math.abs(hash);
+}
+
+export function avatarColors(name: string): { bg: string; fg: string } {
+  const i = (hashName(name) % PALETTE_SIZE) + 1;
+  return {
+    bg: `hsl(var(--avatar-${i}-bg))`,
+    fg: `hsl(var(--avatar-${i}-fg))`,
+  };
 }
 
 type Props = {
@@ -45,7 +28,7 @@ export function UserAvatar({ name, avatarUrl, size = 28 }: Props) {
     return <img src={avatarUrl} alt={name} style={{ ...style, objectFit: 'cover' }} />;
   }
 
-  const { bg, text } = colorFromName(name);
+  const { bg, fg } = avatarColors(name);
   return (
     <span
       style={{
@@ -54,7 +37,7 @@ export function UserAvatar({ name, avatarUrl, size = 28 }: Props) {
         display: 'inline-flex',
         alignItems: 'center',
         justifyContent: 'center',
-        color: text,
+        color: fg,
         fontSize: size * 0.42,
         fontWeight: 600,
         userSelect: 'none',

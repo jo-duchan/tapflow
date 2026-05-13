@@ -17,6 +17,8 @@ import {
   AlertDialogTitle,
   AlertDialogTrigger,
 } from '@/components/ui/alert-dialog'
+import { ImageIcon, Pencil } from 'lucide-react'
+import { avatarColors } from '@/components/user-avatar'
 import { useAuth } from '@/hooks/useAuth'
 
 type App = { id: number; name: string; bundle_id_key: string; platform: string }
@@ -171,24 +173,32 @@ export function DefaultSettings() {
               <Separator />
               <div className="grid gap-2">
                 <Label>Logo <span className="text-muted-foreground text-xs">(png · jpg, max 2MB)</span></Label>
-                <div className="flex items-center gap-4">
-                  {logoUrl && (
-                    <img src={logoUrl} alt="logo" className="h-12 w-12 rounded object-contain border" />
+                <div className="relative w-16 h-16">
+                  {logoUrl ? (
+                    <img src={logoUrl} alt="logo" className="w-16 h-16 rounded-lg object-contain border bg-muted" />
+                  ) : (
+                    <div className="w-16 h-16 rounded-lg border-2 border-dashed border-border bg-muted flex items-center justify-center">
+                      <ImageIcon className="w-6 h-6 text-muted-foreground" />
+                    </div>
                   )}
-                  <Button type="button" variant="outline" size="sm" onClick={() => logoRef.current?.click()}>
-                    {logoFile ? logoFile.name : 'Choose file'}
-                  </Button>
+                  <button
+                    type="button"
+                    onClick={() => logoRef.current?.click()}
+                    className="absolute bottom-0 right-0 w-6 h-6 rounded-full bg-background border border-border shadow-sm flex items-center justify-center hover:bg-accent transition-colors"
+                  >
+                    <Pencil className="w-3 h-3" />
+                  </button>
                   <input ref={logoRef} type="file" accept=".png,.jpg,.jpeg" className="hidden"
                     onChange={(e) => {
                       const f = e.target.files?.[0]
                       if (f && f.size > 2 * 1024 * 1024) { alert('Max 2MB'); return }
-                      if (f) setLogoFile(f)
+                      if (f) { setLogoFile(f); setLogoUrl(URL.createObjectURL(f)) }
                     }}
                   />
                 </div>
               </div>
               <div className="flex justify-end">
-                <Button type="submit" disabled={workspaceSaving}>
+                <Button type="submit" size="sm" disabled={workspaceSaving}>
                   {workspaceSaved ? 'Saved!' : workspaceSaving ? 'Saving…' : 'Save changes'}
                 </Button>
               </div>
@@ -209,13 +219,24 @@ export function DefaultSettings() {
             <Separator />
             <div className="grid gap-2">
               <Label>Avatar <span className="text-muted-foreground text-xs">(png · jpg, max 2MB)</span></Label>
-              <div className="flex items-center gap-4">
-                {avatarUrl && (
-                  <img src={avatarUrl} alt="avatar" className="h-10 w-10 rounded-full object-cover border" />
+              <div className="relative w-14 h-14">
+                {avatarUrl ? (
+                  <img src={avatarUrl} alt="avatar" className="w-14 h-14 rounded-full object-cover border" />
+                ) : (
+                  <div
+                    className="w-14 h-14 rounded-full flex items-center justify-center text-lg font-medium"
+                    style={(() => { const c = avatarColors(displayName || user?.email || ''); return { backgroundColor: c.bg, color: c.fg } })()}
+                  >
+                    {displayName?.[0]?.toUpperCase() ?? '?'}
+                  </div>
                 )}
-                <Button type="button" variant="outline" size="sm" onClick={() => avatarRef.current?.click()}>
-                  {avatarFile ? avatarFile.name : 'Choose file'}
-                </Button>
+                <button
+                  type="button"
+                  onClick={() => avatarRef.current?.click()}
+                  className="absolute bottom-0 right-0 w-6 h-6 rounded-full bg-background border border-border shadow-sm flex items-center justify-center hover:bg-accent transition-colors"
+                >
+                  <Pencil className="w-3 h-3" />
+                </button>
                 <input ref={avatarRef} type="file" accept=".png,.jpg,.jpeg" className="hidden"
                   onChange={(e) => {
                     const f = e.target.files?.[0]
@@ -226,7 +247,7 @@ export function DefaultSettings() {
               </div>
             </div>
             <div className="flex justify-end">
-              <Button type="submit" disabled={profileSaving}>
+              <Button type="submit" size="sm" disabled={profileSaving}>
                 {profileSaved ? 'Saved!' : profileSaving ? 'Saving…' : 'Save changes'}
               </Button>
             </div>
@@ -253,7 +274,7 @@ export function DefaultSettings() {
             </div>
             {passwordError && <p className="text-sm text-destructive">{passwordError}</p>}
             <div className="flex justify-end">
-              <Button type="submit" disabled={passwordSaving}>
+              <Button type="submit" size="sm" disabled={passwordSaving}>
                 {passwordSaved ? 'Saved!' : passwordSaving ? 'Saving…' : 'Change password'}
               </Button>
             </div>

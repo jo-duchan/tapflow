@@ -5,6 +5,8 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Separator } from '@/components/ui/separator'
+import { Pencil } from 'lucide-react'
+import { avatarColors } from '@/components/user-avatar'
 
 export function Invite() {
   const navigate = useNavigate()
@@ -91,13 +93,24 @@ export function Invite() {
 
             <div className="grid gap-2">
               <Label>Avatar <span className="text-muted-foreground text-xs">(optional, png · jpg, max 2MB)</span></Label>
-              <div className="flex items-center gap-3">
-                {avatarPreview && (
-                  <img src={avatarPreview} alt="avatar" className="h-10 w-10 rounded-full object-cover border" />
+              <div className="relative w-14 h-14">
+                {avatarPreview ? (
+                  <img src={avatarPreview} alt="avatar" className="w-14 h-14 rounded-full object-cover border" />
+                ) : (
+                  <div
+                    className="w-14 h-14 rounded-full flex items-center justify-center text-lg font-medium"
+                    style={(() => { const c = avatarColors(displayName); return { backgroundColor: c.bg, color: c.fg } })()}
+                  >
+                    {displayName?.[0]?.toUpperCase() ?? '?'}
+                  </div>
                 )}
-                <Button type="button" variant="outline" size="sm" onClick={() => avatarRef.current?.click()}>
-                  {avatarFile ? avatarFile.name : 'Choose file'}
-                </Button>
+                <button
+                  type="button"
+                  onClick={() => avatarRef.current?.click()}
+                  className="absolute bottom-0 right-0 w-6 h-6 rounded-full bg-background border border-border shadow-sm flex items-center justify-center hover:bg-accent transition-colors"
+                >
+                  <Pencil className="w-3 h-3" />
+                </button>
                 <input
                   ref={avatarRef}
                   type="file"
