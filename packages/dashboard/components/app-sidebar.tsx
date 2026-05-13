@@ -44,9 +44,9 @@ export function AppSidebar() {
   }
 
   return (
-    <Sidebar>
+    <Sidebar collapsible="icon">
       <SidebarHeader className="px-4 py-3">
-        <span className="text-base font-semibold tracking-tight">tapflow</span>
+        <span className="text-base font-semibold tracking-tight group-data-[collapsible=icon]:hidden">tapflow</span>
       </SidebarHeader>
 
       <SidebarContent>
@@ -55,7 +55,7 @@ export function AppSidebar() {
             <SidebarMenu>
               {navItems.map((item) => (
                 <SidebarMenuItem key={item.href}>
-                  <SidebarMenuButton asChild isActive={pathname.startsWith(item.href)}>
+                  <SidebarMenuButton asChild isActive={pathname.startsWith(item.href)} tooltip={item.label}>
                     <Link to={item.href}>
                       <item.icon />
                       <span>{item.label}</span>
@@ -73,7 +73,7 @@ export function AppSidebar() {
             <SidebarMenu>
               {settingsItems.filter((item) => !item.adminOnly || isAdmin).map((item) => (
                 <SidebarMenuItem key={item.href}>
-                  <SidebarMenuButton asChild isActive={pathname === item.href}>
+                  <SidebarMenuButton asChild isActive={pathname === item.href} tooltip={item.label}>
                     <Link to={item.href}>
                       <item.icon />
                       <span>{item.label}</span>
@@ -87,12 +87,12 @@ export function AppSidebar() {
       </SidebarContent>
 
       {user && (
-        <SidebarFooter className="px-3 py-3 border-t">
+        <SidebarFooter className="px-3 py-3">
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
-              <button className="flex w-full items-center gap-2.5 rounded-md px-1 py-1 text-left hover:bg-sidebar-accent transition-colors">
+              <button className="flex w-full items-center gap-2.5 rounded-md px-1 py-1 text-left hover:bg-sidebar-accent transition-colors group-data-[collapsible=icon]:justify-center">
                 <UserAvatar name={user.displayName ?? ''} avatarUrl={user.avatarUrl} size={28} />
-                <div className="flex flex-col min-w-0 flex-1">
+                <div className="flex flex-col min-w-0 flex-1 group-data-[collapsible=icon]:hidden">
                   <span className="text-sm font-medium truncate">{user.displayName}</span>
                   <span className="text-xs text-muted-foreground truncate">{user.email}</span>
                 </div>

@@ -12,7 +12,7 @@ import {
 import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from '@/components/ui/table'
-import { KeyRound, Trash2, UserPlus } from 'lucide-react'
+import { UserPlus } from 'lucide-react'
 
 type Member = { id: number; email: string; display_name: string; role: string; joined_at: string }
 
@@ -72,7 +72,7 @@ export function TeamSettings() {
   }
 
   return (
-    <div className="flex flex-col gap-6 max-w-2xl">
+    <div className="flex flex-col gap-6 max-w-[900px] mx-auto w-full p-6">
       <div className="flex items-center justify-between">
         <h1 className="text-xl font-semibold">Team</h1>
         <Dialog open={inviteOpen} onOpenChange={(o) => { setInviteOpen(o); if (!o) { setInviteEmail(''); setInviteLink('') } }}>
@@ -114,11 +114,12 @@ export function TeamSettings() {
 
       <Card>
         <CardHeader><CardTitle>Members ({members.length})</CardTitle></CardHeader>
-        <CardContent className="p-0">
+        <CardContent className="px-4 pt-0 pb-2">
           <Table>
             <TableHeader>
               <TableRow>
-                <TableHead>Member</TableHead>
+                <TableHead>Nickname</TableHead>
+                <TableHead>Email</TableHead>
                 <TableHead>Role</TableHead>
                 <TableHead>Joined</TableHead>
                 <TableHead className="w-10" />
@@ -126,11 +127,9 @@ export function TeamSettings() {
             </TableHeader>
             <TableBody>
               {members.map((m) => (
-                <TableRow key={m.id}>
-                  <TableCell>
-                    <div className="font-medium">{m.display_name || m.email}</div>
-                    <div className="text-xs text-muted-foreground">{m.email}</div>
-                  </TableCell>
+                <TableRow key={m.id} className="hover:bg-transparent">
+                  <TableCell className="font-medium">{m.display_name || '—'}</TableCell>
+                  <TableCell className="text-muted-foreground text-sm">{m.email}</TableCell>
                   <TableCell>
                     <Select value={m.role} onValueChange={(r) => handleRoleChange(m.id, r)}>
                       <SelectTrigger className="h-7 w-28"><SelectValue /></SelectTrigger>
@@ -146,22 +145,16 @@ export function TeamSettings() {
                     {new Date(m.joined_at).toLocaleDateString()}
                   </TableCell>
                   <TableCell>
-                    <div className="flex items-center gap-1">
+                    <div className="flex items-center gap-2">
                       <Button
-                        variant="ghost"
-                        size="icon"
-                        className="h-7 w-7"
-                        title="Send password reset email"
+                        variant="secondary"
+                        size="nav"
                         onClick={() => handleSendReset(m.id)}
                       >
-                        {resetSent[m.id] ? (
-                          <span className="text-xs">{resetSent[m.id]}</span>
-                        ) : (
-                          <KeyRound className="h-4 w-4" />
-                        )}
+                        {resetSent[m.id] ?? 'Reset pwd'}
                       </Button>
-                      <Button variant="ghost" size="icon" className="h-7 w-7 text-destructive" onClick={() => handleDelete(m.id)}>
-                        <Trash2 className="h-4 w-4" />
+                      <Button variant="destructive" size="nav" onClick={() => handleDelete(m.id)}>
+                        Remove
                       </Button>
                     </div>
                   </TableCell>

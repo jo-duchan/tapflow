@@ -1,10 +1,9 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useSearchParams, useNavigate } from 'react-router-dom';
 import { useRelay } from '@/hooks/useRelay';
+import { useBreadcrumb } from '@/hooks/useBreadcrumb';
 import { SimulatorViewer } from '@/components/SimulatorViewer';
-import { CommentPanel } from '@/components/comment-panel';
-import { RecordingsList } from '@/components/RecordingsList';
-import { Button } from '@/components/ui/button';
+import { SessionPanel } from '@/components/session-panel';
 import {
   Select,
   SelectContent,
@@ -14,16 +13,15 @@ import {
 } from '@/components/ui/select';
 import { Badge } from '@/components/ui/badge';
 import { Separator } from '@/components/ui/separator';
-import { ArrowLeft } from 'lucide-react';
-import type { AgentDevice, RelayMessage, SessionInfo } from '@/lib/types';
-
-type Build = {
-  id: number;
-  name: string;
-  version_label: string | null;
-  status_label: string | null;
-  platform: string;
-};
+import {
+  Breadcrumb, BreadcrumbItem, BreadcrumbLink,
+  BreadcrumbList, BreadcrumbPage, BreadcrumbSeparator,
+} from '@/components/ui/breadcrumb';
+import { getBuild } from '@/lib/queries';
+import { cn } from '@/lib/utils';
+import { STATUS_TONE, buildLabel } from '@/lib/build-format';
+import { SearchInput } from '@/components/ui/search-input';
+import type { AgentDevice, Build, RelayMessage, SessionInfo } from '@/lib/types';
 
 export function QASession() {
   const [searchParams] = useSearchParams();
@@ -40,9 +38,7 @@ export function QASession() {
 
   useEffect(() => {
     if (!buildId) return;
-    fetch(`/api/v1/builds/${buildId}`, { credentials: 'include' })
-      .then((r) => (r.ok ? r.json() : null))
-      .then(setBuild);
+    getBuild(buildId).then(setBuild);
   }, [buildId]);
 
   const handleMessage = useCallback(
@@ -75,6 +71,10 @@ export function QASession() {
   const os = build?.platform ?? 'ios';
   const allDevices = sessions.flatMap((s) => s.devices);
   const filteredDevices = allDevices.filter((d) => d.platform === os);
+  const selectedDevice = allDevices.find((d) => d.id === deviceId);
+  const deviceLabel = selectedDevice
+    ? `${selectedDevice.name}${selectedDevice.osVersion ? ` · ${selectedDevice.osVersion}` : ''}`
+    : '';
 
   const osVersions = [
     ...new Set(filteredDevices.map((d) => d.osVersion).filter(Boolean)),
@@ -88,151 +88,186 @@ export function QASession() {
     return 0
   }) as string[];
   const [osVersion, setOsVersion] = useState<string>('');
+  const [deviceSearch, setDeviceSearch] = useState('');
 
-  const versionedDevices = osVersion
+  const versionedDevices = (osVersion
     ? filteredDevices.filter((d) => d.osVersion === osVersion)
-    : filteredDevices;
+    : filteredDevices
+  ).filter((d) => !deviceSearch || d.name.toLowerCase().includes(deviceSearch.toLowerCase()));
 
-  const selectedDevice = allDevices.find((d) => d.id === deviceId);
-
-  function handleBoot() {
-    if (!selectedDevice || !deviceId) return;
-    setBooting(true);
-    setStatus('Booting…');
-    setActiveSessionId(selectedDevice.sessionId);
-  }
-
-  function handleBack() {
+  const handleBack = useCallback(() => {
     if (activeSessionId && deviceId) {
       send({ type: 'device:shutdown', sessionId: activeSessionId, payload: { deviceId } });
     }
     setActiveSessionId(null);
     setBooting(false);
     setStatus('');
-  }
+  }, [activeSessionId, deviceId, send]);
+
+  // ref로 최신 session 정보를 추적 — cleanup 클로저에서 stale state 방지
+  const activeSessionRef = useRef({ sessionId: activeSessionId, deviceId });
+  useEffect(() => {
+    activeSessionRef.current = { sessionId: activeSessionId, deviceId };
+  }, [activeSessionId, deviceId]);
+
+  // 언마운트 시 디바이스 shutdown — useRelay cleanup(ws.close)보다 먼저 실행됨
+  useEffect(() => {
+    return () => {
+      const { sessionId, deviceId: dId } = activeSessionRef.current;
+      if (sessionId && dId) {
+        send({ type: 'device:shutdown', sessionId, payload: { deviceId: dId } });
+      }
+    };
+  }, [send]);
+
+  // 헤더 breadcrumb 설정
+  const { setNode: setBreadcrumb } = useBreadcrumb();
+  useEffect(() => {
+    if (!build) return;
+    setBreadcrumb(
+      <div className="flex items-center gap-3">
+        <Breadcrumb>
+          <BreadcrumbList>
+            <BreadcrumbItem>
+              <BreadcrumbLink asChild>
+                <button onClick={() => navigate(`/app-center?appId=${build.app_id}`)}>
+                  {build.name}
+                </button>
+              </BreadcrumbLink>
+            </BreadcrumbItem>
+            <BreadcrumbSeparator />
+            <BreadcrumbItem>
+              {activeSessionId ? (
+                <BreadcrumbLink asChild>
+                  <button onClick={handleBack}>{buildLabel(build)}</button>
+                </BreadcrumbLink>
+              ) : (
+                <BreadcrumbPage>{buildLabel(build)}</BreadcrumbPage>
+              )}
+            </BreadcrumbItem>
+            {activeSessionId && (
+              <>
+                <BreadcrumbSeparator />
+                <BreadcrumbItem>
+                  <BreadcrumbPage>{deviceLabel}</BreadcrumbPage>
+                </BreadcrumbItem>
+              </>
+            )}
+          </BreadcrumbList>
+        </Breadcrumb>
+        {!activeSessionId && build.status_label && (
+          <Badge tone={STATUS_TONE[build.status_label as keyof typeof STATUS_TONE]}>
+            {build.status_label}
+          </Badge>
+        )}
+      </div>
+    );
+    return () => setBreadcrumb(null);
+  }, [build, activeSessionId, deviceLabel, navigate, handleBack, setBreadcrumb]);
 
   return (
-    <div className="flex h-full gap-6">
-      <div className="flex flex-col gap-3 flex-1 min-w-0">
-        {activeSessionId ? (
-          <>
-            <div className="flex w-full items-center gap-3">
-              <Button variant="ghost" size="sm" onClick={handleBack}>
-                <ArrowLeft className="mr-1 h-4 w-4" />
-                Back
-              </Button>
-              {build && (
-                <span className="text-sm text-muted-foreground">
-                  {build.name}
-                  {build.version_label ? ` · ${build.version_label}` : ''}
-                </span>
-              )}
+    <div className="flex h-full min-h-0 gap-6 p-6">
+      <div className="flex flex-col gap-3 flex-1 min-w-0 min-h-0">
+        {/* -ml-1 pl-1: 좌측 ring 클리핑 방지 / -mr-4 pr-4: 스크롤바 마진 영역으로 분리 */}
+        <div className="flex-1 min-h-0 overflow-y-auto -ml-1 pl-1 -mr-4 pr-4">
+          {activeSessionId ? (
+            <div className="min-h-full flex items-center justify-center py-6">
+              <SimulatorViewer
+                sessionId={activeSessionId}
+                deviceId={deviceId}
+                buildId={build?.id}
+                onRecordingUploaded={() => setRecordingsKey((k) => k + 1)}
+              />
             </div>
-            <SimulatorViewer
-              sessionId={activeSessionId}
-              deviceId={deviceId}
-              onBack={handleBack}
-              buildId={build?.id}
-              onRecordingUploaded={() => setRecordingsKey((k) => k + 1)}
-            />
-            <RecordingsList sessionId={activeSessionId} refreshKey={recordingsKey} />
-          </>
-        ) : (
-          <div className="flex flex-col gap-6 max-w-lg">
-            <div className="flex items-center gap-3">
-              <Button variant="ghost" size="sm" onClick={() => navigate(-1)}>
-                <ArrowLeft className="mr-1 h-4 w-4" />
-                Back
-              </Button>
-              {build && (
-                <div className="flex items-center gap-2">
-                  <span className="font-medium">{build.name}</span>
-                  {build.version_label && <Badge variant="outline">{build.version_label}</Badge>}
-                  {build.status_label && <Badge variant="secondary">{build.status_label}</Badge>}
-                </div>
-              )}
-            </div>
+          ) : (
+            <div className="flex flex-col gap-5">
+              <h1 className="text-xl font-semibold tracking-tight">Select device</h1>
 
-            <div className="flex flex-col gap-4">
-              <h2 className="text-sm font-medium text-muted-foreground uppercase tracking-wider">
-                Select device
-              </h2>
-
-              <div className="flex flex-col gap-3">
+              <div className="flex gap-2">
+                <SearchInput
+                  placeholder="Search device…"
+                  value={deviceSearch}
+                  onChange={setDeviceSearch}
+                />
                 {osVersions.length > 0 && (
-                  <div className="grid gap-1.5">
-                    <span className="text-sm font-medium">OS version</span>
-                    <Select
-                      value={osVersion || '__all__'}
-                      onValueChange={(v) => {
-                        setOsVersion(v === '__all__' ? '' : v);
-                        setDeviceId('');
-                      }}
-                    >
-                      <SelectTrigger>
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="__all__">Any version</SelectItem>
-                        {osVersions.map((v) => (
-                          <SelectItem key={v} value={v}>
-                            {v}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
+                  <Select
+                    value={osVersion || '__all__'}
+                    onValueChange={(v) => {
+                      setOsVersion(v === '__all__' ? '' : v);
+                      setDeviceId('');
+                    }}
+                  >
+                    <SelectTrigger className="h-8 w-36 shrink-0">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="__all__">Any version</SelectItem>
+                      {osVersions.map((v) => (
+                        <SelectItem key={v} value={v}>{v}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
                 )}
-
-                <div className="grid gap-1.5">
-                  <span className="text-sm font-medium">Device</span>
-                  {versionedDevices.length === 0 ? (
-                    <p className="text-sm text-muted-foreground">
-                      {connected ? 'No devices available for this OS.' : 'Connecting to relay…'}
-                    </p>
-                  ) : (
-                    <Select value={deviceId} onValueChange={setDeviceId}>
-                      <SelectTrigger>
-                        <SelectValue placeholder="Select a device" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {versionedDevices.map((d: AgentDevice) => (
-                          <SelectItem key={d.id} value={d.id}>
-                            {d.name}
-                            {d.status === 'booted' && (
-                              <span className="ml-1 text-xs text-muted-foreground">(booted)</span>
-                            )}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  )}
-                </div>
               </div>
 
-              {status && <p className="text-sm text-muted-foreground">{status}</p>}
+              {versionedDevices.length === 0 ? (
+                <p className="text-sm text-muted-foreground">
+                  {connected ? 'No devices available for this OS.' : 'Connecting to relay…'}
+                </p>
+              ) : (
+                <div className="grid grid-cols-2 gap-2">
+                  {versionedDevices.map((d: AgentDevice) => {
+                    const isBooted = d.status === 'booted'
+                    const isBusy = d.busy
+                    const statusLabel = isBusy ? 'In use' : isBooted ? 'Booted' : 'Available'
+                    const statusDot = isBusy
+                      ? 'bg-amber-400'
+                      : isBooted
+                        ? 'bg-emerald-400'
+                        : 'bg-muted-foreground/40'
+                    return (
+                      <button
+                        key={d.id}
+                        disabled={isBusy || booting || !connected}
+                        onClick={() => {
+                          setDeviceId(d.id)
+                          setBooting(true)
+                          setStatus('Booting…')
+                          setActiveSessionId(d.sessionId)
+                        }}
+                        className={cn(
+                          'flex flex-col gap-3 rounded-lg border p-3 text-left transition-colors',
+                          'hover:bg-accent disabled:cursor-not-allowed disabled:opacity-50',
+                        )}
+                      >
+                        <span className="text-sm font-medium leading-tight">{d.name}</span>
+                        {d.osVersion && (
+                          <span className="font-mono text-xs text-muted-foreground">{d.osVersion}</span>
+                        )}
+                        <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                          <span className={cn('inline-block h-1.5 w-1.5 rounded-full', statusDot)} />
+                          {statusLabel}
+                        </span>
+                      </button>
+                    )
+                  })}
+                </div>
+              )}
 
-              <Button
-                onClick={handleBoot}
-                disabled={!deviceId || booting || !connected}
-                className="w-full"
-              >
-                {booting
-                  ? 'Booting…'
-                  : selectedDevice?.status === 'booted'
-                    ? 'Connect'
-                    : 'Boot & Connect'}
-              </Button>
+              {status && <p className="text-sm text-muted-foreground">{status}</p>}
             </div>
-          </div>
-        )}
+          )}
+        </div>
       </div>
 
       {buildId && (
         <>
           <Separator orientation="vertical" className="h-auto" />
-          <div className="w-80 shrink-0">
-            <CommentPanel buildId={Number(buildId)} />
+          <div className="w-80 shrink-0 h-full">
+            <SessionPanel
+              buildId={Number(buildId)}
+              recordingsRefreshKey={recordingsKey}
+            />
           </div>
         </>
       )}

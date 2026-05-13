@@ -54,7 +54,7 @@ export function TokenSettings() {
   }
 
   return (
-    <div className="flex flex-col gap-6 max-w-2xl">
+    <div className="flex flex-col gap-6 max-w-[900px] mx-auto w-full p-6">
       <div className="flex items-center justify-between">
         <h1 className="text-xl font-semibold">Personal Access Tokens</h1>
         <Dialog open={open} onOpenChange={(o) => { setOpen(o); if (!o) { setName(''); setNewToken('') } }}>
@@ -81,7 +81,7 @@ export function TokenSettings() {
                   <Label htmlFor="expires">Expires in (days)</Label>
                   <Input id="expires" type="number" min="1" max="365" value={expiresDays} onChange={(e) => setExpiresDays(e.target.value)} />
                 </div>
-                <p className="text-xs text-muted-foreground">Scope: <Badge variant="outline">builds:write</Badge></p>
+                <p className="text-xs text-muted-foreground">Scope: <Badge variant="secondary">builds:write</Badge></p>
                 <Button type="submit" disabled={creating}>{creating ? 'Creating…' : 'Create token'}</Button>
               </form>
             )}
@@ -94,7 +94,7 @@ export function TokenSettings() {
           <CardTitle>Active tokens</CardTitle>
           <CardDescription>Use these tokens with <code className="text-xs">Authorization: Bearer &lt;token&gt;</code> for API deployments.</CardDescription>
         </CardHeader>
-        <CardContent className="p-0">
+        <CardContent className="px-4 pt-0 pb-2">
           <Table>
             <TableHeader>
               <TableRow>
@@ -111,9 +111,9 @@ export function TokenSettings() {
                   <TableCell colSpan={5} className="h-20 text-center text-muted-foreground">No tokens yet.</TableCell>
                 </TableRow>
               ) : tokens.map((t) => (
-                <TableRow key={t.id}>
+                <TableRow key={t.id} className="hover:bg-transparent">
                   <TableCell className="font-medium">{t.name}</TableCell>
-                  <TableCell><Badge variant="outline">{t.scope}</Badge></TableCell>
+                  <TableCell><Badge variant="secondary">{t.scope}</Badge></TableCell>
                   <TableCell className="text-muted-foreground text-sm">{t.last_used_at ? new Date(t.last_used_at).toLocaleDateString() : 'Never'}</TableCell>
                   <TableCell>
                     {t.expires_at ? (
@@ -123,7 +123,7 @@ export function TokenSettings() {
                     ) : <span className="text-muted-foreground text-sm">Never</span>}
                   </TableCell>
                   <TableCell>
-                    <Button variant="ghost" size="icon" className="h-7 w-7 text-destructive" onClick={() => handleRevoke(t.id)}>
+                    <Button variant="destructive" size="icon" className="h-7 w-7" onClick={() => handleRevoke(t.id)}>
                       <Trash2 className="h-4 w-4" />
                     </Button>
                   </TableCell>

@@ -4,6 +4,10 @@
 
 ---
 
+## Design Reference
+
+디자인·프론트엔드 작업 시 **[docs/DESIGN.md](../../docs/DESIGN.md)** 를 먼저 읽고 색상 토큰, 타이포그래피, 엘리베이션 규칙을 따른다.
+
 ## WHAT
 
 React SPA QA 대시보드: 시뮬레이터 뷰어, 버그 리포트, 팀 초대 화면을 제공한다.

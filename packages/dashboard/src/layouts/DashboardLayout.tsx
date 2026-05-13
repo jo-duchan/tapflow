@@ -4,6 +4,20 @@ import { AppSidebar } from '@/components/app-sidebar'
 import { ThemeToggle } from '@/components/theme-toggle'
 import { Separator } from '@/components/ui/separator'
 import { useAuth } from '@/hooks/useAuth'
+import { BreadcrumbProvider, useBreadcrumb } from '@/hooks/useBreadcrumb'
+
+function DashboardHeader() {
+  const { node } = useBreadcrumb()
+  return (
+    <header className="flex h-16 items-center gap-2 border-b px-4">
+      <SidebarTrigger className="-ml-1" />
+      <Separator orientation="vertical" className="h-4" />
+      {node}
+      <div className="flex-1" />
+      <ThemeToggle />
+    </header>
+  )
+}
 
 export function DashboardLayout() {
   const { user, loading } = useAuth()
@@ -25,19 +39,16 @@ export function DashboardLayout() {
   }
 
   return (
-    <SidebarProvider>
-      <AppSidebar />
-      <SidebarInset>
-        <header className="flex h-12 items-center gap-2 border-b px-4">
-          <SidebarTrigger className="-ml-1" />
-          <Separator orientation="vertical" className="h-4" />
-          <div className="flex-1" />
-          <ThemeToggle />
-        </header>
-        <main className="flex-1 overflow-auto p-6">
-          <Outlet />
-        </main>
-      </SidebarInset>
-    </SidebarProvider>
+    <BreadcrumbProvider>
+      <SidebarProvider>
+        <AppSidebar />
+        <SidebarInset>
+          <DashboardHeader />
+          <main className="flex-1 min-h-0 overflow-auto">
+            <Outlet />
+          </main>
+        </SidebarInset>
+      </SidebarProvider>
+    </BreadcrumbProvider>
   )
 }

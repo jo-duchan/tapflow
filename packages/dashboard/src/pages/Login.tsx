@@ -29,10 +29,10 @@ export function Login() {
   }
 
   return (
-    <div className="flex min-h-svh items-center justify-center p-4">
-      <Card className="w-full max-w-sm">
+    <div className="bg-mesh-gradient flex min-h-svh items-center justify-center overflow-hidden p-4">
+      <Card level={4} className="w-full max-w-sm">
         <CardHeader className="text-center">
-          <CardTitle className="text-2xl">tapflow</CardTitle>
+          <CardTitle className="text-2xl tracking-display-md">tapflow</CardTitle>
           <CardDescription>Sign in to your team workspace</CardDescription>
         </CardHeader>
         <CardContent>
@@ -61,7 +61,7 @@ export function Login() {
               />
             </div>
             {error && <p className="text-sm text-destructive">{error}</p>}
-            <Button type="submit" disabled={loading} className="w-full">
+            <Button type="submit" size="pill" disabled={loading} className="w-full mt-1">
               {loading ? 'Signing in…' : 'Sign in'}
             </Button>
           </form>

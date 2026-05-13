@@ -1,9 +1,24 @@
 import { useEffect, useRef, useState } from 'react'
-import { Button } from '@/components/ui/button'
+import { Button, buttonVariants } from '@/components/ui/button'
+import { cn } from '@/lib/utils'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import { Badge } from '@/components/ui/badge'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Separator } from '@/components/ui/separator'
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from '@/components/ui/alert-dialog'
+import { ImageIcon, Pencil } from 'lucide-react'
+import { avatarColors } from '@/components/user-avatar'
 import { useAuth } from '@/hooks/useAuth'
 
 type App = { id: number; name: string; bundle_id_key: string; platform: string }
@@ -106,6 +121,7 @@ export function DefaultSettings() {
   const [appNames, setAppNames] = useState<Record<number, string>>({})
   const [appsSaving, setAppsSaving] = useState<Record<number, boolean>>({})
   const [appsSaved, setAppsSaved] = useState<Record<number, boolean>>({})
+  const [appsDeleting, setAppsDeleting] = useState<Record<number, boolean>>({})
 
   useEffect(() => {
     if (!canEditApps) return
@@ -119,6 +135,13 @@ export function DefaultSettings() {
         setAppNames(names)
       })
   }, [canEditApps])
+
+  async function handleAppDelete(appId: number) {
+    setAppsDeleting((p) => ({ ...p, [appId]: true }))
+    await fetch(`/api/v1/apps/${appId}`, { method: 'DELETE', credentials: 'include' })
+    setApps((p) => p.filter((a) => a.id !== appId))
+    setAppsDeleting((p) => ({ ...p, [appId]: false }))
+  }
 
   async function handleAppNameSave(appId: number) {
     setAppsSaving((p) => ({ ...p, [appId]: true }))
@@ -134,8 +157,8 @@ export function DefaultSettings() {
   }
 
   return (
-    <div className="flex flex-col gap-6 max-w-lg">
-      <h1 className="text-xl font-semibold">Settings</h1>
+    <div className="flex flex-col gap-6 max-w-[900px] mx-auto w-full p-6">
+      <h1 className="text-xl font-semibold tracking-display-sm">Settings</h1>
 
       {/* Workspace — Admin only */}
       {isAdmin && (
@@ -150,24 +173,32 @@ export function DefaultSettings() {
               <Separator />
               <div className="grid gap-2">
                 <Label>Logo <span className="text-muted-foreground text-xs">(png · jpg, max 2MB)</span></Label>
-                <div className="flex items-center gap-4">
-                  {logoUrl && (
-                    <img src={logoUrl} alt="logo" className="h-12 w-12 rounded object-contain border" />
+                <div className="relative w-16 h-16">
+                  {logoUrl ? (
+                    <img src={logoUrl} alt="logo" className="w-16 h-16 rounded-lg object-contain border bg-muted" />
+                  ) : (
+                    <div className="w-16 h-16 rounded-lg border-2 border-dashed border-border bg-muted flex items-center justify-center">
+                      <ImageIcon className="w-6 h-6 text-muted-foreground" />
+                    </div>
                   )}
-                  <Button type="button" variant="outline" size="sm" onClick={() => logoRef.current?.click()}>
-                    {logoFile ? logoFile.name : 'Choose file'}
-                  </Button>
+                  <button
+                    type="button"
+                    onClick={() => logoRef.current?.click()}
+                    className="absolute bottom-0 right-0 w-6 h-6 rounded-full bg-background border border-border shadow-sm flex items-center justify-center hover:bg-accent transition-colors"
+                  >
+                    <Pencil className="w-3 h-3" />
+                  </button>
                   <input ref={logoRef} type="file" accept=".png,.jpg,.jpeg" className="hidden"
                     onChange={(e) => {
                       const f = e.target.files?.[0]
                       if (f && f.size > 2 * 1024 * 1024) { alert('Max 2MB'); return }
-                      if (f) setLogoFile(f)
+                      if (f) { setLogoFile(f); setLogoUrl(URL.createObjectURL(f)) }
                     }}
                   />
                 </div>
               </div>
               <div className="flex justify-end">
-                <Button type="submit" disabled={workspaceSaving}>
+                <Button type="submit" size="sm" disabled={workspaceSaving}>
                   {workspaceSaved ? 'Saved!' : workspaceSaving ? 'Saving…' : 'Save changes'}
                 </Button>
               </div>
@@ -188,13 +219,24 @@ export function DefaultSettings() {
             <Separator />
             <div className="grid gap-2">
               <Label>Avatar <span className="text-muted-foreground text-xs">(png · jpg, max 2MB)</span></Label>
-              <div className="flex items-center gap-4">
-                {avatarUrl && (
-                  <img src={avatarUrl} alt="avatar" className="h-10 w-10 rounded-full object-cover border" />
+              <div className="relative w-14 h-14">
+                {avatarUrl ? (
+                  <img src={avatarUrl} alt="avatar" className="w-14 h-14 rounded-full object-cover border" />
+                ) : (
+                  <div
+                    className="w-14 h-14 rounded-full flex items-center justify-center text-lg font-medium"
+                    style={(() => { const c = avatarColors(displayName || user?.email || ''); return { backgroundColor: c.bg, color: c.fg } })()}
+                  >
+                    {displayName?.[0]?.toUpperCase() ?? '?'}
+                  </div>
                 )}
-                <Button type="button" variant="outline" size="sm" onClick={() => avatarRef.current?.click()}>
-                  {avatarFile ? avatarFile.name : 'Choose file'}
-                </Button>
+                <button
+                  type="button"
+                  onClick={() => avatarRef.current?.click()}
+                  className="absolute bottom-0 right-0 w-6 h-6 rounded-full bg-background border border-border shadow-sm flex items-center justify-center hover:bg-accent transition-colors"
+                >
+                  <Pencil className="w-3 h-3" />
+                </button>
                 <input ref={avatarRef} type="file" accept=".png,.jpg,.jpeg" className="hidden"
                   onChange={(e) => {
                     const f = e.target.files?.[0]
@@ -205,7 +247,7 @@ export function DefaultSettings() {
               </div>
             </div>
             <div className="flex justify-end">
-              <Button type="submit" disabled={profileSaving}>
+              <Button type="submit" size="sm" disabled={profileSaving}>
                 {profileSaved ? 'Saved!' : profileSaving ? 'Saving…' : 'Save changes'}
               </Button>
             </div>
@@ -232,7 +274,7 @@ export function DefaultSettings() {
             </div>
             {passwordError && <p className="text-sm text-destructive">{passwordError}</p>}
             <div className="flex justify-end">
-              <Button type="submit" disabled={passwordSaving}>
+              <Button type="submit" size="sm" disabled={passwordSaving}>
                 {passwordSaved ? 'Saved!' : passwordSaving ? 'Saving…' : 'Change password'}
               </Button>
             </div>
@@ -245,28 +287,61 @@ export function DefaultSettings() {
         <Card>
           <CardHeader><CardTitle>Apps</CardTitle></CardHeader>
           <CardContent>
-            <div className="flex flex-col gap-4">
+            <div className="flex flex-col divide-y divide-border">
               {apps.map((app) => (
-                <div key={app.id} className="flex items-end gap-2">
-                  <div className="flex-1 grid gap-1.5">
-                    <Label htmlFor={`app-${app.id}`}>
-                      {app.bundle_id_key}
-                      <span className="ml-2 text-xs text-muted-foreground capitalize">{app.platform}</span>
-                    </Label>
-                    <Input
-                      id={`app-${app.id}`}
-                      value={appNames[app.id] ?? ''}
-                      onChange={(e) => setAppNames((p) => ({ ...p, [app.id]: e.target.value }))}
-                    />
+                <div key={app.id} className="flex flex-col gap-2 py-4 first:pt-0 last:pb-0">
+                  <Label htmlFor={`app-${app.id}`}>App Name</Label>
+                  <Input
+                    id={`app-${app.id}`}
+                    value={appNames[app.id] ?? ''}
+                    onChange={(e) => setAppNames((p) => ({ ...p, [app.id]: e.target.value }))}
+                  />
+                  <div className="flex flex-col gap-1.5 mt-1">
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs text-muted-foreground font-mono">{app.bundle_id_key}</span>
+                      <Badge
+                        tone={app.platform === 'ios' ? 'ios' : app.platform === 'android' ? 'android' : undefined}
+                        variant={app.platform === 'both' ? 'secondary' : undefined}
+                        className="capitalize"
+                      >
+                        {app.platform}
+                      </Badge>
+                    </div>
+                    <div className="flex items-center justify-end gap-2">
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        disabled={appsSaving[app.id]}
+                        onClick={() => handleAppNameSave(app.id)}
+                      >
+                        {appsSaved[app.id] ? 'Saved!' : appsSaving[app.id] ? 'Saving…' : 'Save'}
+                      </Button>
+                      <AlertDialog>
+                        <AlertDialogTrigger asChild>
+                          <Button size="sm" variant="destructive" disabled={appsDeleting[app.id]}>
+                            {appsDeleting[app.id] ? 'Deleting…' : 'Delete'}
+                          </Button>
+                        </AlertDialogTrigger>
+                        <AlertDialogContent>
+                          <AlertDialogHeader>
+                            <AlertDialogTitle>Delete app?</AlertDialogTitle>
+                            <AlertDialogDescription>
+                              This will permanently delete <strong>{app.name}</strong> and all its builds. This action cannot be undone.
+                            </AlertDialogDescription>
+                          </AlertDialogHeader>
+                          <AlertDialogFooter>
+                            <AlertDialogCancel className="w-24">Cancel</AlertDialogCancel>
+                            <AlertDialogAction
+                              className={cn(buttonVariants({ variant: 'destructive' }), 'w-24')}
+                              onClick={() => handleAppDelete(app.id)}
+                            >
+                              Delete
+                            </AlertDialogAction>
+                          </AlertDialogFooter>
+                        </AlertDialogContent>
+                      </AlertDialog>
+                    </div>
                   </div>
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    disabled={appsSaving[app.id]}
-                    onClick={() => handleAppNameSave(app.id)}
-                  >
-                    {appsSaved[app.id] ? 'Saved!' : appsSaving[app.id] ? 'Saving…' : 'Save'}
-                  </Button>
                 </div>
               ))}
             </div>

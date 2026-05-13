@@ -18,9 +18,9 @@ import {
 } from '@/components/ui/select'
 import { Upload } from 'lucide-react'
 
-type Props = { onSuccess: () => void }
+type Props = { onSuccess: () => void; appId?: number | null }
 
-export function UploadBuildDialog({ onSuccess }: Props) {
+export function UploadBuildDialog({ onSuccess, appId }: Props) {
   const [open, setOpen] = useState(false)
   const [file, setFile] = useState<File | null>(null)
   const [statusLabel, setStatusLabel] = useState('none')
@@ -37,6 +37,7 @@ export function UploadBuildDialog({ onSuccess }: Props) {
       const form = new FormData()
       form.append('file', file)
       if (statusLabel !== 'none') form.append('status', statusLabel)
+      if (appId) form.append('app_id', String(appId))
 
       const res = await fetch('/api/v1/builds', { method: 'POST', credentials: 'include', body: form })
       if (!res.ok) { setError('Upload failed. Check the file format.'); return }
@@ -79,7 +80,7 @@ export function UploadBuildDialog({ onSuccess }: Props) {
               onChange={(e) => setFile(e.target.files?.[0] ?? null)}
             />
             <p className="text-xs text-muted-foreground">
-              iOS: <code>.app.zip</code> (xcodebuild -sdk iphonesimulator 빌드 후 .app 폴더를 zip 압축)
+              iOS: <code>.app.zip</code> (zip the <code>.app</code> folder after <code>xcodebuild -sdk iphonesimulator</code>)
               &nbsp;·&nbsp;Android: <code>.apk</code>
             </p>
           </div>
@@ -98,8 +99,8 @@ export function UploadBuildDialog({ onSuccess }: Props) {
           </div>
           {error && <p className="text-sm text-destructive">{error}</p>}
           <div className="flex justify-end gap-2">
-            <Button type="button" variant="outline" onClick={() => setOpen(false)}>Cancel</Button>
-            <Button type="submit" disabled={!file || uploading}>
+            <Button type="button" variant="outline" className="w-24" onClick={() => setOpen(false)}>Cancel</Button>
+            <Button type="submit" className="w-24" disabled={!file || uploading}>
               {uploading ? 'Uploading…' : 'Upload'}
             </Button>
           </div>

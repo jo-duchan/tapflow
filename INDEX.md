@@ -28,6 +28,7 @@
 | 파일 | 내용 |
 |------|------|
 | [docs/PRD.md](./docs/PRD.md) | 제품 요구사항 |
+| [docs/DESIGN.md](./docs/DESIGN.md) | dashboard 디자인 시스템 — 색상 토큰, 타이포그래피, elevation, 컴포넌트 스펙 |
 | [docs/simkit-internals.md](./docs/simkit-internals.md) | SimulatorKit HID 분석 |
 | [CONTRIBUTING.md](./CONTRIBUTING.md) | 브랜치·릴리즈·커밋 컨벤션 |
 

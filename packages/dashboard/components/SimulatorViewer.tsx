@@ -1,20 +1,26 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState, Fragment } from 'react';
-import { Home, Camera, RotateCw, Play, Circle, Square, Loader2, Keyboard } from 'lucide-react';
+import { Home, Camera, RotateCw, Play, Video, Square, Loader2, Keyboard, ScanLine } from 'lucide-react';
 import { useRelay } from '@/hooks/useRelay';
-import type { ChromeData, DeviceInfo, RelayMessage } from '@/lib/types';
+import type { ChromeData, RelayMessage } from '@/lib/types';
 import { Button } from '@/components/ui/button';
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
+import { cn } from '@/lib/utils';
 
 interface Props {
   sessionId: string;
   deviceId: string;
-  onBack: () => void;
   buildId?: number;
   onRecordingUploaded?: () => void;
 }
 
-export function SimulatorViewer({ sessionId, deviceId, onBack, buildId, onRecordingUploaded }: Props) {
+// Cursor & pinch hint dimensions — shared between DOM overlay and recording canvas.
+// DOM px = R * 2; canvas uses radius directly.
+const CURSOR_RING_R = 13;  // idle / pinch-hover ring
+const CURSOR_DOT_R = 8;    // down / pinch-active dot
+
+export function SimulatorViewer({ sessionId, deviceId, buildId, onRecordingUploaded }: Props) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   // off-screen canvas: source for MediaRecorder (composite of framebuffer + chrome + overlays)
@@ -24,7 +30,6 @@ export function SimulatorViewer({ sessionId, deviceId, onBack, buildId, onRecord
   const [deviceReady, setDeviceReady] = useState(false);
   const [fps, setFps] = useState(0);
   const [chrome, setChrome] = useState<ChromeData | null>(null);
-  const [deviceInfo, setDeviceInfo] = useState<DeviceInfo | null>(null);
   const frameCount = useRef(0);
   const sendRef = useRef<(msg: object) => void>(() => {});
   const deviceSeq = useRef(0);
@@ -32,6 +37,9 @@ export function SimulatorViewer({ sessionId, deviceId, onBack, buildId, onRecord
   const [installed, setInstalled] = useState(false);
   const [installError, setInstallError] = useState<string | null>(null);
   const [launching, setLaunching] = useState(false);
+
+  const [canvasReady, setCanvasReady] = useState(false);
+  const [pinchActive, setPinchActive] = useState(false);
 
   // ── recording state ───────────────────────────────────────────────────────
   const [recordState, setRecordState] = useState<'idle' | 'recording' | 'uploading' | 'done'>('idle');
@@ -82,6 +90,7 @@ export function SimulatorViewer({ sessionId, deviceId, onBack, buildId, onRecord
             }
           }
           ctx.drawImage(bitmap, 0, 0);
+          setCanvasReady(true);
           frameCount.current += 1;
         }
         bitmap.close();
@@ -100,6 +109,7 @@ export function SimulatorViewer({ sessionId, deviceId, onBack, buildId, onRecord
         setInstalling(false);
         setInstalled(false);
         setInstallError(null);
+        setCanvasReady(false);
         deviceSeq.current += 1;
         const canvas = canvasRef.current;
         if (canvas) { const ctx = canvas.getContext('2d'); ctx?.clearRect(0, 0, canvas.width, canvas.height); }
@@ -113,7 +123,6 @@ export function SimulatorViewer({ sessionId, deviceId, onBack, buildId, onRecord
       if (msg.type === 'app:launch-done') { setLaunching(false); }
       if (msg.type === 'app:launch-error') { setLaunching(false); }
       if (msg.type === 'session:chrome') { setChrome(msg.payload); }
-      if (msg.type === 'session:deviceInfo') { setDeviceInfo(msg.payload); }
     },
     [drawToCanvas, sessionId, deviceId, buildId],
   );
@@ -194,13 +203,26 @@ export function SimulatorViewer({ sessionId, deviceId, onBack, buildId, onRecord
           cx = f.x * rc.width;
           cy = f.y * rc.height;
         }
-        ctx.beginPath();
-        ctx.arc(cx, cy, 17, 0, Math.PI * 2);
-        ctx.fillStyle = 'rgba(30,140,243,0.20)';
-        ctx.fill();
-        ctx.strokeStyle = 'rgba(30,140,243,0.60)';
-        ctx.lineWidth = 1.5;
-        ctx.stroke();
+        if (isPinchMode.current) {
+          ctx.beginPath();
+          ctx.arc(cx, cy, CURSOR_DOT_R, 0, Math.PI * 2);
+          ctx.fillStyle = 'rgba(255,255,255,0.92)';
+          ctx.fill();
+          ctx.strokeStyle = 'rgba(0,0,0,0.2)';
+          ctx.lineWidth = 1;
+          ctx.stroke();
+        } else {
+          ctx.beginPath();
+          ctx.arc(cx, cy, CURSOR_RING_R, 0, Math.PI * 2);
+          ctx.strokeStyle = 'rgba(0,0,0,0.3)';
+          ctx.lineWidth = 3;
+          ctx.stroke();
+          ctx.beginPath();
+          ctx.arc(cx, cy, CURSOR_RING_R, 0, Math.PI * 2);
+          ctx.strokeStyle = 'rgba(255,255,255,0.65)';
+          ctx.lineWidth = 1.5;
+          ctx.stroke();
+        }
       }
     }
 
@@ -212,31 +234,30 @@ export function SimulatorViewer({ sessionId, deviceId, onBack, buildId, onRecord
       ctx.save();
       if (state === 'down') {
         ctx.beginPath();
-        ctx.arc(cp.x, cp.y, 16, 0, Math.PI * 2);
-        ctx.fillStyle = 'rgba(220,38,38,0.4)';
+        ctx.arc(cp.x, cp.y, CURSOR_DOT_R, 0, Math.PI * 2);
+        ctx.fillStyle = 'rgba(255,255,255,0.92)';
         ctx.fill();
-        ctx.strokeStyle = 'rgb(220,38,38)';
-        ctx.lineWidth = 3;
+        ctx.strokeStyle = 'rgba(0,0,0,0.2)';
+        ctx.lineWidth = 1;
         ctx.stroke();
       } else if (state === 'release' && ra) {
-        const t = Math.min((performance.now() - ra.startTime) / 300, 1);
+        const t = Math.min((performance.now() - ra.startTime) / 350, 1);
         ctx.beginPath();
-        ctx.arc(cp.x, cp.y, 16 + 16 * t, 0, Math.PI * 2);
-        ctx.strokeStyle = `rgba(220,38,38,${(1 - t) * 0.8})`;
-        ctx.lineWidth = 3;
+        ctx.arc(cp.x, cp.y, CURSOR_DOT_R + 26 * t, 0, Math.PI * 2);
+        ctx.strokeStyle = `rgba(255,255,255,${(1 - t) * 0.55})`;
+        ctx.lineWidth = 1.5;
         ctx.stroke();
         if (t >= 1) { cursorStateRef.current = 'idle'; releaseAnimRef.current = null; }
       } else {
         ctx.beginPath();
-        ctx.arc(cp.x, cp.y, 12, 0, Math.PI * 2);
-        ctx.fillStyle = 'rgba(255,255,255,0.5)';
-        ctx.fill();
-        // dark outline first (wider), then white ring on top — visible on any background
-        ctx.strokeStyle = 'rgba(0,0,0,0.55)';
-        ctx.lineWidth = 4;
+        ctx.arc(cp.x, cp.y, CURSOR_RING_R, 0, Math.PI * 2);
+        ctx.strokeStyle = 'rgba(0,0,0,0.3)';
+        ctx.lineWidth = 3;
         ctx.stroke();
-        ctx.strokeStyle = 'rgba(255,255,255,0.9)';
-        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.arc(cp.x, cp.y, CURSOR_RING_R, 0, Math.PI * 2);
+        ctx.strokeStyle = 'rgba(255,255,255,0.65)';
+        ctx.lineWidth = 1.5;
         ctx.stroke();
       }
       ctx.restore();
@@ -303,7 +324,9 @@ export function SimulatorViewer({ sessionId, deviceId, onBack, buildId, onRecord
     formData.append('file', blob, `tapflow-${Date.now()}${ext}`);
 
     try {
-      const res = await fetch(`/api/v1/recordings/upload?sessionId=${sessionId}`, {
+      const params = new URLSearchParams({ sessionId })
+      if (buildId) params.set('buildId', String(buildId))
+      const res = await fetch(`/api/v1/recordings/upload?${params}`, {
         method: 'POST',
         credentials: 'include',
         body: formData,
@@ -368,12 +391,28 @@ export function SimulatorViewer({ sessionId, deviceId, onBack, buildId, onRecord
       const modifiers = (e.shiftKey ? 0x02 : 0) | (e.ctrlKey ? 0x01 : 0) | (e.metaKey ? 0x08 : 0);
       send({ type: 'input:key', sessionId, payload: { code: e.code, modifiers } });
     };
-    const onKeyUp = (e: KeyboardEvent) => {
-      if (e.code === 'AltLeft' || e.code === 'AltRight') { isOptionHeld.current = false; setPinchHint(null); }
+    const endPinchIfActive = () => {
+      if (isPinchMode.current) {
+        isPinchMode.current = false;
+        setPinchActive(false);
+        send({ type: 'input:pinch:end', sessionId });
+      }
+      isOptionHeld.current = false;
+      setPinchHint(null);
     };
+    const onKeyUp = (e: KeyboardEvent) => {
+      if (e.code === 'AltLeft' || e.code === 'AltRight') endPinchIfActive();
+    };
+    // keyup가 누락되는 경우(포커스 이탈 등) 핀치 상태 초기화
+    const onBlur = () => { if (isOptionHeld.current) endPinchIfActive(); };
     window.addEventListener('keydown', onKeyDown);
     window.addEventListener('keyup', onKeyUp);
-    return () => { window.removeEventListener('keydown', onKeyDown); window.removeEventListener('keyup', onKeyUp); };
+    window.addEventListener('blur', onBlur);
+    return () => {
+      window.removeEventListener('keydown', onKeyDown);
+      window.removeEventListener('keyup', onKeyUp);
+      window.removeEventListener('blur', onBlur);
+    };
   }, [keyboardActive, send, sessionId]);
 
   useEffect(() => {
@@ -470,6 +509,7 @@ export function SimulatorViewer({ sessionId, deviceId, onBack, buildId, onRecord
         const fingers = toPinchFingers(e);
         if (!fingers) return;
         isPinchMode.current = true;
+        setPinchActive(true);
         (e.target as Element).setPointerCapture(e.pointerId);
         setPinchHint(fingers);
         send({ type: 'input:pinch:start', sessionId, payload: fingers });
@@ -490,9 +530,10 @@ export function SimulatorViewer({ sessionId, deviceId, onBack, buildId, onRecord
         _lc.style.display = 'block';
         _lc.style.left = `${e.clientX - _rect.left}px`;
         _lc.style.top = `${e.clientY - _rect.top}px`;
-        _lc.style.width = '32px'; _lc.style.height = '32px';
-        _lc.style.background = 'rgba(220,38,38,0.3)';
-        _lc.style.border = '3px solid rgb(220,38,38)';
+        _lc.style.width = `${CURSOR_DOT_R * 2}px`; _lc.style.height = `${CURSOR_DOT_R * 2}px`;
+        _lc.style.background = 'rgba(255,255,255,0.92)';
+        _lc.style.border = '1.5px solid rgba(0,0,0,0.2)';
+        _lc.style.boxShadow = '0 0 0 1px rgba(0,0,0,0.15), 0 0 8px rgba(255,255,255,0.25)';
       }
       send({ type: 'input:touch:start', sessionId, payload: pos });
     },
@@ -520,9 +561,10 @@ export function SimulatorViewer({ sessionId, deviceId, onBack, buildId, onRecord
               _lc2.style.display = 'block';
               _lc2.style.left = `${e.clientX - _r2.left}px`;
               _lc2.style.top = `${e.clientY - _r2.top}px`;
-              _lc2.style.width = '24px'; _lc2.style.height = '24px';
-              _lc2.style.background = 'rgba(255,255,255,0.25)';
-              _lc2.style.border = '2px solid rgba(255,255,255,0.85)';
+              _lc2.style.width = `${CURSOR_RING_R * 2}px`; _lc2.style.height = `${CURSOR_RING_R * 2}px`;
+              _lc2.style.background = 'transparent';
+              _lc2.style.border = '1.5px solid rgba(255,255,255,0.6)';
+              _lc2.style.boxShadow = '0 0 0 1px rgba(0,0,0,0.3)';
             } else {
               _lc2.style.display = 'none';
             }
@@ -573,6 +615,7 @@ export function SimulatorViewer({ sessionId, deviceId, onBack, buildId, onRecord
   const handlePointerUp = useCallback(() => {
     if (isPinchMode.current) {
       isPinchMode.current = false;
+      setPinchActive(false);
       setPinchHint(null);
       send({ type: 'input:pinch:end', sessionId });
       return;
@@ -588,9 +631,10 @@ export function SimulatorViewer({ sessionId, deviceId, onBack, buildId, onRecord
     releaseAnimRef.current = { startTime: performance.now() };
     const _lc = liveCursorRef.current;
     if (_lc) {
-      _lc.style.width = '24px'; _lc.style.height = '24px';
-      _lc.style.background = 'rgba(255,255,255,0.25)';
-      _lc.style.border = '2px solid rgba(255,255,255,0.85)';
+      _lc.style.width = `${CURSOR_RING_R * 2}px`; _lc.style.height = `${CURSOR_RING_R * 2}px`;
+      _lc.style.background = 'transparent';
+      _lc.style.border = '1.5px solid rgba(255,255,255,0.6)';
+      _lc.style.boxShadow = '0 0 0 1px rgba(0,0,0,0.3)';
     }
     send({ type: 'input:touch:end', sessionId });
   }, [send, sessionId]);
@@ -598,6 +642,7 @@ export function SimulatorViewer({ sessionId, deviceId, onBack, buildId, onRecord
   const handlePointerCancel = useCallback(() => {
     if (isPinchMode.current) {
       isPinchMode.current = false;
+      setPinchActive(false);
       setPinchHint(null);
       send({ type: 'input:pinch:end', sessionId });
       return;
@@ -645,18 +690,6 @@ export function SimulatorViewer({ sessionId, deviceId, onBack, buildId, onRecord
   }, [send, sessionId]);
 
   // ── layout ────────────────────────────────────────────────────────────────
-  const statusText = !connected
-    ? 'Connecting...'
-    : !joined
-      ? 'Joining session...'
-      : !deviceReady
-        ? 'Starting device...'
-        : installing
-          ? 'Installing app…'
-          : installError
-            ? `Install failed: ${installError}`
-            : `Live · ${fps} fps`;
-
   const compositeLogicalW = chrome ? chrome.compositeWidth / 2 : 0;
   const compositeLogicalH = chrome ? chrome.compositeHeight / 2 : 0;
   const MAX_DISPLAY_H = 750;
@@ -671,21 +704,108 @@ export function SimulatorViewer({ sessionId, deviceId, onBack, buildId, onRecord
 
   const cssCornerRadius = chrome ? Math.round((chrome.screenCornerRadius / 2) * displayScale) : 0;
 
+  const fpsColor = fps >= 30 ? '#10b981' : fps >= 15 ? '#f59e0b' : fps > 0 ? '#ef4444' : '#6b7280';
+
+  const statusText = !connected
+    ? 'Connecting…'
+    : !joined
+      ? 'Joining session…'
+      : !deviceReady
+        ? 'Starting device…'
+        : installing
+          ? 'Installing app…'
+          : installError
+            ? `Install failed: ${installError.length > 22 ? installError.slice(0, 22) + '…' : installError}`
+            : null;
+  // TODO: remove dummy
+  const _statusText = statusText;
+  const statusTextDisplay = _statusText ?? 'Installing app…';
+
   return (
-    <div className="flex flex-col items-center gap-3">
+    <div className="flex items-start justify-center gap-16">
       {/* hidden off-screen record canvas — source for MediaRecorder */}
       <canvas ref={recordCanvasRef} style={{ display: 'none' }} />
 
-      <div className="flex w-full items-center gap-3">
-        <Button variant="ghost" size="sm" onClick={onBack}>← Back</Button>
-        <span className="text-sm text-muted-foreground">{statusText}</span>
-        {deviceInfo && (
-          <span className="text-sm text-muted-foreground/60">
-            {deviceInfo.deviceName}{deviceInfo.osVersion ? ` · ${deviceInfo.osVersion}` : ''}
-          </span>
-        )}
-      </div>
+      {joined && (
+        <TooltipProvider delayDuration={400}>
+          <div className="flex flex-col items-center gap-0.5 rounded-2xl border bg-background/90 backdrop-blur-sm px-1.5 py-2.5 shrink-0 mt-3">
+            {installed && buildId && (
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button
+                    variant="ghost" size="icon" className="h-8 w-8"
+                    disabled={launching}
+                    onClick={() => { setLaunching(true); sendRef.current({ type: 'app:launch', sessionId, buildId }); }}
+                  >
+                    {launching ? <Loader2 className="h-4 w-4 animate-spin" /> : <Play className="h-4 w-4" />}
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent side="left">{launching ? 'Launching…' : 'Launch app'}</TooltipContent>
+              </Tooltip>
+            )}
 
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button variant="ghost" size="icon" className="h-8 w-8" onClick={handleSoftHome}>
+                  <Home className="h-4 w-4" />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent side="left">Home</TooltipContent>
+            </Tooltip>
+
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button variant="ghost" size="icon" className="h-8 w-8" onClick={handleKeyboardToggle}>
+                  <Keyboard className="h-4 w-4" />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent side="left">Software keyboard</TooltipContent>
+            </Tooltip>
+
+            <div className="w-4 h-px bg-border my-1" />
+
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button variant="ghost" size="icon" className="h-8 w-8" onClick={handleScreenshot}>
+                  <Camera className="h-4 w-4" />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent side="left">Screenshot</TooltipContent>
+            </Tooltip>
+
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  variant="ghost" size="icon"
+                  className={cn('h-8 w-8', recordState === 'recording' && 'text-red-500 hover:text-red-500')}
+                  disabled={recordState === 'uploading' || recordState === 'done'}
+                  onClick={handleRecordToggle}
+                >
+                  {recordState === 'uploading' ? <Loader2 className="h-4 w-4 animate-spin" />
+                    : recordState === 'recording' ? <Square className="h-4 w-4 fill-current" />
+                    : <Video className="h-4 w-4" />}
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent side="left">
+                {recordState === 'idle' ? 'Start recording' : recordState === 'recording' ? 'Stop recording' : 'Processing…'}
+              </TooltipContent>
+            </Tooltip>
+
+            <div className="w-4 h-px bg-border my-1" />
+
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button variant="ghost" size="icon" className="h-8 w-8" onClick={handleRotate}>
+                  <RotateCw className="h-4 w-4" />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent side="left">Rotate</TooltipContent>
+            </Tooltip>
+          </div>
+        </TooltipProvider>
+      )}
+
+      <div className="flex items-start gap-8">
       {chrome ? (
         <div style={{ width: isLandscape ? displayH : displayW, height: isLandscape ? displayW : displayH, position: 'relative', flexShrink: 0 }}>
           <div
@@ -717,8 +837,20 @@ export function SimulatorViewer({ sessionId, deviceId, onBack, buildId, onRecord
                 borderRadius: cssCornerRadius > 0 ? `${cssCornerRadius}px` : undefined,
                 backgroundColor: '#010101',
                 cursor: 'none',
+                visibility: canvasReady ? 'visible' : 'hidden',
               }}
             />
+            {!canvasReady && (
+              <div
+                className="absolute animate-pulse bg-zinc-800"
+                style={{
+                  zIndex: 3,
+                  left: `${screenPctLeft}%`, top: `${screenPctTop}%`,
+                  width: `${screenPctW}%`, height: `${screenPctH}%`,
+                  borderRadius: cssCornerRadius > 0 ? `${cssCornerRadius}px` : undefined,
+                }}
+              />
+            )}
             {/* live cursor overlay — imperative position updates via liveCursorRef */}
             <div
               ref={liveCursorRef}
@@ -729,8 +861,7 @@ export function SimulatorViewer({ sessionId, deviceId, onBack, buildId, onRecord
                 borderRadius: '50%',
                 transform: 'translate(-50%, -50%)',
                 pointerEvents: 'none',
-                outline: '1.5px solid rgba(0,0,0,0.35)',
-                transition: 'width 0.08s, height 0.08s, background 0.08s',
+                transition: 'width 0.1s ease, height 0.1s ease, background 0.1s ease, box-shadow 0.1s ease',
               }}
             />
             {pinchHint && (() => {
@@ -745,11 +876,30 @@ export function SimulatorViewer({ sessionId, deviceId, onBack, buildId, onRecord
               return (
                 <>
                   {([pinchHint.f0, pinchHint.f1] as const).map((f, i) => (
-                    <div key={i} style={{ position: 'absolute', zIndex: 10, width: 34, height: 34, borderRadius: '50%', background: 'rgba(30,140,243,0.20)', border: '1.5px solid rgba(30,140,243,0.60)', transform: 'translate(-50%, -50%)', pointerEvents: 'none', ...toCSS(f.x, f.y) }} />
+                    <div key={i} style={{
+                      position: 'absolute', zIndex: 10, borderRadius: '50%',
+                      transform: 'translate(-50%, -50%)', pointerEvents: 'none',
+                      transition: 'width 0.1s ease, height 0.1s ease, background 0.1s ease',
+                      ...(pinchActive
+                        ? { width: CURSOR_DOT_R * 2, height: CURSOR_DOT_R * 2, background: 'rgba(255,255,255,0.92)', border: '1.5px solid rgba(0,0,0,0.2)', boxShadow: '0 0 0 1px rgba(0,0,0,0.15), 0 0 8px rgba(255,255,255,0.25)' }
+                        : { width: CURSOR_RING_R * 2, height: CURSOR_RING_R * 2, background: 'transparent', border: '1.5px solid rgba(255,255,255,0.6)', boxShadow: '0 0 0 1px rgba(0,0,0,0.3)' }),
+                      ...toCSS(f.x, f.y),
+                    }} />
                   ))}
                 </>
               );
             })()}
+            {joined && fps === 0 && (
+              <div style={{
+                position: 'absolute', zIndex: 8,
+                left: `${screenPctLeft}%`, top: `${screenPctTop}%`,
+                width: `${screenPctW}%`, height: `${screenPctH}%`,
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                pointerEvents: 'none',
+              }}>
+                <span style={{ color: 'white', fontSize: '0.875rem' }}>Waiting for first frame...</span>
+              </div>
+            )}
             {chrome.buttons.map((btn) => {
               const isFlashed = flashedButton === btn.name;
               const isHovered = hoveredButton === btn.name;
@@ -812,59 +962,51 @@ export function SimulatorViewer({ sessionId, deviceId, onBack, buildId, onRecord
           </div>
         </div>
       ) : (
-        <canvas
-          ref={canvasRef}
-          className="block max-w-full cursor-crosshair"
-          style={{ borderRadius: '10%' }}
-          onPointerDown={handlePointerDown}
-          onPointerMove={handlePointerMove}
-          onPointerUp={handlePointerUp}
-          onPointerCancel={handlePointerCancel}
-        />
-      )}
-
-      {joined && fps === 0 && <p className="text-sm text-muted-foreground">Waiting for first frame...</p>}
-
-      {joined && (
-        <div
-          className="flex items-center justify-end rounded-lg border border-border bg-muted/40 px-3 py-1.5"
-          style={{ width: chrome ? (isLandscape ? displayH : displayW) : '100%', minWidth: 200 }}
-        >
-          <div className="flex items-center gap-1">
-            {keyboardActive && <span className="text-xs text-muted-foreground px-1">⌨</span>}
-            <Button variant="ghost" size="icon" className="h-7 w-7" title="Toggle Software Keyboard" onClick={handleKeyboardToggle}>
-              <Keyboard className="h-3.5 w-3.5" />
-            </Button>
-            {installed && buildId && (
-              <Button variant="ghost" size="sm" className="h-7 px-2 text-xs" title="Launch app" disabled={launching}
-                onClick={() => { setLaunching(true); sendRef.current({ type: 'app:launch', sessionId, buildId }); }}>
-                <Play className="h-3 w-3 mr-1" />
-                {launching ? 'Launching…' : 'Launch'}
-              </Button>
-            )}
-            <Button variant="ghost" size="icon" className="h-7 w-7" title="Home" onClick={handleSoftHome}>
-              <Home className="h-3.5 w-3.5" />
-            </Button>
-            <Button variant="ghost" size="icon" className="h-7 w-7" title="Screenshot" onClick={handleScreenshot}>
-              <Camera className="h-3.5 w-3.5" />
-            </Button>
-            <Button
-              variant="ghost" size="icon"
-              className={`h-7 w-7 ${recordState === 'recording' ? 'text-red-500' : ''}`}
-              title={recordState === 'idle' ? 'Start recording' : recordState === 'recording' ? 'Stop recording' : 'Processing…'}
-              disabled={recordState === 'uploading' || recordState === 'done'}
-              onClick={handleRecordToggle}
-            >
-              {recordState === 'uploading' ? <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                : recordState === 'recording' ? <Square className="h-3.5 w-3.5 fill-current" />
-                : <Circle className="h-3.5 w-3.5" />}
-            </Button>
-            <Button variant="ghost" size="icon" className="h-7 w-7" title="Rotate" onClick={handleRotate}>
-              <RotateCw className="h-3.5 w-3.5" />
-            </Button>
-          </div>
+        <div className="relative" style={{ minWidth: 300, minHeight: 560, backgroundColor: '#010101', borderRadius: '10%' }}>
+          <canvas
+            ref={canvasRef}
+            className="block w-full h-full cursor-crosshair"
+            style={{ borderRadius: '10%', visibility: canvasReady ? 'visible' : 'hidden' }}
+            onPointerDown={handlePointerDown}
+            onPointerMove={handlePointerMove}
+            onPointerUp={handlePointerUp}
+            onPointerCancel={handlePointerCancel}
+          />
+          {!canvasReady && (
+            <div className="absolute inset-0 animate-pulse bg-zinc-900/60" style={{ borderRadius: '10%' }} />
+          )}
+          {joined && fps === 0 && canvasReady && (
+            <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+              <span style={{ color: 'white', fontSize: '0.875rem' }}>Waiting for first frame...</span>
+            </div>
+          )}
         </div>
       )}
+
+      {/* Right info card */}
+      <div className="w-[300px] shrink-0 mt-3 rounded-xl border bg-background px-4 py-4 flex flex-col gap-3">
+        <div className={cn(
+          'flex items-center',
+          keyboardActive ? 'text-emerald-500' : 'text-muted-foreground',
+        )} style={{ gap: 6 }}>
+          <ScanLine className="h-3.5 w-3.5 shrink-0" />
+          <span className="text-[12px] font-medium">Focus</span>
+        </div>
+
+        {joined && (
+          <div className="flex items-center" style={{ gap: 6 }}>
+            <span className="h-2 w-2 rounded-full shrink-0" style={{ background: fpsColor }} />
+            <span className="text-[12px] font-mono text-foreground/75">{fps}</span>
+            <span className="text-[12px] text-muted-foreground">fps</span>
+          </div>
+        )}
+
+        {statusTextDisplay && (
+          <p className="text-[12px] text-muted-foreground leading-relaxed">{statusTextDisplay}</p>
+        )}
+      </div>
+
+      </div>
     </div>
   );
 }

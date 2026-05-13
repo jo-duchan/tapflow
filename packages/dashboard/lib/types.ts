@@ -80,6 +80,37 @@ export interface Recording {
   expiresAt: string
 }
 
+export interface App {
+  id: number
+  name: string
+  bundle_id_key: string
+  platform: 'ios' | 'android' | 'both'
+  latest_build_id: number | null
+  version_name: string | null
+  build_number: string | null
+  status_label: string | null
+  latest_uploaded_at: string | null
+}
+
+export interface Build {
+  id: number
+  app_id: number
+  name: string
+  version_name: string | null
+  build_number: string | null
+  version_label: string | null
+  status_label: 'Backlog' | 'In Progress' | 'Done' | 'Rejected' | null
+  platform: 'ios' | 'android'
+  bundle_id: string | null
+  uploaded_at: string
+  uploader: string | null
+}
+
+export interface ReleaseGroup {
+  versionName: string
+  builds: Build[]
+}
+
 export type RelayMessage =
   | { type: 'agents:listed'; sessions: SessionInfo[] }
   | { type: 'session:joined'; sessionId: string }

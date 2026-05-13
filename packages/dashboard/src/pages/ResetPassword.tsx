@@ -51,8 +51,8 @@ export function ResetPassword() {
 
   if (status === 'invalid') {
     return (
-      <div className="flex min-h-svh items-center justify-center p-4">
-        <Card className="w-full max-w-sm text-center">
+      <div className="bg-mesh-gradient flex min-h-svh items-center justify-center overflow-hidden p-4">
+        <Card level={4} className="w-full max-w-sm text-center">
           <CardHeader>
             <CardTitle>Link expired</CardTitle>
             <CardDescription>This password reset link is invalid or has expired. Ask your admin to send a new one.</CardDescription>
@@ -63,8 +63,8 @@ export function ResetPassword() {
   }
 
   return (
-    <div className="flex min-h-svh items-center justify-center p-4">
-      <Card className="w-full max-w-sm">
+    <div className="bg-mesh-gradient flex min-h-svh items-center justify-center overflow-hidden p-4">
+      <Card level={4} className="w-full max-w-sm">
         <CardHeader className="text-center">
           <CardTitle>Reset password</CardTitle>
           <CardDescription>Enter your new password below.</CardDescription>
