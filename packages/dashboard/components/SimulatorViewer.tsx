@@ -15,6 +15,11 @@ interface Props {
   onRecordingUploaded?: () => void;
 }
 
+// Cursor & pinch hint dimensions — shared between DOM overlay and recording canvas.
+// DOM px = R * 2; canvas uses radius directly.
+const CURSOR_RING_R = 13;  // idle / pinch-hover ring
+const CURSOR_DOT_R = 8;    // down / pinch-active dot
+
 export function SimulatorViewer({ sessionId, deviceId, buildId, onRecordingUploaded }: Props) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -34,6 +39,7 @@ export function SimulatorViewer({ sessionId, deviceId, buildId, onRecordingUploa
   const [launching, setLaunching] = useState(false);
 
   const [canvasReady, setCanvasReady] = useState(false);
+  const [pinchActive, setPinchActive] = useState(false);
 
   // ── recording state ───────────────────────────────────────────────────────
   const [recordState, setRecordState] = useState<'idle' | 'recording' | 'uploading' | 'done'>('idle');
@@ -197,13 +203,26 @@ export function SimulatorViewer({ sessionId, deviceId, buildId, onRecordingUploa
           cx = f.x * rc.width;
           cy = f.y * rc.height;
         }
-        ctx.beginPath();
-        ctx.arc(cx, cy, 17, 0, Math.PI * 2);
-        ctx.fillStyle = 'rgba(30,140,243,0.20)';
-        ctx.fill();
-        ctx.strokeStyle = 'rgba(30,140,243,0.60)';
-        ctx.lineWidth = 1.5;
-        ctx.stroke();
+        if (isPinchMode.current) {
+          ctx.beginPath();
+          ctx.arc(cx, cy, CURSOR_DOT_R, 0, Math.PI * 2);
+          ctx.fillStyle = 'rgba(255,255,255,0.92)';
+          ctx.fill();
+          ctx.strokeStyle = 'rgba(0,0,0,0.2)';
+          ctx.lineWidth = 1;
+          ctx.stroke();
+        } else {
+          ctx.beginPath();
+          ctx.arc(cx, cy, CURSOR_RING_R, 0, Math.PI * 2);
+          ctx.strokeStyle = 'rgba(0,0,0,0.3)';
+          ctx.lineWidth = 3;
+          ctx.stroke();
+          ctx.beginPath();
+          ctx.arc(cx, cy, CURSOR_RING_R, 0, Math.PI * 2);
+          ctx.strokeStyle = 'rgba(255,255,255,0.65)';
+          ctx.lineWidth = 1.5;
+          ctx.stroke();
+        }
       }
     }
 
@@ -215,31 +234,30 @@ export function SimulatorViewer({ sessionId, deviceId, buildId, onRecordingUploa
       ctx.save();
       if (state === 'down') {
         ctx.beginPath();
-        ctx.arc(cp.x, cp.y, 16, 0, Math.PI * 2);
-        ctx.fillStyle = 'rgba(220,38,38,0.4)';
+        ctx.arc(cp.x, cp.y, CURSOR_DOT_R, 0, Math.PI * 2);
+        ctx.fillStyle = 'rgba(255,255,255,0.92)';
         ctx.fill();
-        ctx.strokeStyle = 'rgb(220,38,38)';
-        ctx.lineWidth = 3;
+        ctx.strokeStyle = 'rgba(0,0,0,0.2)';
+        ctx.lineWidth = 1;
         ctx.stroke();
       } else if (state === 'release' && ra) {
-        const t = Math.min((performance.now() - ra.startTime) / 300, 1);
+        const t = Math.min((performance.now() - ra.startTime) / 350, 1);
         ctx.beginPath();
-        ctx.arc(cp.x, cp.y, 16 + 16 * t, 0, Math.PI * 2);
-        ctx.strokeStyle = `rgba(220,38,38,${(1 - t) * 0.8})`;
-        ctx.lineWidth = 3;
+        ctx.arc(cp.x, cp.y, CURSOR_DOT_R + 26 * t, 0, Math.PI * 2);
+        ctx.strokeStyle = `rgba(255,255,255,${(1 - t) * 0.55})`;
+        ctx.lineWidth = 1.5;
         ctx.stroke();
         if (t >= 1) { cursorStateRef.current = 'idle'; releaseAnimRef.current = null; }
       } else {
         ctx.beginPath();
-        ctx.arc(cp.x, cp.y, 12, 0, Math.PI * 2);
-        ctx.fillStyle = 'rgba(255,255,255,0.5)';
-        ctx.fill();
-        // dark outline first (wider), then white ring on top — visible on any background
-        ctx.strokeStyle = 'rgba(0,0,0,0.55)';
-        ctx.lineWidth = 4;
+        ctx.arc(cp.x, cp.y, CURSOR_RING_R, 0, Math.PI * 2);
+        ctx.strokeStyle = 'rgba(0,0,0,0.3)';
+        ctx.lineWidth = 3;
         ctx.stroke();
-        ctx.strokeStyle = 'rgba(255,255,255,0.9)';
-        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.arc(cp.x, cp.y, CURSOR_RING_R, 0, Math.PI * 2);
+        ctx.strokeStyle = 'rgba(255,255,255,0.65)';
+        ctx.lineWidth = 1.5;
         ctx.stroke();
       }
       ctx.restore();
@@ -475,6 +493,7 @@ export function SimulatorViewer({ sessionId, deviceId, buildId, onRecordingUploa
         const fingers = toPinchFingers(e);
         if (!fingers) return;
         isPinchMode.current = true;
+        setPinchActive(true);
         (e.target as Element).setPointerCapture(e.pointerId);
         setPinchHint(fingers);
         send({ type: 'input:pinch:start', sessionId, payload: fingers });
@@ -495,9 +514,10 @@ export function SimulatorViewer({ sessionId, deviceId, buildId, onRecordingUploa
         _lc.style.display = 'block';
         _lc.style.left = `${e.clientX - _rect.left}px`;
         _lc.style.top = `${e.clientY - _rect.top}px`;
-        _lc.style.width = '32px'; _lc.style.height = '32px';
-        _lc.style.background = 'rgba(220,38,38,0.3)';
-        _lc.style.border = '3px solid rgb(220,38,38)';
+        _lc.style.width = `${CURSOR_DOT_R * 2}px`; _lc.style.height = `${CURSOR_DOT_R * 2}px`;
+        _lc.style.background = 'rgba(255,255,255,0.92)';
+        _lc.style.border = '1.5px solid rgba(0,0,0,0.2)';
+        _lc.style.boxShadow = '0 0 0 1px rgba(0,0,0,0.15), 0 0 8px rgba(255,255,255,0.25)';
       }
       send({ type: 'input:touch:start', sessionId, payload: pos });
     },
@@ -525,9 +545,10 @@ export function SimulatorViewer({ sessionId, deviceId, buildId, onRecordingUploa
               _lc2.style.display = 'block';
               _lc2.style.left = `${e.clientX - _r2.left}px`;
               _lc2.style.top = `${e.clientY - _r2.top}px`;
-              _lc2.style.width = '24px'; _lc2.style.height = '24px';
-              _lc2.style.background = 'rgba(255,255,255,0.25)';
-              _lc2.style.border = '2px solid rgba(255,255,255,0.85)';
+              _lc2.style.width = `${CURSOR_RING_R * 2}px`; _lc2.style.height = `${CURSOR_RING_R * 2}px`;
+              _lc2.style.background = 'transparent';
+              _lc2.style.border = '1.5px solid rgba(255,255,255,0.6)';
+              _lc2.style.boxShadow = '0 0 0 1px rgba(0,0,0,0.3)';
             } else {
               _lc2.style.display = 'none';
             }
@@ -578,6 +599,7 @@ export function SimulatorViewer({ sessionId, deviceId, buildId, onRecordingUploa
   const handlePointerUp = useCallback(() => {
     if (isPinchMode.current) {
       isPinchMode.current = false;
+      setPinchActive(false);
       setPinchHint(null);
       send({ type: 'input:pinch:end', sessionId });
       return;
@@ -593,9 +615,10 @@ export function SimulatorViewer({ sessionId, deviceId, buildId, onRecordingUploa
     releaseAnimRef.current = { startTime: performance.now() };
     const _lc = liveCursorRef.current;
     if (_lc) {
-      _lc.style.width = '24px'; _lc.style.height = '24px';
-      _lc.style.background = 'rgba(255,255,255,0.25)';
-      _lc.style.border = '2px solid rgba(255,255,255,0.85)';
+      _lc.style.width = `${CURSOR_RING_R * 2}px`; _lc.style.height = `${CURSOR_RING_R * 2}px`;
+      _lc.style.background = 'transparent';
+      _lc.style.border = '1.5px solid rgba(255,255,255,0.6)';
+      _lc.style.boxShadow = '0 0 0 1px rgba(0,0,0,0.3)';
     }
     send({ type: 'input:touch:end', sessionId });
   }, [send, sessionId]);
@@ -603,6 +626,7 @@ export function SimulatorViewer({ sessionId, deviceId, buildId, onRecordingUploa
   const handlePointerCancel = useCallback(() => {
     if (isPinchMode.current) {
       isPinchMode.current = false;
+      setPinchActive(false);
       setPinchHint(null);
       send({ type: 'input:pinch:end', sessionId });
       return;
@@ -821,8 +845,7 @@ export function SimulatorViewer({ sessionId, deviceId, buildId, onRecordingUploa
                 borderRadius: '50%',
                 transform: 'translate(-50%, -50%)',
                 pointerEvents: 'none',
-                outline: '1.5px solid rgba(0,0,0,0.35)',
-                transition: 'width 0.08s, height 0.08s, background 0.08s',
+                transition: 'width 0.1s ease, height 0.1s ease, background 0.1s ease, box-shadow 0.1s ease',
               }}
             />
             {pinchHint && (() => {
@@ -837,7 +860,15 @@ export function SimulatorViewer({ sessionId, deviceId, buildId, onRecordingUploa
               return (
                 <>
                   {([pinchHint.f0, pinchHint.f1] as const).map((f, i) => (
-                    <div key={i} style={{ position: 'absolute', zIndex: 10, width: 34, height: 34, borderRadius: '50%', background: 'rgba(30,140,243,0.20)', border: '1.5px solid rgba(30,140,243,0.60)', transform: 'translate(-50%, -50%)', pointerEvents: 'none', ...toCSS(f.x, f.y) }} />
+                    <div key={i} style={{
+                      position: 'absolute', zIndex: 10, borderRadius: '50%',
+                      transform: 'translate(-50%, -50%)', pointerEvents: 'none',
+                      transition: 'width 0.1s ease, height 0.1s ease, background 0.1s ease',
+                      ...(pinchActive
+                        ? { width: CURSOR_DOT_R * 2, height: CURSOR_DOT_R * 2, background: 'rgba(255,255,255,0.92)', border: '1.5px solid rgba(0,0,0,0.2)', boxShadow: '0 0 0 1px rgba(0,0,0,0.15), 0 0 8px rgba(255,255,255,0.25)' }
+                        : { width: CURSOR_RING_R * 2, height: CURSOR_RING_R * 2, background: 'transparent', border: '1.5px solid rgba(255,255,255,0.6)', boxShadow: '0 0 0 1px rgba(0,0,0,0.3)' }),
+                      ...toCSS(f.x, f.y),
+                    }} />
                   ))}
                 </>
               );
