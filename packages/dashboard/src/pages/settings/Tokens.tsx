@@ -94,7 +94,7 @@ export function TokenSettings() {
           <CardTitle>Active tokens</CardTitle>
           <CardDescription>Use these tokens with <code className="text-xs">Authorization: Bearer &lt;token&gt;</code> for API deployments.</CardDescription>
         </CardHeader>
-        <CardContent className="p-0">
+        <CardContent className="px-4 pt-0 pb-2">
           <Table>
             <TableHeader>
               <TableRow>
