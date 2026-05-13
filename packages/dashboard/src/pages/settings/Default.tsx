@@ -153,7 +153,7 @@ export function DefaultSettings() {
   }
 
   return (
-    <div className="flex flex-col gap-6 max-w-lg p-6">
+    <div className="flex flex-col gap-6 max-w-[900px] mx-auto w-full p-6">
       <h1 className="text-xl font-semibold tracking-display-sm">Settings</h1>
 
       {/* Workspace — Admin only */}

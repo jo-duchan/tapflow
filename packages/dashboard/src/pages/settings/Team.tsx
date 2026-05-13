@@ -72,7 +72,7 @@ export function TeamSettings() {
   }
 
   return (
-    <div className="flex flex-col gap-6 max-w-2xl p-6">
+    <div className="flex flex-col gap-6 max-w-[900px] mx-auto w-full p-6">
       <div className="flex items-center justify-between">
         <h1 className="text-xl font-semibold">Team</h1>
         <Dialog open={inviteOpen} onOpenChange={(o) => { setInviteOpen(o); if (!o) { setInviteEmail(''); setInviteLink('') } }}>
