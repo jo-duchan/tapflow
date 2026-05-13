@@ -123,7 +123,7 @@ export function TokenSettings() {
                     ) : <span className="text-muted-foreground text-sm">Never</span>}
                   </TableCell>
                   <TableCell>
-                    <Button variant="ghost" size="icon" className="h-7 w-7 text-destructive" onClick={() => handleRevoke(t.id)}>
+                    <Button variant="destructive" size="icon" className="h-7 w-7" onClick={() => handleRevoke(t.id)}>
                       <Trash2 className="h-4 w-4" />
                     </Button>
                   </TableCell>

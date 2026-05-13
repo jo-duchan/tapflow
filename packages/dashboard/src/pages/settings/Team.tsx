@@ -148,7 +148,7 @@ export function TeamSettings() {
                   <TableCell>
                     <div className="flex items-center gap-1">
                       <Button
-                        variant="ghost"
+                        variant="secondary"
                         size="icon"
                         className="h-7 w-7"
                         title="Send password reset email"
@@ -160,7 +160,7 @@ export function TeamSettings() {
                           <KeyRound className="h-4 w-4" />
                         )}
                       </Button>
-                      <Button variant="ghost" size="icon" className="h-7 w-7 text-destructive" onClick={() => handleDelete(m.id)}>
+                      <Button variant="destructive" size="icon" className="h-7 w-7" onClick={() => handleDelete(m.id)}>
                         <Trash2 className="h-4 w-4" />
                       </Button>
                     </div>
