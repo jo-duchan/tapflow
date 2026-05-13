@@ -125,64 +125,55 @@ export function QASession() {
 
   return (
     <div className="flex h-full min-h-0 gap-6 p-6">
-      <div className="flex flex-col gap-3 flex-1 min-w-0 min-h-0 overflow-y-auto [scrollbar-gutter:stable]">
-        {activeSessionId ? (
-          <>
-            <div className="flex w-full items-center gap-2">
-              {build && (
-                <Breadcrumb>
-                  <BreadcrumbList>
-                    <BreadcrumbItem>
-                      <BreadcrumbLink asChild>
-                        <button onClick={() => navigate(`/app-center?appId=${build.app_id}`)}>
-                          {build.name}
-                        </button>
-                      </BreadcrumbLink>
-                    </BreadcrumbItem>
-                    <BreadcrumbSeparator />
-                    <BreadcrumbItem>
-                      <BreadcrumbLink asChild>
-                        <button onClick={handleBack}>{buildLabel(build)}</button>
-                      </BreadcrumbLink>
-                    </BreadcrumbItem>
+      <div className="flex flex-col gap-3 flex-1 min-w-0 min-h-0">
+        {/* Breadcrumb — 스크롤과 무관하게 상단 고정 */}
+        {build && (
+          <div className="shrink-0 flex items-center gap-3">
+            <Breadcrumb>
+              <BreadcrumbList>
+                <BreadcrumbItem>
+                  <BreadcrumbLink asChild>
+                    <button onClick={() => navigate(`/app-center?appId=${build.app_id}`)}>
+                      {build.name}
+                    </button>
+                  </BreadcrumbLink>
+                </BreadcrumbItem>
+                <BreadcrumbSeparator />
+                <BreadcrumbItem>
+                  {activeSessionId ? (
+                    <BreadcrumbLink asChild>
+                      <button onClick={handleBack}>{buildLabel(build)}</button>
+                    </BreadcrumbLink>
+                  ) : (
+                    <BreadcrumbPage>{buildLabel(build)}</BreadcrumbPage>
+                  )}
+                </BreadcrumbItem>
+                {activeSessionId && (
+                  <>
                     <BreadcrumbSeparator />
                     <BreadcrumbItem>
                       <BreadcrumbPage>{deviceLabel}</BreadcrumbPage>
                     </BreadcrumbItem>
-                  </BreadcrumbList>
-                </Breadcrumb>
-              )}
-            </div>
+                  </>
+                )}
+              </BreadcrumbList>
+            </Breadcrumb>
+            {!activeSessionId && build.status_label && (
+              <Badge variant="secondary">{build.status_label}</Badge>
+            )}
+          </div>
+        )}
+
+        {/* 스크롤 영역 — pr-4로 스크롤바와 콘텐츠 겹침 방지 */}
+        <div className="flex-1 min-h-0 overflow-y-auto pr-4">
+          {activeSessionId ? (
             <SimulatorViewer
               sessionId={activeSessionId}
               deviceId={deviceId}
               buildId={build?.id}
               onRecordingUploaded={() => setRecordingsKey((k) => k + 1)}
             />
-          </>
-        ) : (
-          <div className="flex flex-col gap-6">
-            {build && (
-              <div className="flex items-center gap-3">
-                <Breadcrumb>
-                  <BreadcrumbList>
-                    <BreadcrumbItem>
-                      <BreadcrumbLink asChild>
-                        <button onClick={() => navigate(`/app-center?appId=${build.app_id}`)}>
-                          {build.name}
-                        </button>
-                      </BreadcrumbLink>
-                    </BreadcrumbItem>
-                    <BreadcrumbSeparator />
-                    <BreadcrumbItem>
-                      <BreadcrumbPage>{buildLabel(build)}</BreadcrumbPage>
-                    </BreadcrumbItem>
-                  </BreadcrumbList>
-                </Breadcrumb>
-                {build.status_label && <Badge variant="secondary">{build.status_label}</Badge>}
-              </div>
-            )}
-
+          ) : (
             <div className="flex flex-col gap-5">
               <h1 className="text-xl font-semibold tracking-tight">Select device</h1>
 
@@ -259,8 +250,8 @@ export function QASession() {
 
               {status && <p className="text-sm text-muted-foreground">{status}</p>}
             </div>
-          </div>
-        )}
+          )}
+        </div>
       </div>
 
       {buildId && (
