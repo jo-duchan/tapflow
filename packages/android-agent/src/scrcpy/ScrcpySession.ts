@@ -70,7 +70,9 @@ export class ScrcpySession {
       'video_codec=h264',
       'video_bit_rate=2000000',
       'max_size=1280',
+      'max_fps=30',
       'audio=false',
+      'stay_awake=true',         // prevent device display from sleeping during capture
       'send_device_meta=true',   // 64-byte name + codec-id + width + height header
       'send_frame_meta=false',   // raw Annex B stream (no length prefix per frame)
       'send_dummy_byte=false',   // skip the 1-byte connection-check byte

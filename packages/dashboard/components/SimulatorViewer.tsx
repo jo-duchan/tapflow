@@ -44,6 +44,8 @@ export function SimulatorViewer({ sessionId, deviceId, buildId, onRecordingUploa
 
   const [canvasReady, setCanvasReady] = useState(false);
   const [pinchActive, setPinchActive] = useState(false);
+  const videoSizeRef = useRef<{ width: number; height: number } | null>(null);
+  const [videoSize, setVideoSize] = useState<{ width: number; height: number } | null>(null);
 
   // ── recording state ───────────────────────────────────────────────────────
   const [recordState, setRecordState] = useState<'idle' | 'recording' | 'uploading' | 'done'>('idle');
@@ -110,9 +112,16 @@ export function SimulatorViewer({ sessionId, deviceId, buildId, onRecordingUploa
     const canvas = canvasRef.current;
     const ctx = canvas?.getContext('2d');
     if (!canvas || !ctx) { frame.close(); return; }
-    if (canvas.width !== frame.displayWidth || canvas.height !== frame.displayHeight) {
-      canvas.width = frame.displayWidth ?? canvas.width;
-      canvas.height = frame.displayHeight ?? canvas.height;
+    const fw = frame.displayWidth ?? canvas.width;
+    const fh = frame.displayHeight ?? canvas.height;
+    if (canvas.width !== fw || canvas.height !== fh) {
+      canvas.width = fw;
+      canvas.height = fh;
+      const prev = videoSizeRef.current;
+      if (!prev || prev.width !== fw || prev.height !== fh) {
+        videoSizeRef.current = { width: fw, height: fh };
+        setVideoSize({ width: fw, height: fh });
+      }
     }
     ctx.drawImage(frame, 0, 0);
     frame.close();
@@ -136,6 +145,8 @@ export function SimulatorViewer({ sessionId, deviceId, buildId, onRecordingUploa
         setInstallError(null);
         setBootError(null);
         setCanvasReady(false);
+        videoSizeRef.current = null;
+        setVideoSize(null);
         deviceSeq.current += 1;
         h264DecoderRef.current?.close();
         h264DecoderRef.current = null;
@@ -749,6 +760,11 @@ export function SimulatorViewer({ sessionId, deviceId, buildId, onRecordingUploa
 
   const cssCornerRadius = iosChrome ? Math.round((iosChrome.screenCornerRadius / 2) * displayScale) : 0;
 
+  const MAX_ANDROID_H = 700;
+  const androidScale = videoSize ? Math.min(1, MAX_ANDROID_H / videoSize.height) : 1;
+  const androidDisplayW = videoSize ? Math.round(videoSize.width * androidScale) : 300;
+  const androidDisplayH = videoSize ? Math.round(videoSize.height * androidScale) : 560;
+
   const fpsColor = fps >= 30 ? '#10b981' : fps >= 15 ? '#f59e0b' : fps > 0 ? '#ef4444' : '#6b7280';
 
   function getStatusText(): string | null {
@@ -785,23 +801,56 @@ export function SimulatorViewer({ sessionId, deviceId, buildId, onRecordingUploa
               </Tooltip>
             )}
 
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <Button variant="ghost" size="icon" className="h-8 w-8" onClick={handleSoftHome}>
-                  <Home className="h-4 w-4" />
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent side="left">Home</TooltipContent>
-            </Tooltip>
+            {androidButtons ? (
+              <>
+                {androidButtons.map((btn) => (
+                  <Tooltip key={btn.name}>
+                    <TooltipTrigger asChild>
+                      <Button
+                        variant="ghost" size="icon" className="h-8 w-8"
+                        onClick={() => send({ type: 'input:button', sessionId, payload: { name: btn.name } })}
+                      >
+                        {btn.name === 'back' ? <ArrowLeft className="h-4 w-4" />
+                          : btn.name === 'recent_apps' ? <LayoutGrid className="h-4 w-4" />
+                          : btn.name === 'volume_up' ? <Volume2 className="h-4 w-4" />
+                          : btn.name === 'volume_down' ? <Volume1 className="h-4 w-4" />
+                          : btn.name === 'power' ? <Power className="h-4 w-4" />
+                          : <Home className="h-4 w-4" />}
+                      </Button>
+                    </TooltipTrigger>
+                    <TooltipContent side="left">{btn.accessibilityTitle}</TooltipContent>
+                  </Tooltip>
+                ))}
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Button variant="ghost" size="icon" className="h-8 w-8" onClick={handleKeyboardToggle}>
+                      <Keyboard className="h-4 w-4" />
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent side="left">Keyboard</TooltipContent>
+                </Tooltip>
+              </>
+            ) : (
+              <>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Button variant="ghost" size="icon" className="h-8 w-8" onClick={handleSoftHome}>
+                      <Home className="h-4 w-4" />
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent side="left">Home</TooltipContent>
+                </Tooltip>
 
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <Button variant="ghost" size="icon" className="h-8 w-8" onClick={handleKeyboardToggle}>
-                  <Keyboard className="h-4 w-4" />
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent side="left">Software keyboard</TooltipContent>
-            </Tooltip>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Button variant="ghost" size="icon" className="h-8 w-8" onClick={handleKeyboardToggle}>
+                      <Keyboard className="h-4 w-4" />
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent side="left">Software keyboard</TooltipContent>
+                </Tooltip>
+              </>
+            )}
 
             <div className="w-4 h-px bg-border my-1" />
 
@@ -1003,49 +1052,55 @@ export function SimulatorViewer({ sessionId, deviceId, buildId, onRecordingUploa
           </div>
         </div>
       ) : (
-        <div className="flex flex-col items-center gap-2">
-          <div className="relative" style={{ minWidth: 300, minHeight: 560, backgroundColor: '#010101', borderRadius: '10%' }}>
-            <canvas
-              ref={canvasRef}
-              className="block w-full h-full cursor-crosshair"
-              style={{ borderRadius: '10%', visibility: canvasReady ? 'visible' : 'hidden' }}
-              onPointerDown={handlePointerDown}
-              onPointerMove={handlePointerMove}
-              onPointerUp={handlePointerUp}
-              onPointerCancel={handlePointerCancel}
-            />
-            {!canvasReady && (
-              <div className="absolute inset-0 animate-pulse bg-zinc-900/60" style={{ borderRadius: '10%' }} />
-            )}
-            {joined && fps === 0 && canvasReady && (
-              <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-                <span style={{ color: 'white', fontSize: '0.875rem' }}>Waiting for first frame...</span>
-              </div>
-            )}
-          </div>
-          {androidButtons && (
-            <div className="flex items-center justify-center gap-1 rounded-xl border bg-background/90 backdrop-blur-sm px-2 py-1.5">
-              {androidButtons.map((btn) => (
-                <TooltipProvider key={btn.name} delayDuration={400}>
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <Button
-                        variant="ghost" size="icon" className="h-8 w-8"
-                        onClick={() => send({ type: 'input:button', sessionId, payload: { name: btn.name } })}
-                      >
-                        {btn.name === 'back' ? <ArrowLeft className="h-4 w-4" />
-                          : btn.name === 'recent_apps' ? <LayoutGrid className="h-4 w-4" />
-                          : btn.name === 'volume_up' ? <Volume2 className="h-4 w-4" />
-                          : btn.name === 'volume_down' ? <Volume1 className="h-4 w-4" />
-                          : btn.name === 'power' ? <Power className="h-4 w-4" />
-                          : <Home className="h-4 w-4" />}
-                      </Button>
-                    </TooltipTrigger>
-                    <TooltipContent side="bottom">{btn.accessibilityTitle}</TooltipContent>
-                  </Tooltip>
-                </TooltipProvider>
-              ))}
+        <div
+          ref={containerRef}
+          className="relative"
+          style={{ width: androidDisplayW, height: androidDisplayH, backgroundColor: '#010101', borderRadius: '28px', flexShrink: 0 }}
+        >
+          <canvas
+            ref={canvasRef}
+            className="block w-full h-full"
+            style={{ borderRadius: '28px', visibility: canvasReady ? 'visible' : 'hidden', cursor: 'none' }}
+            onPointerDown={handlePointerDown}
+            onPointerMove={handlePointerMove}
+            onPointerUp={handlePointerUp}
+            onPointerCancel={handlePointerCancel}
+            onPointerLeave={handlePointerLeave}
+          />
+          {!canvasReady && (
+            <div className="absolute inset-0 animate-pulse bg-zinc-800" style={{ borderRadius: '28px' }} />
+          )}
+          {!canvasReady && deviceReady && (
+            <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+              <span style={{ color: 'rgba(255,255,255,0.6)', fontSize: '0.875rem' }}>Waiting for stream…</span>
             </div>
+          )}
+          <div
+            ref={liveCursorRef}
+            style={{
+              display: 'none',
+              position: 'absolute',
+              zIndex: 20,
+              borderRadius: '50%',
+              transform: 'translate(-50%, -50%)',
+              pointerEvents: 'none',
+              transition: 'width 0.1s ease, height 0.1s ease, background 0.1s ease, box-shadow 0.1s ease',
+            }}
+          />
+          {pinchHint && (
+            <>
+              {([pinchHint.f0, pinchHint.f1] as const).map((f, i) => (
+                <div key={i} style={{
+                  position: 'absolute', zIndex: 10, borderRadius: '50%',
+                  transform: 'translate(-50%, -50%)', pointerEvents: 'none',
+                  transition: 'width 0.1s ease, height 0.1s ease, background 0.1s ease',
+                  left: `${f.x * 100}%`, top: `${f.y * 100}%`,
+                  ...(pinchActive
+                    ? { width: CURSOR_DOT_R * 2, height: CURSOR_DOT_R * 2, background: 'rgba(255,255,255,0.92)', border: '1.5px solid rgba(0,0,0,0.2)', boxShadow: '0 0 0 1px rgba(0,0,0,0.15), 0 0 8px rgba(255,255,255,0.25)' }
+                    : { width: CURSOR_RING_R * 2, height: CURSOR_RING_R * 2, background: 'transparent', border: '1.5px solid rgba(255,255,255,0.6)', boxShadow: '0 0 0 1px rgba(0,0,0,0.3)' }),
+                }} />
+              ))}
+            </>
           )}
         </div>
       )}

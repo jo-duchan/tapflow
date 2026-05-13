@@ -388,11 +388,58 @@ export class AndroidAgent implements DeviceAgent {
         state.touchHelper.pressButton(name)
         break
       }
-      case 'input:keyboard:toggle':
-      case 'input:key':
-        console.warn(`[android-agent] ${msg.type} not supported yet`)
+      case 'input:keyboard:toggle': {
+        const state = this.deviceStates.get(msg.sessionId!)
+        const serial = state ? this.adb.getSerial(state.deviceId) : undefined
+        if (serial) this.adb.sendKeyEvent(serial, '82').catch(() => {}) // KEYCODE_MENU
         break
+      }
+      case 'input:key': {
+        const state = this.deviceStates.get(msg.sessionId!)
+        const serial = state ? this.adb.getSerial(state.deviceId) : undefined
+        if (!serial) break
+        const { code, modifiers } = msg.payload as { code: string; modifiers: number }
+        this.handleKeyInput(serial, code, modifiers).catch(() => {})
+        break
+      }
     }
+  }
+
+  private async handleKeyInput(serial: string, code: string, modifiers: number): Promise<void> {
+    const SPECIAL: Record<string, string> = {
+      Backspace: '67', Enter: '66', Tab: '61', Space: '62', Escape: '111',
+      ArrowLeft: '21', ArrowRight: '22', ArrowUp: '19', ArrowDown: '20',
+      Delete: '112', Home: '122', End: '123', PageUp: '92', PageDown: '93',
+      F1: '131', F2: '132', F3: '133', F4: '134', F5: '135',
+      F6: '136', F7: '137', F8: '138', F9: '139', F10: '140', F11: '141', F12: '142',
+    }
+    if (SPECIAL[code]) {
+      await this.adb.sendKeyEvent(serial, SPECIAL[code])
+      return
+    }
+    const shift = Boolean(modifiers & 0x02)
+    let char: string | null = null
+    if (code.startsWith('Key')) {
+      const letter = code.slice(3)
+      char = shift ? letter.toUpperCase() : letter.toLowerCase()
+    } else if (code.startsWith('Digit')) {
+      const digit = code.slice(5)
+      const shiftDigits: Record<string, string> = {
+        '1': '!', '2': '@', '3': '#', '4': '$', '5': '%',
+        '6': '^', '7': '&', '8': '*', '9': '(', '0': ')',
+      }
+      char = shift ? (shiftDigits[digit] ?? digit) : digit
+    } else {
+      const PUNCT: Record<string, [string, string]> = {
+        Minus: ['-', '_'], Equal: ['=', '+'],
+        BracketLeft: ['[', '{'], BracketRight: [']', '}'],
+        Backslash: ['\\', '|'], Semicolon: [';', ':'],
+        Quote: ["'", '"'], Comma: [',', '<'],
+        Period: ['.', '>'], Slash: ['/', '?'], Backquote: ['`', '~'],
+      }
+      if (PUNCT[code]) char = shift ? PUNCT[code][1] : PUNCT[code][0]
+    }
+    if (char) await this.adb.sendInput(serial, 'text', char)
   }
 
   listDevices(): Promise<Device[]> { return this.adb.listDevices() }
