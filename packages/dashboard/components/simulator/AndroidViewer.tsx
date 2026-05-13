@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { ArrowLeft, Home, Keyboard, LayoutGrid, Loader2, Play, Power, Volume1, Volume2 } from 'lucide-react';
+import { ArrowLeft, Home, LayoutGrid, Loader2, Play, Power, Volume1, Volume2 } from 'lucide-react';
 import { H264Decoder } from '@/lib/H264Decoder';
 import { useWebGLRenderer } from '@/lib/WebGLVideoRenderer';
 import { useFps } from '@/hooks/useFps';
@@ -15,7 +15,7 @@ const CURSOR_RING_R = 13;
 const CURSOR_DOT_R = 8;
 const MOVE_THROTTLE_MS = 16;
 const DRAG_THRESHOLD = 0.02;
-const MAX_ANDROID_H = 700;
+const MAX_ANDROID_LONG = 720;
 
 interface AndroidViewerProps {
   sessionId: string;
@@ -31,15 +31,18 @@ interface AndroidViewerProps {
   launching: boolean;
   setLaunching: (v: boolean) => void;
   androidButtons: AndroidButton[] | null;
-  binaryFrameHandlerRef: React.MutableRefObject<((data: ArrayBuffer) => void) | undefined>;
+  binaryFrameHandlerRef: React.RefObject<((data: ArrayBuffer) => void) | undefined>;
   onRecordingUploaded?: () => void;
+  screenWidth?: number;
+  screenHeight?: number;
 }
 
 export function AndroidViewer({
   sessionId, buildId, send, connected, joined,
-  deviceReady, installing, installed, installError, bootError,
+  deviceReady, installing, installError, bootError,
   launching, setLaunching, androidButtons,
   binaryFrameHandlerRef, onRecordingUploaded,
+  screenWidth, screenHeight,
 }: AndroidViewerProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -176,16 +179,6 @@ export function AndroidViewer({
     }
   }, [keyboardActive, send, sessionId])
 
-  useEffect(() => {
-    if (!keyboardActive) return
-    const onDown = (e: PointerEvent) => {
-      const area = containerRef.current
-      if (area && !area.contains(e.target as Node)) setKeyboardActive(false)
-    }
-    document.addEventListener('pointerdown', onDown)
-    return () => document.removeEventListener('pointerdown', onDown)
-  }, [keyboardActive])
-
   // ── Pointer interaction ───────────────────────────────────────────────────
   const toNorm = useCallback((e: { clientX: number; clientY: number }) => {
     const canvas = canvasRef.current
@@ -204,7 +197,6 @@ export function AndroidViewer({
   }, [toNorm])
 
   const handlePointerDown = useCallback((e: React.PointerEvent) => {
-    setKeyboardActive(true)
     if (isOptionHeld.current) {
       const fingers = toPinchFingers(e)
       if (!fingers) return
@@ -216,6 +208,7 @@ export function AndroidViewer({
     }
     const pos = toNorm(e)
     if (!pos) return
+    setKeyboardActive(true)
     touchStartPos.current = pos
     ;(e.target as Element).setPointerCapture(e.pointerId)
     const _rect = (e.currentTarget as Element).getBoundingClientRect()
@@ -305,9 +298,13 @@ export function AndroidViewer({
   }, [])
 
   // ── Layout ────────────────────────────────────────────────────────────────
-  const androidScale = videoSize ? Math.min(1, MAX_ANDROID_H / videoSize.height) : 1;
-  const androidDisplayW = videoSize ? Math.round(videoSize.width * androidScale) : 300;
-  const androidDisplayH = videoSize ? Math.round(videoSize.height * androidScale) : 560;
+  // Scale by longest side so portrait and landscape stay the same physical size on screen
+  const effectiveSize = videoSize ?? (screenWidth && screenHeight ? { width: screenWidth, height: screenHeight } : null);
+  const androidScale = effectiveSize
+    ? Math.min(1, MAX_ANDROID_LONG / Math.max(effectiveSize.width, effectiveSize.height))
+    : 0.3;
+  const androidDisplayW = effectiveSize ? Math.round(effectiveSize.width * androidScale) : 324;
+  const androidDisplayH = effectiveSize ? Math.round(effectiveSize.height * androidScale) : 720;
 
   const platformSlot = (
     <>
@@ -328,29 +325,21 @@ export function AndroidViewer({
           <TooltipContent side="left">{btn.accessibilityTitle}</TooltipContent>
         </Tooltip>
       ))}
-      <Tooltip>
-        <TooltipTrigger asChild>
-          <Button variant="ghost" size="icon" className="h-8 w-8"
-            onClick={() => send({ type: 'input:keyboard:toggle', sessionId })}
-          >
-            <Keyboard className="h-4 w-4" />
-          </Button>
-        </TooltipTrigger>
-        <TooltipContent side="left">Keyboard</TooltipContent>
-      </Tooltip>
     </>
   );
 
-  const launchSlot = installed && buildId ? (
+  const launchSlot = buildId ? (
     <Tooltip>
       <TooltipTrigger asChild>
-        <Button variant="ghost" size="icon" className="h-8 w-8" disabled={launching}
+        <Button variant="ghost" size="icon" className="h-8 w-8" disabled={launching || installing}
           onClick={() => { setLaunching(true); send({ type: 'app:launch', sessionId, buildId }) }}
         >
           {launching ? <Loader2 className="h-4 w-4 animate-spin" /> : <Play className="h-4 w-4" />}
         </Button>
       </TooltipTrigger>
-      <TooltipContent side="left">{launching ? 'Launching…' : 'Launch app'}</TooltipContent>
+      <TooltipContent side="left">
+        {launching ? 'Launching…' : installing ? 'Installing…' : 'Launch app'}
+      </TooltipContent>
     </Tooltip>
   ) : null;
 
@@ -377,10 +366,12 @@ export function AndroidViewer({
       />
 
       <div className="flex items-start gap-8">
+        {/* phone body bezel */}
+        <div style={{ background: '#1c1c1e', borderRadius: '34px', padding: '12px', flexShrink: 0, boxShadow: '0 8px 32px rgba(0,0,0,0.45), inset 0 1px 0 rgba(255,255,255,0.06)' }}>
         <div
           ref={containerRef}
           className="relative"
-          style={{ width: androidDisplayW, height: androidDisplayH, backgroundColor: '#010101', borderRadius: '28px', flexShrink: 0 }}
+          style={{ width: androidDisplayW, height: androidDisplayH, backgroundColor: '#010101', borderRadius: '22px', overflow: 'hidden' }}
         >
           {glError ? (
             <div className="absolute inset-0 flex items-center justify-center">
@@ -391,7 +382,7 @@ export function AndroidViewer({
               <canvas
                 ref={canvasRef}
                 className="block w-full h-full"
-                style={{ borderRadius: '28px', visibility: canvasReady ? 'visible' : 'hidden', cursor: 'none' }}
+                style={{ visibility: canvasReady ? 'visible' : 'hidden', cursor: 'none' }}
                 onPointerDown={handlePointerDown}
                 onPointerMove={handlePointerMove}
                 onPointerUp={handlePointerUp}
@@ -399,7 +390,7 @@ export function AndroidViewer({
                 onPointerLeave={handlePointerLeave}
               />
               {!canvasReady && (
-                <div className="absolute inset-0 animate-pulse bg-zinc-800" style={{ borderRadius: '28px' }} />
+                <div className="absolute inset-0 animate-pulse bg-zinc-800" />
               )}
               {!canvasReady && deviceReady && (
                 <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
@@ -432,6 +423,7 @@ export function AndroidViewer({
             </>
           )}
         </div>
+        </div>{/* /phone body bezel */}
 
         <SimulatorInfoCard
           joined={joined} fps={fps} connected={connected}

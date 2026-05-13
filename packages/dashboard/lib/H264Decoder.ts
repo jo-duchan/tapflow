@@ -25,7 +25,12 @@ export class H264Decoder {
     const nalType = nalData[0] & 0x1f
 
     if (nalType === 7) { // SPS
+      const changed = !this.sps || nal.length !== this.sps.length || nal.some((b, i) => b !== this.sps![i])
       this.sps = nal
+      if (changed && this.decoder) {
+        this.decoder.close()
+        this.decoder = null
+      }
       return
     }
     if (nalType === 8) { // PPS

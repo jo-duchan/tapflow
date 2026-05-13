@@ -2,6 +2,7 @@ import type { Socket } from 'net'
 
 const TYPE_INJECT_KEYCODE = 0
 const TYPE_INJECT_TOUCH_EVENT = 2
+const TYPE_ROTATE_DEVICE = 11
 
 const ACTION_DOWN = 0
 const ACTION_UP = 1
@@ -10,9 +11,14 @@ const ACTION_MOVE = 2
 export class ScrcpyControl {
   constructor(
     private readonly socket: Socket,
-    private readonly screenWidth: number,
-    private readonly screenHeight: number,
+    private screenWidth: number,
+    private screenHeight: number,
   ) {}
+
+  updateScreenSize(width: number, height: number): void {
+    this.screenWidth = width
+    this.screenHeight = height
+  }
 
   touchDown(pointerId: number, x: number, y: number): void {
     this.writeTouchEvent(ACTION_DOWN, pointerId, x, y)
@@ -24,6 +30,12 @@ export class ScrcpyControl {
 
   touchUp(pointerId: number, x = 0, y = 0): void {
     this.writeTouchEvent(ACTION_UP, pointerId, x, y)
+  }
+
+  rotateDevice(): void {
+    const buf = Buffer.allocUnsafe(1)
+    buf.writeUInt8(TYPE_ROTATE_DEVICE, 0)
+    this.socket.write(buf)
   }
 
   keyEvent(keyCode: number): void {

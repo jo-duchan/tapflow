@@ -140,12 +140,6 @@ export class AndroidAgent implements DeviceAgent {
         osVersion: device.osVersion ?? '',
       },
     }))
-
-    this.ws.send(JSON.stringify({
-      type: 'session:chrome',
-      sessionId: state.sessionId,
-      payload: { buttons: ANDROID_BUTTONS, streamType: 'h264' },
-    }))
   }
 
   private async startVideoStream(state: DeviceState, streamWs: WebSocket): Promise<void> {
@@ -253,6 +247,16 @@ export class AndroidAgent implements DeviceAgent {
 
       await this.startVideoStream(state, streamWs)
       if (seq !== state.bootSeq) return
+      this.ws?.send(JSON.stringify({
+        type: 'session:chrome',
+        sessionId: state.sessionId,
+        payload: {
+          buttons: ANDROID_BUTTONS,
+          streamType: 'h264',
+          screenWidth: state.displayWidth,
+          screenHeight: state.displayHeight,
+        },
+      }))
       this.ws?.send(JSON.stringify({ type: 'device:ready', sessionId, payload: { deviceId: avdId } }))
     } catch (e) {
       if (seq !== state.bootSeq) return
@@ -401,12 +405,16 @@ export class AndroidAgent implements DeviceAgent {
       case 'input:rotate': {
         const state = this.deviceStates.get(msg.sessionId!)
         if (!state) break
-        state.orientation = state.orientation === 'portrait' ? 'landscape' : 'portrait'
         const serial = this.adb.getSerial(state.deviceId)
-        if (serial) {
-          this.adb.setRotation(serial, state.orientation === 'landscape')
-            .catch((e) => console.error('[android-agent] rotate failed:', e))
-        }
+        if (!serial) break
+        const newOrientation = state.orientation === 'portrait' ? 'landscape' : 'portrait'
+        state.orientation = newOrientation
+        // Swap dimensions so subsequent touch events map correctly to the rotated screen
+        ;[state.displayWidth, state.displayHeight] = [state.displayHeight, state.displayWidth]
+        state.scrcpySession?.control.updateScreenSize(state.displayWidth, state.displayHeight)
+        this.adb.setRotation(serial, newOrientation === 'landscape').catch((e) => {
+          console.error('[android-agent] rotation failed:', (e as Error).message)
+        })
         break
       }
       case 'input:button': {
@@ -417,9 +425,7 @@ export class AndroidAgent implements DeviceAgent {
         break
       }
       case 'input:keyboard:toggle': {
-        const state = this.deviceStates.get(msg.sessionId!)
-        const serial = state ? this.adb.getSerial(state.deviceId) : undefined
-        if (serial) this.adb.sendKeyEvent(serial, '82').catch(() => {}) // KEYCODE_MENU
+        // client-side key forwarding toggle only — no ADB side effect needed
         break
       }
       case 'input:key': {

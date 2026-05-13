@@ -40,7 +40,11 @@ export function UploadBuildDialog({ onSuccess, appId }: Props) {
       if (appId) form.append('app_id', String(appId))
 
       const res = await fetch('/api/v1/builds', { method: 'POST', credentials: 'include', body: form })
-      if (!res.ok) { setError('Upload failed. Check the file format.'); return }
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({})) as { error?: string }
+        setError(body.error ?? 'Upload failed. Check the file format.')
+        return
+      }
       setOpen(false)
       setFile(null)
       setStatusLabel('none')
@@ -52,8 +56,13 @@ export function UploadBuildDialog({ onSuccess, appId }: Props) {
     }
   }
 
+  function handleOpenChange(next: boolean) {
+    setOpen(next)
+    if (!next) { setFile(null); setError(''); setStatusLabel('none') }
+  }
+
   return (
-    <Dialog open={open} onOpenChange={setOpen}>
+    <Dialog open={open} onOpenChange={handleOpenChange}>
       <DialogTrigger asChild>
         <Button size="sm"><Upload className="mr-2 h-4 w-4" />Upload build</Button>
       </DialogTrigger>

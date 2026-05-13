@@ -21,7 +21,7 @@ function getStatusText(props: SimulatorInfoCardProps): string | null {
   if (bootError) return `Boot failed: ${bootError.length > 40 ? bootError.slice(0, 40) + '…' : bootError}`;
   if (!deviceReady) return 'Starting device…';
   if (installing) return 'Installing app…';
-  if (installError) return `Install failed: ${installError.length > 22 ? installError.slice(0, 22) + '…' : installError}`;
+  if (installError) return `Install failed: ${installError}`;
   return null;
 }
 

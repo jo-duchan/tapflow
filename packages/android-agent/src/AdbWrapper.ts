@@ -99,7 +99,23 @@ export class AdbWrapper {
   }
 
   async installApp(serial: string, apkPath: string): Promise<void> {
-    await this.runner.exec('-s', serial, 'install', '-r', apkPath)
+    try {
+      await this.runner.exec('-s', serial, 'install', '-r', apkPath)
+    } catch (e) {
+      const stderr = (e as { stderr?: string }).stderr?.trim()
+      if (stderr) {
+        // "Failure [INSTALL_FAILED_...]" → show just the code
+        const failureMatch = stderr.match(/Failure\s*\[(.+?)\]/)
+        if (failureMatch) throw new Error(failureMatch[1])
+        // Strip "adb: failed to install <path>:" prefix and stack trace
+        const stripped = stderr
+          .replace(/^adb: failed to install [^:]+:\s*/, '')
+          .replace(/\s+at\s+[\w$.]+\([\w.]+:\d+\)[\s\S]*$/, '')
+          .trim()
+        throw new Error(stripped || stderr)
+      }
+      throw new Error((e as Error).message)
+    }
   }
 
   async launchApp(serial: string, packageName: string): Promise<void> {
@@ -114,6 +130,7 @@ export class AdbWrapper {
   }
 
   async setRotation(serial: string, landscape: boolean): Promise<void> {
+    await this.runner.exec('-s', serial, 'shell', 'settings', 'put', 'system', 'accelerometer_rotation', '0')
     await this.runner.exec(
       '-s', serial, 'shell', 'settings', 'put', 'system', 'user_rotation',
       landscape ? '1' : '0',
