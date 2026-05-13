@@ -14,11 +14,20 @@ import {
 } from '@/components/ui/select';
 import { Badge } from '@/components/ui/badge';
 import { Separator } from '@/components/ui/separator';
+import {
+  Breadcrumb, BreadcrumbItem, BreadcrumbLink,
+  BreadcrumbList, BreadcrumbPage, BreadcrumbSeparator,
+} from '@/components/ui/breadcrumb';
 import { ArrowLeft } from 'lucide-react';
 import { getBuild } from '@/lib/queries';
 import { cn } from '@/lib/utils';
 import { SearchInput } from '@/components/ui/search-input';
 import type { AgentDevice, Build, RelayMessage, SessionInfo } from '@/lib/types';
+
+function buildLabel(build: Build): string {
+  if (build.version_name && build.build_number) return `${build.version_name} · build ${build.build_number}`
+  return build.version_name ?? build.version_label ?? (build.build_number ? `build ${build.build_number}` : 'Build')
+}
 
 export function QASession() {
   const [searchParams] = useSearchParams();
@@ -68,6 +77,10 @@ export function QASession() {
   const os = build?.platform ?? 'ios';
   const allDevices = sessions.flatMap((s) => s.devices);
   const filteredDevices = allDevices.filter((d) => d.platform === os);
+  const selectedDevice = allDevices.find((d) => d.id === deviceId);
+  const deviceLabel = selectedDevice
+    ? `${selectedDevice.name}${selectedDevice.osVersion ? ` · ${selectedDevice.osVersion}` : ''}`
+    : '';
 
   const osVersions = [
     ...new Set(filteredDevices.map((d) => d.osVersion).filter(Boolean)),
@@ -102,16 +115,32 @@ export function QASession() {
       <div className="flex flex-col gap-3 flex-1 min-w-0">
         {activeSessionId ? (
           <>
-            <div className="flex w-full items-center gap-3">
-              <Button variant="ghost" size="sm" onClick={handleBack}>
-                <ArrowLeft className="mr-1 h-4 w-4" />
-                Back
+            <div className="flex w-full items-center gap-2">
+              <Button variant="ghost" size="icon" className="h-7 w-7 shrink-0" onClick={handleBack}>
+                <ArrowLeft className="h-4 w-4" />
               </Button>
               {build && (
-                <span className="text-sm text-muted-foreground">
-                  {build.name}
-                  {build.version_label ? ` · ${build.version_label}` : ''}
-                </span>
+                <Breadcrumb>
+                  <BreadcrumbList>
+                    <BreadcrumbItem>
+                      <BreadcrumbLink asChild>
+                        <button onClick={() => navigate(`/app-center?appId=${build.app_id}`)}>
+                          {build.name}
+                        </button>
+                      </BreadcrumbLink>
+                    </BreadcrumbItem>
+                    <BreadcrumbSeparator />
+                    <BreadcrumbItem>
+                      <BreadcrumbLink asChild>
+                        <button onClick={handleBack}>{buildLabel(build)}</button>
+                      </BreadcrumbLink>
+                    </BreadcrumbItem>
+                    <BreadcrumbSeparator />
+                    <BreadcrumbItem>
+                      <BreadcrumbPage>{deviceLabel}</BreadcrumbPage>
+                    </BreadcrumbItem>
+                  </BreadcrumbList>
+                </Breadcrumb>
               )}
             </div>
             <SimulatorViewer
@@ -125,19 +154,26 @@ export function QASession() {
           </>
         ) : (
           <div className="flex flex-col gap-6">
-            <div className="flex items-center gap-3">
-              <Button variant="ghost" size="sm" onClick={() => navigate(-1)}>
-                <ArrowLeft className="mr-1 h-4 w-4" />
-                Back
-              </Button>
-              {build && (
-                <div className="flex items-center gap-2">
-                  <span className="font-medium">{build.name}</span>
-                  {build.version_label && <Badge variant="outline">{build.version_label}</Badge>}
-                  {build.status_label && <Badge variant="secondary">{build.status_label}</Badge>}
-                </div>
-              )}
-            </div>
+            {build && (
+              <div className="flex items-center gap-3">
+                <Breadcrumb>
+                  <BreadcrumbList>
+                    <BreadcrumbItem>
+                      <BreadcrumbLink asChild>
+                        <button onClick={() => navigate(`/app-center?appId=${build.app_id}`)}>
+                          {build.name}
+                        </button>
+                      </BreadcrumbLink>
+                    </BreadcrumbItem>
+                    <BreadcrumbSeparator />
+                    <BreadcrumbItem>
+                      <BreadcrumbPage>{buildLabel(build)}</BreadcrumbPage>
+                    </BreadcrumbItem>
+                  </BreadcrumbList>
+                </Breadcrumb>
+                {build.status_label && <Badge variant="secondary">{build.status_label}</Badge>}
+              </div>
+            )}
 
             <div className="flex flex-col gap-5">
               <h1 className="text-xl font-semibold tracking-tight">Select device</h1>
