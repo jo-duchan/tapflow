@@ -22,6 +22,7 @@ export function handleUploadRecording(
 
   const u = new URL(req.url ?? '/', 'http://x')
   const sessionId = u.searchParams.get('sessionId') ?? null
+  const buildId = u.searchParams.get('buildId') ? Number(u.searchParams.get('buildId')) : null
 
   fs.mkdirSync(recordingsDir, { recursive: true })
 
@@ -50,9 +51,9 @@ export function handleUploadRecording(
         const stat = fs.statSync(filePath)
         const db = getDb()
         db.prepare(`
-          INSERT INTO recordings (filename, session_id, uploader_id, file_size, mime, expires_at)
-          VALUES (?, ?, ?, ?, ?, ?)
-        `).run(filename, sessionId, auth.userId, stat.size, mime, expiresAt())
+          INSERT INTO recordings (filename, session_id, build_id, uploader_id, file_size, mime, expires_at)
+          VALUES (?, ?, ?, ?, ?, ?, ?)
+        `).run(filename, sessionId, buildId, auth.userId, stat.size, mime, expiresAt())
         res.writeHead(200, { 'Content-Type': 'application/json' })
         res.end(JSON.stringify({ url: `/api/v1/recordings/${filename}` }))
       })
@@ -70,16 +71,16 @@ export function handleListRecordings(
   if (!auth) return
 
   const u = new URL(req.url ?? '/', 'http://x')
-  const sessionId = u.searchParams.get('sessionId')
+  const buildId = u.searchParams.get('buildId')
 
   const db = getDb()
-  const rows = sessionId
+  const rows = buildId
     ? db.prepare(`
         SELECT id, filename, session_id, file_size, mime, created_at, expires_at
         FROM recordings
-        WHERE expires_at > datetime('now') AND session_id = ?
+        WHERE expires_at > datetime('now') AND build_id = ?
         ORDER BY created_at DESC
-      `).all(sessionId)
+      `).all(Number(buildId))
     : db.prepare(`
         SELECT id, filename, session_id, file_size, mime, created_at, expires_at
         FROM recordings

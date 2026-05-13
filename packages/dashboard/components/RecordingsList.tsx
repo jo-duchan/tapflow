@@ -1,12 +1,12 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { Download, Film } from 'lucide-react';
+import { Download } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import type { Recording } from '@/lib/types';
 
 interface Props {
-  sessionId: string;
+  buildId: number;
   refreshKey?: number;
 }
 
@@ -33,20 +33,20 @@ function formatExpiry(iso: string): { label: string; urgent: boolean } {
   return { label: `Expires in ${Math.floor(h / 24)}d`, urgent: false };
 }
 
-export function RecordingsList({ sessionId, refreshKey }: Props) {
+export function RecordingsList({ buildId, refreshKey }: Props) {
   const [recordings, setRecordings] = useState<Recording[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     setLoading(true);
-    fetch(`/api/v1/recordings?sessionId=${encodeURIComponent(sessionId)}`, {
+    fetch(`/api/v1/recordings?buildId=${buildId}`, {
       credentials: 'include',
     })
       .then((r) => (r.ok ? r.json() : []))
       .then((data: Recording[]) => setRecordings(data))
       .catch(() => setRecordings([]))
       .finally(() => setLoading(false));
-  }, [sessionId, refreshKey]);
+  }, [buildId, refreshKey]);
 
   if (loading) {
     return <p className="text-xs text-muted-foreground">Loading recordings…</p>;
@@ -54,10 +54,7 @@ export function RecordingsList({ sessionId, refreshKey }: Props) {
 
   if (recordings.length === 0) {
     return (
-      <div className="flex items-center gap-2 text-xs text-muted-foreground py-1">
-        <Film className="h-3.5 w-3.5 shrink-0" />
-        <span>No recordings for this session</span>
-      </div>
+      <p className="py-8 text-center text-sm text-muted-foreground">No recordings yet.</p>
     );
   }
 

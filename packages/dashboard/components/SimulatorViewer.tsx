@@ -302,7 +302,9 @@ export function SimulatorViewer({ sessionId, deviceId, buildId, onRecordingUploa
     formData.append('file', blob, `tapflow-${Date.now()}${ext}`);
 
     try {
-      const res = await fetch(`/api/v1/recordings/upload?sessionId=${sessionId}`, {
+      const params = new URLSearchParams({ sessionId })
+      if (buildId) params.set('buildId', String(buildId))
+      const res = await fetch(`/api/v1/recordings/upload?${params}`, {
         method: 'POST',
         credentials: 'include',
         body: formData,

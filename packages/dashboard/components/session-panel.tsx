@@ -5,11 +5,10 @@ import { RecordingsList } from '@/components/RecordingsList'
 
 interface Props {
   buildId: number
-  sessionId: string | null
   recordingsRefreshKey?: number
 }
 
-export function SessionPanel({ buildId, sessionId, recordingsRefreshKey = 0 }: Props) {
+export function SessionPanel({ buildId, recordingsRefreshKey = 0 }: Props) {
   return (
     <Tabs defaultValue="comments" className="flex h-full flex-col">
       <TabsList className="w-full shrink-0">
@@ -28,13 +27,7 @@ export function SessionPanel({ buildId, sessionId, recordingsRefreshKey = 0 }: P
       </TabsContent>
 
       <TabsContent value="recordings" className="mt-3 min-h-0 flex-1 overflow-y-auto">
-        {sessionId ? (
-          <RecordingsList sessionId={sessionId} refreshKey={recordingsRefreshKey} />
-        ) : (
-          <p className="py-8 text-center text-sm text-muted-foreground">
-            세션을 시작하면 녹화 목록이 표시됩니다.
-          </p>
-        )}
+        <RecordingsList buildId={buildId} refreshKey={recordingsRefreshKey} />
       </TabsContent>
     </Tabs>
   )

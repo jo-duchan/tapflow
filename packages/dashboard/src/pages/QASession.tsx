@@ -266,7 +266,6 @@ export function QASession() {
           <div className="w-80 shrink-0 h-full">
             <SessionPanel
               buildId={Number(buildId)}
-              sessionId={activeSessionId}
               recordingsRefreshKey={recordingsKey}
             />
           </div>
