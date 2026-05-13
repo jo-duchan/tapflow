@@ -268,15 +268,15 @@ export function DefaultSettings() {
           <CardContent>
             <div className="flex flex-col gap-4">
               {apps.map((app) => (
-                <div key={app.id} className="flex items-end gap-2">
-                  <div className="flex-1 grid gap-1.5">
-                    <Input
-                      id={`app-${app.id}`}
-                      value={appNames[app.id] ?? ''}
-                      onChange={(e) => setAppNames((p) => ({ ...p, [app.id]: e.target.value }))}
-                    />
+                <div key={app.id} className="flex flex-col gap-1.5">
+                  <Input
+                    id={`app-${app.id}`}
+                    value={appNames[app.id] ?? ''}
+                    onChange={(e) => setAppNames((p) => ({ ...p, [app.id]: e.target.value }))}
+                  />
+                  <div className="flex items-center justify-between">
                     <div className="flex items-center gap-2">
-                      <Label htmlFor={`app-${app.id}`} className="text-xs text-muted-foreground font-normal">{app.bundle_id_key}</Label>
+                      <span className="text-xs text-muted-foreground font-mono">{app.bundle_id_key}</span>
                       <Badge
                         tone={app.platform === 'ios' ? 'ios' : app.platform === 'android' ? 'android' : undefined}
                         variant={app.platform === 'both' ? 'secondary' : undefined}
@@ -285,40 +285,41 @@ export function DefaultSettings() {
                         {app.platform}
                       </Badge>
                     </div>
-                  </div>
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    className="w-20"
-                    disabled={appsSaving[app.id]}
-                    onClick={() => handleAppNameSave(app.id)}
-                  >
-                    {appsSaved[app.id] ? 'Saved!' : appsSaving[app.id] ? 'Saving…' : 'Save'}
-                  </Button>
-                  <AlertDialog>
-                    <AlertDialogTrigger asChild>
-                      <Button size="sm" variant="destructive" className="w-20" disabled={appsDeleting[app.id]}>
-                        {appsDeleting[app.id] ? 'Deleting…' : 'Delete'}
+                    <div className="flex items-center gap-2">
+                      <Button
+                        size="nav"
+                        variant="outline"
+                        disabled={appsSaving[app.id]}
+                        onClick={() => handleAppNameSave(app.id)}
+                      >
+                        {appsSaved[app.id] ? 'Saved!' : appsSaving[app.id] ? 'Saving…' : 'Save'}
                       </Button>
-                    </AlertDialogTrigger>
-                    <AlertDialogContent>
-                      <AlertDialogHeader>
-                        <AlertDialogTitle>Delete app?</AlertDialogTitle>
-                        <AlertDialogDescription>
-                          This will permanently delete <strong>{app.name}</strong> and all its builds. This action cannot be undone.
-                        </AlertDialogDescription>
-                      </AlertDialogHeader>
-                      <AlertDialogFooter>
-                        <AlertDialogCancel className="w-24">Cancel</AlertDialogCancel>
-                        <AlertDialogAction
-                          className={cn(buttonVariants({ variant: 'destructive' }), 'w-24')}
-                          onClick={() => handleAppDelete(app.id)}
-                        >
-                          Delete
-                        </AlertDialogAction>
-                      </AlertDialogFooter>
-                    </AlertDialogContent>
-                  </AlertDialog>
+                      <AlertDialog>
+                        <AlertDialogTrigger asChild>
+                          <Button size="nav" variant="destructive" disabled={appsDeleting[app.id]}>
+                            {appsDeleting[app.id] ? 'Deleting…' : 'Delete'}
+                          </Button>
+                        </AlertDialogTrigger>
+                        <AlertDialogContent>
+                          <AlertDialogHeader>
+                            <AlertDialogTitle>Delete app?</AlertDialogTitle>
+                            <AlertDialogDescription>
+                              This will permanently delete <strong>{app.name}</strong> and all its builds. This action cannot be undone.
+                            </AlertDialogDescription>
+                          </AlertDialogHeader>
+                          <AlertDialogFooter>
+                            <AlertDialogCancel className="w-24">Cancel</AlertDialogCancel>
+                            <AlertDialogAction
+                              className={cn(buttonVariants({ variant: 'destructive' }), 'w-24')}
+                              onClick={() => handleAppDelete(app.id)}
+                            >
+                              Delete
+                            </AlertDialogAction>
+                          </AlertDialogFooter>
+                        </AlertDialogContent>
+                      </AlertDialog>
+                    </div>
+                  </div>
                 </div>
               ))}
             </div>
