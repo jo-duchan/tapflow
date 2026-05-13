@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
-import { Button } from '@/components/ui/button'
+import { Button, buttonVariants } from '@/components/ui/button'
+import { cn } from '@/lib/utils'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
@@ -303,7 +304,7 @@ export function DefaultSettings() {
                       <AlertDialogFooter>
                         <AlertDialogCancel className="w-24">Cancel</AlertDialogCancel>
                         <AlertDialogAction
-                          className="w-24 bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                          className={cn(buttonVariants({ variant: 'destructive' }), 'w-24')}
                           onClick={() => handleAppDelete(app.id)}
                         >
                           Delete
