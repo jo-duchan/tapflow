@@ -111,7 +111,7 @@ export function TokenSettings() {
                   <TableCell colSpan={5} className="h-20 text-center text-muted-foreground">No tokens yet.</TableCell>
                 </TableRow>
               ) : tokens.map((t) => (
-                <TableRow key={t.id}>
+                <TableRow key={t.id} className="hover:bg-transparent">
                   <TableCell className="font-medium">{t.name}</TableCell>
                   <TableCell><Badge variant="outline">{t.scope}</Badge></TableCell>
                   <TableCell className="text-muted-foreground text-sm">{t.last_used_at ? new Date(t.last_used_at).toLocaleDateString() : 'Never'}</TableCell>

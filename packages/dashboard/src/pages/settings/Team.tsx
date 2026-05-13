@@ -126,7 +126,7 @@ export function TeamSettings() {
             </TableHeader>
             <TableBody>
               {members.map((m) => (
-                <TableRow key={m.id}>
+                <TableRow key={m.id} className="hover:bg-transparent">
                   <TableCell>
                     <div className="font-medium">{m.display_name || m.email}</div>
                     <div className="text-xs text-muted-foreground">{m.email}</div>
