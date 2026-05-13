@@ -118,7 +118,8 @@ export function TeamSettings() {
           <Table>
             <TableHeader>
               <TableRow>
-                <TableHead>Member</TableHead>
+                <TableHead>Nickname</TableHead>
+                <TableHead>Email</TableHead>
                 <TableHead>Role</TableHead>
                 <TableHead>Joined</TableHead>
                 <TableHead className="w-10" />
@@ -127,10 +128,8 @@ export function TeamSettings() {
             <TableBody>
               {members.map((m) => (
                 <TableRow key={m.id} className="hover:bg-transparent">
-                  <TableCell>
-                    <div className="font-medium">{m.display_name || m.email}</div>
-                    <div className="text-xs text-muted-foreground">{m.email}</div>
-                  </TableCell>
+                  <TableCell className="font-medium">{m.display_name || '—'}</TableCell>
+                  <TableCell className="text-muted-foreground text-sm">{m.email}</TableCell>
                   <TableCell>
                     <Select value={m.role} onValueChange={(r) => handleRoleChange(m.id, r)}>
                       <SelectTrigger className="h-7 w-28"><SelectValue /></SelectTrigger>
