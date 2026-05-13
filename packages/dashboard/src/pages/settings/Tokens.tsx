@@ -81,7 +81,7 @@ export function TokenSettings() {
                   <Label htmlFor="expires">Expires in (days)</Label>
                   <Input id="expires" type="number" min="1" max="365" value={expiresDays} onChange={(e) => setExpiresDays(e.target.value)} />
                 </div>
-                <p className="text-xs text-muted-foreground">Scope: <Badge>builds:write</Badge></p>
+                <p className="text-xs text-muted-foreground">Scope: <Badge variant="secondary">builds:write</Badge></p>
                 <Button type="submit" disabled={creating}>{creating ? 'Creating…' : 'Create token'}</Button>
               </form>
             )}
@@ -113,7 +113,7 @@ export function TokenSettings() {
               ) : tokens.map((t) => (
                 <TableRow key={t.id} className="hover:bg-transparent">
                   <TableCell className="font-medium">{t.name}</TableCell>
-                  <TableCell><Badge>{t.scope}</Badge></TableCell>
+                  <TableCell><Badge variant="secondary">{t.scope}</Badge></TableCell>
                   <TableCell className="text-muted-foreground text-sm">{t.last_used_at ? new Date(t.last_used_at).toLocaleDateString() : 'Never'}</TableCell>
                   <TableCell>
                     {t.expires_at ? (
