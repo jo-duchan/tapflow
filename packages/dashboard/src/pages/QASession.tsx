@@ -1,10 +1,9 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useSearchParams, useNavigate } from 'react-router-dom';
 import { useRelay } from '@/hooks/useRelay';
 import { SimulatorViewer } from '@/components/SimulatorViewer';
 import { CommentPanel } from '@/components/comment-panel';
 import { RecordingsList } from '@/components/RecordingsList';
-import { Button } from '@/components/ui/button';
 import {
   Select,
   SelectContent,
@@ -108,6 +107,22 @@ export function QASession() {
     setBooting(false);
     setStatus('');
   }
+
+  // ref로 최신 session 정보를 추적 — cleanup 클로저에서 stale state 방지
+  const activeSessionRef = useRef({ sessionId: activeSessionId, deviceId });
+  useEffect(() => {
+    activeSessionRef.current = { sessionId: activeSessionId, deviceId };
+  }, [activeSessionId, deviceId]);
+
+  // 언마운트 시 디바이스 shutdown — useRelay cleanup(ws.close)보다 먼저 실행됨
+  useEffect(() => {
+    return () => {
+      const { sessionId, deviceId: dId } = activeSessionRef.current;
+      if (sessionId && dId) {
+        send({ type: 'device:shutdown', sessionId, payload: { deviceId: dId } });
+      }
+    };
+  }, [send]);
 
   return (
     <div className="flex h-full gap-6 p-6">
