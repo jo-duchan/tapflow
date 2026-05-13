@@ -1,3 +1,10 @@
+---
+title: Tapflow Design Reference
+language: en-US
+cspell:locale: en-US
+cspell:words: colour miniaturised deemphasised miniaturise Grotesk Satoshi Ecommerce viewports grayscale WCAG
+---
+
 ## Overview
 
 Vercel is a developer-platform brand — the page is a deployment dashboard's marketing surface, written for engineers who already know the syntax. It earns that posture with one of the cleanest stark systems on the web: near-white `{colors.canvas-soft}` body background, ink-near-black `{colors.ink}` text, a 200-step gray scale that gives every divider, border, and disabled state its own deliberate step. The only place the brand introduces colour at marketing scale is the multi-stop mesh gradient (`{colors.gradient-develop-start}` → `{colors.gradient-preview-end}` → `{colors.gradient-ship-start}` → cyan / magenta / amber) that floats in atmospheric backdrops, never miniaturised to a swatch. That gradient is the entire decoration system.
@@ -337,98 +344,52 @@ The brand uses STACKED shadows — multiple small offsets layered to fake natura
 
 - Text `{colors.link}` (`#0070f3`), body in `{typography.body-md}`, underlined.
 
-### Examples (illustrative)
-
-> Auto-derived kit-mirror demonstration surfaces (`scripts/derive-examples-block.mjs`). Each `ex-*` entry references brand-native primitives so downstream consumers (`/preview-design`, `/generate-kit`) re-skin the same 10 surfaces consistently. `TO_FILL` markers indicate missing primitives — resolve in the LLM judgment pass.
-
-**`ex-pricing-tier`** — Default Pricing tier card. Re-uses feature-card chrome with brand canvas-soft surface.
-
-- Properties: `backgroundColor`, `textColor`, `borderColor`, `rounded`, `padding`
-
-**`ex-pricing-tier-featured`** — Featured/highlighted tier — polarity-flipped surface (dark fill + light text in light mode, light fill + dark text in dark mode).
-
-- Properties: `backgroundColor`, `textColor`, `rounded`, `padding`
-
-**`ex-product-selector`** — What's Included summary card — re-purposed for SaaS / B2B verticals (NOT a literal product gallery).
-
-- Properties: `backgroundColor`, `rounded`, `padding`
-
-**`ex-cart-drawer`** — Subscription summary — re-purposed for SaaS / B2B (line items per add-on, not literal cart).
-
-- Properties: `backgroundColor`, `rounded`, `padding`, `item-divider`
-
-**`ex-app-shell-row`** — Sidebar nav row inside the App Shell example. Active state uses brand primary as the indicator.
-
-- Properties: `backgroundColor`, `activeIndicator`, `rounded`, `padding`
-
-**`ex-data-table-cell`** — Default data-table th + td chrome. Header uses mono-caps eyebrow typography; body uses body-sm.
-
-- Properties: `headerBackground`, `headerTypography`, `bodyTypography`, `cellPadding`, `rowBorder`
-
-**`ex-auth-form-card`** — Sign-in / sign-up card. Re-uses feature-card chrome with text-input primitives inside.
-
-- Properties: `backgroundColor`, `rounded`, `padding`
-
-**`ex-modal-card`** — Modal dialog surface — same chrome as feature-card with elevated shadow.
-
-- Properties: `backgroundColor`, `rounded`, `padding`
-
-**`ex-empty-state-card`** — Empty-state illustration frame.
-
-- Properties: `backgroundColor`, `rounded`, `padding`, `captionTypography`
-
-**`ex-toast`** — Toast notification surface — feature-card shape + medium shadow.
-
-- Properties: `backgroundColor`, `rounded`, `padding`, `typography`
-
 ## Tapflow Dashboard Design Decisions
 
-아래는 tapflow 대시보드 구현 과정에서 확립한 패턴들이다. 새 컴포넌트·화면을 작성할 때 이 결정을 따른다.
+Patterns established during tapflow dashboard implementation. Follow these decisions when writing new components or screens.
 
-### 다크 모드 테마 방식
+### Dark Mode Theming
 
-**CSS 변수로만 처리, 컴포넌트에 `dark:` 클래스 금지.**
+**Theme via CSS variables only — no `dark:` class overrides in components.**
 
 ```css
 /* index.css */
 :root  { --destructive: 0 100% 47%; }
-.dark  { --destructive: 0 70% 62%; }  /* 밝기를 높여 /10 opacity에서도 식별 가능 */
+.dark  { --destructive: 0 70% 62%; }  /* raised lightness so /10 opacity remains visible */
 ```
 
-컴포넌트는 `bg-destructive/10 text-destructive` 처럼 변수만 참조한다. `dark:bg-red-900` 같은 하드코딩 오버라이드를 쓰면 CSS 변수 시스템이 깨진다.
+Components reference only the variable: `bg-destructive/10 text-destructive`. Hardcoded overrides like `dark:bg-red-900` break the variable system and must not be used.
 
-### Destructive 버튼 스타일
+### Destructive Button Style
 
-shadcn v4 기준: **소프트 변형(Soft variant)** — 채운 빨강 대신 반투명 tint + 색 텍스트.
+Following shadcn v4: **soft variant** — translucent tint background with colored text, not a solid red fill.
 
 ```
 bg-destructive/10  text-destructive  hover:bg-destructive/20
 ```
 
-다크 모드에서 `--destructive`를 충분히 밝게(L ≥ 60%) 설정해야 `/10` 배경과 텍스트 모두 식별된다.
+In dark mode, `--destructive` must be bright enough (L ≥ 60%) so that both the `/10` background and the text color are legible against dark surfaces.
 
-### 아바타 색상 시스템
+### Avatar Color System
 
-이름 해시 기반 6-slot 팔레트. **모든 아바타는 `avatarColors(name)` 함수를 통해 색을 받는다.**
+Name-hash-based 6-slot palette. **Every avatar placeholder must use `avatarColors(name)`** — never `bg-muted` directly.
 
 ```ts
 // components/user-avatar.tsx
 export function avatarColors(name: string): { bg: string; fg: string }
 ```
 
-색상 값은 CSS 변수(`--avatar-1-bg` … `--avatar-6-fg`)로 정의되어 다크 모드를 처리한다.
-- **Light**: 채도 높은 파스텔 (lightness ~70–84%)
-- **Dark**: 같은 Hue, 채도·밝기 낮춤 (lightness ~28–32%)
+Colors are defined as CSS variables (`--avatar-1-bg` … `--avatar-6-fg`) with separate light and dark values:
+- **Light**: vibrant pastels (lightness ~70–84%)
+- **Dark**: same hue, reduced saturation and lightness (~28–32%)
 
-새 아바타 플레이스홀더를 만들 때는 `bg-muted` 대신 이 함수를 사용한다.
+### Image Input Pattern (Avatar / Logo)
 
-### 이미지 입력 패턴 (아바타·로고)
-
-"Choose file" 버튼 대신 **현재 이미지 위 우하단 오버레이 연필 버튼** 패턴을 쓴다.
+Replace "Choose file" buttons with an **overlay pencil button at the bottom-right of the current image preview**.
 
 ```tsx
 <div className="relative w-14 h-14">
-  {/* 이미지 또는 이니셜 플레이스홀더 */}
+  {/* current image or initials placeholder */}
   <button
     type="button"
     onClick={() => fileInputRef.current?.click()}
@@ -436,15 +397,15 @@ export function avatarColors(name: string): { bg: string; fg: string }
   >
     <Pencil className="w-3 h-3" />
   </button>
-  <input ref={fileInputRef} type="file" className="hidden" … />
+  <input ref={fileInputRef} type="file" className="hidden" />
 </div>
 ```
 
-파일 선택 즉시 미리보기(`URL.createObjectURL`)를 업데이트해 반응성을 제공한다.
+Update the preview immediately on file selection via `URL.createObjectURL` for instant feedback.
 
-### 버튼 Press 피드백
+### Button Press Feedback
 
-버튼 누름 시 `translateY(1px)` 피드백. 컴포넌트가 아닌 `index.css` base 레이어로 전역 적용.
+A `translateY(1px)` press effect is applied globally via `index.css` base layer — not in the component.
 
 ```css
 button:not([aria-haspopup]):not(:disabled),
@@ -457,16 +418,16 @@ button:active:not([aria-haspopup]):not(:disabled) {
 }
 ```
 
-`aria-haspopup` 속성이 있는 요소(Select·DropdownMenu 트리거 등)는 제외한다.
+Elements with `aria-haspopup` (Select, DropdownMenu triggers, etc.) are excluded to avoid visual glitches when opening overlays.
 
-### 버튼 크기 가이드라인
+### Button Size Guidelines
 
-| 컨텍스트 | size |
+| Context | size |
 |---|---|
-| 폼 submit (Settings 등) | `sm` (h-9) |
-| 앱 목록 내 인라인 액션 | `sm` |
-| 내비게이션·테이블 인라인 | `nav` (h-7) |
-| 마케팅·히어로 CTA | `pill` (h-12) |
+| Form submit (Settings, etc.) | `sm` (h-9) |
+| Inline actions within a list | `sm` |
+| Navigation / table inline actions | `nav` (h-7) |
+| Marketing / hero CTAs | `pill` (h-12) |
 
 ---
 
