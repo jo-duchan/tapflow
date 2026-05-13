@@ -181,7 +181,7 @@ export class RelayServer {
   private route(ws: WebSocket, msg: RelayMessage): void {
     switch (msg.type) {
       case 'agent:register': {
-        const sessionIds = this.sessions.create(ws, msg.devices ?? [], msg.agentName)
+        const sessionIds = this.sessions.create(ws, msg.devices ?? [], msg.agentName, msg.platform)
         const registeredSessions = (msg.devices ?? []).map((d, i) => ({
           deviceId: d.id,
           sessionId: sessionIds[i],

@@ -64,6 +64,7 @@ export class IOSAgent implements DeviceAgent {
       ws.once('open', () => {
         ws.send(JSON.stringify({
           type: 'agent:register',
+          platform: 'ios',
           agentName: os.hostname(),
           devices: devices.map((d) => ({
             id: d.id,

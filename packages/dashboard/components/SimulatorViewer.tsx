@@ -1,9 +1,10 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState, Fragment } from 'react';
-import { Home, Camera, RotateCw, Play, Video, Square, Loader2, Keyboard, ScanLine } from 'lucide-react';
+import { Home, Camera, RotateCw, Play, Video, Square, Loader2, Keyboard, ScanLine, ArrowLeft, LayoutGrid, Volume2, Volume1, Power } from 'lucide-react';
 import { useRelay } from '@/hooks/useRelay';
-import type { ChromeData, RelayMessage } from '@/lib/types';
+import type { AndroidButton, ChromeData, RelayMessage } from '@/lib/types';
+import { H264Decoder } from '@/lib/H264Decoder';
 import { Button } from '@/components/ui/button';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { cn } from '@/lib/utils';
@@ -25,17 +26,20 @@ export function SimulatorViewer({ sessionId, deviceId, buildId, onRecordingUploa
   const containerRef = useRef<HTMLDivElement>(null);
   // off-screen canvas: source for MediaRecorder (composite of framebuffer + chrome + overlays)
   const recordCanvasRef = useRef<HTMLCanvasElement>(null);
+  const h264DecoderRef = useRef<H264Decoder | null>(null);
+  const streamTypeRef = useRef<'mjpeg' | 'h264'>('mjpeg');
 
   const [joined, setJoined] = useState(false);
   const [deviceReady, setDeviceReady] = useState(false);
   const [fps, setFps] = useState(0);
-  const [chrome, setChrome] = useState<ChromeData | null>(null);
+  const [chrome, setChrome] = useState<ChromeData | { buttons: AndroidButton[] } | null>(null);
   const frameCount = useRef(0);
   const sendRef = useRef<(msg: object) => void>(() => {});
   const deviceSeq = useRef(0);
   const [installing, setInstalling] = useState(false);
   const [installed, setInstalled] = useState(false);
   const [installError, setInstallError] = useState<string | null>(null);
+  const [bootError, setBootError] = useState<string | null>(null);
   const [launching, setLaunching] = useState(false);
 
   const [canvasReady, setCanvasReady] = useState(false);
@@ -49,17 +53,21 @@ export function SimulatorViewer({ sessionId, deviceId, buildId, onRecordingUploa
   const recordMimeRef = useRef('');
   const rafIdRef = useRef(0);
 
+  const iosChrome = chrome !== null && 'framePng' in chrome ? chrome as ChromeData : null;
+  const androidButtons = chrome !== null && !('framePng' in chrome) && 'buttons' in chrome
+    ? (chrome as { buttons: AndroidButton[] }).buttons : null;
+
   // chrome image cache for drawImage in rAF loop (avoid re-decoding base64 every frame)
   const chromeImgRef = useRef<HTMLImageElement | null>(null);
   const chromeRef = useRef<ChromeData | null>(null);
-  useEffect(() => { chromeRef.current = chrome; }, [chrome]);
+  useEffect(() => { chromeRef.current = iosChrome; }, [iosChrome]);
 
   useEffect(() => {
-    if (!chrome) { chromeImgRef.current = null; return; }
+    if (!iosChrome) { chromeImgRef.current = null; return; }
     const img = new Image();
     img.onload = () => { chromeImgRef.current = img; };
-    img.src = `data:image/png;base64,${chrome.framePng}`;
-  }, [chrome]);
+    img.src = `data:image/png;base64,${iosChrome.framePng}`;
+  }, [iosChrome]);
 
   // cursor overlay state (refs to avoid stale closures in rAF)
   const cursorPosRef = useRef<{ x: number; y: number } | null>(null);
@@ -98,19 +106,40 @@ export function SimulatorViewer({ sessionId, deviceId, buildId, onRecordingUploa
       .catch(() => {});
   }, []);
 
+  const drawVideoFrame = useCallback((frame: VideoFrame) => {
+    const canvas = canvasRef.current;
+    const ctx = canvas?.getContext('2d');
+    if (!canvas || !ctx) { frame.close(); return; }
+    if (canvas.width !== frame.displayWidth || canvas.height !== frame.displayHeight) {
+      canvas.width = frame.displayWidth ?? canvas.width;
+      canvas.height = frame.displayHeight ?? canvas.height;
+    }
+    ctx.drawImage(frame, 0, 0);
+    frame.close();
+    setCanvasReady(true);
+    frameCount.current += 1;
+  }, []);
+
   const handleMessage = useCallback(
     (msg: RelayMessage) => {
       if (msg.type === 'session:joined') {
         setJoined(true);
         sendRef.current({ type: 'device:boot', sessionId, payload: { deviceId } });
       }
+      if (msg.type === 'device:boot-error') {
+        setBootError((msg as unknown as { message: string }).message);
+      }
       if (msg.type === 'device:booting') {
         setDeviceReady(false);
         setInstalling(false);
         setInstalled(false);
         setInstallError(null);
+        setBootError(null);
         setCanvasReady(false);
         deviceSeq.current += 1;
+        h264DecoderRef.current?.close();
+        h264DecoderRef.current = null;
+        streamTypeRef.current = 'mjpeg';
         const canvas = canvasRef.current;
         if (canvas) { const ctx = canvas.getContext('2d'); ctx?.clearRect(0, 0, canvas.width, canvas.height); }
       }
@@ -122,12 +151,28 @@ export function SimulatorViewer({ sessionId, deviceId, buildId, onRecordingUploa
       if (msg.type === 'app:install-error') { setInstalling(false); setInstallError(msg.message); }
       if (msg.type === 'app:launch-done') { setLaunching(false); }
       if (msg.type === 'app:launch-error') { setLaunching(false); }
-      if (msg.type === 'session:chrome') { setChrome(msg.payload); }
+      if (msg.type === 'session:chrome') {
+        setChrome(msg.payload);
+        const p = msg.payload;
+        if (!('framePng' in p) && p.streamType === 'h264') {
+          streamTypeRef.current = 'h264';
+          h264DecoderRef.current?.close();
+          h264DecoderRef.current = new H264Decoder(drawVideoFrame);
+        } else {
+          streamTypeRef.current = 'mjpeg';
+        }
+      }
     },
-    [drawToCanvas, sessionId, deviceId, buildId],
+    [drawToCanvas, drawVideoFrame, sessionId, deviceId, buildId],
   );
 
-  const handleBinaryFrame = useCallback((data: ArrayBuffer) => { drawToCanvas(data); }, [drawToCanvas]);
+  const handleBinaryFrame = useCallback((data: ArrayBuffer) => {
+    if (streamTypeRef.current === 'h264') {
+      h264DecoderRef.current?.decode(data);
+    } else {
+      drawToCanvas(data);
+    }
+  }, [drawToCanvas]);
 
   const { send, connected } = useRelay(handleMessage, handleBinaryFrame);
   sendRef.current = send;
@@ -143,11 +188,11 @@ export function SimulatorViewer({ sessionId, deviceId, buildId, onRecordingUploa
 
   // sync record canvas size to container (display) dimensions when chrome arrives
   useEffect(() => {
-    if (!chrome) return;
+    if (!iosChrome) return;
     const rc = recordCanvasRef.current;
     const container = containerRef.current;
     if (rc && container) { rc.width = container.clientWidth; rc.height = container.clientHeight; }
-  }, [chrome]);
+  }, [iosChrome]);
 
   // ── rAF compose loop ──────────────────────────────────────────────────────
   const composeFrame = useCallback(() => {
@@ -427,14 +472,14 @@ export function SimulatorViewer({ sessionId, deviceId, buildId, onRecordingUploa
 
   const toNormScreen = useCallback(
     (e: { clientX: number; clientY: number }) => {
-      if (chrome && containerRef.current) {
+      if (iosChrome && containerRef.current) {
         const rect = containerRef.current.getBoundingClientRect();
-        const cw = chrome.compositeWidth / 2;
-        const ch = chrome.compositeHeight / 2;
-        const sx = chrome.screenRect.x / 2;
-        const sy = chrome.screenRect.y / 2;
-        const sw = chrome.screenRect.width / 2;
-        const sh = chrome.screenRect.height / 2;
+        const cw = iosChrome.compositeWidth / 2;
+        const ch = iosChrome.compositeHeight / 2;
+        const sx = iosChrome.screenRect.x / 2;
+        const sy = iosChrome.screenRect.y / 2;
+        const sw = iosChrome.screenRect.width / 2;
+        const sh = iosChrome.screenRect.height / 2;
         let cx: number, cy: number;
         if (isLandscape) {
           const u = (e.clientX - rect.left) / rect.width;
@@ -447,7 +492,7 @@ export function SimulatorViewer({ sessionId, deviceId, buildId, onRecordingUploa
         if (cx < sx || cx > sx + sw || cy < sy || cy > sy + sh) return null;
         return { x: (cx - sx) / sw, y: (cy - sy) / sh };
       }
-      if (!chrome && canvasRef.current) {
+      if (!iosChrome && canvasRef.current) {
         const rect = canvasRef.current.getBoundingClientRect();
         const x = (e.clientX - rect.left) / rect.width;
         const y = (e.clientY - rect.top) / rect.height;
@@ -456,7 +501,7 @@ export function SimulatorViewer({ sessionId, deviceId, buildId, onRecordingUploa
       }
       return null;
     },
-    [chrome, isLandscape],
+    [iosChrome, isLandscape],
   );
 
   const toPinchFingers = useCallback(
@@ -472,18 +517,18 @@ export function SimulatorViewer({ sessionId, deviceId, buildId, onRecordingUploa
 
   const toButton = useCallback(
     (e: { clientX: number; clientY: number }): string | null => {
-      if (!containerRef.current || !chrome || isLandscape) return null;
+      if (!containerRef.current || !iosChrome || isLandscape) return null;
       const rect = containerRef.current.getBoundingClientRect();
-      const cx = (e.clientX - rect.left) * (chrome.compositeWidth / rect.width);
-      const cy = (e.clientY - rect.top) * (chrome.compositeHeight / rect.height);
-      for (const btn of chrome.buttons) {
+      const cx = (e.clientX - rect.left) * (iosChrome.compositeWidth / rect.width);
+      const cy = (e.clientY - rect.top) * (iosChrome.compositeHeight / rect.height);
+      for (const btn of iosChrome.buttons) {
         const dx = cx - btn.normalOffset.x;
         const dy = cy - btn.normalOffset.y;
         if (dx * dx + dy * dy < BUTTON_HIT_RADIUS ** 2) return btn.name;
       }
       return null;
     },
-    [chrome],
+    [iosChrome],
   );
 
   // convert normalized screen coord → record canvas coord (CSS display coordinates)
@@ -690,34 +735,32 @@ export function SimulatorViewer({ sessionId, deviceId, buildId, onRecordingUploa
   }, [send, sessionId]);
 
   // ── layout ────────────────────────────────────────────────────────────────
-  const compositeLogicalW = chrome ? chrome.compositeWidth / 2 : 0;
-  const compositeLogicalH = chrome ? chrome.compositeHeight / 2 : 0;
+  const compositeLogicalW = iosChrome ? iosChrome.compositeWidth / 2 : 0;
+  const compositeLogicalH = iosChrome ? iosChrome.compositeHeight / 2 : 0;
   const MAX_DISPLAY_H = 750;
   const displayScale = compositeLogicalH > 0 ? Math.min(1, MAX_DISPLAY_H / compositeLogicalH) : 1;
   const displayW = Math.round(compositeLogicalW * displayScale);
   const displayH = Math.round(compositeLogicalH * displayScale);
 
-  const screenPctLeft = chrome ? (chrome.screenRect.x / chrome.compositeWidth) * 100 : 0;
-  const screenPctTop = chrome ? (chrome.screenRect.y / chrome.compositeHeight) * 100 : 0;
-  const screenPctW = chrome ? (chrome.screenRect.width / chrome.compositeWidth) * 100 : 100;
-  const screenPctH = chrome ? (chrome.screenRect.height / chrome.compositeHeight) * 100 : 100;
+  const screenPctLeft = iosChrome ? (iosChrome.screenRect.x / iosChrome.compositeWidth) * 100 : 0;
+  const screenPctTop = iosChrome ? (iosChrome.screenRect.y / iosChrome.compositeHeight) * 100 : 0;
+  const screenPctW = iosChrome ? (iosChrome.screenRect.width / iosChrome.compositeWidth) * 100 : 100;
+  const screenPctH = iosChrome ? (iosChrome.screenRect.height / iosChrome.compositeHeight) * 100 : 100;
 
-  const cssCornerRadius = chrome ? Math.round((chrome.screenCornerRadius / 2) * displayScale) : 0;
+  const cssCornerRadius = iosChrome ? Math.round((iosChrome.screenCornerRadius / 2) * displayScale) : 0;
 
   const fpsColor = fps >= 30 ? '#10b981' : fps >= 15 ? '#f59e0b' : fps > 0 ? '#ef4444' : '#6b7280';
 
-  const statusText = !connected
-    ? 'Connecting…'
-    : !joined
-      ? 'Joining session…'
-      : !deviceReady
-        ? 'Starting device…'
-        : installing
-          ? 'Installing app…'
-          : installError
-            ? `Install failed: ${installError.length > 22 ? installError.slice(0, 22) + '…' : installError}`
-            : null;
-  const statusTextDisplay = statusText;
+  function getStatusText(): string | null {
+    if (!connected) return 'Connecting…';
+    if (!joined) return 'Joining session…';
+    if (bootError) return `Boot failed: ${bootError.length > 40 ? bootError.slice(0, 40) + '…' : bootError}`;
+    if (!deviceReady) return 'Starting device…';
+    if (installing) return 'Installing app…';
+    if (installError) return `Install failed: ${installError.length > 22 ? installError.slice(0, 22) + '…' : installError}`;
+    return null;
+  }
+  const statusText = getStatusText();
 
   return (
     <div className="flex items-start justify-center gap-16">
@@ -804,7 +847,7 @@ export function SimulatorViewer({ sessionId, deviceId, buildId, onRecordingUploa
       )}
 
       <div className="flex items-start gap-8">
-      {chrome ? (
+      {iosChrome ? (
         <div style={{ width: isLandscape ? displayH : displayW, height: isLandscape ? displayW : displayH, position: 'relative', flexShrink: 0 }}>
           <div
             ref={containerRef}
@@ -821,7 +864,7 @@ export function SimulatorViewer({ sessionId, deviceId, buildId, onRecordingUploa
             onPointerLeave={handlePointerLeave}
           >
             <img
-              src={`data:image/png;base64,${chrome.framePng}`}
+              src={`data:image/png;base64,${iosChrome!.framePng}`}
               style={{ position: 'absolute', top: 0, left: 0, zIndex: 2, width: '100%', height: '100%', display: 'block', pointerEvents: 'none', userSelect: 'none' }}
               draggable={false}
               alt=""
@@ -898,26 +941,26 @@ export function SimulatorViewer({ sessionId, deviceId, buildId, onRecordingUploa
                 <span style={{ color: 'white', fontSize: '0.875rem' }}>Waiting for first frame...</span>
               </div>
             )}
-            {chrome.buttons.map((btn) => {
+            {iosChrome!.buttons.map((btn) => {
               const isFlashed = flashedButton === btn.name;
               const isHovered = hoveredButton === btn.name;
               const isBottomAnchor = btn.anchor === 'bottom';
               const isTopAnchor = btn.anchor === 'top';
               const imgTopPct = isBottomAnchor
-                ? ((btn.normalOffset.y - btn.buttonH / 2) / chrome.compositeHeight) * 100
-                : isTopAnchor ? (btn.rolloverOffset.y / chrome.compositeHeight) * 100
-                : (btn.normalOffset.y / chrome.compositeHeight) * 100;
-              const imgHPct = (btn.buttonH / chrome.compositeHeight) * 100;
-              const imgWPct = (btn.buttonW / chrome.compositeWidth) * 100;
+                ? ((btn.normalOffset.y - btn.buttonH / 2) / iosChrome!.compositeHeight) * 100
+                : isTopAnchor ? (btn.rolloverOffset.y / iosChrome!.compositeHeight) * 100
+                : (btn.normalOffset.y / iosChrome!.compositeHeight) * 100;
+              const imgHPct = (btn.buttonH / iosChrome!.compositeHeight) * 100;
+              const imgWPct = (btn.buttonW / iosChrome!.compositeWidth) * 100;
               const halfW = btn.buttonW / 2;
-              const rolloverLeftPct = ((btn.rolloverOffset.x - halfW) / chrome.compositeWidth) * 100;
-              const hoverLeftPct = ((2 * btn.rolloverOffset.x - btn.normalOffset.x - halfW) / chrome.compositeWidth) * 100;
-              const tooltipLeftPct = (btn.rolloverOffset.x / chrome.compositeWidth) * 100;
+              const rolloverLeftPct = ((btn.rolloverOffset.x - halfW) / iosChrome!.compositeWidth) * 100;
+              const hoverLeftPct = ((2 * btn.rolloverOffset.x - btn.normalOffset.x - halfW) / iosChrome!.compositeWidth) * 100;
+              const tooltipLeftPct = (btn.rolloverOffset.x / iosChrome!.compositeWidth) * 100;
               const tooltipTopPct = isBottomAnchor
-                ? ((btn.normalOffset.y - btn.buttonH / 2) / chrome.compositeHeight) * 100
-                : isTopAnchor ? (btn.rolloverOffset.y / chrome.compositeHeight) * 100
-                : (btn.normalOffset.y / chrome.compositeHeight) * 100;
-              const hoverTopPct = isTopAnchor ? ((2 * btn.rolloverOffset.y - btn.normalOffset.y) / chrome.compositeHeight) * 100 : 0;
+                ? ((btn.normalOffset.y - btn.buttonH / 2) / iosChrome!.compositeHeight) * 100
+                : isTopAnchor ? (btn.rolloverOffset.y / iosChrome!.compositeHeight) * 100
+                : (btn.normalOffset.y / iosChrome!.compositeHeight) * 100;
+              const hoverTopPct = isTopAnchor ? ((2 * btn.rolloverOffset.y - btn.normalOffset.y) / iosChrome!.compositeHeight) * 100 : 0;
               const btnZ = btn.onTop ? 4 : 1;
               return (
                 <Fragment key={btn.name}>
@@ -941,9 +984,9 @@ export function SimulatorViewer({ sessionId, deviceId, buildId, onRecordingUploa
                       style={{
                         position: 'absolute', zIndex: btn.onTop ? 3 : 1,
                         left: `${isTopAnchor ? rolloverLeftPct : isHovered ? hoverLeftPct : rolloverLeftPct}%`,
-                        top: `${isTopAnchor ? (isHovered ? hoverTopPct : imgTopPct) : (btn.pressedRect.y / chrome.compositeHeight) * 100}%`,
-                        width: `${(btn.pressedRect.width / chrome.compositeWidth) * 100}%`,
-                        height: `${(btn.pressedRect.height / chrome.compositeHeight) * 100}%`,
+                        top: `${isTopAnchor ? (isHovered ? hoverTopPct : imgTopPct) : (btn.pressedRect.y / iosChrome!.compositeHeight) * 100}%`,
+                        width: `${(btn.pressedRect.width / iosChrome!.compositeWidth) * 100}%`,
+                        height: `${(btn.pressedRect.height / iosChrome!.compositeHeight) * 100}%`,
                         pointerEvents: 'none', userSelect: 'none',
                       }}
                       draggable={false} alt=""
@@ -960,22 +1003,48 @@ export function SimulatorViewer({ sessionId, deviceId, buildId, onRecordingUploa
           </div>
         </div>
       ) : (
-        <div className="relative" style={{ minWidth: 300, minHeight: 560, backgroundColor: '#010101', borderRadius: '10%' }}>
-          <canvas
-            ref={canvasRef}
-            className="block w-full h-full cursor-crosshair"
-            style={{ borderRadius: '10%', visibility: canvasReady ? 'visible' : 'hidden' }}
-            onPointerDown={handlePointerDown}
-            onPointerMove={handlePointerMove}
-            onPointerUp={handlePointerUp}
-            onPointerCancel={handlePointerCancel}
-          />
-          {!canvasReady && (
-            <div className="absolute inset-0 animate-pulse bg-zinc-900/60" style={{ borderRadius: '10%' }} />
-          )}
-          {joined && fps === 0 && canvasReady && (
-            <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-              <span style={{ color: 'white', fontSize: '0.875rem' }}>Waiting for first frame...</span>
+        <div className="flex flex-col items-center gap-2">
+          <div className="relative" style={{ minWidth: 300, minHeight: 560, backgroundColor: '#010101', borderRadius: '10%' }}>
+            <canvas
+              ref={canvasRef}
+              className="block w-full h-full cursor-crosshair"
+              style={{ borderRadius: '10%', visibility: canvasReady ? 'visible' : 'hidden' }}
+              onPointerDown={handlePointerDown}
+              onPointerMove={handlePointerMove}
+              onPointerUp={handlePointerUp}
+              onPointerCancel={handlePointerCancel}
+            />
+            {!canvasReady && (
+              <div className="absolute inset-0 animate-pulse bg-zinc-900/60" style={{ borderRadius: '10%' }} />
+            )}
+            {joined && fps === 0 && canvasReady && (
+              <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+                <span style={{ color: 'white', fontSize: '0.875rem' }}>Waiting for first frame...</span>
+              </div>
+            )}
+          </div>
+          {androidButtons && (
+            <div className="flex items-center justify-center gap-1 rounded-xl border bg-background/90 backdrop-blur-sm px-2 py-1.5">
+              {androidButtons.map((btn) => (
+                <TooltipProvider key={btn.name} delayDuration={400}>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <Button
+                        variant="ghost" size="icon" className="h-8 w-8"
+                        onClick={() => send({ type: 'input:button', sessionId, payload: { name: btn.name } })}
+                      >
+                        {btn.name === 'back' ? <ArrowLeft className="h-4 w-4" />
+                          : btn.name === 'recent_apps' ? <LayoutGrid className="h-4 w-4" />
+                          : btn.name === 'volume_up' ? <Volume2 className="h-4 w-4" />
+                          : btn.name === 'volume_down' ? <Volume1 className="h-4 w-4" />
+                          : btn.name === 'power' ? <Power className="h-4 w-4" />
+                          : <Home className="h-4 w-4" />}
+                      </Button>
+                    </TooltipTrigger>
+                    <TooltipContent side="bottom">{btn.accessibilityTitle}</TooltipContent>
+                  </Tooltip>
+                </TooltipProvider>
+              ))}
             </div>
           )}
         </div>
@@ -999,8 +1068,8 @@ export function SimulatorViewer({ sessionId, deviceId, buildId, onRecordingUploa
           </div>
         )}
 
-        {statusTextDisplay && (
-          <p className="text-[12px] text-muted-foreground leading-relaxed">{statusTextDisplay}</p>
+        {statusText && (
+          <p className="text-[12px] text-muted-foreground leading-relaxed">{statusText}</p>
         )}
       </div>
 

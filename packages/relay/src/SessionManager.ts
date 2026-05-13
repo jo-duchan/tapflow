@@ -5,6 +5,7 @@ import type { SessionInfo } from './types.js'
 export interface Session {
   id: string
   agentName?: string
+  agentPlatform?: string
   agentSocket: WebSocket
   browserSocket: WebSocket | null
   streamSocket: WebSocket | null
@@ -22,12 +23,13 @@ type RawDevice = { id: string; name: string; platform: string; status: string; o
 export class SessionManager {
   private sessions = new Map<string, Session>()
 
-  create(agentSocket: WebSocket, devices: RawDevice[] = [], agentName?: string): string[] {
+  create(agentSocket: WebSocket, devices: RawDevice[] = [], agentName?: string, agentPlatform?: string): string[] {
     return devices.map((d) => {
       const id = randomUUID()
       this.sessions.set(id, {
         id,
         agentName,
+        agentPlatform,
         agentSocket,
         browserSocket: null,
         streamSocket: null,
@@ -121,6 +123,7 @@ export class SessionManager {
 
     return Array.from(agentMap.values()).map((group) => ({
       agentName: group[0].agentName,
+      platform: group[0].agentPlatform,
       devices: group.map((s) => ({
         id: s.deviceId,
         name: s.deviceName,

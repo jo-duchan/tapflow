@@ -48,6 +48,7 @@ export interface DeviceInfo {
 // agents:listed response groups devices by agent machine
 export interface SessionInfo {
   agentName?: string
+  platform?: string
   devices: DeviceInfo[]
 }
 
@@ -59,6 +60,7 @@ export interface RelayMessage {
   agentName?: string
   // agent:register: raw device list (without sessionId/busy — added by relay)
   devices?: Array<{ id: string; name: string; platform: string; status: string; osVersion?: string }>
+  platform?: string  // agent:register: agent platform ('ios' | 'android')
   // agents:listed: grouped by agent
   sessions?: SessionInfo[]
   // agent:registered: per-device sessionId assignments
