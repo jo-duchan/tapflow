@@ -281,6 +281,7 @@ export function DefaultSettings() {
                   <Button
                     size="sm"
                     variant="outline"
+                    className="w-20"
                     disabled={appsSaving[app.id]}
                     onClick={() => handleAppNameSave(app.id)}
                   >
@@ -288,7 +289,7 @@ export function DefaultSettings() {
                   </Button>
                   <AlertDialog>
                     <AlertDialogTrigger asChild>
-                      <Button size="sm" variant="destructive" disabled={appsDeleting[app.id]}>
+                      <Button size="sm" variant="destructive" className="w-20" disabled={appsDeleting[app.id]}>
                         {appsDeleting[app.id] ? 'Deleting…' : 'Delete'}
                       </Button>
                     </AlertDialogTrigger>
@@ -300,9 +301,9 @@ export function DefaultSettings() {
                         </AlertDialogDescription>
                       </AlertDialogHeader>
                       <AlertDialogFooter>
-                        <AlertDialogCancel>Cancel</AlertDialogCancel>
+                        <AlertDialogCancel className="w-24">Cancel</AlertDialogCancel>
                         <AlertDialogAction
-                          className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                          className="w-24 bg-destructive text-destructive-foreground hover:bg-destructive/90"
                           onClick={() => handleAppDelete(app.id)}
                         >
                           Delete

@@ -99,8 +99,8 @@ export function UploadBuildDialog({ onSuccess, appId }: Props) {
           </div>
           {error && <p className="text-sm text-destructive">{error}</p>}
           <div className="flex justify-end gap-2">
-            <Button type="button" variant="outline" onClick={() => setOpen(false)}>Cancel</Button>
-            <Button type="submit" disabled={!file || uploading}>
+            <Button type="button" variant="outline" className="w-24" onClick={() => setOpen(false)}>Cancel</Button>
+            <Button type="submit" className="w-24" disabled={!file || uploading}>
               {uploading ? 'Uploading…' : 'Upload'}
             </Button>
           </div>
