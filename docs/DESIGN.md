@@ -381,6 +381,95 @@ The brand uses STACKED shadows — multiple small offsets layered to fake natura
 
 - Properties: `backgroundColor`, `rounded`, `padding`, `typography`
 
+## Tapflow Dashboard Design Decisions
+
+아래는 tapflow 대시보드 구현 과정에서 확립한 패턴들이다. 새 컴포넌트·화면을 작성할 때 이 결정을 따른다.
+
+### 다크 모드 테마 방식
+
+**CSS 변수로만 처리, 컴포넌트에 `dark:` 클래스 금지.**
+
+```css
+/* index.css */
+:root  { --destructive: 0 100% 47%; }
+.dark  { --destructive: 0 70% 62%; }  /* 밝기를 높여 /10 opacity에서도 식별 가능 */
+```
+
+컴포넌트는 `bg-destructive/10 text-destructive` 처럼 변수만 참조한다. `dark:bg-red-900` 같은 하드코딩 오버라이드를 쓰면 CSS 변수 시스템이 깨진다.
+
+### Destructive 버튼 스타일
+
+shadcn v4 기준: **소프트 변형(Soft variant)** — 채운 빨강 대신 반투명 tint + 색 텍스트.
+
+```
+bg-destructive/10  text-destructive  hover:bg-destructive/20
+```
+
+다크 모드에서 `--destructive`를 충분히 밝게(L ≥ 60%) 설정해야 `/10` 배경과 텍스트 모두 식별된다.
+
+### 아바타 색상 시스템
+
+이름 해시 기반 6-slot 팔레트. **모든 아바타는 `avatarColors(name)` 함수를 통해 색을 받는다.**
+
+```ts
+// components/user-avatar.tsx
+export function avatarColors(name: string): { bg: string; fg: string }
+```
+
+색상 값은 CSS 변수(`--avatar-1-bg` … `--avatar-6-fg`)로 정의되어 다크 모드를 처리한다.
+- **Light**: 채도 높은 파스텔 (lightness ~70–84%)
+- **Dark**: 같은 Hue, 채도·밝기 낮춤 (lightness ~28–32%)
+
+새 아바타 플레이스홀더를 만들 때는 `bg-muted` 대신 이 함수를 사용한다.
+
+### 이미지 입력 패턴 (아바타·로고)
+
+"Choose file" 버튼 대신 **현재 이미지 위 우하단 오버레이 연필 버튼** 패턴을 쓴다.
+
+```tsx
+<div className="relative w-14 h-14">
+  {/* 이미지 또는 이니셜 플레이스홀더 */}
+  <button
+    type="button"
+    onClick={() => fileInputRef.current?.click()}
+    className="absolute bottom-0 right-0 w-6 h-6 rounded-full bg-background border border-border shadow-sm flex items-center justify-center hover:bg-accent transition-colors"
+  >
+    <Pencil className="w-3 h-3" />
+  </button>
+  <input ref={fileInputRef} type="file" className="hidden" … />
+</div>
+```
+
+파일 선택 즉시 미리보기(`URL.createObjectURL`)를 업데이트해 반응성을 제공한다.
+
+### 버튼 Press 피드백
+
+버튼 누름 시 `translateY(1px)` 피드백. 컴포넌트가 아닌 `index.css` base 레이어로 전역 적용.
+
+```css
+button:not([aria-haspopup]):not(:disabled),
+[role="button"]:not([aria-haspopup]):not(:disabled) {
+  transition-property: color, background-color, border-color, transform;
+  transition-duration: 120ms;
+}
+button:active:not([aria-haspopup]):not(:disabled) {
+  transform: translateY(1px);
+}
+```
+
+`aria-haspopup` 속성이 있는 요소(Select·DropdownMenu 트리거 등)는 제외한다.
+
+### 버튼 크기 가이드라인
+
+| 컨텍스트 | size |
+|---|---|
+| 폼 submit (Settings 등) | `sm` (h-9) |
+| 앱 목록 내 인라인 액션 | `sm` |
+| 내비게이션·테이블 인라인 | `nav` (h-7) |
+| 마케팅·히어로 CTA | `pill` (h-12) |
+
+---
+
 ## Do's and Don'ts
 
 ### Do
