@@ -43,7 +43,7 @@ export function AndroidViewer({
 }: AndroidViewerProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
-  const glRenderer = useWebGLRenderer(canvasRef);
+  const { init: glInit, dispose: glDispose, drawFrame: glDrawFrame } = useWebGLRenderer(canvasRef);
   const { fps, frameCount } = useFps();
 
   const [canvasReady, setCanvasReady] = useState(false);
@@ -67,11 +67,11 @@ export function AndroidViewer({
 
   // ── WebGL init + H264Decoder lifecycle ───────────────────────────────────
   useEffect(() => {
-    const ok = glRenderer.init()
+    const ok = glInit()
     if (!ok) { setGlError(true); return }
 
     const decoder = new H264Decoder((frame) => {
-      const size = glRenderer.drawFrame(frame)
+      const size = glDrawFrame(frame)
       if (!size) return
       frameCount.current += 1
       setCanvasReady(true)
@@ -87,9 +87,9 @@ export function AndroidViewer({
     return () => {
       binaryFrameHandlerRef.current = undefined
       decoder.close()
-      glRenderer.dispose()
+      glDispose()
     }
-  }, [glRenderer, frameCount, binaryFrameHandlerRef])
+  }, [glInit, glDispose, glDrawFrame, frameCount, binaryFrameHandlerRef])
 
   // ── Recording ─────────────────────────────────────────────────────────────
   const [recordState, setRecordState] = useState<'idle' | 'recording' | 'uploading' | 'done'>('idle');

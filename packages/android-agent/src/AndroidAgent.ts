@@ -21,6 +21,9 @@ interface DeviceState {
   touchHelper: AndroidTouchHelper | null
   streamWs: WebSocket | null
   scrcpySession: ScrcpySession | null
+  displayWidth: number
+  displayHeight: number
+  lastTouchPx: { x: number; y: number }
   bootSeq: number
   orientation: 'portrait' | 'landscape'
 }
@@ -98,6 +101,9 @@ export class AndroidAgent implements DeviceAgent {
         touchHelper: null,
         streamWs: null,
         scrcpySession: null,
+        displayWidth: 0,
+        displayHeight: 0,
+        lastTouchPx: { x: 0, y: 0 },
         bootSeq: 0,
         orientation: 'portrait',
       })
@@ -151,8 +157,10 @@ export class AndroidAgent implements DeviceAgent {
     state.touchHelper = touchHelper
 
     const session = new ScrcpySession()
-    await session.start(serial)
+    const info = await session.start(serial)
     state.scrcpySession = session
+    state.displayWidth = info.width
+    state.displayHeight = info.height
 
     const stream = session.video.start()
     const reader = stream.getReader()
@@ -169,14 +177,15 @@ export class AndroidAgent implements DeviceAgent {
         // stream cancelled or ws closed — expected on disconnect
       }
       const ranMs = Date.now() - startedAt
-      if (state.scrcpySession === session && streamWs.readyState === WebSocket.OPEN) {
-        if (ranMs > 5_000) {
-          this.startVideoStream(state, streamWs).catch((e) =>
-            console.error('[android-agent] scrcpy restart failed:', e),
-          )
-        } else {
-          console.error(`[android-agent] scrcpy stream exited after ${ranMs}ms — not restarting`)
-        }
+      // Never silently restart — creates zombie scrcpy server processes.
+      // Report to relay so the dashboard can trigger device:boot again if needed.
+      if (state.scrcpySession === session) {
+        console.error(`[android-agent] scrcpy stream ended after ${ranMs}ms`)
+        this.ws?.send(JSON.stringify({
+          type: 'device:boot-error',
+          sessionId: state.sessionId,
+          message: `scrcpy stream ended after ${Math.round(ranMs / 1000)}s`,
+        }))
       }
     }
 
@@ -334,21 +343,40 @@ export class AndroidAgent implements DeviceAgent {
       }
       case 'input:touch:start': {
         const state = this.deviceStates.get(msg.sessionId!)
-        if (!state?.touchHelper) break
+        if (!state) break
         const { x, y } = msg.payload as { x: number; y: number }
-        state.touchHelper.touchStart(x, y)
+        if (state.scrcpySession && state.displayWidth > 0) {
+          const px = Math.round(x * state.displayWidth)
+          const py = Math.round(y * state.displayHeight)
+          state.lastTouchPx = { x: px, y: py }
+          state.scrcpySession.control.touchDown(0, px, py)
+        } else {
+          state.touchHelper?.touchStart(x, y)
+        }
         break
       }
       case 'input:touch:move': {
         const state = this.deviceStates.get(msg.sessionId!)
-        if (!state?.touchHelper) break
+        if (!state) break
         const { x, y } = msg.payload as { x: number; y: number }
-        state.touchHelper.touchMove(x, y)
+        if (state.scrcpySession && state.displayWidth > 0) {
+          const px = Math.round(x * state.displayWidth)
+          const py = Math.round(y * state.displayHeight)
+          state.lastTouchPx = { x: px, y: py }
+          state.scrcpySession.control.touchMove(0, px, py)
+        } else {
+          state.touchHelper?.touchMove(x, y)
+        }
         break
       }
       case 'input:touch:end': {
         const state = this.deviceStates.get(msg.sessionId!)
-        state?.touchHelper?.touchEnd()
+        if (!state) break
+        if (state.scrcpySession) {
+          state.scrcpySession.control.touchUp(0, state.lastTouchPx.x, state.lastTouchPx.y)
+        } else {
+          state.touchHelper?.touchEnd()
+        }
         break
       }
       case 'input:pinch:start': {

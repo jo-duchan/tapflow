@@ -1,9 +1,10 @@
 'use client';
 
-import { useCallback, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useRelay } from '@/hooks/useRelay';
 import { IOSViewer } from './simulator/IOSViewer';
 import { AndroidViewer } from './simulator/AndroidViewer';
+import { SimulatorInfoCard } from './simulator/shared/SimulatorInfoCard';
 import type { AndroidButton, ChromeData, RelayMessage } from '@/lib/types';
 
 interface Props {
@@ -65,6 +66,10 @@ export function SimulatorViewer({ sessionId, deviceId, buildId, onRecordingUploa
   const { send, connected } = useRelay(handleMessage, handleBinaryFrame);
   sendRef.current = send;
 
+  useEffect(() => {
+    if (connected) send({ type: 'session:start', sessionId });
+  }, [connected, send, sessionId]);
+
   // Derive platform from chrome payload shape
   const iosChrome = chrome !== null && 'framePng' in chrome ? chrome as ChromeData : null;
   const androidChrome = chrome !== null && !('framePng' in chrome) ? chrome as AndroidChrome : null;
@@ -76,6 +81,20 @@ export function SimulatorViewer({ sessionId, deviceId, buildId, onRecordingUploa
     binaryFrameHandlerRef,
     onRecordingUploaded,
   };
+
+  // Before chrome arrives, show status card so the user sees connection/boot progress
+  if (!iosChrome && !androidChrome) {
+    return (
+      <div className="flex items-start justify-center gap-16">
+        <SimulatorInfoCard
+          joined={joined} fps={0} connected={connected}
+          deviceReady={deviceReady} bootError={bootError}
+          installing={installing} installError={installError}
+          keyboardActive={false}
+        />
+      </div>
+    );
+  }
 
   return (
     <>

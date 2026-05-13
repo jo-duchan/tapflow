@@ -22,8 +22,8 @@ export class ScrcpyControl {
     this.writeTouchEvent(ACTION_MOVE, pointerId, x, y)
   }
 
-  touchUp(pointerId: number): void {
-    this.writeTouchEvent(ACTION_UP, pointerId, 0, 0)
+  touchUp(pointerId: number, x = 0, y = 0): void {
+    this.writeTouchEvent(ACTION_UP, pointerId, x, y)
   }
 
   keyEvent(keyCode: number): void {
@@ -37,17 +37,20 @@ export class ScrcpyControl {
   }
 
   private writeTouchEvent(action: number, pointerId: number, x: number, y: number): void {
-    const buf = Buffer.allocUnsafe(28)
+    // scrcpy 3.x INJECT_TOUCH_EVENT layout (32 bytes total):
+    // [0] type [1] action [2..9] pointerId(long) [10..13] x [14..17] y
+    // [18..19] screenW [20..21] screenH [22..23] pressure [24..27] actionButton [28..31] buttons
+    const buf = Buffer.allocUnsafe(32)
     buf.writeUInt8(TYPE_INJECT_TOUCH_EVENT, 0)
     buf.writeUInt8(action, 1)
-    buf.writeInt32BE(pointerId, 2)
-    buf.writeInt32BE(x, 6)
-    buf.writeInt32BE(y, 10)
-    buf.writeUInt16BE(this.screenWidth, 14)
-    buf.writeUInt16BE(this.screenHeight, 16)
-    buf.writeUInt16BE(action === ACTION_UP ? 0 : 0xffff, 18) // pressure
-    buf.writeUInt32BE(0x1, 22)    // actionButton (BUTTON_PRIMARY)
-    buf.writeUInt32BE(0, 24)      // buttons
+    buf.writeBigInt64BE(BigInt(pointerId), 2)
+    buf.writeInt32BE(x, 10)
+    buf.writeInt32BE(y, 14)
+    buf.writeUInt16BE(this.screenWidth, 18)
+    buf.writeUInt16BE(this.screenHeight, 20)
+    buf.writeUInt16BE(action === ACTION_UP ? 0 : 0xffff, 22) // pressure
+    buf.writeInt32BE(0x1, 24)    // actionButton (BUTTON_PRIMARY)
+    buf.writeInt32BE(0, 28)      // buttons
     this.socket.write(buf)
   }
 }

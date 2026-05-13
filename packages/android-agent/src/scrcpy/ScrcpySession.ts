@@ -68,8 +68,8 @@ export class ScrcpySession {
       `scid=${SCID}`,
       'tunnel_forward=true',
       'video_codec=h264',
-      'video_bit_rate=2000000',
-      'max_size=1280',
+      'video_encoder=OMX.google.h264.encoder', // software encoder — avoids c2.android.avc.encoder stalling under GPU load
+      'video_bit_rate=8000000',
       'max_fps=30',
       'audio=false',
       'stay_awake=true',         // prevent device display from sleeping during capture
