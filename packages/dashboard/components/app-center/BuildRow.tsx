@@ -47,7 +47,7 @@ export function BuildRow({ build, isLast, onNavigate, onStatusChange }: Props) {
         value={build.status_label ?? 'none'}
         onValueChange={(val) => onStatusChange(build.id, val === 'none' ? null : val)}
       >
-        <SelectTrigger className="h-7 w-32 text-xs">
+        <SelectTrigger className="h-9 w-32 text-xs">
           <SelectValue />
         </SelectTrigger>
         <SelectContent>
