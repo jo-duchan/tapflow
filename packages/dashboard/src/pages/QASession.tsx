@@ -18,13 +18,10 @@ import {
 } from '@/components/ui/breadcrumb';
 import { getBuild } from '@/lib/queries';
 import { cn } from '@/lib/utils';
+import { STATUS_TONE, buildLabel } from '@/lib/build-format';
 import { SearchInput } from '@/components/ui/search-input';
 import type { AgentDevice, Build, RelayMessage, SessionInfo } from '@/lib/types';
 
-function buildLabel(build: Build): string {
-  if (build.version_name && build.build_number) return `${build.version_name} · build ${build.build_number}`
-  return build.version_name ?? build.version_label ?? (build.build_number ? `build ${build.build_number}` : 'Build')
-}
 
 export function QASession() {
   const [searchParams] = useSearchParams();
@@ -159,13 +156,13 @@ export function QASession() {
               </BreadcrumbList>
             </Breadcrumb>
             {!activeSessionId && build.status_label && (
-              <Badge variant="secondary">{build.status_label}</Badge>
+              <Badge tone={STATUS_TONE[build.status_label as keyof typeof STATUS_TONE]}>{build.status_label}</Badge>
             )}
           </div>
         )}
 
-        {/* 스크롤 영역 — pr-4로 스크롤바와 콘텐츠 겹침 방지 */}
-        <div className="flex-1 min-h-0 overflow-y-auto pr-4">
+        {/* -mr-4 pr-4: 스크롤바를 오른쪽 마진 영역으로 밀어 콘텐츠와 겹치지 않게 */}
+        <div className="flex-1 min-h-0 overflow-y-auto -mr-4 pr-4">
           {activeSessionId ? (
             <SimulatorViewer
               sessionId={activeSessionId}

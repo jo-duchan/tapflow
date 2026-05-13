@@ -6,13 +6,7 @@ import {
 } from '@/components/ui/select'
 import { Play } from 'lucide-react'
 import type { Build } from '@/lib/types'
-
-const STATUS_TONE = {
-  Backlog:       'backlog',
-  'In Progress': 'progress',
-  Done:          'done',
-  Rejected:      'rejected',
-} as const satisfies Record<string, 'backlog' | 'progress' | 'done' | 'rejected'>
+import { STATUS_TONE } from '@/lib/build-format'
 
 interface Props {
   build: Build
