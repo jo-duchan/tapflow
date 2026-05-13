@@ -265,7 +265,7 @@ export function DefaultSettings() {
         <Card>
           <CardHeader><CardTitle>Apps</CardTitle></CardHeader>
           <CardContent>
-            <div className="flex flex-col gap-4">
+            <div className="flex flex-col gap-6">
               {apps.map((app) => (
                 <div key={app.id} className="flex items-end gap-2">
                   <div className="flex-1 grid gap-1.5">
