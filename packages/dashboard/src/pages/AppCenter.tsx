@@ -1,5 +1,6 @@
 import { useEffect, useState, useCallback } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
+import { Layers, Package } from 'lucide-react'
 import { SearchInput } from '@/components/ui/search-input'
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
@@ -91,6 +92,14 @@ export function AppCenter() {
           <UploadBuildDialog onSuccess={() => { fetchApps(); fetchBuilds() }} appId={selectedAppId} />
         </div>
 
+        {!selectedAppId ? (
+          <div className="flex-1 flex flex-col items-center justify-center gap-2 text-center">
+            <Layers className="w-8 h-8 text-muted-foreground/40" />
+            <p className="text-sm font-medium">No app selected</p>
+            <p className="text-sm text-muted-foreground">Choose an app from the sidebar to view its builds.</p>
+          </div>
+        ) : (
+        <>
         <div className="flex flex-wrap gap-2">
           <SearchInput
             placeholder="Search version…"
@@ -109,12 +118,14 @@ export function AppCenter() {
           </Select>
         </div>
 
-        {!selectedAppId ? (
-          <p className="text-sm text-muted-foreground">Choose an app from the sidebar to view its builds.</p>
-        ) : loading ? (
+        {loading ? (
           <p className="text-sm text-muted-foreground">Loading…</p>
         ) : releaseGroups.length === 0 ? (
-          <p className="text-sm text-muted-foreground">Upload the first build to get started.</p>
+          <div className="flex-1 flex flex-col items-center justify-center gap-2 text-center">
+            <Package className="w-8 h-8 text-muted-foreground/40" />
+            <p className="text-sm font-medium">No builds yet</p>
+            <p className="text-sm text-muted-foreground">Upload the first build to get started.</p>
+          </div>
         ) : (
           <div className="flex flex-col gap-2">
             {releaseGroups.map(({ versionName, builds: groupBuilds }) => (
@@ -129,6 +140,8 @@ export function AppCenter() {
               />
             ))}
           </div>
+        )}
+        </>
         )}
       </main>
     </div>
