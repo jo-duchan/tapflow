@@ -717,9 +717,7 @@ export function SimulatorViewer({ sessionId, deviceId, buildId, onRecordingUploa
           : installError
             ? `Install failed: ${installError.length > 22 ? installError.slice(0, 22) + '…' : installError}`
             : null;
-  // TODO: remove dummy
-  const _statusText = statusText;
-  const statusTextDisplay = _statusText ?? 'Installing app…';
+  const statusTextDisplay = statusText;
 
   return (
     <div className="flex items-start justify-center gap-16">
