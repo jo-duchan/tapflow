@@ -266,15 +266,16 @@ export function DefaultSettings() {
         <Card>
           <CardHeader><CardTitle>Apps</CardTitle></CardHeader>
           <CardContent>
-            <div className="flex flex-col gap-4">
+            <div className="flex flex-col divide-y divide-border">
               {apps.map((app) => (
-                <div key={app.id} className="flex flex-col gap-1.5">
+                <div key={app.id} className="flex flex-col gap-2 py-4 first:pt-0 last:pb-0">
+                  <Label htmlFor={`app-${app.id}`}>App Name</Label>
                   <Input
                     id={`app-${app.id}`}
                     value={appNames[app.id] ?? ''}
                     onChange={(e) => setAppNames((p) => ({ ...p, [app.id]: e.target.value }))}
                   />
-                  <div className="flex items-center justify-between">
+                  <div className="flex items-center justify-between mt-1">
                     <div className="flex items-center gap-2">
                       <span className="text-xs text-muted-foreground font-mono">{app.bundle_id_key}</span>
                       <Badge
@@ -287,7 +288,7 @@ export function DefaultSettings() {
                     </div>
                     <div className="flex items-center gap-2">
                       <Button
-                        size="nav"
+                        size="sm"
                         variant="outline"
                         disabled={appsSaving[app.id]}
                         onClick={() => handleAppNameSave(app.id)}
@@ -296,7 +297,7 @@ export function DefaultSettings() {
                       </Button>
                       <AlertDialog>
                         <AlertDialogTrigger asChild>
-                          <Button size="nav" variant="destructive" disabled={appsDeleting[app.id]}>
+                          <Button size="sm" variant="destructive" disabled={appsDeleting[app.id]}>
                             {appsDeleting[app.id] ? 'Deleting…' : 'Delete'}
                           </Button>
                         </AlertDialogTrigger>
