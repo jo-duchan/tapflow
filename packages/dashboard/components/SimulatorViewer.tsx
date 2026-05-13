@@ -3,18 +3,17 @@
 import { useCallback, useEffect, useRef, useState, Fragment } from 'react';
 import { Home, Camera, RotateCw, Play, Circle, Square, Loader2, Keyboard } from 'lucide-react';
 import { useRelay } from '@/hooks/useRelay';
-import type { ChromeData, DeviceInfo, RelayMessage } from '@/lib/types';
+import type { ChromeData, RelayMessage } from '@/lib/types';
 import { Button } from '@/components/ui/button';
 
 interface Props {
   sessionId: string;
   deviceId: string;
-  onBack: () => void;
   buildId?: number;
   onRecordingUploaded?: () => void;
 }
 
-export function SimulatorViewer({ sessionId, deviceId, onBack, buildId, onRecordingUploaded }: Props) {
+export function SimulatorViewer({ sessionId, deviceId, buildId, onRecordingUploaded }: Props) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   // off-screen canvas: source for MediaRecorder (composite of framebuffer + chrome + overlays)
@@ -24,7 +23,6 @@ export function SimulatorViewer({ sessionId, deviceId, onBack, buildId, onRecord
   const [deviceReady, setDeviceReady] = useState(false);
   const [fps, setFps] = useState(0);
   const [chrome, setChrome] = useState<ChromeData | null>(null);
-  const [deviceInfo, setDeviceInfo] = useState<DeviceInfo | null>(null);
   const frameCount = useRef(0);
   const sendRef = useRef<(msg: object) => void>(() => {});
   const deviceSeq = useRef(0);
@@ -113,7 +111,6 @@ export function SimulatorViewer({ sessionId, deviceId, onBack, buildId, onRecord
       if (msg.type === 'app:launch-done') { setLaunching(false); }
       if (msg.type === 'app:launch-error') { setLaunching(false); }
       if (msg.type === 'session:chrome') { setChrome(msg.payload); }
-      if (msg.type === 'session:deviceInfo') { setDeviceInfo(msg.payload); }
     },
     [drawToCanvas, sessionId, deviceId, buildId],
   );
@@ -645,18 +642,6 @@ export function SimulatorViewer({ sessionId, deviceId, onBack, buildId, onRecord
   }, [send, sessionId]);
 
   // ── layout ────────────────────────────────────────────────────────────────
-  const statusText = !connected
-    ? 'Connecting...'
-    : !joined
-      ? 'Joining session...'
-      : !deviceReady
-        ? 'Starting device...'
-        : installing
-          ? 'Installing app…'
-          : installError
-            ? `Install failed: ${installError}`
-            : `Live · ${fps} fps`;
-
   const compositeLogicalW = chrome ? chrome.compositeWidth / 2 : 0;
   const compositeLogicalH = chrome ? chrome.compositeHeight / 2 : 0;
   const MAX_DISPLAY_H = 750;
@@ -675,16 +660,6 @@ export function SimulatorViewer({ sessionId, deviceId, onBack, buildId, onRecord
     <div className="flex flex-col items-center gap-3">
       {/* hidden off-screen record canvas — source for MediaRecorder */}
       <canvas ref={recordCanvasRef} style={{ display: 'none' }} />
-
-      <div className="flex w-full items-center gap-3">
-        <Button variant="ghost" size="sm" onClick={onBack}>← Back</Button>
-        <span className="text-sm text-muted-foreground">{statusText}</span>
-        {deviceInfo && (
-          <span className="text-sm text-muted-foreground/60">
-            {deviceInfo.deviceName}{deviceInfo.osVersion ? ` · ${deviceInfo.osVersion}` : ''}
-          </span>
-        )}
-      </div>
 
       {chrome ? (
         <div style={{ width: isLandscape ? displayH : displayW, height: isLandscape ? displayW : displayH, position: 'relative', flexShrink: 0 }}>

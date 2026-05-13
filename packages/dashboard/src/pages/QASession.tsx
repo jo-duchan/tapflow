@@ -18,7 +18,6 @@ import {
   Breadcrumb, BreadcrumbItem, BreadcrumbLink,
   BreadcrumbList, BreadcrumbPage, BreadcrumbSeparator,
 } from '@/components/ui/breadcrumb';
-import { ArrowLeft } from 'lucide-react';
 import { getBuild } from '@/lib/queries';
 import { cn } from '@/lib/utils';
 import { SearchInput } from '@/components/ui/search-input';
@@ -116,9 +115,6 @@ export function QASession() {
         {activeSessionId ? (
           <>
             <div className="flex w-full items-center gap-2">
-              <Button variant="ghost" size="icon" className="h-7 w-7 shrink-0" onClick={handleBack}>
-                <ArrowLeft className="h-4 w-4" />
-              </Button>
               {build && (
                 <Breadcrumb>
                   <BreadcrumbList>
@@ -146,7 +142,6 @@ export function QASession() {
             <SimulatorViewer
               sessionId={activeSessionId}
               deviceId={deviceId}
-              onBack={handleBack}
               buildId={build?.id}
               onRecordingUploaded={() => setRecordingsKey((k) => k + 1)}
             />
