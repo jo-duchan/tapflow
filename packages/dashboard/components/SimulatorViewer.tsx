@@ -391,12 +391,28 @@ export function SimulatorViewer({ sessionId, deviceId, buildId, onRecordingUploa
       const modifiers = (e.shiftKey ? 0x02 : 0) | (e.ctrlKey ? 0x01 : 0) | (e.metaKey ? 0x08 : 0);
       send({ type: 'input:key', sessionId, payload: { code: e.code, modifiers } });
     };
-    const onKeyUp = (e: KeyboardEvent) => {
-      if (e.code === 'AltLeft' || e.code === 'AltRight') { isOptionHeld.current = false; setPinchHint(null); }
+    const endPinchIfActive = () => {
+      if (isPinchMode.current) {
+        isPinchMode.current = false;
+        setPinchActive(false);
+        send({ type: 'input:pinch:end', sessionId });
+      }
+      isOptionHeld.current = false;
+      setPinchHint(null);
     };
+    const onKeyUp = (e: KeyboardEvent) => {
+      if (e.code === 'AltLeft' || e.code === 'AltRight') endPinchIfActive();
+    };
+    // keyup가 누락되는 경우(포커스 이탈 등) 핀치 상태 초기화
+    const onBlur = () => { if (isOptionHeld.current) endPinchIfActive(); };
     window.addEventListener('keydown', onKeyDown);
     window.addEventListener('keyup', onKeyUp);
-    return () => { window.removeEventListener('keydown', onKeyDown); window.removeEventListener('keyup', onKeyUp); };
+    window.addEventListener('blur', onBlur);
+    return () => {
+      window.removeEventListener('keydown', onKeyDown);
+      window.removeEventListener('keyup', onKeyUp);
+      window.removeEventListener('blur', onBlur);
+    };
   }, [keyboardActive, send, sessionId]);
 
   useEffect(() => {
