@@ -14,10 +14,10 @@ import {
 } from '@/components/ui/select';
 import { Badge } from '@/components/ui/badge';
 import { Separator } from '@/components/ui/separator';
-import { ArrowLeft, Search } from 'lucide-react';
+import { ArrowLeft } from 'lucide-react';
 import { getBuild } from '@/lib/queries';
 import { cn } from '@/lib/utils';
-import { Input } from '@/components/ui/input';
+import { SearchInput } from '@/components/ui/search-input';
 import type { AgentDevice, Build, RelayMessage, SessionInfo } from '@/lib/types';
 
 export function QASession() {
@@ -143,15 +143,11 @@ export function QASession() {
               <h1 className="text-xl font-semibold tracking-tight">Select device</h1>
 
               <div className="flex gap-2">
-                <div className="relative">
-                  <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground pointer-events-none" />
-                  <Input
-                    placeholder="Search device…"
-                    value={deviceSearch}
-                    onChange={(e) => setDeviceSearch(e.target.value)}
-                    className="h-8 w-48 pl-8"
-                  />
-                </div>
+                <SearchInput
+                  placeholder="Search device…"
+                  value={deviceSearch}
+                  onChange={setDeviceSearch}
+                />
                 {osVersions.length > 0 && (
                   <Select
                     value={osVersion || '__all__'}

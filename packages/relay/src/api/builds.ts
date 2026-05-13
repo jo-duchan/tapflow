@@ -130,13 +130,12 @@ export function handleListBuilds(req: http.IncomingMessage, res: http.ServerResp
   const conds: string[] = []
   const params: unknown[] = []
 
-  if (q)        { conds.push('(a.name LIKE ? OR b.version_name LIKE ?)'); params.push(`%${q}%`, `%${q}%`) }
+  if (q)        { conds.push('b.version_name LIKE ?'); params.push(`%${q}%`) }
   if (platform) { conds.push('ap.platform = ?'); params.push(platform) }
   if (status)   { conds.push('b.status_label = ?'); params.push(status) }
   if (appId)    { conds.push('b.app_id = ?'); params.push(Number(appId)) }
 
   const where = conds.length ? `WHERE ${conds.join(' AND ')}` : ''
-  // alias 'a' for build name fallback via app name
   const baseFrom = `
     FROM builds b
     LEFT JOIN apps ap ON ap.id = b.app_id
@@ -144,7 +143,7 @@ export function handleListBuilds(req: http.IncomingMessage, res: http.ServerResp
   `
 
   const total = (db.prepare(
-    `SELECT COUNT(*) as n ${baseFrom} ${where}`.replace('a.name', 'ap.name')
+    `SELECT COUNT(*) as n ${baseFrom} ${where}`
   ).get(...params) as { n: number }).n
 
   const items = db.prepare(`
@@ -153,7 +152,7 @@ export function handleListBuilds(req: http.IncomingMessage, res: http.ServerResp
            b.bundle_id, b.uploaded_at,
            COALESCE(u.display_name, substr(u.email, 1, instr(u.email, '@') - 1)) as uploader
     ${baseFrom}
-    ${where.replace('a.name', 'ap.name')}
+    ${where}
     ORDER BY b.${sortKey} ${sortDir}
     LIMIT ? OFFSET ?
   `).all(...params, limit, page * limit)
