@@ -110,11 +110,11 @@ export function AppCenter() {
         </div>
 
         {!selectedAppId ? (
-          <p className="text-sm text-muted-foreground">좌측에서 앱을 선택하세요.</p>
+          <p className="text-sm text-muted-foreground">Choose an app from the sidebar to view its builds.</p>
         ) : loading ? (
           <p className="text-sm text-muted-foreground">Loading…</p>
         ) : releaseGroups.length === 0 ? (
-          <p className="text-sm text-muted-foreground">No builds yet. Upload the first build.</p>
+          <p className="text-sm text-muted-foreground">Upload the first build to get started.</p>
         ) : (
           <div className="flex flex-col gap-2">
             {releaseGroups.map(({ versionName, builds: groupBuilds }) => (

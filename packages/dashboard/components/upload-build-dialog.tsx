@@ -80,7 +80,7 @@ export function UploadBuildDialog({ onSuccess, appId }: Props) {
               onChange={(e) => setFile(e.target.files?.[0] ?? null)}
             />
             <p className="text-xs text-muted-foreground">
-              iOS: <code>.app.zip</code> (xcodebuild -sdk iphonesimulator 빌드 후 .app 폴더를 zip 압축)
+              iOS: <code>.app.zip</code> (zip the <code>.app</code> folder after <code>xcodebuild -sdk iphonesimulator</code>)
               &nbsp;·&nbsp;Android: <code>.apk</code>
             </p>
           </div>
