@@ -114,7 +114,7 @@ export function TeamSettings() {
 
       <Card>
         <CardHeader><CardTitle>Members ({members.length})</CardTitle></CardHeader>
-        <CardContent className="p-0">
+        <CardContent className="px-4 pt-0 pb-2">
           <Table>
             <TableHeader>
               <TableRow>
