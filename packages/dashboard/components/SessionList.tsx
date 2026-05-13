@@ -113,8 +113,8 @@ export function SessionList({ onSelect }: Props) {
                     <p className="mt-0.5 text-xs capitalize text-muted-foreground">{d.platform}</p>
                   </div>
 
-                  {isBusy && <Badge variant="destructive">사용 중</Badge>}
-                  {isError && <Badge variant="destructive">오류</Badge>}
+                  {isBusy && <Badge variant="destructive">In Use</Badge>}
+                  {isError && <Badge variant="destructive">Error</Badge>}
                   {isBooting && <Badge variant="secondary">Booting...</Badge>}
                   {isShutting && <Badge variant="secondary">Shutting down...</Badge>}
                   {!isBusy && !isBooting && !isError && !isShutting && (

@@ -16,7 +16,7 @@ function formatBytes(bytes: number): string {
 }
 
 function formatDate(iso: string): string {
-  return new Date(iso).toLocaleString('ko-KR', {
+  return new Date(iso).toLocaleString(undefined, {
     month: 'short',
     day: 'numeric',
     hour: '2-digit',
@@ -26,11 +26,11 @@ function formatDate(iso: string): string {
 
 function formatExpiry(iso: string): { label: string; urgent: boolean } {
   const diff = new Date(iso).getTime() - Date.now();
-  if (diff <= 0) return { label: '만료됨', urgent: true };
+  if (diff <= 0) return { label: 'Expired', urgent: true };
   const h = Math.floor(diff / 3_600_000);
-  if (h < 1) return { label: '1시간 미만', urgent: true };
-  if (h < 24) return { label: `${h}시간 후 만료`, urgent: h < 6 };
-  return { label: `${Math.floor(h / 24)}일 후 만료`, urgent: false };
+  if (h < 1) return { label: '< 1 hour left', urgent: true };
+  if (h < 24) return { label: `Expires in ${h}h`, urgent: h < 6 };
+  return { label: `Expires in ${Math.floor(h / 24)}d`, urgent: false };
 }
 
 export function RecordingsList({ sessionId, refreshKey }: Props) {
@@ -49,20 +49,20 @@ export function RecordingsList({ sessionId, refreshKey }: Props) {
   }, [sessionId, refreshKey]);
 
   if (loading) {
-    return <p className="text-xs text-muted-foreground">녹화 목록 로딩 중...</p>;
+    return <p className="text-xs text-muted-foreground">Loading recordings…</p>;
   }
 
   if (recordings.length === 0) {
     return (
       <div className="flex items-center gap-2 text-xs text-muted-foreground py-1">
         <Film className="h-3.5 w-3.5 shrink-0" />
-        <span>이 세션의 녹화가 없습니다</span>
+        <span>No recordings for this session</span>
       </div>
     );
   }
 
   return (
-    <div className="flex flex-col gap-1">
+    <div className="flex flex-col gap-2">
       {recordings.map((rec) => {
         const expiry = formatExpiry(rec.expiresAt);
         return (
@@ -80,7 +80,7 @@ export function RecordingsList({ sessionId, refreshKey }: Props) {
               variant="ghost"
               size="icon"
               className="h-7 w-7 shrink-0 ml-2"
-              title="다운로드"
+              title="Download"
               onClick={() => {
                 const a = document.createElement('a');
                 a.href = rec.url;

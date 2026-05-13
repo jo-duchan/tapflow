@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useSearchParams, useNavigate } from 'react-router-dom';
 import { useRelay } from '@/hooks/useRelay';
+import { useBreadcrumb } from '@/hooks/useBreadcrumb';
 import { SimulatorViewer } from '@/components/SimulatorViewer';
 import { SessionPanel } from '@/components/session-panel';
 import {
@@ -21,7 +22,6 @@ import { cn } from '@/lib/utils';
 import { STATUS_TONE, buildLabel } from '@/lib/build-format';
 import { SearchInput } from '@/components/ui/search-input';
 import type { AgentDevice, Build, RelayMessage, SessionInfo } from '@/lib/types';
-
 
 export function QASession() {
   const [searchParams] = useSearchParams();
@@ -95,14 +95,14 @@ export function QASession() {
     : filteredDevices
   ).filter((d) => !deviceSearch || d.name.toLowerCase().includes(deviceSearch.toLowerCase()));
 
-  function handleBack() {
+  const handleBack = useCallback(() => {
     if (activeSessionId && deviceId) {
       send({ type: 'device:shutdown', sessionId: activeSessionId, payload: { deviceId } });
     }
     setActiveSessionId(null);
     setBooting(false);
     setStatus('');
-  }
+  }, [activeSessionId, deviceId, send]);
 
   // ref로 최신 session 정보를 추적 — cleanup 클로저에서 stale state 방지
   const activeSessionRef = useRef({ sessionId: activeSessionId, deviceId });
@@ -120,56 +120,65 @@ export function QASession() {
     };
   }, [send]);
 
+  // 헤더 breadcrumb 설정
+  const { setNode: setBreadcrumb } = useBreadcrumb();
+  useEffect(() => {
+    if (!build) return;
+    setBreadcrumb(
+      <div className="flex items-center gap-3">
+        <Breadcrumb>
+          <BreadcrumbList>
+            <BreadcrumbItem>
+              <BreadcrumbLink asChild>
+                <button onClick={() => navigate(`/app-center?appId=${build.app_id}`)}>
+                  {build.name}
+                </button>
+              </BreadcrumbLink>
+            </BreadcrumbItem>
+            <BreadcrumbSeparator />
+            <BreadcrumbItem>
+              {activeSessionId ? (
+                <BreadcrumbLink asChild>
+                  <button onClick={handleBack}>{buildLabel(build)}</button>
+                </BreadcrumbLink>
+              ) : (
+                <BreadcrumbPage>{buildLabel(build)}</BreadcrumbPage>
+              )}
+            </BreadcrumbItem>
+            {activeSessionId && (
+              <>
+                <BreadcrumbSeparator />
+                <BreadcrumbItem>
+                  <BreadcrumbPage>{deviceLabel}</BreadcrumbPage>
+                </BreadcrumbItem>
+              </>
+            )}
+          </BreadcrumbList>
+        </Breadcrumb>
+        {!activeSessionId && build.status_label && (
+          <Badge tone={STATUS_TONE[build.status_label as keyof typeof STATUS_TONE]}>
+            {build.status_label}
+          </Badge>
+        )}
+      </div>
+    );
+    return () => setBreadcrumb(null);
+  }, [build, activeSessionId, deviceLabel, navigate, handleBack, setBreadcrumb]);
+
   return (
     <div className="flex h-full min-h-0 gap-6 p-6">
       <div className="flex flex-col gap-3 flex-1 min-w-0 min-h-0">
-        {/* Breadcrumb — 스크롤과 무관하게 상단 고정 */}
-        {build && (
-          <div className="shrink-0 flex items-center gap-3">
-            <Breadcrumb>
-              <BreadcrumbList>
-                <BreadcrumbItem>
-                  <BreadcrumbLink asChild>
-                    <button onClick={() => navigate(`/app-center?appId=${build.app_id}`)}>
-                      {build.name}
-                    </button>
-                  </BreadcrumbLink>
-                </BreadcrumbItem>
-                <BreadcrumbSeparator />
-                <BreadcrumbItem>
-                  {activeSessionId ? (
-                    <BreadcrumbLink asChild>
-                      <button onClick={handleBack}>{buildLabel(build)}</button>
-                    </BreadcrumbLink>
-                  ) : (
-                    <BreadcrumbPage>{buildLabel(build)}</BreadcrumbPage>
-                  )}
-                </BreadcrumbItem>
-                {activeSessionId && (
-                  <>
-                    <BreadcrumbSeparator />
-                    <BreadcrumbItem>
-                      <BreadcrumbPage>{deviceLabel}</BreadcrumbPage>
-                    </BreadcrumbItem>
-                  </>
-                )}
-              </BreadcrumbList>
-            </Breadcrumb>
-            {!activeSessionId && build.status_label && (
-              <Badge tone={STATUS_TONE[build.status_label as keyof typeof STATUS_TONE]}>{build.status_label}</Badge>
-            )}
-          </div>
-        )}
-
-        {/* -mr-4 pr-4: 스크롤바를 오른쪽 마진 영역으로 밀어 콘텐츠와 겹치지 않게 */}
-        <div className="flex-1 min-h-0 overflow-y-auto -mr-4 pr-4">
+        {/* -ml-1 pl-1: 좌측 ring 클리핑 방지 / -mr-4 pr-4: 스크롤바 마진 영역으로 분리 */}
+        <div className="flex-1 min-h-0 overflow-y-auto -ml-1 pl-1 -mr-4 pr-4">
           {activeSessionId ? (
-            <SimulatorViewer
-              sessionId={activeSessionId}
-              deviceId={deviceId}
-              buildId={build?.id}
-              onRecordingUploaded={() => setRecordingsKey((k) => k + 1)}
-            />
+            <div className="min-h-full flex items-center justify-center py-6">
+              <SimulatorViewer
+                sessionId={activeSessionId}
+                deviceId={deviceId}
+                buildId={build?.id}
+                onRecordingUploaded={() => setRecordingsKey((k) => k + 1)}
+              />
+            </div>
           ) : (
             <div className="flex flex-col gap-5">
               <h1 className="text-xl font-semibold tracking-tight">Select device</h1>

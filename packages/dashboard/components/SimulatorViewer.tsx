@@ -1,10 +1,12 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState, Fragment } from 'react';
-import { Home, Camera, RotateCw, Play, Circle, Square, Loader2, Keyboard } from 'lucide-react';
+import { Home, Camera, RotateCw, Play, Video, Square, Loader2, Keyboard, ScanLine } from 'lucide-react';
 import { useRelay } from '@/hooks/useRelay';
 import type { ChromeData, RelayMessage } from '@/lib/types';
 import { Button } from '@/components/ui/button';
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
+import { cn } from '@/lib/utils';
 
 interface Props {
   sessionId: string;
@@ -656,11 +658,108 @@ export function SimulatorViewer({ sessionId, deviceId, buildId, onRecordingUploa
 
   const cssCornerRadius = chrome ? Math.round((chrome.screenCornerRadius / 2) * displayScale) : 0;
 
+  const fpsColor = fps >= 30 ? '#10b981' : fps >= 15 ? '#f59e0b' : fps > 0 ? '#ef4444' : '#6b7280';
+
+  const statusText = !connected
+    ? 'Connecting…'
+    : !joined
+      ? 'Joining session…'
+      : !deviceReady
+        ? 'Starting device…'
+        : installing
+          ? 'Installing app…'
+          : installError
+            ? `Install failed: ${installError.length > 22 ? installError.slice(0, 22) + '…' : installError}`
+            : null;
+  // TODO: remove dummy
+  const _statusText = statusText;
+  const statusTextDisplay = _statusText ?? 'Installing app…';
+
   return (
-    <div className="flex flex-col items-center gap-3">
+    <div className="flex items-start justify-center gap-16">
       {/* hidden off-screen record canvas — source for MediaRecorder */}
       <canvas ref={recordCanvasRef} style={{ display: 'none' }} />
 
+      {joined && (
+        <TooltipProvider delayDuration={400}>
+          <div className="flex flex-col items-center gap-0.5 rounded-2xl border bg-background/90 backdrop-blur-sm px-1.5 py-2.5 shrink-0 mt-3">
+            {installed && buildId && (
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button
+                    variant="ghost" size="icon" className="h-8 w-8"
+                    disabled={launching}
+                    onClick={() => { setLaunching(true); sendRef.current({ type: 'app:launch', sessionId, buildId }); }}
+                  >
+                    {launching ? <Loader2 className="h-4 w-4 animate-spin" /> : <Play className="h-4 w-4" />}
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent side="left">{launching ? 'Launching…' : 'Launch app'}</TooltipContent>
+              </Tooltip>
+            )}
+
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button variant="ghost" size="icon" className="h-8 w-8" onClick={handleSoftHome}>
+                  <Home className="h-4 w-4" />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent side="left">Home</TooltipContent>
+            </Tooltip>
+
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button variant="ghost" size="icon" className="h-8 w-8" onClick={handleKeyboardToggle}>
+                  <Keyboard className="h-4 w-4" />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent side="left">Software keyboard</TooltipContent>
+            </Tooltip>
+
+            <div className="w-4 h-px bg-border my-1" />
+
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button variant="ghost" size="icon" className="h-8 w-8" onClick={handleScreenshot}>
+                  <Camera className="h-4 w-4" />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent side="left">Screenshot</TooltipContent>
+            </Tooltip>
+
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  variant="ghost" size="icon"
+                  className={cn('h-8 w-8', recordState === 'recording' && 'text-red-500 hover:text-red-500')}
+                  disabled={recordState === 'uploading' || recordState === 'done'}
+                  onClick={handleRecordToggle}
+                >
+                  {recordState === 'uploading' ? <Loader2 className="h-4 w-4 animate-spin" />
+                    : recordState === 'recording' ? <Square className="h-4 w-4 fill-current" />
+                    : <Video className="h-4 w-4" />}
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent side="left">
+                {recordState === 'idle' ? 'Start recording' : recordState === 'recording' ? 'Stop recording' : 'Processing…'}
+              </TooltipContent>
+            </Tooltip>
+
+            <div className="w-4 h-px bg-border my-1" />
+
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button variant="ghost" size="icon" className="h-8 w-8" onClick={handleRotate}>
+                  <RotateCw className="h-4 w-4" />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent side="left">Rotate</TooltipContent>
+            </Tooltip>
+          </div>
+        </TooltipProvider>
+      )}
+
+      <div className="flex items-start gap-8">
       {chrome ? (
         <div style={{ width: isLandscape ? displayH : displayW, height: isLandscape ? displayW : displayH, position: 'relative', flexShrink: 0 }}>
           <div
@@ -725,6 +824,17 @@ export function SimulatorViewer({ sessionId, deviceId, buildId, onRecordingUploa
                 </>
               );
             })()}
+            {joined && fps === 0 && (
+              <div style={{
+                position: 'absolute', zIndex: 8,
+                left: `${screenPctLeft}%`, top: `${screenPctTop}%`,
+                width: `${screenPctW}%`, height: `${screenPctH}%`,
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                pointerEvents: 'none',
+              }}>
+                <span style={{ color: 'white', fontSize: '0.875rem' }}>Waiting for first frame...</span>
+              </div>
+            )}
             {chrome.buttons.map((btn) => {
               const isFlashed = flashedButton === btn.name;
               const isHovered = hoveredButton === btn.name;
@@ -787,59 +897,48 @@ export function SimulatorViewer({ sessionId, deviceId, buildId, onRecordingUploa
           </div>
         </div>
       ) : (
-        <canvas
-          ref={canvasRef}
-          className="block max-w-full cursor-crosshair"
-          style={{ borderRadius: '10%' }}
-          onPointerDown={handlePointerDown}
-          onPointerMove={handlePointerMove}
-          onPointerUp={handlePointerUp}
-          onPointerCancel={handlePointerCancel}
-        />
-      )}
-
-      {joined && fps === 0 && <p className="text-sm text-muted-foreground">Waiting for first frame...</p>}
-
-      {joined && (
-        <div
-          className="flex items-center justify-end rounded-lg border border-border bg-muted/40 px-3 py-1.5"
-          style={{ width: chrome ? (isLandscape ? displayH : displayW) : '100%', minWidth: 200 }}
-        >
-          <div className="flex items-center gap-1">
-            {keyboardActive && <span className="text-xs text-muted-foreground px-1">⌨</span>}
-            <Button variant="ghost" size="icon" className="h-7 w-7" title="Toggle Software Keyboard" onClick={handleKeyboardToggle}>
-              <Keyboard className="h-3.5 w-3.5" />
-            </Button>
-            {installed && buildId && (
-              <Button variant="ghost" size="sm" className="h-7 px-2 text-xs" title="Launch app" disabled={launching}
-                onClick={() => { setLaunching(true); sendRef.current({ type: 'app:launch', sessionId, buildId }); }}>
-                <Play className="h-3 w-3 mr-1" />
-                {launching ? 'Launching…' : 'Launch'}
-              </Button>
-            )}
-            <Button variant="ghost" size="icon" className="h-7 w-7" title="Home" onClick={handleSoftHome}>
-              <Home className="h-3.5 w-3.5" />
-            </Button>
-            <Button variant="ghost" size="icon" className="h-7 w-7" title="Screenshot" onClick={handleScreenshot}>
-              <Camera className="h-3.5 w-3.5" />
-            </Button>
-            <Button
-              variant="ghost" size="icon"
-              className={`h-7 w-7 ${recordState === 'recording' ? 'text-red-500' : ''}`}
-              title={recordState === 'idle' ? 'Start recording' : recordState === 'recording' ? 'Stop recording' : 'Processing…'}
-              disabled={recordState === 'uploading' || recordState === 'done'}
-              onClick={handleRecordToggle}
-            >
-              {recordState === 'uploading' ? <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                : recordState === 'recording' ? <Square className="h-3.5 w-3.5 fill-current" />
-                : <Circle className="h-3.5 w-3.5" />}
-            </Button>
-            <Button variant="ghost" size="icon" className="h-7 w-7" title="Rotate" onClick={handleRotate}>
-              <RotateCw className="h-3.5 w-3.5" />
-            </Button>
-          </div>
+        <div className="relative" style={{ minWidth: 300, minHeight: 560, backgroundColor: '#010101', borderRadius: '10%' }}>
+          <canvas
+            ref={canvasRef}
+            className="block w-full h-full cursor-crosshair"
+            style={{ borderRadius: '10%' }}
+            onPointerDown={handlePointerDown}
+            onPointerMove={handlePointerMove}
+            onPointerUp={handlePointerUp}
+            onPointerCancel={handlePointerCancel}
+          />
+          {joined && fps === 0 && (
+            <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+              <span style={{ color: 'white', fontSize: '0.875rem' }}>Waiting for first frame...</span>
+            </div>
+          )}
         </div>
       )}
+
+      {/* Right info card */}
+      <div className="w-[300px] shrink-0 mt-3 rounded-xl border bg-background px-4 py-4 flex flex-col gap-3">
+        <div className={cn(
+          'flex items-center',
+          keyboardActive ? 'text-emerald-500' : 'text-muted-foreground',
+        )} style={{ gap: 6 }}>
+          <ScanLine className="h-3.5 w-3.5 shrink-0" />
+          <span className="text-[12px] font-medium">Focus</span>
+        </div>
+
+        {joined && (
+          <div className="flex items-center" style={{ gap: 6 }}>
+            <span className="h-2 w-2 rounded-full shrink-0" style={{ background: fpsColor }} />
+            <span className="text-[12px] font-mono text-foreground/75">{fps}</span>
+            <span className="text-[12px] text-muted-foreground">fps</span>
+          </div>
+        )}
+
+        {statusTextDisplay && (
+          <p className="text-[12px] text-muted-foreground leading-relaxed">{statusTextDisplay}</p>
+        )}
+      </div>
+
+      </div>
     </div>
   );
 }

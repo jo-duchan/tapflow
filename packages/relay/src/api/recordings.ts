@@ -28,7 +28,7 @@ export function handleUploadRecording(
   let filePath = ''
   let filename = ''
   let mime = 'video/webm'
-  let saved = false
+  let writeDone: Promise<void> | null = null
 
   const bb = busboy({ headers: req.headers as Record<string, string | string[]> })
   bb.on('file', (_field, fileStream, info) => {
@@ -36,21 +36,27 @@ export function handleUploadRecording(
     mime = info.mimeType || mime
     filename = `${randomUUID()}-${Date.now()}${ext}`
     filePath = path.join(recordingsDir, filename)
-    fileStream.pipe(fs.createWriteStream(filePath))
-    saved = true
+    const ws = fs.createWriteStream(filePath)
+    fileStream.pipe(ws)
+    writeDone = new Promise<void>((resolve, reject) => {
+      ws.on('finish', resolve)
+      ws.on('error', reject)
+    })
   })
   bb.on('finish', () => {
-    if (!saved) { res.writeHead(400); res.end('No file'); return }
-
-    const stat = fs.statSync(filePath)
-    const db = getDb()
-    db.prepare(`
-      INSERT INTO recordings (filename, session_id, uploader_id, file_size, mime, expires_at)
-      VALUES (?, ?, ?, ?, ?, ?)
-    `).run(filename, sessionId, auth.userId, stat.size, mime, expiresAt())
-
-    res.writeHead(200, { 'Content-Type': 'application/json' })
-    res.end(JSON.stringify({ url: `/api/v1/recordings/${filename}` }))
+    if (!writeDone) { res.writeHead(400); res.end('No file'); return }
+    writeDone
+      .then(() => {
+        const stat = fs.statSync(filePath)
+        const db = getDb()
+        db.prepare(`
+          INSERT INTO recordings (filename, session_id, uploader_id, file_size, mime, expires_at)
+          VALUES (?, ?, ?, ?, ?, ?)
+        `).run(filename, sessionId, auth.userId, stat.size, mime, expiresAt())
+        res.writeHead(200, { 'Content-Type': 'application/json' })
+        res.end(JSON.stringify({ url: `/api/v1/recordings/${filename}` }))
+      })
+      .catch(() => { res.writeHead(500); res.end('Write failed') })
   })
   bb.on('error', () => { res.writeHead(500); res.end('Upload failed') })
   req.pipe(bb)
