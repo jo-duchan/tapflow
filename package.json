@@ -15,7 +15,8 @@
     "dev": "concurrently -n relay,dashboard,ios,android -c cyan,magenta,green,yellow \"npm run dev:relay\" \"npm run dev --workspace=@tapflow/dashboard\" \"npm run dev:ios-agent\" \"npm run dev:android-agent\"",
     "dev:relay": "npm run relay --workspace=@tapflow/playground",
     "dev:ios-agent": "npm run ios-agent --workspace=@tapflow/playground",
-    "dev:android-agent": "npm run android-agent --workspace=@tapflow/playground"
+    "dev:android-agent": "npm run android-agent --workspace=@tapflow/playground",
+    "dev:mock-agents": "npm run mock-agents --workspace=@tapflow/playground"
   },
   "engines": {
     "node": ">=20"

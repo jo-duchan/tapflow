@@ -11,8 +11,11 @@
     "android-agent": "tsx --conditions=source android-agent.ts",
     "dev:doctor": "tsx --conditions=source ../packages/cli/src/index.ts doctor",
     "dev:reset": "tsx --conditions=source ../packages/cli/src/index.ts reset",
+    "mock-agent": "tsx --conditions=source mock-agent.ts",
+    "mock-agents": "tsx --conditions=source multi-agent.ts",
     "dev:up": "concurrently -n relay,agent -c cyan,green \"npm run relay\" \"npm run ios-agent\"",
-    "dev:up:full": "concurrently -k -n relay,ios,android -c cyan,green,yellow \"npm run relay\" \"npm run ios-agent\" \"npm run android-agent\""
+    "dev:up:full": "concurrently -k -n relay,ios,android -c cyan,green,yellow \"npm run relay\" \"npm run ios-agent\" \"npm run android-agent\"",
+    "dev:up:pool": "concurrently -k -n relay,ios,mocks -c cyan,green,yellow \"npm run relay\" \"npm run ios-agent\" \"npm run mock-agents\""
   },
   "dependencies": {
     "@tapflow/agent-core": "*",

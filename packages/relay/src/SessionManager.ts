@@ -1,6 +1,6 @@
 import { randomUUID } from 'crypto'
 import type { WebSocket } from 'ws'
-import type { SessionInfo } from './types.js'
+import type { AgentResources, SessionInfo } from './types.js'
 
 export interface Session {
   id: string
@@ -22,6 +22,7 @@ type RawDevice = { id: string; name: string; platform: string; status: string; o
 
 export class SessionManager {
   private sessions = new Map<string, Session>()
+  private agentResources = new Map<WebSocket, AgentResources>()
 
   create(agentSocket: WebSocket, devices: RawDevice[] = [], agentName?: string, agentPlatform?: string): string[] {
     return devices.map((d) => {
@@ -84,6 +85,14 @@ export class SessionManager {
     session.browserSocket = null
   }
 
+  setResources(agentSocket: WebSocket, resources: AgentResources): void {
+    this.agentResources.set(agentSocket, resources)
+  }
+
+  removeResources(agentSocket: WebSocket): void {
+    this.agentResources.delete(agentSocket)
+  }
+
   clearDeviceCache(sessionId: string): void {
     const session = this.sessions.get(sessionId)
     if (!session) return
@@ -124,6 +133,7 @@ export class SessionManager {
     return Array.from(agentMap.values()).map((group) => ({
       agentName: group[0].agentName,
       platform: group[0].agentPlatform,
+      resources: this.agentResources.get(group[0].agentSocket),
       devices: group.map((s) => ({
         id: s.deviceId,
         name: s.deviceName,

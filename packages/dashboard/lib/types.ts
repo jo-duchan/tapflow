@@ -1,3 +1,12 @@
+export interface AgentResources {
+  cpuPercent: number
+  memUsedMB: number
+  memTotalMB: number
+  slotsAvailable: number
+  slotsTotal: number
+  reportedAt: number
+}
+
 export interface AgentDevice {
   id: string
   name: string
@@ -25,6 +34,8 @@ export interface CommentAttachment {
 
 export interface SessionInfo {
   agentName?: string
+  platform?: string
+  resources?: AgentResources
   devices: AgentDevice[]
 }
 

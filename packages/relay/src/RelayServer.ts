@@ -160,6 +160,7 @@ export class RelayServer {
       const agentSessions = this.sessions.getAllByAgentSocket(ws)
       if (agentSessions.length > 0) {
         for (const s of agentSessions) this.sessions.remove(s.id)
+        this.sessions.removeResources(ws)
         return
       }
 
@@ -180,6 +181,11 @@ export class RelayServer {
 
   private route(ws: WebSocket, msg: RelayMessage): void {
     switch (msg.type) {
+      case 'agent:resources': {
+        if (msg.resources) this.sessions.setResources(ws, msg.resources)
+        break
+      }
+
       case 'agent:register': {
         const sessionIds = this.sessions.create(ws, msg.devices ?? [], msg.agentName, msg.platform)
         const registeredSessions = (msg.devices ?? []).map((d, i) => ({

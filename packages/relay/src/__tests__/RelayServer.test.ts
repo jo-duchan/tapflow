@@ -425,6 +425,51 @@ describe('RelayServer', () => {
     observer.close()
   })
 
+  it('agent:resources is reflected in agents:listed', async () => {
+    const agent = new WebSocket(`ws://localhost:${port}`)
+    await waitForOpen(agent)
+    agent.send(JSON.stringify({ type: 'agent:register', agentName: 'Mac1', devices: [{ id: 'd1', name: 'iPhone', platform: 'ios', status: 'shutdown' }] }))
+    await waitForMessage(agent)
+
+    agent.send(JSON.stringify({
+      type: 'agent:resources',
+      resources: { cpuPercent: 25, memUsedMB: 4096, memTotalMB: 16384, slotsAvailable: 2, slotsTotal: 3, reportedAt: 1000 },
+    }))
+    await new Promise((r) => setTimeout(r, 10))
+
+    const observer = new WebSocket(`ws://localhost:${port}`)
+    await waitForOpen(observer)
+    observer.send(JSON.stringify({ type: 'agents:list' }))
+    const listed = await waitForMessage(observer)
+    expect(listed.sessions![0].resources?.cpuPercent).toBe(25)
+    expect(listed.sessions![0].resources?.slotsTotal).toBe(3)
+
+    agent.close()
+    observer.close()
+  })
+
+  it('agent resources are cleared after agent disconnects', async () => {
+    const agent = new WebSocket(`ws://localhost:${port}`)
+    await waitForOpen(agent)
+    agent.send(JSON.stringify({ type: 'agent:register', agentName: 'Mac1', devices: [{ id: 'd1', name: 'iPhone', platform: 'ios', status: 'shutdown' }] }))
+    await waitForMessage(agent)
+    agent.send(JSON.stringify({
+      type: 'agent:resources',
+      resources: { cpuPercent: 50, memUsedMB: 8000, memTotalMB: 16000, slotsAvailable: 3, slotsTotal: 3, reportedAt: 1000 },
+    }))
+    await new Promise((r) => setTimeout(r, 10))
+    agent.close()
+    await new Promise((r) => setTimeout(r, 50))
+
+    const observer = new WebSocket(`ws://localhost:${port}`)
+    await waitForOpen(observer)
+    observer.send(JSON.stringify({ type: 'agents:list' }))
+    const listed = await waitForMessage(observer)
+    expect(listed.sessions).toHaveLength(0)
+
+    observer.close()
+  })
+
   it('replays device:ready on reconnect when device is already booted', async () => {
     const devices = [{ id: 'devA', name: 'iPhone A', platform: 'ios', status: 'shutdown' }]
     const agent = new WebSocket(`ws://localhost:${port}`)

@@ -41,6 +41,8 @@ export class IOSAgent implements DeviceAgent {
   private ws: WebSocket | null = null
   private deviceStates = new Map<string, DeviceState>()
   private relayUrl: string | null = null
+  private resourcesTimer: ReturnType<typeof setInterval> | null = null
+  private lastCpuTimes: { idle: number; total: number } | null = null
 
   constructor(options: IOSAgentOptions = {}, simctl?: SimctlWrapper) {
     this.simctl = simctl ?? new SimctlWrapper()
@@ -86,6 +88,8 @@ export class IOSAgent implements DeviceAgent {
           ws.on('message', (d) => {
             try { this.handleRelayMessage(JSON.parse(d.toString())) } catch { /* ignore malformed */ }
           })
+          this.reportResources()
+          this.resourcesTimer = setInterval(() => this.reportResources(), 5000)
           resolve()
         } else {
           reject(new Error(`Unexpected message during handshake: ${msg.type}`))
@@ -115,6 +119,7 @@ export class IOSAgent implements DeviceAgent {
   }
 
   disconnect(): void {
+    if (this.resourcesTimer) { clearInterval(this.resourcesTimer); this.resourcesTimer = null }
     for (const state of this.deviceStates.values()) {
       this.cleanupDeviceState(state)
     }
@@ -122,6 +127,61 @@ export class IOSAgent implements DeviceAgent {
     this.ws?.close()
     this.ws = null
     this.relayUrl = null
+  }
+
+  private getCpuPercent(): number {
+    let idle = 0, total = 0
+    for (const cpu of os.cpus()) {
+      const t = cpu.times
+      idle += t.idle
+      total += t.user + t.nice + t.sys + t.idle + t.irq
+    }
+    if (!this.lastCpuTimes) {
+      this.lastCpuTimes = { idle, total }
+      return 0
+    }
+    const idleDiff = idle - this.lastCpuTimes.idle
+    const totalDiff = total - this.lastCpuTimes.total
+    this.lastCpuTimes = { idle, total }
+    if (totalDiff === 0) return 0
+    return Math.min(100, Math.round((1 - idleDiff / totalDiff) * 1000) / 10)
+  }
+
+  // macOS: active + wired + compressed 만 실제 점유 메모리
+  private getMemoryUsage(): { memUsedMB: number; memTotalMB: number } {
+    const memTotalMB = Math.round(os.totalmem() / 1024 / 1024)
+    try {
+      const { stdout, status } = spawnSync('vm_stat', [], { encoding: 'utf8' })
+      if (status !== 0 || !stdout) throw new Error('vm_stat failed')
+      const lines = (stdout as string).split('\n')
+      const pageSize = parseInt(lines[0]?.match(/page size of (\d+)/)?.[1] ?? '16384')
+      const get = (key: string) => {
+        const m = lines.find((l) => l.startsWith(key))?.match(/:\s*(\d+)/)
+        return parseInt(m?.[1] ?? '0')
+      }
+      const pages = get('Pages active') + get('Pages wired down') + get('Pages occupied by compressor')
+      return { memUsedMB: Math.round(pages * pageSize / 1024 / 1024), memTotalMB }
+    } catch {
+      return { memUsedMB: Math.round((os.totalmem() - os.freemem()) / 1024 / 1024), memTotalMB }
+    }
+  }
+
+  private reportResources(): void {
+    if (!this.ws || this.ws.readyState !== WebSocket.OPEN) return
+    const bootedCount = Array.from(this.deviceStates.values()).filter((s) => s.streamReader !== null).length
+    const slotsTotal = this.deviceStates.size
+    const { memUsedMB, memTotalMB } = this.getMemoryUsage()
+    this.ws.send(JSON.stringify({
+      type: 'agent:resources',
+      resources: {
+        cpuPercent: this.getCpuPercent(),
+        memUsedMB,
+        memTotalMB,
+        slotsAvailable: Math.max(0, slotsTotal - bootedCount),
+        slotsTotal,
+        reportedAt: Date.now(),
+      },
+    }))
   }
 
   private cleanupDeviceState(state: DeviceState): void {

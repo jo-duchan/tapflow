@@ -168,6 +168,51 @@ describe('SessionManager', () => {
     })
   })
 
+  describe('setResources() / removeResources()', () => {
+    it('list() has undefined resources when none reported', () => {
+      const sm = new SessionManager()
+      sm.create(mockSocket(), [{ id: 'd1', name: 'X', platform: 'ios', status: 'shutdown' }], 'Mac1')
+      expect(sm.list()[0].resources).toBeUndefined()
+    })
+
+    it('setResources() is reflected in list()', () => {
+      const sm = new SessionManager()
+      const ws = mockSocket()
+      sm.create(ws, [{ id: 'd1', name: 'X', platform: 'ios', status: 'shutdown' }], 'Mac1')
+      const resources = { cpuPercent: 42, memUsedMB: 8192, memTotalMB: 16384, slotsAvailable: 2, slotsTotal: 3, reportedAt: 1000 }
+      sm.setResources(ws, resources)
+      expect(sm.list()[0].resources).toEqual(resources)
+    })
+
+    it('removeResources() clears resources from list()', () => {
+      const sm = new SessionManager()
+      const ws = mockSocket()
+      sm.create(ws, [{ id: 'd1', name: 'X', platform: 'ios', status: 'shutdown' }], 'Mac1')
+      sm.setResources(ws, { cpuPercent: 50, memUsedMB: 4096, memTotalMB: 16384, slotsAvailable: 3, slotsTotal: 3, reportedAt: 1000 })
+      sm.removeResources(ws)
+      expect(sm.list()[0].resources).toBeUndefined()
+    })
+
+    it('setResources() on unknown socket does not throw', () => {
+      const sm = new SessionManager()
+      expect(() => sm.setResources(mockSocket(), { cpuPercent: 0, memUsedMB: 0, memTotalMB: 0, slotsAvailable: 0, slotsTotal: 0, reportedAt: 0 })).not.toThrow()
+    })
+
+    it('resources from different agents are independent', () => {
+      const sm = new SessionManager()
+      const ws1 = mockSocket()
+      const ws2 = mockSocket()
+      sm.create(ws1, [{ id: 'd1', name: 'A', platform: 'ios', status: 'shutdown' }], 'Mac1')
+      sm.create(ws2, [{ id: 'd2', name: 'B', platform: 'ios', status: 'shutdown' }], 'Mac2')
+      sm.setResources(ws1, { cpuPercent: 10, memUsedMB: 1000, memTotalMB: 8000, slotsAvailable: 3, slotsTotal: 3, reportedAt: 1000 })
+      const listed = sm.list()
+      const mac1 = listed.find((g) => g.agentName === 'Mac1')!
+      const mac2 = listed.find((g) => g.agentName === 'Mac2')!
+      expect(mac1.resources?.cpuPercent).toBe(10)
+      expect(mac2.resources).toBeUndefined()
+    })
+  })
+
   describe('list()', () => {
     it('returns empty array when no sessions', () => {
       const sm = new SessionManager()

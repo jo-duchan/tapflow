@@ -16,6 +16,15 @@ export interface Point {
   y: number
 }
 
+export interface AgentResources {
+  cpuPercent: number
+  memUsedMB: number
+  memTotalMB: number
+  slotsAvailable: number
+  slotsTotal: number
+  reportedAt: number  // Date.now()
+}
+
 // Android physical button descriptor sent via session:chrome payload
 export interface AndroidButton {
   name: string
