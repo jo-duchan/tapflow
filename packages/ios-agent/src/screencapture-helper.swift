@@ -278,11 +278,24 @@ DispatchQueue.global().asyncAfter(deadline: .now() + 8) {
     exit(1)
 }
 
-// Timer-driven emission: fires at the target FPS and encodes the latest surface
+// Timer-driven emission: fires at the target FPS and encodes the latest surface.
+// Skips encoding when the IOSurface seed is unchanged (screen static) unless
+// 100ms have passed since the last sent frame — matching Android scrcpy's
+// KEY_REPEAT_PREVIOUS_FRAME_AFTER keep-alive behaviour.
+var lastSeed: UInt32 = 0
+var lastSentNs: UInt64 = 0
+
 let timer = DispatchSource.makeTimerSource(queue: captureQueue)
 timer.schedule(deadline: .now(), repeating: 1.0 / fps)
 timer.setEventHandler {
-    guard let surf = latestSurface, let jpeg = encodeJPEG(surf) else { return }
+    guard let surf = latestSurface else { return }
+    let seed = IOSurfaceGetSeed(surf)
+    let nowNs = DispatchTime.now().uptimeNanoseconds
+    let elapsedMs = Double(nowNs - lastSentNs) / 1_000_000
+    if seed == lastSeed && elapsedMs < 100 { return }
+    guard let jpeg = encodeJPEG(surf) else { return }
+    lastSeed = seed
+    lastSentNs = nowNs
     firstFrameSent = true
     writeFrame(jpeg)
 }
