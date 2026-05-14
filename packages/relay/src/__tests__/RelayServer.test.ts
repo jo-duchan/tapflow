@@ -470,6 +470,96 @@ describe('RelayServer', () => {
     observer.close()
   })
 
+  it('browser disconnect starts idle timer — agent receives device:shutdown after timeout', async () => {
+    const shortServer = new RelayServer({ port: 0, idleTimeoutMs: 80 })
+    await shortServer.start()
+    const shortPort = (shortServer.address() as { port: number }).port
+
+    const agent = new WebSocket(`ws://localhost:${shortPort}`)
+    await waitForOpen(agent)
+    agent.send(JSON.stringify({ type: 'agent:register', devices: [{ id: 'devA', name: 'A', platform: 'ios', status: 'shutdown' }] }))
+    const { registeredSessions } = await waitForMessage(agent)
+    const sessionId = registeredSessions![0].sessionId
+
+    const browser = new WebSocket(`ws://localhost:${shortPort}`)
+    await waitForOpen(browser)
+    browser.send(JSON.stringify({ type: 'session:start', sessionId }))
+    await waitForMessage(browser) // session:joined
+
+    const shutdownPromise = waitForType(agent, 'device:shutdown')
+    browser.close()
+    const shutdown = await shutdownPromise
+    expect(shutdown.type).toBe('device:shutdown')
+    expect(shutdown.sessionId).toBe(sessionId)
+
+    agent.close()
+    await shortServer.stop()
+  })
+
+  it('browser reconnect before timeout cancels shutdown', async () => {
+    const shortServer = new RelayServer({ port: 0, idleTimeoutMs: 200 })
+    await shortServer.start()
+    const shortPort = (shortServer.address() as { port: number }).port
+
+    const agent = new WebSocket(`ws://localhost:${shortPort}`)
+    await waitForOpen(agent)
+    agent.send(JSON.stringify({ type: 'agent:register', devices: [{ id: 'devA', name: 'A', platform: 'ios', status: 'shutdown' }] }))
+    const { registeredSessions } = await waitForMessage(agent)
+    const sessionId = registeredSessions![0].sessionId
+
+    const browser = new WebSocket(`ws://localhost:${shortPort}`)
+    await waitForOpen(browser)
+    browser.send(JSON.stringify({ type: 'session:start', sessionId }))
+    await waitForMessage(browser)
+
+    // Disconnect and immediately reconnect (within timeout)
+    browser.close()
+    await new Promise((r) => setTimeout(r, 40))
+
+    const browser2 = new WebSocket(`ws://localhost:${shortPort}`)
+    await waitForOpen(browser2)
+    browser2.send(JSON.stringify({ type: 'session:start', sessionId }))
+    await waitForMessage(browser2) // session:joined
+
+    // Wait past the original timeout — no shutdown should arrive
+    let gotShutdown = false
+    agent.on('message', (d) => {
+      const msg = JSON.parse(d.toString())
+      if (msg.type === 'device:shutdown') gotShutdown = true
+    })
+    await new Promise((r) => setTimeout(r, 300))
+    expect(gotShutdown).toBe(false)
+
+    agent.close()
+    browser2.close()
+    await shortServer.stop()
+  })
+
+  it('idle timeout after agent already disconnected — no error thrown', async () => {
+    const shortServer = new RelayServer({ port: 0, idleTimeoutMs: 80 })
+    await shortServer.start()
+    const shortPort = (shortServer.address() as { port: number }).port
+
+    const agent = new WebSocket(`ws://localhost:${shortPort}`)
+    await waitForOpen(agent)
+    agent.send(JSON.stringify({ type: 'agent:register', devices: [{ id: 'devA', name: 'A', platform: 'ios', status: 'shutdown' }] }))
+    const { registeredSessions } = await waitForMessage(agent)
+    const sessionId = registeredSessions![0].sessionId
+
+    const browser = new WebSocket(`ws://localhost:${shortPort}`)
+    await waitForOpen(browser)
+    browser.send(JSON.stringify({ type: 'session:start', sessionId }))
+    await waitForMessage(browser)
+
+    // Both close — agent first
+    agent.close()
+    browser.close()
+
+    // Wait past timeout — no crash expected
+    await new Promise((r) => setTimeout(r, 150))
+    await shortServer.stop()
+  })
+
   it('replays device:ready on reconnect when device is already booted', async () => {
     const devices = [{ id: 'devA', name: 'iPhone A', platform: 'ios', status: 'shutdown' }]
     const agent = new WebSocket(`ws://localhost:${port}`)

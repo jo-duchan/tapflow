@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest'
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { SessionManager } from '../SessionManager'
 import type { WebSocket } from 'ws'
 
@@ -210,6 +210,52 @@ describe('SessionManager', () => {
       const mac2 = listed.find((g) => g.agentName === 'Mac2')!
       expect(mac1.resources?.cpuPercent).toBe(10)
       expect(mac2.resources).toBeUndefined()
+    })
+  })
+
+  describe('idle timeout', () => {
+    beforeEach(() => { vi.useFakeTimers() })
+    afterEach(() => { vi.useRealTimers() })
+
+    it('clearBrowser() with onTimeout fires callback after idleTimeoutMs', () => {
+      const sm = new SessionManager({ idleTimeoutMs: 1000 })
+      const [id] = sm.create(mockSocket(), [{ id: 'd1', name: 'X', platform: 'ios', status: 'shutdown' }])
+      sm.join(id, mockSocket())
+      const onTimeout = vi.fn()
+      sm.clearBrowser(id, onTimeout)
+      expect(onTimeout).not.toHaveBeenCalled()
+      vi.advanceTimersByTime(1000)
+      expect(onTimeout).toHaveBeenCalledOnce()
+    })
+
+    it('join() cancels a pending idle timer', () => {
+      const sm = new SessionManager({ idleTimeoutMs: 1000 })
+      const [id] = sm.create(mockSocket(), [{ id: 'd1', name: 'X', platform: 'ios', status: 'shutdown' }])
+      sm.join(id, mockSocket())
+      const onTimeout = vi.fn()
+      sm.clearBrowser(id, onTimeout)
+      sm.join(id, mockSocket())          // reconnect before timeout
+      vi.advanceTimersByTime(2000)
+      expect(onTimeout).not.toHaveBeenCalled()
+    })
+
+    it('remove() cancels a pending idle timer', () => {
+      const sm = new SessionManager({ idleTimeoutMs: 1000 })
+      const [id] = sm.create(mockSocket(), [{ id: 'd1', name: 'X', platform: 'ios', status: 'shutdown' }])
+      sm.join(id, mockSocket())
+      const onTimeout = vi.fn()
+      sm.clearBrowser(id, onTimeout)
+      sm.remove(id)
+      vi.advanceTimersByTime(2000)
+      expect(onTimeout).not.toHaveBeenCalled()
+    })
+
+    it('clearBrowser() without onTimeout starts no timer', () => {
+      const sm = new SessionManager({ idleTimeoutMs: 1000 })
+      const [id] = sm.create(mockSocket(), [{ id: 'd1', name: 'X', platform: 'ios', status: 'shutdown' }])
+      sm.join(id, mockSocket())
+      sm.clearBrowser(id)               // no callback
+      expect(sm.get(id)?.idleTimer).toBeNull()
     })
   })
 

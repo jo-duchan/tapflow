@@ -41,8 +41,8 @@ export class RelayServer {
   private uploadsDir: string
   private router: Router
 
-  constructor(private readonly options: { port: number; publicDir?: string; uploadsDir?: string }) {
-    this.sessions = new SessionManager()
+  constructor(private readonly options: { port: number; publicDir?: string; uploadsDir?: string; idleTimeoutMs?: number }) {
+    this.sessions = new SessionManager({ idleTimeoutMs: options.idleTimeoutMs })
     this.publicDir = options.publicDir ?? path.join(import.meta.dirname, '../public')
     this.uploadsDir = options.uploadsDir ?? path.join(import.meta.dirname, '../uploads')
     this.router = new Router()
@@ -171,10 +171,19 @@ export class RelayServer {
         return
       }
 
-      // Browser socket disconnected → clear browserSocket so session becomes available again
+      // Browser socket disconnected → clear browserSocket, start idle timer
       const browserSession = this.sessions.getByBrowserSocket(ws)
       if (browserSession) {
-        this.sessions.clearBrowser(browserSession.id)
+        this.sessions.clearBrowser(browserSession.id, () => {
+          const session = this.sessions.get(browserSession.id)
+          if (session?.agentSocket.readyState === WebSocket.OPEN) {
+            session.agentSocket.send(JSON.stringify({
+              type: 'device:shutdown',
+              sessionId: session.id,
+              payload: { deviceId: session.deviceId },
+            }))
+          }
+        })
       }
     })
   }
