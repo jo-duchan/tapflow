@@ -236,7 +236,7 @@ export function QASession() {
                           setActiveSessionId(d.sessionId)
                         }}
                         className={cn(
-                          'flex flex-col gap-3 rounded-lg border p-3 text-left transition-colors',
+                          'flex flex-col gap-3 rounded-lg border p-3 text-left transition-colors min-h-[100px]',
                           'hover:bg-accent disabled:cursor-not-allowed disabled:opacity-50',
                         )}
                       >

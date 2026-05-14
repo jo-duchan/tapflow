@@ -28,7 +28,12 @@ function getStatusText(props: SimulatorInfoCardProps): string | null {
 export function SimulatorInfoCard(props: SimulatorInfoCardProps) {
   const { joined, fps, keyboardActive } = props;
   const statusText = getStatusText(props);
-  const fpsColor = fps >= 30 ? '#10b981' : fps >= 15 ? '#f59e0b' : fps > 0 ? '#ef4444' : '#6b7280';
+  // fps is intentionally low when screen is static (idle keep-alive ~10fps).
+  // Use "active/idle" framing instead of red/green to avoid false alarm.
+  const isActive = fps > 15;
+  const isIdle = fps > 0 && fps <= 15;
+  const dotColor = isActive ? '#10b981' : isIdle ? '#94a3b8' : 'transparent';
+  const stateLabel = isActive ? 'Active' : isIdle ? 'Idle' : null;
 
   return (
     <div className="w-[300px] shrink-0 mt-3 rounded-xl border bg-background px-4 py-4 flex flex-col gap-3">
@@ -37,11 +42,16 @@ export function SimulatorInfoCard(props: SimulatorInfoCardProps) {
         <span className="text-[12px] font-medium">Focus</span>
       </div>
 
-      {joined && (
+      {joined && fps > 0 && (
         <div className="flex items-center" style={{ gap: 6 }}>
-          <span className="h-2 w-2 rounded-full shrink-0" style={{ background: fpsColor }} />
+          <span className="h-2 w-2 rounded-full shrink-0" style={{ background: dotColor }} />
           <span className="text-[12px] font-mono text-foreground/75">{fps}</span>
           <span className="text-[12px] text-muted-foreground">fps</span>
+          {stateLabel && (
+            <span className={cn('text-[11px]', isActive ? 'text-emerald-500' : 'text-muted-foreground/60')}>
+              · {stateLabel}
+            </span>
+          )}
         </div>
       )}
 
