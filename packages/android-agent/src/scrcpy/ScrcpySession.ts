@@ -51,7 +51,7 @@ export class ScrcpySession {
     return this._control
   }
 
-  async start(serial: string): Promise<ScrcpyDeviceInfo> {
+  async start(serial: string, onRotation?: (rotation: number) => void): Promise<ScrcpyDeviceInfo> {
     const adb = getAdbPath()
     const port = allocatePort()
     this.port = port
@@ -101,7 +101,7 @@ export class ScrcpySession {
     this._video = new ScrcpyVideo(this.videoSocket)
     const info = await this._video.deviceInfo()
 
-    this._control = new ScrcpyControl(this.controlSocket, info.width, info.height)
+    this._control = new ScrcpyControl(this.controlSocket, info.width, info.height, onRotation)
     console.log(`[scrcpy] ready — ${info.deviceName} ${info.width}×${info.height}`)
     return info
   }

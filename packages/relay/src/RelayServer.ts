@@ -309,6 +309,15 @@ export class RelayServer {
         break
       }
 
+      case 'device:rotate': {
+        // agent → browser
+        const session = this.sessions.get(msg.sessionId!)
+        if (session?.browserSocket?.readyState === WebSocket.OPEN) {
+          session.browserSocket.send(JSON.stringify(msg))
+        }
+        break
+      }
+
       case 'app:install': {
         // browser → agent: relay looks up file_path from DB and enriches; includes sessionId for response routing
         const session = this.sessions.get(msg.sessionId!)

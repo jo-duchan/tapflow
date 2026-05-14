@@ -2,9 +2,9 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useRelay } from '@/hooks/useRelay';
-import { IOSViewer } from './simulator/IOSViewer';
-import { AndroidViewer } from './simulator/AndroidViewer';
-import { SimulatorInfoCard } from './simulator/shared/SimulatorInfoCard';
+import { IOSViewer } from './device/IOSViewer';
+import { AndroidViewer } from './device/AndroidViewer';
+import { SimulatorInfoCard } from './device/shared/SimulatorInfoCard';
 import type { AndroidButton, ChromeData, RelayMessage } from '@/lib/types';
 
 interface Props {
@@ -16,7 +16,7 @@ interface Props {
 
 type AndroidChrome = { buttons: AndroidButton[]; streamType: 'h264'; screenWidth?: number; screenHeight?: number };
 
-export function SimulatorViewer({ sessionId, deviceId, buildId, onRecordingUploaded }: Props) {
+export function DeviceViewer({ sessionId, deviceId, buildId, onRecordingUploaded }: Props) {
   const sendRef = useRef<(msg: object) => void>(() => {});
 
   const [joined, setJoined] = useState(false);
@@ -27,6 +27,7 @@ export function SimulatorViewer({ sessionId, deviceId, buildId, onRecordingUploa
   const [installError, setInstallError] = useState<string | null>(null);
   const [bootError, setBootError] = useState<string | null>(null);
   const [launching, setLaunching] = useState(false);
+  const [deviceRotation, setDeviceRotation] = useState(0);
 
   // Active viewer registers its binary frame decoder here.
   // SimulatorViewer routes incoming binary frames to whichever viewer is mounted.
@@ -47,6 +48,10 @@ export function SimulatorViewer({ sessionId, deviceId, buildId, onRecordingUploa
       setInstallError(null);
       setBootError(null);
       setChrome(null); // causes active viewer to unmount → cleanup
+      setDeviceRotation(0);
+    }
+    if (msg.type === 'device:rotate') {
+      setDeviceRotation(msg.payload.rotation);
     }
     if (msg.type === 'device:ready') {
       setDeviceReady(true);
@@ -111,7 +116,7 @@ export function SimulatorViewer({ sessionId, deviceId, buildId, onRecordingUploa
   return (
     <>
       {iosChrome && <IOSViewer {...commonProps} chrome={iosChrome} />}
-      {androidChrome && <AndroidViewer {...commonProps} androidButtons={androidChrome.buttons} screenWidth={androidChrome.screenWidth} screenHeight={androidChrome.screenHeight} />}
+      {androidChrome && <AndroidViewer {...commonProps} androidButtons={androidChrome.buttons} screenWidth={androidChrome.screenWidth} screenHeight={androidChrome.screenHeight} deviceRotation={deviceRotation} />}
     </>
   );
 }

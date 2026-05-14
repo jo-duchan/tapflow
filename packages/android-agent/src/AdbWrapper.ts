@@ -98,6 +98,10 @@ export class AdbWrapper {
     return { width: parseInt(m[1], 10), height: parseInt(m[2], 10) }
   }
 
+  async clearAppData(serial: string, packageName: string): Promise<void> {
+    await this.runner.exec('-s', serial, 'shell', 'pm', 'clear', packageName)
+  }
+
   async installApp(serial: string, apkPath: string): Promise<void> {
     try {
       await this.runner.exec('-s', serial, 'install', '-r', apkPath)

@@ -23,6 +23,7 @@ interface DeviceState {
   scrcpySession: ScrcpySession | null
   displayWidth: number
   displayHeight: number
+  deviceRotation: number
   lastTouchPx: { x: number; y: number }
   bootSeq: number
 }
@@ -102,6 +103,7 @@ export class AndroidAgent implements DeviceAgent {
         scrcpySession: null,
         displayWidth: 0,
         displayHeight: 0,
+        deviceRotation: 0,
         lastTouchPx: { x: 0, y: 0 },
         bootSeq: 0,
       })
@@ -149,8 +151,9 @@ export class AndroidAgent implements DeviceAgent {
     state.touchHelper = touchHelper
 
     const session = new ScrcpySession()
-    const info = await session.start(serial)
+    const info = await session.start(serial, (rotation) => this.handleRotationNotification(state, rotation))
     state.scrcpySession = session
+    state.deviceRotation = 0
     state.displayWidth = info.width
     state.displayHeight = info.height
 
@@ -182,6 +185,27 @@ export class AndroidAgent implements DeviceAgent {
     }
 
     pump()
+  }
+
+  private handleRotationNotification(state: DeviceState, rotation: number): void {
+    if (rotation === state.deviceRotation) return
+    const prevRotation = state.deviceRotation
+    state.deviceRotation = rotation
+
+    // Swap displayW/H when rotation changes by an odd number of 90° steps
+    const quarters = ((rotation - prevRotation) + 4) % 4
+    if (quarters === 1 || quarters === 3) {
+      ;[state.displayWidth, state.displayHeight] = [state.displayHeight, state.displayWidth]
+      state.scrcpySession?.control.updateScreenSize(state.displayWidth, state.displayHeight)
+    }
+
+    console.log(`[android-agent] rotation ${prevRotation}→${rotation} displaySize=${state.displayWidth}×${state.displayHeight}`)
+
+    this.ws?.send(JSON.stringify({
+      type: 'device:rotate',
+      sessionId: state.sessionId,
+      payload: { rotation, displayWidth: state.displayWidth, displayHeight: state.displayHeight },
+    }))
   }
 
   private async openStreamWs(state: DeviceState): Promise<WebSocket> {
@@ -317,8 +341,11 @@ export class AndroidAgent implements DeviceAgent {
           }))
           break
         }
-        void bundleId
-        this.adb.installApp(serial, filePath)
+        const doInstall = async () => {
+          if (bundleId) await this.adb.clearAppData(serial, bundleId).catch(() => {})
+          await this.adb.installApp(serial, filePath)
+        }
+        doInstall()
           .then(() => this.ws?.send(JSON.stringify({ type: 'app:install-done', sessionId })))
           .catch((e: unknown) => {
             const message = e instanceof Error ? e.message : String(e)
@@ -405,8 +432,10 @@ export class AndroidAgent implements DeviceAgent {
         if (!state) break
         const serial = this.adb.getSerial(state.deviceId)
         if (!serial) break
-        ;[state.displayWidth, state.displayHeight] = [state.displayHeight, state.displayWidth]
-        state.scrcpySession?.control.updateScreenSize(state.displayWidth, state.displayHeight)
+        // Optimistically advance rotation by 90° so the view updates immediately.
+        // ROTATION_NOTIFICATION will reconcile the actual value; dedup logic in handleRotationNotification
+        // prevents a double-swap if prediction matches.
+        this.handleRotationNotification(state, (state.deviceRotation + 1) % 4)
         this.adb.enableAutoRotate(serial).catch(() => {})
         this.adb.emuRotate(serial).catch(() => {})
         break

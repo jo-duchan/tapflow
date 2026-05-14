@@ -14,6 +14,7 @@ export type MessageType =
   | 'device:booting'
   | 'device:ready'
   | 'device:boot-error'
+  | 'device:rotate'
   | 'device:shutdown'
   | 'device:shutdown-done'
   | 'app:install'

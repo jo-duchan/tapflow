@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { useSearchParams, useNavigate } from 'react-router-dom';
 import { useRelay } from '@/hooks/useRelay';
 import { useBreadcrumb } from '@/hooks/useBreadcrumb';
-import { SimulatorViewer } from '@/components/SimulatorViewer';
+import { DeviceViewer } from '@/components/DeviceViewer';
 import { SessionPanel } from '@/components/session-panel';
 import {
   Select,
@@ -172,7 +172,7 @@ export function QASession() {
         <div className="flex-1 min-h-0 overflow-auto -ml-1 pl-1 -mr-4 pr-4">
           {activeSessionId ? (
             <div className="min-h-full flex items-center justify-center py-6 px-8 min-w-max">
-              <SimulatorViewer
+              <DeviceViewer
                 sessionId={activeSessionId}
                 deviceId={deviceId}
                 buildId={build?.id}

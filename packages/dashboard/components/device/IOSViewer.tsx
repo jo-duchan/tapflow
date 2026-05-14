@@ -223,7 +223,16 @@ export function IOSViewer({
     if (recordState !== 'recording') return
     const onVisibility = () => { if (document.visibilityState === 'hidden') stopClientRecording() }
     document.addEventListener('visibilitychange', onVisibility)
-    return () => document.removeEventListener('visibilitychange', onVisibility)
+    return () => {
+      document.removeEventListener('visibilitychange', onVisibility)
+      // Cancel RAF loop on unmount to prevent it from running after component is gone
+      if (recordingRef.current) {
+        recordingRef.current = false
+        cancelAnimationFrame(rafIdRef.current)
+        mediaRecorderRef.current?.stop()
+        mediaRecorderRef.current = null
+      }
+    }
   }, [recordState, stopClientRecording])
 
   // ── Keyboard forwarding ───────────────────────────────────────────────────
