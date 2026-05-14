@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { useSearchParams, useNavigate } from 'react-router-dom';
 import { useRelay } from '@/hooks/useRelay';
 import { useBreadcrumb } from '@/hooks/useBreadcrumb';
-import { SimulatorViewer } from '@/components/SimulatorViewer';
+import { DeviceViewer } from '@/components/DeviceViewer';
 import { SessionPanel } from '@/components/session-panel';
 import {
   Select,
@@ -169,10 +169,10 @@ export function QASession() {
     <div className="flex h-full min-h-0 gap-6 p-6">
       <div className="flex flex-col gap-3 flex-1 min-w-0 min-h-0">
         {/* -ml-1 pl-1: 좌측 ring 클리핑 방지 / -mr-4 pr-4: 스크롤바 마진 영역으로 분리 */}
-        <div className="flex-1 min-h-0 overflow-y-auto -ml-1 pl-1 -mr-4 pr-4">
+        <div className="flex-1 min-h-0 overflow-auto -ml-1 pl-1 -mr-4 pr-4">
           {activeSessionId ? (
-            <div className="min-h-full flex items-center justify-center py-6">
-              <SimulatorViewer
+            <div className="min-h-full flex items-center justify-center py-6 px-8 min-w-max">
+              <DeviceViewer
                 sessionId={activeSessionId}
                 deviceId={deviceId}
                 buildId={build?.id}

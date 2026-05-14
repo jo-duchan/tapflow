@@ -68,6 +68,55 @@ export function extractAppZipInfo(zipPath: string): {
   }
 }
 
+/** ANDROID_HOME/build-tools 아래에서 최신 aapt 경로를 찾는다. macOS 기본 경로 + PATH fallback 포함. */
+function findAapt(): string | null {
+  const candidates = [
+    process.env['ANDROID_HOME'],
+    `${process.env['HOME']}/Library/Android/sdk`,
+  ].filter(Boolean) as string[]
+
+  for (const androidHome of candidates) {
+    const buildToolsDir = path.join(androidHome, 'build-tools')
+    if (!fs.existsSync(buildToolsDir)) continue
+    const versions = fs.readdirSync(buildToolsDir)
+      .filter(v => /^\d+\.\d+\.\d+$/.test(v))
+      .sort((a, b) => {
+        const p = (s: string) => s.split('.').map(Number)
+        const [am, ai, ap] = p(a); const [bm, bi, bp] = p(b)
+        return bm - am || bi - ai || bp - ap
+      })
+    for (const v of versions) {
+      const aapt = path.join(buildToolsDir, v, 'aapt')
+      if (fs.existsSync(aapt)) return aapt
+    }
+  }
+
+  // PATH fallback — relay 프로세스가 ANDROID_HOME을 상속받지 못한 경우
+  const which = spawnSync('which', ['aapt'], { encoding: 'utf8' })
+  if (which.status === 0) return (which.stdout as string).trim()
+
+  return null
+}
+
+/** aapt dump badging으로 APK 메타데이터를 추출한다. aapt 미설치 시 null 필드. */
+function extractApkInfo(apkPath: string): {
+  bundleId: string | null; versionName: string | null
+  buildNumber: string | null; appName: string | null
+} {
+  const empty = { bundleId: null, versionName: null, buildNumber: null, appName: null }
+  const aapt = findAapt()
+  if (!aapt) return empty
+  const r = spawnSync(aapt, ['dump', 'badging', apkPath], { encoding: 'utf8' })
+  if (r.status !== 0) return empty
+  const out = r.stdout as string
+  return {
+    bundleId:    out.match(/package: name='([^']+)'/)?.[1] ?? null,
+    versionName: out.match(/versionName='([^']+)'/)?.[1] ?? null,
+    buildNumber: out.match(/versionCode='([^']+)'/)?.[1] ?? null,
+    appName:     out.match(/application-label(?:-\w+)?:'([^']+)'/)?.[1] ?? null,
+  }
+}
+
 /**
  * lipo로 시뮬레이터 슬라이스 존재를 확인한다.
  * lipo 미설치(Linux relay) 시 null 반환 → 검증 skip.
@@ -299,7 +348,11 @@ export function handleUploadBuild(
       buildNumber  = info.buildNumber
       resolvedAppName = info.appName
     } else {
-      bundleId = null // Android: bundle_id 추출 생략 (Phase 3 본작업에서 처리)
+      const info = extractApkInfo(savedPath)
+      bundleId        = info.bundleId
+      versionName     = info.versionName
+      buildNumber     = info.buildNumber
+      resolvedAppName = info.appName
     }
 
     const bundleIdKey = bundleId ?? '__unknown__'

@@ -181,7 +181,7 @@ export class RelayServer {
   private route(ws: WebSocket, msg: RelayMessage): void {
     switch (msg.type) {
       case 'agent:register': {
-        const sessionIds = this.sessions.create(ws, msg.devices ?? [], msg.agentName)
+        const sessionIds = this.sessions.create(ws, msg.devices ?? [], msg.agentName, msg.platform)
         const registeredSessions = (msg.devices ?? []).map((d, i) => ({
           deviceId: d.id,
           sessionId: sessionIds[i],
@@ -304,6 +304,15 @@ export class RelayServer {
         if (!session) break
         this.sessions.updateDeviceStatus(session.id, 'booted')
         if (session.browserSocket?.readyState === WebSocket.OPEN) {
+          session.browserSocket.send(JSON.stringify(msg))
+        }
+        break
+      }
+
+      case 'device:rotate': {
+        // agent → browser
+        const session = this.sessions.get(msg.sessionId!)
+        if (session?.browserSocket?.readyState === WebSocket.OPEN) {
           session.browserSocket.send(JSON.stringify(msg))
         }
         break

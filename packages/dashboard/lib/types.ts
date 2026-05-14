@@ -51,6 +51,12 @@ export interface ChromeButton {
   pressedRect?: ChromeRect
 }
 
+export interface AndroidButton {
+  name: string
+  accessibilityTitle: string
+  keyCode: number
+}
+
 export interface ChromeData {
   framePng: string         // full composite PDF at 2× — device frame visible, screen hole transparent
   bezelWidth: number
@@ -114,12 +120,13 @@ export interface ReleaseGroup {
 export type RelayMessage =
   | { type: 'agents:listed'; sessions: SessionInfo[] }
   | { type: 'session:joined'; sessionId: string }
-  | { type: 'session:chrome'; payload: ChromeData }
+  | { type: 'session:chrome'; payload: ChromeData | { buttons: AndroidButton[]; streamType: 'h264' } }
   | { type: 'session:deviceInfo'; payload: DeviceInfo }
   | { type: 'device:boot'; sessionId: string; payload: { deviceId: string } }
   | { type: 'device:booting' }
   | { type: 'device:ready'; payload: { deviceId: string } }
   | { type: 'device:boot-error'; message: string }
+  | { type: 'device:rotate'; payload: { rotation: number; displayWidth: number; displayHeight: number } }
   | { type: 'device:shutdown'; sessionId: string; payload: { deviceId: string } }
   | { type: 'device:shutdown-done'; payload: { deviceId: string } }
   | { type: 'input:touch:start'; sessionId: string; payload: { x: number; y: number } }

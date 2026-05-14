@@ -15,3 +15,10 @@ export interface Point {
   x: number
   y: number
 }
+
+// Android physical button descriptor sent via session:chrome payload
+export interface AndroidButton {
+  name: string
+  accessibilityTitle: string
+  keyCode: number
+}

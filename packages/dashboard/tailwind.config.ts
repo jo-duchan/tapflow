@@ -82,6 +82,14 @@ const config: Config = {
         'display-sm': '-0.6px',
         'body-sm':    '-0.28px',
       },
+      zIndex: {
+        /* Layer tokens — use these instead of raw z-{n} for semantic stacking.
+         * sidebar(10) < tooltip(100) < overlay(200) < modal(300) */
+        'sidebar':  '10',
+        'tooltip':  '100',
+        'overlay':  '200',  /* modal/dialog dim background */
+        'modal':    '300',  /* modal/dialog content */
+      },
     },
   },
   plugins: [],

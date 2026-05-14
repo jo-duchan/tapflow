@@ -32,6 +32,7 @@ tsx ../packages/cli/src/index.ts start --device "iPhone 16"
 
 ```bash
 npm run dev:up        # relay + ios-agent를 concurrently로 기동
+npm run dev:up:full   # relay + ios-agent + android-agent 동시 기동 (Mac 풀 구동)
 
 npm run relay                              # 릴레이 단독
 npm run ios-agent                          # 첫 번째 booted 시뮬레이터

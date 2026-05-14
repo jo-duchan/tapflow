@@ -4,5 +4,12 @@ This product includes logic derived from baguette
 (https://github.com/tddworks/baguette),
 licensed under the Apache License, Version 2.0.
 
+This product bundles scrcpy-server
+(https://github.com/Genymobile/scrcpy),
+licensed under the Apache License, Version 2.0.
+
+    Copyright (C) 2018 Genymobile
+    Copyright (C) 2018-2026 Romain Vimont
+
 You may obtain a copy of the Apache License at:
 https://www.apache.org/licenses/LICENSE-2.0
