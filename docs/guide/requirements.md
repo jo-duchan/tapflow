@@ -11,7 +11,6 @@
 - **macOS** — required by Apple policy (iOS Simulator only runs on macOS)
 - Xcode with iOS Simulator Runtime installed
 - Node.js ≥ 20
-- WebDriverAgent (installed via `npx tapflow ios setup`)
 
 ## Android Agent
 
