@@ -45,3 +45,7 @@ playground/.tapflow/
 
 # playground test builds
 playground/test-builds/
+
+# VitePress
+docs/.vitepress/cache
+docs/.vitepress/dist
