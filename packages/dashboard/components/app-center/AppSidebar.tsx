@@ -23,7 +23,7 @@ export function AppSidebar({ apps, selectedAppId, onSelect, onAdd }: Props) {
           key={app.id}
           onClick={() => onSelect(app.id)}
           className={[
-            'flex flex-col gap-0.5 rounded-md px-2 py-2 text-left text-sm hover:bg-accent',
+            'flex flex-col gap-0.5 rounded-md px-2 py-2 text-left text-sm hover:bg-accent overflow-hidden',
             app.id === selectedAppId ? 'bg-accent font-medium' : '',
           ].join(' ')}
         >
