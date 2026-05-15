@@ -1,0 +1,35 @@
+# Android Agent Setup
+
+The Android agent uses ADB and scrcpy to stream emulator screens.
+
+## Prerequisites
+
+- Android SDK installed (`ANDROID_HOME` set or `adb` in `$PATH`)
+- An AVD using the `google_apis/arm64-v8a` system image (android-34)
+
+::: warning AVD image matters
+Use `google_apis/arm64-v8a` — **not** `google_apis_playstore`. The Play Store image causes the H.264 encoder to crash silently.
+:::
+
+## Create an AVD
+
+```sh
+sdkmanager "system-images;android-34;google_apis;arm64-v8a"
+avdmanager create avd -n Pixel_8 -k "system-images;android-34;google_apis;arm64-v8a"
+```
+
+## Start the agent
+
+```sh
+tapflow agent start --relay wss://your-relay-url
+```
+
+The agent boots the emulator automatically, waits for `sys.boot_completed`, then begins streaming.
+
+## Troubleshooting
+
+```sh
+tapflow doctor
+# ✓ adb found: /usr/local/bin/adb
+# ✓ AVD: Pixel_8 (android-34 · google_apis/arm64-v8a)
+```

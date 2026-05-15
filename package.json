@@ -16,6 +16,9 @@
     "dev:relay": "pnpm --filter @tapflow/playground relay",
     "dev:ios-agent": "pnpm --filter @tapflow/playground ios-agent",
     "dev:android-agent": "pnpm --filter @tapflow/playground android-agent",
-    "dev:mock-agents": "pnpm --filter @tapflow/playground mock-agents"
+    "dev:mock-agents": "pnpm --filter @tapflow/playground mock-agents",
+    "docs:dev": "pnpm --filter @tapflow/docs dev",
+    "docs:build": "pnpm --filter @tapflow/docs build",
+    "docs:preview": "pnpm --filter @tapflow/docs preview"
   }
 }
