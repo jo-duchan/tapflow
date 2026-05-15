@@ -1,6 +1,17 @@
 # CONTRIBUTING.md — 브랜치·릴리즈·커밋 컨벤션
 
-> 공통 규칙: [CLAUDE.md](./CLAUDE.md) | 전체 인덱스: [INDEX.md](./INDEX.md)
+> 공통 규칙: [CLAUDE.md](../CLAUDE.md) | 전체 인덱스: [INDEX.md](../INDEX.md)
+
+## 개발 환경 설정
+
+**요구사항**: Node.js ≥ 20, pnpm ≥ 9
+
+```sh
+git clone https://github.com/jo-duchan/tapflow.git
+cd tapflow
+pnpm install
+pnpm dev
+```
 
 ---
 
