@@ -275,7 +275,7 @@ export function QASession() {
                   {connected ? 'No devices available for this OS.' : 'Connecting to relay…'}
                 </p>
               ) : (
-                <div className="grid grid-cols-2 gap-2">
+                <div className="grid grid-cols-1 lg:grid-cols-2 2xl:grid-cols-3 gap-2">
                   {versionedDevices.map((d: AgentDevice) => {
                     const isBooted = d.status === 'booted'
                     const isBusy = d.busy
@@ -325,7 +325,7 @@ export function QASession() {
                   {connected ? `No agents available for ${os}.` : 'Connecting to relay…'}
                 </p>
               ) : (
-                <div className="grid grid-cols-2 gap-2">
+                <div className="grid grid-cols-1 lg:grid-cols-2 2xl:grid-cols-3 gap-2">
                   {agentGroups.map((s: SessionInfo) => {
                     const res = s.resources
                     const isStale = res ? Date.now() - res.reportedAt > 30_000 : false
