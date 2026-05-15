@@ -27,9 +27,6 @@ export default defineConfig({
     logo: '/logo.svg',
     nav: [
       { text: 'Guide', link: '/guide/introduction' },
-      { text: 'Dashboard', link: '/dashboard/setup' },
-      { text: 'Reference', link: '/reference/cli' },
-      { text: 'GitHub', link: 'https://github.com/jo-duchan/tapflow' },
     ],
 
     sidebar: [
