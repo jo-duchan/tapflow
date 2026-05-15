@@ -263,7 +263,7 @@ export class IOSAgent implements DeviceAgent {
     })
   }
 
-  private async handleDeviceBoot(sessionId: string, deviceId: string): Promise<void> {
+  private async handleDeviceBoot(sessionId: string, deviceId: string, fullErase = false): Promise<void> {
     const state = this.deviceStates.get(sessionId)
     if (!state || !this.ws) return
 
@@ -285,7 +285,10 @@ export class IOSAgent implements DeviceAgent {
       const target = devices.find((d) => d.id === deviceId)
       if (!target) throw new Error(`Device not found: ${deviceId}`)
 
-      if (target.status !== 'booted') {
+      if (fullErase) {
+        await this.simctl.erase(deviceId)
+        await this.simctl.boot(deviceId)
+      } else if (target.status !== 'booted') {
         await this.simctl.boot(deviceId)
       }
 
@@ -348,9 +351,9 @@ export class IOSAgent implements DeviceAgent {
   private handleRelayMessage(msg: { type: string; sessionId?: string; payload?: unknown }): void {
     switch (msg.type) {
       case 'device:boot': {
-        const { deviceId } = msg.payload as { deviceId: string }
+        const { deviceId, resetMode } = msg.payload as { deviceId: string; resetMode?: string }
         const sessionId = msg.sessionId!
-        this.handleDeviceBoot(sessionId, deviceId)
+        this.handleDeviceBoot(sessionId, deviceId, resetMode === 'full-erase')
           .catch((e) => console.error('[agent] handleDeviceBoot failed:', e))
         break
       }

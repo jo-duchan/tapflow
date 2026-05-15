@@ -20,6 +20,10 @@ import {
 import { getBuild } from '@/lib/queries';
 import { cn } from '@/lib/utils';
 import { STATUS_TONE, buildLabel } from '@/lib/build-format';
+import { Info } from 'lucide-react';
+import { Switch } from '@/components/ui/switch';
+import { Label } from '@/components/ui/label';
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { SearchInput } from '@/components/ui/search-input';
 import type { AgentDevice, Build, RelayMessage, SessionInfo } from '@/lib/types';
 
@@ -36,6 +40,7 @@ export function QASession() {
   const [booting, setBooting] = useState(false);
   const [status, setStatus] = useState('');
   const [recordingsKey, setRecordingsKey] = useState(0);
+  const [resetMode, setResetMode] = useState<'app-only' | 'full-erase'>('app-only');
 
   useEffect(() => {
     if (!buildId) return;
@@ -202,6 +207,7 @@ export function QASession() {
                 sessionId={activeSessionId}
                 deviceId={deviceId}
                 buildId={build?.id}
+                resetMode={resetMode}
                 onRecordingUploaded={() => setRecordingsKey((k) => k + 1)}
               />
             </div>
@@ -217,7 +223,7 @@ export function QASession() {
                 <h1 className="text-xl font-semibold tracking-tight">Select device</h1>
               </div>
 
-              <div className="flex gap-2">
+              <div className="flex items-center gap-2">
                 <SearchInput
                   placeholder="Search device…"
                   value={deviceSearch}
@@ -242,6 +248,26 @@ export function QASession() {
                     </SelectContent>
                   </Select>
                 )}
+                <TooltipProvider>
+                  <Tooltip>
+                    <div className="ml-auto flex items-center gap-2 shrink-0">
+                      <TooltipTrigger asChild>
+                        <Label htmlFor="reset-mode" className="flex items-center gap-1 text-sm cursor-pointer whitespace-nowrap">
+                          <Info className="h-3.5 w-3.5 text-muted-foreground" />
+                          Full reset
+                        </Label>
+                      </TooltipTrigger>
+                      <Switch
+                        id="reset-mode"
+                        checked={resetMode === 'full-erase'}
+                        onCheckedChange={(checked) => setResetMode(checked ? 'full-erase' : 'app-only')}
+                      />
+                    </div>
+                    <TooltipContent>
+                      {resetMode === 'full-erase' ? 'Erase all data before booting' : 'Keep existing data'}
+                    </TooltipContent>
+                  </Tooltip>
+                </TooltipProvider>
               </div>
 
               {versionedDevices.length === 0 ? (

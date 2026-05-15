@@ -13,6 +13,8 @@ const server = new RelayServer({
 
 server.start()
 
+const idleMs = process.env['IDLE_TIMEOUT_MS']
 console.log(`Relay  →  ws://localhost:${PORT}`)
 console.log(`Dashboard  →  http://localhost:${PORT}  (dev: http://localhost:3001)`)
+console.log(`Idle timeout  →  ${idleMs ? `${idleMs}ms (env)` : '300000ms (default)'}`)
 console.log('\nWaiting for agents...')
