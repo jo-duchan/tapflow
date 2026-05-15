@@ -56,7 +56,7 @@ export function SimulatorInfoCard(props: SimulatorInfoCardProps) {
       )}
 
       {statusText && (
-        <p className="text-[12px] text-muted-foreground leading-relaxed">{statusText}</p>
+        <p className="text-[12px] text-muted-foreground leading-relaxed break-all">{statusText}</p>
       )}
     </div>
   );

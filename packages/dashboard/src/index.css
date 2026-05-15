@@ -56,6 +56,12 @@
     --sidebar-accent-foreground: 0 0% 9%;
     --sidebar-border: 0 0% 92%;
     --sidebar-ring: 211 100% 48%;    /* link blue    #0070f3     */
+
+    --chart-1: 216 85% 55%;
+    --chart-2: 262 65% 58%;
+    --chart-3: 30 80% 55%;
+    --chart-4: 151 65% 45%;
+    --chart-5: 340 75% 55%;
   }
 
   .dark {
@@ -93,6 +99,12 @@
     --sidebar-accent-foreground: 0 0% 98%;
     --sidebar-border: 0 0% 18%;
     --sidebar-ring: 211 100% 48%;
+
+    --chart-1: 216 80% 65%;
+    --chart-2: 262 60% 68%;
+    --chart-3: 30 75% 65%;
+    --chart-4: 151 60% 55%;
+    --chart-5: 340 70% 65%;
   }
 }
 
