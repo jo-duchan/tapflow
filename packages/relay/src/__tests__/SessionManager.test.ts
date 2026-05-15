@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest'
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { SessionManager } from '../SessionManager'
 import type { WebSocket } from 'ws'
 
@@ -165,6 +165,97 @@ describe('SessionManager', () => {
       const [id] = sm.create(mockSocket(), [{ id: 'd1', name: 'X', platform: 'ios', status: 'shutdown' }])
       sm.updateDeviceStatus(id, 'booted')
       expect(sm.get(id)?.deviceStatus).toBe('booted')
+    })
+  })
+
+  describe('setResources() / removeResources()', () => {
+    it('list() has undefined resources when none reported', () => {
+      const sm = new SessionManager()
+      sm.create(mockSocket(), [{ id: 'd1', name: 'X', platform: 'ios', status: 'shutdown' }], 'Mac1')
+      expect(sm.list()[0].resources).toBeUndefined()
+    })
+
+    it('setResources() is reflected in list()', () => {
+      const sm = new SessionManager()
+      const ws = mockSocket()
+      sm.create(ws, [{ id: 'd1', name: 'X', platform: 'ios', status: 'shutdown' }], 'Mac1')
+      const resources = { cpuPercent: 42, memUsedMB: 8192, memTotalMB: 16384, slotsAvailable: 2, slotsTotal: 3, reportedAt: 1000 }
+      sm.setResources(ws, resources)
+      expect(sm.list()[0].resources).toEqual(resources)
+    })
+
+    it('removeResources() clears resources from list()', () => {
+      const sm = new SessionManager()
+      const ws = mockSocket()
+      sm.create(ws, [{ id: 'd1', name: 'X', platform: 'ios', status: 'shutdown' }], 'Mac1')
+      sm.setResources(ws, { cpuPercent: 50, memUsedMB: 4096, memTotalMB: 16384, slotsAvailable: 3, slotsTotal: 3, reportedAt: 1000 })
+      sm.removeResources(ws)
+      expect(sm.list()[0].resources).toBeUndefined()
+    })
+
+    it('setResources() on unknown socket does not throw', () => {
+      const sm = new SessionManager()
+      expect(() => sm.setResources(mockSocket(), { cpuPercent: 0, memUsedMB: 0, memTotalMB: 0, slotsAvailable: 0, slotsTotal: 0, reportedAt: 0 })).not.toThrow()
+    })
+
+    it('resources from different agents are independent', () => {
+      const sm = new SessionManager()
+      const ws1 = mockSocket()
+      const ws2 = mockSocket()
+      sm.create(ws1, [{ id: 'd1', name: 'A', platform: 'ios', status: 'shutdown' }], 'Mac1')
+      sm.create(ws2, [{ id: 'd2', name: 'B', platform: 'ios', status: 'shutdown' }], 'Mac2')
+      sm.setResources(ws1, { cpuPercent: 10, memUsedMB: 1000, memTotalMB: 8000, slotsAvailable: 3, slotsTotal: 3, reportedAt: 1000 })
+      const listed = sm.list()
+      const mac1 = listed.find((g) => g.agentName === 'Mac1')!
+      const mac2 = listed.find((g) => g.agentName === 'Mac2')!
+      expect(mac1.resources?.cpuPercent).toBe(10)
+      expect(mac2.resources).toBeUndefined()
+    })
+  })
+
+  describe('idle timeout', () => {
+    beforeEach(() => { vi.useFakeTimers() })
+    afterEach(() => { vi.useRealTimers() })
+
+    it('clearBrowser() with onTimeout fires callback after idleTimeoutMs', () => {
+      const sm = new SessionManager({ idleTimeoutMs: 1000 })
+      const [id] = sm.create(mockSocket(), [{ id: 'd1', name: 'X', platform: 'ios', status: 'shutdown' }])
+      sm.join(id, mockSocket())
+      const onTimeout = vi.fn()
+      sm.clearBrowser(id, onTimeout)
+      expect(onTimeout).not.toHaveBeenCalled()
+      vi.advanceTimersByTime(1000)
+      expect(onTimeout).toHaveBeenCalledOnce()
+    })
+
+    it('join() cancels a pending idle timer', () => {
+      const sm = new SessionManager({ idleTimeoutMs: 1000 })
+      const [id] = sm.create(mockSocket(), [{ id: 'd1', name: 'X', platform: 'ios', status: 'shutdown' }])
+      sm.join(id, mockSocket())
+      const onTimeout = vi.fn()
+      sm.clearBrowser(id, onTimeout)
+      sm.join(id, mockSocket())          // reconnect before timeout
+      vi.advanceTimersByTime(2000)
+      expect(onTimeout).not.toHaveBeenCalled()
+    })
+
+    it('remove() cancels a pending idle timer', () => {
+      const sm = new SessionManager({ idleTimeoutMs: 1000 })
+      const [id] = sm.create(mockSocket(), [{ id: 'd1', name: 'X', platform: 'ios', status: 'shutdown' }])
+      sm.join(id, mockSocket())
+      const onTimeout = vi.fn()
+      sm.clearBrowser(id, onTimeout)
+      sm.remove(id)
+      vi.advanceTimersByTime(2000)
+      expect(onTimeout).not.toHaveBeenCalled()
+    })
+
+    it('clearBrowser() without onTimeout starts no timer', () => {
+      const sm = new SessionManager({ idleTimeoutMs: 1000 })
+      const [id] = sm.create(mockSocket(), [{ id: 'd1', name: 'X', platform: 'ios', status: 'shutdown' }])
+      sm.join(id, mockSocket())
+      sm.clearBrowser(id)               // no callback
+      expect(sm.get(id)?.idleTimer).toBeNull()
     })
   })
 

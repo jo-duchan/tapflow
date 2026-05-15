@@ -41,8 +41,8 @@ export class RelayServer {
   private uploadsDir: string
   private router: Router
 
-  constructor(private readonly options: { port: number; publicDir?: string; uploadsDir?: string }) {
-    this.sessions = new SessionManager()
+  constructor(private readonly options: { port: number; publicDir?: string; uploadsDir?: string; idleTimeoutMs?: number }) {
+    this.sessions = new SessionManager({ idleTimeoutMs: options.idleTimeoutMs })
     this.publicDir = options.publicDir ?? path.join(import.meta.dirname, '../public')
     this.uploadsDir = options.uploadsDir ?? path.join(import.meta.dirname, '../uploads')
     this.router = new Router()
@@ -160,6 +160,7 @@ export class RelayServer {
       const agentSessions = this.sessions.getAllByAgentSocket(ws)
       if (agentSessions.length > 0) {
         for (const s of agentSessions) this.sessions.remove(s.id)
+        this.sessions.removeResources(ws)
         return
       }
 
@@ -170,16 +171,30 @@ export class RelayServer {
         return
       }
 
-      // Browser socket disconnected → clear browserSocket so session becomes available again
+      // Browser socket disconnected → clear browserSocket, start idle timer
       const browserSession = this.sessions.getByBrowserSocket(ws)
       if (browserSession) {
-        this.sessions.clearBrowser(browserSession.id)
+        this.sessions.clearBrowser(browserSession.id, () => {
+          const session = this.sessions.get(browserSession.id)
+          if (session?.agentSocket.readyState === WebSocket.OPEN) {
+            session.agentSocket.send(JSON.stringify({
+              type: 'device:shutdown',
+              sessionId: session.id,
+              payload: { deviceId: session.deviceId },
+            }))
+          }
+        })
       }
     })
   }
 
   private route(ws: WebSocket, msg: RelayMessage): void {
     switch (msg.type) {
+      case 'agent:resources': {
+        if (msg.resources) this.sessions.setResources(ws, msg.resources)
+        break
+      }
+
       case 'agent:register': {
         const sessionIds = this.sessions.create(ws, msg.devices ?? [], msg.agentName, msg.platform)
         const registeredSessions = (msg.devices ?? []).map((d, i) => ({

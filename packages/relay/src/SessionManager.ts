@@ -1,6 +1,6 @@
 import { randomUUID } from 'crypto'
 import type { WebSocket } from 'ws'
-import type { SessionInfo } from './types.js'
+import type { AgentResources, SessionInfo } from './types.js'
 
 export interface Session {
   id: string
@@ -16,12 +16,21 @@ export interface Session {
   deviceOsVersion?: string
   chromeData?: unknown
   deviceInfo?: { deviceName: string; osVersion: string }
+  idleTimer: ReturnType<typeof setTimeout> | null
 }
 
 type RawDevice = { id: string; name: string; platform: string; status: string; osVersion?: string }
 
+const DEFAULT_IDLE_TIMEOUT_MS = parseInt(process.env['IDLE_TIMEOUT_MS'] ?? String(5 * 60 * 1000))
+
 export class SessionManager {
   private sessions = new Map<string, Session>()
+  private agentResources = new Map<WebSocket, AgentResources>()
+  private readonly idleTimeoutMs: number
+
+  constructor(options: { idleTimeoutMs?: number } = {}) {
+    this.idleTimeoutMs = options.idleTimeoutMs ?? DEFAULT_IDLE_TIMEOUT_MS
+  }
 
   create(agentSocket: WebSocket, devices: RawDevice[] = [], agentName?: string, agentPlatform?: string): string[] {
     return devices.map((d) => {
@@ -38,6 +47,7 @@ export class SessionManager {
         devicePlatform: d.platform,
         deviceStatus: d.status,
         deviceOsVersion: d.osVersion,
+        idleTimer: null,
       })
       return id
     })
@@ -71,17 +81,35 @@ export class SessionManager {
     if (session.browserSocket?.readyState === 1 /* OPEN */) {
       throw new Error(`Session busy: ${sessionId}`)
     }
+    if (session.idleTimer) { clearTimeout(session.idleTimer); session.idleTimer = null }
     session.browserSocket = browserSocket
   }
 
   remove(sessionId: string): void {
+    const session = this.sessions.get(sessionId)
+    if (session?.idleTimer) { clearTimeout(session.idleTimer); session.idleTimer = null }
     this.sessions.delete(sessionId)
   }
 
-  clearBrowser(sessionId: string): void {
+  clearBrowser(sessionId: string, onTimeout?: () => void): void {
     const session = this.sessions.get(sessionId)
     if (!session) return
     session.browserSocket = null
+    if (session.idleTimer) { clearTimeout(session.idleTimer); session.idleTimer = null }
+    if (onTimeout) {
+      session.idleTimer = setTimeout(() => {
+        session.idleTimer = null
+        onTimeout()
+      }, this.idleTimeoutMs)
+    }
+  }
+
+  setResources(agentSocket: WebSocket, resources: AgentResources): void {
+    this.agentResources.set(agentSocket, resources)
+  }
+
+  removeResources(agentSocket: WebSocket): void {
+    this.agentResources.delete(agentSocket)
   }
 
   clearDeviceCache(sessionId: string): void {
@@ -124,6 +152,7 @@ export class SessionManager {
     return Array.from(agentMap.values()).map((group) => ({
       agentName: group[0].agentName,
       platform: group[0].agentPlatform,
+      resources: this.agentResources.get(group[0].agentSocket),
       devices: group.map((s) => ({
         id: s.deviceId,
         name: s.deviceName,

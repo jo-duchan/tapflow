@@ -97,6 +97,10 @@ export class SimctlWrapper {
     await this.runner.exec('shutdown', deviceId)
   }
 
+  async erase(deviceId: string): Promise<void> {
+    await this.runner.exec('erase', deviceId)
+  }
+
   async uninstallApp(bundleId: string): Promise<void> {
     await this.runner.exec('uninstall', 'booted', bundleId)
   }
@@ -147,6 +151,10 @@ export class SimctlWrapper {
     try {
       await this.runner.exec('spawn', udid, 'launchctl', 'kickstart', '-k', 'system/com.apple.kbd')
     } catch { /* expected on some iOS versions */ }
+  }
+
+  async openSimulatorApp(): Promise<void> {
+    await execFileAsync('open', ['-a', 'Simulator'])
   }
 
   async rotate(_udid: string, orientation: 'portrait' | 'landscapeLeft' | 'landscapeRight' | 'portraitUpsideDown'): Promise<void> {

@@ -11,12 +11,13 @@ interface Props {
   sessionId: string;
   deviceId: string;
   buildId?: number;
+  resetMode?: 'app-only' | 'full-erase';
   onRecordingUploaded?: () => void;
 }
 
 type AndroidChrome = { buttons: AndroidButton[]; streamType: 'h264'; screenWidth?: number; screenHeight?: number };
 
-export function DeviceViewer({ sessionId, deviceId, buildId, onRecordingUploaded }: Props) {
+export function DeviceViewer({ sessionId, deviceId, buildId, resetMode, onRecordingUploaded }: Props) {
   const sendRef = useRef<(msg: object) => void>(() => {});
 
   const [joined, setJoined] = useState(false);
@@ -36,7 +37,7 @@ export function DeviceViewer({ sessionId, deviceId, buildId, onRecordingUploaded
   const handleMessage = useCallback((msg: RelayMessage) => {
     if (msg.type === 'session:joined') {
       setJoined(true);
-      sendRef.current({ type: 'device:boot', sessionId, payload: { deviceId } });
+      sendRef.current({ type: 'device:boot', sessionId, payload: { deviceId, resetMode } });
     }
     if (msg.type === 'device:boot-error') {
       setBootError((msg as unknown as { message: string }).message);

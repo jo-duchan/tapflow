@@ -1,6 +1,7 @@
 export type MessageType =
   | 'agent:register'
   | 'agent:registered'
+  | 'agent:resources'
   | 'agents:list'
   | 'agents:listed'
   | 'session:start'
@@ -36,6 +37,15 @@ export type MessageType =
   | 'input:keyboard:toggle'
   | 'error'
 
+export interface AgentResources {
+  cpuPercent: number
+  memUsedMB: number
+  memTotalMB: number
+  slotsAvailable: number
+  slotsTotal: number
+  reportedAt: number
+}
+
 export interface DeviceInfo {
   id: string
   name: string
@@ -50,6 +60,7 @@ export interface DeviceInfo {
 export interface SessionInfo {
   agentName?: string
   platform?: string
+  resources?: AgentResources
   devices: DeviceInfo[]
 }
 
@@ -67,4 +78,5 @@ export interface RelayMessage {
   // agent:registered: per-device sessionId assignments
   registeredSessions?: Array<{ deviceId: string; sessionId: string }>
   buildId?: number
+  resources?: AgentResources
 }
