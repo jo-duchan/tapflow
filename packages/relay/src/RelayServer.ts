@@ -17,6 +17,7 @@ import { handleListTokens, handleCreateToken, handleRevokeToken } from './api/to
 import { handleGetSettings, handleUpdateSettings } from './api/settings.js'
 import { handleUpdateProfile } from './api/profile.js'
 import { handleUploadRecording, handleListRecordings, handleDownloadRecording, purgeExpiredRecordings } from './api/recordings.js'
+import { handleListAgents, handleGetAgentResources } from './api/agents.js'
 
 const MIME_TYPES: Record<string, string> = {
   '.html': 'text/html',
@@ -40,6 +41,7 @@ export class RelayServer {
   private publicDir: string
   private uploadsDir: string
   private router: Router
+  private resourceBuffers = new Map<string, { cpu: number[]; mem: number[] }>()
 
   constructor(private readonly options: { port: number; publicDir?: string; uploadsDir?: string; idleTimeoutMs?: number }) {
     this.sessions = new SessionManager({ idleTimeoutMs: options.idleTimeoutMs })
@@ -109,6 +111,16 @@ export class RelayServer {
     this.router.post('/api/v1/recordings/upload', (req, res) => handleUploadRecording(req, res, recordingsDir))
     this.router.get('/api/v1/recordings', (req, res) => handleListRecordings(req, res))
     this.router.get('/api/v1/recordings/:filename', (req, res) => handleDownloadRecording(req, res, recordingsDir))
+
+    // agent resources
+    const purgeOldResources = () => {
+      getDb().prepare(`DELETE FROM agent_resources WHERE recorded_at < strftime('%Y-%m-%dT%H:%M:%fZ', 'now', '-30 days')`).run()
+    }
+    purgeOldResources()
+    setInterval(purgeOldResources, 24 * 60 * 60 * 1000).unref()
+    setInterval(() => this.flushResourceBuffers(), 60_000).unref()
+    this.router.get('/api/v1/agents', handleListAgents)
+    this.router.get('/api/v1/agents/:name/resources', handleGetAgentResources)
   }
 
   start(): Promise<void> {
@@ -191,7 +203,16 @@ export class RelayServer {
   private route(ws: WebSocket, msg: RelayMessage): void {
     switch (msg.type) {
       case 'agent:resources': {
-        if (msg.resources) this.sessions.setResources(ws, msg.resources)
+        if (msg.resources) {
+          this.sessions.setResources(ws, msg.resources)
+          const agentName = this.sessions.getAllByAgentSocket(ws)[0]?.agentName
+          if (agentName) {
+            const buf = this.resourceBuffers.get(agentName) ?? { cpu: [], mem: [] }
+            buf.cpu.push(msg.resources.cpuPercent)
+            buf.mem.push((msg.resources.memUsedMB / msg.resources.memTotalMB) * 100)
+            this.resourceBuffers.set(agentName, buf)
+          }
+        }
         break
       }
 
@@ -420,6 +441,21 @@ export class RelayServer {
         break
       }
     }
+  }
+
+  private flushResourceBuffers(): void {
+    if (this.resourceBuffers.size === 0) return
+    const db = getDb()
+    const insert = db.prepare('INSERT INTO agent_resources (agent_name, cpu_percent, mem_percent) VALUES (?, ?, ?)')
+    db.transaction(() => {
+      for (const [agentName, buf] of this.resourceBuffers.entries()) {
+        if (buf.cpu.length === 0) continue
+        const avgCpu = buf.cpu.reduce((a, b) => a + b, 0) / buf.cpu.length
+        const avgMem = buf.mem.reduce((a, b) => a + b, 0) / buf.mem.length
+        insert.run(agentName, avgCpu, avgMem)
+      }
+    })()
+    this.resourceBuffers.clear()
   }
 
   private async handleRequest(req: http.IncomingMessage, res: http.ServerResponse): Promise<void> {

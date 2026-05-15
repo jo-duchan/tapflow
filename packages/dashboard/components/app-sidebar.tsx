@@ -1,5 +1,5 @@
 import { Link, useLocation, useNavigate } from 'react-router-dom'
-import { LayoutGrid, LogOut, Settings, Users, KeyRound } from 'lucide-react'
+import { LayoutGrid, LogOut, Settings, Users, KeyRound, Monitor } from 'lucide-react'
 import {
   Sidebar,
   SidebarContent,
@@ -24,6 +24,7 @@ import { UserAvatar } from '@/components/user-avatar'
 
 const navItems = [
   { label: 'App Center', href: '/app-center', icon: LayoutGrid },
+  { label: 'Mac Resources', href: '/mac-resources', icon: Monitor },
 ]
 
 const settingsItems = [
