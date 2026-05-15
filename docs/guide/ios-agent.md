@@ -2,23 +2,16 @@
 
 The iOS agent runs on a Mac and streams simulator screens to the relay.
 
-## One-time setup
+## Prerequisites
 
-```sh
-tapflow ios setup
-```
-
-This command:
-1. Detects your Xcode SDK version
-2. Downloads the matching iOS Simulator Runtime if not already installed (~3 GB)
-3. Downloads and builds WebDriverAgent for the simulator
-
-You will be prompted for your Apple Team ID once during the WDA build step.
+- macOS
+- Xcode with iOS Simulator Runtime installed
+- Node.js ≥ 20
 
 ## Start the agent
 
 ```sh
-tapflow agent start --relay wss://your-relay-url
+tapflow start --relay wss://your-relay-url
 ```
 
 The agent connects outbound — no inbound firewall rules needed.
@@ -27,9 +20,20 @@ The agent connects outbound — no inbound firewall rules needed.
 
 | Option | Default | Description |
 |--------|---------|-------------|
-| `--relay` | — | Relay WebSocket URL (required) |
-| `--fps` | 30 | Target capture FPS |
-| `--name` | `os.hostname()` | Name shown in the dashboard |
+| `--relay` | — | Relay WebSocket URL |
+| `--device` | first booted | Simulator name or UDID to use |
+
+## List available simulators
+
+```sh
+tapflow devices
+```
+
+## Boot a specific simulator
+
+```sh
+tapflow boot "iPhone 16 Pro"
+```
 
 ## Multiple simulators
 
@@ -40,8 +44,9 @@ Each Mac supports 2–4 simultaneous simulators depending on available RAM. The 
 Run `tapflow doctor` to diagnose common issues:
 
 ```
-✓ Node.js 20.x
+✓ macOS
 ✓ Xcode 16.2
-✗ WebDriverAgent — localhost:8100 not responding
-    → Run: npx tapflow ios setup
+✓ xcrun simctl
+✓ Simulator booted: iPhone 16 Pro
+✓ Node v20.x
 ```

@@ -2,7 +2,7 @@
 
 Get tapflow running in under 10 minutes.
 
-## 1. Deploy the relay
+## 1. Install tapflow
 
 ::: code-group
 
@@ -20,46 +20,30 @@ pnpm add -g tapflow
 
 :::
 
-```sh
-tapflow deploy
-# ? Cloud provider: fly.io / AWS / self-hosted
-# ✓ Relay deployed: wss://relay.myteam.example.com
-```
+## 2. Start the relay + agent
 
-## 2. Set up iOS agent (Mac)
-
-Run this once on the Mac that will serve as the iOS agent:
+On your Mac, run:
 
 ```sh
-tapflow ios setup
-# Detects Xcode SDK, downloads matching Simulator Runtime if needed,
-# downloads and builds WebDriverAgent (~2 min)
-```
-
-## 3. Start the agent
-
-```sh
-tapflow agent start --relay wss://relay.myteam.example.com
+tapflow start
+# ✓ Relay started on ws://localhost:4000
 # ✓ iOS Agent connected (3 simulators available)
 ```
 
-## 4. Invite your QA team
+To connect to a remote relay instead:
 
 ```sh
-tapflow invite qa@company.com
-# An invitation email is sent automatically
+tapflow start --relay wss://relay.myteam.example.com
 ```
 
-Open the dashboard URL (`https://relay.myteam.example.com`) and sign in.
+## 3. Open the dashboard
 
-## 5. Upload a build
+Navigate to `http://localhost:4000` (or your relay URL) in any browser.
+
+Sign in with your team credentials, select a device, and start a session.
+
+## 4. Check your environment
 
 ```sh
-# iOS — build with xcodebuild -sdk iphonesimulator, then zip the .app bundle
-tapflow upload MyApp.app.zip --token <pat>
-
-# Android
-tapflow upload MyApp.apk --token <pat>
+tapflow doctor
 ```
-
-Your QA team can now pick a build, select a device, and start a session.

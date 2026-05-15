@@ -24,17 +24,14 @@ Browser (QA team)  ←→  Relay Server  ←→  Mac Agent (iOS Simulator × 2�
 # Install
 npm install -g tapflow
 
-# Deploy relay (fly.io / AWS / self-hosted)
-tapflow deploy
+# Start relay + iOS agent
+tapflow start
 
-# Set up iOS environment on Mac (one-time)
-tapflow ios setup
+# Or connect to a remote relay
+tapflow start --relay wss://your-relay-url
 
-# Start agent
-tapflow agent start --relay wss://your-relay-url
-
-# Invite QA team
-tapflow invite qa@company.com
+# Check environment
+tapflow doctor
 ```
 
 → Full documentation: **[tapflow docs](https://github.com/jo-duchan/tapflow)**
