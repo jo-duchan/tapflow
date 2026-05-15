@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
+import { describe, it, expect, vi, beforeEach, afterEach, type MockInstance } from 'vitest'
 
 vi.mock('node:child_process', () => ({
   execSync: vi.fn(),
@@ -18,8 +18,7 @@ const simctlWith = (state: 'Booted' | 'Shutdown') =>
 
 describe('cmdBoot', () => {
   let logLines: string[]
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  let exitSpy: any
+  let exitSpy: MockInstance
 
   beforeEach(() => {
     vi.resetAllMocks()

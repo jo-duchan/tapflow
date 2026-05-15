@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
+import { describe, it, expect, vi, beforeEach, afterEach, type MockInstance } from 'vitest'
 
 vi.mock('ws')
 
@@ -28,7 +28,7 @@ function createMockWs(behavior: (handlers: WsEventMap) => void) {
 
 describe('cmdStatus', () => {
   let output: string[]
-  let exitSpy: ReturnType<typeof vi.spyOn>
+  let exitSpy: MockInstance
 
   beforeEach(() => {
     vi.resetAllMocks()

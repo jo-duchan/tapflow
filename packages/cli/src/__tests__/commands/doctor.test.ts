@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
+import { describe, it, expect, vi, beforeEach, afterEach, type MockInstance } from 'vitest'
 
 vi.mock('../../lib/doctor.js', () => ({
   runDoctorChecks: vi.fn(),
@@ -11,7 +11,7 @@ const mockRunDoctorChecks = vi.mocked(runDoctorChecks)
 
 describe('cmdDoctor', () => {
   let logLines: string[]
-  let exitSpy: ReturnType<typeof vi.spyOn>
+  let exitSpy: MockInstance
 
   beforeEach(() => {
     vi.resetAllMocks()

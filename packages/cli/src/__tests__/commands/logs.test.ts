@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
+import { describe, it, expect, vi, beforeEach, afterEach, type MockInstance } from 'vitest'
 import { cmdLogs } from '../../commands/logs.js'
 
 function mockFetch(status: number, body: unknown) {
@@ -11,7 +11,7 @@ function mockFetch(status: number, body: unknown) {
 
 describe('cmdLogs', () => {
   let output: string[]
-  let exitSpy: ReturnType<typeof vi.spyOn>
+  let exitSpy: MockInstance
 
   beforeEach(() => {
     vi.resetAllMocks()
