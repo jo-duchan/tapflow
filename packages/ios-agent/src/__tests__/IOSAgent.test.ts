@@ -60,6 +60,8 @@ function mockSimctl(booted = false): SimctlWrapper {
     screenshot: vi.fn().mockResolvedValue(Buffer.from('png')),
     syncKeyboardsFromLanguages: vi.fn().mockResolvedValue(undefined),
     openSimulatorApp: vi.fn().mockResolvedValue(undefined),
+    showSoftwareKeyboard: vi.fn().mockResolvedValue(undefined),
+    hideSoftwareKeyboard: vi.fn().mockResolvedValue(undefined),
   } as unknown as SimctlWrapper
 }
 
@@ -380,6 +382,61 @@ describe('IOSAgent', () => {
       browser.send(JSON.stringify({ type: 'input:key', sessionId: agent.sessionId, payload: { code: 'UnknownKey', modifiers: 0 } }))
       await new Promise((r) => setTimeout(r, 50))
       expect(thInstance.sendKey).not.toHaveBeenCalled()
+      agent.disconnect()
+      browser.close()
+    })
+  })
+
+  describe('input:keyboard:toggle handler', () => {
+    async function setupSession(sim = mockSimctl(true)) {
+      const browser = new WebSocket(`ws://localhost:${port}`)
+      await waitForOpen(browser)
+      const agent = new IOSAgent({ intervalMs: 50 }, sim)
+      await agent.connect(`ws://localhost:${port}`)
+      browser.send(JSON.stringify({ type: 'session:start', sessionId: agent.sessionId }))
+      await waitForType(browser, 'session:joined')
+      browser.send(JSON.stringify({ type: 'device:boot', sessionId: agent.sessionId, payload: { deviceId: 'dev-1' } }))
+      await waitForType(browser, 'device:ready')
+      return { browser, agent, sim }
+    }
+
+    it('첫 토글 시 showSoftwareKeyboard를 호출한다', async () => {
+      const sim = mockSimctl(true)
+      const { browser, agent } = await setupSession(sim)
+      browser.send(JSON.stringify({ type: 'input:keyboard:toggle', sessionId: agent.sessionId }))
+      await new Promise((r) => setTimeout(r, 50))
+      expect(sim.showSoftwareKeyboard).toHaveBeenCalledWith('dev-1')
+      expect(sim.hideSoftwareKeyboard).not.toHaveBeenCalled()
+      agent.disconnect()
+      browser.close()
+    })
+
+    it('두 번째 토글 시 hideSoftwareKeyboard를 호출한다', async () => {
+      const sim = mockSimctl(true)
+      const { browser, agent } = await setupSession(sim)
+      browser.send(JSON.stringify({ type: 'input:keyboard:toggle', sessionId: agent.sessionId }))
+      await new Promise((r) => setTimeout(r, 50))
+      browser.send(JSON.stringify({ type: 'input:keyboard:toggle', sessionId: agent.sessionId }))
+      await new Promise((r) => setTimeout(r, 50))
+      expect(sim.showSoftwareKeyboard).toHaveBeenCalledTimes(1)
+      expect(sim.hideSoftwareKeyboard).toHaveBeenCalledWith('dev-1')
+      agent.disconnect()
+      browser.close()
+    })
+
+    it('input:key 수신 시 softKeyboardVisible이 false로 리셋된다', async () => {
+      const sim = mockSimctl(true)
+      const { browser, agent } = await setupSession(sim)
+      // show keyboard
+      browser.send(JSON.stringify({ type: 'input:keyboard:toggle', sessionId: agent.sessionId }))
+      await new Promise((r) => setTimeout(r, 50))
+      // hardware key press → keyboard auto-hides in iOS, state resets
+      browser.send(JSON.stringify({ type: 'input:key', sessionId: agent.sessionId, payload: { code: 'KeyA', modifiers: 0 } }))
+      await new Promise((r) => setTimeout(r, 50))
+      // next toggle should show again (not hide)
+      browser.send(JSON.stringify({ type: 'input:keyboard:toggle', sessionId: agent.sessionId }))
+      await new Promise((r) => setTimeout(r, 50))
+      expect(sim.showSoftwareKeyboard).toHaveBeenCalledTimes(2)
       agent.disconnect()
       browser.close()
     })
