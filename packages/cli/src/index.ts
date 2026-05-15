@@ -1,4 +1,5 @@
 import { cac } from 'cac'
+import { cmdInit } from './commands/init.js'
 import { cmdDoctor } from './commands/doctor.js'
 import { cmdDevices } from './commands/devices.js'
 import { cmdBoot } from './commands/boot.js'
@@ -8,6 +9,11 @@ import { cmdStatus } from './commands/status.js'
 import { cmdLogs } from './commands/logs.js'
 
 const cli = cac('tapflow')
+
+cli
+  .command('init', 'Create the first admin account on the relay')
+  .option('--relay <url>', 'Relay URL (default: http://localhost:4000)')
+  .action((opts: { relay?: string }) => cmdInit(opts))
 
 cli
   .command('doctor', 'Check system prerequisites')

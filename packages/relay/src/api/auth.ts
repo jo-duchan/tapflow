@@ -78,3 +78,18 @@ export function handleLogout(_req: http.IncomingMessage, res: http.ServerRespons
   })
   res.end(JSON.stringify({ ok: true }))
 }
+
+export async function handleInit(req: http.IncomingMessage, res: http.ServerResponse): Promise<void> {
+  const db = getDb()
+  const { n } = db.prepare('SELECT COUNT(*) as n FROM users').get() as { n: number }
+  if (n > 0) return json(res, 403, { error: 'Already initialized' })
+
+  const body = await readJson<{ email: string; password: string }>(req)
+  if (!body.email || !body.password) return json(res, 400, { error: 'email and password required' })
+  if (body.password.length < 8) return json(res, 400, { error: 'Password must be at least 8 characters' })
+
+  db.prepare('INSERT INTO users (email, display_name, role, password_hash) VALUES (?, ?, ?, ?)')
+    .run(body.email, 'Admin', 'Admin', makePasswordHash(body.password))
+
+  json(res, 201, { ok: true })
+}

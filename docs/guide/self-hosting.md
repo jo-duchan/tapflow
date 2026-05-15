@@ -2,16 +2,6 @@
 
 The relay is a lightweight Node.js server. It only routes WebSocket traffic and serves the dashboard — no heavy compute needed.
 
-## fly.io (recommended)
-
-```sh
-tapflow deploy
-# Select fly.io → follow prompts
-# ✓ Relay deployed: wss://tapflow-myteam.fly.dev
-```
-
-Cost: ~$5/month on the `shared-cpu-1x` plan.
-
 ## Docker
 
 ```sh
@@ -25,6 +15,12 @@ docker run -d \
   tapflow
 ```
 
+Then create the first admin account from any machine that can reach the relay:
+
+```sh
+tapflow init --relay http://your-server:4000
+```
+
 ## Manual (Node.js)
 
 ```sh
@@ -33,6 +29,12 @@ tapflow relay start
 ```
 
 The relay reads `tapflow.config.json` from the working directory. See [Configuration](/reference/configuration).
+
+After starting, create the admin account:
+
+```sh
+tapflow init
+```
 
 ## Data directory
 

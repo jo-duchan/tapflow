@@ -21,15 +21,25 @@ avdmanager create avd -n Pixel_8 -k "system-images;android-34;google_apis;arm64-
 ## Start the agent
 
 ```sh
-tapflow agent start --relay wss://your-relay-url
+tapflow start --platform android --relay wss://your-relay-url
 ```
 
 The agent boots the emulator automatically, waits for `sys.boot_completed`, then begins streaming.
+
+To start both iOS and Android agents together:
+
+```sh
+tapflow start --relay wss://your-relay-url
+```
 
 ## Troubleshooting
 
 ```sh
 tapflow doctor
-# ✓ adb found: /usr/local/bin/adb
-# ✓ AVD: Pixel_8 (android-34 · google_apis/arm64-v8a)
+# Common
+#   ✓ Node v20.x
+#
+# Android
+#   ✓ adb found: /usr/local/bin/adb
+#   ✓ AVD: Pixel_8 (android-34 · google_apis/arm64-v8a)
 ```

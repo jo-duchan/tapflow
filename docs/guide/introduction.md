@@ -16,14 +16,15 @@
 ```
 Browser (QA team)
     ↕ WebSocket
-Relay Server  ← you deploy this once (fly.io, AWS, self-hosted)
+Relay Server  ← you deploy this once (Docker, AWS, self-hosted)
     ↕ WebSocket (outbound from agent)
 Mac Agent     ← runs on your Mac, connects to the relay
-  └── iOS Simulator × 2–4
+  ├── iOS Simulator × 2–4
+  └── Android Emulator × 1–2
 ```
 
 1. A **Mac Agent** connects outbound to the relay — no firewall rules needed.
-2. QA team opens the dashboard in any browser and sees all available simulators.
+2. QA team opens the dashboard in any browser and sees all available simulators and emulators.
 3. Touch events are forwarded in real time; the screen streams back as JPEG frames (~30 fps).
 
 ## Key concepts

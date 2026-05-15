@@ -20,6 +20,29 @@ pnpm add -g tapflow
 
 ---
 
+## `tapflow init`
+
+Create the first admin account on the relay. Only works when no accounts exist yet.
+
+```sh
+tapflow init [options]
+```
+
+| Option | Description |
+|--------|-------------|
+| `--relay <url>` | Relay URL (default: `http://localhost:4000`) |
+
+Example:
+
+```
+  ? Admin email: admin@yourteam.com
+  ? Password: ********
+  ✓ Admin account created
+  →  Open http://localhost:4000 to sign in
+```
+
+---
+
 ## `tapflow start`
 
 Start the relay and all available agents. Auto-detects iOS and Android based on your environment.

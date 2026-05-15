@@ -36,13 +36,25 @@ To connect to a remote relay instead:
 tapflow start --relay wss://relay.myteam.example.com
 ```
 
-## 3. Open the dashboard
+## 3. Create the admin account
 
-Navigate to `http://localhost:4000` (or your relay URL) in any browser.
+tapflow has no default credentials. Create the first admin account:
 
-Sign in with your team credentials, select a device, and start a session.
+```sh
+tapflow init
+  ? Admin email: admin@yourteam.com
+  ? Password: ********
+  ✓ Admin account created
+  →  Open http://localhost:4000 to sign in
+```
 
-## 4. Check your environment
+## 4. Open the dashboard
+
+Navigate to `http://localhost:4000` (or your relay URL) in any browser, then sign in with the credentials you just created.
+
+For the full first-time setup flow — inviting your team and uploading a first build — see [First-time Setup](/dashboard/setup).
+
+## 5. Check your environment
 
 ```sh
 tapflow doctor

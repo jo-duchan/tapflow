@@ -6,7 +6,7 @@ import { SessionManager } from './SessionManager.js'
 import type { RelayMessage } from './types.js'
 import { Router } from './router.js'
 import { getDb } from './db.js'
-import { handleLogin, handleLogout, handleMe, handleChangePassword } from './api/auth.js'
+import { handleLogin, handleLogout, handleMe, handleChangePassword, handleInit } from './api/auth.js'
 import { handleVerify, handleAccept } from './api/invitations.js'
 import { handleVerifyReset, handleDoReset, handleSendMemberReset } from './api/passwordReset.js'
 import { handleListBuilds, handleGetBuild, handleUpdateBuild, handleUploadBuild } from './api/builds.js'
@@ -60,6 +60,7 @@ export class RelayServer {
     const u = this.uploadsDir
 
     // auth
+    this.router.post('/api/v1/auth/init', handleInit)
     this.router.get('/api/v1/auth/me', handleMe)
     this.router.post('/api/v1/auth/login', handleLogin)
     this.router.post('/api/v1/auth/logout', handleLogout)
