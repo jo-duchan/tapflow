@@ -62,6 +62,7 @@ export function MacResources() {
 
   const connectedNames = sessions.map((s) => s.agentName).filter(Boolean) as string[]
   const allAgents = [...new Set([...connectedNames, ...knownAgents])]
+  const connectedSet = new Set(connectedNames)
 
   useEffect(() => {
     if (!selectedAgent && allAgents.length > 0) setSelectedAgent(allAgents[0])
@@ -82,66 +83,73 @@ export function MacResources() {
     mem: Math.round(p.mem_percent * 10) / 10,
   }))
 
-  const connectedSet = new Set(connectedNames)
-
   return (
-    <div className="flex flex-col gap-6 p-6 h-full min-h-0">
-      {allAgents.length === 0 ? (
-        <div className="flex flex-col items-center justify-center flex-1 gap-2 text-muted-foreground">
-          <Monitor className="h-8 w-8" />
-          <p className="text-sm">{connected ? 'No agents connected yet.' : 'Connecting to relay…'}</p>
-        </div>
-      ) : (
-        <>
-          {/* Agent tabs */}
-          <div className="flex flex-wrap gap-2">
-            {allAgents.map((name) => {
-              const isOnline = connectedSet.has(name)
-              const isSelected = selectedAgent === name
-              return (
-                <button
-                  key={name}
-                  onClick={() => setSelectedAgent(name)}
-                  className={`flex items-center gap-1.5 rounded-md border px-3 py-1.5 text-sm transition-colors
-                    ${isSelected ? 'bg-primary text-primary-foreground border-primary' : 'hover:bg-accent'}`}
-                >
-                  <span className={`inline-block h-1.5 w-1.5 rounded-full ${isOnline ? 'bg-emerald-400' : 'bg-muted-foreground/40'}`} />
-                  {name}
-                </button>
-              )
-            })}
+    <div className="flex h-full min-h-0">
+      {/* Macs sidebar */}
+      <aside className="w-64 shrink-0 border-r flex flex-col gap-1 p-3 overflow-y-auto">
+        <span className="px-2 pb-1 font-mono text-xs font-medium text-muted-foreground uppercase tracking-wider">
+          Macs
+        </span>
+        {allAgents.length === 0 ? (
+          <span className="px-2 text-sm text-muted-foreground">
+            {connected ? 'No agents yet.' : 'Connecting…'}
+          </span>
+        ) : (
+          allAgents.map((name) => {
+            const isOnline = connectedSet.has(name)
+            const isSelected = selectedAgent === name
+            return (
+              <button
+                key={name}
+                onClick={() => setSelectedAgent(name)}
+                className={[
+                  'flex items-center gap-2 rounded-md px-2 py-2 text-left text-sm hover:bg-accent transition-colors',
+                  isSelected ? 'bg-accent font-medium' : '',
+                ].join(' ')}
+              >
+                <span className={`inline-block h-1.5 w-1.5 shrink-0 rounded-full ${isOnline ? 'bg-emerald-400' : 'bg-muted-foreground/40'}`} />
+                <span className="truncate">{name}</span>
+              </button>
+            )
+          })
+        )}
+      </aside>
+
+      {/* Main content */}
+      <div className="flex-1 min-w-0 overflow-auto">
+        {!selectedAgent ? (
+          <div className="flex h-full items-center justify-center gap-2 text-muted-foreground">
+            <Monitor className="h-8 w-8" />
+            <p className="text-sm">Select a Mac to view resource history.</p>
           </div>
-
-          {/* Graph area */}
-          {selectedAgent && (
-            <div className="flex flex-col gap-4 flex-1 min-h-0">
-              <div className="flex items-center justify-between">
-                <h2 className="text-base font-semibold">{selectedAgent}</h2>
-                <Tabs value={range} onValueChange={(v) => setRange(v as Range)}>
-                  <TabsList>
-                    {(Object.keys(RANGE_LABELS) as Range[]).map((r) => (
-                      <TabsTrigger key={r} value={r}>{RANGE_LABELS[r]}</TabsTrigger>
-                    ))}
-                  </TabsList>
-                </Tabs>
-              </div>
-
-              {loading ? (
-                <div className="flex-1 flex items-center justify-center text-sm text-muted-foreground">Loading…</div>
-              ) : chartData.length === 0 ? (
-                <div className="flex-1 flex items-center justify-center text-sm text-muted-foreground">
-                  No data yet for this range. Data is collected every minute while the agent is connected.
-                </div>
-              ) : (
-                <div className="flex flex-col gap-6 flex-1">
-                  <ChartCard title="CPU %" color="cpu" data={chartData} dataKey="cpu" range={range} formatTick={formatTick} />
-                  <ChartCard title="RAM %" color="mem" data={chartData} dataKey="mem" range={range} formatTick={formatTick} />
-                </div>
-              )}
+        ) : (
+          <div className="flex flex-col gap-6 p-6">
+            <div className="flex items-center justify-between">
+              <h2 className="text-base font-semibold">{selectedAgent}</h2>
+              <Tabs value={range} onValueChange={(v) => setRange(v as Range)}>
+                <TabsList>
+                  {(Object.keys(RANGE_LABELS) as Range[]).map((r) => (
+                    <TabsTrigger key={r} value={r}>{RANGE_LABELS[r]}</TabsTrigger>
+                  ))}
+                </TabsList>
+              </Tabs>
             </div>
-          )}
-        </>
-      )}
+
+            {loading ? (
+              <div className="flex h-40 items-center justify-center text-sm text-muted-foreground">Loading…</div>
+            ) : chartData.length === 0 ? (
+              <div className="flex h-40 items-center justify-center text-sm text-muted-foreground">
+                No data yet for this range. Data is collected every minute while the agent is connected.
+              </div>
+            ) : (
+              <div className="flex flex-col gap-6">
+                <ChartCard title="CPU %" color="cpu" data={chartData} dataKey="cpu" range={range} formatTick={formatTick} />
+                <ChartCard title="RAM %" color="mem" data={chartData} dataKey="mem" range={range} formatTick={formatTick} />
+              </div>
+            )}
+          </div>
+        )}
+      </div>
     </div>
   )
 }
