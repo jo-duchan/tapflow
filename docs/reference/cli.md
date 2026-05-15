@@ -25,7 +25,7 @@ pnpm add -g tapflow
 Create the first admin account on the relay. Only works when no accounts exist yet.
 
 ```sh
-tapflow init [options]
+tapflow init
 ```
 
 | Option | Description |
@@ -48,7 +48,7 @@ Example:
 Start the relay and all available agents. Auto-detects iOS and Android based on your environment.
 
 ```sh
-tapflow start [options]
+tapflow start
 ```
 
 | Option | Description |
@@ -117,7 +117,7 @@ tapflow reset
 Show connected agents, devices, and active sessions.
 
 ```sh
-tapflow status [--relay <url>]
+tapflow status
 ```
 
 Example output:
@@ -137,7 +137,7 @@ Example output:
 Show recent relay log entries (last 100 lines by default).
 
 ```sh
-tapflow logs [--relay <url>] [--lines <n>]
+tapflow logs
 ```
 
 | Option | Default | Description |

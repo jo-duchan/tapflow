@@ -31,6 +31,7 @@
 | [contributing/DESIGN.md](./contributing/DESIGN.md) | dashboard 디자인 시스템 — 색상 토큰, 타이포그래피, elevation, 컴포넌트 스펙 |
 | [docs/simkit-internals.md](./docs/simkit-internals.md) | SimulatorKit HID 분석 |
 | [contributing/CONTRIBUTING.md](./contributing/contributing/CONTRIBUTING.md) | 브랜치·릴리즈·커밋 컨벤션 |
+| [docs/CLAUDE.md](./docs/CLAUDE.md) | VitePress 작업 규칙 — shiki 코드블럭, CSS 커스터마이징 주의사항 |
 
 ---
 
@@ -47,5 +48,6 @@ CLAUDE.md (공통 규칙 — WHAT/WHY/HOW/HOW NOT)
     ├── packages/cli/CLAUDE.md
     ├── playground/CLAUDE.md
     ├── .work/CLAUDE.md
+    ├── docs/CLAUDE.md
     └── contributing/CONTRIBUTING.md
 ```

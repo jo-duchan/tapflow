@@ -6,10 +6,10 @@
 
 /* ─── Brand colours (light) ─────────────────────────────── */
 :root {
-  --vp-c-brand-1: #171717;
-  --vp-c-brand-2: #373737;
-  --vp-c-brand-3: #575757;
-  --vp-c-brand-soft: rgba(23, 23, 23, 0.08);
+  --vp-c-brand-1: #0070f3;
+  --vp-c-brand-2: #2985f5;
+  --vp-c-brand-3: #5aa3f7;
+  --vp-c-brand-soft: rgba(0, 112, 243, 0.08);
 
   /* Surfaces */
   --vp-c-bg: #ffffff;
@@ -35,10 +35,10 @@
 
 /* ─── Brand colours (dark) ──────────────────────────────── */
 .dark {
-  --vp-c-brand-1: #e5e5e5;
-  --vp-c-brand-2: #c2c2c2;
-  --vp-c-brand-3: #a0a0a0;
-  --vp-c-brand-soft: rgba(255, 255, 255, 0.08);
+  --vp-c-brand-1: #60a5fa;
+  --vp-c-brand-2: #93c5fd;
+  --vp-c-brand-3: #bfdbfe;
+  --vp-c-brand-soft: rgba(96, 165, 250, 0.1);
 
   --vp-c-bg: #0a0a0a;
   --vp-c-bg-soft: #171717;
@@ -66,6 +66,17 @@
   font-weight: 600;
 }
 
+/* inline code inside headings — inherit heading font so same-level titles look consistent */
+.vp-doc h1 code,
+.vp-doc h2 code,
+.vp-doc h3 code {
+  font-family: inherit;
+  font-size: 0.95em;
+  font-weight: 600;
+  color: inherit;
+  letter-spacing: inherit;
+}
+
 .VPHero .name {
   letter-spacing: -0.04em;
   font-weight: 600;
@@ -88,8 +99,8 @@
 }
 
 .VPButton.brand {
-  background-color: var(--vp-c-brand-1) !important;
-  border-color: var(--vp-c-brand-1) !important;
+  background-color: #171717 !important;
+  border-color: #171717 !important;
   color: #ffffff !important;
 }
 
@@ -148,6 +159,46 @@
   font-weight: 400;
 }
 
+/* ─── UI controls: keep original dark border, not brand blue ────────── */
+.VPSwitch:hover {
+  border-color: var(--vp-c-text-1) !important;
+}
+
+.search-bar:focus-within {
+  border-color: var(--vp-c-text-1) !important;
+}
+
+.DocSearch-Form {
+  border-color: var(--vp-c-text-2) !important;
+}
+
+.DocSearch-Button:hover {
+  border-color: var(--vp-c-text-1) !important;
+}
+
+/* ─── Active state indicators ───────────────────────────── */
+/* nav: underline indicator (brand color = same as text, so use decoration) */
+.VPNavBarMenuLink.active {
+  font-weight: 600;
+  position: relative;
+}
+
+.VPNavBarMenuLink.active::after {
+  content: '';
+  position: absolute;
+  bottom: -2px;
+  left: 0;
+  right: 0;
+  height: 1.5px;
+  background-color: var(--vp-c-brand-1);
+  border-radius: 1px;
+}
+
+/* sidebar level-1: show indicator line (VitePress only enables it for level 2+) */
+.VPSidebarItem.level-1.is-active > .item > .indicator {
+  background-color: var(--vp-c-brand-1);
+}
+
 /* ─── Feature cards — no border, no hover ───────────────── */
 .VPFeature {
   border-radius: 8px !important;
@@ -162,4 +213,16 @@
 /* ─── Code blocks ────────────────────────────────────────── */
 .vp-doc div[class*='language-'] {
   border-radius: 8px;
+}
+
+/* pre/code: disable text-autospace (macOS Safari adds spacing near CJK chars) */
+.vp-doc div[class*='language-'] pre,
+.vp-doc div[class*='language-'] code {
+  text-autospace: no-autospace;
+}
+
+/* each .line fills the row without creating extra block-level space from \n chars */
+.vp-doc div[class*='language-'] pre code .line {
+  display: inline-block;
+  width: 100%;
 }
