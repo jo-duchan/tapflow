@@ -470,6 +470,108 @@ describe('RelayServer', () => {
     observer.close()
   })
 
+  describe('mock-agent — 다중 agent 등록·자원 보고', () => {
+    it('두 mock agent가 독립적으로 등록되어 agents:listed에 각각 표시됨', async () => {
+      const agentA = new WebSocket(`ws://localhost:${port}`)
+      await waitForOpen(agentA)
+      agentA.send(JSON.stringify({
+        type: 'agent:register',
+        agentName: 'Mac-A',
+        devices: [
+          { id: 'a1', name: 'iPhone A1', platform: 'ios', status: 'shutdown' },
+          { id: 'a2', name: 'iPhone A2', platform: 'ios', status: 'shutdown' },
+        ],
+      }))
+      await waitForMessage(agentA)
+
+      const agentB = new WebSocket(`ws://localhost:${port}`)
+      await waitForOpen(agentB)
+      agentB.send(JSON.stringify({
+        type: 'agent:register',
+        agentName: 'Mac-B',
+        devices: [{ id: 'b1', name: 'iPhone B1', platform: 'ios', status: 'shutdown' }],
+      }))
+      await waitForMessage(agentB)
+
+      const observer = new WebSocket(`ws://localhost:${port}`)
+      await waitForOpen(observer)
+      observer.send(JSON.stringify({ type: 'agents:list' }))
+      const listed = await waitForMessage(observer)
+
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const sessions = listed.sessions as any[]
+      expect(sessions).toHaveLength(2)
+      const macA = sessions.find((s) => s.agentName === 'Mac-A')
+      const macB = sessions.find((s) => s.agentName === 'Mac-B')
+      expect(macA.devices).toHaveLength(2)
+      expect(macB.devices).toHaveLength(1)
+
+      agentA.close()
+      agentB.close()
+      observer.close()
+    })
+
+    it('각 agent의 resources가 agents:listed에 독립적으로 반영됨', async () => {
+      const agentA = new WebSocket(`ws://localhost:${port}`)
+      await waitForOpen(agentA)
+      agentA.send(JSON.stringify({ type: 'agent:register', agentName: 'Mac-A', devices: [{ id: 'a1', name: 'iPhone', platform: 'ios', status: 'shutdown' }] }))
+      await waitForMessage(agentA)
+      agentA.send(JSON.stringify({ type: 'agent:resources', resources: { cpuPercent: 30, memUsedMB: 4000, memTotalMB: 16000, slotsAvailable: 1, slotsTotal: 1, reportedAt: Date.now() } }))
+
+      const agentB = new WebSocket(`ws://localhost:${port}`)
+      await waitForOpen(agentB)
+      agentB.send(JSON.stringify({ type: 'agent:register', agentName: 'Mac-B', devices: [{ id: 'b1', name: 'iPhone', platform: 'ios', status: 'shutdown' }] }))
+      await waitForMessage(agentB)
+      agentB.send(JSON.stringify({ type: 'agent:resources', resources: { cpuPercent: 70, memUsedMB: 12000, memTotalMB: 16000, slotsAvailable: 1, slotsTotal: 1, reportedAt: Date.now() } }))
+
+      await new Promise((r) => setTimeout(r, 20))
+
+      const observer = new WebSocket(`ws://localhost:${port}`)
+      await waitForOpen(observer)
+      observer.send(JSON.stringify({ type: 'agents:list' }))
+      const listed = await waitForMessage(observer)
+
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const sessions = listed.sessions as any[]
+      const macA = sessions.find((s) => s.agentName === 'Mac-A')
+      const macB = sessions.find((s) => s.agentName === 'Mac-B')
+      expect(macA.resources?.cpuPercent).toBe(30)
+      expect(macB.resources?.cpuPercent).toBe(70)
+
+      agentA.close()
+      agentB.close()
+      observer.close()
+    })
+
+    it('한 agent 종료 시 해당 agent 세션만 제거됨', async () => {
+      const agentA = new WebSocket(`ws://localhost:${port}`)
+      await waitForOpen(agentA)
+      agentA.send(JSON.stringify({ type: 'agent:register', agentName: 'Mac-A', devices: [{ id: 'a1', name: 'iPhone', platform: 'ios', status: 'shutdown' }] }))
+      await waitForMessage(agentA)
+
+      const agentB = new WebSocket(`ws://localhost:${port}`)
+      await waitForOpen(agentB)
+      agentB.send(JSON.stringify({ type: 'agent:register', agentName: 'Mac-B', devices: [{ id: 'b1', name: 'iPhone', platform: 'ios', status: 'shutdown' }] }))
+      await waitForMessage(agentB)
+
+      agentA.close()
+      await new Promise((r) => setTimeout(r, 50))
+
+      const observer = new WebSocket(`ws://localhost:${port}`)
+      await waitForOpen(observer)
+      observer.send(JSON.stringify({ type: 'agents:list' }))
+      const listed = await waitForMessage(observer)
+
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const sessions = listed.sessions as any[]
+      expect(sessions).toHaveLength(1)
+      expect(sessions[0].agentName).toBe('Mac-B')
+
+      agentB.close()
+      observer.close()
+    })
+  })
+
   it('browser disconnect starts idle timer — agent receives device:shutdown after timeout', async () => {
     const shortServer = new RelayServer({ port: 0, idleTimeoutMs: 80 })
     await shortServer.start()

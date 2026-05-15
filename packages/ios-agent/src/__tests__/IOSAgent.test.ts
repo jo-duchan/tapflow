@@ -53,6 +53,7 @@ function mockSimctl(booted = false): SimctlWrapper {
     ]),
     boot: vi.fn().mockResolvedValue(undefined),
     shutdown: vi.fn().mockResolvedValue(undefined),
+    erase: vi.fn().mockResolvedValue(undefined),
     uninstallApp: vi.fn().mockResolvedValue(undefined),
     installApp: vi.fn().mockResolvedValue(undefined),
     launchApp: vi.fn().mockResolvedValue(undefined),
@@ -187,6 +188,54 @@ describe('IOSAgent', () => {
       await bootingPromise
       const ready = await readyPromise
       expect((ready.payload as { deviceId: string }).deviceId).toBe('dev-1')
+      expect(simctl.boot).toHaveBeenCalledWith('dev-1')
+
+      agent.disconnect()
+      browser.close()
+    })
+
+    it('calls erase then boot when resetMode=full-erase', async () => {
+      const simctl = mockSimctl(false)
+      const agent = new IOSAgent({ intervalMs: 50 }, simctl)
+      await agent.connect(`ws://localhost:${port}`)
+
+      const browser = new WebSocket(`ws://localhost:${port}`)
+      await waitForOpen(browser)
+      browser.send(JSON.stringify({ type: 'session:start', sessionId: agent.sessionId }))
+      await waitForType(browser, 'session:joined')
+
+      browser.send(JSON.stringify({
+        type: 'device:boot',
+        sessionId: agent.sessionId,
+        payload: { deviceId: 'dev-1', resetMode: 'full-erase' },
+      }))
+      await waitForType(browser, 'device:ready')
+
+      expect(simctl.erase).toHaveBeenCalledWith('dev-1')
+      expect(simctl.boot).toHaveBeenCalledWith('dev-1')
+      // erase must precede boot
+      const eraseOrder = (simctl.erase as ReturnType<typeof vi.fn>).mock.invocationCallOrder[0]!
+      const bootOrder = (simctl.boot as ReturnType<typeof vi.fn>).mock.invocationCallOrder[0]!
+      expect(eraseOrder).toBeLessThan(bootOrder)
+
+      agent.disconnect()
+      browser.close()
+    })
+
+    it('does not call erase when resetMode is omitted', async () => {
+      const simctl = mockSimctl(false)
+      const agent = new IOSAgent({ intervalMs: 50 }, simctl)
+      await agent.connect(`ws://localhost:${port}`)
+
+      const browser = new WebSocket(`ws://localhost:${port}`)
+      await waitForOpen(browser)
+      browser.send(JSON.stringify({ type: 'session:start', sessionId: agent.sessionId }))
+      await waitForType(browser, 'session:joined')
+
+      browser.send(JSON.stringify({ type: 'device:boot', sessionId: agent.sessionId, payload: { deviceId: 'dev-1' } }))
+      await waitForType(browser, 'device:ready')
+
+      expect(simctl.erase).not.toHaveBeenCalled()
       expect(simctl.boot).toHaveBeenCalledWith('dev-1')
 
       agent.disconnect()
