@@ -27,10 +27,10 @@
 
 | 파일 | 내용 |
 |------|------|
-| [docs/PRD.md](./docs/PRD.md) | 제품 요구사항 |
-| [docs/DESIGN.md](./docs/DESIGN.md) | dashboard 디자인 시스템 — 색상 토큰, 타이포그래피, elevation, 컴포넌트 스펙 |
+| [contributing/PRD.md](./contributing/PRD.md) | 제품 요구사항 |
+| [contributing/DESIGN.md](./contributing/DESIGN.md) | dashboard 디자인 시스템 — 색상 토큰, 타이포그래피, elevation, 컴포넌트 스펙 |
 | [docs/simkit-internals.md](./docs/simkit-internals.md) | SimulatorKit HID 분석 |
-| [CONTRIBUTING.md](./CONTRIBUTING.md) | 브랜치·릴리즈·커밋 컨벤션 |
+| [contributing/CONTRIBUTING.md](./contributing/contributing/CONTRIBUTING.md) | 브랜치·릴리즈·커밋 컨벤션 |
 
 ---
 
@@ -47,5 +47,5 @@ CLAUDE.md (공통 규칙 — WHAT/WHY/HOW/HOW NOT)
     ├── packages/cli/CLAUDE.md
     ├── playground/CLAUDE.md
     ├── .work/CLAUDE.md
-    └── CONTRIBUTING.md
+    └── contributing/CONTRIBUTING.md
 ```

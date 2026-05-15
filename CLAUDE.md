@@ -63,7 +63,7 @@ tapflow는 QA팀이 iOS/Android 시뮬레이터·에뮬레이터를 브라우저
 - WebSocket: `ws`. Dashboard: Vite + React 19 + React Router v7. 테스트: vitest.
 
 ### 브랜치·커밋·릴리즈
-→ [CONTRIBUTING.md](./CONTRIBUTING.md)
+→ [CONTRIBUTING.md](./contributing/CONTRIBUTING.md)
 
 ### 워크플로우 (Plan → Work → Review → Compound)
 
