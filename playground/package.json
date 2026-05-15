@@ -21,8 +21,7 @@
     "@tapflow/agent-core": "workspace:*",
     "@tapflow/ios-agent": "workspace:*",
     "@tapflow/android-agent": "workspace:*",
-    "@tapflow/relay": "workspace:*",
-    "@tapflow/cli": "workspace:*"
+    "@tapflow/relay": "workspace:*"
   },
   "devDependencies": {
     "concurrently": "^9.0.0",

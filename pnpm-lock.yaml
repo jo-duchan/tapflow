@@ -56,6 +56,9 @@ importers:
       '@tapflow/agent-core':
         specifier: workspace:*
         version: link:../agent-core
+      '@tapflow/android-agent':
+        specifier: workspace:*
+        version: link:../android-agent
       '@tapflow/ios-agent':
         specifier: workspace:*
         version: link:../ios-agent
@@ -285,9 +288,6 @@ importers:
       '@tapflow/android-agent':
         specifier: workspace:*
         version: link:../packages/android-agent
-      '@tapflow/cli':
-        specifier: workspace:*
-        version: link:../packages/cli
       '@tapflow/ios-agent':
         specifier: workspace:*
         version: link:../packages/ios-agent

@@ -14,7 +14,7 @@ cli
   .action(() => cmdDoctor())
 
 cli
-  .command('devices', 'List available simulators')
+  .command('devices', 'List available iOS simulators and Android AVDs')
   .action(() => cmdDevices())
 
 cli
@@ -22,10 +22,11 @@ cli
   .action((name: string) => cmdBoot(name))
 
 cli
-  .command('start', 'Start relay + iOS agent (one-command setup)')
-  .option('--device <name>', 'Simulator name or UDID to use')
+  .command('start', 'Start relay and available agents (iOS + Android by default)')
+  .option('--platform <platform>', 'Platform to start: ios | android | all (default: auto-detect)')
+  .option('--device <name>', 'iOS Simulator name or UDID to use')
   .option('--relay <url>', 'Relay WebSocket URL (skips local relay spawn)')
-  .action((opts: { device?: string; relay?: string }) => cmdStart(opts))
+  .action((opts: { platform?: 'ios' | 'android' | 'all'; device?: string; relay?: string }) => cmdStart(opts))
 
 cli
   .command('reset', 'Shut down all simulators')

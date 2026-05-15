@@ -22,7 +22,7 @@ pnpm add -g tapflow
 
 ## `tapflow start`
 
-Start the relay and iOS agent together.
+Start the relay and all available agents. Auto-detects iOS and Android based on your environment.
 
 ```sh
 tapflow start [options]
@@ -30,7 +30,8 @@ tapflow start [options]
 
 | Option | Description |
 |--------|-------------|
-| `--device <name>` | Simulator name or UDID (default: first booted) |
+| `--platform <ios\|android\|all>` | Platform to start (default: auto-detect) |
+| `--device <name>` | iOS Simulator name or UDID (default: first booted) |
 | `--relay <url>` | Connect to an existing relay instead of starting a local one |
 
 ---
