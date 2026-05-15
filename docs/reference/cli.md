@@ -64,18 +64,24 @@ tapflow devices
 
 ## `tapflow boot`
 
-Boot a simulator by name or UDID.
+Boot a simulator or AVD by name. Searches iOS simulators first, then Android AVDs.
 
 ```sh
+# iOS
 tapflow boot "iPhone 16 Pro"
 tapflow boot 822F00B0-D9CF-4B78-8EDD-6322974E4079
+
+# Android (AVD name)
+tapflow boot Pixel_8
 ```
+
+Android AVDs start in the background. Run `tapflow devices` to check status.
 
 ---
 
 ## `tapflow reset`
 
-Shut down all simulators.
+Shut down all simulators and emulators.
 
 ```sh
 tapflow reset
