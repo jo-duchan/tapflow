@@ -1,0 +1,11 @@
+node_modules
+**/node_modules
+**/.tapflow
+**/dist
+playground
+docs
+contributing
+.work
+.git
+*.md
+!tapflow.config.example.json

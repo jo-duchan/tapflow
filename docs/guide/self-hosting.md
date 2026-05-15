@@ -15,11 +15,14 @@ Cost: ~$5/month on the `shared-cpu-1x` plan.
 ## Docker
 
 ```sh
+git clone https://github.com/jo-duchan/tapflow.git
+cd tapflow
+docker build -t tapflow .
 docker run -d \
   -p 4000:4000 \
   -v $(pwd)/.tapflow:/app/.tapflow \
   -e JWT_SECRET=your_long_random_secret \
-  ghcr.io/jo-duchan/tapflow:latest
+  tapflow
 ```
 
 ## Manual (Node.js)
