@@ -17,40 +17,40 @@
 
 ```bash
 # 빌드 후 사용
-npm run build --workspace=@tapflow/cli
-tapflow start                           # relay + WDA + agent 한 번에 기동
+pnpm --filter @tapflow/cli build
+tapflow start                           # relay + agent 한 번에 기동
 tapflow start --device "iPhone 16"     # 디바이스 지정
 tapflow start --relay ws://remote:3000  # 외부 relay 사용
 
 # 빌드 없이 소스에서 직접 실행
 tsx ../packages/cli/src/index.ts start
 tsx ../packages/cli/src/index.ts start --device "iPhone 16"
-# 브라우저 → http://localhost:3000
+# 브라우저 → http://localhost:4000
 ```
 
 ### Playground 스크립트 (개발·디버깅용)
 
 ```bash
-npm run dev:up        # relay + ios-agent를 concurrently로 기동
-npm run dev:up:full   # relay + ios-agent + android-agent 동시 기동 (Mac 풀 구동)
+pnpm dev:up        # relay + ios-agent를 concurrently로 기동
+pnpm dev:up:full   # relay + ios-agent + android-agent 동시 기동 (Mac 풀 구동)
 
-npm run relay                              # 릴레이 단독
-npm run ios-agent                          # 첫 번째 booted 시뮬레이터
-npm run ios-agent -- --device "iPhone 16" # 디바이스 지정
-npm run android-agent
+pnpm relay                              # 릴레이 단독
+pnpm ios-agent                          # 첫 번째 booted 시뮬레이터
+pnpm ios-agent -- --device "iPhone 16" # 디바이스 지정
+pnpm android-agent
 ```
 
 ### 진단 · 초기화
 
 ```bash
-npm run dev:doctor    # 시스템 상태 점검 (tapflow doctor와 동일)
-npm run dev:reset     # WDA 종료 + 시뮬레이터 전체 shutdown (tapflow reset과 동일)
+pnpm dev:doctor    # 시스템 상태 점검 (tapflow doctor와 동일)
+pnpm dev:reset     # 시뮬레이터 전체 shutdown (tapflow reset과 동일)
 ```
 
 환경변수로 포트·릴레이 URL 오버라이드 가능.
 ```bash
-PORT=4000 npm run relay
-RELAY_URL=ws://localhost:4000 npm run ios-agent
+PORT=4000 pnpm relay
+RELAY_URL=ws://localhost:4000 pnpm ios-agent
 ```
 
 ## HOW NOT
