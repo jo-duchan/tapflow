@@ -18,11 +18,11 @@
     "dev:up:pool": "concurrently -k -n relay,ios,mocks -c cyan,green,yellow \"npm run relay\" \"npm run ios-agent\" \"npm run mock-agents\""
   },
   "dependencies": {
-    "@tapflow/agent-core": "*",
-    "@tapflow/ios-agent": "*",
-    "@tapflow/android-agent": "*",
-    "@tapflow/relay": "*",
-    "@tapflow/cli": "*"
+    "@tapflow/agent-core": "workspace:*",
+    "@tapflow/ios-agent": "workspace:*",
+    "@tapflow/android-agent": "workspace:*",
+    "@tapflow/relay": "workspace:*",
+    "@tapflow/cli": "workspace:*"
   },
   "devDependencies": {
     "concurrently": "^9.0.0",

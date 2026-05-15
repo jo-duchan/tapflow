@@ -1,5 +1,6 @@
 {
   "name": "@tapflow/agent-core",
+  "private": true,
   "version": "0.1.0",
   "description": "DeviceAgent interface and AgentRegistry",
   "type": "module",

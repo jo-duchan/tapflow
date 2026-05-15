@@ -4,21 +4,18 @@
   "description": "Self-hosted iOS/Android simulator streaming and remote control for QA teams.",
   "license": "MIT",
   "private": true,
-  "workspaces": [
-    "packages/*",
-    "playground"
-  ],
-  "scripts": {
-    "build": "npm run build --workspace=@tapflow/agent-core && npm run build --workspace=@tapflow/dashboard && npm run build --workspace=@tapflow/relay && npm run build --workspace=@tapflow/ios-agent && npm run build --workspace=@tapflow/android-agent && npm run build --workspace=@tapflow/cli",
-    "test": "npm run test --workspaces --if-present",
-    "lint": "npm run lint --workspaces --if-present",
-    "dev": "concurrently -n relay,dashboard,ios,android -c cyan,magenta,green,yellow \"npm run dev:relay\" \"npm run dev --workspace=@tapflow/dashboard\" \"npm run dev:ios-agent\" \"npm run dev:android-agent\"",
-    "dev:relay": "npm run relay --workspace=@tapflow/playground",
-    "dev:ios-agent": "npm run ios-agent --workspace=@tapflow/playground",
-    "dev:android-agent": "npm run android-agent --workspace=@tapflow/playground",
-    "dev:mock-agents": "npm run mock-agents --workspace=@tapflow/playground"
-  },
+  "packageManager": "pnpm@9.15.1",
   "engines": {
     "node": ">=20"
+  },
+  "scripts": {
+    "build": "pnpm --filter @tapflow/agent-core build && pnpm --filter @tapflow/dashboard build && pnpm --filter @tapflow/relay build && pnpm --filter @tapflow/ios-agent build && pnpm --filter @tapflow/android-agent build && pnpm --filter @tapflow/cli build",
+    "test": "pnpm -r test --if-present",
+    "lint": "pnpm -r lint --if-present",
+    "dev": "concurrently -n relay,dashboard,ios,android -c cyan,magenta,green,yellow \"pnpm dev:relay\" \"pnpm --filter @tapflow/dashboard dev\" \"pnpm dev:ios-agent\" \"pnpm dev:android-agent\"",
+    "dev:relay": "pnpm --filter @tapflow/playground relay",
+    "dev:ios-agent": "pnpm --filter @tapflow/playground ios-agent",
+    "dev:android-agent": "pnpm --filter @tapflow/playground android-agent",
+    "dev:mock-agents": "pnpm --filter @tapflow/playground mock-agents"
   }
 }

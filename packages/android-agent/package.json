@@ -1,5 +1,6 @@
 {
   "name": "@tapflow/android-agent",
+  "private": true,
   "version": "0.1.0",
   "description": "Android emulator agent using ADB",
   "type": "module",
@@ -21,11 +22,11 @@
     "download-scrcpy-server": "node scripts/download-scrcpy-server.mjs"
   },
   "dependencies": {
-    "@tapflow/agent-core": "*",
+    "@tapflow/agent-core": "workspace:*",
     "ws": "^8.0.0"
   },
   "devDependencies": {
-    "@tapflow/relay": "*",
+    "@tapflow/relay": "workspace:*",
     "@types/node": "^20.0.0",
     "@types/ws": "^8.0.0",
     "typescript": "^5.0.0",
