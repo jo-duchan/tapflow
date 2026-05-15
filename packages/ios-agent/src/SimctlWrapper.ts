@@ -3,8 +3,11 @@ import { execFile } from 'child_process'
 import { promisify } from 'util'
 import { promises as fs } from 'fs'
 import { tmpdir } from 'os'
+import { join, dirname } from 'path'
+import { fileURLToPath } from 'url'
 
 const execFileAsync = promisify(execFile)
+const KEYBOARD_HELPER = join(dirname(fileURLToPath(import.meta.url)), 'keyboard-helper')
 
 // Language code → iOS AppleKeyboards entry string with hw=Automatic.
 // hw=Automatic lets iOS switch the hardware layout when the input source changes via LANG1/CapsLock.
@@ -167,46 +170,11 @@ export class SimctlWrapper {
     ])
   }
 
-  // Cached so we only run the slow path (menu navigation) once per agent lifetime.
-  private connectHwKbdEnabled = false
-
-  private async sendToggleKey(): Promise<void> {
-    await execFileAsync('osascript', [
-      '-e', 'tell application "Simulator" to activate',
-      '-e', 'delay 0.05',
-      '-e', 'tell application "System Events" to keystroke "k" using {command down}',
-    ])
+  async showSoftwareKeyboard(udid: string): Promise<void> {
+    await execFileAsync(KEYBOARD_HELPER, ['show', udid])
   }
 
-  async showSoftwareKeyboard(_udid: string): Promise<void> {
-    if (this.connectHwKbdEnabled) {
-      return this.sendToggleKey()
-    }
-    // "Toggle Software Keyboard" is grayed out when "Connect Hardware Keyboard" is OFF.
-    // Check enabled state of the toggle item directly (more reliable than reading AXMenuItemMarkChar,
-    // which can return missing value instead of "" on some macOS versions).
-    await execFileAsync('osascript', [
-      '-e', 'tell application "Simulator" to activate',
-      '-e', 'tell application "System Events"',
-      '-e', '  repeat until frontmost of process "Simulator"',
-      '-e', '    delay 0.05',
-      '-e', '  end repeat',
-      '-e', '  tell process "Simulator"',
-      '-e', '    tell menu "Keyboard" of menu item "Keyboard" of menu "I/O" of menu bar 1',
-      '-e', '      if not (enabled of menu item "Toggle Software Keyboard") then',
-      '-e', '        click menu item "Connect Hardware Keyboard"',
-      '-e', '        delay 0.05',
-      '-e', '      end if',
-      '-e', '      click menu item "Toggle Software Keyboard"',
-      '-e', '    end tell',
-      '-e', '  end tell',
-      '-e', 'end tell',
-    ])
-    this.connectHwKbdEnabled = true
-  }
-
-  async hideSoftwareKeyboard(_udid: string): Promise<void> {
-    // ConnectHardwareKeyboard stays ON between show/hide cycles — no menu navigation needed.
-    await this.sendToggleKey()
+  async hideSoftwareKeyboard(udid: string): Promise<void> {
+    await execFileAsync(KEYBOARD_HELPER, ['hide', udid])
   }
 }

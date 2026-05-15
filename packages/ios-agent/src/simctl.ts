@@ -3,6 +3,18 @@ import { promisify } from 'util'
 
 const execFileAsync = promisify(execFile)
 
+function isCoreSimulatorVersionMismatch(err: unknown): boolean {
+  const msg = (err as { stderr?: string; message?: string }).stderr
+    ?? (err as { message?: string }).message ?? ''
+  return msg.includes('CoreSimulator.framework was changed') ||
+    msg.includes('Service version') && msg.includes('does not match expected service version')
+}
+
+async function restartCoreSimulatorService(): Promise<void> {
+  await execFileAsync('killall', ['com.apple.CoreSimulator.CoreSimulatorService']).catch(() => {})
+  await new Promise<void>((r) => setTimeout(r, 2000))
+}
+
 export interface SimctlRunner {
   exec(...args: string[]): Promise<string>
   execBinary(...args: string[]): Promise<Buffer>
@@ -10,11 +22,27 @@ export interface SimctlRunner {
 
 export const defaultRunner: SimctlRunner = {
   async exec(...args: string[]): Promise<string> {
-    const { stdout } = await execFileAsync('xcrun', ['simctl', ...args])
-    return stdout
+    try {
+      const { stdout } = await execFileAsync('xcrun', ['simctl', ...args])
+      return stdout
+    } catch (err) {
+      if (!isCoreSimulatorVersionMismatch(err)) throw err
+      console.error('[agent] CoreSimulatorService version mismatch — restarting service and retrying')
+      await restartCoreSimulatorService()
+      const { stdout } = await execFileAsync('xcrun', ['simctl', ...args])
+      return stdout
+    }
   },
   async execBinary(...args: string[]): Promise<Buffer> {
-    const { stdout } = await execFileAsync('xcrun', ['simctl', ...args], { encoding: 'buffer' })
-    return stdout
+    try {
+      const { stdout } = await execFileAsync('xcrun', ['simctl', ...args], { encoding: 'buffer' })
+      return stdout
+    } catch (err) {
+      if (!isCoreSimulatorVersionMismatch(err)) throw err
+      console.error('[agent] CoreSimulatorService version mismatch — restarting service and retrying')
+      await restartCoreSimulatorService()
+      const { stdout } = await execFileAsync('xcrun', ['simctl', ...args], { encoding: 'buffer' })
+      return stdout
+    }
   },
 }

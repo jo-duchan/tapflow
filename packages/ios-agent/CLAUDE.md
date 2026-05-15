@@ -83,6 +83,27 @@ npm run build --workspace=@tapflow/ios-agent
 
 ---
 
+### keyboard-helper 인터페이스
+
+```
+keyboard-helper <show|hide> <udid|booted>
+```
+
+CoreSimulator.framework을 직접 로드해 `SimDevice.setHardwareKeyboardEnabled(_:keyboardType:error:)`를 호출한다.
+macOS 접근성(Accessibility) 권한이 필요 없다.
+
+- `show`: `setHardwareKeyboardEnabled(false)` — 하드웨어 키보드 연결 해제 → 텍스트 필드 포커스 시 소프트웨어 키보드 등장
+- `hide`: `setHardwareKeyboardEnabled(true)` — 하드웨어 키보드 연결 → 소프트웨어 키보드 즉시 숨김
+
+컴파일:
+```bash
+swiftc packages/ios-agent/src/keyboard-helper.swift \
+  -o packages/ios-agent/src/keyboard-helper \
+  -sdk "$(xcrun --show-sdk-path --sdk macosx)"
+```
+
+---
+
 ### IOSurface 캡처 — timer-driven 전략
 
 IOSurface 콜백만으로는 화면이 정적일 때 프레임이 오지 않는다.

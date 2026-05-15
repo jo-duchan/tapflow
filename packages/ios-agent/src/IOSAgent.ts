@@ -46,7 +46,7 @@ export class IOSAgent implements DeviceAgent {
 
   constructor(options: IOSAgentOptions = {}, simctl?: SimctlWrapper) {
     this.simctl = simctl ?? new SimctlWrapper()
-    this.fps = options.fps ?? 60
+    this.fps = options.fps ?? 30
     this.intervalMs = options.intervalMs
     this.chromeLoader = new DeviceChromeLoader()
   }
