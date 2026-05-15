@@ -3,8 +3,8 @@ import { useRelay } from '@/hooks/useRelay'
 import { useBreadcrumb } from '@/hooks/useBreadcrumb'
 import { Monitor } from 'lucide-react'
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
-import { ChartContainer, ChartTooltip, ChartTooltipContent, type ChartConfig } from '@/components/ui/chart'
-import { LineChart, Line, XAxis, YAxis, CartesianGrid } from 'recharts'
+import { ChartContainer, ChartTooltip, type ChartConfig } from '@/components/ui/chart'
+import { AreaChart, Area, XAxis, YAxis, CartesianGrid } from 'recharts'
 import type { RelayMessage, SessionInfo } from '@/lib/types'
 
 interface ResourcePoint {
@@ -16,8 +16,8 @@ interface ResourcePoint {
 type Range = '1h' | '6h' | '24h' | '7d'
 
 const chartConfig = {
-  cpu: { label: 'CPU', color: 'hsl(var(--chart-1))' },
-  mem: { label: 'RAM', color: 'hsl(var(--chart-2))' },
+  cpu: { label: 'CPU', color: '#60a5fa' },
+  mem: { label: 'RAM', color: '#a78bfa' },
 } satisfies ChartConfig
 
 const RANGE_LABELS: Record<Range, string> = { '1h': '1h', '6h': '6h', '24h': '24h', '7d': '7d' }
@@ -164,15 +164,23 @@ function ChartCard({
   const tickCount = Math.min(data.length, range === '7d' ? 7 : range === '24h' ? 8 : 6)
   const step = Math.max(1, Math.floor(data.length / tickCount))
   const ticks = data.filter((_, i) => i % step === 0).map((d) => d.time)
+  const lastTime = data[data.length - 1]?.time
+  if (lastTime && !ticks.includes(lastTime)) ticks.push(lastTime)
 
   return (
     <div className="rounded-lg border p-4 flex flex-col gap-3">
       <div className="flex items-center gap-2">
-        <span className="inline-block h-2.5 w-2.5 rounded-full" style={{ background: `hsl(var(--${color === 'cpu' ? 'chart-1' : 'chart-2'}))` }} />
+        <span className="inline-block h-2.5 w-2.5 rounded-full" style={{ background: color === 'cpu' ? '#60a5fa' : '#a78bfa' }} />
         <span className="text-sm font-medium">{title}</span>
       </div>
-      <ChartContainer config={chartConfig} className="h-[140px] w-full">
-        <LineChart data={data} margin={{ top: 4, right: 8, bottom: 0, left: 0 }}>
+      <ChartContainer config={chartConfig} className="h-[220px] w-full">
+        <AreaChart data={data} margin={{ top: 8, right: 24, bottom: 24, left: 8 }}>
+          <defs>
+            <linearGradient id={`fill-${dataKey}`} x1="0" y1="0" x2="0" y2="1">
+              <stop offset="5%" stopColor={color === 'cpu' ? '#60a5fa' : '#a78bfa'} stopOpacity={0.3} />
+              <stop offset="95%" stopColor={color === 'cpu' ? '#60a5fa' : '#a78bfa'} stopOpacity={0} />
+            </linearGradient>
+          </defs>
           <CartesianGrid strokeDasharray="3 3" vertical={false} className="stroke-border" />
           <XAxis
             dataKey="time"
@@ -181,27 +189,47 @@ function ChartCard({
             tick={{ fontSize: 11 }}
             tickLine={false}
             axisLine={false}
+            dy={6}
+            padding={{ left: 16, right: 16 }}
           />
           <YAxis
             domain={[0, 100]}
+            ticks={[0, 25, 50, 75, 100]}
             tickFormatter={(v) => `${v}%`}
             tick={{ fontSize: 11 }}
             tickLine={false}
             axisLine={false}
-            width={36}
+            width={40}
+            dx={-4}
+            padding={{ top: 16, bottom: 0 }}
           />
           <ChartTooltip
-            content={<ChartTooltipContent formatter={(v) => `${v}%`} />}
+            content={({ active, payload }) => {
+              if (!active || !payload?.length) return null
+              const d = new Date(payload[0].payload.time)
+              const dateStr = d.toLocaleString('ko-KR', {
+                month: 'short', day: 'numeric',
+                hour: '2-digit', minute: '2-digit', hour12: false,
+              })
+              const value = payload[0].value as number
+              return (
+                <div className="rounded-lg border bg-background px-3 py-2 shadow-md text-xs">
+                  <p className="mb-1">Date: {dateStr}</p>
+                  <p>{chartConfig[dataKey].label}: {value}%</p>
+                </div>
+              )
+            }}
           />
-          <Line
+          <Area
             type="monotone"
             dataKey={dataKey}
-            stroke={`hsl(var(--${color === 'cpu' ? 'chart-1' : 'chart-2'}))`}
+            stroke={color === 'cpu' ? '#60a5fa' : '#a78bfa'}
             strokeWidth={1.5}
+            fill={`url(#fill-${dataKey})`}
             dot={false}
             isAnimationActive={false}
           />
-        </LineChart>
+        </AreaChart>
       </ChartContainer>
     </div>
   )
