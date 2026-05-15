@@ -134,12 +134,3 @@
   }
 }
 
-@layer utilities {
-  /* DESIGN.md 브랜드 mesh gradient — Develop(blue)·Preview(purple)·Ship(red) 3쌍 대기 화면용 */
-  .bg-mesh-gradient {
-    background-image:
-      radial-gradient(ellipse 80% 50% at 20% -10%, rgba(0, 124, 240, 0.12) 0%, transparent 60%),
-      radial-gradient(ellipse 60% 45% at 80% 10%, rgba(121, 40, 202, 0.10) 0%, transparent 55%),
-      radial-gradient(ellipse 50% 35% at 50% 95%, rgba(255, 77, 77, 0.06) 0%, transparent 60%);
-  }
-}

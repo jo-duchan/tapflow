@@ -1,5 +1,6 @@
 {
   "name": "@tapflow/ios-agent",
+  "private": true,
   "version": "0.1.0",
   "description": "iOS simulator agent using xcrun simctl and WebDriverAgent",
   "type": "module",
@@ -20,10 +21,10 @@
     "lint": "eslint src"
   },
   "dependencies": {
-    "@tapflow/agent-core": "*"
+    "@tapflow/agent-core": "workspace:*"
   },
   "devDependencies": {
-    "@tapflow/relay": "*",
+    "@tapflow/relay": "workspace:*",
     "@types/node": "^20.0.0",
     "@types/ws": "^8.0.0",
     "typescript": "^5.0.0",

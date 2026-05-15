@@ -6,22 +6,20 @@ export interface DoctorCheck {
   detail?: string
 }
 
-export async function runDoctorChecks(): Promise<DoctorCheck[]> {
-  return [
-    checkMacOS(),
-    checkXcode(),
-    checkSimctl(),
-    checkBootedSimulator(),
-    checkNodeVersion(),
-  ]
+export interface DoctorResult {
+  common: DoctorCheck[]
+  ios: DoctorCheck[] | null
+  android: DoctorCheck[] | null
 }
 
-function checkMacOS(): DoctorCheck {
-  const ok = process.platform === 'darwin'
+export async function runDoctorChecks(): Promise<DoctorResult> {
+  const isMac = process.platform === 'darwin'
+  const adbPath = resolveAdb()
+
   return {
-    label: 'macOS',
-    ok,
-    detail: ok ? undefined : 'tapflow is macOS-only',
+    common: [checkNodeVersion()],
+    ios: isMac ? [checkXcode(), checkSimctl(), checkBootedSimulator()] : null,
+    android: adbPath !== null ? [checkAdb(adbPath), checkBootedAvd()] : null,
   }
 }
 
@@ -34,7 +32,7 @@ function checkXcode(): DoctorCheck {
     return {
       label: 'Xcode',
       ok: false,
-      detail: 'Not installed. Install Xcode from the App Store.',
+      detail: 'Install Xcode from https://developer.apple.com/xcode/ or the Mac App Store.',
     }
   }
 }
@@ -47,7 +45,7 @@ function checkSimctl(): DoctorCheck {
     return {
       label: 'xcrun simctl',
       ok: false,
-      detail: 'Run `xcode-select --install` to install command-line tools.',
+      detail: 'Run: xcode-select --install',
     }
   }
 }
@@ -55,20 +53,19 @@ function checkSimctl(): DoctorCheck {
 function checkBootedSimulator(): DoctorCheck {
   try {
     const raw = execSync('xcrun simctl list devices --json', { encoding: 'utf8', stdio: 'pipe' })
-    const data = JSON.parse(raw) as { devices: Record<string, Array<{ name: string; state: string }>> }
-    const booted = Object.values(data.devices)
-      .flat()
-      .find((d) => d.state === 'Booted')
+    const data = JSON.parse(raw) as { devices: Record<string, Array<{ name: string; state: string; udid: string }>> }
+    const allDevices = Object.values(data.devices).flat()
+    const booted = allDevices.find((d) => d.state === 'Booted')
     if (booted) {
       return { label: `Simulator booted: ${booted.name}`, ok: true }
     }
-    return {
-      label: 'Simulator',
-      ok: false,
-      detail: 'No booted simulator. Run `tapflow boot <name>` or open Simulator.app.',
-    }
+    const available = allDevices.find((d) => d.state === 'Shutdown')
+    const hint = available
+      ? `Run: tapflow boot "${available.name}"`
+      : 'Run: tapflow devices  to see available simulators, then: tapflow boot "<name>"'
+    return { label: 'Simulator', ok: false, detail: hint }
   } catch {
-    return { label: 'Simulator', ok: false, detail: 'Could not query simulators.' }
+    return { label: 'Simulator', ok: false, detail: 'Could not query simulators. Is Xcode installed?' }
   }
 }
 
@@ -79,6 +76,58 @@ function checkNodeVersion(): DoctorCheck {
   return {
     label: `Node ${version}`,
     ok,
-    detail: ok ? undefined : 'Node ≥ 20 required.',
+    detail: ok ? undefined : 'Node ≥ 20 required. Install from https://nodejs.org/',
+  }
+}
+
+function resolveAdb(): string | null {
+  try {
+    const path = execSync('which adb', { encoding: 'utf8', stdio: 'pipe' }).trim()
+    return path || null
+  } catch {
+    return null
+  }
+}
+
+function checkAdb(path: string): DoctorCheck {
+  return { label: `adb found: ${path}`, ok: true }
+}
+
+function checkBootedAvd(): DoctorCheck {
+  try {
+    const out = execSync('adb devices', { encoding: 'utf8', stdio: 'pipe' })
+    const lines = out.trim().split('\n').slice(1).filter(Boolean)
+    const emulator = lines.find((l) => l.startsWith('emulator-'))
+    if (!emulator) {
+      const hint = listAvdHint()
+      return {
+        label: 'AVD',
+        ok: false,
+        detail: hint
+          ? `No running emulator. Run: emulator @${hint}`
+          : 'No running emulator. Start an AVD from Android Studio > Device Manager.',
+      }
+    }
+
+    const serial = emulator.split('\t')[0]?.trim() ?? ''
+    try {
+      const avdName = execSync(`adb -s ${serial} emu avd name`, { encoding: 'utf8', stdio: 'pipe' })
+        .split('\n')[0]
+        ?.trim() ?? serial
+      return { label: `AVD: ${avdName}`, ok: true }
+    } catch {
+      return { label: `AVD: ${serial}`, ok: true }
+    }
+  } catch {
+    return { label: 'AVD', ok: false, detail: 'Could not query running emulators.' }
+  }
+}
+
+function listAvdHint(): string | null {
+  try {
+    const out = execSync('emulator -list-avds', { encoding: 'utf8', stdio: 'pipe' }).trim()
+    return out.split('\n')[0]?.trim() || null
+  } catch {
+    return null
   }
 }
