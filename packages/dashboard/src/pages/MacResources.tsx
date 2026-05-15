@@ -108,7 +108,7 @@ export function MacResources() {
                 ].join(' ')}
               >
                 <span className={`inline-block h-1.5 w-1.5 shrink-0 rounded-full ${isOnline ? 'bg-emerald-400' : 'bg-muted-foreground/40'}`} />
-                <span className="truncate">{name}</span>
+                <span className="truncate min-w-0">{name}</span>
               </button>
             )
           })
