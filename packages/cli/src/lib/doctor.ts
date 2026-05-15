@@ -6,22 +6,20 @@ export interface DoctorCheck {
   detail?: string
 }
 
-export async function runDoctorChecks(): Promise<DoctorCheck[]> {
-  return [
-    checkMacOS(),
-    checkXcode(),
-    checkSimctl(),
-    checkBootedSimulator(),
-    checkNodeVersion(),
-  ]
+export interface DoctorResult {
+  common: DoctorCheck[]
+  ios: DoctorCheck[] | null
+  android: DoctorCheck[] | null
 }
 
-function checkMacOS(): DoctorCheck {
-  const ok = process.platform === 'darwin'
+export async function runDoctorChecks(): Promise<DoctorResult> {
+  const isMac = process.platform === 'darwin'
+  const adbPath = resolveAdb()
+
   return {
-    label: 'macOS',
-    ok,
-    detail: ok ? undefined : 'tapflow is macOS-only',
+    common: [checkNodeVersion()],
+    ios: isMac ? [checkXcode(), checkSimctl(), checkBootedSimulator()] : null,
+    android: adbPath !== null ? [checkAdb(adbPath), checkBootedAvd()] : null,
   }
 }
 
@@ -80,5 +78,45 @@ function checkNodeVersion(): DoctorCheck {
     label: `Node ${version}`,
     ok,
     detail: ok ? undefined : 'Node ≥ 20 required.',
+  }
+}
+
+function resolveAdb(): string | null {
+  try {
+    const path = execSync('which adb', { encoding: 'utf8', stdio: 'pipe' }).trim()
+    return path || null
+  } catch {
+    return null
+  }
+}
+
+function checkAdb(path: string): DoctorCheck {
+  return { label: `adb found: ${path}`, ok: true }
+}
+
+function checkBootedAvd(): DoctorCheck {
+  try {
+    const out = execSync('adb devices', { encoding: 'utf8', stdio: 'pipe' })
+    const lines = out.trim().split('\n').slice(1).filter(Boolean)
+    const emulator = lines.find((l) => l.startsWith('emulator-'))
+    if (!emulator) {
+      return {
+        label: 'AVD',
+        ok: false,
+        detail: 'No running emulator. Start an AVD from Android Studio or `emulator @<avd>`.',
+      }
+    }
+
+    const serial = emulator.split('\t')[0]?.trim() ?? ''
+    try {
+      const avdName = execSync(`adb -s ${serial} emu avd name`, { encoding: 'utf8', stdio: 'pipe' })
+        .split('\n')[0]
+        ?.trim() ?? serial
+      return { label: `AVD: ${avdName}`, ok: true }
+    } catch {
+      return { label: `AVD: ${serial}`, ok: true }
+    }
+  } catch {
+    return { label: 'AVD', ok: false, detail: 'Could not query running emulators.' }
   }
 }

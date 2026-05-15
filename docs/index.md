@@ -15,11 +15,11 @@ hero:
 
 features:
   - title: Zero Infra Cost
-    details: Reuse the Macs and Linux machines your team already owns. No cloud required.
+    details: Reuse the Macs your team already owns. No cloud required.
   - title: Zero Data Leaks
     details: Your app binaries and test data never leave your network.
   - title: Multi-Platform
-    details: iOS (Mac) and Android (Linux/Mac) through a single unified interface.
+    details: iOS and Android simulators through a single unified interface.
   - title: Open Source
     details: Fully open source and self-hosted. Customize anything.
 ---

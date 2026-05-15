@@ -29,6 +29,6 @@ Mac Agent     ← runs on your Mac, connects to the relay
 ## Key concepts
 
 - **Relay** — the central server. Routes traffic between agents and browsers. Deploy once.
-- **Agent** — runs on Mac (iOS) or Linux/Mac (Android). Connects to the relay.
+- **Agent** — runs on Mac (iOS and Android). Connects to the relay.
 - **Dashboard** — the React SPA served by the relay. No separate deploy needed.
 - **App Center** — upload `.app.zip` (iOS) or `.apk` (Android) builds; QA picks a build and device to start a session.

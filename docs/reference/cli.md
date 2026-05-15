@@ -43,7 +43,11 @@ Diagnose environment issues.
 tapflow doctor
 ```
 
-Checks: macOS, Xcode, xcrun simctl, booted simulator, Node.js version.
+Auto-detects available platforms and checks only what's relevant:
+
+- **Common**: Node.js version
+- **iOS** (macOS only): Xcode, xcrun simctl, booted simulator
+- **Android** (if `adb` is in PATH): adb path, running AVD
 
 ---
 

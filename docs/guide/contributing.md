@@ -21,7 +21,7 @@ pnpm dev
 packages/
   agent-core/     ← shared DeviceAgent interface
   ios-agent/      ← IOSAgent (macOS)
-  android-agent/  ← AndroidAgent (Linux/Mac)
+  android-agent/  ← AndroidAgent (macOS)
   relay/          ← relay server + REST API + SQLite
   dashboard/      ← React SPA (served by relay)
   cli/            ← tapflow CLI
