@@ -153,6 +153,10 @@ export class SimctlWrapper {
     } catch { /* expected on some iOS versions */ }
   }
 
+  async openSimulatorApp(): Promise<void> {
+    await execFileAsync('open', ['-a', 'Simulator'])
+  }
+
   async rotate(_udid: string, orientation: 'portrait' | 'landscapeLeft' | 'landscapeRight' | 'portraitUpsideDown'): Promise<void> {
     // xcrun simctl io does not support rotate; use Simulator.app keyboard shortcut via AppleScript
     const goClockwise = orientation === 'landscapeRight' || orientation === 'portraitUpsideDown'

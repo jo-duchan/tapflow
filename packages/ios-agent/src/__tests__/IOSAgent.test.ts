@@ -59,6 +59,7 @@ function mockSimctl(booted = false): SimctlWrapper {
     launchApp: vi.fn().mockResolvedValue(undefined),
     screenshot: vi.fn().mockResolvedValue(Buffer.from('png')),
     syncKeyboardsFromLanguages: vi.fn().mockResolvedValue(undefined),
+    openSimulatorApp: vi.fn().mockResolvedValue(undefined),
   } as unknown as SimctlWrapper
 }
 
