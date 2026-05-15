@@ -75,3 +75,38 @@ Shut down all simulators.
 ```sh
 tapflow reset
 ```
+
+---
+
+## `tapflow status`
+
+Show connected agents, devices, and active sessions.
+
+```sh
+tapflow status [--relay <url>]
+```
+
+Example output:
+
+```
+  ● mac-mini-office
+      ◉  iPhone 16 Pro   ← qa@company.com
+      ○  iPhone 15
+
+  1 agent(s) · 2 device(s) · 1 active session(s)
+```
+
+---
+
+## `tapflow logs`
+
+Show recent relay log entries (last 100 lines by default).
+
+```sh
+tapflow logs [--relay <url>] [--lines <n>]
+```
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `--relay` | `http://localhost:4000` | Relay URL |
+| `--lines` | 100 | Number of log lines to show (max 500) |

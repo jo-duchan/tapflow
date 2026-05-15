@@ -16,6 +16,8 @@
 | `boot <name>` | 이름 또는 UDID로 시뮬레이터 부팅 |
 | `start [--device, --relay]` | relay + ios-agent 동시 기동 |
 | `reset` | 모든 시뮬레이터 종료 |
+| `status [--relay]` | 연결된 agent·디바이스·세션 수 표시 (WebSocket `agents:listed`) |
+| `logs [--relay] [--lines]` | relay 인메모리 로그 버퍼 조회 (`GET /api/v1/logs`) |
 
 ## HOW
 

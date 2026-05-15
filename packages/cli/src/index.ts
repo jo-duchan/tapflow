@@ -4,6 +4,8 @@ import { cmdDevices } from './commands/devices.js'
 import { cmdBoot } from './commands/boot.js'
 import { cmdStart } from './commands/start.js'
 import { cmdReset } from './commands/reset.js'
+import { cmdStatus } from './commands/status.js'
+import { cmdLogs } from './commands/logs.js'
 
 const cli = cac('tapflow')
 
@@ -28,6 +30,17 @@ cli
 cli
   .command('reset', 'Shut down all simulators')
   .action(() => cmdReset())
+
+cli
+  .command('status', 'Show connected agents, devices, and active sessions')
+  .option('--relay <url>', 'Relay URL (default: ws://localhost:4000)')
+  .action((opts: { relay?: string }) => cmdStatus(opts))
+
+cli
+  .command('logs', 'Show recent relay log entries')
+  .option('--relay <url>', 'Relay URL (default: http://localhost:4000)')
+  .option('--lines <n>', 'Number of lines to show (default: 100)', { default: 100 })
+  .action((opts: { relay?: string; lines?: number }) => cmdLogs(opts))
 
 cli.help()
 cli.version('0.1.0')

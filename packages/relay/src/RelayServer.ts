@@ -42,6 +42,7 @@ export class RelayServer {
   private uploadsDir: string
   private router: Router
   private resourceBuffers = new Map<string, { cpu: number[]; mem: number[] }>()
+  private logBuffer: string[] = []
 
   constructor(private readonly options: { port: number; publicDir?: string; uploadsDir?: string; idleTimeoutMs?: number }) {
     this.sessions = new SessionManager({ idleTimeoutMs: options.idleTimeoutMs })
@@ -112,6 +113,14 @@ export class RelayServer {
     this.router.get('/api/v1/recordings', (req, res) => handleListRecordings(req, res))
     this.router.get('/api/v1/recordings/:filename', (req, res) => handleDownloadRecording(req, res, recordingsDir))
 
+    // logs
+    this.router.get('/api/v1/logs', (req, res) => {
+      const url = new URL(req.url ?? '/', `http://localhost`)
+      const lines = Math.min(Number(url.searchParams.get('lines') ?? 100), 500)
+      res.writeHead(200, { 'Content-Type': 'application/json' })
+      res.end(JSON.stringify(this.logBuffer.slice(-lines)))
+    })
+
     // agent resources
     const purgeOldResources = () => {
       getDb().prepare(`DELETE FROM agent_resources WHERE recorded_at < strftime('%Y-%m-%dT%H:%M:%fZ', 'now', '-30 days')`).run()
@@ -121,6 +130,13 @@ export class RelayServer {
     setInterval(() => this.flushResourceBuffers(), 60_000).unref()
     this.router.get('/api/v1/agents', handleListAgents)
     this.router.get('/api/v1/agents/:name/resources', handleGetAgentResources)
+  }
+
+  pushLog(msg: string): void {
+    const line = `[${new Date().toISOString()}] ${msg}`
+    this.logBuffer.push(line)
+    if (this.logBuffer.length > 500) this.logBuffer.shift()
+    console.log(line)
   }
 
   start(): Promise<void> {

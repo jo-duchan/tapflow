@@ -1,13 +1,30 @@
 {
-  "name": "@tapflow/cli",
+  "name": "tapflow",
   "version": "0.1.0",
-  "description": "tapflow CLI — setup, agent management, and playground utilities",
+  "description": "Self-hosted iOS/Android simulator streaming for QA teams",
+  "keywords": ["ios", "android", "simulator", "emulator", "qa", "testing", "streaming", "self-hosted"],
+  "homepage": "https://github.com/jo-duchan/tapflow",
+  "bugs": "https://github.com/jo-duchan/tapflow/issues",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/jo-duchan/tapflow.git"
+  },
+  "license": "MIT",
   "bin": {
     "tapflow": "./bin/tapflow.js"
   },
   "type": "module",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
+  "files": [
+    "bin",
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
   "exports": {
     ".": {
       "source": "./src/index.ts",
@@ -16,7 +33,6 @@
       "default": "./dist/index.js"
     }
   },
-  "license": "MIT",
   "scripts": {
     "build": "tsc",
     "dev": "tsx src/index.ts",
