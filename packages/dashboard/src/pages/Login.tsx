@@ -29,7 +29,7 @@ export function Login() {
   }
 
   return (
-    <div className="bg-mesh-gradient flex min-h-svh items-center justify-center overflow-hidden p-4">
+    <div className="flex min-h-svh items-center justify-center overflow-hidden p-4">
       <Card level={4} className="w-full max-w-sm">
         <CardHeader className="text-center">
           <CardTitle className="text-2xl tracking-display-md">tapflow</CardTitle>
