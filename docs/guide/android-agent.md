@@ -13,14 +13,7 @@ Use `google_apis/arm64-v8a` — **not** `google_apis_playstore`. The Play Store 
 
 ## Create an AVD
 
-Create an AVD using Android Studio's AVD Manager. See [Create and manage virtual devices](https://developer.android.com/studio/run/managing-avds) for a step-by-step guide. When selecting the system image, choose `google_apis/arm64-v8a` (android-34).
-
-You can also create one from the command line:
-
-```sh
-sdkmanager "system-images;android-34;google_apis;arm64-v8a"
-avdmanager create avd -n Pixel_8 -k "system-images;android-34;google_apis;arm64-v8a"
-```
+Create an AVD using Android Studio's AVD Manager. See the [Android Studio documentation](https://developer.android.com/studio/run) for a step-by-step guide. When selecting the system image, choose `google_apis/arm64-v8a` (android-34).
 
 ## Start the agent
 
