@@ -122,6 +122,8 @@ export default withMermaid(defineConfig({
   },
 
   head: [
+    ['link', { rel: 'icon', href: '/favicon.ico', sizes: '32x32' }],
+    ['link', { rel: 'icon', href: '/favicon.svg', type: 'image/svg+xml' }],
     ['link', { rel: 'preconnect', href: 'https://fonts.googleapis.com' }],
     ['link', { rel: 'preconnect', href: 'https://fonts.gstatic.com', crossorigin: '' }],
     [
@@ -144,7 +146,7 @@ export default withMermaid(defineConfig({
   },
 
   themeConfig: {
-    logo: '/logo.svg',
+    logo: { light: '/logo.svg', dark: '/logo-dark.svg' },
     socialLinks: [
       { icon: 'github', link: 'https://github.com/jo-duchan/tapflow' },
     ],

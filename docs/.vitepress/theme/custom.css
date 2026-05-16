@@ -82,8 +82,40 @@
 }
 
 .VPHero .name {
+  display: flex !important;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  line-height: 1.25;
   letter-spacing: -0.04em;
   font-weight: 600;
+}
+
+.VPHero .name::before {
+  content: '';
+  display: block;
+  width: 84px;
+  height: 60px;
+  background-image: url('/logo-hero.svg');
+  background-size: contain;
+  background-repeat: no-repeat;
+  background-position: center;
+  flex-shrink: 0;
+}
+
+@media (max-width: 639px) {
+  .VPHero .name {
+    gap: 10px;
+  }
+
+  .VPHero .name::before {
+    width: 48px;
+    height: 34px;
+  }
+}
+
+.VPHero .text {
+  line-height: 1.25;
 }
 
 .VPHero .tagline {
@@ -116,6 +148,12 @@
 
 .VPButton.alt {
   border-color: var(--vp-c-border) !important;
+}
+
+/* ─── Nav logo ───────────────────────────────────────────── */
+.VPNavBarTitle .logo {
+  height: 20px;
+  width: auto;
 }
 
 /* ─── Nav ────────────────────────────────────────────────── */
