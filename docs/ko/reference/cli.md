@@ -66,7 +66,7 @@ tapflow start
 
 ## `tapflow relay start`
 
-릴레이 서버만 시작합니다. Docker/Linux 서버 배포 시 사용합니다.
+릴레이 서버만 시작합니다. 서버 배포 시 사용합니다.
 
 ```sh
 tapflow relay start
@@ -114,7 +114,7 @@ tapflow doctor
 
 ## `tapflow devices`
 
-사용 가능한 시뮬레이터 목록을 표시합니다.
+사용 가능한 시뮬레이터·에뮬레이터 목록을 표시합니다.
 
 ```sh
 tapflow devices
@@ -124,18 +124,18 @@ tapflow devices
 
 ## `tapflow boot`
 
-이름 또는 UDID로 시뮬레이터 또는 AVD를 부팅합니다. iOS 시뮬레이터를 먼저 검색한 뒤 Android AVD를 검색합니다.
+이름 또는 UDID로 시뮬레이터 또는 에뮬레이터를 부팅합니다. iOS 시뮬레이터를 먼저 검색한 뒤 Android 에뮬레이터를 검색합니다.
 
 ```sh
 # iOS
 tapflow boot "iPhone 16 Pro"
 tapflow boot 822F00B0-D9CF-4B78-8EDD-6322974E4079
 
-# Android (AVD 이름)
+# Android (에뮬레이터 이름)
 tapflow boot Pixel_8
 ```
 
-Android AVD는 백그라운드에서 시작됩니다. `tapflow devices`로 상태를 확인하세요.
+Android 에뮬레이터는 백그라운드에서 시작됩니다. `tapflow devices`로 상태를 확인하세요.
 
 ---
 
