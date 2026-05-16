@@ -374,8 +374,7 @@ export function handleUploadBuild(
         return json(res, 404, { error: 'App not found' })
       }
       if (app.platform !== 'both' && app.platform !== platform) {
-        fs.unlinkSync(savedPath)
-        return json(res, 400, { error: `App platform is '${app.platform}' but build is '${platform}'` })
+        db.prepare('UPDATE apps SET platform = ? WHERE id = ?').run('both', appId)
       }
       if (!app.bundle_id_key && bundleId) {
         db.prepare('UPDATE apps SET bundle_id_key = ? WHERE id = ?').run(bundleId, appId)
