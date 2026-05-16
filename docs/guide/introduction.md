@@ -13,14 +13,18 @@
 
 ## How it works
 
-```
-Browser (QA team)
-    ↕ WebSocket
-Relay Server  ← you deploy this once (Docker, AWS, self-hosted)
-    ↕ WebSocket (outbound from agent)
-Mac Agent     ← runs on your Mac, connects to the relay
-  ├── iOS Simulator × 2–4
-  └── Android Emulator × 1–2
+```mermaid
+flowchart TD
+    B["Browser (QA team)"]
+    R["Relay Server<br/>Docker / AWS / self-hosted"]
+    A1["Mac Agent 1<br/>iOS · Android simulators"]
+    A2["Mac Agent 2<br/>iOS · Android simulators"]
+    More["Mac Agent N<br/>iOS · Android simulators"]
+
+    B <-->|WebSocket| R
+    R <-->|WebSocket outbound| A1
+    R <-->|WebSocket outbound| A2
+    R -.->|WebSocket outbound| More
 ```
 
 1. A **Mac Agent** connects outbound to the relay — no firewall rules needed.

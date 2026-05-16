@@ -3,7 +3,7 @@
   "type": "dark",
   "colors": {
     "editor.background": "#171717",
-    "editor.foreground": "#d8d8d8"
+    "editor.foreground": "#ededed"
   },
   "tokenColors": [
     {
@@ -14,7 +14,7 @@
         "comment.block",
         "punctuation.definition.comment"
       ],
-      "settings": { "foreground": "#666666", "fontStyle": "italic" }
+      "settings": { "foreground": "#a1a1a1", "fontStyle": "italic" }
     },
     {
       "name": "String",
@@ -27,7 +27,7 @@
         "string.regexp",
         "string.unquoted"
       ],
-      "settings": { "foreground": "#4ade80" }
+      "settings": { "foreground": "#62c073" }
     },
     {
       "name": "Keyword",
@@ -40,7 +40,7 @@
         "storage.modifier",
         "keyword.declaration"
       ],
-      "settings": { "foreground": "#50e3c2", "fontStyle": "bold" }
+      "settings": { "foreground": "#f75f8f" }
     },
     {
       "name": "Operator",
@@ -52,7 +52,7 @@
         "keyword.operator.logical",
         "keyword.operator.type"
       ],
-      "settings": { "foreground": "#888888" }
+      "settings": { "foreground": "#ededed" }
     },
     {
       "name": "Constant",
@@ -62,7 +62,7 @@
         "constant.language.boolean",
         "constant.character"
       ],
-      "settings": { "foreground": "#50e3c2" }
+      "settings": { "foreground": "#52a8ff" }
     },
     {
       "name": "Function",
@@ -72,7 +72,7 @@
         "meta.function-call.generic",
         "support.function.builtin"
       ],
-      "settings": { "foreground": "#93c5fd" }
+      "settings": { "foreground": "#bf7af0" }
     },
     {
       "name": "Type / Class",
@@ -84,7 +84,14 @@
         "support.type",
         "entity.name.namespace"
       ],
-      "settings": { "foreground": "#b0b0b0" }
+      "settings": { "foreground": "#bf7af0" }
+    },
+    {
+      "name": "Parameter",
+      "scope": [
+        "variable.parameter"
+      ],
+      "settings": { "foreground": "#f2a20d" }
     },
     {
       "name": "Variable",
@@ -92,10 +99,9 @@
         "variable",
         "variable.other",
         "variable.other.readwrite",
-        "variable.other.constant",
-        "variable.parameter"
+        "variable.other.constant"
       ],
-      "settings": { "foreground": "#d8d8d8" }
+      "settings": { "foreground": "#ededed" }
     },
     {
       "name": "Punctuation",
@@ -106,7 +112,7 @@
         "punctuation.terminator",
         "meta.brace"
       ],
-      "settings": { "foreground": "#888888" }
+      "settings": { "foreground": "#ededed" }
     },
     {
       "name": "Tag",
@@ -114,7 +120,7 @@
         "entity.name.tag",
         "meta.tag"
       ],
-      "settings": { "foreground": "#4ade80" }
+      "settings": { "foreground": "#62c073" }
     }
   ]
 }

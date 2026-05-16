@@ -14,7 +14,7 @@
         "comment.block",
         "punctuation.definition.comment"
       ],
-      "settings": { "foreground": "#9a9a9a", "fontStyle": "italic" }
+      "settings": { "foreground": "#4d4d4d", "fontStyle": "italic" }
     },
     {
       "name": "String",
@@ -27,7 +27,7 @@
         "string.regexp",
         "string.unquoted"
       ],
-      "settings": { "foreground": "#16a34a" }
+      "settings": { "foreground": "#297a3a" }
     },
     {
       "name": "Keyword",
@@ -40,7 +40,7 @@
         "storage.modifier",
         "keyword.declaration"
       ],
-      "settings": { "foreground": "#0070f3", "fontStyle": "bold" }
+      "settings": { "foreground": "#bd2864" }
     },
     {
       "name": "Operator",
@@ -52,7 +52,7 @@
         "keyword.operator.logical",
         "keyword.operator.type"
       ],
-      "settings": { "foreground": "#666666" }
+      "settings": { "foreground": "#171717" }
     },
     {
       "name": "Constant",
@@ -62,7 +62,7 @@
         "constant.language.boolean",
         "constant.character"
       ],
-      "settings": { "foreground": "#0070f3" }
+      "settings": { "foreground": "#0068d6" }
     },
     {
       "name": "Function",
@@ -72,7 +72,7 @@
         "meta.function-call.generic",
         "support.function.builtin"
       ],
-      "settings": { "foreground": "#0070f3" }
+      "settings": { "foreground": "#7820bc" }
     },
     {
       "name": "Type / Class",
@@ -84,7 +84,14 @@
         "support.type",
         "entity.name.namespace"
       ],
-      "settings": { "foreground": "#4d4d4d" }
+      "settings": { "foreground": "#7820bc" }
+    },
+    {
+      "name": "Parameter",
+      "scope": [
+        "variable.parameter"
+      ],
+      "settings": { "foreground": "#a35200" }
     },
     {
       "name": "Variable",
@@ -92,8 +99,7 @@
         "variable",
         "variable.other",
         "variable.other.readwrite",
-        "variable.other.constant",
-        "variable.parameter"
+        "variable.other.constant"
       ],
       "settings": { "foreground": "#171717" }
     },
@@ -106,7 +112,7 @@
         "punctuation.terminator",
         "meta.brace"
       ],
-      "settings": { "foreground": "#888888" }
+      "settings": { "foreground": "#171717" }
     },
     {
       "name": "Tag",
@@ -114,7 +120,7 @@
         "entity.name.tag",
         "meta.tag"
       ],
-      "settings": { "foreground": "#16a34a" }
+      "settings": { "foreground": "#297a3a" }
     }
   ]
 }

@@ -6,10 +6,12 @@
 
 /* ─── Brand colours (light) ─────────────────────────────── */
 :root {
-  --vp-c-brand-1: #0070f3;
-  --vp-c-brand-2: #2985f5;
-  --vp-c-brand-3: #5aa3f7;
-  --vp-c-brand-soft: rgba(0, 112, 243, 0.08);
+  --vp-c-brand-1: #171717;
+  --vp-c-brand-2: #333333;
+  --vp-c-brand-3: #555555;
+  --vp-c-brand-soft: rgba(23, 23, 23, 0.06);
+
+  --tf-link: #0070f3;
 
   /* Surfaces */
   --vp-c-bg: #ffffff;
@@ -35,10 +37,12 @@
 
 /* ─── Brand colours (dark) ──────────────────────────────── */
 .dark {
-  --vp-c-brand-1: #60a5fa;
-  --vp-c-brand-2: #93c5fd;
-  --vp-c-brand-3: #bfdbfe;
-  --vp-c-brand-soft: rgba(96, 165, 250, 0.1);
+  --vp-c-brand-1: #f5f5f5;
+  --vp-c-brand-2: #d4d4d4;
+  --vp-c-brand-3: #a3a3a3;
+  --vp-c-brand-soft: rgba(245, 245, 245, 0.08);
+
+  --tf-link: #60a5fa;
 
   --vp-c-bg: #0a0a0a;
   --vp-c-bg-soft: #171717;
@@ -151,30 +155,14 @@
 }
 
 .VPSidebarItem.level-0 > .item > .text {
-  font-size: 12px;
-  font-family: var(--vp-font-family-mono);
-  text-transform: uppercase;
-  letter-spacing: 0.08em;
-  color: var(--vp-c-text-3);
-  font-weight: 400;
+  font-size: 13px;
+  font-family: var(--vp-font-family-base);
+  text-transform: none;
+  letter-spacing: normal;
+  color: var(--vp-c-text-1);
+  font-weight: 600;
 }
 
-/* ─── UI controls: keep original dark border, not brand blue ────────── */
-.VPSwitch:hover {
-  border-color: var(--vp-c-text-1) !important;
-}
-
-.search-bar:focus-within {
-  border-color: var(--vp-c-text-1) !important;
-}
-
-.DocSearch-Form {
-  border-color: var(--vp-c-text-2) !important;
-}
-
-.DocSearch-Button:hover {
-  border-color: var(--vp-c-text-1) !important;
-}
 
 /* ─── Active state indicators ───────────────────────────── */
 /* nav: underline indicator (brand color = same as text, so use decoration) */
@@ -190,13 +178,31 @@
   left: 0;
   right: 0;
   height: 1.5px;
-  background-color: var(--vp-c-brand-1);
+  background-color: var(--tf-link);
   border-radius: 1px;
+}
+
+/* sidebar item links */
+.VPSidebarItem.level-1 > .item .link .text {
+  color: var(--vp-c-text-3);
+}
+
+.VPSidebarItem.level-1.is-active > .item .link .text {
+  color: var(--tf-link) !important;
+}
+
+/* nav links */
+.VPNavBarMenuLink {
+  color: var(--vp-c-text-3) !important;
+}
+
+.VPNavBarMenuLink.active {
+  color: var(--tf-link) !important;
 }
 
 /* sidebar level-1: show indicator line (VitePress only enables it for level 2+) */
 .VPSidebarItem.level-1.is-active > .item > .indicator {
-  background-color: var(--vp-c-brand-1);
+  background-color: var(--tf-link);
 }
 
 /* ─── Feature cards — no border, no hover ───────────────── */
@@ -208,6 +214,11 @@
 
 .VPFeature:hover {
   box-shadow: none !important;
+}
+
+/* ─── Links ──────────────────────────────────────────────── */
+.vp-doc a {
+  color: var(--tf-link);
 }
 
 /* ─── Code blocks ────────────────────────────────────────── */

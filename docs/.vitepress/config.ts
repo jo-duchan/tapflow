@@ -1,8 +1,9 @@
 import { defineConfig } from 'vitepress'
+import { withMermaid } from 'vitepress-plugin-mermaid'
 import tapflowLight from './theme/tapflow-light.json'
 import tapflowDark from './theme/tapflow-dark.json'
 
-export default defineConfig({
+export default withMermaid(defineConfig({
   title: 'tapflow',
   description: 'Self-hosted iOS/Android simulator streaming for QA teams',
   lang: 'en-US',
@@ -23,10 +24,16 @@ export default defineConfig({
     theme: { light: tapflowLight as any, dark: tapflowDark as any },
   },
 
+  vite: {
+    optimizeDeps: {
+      include: ['mermaid'],
+    },
+  },
+
   themeConfig: {
     logo: '/logo.svg',
     nav: [
-      { text: 'Guide', link: '/guide/introduction' },
+      { text: 'Guide', link: '/guide/introduction', activeMatch: '/' },
     ],
 
     sidebar: [
@@ -84,4 +91,4 @@ export default defineConfig({
       provider: 'local',
     },
   },
-})
+}))
