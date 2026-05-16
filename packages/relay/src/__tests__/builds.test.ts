@@ -82,6 +82,56 @@ describe('Migration 004: apps/builds split', () => {
   })
 })
 
+// ── upsertApp unit tests ──────────────────────────────────────────────────
+
+describe('upsertApp: bundle_id grouping', () => {
+  let tmpDir: string
+  let upsertApp: typeof import('../api/builds').upsertApp
+
+  beforeAll(async () => {
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'tapflow-upsert-test-'))
+    initDb(path.join(tmpDir, 'test.db'))
+    const mod = await import('../api/builds')
+    upsertApp = mod.upsertApp
+  })
+
+  afterAll(() => { fs.rmSync(tmpDir, { recursive: true }) })
+
+  it('iOS then Android with same bundle_id → single app, platform=both', () => {
+    const db = getDb()
+    const id1 = upsertApp('MyApp', 'com.example.myapp', 'ios')
+    const id2 = upsertApp('MyApp', 'com.example.myapp', 'android')
+    expect(id1).toBe(id2)
+    const app = db.prepare('SELECT platform FROM apps WHERE id = ?').get(id1) as { platform: string }
+    expect(app.platform).toBe('both')
+  })
+
+  it('iOS uploaded twice with same bundle_id → same app, platform stays ios', () => {
+    const db = getDb()
+    const id1 = upsertApp('AppA', 'com.example.appa', 'ios')
+    const id2 = upsertApp('AppA', 'com.example.appa', 'ios')
+    expect(id1).toBe(id2)
+    const app = db.prepare('SELECT platform FROM apps WHERE id = ?').get(id1) as { platform: string }
+    expect(app.platform).toBe('ios')
+  })
+
+  it('different bundle_ids → separate apps', () => {
+    const idA = upsertApp('AppB', 'com.example.appb', 'ios')
+    const idC = upsertApp('AppC', 'com.example.appc', 'android')
+    expect(idA).not.toBe(idC)
+  })
+
+  it('platform=both is not downgraded on subsequent uploads', () => {
+    const db = getDb()
+    const id1 = upsertApp('AppD', 'com.example.appd', 'ios')
+    upsertApp('AppD', 'com.example.appd', 'android') // upgrades to both
+    const id2 = upsertApp('AppD', 'com.example.appd', 'ios') // should stay both
+    expect(id1).toBe(id2)
+    const app = db.prepare('SELECT platform FROM apps WHERE id = ?').get(id1) as { platform: string }
+    expect(app.platform).toBe('both')
+  })
+})
+
 // ── extractAppZipInfo unit tests ──────────────────────────────────────────
 
 describe('extractAppZipInfo', () => {

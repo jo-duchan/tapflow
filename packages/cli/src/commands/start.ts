@@ -6,7 +6,6 @@ import { banner, createSpinner, step } from '../lib/print.js'
 
 export interface StartOptions {
   device?: string
-  relay?: string
   platform?: 'ios' | 'android' | 'all'
 }
 
@@ -22,30 +21,33 @@ function hasAdb(): boolean {
 
 export async function cmdStart(opts: StartOptions): Promise<void> {
   const isMac = process.platform === 'darwin'
-  const relayUrl = opts.relay ?? `ws://localhost:${RELAY_PORT}`
+  const relayUrl = `ws://localhost:${RELAY_PORT}`
 
   const explicit = opts.platform
   const runIOS = explicit === 'ios' || explicit === 'all' || (!explicit && isMac)
   const runAndroid = explicit === 'android' || explicit === 'all' || (!explicit && hasAdb())
 
-  if (!runIOS && !runAndroid) {
-    banner('error', 'NO PLATFORM AVAILABLE', [
-      'No iOS simulator or Android adb found.',
-      'Run `tapflow doctor` to diagnose.',
-    ])
-    process.exit(1)
-  }
+  // ── 1. Relay (always local) ───────────────────────────────────────────────
+  const server = new RelayServer({ port: RELAY_PORT })
+  await server.start()
+  step(`Relay started on ws://localhost:${RELAY_PORT}`)
 
-  // ── 1. Relay ──────────────────────────────────────────────────────────────
-  if (!opts.relay) {
-    const server = new RelayServer({ port: RELAY_PORT })
-    await server.start()
-    step(`Relay started on ws://localhost:${RELAY_PORT}`)
+  // ── 2. Agent availability check ───────────────────────────────────────────
+  if (!runIOS && !runAndroid) {
+    // 에이전트 없이 릴레이만 기동 (Linux/Docker 등 비-Mac 환경)
+    banner('success', 'TAPFLOW RELAY READY', [
+      `Relay  : http://localhost:${RELAY_PORT}`,
+      'No agent environment detected — running relay only.',
+      `Connect a Mac agent:  tapflow agent start --relay ws://<this-ip>:${RELAY_PORT}`,
+      'Press Ctrl+C to stop.',
+    ])
+    process.on('SIGINT', () => process.exit(0))
+    return
   }
 
   const agents: Array<{ disconnect(): void }> = []
 
-  // ── 2. iOS Agent ──────────────────────────────────────────────────────────
+  // ── 3. iOS Agent ──────────────────────────────────────────────────────────
   if (runIOS) {
     const iosAgent = new IOSAgent()
     const devices = await iosAgent.listDevices()
@@ -97,7 +99,7 @@ export async function cmdStart(opts: StartOptions): Promise<void> {
     }
   }
 
-  // ── 3. Android Agent ──────────────────────────────────────────────────────
+  // ── 4. Android Agent ──────────────────────────────────────────────────────
   if (runAndroid) {
     const androidAgent = new AndroidAgent()
     const androidSpinner = createSpinner('Connecting Android agent…')
@@ -119,7 +121,7 @@ export async function cmdStart(opts: StartOptions): Promise<void> {
   }
 
   banner('success', 'TAPFLOW READY', [
-    `Relay  : ${opts.relay ?? `http://localhost:${RELAY_PORT}`}`,
+    `Relay  : http://localhost:${RELAY_PORT}`,
     `Open http://localhost:${RELAY_PORT} in your browser.`,
     'Press Ctrl+C to stop.',
   ])

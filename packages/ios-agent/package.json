@@ -21,7 +21,8 @@
     "lint": "eslint src"
   },
   "dependencies": {
-    "@tapflow/agent-core": "workspace:*"
+    "@tapflow/agent-core": "workspace:*",
+    "ws": "^8.0.0"
   },
   "devDependencies": {
     "@tapflow/relay": "workspace:*",

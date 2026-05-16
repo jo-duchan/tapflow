@@ -1,6 +1,10 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest'
+import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach } from 'vitest'
+import fs from 'fs'
+import os from 'os'
+import path from 'path'
 import { WebSocket } from 'ws'
 import { RelayServer } from '../RelayServer'
+import { initDb, closeDb } from '../db'
 import type { RelayMessage } from '../types'
 
 const waitForOpen = (ws: WebSocket) =>
@@ -26,6 +30,17 @@ const waitForType = (ws: WebSocket, type: string) =>
 describe('RelayServer', () => {
   let server: RelayServer
   let port: number
+  let tmpDir: string
+
+  beforeAll(() => {
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'tapflow-relay-test-'))
+    initDb(path.join(tmpDir, 'test.db'))
+  })
+
+  afterAll(() => {
+    closeDb()
+    fs.rmSync(tmpDir, { recursive: true })
+  })
 
   beforeEach(async () => {
     server = new RelayServer({ port: 0 })

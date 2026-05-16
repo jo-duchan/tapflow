@@ -6,18 +6,26 @@
 
 ## WHAT
 
-`tapflow` CLI: 로컬 개발 환경 점검과 시뮬레이터·릴레이·에이전트 기동을 한 번에 처리한다.
-실제 명령어는 `src/index.ts`에 등록된 5개:
+`tapflow` CLI: 로컬 개발 환경 점검과 시뮬레이터·릴레이·에이전트 기동을 처리한다.
+실제 명령어는 `src/index.ts`에 등록:
 
 | 명령 | 동작 |
 |------|------|
-| `doctor` | 시스템 prerequisites 점검 (Xcode, simctl, etc.) |
-| `devices` | 사용 가능한 시뮬레이터 목록 |
+| `start [--device, --platform]` | 로컬 전용 shortcut — relay + agent 동시 기동 (같은 Mac) |
+| `relay start [--port]` | relay만 기동 (Docker/Linux 서버용) |
+| `agent start [--relay, --device, --platform]` | agent만 기동 — 기존 relay에 연결 |
+| `doctor` | 시스템 prerequisites 점검 (Xcode, simctl, adb, etc.) |
+| `devices` | 사용 가능한 시뮬레이터·AVD 목록 |
 | `boot <name>` | 이름 또는 UDID로 시뮬레이터 부팅 |
-| `start [--device, --relay]` | relay + ios-agent 동시 기동 |
-| `reset` | 모든 시뮬레이터 종료 |
+| `reset` | 모든 시뮬레이터·에뮬레이터 종료 |
 | `status [--relay]` | 연결된 agent·디바이스·세션 수 표시 (WebSocket `agents:listed`) |
 | `logs [--relay] [--lines]` | relay 인메모리 로그 버퍼 조회 (`GET /api/v1/logs`) |
+| `init [--relay]` | relay에 최초 관리자 계정 생성 |
+
+### 커맨드 설계 원칙
+
+커맨드마다 역할이 하나다. `tapflow start`는 로컬 개발 전용이며 `--relay` 옵션을 받지 않는다.
+"relay에 연결"과 "relay를 기동"은 별도 커맨드(`agent start` / `relay start`)로 분리한다.
 
 ## HOW
 

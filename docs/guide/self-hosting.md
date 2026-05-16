@@ -2,30 +2,37 @@
 
 The relay is a lightweight Node.js server. It only routes WebSocket traffic and serves the dashboard — no heavy compute needed.
 
-## fly.io (recommended)
+::: info Relay URL = Dashboard URL
+The relay serves the React dashboard SPA on the same port as WebSocket and REST API. Open `http://your-server:4000` in a browser to reach the dashboard directly. No separate web server configuration needed.
+:::
+
+## Deployment scenarios
+
+### Local (single Mac)
+
+Run the relay and agent on the same Mac at once.
 
 ```sh
-tapflow deploy
-# Select fly.io → follow prompts
-# ✓ Relay deployed: wss://tapflow-myteam.fly.dev
+tapflow start
 ```
 
-Cost: ~$5/month on the `shared-cpu-1x` plan.
+### Team (separate relay server)
 
-## Docker
+Run the relay on a Linux server or dedicated Mac; run the agent on each Mac with a simulator.
+
+**On the server** (PM2 or plain Node.js — see below):
 
 ```sh
-git clone https://github.com/jo-duchan/tapflow.git
-cd tapflow
-docker build -t tapflow .
-docker run -d \
-  -p 4000:4000 \
-  -v $(pwd)/.tapflow:/app/.tapflow \
-  -e JWT_SECRET=your_long_random_secret \
-  tapflow
+tapflow relay start
 ```
 
-## Manual (Node.js)
+**On each Mac:**
+
+```sh
+tapflow agent start --relay wss://your-relay-url
+```
+
+## Node.js
 
 ```sh
 npm install -g tapflow
@@ -34,17 +41,120 @@ tapflow relay start
 
 The relay reads `tapflow.config.json` from the working directory. See [Configuration](/reference/configuration).
 
-## Data directory
+## JWT_SECRET
 
-By default the relay stores all data in `.tapflow/`:
+::: warning Replace before deploying to a server
+The default value (`tapflow-dev-secret-change-in-production`) is public in the source code. Leaving it unchanged lets anyone forge valid tokens.
+:::
+
+Generate a secure random secret:
+
+```sh
+openssl rand -hex 32
+```
+
+Inject the generated value as an environment variable:
+
+```sh
+# Node.js
+JWT_SECRET=YOUR_JWT_SECRET tapflow relay start
+
+# PM2
+JWT_SECRET=YOUR_JWT_SECRET pm2 start tapflow --name relay -- relay start
+```
+
+## PM2 (recommended for servers)
+
+Handles automatic restart on crash, restart on server reboot, and log management.
+
+```sh
+npm install -g pm2 tapflow
+```
+
+Inject the JWT_SECRET you generated above, then start:
+
+```sh
+JWT_SECRET=YOUR_JWT_SECRET pm2 start tapflow --name relay -- relay start
+pm2 save
+pm2 startup
+```
+
+To update tapflow:
+
+```sh
+npm update -g tapflow
+pm2 restart relay
+```
+
+::: tip Next step
+Once the relay is running, create the first admin account with `tapflow init`. For team invitations and your first build upload, see [First-time Setup](/dashboard/setup).
+:::
+
+## External access
+
+Regardless of how you run the relay, you need an external URL when teammates access the dashboard from outside your local machine, or when agents connect from a different network.
+
+### ngrok (quick start)
+
+The fastest way to get a public URL without setting up a domain or server.
+
+```sh
+# Terminal 1: start the relay
+tapflow relay start
+
+# Terminal 2: expose with ngrok
+ngrok http 4000
+```
+
+ngrok prints a URL like `https://abc123.ngrok-free.app`. That URL is both the relay address and the dashboard address.
+
+When connecting agents, use the `wss://` scheme:
+
+```sh
+tapflow agent start --relay wss://abc123.ngrok-free.app
+```
+
+::: warning ngrok free plan limitations
+- The URL changes on every restart (fixed URL requires a paid plan).
+- All traffic — including video streams — passes through ngrok servers. This conflicts with tapflow's "data stays in your infrastructure" principle.
+- Use ngrok for **testing and demos only**. Use a reverse proxy for team production environments.
+:::
+
+### nginx example
+
+::: warning WebSocket upgrade headers required
+Without `Upgrade` and `Connection` headers, the agent's WebSocket connection will fail.
+:::
+
+```nginx
+server {
+    listen 443 ssl;
+    server_name tapflow.myteam.example.com;
+
+    ssl_certificate     /etc/letsencrypt/live/tapflow.myteam.example.com/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/tapflow.myteam.example.com/privkey.pem;
+
+    location / {
+        proxy_pass http://localhost:4000;
+        proxy_http_version 1.1;
+
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+
+        proxy_read_timeout 3600s;
+    }
+}
+```
+
+### Caddy example
 
 ```
-.tapflow/
-  tapflow.db      ← SQLite database
-  uploads/
-    builds/       ← .app.zip and .apk files
-    avatars/
-    comments/
+tapflow.myteam.example.com {
+    reverse_proxy localhost:4000
+}
 ```
 
-Back up this directory to preserve all data.
+Caddy handles TLS and WebSocket upgrades automatically.

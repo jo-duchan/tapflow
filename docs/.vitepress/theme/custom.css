@@ -1,0 +1,300 @@
+/* ─── Fonts ──────────────────────────────────────────────── */
+:root {
+  --vp-font-family-base: 'Inter', system-ui, -apple-system, sans-serif;
+  --vp-font-family-mono: 'JetBrains Mono', 'Fira Code', monospace;
+}
+
+/* ─── Brand colours (light) ─────────────────────────────── */
+:root {
+  --vp-c-brand-1: #171717;
+  --vp-c-brand-2: #333333;
+  --vp-c-brand-3: #555555;
+  --vp-c-brand-soft: rgba(23, 23, 23, 0.06);
+
+  --tf-link: #0070f3;
+
+  /* Surfaces */
+  --vp-c-bg: #ffffff;
+  --vp-c-bg-soft: #f5f5f5;
+  --vp-c-bg-alt: #fafafa;
+
+  /* Borders */
+  --vp-c-border: #ebebeb;
+  --vp-c-divider: #ebebeb;
+
+  /* Text */
+  --vp-c-text-1: #171717;
+  --vp-c-text-2: #4d4d4d;
+  --vp-c-text-3: #888888;
+
+  /* Code */
+  --vp-code-bg: #f5f5f5;
+  --vp-code-color: #171717;
+
+  /* Nav */
+  --vp-nav-height: 64px;
+}
+
+/* ─── Brand colours (dark) ──────────────────────────────── */
+.dark {
+  --vp-c-brand-1: #f5f5f5;
+  --vp-c-brand-2: #d4d4d4;
+  --vp-c-brand-3: #a3a3a3;
+  --vp-c-brand-soft: rgba(245, 245, 245, 0.08);
+
+  --tf-link: #60a5fa;
+
+  --vp-c-bg: #0a0a0a;
+  --vp-c-bg-soft: #171717;
+  --vp-c-bg-alt: #111111;
+
+  --vp-c-border: #2a2a2a;
+  --vp-c-divider: #2a2a2a;
+
+  --vp-c-text-1: #f5f5f5;
+  --vp-c-text-2: #a8a8a8;
+  --vp-c-text-3: #717171;
+
+  --vp-code-bg: #1a1a1a;
+  --vp-code-color: #e5e5e5;
+
+  /* divider-line (VPNavBar) — VitePress default #000 is invisible on #0a0a0a */
+  --vp-c-gutter: #2a2a2a;
+}
+
+/* ─── Typography ─────────────────────────────────────────── */
+.vp-doc h1,
+.vp-doc h2,
+.vp-doc h3 {
+  letter-spacing: -0.02em;
+  font-weight: 600;
+}
+
+/* inline code inside headings — inherit heading font so same-level titles look consistent */
+.vp-doc h1 code,
+.vp-doc h2 code,
+.vp-doc h3 code {
+  font-family: inherit;
+  font-size: 0.95em;
+  font-weight: 600;
+  color: inherit;
+  letter-spacing: inherit;
+}
+
+.VPHero .name {
+  display: flex !important;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  line-height: 1.25;
+  letter-spacing: -0.04em;
+  font-weight: 600;
+}
+
+.VPHero .name::before {
+  content: '';
+  display: block;
+  width: 84px;
+  height: 60px;
+  background-image: url('/logo-hero.svg');
+  background-size: contain;
+  background-repeat: no-repeat;
+  background-position: center;
+  flex-shrink: 0;
+}
+
+@media (max-width: 639px) {
+  .VPHero .name {
+    gap: 10px;
+  }
+
+  .VPHero .name::before {
+    width: 48px;
+    height: 34px;
+  }
+}
+
+.VPHero .text {
+  line-height: 1.25;
+}
+
+.VPHero .tagline {
+  color: var(--vp-c-text-2);
+}
+
+/* ─── Hero CTA buttons — pill shape ─────────────────────── */
+.VPButton {
+  border-radius: 100px !important;
+  font-weight: 500;
+  letter-spacing: -0.01em;
+  transition: opacity 120ms, transform 120ms;
+}
+
+.VPButton:active {
+  transform: translateY(1px);
+}
+
+.VPButton.brand {
+  background-color: #171717 !important;
+  border-color: #171717 !important;
+  color: #ffffff !important;
+}
+
+.dark .VPButton.brand {
+  background-color: #ffffff !important;
+  border-color: #ffffff !important;
+  color: #171717 !important;
+}
+
+.VPButton.alt {
+  border-color: var(--vp-c-border) !important;
+}
+
+/* ─── Nav logo ───────────────────────────────────────────── */
+.VPNavBarTitle .logo {
+  height: 24px;
+  width: auto;
+  margin-right: 6px;
+}
+
+/* ─── Nav ────────────────────────────────────────────────── */
+/* desktop: frosted glass */
+@media (min-width: 960px) {
+  .VPNav {
+    backdrop-filter: blur(8px);
+  }
+}
+
+/* ─── Mobile sidebar: nav always on top (same pattern as desktop) ── */
+/* Lower sidebar/backdrop z-index below nav(30) so tapflow brand
+   remains visible. Add padding-top + curtain identical to the
+   desktop treatment so content starts below the nav bar. */
+@media (max-width: 959px) {
+  :root {
+    --vp-z-index-sidebar: 27;
+    --vp-z-index-backdrop: 25;
+  }
+
+  .VPSidebar {
+    padding-top: var(--vp-nav-height) !important;
+  }
+
+  /* Curtain masks sidebar items that scroll into the nav area */
+  .VPSidebar .curtain {
+    position: sticky;
+    top: calc(var(--vp-nav-height) * -1);
+    left: 0;
+    z-index: 1;
+    margin-top: calc(var(--vp-nav-height) * -1);
+    margin-right: -32px;
+    margin-left: -32px;
+    height: var(--vp-nav-height);
+    background-color: var(--vp-sidebar-bg-color);
+  }
+}
+
+.VPSidebarItem.level-0 > .item > .text {
+  font-size: 13px;
+  font-family: var(--vp-font-family-base);
+  text-transform: none;
+  letter-spacing: normal;
+  color: var(--vp-c-text-1);
+  font-weight: 600;
+}
+
+
+/* ─── Active state indicators ───────────────────────────── */
+/* nav: underline indicator (brand color = same as text, so use decoration) */
+.VPNavBarMenuLink.active {
+  font-weight: 600;
+  position: relative;
+}
+
+.VPNavBarMenuLink.active::after {
+  content: '';
+  position: absolute;
+  bottom: -2px;
+  left: 0;
+  right: 0;
+  height: 1.5px;
+  background-color: var(--tf-link);
+  border-radius: 1px;
+}
+
+/* sidebar item links */
+.VPSidebarItem.level-1 > .item .link .text {
+  color: var(--vp-c-text-3);
+}
+
+.VPSidebarItem.level-1.is-active > .item .link .text {
+  color: var(--tf-link) !important;
+}
+
+/* nav links */
+.VPNavBarMenuLink {
+  color: var(--vp-c-text-2) !important;
+}
+
+.VPNavBarMenuLink.active {
+  color: var(--tf-link) !important;
+}
+
+/* sidebar level-1: show indicator line (VitePress only enables it for level 2+) */
+.VPSidebarItem.level-1.is-active > .item > .indicator {
+  background-color: var(--tf-link);
+}
+
+/* ─── Feature cards — no border, no hover ───────────────── */
+.VPFeature {
+  border-radius: 8px !important;
+  border: none !important;
+  box-shadow: none !important;
+}
+
+.VPFeature:hover {
+  box-shadow: none !important;
+}
+
+/* ─── Language switcher ─────────────────────────────────── */
+/* 文A 아이콘 버튼 */
+.VPNavBarTranslations .button {
+  color: var(--vp-c-text-2);
+}
+
+.VPNavBarTranslations .button .text {
+  color: var(--vp-c-text-2);
+}
+
+/* 드롭다운 아이템 (미선택) */
+.VPNavBarTranslations .VPMenuLink .link,
+.VPNavScreenTranslations .VPMenuLink .link {
+  color: var(--vp-c-text-2);
+}
+
+/* 드롭다운 — 현재 선택된 언어 타이틀 */
+.VPNavBarTranslations .title,
+.VPNavScreenTranslations .title {
+  color: var(--tf-link) !important;
+}
+
+/* ─── Links ──────────────────────────────────────────────── */
+.vp-doc a {
+  color: var(--tf-link);
+}
+
+/* ─── Code blocks ────────────────────────────────────────── */
+.vp-doc div[class*='language-'] {
+  border-radius: 8px;
+}
+
+/* pre/code: disable text-autospace (macOS Safari adds spacing near CJK chars) */
+.vp-doc div[class*='language-'] pre,
+.vp-doc div[class*='language-'] code {
+  text-autospace: no-autospace;
+}
+
+/* each .line fills the row without creating extra block-level space from \n chars */
+.vp-doc div[class*='language-'] pre code .line {
+  display: inline-block;
+  width: 100%;
+}

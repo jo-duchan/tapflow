@@ -13,23 +13,32 @@ Use `google_apis/arm64-v8a` — **not** `google_apis_playstore`. The Play Store 
 
 ## Create an AVD
 
-```sh
-sdkmanager "system-images;android-34;google_apis;arm64-v8a"
-avdmanager create avd -n Pixel_8 -k "system-images;android-34;google_apis;arm64-v8a"
-```
+Create an AVD using Android Studio's AVD Manager. See the [Android Studio documentation](https://developer.android.com/studio/run) for a step-by-step guide. When selecting the system image, choose `google_apis/arm64-v8a` (android-34).
 
 ## Start the agent
+
+```sh
+tapflow agent start --platform android --relay wss://your-relay-url
+```
+
+The agent boots the emulator automatically, waits for `sys.boot_completed`, then begins streaming.
+
+To start both iOS and Android agents together:
 
 ```sh
 tapflow agent start --relay wss://your-relay-url
 ```
 
-The agent boots the emulator automatically, waits for `sys.boot_completed`, then begins streaming.
-
 ## Troubleshooting
 
 ```sh
 tapflow doctor
-# ✓ adb found: /usr/local/bin/adb
-# ✓ AVD: Pixel_8 (android-34 · google_apis/arm64-v8a)
+# Common
+#   ✓ Node v20.x
+#
+# Android
+#   ✓ adb found: /usr/local/bin/adb
+#   ✓ AVD: Pixel_8 (android-34 · google_apis/arm64-v8a)
 ```
+
+See [Troubleshooting](/guide/troubleshooting) for more detailed solutions.
