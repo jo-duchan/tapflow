@@ -7,7 +7,7 @@ tapflow scales horizontally — add more Mac hosts to the same relay to expand y
 ```mermaid
 flowchart TD
     B["Browser (QA team)"]
-    R["Relay Server<br/>Docker / AWS / self-hosted"]
+    R["Relay Server<br/>Linux server or Mac"]
     A1["Mac Agent 1<br/>iOS · Android simulators"]
     A2["Mac Agent 2<br/>iOS · Android simulators"]
     More["Mac Agent N<br/>iOS · Android simulators"]
@@ -21,6 +21,10 @@ flowchart TD
 The dashboard shows all devices from all connected agents in a single list. QA picks any available device — tapflow routes the session to the right Mac automatically.
 
 ## Adding a second Mac
+
+::: tip The relay must be reachable from all Macs
+When running `tapflow agent start` on another Mac, `ws://localhost:4000` resolves to that Mac's own localhost — not the relay machine. Use the relay's actual network address: a local IP (`ws://192.168.x.x:4000`) for the same LAN, or a public URL for agents on different networks. See [Self-Hosting the Relay](/guide/self-hosting).
+:::
 
 On the new Mac, install tapflow and point it at your existing relay:
 

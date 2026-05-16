@@ -41,29 +41,6 @@ tapflow relay start
 
 릴레이는 현재 디렉토리에서 `tapflow.config.json`을 읽습니다. [설정 파일](/ko/reference/configuration)을 참고하세요.
 
-## PM2 (서버 운영 권장)
-
-서버에서 릴레이를 안정적으로 운영할 때 권장합니다. 크래시 시 자동 재시작, 서버 재부팅 후 자동 시작, 로그 관리를 처리합니다.
-
-```sh
-npm install -g pm2 tapflow
-```
-
-생성된 값을 환경변수로 주입해 시작합니다:
-
-```sh
-JWT_SECRET=<생성된_값> pm2 start tapflow --name relay -- relay start
-pm2 save
-pm2 startup
-```
-
-tapflow를 업데이트할 때는:
-
-```sh
-npm update -g tapflow
-pm2 restart relay
-```
-
 ## JWT_SECRET 설정
 
 ::: warning 서버 배포 시 반드시 교체하세요
@@ -84,6 +61,29 @@ JWT_SECRET=<생성된_값> tapflow relay start
 
 # PM2
 JWT_SECRET=<생성된_값> pm2 start tapflow --name relay -- relay start
+```
+
+## PM2 (서버 운영 권장)
+
+서버에서 릴레이를 안정적으로 운영할 때 권장합니다. 크래시 시 자동 재시작, 서버 재부팅 후 자동 시작, 로그 관리를 처리합니다.
+
+```sh
+npm install -g pm2 tapflow
+```
+
+위에서 생성한 `JWT_SECRET`을 환경변수로 주입해 시작합니다:
+
+```sh
+JWT_SECRET=<생성된_값> pm2 start tapflow --name relay -- relay start
+pm2 save
+pm2 startup
+```
+
+tapflow를 업데이트할 때는:
+
+```sh
+npm update -g tapflow
+pm2 restart relay
 ```
 
 ::: tip 다음 단계

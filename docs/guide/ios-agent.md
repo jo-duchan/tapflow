@@ -53,3 +53,5 @@ iOS
   ✓ xcrun simctl
   ✓ Simulator booted: iPhone 16 Pro
 ```
+
+See [Troubleshooting](/guide/troubleshooting) for more detailed solutions.

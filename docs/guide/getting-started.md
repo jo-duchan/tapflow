@@ -30,11 +30,9 @@ tapflow start
 # ✓ iOS Agent connected (3 simulators available)
 ```
 
-To connect a Mac agent to a remote relay instead:
-
-```sh
-tapflow agent start --relay wss://relay.myteam.example.com
-```
+::: tip Running the relay on a separate server?
+Use `tapflow relay start` and `tapflow agent start`. See [Self-Hosting the Relay](/guide/self-hosting).
+:::
 
 ## 3. Create the admin account
 
@@ -48,14 +46,16 @@ tapflow init
   →  Open http://localhost:4000 to sign in
 ```
 
+::: warning One-time only
+`tapflow init` only works when no accounts exist. After this step, invite teammates from **Settings → Team** in the dashboard.
+:::
+
 ## 4. Open the dashboard
 
-Navigate to `http://localhost:4000` (or your relay URL) in any browser, then sign in with the credentials you just created.
+Navigate to `http://localhost:4000` (or your relay URL), then sign in with the account you just created.
 
-For the full first-time setup flow — inviting your team and uploading a first build — see [First-time Setup](/dashboard/setup).
+For the full onboarding flow — team invitations and your first build upload — see [First-time Setup](/dashboard/setup).
 
-## 5. Check your environment
-
-```sh
-tapflow doctor
-```
+::: tip Environment check
+If you run into issues during setup, run `tapflow doctor`. It automatically diagnoses prerequisites like Node.js version, Xcode, and adb.
+:::

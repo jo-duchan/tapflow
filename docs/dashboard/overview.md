@@ -32,7 +32,23 @@ The full-screen simulator view. Opened when you click a device card in App Cente
 | FPS indicator | Shows current frames-per-second in the top-right corner. |
 | End session | Disconnects your browser from the device and returns the device to available state. |
 
-The screen streams as JPEG frames at ~30 fps. Frame rate adapts to your network automatically.
+The screen streams at ~30 fps. Frame rate adapts to your network automatically.
+
+## Recordings
+
+**Route**: `/app-center/build` (during a session)
+
+Record QA sessions and share them with your team.
+
+| Element | Description |
+|---|---|
+| Start / Stop recording | Start and stop recording from the session control bar. |
+| Recording list | View saved recordings per build. |
+| Download | Save a recording to your local machine. |
+
+::: info Retention
+Recordings are kept for **72 hours** after creation. Download them before they expire if you need them long-term.
+:::
 
 ## Mac Resources
 
@@ -68,6 +84,7 @@ Visible to **Admin** only.
 - **Invite member** — send an email invite or generate a copy-paste link. Invites expire after 7 days.
 - **Change role** — reassign any member's role (Admin / Developer / QA / Viewer).
 - **Remove member** — permanently deletes the account. You cannot remove yourself.
+- **Reset password** — send a password reset email to a specific member.
 
 ### Tokens
 

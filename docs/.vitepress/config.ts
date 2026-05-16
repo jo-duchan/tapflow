@@ -38,6 +38,12 @@ const enSidebar = [
     ],
   },
   {
+    text: 'Troubleshooting',
+    items: [
+      { text: 'Troubleshooting', link: '/guide/troubleshooting' },
+    ],
+  },
+  {
     text: 'Contributing',
     items: [
       { text: 'Contributing Guide', link: '/guide/contributing' },
