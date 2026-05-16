@@ -42,7 +42,10 @@ curl -X POST https://your-relay/api/v1/builds \
 1. The relay extracts metadata from the binary:
    - iOS: reads `Info.plist` → `CFBundleIdentifier`, `CFBundleShortVersionString`, `CFBundleVersion`
    - Android: reads `AndroidManifest.xml`
-2. An **App** entry is created automatically if one with the same bundle ID doesn't exist.
+2. An **App** entry is looked up by bundle ID:
+   - First upload → App created automatically.
+   - Same bundle ID, same platform → existing App reused.
+   - Same bundle ID, different platform → App platform upgraded to `both` (iOS + Android grouped under one App).
 3. A **Build** entry is created under the App.
 4. QA team sees the new build in App Center immediately.
 

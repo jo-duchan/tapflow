@@ -57,14 +57,18 @@ Once signed in as Admin, go to **Settings → Team** and send invitations:
 If SMTP isn't configured, copy the invite link from the response and share it directly. See [Configuration](/reference/configuration) to set up SMTP.
 :::
 
-## 5. Upload your first build
+## 5. Add your first app
 
-Go to **App Center** and click **Upload Build**:
+Go to **App Center**. There are two ways to add an app:
 
-- **iOS**: upload a `.app.zip` — zip your `.app` bundle built with `xcodebuild -sdk iphonesimulator`.
-- **Android**: upload a `.apk`.
+**Option A — Upload a build**: Click **Upload Build** and select your file. tapflow reads the bundle ID, version, and build number automatically and creates the App entry.
 
-tapflow reads the bundle ID, version, and build number automatically and creates an App entry.
+- iOS: `.app.zip` (zip the `.app` folder built with `xcodebuild -sdk iphonesimulator`)
+- Android: `.apk`
+
+**Option B — Add App manually**: Click **+ Add App** in the sidebar and enter the app name, bundle ID, and platform. Use this to pre-register an app before any build is ready.
+
+If an App with the same bundle ID already exists for the other platform, the two are grouped under a single App entry (`both`).
 
 ## 6. Start a session
 
