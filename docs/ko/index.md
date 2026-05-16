@@ -3,7 +3,7 @@ layout: home
 
 hero:
   name: tapflow
-  text: 'QA를 위한 <span style="white-space: nowrap">셀프호스팅 시뮬레이터 스트리밍</span>'
+  text: 'QA를 위한 셀프호스팅<br>시뮬레이터 스트리밍'
   tagline: 클라우드 없이, 데이터 유출 없이, 월 구독료 없이 — 브라우저에서 iOS·Android 시뮬레이터를 바로 실행하세요.
   actions:
     - theme: brand

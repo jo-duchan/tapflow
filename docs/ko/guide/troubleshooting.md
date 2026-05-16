@@ -24,6 +24,22 @@ proxy_read_timeout 3600s;
 
 ---
 
+## iOS 17 이하 — 한글 입력 시 자모 분리
+
+iOS 17 이하 시뮬레이터에서 한글을 입력하면 음절로 조합되지 않고 자모가 분리됩니다 (예: "안녕" → "ㅇㅏㄴㄴㅕㅇ").
+
+이는 iOS 시뮬레이터의 IME 처리 버그로, tapflow가 아닌 iOS 시뮬레이터 자체의 문제입니다. 시스템 앱(메시지 등)에서도 동일하게 재현됩니다.
+
+**iOS 18 이상 시뮬레이터 런타임으로 업그레이드하세요.**  
+Xcode → Settings → Platforms에서 iOS 18+ 런타임을 설치합니다.
+
+::: details 레퍼런스
+- [React Native #41494](https://github.com/facebook/react-native/issues/41494)
+- [Flutter #135825](https://github.com/flutter/flutter/issues/135825)
+:::
+
+---
+
 ## iOS 빌드 업로드 오류
 
 ### 업로드 시 `400` 오류
