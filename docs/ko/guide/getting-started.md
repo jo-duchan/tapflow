@@ -31,7 +31,7 @@ tapflow start
 ```
 
 ::: tip 릴레이를 서버에 따로 띄우려면
-`tapflow relay start`와 `tapflow agent start`를 사용하세요. 자세한 내용은 [릴레이 서버 설정](/ko/guide/self-hosting)과 [셀프호스팅](/ko/guide/hosting)을 참고하세요.
+`tapflow relay start`와 `tapflow agent start`를 사용하세요. 자세한 내용은 [릴레이 배포](/ko/guide/self-hosting)를 참고하세요.
 :::
 
 ## 3. 관리자 계정 생성

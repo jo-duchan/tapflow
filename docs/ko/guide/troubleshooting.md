@@ -20,7 +20,7 @@ proxy_set_header Connection "upgrade";
 proxy_read_timeout 3600s;
 ```
 
-설정 예시는 [셀프호스팅](/ko/guide/hosting#https-리버스-프록시)을 참고하세요.
+설정 예시는 [릴레이 배포](/ko/guide/self-hosting#nginx-예시)를 참고하세요.
 
 ---
 

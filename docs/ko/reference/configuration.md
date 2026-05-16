@@ -50,6 +50,21 @@ openssl rand -hex 32
 ```
 :::
 
+## 데이터 디렉토리
+
+릴레이는 모든 데이터를 `.tapflow/`에 저장합니다 (기본값):
+
+```
+.tapflow/
+  db.sqlite         ← SQLite 데이터베이스
+  uploads/
+    builds/         ← .app.zip 및 .apk 파일
+    avatars/
+    comments/
+```
+
+위치를 변경하려면 `TAPFLOW_DATA_DIR` 환경변수 또는 `server.dataDir` 설정을 사용합니다. 이 디렉토리를 백업하면 모든 데이터가 보존됩니다.
+
 ## SMTP 설정
 
 SMTP가 설정되지 않으면 초대 이메일과 비밀번호 재설정 이메일이 발송되지 않습니다. 이 경우 Admin이 초대 링크를 직접 복사해 공유할 수 있습니다.

@@ -58,8 +58,7 @@ const koSidebar = [
     text: '설정',
     items: [
       { text: '에이전트 설정', link: '/ko/guide/agent' },
-      { text: '릴레이 서버 설정', link: '/ko/guide/self-hosting' },
-      { text: '셀프호스팅', link: '/ko/guide/hosting' },
+      { text: '릴레이 배포', link: '/ko/guide/self-hosting' },
       { text: '빌드 업로드 (CI/CD)', link: '/ko/guide/upload-builds' },
       { text: 'Mac 리소스 확장', link: '/ko/guide/scaling' },
     ],
