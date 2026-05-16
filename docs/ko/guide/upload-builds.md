@@ -6,7 +6,7 @@ QA를 진행할 수 있도록 iOS 또는 Android 빌드를 업로드합니다.
 
 App Center에서 **Upload Build**를 클릭하고 파일을 선택합니다.
 
-- iOS: `.app.zip` — `xcodebuild -sdk iphonesimulator`로 빌드한 시뮬레이터용 바이너리
+- iOS: `.app.zip` — 시뮬레이터용 바이너리 ([커맨드라인 빌드 방법](https://developer.apple.com/library/archive/technotes/tn2339/_index.html))
 - Android: `.apk`
 
 ::: warning iOS — `.ipa` 파일은 지원하지 않습니다
