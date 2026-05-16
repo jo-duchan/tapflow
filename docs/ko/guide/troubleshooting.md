@@ -86,7 +86,7 @@ export PATH=$PATH:$ANDROID_HOME/platform-tools
 
 - 릴레이와 에이전트 사이의 네트워크 품질을 확인합니다.
 - 대시보드 **Mac Resources** 탭에서 해당 Mac의 CPU·RAM 사용량을 확인합니다.
-- 한 Mac에서 동시에 실행하는 시뮬레이터 수를 줄입니다.
+- 한 Mac에서 동시에 실행하는 디바이스 수를 줄입니다.
 
 ---
 

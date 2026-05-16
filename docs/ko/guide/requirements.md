@@ -16,7 +16,7 @@
 
 - macOS
 - Android SDK (`adb`가 `$PATH`에 있거나 `ANDROID_HOME` 설정)
-- `google_apis/arm64-v8a` 시스템 이미지 (android-34)를 사용하는 AVD
+- `google_apis/arm64-v8a` 시스템 이미지 (android-34)를 사용하는 에뮬레이터
 - Node.js ≥ 20
 
 ## 브라우저 (QA)
