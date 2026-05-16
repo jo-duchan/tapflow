@@ -154,6 +154,7 @@
 .VPNavBarTitle .logo {
   height: 20px;
   width: auto;
+  margin-right: 6px;
 }
 
 /* ─── Nav ────────────────────────────────────────────────── */
@@ -231,7 +232,7 @@
 
 /* nav links */
 .VPNavBarMenuLink {
-  color: var(--vp-c-text-3) !important;
+  color: var(--vp-c-text-2) !important;
 }
 
 .VPNavBarMenuLink.active {
@@ -260,16 +261,20 @@
   color: var(--vp-c-text-2);
 }
 
+.VPNavBarTranslations .button .text {
+  color: var(--vp-c-text-2);
+}
+
 /* 드롭다운 아이템 (미선택) */
 .VPNavBarTranslations .VPMenuLink .link,
 .VPNavScreenTranslations .VPMenuLink .link {
   color: var(--vp-c-text-2);
 }
 
-/* 드롭다운 아이템 (현재 선택된 언어) */
-.VPNavBarTranslations .VPMenuLink.active .link,
-.VPNavScreenTranslations .VPMenuLink.active .link {
-  color: var(--tf-link);
+/* 드롭다운 — 현재 선택된 언어 타이틀 */
+.VPNavBarTranslations .title,
+.VPNavScreenTranslations .title {
+  color: var(--tf-link) !important;
 }
 
 /* ─── Links ──────────────────────────────────────────────── */
