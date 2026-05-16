@@ -1,26 +1,19 @@
 # 빌드 업로드
 
-QA가 시뮬레이터에 설치할 수 있도록 iOS 또는 Android 빌드를 업로드합니다.
+QA를 진행할 수 있도록 iOS 또는 Android 빌드를 업로드합니다.
 
 ## 대시보드에서 업로드
 
 App Center에서 **Upload Build**를 클릭하고 파일을 선택합니다.
 
-- iOS: `.app.zip` — `xcodebuild -sdk iphonesimulator`로 빌드한 `.app` 번들을 zip으로 압축한 파일
+- iOS: `.app.zip` — `xcodebuild -sdk iphonesimulator`로 빌드한 시뮬레이터용 바이너리
 - Android: `.apk`
 
-::: warning iOS 빌드 준비 시 주의사항
-**`.ipa` 파일은 지원하지 않습니다.** `.ipa`는 실제 기기용 포맷입니다. tapflow는 시뮬레이터용 `.app.zip`만 허용합니다.
-
-`.app` 폴더는 ZIP의 루트에 있어야 합니다. 상위 폴더로 감싸면 메타데이터 파싱에 실패합니다.
-
-```
-MyApp.app.zip
-└── MyApp.app/        ← 루트에 바로 위치해야 함
-    ├── Info.plist
-    └── ...
-```
+::: warning iOS — `.ipa` 파일은 지원하지 않습니다
+`.ipa`는 실제 기기용 포맷입니다. tapflow는 시뮬레이터용 `.app.zip`만 허용합니다. 업로드 오류가 발생하면 [문제 해결](/ko/guide/troubleshooting#ios-빌드-업로드-오류)을 참고하세요.
 :::
+
+업로드 시 bundle ID를 기준으로 App에 연결되고, 최초 업로드 시 App을 자동으로 생성합니다. 또한 App을 먼저 생성한 뒤 빌드를 연결하는 것도 가능합니다.
 
 ## API 업로드 (CI/CD)
 
@@ -57,18 +50,6 @@ curl -X POST https://your-relay/api/v1/builds \
       -F "file=@MyApp.app.zip" \
       -F "status=In Progress"
 ```
-
-## 업로드 후 처리 흐름
-
-1. 릴레이가 바이너리에서 메타데이터를 추출합니다:
-   - iOS: `Info.plist` → `CFBundleIdentifier`, `CFBundleShortVersionString`, `CFBundleVersion`
-   - Android: `AndroidManifest.xml` 파싱 (aapt 사용)
-2. bundle ID로 **App** 항목을 조회합니다:
-   - 첫 업로드 → App이 자동 생성됩니다
-   - 동일 bundle ID, 동일 플랫폼 → 기존 App에 빌드가 추가됩니다
-   - 동일 bundle ID, 다른 플랫폼 → App의 플랫폼이 `both`로 업그레이드됩니다 (iOS·Android를 하나의 App으로 통합)
-3. App 하위에 **Build** 항목이 생성됩니다.
-4. QA가 App Center에서 즉시 새 빌드를 확인할 수 있습니다.
 
 ## 빌드 상태
 
