@@ -20,5 +20,8 @@
     "docs:dev": "pnpm --filter @tapflow/docs dev",
     "docs:build": "pnpm --filter @tapflow/docs build",
     "docs:preview": "pnpm --filter @tapflow/docs preview"
+  },
+  "devDependencies": {
+    "concurrently": "^9.0.0"
   }
 }

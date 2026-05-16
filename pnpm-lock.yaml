@@ -6,7 +6,11 @@ settings:
 
 importers:
 
-  .: {}
+  .:
+    devDependencies:
+      concurrently:
+        specifier: ^9.0.0
+        version: 9.2.1
 
   docs:
     devDependencies:
@@ -226,6 +230,9 @@ importers:
       '@tapflow/agent-core':
         specifier: workspace:*
         version: link:../agent-core
+      ws:
+        specifier: ^8.0.0
+        version: 8.20.1
     devDependencies:
       '@tapflow/relay':
         specifier: workspace:*
