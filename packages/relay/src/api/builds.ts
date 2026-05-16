@@ -142,15 +142,19 @@ function hasSimulatorSlice(zipPath: string, appDir: string): boolean | null {
 
 // ── app 자동 생성 / 조회 ──────────────────────────────────────────────────
 
-function upsertApp(name: string, bundleIdKey: string, platform: string): number {
+export function upsertApp(name: string, bundleIdKey: string, platform: string): number {
   const db = getDb()
-  // 정확히 일치하는 플랫폼 우선, 없으면 'both' 앱 검색
   const existing = db.prepare(
-    `SELECT id FROM apps WHERE bundle_id_key = ? AND (platform = ? OR platform = 'both')
-     ORDER BY CASE platform WHEN ? THEN 0 ELSE 1 END LIMIT 1`
-  ).get(bundleIdKey, platform, platform) as { id: number } | undefined
+    'SELECT id, platform FROM apps WHERE bundle_id_key = ? LIMIT 1'
+  ).get(bundleIdKey) as { id: number; platform: string } | undefined
 
-  if (existing) return existing.id
+  if (existing) {
+    // 다른 플랫폼 빌드가 올라오면 both로 업그레이드
+    if (existing.platform !== 'both' && existing.platform !== platform) {
+      db.prepare('UPDATE apps SET platform = ? WHERE id = ?').run('both', existing.id)
+    }
+    return existing.id
+  }
 
   const result = db.prepare(
     'INSERT INTO apps (name, bundle_id_key, platform) VALUES (?, ?, ?)'

@@ -9,6 +9,11 @@ export function getDb(): Database.Database {
   return db
 }
 
+export function closeDb(): void {
+  db?.close()
+  db = null
+}
+
 export function initDb(dbPath: string): void {
   fs.mkdirSync(path.dirname(dbPath), { recursive: true })
   db = new Database(dbPath)

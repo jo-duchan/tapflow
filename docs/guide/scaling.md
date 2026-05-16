@@ -4,14 +4,18 @@ tapflow scales horizontally — add more Mac hosts to the same relay to expand y
 
 ## How it works
 
-```
-Browser (QA team)
-    ↕ WebSocket
-Relay Server
-    ↕ WebSocket (outbound)          ↕ WebSocket (outbound)
-Mac A (mac-mini-office)             Mac B (mac-mini-lab)
-  ├── iOS Simulator × 3               ├── iOS Simulator × 3
-  └── Android Emulator × 1           └── Android Emulator × 1
+```mermaid
+flowchart TD
+    B["Browser (QA team)"]
+    R["Relay Server<br/>Docker / AWS / self-hosted"]
+    A1["Mac Agent 1<br/>iOS · Android simulators"]
+    A2["Mac Agent 2<br/>iOS · Android simulators"]
+    More["Mac Agent N<br/>iOS · Android simulators"]
+
+    B <-->|WebSocket| R
+    R <-->|WebSocket outbound| A1
+    R <-->|WebSocket outbound| A2
+    R -.->|WebSocket outbound| More
 ```
 
 The dashboard shows all devices from all connected agents in a single list. QA picks any available device — tapflow routes the session to the right Mac automatically.
@@ -49,22 +53,9 @@ The agent name is derived from the Mac's system hostname (`scutil --get Computer
 
 ## How many simulators per Mac?
 
-iOS Simulator and Android Emulator are memory-intensive. As a guideline:
+iOS Simulator and Android Emulator are memory-intensive. The number you can run simultaneously depends on your Mac's RAM and CPU.
 
-| RAM | Recommended slots |
-|-----|-------------------|
-| 8 GB | 1–2 iOS or 1 Android |
-| 16 GB | 2–3 iOS or 1–2 Android |
-| 32 GB | 4 iOS + 1–2 Android |
-
-Boot only the simulators you need:
-
-```sh
-tapflow boot "iPhone 16 Pro"
-tapflow boot "iPhone 15"
-```
-
-Then start the agent — it reports only booted simulators to the relay.
+Simulators are booted and managed through the dashboard. The agent reports only booted simulators to the relay, so QA sees exactly what's available.
 
 ## Monitoring
 
