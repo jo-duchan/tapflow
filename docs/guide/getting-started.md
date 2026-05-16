@@ -30,10 +30,10 @@ tapflow start
 # ✓ iOS Agent connected (3 simulators available)
 ```
 
-To connect to a remote relay instead:
+To connect a Mac agent to a remote relay instead:
 
 ```sh
-tapflow start --relay wss://relay.myteam.example.com
+tapflow agent start --relay wss://relay.myteam.example.com
 ```
 
 ## 3. Create the admin account

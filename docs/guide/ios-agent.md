@@ -11,7 +11,7 @@ The iOS agent runs on a Mac and streams simulator screens to the relay.
 ## Start the agent
 
 ```sh
-tapflow start --relay wss://your-relay-url
+tapflow agent start --relay wss://your-relay-url
 ```
 
 The agent connects outbound — no inbound firewall rules needed.

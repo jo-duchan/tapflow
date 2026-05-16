@@ -4,6 +4,8 @@ import { cmdDoctor } from './commands/doctor.js'
 import { cmdDevices } from './commands/devices.js'
 import { cmdBoot } from './commands/boot.js'
 import { cmdStart } from './commands/start.js'
+import { cmdRelayStart } from './commands/relay-start.js'
+import { cmdAgentStart } from './commands/agent-start.js'
 import { cmdReset } from './commands/reset.js'
 import { cmdStatus } from './commands/status.js'
 import { cmdLogs } from './commands/logs.js'
@@ -28,11 +30,22 @@ cli
   .action((name: string) => cmdBoot(name))
 
 cli
-  .command('start', 'Start relay and available agents (iOS + Android by default)')
+  .command('start', 'Start relay and available agents locally (local dev shortcut)')
   .option('--platform <platform>', 'Platform to start: ios | android | all (default: auto-detect)')
   .option('--device <name>', 'iOS Simulator name or UDID to use')
-  .option('--relay <url>', 'Relay WebSocket URL (skips local relay spawn)')
-  .action((opts: { platform?: 'ios' | 'android' | 'all'; device?: string; relay?: string }) => cmdStart(opts))
+  .action((opts: { platform?: 'ios' | 'android' | 'all'; device?: string }) => cmdStart(opts))
+
+cli
+  .command('relay start', 'Start the relay server only (no agents)')
+  .option('--port <n>', 'Port to listen on (default: 4000)')
+  .action((opts: { port?: number }) => cmdRelayStart(opts))
+
+cli
+  .command('agent start', 'Start agents and connect to a relay (no local relay spawned)')
+  .option('--relay <url>', 'Relay WebSocket URL (default: ws://localhost:4000)')
+  .option('--platform <platform>', 'Platform to start: ios | android | all (default: auto-detect)')
+  .option('--device <name>', 'iOS Simulator name or UDID to use')
+  .action((opts: { relay?: string; platform?: 'ios' | 'android' | 'all'; device?: string }) => cmdAgentStart(opts))
 
 cli
   .command('reset', 'Shut down all simulators')

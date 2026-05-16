@@ -25,7 +25,7 @@ tapflow init --relay http://your-server:4000
 
 ```sh
 npm install -g tapflow
-tapflow relay start
+tapflow start
 ```
 
 The relay reads `tapflow.config.json` from the working directory. See [Configuration](/reference/configuration).

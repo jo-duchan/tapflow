@@ -26,7 +26,7 @@ On the new Mac, install tapflow and point it at your existing relay:
 
 ```sh
 npm install -g tapflow
-tapflow start --relay wss://your-relay-url
+tapflow agent start --relay wss://your-relay-url
 ```
 
 That's it. The new Mac registers itself and its devices become visible in the dashboard immediately.

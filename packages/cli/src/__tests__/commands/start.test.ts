@@ -69,11 +69,6 @@ describe('cmdStart', () => {
     expect(vi.mocked(RelayServer).mock.results[0]?.value.start).toHaveBeenCalled()
   })
 
-  it('--relay 있으면 RelayServer 기동 안 함', async () => {
-    await cmdStart({ relay: 'ws://remote:4000' })
-    expect(RelayServer).not.toHaveBeenCalled()
-  })
-
   it('macOS + adb 있으면 iOS와 Android 모두 연결', async () => {
     await cmdStart({})
     expect(IOSAgent).toHaveBeenCalled()
@@ -135,4 +130,21 @@ describe('cmdStart', () => {
     await expect(cmdStart({ platform: 'ios' })).rejects.toThrow('process.exit')
     expect(exitSpy).toHaveBeenCalledWith(1)
   })
+
+  it('비-Mac + adb 없음 → 릴레이 기동 후 relay-only 모드 (exit 없음)', async () => {
+    vi.spyOn(process, 'platform', 'get').mockReturnValue('linux')
+    mockExecSync.mockImplementation((cmd) => {
+      if ((cmd as string) === 'which adb') throw new Error('not found')
+      return ''
+    })
+    const exitSpy = vi.spyOn(process, 'exit').mockImplementation(() => { throw new Error('process.exit') })
+
+    await cmdStart({})
+
+    expect(RelayServer).toHaveBeenCalled()
+    expect(IOSAgent).not.toHaveBeenCalled()
+    expect(AndroidAgent).not.toHaveBeenCalled()
+    expect(exitSpy).not.toHaveBeenCalled()
+  })
+
 })

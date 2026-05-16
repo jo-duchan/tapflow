@@ -1,0 +1,78 @@
+# 에이전트 설정
+
+에이전트는 Mac에서 실행되며 시뮬레이터·에뮬레이터 화면을 릴레이로 스트리밍합니다. 아웃바운드로 릴레이에 연결하므로 인바운드 방화벽 규칙이 필요 없습니다.
+
+## 에이전트 시작
+
+```sh
+tapflow agent start --relay wss://your-relay-url
+```
+
+| 옵션 | 기본값 | 설명 |
+|------|--------|------|
+| `--relay` | `ws://localhost:4000` | 릴레이 WebSocket URL |
+| `--platform` | 자동 감지 | `ios` \| `android` \| `all` |
+| `--device` | 부팅된 첫 번째 시뮬레이터 | iOS 시뮬레이터 이름 또는 UDID |
+
+## iOS
+
+### 사전 요구사항
+
+- macOS
+- iOS Simulator Runtime이 설치된 Xcode
+- Node.js ≥ 20
+
+### 시뮬레이터 확인
+
+```sh
+tapflow devices
+```
+
+### 여러 시뮬레이터 동시 사용
+
+한 Mac에서 RAM에 따라 2–4개의 시뮬레이터를 동시에 실행할 수 있습니다. 에이전트가 사용 가능한 슬롯 수를 자동으로 보고합니다. 더 많은 시뮬레이터가 필요하다면 [Mac 리소스 확장](/ko/guide/scaling)을 참고하세요.
+
+### 트러블슈팅
+
+```
+Common
+  ✓ Node v20.x
+
+iOS
+  ✓ Xcode 16.2
+  ✓ xcrun simctl
+  ✓ Simulator booted: iPhone 16 Pro
+```
+
+## Android
+
+### 사전 요구사항
+
+- Android SDK 설치 (`ANDROID_HOME` 설정 또는 `adb`가 `$PATH`에 있어야 함)
+- `google_apis/arm64-v8a` 시스템 이미지 (android-34)를 사용하는 AVD
+
+### AVD 생성
+
+Android Studio의 AVD Manager에서 AVD를 생성합니다. 자세한 방법은 [가상 기기 만들기 및 관리하기](https://developer.android.com/studio/run/managing-avds?hl=ko)를 참고하세요.
+
+AVD를 생성할 때 시스템 이미지 선택에 주의하세요:
+
+::: warning AVD 이미지 선택이 중요합니다
+`google_apis/arm64-v8a`를 사용하세요. **`google_apis_playstore` 이미지는 사용하지 마세요.** Play Store 이미지는 H.264 인코더가 조용히 크래시합니다.
+:::
+
+에이전트가 에뮬레이터를 자동으로 부팅하고, `sys.boot_completed`를 기다린 뒤 스트리밍을 시작합니다.
+
+### 트러블슈팅
+
+```sh
+tapflow doctor
+# Common
+#   ✓ Node v20.x
+#
+# Android
+#   ✓ adb found: /usr/local/bin/adb
+#   ✓ AVD: Pixel_8 (android-34 · google_apis/arm64-v8a)
+```
+
+더 자세한 문제 해결 방법은 [문제 해결](/ko/guide/troubleshooting)을 참고하세요.

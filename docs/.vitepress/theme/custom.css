@@ -216,6 +216,24 @@
   box-shadow: none !important;
 }
 
+/* ─── Language switcher ─────────────────────────────────── */
+/* 文A 아이콘 버튼 */
+.VPNavBarTranslations .button {
+  color: var(--vp-c-text-2);
+}
+
+/* 드롭다운 아이템 (미선택) */
+.VPNavBarTranslations .VPMenuLink .link,
+.VPNavScreenTranslations .VPMenuLink .link {
+  color: var(--vp-c-text-2);
+}
+
+/* 드롭다운 아이템 (현재 선택된 언어) */
+.VPNavBarTranslations .VPMenuLink.active .link,
+.VPNavScreenTranslations .VPMenuLink.active .link {
+  color: var(--tf-link);
+}
+
 /* ─── Links ──────────────────────────────────────────────── */
 .vp-doc a {
   color: var(--tf-link);
