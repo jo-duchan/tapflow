@@ -1,6 +1,6 @@
 # Android 비디오 스트리밍 진단 — 인사이트
 
-> 작성 배경: scrcpy 방식으로 전환하는 과정에서 ARM64 에뮬레이터 환경의 H.264 인코더 문제를 만나 진단한 기록.
+> 이 문서는 Android 에뮬레이터 스트리밍 과정에서 만난 문제들의 진단·해결 기록이다. 이슈별로 섹션을 추가한다.
 
 ---
 
@@ -131,4 +131,106 @@ adb shell ls -la /sdcard/test.mp4   # 0바이트면 인코더 실패
 
 # 3) scrcpy CLI 직접 테스트 (brew install scrcpy 필요)
 scrcpy -s <serial> --print-fps
+```
+
+---
+
+---
+
+## Issue 2 — macOS 윈도우 오클루전으로 인한 FPS 저하 (2026-05-18 해결)
+
+### 핵심 결론 (먼저 읽어라)
+
+`-no-window -gpu host` 조합으로 에뮬레이터를 기동하면 해결된다.  
+에뮬레이터 창이 없으면 macOS가 오클루전 상태를 판정할 대상이 사라지고,  
+`-gpu host`는 `-no-window`와 함께 써도 Metal 가속을 그대로 유지한다.
+
+```bash
+emulator -avd <name> -no-window -gpu host -no-audio -no-snapshot
+```
+
+검증:
+```bash
+adb shell getprop ro.hardware.egl     # "emulation" → goldfish GL (host Metal), SwiftShader 아님
+adb shell getprop debug.hwui.renderer # "skiagl"    → 정상 가속 상태
+```
+
+---
+
+### 증상
+
+- 에뮬레이터 창이 브라우저 창 뒤에 완전히 가려지면 수십 초 내로 FPS가 7~9 수준으로 떨어짐
+- 브라우저와 에뮬레이터를 나란히 놓으면(side-by-side) FPS 저하 없음
+- 에뮬레이터를 직접 터치하면 FPS가 일시 회복
+- idle과는 무관 — 에뮬레이터 화면이 바뀌지 않아도 가려지지만 않으면 정상
+
+### 근본 원인
+
+macOS는 `NSWindowOcclusionState` API를 통해 완전히 가려진 윈도우의 GPU 렌더링을 의도적으로 스로틀링한다. 에뮬레이터(QEMU)가 Metal swap buffer / vsync에 동기화되어 있으므로:
+
+```
+macOS Metal 콜백 감소
+  → QEMU Choreographer VSYNC 슬로우다운
+    → SurfaceFlinger 60Hz 유지 불가
+      → scrcpy MediaCodec에 도달하는 프레임 수 감소
+```
+
+이것은 scrcpy 문제도, 인코더 문제도 아니다. **QEMU가 창이 가려졌을 때 프레임을 덜 만든다**는 설계 충돌이다.
+
+### 시도했지만 실패한 방법들
+
+| 접근 | 결과 | 이유 |
+|---|---|---|
+| `event tap 0 0` (emulator 콘솔 keepalive, 3초마다) | **화면 동결** 부작용 | scrcpy 터치 입력 파이프라인과 충돌 |
+| `repeat-previous-frame-after:long=33333` codec 옵션 | 효과 없음 | SurfaceFlinger 프레임 부재를 인코더 레이어에서 해결 불가 |
+| `stay_awake=true` (이미 적용 중) | 효과 없음 | 디스플레이 sleep과 별개 문제 |
+| `-gpu swiftshader_indirect` (SW 렌더링) | 너무 느림 | CPU 전용, Metal 미사용 |
+| 윈도우 off-screen 이동, minimize | 효과 없음 | macOS가 동일하게 occluded로 처리 |
+
+### macOS 오클루전의 특성 (중요)
+
+Apple 공식 문서에 따르면 다음은 **모두 occluded로 처리**된다:
+- 다른 창에 완전히 가려진 경우
+- Dock으로 최소화된 경우
+- 다른 Space(데스크탑)에 있는 경우
+- 화면 밖 좌표로 이동한 경우
+
+`NSWindowOcclusionState`는 **read-only**이므로 외부에서 강제로 "항상 visible" 상태로 만들 수 없다.
+
+### 왜 `-no-window -gpu host`가 작동하는가
+
+- `-no-window`: 에뮬레이터가 macOS 창을 생성하지 않음 → 오클루전 판정 대상 자체가 없어짐
+- `-gpu host`: Metal 하드웨어 가속 유지 (금속 렌더링이 창의 swap과 분리되어 계속 동작)
+
+**흔한 오해**: "`-no-window`를 쓰면 자동으로 SwiftShader로 전환된다."  
+→ 오래된 emulator(v28.x 이전)의 동작이 입소문으로 퍼진 것. 최신 emulator(v33+)에서는 거짓.
+
+### Code
+
+`EmulatorLauncher.ts` — `launch()` 메서드:
+
+```typescript
+const proc = spawn(getEmulatorPath(), [
+  '-avd', avdName,
+  '-no-audio',
+  '-no-snapshot',
+  '-no-window',   // macOS 오클루전 회피
+  '-gpu', 'host', // Metal 가속 유지
+], { detached: true, stdio: 'ignore' })
+```
+
+### 리서치 과정에서 얻은 참고 정보
+
+- pupil-labs는 자신들의 앱(PyOpenGL)에서 동일 증상을 `glfw.swap_interval(0)` 한 줄로 해결했다. QEMU/emulator에 같은 패치를 적용하려면 소스 fork가 필요하고 그 비용 대비 `-no-window`가 훨씬 현실적이다.
+- Google의 `android-emulator-webrtc`(gRPC + WebRTC로 emulator 스트리밍)는 2025년 9월 archive 처리됐고, 처음부터 Linux + NVIDIA 전용이었다. Google조차 macOS에서 이 문제를 해결하지 않고 Linux로 회피한 것.
+- `NSWindowOcclusionState`를 끄는 plist 키나 system API는 존재하지 않는다 (Apple 의도적 설계).
+- `-gpu angle_indirect`, `-gpu auto-no-window` 등은 macOS에서 미지원이거나 존재하지 않는 옵션이다.
+
+### 대안 접근 (만약 `-no-window`가 요구사항과 충돌할 경우)
+
+emulator gRPC API의 `streamScreenshot` RPC를 사용해 scrcpy를 완전히 대체하는 방법이 있다. emulator 프로세스 내부에서 프레임을 직접 생성하므로 SurfaceFlinger의 vsync 경로를 우회할 가능성이 있다. 검증은 아직 미진행.
+
+```bash
+emulator -avd <name> -grpc 8554 -gpu host
+# 이후 grpcurl로 streamScreenshot 호출 후 FPS 측정
 ```

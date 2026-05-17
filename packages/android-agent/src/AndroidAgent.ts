@@ -27,6 +27,7 @@ interface DeviceState {
   deviceRotation: number
   lastTouchPx: { x: number; y: number }
   bootSeq: number
+  restarting: boolean
 }
 
 export interface AndroidAgentOptions {
@@ -119,6 +120,7 @@ export class AndroidAgent implements DeviceAgent {
         deviceRotation: 0,
         lastTouchPx: { x: 0, y: 0 },
         bootSeq: 0,
+        restarting: false,
       })
     })
   }
@@ -186,12 +188,12 @@ export class AndroidAgent implements DeviceAgent {
     const info = await session.start(serial, (rotation) => this.handleRotationNotification(state, rotation))
     state.scrcpySession = session
     state.deviceRotation = 0
+
     state.displayWidth = info.width
     state.displayHeight = info.height
 
     const stream = session.video.start()
     const reader = stream.getReader()
-    const startedAt = Date.now()
 
     const pump = async () => {
       try {
@@ -203,20 +205,48 @@ export class AndroidAgent implements DeviceAgent {
       } catch {
         // stream cancelled or ws closed — expected on disconnect
       }
-      const ranMs = Date.now() - startedAt
-      // Never silently restart — creates zombie scrcpy server processes.
-      // Report to relay so the dashboard can trigger device:boot again if needed.
-      if (state.scrcpySession === session) {
-        console.error(`[android-agent] scrcpy stream ended after ${ranMs}ms`)
-        this.ws?.send(JSON.stringify({
-          type: 'device:boot-error',
-          sessionId: state.sessionId,
-          message: `scrcpy stream ended after ${Math.round(ranMs / 1000)}s`,
-        }))
+      if (state.scrcpySession === session && !state.restarting) {
+        state.restarting = true
+        void this.restartVideoStream(state)
       }
     }
 
     void pump()
+  }
+
+  private async restartVideoStream(state: DeviceState): Promise<void> {
+    const serial = this.adb.getSerial(state.deviceId)
+    if (!serial) { state.restarting = false; return }
+
+    state.scrcpySession?.stop(serial)
+    state.scrcpySession = null
+    state.touchHelper?.stop()
+    state.touchHelper = null
+
+    const { streamWs } = state
+    if (!streamWs || streamWs.readyState !== WebSocket.OPEN) {
+      state.restarting = false
+      return
+    }
+
+    // kill any lingering scrcpy server process on the device before restarting
+    await this.adb.pkill(serial, 'scrcpy-server').catch(() => {})
+    await new Promise<void>((r) => setTimeout(r, 1500))
+
+    if (!this.deviceStates.has(state.sessionId)) return
+
+    try {
+      await this.startVideoStream(state, streamWs)
+    } catch (err) {
+      console.error(`[android-agent] scrcpy restart failed: ${err}`)
+      this.ws?.send(JSON.stringify({
+        type: 'device:boot-error',
+        sessionId: state.sessionId,
+        message: 'scrcpy failed to restart',
+      }))
+    } finally {
+      state.restarting = false
+    }
   }
 
   private handleRotationNotification(state: DeviceState, rotation: number): void {

@@ -23,7 +23,7 @@ function getEmulatorPath(): string {
 
 export class EmulatorLauncher {
   launch(avdName: string): void {
-    const proc = spawn(getEmulatorPath(), ['-avd', avdName, '-no-audio', '-no-snapshot'], {
+    const proc = spawn(getEmulatorPath(), ['-avd', avdName, '-no-audio', '-no-snapshot', '-no-window', '-gpu', 'host'], {
       detached: true,
       stdio: 'ignore',
     })
