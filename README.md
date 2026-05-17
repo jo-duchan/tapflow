@@ -60,7 +60,7 @@ pnpm install
 pnpm dev
 ```
 
-See [contributing/CONTRIBUTING.md](contributing/CONTRIBUTING.md) for branch strategy and commit conventions.
+See [CONTRIBUTING.md](CONTRIBUTING.md) for branch strategy and commit conventions.
 
 ## License
 

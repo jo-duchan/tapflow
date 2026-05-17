@@ -1,6 +1,6 @@
 # Contributing to tapflow
 
-> Common rules: [CLAUDE.md](../CLAUDE.md) | Full index: [INDEX.md](../INDEX.md)
+> Common rules: [CLAUDE.md](./CLAUDE.md) | Full index: [INDEX.md](./INDEX.md)
 
 ## Development setup
 

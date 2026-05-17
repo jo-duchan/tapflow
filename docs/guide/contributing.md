@@ -1,6 +1,6 @@
 # Contributing
 
-Contributions are welcome. See [`contributing/CONTRIBUTING.md`](https://github.com/jo-duchan/tapflow/blob/main/contributing/CONTRIBUTING.md) in the repository for branch strategy, commit conventions, and PR guidelines.
+Contributions are welcome. See [`CONTRIBUTING.md`](https://github.com/jo-duchan/tapflow/blob/main/CONTRIBUTING.md) in the repository for branch strategy, commit conventions, and PR guidelines.
 
 ## Local development
 
@@ -26,7 +26,7 @@ packages/
   dashboard/      ← React SPA (served by relay)
   cli/            ← tapflow CLI
 docs/             ← this documentation site (VitePress)
-contributing/     ← internal docs (PRD, design system, architecture)
+internal/         ← team-internal docs (PRD, design system, architecture)
 playground/       ← local integration test environment
 ```
 

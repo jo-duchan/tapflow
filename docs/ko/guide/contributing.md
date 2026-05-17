@@ -1,6 +1,6 @@
 # 기여 가이드
 
-기여를 환영합니다. 브랜치 전략, 커밋 컨벤션, PR 가이드라인은 저장소의 [`contributing/CONTRIBUTING.md`](https://github.com/jo-duchan/tapflow/blob/main/contributing/CONTRIBUTING.md)를 참고하세요.
+기여를 환영합니다. 브랜치 전략, 커밋 컨벤션, PR 가이드라인은 저장소의 [`CONTRIBUTING.md`](https://github.com/jo-duchan/tapflow/blob/main/CONTRIBUTING.md)를 참고하세요.
 
 ## 로컬 개발 환경
 
@@ -26,7 +26,7 @@ packages/
   dashboard/      ← React SPA (릴레이가 서빙)
   cli/            ← tapflow CLI
 docs/             ← 이 문서 사이트 (VitePress)
-contributing/     ← 내부 문서 (PRD, 디자인 시스템, 아키텍처)
+internal/         ← 팀 내부 문서 (PRD, 디자인 시스템, 아키텍처)
 playground/       ← 로컬 통합 테스트 환경
 ```
 
