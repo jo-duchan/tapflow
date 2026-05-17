@@ -10,12 +10,11 @@ Run simulators and emulators in the browser — no Appetize, no BrowserStack, no
 ## How it works
 
 ```
-Browser (QA team)  ←→  Relay Server  ←→  Mac Agent (iOS Simulator × 2–4)
-                                     ←→  Linux Agent (Android Emulator)
+Browser (QA team)  ←→  Relay Server  ←→  Mac Agent (iOS Simulator + Android Emulator)
 ```
 
 - **Relay**: lightweight Node.js server you deploy once (fly.io, Docker, or bare metal)
-- **Agent**: runs on your Mac/Linux, connects outbound to the relay — no firewall rules needed
+- **Agent**: runs on your Mac, connects outbound to the relay — no firewall rules needed
 - **Dashboard**: React SPA served by the relay, accessible from any browser
 
 ## Quick start
