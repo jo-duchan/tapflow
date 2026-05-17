@@ -131,7 +131,7 @@ timer.setEventHandler {
 키보드 주입은 `IndigoHIDMessageForKeyboardArbitrary(usage, op)` 를 사용한다.  
 `IndigoHIDMessageForHIDArbitrary(target=0x32, page=0x07, ...)` 는 digitizer(터치) 경로여서 iOS가 하드웨어 키보드로 인식하지 못해 CapsLock HUD와 한/영 전환이 동작하지 않는다.
 
-→ 상세 분석(target 차이, 증상 패턴, SimKeyboardInputController 심볼): [`docs/simkit-internals.md` §5](../../docs/simkit-internals.md)
+→ 상세 분석(target 차이, 증상 패턴, SimKeyboardInputController 심볼): [`internal/simkit-internals.md` §5](../../internal/simkit-internals.md)
 
 ---
 

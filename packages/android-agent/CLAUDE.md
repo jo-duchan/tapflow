@@ -7,7 +7,7 @@
 ## WHAT
 
 `AndroidAgent`: ADB를 통해 Android 에뮬레이터를 제어하고, **scrcpy**로 H.264 화면을 스트리밍한다.
-**Phase 3 기준: Mac 단일 머신에서 `ios-agent`와 함께 구동하는 것을 1순위 경로로 한다.** Linux 클라우드 Android는 Phase 4 이후.
+Mac 단일 머신에서 `ios-agent`와 함께 구동한다.
 
 ## HOW
 
@@ -16,7 +16,7 @@
 - 화면 스트리밍: `ScrcpySession` → `ScrcpyVideo` — scrcpy 서버를 기기에 push·실행 후 TCP 소켓으로 H.264 Annex B 스트림 수신. AVD 이미지는 반드시 `google_apis/arm64-v8a`(android-34) 사용 — `google_apis_playstore` 이미지는 H.264 인코더가 crash한다.
 - **인코더**: `OMX.google.h264.encoder`(순수 소프트웨어) 고정 사용. 기본값인 `c2.android.avc.encoder`(Codec 2.0)는 Chrome 등 GPU 프로세스가 올라올 때 가상화 GPU 레이어에서 stall — 예외 없이 조용히 멈춰서 scrcpy 서버와 pump loop 모두 감지 불가. 에뮬레이터에서는 어차피 소프트웨어 에뮬이므로 성능 차이 없음.
 - scrcpy 프로토콜: video 소켓(1st) + control 소켓(2nd) 순서로 두 번 연결해야 서버가 스트리밍을 시작한다. `ScrcpyControl`은 control 소켓을 열어두는 역할과 미래 바이너리 터치 프로토콜 기반.
-- 터치: `AndroidTouchHelper` — `touchStart/touchMove/touchEnd/pressButton`. 현재 `adb input tap/swipe`로 구현. `ScrcpyControl`의 바이너리 프로토콜로 교체하면 지연 대폭 감소.
+- 터치: scrcpy control 소켓(`ScrcpyControl.touchDown/touchMove/touchUp`) 우선 사용 — scrcpy 세션이 활성일 때 저지연 바이너리 프로토콜로 주입. scrcpy 세션이 없는 경우에만 `AndroidTouchHelper`(`adb input tap/swipe`)로 폴백.
 - AVD 이름을 `Device.id`의 stable key로 사용 (`"avd:<name>"`). ADB serial은 내부 `serialMap`에만 보관.
 - `ANDROID_HOME` 또는 `ADB_PATH` 환경변수 필수. 없으면 명확한 오류로 즉시 종료.
 - Apple Silicon Mac: `system-images;android-34;google_apis;arm64-v8a` 이미지 필수.
