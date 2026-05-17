@@ -1,4 +1,7 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
+import { describe, it, expect, vi, beforeAll, afterAll, beforeEach, afterEach } from 'vitest'
+import fs from 'fs'
+import os from 'os'
+import path from 'path'
 
 vi.mock('../TouchHelper', () => ({
   TouchHelper: vi.fn(() => ({
@@ -17,7 +20,7 @@ vi.mock('../TouchHelper', () => ({
 }))
 
 import { WebSocket } from 'ws'
-import { RelayServer } from '@tapflow/relay'
+import { RelayServer, initDb, closeDb } from '@tapflow/relay'
 import { IOSAgent } from '../IOSAgent'
 import { SimctlWrapper } from '../SimctlWrapper'
 // eslint-disable-next-line @typescript-eslint/no-unused-vars
@@ -68,6 +71,17 @@ function mockSimctl(booted = false): SimctlWrapper {
 describe('IOSAgent', () => {
   let relay: RelayServer
   let port: number
+  let tmpDir: string
+
+  beforeAll(() => {
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'tapflow-ios-test-'))
+    initDb(path.join(tmpDir, 'test.db'))
+  })
+
+  afterAll(() => {
+    closeDb()
+    fs.rmSync(tmpDir, { recursive: true })
+  })
 
   beforeEach(async () => {
     relay = new RelayServer({ port: 0 })

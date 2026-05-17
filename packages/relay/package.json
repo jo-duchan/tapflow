@@ -21,7 +21,7 @@
     "README.md"
   ],
   "scripts": {
-    "build": "tsc && cp -r src/migrations dist/migrations",
+    "build": "tsc && rm -rf dist/migrations && cp -r src/migrations dist/migrations",
     "start": "node dist/server.js",
     "test": "vitest run",
     "lint": "eslint src"
