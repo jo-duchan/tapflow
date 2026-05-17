@@ -185,7 +185,7 @@ export class IOSAgent implements DeviceAgent {
   }
 
   private cleanupDeviceState(state: DeviceState): void {
-    state.streamReader?.cancel()
+    void state.streamReader?.cancel()
     state.streamReader = null
     state.touchHelper?.stop()
     state.touchHelper = null
@@ -239,7 +239,7 @@ export class IOSAgent implements DeviceAgent {
       }
     }
 
-    pump()
+    void pump()
   }
 
   private async openStreamWs(state: DeviceState): Promise<WebSocket> {
@@ -269,7 +269,7 @@ export class IOSAgent implements DeviceAgent {
 
     const seq = ++state.bootSeq
 
-    state.streamReader?.cancel()
+    void state.streamReader?.cancel()
     state.streamReader = null
     state.touchHelper?.stop()
     state.touchHelper = null
@@ -332,7 +332,7 @@ export class IOSAgent implements DeviceAgent {
     if (!state) return
 
     state.bootSeq++
-    state.streamReader?.cancel()
+    void state.streamReader?.cancel()
     state.streamReader = null
     state.touchHelper?.stop()
     state.touchHelper = null

@@ -244,7 +244,7 @@ export class AndroidAgent implements DeviceAgent {
       }
     }
 
-    pump()
+    void pump()
   }
 
   private handleRotationNotification(state: DeviceState, rotation: number): void {

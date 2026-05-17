@@ -11,7 +11,7 @@ initDb(dbPath)
 
 const server = new RelayServer({ port, uploadsDir })
 
-server.start().then(() => {
+void server.start().then(() => {
   console.log(`tapflow relay running on port ${port}`)
 })
 

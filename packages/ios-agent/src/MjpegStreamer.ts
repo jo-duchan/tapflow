@@ -27,7 +27,7 @@ export class MjpegStreamer {
           }
         }
 
-        capture()
+        void capture()
         timer = setInterval(capture, this.intervalMs)
       },
       cancel: () => {

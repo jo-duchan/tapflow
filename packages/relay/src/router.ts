@@ -37,7 +37,7 @@ export class Router {
       route.paramNames.forEach((name, i) => { params[name] = match[i + 1] })
       try {
         await route.handler(req, res, params)
-      } catch (err) {
+      } catch (_err) {
         json(res, 500, { error: 'Internal server error' })
       }
       return true
