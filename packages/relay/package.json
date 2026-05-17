@@ -27,6 +27,7 @@
     "lint": "eslint src"
   },
   "dependencies": {
+    "@tapflow/agent-core": "workspace:*",
     "better-sqlite3": "^12.9.0",
     "busboy": "^1.6.0",
     "jsonwebtoken": "^9.0.3",

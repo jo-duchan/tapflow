@@ -6,6 +6,7 @@ import { randomUUID } from 'crypto'
 import { spawnSync } from 'child_process'
 import { WebSocket } from 'ws'
 import type { Device, DeviceAgent } from '@tapflow/agent-core'
+import { createResourceSampler, registerStreamWs } from '@tapflow/agent-core/utils'
 import { SimctlWrapper } from './SimctlWrapper.js'
 import { ScreenCaptureStreamer } from './ScreenCaptureStreamer.js'
 import { MjpegStreamer } from './MjpegStreamer.js'
@@ -42,7 +43,7 @@ export class IOSAgent implements DeviceAgent {
   private deviceStates = new Map<string, DeviceState>()
   private relayUrl: string | null = null
   private resourcesTimer: ReturnType<typeof setInterval> | null = null
-  private lastCpuTimes: { idle: number; total: number } | null = null
+  private readonly resources = createResourceSampler()
 
   constructor(options: IOSAgentOptions = {}, simctl?: SimctlWrapper) {
     this.simctl = simctl ?? new SimctlWrapper()
@@ -129,52 +130,15 @@ export class IOSAgent implements DeviceAgent {
     this.relayUrl = null
   }
 
-  private getCpuPercent(): number {
-    let idle = 0, total = 0
-    for (const cpu of os.cpus()) {
-      const t = cpu.times
-      idle += t.idle
-      total += t.user + t.nice + t.sys + t.idle + t.irq
-    }
-    if (!this.lastCpuTimes) {
-      this.lastCpuTimes = { idle, total }
-      return 0
-    }
-    const idleDiff = idle - this.lastCpuTimes.idle
-    const totalDiff = total - this.lastCpuTimes.total
-    this.lastCpuTimes = { idle, total }
-    if (totalDiff === 0) return 0
-    return Math.min(100, Math.round((1 - idleDiff / totalDiff) * 1000) / 10)
-  }
-
-  // macOS: active + wired + compressed 만 실제 점유 메모리
-  private getMemoryUsage(): { memUsedMB: number; memTotalMB: number } {
-    const memTotalMB = Math.round(os.totalmem() / 1024 / 1024)
-    try {
-      const { stdout, status } = spawnSync('vm_stat', [], { encoding: 'utf8' })
-      if (status !== 0 || !stdout) throw new Error('vm_stat failed')
-      const lines = (stdout as string).split('\n')
-      const pageSize = parseInt(lines[0]?.match(/page size of (\d+)/)?.[1] ?? '16384')
-      const get = (key: string) => {
-        const m = lines.find((l) => l.startsWith(key))?.match(/:\s*(\d+)/)
-        return parseInt(m?.[1] ?? '0')
-      }
-      const pages = get('Pages active') + get('Pages wired down') + get('Pages occupied by compressor')
-      return { memUsedMB: Math.round(pages * pageSize / 1024 / 1024), memTotalMB }
-    } catch {
-      return { memUsedMB: Math.round((os.totalmem() - os.freemem()) / 1024 / 1024), memTotalMB }
-    }
-  }
-
   private reportResources(): void {
     if (!this.ws || this.ws.readyState !== WebSocket.OPEN) return
     const bootedCount = Array.from(this.deviceStates.values()).filter((s) => s.streamReader !== null).length
     const slotsTotal = this.deviceStates.size
-    const { memUsedMB, memTotalMB } = this.getMemoryUsage()
+    const { memUsedMB, memTotalMB } = this.resources.getMemoryUsage()
     this.ws.send(JSON.stringify({
       type: 'agent:resources',
       resources: {
-        cpuPercent: this.getCpuPercent(),
+        cpuPercent: this.resources.getCpuPercent(),
         memUsedMB,
         memTotalMB,
         slotsAvailable: Math.max(0, slotsTotal - bootedCount),
@@ -243,24 +207,10 @@ export class IOSAgent implements DeviceAgent {
   }
 
   private async openStreamWs(state: DeviceState): Promise<WebSocket> {
-    return new Promise((resolve, reject) => {
-      const streamWs = new WebSocket(this.relayUrl!)
-      state.streamWs = streamWs
-
-      streamWs.once('open', () => {
-        streamWs.send(JSON.stringify({ type: 'stream:register', sessionId: state.sessionId }))
-      })
-
-      const onMsg = (data: Buffer) => {
-        const msg = JSON.parse(data.toString())
-        if (msg.type === 'stream:registered') {
-          streamWs.off('message', onMsg)
-          resolve(streamWs)
-        }
-      }
-      streamWs.on('message', onMsg)
-      streamWs.once('error', reject)
-    })
+    const streamWs = new WebSocket(this.relayUrl!)
+    state.streamWs = streamWs
+    await registerStreamWs(streamWs, state.sessionId)
+    return streamWs
   }
 
   private async handleDeviceBoot(sessionId: string, deviceId: string, fullErase = false): Promise<void> {
@@ -540,6 +490,4 @@ export class IOSAgent implements DeviceAgent {
     first?.touchHelper?.touchEnd()
     return Promise.resolve()
   }
-  type(_text: string): Promise<void> { return Promise.resolve() }
-  pressKey(_key: string): Promise<void> { return Promise.resolve() }
 }
