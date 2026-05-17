@@ -53,9 +53,9 @@ Swift 소스 변경 시 **반드시 두 곳을 동시에** 수정한다:
 1. `src/touch-helper.swift` — stdin 프로토콜 변경
 2. `src/TouchHelper.ts` — `write()` 메서드의 byte layout 변경
 
-컴파일:
+컴파일 (출력은 `bin/`):
 ```bash
-cd packages/ios-agent/src && swiftc touch-helper.swift -o touch-helper
+cd packages/ios-agent && swiftc src/touch-helper.swift -o bin/touch-helper
 ```
 
 ---
@@ -75,10 +75,10 @@ Swift 바이너리 인터페이스가 바뀌면 **반드시 두 곳을 동시에
 
 컴파일 후 TypeScript dist 재빌드가 필요하다:
 ```bash
-cd packages/ios-agent/src
-swiftc screencapture-helper.swift -o screencapture-helper \
+cd packages/ios-agent
+swiftc src/screencapture-helper.swift -o bin/screencapture-helper \
   -framework CoreVideo -framework ImageIO
-npm run build --workspace=@tapflow/ios-agent
+pnpm build
 ```
 
 ---
@@ -95,10 +95,10 @@ macOS 접근성(Accessibility) 권한이 필요 없다.
 - `show`: `setHardwareKeyboardEnabled(false)` — 하드웨어 키보드 연결 해제 → 텍스트 필드 포커스 시 소프트웨어 키보드 등장
 - `hide`: `setHardwareKeyboardEnabled(true)` — 하드웨어 키보드 연결 → 소프트웨어 키보드 즉시 숨김
 
-컴파일:
+컴파일 (출력은 `bin/`):
 ```bash
 swiftc packages/ios-agent/src/keyboard-helper.swift \
-  -o packages/ios-agent/src/keyboard-helper \
+  -o packages/ios-agent/bin/keyboard-helper \
   -sdk "$(xcrun --show-sdk-path --sdk macosx)"
 ```
 

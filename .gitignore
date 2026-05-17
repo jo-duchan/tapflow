@@ -12,9 +12,6 @@ packages/relay/public/
 # local work logs (not for contributors)
 .work/
 
-# compiled swift binaries
-packages/ios-agent/src/screencapture-helper
-
 # env
 .env
 .env.local

@@ -1,8 +1,17 @@
 {
   "name": "@tapflow/agent-core",
-  "private": true,
   "version": "0.1.0",
-  "description": "DeviceAgent interface and AgentRegistry",
+  "description": "DeviceAgent interface, AgentRegistry, and shared utilities for tapflow agents",
+  "keywords": ["tapflow", "ios", "android", "simulator", "emulator", "device-agent"],
+  "homepage": "https://github.com/jo-duchan/tapflow",
+  "bugs": "https://github.com/jo-duchan/tapflow/issues",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/jo-duchan/tapflow.git",
+    "directory": "packages/agent-core"
+  },
+  "license": "MIT",
+  "author": "tapflow contributors",
   "type": "module",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
@@ -20,7 +29,17 @@
       "default": "./dist/utils/index.js"
     }
   },
-  "license": "MIT",
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
   "scripts": {
     "build": "tsc",
     "test": "vitest run",

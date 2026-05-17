@@ -1,8 +1,17 @@
 {
   "name": "@tapflow/relay",
-  "private": true,
   "version": "0.1.0",
-  "description": "WebSocket relay server with bundled dashboard — NAT traversal, session routing, JWT auth",
+  "description": "WebSocket relay server for tapflow — NAT traversal, session routing, JWT auth, bundled dashboard",
+  "keywords": ["tapflow", "relay", "websocket", "self-hosted", "ios", "android", "simulator"],
+  "homepage": "https://github.com/jo-duchan/tapflow",
+  "bugs": "https://github.com/jo-duchan/tapflow/issues",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/jo-duchan/tapflow.git",
+    "directory": "packages/relay"
+  },
+  "license": "MIT",
+  "author": "tapflow contributors",
   "type": "module",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
@@ -14,12 +23,18 @@
       "default": "./dist/index.js"
     }
   },
-  "license": "MIT",
   "files": [
     "dist",
     "public",
-    "README.md"
+    "README.md",
+    "LICENSE"
   ],
+  "engines": {
+    "node": ">=20"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
   "scripts": {
     "build": "tsc && rm -rf dist/migrations && cp -r src/migrations dist/migrations",
     "start": "node dist/server.js",
