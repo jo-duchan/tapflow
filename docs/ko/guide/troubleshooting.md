@@ -22,8 +22,6 @@ proxy_read_timeout 3600s;
 
 설정 예시는 [릴레이 배포](/ko/guide/self-hosting#nginx-예시)를 참고하세요.
 
----
-
 ## iOS 시뮬레이터 서비스 버전 불일치 {#ios-simulator-service-version-mismatch}
 
 Xcode를 업데이트한 후 다음과 같은 macOS 알림이 표시될 수 있습니다:
@@ -42,8 +40,6 @@ killall -9 com.apple.CoreSimulator.CoreSimulatorService
 Xcode 업데이트 시 새 버전의 `CoreSimulator.framework`가 설치되지만, 이전 세션에서 기동한 `CoreSimulatorService` 데몬은 그대로 남아 있습니다. `xcrun simctl`이 버전 불일치를 감지하면 tapflow가 데몬을 강제 종료해 `launchd`가 새 버전으로 재시작하도록 유도합니다. 데몬이 멈춰 있어 첫 번째 시도에 종료되지 않으면 위의 수동 명령어가 필요합니다.
 :::
 
----
-
 ## iOS 17 이하 — 한글 입력 시 자모 분리
 
 iOS 17 이하 시뮬레이터에서 한글을 입력하면 음절로 조합되지 않고 자모가 분리됩니다 (예: "안녕" → "ㅇㅏㄴㄴㅕㅇ").
@@ -58,8 +54,6 @@ Xcode → Settings → Platforms에서 iOS 18+ 런타임을 설치합니다.
 - [Flutter #135825](https://github.com/flutter/flutter/issues/135825)
 :::
 
----
-
 ## iOS 빌드 업로드 오류
 
 ### 업로드 시 `400` 오류
@@ -69,8 +63,6 @@ Xcode → Settings → Platforms에서 iOS 18+ 런타임을 설치합니다.
 | `.ipa` 파일 업로드 | `.ipa`는 실제 기기용입니다. `xcodebuild -sdk iphonesimulator`로 빌드 후 `.app` 폴더를 zip으로 압축하세요 |
 | `.app`이 ZIP 루트에 없음 | 압축 해제 시 `MyApp.app`이 바로 나와야 합니다. 상위 폴더로 감싸면 파싱에 실패합니다 |
 | 디바이스용 슬라이스만 포함 | 시뮬레이터용 빌드인지 확인합니다. `lipo -info MyApp.app/MyApp` 출력에 `x86_64` 또는 `arm64`(시뮬레이터)가 있어야 합니다 |
-
----
 
 ## Android 에뮬레이터 문제
 
@@ -82,8 +74,6 @@ AVD가 `google_apis_playstore` 이미지를 사용하고 있는 경우 발생합
 sdkmanager "system-images;android-34;google_apis;arm64-v8a"
 avdmanager create avd -n Pixel_8 -k "system-images;android-34;google_apis;arm64-v8a"
 ```
-
----
 
 ## `tapflow doctor` 실패
 
@@ -110,8 +100,6 @@ export ANDROID_HOME=$HOME/Library/Android/sdk
 export PATH=$PATH:$ANDROID_HOME/platform-tools
 ```
 
----
-
 ## 세션 관련
 
 ### 세션이 자동으로 종료됨
@@ -123,8 +111,6 @@ export PATH=$PATH:$ANDROID_HOME/platform-tools
 - 릴레이와 에이전트 사이의 네트워크 품질을 확인합니다.
 - 대시보드 **Mac Resources** 탭에서 해당 Mac의 CPU·RAM 사용량을 확인합니다.
 - 한 Mac에서 동시에 실행하는 디바이스 수를 줄입니다.
-
----
 
 ## 인증 관련
 
@@ -139,8 +125,6 @@ export PATH=$PATH:$ANDROID_HOME/platform-tools
 ### 비밀번호 재설정 링크가 만료됨
 
 비밀번호 재설정 링크는 **2시간** 후 만료됩니다. Admin이 **Settings → Team → 회원 선택 → 비밀번호 재설정 발송**으로 새 링크를 요청할 수 있습니다.
-
----
 
 ## 로그 확인
 
