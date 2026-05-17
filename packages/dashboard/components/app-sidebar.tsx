@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Link, useLocation, useNavigate } from 'react-router-dom'
 import { useTheme } from 'next-themes'
-import { LayoutGrid, LogOut, Settings, Users, KeyRound, Monitor } from 'lucide-react'
+import { LayoutGrid, LogOut, Settings, Users, KeyRound, Monitor, BookOpen } from 'lucide-react'
 import {
   Sidebar,
   SidebarContent,
@@ -33,6 +33,10 @@ const settingsItems = [
   { label: 'Default', href: '/settings/default', icon: Settings, adminOnly: false },
   { label: 'Team', href: '/settings/team', icon: Users, adminOnly: true },
   { label: 'Tokens', href: '/settings/tokens', icon: KeyRound, adminOnly: true },
+]
+
+const referenceItems = [
+  { label: 'Docs', href: 'https://www.tapflow.dev', icon: BookOpen },
 ]
 
 export function AppSidebar() {
@@ -97,6 +101,24 @@ export function AppSidebar() {
                       <item.icon />
                       <span>{item.label}</span>
                     </Link>
+                  </SidebarMenuButton>
+                </SidebarMenuItem>
+              ))}
+            </SidebarMenu>
+          </SidebarGroupContent>
+        </SidebarGroup>
+
+        <SidebarGroup>
+          <SidebarGroupLabel>Reference</SidebarGroupLabel>
+          <SidebarGroupContent>
+            <SidebarMenu>
+              {referenceItems.map((item) => (
+                <SidebarMenuItem key={item.href}>
+                  <SidebarMenuButton asChild tooltip={item.label}>
+                    <a href={item.href} target="_blank" rel="noopener noreferrer">
+                      <item.icon />
+                      <span>{item.label}</span>
+                    </a>
                   </SidebarMenuButton>
                 </SidebarMenuItem>
               ))}
