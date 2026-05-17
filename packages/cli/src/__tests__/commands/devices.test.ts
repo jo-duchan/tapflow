@@ -88,11 +88,11 @@ describe('cmdDevices', () => {
     expect(joined).toContain('○ Pixel_6')
   })
 
-  it('iOS도 Android도 없으면 "No devices found" 출력', () => {
+  it('iOS도 Android도 없으면 "NO DEVICES FOUND" 배너 출력', () => {
     mockExecSync.mockImplementation(() => { throw new Error('not found') })
 
     cmdDevices()
-    expect(output.join('\n')).toContain('No devices found')
+    expect(output.join('\n')).toContain('NO DEVICES FOUND')
   })
 
   it('iOS와 Android 모두 있으면 두 섹션 모두 출력', () => {

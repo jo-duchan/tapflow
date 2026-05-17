@@ -1,5 +1,4 @@
-const DIM = '\x1b[2m'
-const R = '\x1b[0m'
+import { DIM, RED, R } from '../lib/print.js'
 
 export async function cmdLogs(opts: { relay?: string; lines?: number }): Promise<void> {
   const base = (opts.relay ?? 'http://localhost:4000').replace(/^ws/, 'http')
@@ -9,7 +8,7 @@ export async function cmdLogs(opts: { relay?: string; lines?: number }): Promise
   const res = await fetch(url).catch(() => null)
 
   if (!res || !res.ok) {
-    console.error(`\n  \x1b[31m✗\x1b[0m  Could not reach relay at ${base}\n  Make sure tapflow is running.\n`)
+    console.error(`\n  ${RED}✗${R}  Could not reach relay at ${base}\n  Make sure tapflow is running.\n`)
     process.exit(1)
   }
 

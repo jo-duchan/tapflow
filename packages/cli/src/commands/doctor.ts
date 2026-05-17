@@ -1,10 +1,5 @@
 import { runDoctorChecks, type DoctorCheck } from '../lib/doctor.js'
-
-const GREEN = '\x1b[32m'
-const RED = '\x1b[31m'
-const BOLD = '\x1b[1m'
-const DIM = '\x1b[2m'
-const R = '\x1b[0m'
+import { banner, step, GREEN, RED, BOLD, DIM, R } from '../lib/print.js'
 
 function printChecks(checks: DoctorCheck[]): boolean {
   let hasFailure = false
@@ -39,10 +34,10 @@ export async function cmdDoctor(): Promise<void> {
 
   console.log()
   if (hasFailure) {
-    console.log(`  ${RED}Some checks failed.${R} Fix the issues above before running \`tapflow start\`.`)
+    banner('error', 'SOME CHECKS FAILED', ['Fix the issues above before running `tapflow start`.'])
     process.exit(1)
   } else {
-    console.log(`  ${GREEN}All checks passed.${R}`)
+    step('All checks passed.')
+    console.log()
   }
-  console.log()
 }

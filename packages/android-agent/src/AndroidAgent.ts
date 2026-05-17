@@ -31,6 +31,8 @@ interface DeviceState {
 
 export interface AndroidAgentOptions {
   fps?: number
+  /** AVD name or emulator serial to expose. Omit to expose all detected devices. */
+  deviceFilter?: string
 }
 
 export class AndroidAgent implements DeviceAgent {
@@ -42,9 +44,12 @@ export class AndroidAgent implements DeviceAgent {
   private resourcesTimer: ReturnType<typeof setInterval> | null = null
   private lastCpuTimes: { idle: number; total: number } | null = null
 
-  constructor(_options: AndroidAgentOptions = {}, adb?: AdbWrapper) {
+  private readonly deviceFilter?: string
+
+  constructor(options: AndroidAgentOptions = {}, adb?: AdbWrapper) {
     this.adb = adb ?? new AdbWrapper()
     this.launcher = new EmulatorLauncher()
+    this.deviceFilter = options.deviceFilter
   }
 
   get sessionId(): string | null {
@@ -54,7 +59,10 @@ export class AndroidAgent implements DeviceAgent {
 
   async connect(relayUrl: string): Promise<void> {
     this.relayUrl = relayUrl
-    const devices = await this.adb.listDevices()
+    const allDevices = await this.adb.listDevices()
+    const devices = this.deviceFilter
+      ? allDevices.filter((d) => d.name === this.deviceFilter || d.id === this.deviceFilter)
+      : allDevices
 
     return new Promise((resolve, reject) => {
       const ws = new WebSocket(relayUrl)

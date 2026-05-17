@@ -1,4 +1,5 @@
 import { execSync } from 'node:child_process'
+import { banner } from '../lib/print.js'
 
 interface SimDevice {
   udid: string
@@ -78,7 +79,7 @@ export function cmdDevices(): void {
   }
 
   if (sections.length === 0) {
-    console.log('No devices found. Run `tapflow doctor` to diagnose.')
+    banner('error', 'NO DEVICES FOUND', ['Run `tapflow doctor` to diagnose your environment.'])
     return
   }
 

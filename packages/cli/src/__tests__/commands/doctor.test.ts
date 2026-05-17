@@ -42,7 +42,7 @@ describe('cmdDoctor', () => {
 
     await expect(cmdDoctor()).rejects.toThrow('process.exit')
     expect(exitSpy).toHaveBeenCalledWith(1)
-    expect(logLines.join('\n')).toContain('Some checks failed')
+    expect(logLines.join('\n')).toContain('SOME CHECKS FAILED')
   })
 
   it('iOS 섹션 있으면 iOS 헤더 출력', async () => {

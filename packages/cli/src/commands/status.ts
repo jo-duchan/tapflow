@@ -1,21 +1,17 @@
 import { WebSocket } from 'ws'
-
-const DIM = '\x1b[2m'
-const BOLD = '\x1b[1m'
-const GREEN = '\x1b[32m'
-const YELLOW = '\x1b[33m'
-const R = '\x1b[0m'
+import { DIM, BOLD, GREEN, YELLOW, RED, R } from '../lib/print.js'
 
 export async function cmdStatus(opts: { relay?: string }): Promise<void> {
   const relayUrl = (opts.relay ?? 'ws://localhost:4000').replace(/^http/, 'ws')
 
   console.log(`\n  Connecting to ${relayUrl}…\n`)
+  console.log(`  ${DIM}● agent  ◉ in use  ○ idle${R}\n`)
 
   await new Promise<void>((resolve, reject) => {
     const ws = new WebSocket(relayUrl)
     const timeout = setTimeout(() => {
       ws.terminate()
-      reject(new Error(`Could not connect to relay at ${relayUrl}`))
+      reject(new Error(`Could not connect to relay at ${relayUrl} (5s timeout)`))
     }, 5000)
 
     ws.on('open', () => ws.send(JSON.stringify({ type: 'agents:list' })))
@@ -61,7 +57,7 @@ export async function cmdStatus(opts: { relay?: string }): Promise<void> {
       reject(err)
     })
   }).catch((err: Error) => {
-    console.error(`\n  ${'\x1b[31m'}✗${R}  ${err.message}\n`)
+    console.error(`\n  ${RED}✗${R}  ${err.message}\n`)
     process.exit(1)
   })
 }
