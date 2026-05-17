@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach } from 'vitest'
 import { AgentRegistry } from '../AgentRegistry'
 import type { DeviceAgent } from '../DeviceAgent'
-import type { Device, Point } from '../types'
+import type { Device } from '../types'
 
 class MockAgent implements DeviceAgent {
   listDevices(): Promise<Device[]> { return Promise.resolve([]) }
@@ -10,10 +10,10 @@ class MockAgent implements DeviceAgent {
   installApp(_path: string): Promise<void> { return Promise.resolve() }
   launchApp(_bundleId: string): Promise<void> { return Promise.resolve() }
   screenshot(): Promise<Buffer> { return Promise.resolve(Buffer.alloc(0)) }
-  stream(): ReadableStream { return new ReadableStream() }
-  tap(_x: number, _y: number): Promise<void> { return Promise.resolve() }
-  swipe(_from: Point, _to: Point): Promise<void> { return Promise.resolve() }
-  type(_text: string): Promise<void> { return Promise.resolve() }
+  stream(): ReadableStream<Buffer> { return new ReadableStream() }
+  touchStart(_x: number, _y: number): void {}
+  touchMove(_x: number, _y: number): Promise<void> { return Promise.resolve() }
+  touchEnd(): Promise<void> { return Promise.resolve() }
 }
 
 describe('AgentRegistry', () => {

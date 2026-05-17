@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach } from 'vitest'
+import { describe, it, expect, vi, beforeAll, afterAll, beforeEach, afterEach } from 'vitest'
 import fs from 'fs'
 import os from 'os'
 import path from 'path'
@@ -357,7 +357,8 @@ describe('RelayServer', () => {
     streamA.send(Buffer.from([0xaa, 0xbb]))
     const received = await framePromise
     expect(received).toEqual(Buffer.from([0xaa, 0xbb]))
-    await new Promise((r) => setTimeout(r, 20))
+    // framePromise resolved → relay already made the routing decision in the same event loop tick
+    await new Promise<void>((r) => setImmediate(r))
     expect(browserBGotBinary).toBe(false)
 
     agent.close()
@@ -428,15 +429,13 @@ describe('RelayServer', () => {
     await waitForMessage(agent)
     agent.close()
 
-    // Wait for close to propagate
-    await new Promise((r) => setTimeout(r, 50))
-
     const observer = new WebSocket(`ws://localhost:${port}`)
     await waitForOpen(observer)
-    observer.send(JSON.stringify({ type: 'agents:list' }))
-    const listed = await waitForMessage(observer)
-    expect(listed.sessions).toHaveLength(0)
-
+    await vi.waitFor(async () => {
+      observer.send(JSON.stringify({ type: 'agents:list' }))
+      const listed = await waitForMessage(observer)
+      expect(listed.sessions).toHaveLength(0)
+    }, { timeout: 2000 })
     observer.close()
   })
 
@@ -450,14 +449,15 @@ describe('RelayServer', () => {
       type: 'agent:resources',
       resources: { cpuPercent: 25, memUsedMB: 4096, memTotalMB: 16384, slotsAvailable: 2, slotsTotal: 3, reportedAt: 1000 },
     }))
-    await new Promise((r) => setTimeout(r, 10))
 
     const observer = new WebSocket(`ws://localhost:${port}`)
     await waitForOpen(observer)
-    observer.send(JSON.stringify({ type: 'agents:list' }))
-    const listed = await waitForMessage(observer)
-    expect(listed.sessions![0].resources?.cpuPercent).toBe(25)
-    expect(listed.sessions![0].resources?.slotsTotal).toBe(3)
+    await vi.waitFor(async () => {
+      observer.send(JSON.stringify({ type: 'agents:list' }))
+      const listed = await waitForMessage(observer)
+      expect(listed.sessions![0].resources?.cpuPercent).toBe(25)
+      expect(listed.sessions![0].resources?.slotsTotal).toBe(3)
+    }, { timeout: 500 })
 
     agent.close()
     observer.close()
@@ -472,15 +472,15 @@ describe('RelayServer', () => {
       type: 'agent:resources',
       resources: { cpuPercent: 50, memUsedMB: 8000, memTotalMB: 16000, slotsAvailable: 3, slotsTotal: 3, reportedAt: 1000 },
     }))
-    await new Promise((r) => setTimeout(r, 10))
     agent.close()
-    await new Promise((r) => setTimeout(r, 50))
 
     const observer = new WebSocket(`ws://localhost:${port}`)
     await waitForOpen(observer)
-    observer.send(JSON.stringify({ type: 'agents:list' }))
-    const listed = await waitForMessage(observer)
-    expect(listed.sessions).toHaveLength(0)
+    await vi.waitFor(async () => {
+      observer.send(JSON.stringify({ type: 'agents:list' }))
+      const listed = await waitForMessage(observer)
+      expect(listed.sessions).toHaveLength(0)
+    }, { timeout: 2000 })
 
     observer.close()
   })
@@ -531,27 +531,26 @@ describe('RelayServer', () => {
       await waitForOpen(agentA)
       agentA.send(JSON.stringify({ type: 'agent:register', agentName: 'Mac-A', devices: [{ id: 'a1', name: 'iPhone', platform: 'ios', status: 'shutdown' }] }))
       await waitForMessage(agentA)
-      agentA.send(JSON.stringify({ type: 'agent:resources', resources: { cpuPercent: 30, memUsedMB: 4000, memTotalMB: 16000, slotsAvailable: 1, slotsTotal: 1, reportedAt: Date.now() } }))
+      agentA.send(JSON.stringify({ type: 'agent:resources', resources: { cpuPercent: 30, memUsedMB: 4000, memTotalMB: 16000, slotsAvailable: 1, slotsTotal: 1, reportedAt: 1000 } }))
 
       const agentB = new WebSocket(`ws://localhost:${port}`)
       await waitForOpen(agentB)
       agentB.send(JSON.stringify({ type: 'agent:register', agentName: 'Mac-B', devices: [{ id: 'b1', name: 'iPhone', platform: 'ios', status: 'shutdown' }] }))
       await waitForMessage(agentB)
-      agentB.send(JSON.stringify({ type: 'agent:resources', resources: { cpuPercent: 70, memUsedMB: 12000, memTotalMB: 16000, slotsAvailable: 1, slotsTotal: 1, reportedAt: Date.now() } }))
-
-      await new Promise((r) => setTimeout(r, 20))
+      agentB.send(JSON.stringify({ type: 'agent:resources', resources: { cpuPercent: 70, memUsedMB: 12000, memTotalMB: 16000, slotsAvailable: 1, slotsTotal: 1, reportedAt: 1000 } }))
 
       const observer = new WebSocket(`ws://localhost:${port}`)
       await waitForOpen(observer)
-      observer.send(JSON.stringify({ type: 'agents:list' }))
-      const listed = await waitForMessage(observer)
-
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const sessions = listed.sessions as any[]
-      const macA = sessions.find((s) => s.agentName === 'Mac-A')
-      const macB = sessions.find((s) => s.agentName === 'Mac-B')
-      expect(macA.resources?.cpuPercent).toBe(30)
-      expect(macB.resources?.cpuPercent).toBe(70)
+      await vi.waitFor(async () => {
+        observer.send(JSON.stringify({ type: 'agents:list' }))
+        const listed = await waitForMessage(observer)
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const sessions = listed.sessions as any[]
+        const macA = sessions.find((s: { agentName: string }) => s.agentName === 'Mac-A')
+        const macB = sessions.find((s: { agentName: string }) => s.agentName === 'Mac-B')
+        expect(macA?.resources?.cpuPercent).toBe(30)
+        expect(macB?.resources?.cpuPercent).toBe(70)
+      }, { timeout: 500 })
 
       agentA.close()
       agentB.close()
@@ -570,17 +569,17 @@ describe('RelayServer', () => {
       await waitForMessage(agentB)
 
       agentA.close()
-      await new Promise((r) => setTimeout(r, 50))
 
       const observer = new WebSocket(`ws://localhost:${port}`)
       await waitForOpen(observer)
-      observer.send(JSON.stringify({ type: 'agents:list' }))
-      const listed = await waitForMessage(observer)
-
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const sessions = listed.sessions as any[]
-      expect(sessions).toHaveLength(1)
-      expect(sessions[0].agentName).toBe('Mac-B')
+      await vi.waitFor(async () => {
+        observer.send(JSON.stringify({ type: 'agents:list' }))
+        const listed = await waitForMessage(observer)
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const sessions = listed.sessions as any[]
+        expect(sessions).toHaveLength(1)
+        expect(sessions[0].agentName).toBe('Mac-B')
+      }, { timeout: 2000 })
 
       agentB.close()
       observer.close()
@@ -614,7 +613,8 @@ describe('RelayServer', () => {
   })
 
   it('browser reconnect before timeout cancels shutdown', async () => {
-    const shortServer = new RelayServer({ port: 0, idleTimeoutMs: 200 })
+    // idleTimeoutMs 500ms — reconnect at 60ms gives a 440ms margin before shutdown fires
+    const shortServer = new RelayServer({ port: 0, idleTimeoutMs: 500 })
     await shortServer.start()
     const shortPort = (shortServer.address() as { port: number }).port
 
@@ -629,22 +629,22 @@ describe('RelayServer', () => {
     browser.send(JSON.stringify({ type: 'session:start', sessionId }))
     await waitForMessage(browser)
 
-    // Disconnect and immediately reconnect (within timeout)
+    // Disconnect and reconnect before the 500ms timeout
     browser.close()
-    await new Promise((r) => setTimeout(r, 40))
+    await new Promise((r) => setTimeout(r, 60))
 
     const browser2 = new WebSocket(`ws://localhost:${shortPort}`)
     await waitForOpen(browser2)
     browser2.send(JSON.stringify({ type: 'session:start', sessionId }))
     await waitForMessage(browser2) // session:joined
 
-    // Wait past the original timeout — no shutdown should arrive
+    // Attach shutdown listener, then wait well past the original timeout window
     let gotShutdown = false
     agent.on('message', (d) => {
       const msg = JSON.parse(d.toString())
       if (msg.type === 'device:shutdown') gotShutdown = true
     })
-    await new Promise((r) => setTimeout(r, 300))
+    await new Promise((r) => setTimeout(r, 700))
     expect(gotShutdown).toBe(false)
 
     agent.close()
@@ -653,7 +653,8 @@ describe('RelayServer', () => {
   })
 
   it('idle timeout after agent already disconnected — no error thrown', async () => {
-    const shortServer = new RelayServer({ port: 0, idleTimeoutMs: 80 })
+    // idleTimeoutMs 50ms — wait 400ms gives 8× margin, reliable on slow CI
+    const shortServer = new RelayServer({ port: 0, idleTimeoutMs: 50 })
     await shortServer.start()
     const shortPort = (shortServer.address() as { port: number }).port
 
@@ -668,12 +669,10 @@ describe('RelayServer', () => {
     browser.send(JSON.stringify({ type: 'session:start', sessionId }))
     await waitForMessage(browser)
 
-    // Both close — agent first
+    // Both close — agent first; idle timer fires at ~50ms; wait 400ms past that
     agent.close()
     browser.close()
-
-    // Wait past timeout — no crash expected
-    await new Promise((r) => setTimeout(r, 150))
+    await new Promise((r) => setTimeout(r, 400))
     await shortServer.stop()
   })
 
@@ -695,25 +694,26 @@ describe('RelayServer', () => {
     await waitForType(browser, 'device:ready')
 
     browser.close()
-    await new Promise((r) => setTimeout(r, 30))
+    // Poll until relay has cleared browser from session (busy=false)
+    // so the replay logic correctly re-sends device:ready to browser2
+    const tmpObs = new WebSocket(`ws://localhost:${port}`)
+    await waitForOpen(tmpObs)
+    await vi.waitFor(async () => {
+      tmpObs.send(JSON.stringify({ type: 'agents:list' }))
+      const listed = await waitForMessage(tmpObs)
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      expect((listed.sessions as any[])[0].devices[0].busy).toBe(false)
+    }, { timeout: 2000 })
+    tmpObs.close()
 
-    // Browser reconnects
+    // Browser reconnects — set up both listeners before sending to avoid race
     const browser2 = new WebSocket(`ws://localhost:${port}`)
     await waitForOpen(browser2)
+    const joinedPromise = waitForType(browser2, 'session:joined')
+    const readyPromise = waitForType(browser2, 'device:ready')
     browser2.send(JSON.stringify({ type: 'session:start', sessionId }))
-    const msgs: string[] = []
-    await new Promise<void>((resolve) => {
-      let received = 0
-      browser2.on('message', (data) => {
-        const msg = JSON.parse(data.toString())
-        msgs.push(msg.type)
-        received++
-        if (received >= 2) resolve()
-      })
-      setTimeout(resolve, 200)
-    })
-    expect(msgs).toContain('session:joined')
-    expect(msgs).toContain('device:ready')
+    await joinedPromise
+    await readyPromise
 
     agent.close()
     browser2.close()

@@ -11,13 +11,25 @@ function isCoreSimulatorVersionMismatch(err: unknown): boolean {
 }
 
 async function restartCoreSimulatorService(): Promise<void> {
-  await execFileAsync('killall', ['com.apple.CoreSimulator.CoreSimulatorService']).catch(() => {})
-  await new Promise<void>((r) => setTimeout(r, 2000))
+  // SIGKILL (-9) guarantees the process dies even if it ignores SIGTERM
+  await execFileAsync('killall', ['-9', 'com.apple.CoreSimulator.CoreSimulatorService']).catch(() => {})
+  await new Promise<void>((r) => setTimeout(r, 3000))
 }
 
 export interface SimctlRunner {
   exec(...args: string[]): Promise<string>
   execBinary(...args: string[]): Promise<Buffer>
+}
+
+const CORE_SIM_DOCS_URL = 'https://tapflow.dev/guide/troubleshooting#ios-simulator-service-version-mismatch'
+
+function coreSimServiceError(): Error {
+  return new Error(
+    'CoreSimulatorService version mismatch — the service could not be recovered automatically.\n' +
+    'Run the following command and try again:\n\n' +
+    '  killall -9 com.apple.CoreSimulator.CoreSimulatorService\n\n' +
+    `See ${CORE_SIM_DOCS_URL}`,
+  )
 }
 
 export const defaultRunner: SimctlRunner = {
@@ -29,8 +41,12 @@ export const defaultRunner: SimctlRunner = {
       if (!isCoreSimulatorVersionMismatch(err)) throw err
       console.error('[agent] CoreSimulatorService version mismatch — restarting service and retrying')
       await restartCoreSimulatorService()
-      const { stdout } = await execFileAsync('xcrun', ['simctl', ...args])
-      return stdout
+      try {
+        const { stdout } = await execFileAsync('xcrun', ['simctl', ...args])
+        return stdout
+      } catch {
+        throw coreSimServiceError()
+      }
     }
   },
   async execBinary(...args: string[]): Promise<Buffer> {
@@ -41,8 +57,12 @@ export const defaultRunner: SimctlRunner = {
       if (!isCoreSimulatorVersionMismatch(err)) throw err
       console.error('[agent] CoreSimulatorService version mismatch — restarting service and retrying')
       await restartCoreSimulatorService()
-      const { stdout } = await execFileAsync('xcrun', ['simctl', ...args], { encoding: 'buffer' })
-      return stdout
+      try {
+        const { stdout } = await execFileAsync('xcrun', ['simctl', ...args], { encoding: 'buffer' })
+        return stdout
+      } catch {
+        throw coreSimServiceError()
+      }
     }
   },
 }

@@ -1,4 +1,7 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
+import { describe, it, expect, vi, beforeAll, afterAll, beforeEach, afterEach } from 'vitest'
+import fs from 'fs'
+import os from 'os'
+import path from 'path'
 
 vi.mock('../TouchHelper', () => ({
   TouchHelper: vi.fn(() => ({
@@ -17,7 +20,7 @@ vi.mock('../TouchHelper', () => ({
 }))
 
 import { WebSocket } from 'ws'
-import { RelayServer } from '@tapflow/relay'
+import { RelayServer, initDb, closeDb } from '@tapflow/relay'
 import { IOSAgent } from '../IOSAgent'
 import { SimctlWrapper } from '../SimctlWrapper'
 // eslint-disable-next-line @typescript-eslint/no-unused-vars
@@ -68,6 +71,17 @@ function mockSimctl(booted = false): SimctlWrapper {
 describe('IOSAgent', () => {
   let relay: RelayServer
   let port: number
+  let tmpDir: string
+
+  beforeAll(() => {
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'tapflow-ios-test-'))
+    initDb(path.join(tmpDir, 'test.db'))
+  })
+
+  afterAll(() => {
+    closeDb()
+    fs.rmSync(tmpDir, { recursive: true })
+  })
 
   beforeEach(async () => {
     relay = new RelayServer({ port: 0 })
@@ -144,8 +158,7 @@ describe('IOSAgent', () => {
         sessionId: agent.sessionId,
         payload: { f0: { x: 0.3, y: 0.5 }, f1: { x: 0.7, y: 0.5 } },
       }))
-      await new Promise((r) => setTimeout(r, 50))
-      expect(thInstance.pinchStart).toHaveBeenCalledWith(0.3, 0.5, 0.7, 0.5)
+      await vi.waitFor(() => expect(thInstance.pinchStart).toHaveBeenCalledWith(0.3, 0.5, 0.7, 0.5), { timeout: 500 })
       agent.disconnect()
       browser.close()
     })
@@ -157,8 +170,7 @@ describe('IOSAgent', () => {
         sessionId: agent.sessionId,
         payload: { f0: { x: 0.2, y: 0.5 }, f1: { x: 0.8, y: 0.5 } },
       }))
-      await new Promise((r) => setTimeout(r, 50))
-      expect(thInstance.pinchMove).toHaveBeenCalledWith(0.2, 0.5, 0.8, 0.5)
+      await vi.waitFor(() => expect(thInstance.pinchMove).toHaveBeenCalledWith(0.2, 0.5, 0.8, 0.5), { timeout: 500 })
       agent.disconnect()
       browser.close()
     })
@@ -166,8 +178,7 @@ describe('IOSAgent', () => {
     it('input:pinch:end calls touchHelper.pinchEnd', async () => {
       const { browser, agent, thInstance } = await setupPinchSession()
       browser.send(JSON.stringify({ type: 'input:pinch:end', sessionId: agent.sessionId }))
-      await new Promise((r) => setTimeout(r, 50))
-      expect(thInstance.pinchEnd).toHaveBeenCalled()
+      await vi.waitFor(() => expect(thInstance.pinchEnd).toHaveBeenCalled(), { timeout: 500 })
       agent.disconnect()
       browser.close()
     })
@@ -353,8 +364,7 @@ describe('IOSAgent', () => {
     it('input:key Backspace calls touchHelper.sendKey with HID usage 0x2A', async () => {
       const { browser, agent, thInstance } = await setupSession()
       browser.send(JSON.stringify({ type: 'input:key', sessionId: agent.sessionId, payload: { code: 'Backspace', modifiers: 0 } }))
-      await new Promise((r) => setTimeout(r, 50))
-      expect(thInstance.sendKey).toHaveBeenCalledWith(HID_BACKSPACE, 0)
+      await vi.waitFor(() => expect(thInstance.sendKey).toHaveBeenCalledWith(HID_BACKSPACE, 0), { timeout: 500 })
       agent.disconnect()
       browser.close()
     })
@@ -362,8 +372,7 @@ describe('IOSAgent', () => {
     it('input:key KeyA calls touchHelper.sendKey with HID usage 0x04', async () => {
       const { browser, agent, thInstance } = await setupSession()
       browser.send(JSON.stringify({ type: 'input:key', sessionId: agent.sessionId, payload: { code: 'KeyA', modifiers: 0 } }))
-      await new Promise((r) => setTimeout(r, 50))
-      expect(thInstance.sendKey).toHaveBeenCalledWith(HID_KEY_A, 0)
+      await vi.waitFor(() => expect(thInstance.sendKey).toHaveBeenCalledWith(HID_KEY_A, 0), { timeout: 500 })
       agent.disconnect()
       browser.close()
     })
@@ -371,17 +380,19 @@ describe('IOSAgent', () => {
     it('input:key with Shift modifier forwards modifier bits', async () => {
       const { browser, agent, thInstance } = await setupSession()
       browser.send(JSON.stringify({ type: 'input:key', sessionId: agent.sessionId, payload: { code: 'KeyA', modifiers: 0x02 } }))
-      await new Promise((r) => setTimeout(r, 50))
-      expect(thInstance.sendKey).toHaveBeenCalledWith(HID_KEY_A, 0x02)
+      await vi.waitFor(() => expect(thInstance.sendKey).toHaveBeenCalledWith(HID_KEY_A, 0x02), { timeout: 500 })
       agent.disconnect()
       browser.close()
     })
 
     it('input:key unknown code is silently dropped', async () => {
       const { browser, agent, thInstance } = await setupSession()
+      // Send unknown key first, then a known key as a sentinel.
+      // WebSocket messages are ordered — when KeyA is processed, UnknownKey was already processed.
       browser.send(JSON.stringify({ type: 'input:key', sessionId: agent.sessionId, payload: { code: 'UnknownKey', modifiers: 0 } }))
-      await new Promise((r) => setTimeout(r, 50))
-      expect(thInstance.sendKey).not.toHaveBeenCalled()
+      browser.send(JSON.stringify({ type: 'input:key', sessionId: agent.sessionId, payload: { code: 'KeyA', modifiers: 0 } }))
+      await vi.waitFor(() => expect(thInstance.sendKey).toHaveBeenCalledTimes(1), { timeout: 500 })
+      expect(thInstance.sendKey).toHaveBeenCalledWith(HID_KEY_A, 0)
       agent.disconnect()
       browser.close()
     })
@@ -404,8 +415,7 @@ describe('IOSAgent', () => {
       const sim = mockSimctl(true)
       const { browser, agent } = await setupSession(sim)
       browser.send(JSON.stringify({ type: 'input:keyboard:toggle', sessionId: agent.sessionId }))
-      await new Promise((r) => setTimeout(r, 50))
-      expect(sim.showSoftwareKeyboard).toHaveBeenCalledWith('dev-1')
+      await vi.waitFor(() => expect(sim.showSoftwareKeyboard).toHaveBeenCalledWith('dev-1'), { timeout: 500 })
       expect(sim.hideSoftwareKeyboard).not.toHaveBeenCalled()
       agent.disconnect()
       browser.close()
@@ -415,11 +425,10 @@ describe('IOSAgent', () => {
       const sim = mockSimctl(true)
       const { browser, agent } = await setupSession(sim)
       browser.send(JSON.stringify({ type: 'input:keyboard:toggle', sessionId: agent.sessionId }))
-      await new Promise((r) => setTimeout(r, 50))
+      await vi.waitFor(() => expect(sim.showSoftwareKeyboard).toHaveBeenCalledTimes(1), { timeout: 500 })
       browser.send(JSON.stringify({ type: 'input:keyboard:toggle', sessionId: agent.sessionId }))
-      await new Promise((r) => setTimeout(r, 50))
+      await vi.waitFor(() => expect(sim.hideSoftwareKeyboard).toHaveBeenCalledWith('dev-1'), { timeout: 500 })
       expect(sim.showSoftwareKeyboard).toHaveBeenCalledTimes(1)
-      expect(sim.hideSoftwareKeyboard).toHaveBeenCalledWith('dev-1')
       agent.disconnect()
       browser.close()
     })
@@ -429,14 +438,12 @@ describe('IOSAgent', () => {
       const { browser, agent } = await setupSession(sim)
       // show keyboard
       browser.send(JSON.stringify({ type: 'input:keyboard:toggle', sessionId: agent.sessionId }))
-      await new Promise((r) => setTimeout(r, 50))
+      await vi.waitFor(() => expect(sim.showSoftwareKeyboard).toHaveBeenCalledTimes(1), { timeout: 500 })
       // hardware key press → keyboard auto-hides in iOS, state resets
       browser.send(JSON.stringify({ type: 'input:key', sessionId: agent.sessionId, payload: { code: 'KeyA', modifiers: 0 } }))
-      await new Promise((r) => setTimeout(r, 50))
       // next toggle should show again (not hide)
       browser.send(JSON.stringify({ type: 'input:keyboard:toggle', sessionId: agent.sessionId }))
-      await new Promise((r) => setTimeout(r, 50))
-      expect(sim.showSoftwareKeyboard).toHaveBeenCalledTimes(2)
+      await vi.waitFor(() => expect(sim.showSoftwareKeyboard).toHaveBeenCalledTimes(2), { timeout: 500 })
       agent.disconnect()
       browser.close()
     })

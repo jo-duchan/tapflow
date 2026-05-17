@@ -1,8 +1,18 @@
 {
   "name": "@tapflow/ios-agent",
-  "private": true,
   "version": "0.1.0",
-  "description": "iOS simulator agent using xcrun simctl and WebDriverAgent",
+  "description": "iOS simulator agent for tapflow — xcrun simctl control and screen streaming",
+  "keywords": ["tapflow", "ios", "simulator", "xcrun", "simctl", "streaming", "qa"],
+  "homepage": "https://github.com/jo-duchan/tapflow",
+  "bugs": "https://github.com/jo-duchan/tapflow/issues",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/jo-duchan/tapflow.git",
+    "directory": "packages/ios-agent"
+  },
+  "license": "MIT",
+  "author": "tapflow contributors",
+  "os": ["darwin"],
   "type": "module",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
@@ -14,7 +24,18 @@
       "default": "./dist/index.js"
     }
   },
-  "license": "MIT",
+  "files": [
+    "dist",
+    "bin",
+    "README.md",
+    "LICENSE"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
   "scripts": {
     "build": "tsc",
     "test": "vitest run",
@@ -30,10 +51,5 @@
     "@types/ws": "^8.0.0",
     "typescript": "^5.0.0",
     "vitest": "^2.0.0"
-  },
-  "engines": {
-    "os": [
-      "darwin"
-    ]
   }
 }

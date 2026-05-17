@@ -18,4 +18,10 @@
 ## HOW NOT
 
 - 플랫폼 특화 타입(xcrun 응답, ADB 출력 등)을 이 패키지에 넣지 않는다.
-- 런타임 의존성을 추가하지 않는다 (순수 타입 + 레지스트리만).
+- `DeviceAgent` 인터페이스에 플랫폼 특화 메서드를 추가하지 않는다.
+- 런타임 의존성은 구현체 공통 유틸(`src/utils/`)에 한해 허용한다. 인터페이스·레지스트리 코드는 의존성 금지.
+
+## 디렉터리 구조
+
+- `src/` — `DeviceAgent` 인터페이스, `AgentRegistry`, 공유 타입
+- `src/utils/` — ios-agent·android-agent 공통 구현 유틸. 현재: `createResourceSampler` (CPU·메모리 샘플링). 인터페이스에 노출하지 않는다.

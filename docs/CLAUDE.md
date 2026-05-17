@@ -131,7 +131,19 @@ level-1 항목에도 표시하려면 명시적으로 추가해야 한다.
 
 ---
 
-### 7. 코드블럭 `.line` span의 display
+### 7. 섹션 구분에 `---` 사용 금지
+
+VitePress는 `h2`에 기본으로 `border-top: 1px solid var(--vp-c-divider)`를 적용한다.
+`---`(`<hr>`)를 h2 앞에 쓰면 `<hr>` + h2 border-top이 겹쳐 구분선이 두 줄로 렌더링된다.
+
+- ❌ 섹션 사이에 `---` 추가
+- ✅ `---` 없이 `## Section` 바로 작성 — h2 border-top이 구분선 역할을 함
+
+기존 파일을 편집할 때 `---`가 있으면 제거한다. 다른 docs 페이지(`ios-agent.md`, `getting-started.md` 등)는 모두 `---`를 쓰지 않는다.
+
+---
+
+### 8. 코드블럭 `.line` span의 display
 
 `.line` span에 `display: block` 을 주면 `<pre>` 안의 `\n` 텍스트 노드와 겹쳐 빈 줄이 생기고 코드블럭 높이가 깨진다.
 `display: inline-block; width: 100%` 을 사용한다.

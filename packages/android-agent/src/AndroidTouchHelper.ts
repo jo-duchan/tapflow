@@ -46,7 +46,7 @@ export class AndroidTouchHelper {
     if (!this.touching) return
     this.touching = false
     const isTap = Math.abs(this.lastX - this.startX) < 0.01 && Math.abs(this.lastY - this.startY) < 0.01
-    this.getScreenSize().then(({ width, height }) => {
+    void this.getScreenSize().then(({ width, height }) => {
       if (isTap) {
         const px = Math.round(this.startX * width)
         const py = Math.round(this.startY * height)

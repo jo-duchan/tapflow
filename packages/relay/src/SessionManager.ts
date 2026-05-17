@@ -1,5 +1,6 @@
 import { randomUUID } from 'crypto'
-import type { WebSocket } from 'ws'
+import { WebSocket } from 'ws'
+import type { DeviceStatus } from '@tapflow/agent-core'
 import type { AgentResources, SessionInfo } from './types.js'
 
 export interface Session {
@@ -12,7 +13,7 @@ export interface Session {
   deviceId: string
   deviceName: string
   devicePlatform: string
-  deviceStatus: string
+  deviceStatus: DeviceStatus
   deviceOsVersion?: string
   chromeData?: unknown
   deviceInfo?: { deviceName: string; osVersion: string }
@@ -26,6 +27,9 @@ const DEFAULT_IDLE_TIMEOUT_MS = parseInt(process.env['IDLE_TIMEOUT_MS'] ?? Strin
 export class SessionManager {
   private sessions = new Map<string, Session>()
   private agentResources = new Map<WebSocket, AgentResources>()
+  private agentSocketIndex = new Map<WebSocket, Set<string>>()
+  private streamSocketIndex = new Map<WebSocket, Session>()
+  private browserSocketIndex = new Map<WebSocket, Session>()
   private readonly idleTimeoutMs: number
 
   constructor(options: { idleTimeoutMs?: number } = {}) {
@@ -33,6 +37,7 @@ export class SessionManager {
   }
 
   create(agentSocket: WebSocket, devices: RawDevice[] = [], agentName?: string, agentPlatform?: string): string[] {
+    const agentIds = this.agentSocketIndex.get(agentSocket) ?? new Set<string>()
     return devices.map((d) => {
       const id = randomUUID()
       this.sessions.set(id, {
@@ -45,10 +50,12 @@ export class SessionManager {
         deviceId: d.id,
         deviceName: d.name,
         devicePlatform: d.platform,
-        deviceStatus: d.status,
+        deviceStatus: d.status as DeviceStatus,
         deviceOsVersion: d.osVersion,
         idleTimer: null,
       })
+      agentIds.add(id)
+      this.agentSocketIndex.set(agentSocket, agentIds)
       return id
     })
   }
@@ -58,43 +65,50 @@ export class SessionManager {
   }
 
   getAllByAgentSocket(ws: WebSocket): Session[] {
-    return Array.from(this.sessions.values()).filter((s) => s.agentSocket === ws)
+    const ids = this.agentSocketIndex.get(ws)
+    if (!ids) return []
+    return Array.from(ids).map((id) => this.sessions.get(id)).filter((s): s is Session => s !== undefined)
   }
 
   getByStreamSocket(ws: WebSocket): Session | undefined {
-    for (const session of this.sessions.values()) {
-      if (session.streamSocket === ws) return session
-    }
-    return undefined
+    return this.streamSocketIndex.get(ws)
   }
 
   getByBrowserSocket(ws: WebSocket): Session | undefined {
-    for (const session of this.sessions.values()) {
-      if (session.browserSocket === ws) return session
-    }
-    return undefined
+    return this.browserSocketIndex.get(ws)
   }
 
   join(sessionId: string, browserSocket: WebSocket): void {
     const session = this.sessions.get(sessionId)
     if (!session) throw new Error(`Session not found: ${sessionId}`)
-    if (session.browserSocket?.readyState === 1 /* OPEN */) {
+    if (session.browserSocket?.readyState === WebSocket.OPEN) {
       throw new Error(`Session busy: ${sessionId}`)
     }
     if (session.idleTimer) { clearTimeout(session.idleTimer); session.idleTimer = null }
+    if (session.browserSocket) this.browserSocketIndex.delete(session.browserSocket)
     session.browserSocket = browserSocket
+    this.browserSocketIndex.set(browserSocket, session)
   }
 
   remove(sessionId: string): void {
     const session = this.sessions.get(sessionId)
-    if (session?.idleTimer) { clearTimeout(session.idleTimer); session.idleTimer = null }
+    if (!session) return
+    if (session.idleTimer) { clearTimeout(session.idleTimer); session.idleTimer = null }
+    if (session.streamSocket) this.streamSocketIndex.delete(session.streamSocket)
+    if (session.browserSocket) this.browserSocketIndex.delete(session.browserSocket)
+    const agentIds = this.agentSocketIndex.get(session.agentSocket)
+    agentIds?.delete(sessionId)
+    if (agentIds?.size === 0) this.agentSocketIndex.delete(session.agentSocket)
     this.sessions.delete(sessionId)
   }
 
   clearBrowser(sessionId: string, onTimeout?: () => void): void {
     const session = this.sessions.get(sessionId)
     if (!session) return
-    session.browserSocket = null
+    if (session.browserSocket) {
+      this.browserSocketIndex.delete(session.browserSocket)
+      session.browserSocket = null
+    }
     if (session.idleTimer) { clearTimeout(session.idleTimer); session.idleTimer = null }
     if (onTimeout) {
       session.idleTimer = setTimeout(() => {
@@ -122,7 +136,17 @@ export class SessionManager {
 
   setStreamSocket(sessionId: string, ws: WebSocket): void {
     const session = this.sessions.get(sessionId)
-    if (session) session.streamSocket = ws
+    if (!session) return
+    if (session.streamSocket) this.streamSocketIndex.delete(session.streamSocket)
+    session.streamSocket = ws
+    this.streamSocketIndex.set(ws, session)
+  }
+
+  clearStreamSocket(sessionId: string): void {
+    const session = this.sessions.get(sessionId)
+    if (!session?.streamSocket) return
+    this.streamSocketIndex.delete(session.streamSocket)
+    session.streamSocket = null
   }
 
   setChromeData(sessionId: string, data: unknown): void {
@@ -135,7 +159,7 @@ export class SessionManager {
     if (session) session.deviceInfo = info
   }
 
-  updateDeviceStatus(sessionId: string, status: string): void {
+  updateDeviceStatus(sessionId: string, status: DeviceStatus): void {
     const session = this.sessions.get(sessionId)
     if (session) session.deviceStatus = status
   }

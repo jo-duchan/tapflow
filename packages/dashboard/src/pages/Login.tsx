@@ -1,5 +1,6 @@
-import { useState, type FormEvent } from 'react'
+import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
+import { useTheme } from 'next-themes'
 import { api } from '@/lib/api'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -8,12 +9,14 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 
 export function Login() {
   const navigate = useNavigate()
+  const { resolvedTheme } = useTheme()
+  const defaultLogo = resolvedTheme === 'dark' ? '/logo-dark.svg' : '/logo.svg'
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
 
-  async function handleSubmit(e: FormEvent) {
+  async function handleSubmit(e: { preventDefault(): void }) {
     e.preventDefault()
     setError('')
     setLoading(true)
@@ -30,9 +33,14 @@ export function Login() {
 
   return (
     <div className="flex min-h-svh items-center justify-center overflow-hidden p-4">
-      <Card level={4} className="w-full max-w-sm">
+      <div className="flex flex-col items-center gap-6 w-full max-w-sm">
+        <div className="flex items-center gap-2">
+          <img src={defaultLogo} alt="tapflow" className="w-6 h-6" />
+          <span className="text-base font-semibold tracking-tight">tapflow</span>
+        </div>
+        <Card level={4} className="w-full">
         <CardHeader className="text-center">
-          <CardTitle className="text-2xl tracking-display-md">tapflow</CardTitle>
+          <CardTitle className="text-2xl tracking-display-md">Welcome back</CardTitle>
           <CardDescription>Sign in to your team workspace</CardDescription>
         </CardHeader>
         <CardContent>
@@ -64,9 +72,16 @@ export function Login() {
             <Button type="submit" size="pill" disabled={loading} className="w-full mt-1">
               {loading ? 'Signing in…' : 'Sign in'}
             </Button>
+            <p className="text-center text-sm text-muted-foreground">
+              First time here?{' '}
+              <a href="https://www.tapflow.dev/dashboard/setup.html" target="_blank" rel="noopener noreferrer" className="underline underline-offset-4 hover:text-foreground transition-colors">
+                Set up your workspace
+              </a>
+            </p>
           </form>
         </CardContent>
-      </Card>
+        </Card>
+      </div>
     </div>
   )
 }

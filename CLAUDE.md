@@ -6,13 +6,13 @@
 
 ## WHAT
 
-tapflow는 QA팀이 iOS/Android 시뮬레이터·에뮬레이터를 브라우저에서 직접 조작할 수 있게 해주는 **오픈소스 셀프호스팅 라이브러리**다.
-외부 클라우드 의존 없이 팀의 Mac/Linux를 그대로 서버로 쓴다.
+tapflow는 QA가 iOS/Android 시뮬레이터·에뮬레이터를 브라우저에서 직접 조작할 수 있게 해주는 **오픈소스 셀프호스팅 라이브러리**다.
+외부 클라우드 의존 없이 팀의 Mac을 그대로 서버로 쓴다.
 
 ## WHY
 
 - Appetize·BrowserStack은 비싸고 앱 데이터가 외부로 나간다.
-- 개발자가 이미 보유한 인프라(Mac, Linux)를 재활용한다.
+- 개발자가 이미 보유한 인프라(Mac)를 재활용한다.
 - 완전 오픈소스로 커스터마이징이 가능하다.
 
 ---
@@ -63,7 +63,7 @@ tapflow는 QA팀이 iOS/Android 시뮬레이터·에뮬레이터를 브라우저
 - WebSocket: `ws`. Dashboard: Vite + React 19 + React Router v7. 테스트: vitest.
 
 ### 브랜치·커밋·릴리즈
-→ [CONTRIBUTING.md](./contributing/CONTRIBUTING.md)
+→ [CONTRIBUTING.md](./CONTRIBUTING.md)
 
 ### 워크플로우 (Plan → Work → Review → Compound)
 

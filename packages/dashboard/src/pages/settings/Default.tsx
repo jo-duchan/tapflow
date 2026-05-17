@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import { useTheme } from 'next-themes'
 import { Button, buttonVariants } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
 import { Input } from '@/components/ui/input'
@@ -17,13 +18,15 @@ import {
   AlertDialogTitle,
   AlertDialogTrigger,
 } from '@/components/ui/alert-dialog'
-import { ImageIcon, Pencil } from 'lucide-react'
+import { Pencil } from 'lucide-react'
 import { avatarColors } from '@/components/user-avatar'
 import { useAuth } from '@/hooks/useAuth'
 
 type App = { id: number; name: string; bundle_id_key: string; platform: string }
 
 export function DefaultSettings() {
+  const { resolvedTheme } = useTheme()
+  const defaultLogo = resolvedTheme === 'dark' ? '/logo-dark.svg' : '/logo.svg'
   const { user } = useAuth()
   const isAdmin = user?.role === 'Admin'
   const canEditApps = user?.role === 'Admin' || user?.role === 'Developer'
@@ -174,13 +177,7 @@ export function DefaultSettings() {
               <div className="grid gap-2">
                 <Label>Logo <span className="text-muted-foreground text-xs">(png · jpg, max 2MB)</span></Label>
                 <div className="relative w-16 h-16">
-                  {logoUrl ? (
-                    <img src={logoUrl} alt="logo" className="w-16 h-16 rounded-lg object-contain border bg-muted" />
-                  ) : (
-                    <div className="w-16 h-16 rounded-lg border-2 border-dashed border-border bg-muted flex items-center justify-center">
-                      <ImageIcon className="w-6 h-6 text-muted-foreground" />
-                    </div>
-                  )}
+                  <img src={logoUrl ?? defaultLogo} alt="logo" className="w-16 h-16 rounded-lg object-contain" />
                   <button
                     type="button"
                     onClick={() => logoRef.current?.click()}

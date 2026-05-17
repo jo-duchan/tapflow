@@ -3,11 +3,10 @@ import { execFile } from 'child_process'
 import { promisify } from 'util'
 import { promises as fs } from 'fs'
 import { tmpdir } from 'os'
-import { join, dirname } from 'path'
-import { fileURLToPath } from 'url'
+import { join } from 'path'
 
 const execFileAsync = promisify(execFile)
-const KEYBOARD_HELPER = join(dirname(fileURLToPath(import.meta.url)), 'keyboard-helper')
+const KEYBOARD_HELPER = join(import.meta.dirname, '..', 'bin', 'keyboard-helper')
 
 // Language code → iOS AppleKeyboards entry string with hw=Automatic.
 // hw=Automatic lets iOS switch the hardware layout when the input source changes via LANG1/CapsLock.

@@ -7,12 +7,10 @@ export interface DeviceAgent {
   installApp(path: string): Promise<void>
   launchApp(bundleId: string): Promise<void>
   screenshot(): Promise<Buffer>
-  stream(): ReadableStream
+  stream(): ReadableStream<Buffer>
   touchStart(x: number, y: number): void
   touchMove(x: number, y: number): Promise<void>
   touchEnd(): Promise<void>
-  type(text: string): Promise<void>
-  pressKey(key: string): Promise<void>
 }
 
 export type DeviceAgentConstructor = new () => DeviceAgent

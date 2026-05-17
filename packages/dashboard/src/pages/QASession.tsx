@@ -328,7 +328,7 @@ export function QASession() {
                 <div className="grid grid-cols-1 lg:grid-cols-2 2xl:grid-cols-3 gap-2">
                   {agentGroups.map((s: SessionInfo) => {
                     const res = s.resources
-                    const isStale = res ? Date.now() - res.reportedAt > 30_000 : false
+                    const isStale = res ? Date.now() - res.reportedAt > 30_000 : false // eslint-disable-line react-hooks/purity
                     const deviceCount = s.devices.filter((d) => d.platform === os).length
                     const cpuPercent = res?.cpuPercent ?? 0
                     const memPercent = res ? (res.memUsedMB / res.memTotalMB) * 100 : 0

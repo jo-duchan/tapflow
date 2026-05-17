@@ -27,6 +27,7 @@ export class EmulatorLauncher {
       detached: true,
       stdio: 'ignore',
     })
+    proc.on('error', (err) => console.error(`[android-agent] emulator launch failed: ${err.message}`))
     proc.unref()
   }
 

@@ -5,15 +5,13 @@ node_modules/
 dist/
 out/
 .next/
+*.tgz
 
 # dashboard build bundled into relay
 packages/relay/public/
 
 # local work logs (not for contributors)
 .work/
-
-# compiled swift binaries
-packages/ios-agent/src/screencapture-helper
 
 # env
 .env

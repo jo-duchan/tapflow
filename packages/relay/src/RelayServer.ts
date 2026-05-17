@@ -196,7 +196,7 @@ export class RelayServer {
       // Stream socket disconnected → clear the streamSocket reference
       const streamSession = this.sessions.getByStreamSocket(ws)
       if (streamSession) {
-        streamSession.streamSocket = null
+        this.sessions.clearStreamSocket(streamSession.id)
         return
       }
 
@@ -219,62 +219,30 @@ export class RelayServer {
 
   private route(ws: WebSocket, msg: RelayMessage): void {
     switch (msg.type) {
-      case 'agent:resources': {
-        if (msg.resources) {
-          this.sessions.setResources(ws, msg.resources)
-          const agentName = this.sessions.getAllByAgentSocket(ws)[0]?.agentName
-          if (agentName) {
-            const buf = this.resourceBuffers.get(agentName) ?? { cpu: [], mem: [] }
-            buf.cpu.push(msg.resources.cpuPercent)
-            buf.mem.push((msg.resources.memUsedMB / msg.resources.memTotalMB) * 100)
-            this.resourceBuffers.set(agentName, buf)
-          }
-        }
-        break
-      }
-
-      case 'agent:register': {
-        const sessionIds = this.sessions.create(ws, msg.devices ?? [], msg.agentName, msg.platform)
-        const registeredSessions = (msg.devices ?? []).map((d, i) => ({
-          deviceId: d.id,
-          sessionId: sessionIds[i],
-        }))
-        ws.send(JSON.stringify({ type: 'agent:registered', registeredSessions }))
-        break
-      }
-
+      // ── Agent → Relay ─────────────────────────────────────────────────────
+      case 'agent:resources':    this.handleAgentResources(ws, msg); break
+      case 'agent:register':     this.handleAgentRegister(ws, msg); break
       case 'agents:list': {
-        const sessions = this.sessions.list()
-        ws.send(JSON.stringify({ type: 'agents:listed', sessions }))
+        ws.send(JSON.stringify({ type: 'agents:listed', sessions: this.sessions.list() }))
         break
       }
 
-      case 'session:start': {
+      // ── Session / Stream lifecycle ─────────────────────────────────────────
+      case 'session:start':    this.handleSessionStart(ws, msg); break
+      case 'session:end': {
+        if (msg.sessionId) this.sessions.remove(msg.sessionId)
+        break
+      }
+      case 'stream:register': {
         const session = this.sessions.get(msg.sessionId!)
-        if (!session) {
-          ws.send(JSON.stringify({ type: 'error', message: 'Session not found' }))
-          return
-        }
-        try {
-          this.sessions.join(msg.sessionId!, ws)
-        } catch {
-          ws.send(JSON.stringify({ type: 'error', message: 'Session busy' }))
-          return
-        }
-        ws.send(JSON.stringify({ type: 'session:joined', sessionId: msg.sessionId }))
-        if (session.chromeData) {
-          ws.send(JSON.stringify({ type: 'session:chrome', payload: session.chromeData }))
-        }
-        if (session.deviceInfo) {
-          ws.send(JSON.stringify({ type: 'session:deviceInfo', payload: session.deviceInfo }))
-        }
-        // Replay device:ready if the device is already booted (browser WS blip reconnect)
-        if (session.deviceStatus === 'booted') {
-          ws.send(JSON.stringify({ type: 'device:ready', payload: { deviceId: session.deviceId } }))
+        if (session) {
+          this.sessions.setStreamSocket(session.id, ws)
+          ws.send(JSON.stringify({ type: 'stream:registered' }))
         }
         break
       }
 
+      // ── Agent → Browser ────────────────────────────────────────────────────
       case 'session:chrome': {
         const session = this.sessions.get(msg.sessionId!)
         if (!session) break
@@ -284,7 +252,6 @@ export class RelayServer {
         }
         break
       }
-
       case 'session:deviceInfo': {
         const session = this.sessions.get(msg.sessionId!)
         if (!session) break
@@ -294,34 +261,8 @@ export class RelayServer {
         }
         break
       }
-
-      case 'session:end': {
-        if (msg.sessionId) this.sessions.remove(msg.sessionId)
-        break
-      }
-
-      case 'stream:register': {
-        // Dedicated stream WS from agent: register it and ack so agent knows it's safe to send frames
-        const session = this.sessions.get(msg.sessionId!)
-        if (session) {
-          this.sessions.setStreamSocket(session.id, ws)
-          ws.send(JSON.stringify({ type: 'stream:registered' }))
-        }
-        break
-      }
-
-      case 'device:boot':
-      case 'device:shutdown': {
-        // browser → agent
-        const session = this.sessions.get(msg.sessionId!)
-        if (session?.agentSocket.readyState === WebSocket.OPEN) {
-          session.agentSocket.send(JSON.stringify(msg))
-        }
-        break
-      }
-
       case 'device:booting': {
-        // agent → browser; clear cached device data so reconnecting browser doesn't get stale chrome
+        // clear cached device data so reconnecting browser doesn't get stale chrome
         const session = this.sessions.get(msg.sessionId!)
         if (!session) break
         this.sessions.clearDeviceCache(session.id)
@@ -330,18 +271,14 @@ export class RelayServer {
         }
         break
       }
-
       case 'device:boot-error': {
-        // agent → browser
         const session = this.sessions.get(msg.sessionId!)
         if (session?.browserSocket?.readyState === WebSocket.OPEN) {
           session.browserSocket.send(JSON.stringify(msg))
         }
         break
       }
-
       case 'device:shutdown-done': {
-        // agent → browser + persist shutdown status
         const session = this.sessions.get(msg.sessionId!)
         if (!session) break
         this.sessions.updateDeviceStatus(session.id, 'shutdown')
@@ -350,9 +287,7 @@ export class RelayServer {
         }
         break
       }
-
       case 'device:ready': {
-        // agent → browser + persist booted status
         const session = this.sessions.get(msg.sessionId!)
         if (!session) break
         this.sessions.updateDeviceStatus(session.id, 'booted')
@@ -361,77 +296,17 @@ export class RelayServer {
         }
         break
       }
-
       case 'device:rotate': {
-        // agent → browser
         const session = this.sessions.get(msg.sessionId!)
         if (session?.browserSocket?.readyState === WebSocket.OPEN) {
           session.browserSocket.send(JSON.stringify(msg))
         }
         break
       }
-
-      case 'app:install': {
-        // browser → agent: relay looks up file_path from DB and enriches; includes sessionId for response routing
-        const session = this.sessions.get(msg.sessionId!)
-        if (!session) {
-          ws.send(JSON.stringify({ type: 'error', message: 'Session not found' }))
-          break
-        }
-        const build = getDb()
-          .prepare('SELECT file_path, bundle_id FROM builds WHERE id = ?')
-          .get(msg.buildId!) as { file_path: string; bundle_id: string | null } | undefined
-        if (!build) {
-          ws.send(JSON.stringify({ type: 'app:install-error', message: 'Build not found' }))
-          break
-        }
-        if (session.agentSocket.readyState === WebSocket.OPEN) {
-          session.agentSocket.send(JSON.stringify({
-            type: 'app:install',
-            sessionId: msg.sessionId,
-            payload: { filePath: build.file_path, bundleId: build.bundle_id },
-          }))
-        }
-        break
-      }
-
       case 'app:install-done':
-      case 'app:install-error': {
-        // agent → browser
-        const session = this.sessions.get(msg.sessionId!)
-        if (session?.browserSocket?.readyState === WebSocket.OPEN) {
-          session.browserSocket.send(JSON.stringify(msg))
-        }
-        break
-      }
-
-      case 'app:launch': {
-        // browser → agent: relay looks up bundle_id from DB; includes sessionId for response routing
-        const session = this.sessions.get(msg.sessionId!)
-        if (!session) {
-          ws.send(JSON.stringify({ type: 'error', message: 'Session not found' }))
-          break
-        }
-        const build = getDb()
-          .prepare('SELECT bundle_id FROM builds WHERE id = ?')
-          .get(msg.buildId!) as { bundle_id: string | null } | undefined
-        if (!build?.bundle_id) {
-          ws.send(JSON.stringify({ type: 'app:launch-error', message: 'Bundle ID not available for this build' }))
-          break
-        }
-        if (session.agentSocket.readyState === WebSocket.OPEN) {
-          session.agentSocket.send(JSON.stringify({
-            type: 'app:launch',
-            sessionId: msg.sessionId,
-            payload: { bundleId: build.bundle_id },
-          }))
-        }
-        break
-      }
-
+      case 'app:install-error':
       case 'app:launch-done':
       case 'app:launch-error': {
-        // agent → browser
         const session = this.sessions.get(msg.sessionId!)
         if (session?.browserSocket?.readyState === WebSocket.OPEN) {
           session.browserSocket.send(JSON.stringify(msg))
@@ -439,6 +314,17 @@ export class RelayServer {
         break
       }
 
+      // ── Browser → Agent ────────────────────────────────────────────────────
+      case 'device:boot':
+      case 'device:shutdown': {
+        const session = this.sessions.get(msg.sessionId!)
+        if (session?.agentSocket.readyState === WebSocket.OPEN) {
+          session.agentSocket.send(JSON.stringify(msg))
+        }
+        break
+      }
+      case 'app:install': this.handleBrowserAppInstall(ws, msg); break
+      case 'app:launch':  this.handleBrowserAppLaunch(ws, msg); break
       case 'input:touch:start':
       case 'input:touch:move':
       case 'input:touch:end':
@@ -450,13 +336,104 @@ export class RelayServer {
       case 'input:button':
       case 'input:rotate':
       case 'input:keyboard:toggle': {
-        // browser → agent
         const session = this.sessions.get(msg.sessionId!)
         if (session?.agentSocket.readyState === WebSocket.OPEN) {
           session.agentSocket.send(JSON.stringify(msg))
         }
         break
       }
+    }
+  }
+
+  private handleAgentResources(ws: WebSocket, msg: RelayMessage): void {
+    if (!msg.resources) return
+    this.sessions.setResources(ws, msg.resources)
+    const agentName = this.sessions.getAllByAgentSocket(ws)[0]?.agentName
+    if (agentName) {
+      const buf = this.resourceBuffers.get(agentName) ?? { cpu: [], mem: [] }
+      buf.cpu.push(msg.resources.cpuPercent)
+      buf.mem.push((msg.resources.memUsedMB / msg.resources.memTotalMB) * 100)
+      this.resourceBuffers.set(agentName, buf)
+    }
+  }
+
+  private handleAgentRegister(ws: WebSocket, msg: RelayMessage): void {
+    const sessionIds = this.sessions.create(ws, msg.devices ?? [], msg.agentName, msg.platform)
+    const registeredSessions = (msg.devices ?? []).map((d, i) => ({
+      deviceId: d.id,
+      sessionId: sessionIds[i],
+    }))
+    ws.send(JSON.stringify({ type: 'agent:registered', registeredSessions }))
+  }
+
+  private handleSessionStart(ws: WebSocket, msg: RelayMessage): void {
+    const session = this.sessions.get(msg.sessionId!)
+    if (!session) {
+      ws.send(JSON.stringify({ type: 'error', message: 'Session not found' }))
+      return
+    }
+    try {
+      this.sessions.join(msg.sessionId!, ws)
+    } catch {
+      ws.send(JSON.stringify({ type: 'error', message: 'Session busy' }))
+      return
+    }
+    ws.send(JSON.stringify({ type: 'session:joined', sessionId: msg.sessionId }))
+    if (session.chromeData) {
+      ws.send(JSON.stringify({ type: 'session:chrome', payload: session.chromeData }))
+    }
+    if (session.deviceInfo) {
+      ws.send(JSON.stringify({ type: 'session:deviceInfo', payload: session.deviceInfo }))
+    }
+    // Replay device:ready if the device is already booted (browser WS blip reconnect)
+    if (session.deviceStatus === 'booted') {
+      ws.send(JSON.stringify({ type: 'device:ready', payload: { deviceId: session.deviceId } }))
+    }
+  }
+
+  private handleBrowserAppInstall(ws: WebSocket, msg: RelayMessage): void {
+    // Relay looks up file_path from DB and enriches; includes sessionId for response routing
+    const session = this.sessions.get(msg.sessionId!)
+    if (!session) {
+      ws.send(JSON.stringify({ type: 'error', message: 'Session not found' }))
+      return
+    }
+    const build = getDb()
+      .prepare('SELECT file_path, bundle_id FROM builds WHERE id = ?')
+      .get(msg.buildId!) as { file_path: string; bundle_id: string | null } | undefined
+    if (!build) {
+      ws.send(JSON.stringify({ type: 'app:install-error', message: 'Build not found' }))
+      return
+    }
+    if (session.agentSocket.readyState === WebSocket.OPEN) {
+      session.agentSocket.send(JSON.stringify({
+        type: 'app:install',
+        sessionId: msg.sessionId,
+        payload: { filePath: build.file_path, bundleId: build.bundle_id },
+      }))
+    }
+  }
+
+  private handleBrowserAppLaunch(ws: WebSocket, msg: RelayMessage): void {
+    // Relay looks up bundle_id from DB; includes sessionId for response routing
+    const session = this.sessions.get(msg.sessionId!)
+    if (!session) {
+      ws.send(JSON.stringify({ type: 'error', message: 'Session not found' }))
+      return
+    }
+    const build = getDb()
+      .prepare('SELECT bundle_id FROM builds WHERE id = ?')
+      .get(msg.buildId!) as { bundle_id: string | null } | undefined
+    if (!build?.bundle_id) {
+      ws.send(JSON.stringify({ type: 'app:launch-error', message: 'Bundle ID not available for this build' }))
+      return
+    }
+    if (session.agentSocket.readyState === WebSocket.OPEN) {
+      session.agentSocket.send(JSON.stringify({
+        type: 'app:launch',
+        sessionId: msg.sessionId,
+        payload: { bundleId: build.bundle_id },
+      }))
     }
   }
 
@@ -512,7 +489,9 @@ export class RelayServer {
     }
     const contentType = MIME_TYPES[path.extname(filePath)] ?? 'application/octet-stream'
     res.writeHead(200, { 'Content-Type': contentType })
-    fs.createReadStream(filePath).pipe(res)
+    fs.createReadStream(filePath)
+      .on('error', () => { res.destroy() })
+      .pipe(res)
   }
 
   private serveStatic(req: http.IncomingMessage, res: http.ServerResponse): void {
@@ -536,6 +515,8 @@ export class RelayServer {
 
     const contentType = MIME_TYPES[path.extname(filePath)] ?? 'text/html'
     res.writeHead(200, { 'Content-Type': contentType })
-    fs.createReadStream(filePath).pipe(res)
+    fs.createReadStream(filePath)
+      .on('error', () => { res.destroy() })
+      .pipe(res)
   }
 }
