@@ -21,6 +21,28 @@ pnpm dev
 - 새 브랜치는 반드시 `origin/main` 기준으로 생성한다 (`git fetch origin && git checkout -b feature/{topic} origin/main`). 로컬 `main`이 뒤처져 있을 수 있다.
 - 배포는 git tag(Semver) → GitHub Release + npm publish. main 머지만으로 자동 배포되지 않는다. `v1.0.0` 이전은 minor에서도 breaking 가능.
 
+## 테스트
+
+전체 패키지:
+
+```sh
+pnpm test
+```
+
+특정 패키지만:
+
+```sh
+pnpm --filter @tapflow/ios-agent test
+pnpm --filter @tapflow/android-agent test
+pnpm --filter @tapflow/relay test
+pnpm --filter @tapflow/cli test
+```
+
+PR을 올리기 전에 변경된 패키지의 테스트가 통과하는지 확인한다.
+새 동작을 추가할 때는 테스트를 먼저 작성하고, 통과한 상태로 PR을 올린다.
+
+---
+
 ## 커밋 메시지 — Conventional Commits
 
 ```
