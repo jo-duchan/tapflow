@@ -72,8 +72,6 @@ Name-hash-based 6-slot colors. The `avatarColors(name)` function returns the CSS
 | 5 (blue) | `hsl(216 90% 78%)` / `hsl(216 85% 25%)` | `hsl(216 42% 32%)` / `hsl(216 60% 78%)` |
 | 6 (purple) | `hsl(278 75% 84%)` / `hsl(278 75% 28%)` | `hsl(278 38% 32%)` / `hsl(278 55% 78%)` |
 
-Always use `avatarColors(name)` for avatar placeholders. Never use `bg-muted` directly.
-
 ### Chart Colors
 
 Used exclusively for the Area chart on the `MacResources` page. Five series colors.
@@ -99,7 +97,7 @@ Only two typefaces are used.
 
 `font-feature-settings: 'ss01', 'ss02'` is applied globally on `body` to enable Inter's geometric alternate glyphs.
 
-Mono is for the technical layer only — code blocks, `build_number`, `bundle_id`, UDIDs. Never use mono for body paragraphs.
+Mono is for the technical layer only — code blocks, `build_number`, `bundle_id`, UDIDs.
 
 ### Letter Spacing Tokens
 
@@ -111,8 +109,6 @@ Mono is for the technical layer only — code blocks, `build_number`, `bundle_id
 | `tracking-display-sm` | `-0.6px` | Small display headings |
 | `tracking-body-sm` | `-0.28px` | Small body text |
 | `tracking-tight` | Tailwind default | Sidebar team name, TechLabel |
-
-Always choose a negative tracking token for headings. Positive tracking and `uppercase` combined are not allowed.
 
 ### Hierarchy
 
@@ -145,8 +141,6 @@ Default card padding: `p-6` (24px). Dense contexts: `p-4` (16px). Sidebar areas:
 | `z-tooltip` | 100 | Tooltips |
 | `z-overlay` | 200 | Modal dim background |
 | `z-modal` | 300 | Modal / dialog content |
-
-Use semantic token classes instead of raw `z-{n}` values.
 
 ## Elevation & Depth
 
@@ -244,8 +238,6 @@ Footer: `UserAvatar` + name/email dropdown (Settings, Log out).
 
 `components/ui/tech-label.tsx` — `font-mono text-xs tabular-nums tracking-tight`.
 
-Always use this component for technical identifiers: `build_number`, `bundle_id`, UDID, version strings.
-
 ```tsx
 <TechLabel>{build.buildNumber}</TechLabel>
 ```
@@ -258,7 +250,7 @@ Always use this component for technical identifiers: `build_number`, `bundle_id`
 <UserAvatar name={user.displayName} avatarUrl={user.avatarUrl} size={28} />
 ```
 
-The placeholder color is determined by `avatarColors(name)`. Never use `bg-muted` directly.
+The placeholder color is determined by `avatarColors(name)`.
 
 ### Theme Toggle
 
@@ -270,19 +262,22 @@ The placeholder color is determined by `avatarColors(name)`. Never use `bg-muted
 
 - Reference colors only through CSS variable tokens (`bg-background`, `text-foreground`, `border-border`).
 - Control card elevation with the `<Card level={n}>` prop.
-- Wrap technical identifiers (`build_number`, UDID, etc.) in `<TechLabel>`.
-- Use `avatarColors(name)` for avatar placeholders.
-- Choose a `tracking-display-*` token for heading letter-spacing.
+- Wrap technical identifiers (`build_number`, `bundle_id`, UDID, version strings) in `<TechLabel>`.
+- Use `avatarColors(name)` for all avatar placeholders.
+- Choose a `tracking-display-*` token for heading letter-spacing (always negative).
 - Use semantic z-index classes (`z-sidebar`, `z-modal`, etc.) instead of raw numbers.
+- Use the overlay pencil button for image uploads — trigger the hidden `<input>` via ref, preview immediately with `URL.createObjectURL`.
 
 ### Don't
 
-- No hardcoded `dark:bg-gray-900` style overrides in components.
-- Never use `bg-muted` directly for avatar placeholders.
-- No single heavy drop-shadows — use `shadow-card-{n}` tokens.
-- Never use mono font for body paragraphs.
+- No `dark:` class overrides in components (e.g. `dark:bg-gray-900`, `dark:bg-red-900`) — use CSS variable tokens only.
+- Never use `bg-muted` directly for avatar placeholders — use `avatarColors(name)`.
+- No single heavy drop-shadows — use `shadow-card-{n}` elevation tokens.
+- Never use mono font for body paragraphs — mono is for technical identifiers only.
 - Never combine `uppercase` with positive letter-spacing on headings.
-- No raw numeric z-index (`z-50`, `z-100`, etc.).
+- No raw numeric z-index (`z-50`, `z-100`, etc.) — use semantic token classes.
+- No "Choose file" button for file uploads — use the overlay pencil button pattern.
+- Never add button press feedback (`translateY`) directly to `aria-haspopup` elements — it causes visual glitches when opening overlays.
 
 ## Established Patterns
 
@@ -298,7 +293,7 @@ Patterns locked in during implementation. Follow these in all new components and
 .dark  { --destructive: 0 70% 62%; }  /* raised lightness so /10 opacity remains visible */
 ```
 
-Components reference the variable only: `bg-destructive/10 text-destructive`. Hardcoded overrides like `dark:bg-red-900` break the variable system and must not be used.
+Components reference the variable only: `bg-destructive/10 text-destructive`.
 
 ### Destructive Button Style
 
@@ -312,7 +307,7 @@ In dark mode, `--destructive` must be L ≥ 60% so both the `/10` background and
 
 ### Avatar Color System
 
-Name-hash-based 6-slot palette. **Always use `avatarColors(name)` for avatar placeholders** — never `bg-muted` directly.
+Name-hash-based 6-slot palette.
 
 ```ts
 // components/user-avatar.tsx
