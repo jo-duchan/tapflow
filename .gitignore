@@ -5,6 +5,7 @@ node_modules/
 dist/
 out/
 .next/
+*.tgz
 
 # dashboard build bundled into relay
 packages/relay/public/
