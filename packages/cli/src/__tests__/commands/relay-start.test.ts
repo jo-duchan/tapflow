@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
+import { describe, it, expect, vi, beforeEach, afterEach, type MockInstance } from 'vitest'
 
 vi.mock('@tapflow/relay', () => ({
   RelayServer: vi.fn().mockImplementation(() => ({
@@ -10,13 +10,17 @@ import { RelayServer } from '@tapflow/relay'
 import { cmdRelayStart } from '../../commands/relay-start.js'
 
 describe('cmdRelayStart', () => {
+  let output: string[]
+  let exitSpy: MockInstance
+
   beforeEach(() => {
     vi.resetAllMocks()
+    output = []
+    vi.spyOn(console, 'log').mockImplementation((...args) => output.push(args.join(' ')))
+    exitSpy = vi.spyOn(process, 'exit').mockImplementation(() => { throw new Error('process.exit') })
     vi.mocked(RelayServer).mockImplementation(() => ({
       start: vi.fn().mockResolvedValue(undefined),
     } as never))
-    vi.spyOn(console, 'log').mockImplementation(() => {})
-    vi.spyOn(process, 'on').mockImplementation(() => process)
   })
 
   afterEach(() => vi.restoreAllMocks())
@@ -32,9 +36,23 @@ describe('cmdRelayStart', () => {
     expect(RelayServer).toHaveBeenCalledWith(expect.objectContaining({ port: 8080 }))
   })
 
-  it('SIGINT 핸들러 등록', async () => {
+  it('SIGINT 시 process.exit(0) 호출', async () => {
     const onSpy = vi.spyOn(process, 'on')
     await cmdRelayStart({})
-    expect(onSpy).toHaveBeenCalledWith('SIGINT', expect.any(Function))
+    const call = onSpy.mock.calls.find(([event]) => event === 'SIGINT')
+    expect(call).toBeDefined()
+    const handler = call![1] as () => void
+    expect(() => handler()).toThrow('process.exit')
+    expect(exitSpy).toHaveBeenCalledWith(0)
+  })
+
+  it('기동 완료 후 포트 번호가 출력에 포함됨', async () => {
+    await cmdRelayStart({ port: 9999 })
+    expect(output.join('\n')).toContain('9999')
+  })
+
+  it('기본 포트 출력에 localhost:4000 포함', async () => {
+    await cmdRelayStart({})
+    expect(output.join('\n')).toContain('localhost:4000')
   })
 })
