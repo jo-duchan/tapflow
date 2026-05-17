@@ -38,6 +38,14 @@ pnpm --filter @tapflow/cli test
 
 Run the tests for any changed packages before opening a PR. New behavior must be covered by tests written first, passing before the PR is opened.
 
+### Test principles
+
+**No Potemkin tests.** A test must be able to fail. If no production code change could break it, delete it. `expect(result).toBeDefined()` alone is not a test — assert the actual value.
+
+**No flaky tests.** Use `vi.useFakeTimers()` instead of `setTimeout` waits. Fix `Date.now()` with `vi.setSystemTime()`. Clean up global state in `beforeEach`/`afterEach`. Never depend on real network ports or file paths.
+
+**Mock only at system boundaries** — real network, OS calls, external processes. Internal module interactions run against real code.
+
 ## Commit messages — Conventional Commits
 
 ```
