@@ -25,8 +25,13 @@ export class EmulatorLauncher {
   launch(avdName: string): void {
     const proc = spawn(getEmulatorPath(), ['-avd', avdName, '-no-audio', '-no-snapshot'], {
       detached: true,
-      stdio: 'ignore',
+      stdio: ['ignore', 'ignore', 'pipe'],
     })
+    proc.stderr?.on('data', (chunk: Buffer) => {
+      const line = chunk.toString().trimEnd()
+      if (line) console.error(`[android-agent] emulator stderr: ${line}`)
+    })
+    proc.on('error', (err) => console.error(`[android-agent] emulator launch failed: ${err.message}`))
     proc.unref()
   }
 

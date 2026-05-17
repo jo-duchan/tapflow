@@ -24,6 +24,26 @@ See the configuration example in [Self-Hosting the Relay](/guide/self-hosting#ng
 
 ---
 
+## iOS Simulator service version mismatch {#ios-simulator-service-version-mismatch}
+
+After updating Xcode, you may see a macOS alert:
+
+> "Loaded CoreSimulatorService is no longer valid for this process … Service version (X) does not match expected service version (Y)."
+
+tapflow automatically detects this and restarts the service. If the automatic recovery fails (the alert still appears after retrying), run this command manually:
+
+```sh
+killall -9 com.apple.CoreSimulator.CoreSimulatorService
+```
+
+`launchd` will restart the service immediately. Then re-run `tapflow start`.
+
+::: details Why this happens
+Xcode ships a newer `CoreSimulator.framework` but the old `CoreSimulatorService` daemon is still running from the previous session. After the first `xcrun simctl` call notices the version mismatch, tapflow force-kills the daemon so launchd can restart it with the new version. If the daemon is stuck and does not die on the first attempt, the manual `killall -9` above is needed.
+:::
+
+---
+
 ## iOS 17 and earlier — Korean text splits into individual characters
 
 On iOS 17 and earlier simulators, Korean input does not combine into syllables — characters appear separated (e.g., "안녕" → "ㅇㅏㄴㄴㅕㅇ").

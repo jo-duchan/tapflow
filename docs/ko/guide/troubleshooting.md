@@ -24,6 +24,26 @@ proxy_read_timeout 3600s;
 
 ---
 
+## iOS 시뮬레이터 서비스 버전 불일치 {#ios-simulator-service-version-mismatch}
+
+Xcode를 업데이트한 후 다음과 같은 macOS 알림이 표시될 수 있습니다:
+
+> "Loaded CoreSimulatorService is no longer valid for this process … Service version (X) does not match expected service version (Y)."
+
+tapflow는 이 오류를 자동으로 감지해 서비스를 재시작합니다. 자동 복구에 실패하면 (재시도 후에도 알림이 계속 표시되면) 아래 명령어를 직접 실행하세요:
+
+```sh
+killall -9 com.apple.CoreSimulator.CoreSimulatorService
+```
+
+`launchd`가 즉시 서비스를 재시작합니다. 이후 `tapflow start`를 다시 실행하면 됩니다.
+
+::: details 발생 원인
+Xcode 업데이트 시 새 버전의 `CoreSimulator.framework`가 설치되지만, 이전 세션에서 기동한 `CoreSimulatorService` 데몬은 그대로 남아 있습니다. `xcrun simctl`이 버전 불일치를 감지하면 tapflow가 데몬을 강제 종료해 `launchd`가 새 버전으로 재시작하도록 유도합니다. 데몬이 멈춰 있어 첫 번째 시도에 종료되지 않으면 위의 수동 명령어가 필요합니다.
+:::
+
+---
+
 ## iOS 17 이하 — 한글 입력 시 자모 분리
 
 iOS 17 이하 시뮬레이터에서 한글을 입력하면 음절로 조합되지 않고 자모가 분리됩니다 (예: "안녕" → "ㅇㅏㄴㄴㅕㅇ").
