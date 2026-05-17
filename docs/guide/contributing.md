@@ -32,6 +32,23 @@ playground/       ← local integration test environment
 
 ## Running tests
 
+All packages:
+
 ```sh
 pnpm test
 ```
+
+A specific package:
+
+```sh
+pnpm --filter @tapflow/ios-agent test
+pnpm --filter @tapflow/android-agent test
+pnpm --filter @tapflow/relay test
+pnpm --filter @tapflow/cli test
+```
+
+Run the relevant package tests before opening a PR. New behavior should be covered by tests.
+
+## Reporting bugs
+
+Use the [Bug Report](https://github.com/jo-duchan/tapflow/issues/new?template=bug_report.yml) issue template. Include steps to reproduce, expected vs. actual behavior, and your environment (tapflow version, Node.js version, and Xcode version for iOS issues).
