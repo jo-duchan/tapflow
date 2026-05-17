@@ -163,7 +163,7 @@ adb install MyApp.apk
 adb shell am start -n com.example.app/.MainActivity
 ```
 
-**터치 인젝션** — `AndroidTouchHelper` via `adb shell input`
+**터치 인젝션** — scrcpy control 소켓(`ScrcpyControl.touchDown/touchMove/touchUp`) 우선, scrcpy 세션이 없는 경우 `AndroidTouchHelper`(`adb shell input`) 폴백
 
 **화면 스트리밍** — scrcpy H.264
 
@@ -436,7 +436,7 @@ await agent.boot(selectedDeviceId)
 - DeviceAgent 인터페이스 정의
 - IOSAgent: xcrun simctl 래퍼
 - IOSAgent: MJPEG 스트리밍
-- IOSAgent: WebDriverAgent 터치 연동
+- IOSAgent: SimDeviceLegacyHIDClient + IndigoHID 터치 인젝션
 - 릴레이 서버: WebSocket 터널
 - Web Dashboard: 시뮬레이터 뷰어 (기본)
 
@@ -449,30 +449,15 @@ await agent.boot(selectedDeviceId)
 - 세션 점유 상태 표시 — 이미 다른 QA가 보고 있는 세션은 "사용 중" 표시 (browser 연결 여부로 판단)
 
 - **SQLite 도입**: relay 서버에 `tapflow.db` 내장 — 이후 모든 데이터(앱, 세션, 유저, 버그)의 기반
-- CLI: `npx tapflow deploy` (fly.io 먼저)
-- CLI: `npx tapflow doctor` — 환경 진단 및 수정 가이드
-  - Xcode 버전 확인
-  - iOS Simulator Runtime 버전과 Xcode SDK 버전 일치 여부 검사
-  - WDA 실행 상태 확인 (`localhost:8100`)
-  - Node.js 버전 확인
-  - 문제 항목마다 수정 커맨드 안내
-- CLI: `npx tapflow ios setup` — WDA 자동 설치·빌드·실행
-  - Xcode SDK 버전 자동 감지 (`xcodebuild -showsdks`)
-  - 일치하는 iOS Simulator Runtime 없으면 자동 다운로드 (`xcodebuild -downloadPlatform iOS`)
-  - `appium-webdriveragent` npm 패키지 다운로드
-  - `xcodebuild`로 시뮬레이터용 빌드 (Team ID 1회 입력)
-  - 이후 `agent start` 시 WDA 자동 시작
+- CLI: `tapflow doctor` — Node.js 버전, Xcode, simctl, booted simulator, adb, booted AVD 점검. 문제 항목마다 수정 커맨드 안내
 - JWT 인증 + 팀 초대 시스템 + 역할별 권한 (Admin / Developer / QA / Viewer)
 - 세션 녹화 + 재생
 - 스크린샷 + 버그 리포트
-- **App Center**: `npx tapflow upload` + Dashboard App Center UI
-  - CLI: `npx tapflow upload MyApp.ipa --label "v1.2.3-staging"` → relay 업로드 + SQLite 등록
-  - Relay: SQLite `apps` 테이블에 메타데이터 저장, 바이너리는 `uploads/apps/`에 보관
+- **App Center**: REST API 업로드 + Dashboard App Center UI
+  - Relay: `POST /api/v1/builds` (multipart) — `apps` 테이블에 메타데이터 저장, 바이너리는 `uploads/` 보관
   - Agent: relay에서 바이너리 수신 후 `xcrun simctl install` / `adb install` 처리
   - Dashboard: 버전 목록 → 디바이스 선택 → 원클릭 설치
-  - CI/CD 연동: Jira Automation, GitHub Actions에서 `npx tapflow upload` 호출
-- **Deep Link 실행**: Dashboard 뷰어 내 패널에서 URL Scheme 직접 트리거
-  - `DeviceAgent.launchApp(bundleId, deepLink)` — iOS: `xcrun simctl openurl`, Android: `adb shell am start`
+  - CI/CD 연동: GitHub Actions 등에서 `POST /api/v1/builds` 직접 호출
 - **이벤트 로그 (기초)**: [Backlog] 앱 로그 스트림 → Dashboard 실시간 표시
   - iOS: `xcrun simctl spawn booted log stream`
   - Android: `adb logcat`
@@ -575,7 +560,7 @@ tapflow를 오픈소스 라이브러리로 다듬는 작업. 사용자가 처음
 | 스트리밍 v1 | SimulatorKit IOSurface → JPEG | Private API, geometry 불필요, ~30fps |
 | 스트리밍 v2 | WebRTC (H.264) | 저지연, ~60fps |
 | iOS 터치 | SimDeviceLegacyHIDClient + IndigoHID (Swift) | 저지연 HID 스트리밍; 터치·버튼·키보드 모두 처리 (WDA 미사용) |
-| Android 터치 | ADB shell input | 표준 도구, 별도 설치 불필요 (Phase 3) |
+| Android 터치 | scrcpy control 소켓 (primary) / adb shell input (fallback) | scrcpy와 같은 TCP 연결 재활용, 저지연 |
 | 인증 | 자체 JWT + 초대 링크 + PAT (API 배포용) | 외부 의존 없음, 셀프호스팅 친화적 |
 
 ---
