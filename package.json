@@ -19,9 +19,13 @@
     "dev:mock-agents": "pnpm --filter @tapflow/playground mock-agents",
     "docs:dev": "pnpm --filter @tapflow/docs dev",
     "docs:build": "pnpm --filter @tapflow/docs build",
-    "docs:preview": "pnpm --filter @tapflow/docs preview"
+    "docs:preview": "pnpm --filter @tapflow/docs preview",
+    "changeset": "changeset",
+    "version": "changeset version",
+    "release": "pnpm build && changeset publish"
   },
   "devDependencies": {
+    "@changesets/cli": "^2.31.0",
     "concurrently": "^9.0.0",
     "eslint": "^10.4.0",
     "globals": "^17.6.0",
