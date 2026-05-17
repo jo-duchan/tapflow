@@ -243,6 +243,16 @@ export function AndroidViewer({
     }
   }, [keyboardActive, send, sessionId])
 
+  useEffect(() => {
+    if (!keyboardActive) return
+    const onDown = (e: PointerEvent) => {
+      const area = containerRef.current ?? canvasRef.current
+      if (area && !area.contains(e.target as Node)) setKeyboardActive(false)
+    }
+    document.addEventListener('pointerdown', onDown)
+    return () => document.removeEventListener('pointerdown', onDown)
+  }, [keyboardActive])
+
   // ── Pointer interaction ───────────────────────────────────────────────────
   const toNorm = useCallback((e: { clientX: number; clientY: number }) => {
     const canvas = canvasRef.current
