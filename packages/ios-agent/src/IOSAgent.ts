@@ -266,10 +266,7 @@ export class IOSAgent implements DeviceAgent {
       this.simctl.syncKeyboardsFromLanguages(deviceId).catch((e) => {
         console.error('[agent] syncKeyboardsFromLanguages failed:', e)
       })
-      // Ensure Simulator.app window is visible so osascript keyboard toggle can access the menu.
-      this.simctl.openSimulatorApp().catch((e) => {
-        console.error('[agent] openSimulatorApp failed:', e)
-      })
+
     } catch (e) {
       if (seq !== state.bootSeq) return
       const message = e instanceof Error ? e.message : String(e)

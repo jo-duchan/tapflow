@@ -104,6 +104,28 @@ swiftc packages/ios-agent/src/keyboard-helper.swift \
 
 ---
 
+### rotation-helper 인터페이스
+
+```
+rotation-helper <portrait|landscapeLeft|landscapeRight|portraitUpsideDown> <udid|booted>
+```
+
+`SimDevice.lookup:error:`로 `PurpleWorkspacePort` mach 포트를 획득한 뒤 `GSEventTypeDeviceOrientationChanged` 이벤트를 직접 전송한다.
+**Simulator.app 불필요. Accessibility 권한 불필요.**
+
+UIDeviceOrientation rawValue: `portrait=1`, `portraitUpsideDown=2`, `landscapeRight=3`, `landscapeLeft=4`
+
+기존 `osascript` 방식(Simulator.app을 foreground로 올려 Cmd+화살표)과 달리 절대 orientation을 직접 지정하므로 현재 상태와 무관하게 동작한다.
+
+컴파일 (출력은 `bin/`):
+```bash
+swiftc packages/ios-agent/src/rotation-helper.swift \
+  -o packages/ios-agent/bin/rotation-helper \
+  -sdk "$(xcrun --show-sdk-path --sdk macosx)"
+```
+
+---
+
 ### IOSurface 캡처 — timer-driven 전략
 
 IOSurface 콜백만으로는 화면이 정적일 때 프레임이 오지 않는다.
