@@ -132,6 +132,56 @@ describe('upsertApp: bundle_id grouping', () => {
   })
 })
 
+// ── app_id + mismatched bundle_id routing ─────────────────────────────────
+
+describe('upload: app_id provided but bundle_id differs → new app', () => {
+  let tmpDir: string
+  let upsertApp: typeof import('../api/builds').upsertApp
+
+  beforeAll(async () => {
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'tapflow-mismatch-test-'))
+    initDb(path.join(tmpDir, 'test.db'))
+    const mod = await import('../api/builds')
+    upsertApp = mod.upsertApp
+  })
+
+  afterAll(() => { fs.rmSync(tmpDir, { recursive: true }) })
+
+  it('bundle_id가 다른 앱을 app_id 지정 업로드 시 새 앱에 라우팅된다', () => {
+    const db = getDb()
+    const bankioId = upsertApp('Bankio', 'com.bankio.mobile', 'ios')
+    const bankio = db.prepare('SELECT id, bundle_id_key FROM apps WHERE id = ?')
+      .get(bankioId) as { id: number; bundle_id_key: string }
+
+    // 핸들러 분기 시뮬레이션: bundleId !== app.bundle_id_key → upsertApp으로 라우팅
+    const uploadedBundleId = 'com.theapp.bundle'
+    const appId =
+      uploadedBundleId && bankio.bundle_id_key && bankio.bundle_id_key !== uploadedBundleId
+        ? upsertApp('TheApp', uploadedBundleId, 'ios')
+        : bankioId
+
+    expect(appId).not.toBe(bankioId)
+    const newApp = db.prepare('SELECT name, bundle_id_key FROM apps WHERE id = ?')
+      .get(appId) as { name: string; bundle_id_key: string }
+    expect(newApp.bundle_id_key).toBe('com.theapp.bundle')
+  })
+
+  it('bundle_id가 같으면 기존 app_id를 그대로 사용한다', () => {
+    const db = getDb()
+    const bankioId = upsertApp('Bankio2', 'com.bankio2.mobile', 'ios')
+    const bankio = db.prepare('SELECT id, bundle_id_key FROM apps WHERE id = ?')
+      .get(bankioId) as { id: number; bundle_id_key: string }
+
+    const uploadedBundleId = 'com.bankio2.mobile'
+    const appId =
+      uploadedBundleId && bankio.bundle_id_key && bankio.bundle_id_key !== uploadedBundleId
+        ? upsertApp('Bankio2', uploadedBundleId, 'ios')
+        : bankioId
+
+    expect(appId).toBe(bankioId)
+  })
+})
+
 // ── extractAppZipInfo unit tests ──────────────────────────────────────────
 
 describe('extractAppZipInfo', () => {
