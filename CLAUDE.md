@@ -52,6 +52,7 @@ tapflow는 QA가 iOS/Android 시뮬레이터·에뮬레이터를 브라우저에
 
 - `git push --force`, `git reset --hard`, 외부 시스템 메시지 전송, DB drop 등.
 - 커밋·PR 생성은 사용자가 명시적으로 요청한 경우에만 한다.
+- **Breaking change는 지양한다.** 불가피하게 발생하는 경우 작업 전 사용자에게 먼저 보고하고 승인을 받는다. Breaking change 대상: 공개 API·인터페이스 시그니처 변경, DB 스키마 변경, WebSocket 메시지 프로토콜 변경, CLI 명령어·플래그 변경.
 
 ---
 
