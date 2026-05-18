@@ -65,6 +65,7 @@ function mockSimctl(booted = false): SimctlWrapper {
     openSimulatorApp: vi.fn().mockResolvedValue(undefined),
     showSoftwareKeyboard: vi.fn().mockResolvedValue(undefined),
     hideSoftwareKeyboard: vi.fn().mockResolvedValue(undefined),
+    stopKeyboardDaemon: vi.fn(),
   } as unknown as SimctlWrapper
 }
 
@@ -433,17 +434,63 @@ describe('IOSAgent', () => {
       browser.close()
     })
 
-    it('input:key 수신 시 softKeyboardVisible이 false로 리셋된다', async () => {
+    it('토글 성공 시 keyboard:toggled ACK를 dashboard로 송신한다', async () => {
       const sim = mockSimctl(true)
       const { browser, agent } = await setupSession(sim)
-      // show keyboard
+      browser.send(JSON.stringify({ type: 'input:keyboard:toggle', sessionId: agent.sessionId }))
+      const ack = await waitForType(browser, 'keyboard:toggled')
+      expect(ack.payload).toEqual({ visible: true })
+      // second toggle: visible becomes false
+      browser.send(JSON.stringify({ type: 'input:keyboard:toggle', sessionId: agent.sessionId }))
+      const ack2 = await waitForType(browser, 'keyboard:toggled')
+      expect(ack2.payload).toEqual({ visible: false })
+      agent.disconnect()
+      browser.close()
+    })
+
+    it('토글 실패 시 state가 롤백되고 ACK가 오지 않는다', async () => {
+      const sim = mockSimctl(true)
+      ;(sim.showSoftwareKeyboard as ReturnType<typeof vi.fn>).mockRejectedValue(new Error('helper failed'))
+      const { browser, agent } = await setupSession(sim)
       browser.send(JSON.stringify({ type: 'input:keyboard:toggle', sessionId: agent.sessionId }))
       await vi.waitFor(() => expect(sim.showSoftwareKeyboard).toHaveBeenCalledTimes(1), { timeout: 500 })
-      // hardware key press → keyboard auto-hides in iOS, state resets
-      browser.send(JSON.stringify({ type: 'input:key', sessionId: agent.sessionId, payload: { code: 'KeyA', modifiers: 0 } }))
-      // next toggle should show again (not hide)
+      // state should remain false (no visible=true ACK)
+      // next toggle should call show again (not hide), confirming state stayed false
+      ;(sim.showSoftwareKeyboard as ReturnType<typeof vi.fn>).mockResolvedValue(undefined)
       browser.send(JSON.stringify({ type: 'input:keyboard:toggle', sessionId: agent.sessionId }))
       await vi.waitFor(() => expect(sim.showSoftwareKeyboard).toHaveBeenCalledTimes(2), { timeout: 500 })
+      expect(sim.hideSoftwareKeyboard).not.toHaveBeenCalled()
+      agent.disconnect()
+      browser.close()
+    })
+
+    it('input:key 수신 시 SW 켜져 있으면 hideSoftwareKeyboard를 먼저 호출한다', async () => {
+      const sim = mockSimctl(true)
+      const { browser, agent } = await setupSession(sim)
+      // show keyboard first
+      browser.send(JSON.stringify({ type: 'input:keyboard:toggle', sessionId: agent.sessionId }))
+      await waitForType(browser, 'keyboard:toggled')
+      // hardware key press → hide must be called before sendKey
+      browser.send(JSON.stringify({ type: 'input:key', sessionId: agent.sessionId, payload: { code: 'KeyA', modifiers: 0 } }))
+      await vi.waitFor(() => expect(sim.hideSoftwareKeyboard).toHaveBeenCalledWith('dev-1'), { timeout: 500 })
+      const thInstance = MockTouchHelper.mock.results[0].value
+      await vi.waitFor(() => expect(thInstance.sendKey).toHaveBeenCalledWith(HID_KEY_A, 0), { timeout: 500 })
+      // next toggle should show (state was reset to false by the key press)
+      browser.send(JSON.stringify({ type: 'input:keyboard:toggle', sessionId: agent.sessionId }))
+      await vi.waitFor(() => expect(sim.showSoftwareKeyboard).toHaveBeenCalledTimes(2), { timeout: 500 })
+      agent.disconnect()
+      browser.close()
+    })
+
+    it('input:key 수신 시 SW 꺼져 있으면 hideSoftwareKeyboard를 호출하지 않는다', async () => {
+      const sim = mockSimctl(true)
+      const { browser, agent } = await setupSession(sim)
+      browser.send(JSON.stringify({ type: 'input:key', sessionId: agent.sessionId, payload: { code: 'KeyA', modifiers: 0 } }))
+      await vi.waitFor(() => {
+        const thInstance = MockTouchHelper.mock.results[0].value
+        return expect(thInstance.sendKey).toHaveBeenCalledWith(HID_KEY_A, 0)
+      }, { timeout: 500 })
+      expect(sim.hideSoftwareKeyboard).not.toHaveBeenCalled()
       agent.disconnect()
       browser.close()
     })

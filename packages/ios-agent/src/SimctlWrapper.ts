@@ -6,7 +6,6 @@ import { tmpdir } from 'os'
 import { join } from 'path'
 
 const execFileAsync = promisify(execFile)
-const KEYBOARD_HELPER  = join(import.meta.dirname, '..', 'bin', 'keyboard-helper')
 const ROTATION_HELPER  = join(import.meta.dirname, '..', 'bin', 'rotation-helper')
 
 // Language code → iOS AppleKeyboards entry string with hw=Automatic.
@@ -33,6 +32,7 @@ function langToKeyboard(lang: string): string {
 }
 import type { Device, DeviceStatus } from '@tapflow/agent-core'
 import { defaultRunner, type SimctlRunner } from './simctl.js'
+import { KeyboardHelperDaemon } from './KeyboardHelperDaemon.js'
 
 interface SimctlDevice {
   udid: string
@@ -60,6 +60,8 @@ function parseOsVersion(runtimeKey: string): string | undefined {
 }
 
 export class SimctlWrapper {
+  private readonly kbd = new KeyboardHelperDaemon()
+
   constructor(private readonly runner: SimctlRunner = defaultRunner) {}
 
   async listDevices(): Promise<Device[]> {
@@ -168,10 +170,14 @@ export class SimctlWrapper {
   }
 
   async showSoftwareKeyboard(udid: string): Promise<void> {
-    await execFileAsync(KEYBOARD_HELPER, ['show', udid])
+    await this.kbd.show(udid)
   }
 
   async hideSoftwareKeyboard(udid: string): Promise<void> {
-    await execFileAsync(KEYBOARD_HELPER, ['hide', udid])
+    await this.kbd.hide(udid)
+  }
+
+  stopKeyboardDaemon(): void {
+    this.kbd.stop()
   }
 }

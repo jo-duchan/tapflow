@@ -306,7 +306,8 @@ export class RelayServer {
       case 'app:install-done':
       case 'app:install-error':
       case 'app:launch-done':
-      case 'app:launch-error': {
+      case 'app:launch-error':
+      case 'keyboard:toggled': {
         const session = this.sessions.get(msg.sessionId!)
         if (session?.browserSocket?.readyState === WebSocket.OPEN) {
           session.browserSocket.send(JSON.stringify(msg))

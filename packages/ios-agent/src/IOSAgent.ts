@@ -128,6 +128,7 @@ export class IOSAgent implements DeviceAgent {
     this.ws?.close()
     this.ws = null
     this.relayUrl = null
+    this.simctl.stopKeyboardDaemon()
   }
 
   private reportResources(): void {
@@ -387,25 +388,39 @@ export class IOSAgent implements DeviceAgent {
       case 'input:keyboard:toggle': {
         const state = this.deviceStates.get(msg.sessionId!)
         if (!state) break
-        if (!state.softKeyboardVisible) {
-          state.softKeyboardVisible = true
-          this.simctl.showSoftwareKeyboard(state.deviceId)
-            .catch((e: unknown) => console.error('[agent] showSoftwareKeyboard failed:', e))
-        } else {
-          state.softKeyboardVisible = false
-          this.simctl.hideSoftwareKeyboard(state.deviceId)
-            .catch((e: unknown) => console.error('[agent] hideSoftwareKeyboard failed:', e))
-        }
+        const showing = !state.softKeyboardVisible
+        const op = showing
+          ? this.simctl.showSoftwareKeyboard(state.deviceId)
+          : this.simctl.hideSoftwareKeyboard(state.deviceId)
+        op.then(() => {
+          state.softKeyboardVisible = showing
+          this.ws?.send(JSON.stringify({
+            type: 'keyboard:toggled',
+            sessionId: state.sessionId,
+            payload: { visible: showing },
+          }))
+        }).catch((e: unknown) => {
+          console.error('[agent] keyboard toggle failed:', e)
+        })
         break
       }
       case 'input:key': {
         const state = this.deviceStates.get(msg.sessionId!)
         if (!state?.touchHelper) break
-        // iOS auto-hides the software keyboard on hardware key input.
-        if (state.softKeyboardVisible) state.softKeyboardVisible = false
         const { code, modifiers } = msg.payload as { code: string; modifiers?: number }
         const usage = KEY_CODE_MAP[code]
-        if (usage !== undefined) {
+        if (usage === undefined) break
+        if (state.softKeyboardVisible) {
+          // Hide the SW keyboard first so iOS re-initialises the HW keyboard
+          // context. Skipping this causes input-source desync (qks / ㅂㅏㄴ symptoms).
+          state.softKeyboardVisible = false
+          this.simctl.hideSoftwareKeyboard(state.deviceId)
+            .then(() => state.touchHelper?.sendKey(usage, modifiers ?? 0))
+            .catch((e: unknown) => {
+              console.error('[agent] hideSoftwareKeyboard (on key) failed:', e)
+              state.touchHelper?.sendKey(usage, modifiers ?? 0)
+            })
+        } else {
           state.touchHelper.sendKey(usage, modifiers ?? 0)
         }
         break

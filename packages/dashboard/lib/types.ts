@@ -151,6 +151,7 @@ export type RelayMessage =
   | { type: 'input:button'; sessionId: string; payload: { name: string } }
   | { type: 'input:rotate'; sessionId: string }
   | { type: 'input:keyboard:toggle'; sessionId: string }
+  | { type: 'keyboard:toggled'; sessionId: string; payload: { visible: boolean } }
   | { type: 'app:install-done' }
   | { type: 'app:install-error'; message: string }
   | { type: 'app:launch-done' }

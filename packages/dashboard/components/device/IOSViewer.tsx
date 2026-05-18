@@ -31,6 +31,9 @@ interface IOSViewerProps {
   chrome: ChromeData;
   binaryFrameHandlerRef: React.MutableRefObject<((data: ArrayBuffer) => void) | undefined>;
   onRecordingUploaded?: () => void;
+  swKeyboardVisible: boolean;
+  swKeyboardPending: boolean;
+  onKbdToggle: () => void;
 }
 
 export function IOSViewer({
@@ -38,6 +41,7 @@ export function IOSViewer({
   deviceReady, installing, installed, installError, bootError,
   launching, setLaunching, chrome,
   binaryFrameHandlerRef, onRecordingUploaded,
+  swKeyboardVisible, swKeyboardPending, onKbdToggle,
 }: IOSViewerProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -451,9 +455,13 @@ export function IOSViewer({
       <Tooltip>
         <TooltipTrigger asChild>
           <Button variant="ghost" size="icon" className="h-8 w-8"
-            onClick={() => send({ type: 'input:keyboard:toggle', sessionId })}
+            disabled={swKeyboardPending}
+            onClick={onKbdToggle}
+            data-active={swKeyboardVisible}
           >
-            <Keyboard className="h-4 w-4" />
+            {swKeyboardPending
+              ? <Loader2 className="h-4 w-4 animate-spin" />
+              : <Keyboard className="h-4 w-4" />}
           </Button>
         </TooltipTrigger>
         <TooltipContent side="left">Software keyboard</TooltipContent>
