@@ -373,11 +373,16 @@ export function handleUploadBuild(
         fs.unlinkSync(savedPath)
         return json(res, 404, { error: 'App not found' })
       }
-      if (app.platform !== 'both' && app.platform !== platform) {
-        db.prepare('UPDATE apps SET platform = ? WHERE id = ?').run('both', appId)
-      }
-      if (!app.bundle_id_key && bundleId) {
-        db.prepare('UPDATE apps SET bundle_id_key = ? WHERE id = ?').run(bundleId, appId)
+      // 추출된 bundle_id가 지정한 앱과 다르면 bundle_id 기준으로 앱을 찾거나 생성
+      if (bundleId && app.bundle_id_key && app.bundle_id_key !== bundleId) {
+        appId = upsertApp(appName, bundleIdKey, platform)
+      } else {
+        if (app.platform !== 'both' && app.platform !== platform) {
+          db.prepare('UPDATE apps SET platform = ? WHERE id = ?').run('both', appId)
+        }
+        if (!app.bundle_id_key && bundleId) {
+          db.prepare('UPDATE apps SET bundle_id_key = ? WHERE id = ?').run(bundleId, appId)
+        }
       }
     } else {
       appId = upsertApp(appName, bundleIdKey, platform)
