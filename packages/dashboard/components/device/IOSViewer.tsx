@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useRef, useState, Fragment } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, Fragment } from 'react';
 import { Home, Keyboard, Loader2, Play } from 'lucide-react';
 import { useFps } from '@/hooks/useFps';
 import { SimulatorToolbar } from './shared/SimulatorToolbar';
@@ -31,6 +31,9 @@ interface IOSViewerProps {
   chrome: ChromeData;
   binaryFrameHandlerRef: React.MutableRefObject<((data: ArrayBuffer) => void) | undefined>;
   onRecordingUploaded?: () => void;
+  swKeyboardVisible: boolean;
+  swKeyboardPending: boolean;
+  onKbdToggle: () => void;
 }
 
 export function IOSViewer({
@@ -38,9 +41,11 @@ export function IOSViewer({
   deviceReady, installing, installed, installError, bootError,
   launching, setLaunching, chrome,
   binaryFrameHandlerRef, onRecordingUploaded,
+  swKeyboardVisible, swKeyboardPending, onKbdToggle,
 }: IOSViewerProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
+  const screenAreaRef = useRef<HTMLDivElement>(null);
   const recordCanvasRef = useRef<HTMLCanvasElement>(null);
   const { fps, frameCount } = useFps();
   const deviceSeq = useRef(0);
@@ -116,13 +121,14 @@ export function IOSViewer({
   const recordChunksRef = useRef<Blob[]>([]);
   const recordMimeRef = useRef('');
   const rafIdRef = useRef(0);
+  const composeFrameRef = useRef<() => void>(() => {});
 
   const composeFrame = useCallback(() => {
     if (!recordingRef.current) return
     const rc = recordCanvasRef.current; const fc = canvasRef.current
-    if (!rc || !fc) { rafIdRef.current = requestAnimationFrame(composeFrame); return }
+    if (!rc || !fc) return
     const ctx = rc.getContext('2d')
-    if (!ctx) { rafIdRef.current = requestAnimationFrame(composeFrame); return }
+    if (!ctx) return
 
     const ch = chromeRef.current
     ctx.clearRect(0, 0, rc.width, rc.height)
@@ -181,8 +187,9 @@ export function IOSViewer({
       }
       ctx.restore()
     }
-    rafIdRef.current = requestAnimationFrame(composeFrame)
+    rafIdRef.current = requestAnimationFrame(composeFrameRef.current)
   }, [])
+  useLayoutEffect(() => { composeFrameRef.current = composeFrame }, [composeFrame])
 
   const startClientRecording = useCallback(() => {
     const rc = recordCanvasRef.current; if (!rc) return
@@ -268,15 +275,21 @@ export function IOSViewer({
 
   // ── Coordinate helpers ────────────────────────────────────────────────────
   const toNormScreen = useCallback((e: { clientX: number; clientY: number }) => {
-    if (!containerRef.current) return null
-    const rect = containerRef.current.getBoundingClientRect()
+    // In landscape, use the outer wrapper div (no CSS transform) to avoid
+    // getBoundingClientRect inaccuracies on CSS-rotated elements.
+    const target = (isLandscape ? screenAreaRef.current : null) ?? containerRef.current
+    if (!target) return null
+    const rect = target.getBoundingClientRect()
     const cw = chrome.compositeWidth / 2; const ch2 = chrome.compositeHeight / 2
     const sx = chrome.screenRect.x / 2; const sy = chrome.screenRect.y / 2
     const sw = chrome.screenRect.width / 2; const sh = chrome.screenRect.height / 2
     let cx: number, cy: number
     if (isLandscape) {
+      // rect is the landscape-sized outer div (width=displayH, height=displayW, no transform).
+      // CSS rotate(-90deg) CCW: visual left=DI(portrait top), visual right=home(portrait bottom).
+      // IndigoHID y=landscape_x(direct), x=1-landscape_y → portrait_x = 1-v, portrait_y = u.
       const u = (e.clientX - rect.left) / rect.width; const v = (e.clientY - rect.top) / rect.height
-      cx = v * cw; cy = (1 - u) * ch2
+      cx = (1 - v) * cw; cy = u * ch2
     } else {
       cx = (e.clientX - rect.left) * (cw / rect.width)
       cy = (e.clientY - rect.top) * (ch2 / rect.height)
@@ -442,9 +455,13 @@ export function IOSViewer({
       <Tooltip>
         <TooltipTrigger asChild>
           <Button variant="ghost" size="icon" className="h-8 w-8"
-            onClick={() => send({ type: 'input:keyboard:toggle', sessionId })}
+            disabled={swKeyboardPending}
+            onClick={onKbdToggle}
+            data-active={swKeyboardVisible}
           >
-            <Keyboard className="h-4 w-4" />
+            {swKeyboardPending
+              ? <Loader2 className="h-4 w-4 animate-spin" />
+              : <Keyboard className="h-4 w-4" />}
           </Button>
         </TooltipTrigger>
         <TooltipContent side="left">Software keyboard</TooltipContent>
@@ -490,13 +507,13 @@ export function IOSViewer({
       />
 
       <div className="flex items-start gap-8">
-        <div style={{ width: isLandscape ? displayH : displayW, height: isLandscape ? displayW : displayH, position: 'relative', flexShrink: 0 }}>
+        <div ref={screenAreaRef} style={{ width: isLandscape ? displayH : displayW, height: isLandscape ? displayW : displayH, position: 'relative', flexShrink: 0 }}>
           <div
             ref={containerRef}
             className={`relative ${hoveredButton ? 'cursor-pointer' : 'cursor-default'}`}
             style={{
               width: displayW, height: displayH,
-              ...(isLandscape ? { position: 'absolute', top: (displayW - displayH) / 2, left: (displayH - displayW) / 2, transform: 'rotate(90deg)', transformOrigin: 'center center' } : {}),
+              ...(isLandscape ? { position: 'absolute', top: (displayW - displayH) / 2, left: (displayH - displayW) / 2, transform: 'rotate(-90deg)', transformOrigin: 'center center' } : {}),
             }}
             onPointerDown={handlePointerDown}
             onPointerMove={handlePointerMove}
@@ -527,14 +544,6 @@ export function IOSViewer({
                 borderRadius: cssCornerRadius > 0 ? `${cssCornerRadius}px` : undefined,
               }} />
             )}
-            <div
-              ref={liveCursorRef}
-              style={{
-                display: 'none', position: 'absolute', zIndex: 20, borderRadius: '50%',
-                transform: 'translate(-50%, -50%)', pointerEvents: 'none',
-                transition: 'width 0.1s ease, height 0.1s ease, background 0.1s ease, box-shadow 0.1s ease',
-              }}
-            />
             {pinchHint && (() => {
               const screenLeft = screenPctLeft / 100; const screenTop = screenPctTop / 100
               const screenW = screenPctW / 100; const screenH = screenPctH / 100
@@ -619,6 +628,14 @@ export function IOSViewer({
               )
             })}
           </div>
+          <div
+            ref={liveCursorRef}
+            style={{
+              display: 'none', position: 'absolute', zIndex: 20, borderRadius: '50%',
+              transform: 'translate(-50%, -50%)', pointerEvents: 'none',
+              transition: 'width 0.1s ease, height 0.1s ease, background 0.1s ease, box-shadow 0.1s ease',
+            }}
+          />
         </div>
 
         <SimulatorInfoCard

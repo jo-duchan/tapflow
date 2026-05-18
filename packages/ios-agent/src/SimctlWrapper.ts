@@ -3,11 +3,10 @@ import { execFile } from 'child_process'
 import { promisify } from 'util'
 import { promises as fs } from 'fs'
 import { tmpdir } from 'os'
-import { join, dirname } from 'path'
-import { fileURLToPath } from 'url'
+import { join } from 'path'
 
 const execFileAsync = promisify(execFile)
-const KEYBOARD_HELPER = join(dirname(fileURLToPath(import.meta.url)), 'keyboard-helper')
+const ROTATION_HELPER  = join(import.meta.dirname, '..', 'bin', 'rotation-helper')
 
 // Language code → iOS AppleKeyboards entry string with hw=Automatic.
 // hw=Automatic lets iOS switch the hardware layout when the input source changes via LANG1/CapsLock.
@@ -33,6 +32,7 @@ function langToKeyboard(lang: string): string {
 }
 import type { Device, DeviceStatus } from '@tapflow/agent-core'
 import { defaultRunner, type SimctlRunner } from './simctl.js'
+import { KeyboardHelperDaemon } from './KeyboardHelperDaemon.js'
 
 interface SimctlDevice {
   udid: string
@@ -60,6 +60,8 @@ function parseOsVersion(runtimeKey: string): string | undefined {
 }
 
 export class SimctlWrapper {
+  private readonly kbd = new KeyboardHelperDaemon()
+
   constructor(private readonly runner: SimctlRunner = defaultRunner) {}
 
   async listDevices(): Promise<Device[]> {
@@ -94,6 +96,9 @@ export class SimctlWrapper {
       if (stderr.includes('Unable to boot device in current state: Booted')) return
       throw err
     }
+    // Xcode 14+ auto-opens Simulator.app on `simctl boot`.
+    // Quitting kills the simulator runtime, so just hide the app window instead.
+    execFile('osascript', ['-e', 'tell application "Simulator" to set visible to false'], () => {})
   }
 
   async shutdown(deviceId: string): Promise<void> {
@@ -156,21 +161,19 @@ export class SimctlWrapper {
     } catch { /* expected on some iOS versions */ }
   }
 
-  async rotate(_udid: string, orientation: 'portrait' | 'landscapeLeft' | 'landscapeRight' | 'portraitUpsideDown'): Promise<void> {
-    // xcrun simctl io does not support rotate; use Simulator.app keyboard shortcut via AppleScript
-    const goClockwise = orientation === 'landscapeRight' || orientation === 'portraitUpsideDown'
-    const keyCode = goClockwise ? 124 : 123   // 124=Right Arrow, 123=Left Arrow
-    await execFileAsync('osascript', [
-      '-e', 'tell application "Simulator" to activate',
-      '-e', `tell application "System Events" to key code ${keyCode} using {command down}`,
-    ])
+  async rotate(udid: string, orientation: 'portrait' | 'landscapeLeft' | 'landscapeRight' | 'portraitUpsideDown'): Promise<void> {
+    await execFileAsync(ROTATION_HELPER, [orientation, udid])
   }
 
   async showSoftwareKeyboard(udid: string): Promise<void> {
-    await execFileAsync(KEYBOARD_HELPER, ['show', udid])
+    await this.kbd.show(udid)
   }
 
   async hideSoftwareKeyboard(udid: string): Promise<void> {
-    await execFileAsync(KEYBOARD_HELPER, ['hide', udid])
+    await this.kbd.hide(udid)
+  }
+
+  stopKeyboardDaemon(): void {
+    this.kbd.stop()
   }
 }

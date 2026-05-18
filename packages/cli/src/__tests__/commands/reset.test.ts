@@ -76,12 +76,12 @@ describe('cmdReset', () => {
     expect(output.join('\n')).toContain('no running emulators')
   })
 
-  it('완료 후 "Reset complete" 출력', async () => {
+  it('완료 후 "RESET COMPLETE" 배너 출력', async () => {
     mockRl('y')
     mockExecSync.mockImplementation(() => '')
 
     await cmdReset()
-    expect(output.join('\n')).toContain('Reset complete')
+    expect(output.join('\n')).toContain('RESET COMPLETE')
   })
 
   it('대소문자 구분 없이 "Y" 도 허용', async () => {
@@ -89,6 +89,6 @@ describe('cmdReset', () => {
     mockExecSync.mockImplementation(() => '')
 
     await cmdReset()
-    expect(output.join('\n')).toContain('Reset complete')
+    expect(output.join('\n')).toContain('RESET COMPLETE')
   })
 })

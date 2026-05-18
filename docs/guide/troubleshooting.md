@@ -22,7 +22,23 @@ proxy_read_timeout 3600s;
 
 See the configuration example in [Self-Hosting the Relay](/guide/self-hosting#nginx-example).
 
----
+## iOS Simulator service version mismatch {#ios-simulator-service-version-mismatch}
+
+After updating Xcode, you may see a macOS alert:
+
+> "Loaded CoreSimulatorService is no longer valid for this process … Service version (X) does not match expected service version (Y)."
+
+tapflow automatically detects this and restarts the service. If the automatic recovery fails (the alert still appears after retrying), run this command manually:
+
+```sh
+killall -9 com.apple.CoreSimulator.CoreSimulatorService
+```
+
+`launchd` will restart the service immediately. Then re-run `tapflow start`.
+
+::: details Why this happens
+Xcode ships a newer `CoreSimulator.framework` but the old `CoreSimulatorService` daemon is still running from the previous session. After the first `xcrun simctl` call notices the version mismatch, tapflow force-kills the daemon so launchd can restart it with the new version. If the daemon is stuck and does not die on the first attempt, the manual `killall -9` above is needed.
+:::
 
 ## iOS 17 and earlier — Korean text splits into individual characters
 
@@ -38,8 +54,6 @@ Install it from Xcode → Settings → Platforms.
 - [Flutter #135825](https://github.com/flutter/flutter/issues/135825)
 :::
 
----
-
 ## iOS build upload errors
 
 ### `400` error on upload
@@ -49,8 +63,6 @@ Install it from Xcode → Settings → Platforms.
 | `.ipa` file uploaded | `.ipa` is for real devices. Build with `xcodebuild -sdk iphonesimulator` and zip the `.app` folder. |
 | `.app` not at the zip root | Extracting the zip must produce `MyApp.app` directly — not inside a subfolder. |
 | Device-only slices | Confirm it is a simulator build. `lipo -info MyApp.app/MyApp` must include `x86_64` or `arm64` (simulator). |
-
----
 
 ## Android emulator issues
 
@@ -62,8 +74,6 @@ Occurs when the AVD uses the `google_apis_playstore` image. Recreate the AVD wit
 sdkmanager "system-images;android-34;google_apis;arm64-v8a"
 avdmanager create avd -n Pixel_8 -k "system-images;android-34;google_apis;arm64-v8a"
 ```
-
----
 
 ## `tapflow doctor` failures
 
@@ -90,8 +100,6 @@ export ANDROID_HOME=$HOME/Library/Android/sdk
 export PATH=$PATH:$ANDROID_HOME/platform-tools
 ```
 
----
-
 ## Session issues
 
 ### Session ends automatically
@@ -103,8 +111,6 @@ Sessions auto-close after 30 minutes of inactivity. This timeout cannot be chang
 - Check the network quality between the relay and the agent.
 - Check CPU and RAM usage for the affected Mac in the **Mac Resources** tab.
 - Reduce the number of simulators running simultaneously on one Mac.
-
----
 
 ## Auth issues
 
@@ -119,8 +125,6 @@ Invitation links expire after **7 days**. An Admin must send a new invitation fr
 ### Password reset link expired
 
 Password reset links expire after **2 hours**. An Admin can request a new link from **Settings → Team → select member → Send password reset**.
-
----
 
 ## Viewing logs
 

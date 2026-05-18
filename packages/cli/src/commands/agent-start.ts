@@ -1,7 +1,7 @@
-import { execSync } from 'node:child_process'
-import { IOSAgent } from '@tapflow/ios-agent'
 import { AndroidAgent } from '@tapflow/android-agent'
-import { banner, createSpinner, step } from '../lib/print.js'
+import { banner, createSpinner } from '../lib/print.js'
+import { hasAdb } from '../lib/platform.js'
+import { resolveAndBootIOSDevice } from '../lib/ios-boot.js'
 
 export interface AgentStartOptions {
   device?: string
@@ -10,14 +10,6 @@ export interface AgentStartOptions {
 }
 
 const DEFAULT_RELAY = 'ws://localhost:4000'
-
-function hasAdb(): boolean {
-  try {
-    return execSync('which adb', { encoding: 'utf8', stdio: 'pipe' }).trim().length > 0
-  } catch {
-    return false
-  }
-}
 
 export async function cmdAgentStart(opts: AgentStartOptions): Promise<void> {
   const isMac = process.platform === 'darwin'
@@ -39,43 +31,7 @@ export async function cmdAgentStart(opts: AgentStartOptions): Promise<void> {
 
   // ── iOS Agent ─────────────────────────────────────────────────────────────
   if (runIOS) {
-    const iosAgent = new IOSAgent()
-    const devices = await iosAgent.listDevices()
-
-    if (opts.device) {
-      const match = devices.find((d) => d.name === opts.device || d.id === opts.device)
-      if (!match) {
-        banner('error', 'DEVICE NOT FOUND', [
-          `"${opts.device}" does not match any simulator.`,
-          'Run `tapflow devices` to see available simulators.',
-        ])
-        process.exit(1)
-      }
-      if (match.status !== 'booted') {
-        const spinner = createSpinner(`Booting ${match.name}…`)
-        spinner.start()
-        execSync(`xcrun simctl boot ${match.id}`, { stdio: 'pipe' })
-        spinner.stop(true)
-      }
-      step(`iOS Simulator: ${match.name}`)
-    } else {
-      const booted = devices.find((d) => d.status === 'booted')
-      if (booted) {
-        step(`iOS Simulator: ${booted.name}`)
-      } else {
-        const first = devices[0]
-        if (!first) {
-          banner('error', 'NO SIMULATOR FOUND', ['Create one in Xcode → Window → Devices and Simulators.'])
-          process.exit(1)
-        }
-        const spinner = createSpinner(`Booting ${first.name}…`)
-        spinner.start()
-        execSync(`xcrun simctl boot ${first.id}`, { stdio: 'pipe' })
-        spinner.stop(true)
-        step(`iOS Simulator: ${first.name}`)
-      }
-    }
-
+    const iosAgent = await resolveAndBootIOSDevice(opts.device)
     const iosSpinner = createSpinner('Connecting iOS agent…')
     iosSpinner.start()
     try {
@@ -91,7 +47,7 @@ export async function cmdAgentStart(opts: AgentStartOptions): Promise<void> {
 
   // ── Android Agent ─────────────────────────────────────────────────────────
   if (runAndroid) {
-    const androidAgent = new AndroidAgent()
+    const androidAgent = new AndroidAgent({ deviceFilter: opts.device })
     const androidSpinner = createSpinner('Connecting Android agent…')
     androidSpinner.start()
     try {

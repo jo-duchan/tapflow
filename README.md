@@ -1,55 +1,178 @@
-# tapflow
+<div align="center">
+  <img src="docs/public/logo-hero.svg" height="72" alt="tapflow" />
 
-[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
-[![Node.js](https://img.shields.io/badge/node-%3E%3D20-brightgreen)](https://nodejs.org)
+  <h3>Self-hosted iOS & Android simulator streaming for QA teams</h3>
 
-Self-hosted iOS/Android simulator streaming for QA teams.
+  <p>
+    Run simulators in the browser — no Appetize, no BrowserStack, no monthly fees.<br />
+    App data never leaves your network.
+  </p>
 
-Run simulators and emulators in the browser — no Appetize, no BrowserStack, no monthly fees. Your app data never leaves your network.
+  <p>
+    <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-blue.svg" alt="MIT License" /></a>
+    <a href="https://nodejs.org"><img src="https://img.shields.io/badge/node-%3E%3D20-brightgreen" alt="Node.js ≥ 20" /></a>
+    <img src="https://img.shields.io/badge/platform-macOS-lightgrey" alt="macOS Agent" />
+    <a href="https://github.com/jo-duchan/tapflow/blob/main/CONTRIBUTING.md"><img src="https://img.shields.io/badge/PRs-welcome-brightgreen.svg" alt="PRs welcome" /></a>
+  </p>
+</div>
+
+---
+
+## Demo
+
+<!--
+  Demo video placeholder.
+  When the recording is ready, replace this block with:
+
+  [![tapflow demo](docs/public/demo-thumbnail.png)](https://YOUR_VIDEO_URL)
+
+  Recommended thumbnail size: 1280×720, saved to docs/public/demo-thumbnail.png
+-->
+
+<div align="center">
+  <strong>🎬 Demo video coming soon</strong>
+</div>
+
+---
+
+## Why tapflow?
+
+| Solution | Problem |
+|----------|---------|
+| Appetize / BrowserStack | Expensive — app data leaves your network |
+| Physical devices | Cost, loss, management overhead |
+| Xcode / Android Studio | Every QA member needs their own Mac + full toolchain setup |
+| **tapflow** | Use the Mac you already own — data stays on-prem, QA team uses a browser |
+
+## Features
+
+- **Browser-based** — QA team needs no installation. Any modern browser works.
+- **iOS Simulator** — JPEG frame streaming at ~30 fps via SimulatorKit IOSurface. No WebDriverAgent required.
+- **Android Emulator** — H.264 streaming via [scrcpy](https://github.com/Genymobile/scrcpy) at ~30 fps.
+- **Touch, swipe & pinch** — real-time input forwarded to the simulator.
+- **App Center** — upload `.app.zip` (iOS) or `.apk` (Android), manage builds by status (Backlog / In Progress / Done / Rejected).
+- **Session Recordings** — record QA sessions, share with your team. Retained for 72 hours.
+- **Mac Resources** — CPU & RAM monitoring per agent. Spot overloaded hosts before assigning sessions.
+- **Team management** — invite links, roles (Admin / Developer / QA / Viewer), Personal Access Tokens for CI/CD.
+- **Self-hosted** — deploy anywhere. No cloud dependency.
 
 <video src="https://github.com/jo-duchan/tapflow/releases/download/demo-assets/tapflow-demo-final-compressed.mp4" controls width="100%"></video>
 
 ## How it works
 
 ```
-Browser (QA team)  ←→  Relay Server  ←→  Mac Agent (iOS Simulator × 2–4)
-                                     ←→  Linux Agent (Android Emulator)
+Browser (QA team)  ←—WebSocket—→  Relay Server  ←—WebSocket (outbound)—→  Mac Agent
+                                  (Linux / Mac)                           (iOS · Android)
 ```
 
-- **Relay**: lightweight Node.js server you deploy once (fly.io, Docker, or bare metal)
-- **Agent**: runs on your Mac/Linux, connects outbound to the relay — no firewall rules needed
-- **Dashboard**: React SPA served by the relay, accessible from any browser
+1. The **Mac Agent** connects *outbound* to the relay — no inbound firewall rules needed.
+2. QA opens the **dashboard** in any browser and sees all available devices.
+3. Touch events are forwarded in real time; the screen streams back to the browser.
+4. The **relay** also serves the dashboard SPA on the same port — no separate web server needed.
 
-## Quick start
+## Quick Start
+
+### 1. Install
 
 ```sh
-# Install
 npm install -g tapflow
+# or: yarn global add tapflow  |  pnpm add -g tapflow
+```
 
-# Start relay + iOS agent
+### 2. Start relay + agent
+
+```sh
 tapflow start
-
-# Or connect to a remote relay
-tapflow start --relay wss://your-relay-url
-
-# Check environment
-tapflow doctor
+# ✓ Relay started on http://localhost:4000
+# ✓ iOS Agent connected (3 simulators available)
 ```
 
-→ Full documentation: **[tapflow docs](https://github.com/jo-duchan/tapflow)**
+This starts both the relay and the agent on the same Mac (local mode).
 
-## Installation
+### 3. Create the first admin account
 
 ```sh
-# npm
-npm install -g tapflow
-
-# yarn
-yarn global add tapflow
-
-# pnpm
-pnpm add -g tapflow
+tapflow init
+# ? Admin email: admin@yourteam.com
+# ? Password: ********
+# ✓ Admin account created
 ```
+
+### 4. Open the dashboard
+
+Navigate to `http://localhost:4000` and sign in with the account you just created.
+
+> **Having issues?** Run `tapflow doctor` to auto-diagnose Node.js, Xcode, `adb`, and other prerequisites.
+
+## Requirements
+
+| Component | Requirements |
+|-----------|-------------|
+| **Relay server** | Node.js ≥ 20, any OS (Linux/macOS), ~512 MB RAM |
+| **iOS Agent** | macOS, Xcode with iOS Simulator Runtime, Node.js ≥ 20 |
+| **Android Agent** | macOS, Android SDK (`adb` in `$PATH` or `$ANDROID_HOME` set), AVD with `google_apis/arm64-v8a` (android-34), Node.js ≥ 20 |
+| **Browser (QA)** | Any modern browser — Chrome, Firefox, Safari, Edge |
+
+## Self-Hosting
+
+### Local (single Mac)
+
+Relay and agent on the same machine — ideal for a single developer or small team.
+
+```sh
+tapflow start
+```
+
+### Team (separate relay server)
+
+Run the relay on a Linux server or dedicated Mac. Each Mac with simulators runs the agent.
+
+**Relay server:**
+
+```sh
+# Recommended: PM2 for automatic restarts
+npm install -g pm2 tapflow
+JWT_SECRET=$(openssl rand -hex 32) pm2 start tapflow --name relay -- relay start
+pm2 save && pm2 startup
+```
+
+**Each Mac agent:**
+
+```sh
+tapflow agent start --relay wss://your-relay-url
+```
+
+> For nginx / Caddy reverse proxy setup and external access, see [Self-Hosting the Relay](https://jo-duchan.github.io/tapflow/guide/self-hosting).
+
+## CLI Reference
+
+| Command | Description |
+|---------|-------------|
+| `tapflow start` | Start relay + agent together (local mode) |
+| `tapflow relay start` | Start relay only |
+| `tapflow agent start --relay <url>` | Start agent and connect to a relay |
+| `tapflow init` | Create the first admin account |
+| `tapflow doctor` | Diagnose environment (Node, Xcode, adb…) |
+| `tapflow devices` | List available simulators and emulators |
+| `tapflow boot <name\|udid>` | Boot a simulator or emulator |
+| `tapflow status` | Show connected agents, devices, active sessions |
+| `tapflow reset` | Shut down all simulators and emulators |
+| `tapflow logs` | Show recent relay log entries |
+
+Full reference → [CLI docs](https://jo-duchan.github.io/tapflow/reference/cli)
+
+## Documentation
+
+**[jo-duchan.github.io/tapflow](https://jo-duchan.github.io/tapflow)**
+
+- [Introduction](https://jo-duchan.github.io/tapflow/guide/introduction)
+- [Quick Start](https://jo-duchan.github.io/tapflow/guide/getting-started)
+- [Self-Hosting the Relay](https://jo-duchan.github.io/tapflow/guide/self-hosting)
+- [iOS Agent Setup](https://jo-duchan.github.io/tapflow/guide/ios-agent)
+- [Android Agent Setup](https://jo-duchan.github.io/tapflow/guide/android-agent)
+- [Uploading Builds (CI/CD)](https://jo-duchan.github.io/tapflow/guide/upload-builds)
+- [CLI Reference](https://jo-duchan.github.io/tapflow/reference/cli)
+- [Troubleshooting](https://jo-duchan.github.io/tapflow/guide/troubleshooting)
 
 ## Development
 
@@ -62,10 +185,10 @@ pnpm install
 pnpm dev
 ```
 
-See [contributing/CONTRIBUTING.md](contributing/CONTRIBUTING.md) for branch strategy and commit conventions.
+See [CONTRIBUTING.md](CONTRIBUTING.md) for branch strategy, commit conventions, and architecture overview.
 
 ## License
 
 [MIT](LICENSE) — Copyright © 2025-present tapflow contributors
 
-> tapflow uses [scrcpy](https://github.com/Genymobile/scrcpy) (Apache-2.0) for Android screen streaming. See [NOTICE](NOTICE) for full attribution.
+> tapflow bundles [scrcpy-server](https://github.com/Genymobile/scrcpy) (Apache-2.0) for Android screen streaming. See [NOTICE](NOTICE) for full attribution.

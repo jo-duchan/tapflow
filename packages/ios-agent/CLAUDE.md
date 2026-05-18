@@ -53,9 +53,9 @@ Swift 소스 변경 시 **반드시 두 곳을 동시에** 수정한다:
 1. `src/touch-helper.swift` — stdin 프로토콜 변경
 2. `src/TouchHelper.ts` — `write()` 메서드의 byte layout 변경
 
-컴파일:
+컴파일 (출력은 `bin/`):
 ```bash
-cd packages/ios-agent/src && swiftc touch-helper.swift -o touch-helper
+cd packages/ios-agent && swiftc src/touch-helper.swift -o bin/touch-helper
 ```
 
 ---
@@ -75,10 +75,10 @@ Swift 바이너리 인터페이스가 바뀌면 **반드시 두 곳을 동시에
 
 컴파일 후 TypeScript dist 재빌드가 필요하다:
 ```bash
-cd packages/ios-agent/src
-swiftc screencapture-helper.swift -o screencapture-helper \
+cd packages/ios-agent
+swiftc src/screencapture-helper.swift -o bin/screencapture-helper \
   -framework CoreVideo -framework ImageIO
-npm run build --workspace=@tapflow/ios-agent
+pnpm build
 ```
 
 ---
@@ -95,10 +95,32 @@ macOS 접근성(Accessibility) 권한이 필요 없다.
 - `show`: `setHardwareKeyboardEnabled(false)` — 하드웨어 키보드 연결 해제 → 텍스트 필드 포커스 시 소프트웨어 키보드 등장
 - `hide`: `setHardwareKeyboardEnabled(true)` — 하드웨어 키보드 연결 → 소프트웨어 키보드 즉시 숨김
 
-컴파일:
+컴파일 (출력은 `bin/`):
 ```bash
 swiftc packages/ios-agent/src/keyboard-helper.swift \
-  -o packages/ios-agent/src/keyboard-helper \
+  -o packages/ios-agent/bin/keyboard-helper \
+  -sdk "$(xcrun --show-sdk-path --sdk macosx)"
+```
+
+---
+
+### rotation-helper 인터페이스
+
+```
+rotation-helper <portrait|landscapeLeft|landscapeRight|portraitUpsideDown> <udid|booted>
+```
+
+`SimDevice.lookup:error:`로 `PurpleWorkspacePort` mach 포트를 획득한 뒤 `GSEventTypeDeviceOrientationChanged` 이벤트를 직접 전송한다.
+**Simulator.app 불필요. Accessibility 권한 불필요.**
+
+UIDeviceOrientation rawValue: `portrait=1`, `portraitUpsideDown=2`, `landscapeRight=3`, `landscapeLeft=4`
+
+기존 `osascript` 방식(Simulator.app을 foreground로 올려 Cmd+화살표)과 달리 절대 orientation을 직접 지정하므로 현재 상태와 무관하게 동작한다.
+
+컴파일 (출력은 `bin/`):
+```bash
+swiftc packages/ios-agent/src/rotation-helper.swift \
+  -o packages/ios-agent/bin/rotation-helper \
   -sdk "$(xcrun --show-sdk-path --sdk macosx)"
 ```
 
@@ -131,7 +153,7 @@ timer.setEventHandler {
 키보드 주입은 `IndigoHIDMessageForKeyboardArbitrary(usage, op)` 를 사용한다.  
 `IndigoHIDMessageForHIDArbitrary(target=0x32, page=0x07, ...)` 는 digitizer(터치) 경로여서 iOS가 하드웨어 키보드로 인식하지 못해 CapsLock HUD와 한/영 전환이 동작하지 않는다.
 
-→ 상세 분석(target 차이, 증상 패턴, SimKeyboardInputController 심볼): [`docs/simkit-internals.md` §5](../../docs/simkit-internals.md)
+→ 상세 분석(target 차이, 증상 패턴, SimKeyboardInputController 심볼): [`internal/simkit-internals.md` §5](../../internal/simkit-internals.md)
 
 ---
 

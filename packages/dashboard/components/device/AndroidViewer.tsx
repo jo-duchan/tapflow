@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { ArrowLeft, Home, LayoutGrid, Loader2, Play, Power, Volume1, Volume2 } from 'lucide-react';
 import { H264Decoder } from '@/lib/H264Decoder';
 import { useWebGLRenderer } from '@/lib/WebGLVideoRenderer';
@@ -106,13 +106,14 @@ export function AndroidViewer({
   const recordChunksRef = useRef<Blob[]>([]);
   const recordMimeRef = useRef('');
   const rafIdRef = useRef(0);
+  const composeFrameRef = useRef<() => void>(() => {});
 
   const composeFrame = useCallback(() => {
     if (!recordingRef.current) return
     const rc = recordCanvasRef.current; const fc = canvasRef.current
-    if (!rc || !fc) { rafIdRef.current = requestAnimationFrame(composeFrame); return }
+    if (!rc || !fc) return
     const ctx = rc.getContext('2d')
-    if (!ctx) { rafIdRef.current = requestAnimationFrame(composeFrame); return }
+    if (!ctx) return
 
     ctx.drawImage(fc, 0, 0, rc.width, rc.height)
 
@@ -160,8 +161,9 @@ export function AndroidViewer({
     }
 
     ctx.restore()
-    rafIdRef.current = requestAnimationFrame(composeFrame)
+    rafIdRef.current = requestAnimationFrame(composeFrameRef.current)
   }, [])
+  useLayoutEffect(() => { composeFrameRef.current = composeFrame }, [composeFrame])
 
   const startClientRecording = useCallback(() => {
     const rc = recordCanvasRef.current; if (!rc) return
@@ -243,15 +245,33 @@ export function AndroidViewer({
     }
   }, [keyboardActive, send, sessionId])
 
+  useEffect(() => {
+    if (!keyboardActive) return
+    const onDown = (e: PointerEvent) => {
+      const area = containerRef.current ?? canvasRef.current
+      if (area && !area.contains(e.target as Node)) setKeyboardActive(false)
+    }
+    document.addEventListener('pointerdown', onDown)
+    return () => document.removeEventListener('pointerdown', onDown)
+  }, [keyboardActive])
+
   // ── Pointer interaction ───────────────────────────────────────────────────
+  const needsCSSRotationRef = useRef(false)
+
   const toNorm = useCallback((e: { clientX: number; clientY: number }) => {
     const canvas = canvasRef.current
     if (!canvas) return null
     const rect = canvas.getBoundingClientRect()
-    const x = (e.clientX - rect.left) / rect.width
-    const y = (e.clientY - rect.top) / rect.height
-    if (x < 0 || x > 1 || y < 0 || y > 1) return null
-    return { x, y }
+    const xv = (e.clientX - rect.left) / rect.width
+    const yv = (e.clientY - rect.top) / rect.height
+    if (xv < 0 || xv > 1 || yv < 0 || yv > 1) return null
+    if (needsCSSRotationRef.current) {
+      // Canvas has CSS rotate(90deg) CW. Visual axes map to portrait video axes:
+      // visual-top = canvas-left (portrait x=0), visual-left = canvas-bottom (portrait y=max).
+      // Transform: portrait_norm_x = yv, portrait_norm_y = 1 - xv
+      return { x: yv, y: 1 - xv }
+    }
+    return { x: xv, y: yv }
   }, [])
 
   const toPinchFingers = useCallback((e: { clientX: number; clientY: number }) => {
@@ -386,6 +406,7 @@ export function AndroidViewer({
   const isLandscapeDevice = deviceRotation === 1 || deviceRotation === 3;
   const isLandscapeContent = effectiveSize ? effectiveSize.width > effectiveSize.height : false;
   const needsCSSRotation = isLandscapeDevice && !isLandscapeContent;
+  useLayoutEffect(() => { needsCSSRotationRef.current = needsCSSRotation }, [needsCSSRotation])
   // Container uses landscape dims; canvas inside rotated 90° to show portrait content in landscape shell
   const containerW = needsCSSRotation ? androidDisplayH : androidDisplayW;
   const containerH = needsCSSRotation ? androidDisplayW : androidDisplayH;

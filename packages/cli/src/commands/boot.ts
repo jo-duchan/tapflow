@@ -1,4 +1,5 @@
 import { execSync, spawn } from 'node:child_process'
+import { banner, createSpinner, step } from '../lib/print.js'
 
 export async function cmdBoot(nameOrUdid: string): Promise<void> {
   // iOS 먼저 탐색
@@ -13,12 +14,14 @@ export async function cmdBoot(nameOrUdid: string): Promise<void> {
       )
       if (target) {
         if (target.state === 'Booted') {
-          console.log(`${target.name} is already booted.`)
+          step(`${target.name} is already booted.`)
           return
         }
-        console.log(`Booting iOS Simulator: ${target.name}…`)
-        execSync(`xcrun simctl boot ${target.udid}`, { stdio: 'inherit' })
-        console.log(`${target.name} booted.`)
+        const spinner = createSpinner(`Booting iOS Simulator: ${target.name}…`)
+        spinner.start()
+        execSync(`xcrun simctl boot ${target.udid}`, { stdio: 'pipe' })
+        spinner.stop(true)
+        step(`${target.name} booted.`)
         return
       }
     } catch { /* xcrun unavailable */ }
@@ -31,19 +34,18 @@ export async function cmdBoot(nameOrUdid: string): Promise<void> {
       .trim().split('\n').map((l) => l.trim()).filter(Boolean)
     const target = avdList.find((avd) => avd === nameOrUdid)
     if (target) {
-      console.log(`Booting Android AVD: ${target}…`)
       // emulator는 실행 후 종료되지 않으므로 detached로 백그라운드 기동
-      const child = spawn('emulator', [`@${target}`], {
-        detached: true,
-        stdio: 'ignore',
-      })
+      const child = spawn('emulator', [`@${target}`], { detached: true, stdio: 'ignore' })
       child.unref()
-      console.log(`${target} is starting in the background. Run \`tapflow devices\` to check status.`)
+      step(`Android AVD: ${target} is starting in the background.`)
+      step('Run `tapflow devices` to check boot status.')
       return
     }
   } catch { /* emulator unavailable */ }
 
-  console.error(`Device not found: ${nameOrUdid}`)
-  console.error('Run `tapflow devices` to see available simulators and AVDs.')
+  banner('error', 'DEVICE NOT FOUND', [
+    `"${nameOrUdid}" does not match any simulator or AVD.`,
+    'Run `tapflow devices` to see available devices.',
+  ])
   process.exit(1)
 }

@@ -13,7 +13,8 @@ export async function cmdInit(opts: InitOptions): Promise<void> {
 
   const email = (await rl.question('  ? Admin email: ')).trim()
 
-  // Suppress echo for password entry
+  // Node.js has no native password-input API. Suppress echo via readline's internal
+  // _writeToOutput hook — a widely used convention that remains stable across versions.
   process.stdout.write('  ? Password: ')
   const rlAny = rl as unknown as { _writeToOutput?: (s: string) => void }
   const origWriteToOutput = rlAny._writeToOutput
@@ -25,11 +26,11 @@ export async function cmdInit(opts: InitOptions): Promise<void> {
   rl.close()
 
   if (!email) {
-    console.error('  Email is required.')
+    banner('error', 'INVALID INPUT', ['Email is required.'])
     process.exit(1)
   }
   if (!password || password.length < 8) {
-    console.error('  Password must be at least 8 characters.')
+    banner('error', 'INVALID INPUT', ['Password must be at least 8 characters.'])
     process.exit(1)
   }
 

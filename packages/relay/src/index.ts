@@ -1,5 +1,5 @@
 export { RelayServer } from './RelayServer.js'
 export { SessionManager } from './SessionManager.js'
-export { initDb, getDb } from './db.js'
+export { initDb, getDb, closeDb } from './db.js'
 export type { Session } from './SessionManager.js'
 export type { RelayMessage, MessageType } from './types.js'

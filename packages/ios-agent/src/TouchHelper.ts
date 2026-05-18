@@ -1,8 +1,7 @@
 import { spawn, type ChildProcess } from 'child_process'
 import { join } from 'path'
 
-// Binary lives in src/, not dist/ — same convention as ScreenCaptureStreamer
-const BINARY = join(import.meta.dirname, '..', 'src', 'touch-helper')
+const BINARY = join(import.meta.dirname, '..', 'bin', 'touch-helper')
 
 export class TouchHelper {
   private proc: ChildProcess | null = null

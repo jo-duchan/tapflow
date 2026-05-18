@@ -1,5 +1,7 @@
+import { useEffect, useState } from 'react'
 import { Link, useLocation, useNavigate } from 'react-router-dom'
-import { LayoutGrid, LogOut, Settings, Users, KeyRound, Monitor } from 'lucide-react'
+import { useTheme } from 'next-themes'
+import { LayoutGrid, LogOut, Settings, Users, KeyRound, Monitor, BookOpen } from 'lucide-react'
 import {
   Sidebar,
   SidebarContent,
@@ -33,11 +35,28 @@ const settingsItems = [
   { label: 'Tokens', href: '/settings/tokens', icon: KeyRound, adminOnly: true },
 ]
 
+const referenceItems = [
+  { label: 'Docs', href: 'https://www.tapflow.dev', icon: BookOpen },
+]
+
 export function AppSidebar() {
   const { pathname } = useLocation()
   const navigate = useNavigate()
   const { user } = useAuth()
   const isAdmin = user?.role === 'Admin'
+  const { resolvedTheme } = useTheme()
+  const defaultLogo = resolvedTheme === 'dark' ? '/logo-dark.svg' : '/logo.svg'
+  const [logoUrl, setLogoUrl] = useState<string | null>(null)
+  const [teamName, setTeamName] = useState('tapflow')
+
+  useEffect(() => {
+    fetch('/api/v1/settings', { credentials: 'include' })
+      .then((r) => r.ok ? r.json() : null)
+      .then((d) => {
+        if (d?.logo_url) setLogoUrl(d.logo_url)
+        if (d?.team_name) setTeamName(d.team_name)
+      })
+  }, [])
 
   async function handleLogout() {
     await fetch('/api/v1/auth/logout', { method: 'POST', credentials: 'include' })
@@ -46,8 +65,11 @@ export function AppSidebar() {
 
   return (
     <Sidebar collapsible="icon">
-      <SidebarHeader className="px-4 py-3">
-        <span className="text-base font-semibold tracking-tight group-data-[collapsible=icon]:hidden">tapflow</span>
+      <SidebarHeader className="p-2">
+        <div className="flex items-center gap-2 p-1">
+          <img src={logoUrl ?? defaultLogo} alt="tapflow" className="w-6 h-6 min-w-6 shrink-0" />
+          <span className="text-base font-semibold tracking-tight truncate text-sidebar-accent-foreground group-data-[collapsible=icon]:hidden">{teamName}</span>
+        </div>
       </SidebarHeader>
 
       <SidebarContent>
@@ -79,6 +101,24 @@ export function AppSidebar() {
                       <item.icon />
                       <span>{item.label}</span>
                     </Link>
+                  </SidebarMenuButton>
+                </SidebarMenuItem>
+              ))}
+            </SidebarMenu>
+          </SidebarGroupContent>
+        </SidebarGroup>
+
+        <SidebarGroup>
+          <SidebarGroupLabel>Reference</SidebarGroupLabel>
+          <SidebarGroupContent>
+            <SidebarMenu>
+              {referenceItems.map((item) => (
+                <SidebarMenuItem key={item.href}>
+                  <SidebarMenuButton asChild tooltip={item.label}>
+                    <a href={item.href} target="_blank" rel="noopener noreferrer">
+                      <item.icon />
+                      <span>{item.label}</span>
+                    </a>
                   </SidebarMenuButton>
                 </SidebarMenuItem>
               ))}

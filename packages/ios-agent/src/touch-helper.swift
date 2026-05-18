@@ -150,6 +150,62 @@ let indigoKeyboard: IndigoKeyboardArbitraryFn? = {
     return unsafeBitCast(sym, to: IndigoKeyboardArbitraryFn.self)
 }()
 
+// MARK: - IOHIDDigitizerDispatch symbols
+// Mouse-class events (IndigoHIDMessageForMouseNSEvent) are ignored by UIBackdropView
+// and other system gesture layers. The digitizer path builds a display-integrated
+// IOHIDEvent pair (parent + finger child) that iOS treats as a real finger touch.
+// Reference: baguette (tddworks/baguette) IOHIDDigitizerDispatch.swift (verified 2026-05-18)
+
+typealias IOHIDEventCreateDigitizerEventFn = @convention(c) (
+    OpaquePointer?,                              // allocator (nil = kCFAllocatorDefault)
+    UInt64,                                      // timestamp (mach_absolute_time)
+    UInt32, UInt32, UInt32, UInt32, UInt32,      // transducerType, index, identity, eventMask, buttonMask
+    Double, Double, Double, Double, Double,      // x, y, z, tipPressure, barrelPressure
+    UInt32, UInt32,                              // range, touch (boolean_t = UInt32)
+    UInt32                                       // options
+) -> OpaquePointer?
+
+typealias IOHIDEventCreateDigitizerFingerEventFn = @convention(c) (
+    OpaquePointer?,                              // allocator
+    UInt64,                                      // timestamp
+    UInt32, UInt32, UInt32,                      // index, identity, eventMask
+    Double, Double, Double, Double, Double,      // x, y, z, tipPressure, twist
+    UInt32, UInt32,                              // range, touch
+    UInt32                                       // options
+) -> OpaquePointer?
+
+typealias IOHIDEventAppendEventFn = @convention(c) (OpaquePointer, OpaquePointer, UInt32) -> Void
+typealias IndigoTrackpadFn        = @convention(c) (OpaquePointer) -> UnsafeMutableRawPointer?
+
+// IOKit symbols live in the dyld shared cache; explicit dlopen ensures they are findable.
+// RTLD_DEFAULT is a C macro ((void*)-2) not importable in Swift — use the explicit handle instead.
+let ioKitHandle = dlopen("/System/Library/Frameworks/IOKit.framework/IOKit", RTLD_NOW | RTLD_GLOBAL)
+
+let mkDigitizer: IOHIDEventCreateDigitizerEventFn? = {
+    guard let sym = dlsym(ioKitHandle, "IOHIDEventCreateDigitizerEvent") else { return nil }
+    return unsafeBitCast(sym, to: IOHIDEventCreateDigitizerEventFn.self)
+}()
+
+let mkFinger: IOHIDEventCreateDigitizerFingerEventFn? = {
+    guard let sym = dlsym(ioKitHandle, "IOHIDEventCreateDigitizerFingerEvent") else { return nil }
+    return unsafeBitCast(sym, to: IOHIDEventCreateDigitizerFingerEventFn.self)
+}()
+
+let appendEv: IOHIDEventAppendEventFn? = {
+    guard let sym = dlsym(ioKitHandle, "IOHIDEventAppendEvent") else { return nil }
+    return unsafeBitCast(sym, to: IOHIDEventAppendEventFn.self)
+}()
+
+let indigoTrackpad: IndigoTrackpadFn? = {
+    guard let sym = dlsym(skHandle, "IndigoHIDMessageForTrackpadEventFromHIDEventRef") else {
+        fputs("warn: IndigoHIDMessageForTrackpadEventFromHIDEventRef not found — mouse fallback active\n", stderr)
+        return nil
+    }
+    return unsafeBitCast(sym, to: IndigoTrackpadFn.self)
+}()
+
+let useDigitizerPath = mkDigitizer != nil && mkFinger != nil && appendEv != nil && indigoTrackpad != nil
+
 // MARK: - ObjC runtime helpers
 
 func classInvoke(_ cls: AnyClass, _ sel: Selector, _ arg: AnyObject,
@@ -220,7 +276,7 @@ guard let hidClient = createHIDClient(device: device) else {
     fputs("error: failed to create SimDeviceLegacyHIDClient\n", stderr)
     exit(1)
 }
-fputs("info: touch-helper ready (udid=\(targetUDID))\n", stderr)
+fputs("info: touch-helper ready (udid=\(targetUDID)) digitizer=\(useDigitizerPath)\n", stderr)
 
 // MARK: - sendWithMessage IMP
 
@@ -251,15 +307,53 @@ let kIndigoHIDTargetDigitizer: UInt32 = 0x32
 let kNormalizedSize = CGSize(width: 1.0, height: 1.0)
 
 func inject(x: Double, y: Double, eventType: UInt) {
+    if useDigitizerPath {
+        injectDigitizer(x: x, y: y, eventType: eventType)
+    } else {
+        injectMouse(x: x, y: y, eventType: eventType)
+    }
+}
+
+func injectMouse(x: Double, y: Double, eventType: UInt) {
     var position = CGPoint(x: x, y: y)
     var delta    = CGPoint.zero
-
     guard let msgPtr = indigoMouse(&position, &delta, kIndigoHIDTargetDigitizer,
                                    eventType, kNormalizedSize, 0) else {
         fputs("warn: IndigoHIDMessageForMouseNSEvent returned nil\n", stderr)
         return
     }
-    // freeWhenDone:YES — SimulatorKit owns and frees the message buffer
+    sendMsg(hidClient, sendSel, msgPtr, true, nil, nil)
+}
+
+// Digitizer path: builds IOHIDEvent parent+finger pair → IndigoHIDMessageForTrackpadEventFromHIDEventRef.
+// UIBackdropView (folder blur) and system gesture layers only respond to digitizer-class events;
+// mouse-class events from IndigoHIDMessageForMouseNSEvent are silently ignored by those layers.
+// byte patches: 0x6c/0x10c = 0x32 (kIOHIDEventFieldDigitizerIsDisplayIntegrated — marks as real finger)
+func injectDigitizer(x: Double, y: Double, eventType: UInt) {
+    guard let createParent = mkDigitizer, let createFinger = mkFinger,
+          let appendFn = appendEv, let trackpadFn = indigoTrackpad else {
+        injectMouse(x: x, y: y, eventType: eventType); return
+    }
+    let ts = mach_absolute_time()
+    let isUp: Bool      = eventType == kNSLeftMouseUp
+    let mask: UInt32    = isUp ? 0x06 : 0x07   // 0x07=Range|Touch|Position, 0x06=Touch|Position
+    let contact: UInt32 = isUp ? 0 : 1
+    guard let parent = createParent(nil, ts, 2, 0, 1, mask, 0, x, y, 0, 0, 0, contact, contact, 0),
+          let finger = createFinger(nil, ts, 1, 1, mask, x, y, 0, 0, 0, contact, contact, 0) else {
+        fputs("warn: IOHIDEventCreate returned nil — mouse fallback\n", stderr)
+        injectMouse(x: x, y: y, eventType: eventType); return
+    }
+    appendFn(parent, finger, 0)
+    guard let msgPtr = trackpadFn(parent) else {
+        fputs("warn: IndigoHIDMessageForTrackpadEventFromHIDEventRef returned nil\n", stderr)
+        injectMouse(x: x, y: y, eventType: eventType); return
+    }
+    // Routing tag: iOS ignores trackpad messages without this — including normal UI touches.
+    // Use malloc_size (not a header field) to safely check the second slot.
+    msgPtr.storeBytes(of: UInt32(0x32), toByteOffset: 0x6c, as: UInt32.self)
+    if malloc_size(msgPtr) >= 0x110 {
+        msgPtr.storeBytes(of: UInt32(0x32), toByteOffset: 0x10c, as: UInt32.self)
+    }
     sendMsg(hidClient, sendSel, msgPtr, true, nil, nil)
 }
 

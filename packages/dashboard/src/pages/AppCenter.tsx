@@ -61,7 +61,8 @@ export function AppCenter() {
   function handleToggleRelease(versionName: string) {
     setOpenReleases(prev => {
       const next = new Set(prev)
-      next.has(versionName) ? next.delete(versionName) : next.add(versionName)
+      if (next.has(versionName)) next.delete(versionName)
+      else next.add(versionName)
       return next
     })
   }

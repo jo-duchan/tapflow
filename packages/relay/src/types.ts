@@ -35,16 +35,11 @@ export type MessageType =
   | 'input:button'
   | 'input:rotate'
   | 'input:keyboard:toggle'
+  | 'keyboard:toggled'
   | 'error'
 
-export interface AgentResources {
-  cpuPercent: number
-  memUsedMB: number
-  memTotalMB: number
-  slotsAvailable: number
-  slotsTotal: number
-  reportedAt: number
-}
+import type { AgentResources } from '@tapflow/agent-core'
+export type { AgentResources }
 
 export interface DeviceInfo {
   id: string
