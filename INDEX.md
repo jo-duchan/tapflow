@@ -1,44 +1,44 @@
-# INDEX.md — CLAUDE.md 참조 인덱스
+# INDEX.md — CLAUDE.md Reference Index
 
-각 패키지의 CLAUDE.md는 이 파일을 통해 계층적으로 참조된다.
-공통 규칙은 루트 [CLAUDE.md](./CLAUDE.md)에서 확인한다.
+Each package's CLAUDE.md is referenced hierarchically through this file.
+Common rules are in the root [CLAUDE.md](./CLAUDE.md).
 
 ---
 
-## 패키지별 규칙
+## Package Rules
 
-| 패키지 | CLAUDE.md | 핵심 역할 |
-|-------|-----------|---------|
-| agent-core | [packages/agent-core/CLAUDE.md](./packages/agent-core/CLAUDE.md) | DeviceAgent 인터페이스 설계 원칙 |
-| ios-agent | [packages/ios-agent/CLAUDE.md](./packages/ios-agent/CLAUDE.md) | macOS 전용 시뮬레이터 제어 규칙 |
-| android-agent | [packages/android-agent/CLAUDE.md](./packages/android-agent/CLAUDE.md) | ADB 기반 에뮬레이터 제어 규칙 |
-| relay | [packages/relay/CLAUDE.md](./packages/relay/CLAUDE.md) | WebSocket 릴레이 서버 규칙 |
-| dashboard | [packages/dashboard/CLAUDE.md](./packages/dashboard/CLAUDE.md) | Vite + React SPA UI 규칙 |
-| cli | [packages/cli/CLAUDE.md](./packages/cli/CLAUDE.md) | CLI UX 규칙 |
-
-## 로컬 전용
-
-| 디렉토리 | CLAUDE.md | 용도 |
+| Package | CLAUDE.md | Role |
 |---------|-----------|------|
-| playground | [playground/CLAUDE.md](./playground/CLAUDE.md) | 전체 스택 로컬 실행 및 통합 테스트 |
-| .work | [.work/CLAUDE.md](./.work/CLAUDE.md) | 로컬 작업 로그 컨벤션 (plan/review/compound) |
+| agent-core | [packages/agent-core/CLAUDE.md](./packages/agent-core/CLAUDE.md) | DeviceAgent interface design principles |
+| ios-agent | [packages/ios-agent/CLAUDE.md](./packages/ios-agent/CLAUDE.md) | macOS-only simulator control rules |
+| android-agent | [packages/android-agent/CLAUDE.md](./packages/android-agent/CLAUDE.md) | ADB-based emulator control rules |
+| relay | [packages/relay/CLAUDE.md](./packages/relay/CLAUDE.md) | WebSocket relay server rules |
+| dashboard | [packages/dashboard/CLAUDE.md](./packages/dashboard/CLAUDE.md) | Vite + React SPA UI rules |
+| cli | [packages/cli/CLAUDE.md](./packages/cli/CLAUDE.md) | CLI UX rules |
 
-## 문서
+## Local Only
 
-| 파일 | 내용 |
-|------|------|
-| [CONTRIBUTING.md](./CONTRIBUTING.md) | 브랜치·릴리즈·커밋 컨벤션 |
-| [packages/dashboard/DESIGN.md](./packages/dashboard/DESIGN.md) | dashboard 디자인 시스템 — 색상 토큰, 타이포그래피, elevation, 컴포넌트 스펙 |
-| [internal/PRD.md](./internal/PRD.md) | 제품 요구사항 (내부 문서) |
-| [docs/CLAUDE.md](./docs/CLAUDE.md) | VitePress 작업 규칙 — shiki 코드블럭, CSS 커스터마이징 주의사항 |
+| Directory | CLAUDE.md | Purpose |
+|-----------|-----------|---------|
+| playground | [playground/CLAUDE.md](./playground/CLAUDE.md) | Full-stack local run and integration testing |
+| .work | [.work/CLAUDE.md](./.work/CLAUDE.md) | Local work log conventions (plan/review/compound) |
+
+## Documentation
+
+| File | Contents |
+|------|----------|
+| [CONTRIBUTING.md](./CONTRIBUTING.md) | Branch, release, and commit conventions |
+| [packages/dashboard/DESIGN.md](./packages/dashboard/DESIGN.md) | Dashboard design system — color tokens, typography, elevation, component specs |
+| [internal/PRD.md](./internal/PRD.md) | Product requirements (internal document) |
+| [docs/CLAUDE.md](./docs/CLAUDE.md) | VitePress work rules — shiki code blocks, CSS customization notes |
 
 ---
 
-## 계층 구조
+## Hierarchy
 
 ```
-CLAUDE.md (공통 규칙 — WHAT/WHY/HOW/HOW NOT)
-└── INDEX.md (이 파일 — 패키지·문서 참조 인덱스)
+CLAUDE.md (common rules — WHAT/WHY/HOW/HOW NOT)
+└── INDEX.md (this file — package & doc reference index)
     ├── packages/agent-core/CLAUDE.md
     ├── packages/ios-agent/CLAUDE.md
     ├── packages/android-agent/CLAUDE.md

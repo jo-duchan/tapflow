@@ -1,99 +1,99 @@
 # tapflow — CLAUDE.md (Common Rules)
 
-> 패키지별 규칙은 [INDEX.md](./INDEX.md)를 통해 참조한다.
+> Package-specific rules are referenced via [INDEX.md](./INDEX.md).
 
 ---
 
 ## WHAT
 
-tapflow는 QA가 iOS/Android 시뮬레이터·에뮬레이터를 브라우저에서 직접 조작할 수 있게 해주는 **오픈소스 셀프호스팅 라이브러리**다.
-외부 클라우드 의존 없이 팀의 Mac을 그대로 서버로 쓴다.
+tapflow is an **open-source self-hosted library** that lets QA teams control iOS/Android simulators and emulators directly from a browser.
+It uses the Mac you already own — no external cloud dependency.
 
 ## WHY
 
-- Appetize·BrowserStack은 비싸고 앱 데이터가 외부로 나간다.
-- 개발자가 이미 보유한 인프라(Mac)를 재활용한다.
-- 완전 오픈소스로 커스터마이징이 가능하다.
+- Appetize / BrowserStack are expensive and send app data outside your network.
+- Reuses infrastructure (Mac) the team already owns.
+- Fully open-source and customizable.
 
 ---
 
-## 핵심 원칙
+## Core Principles
 
-작업을 시작하기 전에 매번 이 네 가지를 점검한다. 어김으로써 발생한 비용(잘못된 수정, 되돌리기, 재작업)이 이를 지킬 때의 비용보다 항상 크다.
+Check these four before every task. The cost of violating them — wrong fixes, reverts, rework — always exceeds the cost of following them.
 
-### 1. 추측 금지 — 근거 기반
+### 1. No guessing — evidence-based
 
-코드·로그·테스트로 사실을 확인하기 전에 원인을 단정하지 않는다.
+Do not conclude a root cause before verifying it with code, logs, or tests.
 
-- 버그 원인을 **추정**하지 않고 재현 → 진단 로그 → 가설 검증 → 수정 순으로 진행한다.
-- 패키지 동작·API 시그니처가 의심되면 `package.json`·소스 코드·런타임 출력을 직접 읽는다.
-- "아마 이래서 그럴 것" 이라는 문장이 떠오르면 멈추고 확인 단계를 먼저 한다.
-- 가설을 세웠으면 검증 방법을 함께 제시한다 (`console.log`, 단위 테스트, `git log`, 직접 호출 등).
+- For bugs: reproduce → diagnostic log → validate hypothesis → fix. No jumping to conclusions.
+- When in doubt about package behavior or API signatures, read `package.json`, source code, or runtime output directly.
+- If "this is probably why" comes to mind, stop and verify first.
+- Every hypothesis must come with a validation method (`console.log`, unit test, `git log`, direct invocation, etc.).
 
-### 2. 최소 변경 — 요청 범위 안에서만
+### 2. Minimal changes — stay within scope
 
-요청된 변경에 직접 연결되는 라인만 건드린다.
+Only touch lines directly connected to the requested change.
 
-- 인접 코드·주석·포맷팅을 "개선"하지 않는다.
-- 기존 스타일과 다르더라도 그 파일의 컨벤션을 따른다.
-- 변경으로 인해 발생한 미사용 import·함수만 정리한다. 기존 dead code는 언급만 하고 두는다.
+- Do not "improve" adjacent code, comments, or formatting.
+- Follow the file's existing conventions even if they differ from your preferences.
+- Only clean up unused imports or functions introduced by the current change. Leave existing dead code as-is (note it if needed).
 
-### 3. 가설 → 검증 가능한 목표
+### 3. Hypothesis → verifiable goal
 
-작업 시작 전에 "성공 여부를 어떻게 확인할 것인가"를 한 문장으로 정의한다.
+Before starting, define in one sentence how success will be measured.
 
-- "버그 수정" → "재현 테스트 작성 → 통과 확인"
-- "리팩터" → "변경 전/후 동일 테스트 통과 확인"
-- 다단계 작업은 단계마다 검증 방식을 함께 명시한다.
+- "Bug fix" → "write a reproducing test → confirm it passes"
+- "Refactor" → "same tests pass before and after"
+- For multi-step tasks, specify the verification method at each step.
 
-### 4. 위험한 행동 전에 멈춤
+### 4. Stop before risky actions
 
-되돌리기 어려운 작업은 사용자 확인을 먼저 받는다.
+Get user confirmation before any hard-to-reverse operation.
 
-- `git push --force`, `git reset --hard`, 외부 시스템 메시지 전송, DB drop 등.
-- 커밋·PR 생성은 사용자가 명시적으로 요청한 경우에만 한다.
-- **Breaking change는 지양한다.** 불가피하게 발생하는 경우 작업 전 사용자에게 먼저 보고하고 승인을 받는다. Breaking change 대상: 공개 API·인터페이스 시그니처 변경, DB 스키마 변경, WebSocket 메시지 프로토콜 변경, CLI 명령어·플래그 변경.
+- `git push --force`, `git reset --hard`, sending messages to external systems, DB drops, etc.
+- Only create commits or PRs when the user explicitly requests it.
+- **Avoid breaking changes.** If unavoidable, report to the user and get approval before proceeding. Breaking change scope: public API / interface signature changes, DB schema changes, WebSocket message protocol changes, CLI command / flag changes.
 
 ---
 
 ## HOW
 
-### 언어·스택
-- 전 패키지 TypeScript. `any` 사용 금지.
+### Language & Stack
+- TypeScript throughout. No `any`.
 - Node.js ≥ 20.
-- WebSocket: `ws`. Dashboard: Vite + React 19 + React Router v7. 테스트: vitest.
+- WebSocket: `ws`. Dashboard: Vite + React 19 + React Router v7. Tests: vitest.
 
-### 브랜치·커밋·릴리즈
+### Branches, Commits & Releases
 → [CONTRIBUTING.md](./CONTRIBUTING.md)
 
-### 워크플로우 (Plan → Work → Review → Compound)
+### Workflow (Plan → Work → Review → Compound)
 
-작업 기록은 `.work/`에 남긴다. 컨벤션: [.work/CLAUDE.md](./.work/CLAUDE.md).
+Work logs go in `.work/`. Conventions: [.work/CLAUDE.md](./.work/CLAUDE.md).
 
-1. **Plan** — 요구사항 + 테스트 케이스를 먼저 정의 (`type: plan`).
-2. **Work** — 테스트 먼저, 통과할 때까지 구현.
-3. **Review** — 엣지 케이스 + 실제 데이터 검증 → PR (`type: review`).
-4. **Compound** — 반복 패턴을 테스트+코드+프롬프트 묶음으로 자산화 (`type: compound`).
+1. **Plan** — define requirements + test cases first (`type: plan`).
+2. **Work** — write tests first, implement until they pass.
+3. **Review** — edge cases + real data validation → PR (`type: review`).
+4. **Compound** — extract repeating patterns into test + code + prompt bundles (`type: compound`).
 
-커스텀 커맨드: `/work-plan {topic}` · `/compound`.
+Custom commands: `/work-plan {topic}` · `/deep-research {problem}` · `/qa {target}` · `/doc-sync` · `/compound`.
 
-### 설계 원칙 (SOLID 중 우선 적용)
+### Design Principles (SOLID — priority subset)
 
-- **OCP**: 새 플랫폼·기능은 기존 코드 수정 없이 추가. `AgentRegistry.register()` 사례.
-- **ISP**: `DeviceAgent`는 모든 플랫폼이 구현 가능한 메서드만. 플랫폼 특화는 별도 인터페이스.
-- **DIP**: 의존성은 생성자 주입. 구현체가 아닌 인터페이스에 의존.
+- **OCP**: New platforms and features are added without modifying existing code. `AgentRegistry.register()` is the example.
+- **ISP**: `DeviceAgent` only contains methods every platform can implement. Platform-specific behavior goes in separate interfaces.
+- **DIP**: Dependencies via constructor injection. Depend on interfaces, not implementations.
 
-### 코드 규칙
-- 주석은 WHY가 비자명한 경우에만 한 줄.
-- 인터페이스 변경 시 `agent-core`를 먼저 수정하고 구현체를 맞춘다.
-- 새 플랫폼은 `AgentRegistry.register()`만으로 추가. 릴레이/대시보드 코드 무수정.
+### Code Rules
+- Comments only when the WHY is non-obvious: one line max.
+- When changing an interface, update `agent-core` first, then align implementations.
+- New platforms are added via `AgentRegistry.register()` only — relay and dashboard code stay unchanged.
 
 ---
 
 ## HOW NOT
 
-- 앱 데이터·스트림을 외부 서비스로 전송하는 코드를 작성하지 않는다.
-- 로드맵에 없는 기능을 선제적으로 추가하지 않는다.
-- `agent-core` 인터페이스를 플랫폼 특화 로직으로 오염시키지 않는다.
-- 테스트 없이 구현 코드를 먼저 작성하지 않는다.
-- 추측으로 수정하지 않는다 — 근거 없이 "아마 이게 원인" 이라는 가설로 코드를 바꾸지 않는다.
+- Do not write code that sends app data or streams to external services.
+- Do not proactively add features not on the roadmap.
+- Do not pollute the `agent-core` interface with platform-specific logic.
+- Do not write implementation code before tests.
+- Do not make changes based on guesses — no "this is probably the cause" code changes without evidence.
