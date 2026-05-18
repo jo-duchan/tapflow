@@ -152,4 +152,8 @@ export class AdbWrapper {
   async shutdown(serial: string): Promise<void> {
     await this.runner.exec('-s', serial, 'emu', 'kill')
   }
+
+  async pkill(serial: string, pattern: string): Promise<void> {
+    await this.runner.exec('-s', serial, 'shell', 'pkill', '-f', pattern)
+  }
 }

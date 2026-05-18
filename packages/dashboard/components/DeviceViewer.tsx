@@ -29,6 +29,8 @@ export function DeviceViewer({ sessionId, deviceId, buildId, resetMode, onRecord
   const [bootError, setBootError] = useState<string | null>(null);
   const [launching, setLaunching] = useState(false);
   const [deviceRotation, setDeviceRotation] = useState(0);
+  const [swKeyboardVisible, setSwKeyboardVisible] = useState(false);
+  const [swKeyboardPending, setSwKeyboardPending] = useState(false);
 
   // Active viewer registers its binary frame decoder here.
   // SimulatorViewer routes incoming binary frames to whichever viewer is mounted.
@@ -63,6 +65,11 @@ export function DeviceViewer({ sessionId, deviceId, buildId, resetMode, onRecord
     if (msg.type === 'app:launch-done') { setLaunching(false); }
     if (msg.type === 'app:launch-error') { setLaunching(false); }
     if (msg.type === 'session:chrome') { setChrome(msg.payload); }
+    if (msg.type === 'keyboard:toggled') {
+      const { visible } = msg.payload as { visible: boolean };
+      setSwKeyboardVisible(visible);
+      setSwKeyboardPending(false);
+    }
   }, [sessionId, deviceId, buildId]);
 
   const handleBinaryFrame = useCallback((data: ArrayBuffer) => {
@@ -80,12 +87,18 @@ export function DeviceViewer({ sessionId, deviceId, buildId, resetMode, onRecord
   const iosChrome = chrome !== null && 'framePng' in chrome ? chrome as ChromeData : null;
   const androidChrome = chrome !== null && !('framePng' in chrome) ? chrome as AndroidChrome : null;
 
+  const onKbdToggle = () => {
+    setSwKeyboardPending(true);
+    send({ type: 'input:keyboard:toggle', sessionId });
+  };
+
   const commonProps = {
     sessionId, buildId, send, connected, joined,
     deviceReady, installing, installed, installError, bootError,
     launching, setLaunching,
     binaryFrameHandlerRef,
     onRecordingUploaded,
+    swKeyboardVisible, swKeyboardPending, onKbdToggle,
   };
 
   // Before chrome arrives, show a phone skeleton + status card so the layout isn't empty

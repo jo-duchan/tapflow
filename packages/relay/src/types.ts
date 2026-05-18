@@ -35,6 +35,7 @@ export type MessageType =
   | 'input:button'
   | 'input:rotate'
   | 'input:keyboard:toggle'
+  | 'keyboard:toggled'
   | 'error'
 
 import type { AgentResources } from '@tapflow/agent-core'
