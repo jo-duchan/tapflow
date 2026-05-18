@@ -7,6 +7,84 @@ import { EmulatorLauncher } from './EmulatorLauncher.js'
 import { AndroidTouchHelper } from './AndroidTouchHelper.js'
 import { ScrcpySession } from './scrcpy/ScrcpySession.js'
 
+// Parse H.264 SPS NAL unit to extract frame dimensions.
+// scrcpy sends a new SPS (inside an IDR keyframe) whenever the capture size changes —
+// e.g. portrait→landscape for landscape-aware apps. This lets the agent track the
+// actual video dimensions and keep ScrcpyControl.screenSize in sync without guessing.
+function parseSpsFromNal(nal: Buffer): { width: number; height: number } | null {
+  // Locate NAL header byte after Annex B start code
+  let offset = 0
+  if (nal.length >= 4 && nal[0] === 0 && nal[1] === 0 && nal[2] === 0 && nal[3] === 1) offset = 4
+  else if (nal.length >= 3 && nal[0] === 0 && nal[1] === 0 && nal[2] === 1) offset = 3
+  else return null
+  if (offset >= nal.length || (nal[offset]! & 0x1f) !== 7) return null  // not SPS
+
+  // Collect RBSP bytes (remove emulation-prevention 0x03 bytes)
+  const bytes: number[] = []
+  for (let i = offset + 1; i < nal.length; i++) {
+    const b = nal[i]!
+    const len = bytes.length
+    if (len >= 2 && b === 3 && bytes[len - 1] === 0 && bytes[len - 2] === 0) continue
+    bytes.push(b)
+  }
+
+  let bit = 0
+  const readU = (n: number): number => {
+    let v = 0
+    for (let i = 0; i < n; i++) {
+      if ((bit >> 3) >= bytes.length) throw new Error('truncated')
+      v = (v << 1) | ((bytes[bit >> 3]! >> (7 - (bit & 7))) & 1)
+      bit++
+    }
+    return v
+  }
+  const readUE = (): number => {
+    let lz = 0
+    while (readU(1) === 0) { if (++lz > 31) throw new Error('overflow') }
+    return lz === 0 ? 0 : (1 << lz) - 1 + readU(lz)
+  }
+  const readSE = (): number => { const v = readUE(); return v % 2 === 0 ? -(v >> 1) : (v + 1) >> 1 }
+
+  try {
+    const profile = readU(8)
+    readU(8); readU(8)           // constraint_flags, level_idc
+    readUE()                     // seq_parameter_set_id
+
+    let subWC = 2, subHC = 2    // 4:2:0 defaults
+    if ([100, 110, 122, 244, 44, 83, 86, 118, 128, 138, 139, 134, 135].includes(profile)) {
+      const cfmt = readUE()
+      subWC = cfmt === 0 ? 1 : cfmt === 2 ? 2 : cfmt === 3 ? 1 : 2
+      subHC = cfmt === 0 ? 1 : cfmt === 1 ? 2 : 1
+      if (cfmt === 3) readU(1)   // separate_colour_plane_flag
+      readUE(); readUE()         // bit_depth_luma/chroma_minus8
+      readU(1)                   // qpprime_y_zero_transform_bypass_flag
+      if (readU(1)) return null  // seq_scaling_matrix_present_flag — skip
+    }
+
+    readUE()                     // log2_max_frame_num_minus4
+    const pocType = readUE()
+    if (pocType === 0) readUE()
+    else if (pocType === 1) {
+      readU(1); readSE(); readSE()
+      const n = readUE(); for (let i = 0; i < n; i++) readSE()
+    }
+    readUE(); readU(1)           // max_num_ref_frames, gaps_in_frame_num_value_allowed_flag
+    const codedW = (readUE() + 1) * 16
+    const mapH = readUE()
+    const frameMbsOnly = readU(1)
+    const codedH = (mapH + 1) * 16 * (frameMbsOnly ? 1 : 2)
+    if (!frameMbsOnly) readU(1) // mb_adaptive_frame_field_flag
+    readU(1)                    // direct_8x8_inference_flag
+    let w = codedW, h = codedH
+    if (readU(1)) {             // frame_cropping_flag
+      const cl = readUE(), cr = readUE(), ct = readUE(), cb = readUE()
+      w = codedW - (cl + cr) * subWC
+      h = codedH - (ct + cb) * subHC * (frameMbsOnly ? 1 : 2)
+    }
+    return { width: w, height: h }
+  } catch { return null }
+}
+
 const ANDROID_BUTTONS: AndroidButton[] = [
   { name: 'home',        accessibilityTitle: 'Home',        keyCode: 3 },
   { name: 'back',        accessibilityTitle: 'Back',        keyCode: 4 },
@@ -24,6 +102,8 @@ interface DeviceState {
   scrcpySession: ScrcpySession | null
   displayWidth: number
   displayHeight: number
+  videoWidth: number   // actual scrcpy video frame dimensions — used for touch coordinates
+  videoHeight: number
   deviceRotation: number
   lastTouchPx: { x: number; y: number }
   bootSeq: number
@@ -117,6 +197,8 @@ export class AndroidAgent implements DeviceAgent {
         scrcpySession: null,
         displayWidth: 0,
         displayHeight: 0,
+        videoWidth: 0,
+        videoHeight: 0,
         deviceRotation: 0,
         lastTouchPx: { x: 0, y: 0 },
         bootSeq: 0,
@@ -191,6 +273,8 @@ export class AndroidAgent implements DeviceAgent {
 
     state.displayWidth = info.width
     state.displayHeight = info.height
+    state.videoWidth = info.width
+    state.videoHeight = info.height
 
     const stream = session.video.start()
     const reader = stream.getReader()
@@ -200,6 +284,15 @@ export class AndroidAgent implements DeviceAgent {
         while (true) {
           const { value, done } = await reader.read()
           if (done) break
+          // Detect video size changes via H.264 SPS so ScrcpyControl.screenSize always
+          // matches what scrcpy server is actually encoding (landscape-aware vs portrait-locked).
+          const parsed = parseSpsFromNal(value)
+          if (parsed && (parsed.width !== state.videoWidth || parsed.height !== state.videoHeight)) {
+            state.videoWidth = parsed.width
+            state.videoHeight = parsed.height
+            state.scrcpySession?.control.updateScreenSize(parsed.width, parsed.height)
+            console.log(`[android-agent] video size → ${parsed.width}×${parsed.height}`)
+          }
           if (streamWs.readyState === WebSocket.OPEN) streamWs.send(value)
         }
       } catch {
@@ -254,11 +347,14 @@ export class AndroidAgent implements DeviceAgent {
     const prevRotation = state.deviceRotation
     state.deviceRotation = rotation
 
-    // Swap displayW/H when rotation changes by an odd number of 90° steps
+    // Swap displayW/H when rotation changes by an odd number of 90° steps.
+    // Do NOT call control.updateScreenSize here — scrcpy screenWidth/Height must match
+    // the actual video frame dimensions set in the ScrcpyControl constructor, not the
+    // display orientation. Portrait-locked apps keep portrait video even on a landscape
+    // device; mismatching screenSize causes scrcpy to silently drop all touch events.
     const quarters = ((rotation - prevRotation) + 4) % 4
     if (quarters === 1 || quarters === 3) {
       ;[state.displayWidth, state.displayHeight] = [state.displayHeight, state.displayWidth]
-      state.scrcpySession?.control.updateScreenSize(state.displayWidth, state.displayHeight)
     }
 
     console.log(`[android-agent] rotation ${prevRotation}→${rotation} displaySize=${state.displayWidth}×${state.displayHeight}`)
@@ -422,9 +518,9 @@ export class AndroidAgent implements DeviceAgent {
         const state = this.deviceStates.get(msg.sessionId!)
         if (!state) break
         const { x, y } = msg.payload as { x: number; y: number }
-        if (state.scrcpySession && state.displayWidth > 0) {
-          const px = Math.round(x * state.displayWidth)
-          const py = Math.round(y * state.displayHeight)
+        if (state.scrcpySession && state.videoWidth > 0) {
+          const px = Math.round(x * state.videoWidth)
+          const py = Math.round(y * state.videoHeight)
           state.lastTouchPx = { x: px, y: py }
           state.scrcpySession.control.touchDown(0, px, py)
         } else {
@@ -436,9 +532,9 @@ export class AndroidAgent implements DeviceAgent {
         const state = this.deviceStates.get(msg.sessionId!)
         if (!state) break
         const { x, y } = msg.payload as { x: number; y: number }
-        if (state.scrcpySession && state.displayWidth > 0) {
-          const px = Math.round(x * state.displayWidth)
-          const py = Math.round(y * state.displayHeight)
+        if (state.scrcpySession && state.videoWidth > 0) {
+          const px = Math.round(x * state.videoWidth)
+          const py = Math.round(y * state.videoHeight)
           state.lastTouchPx = { x: px, y: py }
           state.scrcpySession.control.touchMove(0, px, py)
         } else {

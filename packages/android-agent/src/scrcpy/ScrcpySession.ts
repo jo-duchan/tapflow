@@ -84,9 +84,14 @@ export class ScrcpySession {
       'send_frame_meta=false',   // raw Annex B stream (no length prefix per frame)
       'send_dummy_byte=false',   // skip the 1-byte connection-check byte
       'video_codec_options=repeat-previous-frame-after:long=33333,i-frame-interval:int=1', // keep encoder warm; 1s IDR for faster recovery
-    ], { stdio: 'ignore' })
+    ], { stdio: ['ignore', 'pipe', 'ignore'] })
 
     this.serverProc = serverProc
+    // adb shell mixes server stdout+stderr into the local process stdout
+    serverProc.stdout?.on('data', (d: Buffer) => {
+      const msg = d.toString().trim()
+      if (msg) console.log('[scrcpy-server]', msg)
+    })
     serverProc.unref()
 
     // Wait for server to bind the abstract socket
