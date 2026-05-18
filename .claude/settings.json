@@ -1,0 +1,18 @@
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "input=$(cat); if echo \"$input\" | jq -r '.tool_input.command // \"\"' | grep -qE 'gh pr (merge|review)'; then echo '{\"continue\": false, \"stopReason\": \"PR merge/approve는 직접 수행해주세요.\"}'; else echo \"$input\" | jq -r '.tool_input.command // \"\"' > /dev/null; fi"
+          }
+        ]
+      }
+    ]
+  },
+  "enabledPlugins": {
+    "frontend-design@claude-plugins-official": true
+  }
+}

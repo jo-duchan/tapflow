@@ -1,45 +1,45 @@
 # ios-agent — CLAUDE.md
 
-> 공통 규칙: [CLAUDE.md](../../CLAUDE.md) | 전체 인덱스: [INDEX.md](../../INDEX.md)
+> Common rules: [CLAUDE.md](../../CLAUDE.md) | Full index: [INDEX.md](../../INDEX.md)
 
 ---
 
 ## WHAT
 
-`IOSAgent`: `xcrun simctl`로 iOS 시뮬레이터를 제어하고, SimulatorKit IOSurface 콜백 기반으로 화면을 스트리밍하며, SimDeviceLegacyHIDClient로 터치·키보드·버튼을 직접 주입한다. WebDriverAgent는 사용하지 않는다.
+`IOSAgent`: controls iOS simulators via `xcrun simctl`, streams frames using SimulatorKit IOSurface callbacks, and injects touch / keyboard / button events directly via SimDeviceLegacyHIDClient. No WebDriverAgent.
 
 ## HOW
 
-- macOS에서만 실행됨을 가정한다. 비 macOS 환경에서는 명확한 오류를 던진다.
-- xcrun/simctl 호출은 래핑 함수로 분리해 테스트 시 mock 교체가 가능하게 한다.
-- SimulatorKit IOSurface로 화면을 캡처해 JPEG 프레임을 WebSocket Binary로 스트리밍한다 (≤30fps).
+- Assume macOS only. Throw a clear error on non-macOS environments.
+- Wrap all xcrun/simctl calls in dedicated functions so they can be swapped with mocks in tests.
+- Capture frames via SimulatorKit IOSurface and stream JPEG frames as WebSocket binary messages (≤30 fps).
 
 ## HOW NOT
 
-- `xcrun` 명령을 비즈니스 로직과 인라인으로 섞지 않는다.
-- `DeviceAgent` 인터페이스에 없는 iOS 전용 메서드를 public API로 노출하지 않는다.
-- SCStream/ScreenCaptureKit을 다시 도입하지 않는다 — geometry 좌표계 불일치로 이중 프레임 문제가 발생한다.
-- WebRTC DataChannel로 JPEG 프레임을 스트리밍하지 않는다 — 대용량 메시지(~200KB+)에서 채널이 조용히 닫히며, relay-intermediary 구조에서는 P2P 이점도 없다.
+- Do not inline `xcrun` commands with business logic.
+- Do not expose iOS-specific methods as public API if they are not in the `DeviceAgent` interface.
+- Do not reintroduce SCStream/ScreenCaptureKit — geometry coordinate mismatches cause double-frame issues.
+- Do not stream JPEG frames over WebRTC DataChannel — the channel silently closes on large messages (~200KB+), and there is no P2P benefit in a relay-intermediary architecture.
 
 ---
 
 ## Compound
 
-### touch-helper 인터페이스
+### touch-helper interface
 
 ```
 touch-helper <udid|booted>
 ```
 
-`SimDeviceLegacyHIDClient` + IndigoHID로 iOS Simulator에 직접 HID 이벤트를 주입한다.
+Injects HID events directly into the iOS Simulator via `SimDeviceLegacyHIDClient` + IndigoHID.
 
-stdin 프로토콜 (가변 길이 프레임):
-- type 1–5, 9 : 9바이트 — `[type:u8][a:u8/f32BE][b:f32BE]`
-- type 6–8    : 17바이트 — `[type:u8][x1:f32BE][y1:f32BE][x2:f32BE][y2:f32BE]`
+stdin protocol (variable-length frames):
+- types 1–5, 9 : 9 bytes — `[type:u8][a:u8/f32BE][b:f32BE]`
+- types 6–8    : 17 bytes — `[type:u8][x1:f32BE][y1:f32BE][x2:f32BE][y2:f32BE]`
 
-| type | 동작 |
-|------|------|
-| 1 | touch start (x, y 정규화 0–1) |
+| type | action |
+|------|--------|
+| 1 | touch start (x, y normalized 0–1) |
 | 2 | touch move (x, y) |
 | 3 | touch end |
 | 4 | HID button (a=usagePage, b=usage) |
@@ -49,31 +49,31 @@ stdin 프로토콜 (가변 길이 프레임):
 | 8 | pinch end |
 | 9 | key press ([0]=modifierBitmap, [4–7]=hidUsage u32BE) |
 
-Swift 소스 변경 시 **반드시 두 곳을 동시에** 수정한다:
-1. `src/touch-helper.swift` — stdin 프로토콜 변경
-2. `src/TouchHelper.ts` — `write()` 메서드의 byte layout 변경
+When changing the Swift source, **always update both locations simultaneously**:
+1. `src/touch-helper.swift` — stdin protocol changes
+2. `src/TouchHelper.ts` — byte layout in the `write()` method
 
-컴파일 (출력은 `bin/`):
+Compile (output to `bin/`):
 ```bash
 cd packages/ios-agent && swiftc src/touch-helper.swift -o bin/touch-helper
 ```
 
 ---
 
-### screencapture-helper 인터페이스
+### screencapture-helper interface
 
 ```
 screencapture-helper <fps> <udid|booted>
 ```
 
-SimulatorKit IOSurface 콜백으로 `com.apple.framebuffer.display` 포트를 직접 읽는다.  
-출력: `[4-byte BE uint32 frame length][JPEG bytes] ...`
+Reads the `com.apple.framebuffer.display` port directly via SimulatorKit IOSurface callbacks.  
+Output: `[4-byte BE uint32 frame length][JPEG bytes] ...`
 
-Swift 바이너리 인터페이스가 바뀌면 **반드시 두 곳을 동시에** 수정한다:
-1. `src/screencapture-helper.swift` — 인자 파싱 변경
-2. `src/ScreenCaptureStreamer.ts` — `args` 배열 변경
+When the Swift binary interface changes, **always update both locations simultaneously**:
+1. `src/screencapture-helper.swift` — argument parsing changes
+2. `src/ScreenCaptureStreamer.ts` — `args` array changes
 
-컴파일 후 TypeScript dist 재빌드가 필요하다:
+Requires a TypeScript dist rebuild after compilation:
 ```bash
 cd packages/ios-agent
 swiftc src/screencapture-helper.swift -o bin/screencapture-helper \
@@ -83,19 +83,19 @@ pnpm build
 
 ---
 
-### keyboard-helper 인터페이스
+### keyboard-helper interface
 
 ```
 keyboard-helper <show|hide> <udid|booted>
 ```
 
-CoreSimulator.framework을 직접 로드해 `SimDevice.setHardwareKeyboardEnabled(_:keyboardType:error:)`를 호출한다.
-macOS 접근성(Accessibility) 권한이 필요 없다.
+Loads `CoreSimulator.framework` directly and calls `SimDevice.setHardwareKeyboardEnabled(_:keyboardType:error:)`.
+No macOS Accessibility permission required.
 
-- `show`: `setHardwareKeyboardEnabled(false)` — 하드웨어 키보드 연결 해제 → 텍스트 필드 포커스 시 소프트웨어 키보드 등장
-- `hide`: `setHardwareKeyboardEnabled(true)` — 하드웨어 키보드 연결 → 소프트웨어 키보드 즉시 숨김
+- `show`: `setHardwareKeyboardEnabled(false)` — disconnects the hardware keyboard → software keyboard appears on text field focus
+- `hide`: `setHardwareKeyboardEnabled(true)` — connects the hardware keyboard → software keyboard hides immediately
 
-컴파일 (출력은 `bin/`):
+Compile (output to `bin/`):
 ```bash
 swiftc packages/ios-agent/src/keyboard-helper.swift \
   -o packages/ios-agent/bin/keyboard-helper \
@@ -104,20 +104,20 @@ swiftc packages/ios-agent/src/keyboard-helper.swift \
 
 ---
 
-### rotation-helper 인터페이스
+### rotation-helper interface
 
 ```
 rotation-helper <portrait|landscapeLeft|landscapeRight|portraitUpsideDown> <udid|booted>
 ```
 
-`SimDevice.lookup:error:`로 `PurpleWorkspacePort` mach 포트를 획득한 뒤 `GSEventTypeDeviceOrientationChanged` 이벤트를 직접 전송한다.
-**Simulator.app 불필요. Accessibility 권한 불필요.**
+Acquires the `PurpleWorkspacePort` mach port via `SimDevice.lookup:error:` and sends a `GSEventTypeDeviceOrientationChanged` event directly.
+**No Simulator.app required. No Accessibility permission required.**
 
-UIDeviceOrientation rawValue: `portrait=1`, `portraitUpsideDown=2`, `landscapeRight=3`, `landscapeLeft=4`
+UIDeviceOrientation rawValues: `portrait=1`, `portraitUpsideDown=2`, `landscapeRight=3`, `landscapeLeft=4`
 
-기존 `osascript` 방식(Simulator.app을 foreground로 올려 Cmd+화살표)과 달리 절대 orientation을 직접 지정하므로 현재 상태와 무관하게 동작한다.
+Unlike the legacy `osascript` approach (bringing Simulator.app to the foreground and pressing Cmd+Arrow), this sets the absolute orientation directly, so it works regardless of the current state.
 
-컴파일 (출력은 `bin/`):
+Compile (output to `bin/`):
 ```bash
 swiftc packages/ios-agent/src/rotation-helper.swift \
   -o packages/ios-agent/bin/rotation-helper \
@@ -126,18 +126,18 @@ swiftc packages/ios-agent/src/rotation-helper.swift \
 
 ---
 
-### IOSurface 캡처 — timer-driven 전략
+### IOSurface capture — timer-driven strategy
 
-IOSurface 콜백만으로는 화면이 정적일 때 프레임이 오지 않는다.
-`DispatchSourceTimer`를 함께 사용해 콜백 유무와 관계없이 일정 FPS를 유지한다.
+IOSurface callbacks alone do not deliver frames when the screen is static.
+Use `DispatchSourceTimer` alongside callbacks to maintain a consistent FPS regardless of callback activity.
 
 ```swift
-// 콜백: latestSurface만 갱신
+// callback: only updates latestSurface
 let onFrame: @convention(block) () -> Void = {
     captureQueue.async { updateLatestSurface() }
 }
 
-// 타이머: 매 tick마다 최신 surface를 인코딩
+// timer: encodes the latest surface every tick
 let timer = DispatchSource.makeTimerSource(queue: captureQueue)
 timer.schedule(deadline: .now(), repeating: 1.0 / fps)
 timer.setEventHandler {
@@ -148,65 +148,65 @@ timer.setEventHandler {
 
 ---
 
-### keyboard HID 경로
+### Keyboard HID path
 
-키보드 주입은 `IndigoHIDMessageForKeyboardArbitrary(usage, op)` 를 사용한다.  
-`IndigoHIDMessageForHIDArbitrary(target=0x32, page=0x07, ...)` 는 digitizer(터치) 경로여서 iOS가 하드웨어 키보드로 인식하지 못해 CapsLock HUD와 한/영 전환이 동작하지 않는다.
+Keyboard injection uses `IndigoHIDMessageForKeyboardArbitrary(usage, op)`.  
+`IndigoHIDMessageForHIDArbitrary(target=0x32, page=0x07, ...)` is the digitizer (touch) path — iOS does not recognize it as a hardware keyboard, so the CapsLock HUD and Korean/English toggle do not work.
 
-→ 상세 분석(target 차이, 증상 패턴, SimKeyboardInputController 심볼): [`internal/simkit-internals.md` §5](../../internal/simkit-internals.md)
+→ Detailed analysis (target differences, symptom patterns, SimKeyboardInputController symbols): [`internal/simkit-internals.md` §5](../../internal/simkit-internals.md)
 
 ---
 
 ### DeviceChromeLoader
 
-**device 식별**: `load(typeIdentifier)` 는 인스턴스 이름이 아닌 `typeIdentifier`를 받는다.
-- ❌ `"iPhone 16 (tapflow)"` — 사용자 지정 이름, simdevicetype 파일과 불일치
-- ✅ `"com.apple.CoreSimulator.SimDeviceType.iPhone-16"` — xcrun simctl이 반환하는 공식 식별자
+**Device identification**: `load(typeIdentifier)` takes a `typeIdentifier`, not an instance name.
+- ❌ `"iPhone 16 (tapflow)"` — user-assigned name, does not match simdevicetype files
+- ✅ `"com.apple.CoreSimulator.SimDeviceType.iPhone-16"` — the canonical identifier returned by xcrun simctl
 
-`SimctlWrapper`는 `deviceTypeIdentifier`를 `Device.typeId`로 파싱해 전달한다.
+`SimctlWrapper` parses `deviceTypeIdentifier` into `Device.typeId` and passes it through.
 
-**버튼 레이아웃**: `PhoneComposite.pdf`에 물리 버튼이 없다. 버튼은 별도 PDF 에셋으로 분리되며, `chrome.json`의 `inputs[]`에 배치 정보가 담겨 있다.
+**Button layout**: `PhoneComposite.pdf` contains no physical buttons. Buttons are separate PDF assets; placement data is in `chrome.json`'s `inputs[]`.
 
-margin 계산 (baguette `computeMargins` 동일 로직):
+Margin calculation (same logic as baguette `computeMargins`):
 ```
-left-anchor 버튼:  margin.left  = max(imgWidth - rollover.x, 0)
-right-anchor 버튼: margin.right = max(imgWidth + rollover.x, 0)
+left-anchor button:  margin.left  = max(imgWidth - rollover.x, 0)
+right-anchor button: margin.right = max(imgWidth + rollover.x, 0)
 ```
 
-버튼 center (expanded canvas 기준): `left-anchor: margin.left + rollover.x`  
-렌더링 순서: `behindBtns → composite → onTopBtns`  
-캐시 키: `tapflow-frame-v2-{chromeName}.png`
+Button center (expanded canvas): `left-anchor: margin.left + rollover.x`  
+Render order: `behindBtns → composite → onTopBtns`  
+Cache key: `tapflow-frame-v2-{chromeName}.png`
 
-**screen corner radius**: `chrome.json`의 `paths.simpleOutsideBorder.cornerRadiusX`에서 outer radius를 읽는다.
+**Screen corner radius**: outer radius is read from `paths.simpleOutsideBorder.cornerRadiusX` in `chrome.json`.
 ```
 innerRadius = max(outerRadius - bezelInset, 0)
 bezelInset  = max(leftWidth, topHeight)   // chrome.json images.sizing
 ```
-`ChromeData.screenCornerRadius`는 2× px 단위. `SimulatorViewer.tsx`에서 CSS 변환 시 `÷2 × displayScale`.
+`ChromeData.screenCornerRadius` is in 2× px units. CSS conversion in `SimulatorViewer.tsx`: `÷2 × displayScale`.
 
 ---
 
-### WebSocket Binary MJPEG — 스트리밍 프로토콜
+### WebSocket Binary MJPEG — streaming protocol
 
 `ws.send(Buffer)` → Relay → `ws.send(data, { binary: true })` → Browser `e.data instanceof ArrayBuffer`
 
-DataChannel 대신 WebSocket을 사용하는 이유:
-1. **DataChannel 불안정**: `@roamhq/wrtc`는 ~236KB 이상 메시지에서 채널을 조용히 닫는다.
-2. **GPU 이점 없음**: DataChannel + JPEG는 `createImageBitmap`이 CPU 기반 — WebRTC Video Track이어야 하드웨어 디코딩이 된다.
-3. **P2P 이점 없음**: tapflow는 Agent → Relay → Browser 경로가 고정이다.
+Why WebSocket instead of DataChannel:
+1. **DataChannel instability**: `@roamhq/wrtc` silently closes the channel on messages ~236KB+.
+2. **No GPU benefit**: DataChannel + JPEG uses `createImageBitmap` which is CPU-based — hardware decoding requires a WebRTC Video Track.
+3. **No P2P benefit**: tapflow has a fixed Agent → Relay → Browser path.
 
 ---
 
-### IOSAgent 테스트 — 스트리밍 시작 전제조건
+### IOSAgent tests — streaming prerequisites
 
-`startBinaryStream()`은 `handleDeviceBoot()` 내부에서만 호출된다. 스트리밍·TouchHelper 관련 테스트는 반드시 `device:boot` 흐름을 거쳐야 한다.
+`startBinaryStream()` is called only inside `handleDeviceBoot()`. Any test involving streaming or TouchHelper must go through the `device:boot` flow first.
 
 ```typescript
 browser.send(JSON.stringify({ type: 'session:start', sessionId: agent.sessionId }))
 await waitForType(browser, 'session:joined')
 browser.send(JSON.stringify({ type: 'device:boot', sessionId: agent.sessionId, payload: { deviceId: 'dev-1' } }))
 await waitForType(browser, 'device:ready')
-// MockTouchHelper.mock.results[0].value 이제 접근 가능
+// MockTouchHelper.mock.results[0].value is now accessible
 ```
 
-`mockSimctl(true)` (booted=true) → `device:booting` 없이 즉시 `device:ready`.
+`mockSimctl(true)` (booted=true) → skips `device:booting` and delivers `device:ready` immediately.

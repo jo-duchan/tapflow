@@ -13,6 +13,7 @@
     <a href="https://nodejs.org"><img src="https://img.shields.io/badge/node-%3E%3D20-brightgreen" alt="Node.js ≥ 20" /></a>
     <img src="https://img.shields.io/badge/platform-macOS-lightgrey" alt="macOS Agent" />
     <a href="https://github.com/jo-duchan/tapflow/blob/main/CONTRIBUTING.md"><img src="https://img.shields.io/badge/PRs-welcome-brightgreen.svg" alt="PRs welcome" /></a>
+    <a href="ROADMAP.md"><img src="https://img.shields.io/badge/roadmap-v0.x→v1.0-blueviolet" alt="Roadmap" /></a>
   </p>
 </div>
 
@@ -20,18 +21,7 @@
 
 ## Demo
 
-<!--
-  Demo video placeholder.
-  When the recording is ready, replace this block with:
-
-  [![tapflow demo](docs/public/demo-thumbnail.png)](https://YOUR_VIDEO_URL)
-
-  Recommended thumbnail size: 1280×720, saved to docs/public/demo-thumbnail.png
--->
-
-<div align="center">
-  <strong>🎬 Demo video coming soon</strong>
-</div>
+<video src="https://github.com/jo-duchan/tapflow/releases/download/demo-assets/tapflow-demo-final-compressed.mp4" controls width="100%"></video>
 
 ---
 
@@ -55,8 +45,6 @@
 - **Mac Resources** — CPU & RAM monitoring per agent. Spot overloaded hosts before assigning sessions.
 - **Team management** — invite links, roles (Admin / Developer / QA / Viewer), Personal Access Tokens for CI/CD.
 - **Self-hosted** — deploy anywhere. No cloud dependency.
-
-<video src="https://github.com/jo-duchan/tapflow/releases/download/demo-assets/tapflow-demo-final-compressed.mp4" controls width="100%"></video>
 
 ## How it works
 

@@ -34,8 +34,8 @@ packages/relay/public/
 # cli pack artifacts
 *.tgz
 
-# claude code personal commands
-.claude/
+# claude code personal settings (team settings and commands are tracked)
+.claude/settings.local.json
 
 # sqlite wal/shm temp files
 *.db-shm

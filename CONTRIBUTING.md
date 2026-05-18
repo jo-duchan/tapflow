@@ -17,7 +17,42 @@ pnpm dev
 
 - `main` is always deployable. Direct commits are not allowed. Start work on a `feature/{topic}` branch → PR → merge.
 - Always create new branches from `origin/main` (`git fetch origin && git checkout -b feature/{topic} origin/main`). Your local `main` may be behind.
-- Releases are triggered by a git tag (Semver) → GitHub Release + npm publish. Merging to main does not auto-publish. Before `v1.0.0`, breaking changes may land in minor versions.
+- Releases are triggered by a git tag (Semver) → GitHub Release + npm publish. Merging to main does not auto-publish.
+
+### Versioning (Semver)
+
+Versions follow `MAJOR.MINOR.PATCH`. Determine the bump from the commits since the last release:
+
+| Bump | When |
+|------|------|
+| `patch` | `fix`, `perf`, `docs`, `chore`, `refactor` — no API change |
+| `minor` | `feat` — new functionality, backward-compatible |
+| `major` | Any breaking change (see [CLAUDE.md](./CLAUDE.md) Principle 4 for scope) |
+
+**Before `v1.0.0`:** breaking changes may land in `minor` versions. Once `v1.0.0` is tagged, the table above is strictly enforced.
+
+If a single release contains commits of mixed types, the highest bump wins (`major` > `minor` > `patch`).
+
+#### Pre-release tags
+
+Use the following suffixes for staged rollouts:
+
+```
+v0.3.0-alpha.1   # unstable, internal testing
+v0.3.0-beta.1    # feature-complete, external testing
+v0.3.0-rc.1      # release candidate, no new features
+```
+
+#### Cutting a release
+
+```sh
+# confirm you are on an up-to-date main
+git checkout main && git pull origin main
+
+# tag and push (CI publishes to npm automatically)
+git tag v0.3.0
+git push origin v0.3.0
+```
 
 ## Tests
 

@@ -1,56 +1,56 @@
 # dashboard — CLAUDE.md
 
-> 공통 규칙: [CLAUDE.md](../../CLAUDE.md) | 전체 인덱스: [INDEX.md](../../INDEX.md)
+> Common rules: [CLAUDE.md](../../CLAUDE.md) | Full index: [INDEX.md](../../INDEX.md)
 
 ---
 
 ## Design Reference
 
-디자인·프론트엔드 작업 시 **[DESIGN.md](./DESIGN.md)** 를 먼저 읽고 색상 토큰, 타이포그래피, 엘리베이션 규칙을 따른다.
+Before any design or frontend work, read **[DESIGN.md](./DESIGN.md)** and follow the color tokens, typography, and elevation rules defined there.
 
 ## WHAT
 
-React SPA QA 대시보드: 시뮬레이터 뷰어, 버그 리포트, 팀 초대 화면을 제공한다.
-**독립 배포 없음** — `vite build`로 `dist/`에 번들링하고, relay 패키지의 `public/`에 복사되어 릴레이 서버가 직접 서빙한다.
+React SPA QA dashboard: provides the simulator viewer, bug reports, and team invite screens.
+**No standalone deployment** — bundled to `dist/` via `vite build`, then copied to the relay package's `public/` directory and served directly by the relay server.
 
-### App Center 구조
+### App Center Structure
 
-`/app-center` 경로. 좌측 App 목록 사이드바 + 중앙 Release Accordion + Build 카드 구성.
+`/app-center` route. Left app list sidebar + center Release Accordion + Build cards.
 
-- **App 사이드바**: `GET /api/v1/apps` → 앱 선택 시 `?appId=N` URL 파라미터로 상태 관리.
-- **Release Accordion**: `GET /api/v1/builds?app_id=N` → `version_name` 기준 그룹핑 (`groupByRelease()`). 정식 `releases` 테이블 없음 — `version_name` 메타데이터로 UI 그룹핑.
-- **Build 카드**: `build_number`, `platform`, `status_label`, uploader, `uploaded_at` 표시. status 드롭다운 인라인 변경. **"Start QA" CTA** → `/app-center/build?id={build_id}`.
-- **업로드**: `UploadBuildDialog` — iOS `.app.zip` / Android `.apk`. `version_name`/`build_number`는 plist에서 자동 추출되므로 입력 필드 없음.
+- **App sidebar**: `GET /api/v1/apps` → selecting an app manages state via `?appId=N` URL parameter.
+- **Release Accordion**: `GET /api/v1/builds?app_id=N` → grouped by `version_name` (`groupByRelease()`). No dedicated `releases` table — UI grouping uses `version_name` metadata.
+- **Build card**: shows `build_number`, `platform`, `status_label`, uploader, `uploaded_at`. Inline status dropdown. **"Start QA" CTA** → `/app-center/build?id={build_id}`.
+- **Upload**: `UploadBuildDialog` — iOS `.app.zip` / Android `.apk`. `version_name` / `build_number` are auto-extracted from plist, so no manual input fields.
 
 ## HOW
 
-- **스택**: Vite + React 19 + React Router v7 + Shadcn/Tailwind + next-themes
-- **구조**: `src/` — 앱 엔트리·라우터·페이지, `components/` — 공유 컴포넌트, `hooks/` — 커스텀 훅, `lib/` — 유틸·타입·API 클라이언트
-- **라우팅**: `BrowserRouter` 기반. `/login`, `/invite`는 public. 나머지는 `DashboardLayout`이 `useAuth`로 보호 (`/login` 리다이렉트).
-- **Auth**: `GET /api/v1/auth/me`로 세션 확인. HttpOnly 쿠키 방식 (JS에서 직접 읽지 않음).
-- **스트리밍**: `useRelay`에서 `binaryType = 'arraybuffer'` 설정, `e.data instanceof ArrayBuffer`로 바이너리 프레임 분기.
-- **개발 서버 프록시**: `vite.config.ts`에서 `/api`, `/uploads` → `http://localhost:4000` 프록시.
-- **빌드 순서**: dashboard 먼저 → relay 나중 (`agent-core → dashboard → relay`).
+- **Stack**: Vite + React 19 + React Router v7 + Shadcn/Tailwind + next-themes
+- **Structure**: `src/` — app entry, router, pages; `components/` — shared components; `hooks/` — custom hooks; `lib/` — utils, types, API client
+- **Routing**: `BrowserRouter`-based. `/login` and `/invite` are public. Everything else is protected by `DashboardLayout` via `useAuth` (redirects to `/login`).
+- **Auth**: Session confirmed via `GET /api/v1/auth/me`. HttpOnly cookie (not readable from JS).
+- **Streaming**: set `binaryType = 'arraybuffer'` in `useRelay`, branch on `e.data instanceof ArrayBuffer` for binary frames.
+- **Dev server proxy**: `vite.config.ts` proxies `/api` and `/uploads` → `http://localhost:4000`.
+- **Build order**: dashboard first → relay second (`agent-core → dashboard → relay`).
 
 ## HOW NOT
 
-- `next` 패키지를 다시 도입하지 않는다.
-- 별도 서버로 실행하지 않는다 — relay가 서빙한다.
-- 대시보드에서 Agent를 직접 호출하지 않는다 — 릴레이를 반드시 경유한다.
-- 플랫폼별 조건분기(`if platform === 'ios'`)를 UI 컴포넌트에 넣지 않는다.
-- 세션 영상 데이터를 외부 스토리지로 전송하지 않는다.
+- Do not reintroduce the `next` package.
+- Do not run as a standalone server — the relay serves it.
+- Do not call the Agent directly from the dashboard — always go through the relay.
+- Do not put platform-specific conditionals (`if platform === 'ios'`) in UI components.
+- Do not send session recording data to external storage.
 
 ---
 
 ## Compound
 
-### WebSocket Binary 프레임 수신 패턴
+### WebSocket Binary Frame Reception Pattern
 
-**언제**: `useRelay`에서 바이너리 스트림 프레임을 처리할 때
+**When**: handling binary stream frames in `useRelay`
 
-**방법**:
+**How**:
 ```typescript
-// useRelay.ts — connect() 내부
+// useRelay.ts — inside connect()
 socket.binaryType = 'arraybuffer'
 socket.onmessage = (e) => {
   if (e.data instanceof ArrayBuffer) {
@@ -60,12 +60,12 @@ socket.onmessage = (e) => {
   try { onMessageRef.current(JSON.parse(e.data)) } catch { }
 }
 
-// SimulatorViewer.tsx — 프레임 렌더링
+// SimulatorViewer.tsx — frame rendering
 createImageBitmap(new Blob([data], { type: 'image/jpeg' }))
   .then((bitmap) => {
     ctx.drawImage(bitmap, 0, 0)
-    bitmap.close()  // GPU 텍스처 메모리 해제 필수
+    bitmap.close()  // release GPU texture memory
   })
 ```
 
-**이유**: `binaryType = 'arraybuffer'`를 설정하지 않으면 `e.data`가 `Blob`이 되어 추가 비동기 처리가 필요하다. `bitmap.close()`를 빠뜨리면 프레임마다 GPU 텍스처가 누적된다. `createImageBitmap`은 CPU 기반 디코딩이며 WebRTC Video Track과 달리 하드웨어 가속이 없다.
+**Why**: Without `binaryType = 'arraybuffer'`, `e.data` becomes a `Blob` requiring extra async handling. Omitting `bitmap.close()` leaks GPU texture memory every frame. `createImageBitmap` is CPU-based decoding — no hardware acceleration unlike a WebRTC Video Track.
