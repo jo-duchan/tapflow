@@ -39,6 +39,7 @@ Critical bug fixes before the first public release.
 
 Developer experience and reliability improvements.
 
+- [ ] Pre-commit hooks — add Lefthook with lint + typecheck on staged files to catch errors before push
 - [ ] `logger.ts` abstraction — replace 66 direct `console.log/error` calls with a leveled logger (`debug` / `info` / `warn` / `error`)
 - [ ] Custom error classes — `ValidationError`, `PlatformError`, `AuthError`
 - [ ] CLI smoke tests — `doctor`, `version`, `devices` commands

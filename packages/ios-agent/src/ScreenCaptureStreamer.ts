@@ -83,7 +83,9 @@ export class ScreenCaptureStreamer {
       },
       cancel() {
         done = true
-        proc.kill('SIGKILL')
+        proc.kill('SIGTERM')
+        const killTimer = setTimeout(() => proc.kill('SIGKILL'), 1000)
+        proc.once('exit', () => clearTimeout(killTimer))
       },
     })
   }

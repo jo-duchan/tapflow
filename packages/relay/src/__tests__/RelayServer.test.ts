@@ -718,4 +718,20 @@ describe('RelayServer', () => {
     agent.close()
     browser2.close()
   })
+
+  describe('stop', () => {
+    let stopServer: RelayServer
+
+    beforeEach(async () => {
+      stopServer = new RelayServer({ port: 0 })
+      await stopServer.start()
+    })
+
+    it('clears all interval timers', async () => {
+      const clearSpy = vi.spyOn(globalThis, 'clearInterval')
+      await stopServer.stop()
+      expect(clearSpy).toHaveBeenCalledTimes(3)
+      clearSpy.mockRestore()
+    })
+  })
 })

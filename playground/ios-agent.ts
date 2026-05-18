@@ -7,6 +7,10 @@ const deviceArg = deviceArgIdx >= 0 ? process.argv[deviceArgIdx + 1] : undefined
 
 const agent = new IOSAgent()
 
+const shutdown = () => { agent.disconnect(); process.exit(0) }
+process.once('SIGINT', shutdown)
+process.once('SIGTERM', shutdown)
+
 const devices = await agent.listDevices()
 console.log(`Found ${devices.length} simulators`)
 devices.forEach((d) => console.log(` · [${d.status}] ${d.name} (${d.id})`))

@@ -43,6 +43,9 @@ export class RelayServer {
   private router: Router
   private resourceBuffers = new Map<string, { cpu: number[]; mem: number[] }>()
   private logBuffer: string[] = []
+  private purgeRecordingsTimer: ReturnType<typeof setInterval> | null = null
+  private purgeOldResourcesTimer: ReturnType<typeof setInterval> | null = null
+  private flushResourcesTimer: ReturnType<typeof setInterval> | null = null
 
   constructor(private readonly options: { port: number; publicDir?: string; uploadsDir?: string; idleTimeoutMs?: number }) {
     this.sessions = new SessionManager({ idleTimeoutMs: options.idleTimeoutMs })
@@ -109,7 +112,8 @@ export class RelayServer {
     // recordings
     const recordingsDir = path.join(u, '../recordings')
     purgeExpiredRecordings(recordingsDir)
-    setInterval(() => purgeExpiredRecordings(recordingsDir), 24 * 60 * 60 * 1000).unref()
+    this.purgeRecordingsTimer = setInterval(() => purgeExpiredRecordings(recordingsDir), 24 * 60 * 60 * 1000)
+    this.purgeRecordingsTimer.unref()
     this.router.post('/api/v1/recordings/upload', (req, res) => handleUploadRecording(req, res, recordingsDir))
     this.router.get('/api/v1/recordings', (req, res) => handleListRecordings(req, res))
     this.router.get('/api/v1/recordings/:filename', (req, res) => handleDownloadRecording(req, res, recordingsDir))
@@ -127,8 +131,10 @@ export class RelayServer {
       getDb().prepare(`DELETE FROM agent_resources WHERE recorded_at < strftime('%Y-%m-%dT%H:%M:%fZ', 'now', '-30 days')`).run()
     }
     purgeOldResources()
-    setInterval(purgeOldResources, 24 * 60 * 60 * 1000).unref()
-    setInterval(() => this.flushResourceBuffers(), 60_000).unref()
+    this.purgeOldResourcesTimer = setInterval(purgeOldResources, 24 * 60 * 60 * 1000)
+    this.purgeOldResourcesTimer.unref()
+    this.flushResourcesTimer = setInterval(() => this.flushResourceBuffers(), 60_000)
+    this.flushResourcesTimer.unref()
     this.router.get('/api/v1/agents', handleListAgents)
     this.router.get('/api/v1/agents/:name/resources', handleGetAgentResources)
   }
@@ -154,6 +160,9 @@ export class RelayServer {
   }
 
   stop(): Promise<void> {
+    if (this.purgeRecordingsTimer) { clearInterval(this.purgeRecordingsTimer); this.purgeRecordingsTimer = null }
+    if (this.purgeOldResourcesTimer) { clearInterval(this.purgeOldResourcesTimer); this.purgeOldResourcesTimer = null }
+    if (this.flushResourcesTimer) { clearInterval(this.flushResourcesTimer); this.flushResourcesTimer = null }
     return new Promise((resolve, reject) => {
       this.wss.clients.forEach((ws) => ws.terminate())
       this.wss.close(() => {
