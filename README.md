@@ -7,6 +7,8 @@ Self-hosted iOS/Android simulator streaming for QA teams.
 
 Run simulators and emulators in the browser — no Appetize, no BrowserStack, no monthly fees. Your app data never leaves your network.
 
+<video src="https://github.com/jo-duchan/tapflow/releases/download/demo-assets/tapflow-demo-final-compressed.mp4" controls width="100%"></video>
+
 ## How it works
 
 ```
