@@ -161,10 +161,6 @@ export class SimctlWrapper {
     } catch { /* expected on some iOS versions */ }
   }
 
-  async openSimulatorApp(): Promise<void> {
-    await execFileAsync('open', ['-a', 'Simulator'])
-  }
-
   async rotate(udid: string, orientation: 'portrait' | 'landscapeLeft' | 'landscapeRight' | 'portraitUpsideDown'): Promise<void> {
     await execFileAsync(ROTATION_HELPER, [orientation, udid])
   }

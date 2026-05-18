@@ -56,6 +56,8 @@
 - **Team management** — invite links, roles (Admin / Developer / QA / Viewer), Personal Access Tokens for CI/CD.
 - **Self-hosted** — deploy anywhere. No cloud dependency.
 
+<video src="https://github.com/jo-duchan/tapflow/releases/download/demo-assets/tapflow-demo-final-compressed.mp4" controls width="100%"></video>
+
 ## How it works
 
 ```

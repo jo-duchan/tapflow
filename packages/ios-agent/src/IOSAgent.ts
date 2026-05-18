@@ -268,6 +268,7 @@ export class IOSAgent implements DeviceAgent {
         console.error('[agent] syncKeyboardsFromLanguages failed:', e)
       })
 
+
     } catch (e) {
       if (seq !== state.bootSeq) return
       const message = e instanceof Error ? e.message : String(e)
