@@ -83,7 +83,7 @@ export class ScrcpySession {
       'send_device_meta=true',   // 64-byte name + codec-id + width + height header
       'send_frame_meta=false',   // raw Annex B stream (no length prefix per frame)
       'send_dummy_byte=false',   // skip the 1-byte connection-check byte
-      'video_codec_options=repeat-previous-frame-after:long=33333,i-frame-interval:int=1', // keep encoder warm; 1s IDR for faster recovery
+      'video_codec_options=i-frame-interval:int=1', // 1s IDR interval for faster keyframe recovery after restart
     ], { stdio: ['ignore', 'pipe', 'ignore'] })
 
     this.serverProc = serverProc
