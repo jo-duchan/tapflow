@@ -307,6 +307,9 @@ importers:
       '@tapflow/relay':
         specifier: workspace:*
         version: link:../packages/relay
+      ws:
+        specifier: ^8.0.0
+        version: 8.20.1
     devDependencies:
       concurrently:
         specifier: ^9.0.0

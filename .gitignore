@@ -33,6 +33,9 @@ packages/ios-agent/src/screencapture-helper
 # typescript build cache
 *.tsbuildinfo
 
+# cli pack artifacts
+*.tgz
+
 # claude code personal commands
 .claude/
 
@@ -45,6 +48,10 @@ playground/.tapflow/
 
 # playground test builds
 playground/test-builds/
+
+# playground demo/local scripts (not for contributors)
+playground/demo-seed.ts
+playground/multi-agent.ts
 
 # VitePress
 docs/.vitepress/cache
