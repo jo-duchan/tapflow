@@ -21,7 +21,7 @@
 
 ## Demo
 
-<video src="https://github.com/jo-duchan/tapflow/releases/download/demo-assets/tapflow-demo-final-compressed.mp4" controls width="100%"></video>
+<video src="https://github.com/user-attachments/assets/f8dfb969-3670-41f3-b810-86179d23915e" controls width="100%"></video>
 
 ---
 
