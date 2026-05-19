@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { useTheme } from 'next-themes'
-import { useForm, Controller } from 'react-hook-form'
+import { useForm, useWatch, Controller } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
 import { Button, buttonVariants } from '@/components/ui/button'
@@ -176,7 +176,7 @@ export function DefaultSettings() {
     setTimeout(() => setAppsSaved((p) => ({ ...p, [appId]: false })), 2000)
   }
 
-  const profileDisplayName = profileForm.watch('displayName')
+  const profileDisplayName = useWatch({ control: profileForm.control, name: 'displayName' })
 
   return (
     <div className="flex flex-col gap-6 max-w-[900px] mx-auto w-full p-6">
