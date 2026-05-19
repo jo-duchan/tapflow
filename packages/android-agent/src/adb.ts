@@ -1,5 +1,6 @@
 import { execFile } from 'child_process'
 import { promisify } from 'util'
+import { ValidationError } from '@tapflowio/agent-core'
 
 const execFileAsync = promisify(execFile)
 
@@ -7,7 +8,7 @@ function getAdbPath(): string {
   if (process.env['ADB_PATH']) return process.env['ADB_PATH']
   const androidHome = process.env['ANDROID_HOME']
   if (!androidHome) {
-    throw new Error(
+    throw new ValidationError(
       'ADB not found. Set ANDROID_HOME or ADB_PATH environment variable.\n' +
       'Example: export ANDROID_HOME=$HOME/Library/Android/sdk',
     )
@@ -18,7 +19,7 @@ function getAdbPath(): string {
 function getEmulatorPath(): string {
   const androidHome = process.env['ANDROID_HOME']
   if (!androidHome) {
-    throw new Error(
+    throw new ValidationError(
       'ANDROID_HOME not set. Install Android SDK and set the environment variable.\n' +
       'Example: export ANDROID_HOME=$HOME/Library/Android/sdk',
     )

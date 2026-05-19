@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
+import { ValidationError } from '@tapflowio/agent-core'
 import { SessionManager } from '../SessionManager'
 import type { WebSocket } from 'ws'
 
@@ -128,6 +129,7 @@ describe('SessionManager', () => {
 
     it('throws when session is not found', () => {
       const sm = new SessionManager()
+      expect(() => sm.join('bad-id', mockSocket())).toThrow(ValidationError)
       expect(() => sm.join('bad-id', mockSocket())).toThrow('Session not found: bad-id')
     })
 
@@ -136,6 +138,7 @@ describe('SessionManager', () => {
       const [id] = sm.create(mockSocket(), [{ id: 'd1', name: 'X', platform: 'ios', status: 'shutdown' }])
       const busyWs = { readyState: OPEN } as WebSocket
       sm.join(id, busyWs)
+      expect(() => sm.join(id, mockSocket())).toThrow(ValidationError)
       expect(() => sm.join(id, mockSocket())).toThrow('Session busy')
     })
   })

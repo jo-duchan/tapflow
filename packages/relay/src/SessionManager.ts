@@ -1,6 +1,7 @@
 import { randomUUID } from 'crypto'
 import { WebSocket } from 'ws'
 import type { DeviceStatus } from '@tapflowio/agent-core'
+import { ValidationError } from '@tapflowio/agent-core'
 import type { AgentResources, SessionInfo } from './types.js'
 
 export interface Session {
@@ -80,9 +81,9 @@ export class SessionManager {
 
   join(sessionId: string, browserSocket: WebSocket): void {
     const session = this.sessions.get(sessionId)
-    if (!session) throw new Error(`Session not found: ${sessionId}`)
+    if (!session) throw new ValidationError(`Session not found: ${sessionId}`)
     if (session.browserSocket?.readyState === WebSocket.OPEN) {
-      throw new Error(`Session busy: ${sessionId}`)
+      throw new ValidationError(`Session busy: ${sessionId}`)
     }
     if (session.idleTimer) { clearTimeout(session.idleTimer); session.idleTimer = null }
     if (session.browserSocket) this.browserSocketIndex.delete(session.browserSocket)

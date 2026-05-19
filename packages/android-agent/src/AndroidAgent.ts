@@ -1,7 +1,7 @@
 import os from 'os'
 import { WebSocket } from 'ws'
 import type { AndroidButton, Device, DeviceAgent } from '@tapflowio/agent-core'
-import { createLogger } from '@tapflowio/agent-core'
+import { createLogger, PlatformError, ValidationError } from '@tapflowio/agent-core'
 import { createResourceSampler, registerStreamWs } from '@tapflowio/agent-core/utils'
 import { AdbWrapper } from './AdbWrapper.js'
 import { EmulatorLauncher } from './EmulatorLauncher.js'
@@ -180,7 +180,7 @@ export class AndroidAgent implements DeviceAgent {
           this.resourcesTimer = setInterval(() => this.reportResources(), 5000)
           resolve()
         } else {
-          reject(new Error(`Unexpected message during handshake: ${msg.type}`))
+          reject(new PlatformError(`Unexpected message during handshake: ${msg.type}`))
         }
       })
 
@@ -391,7 +391,7 @@ export class AndroidAgent implements DeviceAgent {
       if (seq !== state.bootSeq) return
 
       const target = devices.find((d) => d.id === avdId)
-      if (!target) throw new Error(`Device not found: ${avdId}`)
+      if (!target) throw new ValidationError(`Device not found: ${avdId}`)
 
       if (target.status !== 'booted') {
         this.launcher.launch(avdName)
@@ -667,27 +667,27 @@ export class AndroidAgent implements DeviceAgent {
   async installApp(apkPath: string): Promise<void> {
     const first = this.deviceStates.values().next().value
     const serial = first ? this.adb.getSerial(first.deviceId) : undefined
-    if (!serial) throw new Error('no booted device — call connect() first')
+    if (!serial) throw new ValidationError('no booted device — call connect() first')
     await this.adb.installApp(serial, apkPath)
   }
 
   async launchApp(packageName: string): Promise<void> {
     const first = this.deviceStates.values().next().value
     const serial = first ? this.adb.getSerial(first.deviceId) : undefined
-    if (!serial) throw new Error('no booted device — call connect() first')
+    if (!serial) throw new ValidationError('no booted device — call connect() first')
     await this.adb.launchApp(serial, packageName)
   }
 
   async screenshot(): Promise<Buffer> {
     const first = this.deviceStates.values().next().value
     const serial = first ? this.adb.getSerial(first.deviceId) : undefined
-    if (!serial) throw new Error('no booted device — call connect() first')
+    if (!serial) throw new ValidationError('no booted device — call connect() first')
     return this.adb.screenshot(serial)
   }
 
   stream(): ReadableStream<Buffer> {
     const state = this.deviceStates.values().next().value
-    if (!state?.scrcpySession) throw new Error('no active scrcpy session — call connect() first')
+    if (!state?.scrcpySession) throw new ValidationError('no active scrcpy session — call connect() first')
     return state.scrcpySession.video.start()
   }
 

@@ -6,7 +6,7 @@ import { randomUUID } from 'crypto'
 import { spawnSync } from 'child_process'
 import { WebSocket } from 'ws'
 import type { Device, DeviceAgent } from '@tapflowio/agent-core'
-import { createLogger } from '@tapflowio/agent-core'
+import { createLogger, PlatformError, ValidationError } from '@tapflowio/agent-core'
 
 const logger = createLogger('ios-agent')
 import { createResourceSampler, registerStreamWs } from '@tapflowio/agent-core/utils'
@@ -96,7 +96,7 @@ export class IOSAgent implements DeviceAgent {
           this.resourcesTimer = setInterval(() => this.reportResources(), 5000)
           resolve()
         } else {
-          reject(new Error(`Unexpected message during handshake: ${msg.type}`))
+          reject(new PlatformError(`Unexpected message during handshake: ${msg.type}`))
         }
       })
 
@@ -237,7 +237,7 @@ export class IOSAgent implements DeviceAgent {
       if (seq !== state.bootSeq) return
 
       const target = devices.find((d) => d.id === deviceId)
-      if (!target) throw new Error(`Device not found: ${deviceId}`)
+      if (!target) throw new ValidationError(`Device not found: ${deviceId}`)
 
       if (fullErase) {
         await this.simctl.erase(deviceId)
@@ -464,13 +464,13 @@ export class IOSAgent implements DeviceAgent {
     try {
       const result = spawnSync('unzip', ['-o', filePath, '-d', tmpDir])
       if (result.status !== 0) {
-        throw new Error(`zip 압축 해제 실패 — 시뮬레이터용 .app.zip 파일인지 확인하세요.`)
+        throw new ValidationError(`zip 압축 해제 실패 — 시뮬레이터용 .app.zip 파일인지 확인하세요.`)
       }
 
       const entries = fs.readdirSync(tmpDir)
       const appDir = entries.find(e => e.endsWith('.app') && fs.statSync(path.join(tmpDir, e)).isDirectory())
       if (!appDir) {
-        throw new Error('.app 디렉토리를 찾을 수 없습니다. xcodebuild -sdk iphonesimulator 로 빌드한 .app 을 zip 압축해 업로드하세요.')
+        throw new ValidationError('.app 디렉토리를 찾을 수 없습니다. xcodebuild -sdk iphonesimulator 로 빌드한 .app 을 zip 압축해 업로드하세요.')
       }
 
       await this.simctl.installApp(path.join(tmpDir, appDir))
@@ -488,7 +488,7 @@ export class IOSAgent implements DeviceAgent {
   screenshot(): Promise<Buffer> { return this.simctl.screenshot() }
   stream(): ReadableStream<Buffer> {
     const first = this.deviceStates.values().next().value
-    if (!first) throw new Error('no booted device — call connect() first')
+    if (!first) throw new ValidationError('no booted device — call connect() first')
     return new ScreenCaptureStreamer(this.fps, first.deviceId).start()
   }
 
