@@ -111,6 +111,8 @@ export function QASession() {
   }, [activeSessionId, deviceId, send]);
 
   // 디바이스 선택 → Mac 선택
+  const handleRecordingUploaded = useCallback(() => setRecordingsKey((k) => k + 1), []);
+
   const handleBackToMacs = useCallback(() => {
     if (activeSessionId && deviceId) {
       send({ type: 'device:shutdown', sessionId: activeSessionId, payload: { deviceId } });
@@ -208,7 +210,7 @@ export function QASession() {
                 deviceId={deviceId}
                 buildId={build?.id}
                 resetMode={resetMode}
-                onRecordingUploaded={() => setRecordingsKey((k) => k + 1)}
+                onRecordingUploaded={handleRecordingUploaded}
               />
             </div>
           ) : selectedAgent ? (

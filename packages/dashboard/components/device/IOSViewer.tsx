@@ -210,8 +210,12 @@ export function IOSViewer({
 
   const stopClientRecording = useCallback(async () => {
     setRecordState('uploading'); recordingRef.current = false; cancelAnimationFrame(rafIdRef.current)
-    const mr = mediaRecorderRef.current; if (!mr) return
-    await new Promise<void>((resolve) => { mr.onstop = () => resolve(); mr.stop() })
+    const mr = mediaRecorderRef.current; if (!mr) { setRecordState('idle'); return }
+    await new Promise<void>((resolve) => {
+      const timeout = setTimeout(resolve, 5000)
+      mr.onstop = () => { clearTimeout(timeout); resolve() }
+      try { mr.stop() } catch { clearTimeout(timeout); resolve() }
+    })
     mediaRecorderRef.current = null
     const mime = recordMimeRef.current; const ext = mime.includes('mp4') ? '.mp4' : '.webm'
     const blob = new Blob(recordChunksRef.current, { type: mime }); recordChunksRef.current = []
