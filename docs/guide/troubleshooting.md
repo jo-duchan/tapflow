@@ -75,6 +75,40 @@ sdkmanager "system-images;android-34;google_apis;arm64-v8a"
 avdmanager create avd -n Pixel_8 -k "system-images;android-34;google_apis;arm64-v8a"
 ```
 
+### `INSTALL_FAILED_NO_MATCHING_ABIS` — APK not compatible with Apple Silicon emulator
+
+```
+INSTALL_FAILED_NO_MATCHING_ABIS: Failed to extract native libraries, res=-113
+```
+
+Apple Silicon Macs (M1/M2/M3) run Android Emulator in a native ARM64 environment. An APK must include the `arm64-v8a` ABI to run on it.
+
+Check which ABIs your APK supports:
+
+```sh
+aapt dump badging your-app.apk | grep native-code
+```
+
+| Result | Compatible |
+|--------|-----------|
+| `native-code: 'arm64-v8a'` | ✅ |
+| `native-code: 'armeabi-v7a' 'arm64-v8a'` | ✅ |
+| `native-code: 'armeabi-v7a' 'x86'` | ❌ |
+| `native-code: 'x86' 'x86_64'` | ❌ |
+
+If `arm64-v8a` is missing, the app was built targeting 32-bit ARM or Intel emulators only. Ask your development team to add `arm64-v8a` to the ABI split configuration.
+
+::: details ABI reference
+
+| ABI | Architecture | Apple Silicon Emulator |
+|-----|-------------|----------------------|
+| `arm64-v8a` | 64-bit ARM | ✅ Required |
+| `armeabi-v7a` | 32-bit ARM | ❌ |
+| `x86_64` | 64-bit Intel | ❌ |
+| `x86` | 32-bit Intel | ❌ |
+
+:::
+
 ## `tapflow doctor` failures
 
 ### All iOS checks fail

@@ -75,7 +75,11 @@ sdkmanager "system-images;android-34;google_apis;arm64-v8a"
 avdmanager create avd -n Pixel_8 -k "system-images;android-34;google_apis;arm64-v8a"
 ```
 
-### Apple Silicon 에뮬레이터와 호환되지 않는 APK
+### `INSTALL_FAILED_NO_MATCHING_ABIS` — Apple Silicon 에뮬레이터와 호환되지 않는 APK
+
+```
+INSTALL_FAILED_NO_MATCHING_ABIS: Failed to extract native libraries, res=-113
+```
 
 Apple Silicon Mac(M1/M2/M3)의 Android 에뮬레이터는 네이티브 ARM64 환경에서 동작합니다. APK에 `arm64-v8a` ABI가 포함되어 있어야 합니다.
 
