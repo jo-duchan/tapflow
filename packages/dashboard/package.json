@@ -7,6 +7,7 @@
   "scripts": {
     "dev": "vite --port 3001",
     "build": "tsc --noEmit && vite build && rm -rf ../relay/public && mkdir -p ../relay/public && cp -r dist/. ../relay/public/",
+    "typecheck": "tsc --noEmit",
     "preview": "vite preview",
     "lint": "eslint src",
     "test": "vitest run",

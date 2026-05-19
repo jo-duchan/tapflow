@@ -37,6 +37,7 @@
   },
   "scripts": {
     "build": "tsc",
+    "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "lint": "eslint src",
     "download-scrcpy-server": "node scripts/download-scrcpy-server.mjs"

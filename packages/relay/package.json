@@ -37,6 +37,7 @@
   },
   "scripts": {
     "build": "tsc && rm -rf dist/migrations && cp -r src/migrations dist/migrations",
+    "typecheck": "tsc --noEmit",
     "start": "node dist/server.js",
     "test": "vitest run",
     "lint": "eslint src"
