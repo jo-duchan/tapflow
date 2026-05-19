@@ -1,24 +1,27 @@
 import fs from 'fs'
 import path from 'path'
+import { z } from 'zod'
 import { createLogger } from '@tapflow/agent-core'
 
 const logger = createLogger('relay:config')
 
-export interface TapflowConfig {
-  server: {
-    port: number
-    dataDir: string
-    jwtSecret: string
-  }
-  smtp: {
-    host: string
-    port: number
-    secure: boolean
-    user: string
-    pass: string
-    from: string
-  }
-}
+const configSchema = z.object({
+  server: z.object({
+    port: z.number().int().min(1).max(65535),
+    dataDir: z.string().min(1),
+    jwtSecret: z.string().min(32, 'jwtSecret must be at least 32 characters'),
+  }),
+  smtp: z.object({
+    host: z.string(),
+    port: z.number().int().min(1).max(65535),
+    secure: z.boolean(),
+    user: z.string(),
+    pass: z.string(),
+    from: z.string(),
+  }),
+})
+
+export type TapflowConfig = z.infer<typeof configSchema>
 
 type DeepPartial<T> = { [K in keyof T]?: T[K] extends object ? DeepPartial<T[K]> : T[K] }
 
@@ -81,7 +84,19 @@ function load(): TapflowConfig {
   if (process.env.SMTP_PASS) cfg.smtp.pass = process.env.SMTP_PASS
   if (process.env.SMTP_FROM) cfg.smtp.from = process.env.SMTP_FROM
 
-  return cfg
+  const result = configSchema.safeParse(cfg)
+  if (!result.success) {
+    for (const issue of result.error.issues) {
+      logger.error(`config error: ${issue.path.join('.')} — ${issue.message}`)
+    }
+    process.exit(1)
+  }
+
+  if (cfg.server.jwtSecret === DEFAULTS.server.jwtSecret) {
+    logger.warn('JWT_SECRET is using the dev default — set a strong secret in production')
+  }
+
+  return result.data
 }
 
 export const config = load()

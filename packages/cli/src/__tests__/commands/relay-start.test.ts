@@ -55,4 +55,19 @@ describe('cmdRelayStart', () => {
     await cmdRelayStart({})
     expect(output.join('\n')).toContain('localhost:4000')
   })
+
+  it('포트 범위 초과(99999) → exit(1)', async () => {
+    await expect(cmdRelayStart({ port: 99999 })).rejects.toThrow('process.exit')
+    expect(exitSpy).toHaveBeenCalledWith(1)
+  })
+
+  it('포트 0 → exit(1)', async () => {
+    await expect(cmdRelayStart({ port: 0 })).rejects.toThrow('process.exit')
+    expect(exitSpy).toHaveBeenCalledWith(1)
+  })
+
+  it('NaN 포트 → exit(1)', async () => {
+    await expect(cmdRelayStart({ port: NaN })).rejects.toThrow('process.exit')
+    expect(exitSpy).toHaveBeenCalledWith(1)
+  })
 })
