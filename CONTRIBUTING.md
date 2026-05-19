@@ -17,7 +17,7 @@ pnpm dev
 
 - `main` is always deployable. Direct commits are not allowed. Start work on a `feature/{topic}` branch → PR → merge.
 - Always create new branches from `origin/main` (`git fetch origin && git checkout -b feature/{topic} origin/main`). Your local `main` may be behind.
-- Releases are triggered by a git tag (Semver) → GitHub Release + npm publish. Merging to main does not auto-publish.
+- Releases are driven by [changesets](https://github.com/changesets/changesets). A tag push triggers GitHub Actions → npm publish + GitHub Release. Merging to main does not auto-publish.
 
 ### Versioning (Semver)
 
@@ -46,12 +46,21 @@ v0.3.0-rc.1      # release candidate, no new features
 #### Cutting a release
 
 ```sh
-# confirm you are on an up-to-date main
+# 1. confirm you are on an up-to-date main
 git checkout main && git pull origin main
 
-# tag and push (CI publishes to npm automatically)
-git tag v0.3.0
-git push origin v0.3.0
+# 2. record what changed
+pnpm changeset add
+
+# 3. bump all package versions (edits package.json files and CHANGELOG.md)
+pnpm changeset version
+
+# 4. commit the version bump
+git add -A && git commit -m "chore: release v<new-version>"
+
+# 5. tag and push — GitHub Actions publishes to npm and creates a GitHub Release
+git tag v<new-version>
+git push origin main v<new-version>
 ```
 
 ## Tests
