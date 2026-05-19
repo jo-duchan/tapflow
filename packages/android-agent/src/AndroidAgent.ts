@@ -1,11 +1,14 @@
 import os from 'os'
 import { WebSocket } from 'ws'
 import type { AndroidButton, Device, DeviceAgent } from '@tapflow/agent-core'
+import { createLogger } from '@tapflow/agent-core'
 import { createResourceSampler, registerStreamWs } from '@tapflow/agent-core/utils'
 import { AdbWrapper } from './AdbWrapper.js'
 import { EmulatorLauncher } from './EmulatorLauncher.js'
 import { AndroidTouchHelper } from './AndroidTouchHelper.js'
 import { ScrcpySession } from './scrcpy/ScrcpySession.js'
+
+const logger = createLogger('android-agent')
 
 // Parse H.264 SPS NAL unit to extract frame dimensions.
 // scrcpy sends a new SPS (inside an IDR keyframe) whenever the capture size changes —
@@ -291,7 +294,7 @@ export class AndroidAgent implements DeviceAgent {
             state.videoWidth = parsed.width
             state.videoHeight = parsed.height
             state.scrcpySession?.control.updateScreenSize(parsed.width, parsed.height)
-            console.log(`[android-agent] video size → ${parsed.width}×${parsed.height}`)
+            logger.info(`video size → ${parsed.width}×${parsed.height}`)
           }
           if (streamWs.readyState === WebSocket.OPEN) streamWs.send(value)
         }
@@ -331,7 +334,7 @@ export class AndroidAgent implements DeviceAgent {
     try {
       await this.startVideoStream(state, streamWs)
     } catch (err) {
-      console.error(`[android-agent] scrcpy restart failed: ${err}`)
+      logger.error(`scrcpy restart failed: ${err}`)
       this.ws?.send(JSON.stringify({
         type: 'device:boot-error',
         sessionId: state.sessionId,
@@ -357,7 +360,7 @@ export class AndroidAgent implements DeviceAgent {
       ;[state.displayWidth, state.displayHeight] = [state.displayHeight, state.displayWidth]
     }
 
-    console.log(`[android-agent] rotation ${prevRotation}→${rotation} displaySize=${state.displayWidth}×${state.displayHeight}`)
+    logger.info(`rotation ${prevRotation}→${rotation} displaySize=${state.displayWidth}×${state.displayHeight}`)
 
     this.ws?.send(JSON.stringify({
       type: 'device:rotate',
@@ -427,7 +430,7 @@ export class AndroidAgent implements DeviceAgent {
     } catch (e) {
       if (seq !== state.bootSeq) return
       const message = e instanceof Error ? e.message : String(e)
-      console.error('[android-agent] boot failed:', message)
+      logger.error('boot failed:', message)
       this.ws?.send(JSON.stringify({ type: 'device:boot-error', sessionId, message }))
     }
   }
@@ -443,7 +446,7 @@ export class AndroidAgent implements DeviceAgent {
     if (serial) {
       // best-effort — emulator may already be gone
       await this.adb.shutdown(serial).catch((e: unknown) => {
-        console.warn('[android-agent] emu kill failed (already gone?):', (e as Error).message)
+        logger.warn('emu kill failed (already gone?):', (e as Error).message)
       })
       this.adb.clearSerial(avdId)
     }
@@ -459,13 +462,13 @@ export class AndroidAgent implements DeviceAgent {
       case 'device:boot': {
         const { deviceId } = msg.payload as { deviceId: string }
         this.handleDeviceBoot(msg.sessionId!, deviceId)
-          .catch((e) => console.error('[android-agent] handleDeviceBoot failed:', e))
+          .catch((e) => logger.error('handleDeviceBoot failed:', e))
         break
       }
       case 'device:shutdown': {
         const { deviceId } = msg.payload as { deviceId: string }
         this.handleDeviceShutdown(msg.sessionId!, deviceId)
-          .catch((e) => console.error('[android-agent] handleDeviceShutdown failed:', e))
+          .catch((e) => logger.error('handleDeviceShutdown failed:', e))
         break
       }
       case 'app:install': {

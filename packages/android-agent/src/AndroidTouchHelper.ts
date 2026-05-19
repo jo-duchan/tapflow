@@ -1,4 +1,7 @@
 import type { AdbWrapper } from './AdbWrapper.js'
+import { createLogger } from '@tapflow/agent-core'
+
+const logger = createLogger('android-agent:touch')
 
 const BUTTON_KEY_MAP: Record<string, string> = {
   home: 'KEYCODE_HOME',
@@ -65,7 +68,7 @@ export class AndroidTouchHelper {
 
   pressButton(name: string): void {
     const keyCode = BUTTON_KEY_MAP[name]
-    if (!keyCode) { console.error(`[AndroidTouchHelper] Unknown button: ${name}`); return }
+    if (!keyCode) { logger.error(`Unknown button: ${name}`); return }
     this.adb.sendKeyEvent(this.serial, keyCode).catch(() => {})
   }
 }

@@ -1,5 +1,8 @@
 import fs from 'fs'
 import path from 'path'
+import { createLogger } from '@tapflow/agent-core'
+
+const logger = createLogger('relay:config')
 
 export interface TapflowConfig {
   server: {
@@ -47,7 +50,7 @@ function load(): TapflowConfig {
     try {
       file = JSON.parse(fs.readFileSync(configPath, 'utf-8')) as DeepPartial<TapflowConfig>
     } catch {
-      console.warn('[tapflow] Failed to parse tapflow.config.json — using defaults')
+      logger.warn('Failed to parse tapflow.config.json — using defaults')
     }
   }
 

@@ -1,6 +1,9 @@
 import { spawn, execFileSync } from 'child_process'
 import { existsSync, statSync, unlinkSync } from 'fs'
 import { join } from 'path'
+import { createLogger } from '@tapflow/agent-core'
+
+const logger = createLogger('ios-agent:screencapture')
 
 const SWIFT_SRC = join(import.meta.dirname, '..', 'src', 'screencapture-helper.swift')
 const BINARY = join(import.meta.dirname, '..', 'bin', 'screencapture-helper')
@@ -12,20 +15,20 @@ function ensureCompiled(): void {
     const srcMtime = statSync(SWIFT_SRC).mtimeMs
     const binMtime = statSync(BINARY).mtimeMs
     if (binMtime >= srcMtime) return
-    console.error('[ScreenCaptureStreamer] Swift source changed, recompiling...')
+    logger.info('Swift source changed, recompiling...')
     unlinkSync(BINARY)
   }
   if (!existsSync(SWIFT_SRC)) {
     throw new Error('screencapture-helper binary missing and Swift source not found — reinstall @tapflow/ios-agent')
   }
-  console.error('[ScreenCaptureStreamer] compiling screencapture-helper...')
+  logger.info('compiling screencapture-helper...')
   execFileSync('swiftc', [
     SWIFT_SRC,
     '-o', BINARY,
     '-framework', 'CoreVideo',
     '-framework', 'ImageIO',
   ], { stdio: ['ignore', 'ignore', 'inherit'] })
-  console.error('[ScreenCaptureStreamer] compiled OK')
+  logger.info('compiled OK')
 }
 
 export class ScreenCaptureStreamer {

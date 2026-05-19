@@ -1,5 +1,8 @@
 import { execFile } from 'child_process'
 import { promisify } from 'util'
+import { createLogger } from '@tapflow/agent-core'
+
+const logger = createLogger('ios-agent:simctl')
 
 const execFileAsync = promisify(execFile)
 
@@ -39,7 +42,7 @@ export const defaultRunner: SimctlRunner = {
       return stdout
     } catch (err) {
       if (!isCoreSimulatorVersionMismatch(err)) throw err
-      console.error('[agent] CoreSimulatorService version mismatch — restarting service and retrying')
+      logger.warn('CoreSimulatorService version mismatch — restarting service and retrying')
       await restartCoreSimulatorService()
       try {
         const { stdout } = await execFileAsync('xcrun', ['simctl', ...args])
@@ -55,7 +58,7 @@ export const defaultRunner: SimctlRunner = {
       return stdout
     } catch (err) {
       if (!isCoreSimulatorVersionMismatch(err)) throw err
-      console.error('[agent] CoreSimulatorService version mismatch — restarting service and retrying')
+      logger.warn('CoreSimulatorService version mismatch — restarting service and retrying')
       await restartCoreSimulatorService()
       try {
         const { stdout } = await execFileAsync('xcrun', ['simctl', ...args], { encoding: 'buffer' })

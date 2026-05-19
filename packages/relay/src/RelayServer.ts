@@ -8,6 +8,9 @@ import { Router } from './router.js'
 import { getDb } from './db.js'
 import { handleLogin, handleLogout, handleMe, handleChangePassword, handleInit } from './api/auth.js'
 import { handleVerify, handleAccept } from './api/invitations.js'
+import { createLogger } from '@tapflow/agent-core'
+
+const logger = createLogger('relay')
 import { handleVerifyReset, handleDoReset, handleSendMemberReset } from './api/passwordReset.js'
 import { handleListBuilds, handleGetBuild, handleUpdateBuild, handleUploadBuild } from './api/builds.js'
 import { handleListApps, handleCreateApp, handleUpdateApp, handleDeleteApp } from './api/apps.js'
@@ -143,7 +146,7 @@ export class RelayServer {
     const line = `[${new Date().toISOString()}] ${msg}`
     this.logBuffer.push(line)
     if (this.logBuffer.length > 500) this.logBuffer.shift()
-    console.log(line)
+    logger.info(msg)
   }
 
   start(): Promise<void> {
