@@ -2,7 +2,16 @@
   "name": "tapflow",
   "version": "0.1.0-alpha.1",
   "description": "Self-hosted iOS/Android simulator streaming for QA teams",
-  "keywords": ["ios", "android", "simulator", "emulator", "qa", "testing", "streaming", "self-hosted"],
+  "keywords": [
+    "ios",
+    "android",
+    "simulator",
+    "emulator",
+    "qa",
+    "testing",
+    "streaming",
+    "self-hosted"
+  ],
   "homepage": "https://github.com/jo-duchan/tapflow",
   "bugs": "https://github.com/jo-duchan/tapflow/issues",
   "repository": {
@@ -42,11 +51,12 @@
   },
   "dependencies": {
     "@tapflow/agent-core": "workspace:*",
-    "@tapflow/ios-agent": "workspace:*",
     "@tapflow/android-agent": "workspace:*",
+    "@tapflow/ios-agent": "workspace:*",
     "@tapflow/relay": "workspace:*",
     "cac": "^6.7.14",
-    "ws": "^8.0.0"
+    "ws": "^8.0.0",
+    "zod": "^4.4.3"
   },
   "devDependencies": {
     "@types/node": "^20.0.0",

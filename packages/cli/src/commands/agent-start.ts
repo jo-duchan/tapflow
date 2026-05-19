@@ -1,3 +1,4 @@
+import { z } from 'zod'
 import { AndroidAgent } from '@tapflow/android-agent'
 import { banner, createSpinner } from '../lib/print.js'
 import { hasAdb } from '../lib/platform.js'
@@ -11,9 +12,21 @@ export interface AgentStartOptions {
 
 const DEFAULT_RELAY = 'ws://localhost:4000'
 
+const relayUrlSchema = z
+  .string()
+  .refine((v) => v.startsWith('ws://') || v.startsWith('wss://'), {
+    message: '--relay must start with ws:// or wss://',
+  })
+
 export async function cmdAgentStart(opts: AgentStartOptions): Promise<void> {
   const isMac = process.platform === 'darwin'
-  const relayUrl = opts.relay ?? DEFAULT_RELAY
+  const rawRelay = opts.relay ?? DEFAULT_RELAY
+  const relayResult = relayUrlSchema.safeParse(rawRelay)
+  if (!relayResult.success) {
+    banner('error', 'INVALID CONFIG', [relayResult.error.issues[0].message])
+    process.exit(1)
+  }
+  const relayUrl = relayResult.data
 
   const explicit = opts.platform
   const runIOS = explicit === 'ios' || explicit === 'all' || (!explicit && isMac)

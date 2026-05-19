@@ -105,6 +105,30 @@ describe('cmdAgentStart', () => {
     expect(exitSpy).toHaveBeenCalledWith(1)
   })
 
+  it('--relay http:// 스킴 → exit(1)', async () => {
+    const exitSpy = vi.spyOn(process, 'exit').mockImplementation(() => { throw new Error('process.exit') })
+    await expect(cmdAgentStart({ platform: 'ios', relay: 'http://localhost:4000' })).rejects.toThrow('process.exit')
+    expect(exitSpy).toHaveBeenCalledWith(1)
+  })
+
+  it('--relay ftp:// 스킴 → exit(1)', async () => {
+    const exitSpy = vi.spyOn(process, 'exit').mockImplementation(() => { throw new Error('process.exit') })
+    await expect(cmdAgentStart({ platform: 'ios', relay: 'ftp://localhost:4000' })).rejects.toThrow('process.exit')
+    expect(exitSpy).toHaveBeenCalledWith(1)
+  })
+
+  it('--relay wss:// 스킴 → 정상 연결', async () => {
+    const connectSpy = vi.fn().mockResolvedValue(undefined)
+    vi.mocked(IOSAgent).mockImplementation(() => ({
+      listDevices: vi.fn().mockResolvedValue([{ id: 'AAA', name: 'iPhone 16 Pro', status: 'booted' }]),
+      connect: connectSpy,
+      disconnect: vi.fn(),
+    } as never))
+
+    await cmdAgentStart({ platform: 'ios', relay: 'wss://relay.example.com' })
+    expect(connectSpy).toHaveBeenCalledWith('wss://relay.example.com')
+  })
+
   it('SIGINT → 모든 에이전트 disconnect', async () => {
     const disconnectSpy = vi.fn()
     vi.mocked(IOSAgent).mockImplementation(() => ({
