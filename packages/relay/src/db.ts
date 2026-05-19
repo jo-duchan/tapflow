@@ -42,7 +42,9 @@ function runMigrations(): void {
   for (const file of files) {
     if (ran.has(file)) continue
     const sql = fs.readFileSync(path.join(migrationsDir, file), 'utf-8')
-    d.exec(sql)
-    d.prepare('INSERT INTO _migrations (name) VALUES (?)').run(file)
+    d.transaction(() => {
+      d.exec(sql)
+      d.prepare('INSERT INTO _migrations (name) VALUES (?)').run(file)
+    })()
   }
 }
