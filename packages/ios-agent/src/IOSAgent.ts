@@ -6,6 +6,9 @@ import { randomUUID } from 'crypto'
 import { spawnSync } from 'child_process'
 import { WebSocket } from 'ws'
 import type { Device, DeviceAgent } from '@tapflow/agent-core'
+import { createLogger } from '@tapflow/agent-core'
+
+const logger = createLogger('ios-agent')
 import { createResourceSampler, registerStreamWs } from '@tapflow/agent-core/utils'
 import { SimctlWrapper } from './SimctlWrapper.js'
 import { ScreenCaptureStreamer } from './ScreenCaptureStreamer.js'
@@ -265,7 +268,7 @@ export class IOSAgent implements DeviceAgent {
       // hw=Automatic lets the hardware layout follow the active input source on LANG1/CapsLock.
       // By the time the user navigates to a text field the sync has already completed.
       this.simctl.syncKeyboardsFromLanguages(deviceId).catch((e) => {
-        console.error('[agent] syncKeyboardsFromLanguages failed:', e)
+        logger.error('syncKeyboardsFromLanguages failed:', e)
       })
 
 
@@ -297,7 +300,7 @@ export class IOSAgent implements DeviceAgent {
       }))
     } catch (e) {
       const message = e instanceof Error ? e.message : String(e)
-      console.error('[agent] shutdown failed:', message)
+      logger.error('shutdown failed:', message)
     }
   }
 
@@ -307,14 +310,14 @@ export class IOSAgent implements DeviceAgent {
         const { deviceId, resetMode } = msg.payload as { deviceId: string; resetMode?: string }
         const sessionId = msg.sessionId!
         this.handleDeviceBoot(sessionId, deviceId, resetMode === 'full-erase')
-          .catch((e) => console.error('[agent] handleDeviceBoot failed:', e))
+          .catch((e) => logger.error('handleDeviceBoot failed:', e))
         break
       }
       case 'device:shutdown': {
         const { deviceId } = msg.payload as { deviceId: string }
         const sessionId = msg.sessionId!
         this.handleDeviceShutdown(sessionId, deviceId)
-          .catch((e) => console.error('[agent] handleDeviceShutdown failed:', e))
+          .catch((e) => logger.error('handleDeviceShutdown failed:', e))
         break
       }
       case 'app:install': {
@@ -341,7 +344,7 @@ export class IOSAgent implements DeviceAgent {
       }
       case 'input:touch:start': {
         const state = this.deviceStates.get(msg.sessionId!)
-        if (!state?.touchHelper) { console.error('[agent] touch:start — touchHelper not ready'); break }
+        if (!state?.touchHelper) { logger.error('touch:start — touchHelper not ready'); break }
         const { x, y } = msg.payload as { x: number; y: number }
         state.touchHelper.touchStart(x, y)
         break
@@ -383,7 +386,7 @@ export class IOSAgent implements DeviceAgent {
         if (!state) break
         state.orientation = state.orientation === 'portrait' ? 'landscapeRight' : 'portrait'
         this.simctl.rotate(state.deviceId, state.orientation)
-          .catch((e) => console.error('[agent] rotate failed:', e))
+          .catch((e) => logger.error('rotate failed:', e))
         break
       }
       case 'input:keyboard:toggle': {
@@ -401,7 +404,7 @@ export class IOSAgent implements DeviceAgent {
             payload: { visible: showing },
           }))
         }).catch((e: unknown) => {
-          console.error('[agent] keyboard toggle failed:', e)
+          logger.error('keyboard toggle failed:', e)
         })
         break
       }
@@ -418,7 +421,7 @@ export class IOSAgent implements DeviceAgent {
           this.simctl.hideSoftwareKeyboard(state.deviceId)
             .then(() => state.touchHelper?.sendKey(usage, modifiers ?? 0))
             .catch((e: unknown) => {
-              console.error('[agent] hideSoftwareKeyboard (on key) failed:', e)
+              logger.error('hideSoftwareKeyboard (on key) failed:', e)
               state.touchHelper?.sendKey(usage, modifiers ?? 0)
             })
         } else {

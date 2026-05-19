@@ -1,5 +1,8 @@
 import { spawn, type ChildProcess } from 'child_process'
 import { join } from 'path'
+import { createLogger } from '@tapflow/agent-core'
+
+const logger = createLogger('ios-agent:touch-helper')
 
 const BINARY = join(import.meta.dirname, '..', 'bin', 'touch-helper')
 
@@ -16,13 +19,13 @@ export class TouchHelper {
     this.proc.stderr?.on('data', (d: Buffer) => {
       const msg = d.toString().trim()
       // print all lines, even debug: lines, until we're confident it's working
-      console.error('[touch-helper]', msg)
+      logger.error(msg)
     })
     this.proc.on('exit', (code) => {
-      console.error('[touch-helper] exited with code', code ?? 'null')
+      logger.error(`exited with code ${code ?? 'null'}`)
     })
     this.proc.on('error', (e) => {
-      console.error('[touch-helper] spawn error:', e.message)
+      logger.error(`spawn error: ${e.message}`)
     })
   }
 

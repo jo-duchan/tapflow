@@ -1,7 +1,9 @@
 import { execFile, spawn } from 'child_process'
 import { promisify } from 'util'
+import { createLogger } from '@tapflow/agent-core'
 
 const execFileAsync = promisify(execFile)
+const logger = createLogger('android-agent:emulator')
 
 function getAdbPath(): string {
   if (process.env['ADB_PATH']) return process.env['ADB_PATH']
@@ -27,7 +29,7 @@ export class EmulatorLauncher {
       detached: true,
       stdio: 'ignore',
     })
-    proc.on('error', (err) => console.error(`[android-agent] emulator launch failed: ${err.message}`))
+    proc.on('error', (err) => logger.error(`emulator launch failed: ${err.message}`))
     proc.unref()
   }
 

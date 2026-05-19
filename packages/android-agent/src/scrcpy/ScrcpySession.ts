@@ -8,6 +8,9 @@ import { promisify } from 'util'
 import { ScrcpyVideo } from './ScrcpyVideo.js'
 import { ScrcpyControl } from './ScrcpyControl.js'
 import type { ScrcpyDeviceInfo } from './ScrcpyVideo.js'
+import { createLogger } from '@tapflow/agent-core'
+
+const logger = createLogger('android-agent:scrcpy')
 
 const execFileAsync = promisify(execFile)
 
@@ -90,7 +93,7 @@ export class ScrcpySession {
     // adb shell mixes server stdout+stderr into the local process stdout
     serverProc.stdout?.on('data', (d: Buffer) => {
       const msg = d.toString().trim()
-      if (msg) console.log('[scrcpy-server]', msg)
+      if (msg) logger.debug(msg)
     })
     serverProc.unref()
 
@@ -109,7 +112,7 @@ export class ScrcpySession {
       const info = await this._video.deviceInfo()
 
       this._control = new ScrcpyControl(this.controlSocket, info.width, info.height, onRotation)
-      console.log(`[scrcpy] ready — ${info.deviceName} ${info.width}×${info.height}`)
+      logger.info(`ready — ${info.deviceName} ${info.width}×${info.height}`)
       return info
     } catch (e) {
       serverProc.kill()

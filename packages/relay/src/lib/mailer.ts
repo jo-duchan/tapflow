@@ -1,5 +1,8 @@
 import nodemailer from 'nodemailer'
 import { config } from './config.js'
+import { createLogger } from '@tapflow/agent-core'
+
+const logger = createLogger('relay:mailer')
 
 function createTransport() {
   if (!config.smtp.host) return null
@@ -20,7 +23,7 @@ export async function sendMail(to: string, subject: string, html: string): Promi
     await transport.sendMail({ from: config.smtp.from, to, subject, html })
     return true
   } catch (err) {
-    console.error('[mailer] send failed:', err)
+    logger.error('send failed', err)
     return false
   }
 }

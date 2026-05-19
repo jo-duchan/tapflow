@@ -1,6 +1,9 @@
 import { spawn, type ChildProcess } from 'child_process'
 import { createInterface } from 'readline'
 import { join } from 'path'
+import { createLogger } from '@tapflow/agent-core'
+
+const logger = createLogger('ios-agent:keyboard-helper')
 
 const BINARY = join(import.meta.dirname, '..', 'bin', 'keyboard-helper')
 
@@ -73,11 +76,11 @@ export class KeyboardHelperDaemon {
     })
 
     proc.stderr?.on('data', (d: Buffer) => {
-      console.error('[keyboard-helper]', d.toString().trim())
+      logger.error(d.toString().trim())
     })
 
     proc.on('exit', (code) => {
-      console.error('[keyboard-helper] exited with code', code ?? 'null')
+      logger.error(`exited with code ${code ?? 'null'}`)
       this.proc = null
       // reject any in-flight pending (rl 'line' won't fire after exit)
       const pending = this.pending
@@ -90,7 +93,7 @@ export class KeyboardHelperDaemon {
     })
 
     proc.on('error', (e) => {
-      console.error('[keyboard-helper] spawn error:', e.message)
+      logger.error(`spawn error: ${e.message}`)
       this.proc = null
       const pending = this.pending
       this.pending = null
