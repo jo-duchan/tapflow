@@ -75,6 +75,36 @@ sdkmanager "system-images;android-34;google_apis;arm64-v8a"
 avdmanager create avd -n Pixel_8 -k "system-images;android-34;google_apis;arm64-v8a"
 ```
 
+### Apple Silicon 에뮬레이터와 호환되지 않는 APK
+
+Apple Silicon Mac(M1/M2/M3)의 Android 에뮬레이터는 네이티브 ARM64 환경에서 동작합니다. APK에 `arm64-v8a` ABI가 포함되어 있어야 합니다.
+
+APK가 지원하는 ABI를 확인합니다:
+
+```sh
+aapt dump badging your-app.apk | grep native-code
+```
+
+| 결과 | 호환 여부 |
+|------|-----------|
+| `native-code: 'arm64-v8a'` | ✅ |
+| `native-code: 'armeabi-v7a' 'arm64-v8a'` | ✅ |
+| `native-code: 'armeabi-v7a' 'x86'` | ❌ |
+| `native-code: 'x86' 'x86_64'` | ❌ |
+
+`arm64-v8a`가 없다면 32비트 ARM 또는 Intel 에뮬레이터용으로 빌드된 APK입니다. 개발팀에 ABI split 설정에 `arm64-v8a`를 추가해 달라고 요청하세요.
+
+::: details ABI 참고
+
+| ABI | 아키텍처 | Apple Silicon 에뮬레이터 |
+|-----|---------|------------------------|
+| `arm64-v8a` | 64비트 ARM | ✅ 필수 |
+| `armeabi-v7a` | 32비트 ARM | ❌ |
+| `x86_64` | 64비트 Intel | ❌ |
+| `x86` | 32비트 Intel | ❌ |
+
+:::
+
 ## `tapflow doctor` 실패
 
 ### iOS 항목이 모두 실패함
