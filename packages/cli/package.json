@@ -1,6 +1,6 @@
 {
   "name": "tapflow",
-  "version": "0.1.0",
+  "version": "0.1.0-alpha.1",
   "description": "Self-hosted iOS/Android simulator streaming for QA teams",
   "keywords": ["ios", "android", "simulator", "emulator", "qa", "testing", "streaming", "self-hosted"],
   "homepage": "https://github.com/jo-duchan/tapflow",
