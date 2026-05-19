@@ -4,6 +4,10 @@ const RELAY = process.env['RELAY_URL'] ?? 'ws://localhost:4000'
 
 const agent = new AndroidAgent()
 
+const shutdown = () => { agent.disconnect(); process.exit(0) }
+process.once('SIGINT', shutdown)
+process.once('SIGTERM', shutdown)
+
 const devices = await agent.listDevices()
 console.log(`Found ${devices.length} emulators`)
 devices.forEach((d) => console.log(` · [${d.status}] ${d.name} (${d.id})`))

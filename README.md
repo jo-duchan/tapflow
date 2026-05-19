@@ -17,6 +17,8 @@
   </p>
 </div>
 
+> **alpha**: tapflow is in active development (v0.x). Breaking changes may appear in minor versions until v1.0.0. See [ROADMAP](./ROADMAP.md) for known gaps.
+
 ---
 
 ## Demo

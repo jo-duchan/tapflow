@@ -94,22 +94,28 @@ export class ScrcpySession {
     })
     serverProc.unref()
 
-    // Wait for server to bind the abstract socket
-    await new Promise((r) => setTimeout(r, 1500))
+    try {
+      // Wait for server to bind the abstract socket
+      await new Promise((r) => setTimeout(r, 1500))
 
-    await execFileAsync(adb, ['-s', serial, 'forward', `tcp:${port}`, `localabstract:${this.socketName}`])
+      await execFileAsync(adb, ['-s', serial, 'forward', `tcp:${port}`, `localabstract:${this.socketName}`])
 
-    // scrcpy accepts connections sequentially on the same socket:
-    // 1st accept() → video stream, 2nd accept() → control stream
-    this.videoSocket = await this.connectTcp(port)
-    this.controlSocket = await this.connectTcp(port)
+      // scrcpy accepts connections sequentially on the same socket:
+      // 1st accept() → video stream, 2nd accept() → control stream
+      this.videoSocket = await this.connectTcp(port)
+      this.controlSocket = await this.connectTcp(port)
 
-    this._video = new ScrcpyVideo(this.videoSocket)
-    const info = await this._video.deviceInfo()
+      this._video = new ScrcpyVideo(this.videoSocket)
+      const info = await this._video.deviceInfo()
 
-    this._control = new ScrcpyControl(this.controlSocket, info.width, info.height, onRotation)
-    console.log(`[scrcpy] ready — ${info.deviceName} ${info.width}×${info.height}`)
-    return info
+      this._control = new ScrcpyControl(this.controlSocket, info.width, info.height, onRotation)
+      console.log(`[scrcpy] ready — ${info.deviceName} ${info.width}×${info.height}`)
+      return info
+    } catch (e) {
+      serverProc.kill()
+      this.serverProc = null
+      throw e
+    }
   }
 
   stop(serial: string): void {

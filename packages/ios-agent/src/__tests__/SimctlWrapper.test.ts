@@ -118,24 +118,24 @@ describe('SimctlWrapper', () => {
   })
 
   describe('rotate', () => {
-    it('calls osascript with Cmd+Right for landscapeRight', async () => {
+    it('calls rotation-helper with landscapeRight', async () => {
       const { execFile } = await import('child_process')
       const wrapper = new SimctlWrapper()
       await wrapper.rotate('device-1', 'landscapeRight')
       expect(vi.mocked(execFile)).toHaveBeenCalledWith(
-        'osascript',
-        expect.arrayContaining([expect.stringContaining('key code 124')]),
+        expect.stringContaining('rotation-helper'),
+        ['landscapeRight', 'device-1'],
         expect.any(Function),
       )
     })
 
-    it('calls osascript with Cmd+Left for portrait', async () => {
+    it('calls rotation-helper with portrait', async () => {
       const { execFile } = await import('child_process')
       const wrapper = new SimctlWrapper()
       await wrapper.rotate('device-1', 'portrait')
       expect(vi.mocked(execFile)).toHaveBeenCalledWith(
-        'osascript',
-        expect.arrayContaining([expect.stringContaining('key code 123')]),
+        expect.stringContaining('rotation-helper'),
+        ['portrait', 'device-1'],
         expect.any(Function),
       )
     })
