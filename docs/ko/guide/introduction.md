@@ -2,7 +2,7 @@
 
 **tapflow**는 QA가 iOS 시뮬레이터와 Android 에뮬레이터를 브라우저에서 직접 실행할 수 있도록 해줍니다. Appetize, BrowserStack, 또는 외부 클라우드 없이 사용 가능합니다.
 
-<video src="https://github.com/jo-duchan/tapflow/releases/download/demo-assets/tapflow-demo-final-compressed.mp4" controls style="width: 100%; border-radius: 8px; margin: 1.5rem 0;"></video>
+<video src="https://github.com/user-attachments/assets/01914ed2-f35c-4230-ae01-166ffe6af395" controls style="width: 100%; border-radius: 8px; margin: 1.5rem 0;"></video>
 
 ## 왜 tapflow인가요?
 

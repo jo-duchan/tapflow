@@ -23,7 +23,7 @@
 
 ## Demo
 
-<video src="https://github.com/user-attachments/assets/f8dfb969-3670-41f3-b810-86179d23915e" controls width="100%"></video>
+<video src="https://github.com/user-attachments/assets/01914ed2-f35c-4230-ae01-166ffe6af395" controls width="100%"></video>
 
 ---
 
