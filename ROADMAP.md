@@ -18,8 +18,9 @@ Breaking changes may appear in minor versions until `v1.0.0` is tagged.
 | Session recordings | ✅ Working |
 | Team management + PAT | ✅ Working |
 | CLI (`start`, `doctor`, `devices`, …) | ✅ Working |
-| Test coverage (cli, dashboard) | ❌ Missing |
-| Structured logging | ❌ Missing |
+| Test coverage (cli) | ✅ Working |
+| Test coverage (dashboard) | ❌ Missing |
+| Structured logging | ✅ Working |
 | WebSocket backpressure | ❌ Missing |
 
 ---
@@ -28,10 +29,10 @@ Breaking changes may appear in minor versions until `v1.0.0` is tagged.
 
 Critical bug fixes before the first public release.
 
-- [ ] Graceful child process shutdown — register `SIGINT`/`SIGTERM` handlers to call `agent.disconnect()`, preventing zombie processes for `touch-helper`, `keyboard-helper`, and `scrcpy`
-- [ ] `ScreenCaptureStreamer`: send `SIGTERM` first → wait 1s → `SIGKILL`
-- [ ] `ScrcpySession.start()`: wrap server process in try-finally to guarantee cleanup on error
-- [ ] `RelayServer.stop()`: call `clearInterval` for `purgeExpiredRecordings` and `flushResourceBuffers`
+- [x] Graceful child process shutdown — register `SIGINT`/`SIGTERM` handlers to call `agent.disconnect()`, preventing zombie processes for `touch-helper`, `keyboard-helper`, and `scrcpy`
+- [x] `ScreenCaptureStreamer`: send `SIGTERM` first → wait 1s → `SIGKILL`
+- [x] `ScrcpySession.start()`: wrap server process in try-finally to guarantee cleanup on error
+- [x] `RelayServer.stop()`: call `clearInterval` for `purgeExpiredRecordings` and `flushResourceBuffers`
 
 ---
 
@@ -39,12 +40,12 @@ Critical bug fixes before the first public release.
 
 Developer experience and reliability improvements.
 
-- [ ] Pre-commit hooks — add Lefthook with lint + typecheck on staged files to catch errors before push
-- [ ] `logger.ts` abstraction — replace 66 direct `console.log/error` calls with a leveled logger (`debug` / `info` / `warn` / `error`)
+- [x] Pre-commit hooks — add Lefthook with lint + typecheck on staged files to catch errors before push
+- [x] `logger.ts` abstraction — replace 66 direct `console.log/error` calls with a leveled logger (`debug` / `info` / `warn` / `error`)
 - [ ] Custom error classes — `ValidationError`, `PlatformError`, `AuthError`
-- [ ] CLI smoke tests — `doctor`, `version`, `devices` commands
-- [ ] Zod-based config validation — catch `NaN` and invalid values at startup instead of silently at runtime
-- [ ] Migration atomic transactions — wrap all migrations in `BEGIN` / `COMMIT` to prevent partial failure states
+- [x] CLI smoke tests — `--version`, `--help` subprocess smoke tests via tsx
+- [x] Zod-based config validation — catch `NaN` and invalid values at startup instead of silently at runtime
+- [x] Migration atomic transactions — wrap all migrations in `db.transaction()` to prevent partial failure states
 - [ ] Coordinate transform unit tests — normalize (0–1), landscape rotation, display scale, bezel offset
 - [ ] `touch-helper` stdin protocol snapshot tests — lock byte layout to the spec in `ios-agent/CLAUDE.md`
 
