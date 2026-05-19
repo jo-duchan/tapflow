@@ -1,33 +1,37 @@
-import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useTheme } from 'next-themes'
+import { useForm } from 'react-hook-form'
+import { zodResolver } from '@hookform/resolvers/zod'
+import { z } from 'zod'
 import { api } from '@/lib/api'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 
+const schema = z.object({
+  email: z.string().email(),
+  password: z.string().min(8),
+})
+type FormData = z.infer<typeof schema>
+
 export function Login() {
   const navigate = useNavigate()
   const { resolvedTheme } = useTheme()
   const defaultLogo = resolvedTheme === 'dark' ? '/logo-dark.svg' : '/logo.svg'
-  const [email, setEmail] = useState('')
-  const [password, setPassword] = useState('')
-  const [error, setError] = useState('')
-  const [loading, setLoading] = useState(false)
 
-  async function handleSubmit(e: { preventDefault(): void }) {
-    e.preventDefault()
-    setError('')
-    setLoading(true)
+  const { register, handleSubmit, setError, formState: { errors, isSubmitting } } = useForm<FormData>({
+    resolver: zodResolver(schema),
+    mode: 'onBlur',
+  })
+
+  async function onSubmit(data: FormData) {
     try {
-      const { status } = await api.post('/api/v1/auth/login', { email, password })
-      if (status !== 200) { setError('Invalid email or password'); return }
+      const { status } = await api.post('/api/v1/auth/login', { email: data.email, password: data.password })
+      if (status !== 200) { setError('root', { message: 'Invalid email or password' }); return }
       navigate('/app-center', { replace: true })
     } catch {
-      setError('Network error. Please try again.')
-    } finally {
-      setLoading(false)
+      setError('root', { message: 'Network error. Please try again.' })
     }
   }
 
@@ -44,33 +48,31 @@ export function Login() {
           <CardDescription>Sign in to your team workspace</CardDescription>
         </CardHeader>
         <CardContent>
-          <form onSubmit={handleSubmit} className="flex flex-col gap-4">
+          <form onSubmit={handleSubmit(onSubmit)} className="flex flex-col gap-4">
             <div className="grid gap-2">
               <Label htmlFor="email">Email</Label>
               <Input
                 id="email"
                 type="email"
                 placeholder="you@company.com"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                required
                 autoComplete="email"
+                {...register('email')}
               />
+              {errors.email && <p className="text-sm text-destructive">{errors.email.message}</p>}
             </div>
             <div className="grid gap-2">
               <Label htmlFor="password">Password</Label>
               <Input
                 id="password"
                 type="password"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                required
                 autoComplete="current-password"
+                {...register('password')}
               />
+              {errors.password && <p className="text-sm text-destructive">{errors.password.message}</p>}
             </div>
-            {error && <p className="text-sm text-destructive">{error}</p>}
-            <Button type="submit" size="pill" disabled={loading} className="w-full mt-1">
-              {loading ? 'Signing in…' : 'Sign in'}
+            {errors.root && <p className="text-sm text-destructive">{errors.root.message}</p>}
+            <Button type="submit" size="pill" disabled={isSubmitting} className="w-full mt-1">
+              {isSubmitting ? 'Signing in…' : 'Sign in'}
             </Button>
             <p className="text-center text-sm text-muted-foreground">
               First time here?{' '}
