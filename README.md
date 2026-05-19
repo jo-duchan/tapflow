@@ -23,7 +23,7 @@
 
 ## Demo
 
-<video src="https://github.com/user-attachments/assets/01914ed2-f35c-4230-ae01-166ffe6af395" controls width="100%"></video>
+<video src="https://github.com/user-attachments/assets/01914ed2-f35c-4230-ae01-166ffe6af395" poster="https://raw.githubusercontent.com/jo-duchan/tapflow/main/docs/public/demo-thumbnail.png" controls width="100%"></video>
 
 ---
 
@@ -51,7 +51,7 @@
 ## How it works
 
 ```
-Browser (QA team)  ←—WebSocket—→  Relay Server  ←—WebSocket (outbound)—→  Mac Agent
+Browser (QA team)  ←─ WebSocket ─→  Relay Server  ←─ WebSocket (outbound) ─→  Mac Agent
                                   (Linux / Mac)                           (iOS · Android)
 ```
 

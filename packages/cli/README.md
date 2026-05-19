@@ -20,17 +20,11 @@
 
 ## Demo
 
-<!--
-  Demo video placeholder.
-  When the recording is ready, replace this block with:
-
-  [![tapflow demo](docs/public/demo-thumbnail.png)](https://YOUR_VIDEO_URL)
-
-  Recommended thumbnail size: 1280×720, saved to docs/public/demo-thumbnail.png
--->
-
 <div align="center">
-  <strong>🎬 Demo video coming soon</strong>
+  <a href="https://github.com/user-attachments/assets/01914ed2-f35c-4230-ae01-166ffe6af395">
+    <img src="https://raw.githubusercontent.com/jo-duchan/tapflow/main/docs/public/demo-thumbnail.png" alt="tapflow demo — click to play" width="100%" />
+  </a>
+  <p><em>Click to play</em></p>
 </div>
 
 ---
@@ -59,7 +53,7 @@
 ## How it works
 
 ```
-Browser (QA team)  ←—WebSocket—→  Relay Server  ←—WebSocket (outbound)—→  Mac Agent
+Browser (QA team)  ←─ WebSocket ─→  Relay Server  ←─ WebSocket (outbound) ─→  Mac Agent
                                   (Linux / Mac)                           (iOS · Android)
 ```
 
