@@ -24,6 +24,7 @@ packages/relay/public/
 # playwright mcp artifacts
 .playwright-mcp/
 *.png
+!docs/public/*.png
 
 # vscode
 .vscode

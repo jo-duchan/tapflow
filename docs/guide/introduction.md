@@ -2,7 +2,7 @@
 
 **tapflow** lets your QA team run iOS simulators and Android emulators directly in the browser — without Appetize, BrowserStack, or any external cloud.
 
-<video src="/tapflow-demo.mp4" controls style="width: 100%; border-radius: 8px; margin: 1.5rem 0;"></video>
+<video src="/tapflow-demo.mp4" poster="/demo-thumbnail.png" controls style="width: 100%; border-radius: 8px; margin: 1.5rem 0;"></video>
 
 ## Why tapflow?
 
