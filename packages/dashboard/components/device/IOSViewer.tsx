@@ -210,7 +210,7 @@ export function IOSViewer({
 
   const stopClientRecording = useCallback(async () => {
     setRecordState('uploading'); recordingRef.current = false; cancelAnimationFrame(rafIdRef.current)
-    const mr = mediaRecorderRef.current; if (!mr) return
+    const mr = mediaRecorderRef.current; if (!mr) { setRecordState('idle'); return }
     await new Promise<void>((resolve) => {
       const timeout = setTimeout(resolve, 5000)
       mr.onstop = () => { clearTimeout(timeout); resolve() }
