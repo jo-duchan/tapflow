@@ -1,4 +1,7 @@
-import { useEffect, useState, type FormEvent } from 'react'
+import { useEffect, useState } from 'react'
+import { useForm } from 'react-hook-form'
+import { zodResolver } from '@hookform/resolvers/zod'
+import { z } from 'zod'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -14,13 +17,25 @@ import { Plus, Trash2 } from 'lucide-react'
 
 type Token = { id: number; name: string; scope: string; last_used_at: string | null; expires_at: string | null; created_at: string }
 
+const schema = z.object({
+  name: z.string().min(1),
+  expiresDays: z.string().refine(
+    (v) => { const n = parseInt(v, 10); return !isNaN(n) && n >= 1 && n <= 365 },
+    { message: 'Must be between 1 and 365' },
+  ),
+})
+type FormData = z.infer<typeof schema>
+
 export function TokenSettings() {
   const [tokens, setTokens] = useState<Token[]>([])
   const [open, setOpen] = useState(false)
-  const [name, setName] = useState('')
-  const [expiresDays, setExpiresDays] = useState('30')
   const [newToken, setNewToken] = useState('')
-  const [creating, setCreating] = useState(false)
+
+  const { register, handleSubmit, reset, formState: { errors, isSubmitting } } = useForm<FormData>({
+    resolver: zodResolver(schema),
+    mode: 'onBlur',
+    defaultValues: { name: '', expiresDays: '30' },
+  })
 
   function load() {
     fetch('/api/v1/tokens', { credentials: 'include' }).then((r) => r.json()).then(setTokens)
@@ -28,19 +43,21 @@ export function TokenSettings() {
 
   useEffect(() => { load() }, [])
 
-  async function handleCreate(e: FormEvent) {
-    e.preventDefault()
-    setCreating(true)
+  async function onCreate(data: FormData) {
     const res = await fetch('/api/v1/tokens', {
       method: 'POST',
       credentials: 'include',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name, expires_in_days: Number(expiresDays) }),
+      body: JSON.stringify({ name: data.name, expires_in_days: parseInt(data.expiresDays, 10) }),
     })
-    const data = await res.json()
-    setNewToken(data.token)
-    setCreating(false)
+    const json = await res.json() as { token: string }
+    setNewToken(json.token)
     load()
+  }
+
+  function handleDialogClose(o: boolean) {
+    setOpen(o)
+    if (!o) { setNewToken(''); reset() }
   }
 
   async function handleRevoke(id: number) {
@@ -57,7 +74,7 @@ export function TokenSettings() {
     <div className="flex flex-col gap-6 max-w-[900px] mx-auto w-full p-6">
       <div className="flex items-center justify-between">
         <h1 className="text-xl font-semibold">Personal Access Tokens</h1>
-        <Dialog open={open} onOpenChange={(o) => { setOpen(o); if (!o) { setName(''); setNewToken('') } }}>
+        <Dialog open={open} onOpenChange={handleDialogClose}>
           <DialogTrigger asChild>
             <Button size="sm"><Plus className="mr-2 h-4 w-4" />New token</Button>
           </DialogTrigger>
@@ -72,17 +89,19 @@ export function TokenSettings() {
                 </Button>
               </div>
             ) : (
-              <form onSubmit={handleCreate} className="flex flex-col gap-4 pt-2">
+              <form onSubmit={handleSubmit(onCreate)} className="flex flex-col gap-4 pt-2">
                 <div className="grid gap-2">
                   <Label htmlFor="token-name">Name</Label>
-                  <Input id="token-name" placeholder="e.g. ci-deploy" value={name} onChange={(e) => setName(e.target.value)} required />
+                  <Input id="token-name" placeholder="e.g. ci-deploy" {...register('name')} />
+                  {errors.name && <p className="text-sm text-destructive">{errors.name.message}</p>}
                 </div>
                 <div className="grid gap-2">
                   <Label htmlFor="expires">Expires in (days)</Label>
-                  <Input id="expires" type="number" min="1" max="365" value={expiresDays} onChange={(e) => setExpiresDays(e.target.value)} />
+                  <Input id="expires" type="number" {...register('expiresDays')} />
+                  {errors.expiresDays && <p className="text-sm text-destructive">{errors.expiresDays.message}</p>}
                 </div>
                 <p className="text-xs text-muted-foreground">Scope: <Badge variant="secondary">builds:write</Badge></p>
-                <Button type="submit" disabled={creating}>{creating ? 'Creating…' : 'Create token'}</Button>
+                <Button type="submit" disabled={isSubmitting}>{isSubmitting ? 'Creating…' : 'Create token'}</Button>
               </form>
             )}
           </DialogContent>

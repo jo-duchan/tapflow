@@ -1,5 +1,8 @@
 import { useEffect, useRef, useState } from 'react'
 import { useTheme } from 'next-themes'
+import { useForm, useWatch, Controller } from 'react-hook-form'
+import { zodResolver } from '@hookform/resolvers/zod'
+import { z } from 'zod'
 import { Button, buttonVariants } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
 import { Input } from '@/components/ui/input'
@@ -24,6 +27,28 @@ import { useAuth } from '@/hooks/useAuth'
 
 type App = { id: number; name: string; bundle_id_key: string; platform: string }
 
+const workspaceSchema = z.object({
+  teamName: z.string().min(1),
+  logo: z.instanceof(File).nullable().optional(),
+})
+type WorkspaceData = z.infer<typeof workspaceSchema>
+
+const profileSchema = z.object({
+  displayName: z.string().min(1),
+  avatar: z.instanceof(File).nullable().optional(),
+})
+type ProfileData = z.infer<typeof profileSchema>
+
+const passwordSchema = z.object({
+  currentPassword: z.string().min(1),
+  newPassword: z.string().min(8),
+  confirmPassword: z.string(),
+}).refine((d) => d.newPassword === d.confirmPassword, {
+  message: 'Passwords do not match',
+  path: ['confirmPassword'],
+})
+type PasswordData = z.infer<typeof passwordSchema>
+
 export function DefaultSettings() {
   const { resolvedTheme } = useTheme()
   const defaultLogo = resolvedTheme === 'dark' ? '/logo-dark.svg' : '/logo.svg'
@@ -32,91 +57,83 @@ export function DefaultSettings() {
   const canEditApps = user?.role === 'Admin' || user?.role === 'Developer'
 
   // ── Workspace (Admin only) ────────────────────────────────────────────────
-  const [teamName, setTeamName] = useState('')
   const [logoUrl, setLogoUrl] = useState<string | null>(null)
-  const [logoFile, setLogoFile] = useState<File | null>(null)
-  const logoRef = useRef<HTMLInputElement>(null)
-  const [workspaceSaving, setWorkspaceSaving] = useState(false)
   const [workspaceSaved, setWorkspaceSaved] = useState(false)
+  const logoRef = useRef<HTMLInputElement>(null)
+
+  const workspaceForm = useForm<WorkspaceData>({
+    resolver: zodResolver(workspaceSchema),
+    mode: 'onBlur',
+    defaultValues: { teamName: '', logo: null },
+  })
 
   useEffect(() => {
     if (!isAdmin) return
     fetch('/api/v1/settings', { credentials: 'include' })
       .then((r) => r.ok ? r.json() : null)
-      .then((d) => { if (d) { setTeamName(d.team_name); setLogoUrl(d.logo_url) } })
-  }, [isAdmin])
+      .then((d: { team_name: string; logo_url: string | null } | null) => {
+        if (d) { workspaceForm.reset({ teamName: d.team_name, logo: null }); setLogoUrl(d.logo_url) }
+      })
+  }, [isAdmin]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  async function handleWorkspaceSave(e: { preventDefault(): void }) {
-    e.preventDefault()
-    setWorkspaceSaving(true)
+  async function onWorkspaceSave(data: WorkspaceData) {
     const form = new FormData()
-    form.append('team_name', teamName)
-    if (logoFile) form.append('logo', logoFile)
+    form.append('team_name', data.teamName)
+    if (data.logo) form.append('logo', data.logo)
     await fetch('/api/v1/settings', { method: 'PATCH', credentials: 'include', body: form })
-    setWorkspaceSaving(false)
     setWorkspaceSaved(true)
     setTimeout(() => setWorkspaceSaved(false), 2000)
   }
 
   // ── Profile (everyone) ────────────────────────────────────────────────────
-  const [displayName, setDisplayName] = useState('')
   const [avatarUrl, setAvatarUrl] = useState<string | null>(null)
-  const [avatarFile, setAvatarFile] = useState<File | null>(null)
-  const avatarRef = useRef<HTMLInputElement>(null)
-  const [profileSaving, setProfileSaving] = useState(false)
   const [profileSaved, setProfileSaved] = useState(false)
+  const avatarRef = useRef<HTMLInputElement>(null)
+
+  const profileForm = useForm<ProfileData>({
+    resolver: zodResolver(profileSchema),
+    mode: 'onBlur',
+    defaultValues: { displayName: '', avatar: null },
+  })
 
   useEffect(() => {
     if (!user) return
-    setDisplayName(user.displayName ?? '')
+    profileForm.reset({ displayName: user.displayName ?? '', avatar: null })
     setAvatarUrl(user.avatarUrl ?? null)
-  }, [user])
+  }, [user]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  async function handleProfileSave(e: { preventDefault(): void }) {
-    e.preventDefault()
-    setProfileSaving(true)
+  async function onProfileSave(data: ProfileData) {
     const form = new FormData()
-    form.append('display_name', displayName)
-    if (avatarFile) form.append('avatar', avatarFile)
+    form.append('display_name', data.displayName)
+    if (data.avatar) form.append('avatar', data.avatar)
     await fetch('/api/v1/profile', { method: 'PATCH', credentials: 'include', body: form })
-    setProfileSaving(false)
     setProfileSaved(true)
     setTimeout(() => setProfileSaved(false), 2000)
   }
 
-  // ── Password (everyone) ──────────────────────────────────────────────────
-  const [currentPassword, setCurrentPassword] = useState('')
-  const [newPassword, setNewPassword] = useState('')
-  const [confirmPassword, setConfirmPassword] = useState('')
-  const [passwordError, setPasswordError] = useState('')
-  const [passwordSaving, setPasswordSaving] = useState(false)
+  // ── Password (everyone) ───────────────────────────────────────────────────
   const [passwordSaved, setPasswordSaved] = useState(false)
 
-  async function handlePasswordChange(e: { preventDefault(): void }) {
-    e.preventDefault()
-    if (newPassword !== confirmPassword) { setPasswordError('Passwords do not match'); return }
-    setPasswordError('')
-    setPasswordSaving(true)
-    try {
-      const res = await fetch('/api/v1/auth/change-password', {
-        method: 'POST',
-        credentials: 'include',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ currentPassword, newPassword }),
-      })
-      if (!res.ok) {
-        const d = await res.json()
-        setPasswordError(d.error ?? 'Failed to change password')
-        return
-      }
-      setCurrentPassword('')
-      setNewPassword('')
-      setConfirmPassword('')
-      setPasswordSaved(true)
-      setTimeout(() => setPasswordSaved(false), 2000)
-    } finally {
-      setPasswordSaving(false)
+  const passwordForm = useForm<PasswordData>({
+    resolver: zodResolver(passwordSchema),
+    mode: 'onBlur',
+  })
+
+  async function onPasswordSave(data: PasswordData) {
+    const res = await fetch('/api/v1/auth/change-password', {
+      method: 'POST',
+      credentials: 'include',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ currentPassword: data.currentPassword, newPassword: data.newPassword }),
+    })
+    if (!res.ok) {
+      const d = await res.json() as { error?: string }
+      passwordForm.setError('root', { message: d.error ?? 'Failed to change password' })
+      return
     }
+    passwordForm.reset()
+    setPasswordSaved(true)
+    setTimeout(() => setPasswordSaved(false), 2000)
   }
 
   // ── Apps (Admin + Developer) ──────────────────────────────────────────────
@@ -130,11 +147,11 @@ export function DefaultSettings() {
     if (!canEditApps) return
     fetch('/api/v1/apps', { credentials: 'include' })
       .then((r) => r.ok ? r.json() : null)
-      .then((d) => {
+      .then((d: { items: App[] } | null) => {
         if (!d) return
         setApps(d.items)
         const names: Record<number, string> = {}
-        d.items.forEach((a: App) => { names[a.id] = a.name })
+        d.items.forEach((a) => { names[a.id] = a.name })
         setAppNames(names)
       })
   }, [canEditApps])
@@ -159,6 +176,8 @@ export function DefaultSettings() {
     setTimeout(() => setAppsSaved((p) => ({ ...p, [appId]: false })), 2000)
   }
 
+  const profileDisplayName = useWatch({ control: profileForm.control, name: 'displayName' })
+
   return (
     <div className="flex flex-col gap-6 max-w-[900px] mx-auto w-full p-6">
       <h1 className="text-xl font-semibold tracking-display-sm">Settings</h1>
@@ -168,35 +187,44 @@ export function DefaultSettings() {
         <Card>
           <CardHeader><CardTitle>Workspace</CardTitle></CardHeader>
           <CardContent>
-            <form onSubmit={handleWorkspaceSave} className="flex flex-col gap-4">
+            <form onSubmit={workspaceForm.handleSubmit(onWorkspaceSave)} className="flex flex-col gap-4">
               <div className="grid gap-2">
                 <Label htmlFor="team-name">Team name</Label>
-                <Input id="team-name" value={teamName} onChange={(e) => setTeamName(e.target.value)} placeholder="My QA Team" />
+                <Input id="team-name" placeholder="My QA Team" {...workspaceForm.register('teamName')} />
+                {workspaceForm.formState.errors.teamName && (
+                  <p className="text-sm text-destructive">{workspaceForm.formState.errors.teamName.message}</p>
+                )}
               </div>
               <Separator />
               <div className="grid gap-2">
                 <Label>Logo <span className="text-muted-foreground text-xs">(png · jpg, max 2MB)</span></Label>
-                <div className="relative w-16 h-16">
-                  <img src={logoUrl ?? defaultLogo} alt="logo" className="w-16 h-16 rounded-lg object-contain" />
-                  <button
-                    type="button"
-                    onClick={() => logoRef.current?.click()}
-                    className="absolute bottom-0 right-0 w-6 h-6 rounded-full bg-background border border-border shadow-sm flex items-center justify-center hover:bg-accent transition-colors"
-                  >
-                    <Pencil className="w-3 h-3" />
-                  </button>
-                  <input ref={logoRef} type="file" accept=".png,.jpg,.jpeg" className="hidden"
-                    onChange={(e) => {
-                      const f = e.target.files?.[0]
-                      if (f && f.size > 2 * 1024 * 1024) { alert('Max 2MB'); return }
-                      if (f) { setLogoFile(f); setLogoUrl(URL.createObjectURL(f)) }
-                    }}
-                  />
-                </div>
+                <Controller
+                  name="logo"
+                  control={workspaceForm.control}
+                  render={({ field }) => (
+                    <div className="relative w-16 h-16">
+                      <img src={logoUrl ?? defaultLogo} alt="logo" className="w-16 h-16 rounded-lg object-contain" />
+                      <button
+                        type="button"
+                        onClick={() => logoRef.current?.click()}
+                        className="absolute bottom-0 right-0 w-6 h-6 rounded-full bg-background border border-border shadow-sm flex items-center justify-center hover:bg-accent transition-colors"
+                      >
+                        <Pencil className="w-3 h-3" />
+                      </button>
+                      <input ref={logoRef} type="file" accept=".png,.jpg,.jpeg" className="hidden"
+                        onChange={(e) => {
+                          const f = e.target.files?.[0]
+                          if (f && f.size > 2 * 1024 * 1024) { alert('Max 2MB'); return }
+                          if (f) { field.onChange(f); setLogoUrl(URL.createObjectURL(f)) }
+                        }}
+                      />
+                    </div>
+                  )}
+                />
               </div>
               <div className="flex justify-end">
-                <Button type="submit" size="sm" disabled={workspaceSaving}>
-                  {workspaceSaved ? 'Saved!' : workspaceSaving ? 'Saving…' : 'Save changes'}
+                <Button type="submit" size="sm" disabled={workspaceForm.formState.isSubmitting}>
+                  {workspaceSaved ? 'Saved!' : workspaceForm.formState.isSubmitting ? 'Saving…' : 'Save changes'}
                 </Button>
               </div>
             </form>
@@ -208,44 +236,53 @@ export function DefaultSettings() {
       <Card>
         <CardHeader><CardTitle>Profile</CardTitle></CardHeader>
         <CardContent>
-          <form onSubmit={handleProfileSave} className="flex flex-col gap-4">
+          <form onSubmit={profileForm.handleSubmit(onProfileSave)} className="flex flex-col gap-4">
             <div className="grid gap-2">
               <Label htmlFor="display-name">Nickname</Label>
-              <Input id="display-name" value={displayName} onChange={(e) => setDisplayName(e.target.value)} placeholder="Your name" />
+              <Input id="display-name" placeholder="Your name" {...profileForm.register('displayName')} />
+              {profileForm.formState.errors.displayName && (
+                <p className="text-sm text-destructive">{profileForm.formState.errors.displayName.message}</p>
+              )}
             </div>
             <Separator />
             <div className="grid gap-2">
               <Label>Avatar <span className="text-muted-foreground text-xs">(png · jpg, max 2MB)</span></Label>
-              <div className="relative w-14 h-14">
-                {avatarUrl ? (
-                  <img src={avatarUrl} alt="avatar" className="w-14 h-14 rounded-full object-cover border" />
-                ) : (
-                  <div
-                    className="w-14 h-14 rounded-full flex items-center justify-center text-lg font-medium"
-                    style={(() => { const c = avatarColors(displayName || user?.email || ''); return { backgroundColor: c.bg, color: c.fg } })()}
-                  >
-                    {displayName?.[0]?.toUpperCase() ?? '?'}
+              <Controller
+                name="avatar"
+                control={profileForm.control}
+                render={({ field }) => (
+                  <div className="relative w-14 h-14">
+                    {avatarUrl ? (
+                      <img src={avatarUrl} alt="avatar" className="w-14 h-14 rounded-full object-cover border" />
+                    ) : (
+                      <div
+                        className="w-14 h-14 rounded-full flex items-center justify-center text-lg font-medium"
+                        style={(() => { const c = avatarColors(profileDisplayName || user?.email || ''); return { backgroundColor: c.bg, color: c.fg } })()}
+                      >
+                        {profileDisplayName?.[0]?.toUpperCase() ?? '?'}
+                      </div>
+                    )}
+                    <button
+                      type="button"
+                      onClick={() => avatarRef.current?.click()}
+                      className="absolute bottom-0 right-0 w-6 h-6 rounded-full bg-background border border-border shadow-sm flex items-center justify-center hover:bg-accent transition-colors"
+                    >
+                      <Pencil className="w-3 h-3" />
+                    </button>
+                    <input ref={avatarRef} type="file" accept=".png,.jpg,.jpeg" className="hidden"
+                      onChange={(e) => {
+                        const f = e.target.files?.[0]
+                        if (f && f.size > 2 * 1024 * 1024) { alert('Max 2MB'); return }
+                        if (f) { field.onChange(f); setAvatarUrl(URL.createObjectURL(f)) }
+                      }}
+                    />
                   </div>
                 )}
-                <button
-                  type="button"
-                  onClick={() => avatarRef.current?.click()}
-                  className="absolute bottom-0 right-0 w-6 h-6 rounded-full bg-background border border-border shadow-sm flex items-center justify-center hover:bg-accent transition-colors"
-                >
-                  <Pencil className="w-3 h-3" />
-                </button>
-                <input ref={avatarRef} type="file" accept=".png,.jpg,.jpeg" className="hidden"
-                  onChange={(e) => {
-                    const f = e.target.files?.[0]
-                    if (f && f.size > 2 * 1024 * 1024) { alert('Max 2MB'); return }
-                    if (f) { setAvatarFile(f); setAvatarUrl(URL.createObjectURL(f)) }
-                  }}
-                />
-              </div>
+              />
             </div>
             <div className="flex justify-end">
-              <Button type="submit" size="sm" disabled={profileSaving}>
-                {profileSaved ? 'Saved!' : profileSaving ? 'Saving…' : 'Save changes'}
+              <Button type="submit" size="sm" disabled={profileForm.formState.isSubmitting}>
+                {profileSaved ? 'Saved!' : profileForm.formState.isSubmitting ? 'Saving…' : 'Save changes'}
               </Button>
             </div>
           </form>
@@ -256,23 +293,34 @@ export function DefaultSettings() {
       <Card>
         <CardHeader><CardTitle>Password</CardTitle></CardHeader>
         <CardContent>
-          <form onSubmit={handlePasswordChange} className="flex flex-col gap-4">
+          <form onSubmit={passwordForm.handleSubmit(onPasswordSave)} className="flex flex-col gap-4">
             <div className="grid gap-2">
               <Label htmlFor="current-password">Current password</Label>
-              <Input id="current-password" type="password" value={currentPassword} onChange={(e) => setCurrentPassword(e.target.value)} required />
+              <Input id="current-password" type="password" {...passwordForm.register('currentPassword')} />
+              {passwordForm.formState.errors.currentPassword && (
+                <p className="text-sm text-destructive">{passwordForm.formState.errors.currentPassword.message}</p>
+              )}
             </div>
             <div className="grid gap-2">
               <Label htmlFor="new-password">New password</Label>
-              <Input id="new-password" type="password" value={newPassword} onChange={(e) => setNewPassword(e.target.value)} required minLength={8} />
+              <Input id="new-password" type="password" {...passwordForm.register('newPassword')} />
+              {passwordForm.formState.errors.newPassword && (
+                <p className="text-sm text-destructive">{passwordForm.formState.errors.newPassword.message}</p>
+              )}
             </div>
             <div className="grid gap-2">
               <Label htmlFor="confirm-password">Confirm new password</Label>
-              <Input id="confirm-password" type="password" value={confirmPassword} onChange={(e) => setConfirmPassword(e.target.value)} required minLength={8} />
+              <Input id="confirm-password" type="password" {...passwordForm.register('confirmPassword')} />
+              {passwordForm.formState.errors.confirmPassword && (
+                <p className="text-sm text-destructive">{passwordForm.formState.errors.confirmPassword.message}</p>
+              )}
             </div>
-            {passwordError && <p className="text-sm text-destructive">{passwordError}</p>}
+            {passwordForm.formState.errors.root && (
+              <p className="text-sm text-destructive">{passwordForm.formState.errors.root.message}</p>
+            )}
             <div className="flex justify-end">
-              <Button type="submit" size="sm" disabled={passwordSaving}>
-                {passwordSaved ? 'Saved!' : passwordSaving ? 'Saving…' : 'Change password'}
+              <Button type="submit" size="sm" disabled={passwordForm.formState.isSubmitting}>
+                {passwordSaved ? 'Saved!' : passwordForm.formState.isSubmitting ? 'Saving…' : 'Change password'}
               </Button>
             </div>
           </form>

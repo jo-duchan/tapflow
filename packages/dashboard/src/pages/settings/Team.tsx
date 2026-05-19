@@ -1,4 +1,7 @@
-import { useEffect, useState, type FormEvent } from 'react'
+import { useEffect, useState } from 'react'
+import { useForm, Controller } from 'react-hook-form'
+import { zodResolver } from '@hookform/resolvers/zod'
+import { z } from 'zod'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -16,14 +19,23 @@ import { UserPlus } from 'lucide-react'
 
 type Member = { id: number; email: string; display_name: string; role: string; joined_at: string }
 
+const inviteSchema = z.object({
+  email: z.string().email(),
+  role: z.string().min(1),
+})
+type InviteData = z.infer<typeof inviteSchema>
+
 export function TeamSettings() {
   const [members, setMembers] = useState<Member[]>([])
   const [resetSent, setResetSent] = useState<Record<number, string>>({})
-  const [inviteEmail, setInviteEmail] = useState('')
-  const [inviteRole, setInviteRole] = useState('QA')
   const [inviteLink, setInviteLink] = useState('')
   const [inviteOpen, setInviteOpen] = useState(false)
-  const [inviting, setInviting] = useState(false)
+
+  const { register, handleSubmit, control, reset, formState: { errors, isSubmitting } } = useForm<InviteData>({
+    resolver: zodResolver(inviteSchema),
+    mode: 'onBlur',
+    defaultValues: { email: '', role: 'QA' },
+  })
 
   function load() {
     fetch('/api/v1/team/members', { credentials: 'include' }).then((r) => r.json()).then(setMembers)
@@ -31,20 +43,22 @@ export function TeamSettings() {
 
   useEffect(() => { load() }, [])
 
-  async function handleInvite(e: FormEvent) {
-    e.preventDefault()
-    setInviting(true)
+  async function onInvite(data: InviteData) {
     const res = await fetch('/api/v1/team/invite', {
       method: 'POST',
       credentials: 'include',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ email: inviteEmail, role: inviteRole }),
+      body: JSON.stringify({ email: data.email, role: data.role }),
     })
-    const data = await res.json()
-    const link = `${location.origin}/invite?token=${data.token}`
+    const json = await res.json() as { token: string }
+    const link = `${location.origin}/invite?token=${json.token}`
     setInviteLink(link)
     navigator.clipboard.writeText(link).catch(() => {})
-    setInviting(false)
+  }
+
+  function handleDialogClose(open: boolean) {
+    setInviteOpen(open)
+    if (!open) { setInviteLink(''); reset() }
   }
 
   async function handleRoleChange(id: number, role: string) {
@@ -59,7 +73,7 @@ export function TeamSettings() {
 
   async function handleSendReset(id: number) {
     const res = await fetch(`/api/v1/team/members/${id}/send-reset`, { method: 'POST', credentials: 'include' })
-    const data = await res.json()
+    const data = await res.json() as { emailSent: boolean }
     const msg = data.emailSent ? 'Sent' : 'No SMTP'
     setResetSent((p) => ({ ...p, [id]: msg }))
     setTimeout(() => setResetSent((p) => { const n = { ...p }; delete n[id]; return n }), 3000)
@@ -75,7 +89,7 @@ export function TeamSettings() {
     <div className="flex flex-col gap-6 max-w-[900px] mx-auto w-full p-6">
       <div className="flex items-center justify-between">
         <h1 className="text-xl font-semibold">Team</h1>
-        <Dialog open={inviteOpen} onOpenChange={(o) => { setInviteOpen(o); if (!o) { setInviteEmail(''); setInviteLink('') } }}>
+        <Dialog open={inviteOpen} onOpenChange={handleDialogClose}>
           <DialogTrigger asChild>
             <Button size="sm"><UserPlus className="mr-2 h-4 w-4" />Invite member</Button>
           </DialogTrigger>
@@ -88,24 +102,31 @@ export function TeamSettings() {
                 <Button onClick={() => setInviteOpen(false)}>Done</Button>
               </div>
             ) : (
-              <form onSubmit={handleInvite} className="flex flex-col gap-4 pt-2">
+              <form onSubmit={handleSubmit(onInvite)} className="flex flex-col gap-4 pt-2">
                 <div className="grid gap-2">
                   <Label htmlFor="invite-email">Email</Label>
-                  <Input id="invite-email" type="email" value={inviteEmail} onChange={(e) => setInviteEmail(e.target.value)} required />
+                  <Input id="invite-email" type="email" {...register('email')} />
+                  {errors.email && <p className="text-sm text-destructive">{errors.email.message}</p>}
                 </div>
                 <div className="grid gap-2">
                   <Label>Role</Label>
-                  <Select value={inviteRole} onValueChange={setInviteRole}>
-                    <SelectTrigger><SelectValue /></SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="Admin">Admin</SelectItem>
-                      <SelectItem value="Developer">Developer</SelectItem>
-                      <SelectItem value="QA">QA</SelectItem>
-                      <SelectItem value="Viewer">Viewer</SelectItem>
-                    </SelectContent>
-                  </Select>
+                  <Controller
+                    name="role"
+                    control={control}
+                    render={({ field }) => (
+                      <Select value={field.value} onValueChange={field.onChange}>
+                        <SelectTrigger><SelectValue /></SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="Admin">Admin</SelectItem>
+                          <SelectItem value="Developer">Developer</SelectItem>
+                          <SelectItem value="QA">QA</SelectItem>
+                          <SelectItem value="Viewer">Viewer</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    )}
+                  />
                 </div>
-                <Button type="submit" disabled={inviting}>{inviting ? 'Creating link…' : 'Generate invite link'}</Button>
+                <Button type="submit" disabled={isSubmitting}>{isSubmitting ? 'Creating link…' : 'Generate invite link'}</Button>
               </form>
             )}
           </DialogContent>
@@ -146,11 +167,7 @@ export function TeamSettings() {
                   </TableCell>
                   <TableCell>
                     <div className="flex items-center gap-2">
-                      <Button
-                        variant="secondary"
-                        size="nav"
-                        onClick={() => handleSendReset(m.id)}
-                      >
+                      <Button variant="secondary" size="nav" onClick={() => handleSendReset(m.id)}>
                         {resetSent[m.id] ?? 'Reset pwd'}
                       </Button>
                       <Button variant="destructive" size="nav" onClick={() => handleDelete(m.id)}>
