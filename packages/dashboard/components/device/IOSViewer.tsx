@@ -7,7 +7,8 @@ import { SimulatorToolbar } from './shared/SimulatorToolbar';
 import { SimulatorInfoCard } from './shared/SimulatorInfoCard';
 import { Button } from '@/components/ui/button';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
-import type { ChromeData } from '@/lib/types';
+import type { ChromeData } from '@/lib/types'
+import { iosToNormScreen, toPinchFingers as makePinchFingers, iosDisplayScale } from '@/lib/coordinate-transform';
 
 const CURSOR_RING_R = 13;
 const CURSOR_DOT_R = 8;
@@ -283,24 +284,18 @@ export function IOSViewer({
     const cw = chrome.compositeWidth / 2; const ch2 = chrome.compositeHeight / 2
     const sx = chrome.screenRect.x / 2; const sy = chrome.screenRect.y / 2
     const sw = chrome.screenRect.width / 2; const sh = chrome.screenRect.height / 2
-    let cx: number, cy: number
-    if (isLandscape) {
-      // rect is the landscape-sized outer div (width=displayH, height=displayW, no transform).
-      // CSS rotate(-90deg) CCW: visual left=DI(portrait top), visual right=home(portrait bottom).
-      // IndigoHID y=landscape_x(direct), x=1-landscape_y → portrait_x = 1-v, portrait_y = u.
-      const u = (e.clientX - rect.left) / rect.width; const v = (e.clientY - rect.top) / rect.height
-      cx = (1 - v) * cw; cy = u * ch2
-    } else {
-      cx = (e.clientX - rect.left) * (cw / rect.width)
-      cy = (e.clientY - rect.top) * (ch2 / rect.height)
-    }
-    if (cx < sx || cx > sx + sw || cy < sy || cy > sy + sh) return null
-    return { x: (cx - sx) / sw, y: (cy - sy) / sh }
+    return iosToNormScreen(
+      { x: e.clientX, y: e.clientY },
+      rect,
+      cw, ch2,
+      { x: sx, y: sy, width: sw, height: sh },
+      isLandscape,
+    )
   }, [chrome, isLandscape])
 
   const toPinchFingers = useCallback((e: { clientX: number; clientY: number }) => {
     const f1 = toNormScreen(e); if (!f1) return null
-    return { f0: { x: 1 - f1.x, y: 1 - f1.y }, f1 }
+    return makePinchFingers(f1)
   }, [toNormScreen])
 
   const toButton = useCallback((e: { clientX: number; clientY: number }): string | null => {
@@ -431,7 +426,7 @@ export function IOSViewer({
   const compositeLogicalW = chrome.compositeWidth / 2;
   const compositeLogicalH = chrome.compositeHeight / 2;
   const MAX_DISPLAY_H = 750;
-  const displayScale = compositeLogicalH > 0 ? Math.min(1, MAX_DISPLAY_H / compositeLogicalH) : 1;
+  const displayScale = iosDisplayScale(compositeLogicalH, MAX_DISPLAY_H);
   const displayW = Math.round(compositeLogicalW * displayScale);
   const displayH = Math.round(compositeLogicalH * displayScale);
   const screenPctLeft = (chrome.screenRect.x / chrome.compositeWidth) * 100;

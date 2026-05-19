@@ -9,7 +9,8 @@ import { SimulatorToolbar } from './shared/SimulatorToolbar';
 import { SimulatorInfoCard } from './shared/SimulatorInfoCard';
 import { Button } from '@/components/ui/button';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
-import type { AndroidButton } from '@/lib/types';
+import type { AndroidButton } from '@/lib/types'
+import { androidToNorm as toNormPure, toPinchFingers as makePinchFingers } from '@/lib/coordinate-transform';
 
 const CURSOR_RING_R = 13;
 const CURSOR_DOT_R = 8;
@@ -262,22 +263,13 @@ export function AndroidViewer({
     const canvas = canvasRef.current
     if (!canvas) return null
     const rect = canvas.getBoundingClientRect()
-    const xv = (e.clientX - rect.left) / rect.width
-    const yv = (e.clientY - rect.top) / rect.height
-    if (xv < 0 || xv > 1 || yv < 0 || yv > 1) return null
-    if (needsCSSRotationRef.current) {
-      // Canvas has CSS rotate(90deg) CW. Visual axes map to portrait video axes:
-      // visual-top = canvas-left (portrait x=0), visual-left = canvas-bottom (portrait y=max).
-      // Transform: portrait_norm_x = yv, portrait_norm_y = 1 - xv
-      return { x: yv, y: 1 - xv }
-    }
-    return { x: xv, y: yv }
+    return toNormPure({ x: e.clientX, y: e.clientY }, rect, needsCSSRotationRef.current)
   }, [])
 
   const toPinchFingers = useCallback((e: { clientX: number; clientY: number }) => {
     const f1 = toNorm(e)
     if (!f1) return null
-    return { f0: { x: 1 - f1.x, y: 1 - f1.y }, f1 }
+    return makePinchFingers(f1)
   }, [toNorm])
 
   const handlePointerDown = useCallback((e: React.PointerEvent) => {

@@ -18,8 +18,7 @@ Breaking changes may appear in minor versions until `v1.0.0` is tagged.
 | Session recordings | ✅ Working |
 | Team management + PAT | ✅ Working |
 | CLI (`start`, `doctor`, `devices`, …) | ✅ Working |
-| Test coverage (cli) | ✅ Working |
-| Test coverage (dashboard) | ❌ Missing |
+| Test coverage (cli, dashboard) | ✅ Working |
 | Structured logging | ✅ Working |
 | WebSocket backpressure | ❌ Missing |
 
@@ -46,8 +45,8 @@ Developer experience and reliability improvements.
 - [x] CLI smoke tests — `--version`, `--help` subprocess smoke tests via tsx
 - [x] Zod-based config validation — catch `NaN` and invalid values at startup instead of silently at runtime
 - [x] Migration atomic transactions — wrap all migrations in `db.transaction()` to prevent partial failure states
-- [ ] Coordinate transform unit tests — normalize (0–1), landscape rotation, display scale, bezel offset
-- [ ] `touch-helper` stdin protocol snapshot tests — lock byte layout to the spec in `ios-agent/CLAUDE.md`
+- [x] Coordinate transform unit tests — normalize (0–1), landscape rotation, display scale, bezel offset
+- [x] `touch-helper` stdin protocol snapshot tests — lock byte layout to the spec in `ios-agent/CLAUDE.md`
 
 ---
 
