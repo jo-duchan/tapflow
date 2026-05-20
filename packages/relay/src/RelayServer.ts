@@ -8,7 +8,7 @@ import { Router } from './router.js'
 import { getDb } from './db.js'
 import { handleLogin, handleLogout, handleMe, handleChangePassword, handleInit } from './api/auth.js'
 import { handleVerify, handleAccept } from './api/invitations.js'
-import { createLogger } from '@tapflow/agent-core'
+import { createLogger } from '@tapflowio/agent-core'
 
 const logger = createLogger('relay')
 import { handleVerifyReset, handleDoReset, handleSendMemberReset } from './api/passwordReset.js'

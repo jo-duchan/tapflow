@@ -38,7 +38,7 @@ export type MessageType =
   | 'keyboard:toggled'
   | 'error'
 
-import type { AgentResources } from '@tapflow/agent-core'
+import type { AgentResources } from '@tapflowio/agent-core'
 export type { AgentResources }
 
 export interface DeviceInfo {

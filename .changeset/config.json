@@ -3,11 +3,11 @@
   "changelog": "@changesets/cli/changelog",
   "commit": false,
   "fixed": [
-    ["tapflow", "@tapflow/agent-core", "@tapflow/ios-agent", "@tapflow/android-agent", "@tapflow/relay"]
+    ["tapflow", "@tapflowio/agent-core", "@tapflowio/ios-agent", "@tapflowio/android-agent", "@tapflowio/relay"]
   ],
   "linked": [],
   "access": "public",
   "baseBranch": "main",
   "updateInternalDependencies": "patch",
-  "ignore": ["@tapflow/dashboard"]
+  "ignore": ["@tapflowio/dashboard"]
 }

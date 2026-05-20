@@ -17,7 +17,7 @@
 
 ```bash
 # 빌드 후 사용
-pnpm --filter @tapflow/cli build
+pnpm --filter @tapflowio/cli build
 tapflow start                           # relay + agent 한 번에 기동
 tapflow start --device "iPhone 16"     # 디바이스 지정
 tapflow start --relay ws://remote:3000  # 외부 relay 사용

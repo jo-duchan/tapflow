@@ -20,7 +20,7 @@ vi.mock('../TouchHelper', () => ({
 }))
 
 import { WebSocket } from 'ws'
-import { RelayServer, initDb, closeDb } from '@tapflow/relay'
+import { RelayServer, initDb, closeDb } from '@tapflowio/relay'
 import { IOSAgent } from '../IOSAgent'
 import { SimctlWrapper } from '../SimctlWrapper'
 // eslint-disable-next-line @typescript-eslint/no-unused-vars

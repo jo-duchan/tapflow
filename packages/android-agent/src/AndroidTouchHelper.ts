@@ -1,5 +1,5 @@
 import type { AdbWrapper } from './AdbWrapper.js'
-import { createLogger } from '@tapflow/agent-core'
+import { createLogger } from '@tapflowio/agent-core'
 
 const logger = createLogger('android-agent:touch')
 

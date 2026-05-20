@@ -2,7 +2,7 @@ import path from 'path'
 import { initDb } from './db.js'
 import { RelayServer } from './RelayServer.js'
 import { config } from './lib/config.js'
-import { createLogger } from '@tapflow/agent-core'
+import { createLogger } from '@tapflowio/agent-core'
 
 const logger = createLogger('relay')
 

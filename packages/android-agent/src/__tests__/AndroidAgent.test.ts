@@ -53,7 +53,7 @@ vi.mock('../EmulatorLauncher', () => ({
 }))
 
 import { WebSocket } from 'ws'
-import { RelayServer, initDb, closeDb } from '@tapflow/relay'
+import { RelayServer, initDb, closeDb } from '@tapflowio/relay'
 import { AndroidAgent } from '../AndroidAgent'
 import { AdbWrapper } from '../AdbWrapper'
 import { ScrcpySession } from '../scrcpy/ScrcpySession'

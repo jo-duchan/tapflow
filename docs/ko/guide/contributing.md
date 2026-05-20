@@ -41,10 +41,10 @@ pnpm test
 특정 패키지만:
 
 ```sh
-pnpm --filter @tapflow/ios-agent test
-pnpm --filter @tapflow/android-agent test
-pnpm --filter @tapflow/relay test
-pnpm --filter @tapflow/cli test
+pnpm --filter @tapflowio/ios-agent test
+pnpm --filter @tapflowio/android-agent test
+pnpm --filter @tapflowio/relay test
+pnpm --filter @tapflowio/cli test
 ```
 
 PR을 올리기 전에 변경된 패키지의 테스트가 통과하는지 확인합니다. 새 동작을 추가할 때는 테스트를 먼저 작성합니다.

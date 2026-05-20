@@ -1,5 +1,5 @@
-import { RelayServer } from '@tapflow/relay'
-import { AndroidAgent } from '@tapflow/android-agent'
+import { RelayServer } from '@tapflowio/relay'
+import { AndroidAgent } from '@tapflowio/android-agent'
 import { banner, createSpinner, step } from '../lib/print.js'
 import { hasAdb } from '../lib/platform.js'
 import { resolveAndBootIOSDevice } from '../lib/ios-boot.js'

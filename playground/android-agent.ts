@@ -1,4 +1,4 @@
-import { AndroidAgent } from '@tapflow/android-agent'
+import { AndroidAgent } from '@tapflowio/android-agent'
 
 const RELAY = process.env['RELAY_URL'] ?? 'ws://localhost:4000'
 

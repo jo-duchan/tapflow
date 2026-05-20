@@ -74,10 +74,10 @@ pnpm test
 A specific package:
 
 ```sh
-pnpm --filter @tapflow/ios-agent test
-pnpm --filter @tapflow/android-agent test
-pnpm --filter @tapflow/relay test
-pnpm --filter @tapflow/cli test
+pnpm --filter @tapflowio/ios-agent test
+pnpm --filter @tapflowio/android-agent test
+pnpm --filter @tapflowio/relay test
+pnpm --filter @tapflowio/cli test
 ```
 
 Run the tests for any changed packages before opening a PR. New behavior must be covered by tests written first, passing before the PR is opened.

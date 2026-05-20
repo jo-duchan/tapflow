@@ -1,4 +1,4 @@
-import { IOSAgent } from '@tapflow/ios-agent'
+import { IOSAgent } from '@tapflowio/ios-agent'
 
 const RELAY = process.env['RELAY_URL'] ?? 'ws://localhost:4000'
 

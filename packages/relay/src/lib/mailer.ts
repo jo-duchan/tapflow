@@ -1,6 +1,6 @@
 import nodemailer from 'nodemailer'
 import { config } from './config.js'
-import { createLogger } from '@tapflow/agent-core'
+import { createLogger } from '@tapflowio/agent-core'
 
 const logger = createLogger('relay:mailer')
 

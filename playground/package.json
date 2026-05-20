@@ -1,5 +1,5 @@
 {
-  "name": "@tapflow/playground",
+  "name": "@tapflowio/playground",
   "version": "0.0.0",
   "private": true,
   "type": "module",
@@ -18,10 +18,10 @@
     "dev:up:pool": "concurrently -k -n relay,ios,mocks -c cyan,green,yellow \"pnpm relay\" \"pnpm ios-agent\" \"pnpm mock-agents\""
   },
   "dependencies": {
-    "@tapflow/agent-core": "workspace:*",
-    "@tapflow/ios-agent": "workspace:*",
-    "@tapflow/android-agent": "workspace:*",
-    "@tapflow/relay": "workspace:*",
+    "@tapflowio/agent-core": "workspace:*",
+    "@tapflowio/ios-agent": "workspace:*",
+    "@tapflowio/android-agent": "workspace:*",
+    "@tapflowio/relay": "workspace:*",
     "ws": "^8.0.0"
   },
   "devDependencies": {

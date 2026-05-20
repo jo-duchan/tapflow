@@ -30,7 +30,7 @@ function langToKeyboard(lang: string): string {
   const code = lang.split('-')[0].toLowerCase()
   return LANG_KEYBOARD_MAP[code] ?? 'en_US@sw=QWERTY;hw=Automatic'
 }
-import type { Device, DeviceStatus } from '@tapflow/agent-core'
+import type { Device, DeviceStatus } from '@tapflowio/agent-core'
 import { defaultRunner, type SimctlRunner } from './simctl.js'
 import { KeyboardHelperDaemon } from './KeyboardHelperDaemon.js'
 

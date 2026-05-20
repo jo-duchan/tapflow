@@ -1,5 +1,5 @@
 import { z } from 'zod'
-import { AndroidAgent } from '@tapflow/android-agent'
+import { AndroidAgent } from '@tapflowio/android-agent'
 import { banner, createSpinner } from '../lib/print.js'
 import { hasAdb } from '../lib/platform.js'
 import { resolveAndBootIOSDevice } from '../lib/ios-boot.js'

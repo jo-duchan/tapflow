@@ -1,7 +1,7 @@
 import { spawn, execFileSync } from 'child_process'
 import { existsSync, statSync, unlinkSync } from 'fs'
 import { join } from 'path'
-import { createLogger } from '@tapflow/agent-core'
+import { createLogger } from '@tapflowio/agent-core'
 
 const logger = createLogger('ios-agent:screencapture')
 
@@ -19,7 +19,7 @@ function ensureCompiled(): void {
     unlinkSync(BINARY)
   }
   if (!existsSync(SWIFT_SRC)) {
-    throw new Error('screencapture-helper binary missing and Swift source not found — reinstall @tapflow/ios-agent')
+    throw new Error('screencapture-helper binary missing and Swift source not found — reinstall @tapflowio/ios-agent')
   }
   logger.info('compiling screencapture-helper...')
   execFileSync('swiftc', [

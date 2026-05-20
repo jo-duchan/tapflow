@@ -1,7 +1,7 @@
 import { spawn, type ChildProcess } from 'child_process'
 import { createInterface } from 'readline'
 import { join } from 'path'
-import { createLogger } from '@tapflow/agent-core'
+import { createLogger } from '@tapflowio/agent-core'
 
 const logger = createLogger('ios-agent:keyboard-helper')
 

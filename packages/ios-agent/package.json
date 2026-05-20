@@ -1,5 +1,5 @@
 {
-  "name": "@tapflow/ios-agent",
+  "name": "@tapflowio/ios-agent",
   "version": "0.1.0-alpha.1",
   "description": "iOS simulator agent for tapflow — xcrun simctl control and screen streaming",
   "keywords": ["tapflow", "ios", "simulator", "xcrun", "simctl", "streaming", "qa"],
@@ -43,11 +43,11 @@
     "lint": "eslint src"
   },
   "dependencies": {
-    "@tapflow/agent-core": "workspace:*",
+    "@tapflowio/agent-core": "workspace:*",
     "ws": "^8.0.0"
   },
   "devDependencies": {
-    "@tapflow/relay": "workspace:*",
+    "@tapflowio/relay": "workspace:*",
     "@types/node": "^20.0.0",
     "@types/ws": "^8.0.0",
     "typescript": "^5.0.0",

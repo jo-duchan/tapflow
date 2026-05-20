@@ -1,4 +1,4 @@
-# @tapflow/relay
+# @tapflowio/relay
 
 WebSocket relay server for [tapflow](https://github.com/jo-duchan/tapflow).
 
@@ -19,7 +19,7 @@ tapflow start
 Or standalone:
 
 ```ts
-import { RelayServer } from '@tapflow/relay'
+import { RelayServer } from '@tapflowio/relay'
 
 const server = new RelayServer({ port: 3000 })
 await server.start()

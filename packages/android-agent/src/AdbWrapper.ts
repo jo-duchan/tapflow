@@ -1,4 +1,4 @@
-import type { Device } from '@tapflow/agent-core'
+import type { Device } from '@tapflowio/agent-core'
 import { defaultRunner, type AdbRunner } from './adb.js'
 
 export class AdbWrapper {

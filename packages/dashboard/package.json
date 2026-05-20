@@ -1,5 +1,5 @@
 {
-  "name": "@tapflow/dashboard",
+  "name": "@tapflowio/dashboard",
   "version": "0.1.0",
   "description": "React SPA dashboard for QA teams",
   "private": true,

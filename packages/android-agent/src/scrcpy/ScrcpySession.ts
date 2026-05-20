@@ -8,7 +8,7 @@ import { promisify } from 'util'
 import { ScrcpyVideo } from './ScrcpyVideo.js'
 import { ScrcpyControl } from './ScrcpyControl.js'
 import type { ScrcpyDeviceInfo } from './ScrcpyVideo.js'
-import { createLogger } from '@tapflow/agent-core'
+import { createLogger } from '@tapflowio/agent-core'
 
 const logger = createLogger('android-agent:scrcpy')
 
