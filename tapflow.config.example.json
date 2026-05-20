@@ -1,8 +1,7 @@
 {
   "server": {
     "port": 4000,
-    "dataDir": ".tapflow",
-    "jwtSecret": "CHANGE_THIS_TO_A_LONG_RANDOM_SECRET"
+    "dataDir": ".tapflow"
   },
   "smtp": {
     "host": "",

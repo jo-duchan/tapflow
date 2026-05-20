@@ -33,16 +33,9 @@ tapflow relay start
 tapflow agent start --relay wss://your-relay-url
 ```
 
-## Node.js
+## Deployment configuration
 
-```sh
-npm install -g tapflow
-tapflow relay start
-```
-
-The relay reads `tapflow.config.json` from the working directory. See [Configuration](/reference/configuration).
-
-## JWT_SECRET
+### JWT_SECRET
 
 ::: warning Replace before deploying to a server
 The default value (`tapflow-dev-secret-change-in-production`) is public in the source code. Leaving it unchanged lets anyone forge valid tokens.
@@ -54,48 +47,32 @@ Generate a secure random secret:
 openssl rand -hex 32
 ```
 
-Inject the generated value as an environment variable:
+Inject the generated value as an environment variable when starting the relay:
 
 ```sh
-# Node.js
 JWT_SECRET=YOUR_JWT_SECRET tapflow relay start
-
-# PM2
-JWT_SECRET=YOUR_JWT_SECRET pm2 start tapflow --name relay -- relay start
 ```
 
 Once set, keep this value stable — changing it invalidates all active sessions immediately. Only rotate if the secret is compromised or you want to force everyone to log out.
 
-## PM2 (recommended for servers)
+### tapflow.config.json
 
-Handles automatic restart on crash, restart on server reboot, and log management.
+The relay reads `tapflow.config.json` from the working directory. See [Configuration](/reference/configuration).
 
-```sh
-npm install -g pm2 tapflow
-```
+## Internal access
 
-Inject the JWT_SECRET you generated above, then start:
+The simplest way for teammates on the same network to reach the dashboard.
 
 ```sh
-JWT_SECRET=YOUR_JWT_SECRET pm2 start tapflow --name relay -- relay start
-pm2 save
-pm2 startup
+npm install -g tapflow
+JWT_SECRET=YOUR_JWT_SECRET tapflow relay start
 ```
 
-To update tapflow:
-
-```sh
-npm update -g tapflow
-pm2 restart relay
-```
-
-::: tip Next step
-Once the relay is running, create the first admin account with `tapflow init`. For team invitations and your first build upload, see [First-time Setup](/dashboard/setup).
-:::
+Teammates connect to `http://MACHINE_LOCAL_IP:4000` in their browser.
 
 ## External access
 
-Regardless of how you run the relay, you need an external URL when teammates access the dashboard from outside your local machine, or when agents connect from a different network.
+You need an external URL when teammates access the dashboard from outside your local network, or when agents connect from a different network.
 
 ### ngrok (quick start)
 
@@ -161,3 +138,30 @@ tapflow.myteam.example.com {
 ```
 
 Caddy handles TLS and WebSocket upgrades automatically.
+
+## PM2 (recommended for servers)
+
+Handles automatic restart on crash, restart on server reboot, and log management.
+
+```sh
+npm install -g pm2 tapflow
+```
+
+Inject the JWT_SECRET you generated above, then start:
+
+```sh
+JWT_SECRET=YOUR_JWT_SECRET pm2 start tapflow --name relay -- relay start
+pm2 save
+pm2 startup
+```
+
+To update tapflow:
+
+```sh
+npm update -g tapflow
+pm2 restart relay
+```
+
+::: tip Next step
+Once the relay is running, create the first admin account with `tapflow init`. For team invitations and your first build upload, see [First-time Setup](/dashboard/setup).
+:::

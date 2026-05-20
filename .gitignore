@@ -18,6 +18,9 @@ packages/relay/public/
 .env.local
 .env.*.local
 
+# tapflow runtime config (auto-generated, may contain local paths)
+tapflow.config.json
+
 # os
 .DS_Store
 
