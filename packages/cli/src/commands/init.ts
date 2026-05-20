@@ -6,24 +6,47 @@ export interface InitOptions {
   relay?: string
 }
 
+function readPassword(prompt: string): Promise<string> {
+  if (!process.stdin.isTTY) {
+    const rl = readline.createInterface({ input, output })
+    return rl.question(prompt).then((v) => { rl.close(); return v.trim() })
+  }
+  return new Promise((resolve) => {
+    process.stdout.write(prompt)
+    const chars: string[] = []
+    process.stdin.setRawMode(true)
+    process.stdin.resume()
+    process.stdin.setEncoding('utf8')
+    const onData = (ch: string) => {
+      if (ch === '\r' || ch === '\n') {
+        process.stdin.setRawMode(false)
+        process.stdin.pause()
+        process.stdin.removeListener('data', onData)
+        process.stdout.write('\n')
+        resolve(chars.join(''))
+      } else if (ch === '') {
+        // Ctrl+C
+        process.stdout.write('\n')
+        process.exit(0)
+      } else if (ch === '' || ch === '\b') {
+        // Backspace / DEL
+        chars.pop()
+      } else if (ch >= ' ') {
+        chars.push(ch)
+      }
+    }
+    process.stdin.on('data', onData)
+  })
+}
+
 export async function cmdInit(opts: InitOptions): Promise<void> {
   const baseUrl = (opts.relay ?? 'http://localhost:4000').replace(/^wss?:\/\//, 'http://')
 
   const rl = readline.createInterface({ input, output })
-
   const email = (await rl.question('  ? Admin email: ')).trim()
-
-  // Node.js has no native password-input API. Suppress echo via readline's internal
-  // _writeToOutput hook — a widely used convention that remains stable across versions.
-  process.stdout.write('  ? Password: ')
-  const rlAny = rl as unknown as { _writeToOutput?: (s: string) => void }
-  const origWriteToOutput = rlAny._writeToOutput
-  if (origWriteToOutput) rlAny._writeToOutput = () => {}
-  const password = (await rl.question('')).trim()
-  if (origWriteToOutput) rlAny._writeToOutput = origWriteToOutput
-  process.stdout.write('\n')
-
   rl.close()
+
+  const password = await readPassword('  ? Password: ')
 
   if (!email) {
     banner('error', 'INVALID INPUT', ['Email is required.'])

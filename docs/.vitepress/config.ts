@@ -15,9 +15,8 @@ const enSidebar = [
   {
     text: 'Setup',
     items: [
-      { text: 'iOS Agent Setup', link: '/guide/ios-agent' },
-      { text: 'Android Agent Setup', link: '/guide/android-agent' },
       { text: 'Self-Hosting the Relay', link: '/guide/self-hosting' },
+      { text: 'Agent Setup', link: '/guide/agent' },
       { text: 'Uploading Builds (CI/CD)', link: '/guide/upload-builds' },
       { text: 'Scaling Mac Resources', link: '/guide/scaling' },
     ],
@@ -63,8 +62,8 @@ const koSidebar = [
   {
     text: '설정',
     items: [
-      { text: '에이전트 설정', link: '/ko/guide/agent' },
       { text: '릴레이 배포', link: '/ko/guide/self-hosting' },
+      { text: '에이전트 설정', link: '/ko/guide/agent' },
       { text: '빌드 업로드 (CI/CD)', link: '/ko/guide/upload-builds' },
       { text: 'Mac 리소스 확장', link: '/ko/guide/scaling' },
     ],
@@ -100,7 +99,7 @@ const koSidebar = [
 
 export default withMermaid(defineConfig({
   title: 'tapflow',
-  description: 'Self-hosted iOS/Android simulator streaming for QA teams',
+  description: 'Self-hosted iOS/Android simulator streaming for QA',
 
   locales: {
     root: {

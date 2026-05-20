@@ -275,6 +275,7 @@
 .VPNavBarTranslations .title,
 .VPNavScreenTranslations .title {
   color: var(--tf-link) !important;
+  font-weight: 600 !important;
 }
 
 /* ─── Links ──────────────────────────────────────────────── */

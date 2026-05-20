@@ -1,8 +1,8 @@
 # Introduction
 
-**tapflow** lets your QA team run iOS simulators and Android emulators directly in the browser — without Appetize, BrowserStack, or any external cloud.
+**tapflow** lets your QA run iOS simulators and Android emulators directly in the browser — without Appetize, BrowserStack, or any external cloud.
 
-<video src="/tapflow-demo.mp4" poster="/demo-thumbnail.png" controls style="width: 100%; border-radius: 8px; margin: 1.5rem 0;"></video>
+<VideoPlayer src="/tapflow-demo.mp4" poster="/demo-thumbnail.png" />
 
 ## Why tapflow?
 
@@ -10,14 +10,14 @@
 |----------|---------|
 | Appetize / BrowserStack | Expensive, app data leaves your network |
 | Physical devices | Cost, loss, management overhead |
-| Xcode / Android Studio directly | Every QA team member needs their own Mac + Xcode or Android Studio setup |
+| Xcode / Android Studio directly | Every QA member needs their own Mac + Xcode or Android Studio setup |
 | tapflow | Use infra you already own, data stays on-prem |
 
 ## How it works
 
 ```mermaid
 flowchart TD
-    B["Browser (QA team)"]
+    B["Browser (QA)"]
     R["Relay Server<br/>Linux server or Mac"]
     A1["Mac Agent 1<br/>iOS · Android simulators"]
     A2["Mac Agent 2<br/>iOS · Android simulators"]
