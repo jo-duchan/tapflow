@@ -1,8 +1,15 @@
 {
   "name": "@tapflowio/agent-core",
-  "version": "0.1.0-alpha.1",
+  "version": "0.1.0-alpha.2",
   "description": "DeviceAgent interface, AgentRegistry, and shared utilities for tapflow agents",
-  "keywords": ["tapflow", "ios", "android", "simulator", "emulator", "device-agent"],
+  "keywords": [
+    "tapflow",
+    "ios",
+    "android",
+    "simulator",
+    "emulator",
+    "device-agent"
+  ],
   "homepage": "https://github.com/jo-duchan/tapflow",
   "bugs": "https://github.com/jo-duchan/tapflow/issues",
   "repository": {
