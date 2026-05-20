@@ -30,7 +30,7 @@ jobs:
 
       - run: pnpm build
 
-      - run: pnpm changeset publish --no-git-tag --tag alpha
+      - run: pnpm changeset publish --no-git-tag
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
