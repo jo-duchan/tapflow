@@ -11,11 +11,10 @@ reviews:
   auto_review:
     enabled: true
     drafts: false
-
-path_filters:
-  - "!pnpm-lock.yaml"
-  - "!packages/ios-agent/bin/**"
-  - "!packages/android-agent/bin/**"
-  - "!docs/.vitepress/theme/tapflow-*.json"
-  - "!internal/**"
-  - "!docs/public/**"
+  path_filters:
+    - "!pnpm-lock.yaml"
+    - "!packages/ios-agent/bin/**"
+    - "!packages/android-agent/bin/**"
+    - "!docs/.vitepress/theme/tapflow-*.json"
+    - "!internal/**"
+    - "!docs/public/**"
