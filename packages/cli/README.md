@@ -31,12 +31,12 @@
 
 ## Why tapflow?
 
-| Solution | Problem |
-|----------|---------|
-| Appetize / BrowserStack | Expensive — app data leaves your network |
-| Physical devices | Cost, loss, management overhead |
-| Xcode / Android Studio | Every QA member needs their own Mac + full toolchain setup |
-| **tapflow** | Use the Mac you already own — data stays on-prem, QA team uses a browser |
+| Solution                | Problem                                                                  |
+| ----------------------- | ------------------------------------------------------------------------ |
+| Appetize / BrowserStack | Expensive — app data leaves your network                                 |
+| Physical devices        | Cost, loss, management overhead                                          |
+| Xcode / Android Studio  | Every QA member needs their own Mac + full toolchain setup               |
+| **tapflow**             | Use the Mac you already own — data stays on-prem, QA team uses a browser |
 
 ## Features
 
@@ -53,11 +53,11 @@
 ## How it works
 
 ```
-Browser (QA team)  ←─ WebSocket ─→  Relay Server  ←─ WebSocket (outbound) ─→  Mac Agent
+Browser (QA team)  ← WebSocket →  Relay Server  ← WebSocket (outbound) →  Mac Agent
                                   (Linux / Mac)                           (iOS · Android)
 ```
 
-1. The **Mac Agent** connects *outbound* to the relay — no inbound firewall rules needed.
+1. The **Mac Agent** connects _outbound_ to the relay — no inbound firewall rules needed.
 2. QA opens the **dashboard** in any browser and sees all available devices.
 3. Touch events are forwarded in real time; the screen streams back to the browser.
 4. The **relay** also serves the dashboard SPA on the same port — no separate web server needed.
@@ -98,12 +98,12 @@ Navigate to `http://localhost:4000` and sign in with the account you just create
 
 ## Requirements
 
-| Component | Requirements |
-|-----------|-------------|
-| **Relay server** | Node.js ≥ 20, any OS (Linux/macOS), ~512 MB RAM |
-| **iOS Agent** | macOS, Xcode with iOS Simulator Runtime, Node.js ≥ 20 |
+| Component         | Requirements                                                                                                              |
+| ----------------- | ------------------------------------------------------------------------------------------------------------------------- |
+| **Relay server**  | Node.js ≥ 20, any OS (Linux/macOS), ~512 MB RAM                                                                           |
+| **iOS Agent**     | macOS, Xcode with iOS Simulator Runtime, Node.js ≥ 20                                                                     |
 | **Android Agent** | macOS, Android SDK (`adb` in `$PATH` or `$ANDROID_HOME` set), AVD with `google_apis/arm64-v8a` (android-34), Node.js ≥ 20 |
-| **Browser (QA)** | Any modern browser — Chrome, Firefox, Safari, Edge |
+| **Browser (QA)**  | Any modern browser — Chrome, Firefox, Safari, Edge                                                                        |
 
 ## Self-Hosting
 
@@ -138,18 +138,18 @@ tapflow agent start --relay wss://your-relay-url
 
 ## CLI Reference
 
-| Command | Description |
-|---------|-------------|
-| `tapflow start` | Start relay + agent together (local mode) |
-| `tapflow relay start` | Start relay only |
-| `tapflow agent start --relay <url>` | Start agent and connect to a relay |
-| `tapflow init` | Create the first admin account |
-| `tapflow doctor` | Diagnose environment (Node, Xcode, adb…) |
-| `tapflow devices` | List available simulators and emulators |
-| `tapflow boot <name\|udid>` | Boot a simulator or emulator |
-| `tapflow status` | Show connected agents, devices, active sessions |
-| `tapflow reset` | Shut down all simulators and emulators |
-| `tapflow logs` | Show recent relay log entries |
+| Command                             | Description                                     |
+| ----------------------------------- | ----------------------------------------------- |
+| `tapflow start`                     | Start relay + agent together (local mode)       |
+| `tapflow relay start`               | Start relay only                                |
+| `tapflow agent start --relay <url>` | Start agent and connect to a relay              |
+| `tapflow init`                      | Create the first admin account                  |
+| `tapflow doctor`                    | Diagnose environment (Node, Xcode, adb…)        |
+| `tapflow devices`                   | List available simulators and emulators         |
+| `tapflow boot <name\|udid>`         | Boot a simulator or emulator                    |
+| `tapflow status`                    | Show connected agents, devices, active sessions |
+| `tapflow reset`                     | Shut down all simulators and emulators          |
+| `tapflow logs`                      | Show recent relay log entries                   |
 
 Full reference → [CLI docs](https://jo-duchan.github.io/tapflow/reference/cli)
 
