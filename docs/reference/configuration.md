@@ -1,6 +1,6 @@
 # Configuration
 
-The relay reads `tapflow.config.json` from the directory where it is started.
+The relay reads `tapflow.config.json` from the directory where it is started. The file is auto-generated on first run — edit it and restart the relay to apply changes.
 
 ## Example
 
@@ -15,13 +15,12 @@ The relay reads `tapflow.config.json` from the directory where it is started.
     "port": 587,
     "secure": false,
     "user": "relay@example.com",
-    "pass": "password",
-    "from": "tapflow <noreply@example.com>"
+    "pass": "password"
   }
 }
 ```
 
-A template is included at `tapflow.config.example.json`.
+`smtp.from` defaults to `tapflow <smtp.user>` when `smtp.user` is set. Override it explicitly if you need a different sender address.
 
 ## Environment variable overrides
 
@@ -37,7 +36,7 @@ Environment variables always take precedence over the config file — useful for
 | `SMTP_SECURE` | `smtp.secure` | `false` | Enable TLS (set to string `"true"`) |
 | `SMTP_USER` | `smtp.user` | `` | SMTP username |
 | `SMTP_PASS` | `smtp.pass` | `` | SMTP password |
-| `SMTP_FROM` | `smtp.from` | `tapflow <noreply@tapflow.local>` | Sender address |
+| `SMTP_FROM` | `smtp.from` | `tapflow <smtp.user>` | Sender address |
 
 ::: warning Always replace JWT_SECRET
 If `JWT_SECRET` is not set, the dev default is used. Using the default in production lets anyone forge valid auth tokens.
@@ -51,18 +50,20 @@ openssl rand -hex 32
 
 ## Data directory
 
-The relay stores all data in `.tapflow-data/` by default:
+The relay creates these files in the working directory on first run:
 
 ```
-.tapflow-data/
-  tapflow.db        ← SQLite database
-  uploads/
-    builds/         ← .app.zip and .apk files
-    avatars/
-    comments/
+your-directory/
+  tapflow.config.json   ← relay configuration (auto-generated)
+  .tapflow-data/
+    tapflow.db          ← SQLite database
+    uploads/
+      builds/           ← .app.zip and .apk files
+      avatars/
+      comments/
 ```
 
-To change the location, set `TAPFLOW_DATA_DIR` or `server.dataDir`. Back up this directory to preserve all data.
+To change the data directory location, set `TAPFLOW_DATA_DIR` or `server.dataDir`. Back up `.tapflow-data/` to preserve all data.
 
 ## SMTP
 

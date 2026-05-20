@@ -85,6 +85,11 @@ function load(): TapflowConfig {
   if (process.env.SMTP_PASS) cfg.smtp.pass = process.env.SMTP_PASS
   if (process.env.SMTP_FROM) cfg.smtp.from = process.env.SMTP_FROM
 
+  // auto-derive from address when user is set but from was never explicitly configured
+  if (cfg.smtp.user && !file.smtp?.from && !process.env.SMTP_FROM) {
+    cfg.smtp.from = `tapflow <${cfg.smtp.user}>`
+  }
+
   const result = configSchema.safeParse(cfg)
   if (!result.success) {
     for (const issue of result.error.issues) {
