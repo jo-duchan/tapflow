@@ -68,7 +68,7 @@ npm install -g tapflow
 JWT_SECRET=YOUR_JWT_SECRET tapflow relay start
 ```
 
-Teammates connect to `http://<machine-local-ip>:4000` in their browser.
+Teammates connect to `http://MACHINE_LOCAL_IP:4000` in their browser.
 
 ## External access
 

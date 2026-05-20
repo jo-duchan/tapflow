@@ -57,7 +57,7 @@ function load(): TapflowConfig {
     }
   }
 
-  if (file.server?.jwtSecret) {
+  if (file.server != null && 'jwtSecret' in file.server) {
     logger.warn('server.jwtSecret in tapflow.config.json is deprecated — use JWT_SECRET env var instead')
   }
 
@@ -97,7 +97,7 @@ function load(): TapflowConfig {
 }
 
 function loadJwtSecret(): string {
-  if (process.env.JWT_SECRET) {
+  if (process.env.JWT_SECRET !== undefined) {
     if (process.env.JWT_SECRET.length < 32) {
       logger.error('config error: JWT_SECRET — must be at least 32 characters')
       process.exit(1)

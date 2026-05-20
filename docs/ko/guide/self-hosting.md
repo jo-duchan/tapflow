@@ -68,7 +68,7 @@ npm install -g tapflow
 JWT_SECRET=YOUR_JWT_SECRET tapflow relay start
 ```
 
-팀원은 `http://<mac-local-ip>:4000`으로 대시보드에 접속합니다.
+팀원은 `http://MAC_LOCAL_IP:4000`으로 대시보드에 접속합니다.
 
 ## 외부 공유
 
