@@ -1,5 +1,15 @@
 # tapflow
 
+## 0.1.0-alpha.8
+
+### Patch Changes
+
+- fix(ci): use --tag alpha for changeset publish in pre mode
+  - @tapflowio/agent-core@0.1.0-alpha.8
+  - @tapflowio/ios-agent@0.1.0-alpha.8
+  - @tapflowio/android-agent@0.1.0-alpha.8
+  - @tapflowio/relay@0.1.0-alpha.8
+
 ## 0.1.0-alpha.7
 
 ### Patch Changes
