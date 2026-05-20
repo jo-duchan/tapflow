@@ -56,7 +56,7 @@ openssl rand -hex 32
 
 ```
 .tapflow/
-  db.sqlite         ← SQLite 데이터베이스
+  tapflow.db        ← SQLite 데이터베이스
   uploads/
     builds/         ← .app.zip 및 .apk 파일
     avatars/

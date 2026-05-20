@@ -18,7 +18,11 @@ pnpm add -g tapflow
 
 :::
 
----
+업데이트:
+
+```sh
+npm update -g tapflow
+```
 
 ## `tapflow init`
 
@@ -43,7 +47,6 @@ tapflow init
 
 비밀번호는 최소 8자 이상이어야 합니다.
 
----
 
 ## `tapflow start`
 
@@ -62,7 +65,6 @@ tapflow start
 릴레이를 서버에 따로 배포한다면 `tapflow relay start`와 `tapflow agent start`를 사용하세요.
 :::
 
----
 
 ## `tapflow relay start`
 
@@ -76,7 +78,6 @@ tapflow relay start
 |------|------|
 | `--port <n>` | 포트 (기본값: `4000`) |
 
----
 
 ## `tapflow agent start`
 
@@ -92,7 +93,6 @@ tapflow agent start --relay wss://relay.myteam.example.com
 | `--platform <ios\|android\|all>` | 자동 감지 | 시작할 플랫폼 |
 | `--device <name>` | 첫 번째 부팅된 시뮬레이터 | iOS 시뮬레이터 이름 또는 UDID |
 
----
 
 ## `tapflow doctor`
 
@@ -110,7 +110,6 @@ tapflow doctor
 
 문제가 하나라도 있으면 종료 코드 `1`을 반환합니다.
 
----
 
 ## `tapflow devices`
 
@@ -120,7 +119,6 @@ tapflow doctor
 tapflow devices
 ```
 
----
 
 ## `tapflow boot`
 
@@ -137,7 +135,6 @@ tapflow boot Pixel_8
 
 Android 에뮬레이터는 백그라운드에서 시작됩니다. `tapflow devices`로 상태를 확인하세요.
 
----
 
 ## `tapflow reset`
 
@@ -149,7 +146,6 @@ tapflow reset
 
 실행 전에 확인 프롬프트가 표시됩니다 (`y/N`). `y`를 입력해야 종료가 진행됩니다.
 
----
 
 ## `tapflow status`
 
@@ -177,7 +173,6 @@ tapflow status
   1 agent(s) · 2 device(s) · 1 active session(s)
 ```
 
----
 
 ## `tapflow logs`
 

@@ -18,7 +18,11 @@ pnpm add -g tapflow
 
 :::
 
----
+To update:
+
+```sh
+npm update -g tapflow
+```
 
 ## `tapflow init`
 
@@ -43,7 +47,6 @@ Example:
 
 Password must be at least 8 characters.
 
----
 
 ## `tapflow start`
 
@@ -62,7 +65,6 @@ tapflow start
 If you are running the relay on a separate server, use `tapflow relay start` and `tapflow agent start` instead.
 :::
 
----
 
 ## `tapflow relay start`
 
@@ -76,7 +78,6 @@ tapflow relay start
 |--------|-------------|
 | `--port <n>` | Port (default: `4000`) |
 
----
 
 ## `tapflow agent start`
 
@@ -92,7 +93,6 @@ tapflow agent start --relay wss://relay.myteam.example.com
 | `--platform <ios\|android\|all>` | auto-detect | Platform to start |
 | `--device <name>` | first booted simulator | iOS Simulator name or UDID |
 
----
 
 ## `tapflow doctor`
 
@@ -110,7 +110,6 @@ Auto-detects available platforms and checks only what's relevant:
 
 Exits with code `1` if any check fails.
 
----
 
 ## `tapflow devices`
 
@@ -120,7 +119,6 @@ List available simulators and emulators.
 tapflow devices
 ```
 
----
 
 ## `tapflow boot`
 
@@ -137,7 +135,6 @@ tapflow boot Pixel_8
 
 Android AVDs start in the background. Run `tapflow devices` to check status.
 
----
 
 ## `tapflow reset`
 
@@ -149,7 +146,6 @@ tapflow reset
 
 A confirmation prompt is shown (`y/N`). Enter `y` to proceed.
 
----
 
 ## `tapflow status`
 
@@ -177,7 +173,6 @@ Example output:
   1 agent(s) · 2 device(s) · 1 active session(s)
 ```
 
----
 
 ## `tapflow logs`
 
