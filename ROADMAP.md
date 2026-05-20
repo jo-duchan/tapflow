@@ -37,7 +37,7 @@ Critical bug fixes before the first public release.
 
 ## Phase 2 — Quality `v0.2.0`
 
-Developer experience and reliability improvements.
+Developer experience and reliability improvements. `v0.2.0` drops the `-alpha` suffix — npm package is stable and all Phase 2 quality items are complete.
 
 - [x] Pre-commit hooks — add Lefthook with lint + typecheck on staged files to catch errors before push
 - [x] `logger.ts` abstraction — replace 66 direct `console.log/error` calls with a leveled logger (`debug` / `info` / `warn` / `error`)
