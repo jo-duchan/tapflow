@@ -12,7 +12,6 @@ const DEFAULT_CONFIG = {
     secure: false,
     user: '',
     pass: '',
-    from: 'tapflow <noreply@tapflow.local>',
   },
 }
 

@@ -1,5 +1,6 @@
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
-import { Toaster } from 'sonner'
+import { Toaster, type ToasterProps } from 'sonner'
+import { useTheme } from 'next-themes'
 import { DashboardLayout } from './layouts/DashboardLayout'
 import { Login } from './pages/Login'
 import { Invite } from './pages/Invite'
@@ -12,6 +13,7 @@ import { TeamSettings } from './pages/settings/Team'
 import { TokenSettings } from './pages/settings/Tokens'
 
 export function App() {
+  const { resolvedTheme } = useTheme()
   return (
     <BrowserRouter>
       <Routes>
@@ -29,7 +31,7 @@ export function App() {
           <Route path="*" element={<Navigate to="/app-center" replace />} />
         </Route>
       </Routes>
-      <Toaster position="bottom-right" richColors />
+      <Toaster position="bottom-right" richColors theme={resolvedTheme as ToasterProps['theme']} />
     </BrowserRouter>
   )
 }

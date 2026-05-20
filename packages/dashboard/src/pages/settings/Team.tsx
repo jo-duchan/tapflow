@@ -50,20 +50,25 @@ export function TeamSettings() {
   useEffect(() => { load() }, [])
 
   async function onInvite(data: InviteData) {
-    const res = await fetch('/api/v1/team/invite', {
-      method: 'POST',
-      credentials: 'include',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ email: data.email, role: data.role }),
-    })
-    const json = inviteResponseSchema.parse(await res.json())
-    const link = `${location.origin}/invite?token=${json.token}`
-    setInviteLink(link)
-    navigator.clipboard.writeText(link).catch(() => {})
-    if (json.emailSent) {
-      toast.success(`Invite email sent to ${data.email}`)
-    } else {
-      toast.warning('Invite link copied — email could not be sent. Check your SMTP settings.')
+    try {
+      const res = await fetch('/api/v1/team/invite', {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: data.email, role: data.role }),
+      })
+      if (!res.ok) throw new Error(`Server error: ${res.status}`)
+      const json = inviteResponseSchema.parse(await res.json())
+      const link = `${location.origin}/invite?token=${json.token}`
+      setInviteLink(link)
+      navigator.clipboard.writeText(link).catch(() => {})
+      if (json.emailSent) {
+        toast.success(`Invite email sent to ${data.email}`)
+      } else {
+        toast.warning('Invite link copied — email could not be sent. Check your SMTP settings.')
+      }
+    } catch {
+      toast.error('Failed to create invite link')
     }
   }
 
