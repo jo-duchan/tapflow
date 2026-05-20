@@ -47,6 +47,7 @@
     "access": "public"
   },
   "scripts": {
+    "postinstall": "node -e \"require('fs').readdirSync('bin').forEach(f => require('fs').chmodSync('bin/' + f, 0o755))\"",
     "build": "tsc",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
