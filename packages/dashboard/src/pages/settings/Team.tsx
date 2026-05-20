@@ -26,6 +26,11 @@ const inviteSchema = z.object({
 })
 type InviteData = z.infer<typeof inviteSchema>
 
+const inviteResponseSchema = z.object({
+  token: z.string(),
+  emailSent: z.boolean(),
+})
+
 export function TeamSettings() {
   const [members, setMembers] = useState<Member[]>([])
   const [resetSent, setResetSent] = useState<Record<number, string>>({})
@@ -51,7 +56,7 @@ export function TeamSettings() {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ email: data.email, role: data.role }),
     })
-    const json = await res.json() as { token: string; emailSent: boolean }
+    const json = inviteResponseSchema.parse(await res.json())
     const link = `${location.origin}/invite?token=${json.token}`
     setInviteLink(link)
     navigator.clipboard.writeText(link).catch(() => {})

@@ -86,7 +86,7 @@ function load(): TapflowConfig {
   if (process.env.SMTP_FROM) cfg.smtp.from = process.env.SMTP_FROM
 
   // auto-derive from address when user is set but from was never explicitly configured
-  if (cfg.smtp.user && !file.smtp?.from && !process.env.SMTP_FROM) {
+  if (cfg.smtp.user && file.smtp?.from === undefined && process.env.SMTP_FROM === undefined) {
     cfg.smtp.from = `tapflow <${cfg.smtp.user}>`
   }
 
