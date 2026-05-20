@@ -23,7 +23,7 @@ jobs:
 
       - run: pnpm lint
 
-      - run: pnpm --filter @tapflow/agent-core build
-      - run: pnpm --filter @tapflow/relay --filter @tapflow/ios-agent --filter @tapflow/android-agent build
+      - run: pnpm --filter @tapflowio/agent-core build
+      - run: pnpm --filter @tapflowio/relay --filter @tapflowio/ios-agent --filter @tapflowio/android-agent build
 
       - run: pnpm test
