@@ -237,7 +237,7 @@ export class IOSAgent implements DeviceAgent {
       if (seq !== state.bootSeq) return
 
       const target = devices.find((d) => d.id === deviceId)
-      if (!target) throw new ValidationError(`Device not found: ${deviceId}`)
+      if (!target) throw new PlatformError(`Device not found: ${deviceId}`)
 
       if (fullErase) {
         await this.simctl.erase(deviceId)
