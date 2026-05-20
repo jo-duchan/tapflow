@@ -1,4 +1,10 @@
+import { readFileSync } from 'fs'
+import { fileURLToPath } from 'url'
+import { dirname, join } from 'path'
 import { cac } from 'cac'
+
+const __dirname = dirname(fileURLToPath(import.meta.url))
+const { version } = JSON.parse(readFileSync(join(__dirname, '..', 'package.json'), 'utf-8')) as { version: string }
 import { cmdInit } from './commands/init.js'
 import { cmdDoctor } from './commands/doctor.js'
 import { cmdDevices } from './commands/devices.js'
@@ -76,5 +82,5 @@ cli
   .action((opts: { relay?: string; lines?: number }) => cmdLogs(opts))
 
 cli.help()
-cli.version('0.1.0')
+cli.version(version)
 cli.parse()

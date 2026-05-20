@@ -47,7 +47,8 @@
     "typecheck": "tsc --noEmit",
     "dev": "tsx src/index.ts",
     "test": "vitest run",
-    "lint": "eslint src"
+    "lint": "eslint src",
+    "postinstall": "node bin/postinstall.js"
   },
   "dependencies": {
     "@tapflowio/agent-core": "workspace:*",
