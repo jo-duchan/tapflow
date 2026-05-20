@@ -2,8 +2,9 @@
 
 The relay is a lightweight Node.js server. It only routes WebSocket traffic and serves the dashboard — no heavy compute needed.
 
-::: info Relay URL = Dashboard URL
-The relay serves the React dashboard SPA on the same port as WebSocket and REST API. Open `http://your-server:4000` in a browser to reach the dashboard directly. No separate web server configuration needed.
+::: info The relay URL has two uses
+- **Dashboard**: Open `http://your-relay-url` in a browser to reach the dashboard.
+- **Agent connection**: `tapflow agent start --relay wss://your-relay-url`
 :::
 
 ## Deployment scenarios
@@ -62,6 +63,8 @@ JWT_SECRET=YOUR_JWT_SECRET tapflow relay start
 # PM2
 JWT_SECRET=YOUR_JWT_SECRET pm2 start tapflow --name relay -- relay start
 ```
+
+Once set, keep this value stable — changing it invalidates all active sessions immediately. Only rotate if the secret is compromised or you want to force everyone to log out.
 
 ## PM2 (recommended for servers)
 

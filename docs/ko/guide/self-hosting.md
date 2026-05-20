@@ -2,8 +2,9 @@
 
 릴레이는 경량 Node.js 서버입니다. WebSocket 트래픽 라우팅과 대시보드 서빙만 담당하므로 무거운 컴퓨팅 자원이 필요하지 않습니다.
 
-::: info 릴레이 URL = 대시보드 URL
-릴레이는 WebSocket, REST API와 함께 React 대시보드 SPA를 하나의 포트에서 서빙합니다. `http://your-server:4000`에 브라우저로 접속하면 바로 대시보드가 열립니다. 별도 웹 서버 설정이 필요 없습니다.
+::: info 릴레이 URL은 두 가지 용도로 사용합니다
+- **대시보드 접속**: 브라우저에서 `http://your-relay-url`로 접속하면 대시보드가 열립니다.
+- **에이전트 연결**: `tapflow agent start --relay wss://your-relay-url`로 에이전트를 연결합니다.
 :::
 
 ## 배포 시나리오
@@ -57,11 +58,13 @@ openssl rand -hex 32
 
 ```sh
 # Node.js
-JWT_SECRET=<생성된_값> tapflow relay start
+JWT_SECRET=YOUR_JWT_SECRET tapflow relay start
 
 # PM2
-JWT_SECRET=<생성된_값> pm2 start tapflow --name relay -- relay start
+JWT_SECRET=YOUR_JWT_SECRET pm2 start tapflow --name relay -- relay start
 ```
+
+한 번 설정한 후에는 값을 유지하세요. 변경하면 기존 세션이 즉시 모두 만료됩니다. 시크릿이 유출됐거나 의도적으로 전체 세션을 초기화할 때만 교체하면 됩니다.
 
 ## PM2 (서버 운영 권장)
 
@@ -74,7 +77,7 @@ npm install -g pm2 tapflow
 위에서 생성한 `JWT_SECRET`을 환경변수로 주입해 시작합니다:
 
 ```sh
-JWT_SECRET=<생성된_값> pm2 start tapflow --name relay -- relay start
+JWT_SECRET=YOUR_JWT_SECRET pm2 start tapflow --name relay -- relay start
 pm2 save
 pm2 startup
 ```
