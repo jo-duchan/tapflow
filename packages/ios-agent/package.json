@@ -1,8 +1,16 @@
 {
   "name": "@tapflowio/ios-agent",
-  "version": "0.1.0-alpha.1",
+  "version": "0.1.0-alpha.2",
   "description": "iOS simulator agent for tapflow — xcrun simctl control and screen streaming",
-  "keywords": ["tapflow", "ios", "simulator", "xcrun", "simctl", "streaming", "qa"],
+  "keywords": [
+    "tapflow",
+    "ios",
+    "simulator",
+    "xcrun",
+    "simctl",
+    "streaming",
+    "qa"
+  ],
   "homepage": "https://github.com/jo-duchan/tapflow",
   "bugs": "https://github.com/jo-duchan/tapflow/issues",
   "repository": {
@@ -12,7 +20,9 @@
   },
   "license": "MIT",
   "author": "tapflow contributors",
-  "os": ["darwin"],
+  "os": [
+    "darwin"
+  ],
   "type": "module",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
