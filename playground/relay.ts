@@ -2,7 +2,7 @@ import path from 'path'
 import { RelayServer, initDb } from '@tapflowio/relay'
 
 const PORT = Number(process.env.PORT ?? 4000)
-const dataDir = path.join(import.meta.dirname, '.tapflow')
+const dataDir = path.join(import.meta.dirname, '.tapflow-data')
 
 initDb(path.join(dataDir, 'tapflow.db'))
 

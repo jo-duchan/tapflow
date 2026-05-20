@@ -46,7 +46,7 @@ tapflow.config.json
 *.db-wal
 
 # playground runtime data (recordings, uploads, db)
-playground/.tapflow/
+playground/.tapflow-data/
 
 # playground test builds
 playground/test-builds/

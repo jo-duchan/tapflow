@@ -8,8 +8,7 @@
 {
   "server": {
     "port": 4000,
-    "dataDir": ".tapflow",
-    "jwtSecret": "CHANGE_THIS_TO_A_LONG_RANDOM_SECRET"
+    "dataDir": ".tapflow-data"
   },
   "smtp": {
     "host": "smtp.example.com",
@@ -31,8 +30,8 @@
 | 환경변수 | Config 키 | 기본값 | 설명 |
 |---------|-----------|--------|------|
 | `TAPFLOW_PORT` | `server.port` | `4000` | 서버 포트 |
-| `JWT_SECRET` | `server.jwtSecret` | *(개발용 기본값)* | JWT 서명 키 |
-| `TAPFLOW_DATA_DIR` | `server.dataDir` | `.tapflow` | DB·업로드 디렉토리 (상대 경로 지원) |
+| `JWT_SECRET` | — | *(개발용 기본값)* | JWT 서명 키 (환경변수 전용) |
+| `TAPFLOW_DATA_DIR` | `server.dataDir` | `.tapflow-data` | DB·업로드 디렉토리 (상대 경로 지원) |
 | `SMTP_HOST` | `smtp.host` | `` | SMTP 호스트 |
 | `SMTP_PORT` | `smtp.port` | `587` | SMTP 포트 |
 | `SMTP_SECURE` | `smtp.secure` | `false` | TLS 사용 여부 (`true` 문자열로 설정) |
@@ -52,10 +51,10 @@ openssl rand -hex 32
 
 ## 데이터 디렉토리
 
-릴레이는 모든 데이터를 `.tapflow/`에 저장합니다 (기본값):
+릴레이는 모든 데이터를 `.tapflow-data/`에 저장합니다 (기본값):
 
 ```
-.tapflow/
+.tapflow-data/
   tapflow.db        ← SQLite 데이터베이스
   uploads/
     builds/         ← .app.zip 및 .apk 파일

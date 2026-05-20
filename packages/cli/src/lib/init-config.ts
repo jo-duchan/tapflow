@@ -4,7 +4,7 @@ import path from 'path'
 const DEFAULT_CONFIG = {
   server: {
     port: 4000,
-    dataDir: '.tapflow',
+    dataDir: '.tapflow-data',
   },
   smtp: {
     host: '',

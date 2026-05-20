@@ -31,7 +31,7 @@ RUN npm install --omit=dev
 
 COPY tapflow.config.example.json ./tapflow.config.example.json
 
-VOLUME ["/app/.tapflow"]
+VOLUME ["/app/.tapflow-data"]
 EXPOSE 4000
 
 CMD ["node", "dist/server.js"]

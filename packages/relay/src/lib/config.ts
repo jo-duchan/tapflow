@@ -29,7 +29,7 @@ type DeepPartial<T> = { [K in keyof T]?: T[K] extends object ? DeepPartial<T[K]>
 const DEFAULTS = {
   server: {
     port: 4000,
-    dataDir: '.tapflow',
+    dataDir: '.tapflow-data',
   },
   smtp: {
     host: '',
