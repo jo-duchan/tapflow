@@ -20,7 +20,7 @@ export async function cmdRelayStart(opts: RelayStartOptions): Promise<void> {
   }
   const port = portResult.data
   initDb(path.join(config.server.dataDir, 'tapflow.db'))
-  const server = new RelayServer({ port })
+  const server = new RelayServer({ port, uploadsDir: path.join(config.server.dataDir, 'uploads') })
   await server.start()
   step(`Relay started on ws://localhost:${port}`)
 

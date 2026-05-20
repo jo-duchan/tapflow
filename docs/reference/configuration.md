@@ -56,7 +56,7 @@ The relay stores all data in `.tapflow/` by default:
 
 ```
 .tapflow/
-  db.sqlite         ← SQLite database
+  tapflow.db        ← SQLite database
   uploads/
     builds/         ← .app.zip and .apk files
     avatars/
