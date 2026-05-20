@@ -2,23 +2,7 @@
 
 tapflow scales horizontally — add more Mac hosts to the same relay to expand your device pool. Each Mac runs its own agent and connects outbound to the relay, so no firewall changes are required.
 
-## How it works
-
-```mermaid
-flowchart TD
-    B["Browser (QA team)"]
-    R["Relay Server<br/>Linux server or Mac"]
-    A1["Mac Agent 1<br/>iOS · Android simulators"]
-    A2["Mac Agent 2<br/>iOS · Android simulators"]
-    More["Mac Agent N<br/>iOS · Android simulators"]
-
-    B <-->|WebSocket| R
-    R <-->|WebSocket outbound| A1
-    R <-->|WebSocket outbound| A2
-    R -.->|WebSocket outbound| More
-```
-
-The dashboard shows all devices from all connected agents in a single list. QA picks any available device — tapflow routes the session to the right Mac automatically.
+See [Introduction — How it works](/guide/introduction#how-it-works) for a diagram.
 
 ## Adding a second Mac
 
@@ -55,9 +39,9 @@ tapflow status --relay wss://your-relay-url
 
 The agent name is derived from the Mac's system hostname (`scutil --get ComputerName` on macOS). To change it, update the hostname in **System Settings → General → Sharing → Computer Name**.
 
-## How many simulators per Mac?
+## Simulators per Mac
 
-iOS Simulator and Android Emulator are memory-intensive. The number you can run simultaneously depends on your Mac's RAM and CPU.
+iOS Simulator and Android Emulator are memory-intensive. Each Mac can typically run 2–4 simultaneously depending on available RAM.
 
 Simulators are booted and managed through the dashboard. The agent reports only booted simulators to the relay, so QA sees exactly what's available.
 

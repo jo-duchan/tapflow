@@ -15,8 +15,7 @@ const enSidebar = [
   {
     text: 'Setup',
     items: [
-      { text: 'iOS Agent Setup', link: '/guide/ios-agent' },
-      { text: 'Android Agent Setup', link: '/guide/android-agent' },
+      { text: 'Agent Setup', link: '/guide/agent' },
       { text: 'Self-Hosting the Relay', link: '/guide/self-hosting' },
       { text: 'Uploading Builds (CI/CD)', link: '/guide/upload-builds' },
       { text: 'Scaling Mac Resources', link: '/guide/scaling' },
