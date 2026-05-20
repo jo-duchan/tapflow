@@ -1,4 +1,5 @@
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
+import { Toaster } from 'sonner'
 import { DashboardLayout } from './layouts/DashboardLayout'
 import { Login } from './pages/Login'
 import { Invite } from './pages/Invite'
@@ -28,6 +29,7 @@ export function App() {
           <Route path="*" element={<Navigate to="/app-center" replace />} />
         </Route>
       </Routes>
+      <Toaster position="bottom-right" richColors />
     </BrowserRouter>
   )
 }

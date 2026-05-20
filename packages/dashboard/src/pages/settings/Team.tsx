@@ -16,6 +16,7 @@ import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from '@/components/ui/table'
 import { UserPlus } from 'lucide-react'
+import { toast } from 'sonner'
 
 type Member = { id: number; email: string; display_name: string; role: string; joined_at: string }
 
@@ -24,6 +25,11 @@ const inviteSchema = z.object({
   role: z.string().min(1),
 })
 type InviteData = z.infer<typeof inviteSchema>
+
+const inviteResponseSchema = z.object({
+  token: z.string(),
+  emailSent: z.boolean(),
+})
 
 export function TeamSettings() {
   const [members, setMembers] = useState<Member[]>([])
@@ -50,10 +56,15 @@ export function TeamSettings() {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ email: data.email, role: data.role }),
     })
-    const json = await res.json() as { token: string }
+    const json = inviteResponseSchema.parse(await res.json())
     const link = `${location.origin}/invite?token=${json.token}`
     setInviteLink(link)
     navigator.clipboard.writeText(link).catch(() => {})
+    if (json.emailSent) {
+      toast.success(`Invite email sent to ${data.email}`)
+    } else {
+      toast.warning('Invite link copied — email could not be sent. Check your SMTP settings.')
+    }
   }
 
   function handleDialogClose(open: boolean) {

@@ -29,8 +29,6 @@ COPY --from=builder /app/packages/relay/package.json ./
 
 RUN npm install --omit=dev
 
-COPY tapflow.config.example.json ./tapflow.config.example.json
-
 VOLUME ["/app/.tapflow-data"]
 EXPOSE 4000
 
