@@ -17,7 +17,7 @@ A single process on a single configurable port (default: 4000) handles both WebS
 - **builds**: build artifacts. `app_id FK → apps.id`. Contains `version_name`, `build_number`, `file_path`.
 - `bundle_id_key` is used to auto-lookup/create the `apps` row → re-uploading the same app adds only a new `builds` row.
 
-Build file storage path: `uploads/builds/` (legacy `uploads/apps/` is preserved).
+Build file storage path: `uploads/builds/`.
 
 iOS build format: `.app.zip` (simulator builds). `.ipa` uploads return 400.
 - Auto-extracts `CFBundleIdentifier`, `CFBundleShortVersionString`, `CFBundleVersion`, `CFBundleDisplayName`/`CFBundleName` from `*.app/Info.plist`.
@@ -38,7 +38,9 @@ iOS build format: `.app.zip` (simulator builds). `.ipa` uploads return 400.
 | Method | Path | Description |
 |--------|------|-------------|
 | `GET` | `/api/v1/apps` | App list (with latest_build summary) |
+| `POST` | `/api/v1/apps` | Create an app entry |
 | `PATCH` | `/api/v1/apps/:id` | Manually rename an app (Admin/Developer) |
+| `DELETE` | `/api/v1/apps/:id` | Delete an app (and its builds) |
 | `POST` | `/api/v1/builds` | Upload a build (`.app.zip` / `.apk`) |
 | `GET` | `/api/v1/builds` | Build list (filterable by `app_id`) |
 | `GET` | `/api/v1/builds/:id` | Single build |
