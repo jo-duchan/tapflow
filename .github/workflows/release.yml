@@ -20,9 +20,11 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 24
           cache: pnpm
           registry-url: https://registry.npmjs.org
+
+      - run: npm install -g npm@latest
 
       - run: pnpm install --frozen-lockfile
 
@@ -31,7 +33,6 @@ jobs:
       - run: pnpm changeset publish --no-git-tag --tag latest
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          NPM_CONFIG_PROVENANCE: 'true'
 
       - uses: softprops/action-gh-release@v2
         with:
