@@ -1,6 +1,6 @@
 {
   "name": "@tapflowio/agent-core",
-  "version": "0.1.0-alpha.3",
+  "version": "0.1.0-alpha.4",
   "description": "DeviceAgent interface, AgentRegistry, and shared utilities for tapflow agents",
   "keywords": [
     "tapflow",
