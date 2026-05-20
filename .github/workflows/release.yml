@@ -28,9 +28,10 @@ jobs:
 
       - run: pnpm build
 
-      - run: pnpm changeset publish --no-git-tag --tag latest --provenance
+      - run: pnpm changeset publish --no-git-tag --tag latest
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          NPM_CONFIG_PROVENANCE: 'true'
 
       - uses: softprops/action-gh-release@v2
         with:
