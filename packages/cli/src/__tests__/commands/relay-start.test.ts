@@ -8,7 +8,7 @@ vi.mock('@tapflowio/relay', () => ({
   config: { server: { dataDir: '/tmp/tapflow-test' } },
 }))
 
-import { RelayServer } from '@tapflowio/relay'
+import { RelayServer, initDb } from '@tapflowio/relay'
 import { cmdRelayStart } from '../../commands/relay-start.js'
 
 describe('cmdRelayStart', () => {
@@ -31,6 +31,19 @@ describe('cmdRelayStart', () => {
     await cmdRelayStart({})
     expect(RelayServer).toHaveBeenCalledWith(expect.objectContaining({ port: 4000 }))
     expect(vi.mocked(RelayServer).mock.results[0]?.value.start).toHaveBeenCalled()
+  })
+
+  it('initDb가 RelayServer 생성 전에 호출됨', async () => {
+    const callOrder: string[] = []
+    vi.mocked(initDb).mockImplementation(() => { callOrder.push('initDb') })
+    vi.mocked(RelayServer).mockImplementation(() => {
+      callOrder.push('RelayServer')
+      return { start: vi.fn().mockResolvedValue(undefined) } as never
+    })
+
+    await cmdRelayStart({})
+
+    expect(callOrder.indexOf('initDb')).toBeLessThan(callOrder.indexOf('RelayServer'))
   })
 
   it('--port 옵션으로 포트 변경', async () => {

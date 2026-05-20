@@ -25,7 +25,7 @@ vi.mock('@tapflowio/android-agent', () => ({
 }))
 
 import { execSync } from 'node:child_process'
-import { RelayServer } from '@tapflowio/relay'
+import { RelayServer, initDb } from '@tapflowio/relay'
 import { IOSAgent } from '@tapflowio/ios-agent'
 import { AndroidAgent } from '@tapflowio/android-agent'
 import { cmdStart } from '../../commands/start.js'
@@ -69,6 +69,19 @@ describe('cmdStart', () => {
     await cmdStart({})
     expect(RelayServer).toHaveBeenCalledWith(expect.objectContaining({ port: 4000 }))
     expect(vi.mocked(RelayServer).mock.results[0]?.value.start).toHaveBeenCalled()
+  })
+
+  it('initDb가 RelayServer 생성 전에 호출됨', async () => {
+    const callOrder: string[] = []
+    vi.mocked(initDb).mockImplementation(() => { callOrder.push('initDb') })
+    vi.mocked(RelayServer).mockImplementation(() => {
+      callOrder.push('RelayServer')
+      return { start: vi.fn().mockResolvedValue(undefined) } as never
+    })
+
+    await cmdStart({})
+
+    expect(callOrder.indexOf('initDb')).toBeLessThan(callOrder.indexOf('RelayServer'))
   })
 
   it('macOS + adb 있으면 iOS와 Android 모두 연결', async () => {
