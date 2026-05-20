@@ -1,6 +1,6 @@
 # Uploading Builds
 
-Upload iOS or Android builds so your QA team can test them.
+Upload iOS or Android builds so your QA can test them.
 
 ## Dashboard upload
 
