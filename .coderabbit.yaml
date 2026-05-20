@@ -1,0 +1,20 @@
+language: en-US
+
+tone_instructions: "Be constructive and concise. Focus on correctness, type safety, and protocol consistency."
+
+reviews:
+  profile: chill
+  request_changes_workflow: false
+  high_level_summary: true
+  poem: false
+  review_status: true
+  auto_review:
+    enabled: true
+    drafts: false
+  path_filters:
+    - "!pnpm-lock.yaml"
+    - "!packages/ios-agent/bin/**"
+    - "!packages/android-agent/bin/**"
+    - "!docs/.vitepress/theme/tapflow-*.json"
+    - "!internal/**"
+    - "!docs/public/**"
