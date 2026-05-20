@@ -23,10 +23,10 @@
 
 ## Demo
 
+<video src="https://github.com/user-attachments/assets/01914ed2-f35c-4230-ae01-166ffe6af395" controls width="100%"></video>
+
 <div align="center">
-  <a href="https://github.com/user-attachments/assets/01914ed2-f35c-4230-ae01-166ffe6af395">
-    <img src="https://raw.githubusercontent.com/jo-duchan/tapflow/main/docs/public/demo-thumbnail.png" alt="tapflow demo — click to play" width="100%" />
-  </a>
+  <a href="https://jo-duchan.github.io/tapflow/guide/introduction">▶ Watch demo</a>
 </div>
 
 ---

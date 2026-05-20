@@ -21,7 +21,7 @@
 ## Demo
 
 <div align="center">
-  <a href="https://github.com/user-attachments/assets/01914ed2-f35c-4230-ae01-166ffe6af395">
+  <a href="https://github.com/user-attachments/assets/01914ed2-f35c-4230-ae01-166ffe6af395" target="_blank" rel="noopener noreferrer">
     <img src="https://raw.githubusercontent.com/jo-duchan/tapflow/main/docs/public/demo-thumbnail.png" alt="tapflow demo — click to play" width="100%" />
   </a>
   <p><em>Click to play</em></p>
