@@ -46,6 +46,7 @@ export class RelayServer {
   private router: Router
   private resourceBuffers = new Map<string, { cpu: number[]; mem: number[] }>()
   private logBuffer: string[] = []
+  private recordingsDir: string = ''
   private purgeRecordingsTimer: ReturnType<typeof setInterval> | null = null
   private purgeOldResourcesTimer: ReturnType<typeof setInterval> | null = null
   private flushResourcesTimer: ReturnType<typeof setInterval> | null = null
@@ -113,13 +114,10 @@ export class RelayServer {
     this.router.patch('/api/v1/profile', (req, res) => handleUpdateProfile(req, res, u))
 
     // recordings
-    const recordingsDir = path.join(u, '../recordings')
-    purgeExpiredRecordings(recordingsDir)
-    this.purgeRecordingsTimer = setInterval(() => purgeExpiredRecordings(recordingsDir), 24 * 60 * 60 * 1000)
-    this.purgeRecordingsTimer.unref()
-    this.router.post('/api/v1/recordings/upload', (req, res) => handleUploadRecording(req, res, recordingsDir))
+    this.recordingsDir = path.join(u, '../recordings')
+    this.router.post('/api/v1/recordings/upload', (req, res) => handleUploadRecording(req, res, this.recordingsDir))
     this.router.get('/api/v1/recordings', (req, res) => handleListRecordings(req, res))
-    this.router.get('/api/v1/recordings/:filename', (req, res) => handleDownloadRecording(req, res, recordingsDir))
+    this.router.get('/api/v1/recordings/:filename', (req, res) => handleDownloadRecording(req, res, this.recordingsDir))
 
     // logs
     this.router.get('/api/v1/logs', (req, res) => {
@@ -130,14 +128,6 @@ export class RelayServer {
     })
 
     // agent resources
-    const purgeOldResources = () => {
-      getDb().prepare(`DELETE FROM agent_resources WHERE recorded_at < strftime('%Y-%m-%dT%H:%M:%fZ', 'now', '-30 days')`).run()
-    }
-    purgeOldResources()
-    this.purgeOldResourcesTimer = setInterval(purgeOldResources, 24 * 60 * 60 * 1000)
-    this.purgeOldResourcesTimer.unref()
-    this.flushResourcesTimer = setInterval(() => this.flushResourceBuffers(), 60_000)
-    this.flushResourcesTimer.unref()
     this.router.get('/api/v1/agents', handleListAgents)
     this.router.get('/api/v1/agents/:name/resources', handleGetAgentResources)
   }
@@ -150,6 +140,19 @@ export class RelayServer {
   }
 
   start(): Promise<void> {
+    purgeExpiredRecordings(this.recordingsDir)
+    this.purgeRecordingsTimer = setInterval(() => purgeExpiredRecordings(this.recordingsDir), 24 * 60 * 60 * 1000)
+    this.purgeRecordingsTimer.unref()
+
+    const purgeOldResources = () => {
+      getDb().prepare(`DELETE FROM agent_resources WHERE recorded_at < strftime('%Y-%m-%dT%H:%M:%fZ', 'now', '-30 days')`).run()
+    }
+    purgeOldResources()
+    this.purgeOldResourcesTimer = setInterval(purgeOldResources, 24 * 60 * 60 * 1000)
+    this.purgeOldResourcesTimer.unref()
+    this.flushResourcesTimer = setInterval(() => this.flushResourceBuffers(), 60_000)
+    this.flushResourcesTimer.unref()
+
     return new Promise((resolve, reject) => {
       this.httpServer.once('error', (err: NodeJS.ErrnoException) => {
         if (err.code === 'EADDRINUSE') {

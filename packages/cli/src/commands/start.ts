@@ -1,4 +1,5 @@
-import { RelayServer } from '@tapflowio/relay'
+import { RelayServer, initDb, config } from '@tapflowio/relay'
+import path from 'path'
 import { AndroidAgent } from '@tapflowio/android-agent'
 import { banner, createSpinner, step } from '../lib/print.js'
 import { hasAdb } from '../lib/platform.js'
@@ -20,6 +21,7 @@ export async function cmdStart(opts: StartOptions): Promise<void> {
   const runAndroid = explicit === 'android' || explicit === 'all' || (!explicit && hasAdb())
 
   // ── 1. Relay (always local) ───────────────────────────────────────────────
+  initDb(path.join(config.server.dataDir, 'tapflow.db'))
   const server = new RelayServer({ port: RELAY_PORT })
   await server.start()
   step(`Relay started on ws://localhost:${RELAY_PORT}`)

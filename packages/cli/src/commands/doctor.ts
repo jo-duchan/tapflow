@@ -1,11 +1,14 @@
 import { runDoctorChecks, type DoctorCheck } from '../lib/doctor.js'
-import { banner, step, GREEN, RED, BOLD, DIM, R } from '../lib/print.js'
+import { banner, step, GREEN, RED, YELLOW, BOLD, DIM, R } from '../lib/print.js'
 
 function printChecks(checks: DoctorCheck[]): boolean {
   let hasFailure = false
   for (const check of checks) {
     if (check.ok) {
       console.log(`  ${GREEN}✓${R}  ${check.label}`)
+    } else if (check.warn) {
+      console.log(`  ${YELLOW}⚠${R}  ${check.label}`)
+      if (check.detail) console.log(`${DIM}       → ${check.detail}${R}`)
     } else {
       console.log(`  ${RED}✗${R}  ${check.label}`)
       if (check.detail) console.log(`${DIM}       → ${check.detail}${R}`)

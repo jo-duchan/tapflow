@@ -4,6 +4,8 @@ vi.mock('@tapflowio/relay', () => ({
   RelayServer: vi.fn().mockImplementation(() => ({
     start: vi.fn().mockResolvedValue(undefined),
   })),
+  initDb: vi.fn(),
+  config: { server: { dataDir: '/tmp/tapflow-test' } },
 }))
 
 import { RelayServer } from '@tapflowio/relay'

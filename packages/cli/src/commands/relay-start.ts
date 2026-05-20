@@ -1,5 +1,6 @@
+import path from 'path'
 import { z } from 'zod'
-import { RelayServer } from '@tapflowio/relay'
+import { RelayServer, initDb, config } from '@tapflowio/relay'
 import { banner, step } from '../lib/print.js'
 
 export interface RelayStartOptions {
@@ -18,6 +19,7 @@ export async function cmdRelayStart(opts: RelayStartOptions): Promise<void> {
     process.exit(1)
   }
   const port = portResult.data
+  initDb(path.join(config.server.dataDir, 'tapflow.db'))
   const server = new RelayServer({ port })
   await server.start()
   step(`Relay started on ws://localhost:${port}`)

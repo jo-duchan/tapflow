@@ -3,6 +3,7 @@ import { execSync } from 'node:child_process'
 export interface DoctorCheck {
   label: string
   ok: boolean
+  warn?: boolean
   detail?: string
 }
 
@@ -103,6 +104,7 @@ function checkBootedAvd(): DoctorCheck {
       return {
         label: 'AVD',
         ok: false,
+        warn: true,
         detail: hint
           ? `No running emulator. Run: emulator @${hint}`
           : 'No running emulator. Start an AVD from Android Studio > Device Manager.',
