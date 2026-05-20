@@ -12,6 +12,7 @@
     "@tapflowio/playground": "0.0.0"
   },
   "changesets": [
+    "fix-ci-release-tag",
     "rename-data-dir"
   ]
 }

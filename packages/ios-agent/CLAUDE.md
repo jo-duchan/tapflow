@@ -182,7 +182,7 @@ Cache key: `tapflow-frame-v2-{chromeName}.png`
 innerRadius = max(outerRadius - bezelInset, 0)
 bezelInset  = max(leftWidth, topHeight)   // chrome.json images.sizing
 ```
-`ChromeData.screenCornerRadius` is in 2× px units. CSS conversion in `SimulatorViewer.tsx`: `÷2 × displayScale`.
+`ChromeData.screenCornerRadius` is in 2× px units. CSS conversion in `IOSViewer.tsx`: `÷2 × displayScale`.
 
 ---
 

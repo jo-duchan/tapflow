@@ -60,7 +60,7 @@ socket.onmessage = (e) => {
   try { onMessageRef.current(JSON.parse(e.data)) } catch { }
 }
 
-// SimulatorViewer.tsx — frame rendering
+// IOSViewer.tsx — frame rendering
 createImageBitmap(new Blob([data], { type: 'image/jpeg' }))
   .then((bitmap) => {
     ctx.drawImage(bitmap, 0, 0)
