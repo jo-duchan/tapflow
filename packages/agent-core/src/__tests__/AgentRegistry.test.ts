@@ -36,8 +36,16 @@ describe('AgentRegistry', () => {
   })
 
   it('throws when platform is not registered', () => {
-    expect(() => AgentRegistry.get('unknown')).toThrow(PlatformError)
-    expect(() => AgentRegistry.get('unknown')).toThrow('No agent registered for platform: unknown')
+    let thrown: unknown
+
+    try {
+      AgentRegistry.get('unknown')
+    } catch (error) {
+      thrown = error
+    }
+
+    expect(thrown).toBeInstanceOf(PlatformError)
+    expect((thrown as Error).message).toBe('No agent registered for platform: unknown')
   })
 
 

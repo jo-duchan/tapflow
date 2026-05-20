@@ -391,7 +391,7 @@ export class AndroidAgent implements DeviceAgent {
       if (seq !== state.bootSeq) return
 
       const target = devices.find((d) => d.id === avdId)
-      if (!target) throw new ValidationError(`Device not found: ${avdId}`)
+      if (!target) throw new PlatformError(`Device not found: ${avdId}`)
 
       if (target.status !== 'booted') {
         this.launcher.launch(avdName)

@@ -10,7 +10,7 @@ const BINARY = join(import.meta.dirname, '..', 'bin', 'screencapture-helper')
 
 function ensureCompiled(): void {
   if (existsSync(BINARY)) {
-    // Swift source is not included in the published package - skip recompilation check
+    // Swift source is not included in the published package — skip recompilation check
     if (!existsSync(SWIFT_SRC)) return
     const srcMtime = statSync(SWIFT_SRC).mtimeMs
     const binMtime = statSync(BINARY).mtimeMs
@@ -19,7 +19,7 @@ function ensureCompiled(): void {
     unlinkSync(BINARY)
   }
   if (!existsSync(SWIFT_SRC)) {
-    throw new PlatformError('screencapture-helper binary missing and Swift source not found - reinstall @tapflowio/ios-agent')
+    throw new PlatformError('screencapture-helper binary missing and Swift source not found — reinstall @tapflowio/ios-agent')
   }
   logger.info('compiling screencapture-helper...')
   execFileSync('swiftc', [
