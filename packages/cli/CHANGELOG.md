@@ -1,5 +1,19 @@
 # tapflow
 
+## 0.1.0-alpha.7
+
+### Patch Changes
+
+- f13bd85: **Breaking change**: default `dataDir` renamed from `.tapflow` to `.tapflow-data`.
+
+  If you have an existing `.tapflow/` directory, either rename it to `.tapflow-data/` or set `dataDir: ".tapflow"` in `tapflow.config.json` to keep using the old path.
+
+- Updated dependencies [f13bd85]
+  - @tapflowio/relay@0.1.0-alpha.7
+  - @tapflowio/android-agent@0.1.0-alpha.7
+  - @tapflowio/ios-agent@0.1.0-alpha.7
+  - @tapflowio/agent-core@0.1.0-alpha.7
+
 ## 0.1.0-alpha.2
 
 ### Patch Changes
