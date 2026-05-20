@@ -26,7 +26,7 @@
 <video src="https://github.com/user-attachments/assets/01914ed2-f35c-4230-ae01-166ffe6af395" controls width="100%"></video>
 
 <div align="center">
-  <a href="https://tapflow-docs.vercel.app/guide/introduction.html#introduction">▶ Watch demo</a>
+  <a href="https://www.tapflow.dev/guide/introduction.html#introduction">▶ Watch demo</a>
 </div>
 
 ---
