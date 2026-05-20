@@ -26,8 +26,7 @@ export function cmdDevices(): void {
     }
     if (available.length > 0) {
       lines.push('  Available:')
-      for (const d of available.slice(0, 20)) lines.push(`    ○ ${d.name}  ${d.udid}`)
-      if (available.length > 20) lines.push(`    … and ${available.length - 20} more`)
+      for (const d of available) lines.push(`    ○ ${d.name}  ${d.udid}`)
     }
     if (lines.length > 0) sections.push('iOS Simulators:\n' + lines.join('\n'))
   } catch {
