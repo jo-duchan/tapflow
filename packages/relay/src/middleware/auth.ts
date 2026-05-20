@@ -2,7 +2,7 @@ import http from 'http'
 import crypto from 'crypto'
 import jwt from 'jsonwebtoken'
 import { getDb } from '../db.js'
-import { config } from '../lib/config.js'
+import { jwtSecret } from '../lib/config.js'
 
 export interface AuthContext {
   userId: number
@@ -13,12 +13,12 @@ export interface AuthContext {
 const JWT_EXPIRES = '7d'
 
 export function signJwt(payload: AuthContext): string {
-  return jwt.sign(payload, config.server.jwtSecret, { expiresIn: JWT_EXPIRES })
+  return jwt.sign(payload, jwtSecret, { expiresIn: JWT_EXPIRES })
 }
 
 export function verifyJwt(token: string): AuthContext | null {
   try {
-    return jwt.verify(token, config.server.jwtSecret) as AuthContext
+    return jwt.verify(token, jwtSecret) as AuthContext
   } catch {
     return null
   }

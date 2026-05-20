@@ -4,6 +4,7 @@ import { AndroidAgent } from '@tapflowio/android-agent'
 import { banner, createSpinner, step } from '../lib/print.js'
 import { hasAdb } from '../lib/platform.js'
 import { resolveAndBootIOSDevice } from '../lib/ios-boot.js'
+import { initConfigFile } from '../lib/init-config.js'
 
 export interface StartOptions {
   device?: string
@@ -21,6 +22,7 @@ export async function cmdStart(opts: StartOptions): Promise<void> {
   const runAndroid = explicit === 'android' || explicit === 'all' || (!explicit && hasAdb())
 
   // ── 1. Relay (always local) ───────────────────────────────────────────────
+  initConfigFile()
   initDb(path.join(config.server.dataDir, 'tapflow.db'))
   const server = new RelayServer({ port: RELAY_PORT, uploadsDir: path.join(config.server.dataDir, 'uploads') })
   await server.start()

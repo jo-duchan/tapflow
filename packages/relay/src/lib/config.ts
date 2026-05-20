@@ -5,11 +5,12 @@ import { createLogger } from '@tapflowio/agent-core'
 
 const logger = createLogger('relay:config')
 
+const DEV_DEFAULT_SECRET = 'tapflow-dev-secret-change-in-production'
+
 const configSchema = z.object({
   server: z.object({
     port: z.number().int().min(1).max(65535),
     dataDir: z.string().min(1),
-    jwtSecret: z.string().min(32, 'jwtSecret must be at least 32 characters'),
   }),
   smtp: z.object({
     host: z.string(),
@@ -29,7 +30,6 @@ const DEFAULTS = {
   server: {
     port: 4000,
     dataDir: '.tapflow',
-    jwtSecret: 'tapflow-dev-secret-change-in-production',
   },
   smtp: {
     host: '',
@@ -46,22 +46,25 @@ function resolveDataDir(raw: string): string {
 }
 
 function load(): TapflowConfig {
-  let file: DeepPartial<TapflowConfig> = {}
+  let file: DeepPartial<TapflowConfig> & { server?: { jwtSecret?: unknown } } = {}
 
   const configPath = path.join(process.cwd(), 'tapflow.config.json')
   if (fs.existsSync(configPath)) {
     try {
-      file = JSON.parse(fs.readFileSync(configPath, 'utf-8')) as DeepPartial<TapflowConfig>
+      file = JSON.parse(fs.readFileSync(configPath, 'utf-8')) as typeof file
     } catch {
       logger.warn('Failed to parse tapflow.config.json — using defaults')
     }
+  }
+
+  if (file.server?.jwtSecret) {
+    logger.warn('server.jwtSecret in tapflow.config.json is deprecated — use JWT_SECRET env var instead')
   }
 
   const cfg: TapflowConfig = {
     server: {
       port: file.server?.port ?? DEFAULTS.server.port,
       dataDir: resolveDataDir(file.server?.dataDir ?? DEFAULTS.server.dataDir),
-      jwtSecret: file.server?.jwtSecret ?? DEFAULTS.server.jwtSecret,
     },
     smtp: {
       host: file.smtp?.host ?? DEFAULTS.smtp.host,
@@ -73,10 +76,8 @@ function load(): TapflowConfig {
     },
   }
 
-  // env vars override config file (useful for Docker / CI)
   if (process.env.TAPFLOW_PORT) cfg.server.port = Number(process.env.TAPFLOW_PORT)
   if (process.env.TAPFLOW_DATA_DIR) cfg.server.dataDir = resolveDataDir(process.env.TAPFLOW_DATA_DIR)
-  if (process.env.JWT_SECRET) cfg.server.jwtSecret = process.env.JWT_SECRET
   if (process.env.SMTP_HOST) cfg.smtp.host = process.env.SMTP_HOST
   if (process.env.SMTP_PORT) cfg.smtp.port = Number(process.env.SMTP_PORT)
   if (process.env.SMTP_SECURE) cfg.smtp.secure = process.env.SMTP_SECURE === 'true'
@@ -92,11 +93,20 @@ function load(): TapflowConfig {
     process.exit(1)
   }
 
-  if (cfg.server.jwtSecret === DEFAULTS.server.jwtSecret) {
-    logger.warn('JWT_SECRET is using the dev default — set a strong secret in production')
-  }
-
   return result.data
 }
 
+function loadJwtSecret(): string {
+  if (process.env.JWT_SECRET) {
+    if (process.env.JWT_SECRET.length < 32) {
+      logger.error('config error: JWT_SECRET — must be at least 32 characters')
+      process.exit(1)
+    }
+    return process.env.JWT_SECRET
+  }
+  logger.warn('JWT_SECRET is using the dev default — set a strong secret in production')
+  return DEV_DEFAULT_SECRET
+}
+
 export const config = load()
+export const jwtSecret = loadJwtSecret()

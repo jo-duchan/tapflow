@@ -33,16 +33,9 @@ tapflow relay start
 tapflow agent start --relay wss://your-relay-url
 ```
 
-## 로컬 설치 (Node.js)
+## 배포 설정
 
-```sh
-npm install -g tapflow
-tapflow relay start
-```
-
-릴레이는 현재 디렉토리에서 `tapflow.config.json`을 읽습니다. [설정 파일](/ko/reference/configuration)을 참고하세요.
-
-## JWT_SECRET 설정
+### JWT_SECRET
 
 ::: warning 서버 배포 시 반드시 교체하세요
 기본값(`tapflow-dev-secret-change-in-production`)이 소스코드에 공개되어 있습니다. 이 값을 그대로 사용하면 누구나 유효한 토큰을 위조할 수 있습니다.
@@ -54,48 +47,32 @@ tapflow relay start
 openssl rand -hex 32
 ```
 
-생성된 값을 환경변수로 주입합니다:
+생성된 값을 환경변수로 주입해 릴레이를 시작합니다:
 
 ```sh
-# Node.js
 JWT_SECRET=YOUR_JWT_SECRET tapflow relay start
-
-# PM2
-JWT_SECRET=YOUR_JWT_SECRET pm2 start tapflow --name relay -- relay start
 ```
 
 한 번 설정한 후에는 값을 유지하세요. 변경하면 기존 세션이 즉시 모두 만료됩니다. 시크릿이 유출됐거나 의도적으로 전체 세션을 초기화할 때만 교체하면 됩니다.
 
-## PM2 (서버 운영 권장)
+### tapflow.config.json
 
-서버에서 릴레이를 안정적으로 운영할 때 권장합니다. 크래시 시 자동 재시작, 서버 재부팅 후 자동 시작, 로그 관리를 처리합니다.
+릴레이는 현재 디렉토리에서 `tapflow.config.json`을 읽습니다. [설정 파일](/ko/reference/configuration)을 참고하세요.
 
-```sh
-npm install -g pm2 tapflow
-```
+## 내부 공유
 
-위에서 생성한 `JWT_SECRET`을 환경변수로 주입해 시작합니다:
+같은 네트워크의 팀원이 대시보드에 접근하는 가장 간단한 방법입니다.
 
 ```sh
-JWT_SECRET=YOUR_JWT_SECRET pm2 start tapflow --name relay -- relay start
-pm2 save
-pm2 startup
+npm install -g tapflow
+JWT_SECRET=YOUR_JWT_SECRET tapflow relay start
 ```
 
-tapflow를 업데이트할 때는:
-
-```sh
-npm update -g tapflow
-pm2 restart relay
-```
-
-::: tip 다음 단계
-릴레이가 실행되면 `tapflow init`으로 최초 관리자 계정을 생성합니다. 이후 팀원 초대와 첫 빌드 업로드는 [대시보드 최초 설정](/ko/dashboard/setup)을 참고하세요.
-:::
+팀원은 `http://<mac-local-ip>:4000`으로 대시보드에 접속합니다.
 
 ## 외부 공유
 
-위 방식 중 어느 것으로 릴레이를 실행하든, 로컬호스트 밖에서 팀원이 접근하거나 에이전트가 다른 네트워크에서 연결하려면 외부 URL이 필요합니다.
+로컬 네트워크 밖에서 팀원이 대시보드에 접근하거나 에이전트가 다른 네트워크에서 연결하려면 외부 URL이 필요합니다.
 
 ### ngrok (빠른 시작)
 
@@ -162,3 +139,29 @@ tapflow.myteam.example.com {
 
 Caddy는 TLS와 WebSocket 업그레이드를 자동으로 처리합니다.
 
+## PM2 (서버 운영 권장)
+
+크래시 시 자동 재시작, 서버 재부팅 후 자동 시작, 로그 관리를 처리합니다.
+
+```sh
+npm install -g pm2 tapflow
+```
+
+위에서 생성한 `JWT_SECRET`을 환경변수로 주입해 시작합니다:
+
+```sh
+JWT_SECRET=YOUR_JWT_SECRET pm2 start tapflow --name relay -- relay start
+pm2 save
+pm2 startup
+```
+
+tapflow를 업데이트할 때는:
+
+```sh
+npm update -g tapflow
+pm2 restart relay
+```
+
+::: tip 다음 단계
+릴레이가 실행되면 `tapflow init`으로 최초 관리자 계정을 생성합니다. 이후 팀원 초대와 첫 빌드 업로드는 [대시보드 최초 설정](/ko/dashboard/setup)을 참고하세요.
+:::
