@@ -8,8 +8,7 @@ The relay reads `tapflow.config.json` from the directory where it is started.
 {
   "server": {
     "port": 4000,
-    "dataDir": ".tapflow",
-    "jwtSecret": "CHANGE_THIS_TO_A_LONG_RANDOM_SECRET"
+    "dataDir": ".tapflow-data"
   },
   "smtp": {
     "host": "smtp.example.com",
@@ -31,8 +30,8 @@ Environment variables always take precedence over the config file — useful for
 | Variable | Config key | Default | Description |
 |----------|------------|---------|-------------|
 | `TAPFLOW_PORT` | `server.port` | `4000` | Server port |
-| `JWT_SECRET` | `server.jwtSecret` | *(dev default)* | JWT signing key |
-| `TAPFLOW_DATA_DIR` | `server.dataDir` | `.tapflow` | DB and uploads directory (supports relative paths) |
+| `JWT_SECRET` | — | *(dev default)* | JWT signing key (env only) |
+| `TAPFLOW_DATA_DIR` | `server.dataDir` | `.tapflow-data` | DB and uploads directory (supports relative paths) |
 | `SMTP_HOST` | `smtp.host` | `` | SMTP host |
 | `SMTP_PORT` | `smtp.port` | `587` | SMTP port |
 | `SMTP_SECURE` | `smtp.secure` | `false` | Enable TLS (set to string `"true"`) |
@@ -52,10 +51,10 @@ openssl rand -hex 32
 
 ## Data directory
 
-The relay stores all data in `.tapflow/` by default:
+The relay stores all data in `.tapflow-data/` by default:
 
 ```
-.tapflow/
+.tapflow-data/
   tapflow.db        ← SQLite database
   uploads/
     builds/         ← .app.zip and .apk files
