@@ -24,7 +24,7 @@ export async function cmdStatus(opts: { relay?: string }): Promise<void> {
         clearTimeout(timeout)
         ws.close()
 
-        const sessions: Array<{ agentName: string; devices: Array<{ name: string; status: string; joinedBy?: string }> }> = msg.sessions ?? []
+        const sessions: Array<{ agentName: string; platform?: string; devices: Array<{ name: string; status: string; joinedBy?: string }> }> = msg.sessions ?? []
 
         if (sessions.length === 0) {
           console.log(`  ${DIM}No agents connected.${R}\n`)
@@ -33,7 +33,9 @@ export async function cmdStatus(opts: { relay?: string }): Promise<void> {
           let activeSessions = 0
 
           for (const session of sessions) {
-            console.log(`  ${BOLD}${GREEN}●${R} ${BOLD}${session.agentName}${R}`)
+            const platformLabel = session.platform === 'ios' ? 'iOS' : session.platform === 'android' ? 'Android' : session.platform
+            const platformSuffix = platformLabel ? `  ${DIM}(${platformLabel})${R}` : ''
+            console.log(`  ${BOLD}${GREEN}●${R} ${BOLD}${session.agentName}${R}${platformSuffix}`)
             for (const device of session.devices ?? []) {
               const occupied = !!device.joinedBy
               const dot = occupied ? `${YELLOW}◉${R}` : `${DIM}○${R}`

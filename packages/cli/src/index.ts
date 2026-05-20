@@ -10,6 +10,11 @@ import { cmdReset } from './commands/reset.js'
 import { cmdStatus } from './commands/status.js'
 import { cmdLogs } from './commands/logs.js'
 
+process.on('unhandledRejection', (err) => {
+  console.error(err instanceof Error ? err.message : String(err))
+  process.exit(1)
+})
+
 const cli = cac('tapflow')
 
 cli
@@ -36,16 +41,24 @@ cli
   .action((opts: { platform?: 'ios' | 'android' | 'all'; device?: string }) => cmdStart(opts))
 
 cli
-  .command('relay start', 'Start the relay server only (no agents)')
+  .command('relay <subcommand>', 'Relay server commands (subcommand: start)')
   .option('--port <n>', 'Port to listen on (default: 4000)')
-  .action((opts: { port?: number }) => cmdRelayStart(opts))
+  .action((subcommand: string, opts: { port?: number }) => {
+    if (subcommand === 'start') return cmdRelayStart(opts)
+    console.error(`Unknown subcommand: relay ${subcommand}`)
+    process.exit(1)
+  })
 
 cli
-  .command('agent start', 'Start agents and connect to a relay (no local relay spawned)')
+  .command('agent <subcommand>', 'Agent commands (subcommand: start)')
   .option('--relay <url>', 'Relay WebSocket URL (default: ws://localhost:4000)')
   .option('--platform <platform>', 'Platform to start: ios | android | all (default: auto-detect)')
   .option('--device <name>', 'iOS Simulator name or UDID to use')
-  .action((opts: { relay?: string; platform?: 'ios' | 'android' | 'all'; device?: string }) => cmdAgentStart(opts))
+  .action((subcommand: string, opts: { relay?: string; platform?: 'ios' | 'android' | 'all'; device?: string }) => {
+    if (subcommand === 'start') return cmdAgentStart(opts)
+    console.error(`Unknown subcommand: agent ${subcommand}`)
+    process.exit(1)
+  })
 
 cli
   .command('reset', 'Shut down all simulators')
