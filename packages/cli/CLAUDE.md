@@ -31,7 +31,7 @@ Each command has exactly one responsibility. `tapflow start` is for local develo
 
 - UX standard: one-line input → progress feedback → result message. Use spinners and banners for visual feedback.
 - Config and cache are stored in `~/.tapflow/`.
-- Package dependencies: `@tapflow/agent-core`, `@tapflow/ios-agent`, `@tapflow/relay`. Import as libraries — do not reimplement.
+- Package dependencies: `@tapflowio/agent-core`, `@tapflowio/ios-agent`, `@tapflowio/relay`. Import as libraries — do not reimplement.
 
 ## HOW NOT
 

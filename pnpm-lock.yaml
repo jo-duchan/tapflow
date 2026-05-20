@@ -60,14 +60,14 @@ importers:
 
   packages/android-agent:
     dependencies:
-      '@tapflow/agent-core':
+      '@tapflowio/agent-core':
         specifier: workspace:*
         version: link:../agent-core
       ws:
         specifier: ^8.0.0
         version: 8.20.1
     devDependencies:
-      '@tapflow/relay':
+      '@tapflowio/relay':
         specifier: workspace:*
         version: link:../relay
       '@types/node':
@@ -85,16 +85,16 @@ importers:
 
   packages/cli:
     dependencies:
-      '@tapflow/agent-core':
+      '@tapflowio/agent-core':
         specifier: workspace:*
         version: link:../agent-core
-      '@tapflow/android-agent':
+      '@tapflowio/android-agent':
         specifier: workspace:*
         version: link:../android-agent
-      '@tapflow/ios-agent':
+      '@tapflowio/ios-agent':
         specifier: workspace:*
         version: link:../ios-agent
-      '@tapflow/relay':
+      '@tapflowio/relay':
         specifier: workspace:*
         version: link:../relay
       cac:
@@ -261,14 +261,14 @@ importers:
 
   packages/ios-agent:
     dependencies:
-      '@tapflow/agent-core':
+      '@tapflowio/agent-core':
         specifier: workspace:*
         version: link:../agent-core
       ws:
         specifier: ^8.0.0
         version: 8.20.1
     devDependencies:
-      '@tapflow/relay':
+      '@tapflowio/relay':
         specifier: workspace:*
         version: link:../relay
       '@types/node':
@@ -286,7 +286,7 @@ importers:
 
   packages/relay:
     dependencies:
-      '@tapflow/agent-core':
+      '@tapflowio/agent-core':
         specifier: workspace:*
         version: link:../agent-core
       better-sqlite3:
@@ -335,16 +335,16 @@ importers:
 
   playground:
     dependencies:
-      '@tapflow/agent-core':
+      '@tapflowio/agent-core':
         specifier: workspace:*
         version: link:../packages/agent-core
-      '@tapflow/android-agent':
+      '@tapflowio/android-agent':
         specifier: workspace:*
         version: link:../packages/android-agent
-      '@tapflow/ios-agent':
+      '@tapflowio/ios-agent':
         specifier: workspace:*
         version: link:../packages/ios-agent
-      '@tapflow/relay':
+      '@tapflowio/relay':
         specifier: workspace:*
         version: link:../packages/relay
       ws:

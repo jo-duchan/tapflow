@@ -1,12 +1,12 @@
 import { describe, it, expect, vi, beforeEach, afterEach, type MockInstance } from 'vitest'
 
-vi.mock('@tapflow/relay', () => ({
+vi.mock('@tapflowio/relay', () => ({
   RelayServer: vi.fn().mockImplementation(() => ({
     start: vi.fn().mockResolvedValue(undefined),
   })),
 }))
 
-import { RelayServer } from '@tapflow/relay'
+import { RelayServer } from '@tapflowio/relay'
 import { cmdRelayStart } from '../../commands/relay-start.js'
 
 describe('cmdRelayStart', () => {

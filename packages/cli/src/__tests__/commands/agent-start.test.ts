@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 
 vi.mock('node:child_process')
-vi.mock('@tapflow/ios-agent', () => ({
+vi.mock('@tapflowio/ios-agent', () => ({
   IOSAgent: vi.fn().mockImplementation(() => ({
     listDevices: vi.fn().mockResolvedValue([
       { id: 'AAA', name: 'iPhone 16 Pro', status: 'booted' },
@@ -10,7 +10,7 @@ vi.mock('@tapflow/ios-agent', () => ({
     disconnect: vi.fn(),
   })),
 }))
-vi.mock('@tapflow/android-agent', () => ({
+vi.mock('@tapflowio/android-agent', () => ({
   AndroidAgent: vi.fn().mockImplementation(() => ({
     connect: vi.fn().mockResolvedValue(undefined),
     disconnect: vi.fn(),
@@ -18,8 +18,8 @@ vi.mock('@tapflow/android-agent', () => ({
 }))
 
 import { execSync } from 'node:child_process'
-import { IOSAgent } from '@tapflow/ios-agent'
-import { AndroidAgent } from '@tapflow/android-agent'
+import { IOSAgent } from '@tapflowio/ios-agent'
+import { AndroidAgent } from '@tapflowio/android-agent'
 import { cmdAgentStart } from '../../commands/agent-start.js'
 
 const mockExecSync = vi.mocked(execSync)

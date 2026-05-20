@@ -1,6 +1,6 @@
 import { execFile } from 'child_process'
 import { promisify } from 'util'
-import { createLogger } from '@tapflow/agent-core'
+import { createLogger } from '@tapflowio/agent-core'
 
 const logger = createLogger('ios-agent:simctl')
 

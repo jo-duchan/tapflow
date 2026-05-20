@@ -1,5 +1,5 @@
 import { z } from 'zod'
-import { RelayServer } from '@tapflow/relay'
+import { RelayServer } from '@tapflowio/relay'
 import { banner, step } from '../lib/print.js'
 
 export interface RelayStartOptions {

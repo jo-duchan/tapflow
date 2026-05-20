@@ -1,5 +1,5 @@
 import { execSync } from 'node:child_process'
-import { IOSAgent } from '@tapflow/ios-agent'
+import { IOSAgent } from '@tapflowio/ios-agent'
 import { banner, createSpinner, step } from './print.js'
 
 export async function resolveAndBootIOSDevice(deviceFilter?: string): Promise<IOSAgent> {

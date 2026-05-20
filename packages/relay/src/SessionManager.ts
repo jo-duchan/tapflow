@@ -1,6 +1,6 @@
 import { randomUUID } from 'crypto'
 import { WebSocket } from 'ws'
-import type { DeviceStatus } from '@tapflow/agent-core'
+import type { DeviceStatus } from '@tapflowio/agent-core'
 import type { AgentResources, SessionInfo } from './types.js'
 
 export interface Session {

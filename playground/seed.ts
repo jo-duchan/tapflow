@@ -1,6 +1,6 @@
 import path from 'path'
 import crypto from 'crypto'
-import { initDb, getDb } from '@tapflow/relay'
+import { initDb, getDb } from '@tapflowio/relay'
 
 const dataDir = path.join(import.meta.dirname, '.tapflow')
 initDb(path.join(dataDir, 'tapflow.db'))

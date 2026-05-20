@@ -50,10 +50,10 @@
     "lint": "eslint src"
   },
   "dependencies": {
-    "@tapflow/agent-core": "workspace:*",
-    "@tapflow/android-agent": "workspace:*",
-    "@tapflow/ios-agent": "workspace:*",
-    "@tapflow/relay": "workspace:*",
+    "@tapflowio/agent-core": "workspace:*",
+    "@tapflowio/android-agent": "workspace:*",
+    "@tapflowio/ios-agent": "workspace:*",
+    "@tapflowio/relay": "workspace:*",
     "cac": "^6.7.14",
     "ws": "^8.0.0",
     "zod": "^4.4.3"

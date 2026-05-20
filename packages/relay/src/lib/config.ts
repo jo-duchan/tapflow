@@ -1,7 +1,7 @@
 import fs from 'fs'
 import path from 'path'
 import { z } from 'zod'
-import { createLogger } from '@tapflow/agent-core'
+import { createLogger } from '@tapflowio/agent-core'
 
 const logger = createLogger('relay:config')
 

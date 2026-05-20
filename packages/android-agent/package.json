@@ -1,5 +1,5 @@
 {
-  "name": "@tapflow/android-agent",
+  "name": "@tapflowio/android-agent",
   "version": "0.1.0-alpha.1",
   "description": "Android emulator agent for tapflow — ADB control and scrcpy H.264 streaming",
   "keywords": ["tapflow", "android", "emulator", "adb", "scrcpy", "streaming", "qa"],
@@ -43,11 +43,11 @@
     "download-scrcpy-server": "node scripts/download-scrcpy-server.mjs"
   },
   "dependencies": {
-    "@tapflow/agent-core": "workspace:*",
+    "@tapflowio/agent-core": "workspace:*",
     "ws": "^8.0.0"
   },
   "devDependencies": {
-    "@tapflow/relay": "workspace:*",
+    "@tapflowio/relay": "workspace:*",
     "@types/node": "^20.0.0",
     "@types/ws": "^8.0.0",
     "typescript": "^5.0.0",

@@ -1,4 +1,4 @@
-# @tapflow/ios-agent
+# @tapflowio/ios-agent
 
 iOS simulator agent for [tapflow](https://github.com/jo-duchan/tapflow).
 
@@ -21,7 +21,7 @@ tapflow start
 Or programmatically:
 
 ```ts
-import { IOSAgent } from '@tapflow/ios-agent'
+import { IOSAgent } from '@tapflowio/ios-agent'
 
 const agent = new IOSAgent()
 await agent.connect('ws://your-relay:3000')

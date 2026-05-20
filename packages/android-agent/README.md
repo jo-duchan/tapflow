@@ -1,4 +1,4 @@
-# @tapflow/android-agent
+# @tapflowio/android-agent
 
 Android emulator agent for [tapflow](https://github.com/jo-duchan/tapflow).
 
@@ -21,7 +21,7 @@ tapflow start
 Or programmatically:
 
 ```ts
-import { AndroidAgent } from '@tapflow/android-agent'
+import { AndroidAgent } from '@tapflowio/android-agent'
 
 const agent = new AndroidAgent()
 await agent.connect('ws://your-relay:3000')
