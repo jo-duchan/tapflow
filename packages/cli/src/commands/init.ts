@@ -25,14 +25,16 @@ function readPassword(prompt: string): Promise<string> {
         process.stdout.write('\n')
         resolve(chars.join(''))
       } else if (ch === '') {
-        // Ctrl+C
         process.stdout.write('\n')
         process.exit(0)
       } else if (ch === '' || ch === '\b') {
-        // Backspace / DEL
-        chars.pop()
+        if (chars.length > 0) {
+          chars.pop()
+          process.stdout.write('\b \b')
+        }
       } else if (ch >= ' ') {
         chars.push(ch)
+        process.stdout.write('*')
       }
     }
     process.stdin.on('data', onData)
