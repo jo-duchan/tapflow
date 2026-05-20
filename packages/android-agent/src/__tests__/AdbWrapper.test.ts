@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { PlatformError, ValidationError } from '@tapflowio/agent-core'
 import { AdbWrapper } from '../AdbWrapper'
 import type { AdbRunner } from '../adb'
 
@@ -113,6 +114,15 @@ describe('AdbWrapper', () => {
       await wrapper.installApp('emulator-5554', '/tmp/app.apk')
       expect(runner.exec).toHaveBeenCalledWith('-s', 'emulator-5554', 'install', '-r', '/tmp/app.apk')
     })
+
+    it('throws ValidationError when adb returns INSTALL_FAILED code', async () => {
+      const runner = mockRunner()
+      ;(runner.exec as ReturnType<typeof vi.fn>).mockRejectedValueOnce({
+        stderr: 'Failure [INSTALL_FAILED_VERSION_DOWNGRADE]',
+      })
+      const wrapper = new AdbWrapper(runner)
+      await expect(wrapper.installApp('emulator-5554', '/tmp/app.apk')).rejects.toBeInstanceOf(ValidationError)
+    })
   })
 
   describe('launchApp', () => {
@@ -132,6 +142,11 @@ describe('AdbWrapper', () => {
       const wrapper = new AdbWrapper(mockRunner({ screenSize: '1080x2400' }))
       const size = await wrapper.getScreenSize('emulator-5554')
       expect(size).toEqual({ width: 1080, height: 2400 })
+    })
+
+    it('throws PlatformError when wm size output is malformed', async () => {
+      const wrapper = new AdbWrapper(mockRunner({ screenSize: 'unknown' }))
+      await expect(wrapper.getScreenSize('emulator-5554')).rejects.toBeInstanceOf(PlatformError)
     })
   })
 

@@ -1,6 +1,7 @@
 import http from 'http'
 import crypto from 'crypto'
 import jwt from 'jsonwebtoken'
+import { AuthError } from '@tapflowio/agent-core'
 import { getDb } from '../db.js'
 import { jwtSecret } from '../lib/config.js'
 
@@ -16,9 +17,17 @@ export function signJwt(payload: AuthContext): string {
   return jwt.sign(payload, jwtSecret, { expiresIn: JWT_EXPIRES })
 }
 
-export function verifyJwt(token: string): AuthContext | null {
+export function verifyJwtOrThrow(token: string): AuthContext {
   try {
     return jwt.verify(token, jwtSecret) as AuthContext
+  } catch (cause) {
+    throw new AuthError('Invalid or expired auth token', { cause })
+  }
+}
+
+export function verifyJwt(token: string): AuthContext | null {
+  try {
+    return verifyJwtOrThrow(token)
   } catch {
     return null
   }

@@ -1,4 +1,5 @@
 import { describe, it, expect, beforeEach } from 'vitest'
+import { PlatformError } from '../index'
 import { AgentRegistry } from '../AgentRegistry'
 import type { DeviceAgent } from '../DeviceAgent'
 import type { Device } from '../types'
@@ -35,10 +36,18 @@ describe('AgentRegistry', () => {
   })
 
   it('throws when platform is not registered', () => {
-    expect(() => AgentRegistry.get('unknown')).toThrow(
-      'No agent registered for platform: unknown'
-    )
+    let thrown: unknown
+
+    try {
+      AgentRegistry.get('unknown')
+    } catch (error) {
+      thrown = error
+    }
+
+    expect(thrown).toBeInstanceOf(PlatformError)
+    expect((thrown as Error).message).toBe('No agent registered for platform: unknown')
   })
+
 
   it('resets cached instance when re-registering', () => {
     AgentRegistry.register('mock', MockAgent)

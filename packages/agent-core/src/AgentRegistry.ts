@@ -1,4 +1,5 @@
 import type { DeviceAgent, DeviceAgentConstructor } from './DeviceAgent.js'
+import { PlatformError } from './errors.js'
 
 const constructors = new Map<string, DeviceAgentConstructor>()
 const instances = new Map<string, DeviceAgent>()
@@ -11,7 +12,7 @@ export const AgentRegistry = {
 
   get(platform: string): DeviceAgent {
     if (!constructors.has(platform)) {
-      throw new Error(`No agent registered for platform: ${platform}`)
+      throw new PlatformError(`No agent registered for platform: ${platform}`)
     }
     if (!instances.has(platform)) {
       const AgentClass = constructors.get(platform)!

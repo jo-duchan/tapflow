@@ -8,7 +8,7 @@ import { promisify } from 'util'
 import { ScrcpyVideo } from './ScrcpyVideo.js'
 import { ScrcpyControl } from './ScrcpyControl.js'
 import type { ScrcpyDeviceInfo } from './ScrcpyVideo.js'
-import { createLogger } from '@tapflowio/agent-core'
+import { createLogger, PlatformError, ValidationError } from '@tapflowio/agent-core'
 
 const logger = createLogger('android-agent:scrcpy')
 
@@ -20,7 +20,7 @@ const DEVICE_PATH = '/data/local/tmp/scrcpy-server.jar'
 function getAdbPath(): string {
   if (process.env['ADB_PATH']) return process.env['ADB_PATH']
   const androidHome = process.env['ANDROID_HOME']
-  if (!androidHome) throw new Error('ANDROID_HOME not set')
+  if (!androidHome) throw new ValidationError('ANDROID_HOME not set')
   return `${androidHome}/platform-tools/adb`
 }
 
@@ -54,12 +54,12 @@ export class ScrcpySession {
   }
 
   get video(): ScrcpyVideo {
-    if (!this._video) throw new Error('ScrcpySession not started')
+    if (!this._video) throw new PlatformError('ScrcpySession not started')
     return this._video
   }
 
   get control(): ScrcpyControl {
-    if (!this._control) throw new Error('ScrcpySession not started')
+    if (!this._control) throw new PlatformError('ScrcpySession not started')
     return this._control
   }
 
@@ -138,7 +138,7 @@ export class ScrcpySession {
   private connectTcp(port: number): Promise<net.Socket> {
     return new Promise((resolve, reject) => {
       const socket: net.Socket = net.connect(port, '127.0.0.1', () => resolve(socket))
-      socket.once('error', reject)
+      socket.once('error', (error) => reject(new PlatformError(`Failed to connect to scrcpy on port ${port}`, { cause: error })))
     })
   }
 }

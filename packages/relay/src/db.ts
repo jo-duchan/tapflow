@@ -1,11 +1,12 @@
 import Database from 'better-sqlite3'
 import fs from 'fs'
 import path from 'path'
+import { PlatformError } from '@tapflowio/agent-core'
 
 let db: Database.Database | null = null
 
 export function getDb(): Database.Database {
-  if (!db) throw new Error('DB not initialized — call initDb() first')
+  if (!db) throw new PlatformError('DB not initialized — call initDb() first')
   return db
 }
 

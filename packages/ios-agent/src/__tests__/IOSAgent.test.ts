@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeAll, afterAll, beforeEach, afterEach } 
 import fs from 'fs'
 import os from 'os'
 import path from 'path'
+import { ValidationError } from '@tapflowio/agent-core'
 
 vi.mock('../TouchHelper', () => ({
   TouchHelper: vi.fn(() => ({
@@ -128,6 +129,11 @@ describe('IOSAgent', () => {
       const agent = new IOSAgent({}, simctl)
       await agent.launchApp('com.example.app')
       expect(simctl.launchApp).toHaveBeenCalledWith('com.example.app')
+    })
+
+    it('stream throws ValidationError before any device session is available', () => {
+      const agent = new IOSAgent({}, mockSimctl())
+      expect(() => agent.stream()).toThrow(ValidationError)
     })
   })
 

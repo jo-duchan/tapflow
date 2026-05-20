@@ -1,4 +1,5 @@
 import type { Device } from '@tapflowio/agent-core'
+import { PlatformError, ValidationError } from '@tapflowio/agent-core'
 import { defaultRunner, type AdbRunner } from './adb.js'
 
 export class AdbWrapper {
@@ -94,7 +95,7 @@ export class AdbWrapper {
     const output = await this.runner.exec('-s', serial, 'shell', 'wm', 'size')
     // "Physical size: 1080x2400"
     const m = output.match(/(\d+)x(\d+)/)
-    if (!m) throw new Error(`Cannot parse screen size from: ${output}`)
+    if (!m) throw new PlatformError(`Cannot parse screen size from: ${output}`)
     return { width: parseInt(m[1], 10), height: parseInt(m[2], 10) }
   }
 
@@ -110,15 +111,15 @@ export class AdbWrapper {
       if (stderr) {
         // "Failure [INSTALL_FAILED_...]" → show just the code
         const failureMatch = stderr.match(/Failure\s*\[(.+?)\]/)
-        if (failureMatch) throw new Error(failureMatch[1])
+        if (failureMatch) throw new ValidationError(failureMatch[1])
         // Strip "adb: failed to install <path>:" prefix and stack trace
         const stripped = stderr
           .replace(/^adb: failed to install [^:]+:\s*/, '')
           .replace(/\s+at\s+[\w$.]+\([\w.]+:\d+\)[\s\S]*$/, '')
           .trim()
-        throw new Error(stripped || stderr)
+        throw new ValidationError(stripped || stderr)
       }
-      throw new Error((e as Error).message)
+      throw new ValidationError((e as Error).message, { cause: e })
     }
   }
 

@@ -24,12 +24,14 @@
   "types": "dist/index.d.ts",
   "exports": {
     ".": {
+      "types": "./src/index.ts",
       "source": "./src/index.ts",
       "tsx": "./src/index.ts",
       "import": "./dist/index.js",
       "default": "./dist/index.js"
     },
     "./utils": {
+      "types": "./src/utils/index.ts",
       "source": "./src/utils/index.ts",
       "tsx": "./src/utils/index.ts",
       "import": "./dist/utils/index.js",

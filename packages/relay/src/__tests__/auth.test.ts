@@ -9,6 +9,7 @@ vi.mock('../db.js', () => ({ getDb: mockGet }))
 import {
   signJwt,
   verifyJwt,
+  verifyJwtOrThrow,
   getAuth,
   requireAuth,
   requireRole,
@@ -16,6 +17,7 @@ import {
   verifyPat,
 } from '../middleware/auth.js'
 import type { AuthContext } from '../middleware/auth.js'
+import { AuthError } from '@tapflowio/agent-core'
 
 // --- 헬퍼 ---
 
@@ -60,6 +62,10 @@ describe('signJwt / verifyJwt', () => {
   it('임의 문자열은 null 반환', () => {
     expect(verifyJwt('not.a.jwt')).toBeNull()
     expect(verifyJwt('')).toBeNull()
+  })
+
+  it('invalid JWT throws AuthError via verifyJwtOrThrow', () => {
+    expect(() => verifyJwtOrThrow('not.a.jwt')).toThrow(AuthError)
   })
 
   it('페이로드에 userId·email·role이 담긴다', () => {

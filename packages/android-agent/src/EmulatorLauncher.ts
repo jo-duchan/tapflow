@@ -1,6 +1,6 @@
 import { execFile, spawn } from 'child_process'
 import { promisify } from 'util'
-import { createLogger } from '@tapflowio/agent-core'
+import { createLogger, PlatformError, ValidationError } from '@tapflowio/agent-core'
 
 const execFileAsync = promisify(execFile)
 const logger = createLogger('android-agent:emulator')
@@ -8,14 +8,14 @@ const logger = createLogger('android-agent:emulator')
 function getAdbPath(): string {
   if (process.env['ADB_PATH']) return process.env['ADB_PATH']
   const androidHome = process.env['ANDROID_HOME']
-  if (!androidHome) throw new Error('ANDROID_HOME not set')
+  if (!androidHome) throw new ValidationError('ANDROID_HOME not set')
   return `${androidHome}/platform-tools/adb`
 }
 
 function getEmulatorPath(): string {
   const androidHome = process.env['ANDROID_HOME']
   if (!androidHome) {
-    throw new Error(
+    throw new ValidationError(
       'ANDROID_HOME not set. Install Android SDK and set the environment variable.\n' +
       'Example: export ANDROID_HOME=$HOME/Library/Android/sdk',
     )
@@ -58,7 +58,7 @@ export class EmulatorLauncher {
       await new Promise((r) => setTimeout(r, 2_000))
     }
 
-    throw new Error(`Could not find emulator serial for AVD "${avdName}" within ${timeoutMs / 1000}s`)
+    throw new PlatformError(`Could not find emulator serial for AVD "${avdName}" within ${timeoutMs / 1000}s`)
   }
 
   async waitForBoot(serial: string, timeoutMs = 120_000): Promise<void> {
@@ -78,6 +78,6 @@ export class EmulatorLauncher {
       await new Promise((r) => setTimeout(r, 3_000))
     }
 
-    throw new Error(`Emulator ${serial} did not finish booting within ${timeoutMs / 1000}s`)
+    throw new PlatformError(`Emulator ${serial} did not finish booting within ${timeoutMs / 1000}s`)
   }
 }
