@@ -52,6 +52,7 @@ Get user confirmation before any hard-to-reverse operation.
 
 - `git push --force`, `git reset --hard`, sending messages to external systems, DB drops, etc.
 - Only create commits or PRs when the user explicitly requests it.
+- **Do not merge PRs.** Always leave merging to the user — even with `--admin`. Create the PR and stop.
 - **Avoid breaking changes.** If unavoidable, report to the user and get approval before proceeding. Breaking change scope: public API / interface signature changes, DB schema changes, WebSocket message protocol changes, CLI command / flag changes.
 
 ---
@@ -65,6 +66,10 @@ Get user confirmation before any hard-to-reverse operation.
 
 ### Branches, Commits & Releases
 → [CONTRIBUTING.md](./CONTRIBUTING.md)
+
+Before starting any task that requires code changes:
+1. `git checkout main && git pull origin main` — always start from the latest main.
+2. `git checkout -b <branch-name>` — work on a new branch, never directly on main.
 
 ### Workflow (Plan → Work → Review → Compound)
 
