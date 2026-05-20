@@ -52,7 +52,7 @@ openssl rand -hex 32
 
 The relay creates these files in the working directory on first run:
 
-```
+```text
 your-directory/
   tapflow.config.json   ← relay configuration (auto-generated)
   .tapflow-data/

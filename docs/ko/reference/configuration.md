@@ -52,7 +52,7 @@ openssl rand -hex 32
 
 릴레이는 최초 실행 시 작업 디렉토리에 다음 파일들을 생성합니다:
 
-```
+```text
 your-directory/
   tapflow.config.json   ← 릴레이 설정 파일 (자동 생성)
   .tapflow-data/
