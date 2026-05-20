@@ -10,6 +10,11 @@ import { cmdReset } from './commands/reset.js'
 import { cmdStatus } from './commands/status.js'
 import { cmdLogs } from './commands/logs.js'
 
+process.on('unhandledRejection', (err) => {
+  console.error(err instanceof Error ? err.message : String(err))
+  process.exit(1)
+})
+
 const cli = cac('tapflow')
 
 cli
