@@ -9,6 +9,11 @@ import { getDb } from './db.js'
 import { handleLogin, handleLogout, handleMe, handleChangePassword, handleInit } from './api/auth.js'
 import { handleVerify, handleAccept } from './api/invitations.js'
 import { createLogger } from '@tapflowio/agent-core'
+import {
+  sendBinaryWithBackpressure,
+  createRateLimitedDropWarn,
+  DEFAULT_BACKPRESSURE_BYTES,
+} from '@tapflowio/agent-core/utils'
 
 const logger = createLogger('relay')
 import { handleVerifyReset, handleDoReset, handleSendMemberReset } from './api/passwordReset.js'
@@ -50,8 +55,11 @@ export class RelayServer {
   private purgeRecordingsTimer: ReturnType<typeof setInterval> | null = null
   private purgeOldResourcesTimer: ReturnType<typeof setInterval> | null = null
   private flushResourcesTimer: ReturnType<typeof setInterval> | null = null
+  private dropHandlers = new Map<string, () => void>()
+  private readonly backpressureBytes: number
 
-  constructor(private readonly options: { port: number; publicDir?: string; uploadsDir?: string; idleTimeoutMs?: number }) {
+  constructor(private readonly options: { port: number; publicDir?: string; uploadsDir?: string; idleTimeoutMs?: number; wsBackpressureBytes?: number }) {
+    this.backpressureBytes = options.wsBackpressureBytes ?? DEFAULT_BACKPRESSURE_BYTES
     this.sessions = new SessionManager({ idleTimeoutMs: options.idleTimeoutMs })
     this.publicDir = options.publicDir ?? path.join(import.meta.dirname, '../public')
     this.uploadsDir = options.uploadsDir ?? path.join(import.meta.dirname, '../uploads')
@@ -186,8 +194,13 @@ export class RelayServer {
       if (isBinary) {
         // Binary frames arrive on the dedicated stream WS, route to the session's browser
         const session = this.sessions.getByStreamSocket(ws)
-        if (session?.browserSocket?.readyState === WebSocket.OPEN) {
-          session.browserSocket.send(data, { binary: true })
+        if (session?.browserSocket) {
+          let onDrop = this.dropHandlers.get(session.id)
+          if (!onDrop) {
+            onDrop = createRateLimitedDropWarn(logger, session.id)
+            this.dropHandlers.set(session.id, onDrop)
+          }
+          sendBinaryWithBackpressure(session.browserSocket, data as Buffer, this.backpressureBytes, onDrop)
         }
         return
       }
@@ -245,7 +258,10 @@ export class RelayServer {
       // ── Session / Stream lifecycle ─────────────────────────────────────────
       case 'session:start':    this.handleSessionStart(ws, msg); break
       case 'session:end': {
-        if (msg.sessionId) this.sessions.remove(msg.sessionId)
+        if (msg.sessionId) {
+          this.sessions.remove(msg.sessionId)
+          this.dropHandlers.delete(msg.sessionId)
+        }
         break
       }
       case 'stream:register': {

@@ -11,6 +11,7 @@ const configSchema = z.object({
   server: z.object({
     port: z.number().int().min(1).max(65535),
     dataDir: z.string().min(1),
+    wsBackpressureBytes: z.number().int().min(1),
   }),
   smtp: z.object({
     host: z.string(),
@@ -30,6 +31,7 @@ const DEFAULTS = {
   server: {
     port: 4000,
     dataDir: '.tapflow-data',
+    wsBackpressureBytes: 1_048_576,
   },
   smtp: {
     host: '',
@@ -65,6 +67,7 @@ function load(): TapflowConfig {
     server: {
       port: file.server?.port ?? DEFAULTS.server.port,
       dataDir: resolveDataDir(file.server?.dataDir ?? DEFAULTS.server.dataDir),
+      wsBackpressureBytes: DEFAULTS.server.wsBackpressureBytes,
     },
     smtp: {
       host: file.smtp?.host ?? DEFAULTS.smtp.host,
@@ -78,6 +81,7 @@ function load(): TapflowConfig {
 
   if (process.env.TAPFLOW_PORT) cfg.server.port = Number(process.env.TAPFLOW_PORT)
   if (process.env.TAPFLOW_DATA_DIR) cfg.server.dataDir = resolveDataDir(process.env.TAPFLOW_DATA_DIR)
+  if (process.env.TAPFLOW_WS_BACKPRESSURE_BYTES) cfg.server.wsBackpressureBytes = Number(process.env.TAPFLOW_WS_BACKPRESSURE_BYTES)
   if (process.env.SMTP_HOST) cfg.smtp.host = process.env.SMTP_HOST
   if (process.env.SMTP_PORT) cfg.smtp.port = Number(process.env.SMTP_PORT)
   if (process.env.SMTP_SECURE) cfg.smtp.secure = process.env.SMTP_SECURE === 'true'

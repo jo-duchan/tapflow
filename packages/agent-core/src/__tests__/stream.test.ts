@@ -1,12 +1,28 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { EventEmitter } from 'events'
 import type { WebSocket as WsType } from 'ws'
-import { registerStreamWs } from '../utils/stream'
+import {
+  registerStreamWs,
+  sendBinaryWithBackpressure,
+  createRateLimitedDropWarn,
+  DEFAULT_BACKPRESSURE_BYTES,
+} from '../utils/stream'
+import type { Logger } from '../logger'
 
-function makeMockWs(): WsType & EventEmitter {
-  const emitter = new EventEmitter() as WsType & EventEmitter
-  emitter.send = vi.fn()
-  return emitter
+function makeMockWs(props?: { readyState?: number; bufferedAmount?: number }): WsType & EventEmitter {
+  const emitter = new EventEmitter()
+  const ws = Object.assign(emitter, {
+    send: vi.fn(),
+    readyState: props?.readyState ?? 1, // OPEN
+    bufferedAmount: props?.bufferedAmount ?? 0,
+    OPEN: 1,
+    CLOSED: 3,
+  }) as unknown as WsType & EventEmitter
+  return ws
+}
+
+function makeMockLogger(): Logger {
+  return { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() }
 }
 
 describe('registerStreamWs', () => {
@@ -62,5 +78,81 @@ describe('registerStreamWs', () => {
     const promise = registerStreamWs(ws, 'sess-err2')
     ws.emit('error', new Error('early error'))
     await expect(promise).rejects.toThrow('early error')
+  })
+})
+
+describe('sendBinaryWithBackpressure', () => {
+  const THRESHOLD = 1024
+  const frame = Buffer.from('frame')
+
+  it('정상 클라이언트: bufferedAmount < threshold → send 호출', () => {
+    const ws = makeMockWs({ readyState: 1, bufferedAmount: 0 })
+    const onDrop = vi.fn()
+    sendBinaryWithBackpressure(ws, frame, THRESHOLD, onDrop)
+    expect(ws.send).toHaveBeenCalledOnce()
+    expect(onDrop).not.toHaveBeenCalled()
+  })
+
+  it('느린 클라이언트: bufferedAmount >= threshold → drop, send 없음', () => {
+    const ws = makeMockWs({ readyState: 1, bufferedAmount: THRESHOLD })
+    const onDrop = vi.fn()
+    sendBinaryWithBackpressure(ws, frame, THRESHOLD, onDrop)
+    expect(ws.send).not.toHaveBeenCalled()
+    expect(onDrop).toHaveBeenCalledOnce()
+  })
+
+  it('임계치 바로 아래 (threshold - 1) → send 호출', () => {
+    const ws = makeMockWs({ readyState: 1, bufferedAmount: THRESHOLD - 1 })
+    const onDrop = vi.fn()
+    sendBinaryWithBackpressure(ws, frame, THRESHOLD, onDrop)
+    expect(ws.send).toHaveBeenCalledOnce()
+    expect(onDrop).not.toHaveBeenCalled()
+  })
+
+  it('닫힌 소켓(CLOSED): send도 drop도 호출하지 않는다', () => {
+    const ws = makeMockWs({ readyState: 3, bufferedAmount: 0 })
+    const onDrop = vi.fn()
+    sendBinaryWithBackpressure(ws, frame, THRESHOLD, onDrop)
+    expect(ws.send).not.toHaveBeenCalled()
+    expect(onDrop).not.toHaveBeenCalled()
+  })
+
+  it('DEFAULT_BACKPRESSURE_BYTES는 1MB(1_048_576)이다', () => {
+    expect(DEFAULT_BACKPRESSURE_BYTES).toBe(1_048_576)
+  })
+})
+
+describe('createRateLimitedDropWarn', () => {
+  it('intervalMs 안에서는 warn을 1번만 호출한다', () => {
+    vi.useFakeTimers()
+    const logger = makeMockLogger()
+    const onDrop = createRateLimitedDropWarn(logger, 'test-ctx', 1000)
+
+    for (let i = 0; i < 100; i++) onDrop()
+
+    expect(logger.warn).toHaveBeenCalledOnce()
+    vi.useRealTimers()
+  })
+
+  it('intervalMs 경과 후에는 다시 warn을 호출한다', () => {
+    vi.useFakeTimers()
+    const logger = makeMockLogger()
+    const onDrop = createRateLimitedDropWarn(logger, 'test-ctx', 1000)
+
+    onDrop()
+    vi.advanceTimersByTime(1001)
+    onDrop()
+
+    expect(logger.warn).toHaveBeenCalledTimes(2)
+    vi.useRealTimers()
+  })
+
+  it('warn 메시지에 context가 포함된다', () => {
+    vi.useFakeTimers()
+    const logger = makeMockLogger()
+    const onDrop = createRateLimitedDropWarn(logger, 'sess-xyz', 1000)
+    onDrop()
+    expect(vi.mocked(logger.warn).mock.calls[0][0]).toContain('sess-xyz')
+    vi.useRealTimers()
   })
 })

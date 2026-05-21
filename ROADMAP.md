@@ -20,7 +20,7 @@ Breaking changes may appear in minor versions until `v1.0.0` is tagged.
 | CLI (`start`, `doctor`, `devices`, …) | ✅ Working |
 | Test coverage (cli, dashboard) | ✅ Working |
 | Structured logging | ✅ Working |
-| WebSocket backpressure | ❌ Missing |
+| WebSocket backpressure | ✅ Working |
 
 ---
 
@@ -54,7 +54,7 @@ Developer experience and reliability improvements. `v0.2.0` drops the `-alpha` s
 
 Scalability, extensibility, and CI/CD integration.
 
-- [ ] WebSocket backpressure — check `ws.bufferedAmount` before sending frames; drop or queue frames for slow clients
+- [x] WebSocket backpressure — check `ws.bufferedAmount` before sending frames; drop or queue frames for slow clients
 - [ ] Runtime platform registration — replace `'ios' | 'android'` literal union with a dynamic registry so new platforms require zero changes to `agent-core`, CLI, or Dashboard
 - [ ] CI/CD integration guide — end-to-end walkthrough: upload `.app.zip` / `.apk` via REST API from CI → view results in the dashboard
 - [ ] PAT scope enforcement — apply `scope` checks consistently across all endpoints

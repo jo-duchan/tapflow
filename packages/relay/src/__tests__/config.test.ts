@@ -26,7 +26,23 @@ describe('relay config validation', () => {
     vi.spyOn(console, 'warn').mockImplementation(() => {})
     const { config } = await import('../lib/config.js')
     expect(config.server.port).toBe(4000)
+    expect(config.server.wsBackpressureBytes).toBe(1_048_576)
     expect(exitSpy).not.toHaveBeenCalled()
+  })
+
+  it('TAPFLOW_WS_BACKPRESSURE_BYTES=524288 → 적용됨', async () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => {})
+    vi.stubEnv('TAPFLOW_WS_BACKPRESSURE_BYTES', '524288')
+    const { config } = await import('../lib/config.js')
+    expect(config.server.wsBackpressureBytes).toBe(524288)
+    expect(exitSpy).not.toHaveBeenCalled()
+  })
+
+  it('TAPFLOW_WS_BACKPRESSURE_BYTES=0 → exit(1) (min 1 위반)', async () => {
+    vi.stubEnv('TAPFLOW_WS_BACKPRESSURE_BYTES', '0')
+    await expect(import('../lib/config.js')).rejects.toThrow('process.exit')
+    expect(exitSpy).toHaveBeenCalledWith(1)
+    expect(errorSpy).toHaveBeenCalledWith(expect.stringContaining('wsBackpressureBytes'))
   })
 
   it('TAPFLOW_PORT=abc → exit(1) + 에러 로그', async () => {

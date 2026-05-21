@@ -58,7 +58,7 @@ iOS build format: `.app.zip` (simulator builds). `.ipa` uploads return 400.
 
 ## Compound
 
-### Binary Frame Forwarding
+### Binary Frame Forwarding with Backpressure
 
 **When**: relaying WebSocket binary messages from the Agent to the Browser
 
@@ -66,9 +66,14 @@ iOS build format: `.app.zip` (simulator builds). `.ipa` uploads return 400.
 ```typescript
 ws.on('message', (data, isBinary) => {
   if (isBinary) {
-    const session = this.sessions.getBySocket(ws)
-    if (session?.browserSocket?.readyState === WebSocket.OPEN) {
-      session.browserSocket.send(data, { binary: true })
+    const session = this.sessions.getByStreamSocket(ws)
+    if (session?.browserSocket) {
+      let onDrop = this.dropHandlers.get(session.id)
+      if (!onDrop) {
+        onDrop = createRateLimitedDropWarn(logger, session.id)
+        this.dropHandlers.set(session.id, onDrop)
+      }
+      sendBinaryWithBackpressure(session.browserSocket, data as Buffer, this.backpressureBytes, onDrop)
     }
     return
   }
@@ -79,4 +84,8 @@ ws.on('message', (data, isBinary) => {
 })
 ```
 
-**Why**: Omitting `{ binary: true }` causes the `ws` library to send the Buffer as UTF-8 text, making `e.data` a string in the browser. The relay must be content-agnostic and incur zero parsing cost.
+**Why**:
+- Omitting `{ binary: true }` causes the `ws` library to send the Buffer as UTF-8 text, making `e.data` a string in the browser. The relay must be content-agnostic and incur zero parsing cost.
+- `sendBinaryWithBackpressure` checks `ws.bufferedAmount` before sending. If it exceeds `wsBackpressureBytes` (default 1 MB, override via `TAPFLOW_WS_BACKPRESSURE_BYTES`), the frame is silently dropped. This prevents unbounded memory growth when a browser client is slow.
+- Drop handlers are stored per session (`this.dropHandlers`) and rate-limit warn logs to at most once per second to avoid log flooding.
+- Drop handlers must be deleted from the map on `session:end`.
