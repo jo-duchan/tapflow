@@ -41,7 +41,7 @@ Developer experience and reliability improvements. `v0.2.0` drops the `-alpha` s
 
 - [x] Pre-commit hooks — add Lefthook with lint + typecheck on staged files to catch errors before push
 - [x] `logger.ts` abstraction — replace 66 direct `console.log/error` calls with a leveled logger (`debug` / `info` / `warn` / `error`)
-- [ ] Custom error classes — `ValidationError`, `PlatformError`, `AuthError`
+- [x] Custom error classes — `ValidationError`, `PlatformError`, `AuthError`
 - [x] CLI smoke tests — `--version`, `--help` subprocess smoke tests via tsx
 - [x] Zod-based config validation — catch `NaN` and invalid values at startup instead of silently at runtime
 - [x] Migration atomic transactions — wrap all migrations in `db.transaction()` to prevent partial failure states
