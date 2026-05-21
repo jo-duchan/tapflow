@@ -17,6 +17,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
+import { toast } from 'sonner'
 import { createApp } from '@/lib/queries'
 
 type Props = { onSuccess: () => void }
@@ -41,7 +42,10 @@ export function AddAppDialog({ onSuccess }: Props) {
       setName('')
       setBundleId('')
       setPlatform('ios')
+      toast.success('App created')
       onSuccess()
+    } catch {
+      toast.error('Failed to create app — check your network')
     } finally {
       setSaving(false)
     }

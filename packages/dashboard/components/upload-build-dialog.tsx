@@ -16,6 +16,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
+import { toast } from 'sonner'
 import { Upload } from 'lucide-react'
 
 type Props = { onSuccess: () => void; appId?: number | null }
@@ -24,41 +25,44 @@ export function UploadBuildDialog({ onSuccess, appId }: Props) {
   const [open, setOpen] = useState(false)
   const [file, setFile] = useState<File | null>(null)
   const [statusLabel, setStatusLabel] = useState('none')
-  const [error, setError] = useState('')
-  const [uploading, setUploading] = useState(false)
   const inputRef = useRef<HTMLInputElement>(null)
 
-  async function handleUpload(e: FormEvent) {
+  function handleUpload(e: FormEvent) {
     e.preventDefault()
     if (!file) return
-    setError('')
-    setUploading(true)
-    try {
-      const form = new FormData()
-      form.append('file', file)
-      if (statusLabel !== 'none') form.append('status', statusLabel)
-      if (appId) form.append('app_id', String(appId))
 
-      const res = await fetch('/api/v1/builds', { method: 'POST', credentials: 'include', body: form })
+    const form = new FormData()
+    form.append('file', file)
+    if (statusLabel !== 'none') form.append('status', statusLabel)
+    if (appId) form.append('app_id', String(appId))
+
+    const uploadPromise = fetch('/api/v1/builds', {
+      method: 'POST',
+      credentials: 'include',
+      body: form,
+    }).then(async (res) => {
       if (!res.ok) {
         const body = await res.json().catch(() => ({})) as { error?: string }
-        setError(body.error ?? 'Upload failed. Check the file format.')
-        return
+        throw new Error(body.error ?? 'Upload failed. Check the file format.')
       }
-      setOpen(false)
-      setFile(null)
-      setStatusLabel('none')
       onSuccess()
-    } catch {
-      setError('Network error.')
-    } finally {
-      setUploading(false)
-    }
+    })
+
+    toast.promise(uploadPromise, {
+      loading: 'Uploading build…',
+      success: 'Build uploaded',
+      error: (err: unknown) =>
+        err instanceof Error ? err.message : 'Failed to upload build',
+    })
+
+    setOpen(false)
+    setFile(null)
+    setStatusLabel('none')
   }
 
   function handleOpenChange(next: boolean) {
     setOpen(next)
-    if (!next) { setFile(null); setError(''); setStatusLabel('none') }
+    if (!next) { setFile(null); setStatusLabel('none') }
   }
 
   return (
@@ -106,12 +110,9 @@ export function UploadBuildDialog({ onSuccess, appId }: Props) {
               </SelectContent>
             </Select>
           </div>
-          {error && <p className="text-sm text-destructive">{error}</p>}
           <div className="flex justify-end gap-2">
             <Button type="button" variant="outline" className="w-24" onClick={() => setOpen(false)}>Cancel</Button>
-            <Button type="submit" className="w-24" disabled={!file || uploading}>
-              {uploading ? 'Uploading…' : 'Upload'}
-            </Button>
+            <Button type="submit" className="w-24" disabled={!file}>Upload</Button>
           </div>
         </form>
       </DialogContent>
