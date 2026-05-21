@@ -157,17 +157,27 @@ Full reference → [CLI docs](https://www.tapflow.dev/reference/cli)
 
 **[www.tapflow.dev](https://www.tapflow.dev)**
 
+**Getting Started**
 - [Introduction](https://www.tapflow.dev/guide/introduction)
-- [Quick Start](https://www.tapflow.dev/guide/getting-started)
+- [Quick Start](https://www.tapflow.dev/guide/quick-start)
+- [Requirements](https://www.tapflow.dev/guide/requirements)
+
+**Setup**
 - [Self-Hosting the Relay](https://www.tapflow.dev/guide/self-hosting)
-- [iOS Agent Setup](https://www.tapflow.dev/guide/ios-agent)
-- [Android Agent Setup](https://www.tapflow.dev/guide/android-agent)
-- [App Center — Upload & Manage Builds](https://www.tapflow.dev/guide/app-center)
-- [Team Management & Access Tokens](https://www.tapflow.dev/guide/team-management)
-- [Session Recordings](https://www.tapflow.dev/guide/recordings)
-- [Uploading Builds via CI/CD](https://www.tapflow.dev/guide/upload-builds)
+- [Agent Setup](https://www.tapflow.dev/guide/agent-setup)
+- [Uploading Builds (CI/CD)](https://www.tapflow.dev/guide/upload-builds)
+- [Scaling Mac Resources](https://www.tapflow.dev/guide/scaling)
+
+**Dashboard**
+- [First-time Setup](https://www.tapflow.dev/guide/first-time-setup)
+- [Dashboard Overview](https://www.tapflow.dev/guide/dashboard-overview)
+
+**Reference**
 - [CLI Reference](https://www.tapflow.dev/reference/cli)
-- [Troubleshooting](https://www.tapflow.dev/guide/troubleshooting)
+- [Configuration](https://www.tapflow.dev/reference/configuration)
+- [REST API](https://www.tapflow.dev/reference/rest-api)
+
+**[Troubleshooting](https://www.tapflow.dev/guide/troubleshooting)**
 
 ## Development
 
