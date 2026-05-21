@@ -114,7 +114,7 @@ export function DeviceViewer({ sessionId, deviceId, buildId, resetMode, onRecord
         <div className="flex items-start gap-8">
           {/* phone body skeleton */}
           <div style={{ background: '#1c1c1e', borderRadius: '34px', padding: '12px', flexShrink: 0 }}>
-            <div className="animate-pulse bg-zinc-800" style={{ width: 324, height: 720, borderRadius: '22px' }} />
+            <div className="animate-pulse bg-zinc-600" style={{ width: 324, height: 720, borderRadius: '22px' }} />
           </div>
           <SimulatorInfoCard
             joined={joined} fps={0} connected={connected}
