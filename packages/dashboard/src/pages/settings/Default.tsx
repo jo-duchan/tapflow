@@ -80,9 +80,13 @@ export function DefaultSettings() {
     const form = new FormData()
     form.append('team_name', data.teamName)
     if (data.logo) form.append('logo', data.logo)
-    const res = await fetch('/api/v1/settings', { method: 'PATCH', credentials: 'include', body: form })
-    if (!res.ok) { toast.error('Failed to update workspace'); return }
-    toast.success('Workspace updated')
+    try {
+      const res = await fetch('/api/v1/settings', { method: 'PATCH', credentials: 'include', body: form })
+      if (!res.ok) { toast.error('Failed to update workspace'); return }
+      toast.success('Workspace updated')
+    } catch {
+      toast.error('Failed to update workspace')
+    }
   }
 
   // ── Profile (everyone) ────────────────────────────────────────────────────
@@ -105,9 +109,13 @@ export function DefaultSettings() {
     const form = new FormData()
     form.append('display_name', data.displayName)
     if (data.avatar) form.append('avatar', data.avatar)
-    const res = await fetch('/api/v1/profile', { method: 'PATCH', credentials: 'include', body: form })
-    if (!res.ok) { toast.error('Failed to update profile'); return }
-    toast.success('Profile updated')
+    try {
+      const res = await fetch('/api/v1/profile', { method: 'PATCH', credentials: 'include', body: form })
+      if (!res.ok) { toast.error('Failed to update profile'); return }
+      toast.success('Profile updated')
+    } catch {
+      toast.error('Failed to update profile')
+    }
   }
 
   const passwordForm = useForm<PasswordData>({
@@ -116,19 +124,23 @@ export function DefaultSettings() {
   })
 
   async function onPasswordSave(data: PasswordData) {
-    const res = await fetch('/api/v1/auth/change-password', {
-      method: 'POST',
-      credentials: 'include',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ currentPassword: data.currentPassword, newPassword: data.newPassword }),
-    })
-    if (!res.ok) {
-      const d = await res.json() as { error?: string }
-      passwordForm.setError('root', { message: d.error ?? 'Failed to change password' })
-      return
+    try {
+      const res = await fetch('/api/v1/auth/change-password', {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ currentPassword: data.currentPassword, newPassword: data.newPassword }),
+      })
+      if (!res.ok) {
+        const d = await res.json() as { error?: string }
+        passwordForm.setError('root', { message: d.error ?? 'Failed to change password' })
+        return
+      }
+      passwordForm.reset()
+      toast.success('Password changed')
+    } catch {
+      passwordForm.setError('root', { message: 'Network error' })
     }
-    passwordForm.reset()
-    toast.success('Password changed')
   }
 
   // ── Apps (Admin + Developer) ──────────────────────────────────────────────
@@ -152,24 +164,34 @@ export function DefaultSettings() {
 
   async function handleAppDelete(appId: number) {
     setAppsDeleting((p) => ({ ...p, [appId]: true }))
-    const res = await fetch(`/api/v1/apps/${appId}`, { method: 'DELETE', credentials: 'include' })
-    setAppsDeleting((p) => ({ ...p, [appId]: false }))
-    if (!res.ok) { toast.error('Failed to delete app'); return }
-    setApps((p) => p.filter((a) => a.id !== appId))
-    toast.success('App deleted')
+    try {
+      const res = await fetch(`/api/v1/apps/${appId}`, { method: 'DELETE', credentials: 'include' })
+      if (!res.ok) { toast.error('Failed to delete app'); return }
+      setApps((p) => p.filter((a) => a.id !== appId))
+      toast.success('App deleted')
+    } catch {
+      toast.error('Failed to delete app')
+    } finally {
+      setAppsDeleting((p) => ({ ...p, [appId]: false }))
+    }
   }
 
   async function handleAppNameSave(appId: number) {
     setAppsSaving((p) => ({ ...p, [appId]: true }))
-    const res = await fetch(`/api/v1/apps/${appId}`, {
-      method: 'PATCH',
-      credentials: 'include',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name: appNames[appId] }),
-    })
-    setAppsSaving((p) => ({ ...p, [appId]: false }))
-    if (!res.ok) { toast.error('Failed to update app'); return }
-    toast.success('App updated')
+    try {
+      const res = await fetch(`/api/v1/apps/${appId}`, {
+        method: 'PATCH',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: appNames[appId] }),
+      })
+      if (!res.ok) { toast.error('Failed to update app'); return }
+      toast.success('App updated')
+    } catch {
+      toast.error('Failed to update app')
+    } finally {
+      setAppsSaving((p) => ({ ...p, [appId]: false }))
+    }
   }
 
   const profileDisplayName = useWatch({ control: profileForm.control, name: 'displayName' })

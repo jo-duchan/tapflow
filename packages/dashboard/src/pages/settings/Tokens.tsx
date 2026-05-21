@@ -9,7 +9,7 @@ import { Label } from '@/components/ui/label'
 import { Badge } from '@/components/ui/badge'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import {
-  AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
+  AlertDialog, AlertDialogCancel, AlertDialogContent,
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
 } from '@/components/ui/alert-dialog'
 import {
@@ -50,20 +50,21 @@ export function TokenSettings() {
   useEffect(() => { load() }, [])
 
   async function onCreate(data: FormData) {
-    const res = await fetch('/api/v1/tokens', {
-      method: 'POST',
-      credentials: 'include',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name: data.name, expires_in_days: parseInt(data.expiresDays, 10) }),
-    })
-    if (!res.ok) {
-      toast.error('Failed to create token')
-      return
+    try {
+      const res = await fetch('/api/v1/tokens', {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: data.name, expires_in_days: parseInt(data.expiresDays, 10) }),
+      })
+      if (!res.ok) { toast.error('Failed to create token'); return }
+      const json = await res.json() as { token: string }
+      toast.success('Token created')
+      setNewToken(json.token)
+      load()
+    } catch {
+      toast.error('Network error')
     }
-    const json = await res.json() as { token: string }
-    toast.success('Token created')
-    setNewToken(json.token)
-    load()
   }
 
   function handleDialogClose(o: boolean) {
@@ -71,14 +72,17 @@ export function TokenSettings() {
     if (!o) { setNewToken(''); reset() }
   }
 
-  async function handleRevoke(id: number) {
-    const res = await fetch(`/api/v1/tokens/${id}`, { method: 'DELETE', credentials: 'include' })
-    if (!res.ok) {
-      toast.error('Failed to revoke token')
-      return
+  async function handleRevoke(id: number): Promise<boolean> {
+    try {
+      const res = await fetch(`/api/v1/tokens/${id}`, { method: 'DELETE', credentials: 'include' })
+      if (!res.ok) { toast.error('Failed to revoke token'); return false }
+      toast.success('Token revoked')
+      load()
+      return true
+    } catch {
+      toast.error('Network error')
+      return false
     }
-    toast.success('Token revoked')
-    load()
   }
 
   function isExpired(t: Token) {
@@ -101,9 +105,8 @@ export function TokenSettings() {
                 <code className="rounded bg-muted px-3 py-2 text-xs break-all font-mono">{newToken}</code>
                 <Button onClick={() => {
                   navigator.clipboard.writeText(newToken)
-                    .then(() => toast.success('Token copied to clipboard'))
+                    .then(() => { toast.success('Token copied to clipboard'); setOpen(false) })
                     .catch(() => toast.error('Failed to copy — copy manually'))
-                  setOpen(false)
                 }}>
                   Copy & close
                 </Button>
@@ -183,12 +186,16 @@ export function TokenSettings() {
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel>Cancel</AlertDialogCancel>
-            <AlertDialogAction
-              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
-              onClick={() => { if (revokeTarget !== null) handleRevoke(revokeTarget); setRevokeTarget(null) }}
+            <Button
+              variant="destructive"
+              onClick={async () => {
+                if (revokeTarget === null) return
+                const ok = await handleRevoke(revokeTarget)
+                if (ok) setRevokeTarget(null)
+              }}
             >
               Revoke
-            </AlertDialogAction>
+            </Button>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
