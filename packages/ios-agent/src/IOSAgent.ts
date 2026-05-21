@@ -9,7 +9,13 @@ import type { Device, DeviceAgent } from '@tapflowio/agent-core'
 import { createLogger, PlatformError, ValidationError } from '@tapflowio/agent-core'
 
 const logger = createLogger('ios-agent')
-import { createResourceSampler, registerStreamWs } from '@tapflowio/agent-core/utils'
+import {
+  createResourceSampler,
+  registerStreamWs,
+  sendBinaryWithBackpressure,
+  createRateLimitedDropWarn,
+  DEFAULT_BACKPRESSURE_BYTES,
+} from '@tapflowio/agent-core/utils'
 import { SimctlWrapper } from './SimctlWrapper.js'
 import { ScreenCaptureStreamer } from './ScreenCaptureStreamer.js'
 import { MjpegStreamer } from './MjpegStreamer.js'
@@ -190,14 +196,15 @@ export class IOSAgent implements DeviceAgent {
     const reader = stream.getReader()
     state.streamReader = reader
 
+    const threshold = Number(process.env.TAPFLOW_WS_BACKPRESSURE_BYTES) || DEFAULT_BACKPRESSURE_BYTES
+    const onDrop = createRateLimitedDropWarn(logger, state.deviceId)
+
     const pump = async () => {
       try {
         while (true) {
           const { value, done } = await reader.read()
           if (done) break
-          if (streamWs.readyState === WebSocket.OPEN) {
-            streamWs.send(value)
-          }
+          sendBinaryWithBackpressure(streamWs, value, threshold, onDrop)
         }
       } catch {
         // stream cancelled or ws closed — expected on disconnect

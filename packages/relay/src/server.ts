@@ -12,7 +12,7 @@ const uploadsDir = path.join(dataDir, 'uploads')
 
 initDb(dbPath)
 
-const server = new RelayServer({ port, uploadsDir })
+const server = new RelayServer({ port, uploadsDir, wsBackpressureBytes: config.server.wsBackpressureBytes })
 
 void server.start().then(() => {
   logger.info(`tapflow relay running on port ${port}`)

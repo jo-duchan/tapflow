@@ -2,7 +2,13 @@ import os from 'os'
 import { WebSocket } from 'ws'
 import type { AndroidButton, Device, DeviceAgent } from '@tapflowio/agent-core'
 import { createLogger, PlatformError, ValidationError } from '@tapflowio/agent-core'
-import { createResourceSampler, registerStreamWs } from '@tapflowio/agent-core/utils'
+import {
+  createResourceSampler,
+  registerStreamWs,
+  sendBinaryWithBackpressure,
+  createRateLimitedDropWarn,
+  DEFAULT_BACKPRESSURE_BYTES,
+} from '@tapflowio/agent-core/utils'
 import { AdbWrapper } from './AdbWrapper.js'
 import { EmulatorLauncher } from './EmulatorLauncher.js'
 import { AndroidTouchHelper } from './AndroidTouchHelper.js'
@@ -282,6 +288,9 @@ export class AndroidAgent implements DeviceAgent {
     const stream = session.video.start()
     const reader = stream.getReader()
 
+    const threshold = Number(process.env.TAPFLOW_WS_BACKPRESSURE_BYTES) || DEFAULT_BACKPRESSURE_BYTES
+    const onDrop = createRateLimitedDropWarn(logger, state.deviceId)
+
     const pump = async () => {
       try {
         while (true) {
@@ -296,7 +305,7 @@ export class AndroidAgent implements DeviceAgent {
             state.scrcpySession?.control.updateScreenSize(parsed.width, parsed.height)
             logger.info(`video size → ${parsed.width}×${parsed.height}`)
           }
-          if (streamWs.readyState === WebSocket.OPEN) streamWs.send(value)
+          sendBinaryWithBackpressure(streamWs, value, threshold, onDrop)
         }
       } catch {
         // stream cancelled or ws closed — expected on disconnect

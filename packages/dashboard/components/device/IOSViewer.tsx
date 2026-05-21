@@ -482,7 +482,7 @@ export function IOSViewer({
               }}
             />
             {!canvasReady && (
-              <div className="absolute animate-pulse bg-zinc-800" style={{
+              <div className="absolute animate-pulse bg-zinc-700" style={{
                 zIndex: 3, left: `${screenPctLeft}%`, top: `${screenPctTop}%`,
                 width: `${screenPctW}%`, height: `${screenPctH}%`,
                 borderRadius: cssCornerRadius > 0 ? `${cssCornerRadius}px` : undefined,

@@ -367,6 +367,49 @@ describe('RelayServer', () => {
     streamA.close()
   })
 
+  it('wsBackpressureBytes: 0 → binary frames are never forwarded to browser', async () => {
+    // Use a fresh server with threshold=0 so bufferedAmount(0) >= threshold(0) is always true
+    const strictServer = new RelayServer({ port: 0, wsBackpressureBytes: 0 })
+    await strictServer.start()
+    const strictPort = (strictServer.address() as { port: number }).port
+
+    try {
+      const devices = [{ id: 'devA', name: 'iPhone A', platform: 'ios', status: 'shutdown' }]
+      const agent = new WebSocket(`ws://localhost:${strictPort}`)
+      await waitForOpen(agent)
+      agent.send(JSON.stringify({ type: 'agent:register', devices }))
+      const { registeredSessions } = await waitForMessage(agent)
+      const sessionId = registeredSessions![0].sessionId
+
+      const browser = new WebSocket(`ws://localhost:${strictPort}`)
+      browser.binaryType = 'nodebuffer'
+      await waitForOpen(browser)
+      browser.send(JSON.stringify({ type: 'session:start', sessionId }))
+      await waitForMessage(browser) // session:joined
+
+      const streamWs = new WebSocket(`ws://localhost:${strictPort}`)
+      await waitForOpen(streamWs)
+      streamWs.send(JSON.stringify({ type: 'stream:register', sessionId }))
+      await waitForMessage(streamWs) // stream:registered
+
+      let binaryReceived = false
+      browser.on('message', (_d, isBinary) => { if (isBinary) binaryReceived = true })
+
+      streamWs.send(Buffer.from([0xff, 0xd8, 0xff]))
+      // Wait a tick for any forwarding to happen
+      await new Promise<void>((r) => setImmediate(r))
+      await new Promise<void>((r) => setTimeout(r, 20))
+
+      expect(binaryReceived).toBe(false)
+
+      agent.close()
+      browser.close()
+      streamWs.close()
+    } finally {
+      await strictServer.stop()
+    }
+  })
+
   it('agents:listed groups devices by agent and includes sessionId per device', async () => {
     const devices = [
       { id: 'devA', name: 'iPhone A', platform: 'ios', status: 'shutdown' },
