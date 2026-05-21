@@ -159,23 +159,23 @@ Full reference → [CLI docs](https://www.tapflow.dev/reference/cli)
 
 **Getting Started**
 - [Introduction](https://www.tapflow.dev/guide/introduction)
-- [Quick Start](https://www.tapflow.dev/guide/quick-start)
+- [Quick Start](https://www.tapflow.dev/guide/getting-started)
 - [Requirements](https://www.tapflow.dev/guide/requirements)
 
 **Setup**
 - [Self-Hosting the Relay](https://www.tapflow.dev/guide/self-hosting)
-- [Agent Setup](https://www.tapflow.dev/guide/agent-setup)
+- [Agent Setup](https://www.tapflow.dev/guide/agent)
 - [Uploading Builds (CI/CD)](https://www.tapflow.dev/guide/upload-builds)
 - [Scaling Mac Resources](https://www.tapflow.dev/guide/scaling)
 
 **Dashboard**
-- [First-time Setup](https://www.tapflow.dev/guide/first-time-setup)
-- [Dashboard Overview](https://www.tapflow.dev/guide/dashboard-overview)
+- [First-time Setup](https://www.tapflow.dev/dashboard/setup)
+- [Dashboard Overview](https://www.tapflow.dev/dashboard/overview)
 
 **Reference**
 - [CLI Reference](https://www.tapflow.dev/reference/cli)
 - [Configuration](https://www.tapflow.dev/reference/configuration)
-- [REST API](https://www.tapflow.dev/reference/rest-api)
+- [REST API](https://www.tapflow.dev/reference/api)
 
 **[Troubleshooting](https://www.tapflow.dev/guide/troubleshooting)**
 

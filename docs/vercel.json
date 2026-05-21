@@ -1,3 +1,4 @@
 {
-  "outputDirectory": ".vitepress/dist"
+  "outputDirectory": ".vitepress/dist",
+  "cleanUrls": true
 }
