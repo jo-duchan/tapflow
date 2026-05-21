@@ -557,21 +557,38 @@ export class AndroidAgent implements DeviceAgent {
       }
       case 'input:pinch:start': {
         const state = this.deviceStates.get(msg.sessionId!)
-        if (!state?.touchHelper) break
-        const { x1, y1, x2, y2 } = msg.payload as { x1: number; y1: number; x2: number; y2: number }
-        state.touchHelper.pinchStart(x1, y1, x2, y2)
+        if (!state) break
+        const { f0, f1 } = msg.payload as { f0: { x: number; y: number }; f1: { x: number; y: number } }
+        if (state.scrcpySession && state.videoWidth > 0) {
+          const px1 = Math.round(f0.x * state.videoWidth), py1 = Math.round(f0.y * state.videoHeight)
+          const px2 = Math.round(f1.x * state.videoWidth), py2 = Math.round(f1.y * state.videoHeight)
+          state.scrcpySession.control.pinchStart(px1, py1, px2, py2)
+        } else {
+          state.touchHelper?.pinchStart(f0.x, f0.y, f1.x, f1.y)
+        }
         break
       }
       case 'input:pinch:move': {
         const state = this.deviceStates.get(msg.sessionId!)
-        if (!state?.touchHelper) break
-        const { x1, y1, x2, y2 } = msg.payload as { x1: number; y1: number; x2: number; y2: number }
-        state.touchHelper.pinchMove(x1, y1, x2, y2)
+        if (!state) break
+        const { f0, f1 } = msg.payload as { f0: { x: number; y: number }; f1: { x: number; y: number } }
+        if (state.scrcpySession && state.videoWidth > 0) {
+          const px1 = Math.round(f0.x * state.videoWidth), py1 = Math.round(f0.y * state.videoHeight)
+          const px2 = Math.round(f1.x * state.videoWidth), py2 = Math.round(f1.y * state.videoHeight)
+          state.scrcpySession.control.pinchMove(px1, py1, px2, py2)
+        } else {
+          state.touchHelper?.pinchMove(f0.x, f0.y, f1.x, f1.y)
+        }
         break
       }
       case 'input:pinch:end': {
         const state = this.deviceStates.get(msg.sessionId!)
-        state?.touchHelper?.pinchEnd()
+        if (!state) break
+        if (state.scrcpySession) {
+          state.scrcpySession.control.pinchEnd()
+        } else {
+          state.touchHelper?.pinchEnd()
+        }
         break
       }
       case 'input:rotate': {

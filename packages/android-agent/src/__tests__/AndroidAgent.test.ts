@@ -40,7 +40,14 @@ vi.mock('../scrcpy/ScrcpySession', () => ({
         },
       })),
     },
-    control: {},
+    control: {
+      touchDown: vi.fn(),
+      touchMove: vi.fn(),
+      touchUp: vi.fn(),
+      pinchStart: vi.fn(),
+      pinchMove: vi.fn(),
+      pinchEnd: vi.fn(),
+    },
   })),
 }))
 

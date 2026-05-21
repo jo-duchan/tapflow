@@ -217,6 +217,7 @@ export function AndroidViewer({
       if (!fingers) return
       isPinchMode.current = true; setPinchActive(true)
       ;(e.target as Element).setPointerCapture(e.pointerId)
+      const _lc = liveCursorRef.current; if (_lc) _lc.style.display = 'none'
       setPinchHint(fingers)
       send({ type: 'input:pinch:start', sessionId, payload: fingers })
       return
@@ -243,7 +244,9 @@ export function AndroidViewer({
   const handlePointerMove = useCallback((e: React.PointerEvent) => {
     if (e.buttons === 0) {
       if (isOptionHeld.current) {
-        setPinchHint(toPinchFingers(e)); cursorPosRef.current = null; return
+        setPinchHint(toPinchFingers(e)); cursorPosRef.current = null
+        const _lc = liveCursorRef.current; if (_lc) _lc.style.display = 'none'
+        return
       }
       const norm = toNorm(e)
       const _r = (e.currentTarget as Element).getBoundingClientRect()
