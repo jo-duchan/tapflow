@@ -455,7 +455,7 @@ export function AndroidViewer({
                 onPointerLeave={handlePointerLeave}
               />
               {!canvasReady && (
-                <div className="absolute inset-0 animate-pulse bg-zinc-600" />
+                <div className="absolute inset-0 animate-pulse bg-zinc-700" />
               )}
               {!canvasReady && deviceReady && (
                 <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
