@@ -32,6 +32,13 @@ React SPA QA dashboard: provides the simulator viewer, bug reports, and team inv
 - **Dev server proxy**: `vite.config.ts` proxies `/api` and `/uploads` → `http://localhost:4000`.
 - **Build order**: dashboard first → relay second (`agent-core → dashboard → relay`).
 
+## Testing
+
+- `pnpm test` is always run foreground (terminal). **Never run vitest as a background process** — worker forks accumulate as zombies and exhaust CPU/RAM.
+- If a test appears to hang, Ctrl+C immediately and diagnose. Do not re-run without fixing the root cause.
+- Components that combine multiple `useEffect` + `react-hook-form` `Controller` + `useWatch` (e.g. `DefaultSettings`) can hang in jsdom under full render. `vitest.config.ts` has `testTimeout: 10000` as a safety net — a timeout failure means the test setup needs fixing, not more retries.
+- When mocking `fetch` in a component that fires multiple concurrent `useEffect` fetches (e.g. `GET /api/v1/settings` + `GET /api/v1/apps`), use URL-based dispatch (`mockImplementation((url) => {...})`) instead of `mockResolvedValueOnce` chains — call order is non-deterministic.
+
 ## HOW NOT
 
 - Do not reintroduce the `next` package.

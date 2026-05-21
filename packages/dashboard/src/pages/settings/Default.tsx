@@ -21,6 +21,7 @@ import {
   AlertDialogTitle,
   AlertDialogTrigger,
 } from '@/components/ui/alert-dialog'
+import { toast } from 'sonner'
 import { Pencil } from 'lucide-react'
 import { avatarColors } from '@/components/user-avatar'
 import { useAuth } from '@/hooks/useAuth'
@@ -58,7 +59,6 @@ export function DefaultSettings() {
 
   // ── Workspace (Admin only) ────────────────────────────────────────────────
   const [logoUrl, setLogoUrl] = useState<string | null>(null)
-  const [workspaceSaved, setWorkspaceSaved] = useState(false)
   const logoRef = useRef<HTMLInputElement>(null)
 
   const workspaceForm = useForm<WorkspaceData>({
@@ -80,14 +80,17 @@ export function DefaultSettings() {
     const form = new FormData()
     form.append('team_name', data.teamName)
     if (data.logo) form.append('logo', data.logo)
-    await fetch('/api/v1/settings', { method: 'PATCH', credentials: 'include', body: form })
-    setWorkspaceSaved(true)
-    setTimeout(() => setWorkspaceSaved(false), 2000)
+    try {
+      const res = await fetch('/api/v1/settings', { method: 'PATCH', credentials: 'include', body: form })
+      if (!res.ok) { toast.error('Failed to update workspace'); return }
+      toast.success('Workspace updated')
+    } catch {
+      toast.error('Failed to update workspace')
+    }
   }
 
   // ── Profile (everyone) ────────────────────────────────────────────────────
   const [avatarUrl, setAvatarUrl] = useState<string | null>(null)
-  const [profileSaved, setProfileSaved] = useState(false)
   const avatarRef = useRef<HTMLInputElement>(null)
 
   const profileForm = useForm<ProfileData>({
@@ -106,13 +109,14 @@ export function DefaultSettings() {
     const form = new FormData()
     form.append('display_name', data.displayName)
     if (data.avatar) form.append('avatar', data.avatar)
-    await fetch('/api/v1/profile', { method: 'PATCH', credentials: 'include', body: form })
-    setProfileSaved(true)
-    setTimeout(() => setProfileSaved(false), 2000)
+    try {
+      const res = await fetch('/api/v1/profile', { method: 'PATCH', credentials: 'include', body: form })
+      if (!res.ok) { toast.error('Failed to update profile'); return }
+      toast.success('Profile updated')
+    } catch {
+      toast.error('Failed to update profile')
+    }
   }
-
-  // ── Password (everyone) ───────────────────────────────────────────────────
-  const [passwordSaved, setPasswordSaved] = useState(false)
 
   const passwordForm = useForm<PasswordData>({
     resolver: zodResolver(passwordSchema),
@@ -120,27 +124,29 @@ export function DefaultSettings() {
   })
 
   async function onPasswordSave(data: PasswordData) {
-    const res = await fetch('/api/v1/auth/change-password', {
-      method: 'POST',
-      credentials: 'include',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ currentPassword: data.currentPassword, newPassword: data.newPassword }),
-    })
-    if (!res.ok) {
-      const d = await res.json() as { error?: string }
-      passwordForm.setError('root', { message: d.error ?? 'Failed to change password' })
-      return
+    try {
+      const res = await fetch('/api/v1/auth/change-password', {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ currentPassword: data.currentPassword, newPassword: data.newPassword }),
+      })
+      if (!res.ok) {
+        const d = await res.json() as { error?: string }
+        passwordForm.setError('root', { message: d.error ?? 'Failed to change password' })
+        return
+      }
+      passwordForm.reset()
+      toast.success('Password changed')
+    } catch {
+      passwordForm.setError('root', { message: 'Network error' })
     }
-    passwordForm.reset()
-    setPasswordSaved(true)
-    setTimeout(() => setPasswordSaved(false), 2000)
   }
 
   // ── Apps (Admin + Developer) ──────────────────────────────────────────────
   const [apps, setApps] = useState<App[]>([])
   const [appNames, setAppNames] = useState<Record<number, string>>({})
   const [appsSaving, setAppsSaving] = useState<Record<number, boolean>>({})
-  const [appsSaved, setAppsSaved] = useState<Record<number, boolean>>({})
   const [appsDeleting, setAppsDeleting] = useState<Record<number, boolean>>({})
 
   useEffect(() => {
@@ -158,22 +164,34 @@ export function DefaultSettings() {
 
   async function handleAppDelete(appId: number) {
     setAppsDeleting((p) => ({ ...p, [appId]: true }))
-    await fetch(`/api/v1/apps/${appId}`, { method: 'DELETE', credentials: 'include' })
-    setApps((p) => p.filter((a) => a.id !== appId))
-    setAppsDeleting((p) => ({ ...p, [appId]: false }))
+    try {
+      const res = await fetch(`/api/v1/apps/${appId}`, { method: 'DELETE', credentials: 'include' })
+      if (!res.ok) { toast.error('Failed to delete app'); return }
+      setApps((p) => p.filter((a) => a.id !== appId))
+      toast.success('App deleted')
+    } catch {
+      toast.error('Failed to delete app')
+    } finally {
+      setAppsDeleting((p) => ({ ...p, [appId]: false }))
+    }
   }
 
   async function handleAppNameSave(appId: number) {
     setAppsSaving((p) => ({ ...p, [appId]: true }))
-    await fetch(`/api/v1/apps/${appId}`, {
-      method: 'PATCH',
-      credentials: 'include',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name: appNames[appId] }),
-    })
-    setAppsSaving((p) => ({ ...p, [appId]: false }))
-    setAppsSaved((p) => ({ ...p, [appId]: true }))
-    setTimeout(() => setAppsSaved((p) => ({ ...p, [appId]: false })), 2000)
+    try {
+      const res = await fetch(`/api/v1/apps/${appId}`, {
+        method: 'PATCH',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: appNames[appId] }),
+      })
+      if (!res.ok) { toast.error('Failed to update app'); return }
+      toast.success('App updated')
+    } catch {
+      toast.error('Failed to update app')
+    } finally {
+      setAppsSaving((p) => ({ ...p, [appId]: false }))
+    }
   }
 
   const profileDisplayName = useWatch({ control: profileForm.control, name: 'displayName' })
@@ -214,7 +232,7 @@ export function DefaultSettings() {
                       <input ref={logoRef} type="file" accept=".png,.jpg,.jpeg" className="hidden"
                         onChange={(e) => {
                           const f = e.target.files?.[0]
-                          if (f && f.size > 2 * 1024 * 1024) { alert('Max 2MB'); return }
+                          if (f && f.size > 2 * 1024 * 1024) { toast.error('Image must be 2MB or less'); return }
                           if (f) { field.onChange(f); setLogoUrl(URL.createObjectURL(f)) }
                         }}
                       />
@@ -224,7 +242,7 @@ export function DefaultSettings() {
               </div>
               <div className="flex justify-end">
                 <Button type="submit" size="sm" disabled={workspaceForm.formState.isSubmitting}>
-                  {workspaceSaved ? 'Saved!' : workspaceForm.formState.isSubmitting ? 'Saving…' : 'Save changes'}
+                  {workspaceForm.formState.isSubmitting ? 'Saving…' : 'Save changes'}
                 </Button>
               </div>
             </form>
@@ -272,7 +290,7 @@ export function DefaultSettings() {
                     <input ref={avatarRef} type="file" accept=".png,.jpg,.jpeg" className="hidden"
                       onChange={(e) => {
                         const f = e.target.files?.[0]
-                        if (f && f.size > 2 * 1024 * 1024) { alert('Max 2MB'); return }
+                        if (f && f.size > 2 * 1024 * 1024) { toast.error('Image must be 2MB or less'); return }
                         if (f) { field.onChange(f); setAvatarUrl(URL.createObjectURL(f)) }
                       }}
                     />
@@ -282,7 +300,7 @@ export function DefaultSettings() {
             </div>
             <div className="flex justify-end">
               <Button type="submit" size="sm" disabled={profileForm.formState.isSubmitting}>
-                {profileSaved ? 'Saved!' : profileForm.formState.isSubmitting ? 'Saving…' : 'Save changes'}
+                {profileForm.formState.isSubmitting ? 'Saving…' : 'Save changes'}
               </Button>
             </div>
           </form>
@@ -320,7 +338,7 @@ export function DefaultSettings() {
             )}
             <div className="flex justify-end">
               <Button type="submit" size="sm" disabled={passwordForm.formState.isSubmitting}>
-                {passwordSaved ? 'Saved!' : passwordForm.formState.isSubmitting ? 'Saving…' : 'Change password'}
+                {passwordForm.formState.isSubmitting ? 'Saving…' : 'Change password'}
               </Button>
             </div>
           </form>
@@ -359,7 +377,7 @@ export function DefaultSettings() {
                         disabled={appsSaving[app.id]}
                         onClick={() => handleAppNameSave(app.id)}
                       >
-                        {appsSaved[app.id] ? 'Saved!' : appsSaving[app.id] ? 'Saving…' : 'Save'}
+                        {appsSaving[app.id] ? 'Saving…' : 'Save'}
                       </Button>
                       <AlertDialog>
                         <AlertDialogTrigger asChild>

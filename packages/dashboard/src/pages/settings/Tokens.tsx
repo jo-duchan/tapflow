@@ -2,11 +2,16 @@ import { useEffect, useState } from 'react'
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
+import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Badge } from '@/components/ui/badge'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
+import {
+  AlertDialog, AlertDialogCancel, AlertDialogContent,
+  AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
+} from '@/components/ui/alert-dialog'
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger,
 } from '@/components/ui/dialog'
@@ -30,6 +35,7 @@ export function TokenSettings() {
   const [tokens, setTokens] = useState<Token[]>([])
   const [open, setOpen] = useState(false)
   const [newToken, setNewToken] = useState('')
+  const [revokeTarget, setRevokeTarget] = useState<number | null>(null)
 
   const { register, handleSubmit, reset, formState: { errors, isSubmitting } } = useForm<FormData>({
     resolver: zodResolver(schema),
@@ -44,15 +50,21 @@ export function TokenSettings() {
   useEffect(() => { load() }, [])
 
   async function onCreate(data: FormData) {
-    const res = await fetch('/api/v1/tokens', {
-      method: 'POST',
-      credentials: 'include',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name: data.name, expires_in_days: parseInt(data.expiresDays, 10) }),
-    })
-    const json = await res.json() as { token: string }
-    setNewToken(json.token)
-    load()
+    try {
+      const res = await fetch('/api/v1/tokens', {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: data.name, expires_in_days: parseInt(data.expiresDays, 10) }),
+      })
+      if (!res.ok) { toast.error('Failed to create token'); return }
+      const json = await res.json() as { token: string }
+      toast.success('Token created')
+      setNewToken(json.token)
+      load()
+    } catch {
+      toast.error('Network error')
+    }
   }
 
   function handleDialogClose(o: boolean) {
@@ -60,10 +72,17 @@ export function TokenSettings() {
     if (!o) { setNewToken(''); reset() }
   }
 
-  async function handleRevoke(id: number) {
-    if (!confirm('Revoke this token? Any active API calls using it will immediately fail.')) return
-    await fetch(`/api/v1/tokens/${id}`, { method: 'DELETE', credentials: 'include' })
-    load()
+  async function handleRevoke(id: number): Promise<boolean> {
+    try {
+      const res = await fetch(`/api/v1/tokens/${id}`, { method: 'DELETE', credentials: 'include' })
+      if (!res.ok) { toast.error('Failed to revoke token'); return false }
+      toast.success('Token revoked')
+      load()
+      return true
+    } catch {
+      toast.error('Network error')
+      return false
+    }
   }
 
   function isExpired(t: Token) {
@@ -84,7 +103,11 @@ export function TokenSettings() {
               <div className="flex flex-col gap-3 pt-2">
                 <p className="text-sm text-muted-foreground">Copy this token now — it won&apos;t be shown again.</p>
                 <code className="rounded bg-muted px-3 py-2 text-xs break-all font-mono">{newToken}</code>
-                <Button onClick={() => { navigator.clipboard.writeText(newToken).catch(() => {}); setOpen(false) }}>
+                <Button onClick={() => {
+                  navigator.clipboard.writeText(newToken)
+                    .then(() => { toast.success('Token copied to clipboard'); setOpen(false) })
+                    .catch(() => toast.error('Failed to copy — copy manually'))
+                }}>
                   Copy & close
                 </Button>
               </div>
@@ -142,7 +165,7 @@ export function TokenSettings() {
                     ) : <span className="text-muted-foreground text-sm">Never</span>}
                   </TableCell>
                   <TableCell>
-                    <Button variant="destructive" size="icon" className="h-7 w-7" onClick={() => handleRevoke(t.id)}>
+                    <Button variant="destructive" size="icon" className="h-7 w-7" aria-label="Revoke token" onClick={() => setRevokeTarget(t.id)}>
                       <Trash2 className="h-4 w-4" />
                     </Button>
                   </TableCell>
@@ -152,6 +175,30 @@ export function TokenSettings() {
           </Table>
         </CardContent>
       </Card>
+
+      <AlertDialog open={revokeTarget !== null} onOpenChange={(o) => { if (!o) setRevokeTarget(null) }}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Revoke token?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Any active API calls using this token will immediately fail.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <Button
+              variant="destructive"
+              onClick={async () => {
+                if (revokeTarget === null) return
+                const ok = await handleRevoke(revokeTarget)
+                if (ok) setRevokeTarget(null)
+              }}
+            >
+              Revoke
+            </Button>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   )
 }
