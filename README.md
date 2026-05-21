@@ -134,7 +134,7 @@ pm2 save && pm2 startup
 tapflow agent start --relay wss://your-relay-url
 ```
 
-> For nginx / Caddy reverse proxy setup and external access, see [Self-Hosting the Relay](https://www.tapflow.dev/guide/self-hosting).
+> For nginx / Caddy reverse proxy setup and external access, see [Self-Hosting the Relay](https://www.tapflow.dev/guide/self-hosting.html).
 
 ## CLI Reference
 
@@ -151,33 +151,33 @@ tapflow agent start --relay wss://your-relay-url
 | `tapflow reset` | Shut down all simulators and emulators |
 | `tapflow logs` | Show recent relay log entries |
 
-Full reference → [CLI docs](https://www.tapflow.dev/reference/cli)
+Full reference → [CLI docs](https://www.tapflow.dev/reference/cli.html)
 
 ## Documentation
 
 **[www.tapflow.dev](https://www.tapflow.dev)**
 
 **Getting Started**
-- [Introduction](https://www.tapflow.dev/guide/introduction)
-- [Quick Start](https://www.tapflow.dev/guide/quick-start)
-- [Requirements](https://www.tapflow.dev/guide/requirements)
+- [Introduction](https://www.tapflow.dev/guide/introduction.html)
+- [Quick Start](https://www.tapflow.dev/guide/getting-started.html)
+- [Requirements](https://www.tapflow.dev/guide/requirements.html)
 
 **Setup**
-- [Self-Hosting the Relay](https://www.tapflow.dev/guide/self-hosting)
-- [Agent Setup](https://www.tapflow.dev/guide/agent-setup)
-- [Uploading Builds (CI/CD)](https://www.tapflow.dev/guide/upload-builds)
-- [Scaling Mac Resources](https://www.tapflow.dev/guide/scaling)
+- [Self-Hosting the Relay](https://www.tapflow.dev/guide/self-hosting.html)
+- [Agent Setup](https://www.tapflow.dev/guide/agent.html)
+- [Uploading Builds (CI/CD)](https://www.tapflow.dev/guide/upload-builds.html)
+- [Scaling Mac Resources](https://www.tapflow.dev/guide/scaling.html)
 
 **Dashboard**
-- [First-time Setup](https://www.tapflow.dev/guide/first-time-setup)
-- [Dashboard Overview](https://www.tapflow.dev/guide/dashboard-overview)
+- [First-time Setup](https://www.tapflow.dev/dashboard/setup.html)
+- [Dashboard Overview](https://www.tapflow.dev/dashboard/overview.html)
 
 **Reference**
-- [CLI Reference](https://www.tapflow.dev/reference/cli)
-- [Configuration](https://www.tapflow.dev/reference/configuration)
-- [REST API](https://www.tapflow.dev/reference/rest-api)
+- [CLI Reference](https://www.tapflow.dev/reference/cli.html)
+- [Configuration](https://www.tapflow.dev/reference/configuration.html)
+- [REST API](https://www.tapflow.dev/reference/api.html)
 
-**[Troubleshooting](https://www.tapflow.dev/guide/troubleshooting)**
+**[Troubleshooting](https://www.tapflow.dev/guide/troubleshooting.html)**
 
 ## Development
 
