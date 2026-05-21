@@ -100,6 +100,7 @@ const koSidebar = [
 export default withMermaid(defineConfig({
   title: 'tapflow',
   description: 'Self-hosted iOS/Android simulator streaming for QA',
+  cleanUrls: true,
 
   locales: {
     root: {
