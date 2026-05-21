@@ -43,6 +43,21 @@ export class ScrcpyControl {
     this.writeTouchEvent(ACTION_UP, pointerId, x, y)
   }
 
+  pinchStart(x1: number, y1: number, x2: number, y2: number): void {
+    this.touchDown(0, x1, y1)
+    this.touchDown(1, x2, y2)
+  }
+
+  pinchMove(x1: number, y1: number, x2: number, y2: number): void {
+    this.touchMove(0, x1, y1)
+    this.touchMove(1, x2, y2)
+  }
+
+  pinchEnd(): void {
+    this.touchUp(0)
+    this.touchUp(1)
+  }
+
   keyEvent(keyCode: number): void {
     const buf = Buffer.allocUnsafe(14)
     buf.writeUInt8(TYPE_INJECT_KEYCODE, 0)

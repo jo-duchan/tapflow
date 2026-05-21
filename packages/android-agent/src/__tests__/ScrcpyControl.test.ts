@@ -56,6 +56,53 @@ describe('ScrcpyControl', () => {
     })
   })
 
+  describe('pinchStart', () => {
+    it('sends touchDown for pointerId 0 then pointerId 1', () => {
+      ctrl.pinchStart(100, 200, 300, 400)
+      expect(socket.write).toHaveBeenCalledTimes(2)
+      const buf0: Buffer = (socket.write as ReturnType<typeof vi.fn>).mock.calls[0][0]
+      const buf1: Buffer = (socket.write as ReturnType<typeof vi.fn>).mock.calls[1][0]
+      expect(buf0.readUInt8(1)).toBe(0)           // action DOWN
+      expect(buf0.readBigInt64BE(2)).toBe(0n)     // pointerId 0
+      expect(buf0.readInt32BE(10)).toBe(100)
+      expect(buf0.readInt32BE(14)).toBe(200)
+      expect(buf1.readUInt8(1)).toBe(0)           // action DOWN
+      expect(buf1.readBigInt64BE(2)).toBe(1n)     // pointerId 1
+      expect(buf1.readInt32BE(10)).toBe(300)
+      expect(buf1.readInt32BE(14)).toBe(400)
+    })
+  })
+
+  describe('pinchMove', () => {
+    it('sends touchMove for pointerId 0 then pointerId 1', () => {
+      ctrl.pinchMove(110, 210, 310, 410)
+      expect(socket.write).toHaveBeenCalledTimes(2)
+      const buf0: Buffer = (socket.write as ReturnType<typeof vi.fn>).mock.calls[0][0]
+      const buf1: Buffer = (socket.write as ReturnType<typeof vi.fn>).mock.calls[1][0]
+      expect(buf0.readUInt8(1)).toBe(2)           // action MOVE
+      expect(buf0.readBigInt64BE(2)).toBe(0n)
+      expect(buf0.readInt32BE(10)).toBe(110)
+      expect(buf1.readUInt8(1)).toBe(2)
+      expect(buf1.readBigInt64BE(2)).toBe(1n)
+      expect(buf1.readInt32BE(10)).toBe(310)
+    })
+  })
+
+  describe('pinchEnd', () => {
+    it('sends touchUp for pointerId 0 then pointerId 1 with zero pressure', () => {
+      ctrl.pinchEnd()
+      expect(socket.write).toHaveBeenCalledTimes(2)
+      const buf0: Buffer = (socket.write as ReturnType<typeof vi.fn>).mock.calls[0][0]
+      const buf1: Buffer = (socket.write as ReturnType<typeof vi.fn>).mock.calls[1][0]
+      expect(buf0.readUInt8(1)).toBe(1)           // action UP
+      expect(buf0.readBigInt64BE(2)).toBe(0n)
+      expect(buf0.readUInt16BE(22)).toBe(0)       // pressure = 0
+      expect(buf1.readUInt8(1)).toBe(1)
+      expect(buf1.readBigInt64BE(2)).toBe(1n)
+      expect(buf1.readUInt16BE(22)).toBe(0)
+    })
+  })
+
   describe('keyEvent', () => {
     it('writes TYPE_INJECT_KEYCODE with given keyCode', () => {
       ctrl.keyEvent(4) // BACK
