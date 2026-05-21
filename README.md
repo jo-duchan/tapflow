@@ -25,7 +25,7 @@
 
 <video src="https://github.com/user-attachments/assets/01914ed2-f35c-4230-ae01-166ffe6af395" controls width="100%"></video>
 
-[▶ Watch demo](https://www.tapflow.dev/guide/introduction.html#introduction)
+[▶ Watch demo](https://www.tapflow.dev/guide/introduction)
 
 ---
 
@@ -134,7 +134,7 @@ pm2 save && pm2 startup
 tapflow agent start --relay wss://your-relay-url
 ```
 
-> For nginx / Caddy reverse proxy setup and external access, see [Self-Hosting the Relay](https://jo-duchan.github.io/tapflow/guide/self-hosting).
+> For nginx / Caddy reverse proxy setup and external access, see [Self-Hosting the Relay](https://www.tapflow.dev/guide/self-hosting).
 
 ## CLI Reference
 
@@ -151,20 +151,23 @@ tapflow agent start --relay wss://your-relay-url
 | `tapflow reset` | Shut down all simulators and emulators |
 | `tapflow logs` | Show recent relay log entries |
 
-Full reference → [CLI docs](https://jo-duchan.github.io/tapflow/reference/cli)
+Full reference → [CLI docs](https://www.tapflow.dev/reference/cli)
 
 ## Documentation
 
-**[jo-duchan.github.io/tapflow](https://jo-duchan.github.io/tapflow)**
+**[www.tapflow.dev](https://www.tapflow.dev)**
 
-- [Introduction](https://jo-duchan.github.io/tapflow/guide/introduction)
-- [Quick Start](https://jo-duchan.github.io/tapflow/guide/getting-started)
-- [Self-Hosting the Relay](https://jo-duchan.github.io/tapflow/guide/self-hosting)
-- [iOS Agent Setup](https://jo-duchan.github.io/tapflow/guide/ios-agent)
-- [Android Agent Setup](https://jo-duchan.github.io/tapflow/guide/android-agent)
-- [Uploading Builds (CI/CD)](https://jo-duchan.github.io/tapflow/guide/upload-builds)
-- [CLI Reference](https://jo-duchan.github.io/tapflow/reference/cli)
-- [Troubleshooting](https://jo-duchan.github.io/tapflow/guide/troubleshooting)
+- [Introduction](https://www.tapflow.dev/guide/introduction)
+- [Quick Start](https://www.tapflow.dev/guide/getting-started)
+- [Self-Hosting the Relay](https://www.tapflow.dev/guide/self-hosting)
+- [iOS Agent Setup](https://www.tapflow.dev/guide/ios-agent)
+- [Android Agent Setup](https://www.tapflow.dev/guide/android-agent)
+- [App Center — Upload & Manage Builds](https://www.tapflow.dev/guide/app-center)
+- [Team Management & Access Tokens](https://www.tapflow.dev/guide/team-management)
+- [Session Recordings](https://www.tapflow.dev/guide/recordings)
+- [Uploading Builds via CI/CD](https://www.tapflow.dev/guide/upload-builds)
+- [CLI Reference](https://www.tapflow.dev/reference/cli)
+- [Troubleshooting](https://www.tapflow.dev/guide/troubleshooting)
 
 ## Development
 
