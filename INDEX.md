@@ -22,6 +22,7 @@ Common rules are in the root [CLAUDE.md](./CLAUDE.md).
 |-----------|-----------|---------|
 | playground | [playground/CLAUDE.md](./playground/CLAUDE.md) | Full-stack local run and integration testing |
 | .work | [.work/CLAUDE.md](./.work/CLAUDE.md) | Local work log conventions (plan/review/compound) |
+| .internal/marketing | [.internal/marketing/CLAUDE.md](./.internal/marketing/CLAUDE.md) | Marketing context — product positioning, copy bank, channel tone guide |
 
 ## Documentation
 
@@ -29,7 +30,7 @@ Common rules are in the root [CLAUDE.md](./CLAUDE.md).
 |------|----------|
 | [CONTRIBUTING.md](./CONTRIBUTING.md) | Branch, release, and commit conventions |
 | [packages/dashboard/DESIGN.md](./packages/dashboard/DESIGN.md) | Dashboard design system — color tokens, typography, elevation, component specs |
-| [internal/PRD.md](./internal/PRD.md) | Product requirements (internal document) |
+| [.internal/PRD.md](./.internal/PRD.md) | Product requirements (local only) |
 | [docs/CLAUDE.md](./docs/CLAUDE.md) | VitePress work rules — shiki code blocks, CSS customization notes |
 
 ---
@@ -47,6 +48,7 @@ CLAUDE.md (common rules — WHAT/WHY/HOW/HOW NOT)
     ├── packages/cli/CLAUDE.md
     ├── playground/CLAUDE.md
     ├── .work/CLAUDE.md
+    ├── .internal/marketing/CLAUDE.md
     ├── docs/CLAUDE.md
     └── CONTRIBUTING.md
 ```
