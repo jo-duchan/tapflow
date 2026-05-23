@@ -116,6 +116,14 @@
 
 .VPHero .text {
   line-height: 1.25;
+  word-break: keep-all;
+}
+
+@media (min-width: 640px) {
+  .VPHero .text,
+  .VPHero .tagline {
+    max-width: none;
+  }
 }
 
 .VPHero .tagline {
