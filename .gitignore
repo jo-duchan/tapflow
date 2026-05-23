@@ -58,3 +58,4 @@ playground/multi-agent.ts
 # VitePress
 docs/.vitepress/cache
 docs/.vitepress/dist
+.internal/

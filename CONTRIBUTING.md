@@ -90,6 +90,13 @@ Run the tests for any changed packages before opening a PR. New behavior must be
 
 **Mock only at system boundaries** — real network, OS calls, external processes. Internal module interactions run against real code.
 
+## Technical internals
+
+Platform-specific implementation notes for contributors:
+
+- [Android video streaming diagnosis](./contributing/android-video-streaming-diagnosis.md) — scrcpy H.264 encoder investigation notes
+- [SimulatorKit internals](./contributing/simkit-internals.md) — iOS touch injection reverse-engineering notes
+
 ## Commit messages — Conventional Commits
 
 ```
