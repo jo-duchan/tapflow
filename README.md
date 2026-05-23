@@ -1,7 +1,7 @@
 <div align="center">
   <img src="docs/public/logo-hero.svg" height="72" alt="tapflow" />
 
-  <h3>Self-hosted iOS & Android simulator streaming for every team member</h3>
+  <h3>Self-hosted iOS & Android simulator streaming for mobile QA</h3>
 
   <p>
     Anyone on your team can run simulators in the browser — no Xcode, no device management, no cloud uploads.<br />
