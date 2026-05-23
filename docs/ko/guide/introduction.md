@@ -1,6 +1,6 @@
 # 소개
 
-**tapflow**는 QA가 iOS 시뮬레이터와 Android 에뮬레이터를 브라우저에서 직접 실행할 수 있도록 해줍니다. Appetize, BrowserStack, 또는 외부 클라우드 없이 사용 가능합니다.
+**tapflow**는 팀 누구나 iOS 시뮬레이터와 Android 에뮬레이터를 브라우저에서 직접 모바일 QA를 수행할 수 있도록 해줍니다. Xcode 없이, 기기 관리 없이 — Appetize, BrowserStack, 또는 외부 클라우드가 필요하지 않습니다.
 
 <VideoPlayer src="/tapflow-demo.mp4" poster="/demo-thumbnail.png" />
 
