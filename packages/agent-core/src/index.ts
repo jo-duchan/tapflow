@@ -1,6 +1,7 @@
 export type { Platform, DeviceStatus, Device, Point, AndroidButton, AgentResources } from './types.js'
 export type { DeviceAgent, DeviceAgentConstructor } from './DeviceAgent.js'
 export { AgentRegistry } from './AgentRegistry.js'
+export type { AgentConnectOpts } from './AgentRegistry.js'
 export { ValidationError, PlatformError, AuthError } from './errors.js'
 export type { Logger, LogLevel } from './logger.js'
 export { createLogger } from './logger.js'

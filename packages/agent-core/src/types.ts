@@ -1,4 +1,4 @@
-export type Platform = 'ios' | 'android'
+export type Platform = string
 
 export type DeviceStatus = 'booted' | 'shutdown' | 'unknown'
 

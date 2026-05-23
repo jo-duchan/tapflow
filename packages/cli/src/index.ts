@@ -42,9 +42,9 @@ cli
 
 cli
   .command('start', 'Start relay and available agents locally (local dev shortcut)')
-  .option('--platform <platform>', 'Platform to start: ios | android | all (default: auto-detect)')
+  .option('--platform <platform>', 'Platform to start: registered key or all (default: auto-detect)')
   .option('--device <name>', 'iOS Simulator name or UDID to use')
-  .action((opts: { platform?: 'ios' | 'android' | 'all'; device?: string }) => cmdStart(opts))
+  .action((opts: { platform?: string; device?: string }) => cmdStart(opts))
 
 cli
   .command('relay <subcommand>', 'Relay server commands (subcommand: start)')
@@ -58,9 +58,9 @@ cli
 cli
   .command('agent <subcommand>', 'Agent commands (subcommand: start)')
   .option('--relay <url>', 'Relay WebSocket URL (default: ws://localhost:4000)')
-  .option('--platform <platform>', 'Platform to start: ios | android | all (default: auto-detect)')
+  .option('--platform <platform>', 'Platform to start: registered key or all (default: auto-detect)')
   .option('--device <name>', 'iOS Simulator name or UDID to use')
-  .action((subcommand: string, opts: { relay?: string; platform?: 'ios' | 'android' | 'all'; device?: string }) => {
+  .action((subcommand: string, opts: { relay?: string; platform?: string; device?: string }) => {
     if (subcommand === 'start') return cmdAgentStart(opts)
     console.error(`Unknown subcommand: agent ${subcommand}`)
     process.exit(1)
