@@ -1,10 +1,10 @@
 <div align="center">
   <img src="docs/public/logo-hero.svg" height="72" alt="tapflow" />
 
-  <h3>Self-hosted iOS & Android simulator streaming for QA teams</h3>
+  <h3>Self-hosted iOS & Android simulator streaming for every team member</h3>
 
   <p>
-    Run simulators in the browser — no Appetize, no BrowserStack, no monthly fees.<br />
+    Anyone on your team can run simulators in the browser — no Xcode, no device management, no cloud uploads.<br />
     App data never leaves your network.
   </p>
 
@@ -13,6 +13,14 @@
     <a href="https://nodejs.org"><img src="https://img.shields.io/badge/node-%3E%3D20-brightgreen" alt="Node.js ≥ 20" /></a>
     <img src="https://img.shields.io/badge/platform-macOS-lightgrey" alt="macOS Agent" />
     <a href="https://github.com/jo-duchan/tapflow/blob/main/CONTRIBUTING.md"><img src="https://img.shields.io/badge/PRs-welcome-brightgreen.svg" alt="PRs welcome" /></a>
+  </p>
+
+  <p>
+    <a href="https://www.tapflow.dev">📖 Docs</a>
+    &nbsp;·&nbsp;
+    <a href="https://www.tapflow.dev/guide/getting-started">🚀 Quick Start</a>
+    &nbsp;·&nbsp;
+    <a href="https://www.tapflow.dev/guide/introduction">🎥 Demo</a>
   </p>
 </div>
 
@@ -30,6 +38,22 @@
 ---
 
 ## Why tapflow?
+
+If you work on a mobile product, you've probably seen this.
+
+Physical devices are never enough. Covering every OS version is even harder — iOS doesn't support downgrading, so maintaining a range of versions means managing a pool of locked devices, which is overhead nobody wants.
+
+But the bigger friction is access. Simulators only run on a developer's Mac, behind Xcode and a full toolchain. Anyone on the team who isn't a mobile developer has to ask one every single time they need to verify something:
+
+> **Server / FE developer** — "How do I install the sandbox build to check what was deployed?"
+>
+> **Product manager** — "I keep having to install and remove different versions just to compare behavior."
+>
+> **Designer** — "I need to check the layout across screen sizes, but I don't have the right devices."
+
+Cloud simulator services exist. But uploading internal app builds to an external service — and paying monthly fees for simulators already running on Macs you own — was never something we wanted to do.
+
+So we built tapflow.
 
 | Solution                | Problem                                                                  |
 | ----------------------- | ------------------------------------------------------------------------ |
