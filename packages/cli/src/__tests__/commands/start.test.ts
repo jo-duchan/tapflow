@@ -8,26 +8,11 @@ vi.mock('@tapflowio/relay', () => ({
   initDb: vi.fn(),
   config: { server: { dataDir: '/tmp/tapflow-test' } },
 }))
-vi.mock('@tapflowio/ios-agent', () => ({
-  IOSAgent: vi.fn().mockImplementation(() => ({
-    listDevices: vi.fn().mockResolvedValue([
-      { id: 'AAA', name: 'iPhone 16 Pro', status: 'booted' },
-    ]),
-    connect: vi.fn().mockResolvedValue(undefined),
-    disconnect: vi.fn(),
-  })),
-}))
-vi.mock('@tapflowio/android-agent', () => ({
-  AndroidAgent: vi.fn().mockImplementation(() => ({
-    connect: vi.fn().mockResolvedValue(undefined),
-    disconnect: vi.fn(),
-  })),
-}))
+vi.mock('@tapflowio/ios-agent', () => ({}))
+vi.mock('@tapflowio/android-agent', () => ({}))
 
 import { execSync } from 'node:child_process'
 import { RelayServer, initDb } from '@tapflowio/relay'
-import { IOSAgent } from '@tapflowio/ios-agent'
-import { AndroidAgent } from '@tapflowio/android-agent'
 import { AgentRegistry } from '@tapflowio/agent-core'
 import { cmdStart } from '../../commands/start.js'
 
@@ -41,27 +26,34 @@ function testHasAdb(): boolean {
   }
 }
 
+class DummyAgent {}
+
 describe('cmdStart', () => {
+  let iosConnectSpy: ReturnType<typeof vi.fn>
+  let androidConnectSpy: ReturnType<typeof vi.fn>
+  let iosDisconnectSpy: ReturnType<typeof vi.fn>
+  let androidDisconnectSpy: ReturnType<typeof vi.fn>
+
   beforeEach(() => {
     vi.resetAllMocks()
-
     AgentRegistry.clear()
-    AgentRegistry.register('ios', vi.mocked(IOSAgent) as never, { canRun: () => process.platform === 'darwin' })
-    AgentRegistry.register('android', vi.mocked(AndroidAgent) as never, { canRun: testHasAdb })
+
+    iosDisconnectSpy = vi.fn()
+    androidDisconnectSpy = vi.fn()
+    iosConnectSpy = vi.fn().mockResolvedValue({ disconnect: iosDisconnectSpy })
+    androidConnectSpy = vi.fn().mockResolvedValue({ disconnect: androidDisconnectSpy })
+
+    AgentRegistry.register('ios', DummyAgent as never, {
+      canRun: () => process.platform === 'darwin',
+      connect: iosConnectSpy,
+    })
+    AgentRegistry.register('android', DummyAgent as never, {
+      canRun: testHasAdb,
+      connect: androidConnectSpy,
+    })
 
     vi.mocked(RelayServer).mockImplementation(() => ({
       start: vi.fn().mockResolvedValue(undefined),
-    } as never))
-    vi.mocked(IOSAgent).mockImplementation(() => ({
-      listDevices: vi.fn().mockResolvedValue([
-        { id: 'AAA', name: 'iPhone 16 Pro', status: 'booted' },
-      ]),
-      connect: vi.fn().mockResolvedValue(undefined),
-      disconnect: vi.fn(),
-    } as never))
-    vi.mocked(AndroidAgent).mockImplementation(() => ({
-      connect: vi.fn().mockResolvedValue(undefined),
-      disconnect: vi.fn(),
     } as never))
 
     vi.spyOn(console, 'log').mockImplementation(() => {})
@@ -100,20 +92,20 @@ describe('cmdStart', () => {
 
   it('macOS + adb 있으면 iOS와 Android 모두 연결', async () => {
     await cmdStart({})
-    expect(IOSAgent).toHaveBeenCalled()
-    expect(AndroidAgent).toHaveBeenCalled()
+    expect(iosConnectSpy).toHaveBeenCalled()
+    expect(androidConnectSpy).toHaveBeenCalled()
   })
 
   it('--platform ios 이면 iOS만 연결', async () => {
     await cmdStart({ platform: 'ios' })
-    expect(IOSAgent).toHaveBeenCalled()
-    expect(AndroidAgent).not.toHaveBeenCalled()
+    expect(iosConnectSpy).toHaveBeenCalled()
+    expect(androidConnectSpy).not.toHaveBeenCalled()
   })
 
   it('--platform android 이면 Android만 연결', async () => {
     await cmdStart({ platform: 'android' })
-    expect(IOSAgent).not.toHaveBeenCalled()
-    expect(AndroidAgent).toHaveBeenCalled()
+    expect(iosConnectSpy).not.toHaveBeenCalled()
+    expect(androidConnectSpy).toHaveBeenCalled()
   })
 
   it('adb 없으면 iOS만 연결', async () => {
@@ -123,25 +115,18 @@ describe('cmdStart', () => {
     })
 
     await cmdStart({})
-    expect(IOSAgent).toHaveBeenCalled()
-    expect(AndroidAgent).not.toHaveBeenCalled()
+    expect(iosConnectSpy).toHaveBeenCalled()
+    expect(androidConnectSpy).not.toHaveBeenCalled()
   })
 
-  it('--device 로 특정 시뮬레이터 지정', async () => {
-    const mockListDevices = vi.fn().mockResolvedValue([
-      { id: 'AAA', name: 'iPhone 16 Pro', status: 'booted' },
-    ])
-    vi.mocked(IOSAgent).mockImplementation(() => ({
-      listDevices: mockListDevices,
-      connect: vi.fn().mockResolvedValue(undefined),
-      disconnect: vi.fn(),
-    } as never))
-
+  it('--device 로 특정 디바이스 지정', async () => {
     await cmdStart({ platform: 'ios', device: 'iPhone 16 Pro' })
-    expect(mockListDevices).toHaveBeenCalled()
+    expect(iosConnectSpy).toHaveBeenCalledWith('ws://localhost:4000', { deviceFilter: 'iPhone 16 Pro' })
   })
 
   it('존재하지 않는 --device 지정 시 exit(1)', async () => {
+    iosConnectSpy.mockRejectedValue(new Error('Device "NonExistent" not found'))
+    AgentRegistry.register('ios', DummyAgent as never, { canRun: () => true, connect: iosConnectSpy })
     const exitSpy = vi.spyOn(process, 'exit').mockImplementation(() => { throw new Error('process.exit') })
 
     await expect(cmdStart({ platform: 'ios', device: 'NonExistent' })).rejects.toThrow('process.exit')
@@ -149,12 +134,8 @@ describe('cmdStart', () => {
   })
 
   it('connect 실패 시 exit(1)', async () => {
-    vi.mocked(IOSAgent).mockImplementation(() => ({
-      listDevices: vi.fn().mockResolvedValue([{ id: 'AAA', name: 'iPhone 16 Pro', status: 'booted' }]),
-      connect: vi.fn().mockRejectedValue(new Error('connection refused')),
-      disconnect: vi.fn(),
-    } as never))
-
+    iosConnectSpy.mockRejectedValue(new Error('connection refused'))
+    AgentRegistry.register('ios', DummyAgent as never, { canRun: () => true, connect: iosConnectSpy })
     const exitSpy = vi.spyOn(process, 'exit').mockImplementation(() => { throw new Error('process.exit') })
     await expect(cmdStart({ platform: 'ios' })).rejects.toThrow('process.exit')
     expect(exitSpy).toHaveBeenCalledWith(1)
@@ -171,8 +152,8 @@ describe('cmdStart', () => {
     await cmdStart({})
 
     expect(RelayServer).toHaveBeenCalled()
-    expect(IOSAgent).not.toHaveBeenCalled()
-    expect(AndroidAgent).not.toHaveBeenCalled()
+    expect(iosConnectSpy).not.toHaveBeenCalled()
+    expect(androidConnectSpy).not.toHaveBeenCalled()
     expect(exitSpy).not.toHaveBeenCalled()
   })
 

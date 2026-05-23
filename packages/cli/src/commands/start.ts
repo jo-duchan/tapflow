@@ -1,9 +1,9 @@
 import { RelayServer, initDb, config } from '@tapflowio/relay'
 import { AgentRegistry } from '@tapflowio/agent-core'
 import path from 'path'
-import { AndroidAgent } from '@tapflowio/android-agent'
+import '@tapflowio/ios-agent'
+import '@tapflowio/android-agent'
 import { banner, createSpinner, step } from '../lib/print.js'
-import { resolveAndBootIOSDevice } from '../lib/ios-boot.js'
 import { initConfigFile } from '../lib/init-config.js'
 
 export interface StartOptions {
@@ -52,37 +52,20 @@ export async function cmdStart(opts: StartOptions): Promise<void> {
 
   const agents: Array<{ disconnect(): void }> = []
 
-  // ── 3. iOS Agent ──────────────────────────────────────────────────────────
-  if (platformsToRun.includes('ios')) {
-    const iosAgent = await resolveAndBootIOSDevice(opts.device)
-    const iosSpinner = createSpinner('Connecting iOS agent…')
-    iosSpinner.start()
+  // ── 3. Connect each registered platform ──────────────────────────────────
+  for (const platform of platformsToRun) {
+    const spinner = createSpinner(`Connecting ${platform} agent…`)
+    spinner.start()
     try {
-      await iosAgent.connect(relayUrl)
-      iosSpinner.stop(true)
-      agents.push(iosAgent)
+      const agent = await AgentRegistry.connect(platform, relayUrl, { deviceFilter: opts.device })
+      spinner.stop(true)
+      agents.push(agent)
     } catch (e) {
-      iosSpinner.stop(false)
-      banner('error', 'IOS CONNECTION FAILED', [(e as Error).message])
-      process.exit(1)
-    }
-  }
-
-  // ── 4. Android Agent ──────────────────────────────────────────────────────
-  if (platformsToRun.includes('android')) {
-    const androidAgent = new AndroidAgent({ deviceFilter: opts.device })
-    const androidSpinner = createSpinner('Connecting Android agent…')
-    androidSpinner.start()
-    try {
-      await androidAgent.connect(relayUrl)
-      androidSpinner.stop(true)
-      agents.push(androidAgent)
-    } catch (e) {
-      androidSpinner.stop(false)
-      if (platformsToRun.includes('ios') && agents.length > 0) {
-        console.log(`  ⚠  Android: ${(e as Error).message}`)
+      spinner.stop(false)
+      if (agents.length > 0) {
+        console.log(`  ⚠  ${platform}: ${(e as Error).message}`)
       } else {
-        banner('error', 'ANDROID CONNECTION FAILED', [(e as Error).message])
+        banner('error', `${platform.toUpperCase()} CONNECTION FAILED`, [(e as Error).message])
         process.exit(1)
       }
     }

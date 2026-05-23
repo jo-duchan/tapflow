@@ -1,8 +1,13 @@
 import type { DeviceAgent, DeviceAgentConstructor } from './DeviceAgent.js'
 import { PlatformError } from './errors.js'
 
+export interface AgentConnectOpts {
+  deviceFilter?: string
+}
+
 interface AgentRegistryOpts {
   canRun?: () => boolean
+  connect?: (relayUrl: string, opts?: AgentConnectOpts) => Promise<{ disconnect(): void }>
 }
 
 const constructors = new Map<string, DeviceAgentConstructor>()
@@ -31,6 +36,14 @@ export const AgentRegistry = {
     return instances.get(platform)!
   },
 
+  async connect(platform: string, relayUrl: string, opts?: AgentConnectOpts): Promise<{ disconnect(): void }> {
+    const hook = registryOpts.get(platform)?.connect
+    if (!hook) {
+      throw new PlatformError(`No connect handler registered for platform: ${platform}`)
+    }
+    return hook(relayUrl, opts)
+  },
+
   platforms(): string[] {
     return [...constructors.keys()]
   },
@@ -38,7 +51,13 @@ export const AgentRegistry = {
   available(): string[] {
     return [...constructors.keys()].filter((p) => {
       const opts = registryOpts.get(p)
-      return !opts?.canRun || opts.canRun()
+      if (!opts?.connect) return false
+      if (!opts.canRun) return true
+      try {
+        return opts.canRun()
+      } catch {
+        return false
+      }
     })
   },
 

@@ -1,5 +1,6 @@
 import { execSync } from 'node:child_process'
 import { AgentRegistry } from '@tapflowio/agent-core'
+import type { AgentConnectOpts } from '@tapflowio/agent-core'
 import { AndroidAgent } from './AndroidAgent.js'
 
 export { AndroidAgent } from './AndroidAgent.js'
@@ -19,4 +20,11 @@ function hasAdb(): boolean {
   }
 }
 
-AgentRegistry.register('android', AndroidAgent, { canRun: hasAdb })
+AgentRegistry.register('android', AndroidAgent, {
+  canRun: hasAdb,
+  connect: async (relayUrl: string, opts?: AgentConnectOpts) => {
+    const agent = new AndroidAgent({ deviceFilter: opts?.deviceFilter })
+    await agent.connect(relayUrl)
+    return agent
+  },
+})
