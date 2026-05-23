@@ -4,7 +4,7 @@ layout: home
 hero:
   name: tapflow
   text: '모바일 QA를 위한<br>셀프호스팅 시뮬레이터 스트리밍'
-  tagline: 브라우저만 있으면 됩니다. Xcode 없이, 기기 관리 없이, 클라우드 업로드 없이 — 팀 누구나 iOS·Android 시뮬레이터를 바로 실행하세요.
+  tagline: 복잡한 세팅 없이, 기기 관리 없이, 외부 데이터 유출 걱정 없이 — 팀 누구나 iOS·Android 시뮬레이터를 브라우저에서 바로 실행하세요.
   actions:
     - theme: brand
       text: 시작하기
