@@ -64,4 +64,74 @@ describe('AgentRegistry', () => {
     expect(AgentRegistry.get('mock')).toBeInstanceOf(MockAgent)
     expect(AgentRegistry.get('another')).toBeInstanceOf(AnotherMock)
   })
+
+  describe('platforms()', () => {
+    it('returns empty array when nothing is registered', () => {
+      expect(AgentRegistry.platforms()).toEqual([])
+    })
+
+    it('returns all registered platform keys', () => {
+      class AnotherMock extends MockAgent {}
+      AgentRegistry.register('ios', MockAgent)
+      AgentRegistry.register('android', AnotherMock)
+      expect(AgentRegistry.platforms()).toEqual(expect.arrayContaining(['ios', 'android']))
+      expect(AgentRegistry.platforms()).toHaveLength(2)
+    })
+
+    it('reflects re-registration without duplicates', () => {
+      AgentRegistry.register('ios', MockAgent)
+      AgentRegistry.register('ios', MockAgent)
+      expect(AgentRegistry.platforms()).toHaveLength(1)
+    })
+  })
+
+  describe('available()', () => {
+    it('returns all platforms when no canRun is provided', () => {
+      class AnotherMock extends MockAgent {}
+      AgentRegistry.register('ios', MockAgent)
+      AgentRegistry.register('android', AnotherMock)
+      expect(AgentRegistry.available()).toEqual(expect.arrayContaining(['ios', 'android']))
+    })
+
+    it('returns platform when canRun returns true', () => {
+      AgentRegistry.register('ios', MockAgent, { canRun: () => true })
+      expect(AgentRegistry.available()).toContain('ios')
+    })
+
+    it('excludes platform when canRun returns false', () => {
+      AgentRegistry.register('ios', MockAgent, { canRun: () => false })
+      expect(AgentRegistry.available()).not.toContain('ios')
+    })
+
+    it('returns empty array when all canRun return false', () => {
+      class AnotherMock extends MockAgent {}
+      AgentRegistry.register('ios', MockAgent, { canRun: () => false })
+      AgentRegistry.register('android', AnotherMock, { canRun: () => false })
+      expect(AgentRegistry.available()).toHaveLength(0)
+    })
+
+    it('mixes: includes only platforms where canRun returns true', () => {
+      class AnotherMock extends MockAgent {}
+      AgentRegistry.register('ios', MockAgent, { canRun: () => true })
+      AgentRegistry.register('android', AnotherMock, { canRun: () => false })
+      expect(AgentRegistry.available()).toEqual(['ios'])
+    })
+
+    it('canRun does not affect get()', () => {
+      AgentRegistry.register('ios', MockAgent, { canRun: () => false })
+      expect(AgentRegistry.get('ios')).toBeInstanceOf(MockAgent)
+    })
+
+    it('re-register without opts clears previous canRun', () => {
+      AgentRegistry.register('ios', MockAgent, { canRun: () => false })
+      AgentRegistry.register('ios', MockAgent)
+      expect(AgentRegistry.available()).toContain('ios')
+    })
+
+    it('re-register with new canRun replaces old one', () => {
+      AgentRegistry.register('ios', MockAgent, { canRun: () => false })
+      AgentRegistry.register('ios', MockAgent, { canRun: () => true })
+      expect(AgentRegistry.available()).toContain('ios')
+    })
+  })
 })

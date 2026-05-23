@@ -55,7 +55,7 @@ Developer experience and reliability improvements. `v0.2.0` drops the `-alpha` s
 Scalability, extensibility, and CI/CD integration.
 
 - [x] WebSocket backpressure — check `ws.bufferedAmount` before sending frames; drop or queue frames for slow clients
-- [ ] Runtime platform registration — replace `'ios' | 'android'` literal union with a dynamic registry so new platforms require zero changes to `agent-core`, CLI, or Dashboard
+- [x] Runtime platform registration — replace `'ios' | 'android'` literal union with a dynamic registry so new platforms require zero changes to `agent-core`, CLI, or Dashboard
 - [ ] CI/CD integration guide — end-to-end walkthrough: upload `.app.zip` / `.apk` via REST API from CI → view results in the dashboard
 - [ ] PAT scope enforcement — apply `scope` checks consistently across all endpoints
 - [ ] Tier 2 integration tests — real simulator / emulator touch and stream smoke tests in GitHub Actions (`macos-latest` for iOS, `ubuntu-latest` + `reactivecircus/android-emulator-runner` for Android)

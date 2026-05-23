@@ -1,25 +1,35 @@
 import { RelayServer, initDb, config } from '@tapflowio/relay'
+import { AgentRegistry } from '@tapflowio/agent-core'
 import path from 'path'
 import { AndroidAgent } from '@tapflowio/android-agent'
 import { banner, createSpinner, step } from '../lib/print.js'
-import { hasAdb } from '../lib/platform.js'
 import { resolveAndBootIOSDevice } from '../lib/ios-boot.js'
 import { initConfigFile } from '../lib/init-config.js'
 
 export interface StartOptions {
   device?: string
-  platform?: 'ios' | 'android' | 'all'
+  platform?: string
 }
 
 const RELAY_PORT = 4000
 
 export async function cmdStart(opts: StartOptions): Promise<void> {
-  const isMac = process.platform === 'darwin'
   const relayUrl = `ws://localhost:${RELAY_PORT}`
-
   const explicit = opts.platform
-  const runIOS = explicit === 'ios' || explicit === 'all' || (!explicit && isMac)
-  const runAndroid = explicit === 'android' || explicit === 'all' || (!explicit && hasAdb())
+
+  let platformsToRun: string[]
+  if (!explicit || explicit === 'all') {
+    platformsToRun = AgentRegistry.available()
+  } else {
+    if (!AgentRegistry.platforms().includes(explicit)) {
+      banner('error', 'UNKNOWN PLATFORM', [
+        `'${explicit}' is not a registered platform.`,
+        `Registered: ${AgentRegistry.platforms().join(', ') || 'none'}`,
+      ])
+      process.exit(1)
+    }
+    platformsToRun = [explicit]
+  }
 
   // ── 1. Relay (always local) ───────────────────────────────────────────────
   initConfigFile()
@@ -29,7 +39,7 @@ export async function cmdStart(opts: StartOptions): Promise<void> {
   step(`Relay started on ws://localhost:${RELAY_PORT}`)
 
   // ── 2. Agent availability check ───────────────────────────────────────────
-  if (!runIOS && !runAndroid) {
+  if (platformsToRun.length === 0) {
     banner('success', 'TAPFLOW RELAY READY', [
       `Relay  : http://localhost:${RELAY_PORT}`,
       'No agent environment detected — running relay only.',
@@ -43,7 +53,7 @@ export async function cmdStart(opts: StartOptions): Promise<void> {
   const agents: Array<{ disconnect(): void }> = []
 
   // ── 3. iOS Agent ──────────────────────────────────────────────────────────
-  if (runIOS) {
+  if (platformsToRun.includes('ios')) {
     const iosAgent = await resolveAndBootIOSDevice(opts.device)
     const iosSpinner = createSpinner('Connecting iOS agent…')
     iosSpinner.start()
@@ -59,7 +69,7 @@ export async function cmdStart(opts: StartOptions): Promise<void> {
   }
 
   // ── 4. Android Agent ──────────────────────────────────────────────────────
-  if (runAndroid) {
+  if (platformsToRun.includes('android')) {
     const androidAgent = new AndroidAgent({ deviceFilter: opts.device })
     const androidSpinner = createSpinner('Connecting Android agent…')
     androidSpinner.start()
@@ -69,8 +79,7 @@ export async function cmdStart(opts: StartOptions): Promise<void> {
       agents.push(androidAgent)
     } catch (e) {
       androidSpinner.stop(false)
-      // Android 연결 실패 시 iOS가 이미 연결됐으면 경고만, 아니면 종료
-      if (runIOS && agents.length > 0) {
+      if (platformsToRun.includes('ios') && agents.length > 0) {
         console.log(`  ⚠  Android: ${(e as Error).message}`)
       } else {
         banner('error', 'ANDROID CONNECTION FAILED', [(e as Error).message])

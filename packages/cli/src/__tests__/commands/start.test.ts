@@ -28,14 +28,27 @@ import { execSync } from 'node:child_process'
 import { RelayServer, initDb } from '@tapflowio/relay'
 import { IOSAgent } from '@tapflowio/ios-agent'
 import { AndroidAgent } from '@tapflowio/android-agent'
+import { AgentRegistry } from '@tapflowio/agent-core'
 import { cmdStart } from '../../commands/start.js'
 
 const mockExecSync = vi.mocked(execSync)
 
+function testHasAdb(): boolean {
+  try {
+    return String(mockExecSync('which adb', { encoding: 'utf8', stdio: 'pipe' })).trim().length > 0
+  } catch {
+    return false
+  }
+}
+
 describe('cmdStart', () => {
   beforeEach(() => {
     vi.resetAllMocks()
-    // resetAllMocks 후 class mock 구현 재설정
+
+    AgentRegistry.clear()
+    AgentRegistry.register('ios', vi.mocked(IOSAgent) as never, { canRun: () => process.platform === 'darwin' })
+    AgentRegistry.register('android', vi.mocked(AndroidAgent) as never, { canRun: testHasAdb })
+
     vi.mocked(RelayServer).mockImplementation(() => ({
       start: vi.fn().mockResolvedValue(undefined),
     } as never))
@@ -55,15 +68,16 @@ describe('cmdStart', () => {
     vi.spyOn(process, 'on').mockImplementation(() => process)
     vi.spyOn(process, 'platform', 'get').mockReturnValue('darwin')
 
-    // 기본: adb 있음
     mockExecSync.mockImplementation((cmd) => {
-      const c = cmd as string
-      if (c === 'which adb') return '/usr/local/bin/adb\n'
+      if ((cmd as string) === 'which adb') return '/usr/local/bin/adb\n'
       return ''
     })
   })
 
-  afterEach(() => vi.restoreAllMocks())
+  afterEach(() => {
+    AgentRegistry.clear()
+    vi.restoreAllMocks()
+  })
 
   it('relay URL 없으면 RelayServer를 포트 4000으로 기동', async () => {
     await cmdStart({})
@@ -162,4 +176,9 @@ describe('cmdStart', () => {
     expect(exitSpy).not.toHaveBeenCalled()
   })
 
+  it('--platform 미등록 플랫폼 → exit(1)', async () => {
+    const exitSpy = vi.spyOn(process, 'exit').mockImplementation(() => { throw new Error('process.exit') })
+    await expect(cmdStart({ platform: 'web' })).rejects.toThrow('process.exit')
+    expect(exitSpy).toHaveBeenCalledWith(1)
+  })
 })

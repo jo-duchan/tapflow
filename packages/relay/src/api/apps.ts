@@ -39,8 +39,8 @@ export async function handleCreateApp(
   const body = await readJson<{ name?: string; bundle_id_key?: string; platform?: string }>(req)
   if (!body.name?.trim()) return json(res, 400, { error: 'name is required' })
   if (!body.bundle_id_key?.trim()) return json(res, 400, { error: 'bundle_id_key is required' })
-  if (!['ios', 'android', 'both'].includes(body.platform ?? '')) {
-    return json(res, 400, { error: 'platform must be ios, android, or both' })
+  if (!body.platform?.trim()) {
+    return json(res, 400, { error: 'platform is required' })
   }
 
   const result = getDb()

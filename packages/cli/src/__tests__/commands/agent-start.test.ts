@@ -20,13 +20,27 @@ vi.mock('@tapflowio/android-agent', () => ({
 import { execSync } from 'node:child_process'
 import { IOSAgent } from '@tapflowio/ios-agent'
 import { AndroidAgent } from '@tapflowio/android-agent'
+import { AgentRegistry } from '@tapflowio/agent-core'
 import { cmdAgentStart } from '../../commands/agent-start.js'
 
 const mockExecSync = vi.mocked(execSync)
 
+function testHasAdb(): boolean {
+  try {
+    return String(mockExecSync('which adb', { encoding: 'utf8', stdio: 'pipe' })).trim().length > 0
+  } catch {
+    return false
+  }
+}
+
 describe('cmdAgentStart', () => {
   beforeEach(() => {
     vi.resetAllMocks()
+
+    AgentRegistry.clear()
+    AgentRegistry.register('ios', vi.mocked(IOSAgent) as never, { canRun: () => process.platform === 'darwin' })
+    AgentRegistry.register('android', vi.mocked(AndroidAgent) as never, { canRun: testHasAdb })
+
     vi.mocked(IOSAgent).mockImplementation(() => ({
       listDevices: vi.fn().mockResolvedValue([
         { id: 'AAA', name: 'iPhone 16 Pro', status: 'booted' },
@@ -49,7 +63,10 @@ describe('cmdAgentStart', () => {
     })
   })
 
-  afterEach(() => vi.restoreAllMocks())
+  afterEach(() => {
+    AgentRegistry.clear()
+    vi.restoreAllMocks()
+  })
 
   it('--relay 없으면 ws://localhost:4000 으로 연결', async () => {
     const connectSpy = vi.fn().mockResolvedValue(undefined)
@@ -147,5 +164,11 @@ describe('cmdAgentStart', () => {
     await cmdAgentStart({ platform: 'ios' })
     expect(() => sigintHandler?.()).toThrow('process.exit')
     expect(disconnectSpy).toHaveBeenCalled()
+  })
+
+  it('--platform 미등록 플랫폼 → exit(1)', async () => {
+    const exitSpy = vi.spyOn(process, 'exit').mockImplementation(() => { throw new Error('process.exit') })
+    await expect(cmdAgentStart({ platform: 'web' })).rejects.toThrow('process.exit')
+    expect(exitSpy).toHaveBeenCalledWith(1)
   })
 })
