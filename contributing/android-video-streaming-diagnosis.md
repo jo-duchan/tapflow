@@ -134,16 +134,6 @@ const proc = spawn(getEmulatorPath(), [
 - Google의 `android-emulator-webrtc`(gRPC + WebRTC로 emulator 스트리밍)는 2025년 9월 archive 처리됐고, 처음부터 Linux + NVIDIA 전용이었다. Google조차 macOS에서 이 문제를 해결하지 않고 Linux로 회피한 것.
 - `NSWindowOcclusionState`를 끄는 plist 키나 system API는 존재하지 않는다 (Apple 의도적 설계).
 - `-gpu angle_indirect`, `-gpu auto-no-window` 등은 macOS에서 미지원이거나 존재하지 않는 옵션이다.
-
-### 대안 접근 (만약 `-no-window`가 요구사항과 충돌할 경우)
-
-emulator gRPC API의 `streamScreenshot` RPC를 사용해 scrcpy를 완전히 대체하는 방법이 있다. emulator 프로세스 내부에서 프레임을 직접 생성하므로 SurfaceFlinger의 vsync 경로를 우회할 가능성이 있다. 검증은 아직 미진행.
-
-```bash
-emulator -avd <name> -grpc 8554 -gpu host
-# 이후 grpcurl로 streamScreenshot 호출 후 FPS 측정
-```
-
 ---
 
 ## Issue 3 — 디바이스 회전 시 scrcpy 스트림 해상도 변경 (2026-05-24 해결)
