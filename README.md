@@ -4,7 +4,7 @@
   <h3>Self-hosted iOS & Android simulator streaming for mobile QA</h3>
 
   <p>
-    Anyone on your team can run simulators in the browser — no Xcode, no device management, no cloud uploads.<br />
+    Anyone on your team can run simulators in the browser — no toolchain setup, no device management, no cloud uploads.<br />
     App data never leaves your network.
   </p>
 
@@ -43,7 +43,7 @@ If you work on a mobile product, you've probably seen this.
 
 Physical devices are never enough. Covering every OS version is even harder — iOS doesn't support downgrading, so maintaining a range of versions means managing a pool of locked devices, which is overhead nobody wants.
 
-But the bigger friction is access. Simulators only run on a developer's Mac, behind Xcode and a full toolchain. Anyone on the team who isn't a mobile developer has to ask one every single time they need to verify something:
+But the bigger friction is access. Simulators only run on a developer's Mac, behind complex developer toolchains. Anyone on the team who isn't a mobile developer has to ask one every single time they need to verify something:
 
 > **Server / FE developer** — "How do I install the sandbox build to check what was deployed?"
 >
@@ -60,11 +60,11 @@ So we built tapflow.
 | Appetize / BrowserStack | Expensive — app data leaves your network |
 | Physical devices | Cost, loss, management overhead |
 | Xcode / Android Studio | Every QA member needs their own Mac + full toolchain setup |
-| **tapflow** | Use the Mac you already own — data stays on-prem, QA team uses a browser |
+| **tapflow** | Use the Mac you already own — data stays on-prem, whole team does QA from a browser |
 
 ## Features
 
-- **Browser-based** — QA team needs no installation. Any modern browser works.
+- **Browser-based** — Anyone on the team needs no installation. Any modern browser works.
 - **iOS Simulator** — JPEG frame streaming at ~30 fps via SimulatorKit IOSurface. No WebDriverAgent required.
 - **Android Emulator** — H.264 streaming via [scrcpy](https://github.com/Genymobile/scrcpy) at ~30 fps.
 - **Touch, swipe & pinch** — real-time input forwarded to the simulator.
@@ -77,12 +77,12 @@ So we built tapflow.
 ## How it works
 
 ```
-Browser (QA team)  ←─ WebSocket ─→  Relay Server  ←─ WebSocket (outbound) ─→  Mac Agent
-                                  (Linux / Mac)                           (iOS · Android)
+Browser (your team)  ←─ WebSocket ─→  Relay Server  ←─ WebSocket (outbound) ─→  Mac Agent
+                                    (Linux / Mac)                           (iOS · Android)
 ```
 
 1. The **Mac Agent** connects *outbound* to the relay — no inbound firewall rules needed.
-2. QA opens the **dashboard** in any browser and sees all available devices.
+2. Anyone on the team opens the **dashboard** in any browser and sees all available devices.
 3. Touch events are forwarded in real time; the screen streams back to the browser.
 4. The **relay** also serves the dashboard SPA on the same port — no separate web server needed.
 
