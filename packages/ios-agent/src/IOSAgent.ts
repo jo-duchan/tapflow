@@ -53,6 +53,9 @@ export class IOSAgent implements DeviceAgent {
   private relayUrl: string | null = null
   private resourcesTimer: ReturnType<typeof setInterval> | null = null
   private readonly resources = createResourceSampler()
+  private _stopping = false
+  private _reconnectTimer: ReturnType<typeof setTimeout> | null = null
+  private _reconnectAttempt = 0
 
   constructor(options: IOSAgentOptions = {}, simctl?: SimctlWrapper) {
     this.simctl = simctl ?? new SimctlWrapper()
@@ -67,6 +70,8 @@ export class IOSAgent implements DeviceAgent {
   }
 
   async connect(relayUrl: string): Promise<void> {
+    this._stopping = false
+    if (this._reconnectTimer) { clearTimeout(this._reconnectTimer); this._reconnectTimer = null }
     this.relayUrl = relayUrl
     const devices = await this.simctl.listDevices()
 
@@ -100,6 +105,7 @@ export class IOSAgent implements DeviceAgent {
           })
           this.reportResources()
           this.resourcesTimer = setInterval(() => this.reportResources(), 5000)
+          ws.on('close', () => this._scheduleReconnect())
           resolve()
         } else {
           reject(new PlatformError(`Unexpected message during handshake: ${msg.type}`))
@@ -129,6 +135,8 @@ export class IOSAgent implements DeviceAgent {
   }
 
   disconnect(): void {
+    this._stopping = true
+    if (this._reconnectTimer) { clearTimeout(this._reconnectTimer); this._reconnectTimer = null }
     if (this.resourcesTimer) { clearInterval(this.resourcesTimer); this.resourcesTimer = null }
     for (const state of this.deviceStates.values()) {
       this.cleanupDeviceState(state)
@@ -138,6 +146,32 @@ export class IOSAgent implements DeviceAgent {
     this.ws = null
     this.relayUrl = null
     this.simctl.stopKeyboardDaemon()
+  }
+
+  private _scheduleReconnect(): void {
+    if (this._stopping) return
+    if (this.resourcesTimer) { clearInterval(this.resourcesTimer); this.resourcesTimer = null }
+    for (const state of this.deviceStates.values()) {
+      this.cleanupDeviceState(state)
+    }
+    this.deviceStates.clear()
+    this.ws = null
+
+    const delays = [1000, 2000, 4000, 8000, 16000, 30000]
+    const delay = delays[Math.min(this._reconnectAttempt, delays.length - 1)]
+    this._reconnectAttempt++
+    logger.warn(`relay disconnected — reconnecting in ${delay / 1000}s (attempt ${this._reconnectAttempt})`)
+
+    this._reconnectTimer = setTimeout(() => {
+      this._reconnectTimer = null
+      if (this._stopping || !this.relayUrl) return
+      this.connect(this.relayUrl).then(() => {
+        this._reconnectAttempt = 0
+        logger.info('reconnected to relay')
+      }).catch(() => {
+        this._scheduleReconnect()
+      })
+    }, delay)
   }
 
   private reportResources(): void {
