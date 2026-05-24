@@ -68,17 +68,6 @@ export interface AndroidButton {
   keyCode: number
 }
 
-export interface AndroidChrome {
-  buttons: AndroidButton[]
-  streamType: 'h264'
-  screenWidth?: number
-  screenHeight?: number
-  skinBackPng?: string        // base64-encoded webp, portrait background image
-  skinScreenRect?: { x: number; y: number; width: number; height: number }
-  skinCompositeSize?: { width: number; height: number }
-  skinCornerRadius?: number
-}
-
 export interface ChromeData {
   framePng: string         // full composite PDF at 2× — device frame visible, screen hole transparent
   bezelWidth: number
@@ -142,7 +131,7 @@ export interface ReleaseGroup {
 export type RelayMessage =
   | { type: 'agents:listed'; sessions: SessionInfo[] }
   | { type: 'session:joined'; sessionId: string }
-  | { type: 'session:chrome'; payload: ChromeData | AndroidChrome }
+  | { type: 'session:chrome'; payload: ChromeData | { buttons: AndroidButton[]; streamType: 'h264' } }
   | { type: 'session:deviceInfo'; payload: DeviceInfo }
   | { type: 'device:boot'; sessionId: string; payload: { deviceId: string; resetMode?: 'app-only' | 'full-erase' } }
   | { type: 'device:booting' }
