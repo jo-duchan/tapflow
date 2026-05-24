@@ -139,7 +139,46 @@ const proc = spawn(getEmulatorPath(), [
 
 emulator gRPC API의 `streamScreenshot` RPC를 사용해 scrcpy를 완전히 대체하는 방법이 있다. emulator 프로세스 내부에서 프레임을 직접 생성하므로 SurfaceFlinger의 vsync 경로를 우회할 가능성이 있다. 검증은 아직 미진행.
 
-```bash
-emulator -avd <name> -grpc 8554 -gpu host
-# 이후 grpcurl로 streamScreenshot 호출 후 FPS 측정
+---
+
+## Issue 3 — SDK 스킨 오버레이 시도 및 롤백 (PR #110 → revert PR #113)
+
+### 결론
+
+Android SDK 스킨(`back.webp` + `mask.webp`)을 디바이스 프레임 오버레이로 렌더링하는 작업을 시도했으나 **`google_apis` 에뮬레이터의 구조적 한계**로 인해 전면 롤백했다.
+
+**핵심**: 어떤 코너 마스킹 방식을 써도 status bar 아이콘이 잘린다. 코드 문제가 아닌 에뮬레이터 이미지 한계다.
+
+### 근본 원인
+
+실제 Pixel 디바이스 펌웨어는 SurfaceFlinger에 `ro.surface_flinger.rounded_corner_radius`를 설정해 Android OS가 화면 모서리 곡률을 인식하게 한다. SystemUI(status bar)는 `WindowInsets.getRoundedCorner()`로 이 값을 읽어 아이콘·시간 표시를 모서리 안쪽으로 자동 inset한다.
+
+`google_apis/arm64-v8a` 에뮬레이터 이미지에는 이 프로퍼티가 없다. 따라서:
+
 ```
+에뮬레이터 프레임버퍼 → SystemUI가 rounded corner inset 없이 status bar를 직사각형 기준으로 그림
+→ WiFi·배터리·시계가 화면 최외각 모서리에 위치
+→ 어떤 코너 마스킹(border-radius / mask.webp / back.webp 오버레이)을 씌워도 해당 픽셀이 가려짐
+```
+
+Android Studio 단독 에뮬레이터 창(`emulator` 바이너리)도 같은 스킨을 씌우면 동일하게 잘린다.
+
+### 시도했지만 실패한 수정 방법
+
+| 방법 | 결과 |
+|---|---|
+| `adb shell settings put secure sysui_rounded_size 87` | 무시됨 — `google_apis` 이미지에서 sysui secure setting이 적용되지 않음 |
+| `adb shell settings put secure sysui_rounded_content_padding 24` | 동일하게 무시됨 |
+| `adb shell am crash com.android.systemui` (SystemUI 재시작) | SystemUI가 재시작되어도 설정값 반영 없음 |
+| `adb shell settings put secure sysui_display_cutout corner` (Display Cutout 시뮬레이션) | 카메라 노치 시뮬레이션용 설정으로 rounded corner inset과 무관, 효과 없음 |
+| `stop surfaceflinger && start surfaceflinger` (**금지**) | 에뮬레이터 부팅 루프 발생 — 절대 실행하지 말 것 |
+
+### 왜 스킨 없이도 괜찮은가
+
+- scrcpy(데스크탑), Genymotion 등 대부분의 에뮬레이터 미러링 도구는 디바이스 프레임을 기본 제공하지 않는다.
+- tapflow는 QA 도구이므로 status bar 가시성이 디바이스 외형 연출보다 중요하다.
+- scrcpy 스트림 자체는 원시 직사각형 프레임버퍼이며 코너 마스킹은 표시 레이어의 순수 시각 효과다.
+
+### 향후 재시도 조건
+
+`google_apis` 이미지가 `ro.surface_flinger.rounded_corner_radius`를 설정하도록 AOSP/Google이 업데이트하거나, SystemUI에 rounded corner inset을 외부에서 주입하는 공식 방법이 생기면 재검토할 수 있다.
