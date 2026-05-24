@@ -135,6 +135,7 @@ export function DeviceViewer({ sessionId, deviceId, buildId, resetMode, onRecord
         screenHeight={androidChrome.screenHeight}
         deviceRotation={deviceRotation}
         skinBackPng={androidChrome.skinBackPng}
+        skinMaskPng={androidChrome.skinMaskPng}
         skinScreenRect={androidChrome.skinScreenRect}
         skinCompositeSize={androidChrome.skinCompositeSize}
         skinCornerRadius={androidChrome.skinCornerRadius}

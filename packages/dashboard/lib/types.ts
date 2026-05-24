@@ -73,7 +73,8 @@ export interface AndroidChrome {
   streamType: 'h264'
   screenWidth?: number
   screenHeight?: number
-  skinBackPng?: string        // base64-encoded webp, portrait background image
+  skinBackPng?: string        // base64-encoded webp, composite-sized device chassis
+  skinMaskPng?: string        // base64-encoded webp, display-sized alpha mask (opaque bezel + transparent screen)
   skinScreenRect?: { x: number; y: number; width: number; height: number }
   skinCompositeSize?: { width: number; height: number }
   skinCornerRadius?: number

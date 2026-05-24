@@ -472,6 +472,7 @@ export class AndroidAgent implements DeviceAgent {
           screenHeight: state.displayHeight,
           ...(skin ? {
             skinBackPng: skin.backPng,
+            ...(skin.maskPng ? { skinMaskPng: skin.maskPng } : {}),
             skinScreenRect: skin.screenRect,
             skinCompositeSize: skin.compositeSize,
             skinCornerRadius: skin.cornerRadius,

@@ -196,3 +196,88 @@ this.adb.setUserRotation(serial, target) // user_rotation=0 or 3
 | `android-agent/src/AdbWrapper.ts` | `disableAutoRotate`, `setUserRotation` 추가 |
 | `android-agent/src/AndroidAgent.ts` | `input:rotate` → 0↔3 토글 |
 | `dashboard/components/device/AndroidViewer.tsx` | 스킨 모드 iOS 패턴으로 단순화 |
+
+---
+
+## Issue 4 — status bar 양끝 잘림: CSS border-radius / back.webp 이중 레이어 한계 (2026-05-25 분석 완료)
+
+### 핵심 결론
+
+`mask.webp`를 스크린 영역에 CSS `mask-image`(또는 `<img>` 오버레이)로 적용해야 한다. `corner_radius` 기반 CSS border-radius는 근본 해결책이 아니다. 구현 계획: `.work/2026-05-25-android-skin-mask-plan.md`.
+
+### 증상
+
+1. **canvas에 `border-radius: skinCornerRadiusCss` 적용 상태**: status bar 우측 wifi/배터리 아이콘이 canvas의 곡률 클리핑에 잘림. 좌측 시간도 일부 잘림.
+2. **canvas border-radius 제거 시도**: 우측 아이콘은 보임. 그러나 좌측 시간은 여전히 `.32`처럼 앞 글자가 잘림.
+
+### 잘못된 가정
+
+**Phase 2 구현 시 판단**: `mask.webp` 기반 `corner_radius` 자동 감지로 충분 → **틀렸음**.
+
+실제로 두 가지 문제가 겹쳐 있었다:
+
+1. **canvas CSS border-radius** → canvas DOM element를 직접 클리핑하므로, status bar 모서리 픽셀이 잘림. 실제 Android OS는 `WindowInsets`로 앱 콘텐츠를 모서리 곡률 안쪽으로 inset 시키므로 화면이 잘리지 않는다. 에뮬레이터는 직사각형 화면 인식이라 inset 없음 → CSS 클리핑이 이 차이를 부각.
+
+2. **back.webp 이중 레이어(zIndex 5) 오버레이** → 동일한 composite back.webp를 canvas 위에 한 번 더 깔아 canvas 가장자리 아티팩트를 가린다. 그런데 back.webp 자체의 불투명 베젤이 스크린 좌상단 모서리(시계 아이콘 영역)를 살짝 덮는다.
+
+### `corner_radius=87`의 정확한 의미
+
+공식 스킨 파일 포맷(ANDROID-SKIN-FILES.TXT)과 실제 스킨 파일 분석 결과:
+
+- `corner_radius`는 **외부 유리(outer glass)의 곡률 힌트** — display 경계의 inner corner radius가 아님.
+- 오래된 에뮬레이터의 화면 클리핑 fallback 용도. 실제 Android Studio는 이것으로 클리핑하지 않는다.
+- `Pixel_6` 스킨: rounded 스크린이지만 `corner_radius` 속성이 없음 → 이 값이 주된 마스킹 메커니즘이 아님을 직접 증명.
+
+### `mask.webp`의 정확한 의미
+
+```
+mask.webp (신형 스킨 구조):
+  - 크기: display 해상도 (예: Pixel 9 = 1080 × 2424)
+  - 내용: 불투명(검정) 베젤 + 투명 스크린 영역 + 투명 카메라 펀치홀
+  - 위치: composite에서 스크린 영역(screenPctLeft, screenPctTop)에 1:1 오버레이
+```
+
+**back.webp와의 역할 분리**:
+- `back.webp` (composite 크기: 1198×2531) = 디바이스 외형(베젤, 버튼, 프레임)
+- `mask.webp` (display 크기: 1080×2424) = 스크린 경계의 정밀 마스킹 (카메라 홀, 모서리 곡률)
+
+### Android Studio가 이 문제를 회피하는 방법
+
+Android Studio 에뮬레이터 창 렌더링 파이프라인:
+1. `back.webp` → OpenGL 텍스처로 그림 (composite 크기)
+2. 스크린 OpenGL 뷰포트에 에뮬레이터 프레임버퍼 직접 렌더
+3. `mask.webp` → OpenGL 알파 마스크로 스크린 영역에 합성
+
+CSS `border-radius`를 사용하지 않음 → 클리핑 없음. `mask.webp`의 알파 채널이 곡률 마스킹을 정확히 처리.
+
+### 올바른 해결 방법
+
+**canvas `border-radius` 제거** + **second back.webp 제거** + **mask.webp를 스크린 영역에 오버레이**:
+
+```tsx
+// 현재 (잘못된 구현)
+<canvas style={{ borderRadius: skinCornerRadiusCss }} />
+<img src={back.webp} style={{ zIndex: 5 }} />  {/* second overlay hack */}
+
+// 올바른 구현
+<canvas />  {/* border-radius 없음 */}
+<img
+  src={`data:image/webp;base64,${skinMaskPng}`}
+  style={{
+    position: 'absolute',
+    left: `${screenPctLeft}%`, top: `${screenPctTop}%`,
+    width: `${screenPctW}%`,  height: `${screenPctH}%`,
+    zIndex: 5,
+  }}
+/>
+```
+
+### 변경이 필요한 파일
+
+| 파일 | 변경 내용 |
+|------|-----------|
+| `android-agent/src/SkinLoader.ts` | `mask.webp` 파일 읽기 → base64 |
+| `dashboard/lib/types.ts` | `AndroidChrome`에 `skinMaskPng?: string` 추가 |
+| `android-agent/src/AndroidAgent.ts` | `session:chrome` 페이로드에 `skinMaskPng` 포함 |
+| `dashboard/components/device/DeviceViewer.tsx` | `skinMaskPng` prop 전달 |
+| `dashboard/components/device/AndroidViewer.tsx` | canvas `borderRadius` 제거, second back.webp → mask.webp 오버레이 교체 |

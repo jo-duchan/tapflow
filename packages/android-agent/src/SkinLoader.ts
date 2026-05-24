@@ -8,7 +8,8 @@ import { createLogger } from '@tapflowio/agent-core'
 const logger = createLogger('android-agent:skin')
 
 export interface SkinData {
-  backPng: string  // base64-encoded image (webp)
+  backPng: string   // base64-encoded webp, composite-sized device chassis
+  maskPng?: string  // base64-encoded webp, display-sized alpha mask (opaque bezel + transparent screen)
   screenRect: { x: number; y: number; width: number; height: number }
   compositeSize: { width: number; height: number }
   cornerRadius: number
@@ -69,8 +70,17 @@ export function loadSkin(
       }
     }
 
+    let maskPng: string | undefined
+    if (layout.maskImage) {
+      const maskPath = join(skinPath, layout.maskImage)
+      if (existsSync(maskPath)) {
+        maskPng = readFileSync(maskPath).toString('base64')
+      }
+    }
+
     return {
       backPng: readFileSync(bgPath).toString('base64'),
+      maskPng,
       screenRect: { x: layout.screenX, y: layout.screenY, width: layout.displayWidth, height: layout.displayHeight },
       compositeSize: { width: layout.compositeWidth, height: layout.compositeHeight },
       cornerRadius,

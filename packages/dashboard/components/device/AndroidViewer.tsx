@@ -39,6 +39,7 @@ interface AndroidViewerProps {
   screenHeight?: number;
   deviceRotation?: number;
   skinBackPng?: string;
+  skinMaskPng?: string;
   skinScreenRect?: { x: number; y: number; width: number; height: number };
   skinCompositeSize?: { width: number; height: number };
   skinCornerRadius?: number;
@@ -50,7 +51,7 @@ export function AndroidViewer({
   launching, setLaunching, androidButtons,
   binaryFrameHandlerRef, onRecordingUploaded,
   screenWidth, screenHeight, deviceRotation = 0,
-  skinBackPng, skinScreenRect, skinCompositeSize, skinCornerRadius = 0,
+  skinBackPng, skinMaskPng, skinScreenRect, skinCompositeSize, skinCornerRadius = 0,
 }: AndroidViewerProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -373,9 +374,7 @@ export function AndroidViewer({
   const screenPctTop  = hasSkin ? (skinScreenRect!.y / skinCompositeSize!.height) * 100 : 0;
   const screenPctW    = hasSkin ? (skinScreenRect!.width  / skinCompositeSize!.width) * 100 : 0;
   const screenPctH    = hasSkin ? (skinScreenRect!.height / skinCompositeSize!.height) * 100 : 0;
-  const skinCornerRadiusCss = hasSkin && skinCornerRadius > 0
-    ? `${Math.round(skinCornerRadius * compositeDisplayH / skinCompositeSize!.height)}px`
-    : '0px';
+  const hasMask = hasSkin && Boolean(skinMaskPng);
 
   // Container uses landscape dims; canvas inside rotated 90° to show portrait content in landscape shell
   const containerW = needsCSSRotation ? androidDisplayH : androidDisplayW;
@@ -523,7 +522,6 @@ export function AndroidViewer({
                       position: 'absolute',
                       left: `${screenPctLeft}%`, top: `${screenPctTop}%`,
                       width: `${screenPctW}%`, height: `${screenPctH}%`,
-                      borderRadius: skinCornerRadiusCss,
                       visibility: canvasReady ? 'visible' : 'hidden',
                       cursor: 'none', backgroundColor: '#010101',
                     }}
@@ -534,7 +532,7 @@ export function AndroidViewer({
                     onPointerLeave={handlePointerLeave}
                   />
                   {!canvasReady && (
-                    <div className="absolute animate-pulse bg-zinc-700" style={{ left: `${screenPctLeft}%`, top: `${screenPctTop}%`, width: `${screenPctW}%`, height: `${screenPctH}%`, borderRadius: skinCornerRadiusCss }} />
+                    <div className="absolute animate-pulse bg-zinc-700" style={{ left: `${screenPctLeft}%`, top: `${screenPctTop}%`, width: `${screenPctW}%`, height: `${screenPctH}%` }} />
                   )}
                   {!canvasReady && deviceReady && (
                     <div className="absolute pointer-events-none" style={{ left: `${screenPctLeft}%`, top: `${screenPctTop}%`, width: `${screenPctW}%`, height: `${screenPctH}%`, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
@@ -558,12 +556,21 @@ export function AndroidViewer({
                   )}
                 </>
               )}
-              {/* back.webp overlay — frame edges opaque, covers canvas edge artifacts */}
-              <img
-                src={`data:image/webp;base64,${skinBackPng}`}
-                style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', pointerEvents: 'none', userSelect: 'none', display: 'block', zIndex: 5 }}
-                alt="" draggable={false}
-              />
+              {/* mask.webp: display-sized alpha overlay — opaque bezel masks canvas corners precisely */}
+              {/* fallback: second back.webp for skins without mask.webp */}
+              {hasMask ? (
+                <img
+                  src={`data:image/webp;base64,${skinMaskPng}`}
+                  style={{ position: 'absolute', left: `${screenPctLeft}%`, top: `${screenPctTop}%`, width: `${screenPctW}%`, height: `${screenPctH}%`, pointerEvents: 'none', userSelect: 'none', display: 'block', zIndex: 5 }}
+                  alt="" draggable={false}
+                />
+              ) : (
+                <img
+                  src={`data:image/webp;base64,${skinBackPng}`}
+                  style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', pointerEvents: 'none', userSelect: 'none', display: 'block', zIndex: 5 }}
+                  alt="" draggable={false}
+                />
+              )}
             </div>
             {/* cursor — in outer non-rotating div so position maps directly to client coords */}
             <div ref={liveCursorRef} style={{ display: 'none', position: 'absolute', zIndex: 15, borderRadius: '50%', transform: 'translate(-50%, -50%)', pointerEvents: 'none', transition: 'width 0.1s ease, height 0.1s ease, background 0.1s ease, box-shadow 0.1s ease' }} />
