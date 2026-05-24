@@ -13,6 +13,7 @@ import { AdbWrapper } from './AdbWrapper.js'
 import { EmulatorLauncher } from './EmulatorLauncher.js'
 import { AndroidTouchHelper } from './AndroidTouchHelper.js'
 import { ScrcpySession } from './scrcpy/ScrcpySession.js'
+import { loadSkin } from './SkinLoader.js'
 
 const logger = createLogger('android-agent')
 
@@ -425,6 +426,8 @@ export class AndroidAgent implements DeviceAgent {
 
       await this.startVideoStream(state, streamWs)
       if (seq !== state.bootSeq) return
+
+      const skin = loadSkin(avdName)
       this.ws?.send(JSON.stringify({
         type: 'session:chrome',
         sessionId: state.sessionId,
@@ -433,6 +436,12 @@ export class AndroidAgent implements DeviceAgent {
           streamType: 'h264',
           screenWidth: state.displayWidth,
           screenHeight: state.displayHeight,
+          ...(skin ? {
+            skinBackPng: skin.backPng,
+            skinScreenRect: skin.screenRect,
+            skinCompositeSize: skin.compositeSize,
+            skinCornerRadius: skin.cornerRadius,
+          } : {}),
         },
       }))
       this.ws?.send(JSON.stringify({ type: 'device:ready', sessionId, payload: { deviceId: avdId } }))
@@ -605,12 +614,15 @@ export class AndroidAgent implements DeviceAgent {
         if (!state) break
         const serial = this.adb.getSerial(state.deviceId)
         if (!serial) break
-        // Optimistically advance rotation by 90° so the view updates immediately.
-        // ROTATION_NOTIFICATION will reconcile the actual value; dedup logic in handleRotationNotification
-        // prevents a double-swap if prediction matches.
-        this.handleRotationNotification(state, (state.deviceRotation + 1) % 4)
-        this.adb.enableAutoRotate(serial).catch(() => {})
-        this.adb.emuRotate(serial).catch(() => {})
+        // Toggle portrait(0) ↔ landscape(3). rotation=3 (CW landscape) is used because
+        // capture_orientation=@0 compensates rotation=3 with a CCW counterrotation, which the dashboard
+        // CSS rotate(90deg) CW undoes correctly. rotation=1 (CCW landscape) needs the opposite CSS
+        // direction, so it cannot share the same correction as no-skin mode.
+        const isLandscape = state.deviceRotation === 1 || state.deviceRotation === 3
+        const target = isLandscape ? 0 : 3
+        this.handleRotationNotification(state, target)
+        this.adb.disableAutoRotate(serial).catch(() => {})
+        this.adb.setUserRotation(serial, target as 0 | 3).catch(() => {})
         break
       }
       case 'input:button': {
