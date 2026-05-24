@@ -1,5 +1,5 @@
 import { readFileSync, existsSync, unlinkSync } from 'fs'
-import { join } from 'path'
+import { join, isAbsolute } from 'path'
 import { inflateSync } from 'zlib'
 import { execSync } from 'child_process'
 import os from 'os'
@@ -47,7 +47,7 @@ export function loadSkin(
 
     // skin.path may be relative (e.g. "skins/pixel_9") — resolve against ANDROID_HOME
     const androidHome = process.env.ANDROID_HOME || process.env.ANDROID_SDK_ROOT || ''
-    const skinPath = rawSkinPath.startsWith('/') ? rawSkinPath : join(androidHome, rawSkinPath)
+    const skinPath = isAbsolute(rawSkinPath) ? rawSkinPath : join(androidHome, rawSkinPath)
 
     const layoutPath = join(skinPath, 'layout')
     if (!existsSync(layoutPath)) return null
