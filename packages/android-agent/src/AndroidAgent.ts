@@ -13,6 +13,7 @@ import { AdbWrapper } from './AdbWrapper.js'
 import { EmulatorLauncher } from './EmulatorLauncher.js'
 import { AndroidTouchHelper } from './AndroidTouchHelper.js'
 import { ScrcpySession } from './scrcpy/ScrcpySession.js'
+import { loadSkin } from './SkinLoader.js'
 
 const logger = createLogger('android-agent')
 
@@ -425,6 +426,8 @@ export class AndroidAgent implements DeviceAgent {
 
       await this.startVideoStream(state, streamWs)
       if (seq !== state.bootSeq) return
+
+      const skin = loadSkin(avdName)
       this.ws?.send(JSON.stringify({
         type: 'session:chrome',
         sessionId: state.sessionId,
@@ -433,6 +436,12 @@ export class AndroidAgent implements DeviceAgent {
           streamType: 'h264',
           screenWidth: state.displayWidth,
           screenHeight: state.displayHeight,
+          ...(skin ? {
+            skinBackPng: skin.backPng,
+            skinScreenRect: skin.screenRect,
+            skinCompositeSize: skin.compositeSize,
+            skinCornerRadius: skin.cornerRadius,
+          } : {}),
         },
       }))
       this.ws?.send(JSON.stringify({ type: 'device:ready', sessionId, payload: { deviceId: avdId } }))

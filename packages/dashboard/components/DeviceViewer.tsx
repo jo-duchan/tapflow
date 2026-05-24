@@ -1,11 +1,11 @@
 'use client';
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { useRelay } from '@/hooks/useRelay';
 import { IOSViewer } from './device/IOSViewer';
 import { AndroidViewer } from './device/AndroidViewer';
 import { SimulatorInfoCard } from './device/shared/SimulatorInfoCard';
-import type { AndroidButton, ChromeData, RelayMessage } from '@/lib/types';
+import type { AndroidChrome, ChromeData, RelayMessage } from '@/lib/types';
 
 interface Props {
   sessionId: string;
@@ -14,8 +14,6 @@ interface Props {
   resetMode?: 'app-only' | 'full-erase';
   onRecordingUploaded?: () => void;
 }
-
-type AndroidChrome = { buttons: AndroidButton[]; streamType: 'h264'; screenWidth?: number; screenHeight?: number };
 
 export function DeviceViewer({ sessionId, deviceId, buildId, resetMode, onRecordingUploaded }: Props) {
   const sendRef = useRef<(msg: object) => void>(() => {});
@@ -77,7 +75,7 @@ export function DeviceViewer({ sessionId, deviceId, buildId, resetMode, onRecord
   }, []);
 
   const { send, connected } = useRelay(handleMessage, handleBinaryFrame);
-  sendRef.current = send;
+  useLayoutEffect(() => { sendRef.current = send; });
 
   useEffect(() => {
     if (connected) send({ type: 'session:start', sessionId });
@@ -130,7 +128,17 @@ export function DeviceViewer({ sessionId, deviceId, buildId, resetMode, onRecord
   return (
     <>
       {iosChrome && <IOSViewer {...commonProps} chrome={iosChrome} />}
-      {androidChrome && <AndroidViewer {...commonProps} androidButtons={androidChrome.buttons} screenWidth={androidChrome.screenWidth} screenHeight={androidChrome.screenHeight} deviceRotation={deviceRotation} />}
+      {androidChrome && <AndroidViewer
+        {...commonProps}
+        androidButtons={androidChrome.buttons}
+        screenWidth={androidChrome.screenWidth}
+        screenHeight={androidChrome.screenHeight}
+        deviceRotation={deviceRotation}
+        skinBackPng={androidChrome.skinBackPng}
+        skinScreenRect={androidChrome.skinScreenRect}
+        skinCompositeSize={androidChrome.skinCompositeSize}
+        skinCornerRadius={androidChrome.skinCornerRadius}
+      />}
     </>
   );
 }
