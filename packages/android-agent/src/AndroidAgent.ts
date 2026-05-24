@@ -152,6 +152,8 @@ export class AndroidAgent implements DeviceAgent {
   }
 
   async connect(relayUrl: string): Promise<void> {
+    this._stopping = false
+    if (this._reconnectTimer) { clearTimeout(this._reconnectTimer); this._reconnectTimer = null }
     this.relayUrl = relayUrl
     const allDevices = await this.adb.listDevices()
     const devices = this.deviceFilter

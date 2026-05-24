@@ -70,6 +70,8 @@ export class IOSAgent implements DeviceAgent {
   }
 
   async connect(relayUrl: string): Promise<void> {
+    this._stopping = false
+    if (this._reconnectTimer) { clearTimeout(this._reconnectTimer); this._reconnectTimer = null }
     this.relayUrl = relayUrl
     const devices = await this.simctl.listDevices()
 
