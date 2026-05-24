@@ -38,10 +38,6 @@ interface AndroidViewerProps {
   screenWidth?: number;
   screenHeight?: number;
   deviceRotation?: number;
-  skinBackPng?: string;
-  skinScreenRect?: { x: number; y: number; width: number; height: number };
-  skinCompositeSize?: { width: number; height: number };
-  skinCornerRadius?: number;
 }
 
 export function AndroidViewer({
@@ -50,7 +46,6 @@ export function AndroidViewer({
   launching, setLaunching, androidButtons,
   binaryFrameHandlerRef, onRecordingUploaded,
   screenWidth, screenHeight, deviceRotation = 0,
-  skinBackPng, skinScreenRect, skinCompositeSize, skinCornerRadius = 0,
 }: AndroidViewerProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -60,7 +55,6 @@ export function AndroidViewer({
 
   const [canvasReady, setCanvasReady] = useState(false);
   const [glError, setGlError] = useState(false);
-  const [pressedButton, setPressedButton] = useState<string | null>(null);
   const videoSizeRef = useRef<{ width: number; height: number } | null>(null);
   const [videoSize, setVideoSize] = useState<{ width: number; height: number } | null>(null);
 
@@ -80,10 +74,6 @@ export function AndroidViewer({
   const cursorPosRef = useRef<{ x: number; y: number } | null>(null);
   const cursorStateRef = useRef<'idle' | 'down' | 'release'>('idle');
   const releaseAnimRef = useRef<{ startTime: number } | null>(null);
-  // In skin mode the cursor div lives in the outer composite wrapper; compositeWrapperRef tracks it.
-  const compositeWrapperRef = useRef<HTMLDivElement>(null);
-  const coordNeedsRotationRef = useRef(false);
-  const hasSkinRef = useRef(false);
 
   // ── WebGL init + H264Decoder lifecycle ───────────────────────────────────
   useEffect(() => {
@@ -206,11 +196,13 @@ export function AndroidViewer({
   }, [keyboardActive])
 
   // ── Pointer interaction ───────────────────────────────────────────────────
+  const needsCSSRotationRef = useRef(false)
+
   const toNorm = useCallback((e: { clientX: number; clientY: number }) => {
     const canvas = canvasRef.current
     if (!canvas) return null
     const rect = canvas.getBoundingClientRect()
-    return toNormPure({ x: e.clientX, y: e.clientY }, rect, coordNeedsRotationRef.current)
+    return toNormPure({ x: e.clientX, y: e.clientY }, rect, needsCSSRotationRef.current)
   }, [])
 
   const toPinchFingers = useCallback((e: { clientX: number; clientY: number }) => {
@@ -240,9 +232,8 @@ export function AndroidViewer({
     cursorStateRef.current = 'down'; releaseAnimRef.current = null
     const _lc = liveCursorRef.current
     if (_lc) {
-      const _pr = (hasSkinRef.current ? compositeWrapperRef : containerRef).current?.getBoundingClientRect()
       _lc.style.display = 'block'
-      if (_pr) { _lc.style.left = `${e.clientX - _pr.left}px`; _lc.style.top = `${e.clientY - _pr.top}px` }
+      _lc.style.left = `${e.clientX - _rect.left}px`; _lc.style.top = `${e.clientY - _rect.top}px`
       _lc.style.width = `${CURSOR_DOT_R * 2}px`; _lc.style.height = `${CURSOR_DOT_R * 2}px`
       _lc.style.background = 'rgba(255,255,255,0.92)'; _lc.style.border = '1.5px solid rgba(0,0,0,0.2)'
       _lc.style.boxShadow = '0 0 0 1px rgba(0,0,0,0.15), 0 0 8px rgba(255,255,255,0.25)'
@@ -264,9 +255,8 @@ export function AndroidViewer({
         cursorPosRef.current = { x: e.clientX - _r.left, y: e.clientY - _r.top }
         if (cursorStateRef.current !== 'down') cursorStateRef.current = 'idle'
         if (_lc) {
-          const _pr = (hasSkinRef.current ? compositeWrapperRef : containerRef).current?.getBoundingClientRect()
           _lc.style.display = 'block'
-          if (_pr) { _lc.style.left = `${e.clientX - _pr.left}px`; _lc.style.top = `${e.clientY - _pr.top}px` }
+          _lc.style.left = `${e.clientX - _r.left}px`; _lc.style.top = `${e.clientY - _r.top}px`
           _lc.style.width = `${CURSOR_RING_R * 2}px`; _lc.style.height = `${CURSOR_RING_R * 2}px`
           _lc.style.background = 'transparent'; _lc.style.border = '1.5px solid rgba(255,255,255,0.6)'
           _lc.style.boxShadow = '0 0 0 1px rgba(0,0,0,0.3)'
@@ -298,8 +288,7 @@ export function AndroidViewer({
     cursorPosRef.current = { x: e.clientX - _r.left, y: e.clientY - _r.top }
     const _lc = liveCursorRef.current
     if (_lc && _lc.style.display !== 'none') {
-      const _pr = (hasSkinRef.current ? compositeWrapperRef : containerRef).current?.getBoundingClientRect()
-      if (_pr) { _lc.style.left = `${e.clientX - _pr.left}px`; _lc.style.top = `${e.clientY - _pr.top}px` }
+      _lc.style.left = `${e.clientX - _r.left}px`; _lc.style.top = `${e.clientY - _r.top}px`
     }
     send({ type: 'input:touch:move', sessionId, payload: pos })
   }, [toNorm, toPinchFingers, send, sessionId])
@@ -338,16 +327,7 @@ export function AndroidViewer({
   }, [])
 
   // ── Layout ────────────────────────────────────────────────────────────────
-  const hasSkin = Boolean(skinBackPng && skinScreenRect && skinCompositeSize);
-
-  // Skin mode: scale composite so its longest side fits MAX_ANDROID_LONG
-  const skinScale = hasSkin
-    ? Math.min(1, MAX_ANDROID_LONG / Math.max(skinCompositeSize!.width, skinCompositeSize!.height))
-    : 0;
-  const compositeDisplayW = hasSkin ? Math.round(skinCompositeSize!.width * skinScale) : 0;
-  const compositeDisplayH = hasSkin ? Math.round(skinCompositeSize!.height * skinScale) : 0;
-
-  // Fallback (no-skin) mode: scale by longest screen side
+  // Scale by longest side so portrait and landscape stay the same physical size on screen
   const effectiveSize = videoSize ?? (screenWidth && screenHeight ? { width: screenWidth, height: screenHeight } : null);
   const androidScale = effectiveSize
     ? Math.min(1, MAX_ANDROID_LONG / Math.max(effectiveSize.width, effectiveSize.height))
@@ -355,28 +335,12 @@ export function AndroidViewer({
   const androidDisplayW = effectiveSize ? Math.round(effectiveSize.width * androidScale) : 324;
   const androidDisplayH = effectiveSize ? Math.round(effectiveSize.height * androidScale) : 720;
 
+  // CSS rotation: applied when device is landscape but video content is portrait (portrait-locked app).
+  // Matches native Android emulator behavior — chrome rotates even when app content stays portrait.
   const isLandscapeDevice = deviceRotation === 1 || deviceRotation === 3;
   const isLandscapeContent = effectiveSize ? effectiveSize.width > effectiveSize.height : false;
-  // Stream is locked portrait by scrcpy capture_orientation=@0, so skin and no-skin both use
-  // isLandscapeDevice to drive CSS rotation — same as iOS pattern.
-  const skinIsLandscape = hasSkin && isLandscapeDevice;
-  const needsCSSRotation = !hasSkin && isLandscapeDevice && !isLandscapeContent;
-  // Both skin landscape and no-skin CSS-rotate the canvas 90° CW → same coordinate correction.
-  const coordNeedsRotation = needsCSSRotation || skinIsLandscape;
-  useLayoutEffect(() => {
-    coordNeedsRotationRef.current = coordNeedsRotation;
-    hasSkinRef.current = hasSkin;
-  }, [coordNeedsRotation, hasSkin])
-
-  // Skin: percentage-based screen position — scales with compositeDisplay dims automatically.
-  const screenPctLeft = hasSkin ? (skinScreenRect!.x / skinCompositeSize!.width) * 100 : 0;
-  const screenPctTop  = hasSkin ? (skinScreenRect!.y / skinCompositeSize!.height) * 100 : 0;
-  const screenPctW    = hasSkin ? (skinScreenRect!.width  / skinCompositeSize!.width) * 100 : 0;
-  const screenPctH    = hasSkin ? (skinScreenRect!.height / skinCompositeSize!.height) * 100 : 0;
-  const skinCornerRadiusCss = hasSkin && skinCornerRadius > 0
-    ? `${Math.round(skinCornerRadius * compositeDisplayH / skinCompositeSize!.height)}px`
-    : '0px';
-
+  const needsCSSRotation = isLandscapeDevice && !isLandscapeContent;
+  useLayoutEffect(() => { needsCSSRotationRef.current = needsCSSRotation }, [needsCSSRotation])
   // Container uses landscape dims; canvas inside rotated 90° to show portrait content in landscape shell
   const containerW = needsCSSRotation ? androidDisplayH : androidDisplayW;
   const containerH = needsCSSRotation ? androidDisplayW : androidDisplayH;
@@ -395,33 +359,20 @@ export function AndroidViewer({
     cursor: 'none',
   };
 
-  const navButtons = androidButtons ?? []
-
-  const sendButton = (name: string) => {
-    send({ type: 'input:button', sessionId, payload: { name } })
-    setPressedButton(name)
-    setTimeout(() => setPressedButton(null), 150)
-  }
-
-  const btnIcon = (name: string) =>
-    name === 'back' ? <ArrowLeft className="h-4 w-4" />
-    : name === 'recent_apps' ? <LayoutGrid className="h-4 w-4" />
-    : name === 'volume_up' ? <Volume2 className="h-4 w-4" />
-    : name === 'volume_down' ? <Volume1 className="h-4 w-4" />
-    : name === 'power' ? <Power className="h-4 w-4" />
-    : <Home className="h-4 w-4" />
-
-  const toolbarButtons = navButtons
-
   const platformSlot = (
     <>
-      {toolbarButtons.map((btn) => (
+      {androidButtons?.map((btn) => (
         <Tooltip key={btn.name}>
           <TooltipTrigger asChild>
             <Button variant="ghost" size="icon" className="h-8 w-8"
-              onClick={() => sendButton(btn.name)}
+              onClick={() => send({ type: 'input:button', sessionId, payload: { name: btn.name } })}
             >
-              {btnIcon(btn.name)}
+              {btn.name === 'back' ? <ArrowLeft className="h-4 w-4" />
+                : btn.name === 'recent_apps' ? <LayoutGrid className="h-4 w-4" />
+                : btn.name === 'volume_up' ? <Volume2 className="h-4 w-4" />
+                : btn.name === 'volume_down' ? <Volume1 className="h-4 w-4" />
+                : btn.name === 'power' ? <Power className="h-4 w-4" />
+                : <Home className="h-4 w-4" />}
             </Button>
           </TooltipTrigger>
           <TooltipContent side="left">{btn.accessibilityTitle}</TooltipContent>
@@ -480,154 +431,64 @@ export function AndroidViewer({
       />
 
       <div className="flex items-start gap-8">
-        {hasSkin ? (
-          // ── Skin mode: iOS-pattern — whole composite rotates as one unit ──
-          // Outer div: non-rotating, swaps W/H for landscape to occupy correct visual space.
-          // Inner div: CSS rotate(90deg) CW in landscape — same direction as no-skin canvas rotation.
-          // Canvas: percent-based position within inner div; no coordinate re-calculation on rotation.
-          <div
-            ref={compositeWrapperRef}
-            style={{
-              position: 'relative', flexShrink: 0,
-              width: skinIsLandscape ? compositeDisplayH : compositeDisplayW,
-              height: skinIsLandscape ? compositeDisplayW : compositeDisplayH,
-            }}
-          >
-            <div
-              style={{
-                width: compositeDisplayW, height: compositeDisplayH,
-                position: 'relative',
-                ...(skinIsLandscape ? {
-                  position: 'absolute',
-                  top:  (compositeDisplayW - compositeDisplayH) / 2,
-                  left: (compositeDisplayH - compositeDisplayW) / 2,
-                  transform: 'rotate(90deg)', transformOrigin: 'center center',
-                } : {}),
-              }}
-            >
-              {/* back.webp background — fills composite, screen interior is transparent */}
-              <img
-                src={`data:image/webp;base64,${skinBackPng}`}
-                style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', pointerEvents: 'none', userSelect: 'none', display: 'block' }}
-                alt="" draggable={false}
+        {/* phone body bezel */}
+        <div style={{ background: '#1c1c1e', borderRadius: '34px', padding: '12px', flexShrink: 0, boxShadow: '0 8px 32px rgba(0,0,0,0.45), inset 0 1px 0 rgba(255,255,255,0.06)' }}>
+        <div
+          ref={containerRef}
+          className="relative"
+          style={{ width: containerW, height: containerH, backgroundColor: '#010101', borderRadius: '22px', overflow: 'hidden' }}
+        >
+          {glError ? (
+            <div className="absolute inset-0 flex items-center justify-center">
+              <span style={{ color: 'rgba(255,255,255,0.6)', fontSize: '0.875rem' }}>WebGL2 not supported</span>
+            </div>
+          ) : (
+            <>
+              <canvas
+                ref={canvasRef}
+                className={needsCSSRotation ? undefined : 'block w-full h-full'}
+                style={rotatedCanvasStyle}
+                onPointerDown={handlePointerDown}
+                onPointerMove={handlePointerMove}
+                onPointerUp={handlePointerUp}
+                onPointerCancel={handlePointerCancel}
+                onPointerLeave={handlePointerLeave}
               />
-              {glError ? (
-                <div className="absolute" style={{ left: `${screenPctLeft}%`, top: `${screenPctTop}%`, width: `${screenPctW}%`, height: `${screenPctH}%`, display: 'flex', alignItems: 'center', justifyContent: 'center', backgroundColor: '#010101' }}>
-                  <span style={{ color: 'rgba(255,255,255,0.6)', fontSize: '0.875rem' }}>WebGL2 not supported</span>
+              {!canvasReady && (
+                <div className="absolute inset-0 animate-pulse bg-zinc-700" />
+              )}
+              {!canvasReady && deviceReady && (
+                <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+                  <span style={{ color: 'rgba(255,255,255,0.6)', fontSize: '0.875rem' }}>Waiting for stream…</span>
                 </div>
-              ) : (
+              )}
+              <div
+                ref={liveCursorRef}
+                style={{
+                  display: 'none', position: 'absolute', zIndex: 20, borderRadius: '50%',
+                  transform: 'translate(-50%, -50%)', pointerEvents: 'none',
+                  transition: 'width 0.1s ease, height 0.1s ease, background 0.1s ease, box-shadow 0.1s ease',
+                }}
+              />
+              {pinchHint && (
                 <>
-                  <canvas
-                    ref={canvasRef}
-                    style={{
-                      position: 'absolute',
-                      left: `${screenPctLeft}%`, top: `${screenPctTop}%`,
-                      width: `${screenPctW}%`, height: `${screenPctH}%`,
-                      borderRadius: skinCornerRadiusCss,
-                      visibility: canvasReady ? 'visible' : 'hidden',
-                      cursor: 'none', backgroundColor: '#010101',
-                    }}
-                    onPointerDown={handlePointerDown}
-                    onPointerMove={handlePointerMove}
-                    onPointerUp={handlePointerUp}
-                    onPointerCancel={handlePointerCancel}
-                    onPointerLeave={handlePointerLeave}
-                  />
-                  {!canvasReady && (
-                    <div className="absolute animate-pulse bg-zinc-700" style={{ left: `${screenPctLeft}%`, top: `${screenPctTop}%`, width: `${screenPctW}%`, height: `${screenPctH}%`, borderRadius: skinCornerRadiusCss }} />
-                  )}
-                  {!canvasReady && deviceReady && (
-                    <div className="absolute pointer-events-none" style={{ left: `${screenPctLeft}%`, top: `${screenPctTop}%`, width: `${screenPctW}%`, height: `${screenPctH}%`, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                      <span style={{ color: 'rgba(255,255,255,0.6)', fontSize: '0.875rem' }}>Waiting for stream…</span>
-                    </div>
-                  )}
-                  {pinchHint && (
-                    <>
-                      {([pinchHint.f0, pinchHint.f1] as const).map((f, i) => (
-                        <div key={i} style={{
-                          position: 'absolute', zIndex: 10, borderRadius: '50%',
-                          transform: 'translate(-50%, -50%)', pointerEvents: 'none',
-                          transition: 'width 0.1s ease, height 0.1s ease, background 0.1s ease',
-                          left: `${screenPctLeft + f.x * screenPctW}%`, top: `${screenPctTop + f.y * screenPctH}%`,
-                          ...(pinchActive
-                            ? { width: CURSOR_DOT_R * 2, height: CURSOR_DOT_R * 2, background: 'rgba(255,255,255,0.92)', border: '1.5px solid rgba(0,0,0,0.2)', boxShadow: '0 0 0 1px rgba(0,0,0,0.15), 0 0 8px rgba(255,255,255,0.25)' }
-                            : { width: CURSOR_RING_R * 2, height: CURSOR_RING_R * 2, background: 'transparent', border: '1.5px solid rgba(255,255,255,0.6)', boxShadow: '0 0 0 1px rgba(0,0,0,0.3)' }),
-                        }} />
-                      ))}
-                    </>
-                  )}
+                  {([pinchHint.f0, pinchHint.f1] as const).map((f, i) => (
+                    <div key={i} style={{
+                      position: 'absolute', zIndex: 10, borderRadius: '50%',
+                      transform: 'translate(-50%, -50%)', pointerEvents: 'none',
+                      transition: 'width 0.1s ease, height 0.1s ease, background 0.1s ease',
+                      left: `${f.x * 100}%`, top: `${f.y * 100}%`,
+                      ...(pinchActive
+                        ? { width: CURSOR_DOT_R * 2, height: CURSOR_DOT_R * 2, background: 'rgba(255,255,255,0.92)', border: '1.5px solid rgba(0,0,0,0.2)', boxShadow: '0 0 0 1px rgba(0,0,0,0.15), 0 0 8px rgba(255,255,255,0.25)' }
+                        : { width: CURSOR_RING_R * 2, height: CURSOR_RING_R * 2, background: 'transparent', border: '1.5px solid rgba(255,255,255,0.6)', boxShadow: '0 0 0 1px rgba(0,0,0,0.3)' }),
+                    }} />
+                  ))}
                 </>
               )}
-              {/* back.webp overlay — frame edges opaque, covers canvas edge artifacts */}
-              <img
-                src={`data:image/webp;base64,${skinBackPng}`}
-                style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', pointerEvents: 'none', userSelect: 'none', display: 'block', zIndex: 5 }}
-                alt="" draggable={false}
-              />
-            </div>
-            {/* cursor — in outer non-rotating div so position maps directly to client coords */}
-            <div ref={liveCursorRef} style={{ display: 'none', position: 'absolute', zIndex: 15, borderRadius: '50%', transform: 'translate(-50%, -50%)', pointerEvents: 'none', transition: 'width 0.1s ease, height 0.1s ease, background 0.1s ease, box-shadow 0.1s ease' }} />
-          </div>
-        ) : (
-          // ── Fallback: CSS bezel ───────────────────────────────────────────
-          <div style={{ background: '#1c1c1e', borderRadius: '34px', padding: '12px', flexShrink: 0, boxShadow: '0 8px 32px rgba(0,0,0,0.45), inset 0 1px 0 rgba(255,255,255,0.06)' }}>
-          <div
-            ref={containerRef}
-            className="relative"
-            style={{ width: containerW, height: containerH, backgroundColor: '#010101', borderRadius: '22px', overflow: 'hidden' }}
-          >
-            {glError ? (
-              <div className="absolute inset-0 flex items-center justify-center">
-                <span style={{ color: 'rgba(255,255,255,0.6)', fontSize: '0.875rem' }}>WebGL2 not supported</span>
-              </div>
-            ) : (
-              <>
-                <canvas
-                  ref={canvasRef}
-                  className={needsCSSRotation ? undefined : 'block w-full h-full'}
-                  style={rotatedCanvasStyle}
-                  onPointerDown={handlePointerDown}
-                  onPointerMove={handlePointerMove}
-                  onPointerUp={handlePointerUp}
-                  onPointerCancel={handlePointerCancel}
-                  onPointerLeave={handlePointerLeave}
-                />
-                {!canvasReady && (
-                  <div className="absolute inset-0 animate-pulse bg-zinc-700" />
-                )}
-                {!canvasReady && deviceReady && (
-                  <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-                    <span style={{ color: 'rgba(255,255,255,0.6)', fontSize: '0.875rem' }}>Waiting for stream…</span>
-                  </div>
-                )}
-                <div
-                  ref={liveCursorRef}
-                  style={{
-                    display: 'none', position: 'absolute', zIndex: 20, borderRadius: '50%',
-                    transform: 'translate(-50%, -50%)', pointerEvents: 'none',
-                    transition: 'width 0.1s ease, height 0.1s ease, background 0.1s ease, box-shadow 0.1s ease',
-                  }}
-                />
-                {pinchHint && (
-                  <>
-                    {([pinchHint.f0, pinchHint.f1] as const).map((f, i) => (
-                      <div key={i} style={{
-                        position: 'absolute', zIndex: 10, borderRadius: '50%',
-                        transform: 'translate(-50%, -50%)', pointerEvents: 'none',
-                        transition: 'width 0.1s ease, height 0.1s ease, background 0.1s ease',
-                        left: `${f.x * 100}%`, top: `${f.y * 100}%`,
-                        ...(pinchActive
-                          ? { width: CURSOR_DOT_R * 2, height: CURSOR_DOT_R * 2, background: 'rgba(255,255,255,0.92)', border: '1.5px solid rgba(0,0,0,0.2)', boxShadow: '0 0 0 1px rgba(0,0,0,0.15), 0 0 8px rgba(255,255,255,0.25)' }
-                          : { width: CURSOR_RING_R * 2, height: CURSOR_RING_R * 2, background: 'transparent', border: '1.5px solid rgba(255,255,255,0.6)', boxShadow: '0 0 0 1px rgba(0,0,0,0.3)' }),
-                      }} />
-                    ))}
-                  </>
-                )}
-              </>
-            )}
-          </div>
-          </div>
-        )}{/* /device frame */}
+            </>
+          )}
+        </div>
+        </div>{/* /phone body bezel */}
 
         <SimulatorInfoCard
           joined={joined} fps={fps} connected={connected}
