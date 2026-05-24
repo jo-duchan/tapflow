@@ -452,4 +452,62 @@ describe('AndroidAgent', () => {
       })
     })
   })
+
+  describe('reconnect', () => {
+    it('disconnect() sets _stopping and cancels pending reconnect timer', async () => {
+      const agent = new AndroidAgent({}, mockAdb())
+      await agent.connect(`ws://localhost:${port}`)
+
+      ;(agent as any)._reconnectTimer = setTimeout(() => {}, 10000)
+
+      agent.disconnect()
+
+      expect((agent as any)._stopping).toBe(true)
+      expect((agent as any)._reconnectTimer).toBeNull()
+    })
+
+    it('_scheduleReconnect() increments attempt and sets timer', async () => {
+      const agent = new AndroidAgent({}, mockAdb())
+      await agent.connect(`ws://localhost:${port}`)
+
+      ;(agent as any)._scheduleReconnect()
+
+      expect((agent as any)._reconnectAttempt).toBe(1)
+      expect((agent as any)._reconnectTimer).not.toBeNull()
+
+      agent.disconnect()
+    })
+
+    it('_scheduleReconnect() is no-op when _stopping is true', async () => {
+      const agent = new AndroidAgent({}, mockAdb())
+      await agent.connect(`ws://localhost:${port}`)
+
+      ;(agent as any)._stopping = true
+      ;(agent as any)._scheduleReconnect()
+
+      expect((agent as any)._reconnectTimer).toBeNull()
+      expect((agent as any)._reconnectAttempt).toBe(0)
+
+      agent.disconnect()
+    })
+
+    it('reconnects automatically when connection drops and relay is available', async () => {
+      const agent = new AndroidAgent({}, mockAdb())
+      await agent.connect(`ws://localhost:${port}`)
+
+      // Terminate the ws to simulate network drop (relay stays up)
+      ;(agent as any).ws.terminate()
+
+      await new Promise(resolve => setTimeout(resolve, 100))
+      expect((agent as any)._reconnectAttempt).toBe(1)
+
+      // Relay is still running — wait for 1s backoff then reconnect
+      await new Promise(resolve => setTimeout(resolve, 1500))
+
+      expect((agent as any)._reconnectAttempt).toBe(0)
+      expect((agent as any).ws).not.toBeNull()
+
+      agent.disconnect()
+    }, 5000)
+  })
 })
