@@ -614,12 +614,15 @@ export class AndroidAgent implements DeviceAgent {
         if (!state) break
         const serial = this.adb.getSerial(state.deviceId)
         if (!serial) break
-        // Optimistically advance rotation by 90° so the view updates immediately.
-        // ROTATION_NOTIFICATION will reconcile the actual value; dedup logic in handleRotationNotification
-        // prevents a double-swap if prediction matches.
-        this.handleRotationNotification(state, (state.deviceRotation + 1) % 4)
-        this.adb.enableAutoRotate(serial).catch(() => {})
-        this.adb.emuRotate(serial).catch(() => {})
+        // Toggle portrait(0) ↔ landscape(3). rotation=3 (CW landscape) is used because
+        // capture_orientation=@0 compensates rotation=3 with a CCW counterrotation, which the dashboard
+        // CSS rotate(90deg) CW undoes correctly. rotation=1 (CCW landscape) needs the opposite CSS
+        // direction, so it cannot share the same correction as no-skin mode.
+        const isLandscape = state.deviceRotation === 1 || state.deviceRotation === 3
+        const target = isLandscape ? 0 : 3
+        this.handleRotationNotification(state, target)
+        this.adb.disableAutoRotate(serial).catch(() => {})
+        this.adb.setUserRotation(serial, target as 0 | 3).catch(() => {})
         break
       }
       case 'input:button': {

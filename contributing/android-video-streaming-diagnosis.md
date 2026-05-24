@@ -143,3 +143,66 @@ emulator gRPC API의 `streamScreenshot` RPC를 사용해 scrcpy를 완전히 대
 emulator -avd <name> -grpc 8554 -gpu host
 # 이후 grpcurl로 streamScreenshot 호출 후 FPS 측정
 ```
+
+---
+
+## Issue 3 — 디바이스 회전 시 scrcpy 스트림 해상도 변경 (2026-05-24 해결)
+
+### 핵심 결론
+
+`capture_orientation=@0` 서버 옵션을 추가해 스트림을 portrait로 고정한다.
+디바이스가 회전해도 스트림 해상도가 변하지 않으므로 대시보드는 CSS rotation만으로 landscape 뷰를 전환할 수 있다.
+
+```typescript
+// ScrcpySession.ts — scrcpy 서버 인수
+'capture_orientation=@0',  // lock stream to portrait
+```
+
+### 원인
+
+`sdk_gphone64_arm64` (google_apis/arm64-v8a, android-34) AVD에서 디바이스를 회전하면 scrcpy 스트림 해상도가 실시간으로 바뀐다.
+
+```
+rotation 0 → 1: stream 1080×2400 → 2400×1080  (H.264 SPS 변경 + 디코더 재초기화)
+rotation 1 → 2: stream 2400×1080 → 1080×2400
+rotation 2 → 3: stream 1080×2400 → 2400×1080
+```
+
+이 때문에:
+- `videoSize` 상태가 비동기로 업데이트 → 스킨 프레임 방향과 스트림 방향이 잠깐 불일치
+- rotation=2(upside-down portrait)에서 스트림이 landscape로 유지 → portrait 프레임 안에 landscape 스트림 → letterbox 발생
+
+### `capture_orientation=@0`의 동작 원리
+
+scrcpy 서버가 display orientation을 0(portrait)으로 고정한다. 물리 회전은 Android 시스템이 감지하지만, 스크린 렌더링은 portrait 기준으로 유지되므로 스트림 해상도가 변하지 않는다.
+
+scrcpy는 회전 이벤트(`DEVICE_MSG_TYPE_ROTATION_CHANGED`)는 여전히 물리 회전 기준으로 전송하므로 대시보드가 현재 방향을 정확히 알 수 있다.
+
+### 스킨 렌더링 단순화 (iOS 패턴 통일)
+
+스트림이 항상 portrait로 고정되면, iOS viewer와 동일한 방식으로 렌더할 수 있다:
+- composite(back.webp) 전체를 portrait 기준으로 유지
+- landscape 전환 시 inner div에 `rotate(90deg)` CSS 한 줄
+- canvas 위치: `skinScreenRect`의 퍼센트 기반 좌표 (픽셀 계산 불필요)
+
+### 회전 방향 선택 — landscape(3) 고정
+
+`capture_orientation=@0` 적용 후 CSS `rotate(90deg)` CW가 scrcpy 보정과 상쇄되는 방향은 `rotation=3`(CW landscape)이다. `rotation=1`(CCW landscape)에서는 scrcpy 보정 방향이 반대라 CSS rotation을 더하면 180° 뒤집힘이 발생한다.
+
+따라서 rotate 버튼은 **portrait(0) ↔ landscape(3)** 2방향 토글로 구현한다:
+
+```typescript
+// AndroidAgent.ts
+const target = isLandscape ? 0 : 3
+this.adb.disableAutoRotate(serial)       // accelerometer_rotation=0
+this.adb.setUserRotation(serial, target) // user_rotation=0 or 3
+```
+
+### 관련 코드
+
+| 파일 | 변경 |
+|------|------|
+| `android-agent/src/scrcpy/ScrcpySession.ts` | `capture_orientation=@0` 추가 |
+| `android-agent/src/AdbWrapper.ts` | `disableAutoRotate`, `setUserRotation` 추가 |
+| `android-agent/src/AndroidAgent.ts` | `input:rotate` → 0↔3 토글 |
+| `dashboard/components/device/AndroidViewer.tsx` | 스킨 모드 iOS 패턴으로 단순화 |

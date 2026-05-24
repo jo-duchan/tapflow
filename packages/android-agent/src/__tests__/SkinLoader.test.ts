@@ -102,6 +102,7 @@ describe('parseLayout', () => {
     const result = parseLayout(PIXEL_9_LAYOUT)
     expect(result).toEqual({
       backgroundImage: 'back.webp',
+      maskImage: 'mask.webp',
       displayWidth: 1080,
       displayHeight: 2424,
       cornerRadius: 87,

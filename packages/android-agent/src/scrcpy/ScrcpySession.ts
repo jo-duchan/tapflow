@@ -87,6 +87,7 @@ export class ScrcpySession {
       'send_frame_meta=false',   // raw Annex B stream (no length prefix per frame)
       'send_dummy_byte=false',   // skip the 1-byte connection-check byte
       'video_codec_options=i-frame-interval:int=1', // 1s IDR interval for faster keyframe recovery after restart
+      'capture_orientation=@0',  // lock stream to portrait — prevents dimension changes on device rotation
     ], { stdio: ['ignore', 'pipe', 'ignore'] })
 
     this.serverProc = serverProc

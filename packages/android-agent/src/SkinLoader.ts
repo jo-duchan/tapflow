@@ -1,5 +1,7 @@
-import { readFileSync, existsSync } from 'fs'
+import { readFileSync, existsSync, unlinkSync } from 'fs'
 import { join } from 'path'
+import { inflateSync } from 'zlib'
+import { execSync } from 'child_process'
 import os from 'os'
 import { createLogger } from '@tapflowio/agent-core'
 
@@ -14,6 +16,7 @@ export interface SkinData {
 
 interface ParsedLayout {
   backgroundImage: string
+  maskImage?: string
   displayWidth: number
   displayHeight: number
   cornerRadius: number
@@ -38,9 +41,13 @@ export function loadSkin(
 
     const config = parseIni(readFileSync(configPath, 'utf-8'))
     const skinName = config['skin.name']
-    const skinPath = config['skin.path']
+    const rawSkinPath = config['skin.path']
 
-    if (!skinName || skinName === '_no_skin' || !skinPath) return null
+    if (!skinName || skinName === '_no_skin' || !rawSkinPath) return null
+
+    // skin.path may be relative (e.g. "skins/pixel_9") — resolve against ANDROID_HOME
+    const androidHome = process.env.ANDROID_HOME || process.env.ANDROID_SDK_ROOT || ''
+    const skinPath = rawSkinPath.startsWith('/') ? rawSkinPath : join(androidHome, rawSkinPath)
 
     const layoutPath = join(skinPath, 'layout')
     if (!existsSync(layoutPath)) return null
@@ -51,15 +58,63 @@ export function loadSkin(
     const bgPath = join(skinPath, layout.backgroundImage)
     if (!existsSync(bgPath)) return null
 
+    // If layout has no corner_radius but skin provides mask.webp, detect radius from mask.
+    // mask.webp for modern Pixel skins has opaque corner areas and a transparent screen interior.
+    // The first transparent pixel on the top row = corner radius in display pixels.
+    let cornerRadius = layout.cornerRadius
+    if (cornerRadius === 0 && layout.maskImage) {
+      const maskPath = join(skinPath, layout.maskImage)
+      if (existsSync(maskPath)) {
+        cornerRadius = detectMaskCornerRadius(maskPath, layout.displayWidth)
+      }
+    }
+
     return {
       backPng: readFileSync(bgPath).toString('base64'),
       screenRect: { x: layout.screenX, y: layout.screenY, width: layout.displayWidth, height: layout.displayHeight },
       compositeSize: { width: layout.compositeWidth, height: layout.compositeHeight },
-      cornerRadius: layout.cornerRadius,
+      cornerRadius,
     }
   } catch (e) {
     logger.warn('skin load failed:', (e as Error).message)
     return null
+  }
+}
+
+// Uses sips (macOS built-in) to export the first row of the mask image as PNG,
+// then scans for the first fully-transparent pixel to determine the screen corner radius.
+function detectMaskCornerRadius(maskPath: string, displayWidth: number): number {
+  const tmpPng = join(os.tmpdir(), `tapflow_mask_cr_${process.pid}.png`)
+  try {
+    execSync(
+      `sips -s format png --cropToHeightWidth 1 ${displayWidth} "${maskPath}" --out "${tmpPng}" 2>/dev/null`,
+      { stdio: 'pipe', timeout: 5000 },
+    )
+    const buf = readFileSync(tmpPng)
+
+    // Collect all IDAT chunks and decompress
+    const idatParts: Buffer[] = []
+    let pos = 8
+    while (pos + 12 <= buf.length) {
+      const len = buf.readUInt32BE(pos)
+      const type = buf.subarray(pos + 4, pos + 8).toString()
+      if (type === 'IDAT') idatParts.push(buf.subarray(pos + 8, pos + 8 + len))
+      if (type === 'IEND') break
+      pos += 12 + len
+    }
+    if (!idatParts.length) return 0
+
+    const raw = inflateSync(Buffer.concat(idatParts))
+    // First scanline: 1 filter byte + W×4 RGBA bytes. Only handle filter 0 (None).
+    if (raw[0] !== 0) return 0
+    for (let x = 0; x < displayWidth; x++) {
+      if (raw[1 + x * 4 + 3] === 0) return x
+    }
+    return 0
+  } catch {
+    return 0
+  } finally {
+    try { unlinkSync(tmpPng) } catch { /* cleanup best-effort */ }
   }
 }
 
@@ -87,6 +142,7 @@ export function parseLayout(text: string): ParsedLayout | null {
   const displayHeight = num(partsDevice.children['display']?.values['height'])
   const cornerRadius = num(partsDevice.children['display']?.values['corner_radius'])
   const backgroundImage = partsPortrait?.children['background']?.values['image'] ?? ''
+  const maskImage = partsPortrait?.children['foreground']?.values['mask'] || undefined
   const compositeWidth = num(layoutsPortrait.values['width'])
   const compositeHeight = num(layoutsPortrait.values['height'])
 
@@ -103,7 +159,7 @@ export function parseLayout(text: string): ParsedLayout | null {
     }
   }
 
-  return { backgroundImage, displayWidth, displayHeight, cornerRadius, compositeWidth, compositeHeight, screenX, screenY }
+  return { backgroundImage, maskImage, displayWidth, displayHeight, cornerRadius, compositeWidth, compositeHeight, screenX, screenY }
 }
 
 function num(v: string | undefined): number {
