@@ -640,12 +640,11 @@ export class AndroidAgent implements DeviceAgent {
         if (!state) break
         const serial = this.adb.getSerial(state.deviceId)
         if (!serial) break
-        // Optimistically advance rotation by 90° so the view updates immediately.
-        // ROTATION_NOTIFICATION will reconcile the actual value; dedup logic in handleRotationNotification
-        // prevents a double-swap if prediction matches.
-        this.handleRotationNotification(state, (state.deviceRotation + 1) % 4)
-        this.adb.enableAutoRotate(serial).catch(() => {})
-        this.adb.emuRotate(serial).catch(() => {})
+        // Toggle portrait (0) ↔ landscape (1). Odd rotation values (1, 3) are landscape.
+        // Optimistically update so the view responds immediately; scrcpy notification reconciles.
+        const targetRotation: 0 | 1 = state.deviceRotation % 2 === 1 ? 0 : 1
+        this.handleRotationNotification(state, targetRotation)
+        this.adb.setRotation(serial, targetRotation).catch(() => {})
         break
       }
       case 'input:button': {
