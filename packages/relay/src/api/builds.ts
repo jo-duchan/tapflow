@@ -258,9 +258,9 @@ export async function handleUpdateBuild(
     }
     updates.push('status_label = ?')
     values.push(body.status_label ?? null)
-    if (body.status_label === 'Done') {
+    if (body.status_label === 'Done' && existing.status_label !== 'Done') {
       updates.push("completed_at = datetime('now')")
-    } else if (existing.status_label === 'Done') {
+    } else if (body.status_label !== 'Done' && existing.status_label === 'Done') {
       updates.push('completed_at = NULL')
     }
   }
@@ -419,6 +419,23 @@ export function handleUploadBuild(
 }
 
 const BUILD_TTL_DAYS = Number(process.env['TAPFLOW_BUILD_TTL_DAYS'] ?? 7)
+const SQLITE_MAX_PARAMS = 999
+
+function chunkArray<T>(arr: T[], size: number): T[][] {
+  const chunks: T[][] = []
+  for (let i = 0; i < arr.length; i += size) chunks.push(arr.slice(i, i + size))
+  return chunks
+}
+
+function unlinkSafe(filePath: string, label: string): void {
+  try {
+    fs.unlinkSync(filePath)
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code !== 'ENOENT') {
+      console.warn(`[tapflow] purge: failed to delete ${label}`, (err as Error).message)
+    }
+  }
+}
 
 export function purgeExpiredBuilds(recordingsDir: string): void {
   const db = getDb()
@@ -429,21 +446,28 @@ export function purgeExpiredBuilds(recordingsDir: string): void {
   if (expired.length === 0) return
 
   const buildIds = expired.map((r) => r.id)
-  const placeholders = buildIds.map(() => '?').join(',')
+  const chunks = chunkArray(buildIds, SQLITE_MAX_PARAMS)
 
   // 연결된 recording 파일 삭제 후 레코드 제거 (recordings.build_id FK에 CASCADE 없음)
-  const recordings = db.prepare(
-    `SELECT filename FROM recordings WHERE build_id IN (${placeholders})`
-  ).all(...buildIds) as { filename: string }[]
+  const recordings = chunks.flatMap((chunk) => {
+    const ph = chunk.map(() => '?').join(',')
+    return db.prepare(`SELECT filename FROM recordings WHERE build_id IN (${ph})`).all(...chunk) as { filename: string }[]
+  })
   for (const { filename } of recordings) {
-    try { fs.unlinkSync(path.join(recordingsDir, filename)) } catch { /* 이미 없는 파일은 무시 */ }
+    unlinkSafe(path.join(recordingsDir, filename), 'recording')
   }
   if (recordings.length > 0) {
-    db.prepare(`DELETE FROM recordings WHERE build_id IN (${placeholders})`).run(...buildIds)
+    for (const chunk of chunks) {
+      const ph = chunk.map(() => '?').join(',')
+      db.prepare(`DELETE FROM recordings WHERE build_id IN (${ph})`).run(...chunk)
+    }
   }
 
   for (const { file_path } of expired) {
-    try { fs.unlinkSync(file_path) } catch { /* 이미 없는 파일은 무시 */ }
+    unlinkSafe(file_path, 'build')
   }
-  db.prepare(`DELETE FROM builds WHERE id IN (${placeholders})`).run(...buildIds)
+  for (const chunk of chunks) {
+    const ph = chunk.map(() => '?').join(',')
+    db.prepare(`DELETE FROM builds WHERE id IN (${ph})`).run(...chunk)
+  }
 }
