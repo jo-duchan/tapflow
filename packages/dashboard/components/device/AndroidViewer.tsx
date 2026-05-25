@@ -12,6 +12,8 @@ import { Button } from '@/components/ui/button';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import type { AndroidButton } from '@/lib/types'
 import { androidToNorm as toNormPure, toPinchFingers as makePinchFingers } from '@/lib/coordinate-transform';
+import type { MutableRefObject } from 'react';
+import type { PerfHook } from '@/components/perf/types';
 
 const CURSOR_RING_R = 13;
 const CURSOR_DOT_R = 8;
@@ -38,6 +40,7 @@ interface AndroidViewerProps {
   screenWidth?: number;
   screenHeight?: number;
   deviceRotation?: number;
+  perfHookRef?: MutableRefObject<PerfHook>;
 }
 
 export function AndroidViewer({
@@ -46,11 +49,13 @@ export function AndroidViewer({
   launching, setLaunching, androidButtons,
   binaryFrameHandlerRef, onRecordingUploaded,
   screenWidth, screenHeight, deviceRotation = 0,
+  perfHookRef,
 }: AndroidViewerProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const { init: glInit, dispose: glDispose, drawFrame: glDrawFrame } = useWebGLRenderer(canvasRef);
   const { fps, frameCount } = useFps();
+  const lastRecvAtRef = useRef<number>(0);
   const { recordState, recordCanvasRef, startClientRecording, stopClientRecording } = useClientRecording({ sessionId, buildId, onRecordingUploaded });
 
   const [canvasReady, setCanvasReady] = useState(false);
@@ -81,7 +86,9 @@ export function AndroidViewer({
     if (!ok) { setGlError(true); return }
 
     const decoder = new H264Decoder((frame) => {
+      const renderStart = performance.now()
       const size = glDrawFrame(frame)
+      const paintMs = performance.now() - renderStart
       if (!size) return
       frameCount.current += 1
       setCanvasReady(true)
@@ -90,16 +97,31 @@ export function AndroidViewer({
         videoSizeRef.current = size
         setVideoSize(size)
       }
+      if (import.meta.env.DEV) {
+        const recvAt = lastRecvAtRef.current
+        perfHookRef?.current?.onFrameEnd({
+          recvAt,
+          recvInterval: 0,
+          decodeMs: renderStart - recvAt,
+          paintMs,
+        })
+      }
     })
 
-    binaryFrameHandlerRef.current = (data) => decoder.decode(data)
+    binaryFrameHandlerRef.current = (data) => {
+      if (import.meta.env.DEV) {
+        lastRecvAtRef.current = performance.now()
+        perfHookRef?.current?.onFrameBegin()
+      }
+      decoder.decode(data)
+    }
 
     return () => {
       binaryFrameHandlerRef.current = undefined
       decoder.close()
       glDispose()
     }
-  }, [glInit, glDispose, glDrawFrame, frameCount, binaryFrameHandlerRef])
+  }, [glInit, glDispose, glDrawFrame, frameCount, binaryFrameHandlerRef, perfHookRef])
 
   // ── Recording (composeFrame only — state/refs/lifecycle in useClientRecording) ──
   const composeFrame = useCallback(() => {

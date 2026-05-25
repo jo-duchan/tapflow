@@ -10,6 +10,8 @@ import { Button } from '@/components/ui/button';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import type { ChromeData } from '@/lib/types'
 import { iosToNormScreen, toPinchFingers as makePinchFingers, iosDisplayScale } from '@/lib/coordinate-transform';
+import type { MutableRefObject } from 'react';
+import type { PerfHook } from '@/components/perf/types';
 
 const CURSOR_RING_R = 13;
 const CURSOR_DOT_R = 8;
@@ -36,6 +38,7 @@ interface IOSViewerProps {
   swKeyboardVisible: boolean;
   swKeyboardPending: boolean;
   onKbdToggle: () => void;
+  perfHookRef?: MutableRefObject<PerfHook>;
 }
 
 export function IOSViewer({
@@ -44,11 +47,13 @@ export function IOSViewer({
   launching, setLaunching, chrome,
   binaryFrameHandlerRef, onRecordingUploaded,
   swKeyboardVisible, swKeyboardPending, onKbdToggle,
+  perfHookRef,
 }: IOSViewerProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const screenAreaRef = useRef<HTMLDivElement>(null);
   const { fps, frameCount } = useFps();
+  const lastFrameRecvAtRef = useRef<number>(0);
   const { recordState, recordCanvasRef, startClientRecording, stopClientRecording } = useClientRecording({ sessionId, buildId, onRecordingUploaded });
   const deviceSeq = useRef(0);
 
@@ -86,9 +91,15 @@ export function IOSViewer({
   // ── Binary frame handler (MJPEG) ─────────────────────────────────────────
   useEffect(() => {
     binaryFrameHandlerRef.current = (data: ArrayBuffer) => {
+      const recvAt = performance.now()
+      const recvInterval = lastFrameRecvAtRef.current ? recvAt - lastFrameRecvAtRef.current : 0
+      lastFrameRecvAtRef.current = recvAt
+      if (import.meta.env.DEV) perfHookRef?.current?.onFrameBegin()
+
       const seq = deviceSeq.current
       createImageBitmap(new Blob([data], { type: 'image/jpeg' }))
         .then((bitmap) => {
+          const decodeMs = performance.now() - recvAt
           if (deviceSeq.current !== seq) { bitmap.close(); return }
           const canvas = canvasRef.current
           const ctx = canvas?.getContext('2d')
@@ -100,15 +111,20 @@ export function IOSViewer({
               if (rc) { rc.width = bitmap.width; rc.height = bitmap.height }
             }
           }
+          const paintStart = performance.now()
           ctx.drawImage(bitmap, 0, 0)
+          const paintMs = performance.now() - paintStart
           bitmap.close()
           setCanvasReady(true)
           frameCount.current += 1
+          if (import.meta.env.DEV) {
+            perfHookRef?.current?.onFrameEnd({ recvAt, recvInterval, decodeMs, paintMs })
+          }
         })
         .catch(() => {})
     }
     return () => { binaryFrameHandlerRef.current = undefined }
-  }, [binaryFrameHandlerRef, frameCount])
+  }, [binaryFrameHandlerRef, frameCount, perfHookRef])
 
   // Sync record canvas size when chrome arrives
   useEffect(() => {
