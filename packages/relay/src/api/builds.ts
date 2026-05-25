@@ -420,7 +420,7 @@ export function handleUploadBuild(
 
 const BUILD_TTL_DAYS = Number(process.env['TAPFLOW_BUILD_TTL_DAYS'] ?? 7)
 
-export function purgeExpiredBuilds(): void {
+export function purgeExpiredBuilds(recordingsDir: string): void {
   const db = getDb()
   const expired = db.prepare(
     `SELECT id, file_path FROM builds WHERE completed_at < datetime('now', '-' || ? || ' days')`
@@ -428,10 +428,22 @@ export function purgeExpiredBuilds(): void {
 
   if (expired.length === 0) return
 
+  const buildIds = expired.map((r) => r.id)
+  const placeholders = buildIds.map(() => '?').join(',')
+
+  // 연결된 recording 파일 삭제 후 레코드 제거 (recordings.build_id FK에 CASCADE 없음)
+  const recordings = db.prepare(
+    `SELECT filename FROM recordings WHERE build_id IN (${placeholders})`
+  ).all(...buildIds) as { filename: string }[]
+  for (const { filename } of recordings) {
+    try { fs.unlinkSync(path.join(recordingsDir, filename)) } catch { /* 이미 없는 파일은 무시 */ }
+  }
+  if (recordings.length > 0) {
+    db.prepare(`DELETE FROM recordings WHERE build_id IN (${placeholders})`).run(...buildIds)
+  }
+
   for (const { file_path } of expired) {
     try { fs.unlinkSync(file_path) } catch { /* 이미 없는 파일은 무시 */ }
   }
-
-  const placeholders = expired.map(() => '?').join(',')
-  db.prepare(`DELETE FROM builds WHERE id IN (${placeholders})`).run(...expired.map((r) => r.id))
+  db.prepare(`DELETE FROM builds WHERE id IN (${placeholders})`).run(...buildIds)
 }
