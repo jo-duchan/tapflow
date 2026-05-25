@@ -17,7 +17,7 @@ pnpm dev
 
 ## Project structure
 
-```
+```text
 packages/
   agent-core/     ← shared DeviceAgent interface
   ios-agent/      ← IOSAgent (macOS)
