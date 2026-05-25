@@ -419,11 +419,13 @@ export function handleUploadBuild(
   req.pipe(bb)
 }
 
+const BUILD_TTL_DAYS = Number(process.env['TAPFLOW_BUILD_TTL_DAYS'] ?? 7)
+
 export function purgeExpiredBuilds(): void {
   const db = getDb()
   const expired = db.prepare(
-    `SELECT id, file_path FROM builds WHERE completed_at < datetime('now', '-7 days')`
-  ).all() as { id: number; file_path: string }[]
+    `SELECT id, file_path FROM builds WHERE completed_at < datetime('now', '-' || ? || ' days')`
+  ).all(BUILD_TTL_DAYS) as { id: number; file_path: string }[]
 
   if (expired.length === 0) return
 
