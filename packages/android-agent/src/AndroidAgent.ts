@@ -640,11 +640,13 @@ export class AndroidAgent implements DeviceAgent {
         if (!state) break
         const serial = this.adb.getSerial(state.deviceId)
         if (!serial) break
-        // Toggle portrait (0) ↔ landscape (1). Odd rotation values (1, 3) are landscape.
-        // Optimistically update so the view responds immediately; scrcpy notification reconciles.
-        const targetRotation: 0 | 1 = state.deviceRotation % 2 === 1 ? 0 : 1
+        // Toggle portrait (0) ↔ landscape (1); optimistic update — roll back if ADB fails.
+        const prevRotation = state.deviceRotation
+        const targetRotation: 0 | 1 = prevRotation % 2 === 1 ? 0 : 1
         this.handleRotationNotification(state, targetRotation)
-        this.adb.setRotation(serial, targetRotation).catch(() => {})
+        this.adb.setRotation(serial, targetRotation).catch(() => {
+          this.handleRotationNotification(state, prevRotation)
+        })
         break
       }
       case 'input:button': {
