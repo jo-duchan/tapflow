@@ -43,26 +43,6 @@ v0.3.0-beta.1    # feature-complete, external testing
 v0.3.0-rc.1      # release candidate, no new features
 ```
 
-#### Cutting a release
-
-```sh
-# 1. confirm you are on an up-to-date main
-git checkout main && git pull origin main
-
-# 2. record what changed
-pnpm changeset add
-
-# 3. bump all package versions (edits package.json files and CHANGELOG.md)
-pnpm changeset version
-
-# 4. commit the version bump
-git add -A && git commit -m "chore: release v<new-version>"
-
-# 5. tag and push — GitHub Actions publishes to npm and creates a GitHub Release
-git tag v<new-version>
-git push origin main v<new-version>
-```
-
 ## Tests
 
 All packages:
