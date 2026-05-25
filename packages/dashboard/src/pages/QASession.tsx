@@ -1,7 +1,9 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { useSearchParams, useNavigate } from 'react-router-dom';
-import { useRelay } from '@/hooks/useRelay';
 import { useBreadcrumb } from '@/hooks/useBreadcrumb';
+import { useBuildLoader } from '@/hooks/useBuildLoader';
+import { useAgentSession } from '@/hooks/useAgentSession';
+import { useDeviceSelector } from '@/hooks/useDeviceSelector';
 import { DeviceViewer } from '@/components/DeviceViewer';
 import { SessionPanel } from '@/components/session-panel';
 import {
@@ -17,7 +19,6 @@ import {
   Breadcrumb, BreadcrumbItem, BreadcrumbLink,
   BreadcrumbList, BreadcrumbPage, BreadcrumbSeparator,
 } from '@/components/ui/breadcrumb';
-import { getBuild } from '@/lib/queries';
 import { cn } from '@/lib/utils';
 import { STATUS_TONE, buildLabel } from '@/lib/build-format';
 import { Info } from 'lucide-react';
@@ -25,121 +26,39 @@ import { Switch } from '@/components/ui/switch';
 import { Label } from '@/components/ui/label';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { SearchInput } from '@/components/ui/search-input';
-import type { AgentDevice, Build, RelayMessage, SessionInfo } from '@/lib/types';
+import type { AgentDevice, SessionInfo } from '@/lib/types';
 
 export function QASession() {
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
   const buildId = searchParams.get('id');
 
-  const [build, setBuild] = useState<Build | null>(null);
-  const [sessions, setSessions] = useState<SessionInfo[]>([]);
-  const [selectedAgent, setSelectedAgent] = useState<string | null>(null);
-  const [deviceId, setDeviceId] = useState<string>('');
-  const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
-  const [booting, setBooting] = useState(false);
-  const [status, setStatus] = useState('');
+  const { build } = useBuildLoader(buildId);
   const [recordingsKey, setRecordingsKey] = useState(0);
-  const [resetMode, setResetMode] = useState<'app-only' | 'full-erase'>('app-only');
-
-  useEffect(() => {
-    if (!buildId) return;
-    getBuild(buildId).then(setBuild);
-  }, [buildId]);
-
-  const handleMessage = useCallback((msg: RelayMessage) => {
-    if (msg.type === 'agents:listed') {
-      setSessions(msg.sessions);
-    }
-    if (msg.type === 'session:joined') {
-      setBooting(false);
-      setStatus('Connected');
-    }
-    if (msg.type === 'error') {
-      setBooting(false);
-      setStatus(`Error: ${msg.message}`);
-    }
-  }, []);
-
-  const { send, connected } = useRelay(handleMessage);
-
-  // 5초마다 polling — 슬롯·자원 최신화
-  useEffect(() => {
-    if (!connected) return;
-    send({ type: 'agents:list' });
-    const id = setInterval(() => send({ type: 'agents:list' }), 5000);
-    return () => clearInterval(id);
-  }, [connected, send]);
 
   const os = build?.platform ?? 'ios';
-  const agentGroups = sessions.filter((s) => s.devices.some((d) => d.platform === os));
+  const {
+    sessions, selectedAgent, setSelectedAgent,
+    activeSessionId, deviceId, booting, status,
+    connected, agentGroups,
+    startDevice, resetDevice, handleBack, handleBackToMacs,
+  } = useAgentSession(os);
+
   const selectedSession = agentGroups.find((s) => s.agentName === selectedAgent);
-  const filteredDevices = selectedSession?.devices.filter((d) => d.platform === os) ?? [];
+  const {
+    osVersions, osVersion, setOsVersion,
+    deviceSearch, setDeviceSearch, versionedDevices,
+    resetMode, setResetMode,
+  } = useDeviceSelector(selectedSession, os);
+
   const allDevices = sessions.flatMap((s) => s.devices);
   const selectedDevice = allDevices.find((d) => d.id === deviceId);
   const deviceLabel = selectedDevice
     ? `${selectedDevice.name}${selectedDevice.osVersion ? ` · ${selectedDevice.osVersion}` : ''}`
     : '';
 
-  const osVersions = [
-    ...new Set(filteredDevices.map((d) => d.osVersion).filter(Boolean)),
-  ].sort((a, b) => {
-    const parts = (s: string) => s.replace(/^[^\d]*/, '').split('.').map(Number)
-    const [aParts, bParts] = [parts(a as string), parts(b as string)]
-    for (let i = 0; i < Math.max(aParts.length, bParts.length); i++) {
-      const diff = (bParts[i] ?? 0) - (aParts[i] ?? 0)
-      if (diff !== 0) return diff
-    }
-    return 0
-  }) as string[];
-  const [osVersion, setOsVersion] = useState<string>('');
-  const [deviceSearch, setDeviceSearch] = useState('');
-
-  const versionedDevices = (osVersion
-    ? filteredDevices.filter((d) => d.osVersion === osVersion)
-    : filteredDevices
-  ).filter((d) => !deviceSearch || d.name.toLowerCase().includes(deviceSearch.toLowerCase()));
-
-  // DeviceViewer → 디바이스 선택
-  const handleBack = useCallback(() => {
-    if (activeSessionId && deviceId) {
-      send({ type: 'device:shutdown', sessionId: activeSessionId, payload: { deviceId } });
-    }
-    setActiveSessionId(null);
-    setBooting(false);
-    setStatus('');
-  }, [activeSessionId, deviceId, send]);
-
-  // 디바이스 선택 → Mac 선택
   const handleRecordingUploaded = useCallback(() => setRecordingsKey((k) => k + 1), []);
 
-  const handleBackToMacs = useCallback(() => {
-    if (activeSessionId && deviceId) {
-      send({ type: 'device:shutdown', sessionId: activeSessionId, payload: { deviceId } });
-    }
-    setActiveSessionId(null);
-    setSelectedAgent(null);
-    setBooting(false);
-    setStatus('');
-  }, [activeSessionId, deviceId, send]);
-
-  // ref로 최신 session 정보를 추적 — cleanup 클로저에서 stale state 방지
-  const activeSessionRef = useRef({ sessionId: activeSessionId, deviceId });
-  useEffect(() => {
-    activeSessionRef.current = { sessionId: activeSessionId, deviceId };
-  }, [activeSessionId, deviceId]);
-
-  // 언마운트 시 디바이스 shutdown — useRelay cleanup(ws.close)보다 먼저 실행됨
-  useEffect(() => {
-    return () => {
-      const { sessionId, deviceId: dId } = activeSessionRef.current;
-      if (sessionId && dId) {
-        send({ type: 'device:shutdown', sessionId, payload: { deviceId: dId } });
-      }
-    };
-  }, [send]);
-
-  // 헤더 breadcrumb 설정
   const { setNode: setBreadcrumb } = useBreadcrumb();
   useEffect(() => {
     if (!build) return;
@@ -236,7 +155,7 @@ export function QASession() {
                     value={osVersion || '__all__'}
                     onValueChange={(v) => {
                       setOsVersion(v === '__all__' ? '' : v);
-                      setDeviceId('');
+                      resetDevice();
                     }}
                   >
                     <SelectTrigger className="h-8 w-36 shrink-0">
@@ -291,12 +210,7 @@ export function QASession() {
                       <button
                         key={d.id}
                         disabled={isBusy || booting || !connected}
-                        onClick={() => {
-                          setDeviceId(d.id)
-                          setBooting(true)
-                          setStatus('Booting…')
-                          setActiveSessionId(d.sessionId)
-                        }}
+                        onClick={() => startDevice(d)}
                         className={cn(
                           'flex flex-col gap-3 rounded-lg border p-3 text-left transition-colors min-h-[100px]',
                           'hover:bg-accent disabled:cursor-not-allowed disabled:opacity-50',
