@@ -773,7 +773,7 @@ describe('RelayServer', () => {
     it('clears all interval timers', async () => {
       const clearSpy = vi.spyOn(globalThis, 'clearInterval')
       await stopServer.stop()
-      expect(clearSpy).toHaveBeenCalledTimes(3)
+      expect(clearSpy).toHaveBeenCalledTimes(4)
       clearSpy.mockRestore()
     })
   })

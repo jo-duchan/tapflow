@@ -17,7 +17,7 @@ import {
 
 const logger = createLogger('relay')
 import { handleVerifyReset, handleDoReset, handleSendMemberReset } from './api/passwordReset.js'
-import { handleListBuilds, handleGetBuild, handleUpdateBuild, handleUploadBuild } from './api/builds.js'
+import { handleListBuilds, handleGetBuild, handleUpdateBuild, handleUploadBuild, purgeExpiredBuilds } from './api/builds.js'
 import { handleListApps, handleCreateApp, handleUpdateApp, handleDeleteApp } from './api/apps.js'
 import { handleListComments, handleCreateComment, handleDeleteComment } from './api/comments.js'
 import { handleListMembers, handleInvite, handleUpdateMember, handleDeleteMember } from './api/team.js'
@@ -54,6 +54,7 @@ export class RelayServer {
   private recordingsDir: string = ''
   private purgeRecordingsTimer: ReturnType<typeof setInterval> | null = null
   private purgeOldResourcesTimer: ReturnType<typeof setInterval> | null = null
+  private purgeBuildsTimer: ReturnType<typeof setInterval> | null = null
   private flushResourcesTimer: ReturnType<typeof setInterval> | null = null
   private dropHandlers = new Map<string, () => void>()
   private readonly backpressureBytes: number
@@ -158,6 +159,11 @@ export class RelayServer {
     purgeOldResources()
     this.purgeOldResourcesTimer = setInterval(purgeOldResources, 24 * 60 * 60 * 1000)
     this.purgeOldResourcesTimer.unref()
+
+    purgeExpiredBuilds()
+    this.purgeBuildsTimer = setInterval(purgeExpiredBuilds, 24 * 60 * 60 * 1000)
+    this.purgeBuildsTimer.unref()
+
     this.flushResourcesTimer = setInterval(() => this.flushResourceBuffers(), 60_000)
     this.flushResourcesTimer.unref()
 
@@ -176,6 +182,7 @@ export class RelayServer {
   stop(): Promise<void> {
     if (this.purgeRecordingsTimer) { clearInterval(this.purgeRecordingsTimer); this.purgeRecordingsTimer = null }
     if (this.purgeOldResourcesTimer) { clearInterval(this.purgeOldResourcesTimer); this.purgeOldResourcesTimer = null }
+    if (this.purgeBuildsTimer) { clearInterval(this.purgeBuildsTimer); this.purgeBuildsTimer = null }
     if (this.flushResourcesTimer) { clearInterval(this.flushResourcesTimer); this.flushResourcesTimer = null }
     return new Promise((resolve, reject) => {
       this.wss.clients.forEach((ws) => ws.terminate())

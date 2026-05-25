@@ -241,17 +241,29 @@ export async function handleUpdateBuild(
   const auth = requireAuth(req, res)
   if (!auth) return
 
+  const db = getDb()
+  const existing = db.prepare('SELECT status_label FROM builds WHERE id = ?').get(params.id) as
+    | { status_label: string | null }
+    | undefined
+  if (!existing) return json(res, 404, { error: 'Build not found' })
+
   const body = await readJson<{ status_label?: string | null; version_label?: string | null }>(req)
   const VALID_STATUS = ['Backlog', 'In Progress', 'Done', 'Rejected']
   const updates: string[] = []
   const values: unknown[] = []
 
   if ('status_label' in body) {
+    if (existing.status_label === 'Done') {
+      return json(res, 400, { error: 'Cannot change status of a completed build' })
+    }
     if (body.status_label !== null && !VALID_STATUS.includes(body.status_label ?? '')) {
       return json(res, 400, { error: 'Invalid status_label' })
     }
     updates.push('status_label = ?')
     values.push(body.status_label ?? null)
+    if (body.status_label === 'Done') {
+      updates.push("completed_at = datetime('now')")
+    }
   }
   if ('version_label' in body) {
     updates.push('version_label = ?')
@@ -260,7 +272,7 @@ export async function handleUpdateBuild(
 
   if (updates.length === 0) return json(res, 400, { error: 'Nothing to update' })
 
-  const result = getDb().prepare(`UPDATE builds SET ${updates.join(', ')} WHERE id = ?`).run(...values, params.id)
+  const result = db.prepare(`UPDATE builds SET ${updates.join(', ')} WHERE id = ?`).run(...values, params.id)
   if (result.changes === 0) return json(res, 404, { error: 'Build not found' })
   json(res, 200, { ok: true })
 }
@@ -405,4 +417,20 @@ export function handleUploadBuild(
 
   bb.on('error', () => json(res, 500, { error: 'Upload failed' }))
   req.pipe(bb)
+}
+
+export function purgeExpiredBuilds(): void {
+  const db = getDb()
+  const expired = db.prepare(
+    `SELECT id, file_path FROM builds WHERE completed_at < datetime('now', '-7 days')`
+  ).all() as { id: number; file_path: string }[]
+
+  if (expired.length === 0) return
+
+  for (const { file_path } of expired) {
+    try { fs.unlinkSync(file_path) } catch { /* 이미 없는 파일은 무시 */ }
+  }
+
+  const placeholders = expired.map(() => '?').join(',')
+  db.prepare(`DELETE FROM builds WHERE id IN (${placeholders})`).run(...expired.map((r) => r.id))
 }
