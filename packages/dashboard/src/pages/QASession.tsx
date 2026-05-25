@@ -40,7 +40,7 @@ export function QASession() {
   const {
     sessions, selectedAgent, setSelectedAgent,
     activeSessionId, deviceId, booting, status,
-    send, connected, agentGroups,
+    connected, agentGroups,
     startDevice, resetDevice, handleBack, handleBackToMacs,
   } = useAgentSession(os);
 
