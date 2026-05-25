@@ -6,6 +6,7 @@ import { WebSocket } from 'ws'
 import { RelayServer } from '../RelayServer'
 import { initDb, closeDb } from '../db'
 import type { RelayMessage } from '../types'
+import { writeEnvelopeHeader, HEADER_SIZE } from '@tapflowio/agent-core/utils'
 
 const waitForOpen = (ws: WebSocket) =>
   new Promise<void>((resolve) => ws.once('open', resolve))
@@ -311,6 +312,80 @@ describe('RelayServer', () => {
     streamWs.send(frame)
     const received = await framePromise
     expect(received).toEqual(frame)
+
+    agent.close()
+    browser.close()
+    streamWs.close()
+  })
+
+  it('relay patches relayedAt in TFFE envelope frames and forwards to browser', async () => {
+    const devices = [{ id: 'devA', name: 'iPhone A', platform: 'ios', status: 'shutdown' }]
+    const agent = new WebSocket(`ws://localhost:${port}`)
+    await waitForOpen(agent)
+    agent.send(JSON.stringify({ type: 'agent:register', devices }))
+    const { registeredSessions } = await waitForMessage(agent)
+    const sessionId = registeredSessions![0].sessionId
+
+    const browser = new WebSocket(`ws://localhost:${port}`)
+    browser.binaryType = 'nodebuffer'
+    await waitForOpen(browser)
+    browser.send(JSON.stringify({ type: 'session:start', sessionId }))
+    await waitForMessage(browser) // session:joined
+
+    const streamWs = new WebSocket(`ws://localhost:${port}`)
+    await waitForOpen(streamWs)
+    streamWs.send(JSON.stringify({ type: 'stream:register', sessionId }))
+    await waitForMessage(streamWs) // stream:registered
+
+    const capturedAt = Date.now() - 10
+    const envelopedFrame = writeEnvelopeHeader(Buffer.from([0xFF, 0xD8]), capturedAt)
+
+    const framePromise = new Promise<Buffer>((r) =>
+      browser.once('message', (d, isBinary) => { if (isBinary) r(d as Buffer) })
+    )
+    const beforeSend = Date.now()
+    streamWs.send(envelopedFrame)
+    const received = await framePromise
+    const afterSend = Date.now()
+
+    expect(received.length).toBe(envelopedFrame.length)
+    const relayedAt = Number(received.readBigUInt64BE(14))
+    expect(relayedAt).toBeGreaterThanOrEqual(beforeSend)
+    expect(relayedAt).toBeLessThanOrEqual(afterSend + 50)
+    // payload bytes preserved
+    expect(received.subarray(HEADER_SIZE)).toEqual(Buffer.from([0xFF, 0xD8]))
+
+    agent.close()
+    browser.close()
+    streamWs.close()
+  })
+
+  it('relay forwards plain (non-envelope) binary frames unchanged', async () => {
+    const devices = [{ id: 'devA', name: 'iPhone A', platform: 'ios', status: 'shutdown' }]
+    const agent = new WebSocket(`ws://localhost:${port}`)
+    await waitForOpen(agent)
+    agent.send(JSON.stringify({ type: 'agent:register', devices }))
+    const { registeredSessions } = await waitForMessage(agent)
+    const sessionId = registeredSessions![0].sessionId
+
+    const browser = new WebSocket(`ws://localhost:${port}`)
+    browser.binaryType = 'nodebuffer'
+    await waitForOpen(browser)
+    browser.send(JSON.stringify({ type: 'session:start', sessionId }))
+    await waitForMessage(browser) // session:joined
+
+    const streamWs = new WebSocket(`ws://localhost:${port}`)
+    await waitForOpen(streamWs)
+    streamWs.send(JSON.stringify({ type: 'stream:register', sessionId }))
+    await waitForMessage(streamWs) // stream:registered
+
+    const framePromise = new Promise<Buffer>((r) =>
+      browser.once('message', (d, isBinary) => { if (isBinary) r(d as Buffer) })
+    )
+    const plain = Buffer.from([0xFF, 0xD8, 0xFF, 0xE0])
+    streamWs.send(plain)
+    const received = await framePromise
+    expect(received).toEqual(plain)
 
     agent.close()
     browser.close()

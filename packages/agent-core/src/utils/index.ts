@@ -5,3 +5,10 @@ export {
   createRateLimitedDropWarn,
   DEFAULT_BACKPRESSURE_BYTES,
 } from './stream.js'
+export {
+  TFFE_MAGIC,
+  HEADER_SIZE,
+  hasEnvelope,
+  writeEnvelopeHeader,
+  patchRelayedAt,
+} from './envelope.js'

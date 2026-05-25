@@ -3,6 +3,8 @@ export interface FrameTiming {
   recvInterval: number
   decodeMs: number
   paintMs: number
+  capturedAt?: number
+  relayedAt?: number
 }
 
 export interface PerfHook {

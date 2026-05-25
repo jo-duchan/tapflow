@@ -15,6 +15,7 @@ import {
   sendBinaryWithBackpressure,
   createRateLimitedDropWarn,
   DEFAULT_BACKPRESSURE_BYTES,
+  writeEnvelopeHeader,
 } from '@tapflowio/agent-core/utils'
 import { SimctlWrapper } from './SimctlWrapper.js'
 import { ScreenCaptureStreamer } from './ScreenCaptureStreamer.js'
@@ -238,7 +239,7 @@ export class IOSAgent implements DeviceAgent {
         while (true) {
           const { value, done } = await reader.read()
           if (done) break
-          sendBinaryWithBackpressure(streamWs, value, threshold, onDrop)
+          sendBinaryWithBackpressure(streamWs, writeEnvelopeHeader(value, Date.now()), threshold, onDrop)
         }
       } catch {
         // stream cancelled or ws closed — expected on disconnect

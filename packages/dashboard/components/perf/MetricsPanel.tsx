@@ -44,15 +44,26 @@ export function MetricsPanel({ pushRef }: Props) {
 
       pane.addButton({ title: 'Export trace' }).on('click', () => {
         if (traceBuffer.length === 0) return
+        const hasAgentHops = traceBuffer.some((t) => t.capturedAt !== undefined)
         const events: object[] = [
           { ph: 'M', pid: 1, tid: 1, name: 'thread_name', args: { name: 'ws-recv' } },
           { ph: 'M', pid: 1, tid: 2, name: 'thread_name', args: { name: 'decode' } },
           { ph: 'M', pid: 1, tid: 3, name: 'thread_name', args: { name: 'paint' } },
         ]
+        if (hasAgentHops) {
+          events.push({ ph: 'M', pid: 1, tid: 4, name: 'thread_name', args: { name: 'relay' } })
+          events.push({ ph: 'M', pid: 1, tid: 5, name: 'thread_name', args: { name: 'agent-capture' } })
+        }
         for (const t of traceBuffer) {
           const recvUs = t.recvAt * 1000
           const decodeUs = t.decodeMs * 1000
           const paintUs = t.paintMs * 1000
+          if (t.capturedAt !== undefined && t.relayedAt !== undefined) {
+            const capturedUs = t.capturedAt * 1000
+            const relayedUs = t.relayedAt * 1000
+            events.push({ ph: 'i', ts: capturedUs, pid: 1, tid: 5, name: 'agent-capture', s: 't' })
+            events.push({ ph: 'X', ts: relayedUs, dur: Math.max(1, recvUs - relayedUs), pid: 1, tid: 4, name: 'relay' })
+          }
           events.push({ ph: 'i', ts: recvUs, pid: 1, tid: 1, name: 'ws-recv', s: 't' })
           events.push({ ph: 'X', ts: recvUs, dur: Math.max(1, decodeUs), pid: 1, tid: 2, name: 'decode' })
           events.push({ ph: 'X', ts: recvUs + decodeUs, dur: Math.max(1, paintUs), pid: 1, tid: 3, name: 'paint' })

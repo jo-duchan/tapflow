@@ -8,6 +8,7 @@ import {
   sendBinaryWithBackpressure,
   createRateLimitedDropWarn,
   DEFAULT_BACKPRESSURE_BYTES,
+  writeEnvelopeHeader,
 } from '@tapflowio/agent-core/utils'
 import { AdbWrapper } from './AdbWrapper.js'
 import { EmulatorLauncher } from './EmulatorLauncher.js'
@@ -339,7 +340,7 @@ export class AndroidAgent implements DeviceAgent {
             state.scrcpySession?.control.updateScreenSize(parsed.width, parsed.height)
             logger.info(`video size → ${parsed.width}×${parsed.height}`)
           }
-          sendBinaryWithBackpressure(streamWs, value, threshold, onDrop)
+          sendBinaryWithBackpressure(streamWs, writeEnvelopeHeader(value, Date.now()), threshold, onDrop)
         }
       } catch {
         // stream cancelled or ws closed — expected on disconnect

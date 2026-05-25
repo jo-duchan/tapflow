@@ -13,6 +13,8 @@ import {
   sendBinaryWithBackpressure,
   createRateLimitedDropWarn,
   DEFAULT_BACKPRESSURE_BYTES,
+  hasEnvelope,
+  patchRelayedAt,
 } from '@tapflowio/agent-core/utils'
 
 const logger = createLogger('relay')
@@ -207,7 +209,9 @@ export class RelayServer {
             onDrop = createRateLimitedDropWarn(logger, session.id)
             this.dropHandlers.set(session.id, onDrop)
           }
-          sendBinaryWithBackpressure(session.browserSocket, data as Buffer, this.backpressureBytes, onDrop)
+          const frame = data as Buffer
+          if (hasEnvelope(frame)) patchRelayedAt(frame, Date.now())
+          sendBinaryWithBackpressure(session.browserSocket, frame, this.backpressureBytes, onDrop)
         }
         return
       }
