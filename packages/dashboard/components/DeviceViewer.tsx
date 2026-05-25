@@ -2,10 +2,14 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useRelay } from '@/hooks/useRelay';
+import { usePerfMode } from '@/hooks/usePerfMode';
 import { IOSViewer } from './device/IOSViewer';
 import { AndroidViewer } from './device/AndroidViewer';
 import { SimulatorInfoCard } from './device/shared/SimulatorInfoCard';
 import type { AndroidButton, ChromeData, RelayMessage } from '@/lib/types';
+import type { FrameTiming, PerfHook } from './perf/types';
+import { StatsOverlay } from './perf/StatsOverlay';
+import { MetricsPanel } from './perf/MetricsPanel';
 
 interface Props {
   sessionId: string;
@@ -19,6 +23,17 @@ type AndroidChrome = { buttons: AndroidButton[]; streamType: 'h264'; screenWidth
 
 export function DeviceViewer({ sessionId, deviceId, buildId, resetMode, onRecordingUploaded }: Props) {
   const sendRef = useRef<(msg: object) => void>(() => {});
+  const { perfMode, visible: perfVisible } = usePerfMode();
+
+  // statsRef is set by StatsOverlay; perfMetricsPushRef is set by MetricsPanel
+  const statsRef = useRef<PerfHook | null>(null);
+  const perfMetricsPushRef = useRef<((t: FrameTiming) => void) | null>(null);
+
+  // Viewers call these; both are no-ops when overlays are not mounted
+  const perfHookRef = useRef<PerfHook>({
+    onFrameBegin: () => statsRef.current?.onFrameBegin(),
+    onFrameEnd: (t) => { statsRef.current?.onFrameEnd(t); perfMetricsPushRef.current?.(t) },
+  });
 
   const [joined, setJoined] = useState(false);
   const [deviceReady, setDeviceReady] = useState(false);
@@ -127,10 +142,18 @@ export function DeviceViewer({ sessionId, deviceId, buildId, resetMode, onRecord
     );
   }
 
+  const devPerfHookRef = import.meta.env.DEV ? perfHookRef : undefined;
+
   return (
     <>
-      {iosChrome && <IOSViewer {...commonProps} chrome={iosChrome} />}
-      {androidChrome && <AndroidViewer {...commonProps} androidButtons={androidChrome.buttons} screenWidth={androidChrome.screenWidth} screenHeight={androidChrome.screenHeight} deviceRotation={deviceRotation} />}
+      {iosChrome && <IOSViewer {...commonProps} chrome={iosChrome} perfHookRef={devPerfHookRef} />}
+      {androidChrome && <AndroidViewer {...commonProps} androidButtons={androidChrome.buttons} screenWidth={androidChrome.screenWidth} screenHeight={androidChrome.screenHeight} deviceRotation={deviceRotation} perfHookRef={devPerfHookRef} />}
+      {import.meta.env.DEV && perfMode && perfVisible && (
+        <>
+          <StatsOverlay perfHookRef={statsRef} />
+          <MetricsPanel pushRef={perfMetricsPushRef} />
+        </>
+      )}
     </>
   );
 }
