@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { useRelay } from '@/hooks/useRelay';
 import { usePerfMode } from '@/hooks/usePerfMode';
 import { IOSViewer } from './device/IOSViewer';
@@ -8,6 +8,7 @@ import { AndroidViewer } from './device/AndroidViewer';
 import { SimulatorInfoCard } from './device/shared/SimulatorInfoCard';
 import type { AndroidButton, ChromeData, RelayMessage } from '@/lib/types';
 import type { FrameTiming, PerfHook } from './perf/types';
+import { parseEnvelopeHeader, HEADER_SIZE } from '@/lib/envelope';
 import { StatsOverlay } from './perf/StatsOverlay';
 import { MetricsPanel } from './perf/MetricsPanel';
 
@@ -28,11 +29,19 @@ export function DeviceViewer({ sessionId, deviceId, buildId, resetMode, onRecord
   // statsRef is set by StatsOverlay; perfMetricsPushRef is set by MetricsPanel
   const statsRef = useRef<PerfHook | null>(null);
   const perfMetricsPushRef = useRef<((t: FrameTiming) => void) | null>(null);
+  // FIFO queue: one entry pushed per incoming frame, shifted on paint completion.
+  // Prevents mis-attribution when multiple frames are in-flight through async decoders.
+  const envelopeQueueRef = useRef<Array<{ capturedAt: number; relayedAt: number } | null>>([]);
 
   // Viewers call these; both are no-ops when overlays are not mounted
   const perfHookRef = useRef<PerfHook>({
     onFrameBegin: () => statsRef.current?.onFrameBegin(),
-    onFrameEnd: (t) => { statsRef.current?.onFrameEnd(t); perfMetricsPushRef.current?.(t) },
+    onFrameEnd: (t) => {
+      const env = envelopeQueueRef.current.shift() ?? null;
+      const timing: FrameTiming = env ? { ...t, capturedAt: env.capturedAt, relayedAt: env.relayedAt } : t;
+      statsRef.current?.onFrameEnd(timing);
+      perfMetricsPushRef.current?.(timing);
+    },
   });
 
   const [joined, setJoined] = useState(false);
@@ -88,11 +97,14 @@ export function DeviceViewer({ sessionId, deviceId, buildId, resetMode, onRecord
   }, [sessionId, deviceId, buildId]);
 
   const handleBinaryFrame = useCallback((data: ArrayBuffer) => {
-    binaryFrameHandlerRef.current?.(data);
+    const envelope = parseEnvelopeHeader(data);
+    envelopeQueueRef.current.push(envelope);
+    const payload = envelope ? data.slice(HEADER_SIZE) : data;
+    binaryFrameHandlerRef.current?.(payload);
   }, []);
 
   const { send, connected } = useRelay(handleMessage, handleBinaryFrame);
-  sendRef.current = send;
+  useLayoutEffect(() => { sendRef.current = send; });
 
   useEffect(() => {
     if (connected) send({ type: 'session:start', sessionId });
