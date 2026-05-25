@@ -62,6 +62,16 @@ Scalability, extensibility, and CI/CD integration.
 
 ---
 
+## Phase 4 — Intelligence `v0.4.0` and beyond
+
+Streaming performance, resource-aware scheduling, and AI agent integration.
+
+- [ ] Streaming performance improvements — encoding and transport optimization for iOS (JPEG pipeline) and Android (scrcpy parameters)
+- [ ] Block new session when agent resource usage is high — prevent overloading the host Mac
+- [ ] AI agent integration — LLM-driven simulator control via screenshot REST endpoint + MCP server package (`@tapflowio/mcp-server`)
+
+---
+
 ## Not planned
 
 The following are out of scope for tapflow's core mission ("browser-based simulator control, data on-premises"):
