@@ -5,7 +5,7 @@ import { SearchInput } from '@/components/ui/search-input'
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from '@/components/ui/select'
-import { UploadBuildDialog } from '@/components/upload-build-dialog'
+import { UploadBuildDialog } from '@/components/UploadBuildDialog'
 import { AppSidebar } from '@/components/app-center/AppSidebar'
 import { ReleaseAccordion } from '@/components/app-center/ReleaseAccordion'
 import { getApps, getBuilds, updateBuildStatus, groupByRelease } from '@/lib/queries'

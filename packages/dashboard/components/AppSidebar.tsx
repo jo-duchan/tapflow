@@ -22,7 +22,7 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
 import { useAuth } from '@/hooks/useAuth'
-import { UserAvatar } from '@/components/user-avatar'
+import { UserAvatar } from '@/components/UserAvatar'
 
 const navItems = [
   { label: 'App Center', href: '/app-center', icon: LayoutGrid },

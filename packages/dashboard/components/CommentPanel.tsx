@@ -4,7 +4,7 @@ import { Textarea } from '@/components/ui/textarea'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Link2, ImagePlus, ArrowUp } from 'lucide-react'
 import type { Comment } from '@/lib/types'
-import { UserAvatar } from '@/components/user-avatar'
+import { UserAvatar } from '@/components/UserAvatar'
 
 // SQLite datetime('now') returns "YYYY-MM-DD HH:MM:SS" (UTC, no timezone marker).
 // Normalize to unambiguous ISO 8601 UTC so all browsers parse it correctly.

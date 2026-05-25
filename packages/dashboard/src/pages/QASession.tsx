@@ -3,7 +3,7 @@ import { useSearchParams, useNavigate } from 'react-router-dom';
 import { useRelay } from '@/hooks/useRelay';
 import { useBreadcrumb } from '@/hooks/useBreadcrumb';
 import { DeviceViewer } from '@/components/DeviceViewer';
-import { SessionPanel } from '@/components/session-panel';
+import { SessionPanel } from '@/components/SessionPanel';
 import {
   Select,
   SelectContent,

@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { toast } from 'sonner'
-import { UploadBuildDialog } from '@/components/upload-build-dialog'
+import { UploadBuildDialog } from '@/components/UploadBuildDialog'
 
 vi.mock('sonner', () => ({
   toast: {
