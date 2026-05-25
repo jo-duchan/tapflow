@@ -51,16 +51,16 @@ export function BuildRow({ build, isLast, onNavigate, onStatusChange }: Props) {
       <AlertDialog open={pendingDone} onOpenChange={setPendingDone}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Done으로 변경하시겠습니까?</AlertDialogTitle>
+            <AlertDialogTitle>Mark as Done?</AlertDialogTitle>
             <AlertDialogDescription>
-              Done으로 변경하면 7일 후 빌드 파일이 자동으로 삭제됩니다.
-              상태를 되돌리면 삭제 일정이 취소됩니다.
+              Build files will be automatically deleted after 7 days.
+              Reverting the status will cancel the scheduled deletion.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel>취소</AlertDialogCancel>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
             <AlertDialogAction onClick={() => { onStatusChange(build.id, 'Done'); setPendingDone(false) }}>
-              확인
+              Confirm
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
