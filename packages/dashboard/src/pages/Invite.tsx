@@ -9,7 +9,7 @@ import { Label } from '@/components/ui/label'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Separator } from '@/components/ui/separator'
 import { Pencil } from 'lucide-react'
-import { avatarColors } from '@/components/user-avatar'
+import { avatarColors } from '@/components/UserAvatar'
 
 const schema = z.object({
   displayName: z.string().optional(),

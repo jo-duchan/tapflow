@@ -23,7 +23,7 @@ import {
 } from '@/components/ui/alert-dialog'
 import { toast } from 'sonner'
 import { Pencil } from 'lucide-react'
-import { avatarColors } from '@/components/user-avatar'
+import { avatarColors } from '@/components/UserAvatar'
 import { useAuth } from '@/hooks/useAuth'
 
 type App = { id: number; name: string; bundle_id_key: string; platform: string }

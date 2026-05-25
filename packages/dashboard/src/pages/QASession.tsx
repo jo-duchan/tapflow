@@ -5,7 +5,7 @@ import { useBuildLoader } from '@/hooks/useBuildLoader';
 import { useAgentSession } from '@/hooks/useAgentSession';
 import { useDeviceSelector } from '@/hooks/useDeviceSelector';
 import { DeviceViewer } from '@/components/DeviceViewer';
-import { SessionPanel } from '@/components/session-panel';
+import { SessionPanel } from '@/components/SessionPanel';
 import {
   Select,
   SelectContent,

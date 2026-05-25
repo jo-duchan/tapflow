@@ -1,6 +1,6 @@
 import { Film, MessageSquare } from 'lucide-react'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
-import { CommentPanel } from '@/components/comment-panel'
+import { CommentPanel } from '@/components/CommentPanel'
 import { RecordingsList } from '@/components/RecordingsList'
 
 interface Props {
