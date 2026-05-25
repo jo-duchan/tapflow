@@ -202,7 +202,7 @@ export function handleListBuilds(req: http.IncomingMessage, res: http.ServerResp
   const items = db.prepare(`
     SELECT b.id, b.app_id, ap.name, b.version_name, b.build_number,
            b.version_label, b.status_label, b.platform,
-           b.bundle_id, b.uploaded_at,
+           b.bundle_id, b.uploaded_at, b.completed_at,
            COALESCE(u.display_name, substr(u.email, 1, instr(u.email, '@') - 1)) as uploader
     ${baseFrom}
     ${where}
@@ -223,7 +223,7 @@ export function handleGetBuild(
 
   const build = getDb().prepare(`
     SELECT b.id, b.app_id, ap.name, b.version_name, b.build_number,
-           b.version_label, b.status_label, b.platform, b.bundle_id, b.uploaded_at
+           b.version_label, b.status_label, b.platform, b.bundle_id, b.uploaded_at, b.completed_at
     FROM builds b
     LEFT JOIN apps ap ON ap.id = b.app_id
     WHERE b.id = ?
@@ -241,6 +241,12 @@ export async function handleUpdateBuild(
   const auth = requireAuth(req, res)
   if (!auth) return
 
+  const db = getDb()
+  const existing = db.prepare('SELECT status_label FROM builds WHERE id = ?').get(params.id) as
+    | { status_label: string | null }
+    | undefined
+  if (!existing) return json(res, 404, { error: 'Build not found' })
+
   const body = await readJson<{ status_label?: string | null; version_label?: string | null }>(req)
   const VALID_STATUS = ['Backlog', 'In Progress', 'Done', 'Rejected']
   const updates: string[] = []
@@ -252,6 +258,11 @@ export async function handleUpdateBuild(
     }
     updates.push('status_label = ?')
     values.push(body.status_label ?? null)
+    if (body.status_label === 'Done' && existing.status_label !== 'Done') {
+      updates.push("completed_at = datetime('now')")
+    } else if (body.status_label !== 'Done' && existing.status_label === 'Done') {
+      updates.push('completed_at = NULL')
+    }
   }
   if ('version_label' in body) {
     updates.push('version_label = ?')
@@ -260,7 +271,7 @@ export async function handleUpdateBuild(
 
   if (updates.length === 0) return json(res, 400, { error: 'Nothing to update' })
 
-  const result = getDb().prepare(`UPDATE builds SET ${updates.join(', ')} WHERE id = ?`).run(...values, params.id)
+  const result = db.prepare(`UPDATE builds SET ${updates.join(', ')} WHERE id = ?`).run(...values, params.id)
   if (result.changes === 0) return json(res, 404, { error: 'Build not found' })
   json(res, 200, { ok: true })
 }
@@ -405,4 +416,58 @@ export function handleUploadBuild(
 
   bb.on('error', () => json(res, 500, { error: 'Upload failed' }))
   req.pipe(bb)
+}
+
+const BUILD_TTL_DAYS = Number(process.env['TAPFLOW_BUILD_TTL_DAYS'] ?? 7)
+const SQLITE_MAX_PARAMS = 999
+
+function chunkArray<T>(arr: T[], size: number): T[][] {
+  const chunks: T[][] = []
+  for (let i = 0; i < arr.length; i += size) chunks.push(arr.slice(i, i + size))
+  return chunks
+}
+
+function unlinkSafe(filePath: string, label: string): void {
+  try {
+    fs.unlinkSync(filePath)
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code !== 'ENOENT') {
+      console.warn(`[tapflow] purge: failed to delete ${label}`, (err as Error).message)
+    }
+  }
+}
+
+export function purgeExpiredBuilds(recordingsDir: string): void {
+  const db = getDb()
+  const expired = db.prepare(
+    `SELECT id, file_path FROM builds WHERE completed_at < datetime('now', '-' || ? || ' days')`
+  ).all(BUILD_TTL_DAYS) as { id: number; file_path: string }[]
+
+  if (expired.length === 0) return
+
+  const buildIds = expired.map((r) => r.id)
+  const chunks = chunkArray(buildIds, SQLITE_MAX_PARAMS)
+
+  // 연결된 recording 파일 삭제 후 레코드 제거 (recordings.build_id FK에 CASCADE 없음)
+  const recordings = chunks.flatMap((chunk) => {
+    const ph = chunk.map(() => '?').join(',')
+    return db.prepare(`SELECT filename FROM recordings WHERE build_id IN (${ph})`).all(...chunk) as { filename: string }[]
+  })
+  for (const { filename } of recordings) {
+    unlinkSafe(path.join(recordingsDir, filename), 'recording')
+  }
+  if (recordings.length > 0) {
+    for (const chunk of chunks) {
+      const ph = chunk.map(() => '?').join(',')
+      db.prepare(`DELETE FROM recordings WHERE build_id IN (${ph})`).run(...chunk)
+    }
+  }
+
+  for (const { file_path } of expired) {
+    unlinkSafe(file_path, 'build')
+  }
+  for (const chunk of chunks) {
+    const ph = chunk.map(() => '?').join(',')
+    db.prepare(`DELETE FROM builds WHERE id IN (${ph})`).run(...chunk)
+  }
 }

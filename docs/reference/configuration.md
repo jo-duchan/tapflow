@@ -31,6 +31,8 @@ Environment variables always take precedence over the config file — useful for
 | `TAPFLOW_PORT` | `server.port` | `4000` | Server port |
 | `JWT_SECRET` | — | *(dev default)* | JWT signing key (env only) |
 | `TAPFLOW_DATA_DIR` | `server.dataDir` | `.tapflow-data` | DB and uploads directory (supports relative paths) |
+| `TAPFLOW_BUILD_TTL_DAYS` | — | `7` | Days before a Done build's files and record are automatically deleted. Set to a small value (e.g. `0.001`) to verify cleanup quickly in local testing. |
+| `TAPFLOW_WS_BACKPRESSURE_BYTES` | — | `1048576` (1 MB) | Binary frame drop threshold per browser socket. Frames are silently dropped when the socket buffer exceeds this value. |
 | `SMTP_HOST` | `smtp.host` | `` | SMTP host |
 | `SMTP_PORT` | `smtp.port` | `587` | SMTP port |
 | `SMTP_SECURE` | `smtp.secure` | `false` | Enable TLS (set to string `"true"`) |

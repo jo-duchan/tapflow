@@ -120,6 +120,7 @@ export interface Build {
   platform: 'ios' | 'android'
   bundle_id: string | null
   uploaded_at: string
+  completed_at: string | null
   uploader: string | null
 }
 
