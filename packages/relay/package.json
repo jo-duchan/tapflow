@@ -1,6 +1,6 @@
 {
   "name": "@tapflowio/relay",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "description": "WebSocket relay server for tapflow — NAT traversal, session routing, JWT auth, bundled dashboard",
   "keywords": [
     "tapflow",

@@ -1,5 +1,15 @@
 # tapflow
 
+## 0.2.2
+
+### Patch Changes
+
+- Updated dependencies [306d859]
+  - @tapflowio/relay@0.2.2
+  - @tapflowio/android-agent@0.2.2
+  - @tapflowio/ios-agent@0.2.2
+  - @tapflowio/agent-core@0.2.2
+
 ## 0.2.1
 
 ### Patch Changes
