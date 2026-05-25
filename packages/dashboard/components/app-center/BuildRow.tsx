@@ -10,6 +10,7 @@ import {
   AlertDialogContent, AlertDialogDescription, AlertDialogFooter,
   AlertDialogHeader, AlertDialogTitle,
 } from '@/components/ui/alert-dialog'
+import { Separator } from '@/components/ui/separator'
 import { Play } from 'lucide-react'
 import type { Build } from '@/lib/types'
 import { STATUS_TONE } from '@/lib/build-format'
@@ -80,17 +81,21 @@ export function BuildRow({ build, isLast, onNavigate, onStatusChange }: Props) {
               </Badge>
             )}
           </div>
-          <p className="text-xs text-muted-foreground mt-0.5">
-            {build.uploader
-              ? <>{build.uploader} · <TechLabel>{new Date(build.uploaded_at).toLocaleDateString()}</TechLabel></>
-              : <TechLabel>{new Date(build.uploaded_at).toLocaleDateString()}</TechLabel>
-            }
-            {expiry && (
-              <span className={`ml-1.5 ${expiry.urgent ? 'text-destructive' : ''}`}>
-                · {expiry.label}
-              </span>
+          <div style={{ display: 'flex', flexDirection: 'row', gap: '14px', marginTop: '0.7rem', alignItems: 'center' }} className="text-xs text-muted-foreground">
+            {build.uploader && (
+              <>
+                <span>{build.uploader}</span>
+                <Separator orientation="vertical" className="h-3" />
+              </>
             )}
-          </p>
+            <TechLabel>{new Date(build.uploaded_at).toLocaleDateString()}</TechLabel>
+            {expiry && (
+              <>
+                <Separator orientation="vertical" className="h-3" />
+                <span className={expiry.urgent ? 'text-destructive' : ''}>{expiry.label}</span>
+              </>
+            )}
+          </div>
         </div>
 
         <Select
