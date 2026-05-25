@@ -31,6 +31,8 @@
 | `TAPFLOW_PORT` | `server.port` | `4000` | 서버 포트 |
 | `JWT_SECRET` | — | *(개발용 기본값)* | JWT 서명 키 (환경변수 전용) |
 | `TAPFLOW_DATA_DIR` | `server.dataDir` | `.tapflow-data` | DB·업로드 디렉토리 (상대 경로 지원) |
+| `TAPFLOW_BUILD_TTL_DAYS` | — | `7` | Done 빌드 파일·레코드 자동 삭제 기간(일). 로컬 테스트 시 `0.001` 등 작은 값으로 즉시 확인 가능. |
+| `TAPFLOW_WS_BACKPRESSURE_BYTES` | — | `1048576` (1 MB) | 브라우저 소켓당 바이너리 프레임 드롭 임계값. 버퍼가 이 값을 초과하면 프레임이 드롭됩니다. |
 | `SMTP_HOST` | `smtp.host` | `` | SMTP 호스트 |
 | `SMTP_PORT` | `smtp.port` | `587` | SMTP 포트 |
 | `SMTP_SECURE` | `smtp.secure` | `false` | TLS 사용 여부 (`true` 문자열로 설정) |
