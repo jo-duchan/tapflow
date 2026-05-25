@@ -66,10 +66,10 @@ export function AppSidebar() {
   return (
     <Sidebar collapsible="icon">
       <SidebarHeader className="p-2">
-        <div className="flex items-center gap-2 p-1">
+        <Link to="/app-center" className="flex items-center gap-2 p-1">
           <img src={logoUrl ?? defaultLogo} alt="tapflow" className="w-6 h-6 min-w-6 shrink-0" />
           <span className="text-base font-semibold tracking-tight truncate text-sidebar-accent-foreground group-data-[collapsible=icon]:hidden">{teamName}</span>
-        </div>
+        </Link>
       </SidebarHeader>
 
       <SidebarContent>
