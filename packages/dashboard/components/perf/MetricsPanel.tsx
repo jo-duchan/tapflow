@@ -63,7 +63,7 @@ export function MetricsPanel({ pushRef }: Props) {
         a.href = url
         a.download = `tapflow-trace-${Date.now()}.json`
         a.click()
-        URL.revokeObjectURL(url)
+        setTimeout(() => URL.revokeObjectURL(url), 0)
       })
 
       dispose = () => pane.dispose()

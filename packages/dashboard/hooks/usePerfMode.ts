@@ -8,6 +8,7 @@ export function usePerfMode() {
 
   useEffect(() => {
     if (!perfMode) { setVisible(false); return }
+    setVisible(true)
     const handler = (e: KeyboardEvent) => {
       if (e.ctrlKey && e.shiftKey && e.key === 'P') setVisible(v => !v)
     }
