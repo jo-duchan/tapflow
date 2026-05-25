@@ -10,6 +10,11 @@ import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger,
 } from '@/components/ui/dialog'
 import {
+  AlertDialog, AlertDialogAction, AlertDialogCancel,
+  AlertDialogContent, AlertDialogDescription, AlertDialogFooter,
+  AlertDialogHeader, AlertDialogTitle,
+} from '@/components/ui/alert-dialog'
+import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from '@/components/ui/select'
 import {
@@ -36,6 +41,7 @@ export function TeamSettings() {
   const [resetSent, setResetSent] = useState<Record<number, string>>({})
   const [inviteLink, setInviteLink] = useState('')
   const [inviteOpen, setInviteOpen] = useState(false)
+  const [pendingDeleteId, setPendingDeleteId] = useState<number | null>(null)
 
   const { register, handleSubmit, control, reset, formState: { errors, isSubmitting } } = useForm<InviteData>({
     resolver: zodResolver(inviteSchema),
@@ -96,13 +102,32 @@ export function TeamSettings() {
   }
 
   async function handleDelete(id: number) {
-    if (!confirm('Remove this member?')) return
     await fetch(`/api/v1/team/members/${id}`, { method: 'DELETE', credentials: 'include' })
+    setPendingDeleteId(null)
     load()
   }
 
   return (
     <div className="flex flex-col gap-6 max-w-[900px] mx-auto w-full p-6">
+      <AlertDialog open={pendingDeleteId !== null} onOpenChange={(open) => { if (!open) setPendingDeleteId(null) }}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Remove this member?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This member will lose access to the team immediately.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              className="bg-destructive/10 text-destructive hover:bg-destructive/20 border-0"
+              onClick={() => pendingDeleteId !== null && handleDelete(pendingDeleteId)}
+            >
+              Remove
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
       <div className="flex items-center justify-between">
         <h1 className="text-xl font-semibold">Team</h1>
         <Dialog open={inviteOpen} onOpenChange={handleDialogClose}>
@@ -186,7 +211,7 @@ export function TeamSettings() {
                       <Button variant="secondary" size="nav" onClick={() => handleSendReset(m.id)}>
                         {resetSent[m.id] ?? 'Reset pwd'}
                       </Button>
-                      <Button variant="destructive" size="nav" onClick={() => handleDelete(m.id)}>
+                      <Button variant="destructive" size="nav" onClick={() => setPendingDeleteId(m.id)}>
                         Remove
                       </Button>
                     </div>
