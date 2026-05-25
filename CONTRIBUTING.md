@@ -13,6 +13,22 @@ pnpm install
 pnpm dev
 ```
 
+`pnpm dev` starts the relay, dashboard, iOS agent, and Android agent concurrently.
+
+## Project structure
+
+```
+packages/
+  agent-core/     ← shared DeviceAgent interface
+  ios-agent/      ← IOSAgent (macOS)
+  android-agent/  ← AndroidAgent (macOS)
+  relay/          ← relay server + REST API + SQLite
+  dashboard/      ← React SPA (served by relay)
+  cli/            ← tapflow CLI
+docs/             ← documentation site (VitePress)
+playground/       ← local integration test environment
+```
+
 ## Branches & releases
 
 - `main` is always deployable. Direct commits are not allowed. Start work on a `feature/{topic}` branch → PR → merge.
@@ -85,3 +101,7 @@ Platform-specific implementation notes for contributors:
 
 - type: `feat` · `fix` · `test` · `refactor` · `docs` · `chore` · `perf`
 - scope: the changed package name (`agent-core` · `ios-agent` · `android-agent` · `relay` · `dashboard` · `cli` · `playground`)
+
+## Reporting bugs
+
+Use the [Bug Report](https://github.com/jo-duchan/tapflow/issues/new?template=bug_report.yml) issue template. Include steps to reproduce, expected vs. actual behavior, and your environment (tapflow version, Node.js version, and Xcode version for iOS issues).

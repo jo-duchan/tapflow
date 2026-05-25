@@ -48,14 +48,11 @@ iOS build format: `.app.zip` (simulator builds). `.ipa` uploads return 400.
 
 ## Environment Variables
 
-| 변수 | 기본값 | 설명 |
-|------|--------|------|
-| `TAPFLOW_PORT` | `4000` | relay 서버 포트 |
-| `TAPFLOW_DATA_DIR` | `.tapflow-data` | DB·uploads 저장 루트 디렉토리 |
-| `TAPFLOW_WS_BACKPRESSURE_BYTES` | `1048576` (1 MB) | 브라우저 소켓 backpressure 임계값. 초과 시 바이너리 프레임 드롭 |
-| `TAPFLOW_BUILD_TTL_DAYS` | `7` | Done 빌드 자동 삭제 기간(일). **로컬 테스트 시 `0.001` 등 작은 값으로 즉시 확인 가능** |
-| `JWT_SECRET` | dev 기본값 | JWT 서명 키. 프로덕션에서는 반드시 32자 이상으로 설정 |
-| `SMTP_HOST` / `SMTP_PORT` / `SMTP_USER` / `SMTP_PASS` | — | 이메일 발송 설정 |
+전체 목록 및 설명: [`docs/reference/configuration.md`](../../docs/reference/configuration.md)
+
+로컬 테스트 시 자주 쓰는 값:
+- `TAPFLOW_BUILD_TTL_DAYS=0.001` — 빌드 자동 삭제를 즉시 확인할 때
+- `TAPFLOW_WS_BACKPRESSURE_BYTES` — 브라우저 소켓 backpressure 임계값 (기본 1 MB)
 
 ## HOW NOT
 
