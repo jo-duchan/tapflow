@@ -202,7 +202,7 @@ export function handleListBuilds(req: http.IncomingMessage, res: http.ServerResp
   const items = db.prepare(`
     SELECT b.id, b.app_id, ap.name, b.version_name, b.build_number,
            b.version_label, b.status_label, b.platform,
-           b.bundle_id, b.uploaded_at,
+           b.bundle_id, b.uploaded_at, b.completed_at,
            COALESCE(u.display_name, substr(u.email, 1, instr(u.email, '@') - 1)) as uploader
     ${baseFrom}
     ${where}
@@ -223,7 +223,7 @@ export function handleGetBuild(
 
   const build = getDb().prepare(`
     SELECT b.id, b.app_id, ap.name, b.version_name, b.build_number,
-           b.version_label, b.status_label, b.platform, b.bundle_id, b.uploaded_at
+           b.version_label, b.status_label, b.platform, b.bundle_id, b.uploaded_at, b.completed_at
     FROM builds b
     LEFT JOIN apps ap ON ap.id = b.app_id
     WHERE b.id = ?
@@ -253,9 +253,6 @@ export async function handleUpdateBuild(
   const values: unknown[] = []
 
   if ('status_label' in body) {
-    if (existing.status_label === 'Done') {
-      return json(res, 400, { error: 'Cannot change status of a completed build' })
-    }
     if (body.status_label !== null && !VALID_STATUS.includes(body.status_label ?? '')) {
       return json(res, 400, { error: 'Invalid status_label' })
     }
@@ -263,6 +260,8 @@ export async function handleUpdateBuild(
     values.push(body.status_label ?? null)
     if (body.status_label === 'Done') {
       updates.push("completed_at = datetime('now')")
+    } else if (existing.status_label === 'Done') {
+      updates.push('completed_at = NULL')
     }
   }
   if ('version_label' in body) {
