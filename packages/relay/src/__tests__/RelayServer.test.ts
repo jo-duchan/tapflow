@@ -761,14 +761,14 @@ describe('RelayServer', () => {
       browser2.send(JSON.stringify({ type: 'session:start', sessionId }))
       await waitForMessage(browser2) // session:joined — relay cancels idle timer
 
-      let gotShutdown = false
-      agent.on('message', (d) => {
-        const msg = JSON.parse(d.toString())
-        if (msg.type === 'device:shutdown') gotShutdown = true
+      // If shutdown arrives at any point during the wait, fail immediately
+      await new Promise<void>((resolve, reject) => {
+        setTimeout(resolve, 600)
+        agent.on('message', (d) => {
+          if (JSON.parse(d.toString()).type === 'device:shutdown')
+            reject(new Error('unexpected device:shutdown — idle timer was not cancelled'))
+        })
       })
-      // Wait well past idleTimeoutMs — timer was cancelled, so no shutdown should fire
-      await new Promise<void>((r) => setTimeout(r, 600))
-      expect(gotShutdown).toBe(false)
 
       agent.close()
       browser2.close()

@@ -495,11 +495,13 @@ describe('AndroidAgent', () => {
       const agent = new AndroidAgent({ reconnectDelays: [0] }, mockAdb())
       await agent.connect(`ws://localhost:${port}`)
 
-      ;(agent as any).ws.terminate()
+      const oldWs = (agent as any).ws as WebSocket
+      oldWs.terminate()
 
       await vi.waitFor(() => {
         const ws = (agent as any).ws as WebSocket | null
         expect(ws).not.toBeNull()
+        expect(ws).not.toBe(oldWs)       // 새 연결 객체여야 함
         expect(ws!.readyState).toBe(WebSocket.OPEN)
       }, { timeout: 2000 })
 
