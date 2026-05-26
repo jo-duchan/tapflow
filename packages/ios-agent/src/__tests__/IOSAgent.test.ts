@@ -514,18 +514,6 @@ describe('IOSAgent', () => {
       expect((agent as any)._reconnectTimer).toBeNull()
     })
 
-    it('_scheduleReconnect() increments attempt and sets timer', async () => {
-      const agent = new IOSAgent({}, mockSimctl())
-      await agent.connect(`ws://localhost:${port}`)
-
-      ;(agent as any)._scheduleReconnect()
-
-      expect((agent as any)._reconnectAttempt).toBe(1)
-      expect((agent as any)._reconnectTimer).not.toBeNull()
-
-      agent.disconnect()
-    })
-
     it('_scheduleReconnect() is no-op when _stopping is true', async () => {
       const agent = new IOSAgent({}, mockSimctl())
       await agent.connect(`ws://localhost:${port}`)

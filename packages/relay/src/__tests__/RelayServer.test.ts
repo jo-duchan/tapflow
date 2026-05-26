@@ -468,15 +468,14 @@ describe('RelayServer', () => {
       streamWs.send(JSON.stringify({ type: 'stream:register', sessionId }))
       await waitForMessage(streamWs) // stream:registered
 
-      let binaryReceived = false
-      browser.on('message', (_d, isBinary) => { if (isBinary) binaryReceived = true })
-
       streamWs.send(Buffer.from([0xff, 0xd8, 0xff]))
-      // bufferedAmount(0) >= wsBackpressureBytes(0) → frame is dropped synchronously.
-      // Wait for the relay's WS message handler to have run (real I/O tick).
-      await new Promise<void>((r) => setImmediate(r))
-
-      expect(binaryReceived).toBe(false)
+      // If backpressure drop is broken, the frame arrives before setImmediate resolves → immediate reject
+      await new Promise<void>((resolve, reject) => {
+        setImmediate(resolve)
+        browser.once('message', (_d, isBinary) => {
+          if (isBinary) reject(new Error('frame should have been dropped by backpressure'))
+        })
+      })
 
       agent.close()
       browser.close()
@@ -962,10 +961,12 @@ describe('RelayServer', () => {
     })
 
     it('clears all interval timers', async () => {
-      const clearSpy = vi.spyOn(globalThis, 'clearInterval')
       await stopServer.stop()
-      expect(clearSpy).toHaveBeenCalledTimes(4)
-      clearSpy.mockRestore()
+      const s = stopServer as any
+      expect(s.purgeRecordingsTimer).toBeNull()
+      expect(s.purgeOldResourcesTimer).toBeNull()
+      expect(s.purgeBuildsTimer).toBeNull()
+      expect(s.flushResourcesTimer).toBeNull()
     })
   })
 })
