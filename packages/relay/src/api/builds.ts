@@ -6,7 +6,7 @@ import { randomUUID } from 'crypto'
 import { spawnSync } from 'child_process'
 import busboy from 'busboy'
 import { getDb } from '../db.js'
-import { requireAuth, verifyPat } from '../middleware/auth.js'
+import { requireAuth, requireBuildAuth } from '../middleware/auth.js'
 import { json, readJson } from '../router.js'
 
 // ── zip / plist helpers ────────────────────────────────────────────────────
@@ -165,7 +165,7 @@ export function upsertApp(name: string, bundleIdKey: string, platform: string): 
 // ── handlers ──────────────────────────────────────────────────────────────
 
 export function handleListBuilds(req: http.IncomingMessage, res: http.ServerResponse): void {
-  const auth = requireAuth(req, res)
+  const auth = requireBuildAuth(req, res)
   if (!auth) return
 
   const u = new URL(req.url ?? '/', 'http://x')
@@ -218,8 +218,7 @@ export function handleGetBuild(
   res: http.ServerResponse,
   params: Record<string, string>
 ): void {
-  const auth = requireAuth(req, res)
-  if (!auth) return
+  if (!requireBuildAuth(req, res)) return
 
   const build = getDb().prepare(`
     SELECT b.id, b.app_id, ap.name, b.version_name, b.build_number,
@@ -281,13 +280,8 @@ export function handleUploadBuild(
   res: http.ServerResponse,
   uploadsDir: string
 ): void {
-  const pat  = verifyPat(req)
-  const auth = pat ? { userId: pat.userId } : requireAuth(req, res)
+  const auth = requireBuildAuth(req, res)
   if (!auth) return
-
-  if (pat && !pat.scope.includes('builds:write')) {
-    return json(res, 403, { error: 'Insufficient scope' })
-  }
 
   const bb = busboy({ headers: req.headers, limits: { fileSize: 500 * 1024 * 1024 } })
   const fields: Record<string, string> = {}
