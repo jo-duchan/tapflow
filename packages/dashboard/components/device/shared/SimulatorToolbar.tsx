@@ -5,6 +5,18 @@ import { Button } from '@/components/ui/button';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { cn } from '@/lib/utils';
 import type { ReactNode } from 'react';
+import { Kbd, KbdGroup } from '@/components/ui/kbd';
+
+function ShortcutTooltip({ label, keys }: { label: string; keys: string[] }) {
+  return (
+    <span className="flex items-center gap-3">
+      {label}
+      <KbdGroup>
+        {keys.map((k) => <Kbd key={k}>{k}</Kbd>)}
+      </KbdGroup>
+    </span>
+  );
+}
 
 interface SimulatorToolbarProps {
   joined: boolean;
@@ -43,7 +55,7 @@ export function SimulatorToolbar({
               <Link2 className="h-4 w-4" />
             </Button>
           </TooltipTrigger>
-          <TooltipContent side="left">Deeplink</TooltipContent>
+          <TooltipContent side="left"><ShortcutTooltip label="Deeplink" keys={['⌘', 'K']} /></TooltipContent>
         </Tooltip>
 
         <div className="w-4 h-px bg-border my-1" />
@@ -54,7 +66,7 @@ export function SimulatorToolbar({
               <Camera className="h-4 w-4" />
             </Button>
           </TooltipTrigger>
-          <TooltipContent side="left">Screenshot</TooltipContent>
+          <TooltipContent side="left"><ShortcutTooltip label="Screenshot" keys={['⌘', 'S']} /></TooltipContent>
         </Tooltip>
 
         <Tooltip>
@@ -73,8 +85,10 @@ export function SimulatorToolbar({
             </Button>
           </TooltipTrigger>
           <TooltipContent side="left">
-            {recordState === 'idle' ? 'Start recording'
-              : recordState === 'recording' ? 'Stop recording'
+            {recordState === 'idle'
+              ? <ShortcutTooltip label="Start recording" keys={['⌘', '⇧', 'Y']} />
+              : recordState === 'recording'
+              ? <ShortcutTooltip label="Stop recording" keys={['⌘', '⇧', 'Y']} />
               : 'Processing…'}
           </TooltipContent>
         </Tooltip>
@@ -87,7 +101,7 @@ export function SimulatorToolbar({
               <RotateCw className="h-4 w-4" />
             </Button>
           </TooltipTrigger>
-          <TooltipContent side="left">Rotate</TooltipContent>
+          <TooltipContent side="left"><ShortcutTooltip label="Rotate" keys={['⌘', '⇧', 'O']} /></TooltipContent>
         </Tooltip>
       </div>
     </TooltipProvider>

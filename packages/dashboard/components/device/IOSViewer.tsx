@@ -9,6 +9,7 @@ import { SimulatorInfoCard } from './shared/SimulatorInfoCard';
 import { DeepLinkDialog } from './DeepLinkDialog';
 import { Button } from '@/components/ui/button';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
+import { Kbd, KbdGroup } from '@/components/ui/kbd';
 import type { ChromeData } from '@/lib/types'
 import { iosToNormScreen, toPinchFingers as makePinchFingers, iosDisplayScale } from '@/lib/coordinate-transform';
 import type { MutableRefObject } from 'react';
@@ -200,11 +201,57 @@ export function IOSViewer({
     }
   }, [])
 
+  const handleScreenshot = useCallback(() => {
+    const src = canvasRef.current; if (!src) return
+    const c = document.createElement('canvas'); const ctx = c.getContext('2d'); if (!ctx) return
+    c.width = src.width; c.height = src.height; ctx.drawImage(src, 0, 0)
+    c.toBlob((blob) => {
+      if (!blob) return
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a'); a.href = url; a.download = `tapflow-${Date.now()}.png`; a.click()
+      URL.revokeObjectURL(url)
+    }, 'image/png')
+  }, [])
+
+  const handleRecordToggle = useCallback(() => {
+    if (recordState === 'idle') {
+      const rc = recordCanvasRef.current; if (!rc) return
+      const container = containerRef.current
+      if (container && container.clientWidth > 0) { rc.width = container.clientWidth; rc.height = container.clientHeight }
+      else { const fc = canvasRef.current; if (fc && fc.width > 0) { rc.width = fc.width; rc.height = fc.height } else return }
+      startClientRecording(composeFrame)
+    } else if (recordState === 'recording') {
+      stopClientRecording()
+    }
+  }, [recordState, startClientRecording, stopClientRecording, composeFrame])
+
+  const handleRotate = useCallback(() => {
+    send({ type: 'input:rotate', sessionId }); setIsLandscape(prev => !prev)
+  }, [send, sessionId])
+
+  const isLandscapeRef = useRef(isLandscape)
+  useEffect(() => { isLandscapeRef.current = isLandscape }, [isLandscape])
+  useEffect(() => {
+    return () => { if (isLandscapeRef.current) send({ type: 'input:rotate', sessionId }) }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
   // ── Keyboard forwarding ───────────────────────────────────────────────────
   useEffect(() => {
     const MODIFIER_CODES = new Set(['ShiftLeft', 'ShiftRight', 'ControlLeft', 'ControlRight', 'MetaLeft', 'MetaRight'])
     const onKeyDown = (e: KeyboardEvent) => {
       if (e.code === 'AltLeft' || e.code === 'AltRight') { isOptionHeld.current = true; return }
+      if (e.metaKey) {
+        const el = document.activeElement
+        if (!el || (el.tagName !== 'INPUT' && el.tagName !== 'TEXTAREA')) {
+          if (!e.shiftKey && e.code === 'KeyK') { e.preventDefault(); setDeepLinkOpen(true); return }
+          if (!e.shiftKey && e.code === 'KeyS') { e.preventDefault(); handleScreenshot(); return }
+          if (e.shiftKey && e.code === 'KeyY') { e.preventDefault(); handleRecordToggle(); return }
+          if (e.shiftKey && e.code === 'KeyO') { e.preventDefault(); handleRotate(); return }
+          if (e.shiftKey && e.code === 'KeyU') { e.preventDefault(); send({ type: 'input:button', sessionId, payload: { name: 'home' } }); return }
+          if (e.shiftKey && e.code === 'KeyK') { e.preventDefault(); if (!swKeyboardPending) onKbdToggle(); return }
+        }
+      }
       if (!keyboardActive) return
       if (MODIFIER_CODES.has(e.code)) return
       e.preventDefault()
@@ -219,7 +266,7 @@ export function IOSViewer({
     const onBlur = () => { if (isOptionHeld.current) endPinch() }
     window.addEventListener('keydown', onKeyDown); window.addEventListener('keyup', onKeyUp); window.addEventListener('blur', onBlur)
     return () => { window.removeEventListener('keydown', onKeyDown); window.removeEventListener('keyup', onKeyUp); window.removeEventListener('blur', onBlur) }
-  }, [keyboardActive, send, sessionId])
+  }, [keyboardActive, send, sessionId, handleScreenshot, handleRecordToggle, handleRotate, onKbdToggle, swKeyboardPending])
 
   useEffect(() => {
     if (!keyboardActive) return
@@ -256,10 +303,21 @@ export function IOSViewer({
   }, [toNormScreen])
 
   const toButton = useCallback((e: { clientX: number; clientY: number }): string | null => {
-    if (!containerRef.current || isLandscape) return null
-    const rect = containerRef.current.getBoundingClientRect()
-    const cx = (e.clientX - rect.left) * (chrome.compositeWidth / rect.width)
-    const cy = (e.clientY - rect.top) * (chrome.compositeHeight / rect.height)
+    const target = (isLandscape ? screenAreaRef.current : containerRef.current)
+    if (!target) return null
+    const rect = target.getBoundingClientRect()
+    let cx: number, cy: number
+    if (isLandscape) {
+      // screenAreaRef is the untransformed wrapper (width=displayH, height=displayW in landscape)
+      // inverse of rotate(-90deg): portrait X ← bottom edge distance, portrait Y ← left edge distance
+      const lx = rect.height - (e.clientY - rect.top)
+      const ly = e.clientX - rect.left
+      cx = lx * (chrome.compositeWidth / rect.height)
+      cy = ly * (chrome.compositeHeight / rect.width)
+    } else {
+      cx = (e.clientX - rect.left) * (chrome.compositeWidth / rect.width)
+      cy = (e.clientY - rect.top) * (chrome.compositeHeight / rect.height)
+    }
     for (const btn of chrome.buttons) {
       const dx = cx - btn.normalOffset.x; const dy = cy - btn.normalOffset.y
       if (dx * dx + dy * dy < BUTTON_HIT_RADIUS ** 2) return btn.name
@@ -402,7 +460,7 @@ export function IOSViewer({
             <Home className="h-4 w-4" />
           </Button>
         </TooltipTrigger>
-        <TooltipContent side="left">Home</TooltipContent>
+        <TooltipContent side="left"><span className="flex items-center gap-3">Home <KbdGroup><Kbd>⌘</Kbd><Kbd>⇧</Kbd><Kbd>U</Kbd></KbdGroup></span></TooltipContent>
       </Tooltip>
       <Tooltip>
         <TooltipTrigger asChild>
@@ -416,7 +474,7 @@ export function IOSViewer({
               : <Keyboard className="h-4 w-4" />}
           </Button>
         </TooltipTrigger>
-        <TooltipContent side="left">Software keyboard</TooltipContent>
+        <TooltipContent side="left"><span className="flex items-center gap-3">Software keyboard <KbdGroup><Kbd>⌘</Kbd><Kbd>⇧</Kbd><Kbd>K</Kbd></KbdGroup></span></TooltipContent>
       </Tooltip>
     </>
   );
@@ -443,30 +501,10 @@ export function IOSViewer({
       <SimulatorToolbar
         joined={joined}
         onDeepLink={() => setDeepLinkOpen(true)}
-        onScreenshot={() => {
-          const src = canvasRef.current; if (!src) return
-          const c = document.createElement('canvas'); const ctx = c.getContext('2d'); if (!ctx) return
-          c.width = src.width; c.height = src.height; ctx.drawImage(src, 0, 0)
-          c.toBlob((blob) => {
-            if (!blob) return
-            const url = URL.createObjectURL(blob)
-            const a = document.createElement('a'); a.href = url; a.download = `tapflow-${Date.now()}.png`; a.click()
-            URL.revokeObjectURL(url)
-          }, 'image/png')
-        }}
-        onRecordToggle={() => {
-          if (recordState === 'idle') {
-            const rc = recordCanvasRef.current; if (!rc) return
-            const container = containerRef.current
-            if (container && container.clientWidth > 0) { rc.width = container.clientWidth; rc.height = container.clientHeight }
-            else { const fc = canvasRef.current; if (fc && fc.width > 0) { rc.width = fc.width; rc.height = fc.height } else return }
-            startClientRecording(composeFrame)
-          } else if (recordState === 'recording') {
-            stopClientRecording()
-          }
-        }}
+        onScreenshot={handleScreenshot}
+        onRecordToggle={handleRecordToggle}
         recordState={recordState}
-        onRotate={() => { send({ type: 'input:rotate', sessionId }); setIsLandscape(prev => !prev) }}
+        onRotate={handleRotate}
         platformSlot={platformSlot}
         launchSlot={launchSlot}
       />
@@ -546,7 +584,7 @@ export function IOSViewer({
               const isBottomAnchor = btn.anchor === 'bottom'; const isTopAnchor = btn.anchor === 'top'
               const imgTopPct = isBottomAnchor ? ((btn.normalOffset.y - btn.buttonH / 2) / chrome.compositeHeight) * 100
                 : isTopAnchor ? (btn.rolloverOffset.y / chrome.compositeHeight) * 100
-                : (btn.normalOffset.y / chrome.compositeHeight) * 100
+                : ((btn.normalOffset.y - btn.buttonH / 2) / chrome.compositeHeight) * 100
               const imgHPct = (btn.buttonH / chrome.compositeHeight) * 100
               const imgWPct = (btn.buttonW / chrome.compositeWidth) * 100
               const halfW = btn.buttonW / 2
@@ -555,7 +593,7 @@ export function IOSViewer({
               const tooltipLeftPct = (btn.rolloverOffset.x / chrome.compositeWidth) * 100
               const tooltipTopPct = isBottomAnchor ? ((btn.normalOffset.y - btn.buttonH / 2) / chrome.compositeHeight) * 100
                 : isTopAnchor ? (btn.rolloverOffset.y / chrome.compositeHeight) * 100
-                : (btn.normalOffset.y / chrome.compositeHeight) * 100
+                : ((btn.normalOffset.y - btn.buttonH / 2) / chrome.compositeHeight) * 100
               const hoverTopPct = isTopAnchor ? ((2 * btn.rolloverOffset.y - btn.normalOffset.y) / chrome.compositeHeight) * 100 : 0
               const btnZ = btn.onTop ? 4 : 1
               return (
@@ -581,11 +619,13 @@ export function IOSViewer({
                     }} draggable={false} alt="" />
                   )}
                   {isHovered && (
-                    <div style={{
-                      position: 'absolute', zIndex: 5, left: `${tooltipLeftPct}%`, top: `${tooltipTopPct}%`,
-                      transform: 'translate(-50%, calc(-100% - 8px))', background: 'rgba(0,0,0,0.72)',
-                      color: '#fff', fontSize: 11, padding: '2px 7px', borderRadius: 4, whiteSpace: 'nowrap', pointerEvents: 'none',
-                    }}>
+                    <div
+                      className="bg-foreground/85 text-background text-[11px] px-[7px] py-1.5 rounded-lg whitespace-nowrap pointer-events-none"
+                      style={{
+                        position: 'absolute', zIndex: 5, left: `${tooltipLeftPct}%`, top: `${tooltipTopPct}%`,
+                        transform: 'translate(-50%, calc(-100% - 8px))',
+                      }}
+                    >
                       {btn.accessibilityTitle}
                     </div>
                   )}
