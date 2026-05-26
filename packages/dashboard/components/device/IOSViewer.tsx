@@ -249,7 +249,7 @@ export function IOSViewer({
           if (e.shiftKey && e.code === 'KeyY') { e.preventDefault(); handleRecordToggle(); return }
           if (e.shiftKey && e.code === 'KeyO') { e.preventDefault(); handleRotate(); return }
           if (e.shiftKey && e.code === 'KeyU') { e.preventDefault(); send({ type: 'input:button', sessionId, payload: { name: 'home' } }); return }
-          if (e.shiftKey && e.code === 'KeyK') { e.preventDefault(); onKbdToggle(); return }
+          if (e.shiftKey && e.code === 'KeyK') { e.preventDefault(); if (!swKeyboardPending) onKbdToggle(); return }
         }
       }
       if (!keyboardActive) return
@@ -266,7 +266,7 @@ export function IOSViewer({
     const onBlur = () => { if (isOptionHeld.current) endPinch() }
     window.addEventListener('keydown', onKeyDown); window.addEventListener('keyup', onKeyUp); window.addEventListener('blur', onBlur)
     return () => { window.removeEventListener('keydown', onKeyDown); window.removeEventListener('keyup', onKeyUp); window.removeEventListener('blur', onBlur) }
-  }, [keyboardActive, send, sessionId, handleScreenshot, handleRecordToggle, handleRotate, onKbdToggle])
+  }, [keyboardActive, send, sessionId, handleScreenshot, handleRecordToggle, handleRotate, onKbdToggle, swKeyboardPending])
 
   useEffect(() => {
     if (!keyboardActive) return
@@ -303,12 +303,13 @@ export function IOSViewer({
   }, [toNormScreen])
 
   const toButton = useCallback((e: { clientX: number; clientY: number }): string | null => {
-    if (!containerRef.current) return null
-    const rect = containerRef.current.getBoundingClientRect()
+    const target = (isLandscape ? screenAreaRef.current : containerRef.current)
+    if (!target) return null
+    const rect = target.getBoundingClientRect()
     let cx: number, cy: number
     if (isLandscape) {
-      // rotate(-90deg) swaps rect dimensions: rect.width=displayH, rect.height=displayW
-      // inverse transform: (lx, ly) → portrait composite coords
+      // screenAreaRef is the untransformed wrapper (width=displayH, height=displayW in landscape)
+      // inverse of rotate(-90deg): portrait X ← bottom edge distance, portrait Y ← left edge distance
       const lx = rect.height - (e.clientY - rect.top)
       const ly = e.clientX - rect.left
       cx = lx * (chrome.compositeWidth / rect.height)
@@ -473,7 +474,7 @@ export function IOSViewer({
               : <Keyboard className="h-4 w-4" />}
           </Button>
         </TooltipTrigger>
-        <TooltipContent side="left">Software keyboard</TooltipContent>
+        <TooltipContent side="left"><span className="flex items-center gap-3">Software keyboard <KbdGroup><Kbd>⌘</Kbd><Kbd>⇧</Kbd><Kbd>K</Kbd></KbdGroup></span></TooltipContent>
       </Tooltip>
     </>
   );
