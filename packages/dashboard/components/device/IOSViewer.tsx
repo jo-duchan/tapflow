@@ -296,10 +296,20 @@ export function IOSViewer({
   }, [toNormScreen])
 
   const toButton = useCallback((e: { clientX: number; clientY: number }): string | null => {
-    if (!containerRef.current || isLandscape) return null
+    if (!containerRef.current) return null
     const rect = containerRef.current.getBoundingClientRect()
-    const cx = (e.clientX - rect.left) * (chrome.compositeWidth / rect.width)
-    const cy = (e.clientY - rect.top) * (chrome.compositeHeight / rect.height)
+    let cx: number, cy: number
+    if (isLandscape) {
+      // rotate(-90deg) swaps rect dimensions: rect.width=displayH, rect.height=displayW
+      // inverse transform: (lx, ly) → portrait composite coords
+      const lx = rect.height - (e.clientY - rect.top)
+      const ly = e.clientX - rect.left
+      cx = lx * (chrome.compositeWidth / rect.height)
+      cy = ly * (chrome.compositeHeight / rect.width)
+    } else {
+      cx = (e.clientX - rect.left) * (chrome.compositeWidth / rect.width)
+      cy = (e.clientY - rect.top) * (chrome.compositeHeight / rect.height)
+    }
     for (const btn of chrome.buttons) {
       const dx = cx - btn.normalOffset.x; const dy = cy - btn.normalOffset.y
       if (dx * dx + dy * dy < BUTTON_HIT_RADIUS ** 2) return btn.name
@@ -566,7 +576,7 @@ export function IOSViewer({
               const isBottomAnchor = btn.anchor === 'bottom'; const isTopAnchor = btn.anchor === 'top'
               const imgTopPct = isBottomAnchor ? ((btn.normalOffset.y - btn.buttonH / 2) / chrome.compositeHeight) * 100
                 : isTopAnchor ? (btn.rolloverOffset.y / chrome.compositeHeight) * 100
-                : (btn.normalOffset.y / chrome.compositeHeight) * 100
+                : ((btn.normalOffset.y - btn.buttonH / 2) / chrome.compositeHeight) * 100
               const imgHPct = (btn.buttonH / chrome.compositeHeight) * 100
               const imgWPct = (btn.buttonW / chrome.compositeWidth) * 100
               const halfW = btn.buttonW / 2
@@ -575,7 +585,7 @@ export function IOSViewer({
               const tooltipLeftPct = (btn.rolloverOffset.x / chrome.compositeWidth) * 100
               const tooltipTopPct = isBottomAnchor ? ((btn.normalOffset.y - btn.buttonH / 2) / chrome.compositeHeight) * 100
                 : isTopAnchor ? (btn.rolloverOffset.y / chrome.compositeHeight) * 100
-                : (btn.normalOffset.y / chrome.compositeHeight) * 100
+                : ((btn.normalOffset.y - btn.buttonH / 2) / chrome.compositeHeight) * 100
               const hoverTopPct = isTopAnchor ? ((2 * btn.rolloverOffset.y - btn.normalOffset.y) / chrome.compositeHeight) * 100 : 0
               const btnZ = btn.onTop ? 4 : 1
               return (
