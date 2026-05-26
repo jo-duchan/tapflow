@@ -28,7 +28,7 @@ export function DeepLinkDialog({ open, onOpenChange, sessionId, send }: Props) {
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent
-        className="w-[500px] max-w-[500px] h-[52px] !rounded-[18px] p-[10px] border border-zinc-300 bg-background shadow-lg overflow-hidden [&>button]:hidden"
+        className="w-[500px] max-w-[500px] h-[52px] !rounded-[18px] p-[10px] border border-border bg-background shadow-lg overflow-hidden [&>button]:hidden"
         aria-describedby={undefined}
       >
         <DialogTitle className="sr-only">Open Deeplink</DialogTitle>
