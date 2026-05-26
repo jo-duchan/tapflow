@@ -153,6 +153,9 @@ describe('IOSAgent', () => {
       browser.send(JSON.stringify({ type: 'device:boot', sessionId: agent.sessionId, payload: { deviceId: 'dev-1' } }))
       await waitForType(browser, 'device:ready')
 
+      // device:ready is sent after TouchHelper is created, but the mock recording
+      // occasionally lags a microtask behind the message delivery — wait explicitly
+      await vi.waitFor(() => expect(MockTouchHelper.mock.results).toHaveLength(1), { timeout: 500 })
       const thInstance = MockTouchHelper.mock.results[0].value
       return { browser, agent, thInstance }
     }
@@ -338,12 +341,21 @@ describe('IOSAgent', () => {
       browser.send(JSON.stringify({ type: 'session:start', sessionId: agent.sessionId }))
       await waitForType(browser, 'session:joined')
 
+      // Register before device:boot — MjpegStreamer emits the first frame immediately
+      // after device:ready; registering after waitForType risks missing it
+      const framePromise = new Promise<Buffer>((r) =>
+        browser.on('message', function listener(d, isBinary) {
+          if (isBinary) {
+            browser.off('message', listener)
+            r(d as Buffer)
+          }
+        })
+      )
+
       browser.send(JSON.stringify({ type: 'device:boot', sessionId: agent.sessionId, payload: { deviceId: 'dev-1' } }))
       await waitForType(browser, 'device:ready')
 
-      const frame = await new Promise<Buffer>((r) =>
-        browser.once('message', (d, isBinary) => { if (isBinary) r(d as Buffer) })
-      )
+      const frame = await framePromise
       expect(frame.length).toBeGreaterThan(0)
 
       agent.disconnect()
@@ -363,6 +375,7 @@ describe('IOSAgent', () => {
       await waitForType(browser, 'session:joined')
       browser.send(JSON.stringify({ type: 'device:boot', sessionId: agent.sessionId, payload: { deviceId: 'dev-1' } }))
       await waitForType(browser, 'device:ready')
+      await vi.waitFor(() => expect(MockTouchHelper.mock.results).toHaveLength(1), { timeout: 500 })
       const thInstance = MockTouchHelper.mock.results[0].value
       return { browser, agent, thInstance }
     }
@@ -405,6 +418,8 @@ describe('IOSAgent', () => {
   })
 
   describe('input:keyboard:toggle handler', () => {
+    beforeEach(() => { MockTouchHelper.mockClear() })
+
     async function setupSession(sim = mockSimctl(true)) {
       const browser = new WebSocket(`ws://localhost:${port}`)
       await waitForOpen(browser)
@@ -478,8 +493,9 @@ describe('IOSAgent', () => {
       // hardware key press → hide must be called before sendKey
       browser.send(JSON.stringify({ type: 'input:key', sessionId: agent.sessionId, payload: { code: 'KeyA', modifiers: 0 } }))
       await vi.waitFor(() => expect(sim.hideSoftwareKeyboard).toHaveBeenCalledWith('dev-1'), { timeout: 500 })
-      const thInstance = MockTouchHelper.mock.results[0].value
-      await vi.waitFor(() => expect(thInstance.sendKey).toHaveBeenCalledWith(HID_KEY_A, 0), { timeout: 500 })
+      await vi.waitFor(() => {
+        expect(MockTouchHelper.mock.results[0].value.sendKey).toHaveBeenCalledWith(HID_KEY_A, 0)
+      }, { timeout: 500 })
       // next toggle should show (state was reset to false by the key press)
       browser.send(JSON.stringify({ type: 'input:keyboard:toggle', sessionId: agent.sessionId }))
       await vi.waitFor(() => expect(sim.showSoftwareKeyboard).toHaveBeenCalledTimes(2), { timeout: 500 })
