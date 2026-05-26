@@ -125,10 +125,11 @@ export class SimctlWrapper {
     await this.runner.exec('openurl', deviceId, url)
   }
 
-  async screenshot(): Promise<Buffer> {
-    const tmpPath = `${tmpdir()}/tapflow-${randomUUID()}.png`
+  async screenshot(format: 'png' | 'jpeg' = 'png'): Promise<Buffer> {
+    const ext = format === 'jpeg' ? 'jpg' : 'png'
+    const tmpPath = `${tmpdir()}/tapflow-${randomUUID()}.${ext}`
     try {
-      await this.runner.exec('io', 'booted', 'screenshot', tmpPath)
+      await this.runner.exec('io', 'booted', 'screenshot', '--type', format, tmpPath)
       return await fs.readFile(tmpPath)
     } finally {
       await fs.unlink(tmpPath).catch(() => {})

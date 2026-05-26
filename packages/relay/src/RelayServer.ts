@@ -1,10 +1,12 @@
 import http from 'http'
 import fs from 'fs'
 import path from 'path'
+import { randomUUID } from 'crypto'
 import { WebSocketServer, WebSocket } from 'ws'
 import { SessionManager } from './SessionManager.js'
 import type { RelayMessage } from './types.js'
-import { Router } from './router.js'
+import { Router, json } from './router.js'
+import { requireAuth } from './middleware/auth.js'
 import { getDb } from './db.js'
 import { handleLogin, handleLogout, handleMe, handleChangePassword, handleInit } from './api/auth.js'
 import { handleVerify, handleAccept } from './api/invitations.js'
@@ -60,9 +62,17 @@ export class RelayServer {
   private flushResourcesTimer: ReturnType<typeof setInterval> | null = null
   private dropHandlers = new Map<string, () => void>()
   private readonly backpressureBytes: number
+  private readonly screenshotTimeoutMs: number
+  private pendingScreenshots = new Map<string, {
+    sessionId: string
+    resolve: (buf: Buffer, format: 'png' | 'jpeg') => void
+    reject: (err: Error) => void
+    timer: ReturnType<typeof setTimeout>
+  }>()
 
-  constructor(private readonly options: { port: number; publicDir?: string; uploadsDir?: string; idleTimeoutMs?: number; wsBackpressureBytes?: number }) {
+  constructor(private readonly options: { port: number; publicDir?: string; uploadsDir?: string; idleTimeoutMs?: number; wsBackpressureBytes?: number; screenshotTimeoutMs?: number }) {
     this.backpressureBytes = options.wsBackpressureBytes ?? DEFAULT_BACKPRESSURE_BYTES
+    this.screenshotTimeoutMs = options.screenshotTimeoutMs ?? 10_000
     this.sessions = new SessionManager({ idleTimeoutMs: options.idleTimeoutMs })
     this.publicDir = options.publicDir ?? path.join(import.meta.dirname, '../public')
     this.uploadsDir = options.uploadsDir ?? path.join(import.meta.dirname, '../uploads')
@@ -141,6 +151,10 @@ export class RelayServer {
     // agent resources
     this.router.get('/api/v1/agents', handleListAgents)
     this.router.get('/api/v1/agents/:name/resources', handleGetAgentResources)
+
+    // screenshot
+    this.router.get('/api/v1/sessions/:sessionId/screenshot',
+      (req, res, params) => this.handleGetScreenshot(req, res, params))
   }
 
   pushLog(msg: string): void {
@@ -227,6 +241,14 @@ export class RelayServer {
       // Agent main socket disconnected → remove all device sessions for this agent
       const agentSessions = this.sessions.getAllByAgentSocket(ws)
       if (agentSessions.length > 0) {
+        const agentSessionIds = new Set(agentSessions.map((s) => s.id))
+        for (const [reqId, pending] of this.pendingScreenshots.entries()) {
+          if (agentSessionIds.has(pending.sessionId)) {
+            clearTimeout(pending.timer)
+            this.pendingScreenshots.delete(reqId)
+            pending.reject(new Error('Agent disconnected'))
+          }
+        }
         for (const s of agentSessions) this.sessions.remove(s.id)
         this.sessions.removeResources(ws)
         return
@@ -261,6 +283,8 @@ export class RelayServer {
       // ── Agent → Relay ─────────────────────────────────────────────────────
       case 'agent:resources':    this.handleAgentResources(ws, msg); break
       case 'agent:register':     this.handleAgentRegister(ws, msg); break
+      case 'screenshot:done':    this.handleScreenshotDone(msg); break
+      case 'screenshot:error':   this.handleScreenshotError(msg); break
       case 'agents:list': {
         ws.send(JSON.stringify({ type: 'agents:listed', sessions: this.sessions.list() }))
         break
@@ -489,6 +513,77 @@ export class RelayServer {
         payload: { bundleId: build.bundle_id },
       }))
     }
+  }
+
+  private async handleGetScreenshot(
+    req: http.IncomingMessage,
+    res: http.ServerResponse,
+    params: Record<string, string>,
+  ): Promise<void> {
+    if (!requireAuth(req, res)) return
+
+    const { sessionId } = params
+    const session = this.sessions.get(sessionId)
+    if (!session) {
+      json(res, 404, { error: 'Session not found' })
+      return
+    }
+    if (session.deviceStatus === 'shutdown') {
+      json(res, 409, { error: 'Device is not booted' })
+      return
+    }
+    if (session.agentSocket.readyState !== WebSocket.OPEN) {
+      json(res, 502, { error: 'Agent offline' })
+      return
+    }
+
+    const urlObj = new URL(req.url ?? '/', 'http://x')
+    const format: 'png' | 'jpeg' = urlObj.searchParams.get('format') === 'jpeg' ? 'jpeg' : 'png'
+    const requestId = randomUUID()
+
+    return new Promise<void>((resolve) => {
+      const timer = setTimeout(() => {
+        this.pendingScreenshots.delete(requestId)
+        json(res, 504, { error: 'Screenshot timed out' })
+        resolve()
+      }, this.screenshotTimeoutMs)
+
+      this.pendingScreenshots.set(requestId, {
+        sessionId,
+        resolve: (buf, fmt) => {
+          clearTimeout(timer)
+          this.pendingScreenshots.delete(requestId)
+          const contentType = fmt === 'jpeg' ? 'image/jpeg' : 'image/png'
+          res.writeHead(200, { 'Content-Type': contentType, 'Content-Length': String(buf.length) })
+          res.end(buf)
+          resolve()
+        },
+        reject: (err) => {
+          clearTimeout(timer)
+          this.pendingScreenshots.delete(requestId)
+          json(res, 502, { error: err.message })
+          resolve()
+        },
+        timer,
+      })
+
+      session.agentSocket.send(JSON.stringify({ type: 'screenshot:request', sessionId, requestId, format }))
+    })
+  }
+
+  private handleScreenshotDone(msg: RelayMessage): void {
+    if (!msg.requestId) return
+    const pending = this.pendingScreenshots.get(msg.requestId)
+    if (!pending) return
+    const buf = Buffer.from(msg.data ?? '', 'base64')
+    pending.resolve(buf, msg.format ?? 'png')
+  }
+
+  private handleScreenshotError(msg: RelayMessage): void {
+    if (!msg.requestId) return
+    const pending = this.pendingScreenshots.get(msg.requestId)
+    if (!pending) return
+    pending.reject(new Error(msg.message ?? 'Screenshot failed'))
   }
 
   private flushResourceBuffers(): void {
