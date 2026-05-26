@@ -374,6 +374,8 @@ export class RelayServer {
         const session = this.sessions.get(msg.sessionId!)
         if (session?.agentSocket.readyState === WebSocket.OPEN) {
           session.agentSocket.send(JSON.stringify(msg))
+        } else {
+          ws.send(JSON.stringify({ type: 'open-url:error', sessionId: msg.sessionId, message: 'agent offline' }))
         }
         break
       }

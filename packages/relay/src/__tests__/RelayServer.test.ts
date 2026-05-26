@@ -905,6 +905,44 @@ describe('RelayServer', () => {
     browser.close()
   })
 
+  it('returns open-url:error to browser when session does not exist', async () => {
+    const browser = new WebSocket(`ws://localhost:${port}`)
+    await waitForOpen(browser)
+
+    const msgPromise = waitForMessage(browser)
+    browser.send(JSON.stringify({ type: 'open-url', sessionId: 'nonexistent-session', payload: { url: 'myapp://home' } }))
+    const received = await msgPromise
+    expect(received.type).toBe('open-url:error')
+    expect(received.message).toBe('agent offline')
+
+    browser.close()
+  })
+
+  it('returns open-url:error to browser when agent socket is closed', async () => {
+    const devices = [{ id: 'devA', name: 'iPhone A', platform: 'ios', status: 'booted' }]
+    const agent = new WebSocket(`ws://localhost:${port}`)
+    await waitForOpen(agent)
+    agent.send(JSON.stringify({ type: 'agent:register', devices }))
+    const { registeredSessions } = await waitForMessage(agent)
+    const sessionId = registeredSessions![0].sessionId
+
+    const browser = new WebSocket(`ws://localhost:${port}`)
+    await waitForOpen(browser)
+    browser.send(JSON.stringify({ type: 'session:start', sessionId }))
+    await waitForMessage(browser)
+
+    agent.close()
+    await new Promise((resolve) => setTimeout(resolve, 50))
+
+    const msgPromise = waitForMessage(browser)
+    browser.send(JSON.stringify({ type: 'open-url', sessionId, payload: { url: 'myapp://home' } }))
+    const received = await msgPromise
+    expect(received.type).toBe('open-url:error')
+    expect(received.message).toBe('agent offline')
+
+    browser.close()
+  })
+
   describe('stop', () => {
     let stopServer: RelayServer
 
