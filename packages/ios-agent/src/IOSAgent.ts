@@ -501,6 +501,24 @@ export class IOSAgent implements DeviceAgent {
           })
         break
       }
+      case 'screenshot:request': {
+        const raw = msg as unknown as { requestId: string; format?: 'png' | 'jpeg'; sessionId?: string }
+        const { requestId, format } = raw
+        const sessionId = msg.sessionId
+        this.simctl.screenshot(format ?? 'png')
+          .then((buf) => this.ws?.send(JSON.stringify({
+            type: 'screenshot:done',
+            sessionId,
+            requestId,
+            format: format ?? 'png',
+            data: buf.toString('base64'),
+          })))
+          .catch((e: unknown) => {
+            const message = e instanceof Error ? e.message : String(e)
+            this.ws?.send(JSON.stringify({ type: 'screenshot:error', sessionId, requestId, message }))
+          })
+        break
+      }
     }
   }
 

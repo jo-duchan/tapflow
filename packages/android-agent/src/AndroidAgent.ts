@@ -685,6 +685,30 @@ export class AndroidAgent implements DeviceAgent {
         this.handleKeyInput(serial, code, modifiers).catch(() => {})
         break
       }
+      case 'screenshot:request': {
+        const raw = msg as unknown as { requestId: string; format?: 'png' | 'jpeg'; sessionId?: string }
+        const { requestId, format } = raw
+        const sessionId = msg.sessionId
+        const state = this.deviceStates.get(sessionId!)
+        const serial = state ? this.adb.getSerial(state.deviceId) : undefined
+        if (!serial) {
+          this.ws?.send(JSON.stringify({ type: 'screenshot:error', sessionId, requestId, message: 'No booted device' }))
+          break
+        }
+        this.adb.screenshot(serial)
+          .then((buf) => this.ws?.send(JSON.stringify({
+            type: 'screenshot:done',
+            sessionId,
+            requestId,
+            format: format ?? 'png',
+            data: buf.toString('base64'),
+          })))
+          .catch((e: unknown) => {
+            const message = e instanceof Error ? e.message : String(e)
+            this.ws?.send(JSON.stringify({ type: 'screenshot:error', sessionId, requestId, message }))
+          })
+        break
+      }
     }
   }
 

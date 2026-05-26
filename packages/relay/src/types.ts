@@ -39,6 +39,9 @@ export type MessageType =
   | 'input:rotate'
   | 'input:keyboard:toggle'
   | 'keyboard:toggled'
+  | 'screenshot:request'
+  | 'screenshot:done'
+  | 'screenshot:error'
   | 'error'
 
 import type { AgentResources } from '@tapflowio/agent-core'
@@ -77,4 +80,7 @@ export interface RelayMessage {
   registeredSessions?: Array<{ deviceId: string; sessionId: string }>
   buildId?: number
   resources?: AgentResources
+  requestId?: string
+  data?: string
+  format?: 'png' | 'jpeg'
 }

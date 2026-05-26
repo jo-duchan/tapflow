@@ -226,7 +226,7 @@ describe('SimctlWrapper', () => {
       const buf = await wrapper.screenshot()
 
       expect(runner.exec).toHaveBeenCalledWith(
-        'io', 'booted', 'screenshot',
+        'io', 'booted', 'screenshot', '--type', 'png',
         expect.stringMatching(/tapflow-.+\.png$/)
       )
       expect(buf).toEqual(pngMagic)
