@@ -229,6 +229,13 @@ export function IOSViewer({
     send({ type: 'input:rotate', sessionId }); setIsLandscape(prev => !prev)
   }, [send, sessionId])
 
+  const isLandscapeRef = useRef(isLandscape)
+  useEffect(() => { isLandscapeRef.current = isLandscape }, [isLandscape])
+  useEffect(() => {
+    return () => { if (isLandscapeRef.current) send({ type: 'input:rotate', sessionId }) }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
   // ── Keyboard forwarding ───────────────────────────────────────────────────
   useEffect(() => {
     const MODIFIER_CODES = new Set(['ShiftLeft', 'ShiftRight', 'ControlLeft', 'ControlRight', 'MetaLeft', 'MetaRight'])
