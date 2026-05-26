@@ -93,6 +93,14 @@ Custom commands: `/work-plan {topic}` · `/deep-research {problem}` · `/qa {tar
 - When changing an interface, update `agent-core` first, then align implementations.
 - New platforms are added via `AgentRegistry.register()` only — relay and dashboard code stay unchanged.
 
+### Test Hygiene
+After running tests (especially repeated or looped runs), always check for zombie vitest processes and kill them:
+```bash
+ps aux | grep vitest | grep -v grep
+pkill -f "vitest"
+```
+Zombie worker processes accumulate silently from `pnpm test` loops and consume memory. Kill them before starting new test runs.
+
 ---
 
 ## HOW NOT
