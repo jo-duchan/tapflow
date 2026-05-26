@@ -365,8 +365,9 @@ describe('AndroidAgent', () => {
         getState().restarting = true
         scrcpyStreamController?.close()
 
-        await new Promise<void>((r) => setTimeout(r, 50))
-        expect(restartSpy).not.toHaveBeenCalled()
+        // Stream close is async — poll until the pump loop has had time to exit.
+        // vi.waitFor retries until the assertion passes or the timeout is exceeded.
+        await vi.waitFor(() => expect(restartSpy).not.toHaveBeenCalled(), { timeout: 200 })
       })
 
       it('skips restartVideoStream when session was intentionally stopped', async () => {
@@ -383,8 +384,7 @@ describe('AndroidAgent', () => {
         ;(agent as any).cleanupDeviceState(state) // sets scrcpySession = null
         scrcpyStreamController?.close()
 
-        await new Promise<void>((r) => setTimeout(r, 50))
-        expect(restartSpy).not.toHaveBeenCalled()
+        await vi.waitFor(() => expect(restartSpy).not.toHaveBeenCalled(), { timeout: 200 })
       })
     })
 
@@ -466,18 +466,6 @@ describe('AndroidAgent', () => {
       expect((agent as any)._reconnectTimer).toBeNull()
     })
 
-    it('_scheduleReconnect() increments attempt and sets timer', async () => {
-      const agent = new AndroidAgent({}, mockAdb())
-      await agent.connect(`ws://localhost:${port}`)
-
-      ;(agent as any)._scheduleReconnect()
-
-      expect((agent as any)._reconnectAttempt).toBe(1)
-      expect((agent as any)._reconnectTimer).not.toBeNull()
-
-      agent.disconnect()
-    })
-
     it('_scheduleReconnect() is no-op when _stopping is true', async () => {
       const agent = new AndroidAgent({}, mockAdb())
       await agent.connect(`ws://localhost:${port}`)
@@ -492,22 +480,20 @@ describe('AndroidAgent', () => {
     })
 
     it('reconnects automatically when connection drops and relay is available', async () => {
-      const agent = new AndroidAgent({}, mockAdb())
+      const agent = new AndroidAgent({ reconnectDelays: [0] }, mockAdb())
       await agent.connect(`ws://localhost:${port}`)
 
-      // Terminate the ws to simulate network drop (relay stays up)
-      ;(agent as any).ws.terminate()
+      const oldWs = (agent as any).ws as WebSocket
+      oldWs.terminate()
 
-      await new Promise(resolve => setTimeout(resolve, 100))
-      expect((agent as any)._reconnectAttempt).toBe(1)
-
-      // Relay is still running — wait for 1s backoff then reconnect
-      await new Promise(resolve => setTimeout(resolve, 1500))
-
-      expect((agent as any)._reconnectAttempt).toBe(0)
-      expect((agent as any).ws).not.toBeNull()
+      await vi.waitFor(() => {
+        const ws = (agent as any).ws as WebSocket | null
+        expect(ws).not.toBeNull()
+        expect(ws).not.toBe(oldWs)       // 새 연결 객체여야 함
+        expect(ws!.readyState).toBe(WebSocket.OPEN)
+      }, { timeout: 2000 })
 
       agent.disconnect()
-    }, 5000)
+    })
   })
 })

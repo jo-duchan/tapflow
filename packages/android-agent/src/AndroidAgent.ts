@@ -124,6 +124,7 @@ export interface AndroidAgentOptions {
   fps?: number
   /** AVD name or emulator serial to expose. Omit to expose all detected devices. */
   deviceFilter?: string
+  reconnectDelays?: number[]
 }
 
 export class AndroidAgent implements DeviceAgent {
@@ -139,11 +140,13 @@ export class AndroidAgent implements DeviceAgent {
   private _reconnectAttempt = 0
 
   private readonly deviceFilter?: string
+  private readonly reconnectDelays: number[]
 
   constructor(options: AndroidAgentOptions = {}, adb?: AdbWrapper) {
     this.adb = adb ?? new AdbWrapper()
     this.launcher = new EmulatorLauncher()
     this.deviceFilter = options.deviceFilter
+    this.reconnectDelays = options.reconnectDelays ?? [1000, 2000, 4000, 8000, 16000, 30000]
   }
 
   get sessionId(): string | null {
@@ -245,7 +248,7 @@ export class AndroidAgent implements DeviceAgent {
     this.deviceStates.clear()
     this.ws = null
 
-    const delays = [1000, 2000, 4000, 8000, 16000, 30000]
+    const delays = this.reconnectDelays
     const delay = delays[Math.min(this._reconnectAttempt, delays.length - 1)]
     this._reconnectAttempt++
     logger.warn(`relay disconnected — reconnecting in ${delay / 1000}s (attempt ${this._reconnectAttempt})`)

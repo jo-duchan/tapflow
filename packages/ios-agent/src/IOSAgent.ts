@@ -27,6 +27,7 @@ import { KEY_CODE_MAP } from './KeyCodeMap.js'
 export interface IOSAgentOptions {
   fps?: number
   intervalMs?: number
+  reconnectDelays?: number[]
 }
 
 interface DeviceState {
@@ -48,6 +49,7 @@ export class IOSAgent implements DeviceAgent {
   private readonly simctl: SimctlWrapper
   private readonly fps: number
   private readonly intervalMs: number | undefined
+  private readonly reconnectDelays: number[]
   private readonly chromeLoader: DeviceChromeLoader
   private ws: WebSocket | null = null
   private deviceStates = new Map<string, DeviceState>()
@@ -62,6 +64,7 @@ export class IOSAgent implements DeviceAgent {
     this.simctl = simctl ?? new SimctlWrapper()
     this.fps = options.fps ?? 30
     this.intervalMs = options.intervalMs
+    this.reconnectDelays = options.reconnectDelays ?? [1000, 2000, 4000, 8000, 16000, 30000]
     this.chromeLoader = new DeviceChromeLoader()
   }
 
@@ -158,7 +161,7 @@ export class IOSAgent implements DeviceAgent {
     this.deviceStates.clear()
     this.ws = null
 
-    const delays = [1000, 2000, 4000, 8000, 16000, 30000]
+    const delays = this.reconnectDelays
     const delay = delays[Math.min(this._reconnectAttempt, delays.length - 1)]
     this._reconnectAttempt++
     logger.warn(`relay disconnected — reconnecting in ${delay / 1000}s (attempt ${this._reconnectAttempt})`)
