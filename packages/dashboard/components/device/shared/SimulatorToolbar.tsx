@@ -1,6 +1,6 @@
 'use client';
 
-import { Camera, Loader2, RotateCw, Square, Video } from 'lucide-react';
+import { Camera, Link2, Loader2, RotateCw, Square, Video } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { cn } from '@/lib/utils';
@@ -12,6 +12,7 @@ interface SimulatorToolbarProps {
   onRecordToggle: () => void;
   recordState: 'idle' | 'recording' | 'uploading' | 'done';
   onRotate: () => void;
+  onDeepLink: () => void;
   /** Platform-specific buttons rendered at the top (e.g. nav buttons, home, keyboard) */
   platformSlot?: ReactNode;
   /** Optional launch button rendered before platform buttons */
@@ -24,6 +25,7 @@ export function SimulatorToolbar({
   onRecordToggle,
   recordState,
   onRotate,
+  onDeepLink,
   platformSlot,
   launchSlot,
 }: SimulatorToolbarProps) {
@@ -34,6 +36,15 @@ export function SimulatorToolbar({
       <div className="flex flex-col items-center gap-0.5 rounded-2xl border bg-background/90 backdrop-blur-sm px-1.5 py-2.5 shrink-0 mt-3">
         {launchSlot}
         {platformSlot}
+
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button variant="ghost" size="icon" className="h-8 w-8" onClick={onDeepLink}>
+              <Link2 className="h-4 w-4" />
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent side="left">Deeplink</TooltipContent>
+        </Tooltip>
 
         <div className="w-4 h-px bg-border my-1" />
 

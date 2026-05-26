@@ -485,6 +485,22 @@ export class IOSAgent implements DeviceAgent {
         }
         break
       }
+      case 'open-url': {
+        const { url } = msg.payload as { url: string }
+        const sessionId = msg.sessionId
+        const state = this.deviceStates.get(sessionId!)
+        if (!state) {
+          this.ws?.send(JSON.stringify({ type: 'open-url:error', sessionId, message: 'no booted device' }))
+          break
+        }
+        this.simctl.openUrl(state.deviceId, url)
+          .then(() => this.ws?.send(JSON.stringify({ type: 'open-url:done', sessionId })))
+          .catch((e: unknown) => {
+            const message = e instanceof Error ? e.message : String(e)
+            this.ws?.send(JSON.stringify({ type: 'open-url:error', sessionId, message }))
+          })
+        break
+      }
     }
   }
 
@@ -547,5 +563,11 @@ export class IOSAgent implements DeviceAgent {
     const first = this.deviceStates.values().next().value
     first?.touchHelper?.touchEnd()
     return Promise.resolve()
+  }
+
+  openUrl(url: string): Promise<void> {
+    const first = this.deviceStates.values().next().value
+    if (!first) throw new ValidationError('no booted device — call connect() first')
+    return this.simctl.openUrl(first.deviceId, url)
   }
 }

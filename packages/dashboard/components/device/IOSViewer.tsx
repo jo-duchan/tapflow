@@ -6,6 +6,7 @@ import { Home, Keyboard, Loader2, Play } from 'lucide-react';
 import { useFps } from '@/hooks/useFps';
 import { SimulatorToolbar } from './shared/SimulatorToolbar';
 import { SimulatorInfoCard } from './shared/SimulatorInfoCard';
+import { DeepLinkDialog } from './DeepLinkDialog';
 import { Button } from '@/components/ui/button';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import type { ChromeData } from '@/lib/types'
@@ -57,6 +58,7 @@ export function IOSViewer({
   const { recordState, recordCanvasRef, startClientRecording, stopClientRecording } = useClientRecording({ sessionId, buildId, onRecordingUploaded });
   const deviceSeq = useRef(0);
 
+  const [deepLinkOpen, setDeepLinkOpen] = useState(false);
   const [canvasReady, setCanvasReady] = useState(false);
   const [isLandscape, setIsLandscape] = useState(false);
   const [keyboardActive, setKeyboardActive] = useState(false);
@@ -436,8 +438,11 @@ export function IOSViewer({
     <div className="flex items-start justify-center gap-16">
       <canvas ref={recordCanvasRef} style={{ display: 'none' }} />
 
+      <DeepLinkDialog open={deepLinkOpen} onOpenChange={setDeepLinkOpen} sessionId={sessionId} send={send} />
+
       <SimulatorToolbar
         joined={joined}
+        onDeepLink={() => setDeepLinkOpen(true)}
         onScreenshot={() => {
           const src = canvasRef.current; if (!src) return
           const c = document.createElement('canvas'); const ctx = c.getContext('2d'); if (!ctx) return

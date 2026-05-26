@@ -159,4 +159,16 @@ describe('AdbWrapper', () => {
       expect(wrapper.getSerial('avd:Pixel_8')).toBeUndefined()
     })
   })
+
+  describe('openUrl', () => {
+    it('calls adb shell am start with VIEW intent and url', async () => {
+      const runner = mockRunner()
+      const wrapper = new AdbWrapper(runner)
+      await wrapper.openUrl('emulator-5554', 'myapp://home')
+      expect(runner.exec).toHaveBeenCalledWith(
+        '-s', 'emulator-5554', 'shell', 'am', 'start',
+        '-a', 'android.intent.action.VIEW', '-d', 'myapp://home',
+      )
+    })
+  })
 })

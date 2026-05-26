@@ -8,6 +8,7 @@ import { useWebGLRenderer } from '@/lib/WebGLVideoRenderer';
 import { useFps } from '@/hooks/useFps';
 import { SimulatorToolbar } from './shared/SimulatorToolbar';
 import { SimulatorInfoCard } from './shared/SimulatorInfoCard';
+import { DeepLinkDialog } from './DeepLinkDialog';
 import { Button } from '@/components/ui/button';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import type { AndroidButton } from '@/lib/types'
@@ -58,6 +59,7 @@ export function AndroidViewer({
   const lastRecvAtRef = useRef<number>(0);
   const { recordState, recordCanvasRef, startClientRecording, stopClientRecording } = useClientRecording({ sessionId, buildId, onRecordingUploaded });
 
+  const [deepLinkOpen, setDeepLinkOpen] = useState(false);
   const [canvasReady, setCanvasReady] = useState(false);
   const [glError, setGlError] = useState(false);
   const videoSizeRef = useRef<{ width: number; height: number } | null>(null);
@@ -421,8 +423,11 @@ export function AndroidViewer({
   return (
     <div className="flex items-start justify-center gap-16">
       <canvas ref={recordCanvasRef} style={{ display: 'none' }} />
+      <DeepLinkDialog open={deepLinkOpen} onOpenChange={setDeepLinkOpen} sessionId={sessionId} send={send} />
+
       <SimulatorToolbar
         joined={joined}
+        onDeepLink={() => setDeepLinkOpen(true)}
         onScreenshot={() => {
           const src = canvasRef.current; if (!src) return
           const c = document.createElement('canvas'); const ctx = c.getContext('2d'); if (!ctx) return
