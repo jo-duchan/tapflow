@@ -11,6 +11,7 @@ export interface DeviceAgent {
   touchStart(x: number, y: number): void
   touchMove(x: number, y: number): Promise<void>
   touchEnd(): Promise<void>
+  openUrl(url: string): Promise<void>
 }
 
 export type DeviceAgentConstructor = new () => DeviceAgent

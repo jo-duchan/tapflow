@@ -656,6 +656,23 @@ export class AndroidAgent implements DeviceAgent {
         state.touchHelper.pressButton(name)
         break
       }
+      case 'open-url': {
+        const { url } = msg.payload as { url: string }
+        const sessionId = msg.sessionId
+        const state = this.deviceStates.get(sessionId!)
+        const serial = state ? this.adb.getSerial(state.deviceId) : undefined
+        if (!serial) {
+          this.ws?.send(JSON.stringify({ type: 'open-url:error', sessionId, message: 'No booted device' }))
+          break
+        }
+        this.adb.openUrl(serial, url)
+          .then(() => this.ws?.send(JSON.stringify({ type: 'open-url:done', sessionId })))
+          .catch((e: unknown) => {
+            const message = e instanceof Error ? e.message : String(e)
+            this.ws?.send(JSON.stringify({ type: 'open-url:error', sessionId, message }))
+          })
+        break
+      }
       case 'input:keyboard:toggle': {
         // client-side key forwarding toggle only — no ADB side effect needed
         break
@@ -770,4 +787,10 @@ export class AndroidAgent implements DeviceAgent {
     return Promise.resolve()
   }
 
+  async openUrl(url: string): Promise<void> {
+    const first = this.deviceStates.values().next().value
+    const serial = first ? this.adb.getSerial(first.deviceId) : undefined
+    if (!serial) throw new ValidationError('no booted device — call connect() first')
+    await this.adb.openUrl(serial, url)
+  }
 }

@@ -349,6 +349,8 @@ export class RelayServer {
       case 'app:install-error':
       case 'app:launch-done':
       case 'app:launch-error':
+      case 'open-url:done':
+      case 'open-url:error':
       case 'keyboard:toggled': {
         const session = this.sessions.get(msg.sessionId!)
         if (session?.browserSocket?.readyState === WebSocket.OPEN) {
@@ -368,6 +370,13 @@ export class RelayServer {
       }
       case 'app:install': this.handleBrowserAppInstall(ws, msg); break
       case 'app:launch':  this.handleBrowserAppLaunch(ws, msg); break
+      case 'open-url': {
+        const session = this.sessions.get(msg.sessionId!)
+        if (session?.agentSocket.readyState === WebSocket.OPEN) {
+          session.agentSocket.send(JSON.stringify(msg))
+        }
+        break
+      }
       case 'input:touch:start':
       case 'input:touch:move':
       case 'input:touch:end':

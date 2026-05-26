@@ -157,4 +157,7 @@ export type RelayMessage =
   | { type: 'app:install-error'; message: string }
   | { type: 'app:launch-done' }
   | { type: 'app:launch-error'; message: string }
+  | { type: 'open-url'; sessionId: string; payload: { url: string } }
+  | { type: 'open-url:done' }
+  | { type: 'open-url:error'; message: string }
   | { type: 'error'; message: string }

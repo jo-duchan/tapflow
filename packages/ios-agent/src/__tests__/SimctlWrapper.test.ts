@@ -117,6 +117,15 @@ describe('SimctlWrapper', () => {
     })
   })
 
+  describe('openUrl', () => {
+    it('calls simctl openurl booted with the url', async () => {
+      const runner = mockRunner()
+      const wrapper = new SimctlWrapper(runner)
+      await wrapper.openUrl('myapp://home')
+      expect(runner.exec).toHaveBeenCalledWith('openurl', 'booted', 'myapp://home')
+    })
+  })
+
   describe('rotate', () => {
     it('calls rotation-helper with landscapeRight', async () => {
       const { execFile } = await import('child_process')

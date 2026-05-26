@@ -837,6 +837,74 @@ describe('RelayServer', () => {
     browser2.close()
   })
 
+  it('routes open-url from browser to agent', async () => {
+    const devices = [{ id: 'devA', name: 'iPhone A', platform: 'ios', status: 'booted' }]
+    const agent = new WebSocket(`ws://localhost:${port}`)
+    await waitForOpen(agent)
+    agent.send(JSON.stringify({ type: 'agent:register', devices }))
+    const { registeredSessions } = await waitForMessage(agent)
+    const sessionId = registeredSessions![0].sessionId
+
+    const browser = new WebSocket(`ws://localhost:${port}`)
+    await waitForOpen(browser)
+    browser.send(JSON.stringify({ type: 'session:start', sessionId }))
+    await waitForMessage(browser)
+
+    const msgPromise = waitForMessage(agent)
+    browser.send(JSON.stringify({ type: 'open-url', sessionId, payload: { url: 'myapp://home' } }))
+    const received = await msgPromise
+    expect(received.type).toBe('open-url')
+    expect((received.payload as { url: string }).url).toBe('myapp://home')
+
+    agent.close()
+    browser.close()
+  })
+
+  it('routes open-url:done from agent to browser', async () => {
+    const devices = [{ id: 'devA', name: 'iPhone A', platform: 'ios', status: 'booted' }]
+    const agent = new WebSocket(`ws://localhost:${port}`)
+    await waitForOpen(agent)
+    agent.send(JSON.stringify({ type: 'agent:register', devices }))
+    const { registeredSessions } = await waitForMessage(agent)
+    const sessionId = registeredSessions![0].sessionId
+
+    const browser = new WebSocket(`ws://localhost:${port}`)
+    await waitForOpen(browser)
+    browser.send(JSON.stringify({ type: 'session:start', sessionId }))
+    await waitForMessage(browser)
+
+    const msgPromise = waitForMessage(browser)
+    agent.send(JSON.stringify({ type: 'open-url:done', sessionId }))
+    const received = await msgPromise
+    expect(received.type).toBe('open-url:done')
+
+    agent.close()
+    browser.close()
+  })
+
+  it('routes open-url:error from agent to browser', async () => {
+    const devices = [{ id: 'devA', name: 'iPhone A', platform: 'ios', status: 'booted' }]
+    const agent = new WebSocket(`ws://localhost:${port}`)
+    await waitForOpen(agent)
+    agent.send(JSON.stringify({ type: 'agent:register', devices }))
+    const { registeredSessions } = await waitForMessage(agent)
+    const sessionId = registeredSessions![0].sessionId
+
+    const browser = new WebSocket(`ws://localhost:${port}`)
+    await waitForOpen(browser)
+    browser.send(JSON.stringify({ type: 'session:start', sessionId }))
+    await waitForMessage(browser)
+
+    const msgPromise = waitForMessage(browser)
+    agent.send(JSON.stringify({ type: 'open-url:error', sessionId, message: 'URL handler not found' }))
+    const received = await msgPromise
+    expect(received.type).toBe('open-url:error')
+    expect(received.message).toBe('URL handler not found')
+
+    agent.close()
+    browser.close()
+  })
+
   describe('stop', () => {
     let stopServer: RelayServer
 

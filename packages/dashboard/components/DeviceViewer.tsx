@@ -11,6 +11,7 @@ import type { FrameTiming, PerfHook } from './perf/types';
 import { parseEnvelopeHeader, HEADER_SIZE } from '@/lib/envelope';
 import { StatsOverlay } from './perf/StatsOverlay';
 import { MetricsPanel } from './perf/MetricsPanel';
+import { toast } from 'sonner';
 
 interface Props {
   sessionId: string;
@@ -94,6 +95,8 @@ export function DeviceViewer({ sessionId, deviceId, buildId, resetMode, onRecord
       setSwKeyboardVisible(visible);
       setSwKeyboardPending(false);
     }
+    if (msg.type === 'open-url:done') { toast.success('Deeplink opened'); }
+    if (msg.type === 'open-url:error') { toast.error(msg.message); }
   }, [sessionId, deviceId, buildId]);
 
   const handleBinaryFrame = useCallback((data: ArrayBuffer) => {

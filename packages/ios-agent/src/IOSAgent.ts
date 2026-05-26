@@ -485,6 +485,17 @@ export class IOSAgent implements DeviceAgent {
         }
         break
       }
+      case 'open-url': {
+        const { url } = msg.payload as { url: string }
+        const sessionId = msg.sessionId
+        this.simctl.openUrl(url)
+          .then(() => this.ws?.send(JSON.stringify({ type: 'open-url:done', sessionId })))
+          .catch((e: unknown) => {
+            const message = e instanceof Error ? e.message : String(e)
+            this.ws?.send(JSON.stringify({ type: 'open-url:error', sessionId, message }))
+          })
+        break
+      }
     }
   }
 
@@ -547,5 +558,9 @@ export class IOSAgent implements DeviceAgent {
     const first = this.deviceStates.values().next().value
     first?.touchHelper?.touchEnd()
     return Promise.resolve()
+  }
+
+  openUrl(url: string): Promise<void> {
+    return this.simctl.openUrl(url)
   }
 }

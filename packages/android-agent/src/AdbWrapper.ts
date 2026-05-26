@@ -130,6 +130,10 @@ export class AdbWrapper {
     )
   }
 
+  async openUrl(serial: string, url: string): Promise<void> {
+    await this.runner.exec('-s', serial, 'shell', 'am', 'start', '-a', 'android.intent.action.VIEW', '-d', url)
+  }
+
   async screenshot(serial: string): Promise<Buffer> {
     return this.runner.execBinary('-s', serial, 'exec-out', 'screencap', '-p')
   }
