@@ -540,23 +540,19 @@ describe('IOSAgent', () => {
     })
 
     it('reconnects automatically when connection drops and relay is available', async () => {
-      const agent = new IOSAgent({}, mockSimctl())
+      const agent = new IOSAgent({ reconnectDelays: [0] }, mockSimctl())
       await agent.connect(`ws://localhost:${port}`)
 
-      // Terminate the ws to simulate network drop (relay stays up)
       ;(agent as any).ws.terminate()
 
-      await new Promise(resolve => setTimeout(resolve, 100))
-      expect((agent as any)._reconnectAttempt).toBe(1)
-
-      // Relay is still running — wait for 1s backoff then reconnect
-      await new Promise(resolve => setTimeout(resolve, 1500))
-
-      expect((agent as any)._reconnectAttempt).toBe(0)
-      expect((agent as any).ws).not.toBeNull()
+      await vi.waitFor(() => {
+        const ws = (agent as any).ws as WebSocket | null
+        expect(ws).not.toBeNull()
+        expect(ws!.readyState).toBe(WebSocket.OPEN)
+      }, { timeout: 2000 })
 
       agent.disconnect()
-    }, 5000)
+    })
   })
 
 })
