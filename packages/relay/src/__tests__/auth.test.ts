@@ -15,6 +15,7 @@ import {
   requireRole,
   hashPat,
   verifyPat,
+  requireBuildAuth,
 } from '../middleware/auth.js'
 import type { AuthContext } from '../middleware/auth.js'
 import { AuthError } from '@tapflowio/agent-core'
@@ -223,5 +224,83 @@ describe('verifyPat', () => {
 
     const req = makeReq({ authorization: 'Bearer tflw_pat_unknown-token' })
     expect(verifyPat(req)).toBeNull()
+  })
+})
+
+// --- requireBuildAuth ---
+
+describe('requireBuildAuth', () => {
+  beforeEach(() => vi.resetAllMocks())
+
+  it('PAT가 있고 builds:write scope이면 userId 반환', () => {
+    const rawToken = 'tflw_pat_test-build-token'
+    const preparedGet = vi.fn().mockReturnValue({ user_id: 3, scope: 'builds:write' })
+    const preparedRun = vi.fn()
+    mockGet.mockReturnValue({
+      prepare: vi.fn()
+        .mockReturnValueOnce({ get: preparedGet })
+        .mockReturnValueOnce({ run: preparedRun }),
+    })
+
+    const req = makeReq({ authorization: `Bearer ${rawToken}` })
+    const res = makeRes()
+    const result = requireBuildAuth(req, res)
+
+    expect(result).toEqual({ userId: 3 })
+    expect(res.writeHead).not.toHaveBeenCalled()
+  })
+
+  it('PAT가 있지만 scope이 부족하면 403 반환 후 null', () => {
+    const rawToken = 'tflw_pat_test-wrong-scope'
+    const preparedGet = vi.fn().mockReturnValue({ user_id: 5, scope: 'other:scope' })
+    const preparedRun = vi.fn()
+    mockGet.mockReturnValue({
+      prepare: vi.fn()
+        .mockReturnValueOnce({ get: preparedGet })
+        .mockReturnValueOnce({ run: preparedRun }),
+    })
+
+    const req = makeReq({ authorization: `Bearer ${rawToken}` })
+    const res = makeRes()
+    const result = requireBuildAuth(req, res)
+
+    expect(result).toBeNull()
+    expect(res._calls[0]?.status).toBe(403)
+    expect(JSON.parse(res._calls[0]?.body ?? '{}')).toMatchObject({ error: 'Insufficient scope' })
+  })
+
+  it('PAT 없고 유효한 JWT 쿠키면 userId 반환', () => {
+    const token = signJwt(SAMPLE)
+    const req = makeReq({ cookie: `tapflow_token=${token}` })
+    const res = makeRes()
+    const result = requireBuildAuth(req, res)
+
+    expect(result).toEqual({ userId: SAMPLE.userId })
+    expect(res.writeHead).not.toHaveBeenCalled()
+  })
+
+  it('PAT 없고 JWT 쿠키도 없으면 401 반환 후 null', () => {
+    const req = makeReq()
+    const res = makeRes()
+    const result = requireBuildAuth(req, res)
+
+    expect(result).toBeNull()
+    expect(res._calls[0]?.status).toBe(401)
+  })
+
+  it('PAT가 만료/무효이면 JWT 쿠키로 fallback', () => {
+    mockGet.mockReturnValue({
+      prepare: vi.fn().mockReturnValue({ get: vi.fn().mockReturnValue(undefined) }),
+    })
+
+    const token = signJwt(SAMPLE)
+    const req = makeReq({
+      authorization: 'Bearer tflw_pat_expired-token',
+      cookie: `tapflow_token=${token}`,
+    })
+    const res = makeRes()
+    const result = requireBuildAuth(req, res)
+
+    expect(result).toEqual({ userId: SAMPLE.userId })
   })
 })

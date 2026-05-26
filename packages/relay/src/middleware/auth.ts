@@ -88,3 +88,21 @@ export function verifyPat(req: http.IncomingMessage): { userId: number; scope: s
 export function hashPat(token: string): string {
   return crypto.createHash('sha256').update(token).digest('hex')
 }
+
+export function requireBuildAuth(
+  req: http.IncomingMessage,
+  res: http.ServerResponse
+): { userId: number } | null {
+  const pat = verifyPat(req)
+  if (pat !== null) {
+    if (!pat.scope.split(',').map((s) => s.trim()).includes('builds:write')) {
+      res.writeHead(403, { 'Content-Type': 'application/json' })
+      res.end(JSON.stringify({ error: 'Insufficient scope' }))
+      return null
+    }
+    return { userId: pat.userId }
+  }
+  const auth = requireAuth(req, res)
+  if (!auth) return null
+  return { userId: auth.userId }
+}
