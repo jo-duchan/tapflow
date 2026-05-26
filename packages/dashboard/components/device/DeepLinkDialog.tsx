@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { Search } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog';
@@ -14,9 +14,14 @@ interface Props {
 
 export function DeepLinkDialog({ open, onOpenChange, sessionId, send }: Props) {
   const [url, setUrl] = useState('');
+  const inputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
-    if (!open) setUrl('');
+    if (open) {
+      setTimeout(() => inputRef.current?.focus(), 0);
+    } else {
+      setUrl('');
+    }
   }, [open]);
 
   const handleSubmit = () => {
@@ -36,6 +41,7 @@ export function DeepLinkDialog({ open, onOpenChange, sessionId, send }: Props) {
           <div className="flex-1 h-[32px] flex items-center gap-2 pl-[4px] pb-[1px]">
             <Search className="h-4 w-4 text-muted-foreground shrink-0" />
             <input
+              ref={inputRef}
               className="flex-1 bg-transparent text-sm outline-none placeholder:text-muted-foreground min-w-0"
               placeholder="myapp://home..."
               value={url}
@@ -43,7 +49,6 @@ export function DeepLinkDialog({ open, onOpenChange, sessionId, send }: Props) {
               onKeyDown={(e) => {
                 if (e.key === 'Enter') handleSubmit();
               }}
-              autoFocus
             />
           </div>
           <Button
