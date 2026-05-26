@@ -468,14 +468,15 @@ describe('RelayServer', () => {
       streamWs.send(JSON.stringify({ type: 'stream:register', sessionId }))
       await waitForMessage(streamWs) // stream:registered
 
-      streamWs.send(Buffer.from([0xff, 0xd8, 0xff]))
-      // If backpressure drop is broken, the frame arrives before setImmediate resolves → immediate reject
-      await new Promise<void>((resolve, reject) => {
+      // Register before send — if drop is broken the frame may arrive before setImmediate fires
+      const dropCheck = new Promise<void>((resolve, reject) => {
         setImmediate(resolve)
         browser.once('message', (_d, isBinary) => {
           if (isBinary) reject(new Error('frame should have been dropped by backpressure'))
         })
       })
+      streamWs.send(Buffer.from([0xff, 0xd8, 0xff]))
+      await dropCheck
 
       agent.close()
       browser.close()
@@ -762,11 +763,14 @@ describe('RelayServer', () => {
 
       // If shutdown arrives at any point during the wait, fail immediately
       await new Promise<void>((resolve, reject) => {
-        setTimeout(resolve, 600)
-        agent.on('message', (d) => {
-          if (JSON.parse(d.toString()).type === 'device:shutdown')
+        const listener = (d: Buffer) => {
+          if (JSON.parse(d.toString()).type === 'device:shutdown') {
+            agent.off('message', listener)
             reject(new Error('unexpected device:shutdown — idle timer was not cancelled'))
-        })
+          }
+        }
+        agent.on('message', listener)
+        setTimeout(() => { agent.off('message', listener); resolve() }, 600)
       })
 
       agent.close()
@@ -962,7 +966,12 @@ describe('RelayServer', () => {
 
     it('clears all interval timers', async () => {
       await stopServer.stop()
-      const s = stopServer as any
+      const s = stopServer as unknown as {
+        purgeRecordingsTimer: ReturnType<typeof setInterval> | null
+        purgeOldResourcesTimer: ReturnType<typeof setInterval> | null
+        purgeBuildsTimer: ReturnType<typeof setInterval> | null
+        flushResourcesTimer: ReturnType<typeof setInterval> | null
+      }
       expect(s.purgeRecordingsTimer).toBeNull()
       expect(s.purgeOldResourcesTimer).toBeNull()
       expect(s.purgeBuildsTimer).toBeNull()
