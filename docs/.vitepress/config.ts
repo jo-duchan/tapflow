@@ -32,6 +32,7 @@ const enSidebar = [
     text: 'AI Agent',
     items: [
       { text: 'MCP Server', link: '/guide/mcp-server' },
+      { text: 'MCP in CI/CD', link: '/guide/mcp-ci' },
     ],
   },
   {
@@ -85,6 +86,7 @@ const koSidebar = [
     text: 'AI 에이전트',
     items: [
       { text: 'MCP 서버', link: '/ko/guide/mcp-server' },
+      { text: 'CI/CD에서 MCP 활용', link: '/ko/guide/mcp-ci' },
     ],
   },
   {

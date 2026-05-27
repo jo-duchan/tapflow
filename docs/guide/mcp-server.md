@@ -1,6 +1,16 @@
 # MCP Server
 
-`@tapflowio/mcp-server` exposes tapflow as a [Model Context Protocol (MCP)](https://modelcontextprotocol.io) server. Any LLM agent that supports MCP — Claude Code, Codex, and others — can call tapflow directly as a native tool.
+`@tapflowio/mcp-server` exposes tapflow as a [Model Context Protocol (MCP)](https://modelcontextprotocol.io) server. Claude Code, Codex, and any other MCP-compatible LLM agent can control iOS simulators and Android emulators as native tools — no scripting, no hardcoded selectors.
+
+## When to use this
+
+**Repeatable automated testing** is where this shines. One-off manual checks are still faster done by hand.
+
+- **CI/CD regression tests** — After each build, an agent boots a simulator, installs the build, walks through key flows, captures screenshots, and reports regressions. No human intervention needed. → [MCP in CI/CD](/guide/mcp-ci)
+- **Multi-device matrix** — Run the same flow on iPhone SE (iOS 16), iPhone 15 Pro (iOS 17), and an Android emulator in sequence without manually switching devices.
+- **Natural language QA scripts** — Non-developers (QA, PM) describe test scenarios in plain text; the agent executes them. No coordinate mapping or brittle selectors.
+
+## How it connects
 
 ```
 LLM Agent (Claude Code, etc.)
@@ -11,6 +21,8 @@ tapflow relay
     ↓  WebSocket
 Mac Agent (iOS · Android)
 ```
+
+The MCP server is a local process that bridges the LLM agent to your self-hosted relay. App data never leaves your network.
 
 ## Prerequisites
 
@@ -24,9 +36,33 @@ Mac Agent (iOS · Android)
 npm install -g @tapflowio/mcp-server
 ```
 
-## Claude Code configuration
+## Setup
 
-Add the following to your project's `.claude/mcp.json`:
+### Claude Code
+
+Register tapflow with the `claude mcp add` command:
+
+```sh
+claude mcp add --scope project \
+  --env TAPFLOW_RELAY_URL=ws://localhost:4000 \
+  --env TAPFLOW_TOKEN=tflw_pat_your_token_here \
+  tapflow -- tapflow-mcp
+```
+
+`--scope project` saves the config to `.mcp.json` so the whole team shares it. Use `--scope local` (the default) if you only want it for yourself.
+
+If the relay is on a remote server, change the URL:
+
+```sh
+claude mcp add --scope project \
+  --env TAPFLOW_RELAY_URL=wss://your-relay.example.com \
+  --env TAPFLOW_TOKEN=tflw_pat_your_token_here \
+  tapflow -- tapflow-mcp
+```
+
+### Other MCP clients (Cursor, VS Code, Codex)
+
+Any MCP-compatible client can use tapflow. Add the following to your MCP config JSON:
 
 ```json
 {
@@ -39,14 +75,6 @@ Add the following to your project's `.claude/mcp.json`:
       }
     }
   }
-}
-```
-
-If the relay is on a remote server, update `TAPFLOW_RELAY_URL` accordingly:
-
-```json
-{
-  "TAPFLOW_RELAY_URL": "wss://your-relay.example.com"
 }
 ```
 
@@ -94,12 +122,4 @@ disconnect_device  → end the session
 If `list_devices` returns `"status": "booted"` for a device, you can skip `boot_device`.
 :::
 
-## Example prompt
-
-In Claude Code, you can instruct the agent in natural language:
-
-```
-Open the simulator and capture the login screen of the sandbox app.
-Type test@example.com into the email field, tap the login button,
-then capture the result screen and check for any errors.
-```
+For running this in a CI pipeline, see [MCP in CI/CD](/guide/mcp-ci).

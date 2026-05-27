@@ -1,6 +1,16 @@
 # MCP 서버
 
-`@tapflowio/mcp-server`는 tapflow를 [Model Context Protocol(MCP)](https://modelcontextprotocol.io) 서버로 노출합니다. Claude Code, Codex 등 MCP를 지원하는 LLM 에이전트가 tapflow를 네이티브 도구로 직접 호출할 수 있습니다.
+`@tapflowio/mcp-server`는 tapflow를 [Model Context Protocol(MCP)](https://modelcontextprotocol.io) 서버로 노출합니다. Claude Code, Codex 등 MCP를 지원하는 LLM 에이전트가 iOS 시뮬레이터와 Android 에뮬레이터를 네이티브 도구로 직접 제어할 수 있습니다. 스크립팅도, 좌표 하드코딩도 필요 없습니다.
+
+## 이럴 때 쓰세요
+
+**반복적인 자동화 테스트**에서 진가를 발휘합니다. 단발성 수동 확인은 여전히 직접 하는 게 빠릅니다.
+
+- **CI/CD 회귀 테스트** — 빌드마다 에이전트가 시뮬레이터를 부팅하고, 빌드를 설치하고, 주요 플로우를 순회하고, 스크린샷을 캡처해 회귀를 감지합니다. 사람이 개입할 필요가 없습니다. → [CI/CD에서 MCP 활용하기](/ko/guide/mcp-ci)
+- **다중 디바이스 매트릭스** — iPhone SE (iOS 16), iPhone 15 Pro (iOS 17), Android 에뮬레이터를 직접 전환하지 않고 동일한 플로우를 순차 실행할 수 있습니다.
+- **자연어 QA 스크립트** — 개발자가 아닌 QA·PM도 테스트 시나리오를 평문으로 작성하면 에이전트가 실행합니다. 셀렉터나 좌표 매핑이 불필요합니다.
+
+## 연결 구조
 
 ```
 LLM 에이전트 (Claude Code 등)
@@ -11,6 +21,8 @@ tapflow relay
     ↓  WebSocket
 Mac 에이전트 (iOS · Android)
 ```
+
+MCP 서버는 LLM 에이전트와 자체 호스팅 relay를 연결하는 로컬 프로세스입니다. 앱 데이터는 네트워크 밖으로 나가지 않습니다.
 
 ## 사전 조건
 
@@ -24,9 +36,33 @@ Mac 에이전트 (iOS · Android)
 npm install -g @tapflowio/mcp-server
 ```
 
-## Claude Code 설정
+## 설정
 
-프로젝트의 `.claude/mcp.json`에 추가합니다.
+### Claude Code
+
+`claude mcp add` 명령어로 바로 등록할 수 있습니다.
+
+```sh
+claude mcp add --scope project \
+  --env TAPFLOW_RELAY_URL=ws://localhost:4000 \
+  --env TAPFLOW_TOKEN=tflw_pat_your_token_here \
+  tapflow -- tapflow-mcp
+```
+
+`--scope project`로 등록하면 `.mcp.json`에 저장되어 팀과 공유됩니다. 본인만 사용할 경우 `--scope local`(기본값)을 사용하세요.
+
+릴레이가 원격 서버에 있다면 URL을 변경합니다.
+
+```sh
+claude mcp add --scope project \
+  --env TAPFLOW_RELAY_URL=wss://your-relay.example.com \
+  --env TAPFLOW_TOKEN=tflw_pat_your_token_here \
+  tapflow -- tapflow-mcp
+```
+
+### 다른 MCP 클라이언트 (Cursor, VS Code, Codex)
+
+MCP를 지원하는 클라이언트라면 모두 tapflow를 사용할 수 있습니다. MCP 설정 JSON에 아래를 추가하세요.
 
 ```json
 {
@@ -39,14 +75,6 @@ npm install -g @tapflowio/mcp-server
       }
     }
   }
-}
-```
-
-릴레이가 원격 서버에 있는 경우 `TAPFLOW_RELAY_URL`을 해당 주소로 변경합니다.
-
-```json
-{
-  "TAPFLOW_RELAY_URL": "wss://your-relay.example.com"
 }
 ```
 
@@ -94,12 +122,4 @@ disconnect_device  → 세션 종료
 `list_devices` 응답의 `status` 필드가 `"booted"`이면 `boot_device`를 생략할 수 있습니다.
 :::
 
-## 예시 프롬프트
-
-Claude Code에서 아래와 같이 자연어로 지시할 수 있습니다.
-
-```
-시뮬레이터를 열고 샌드박스 앱의 로그인 화면을 캡처해줘.
-이메일 필드에 test@example.com을 입력하고 로그인 버튼을 탭한 다음
-결과 화면을 캡처해서 오류가 있는지 확인해줘.
-```
+CI 파이프라인에서 실행하는 방법은 [CI/CD에서 MCP 활용하기](/ko/guide/mcp-ci)를 참고하세요.
