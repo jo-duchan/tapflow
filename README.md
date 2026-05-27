@@ -31,7 +31,7 @@
 
 ## Demo
 
-<video src="https://github.com/user-attachments/assets/01914ed2-f35c-4230-ae01-166ffe6af395" controls width="100%"></video>
+<video src="https://github.com/user-attachments/assets/c19f3c17-0fba-4f73-a8ff-3adb1fa2b2c5" controls width="100%"></video>
 
 [▶ Watch demo](https://www.tapflow.dev/guide/introduction)
 
