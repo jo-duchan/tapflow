@@ -25,15 +25,9 @@
   </p>
 </div>
 
-> **v0.x**: tapflow is under active development. Breaking changes may appear in minor versions until v1.0.0. See [ROADMAP](./ROADMAP.md) for the full plan.
-
----
-
-## Demo
-
 <video src="https://github.com/user-attachments/assets/01914ed2-f35c-4230-ae01-166ffe6af395" controls width="100%"></video>
 
-[▶ Watch demo](https://www.tapflow.dev/guide/introduction)
+> **v0.x**: tapflow is under active development. Breaking changes may appear in minor versions until v1.0.0. See [ROADMAP](./ROADMAP.md) for the full plan.
 
 ---
 
