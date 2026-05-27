@@ -1,10 +1,10 @@
 <div align="center">
   <img src="docs/public/logo-hero.svg" height="72" alt="tapflow" />
 
-  <h3>Self-hosted iOS & Android simulator streaming for mobile QA</h3>
+  <h3>A self-hosted Appetize / BrowserStack alternative for mobile QA teams</h3>
 
   <p>
-    Anyone on your team can run simulators in the browser — no toolchain setup, no device management, no cloud uploads.<br />
+    Run iOS simulators and Android emulators in any browser — no toolchain setup, no device management, no cloud uploads.<br />
     App data never leaves your network.
   </p>
 
@@ -25,15 +25,9 @@
   </p>
 </div>
 
-> **alpha**: tapflow is in active development (v0.x). Breaking changes may appear in minor versions until v1.0.0. See [ROADMAP](./ROADMAP.md) for known gaps.
-
----
-
-## Demo
-
 <video src="https://github.com/user-attachments/assets/01914ed2-f35c-4230-ae01-166ffe6af395" controls width="100%"></video>
 
-[▶ Watch demo](https://www.tapflow.dev/guide/introduction)
+> **v0.x**: tapflow is under active development. Breaking changes may appear in minor versions until v1.0.0. See [ROADMAP](./ROADMAP.md) for the full plan.
 
 ---
 
@@ -64,15 +58,24 @@ So we built tapflow.
 
 ## Features
 
-- **Browser-based** — Anyone on the team needs no installation. Any modern browser works.
-- **iOS Simulator** — JPEG frame streaming at ~30 fps via SimulatorKit IOSurface. No WebDriverAgent required.
-- **Android Emulator** — H.264 streaming via [scrcpy](https://github.com/Genymobile/scrcpy) at ~30 fps.
-- **Touch, swipe & pinch** — real-time input forwarded to the simulator.
-- **App Center** — upload `.app.zip` (iOS) or `.apk` (Android), manage builds by status (Backlog / In Progress / Done / Rejected).
-- **Session Recordings** — record QA sessions, share with your team. Retained for 72 hours.
-- **Mac Resources** — CPU & RAM monitoring per agent. Spot overloaded hosts before assigning sessions.
-- **Team management** — invite links, roles (Admin / Developer / QA / Viewer), Personal Access Tokens for CI/CD.
-- **Self-hosted** — deploy anywhere. No cloud dependency.
+tapflow focuses on:
+
+- **Zero setup for QA** — any browser, no toolchain. Designers, PMs, and server devs test without asking a mobile developer.
+- **Data on-premises** — app binaries and session recordings never leave your network.
+- **Your existing Mac** — no new hardware, no monthly cloud subscription.
+- **API-first** — REST endpoints and PATs built in, ready for CI/CD and AI agent workflows.
+
+What's included:
+
+- **iOS & Android streaming** — ~30 fps, no additional app required on the device
+- **Touch, swipe & pinch** — real-time input forwarded to the simulator
+- **Deeplink** — jump directly to any screen from the QA toolbar, no manual navigation
+- **Keyboard shortcuts** — simulator toolbar actions without leaving the keyboard
+- **App Center** — upload `.app.zip` / `.apk`, track builds by status (Backlog / In Progress / Done / Rejected)
+- **Session recordings** — record and share QA sessions, retained 72 hours
+- **Screenshot REST endpoint** — `GET /api/v1/sessions/:sessionId/screenshot` for CI and AI agents
+- **Mac resource monitoring** — CPU & RAM per agent, spot overloaded hosts before assigning sessions
+- **Team management** — invite links, roles (Admin / Developer / QA / Viewer), Personal Access Tokens
 
 ## How it works
 
