@@ -23,8 +23,9 @@ function parseXmlPlist(xml: string): Record<string, string> {
 function findAppDirInZip(zipPath: string): string | null {
   const list = spawnSync('unzip', ['-l', zipPath], { encoding: 'utf8' })
   if (list.status !== 0) return null
-  // "  12345  2024-01-01 00:00:00  MyApp.app/"  형태를 매칭
-  const re = /\s(\S+\.app)\/\s*$/m
+  // "  12345  2024-01-01 00:00:00  MyApp.app/"  형태를 매칭 (앱 이름에 공백 포함 가능)
+  // HH:MM 시간 컬럼을 기준점으로 삼아 filename 컬럼만 캡처
+  const re = /\d{2}:\d{2}\s+(\S[^/\n]*\.app)\/\s*$/m
   const m = re.exec(list.stdout as string)
   if (!m) return null
   // 루트 레벨만 (슬래시 미포함)

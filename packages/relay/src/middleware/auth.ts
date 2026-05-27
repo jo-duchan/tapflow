@@ -89,6 +89,34 @@ export function hashPat(token: string): string {
   return crypto.createHash('sha256').update(token).digest('hex')
 }
 
+export function requireViewAuth(
+  req: http.IncomingMessage,
+  res: http.ServerResponse,
+): AuthContext | null {
+  const cookieAuth = getAuth(req)
+  if (cookieAuth) return cookieAuth
+  const pat = verifyPat(req)
+  if (!pat) {
+    res.writeHead(401, { 'Content-Type': 'application/json' })
+    res.end(JSON.stringify({ error: 'Unauthorized' }))
+    return null
+  }
+  if (!pat.scope.split(',').map((s) => s.trim()).includes('view')) {
+    res.writeHead(403, { 'Content-Type': 'application/json' })
+    res.end(JSON.stringify({ error: 'Insufficient scope' }))
+    return null
+  }
+  const user = getDb()
+    .prepare('SELECT email, role FROM users WHERE id = ?')
+    .get(pat.userId) as { email: string; role: string } | undefined
+  if (!user) {
+    res.writeHead(401, { 'Content-Type': 'application/json' })
+    res.end(JSON.stringify({ error: 'Unauthorized' }))
+    return null
+  }
+  return { userId: pat.userId, email: user.email, role: user.role }
+}
+
 export function requireBuildAuth(
   req: http.IncomingMessage,
   res: http.ServerResponse

@@ -25,7 +25,7 @@
   </p>
 </div>
 
-<video src="https://github.com/user-attachments/assets/01914ed2-f35c-4230-ae01-166ffe6af395" controls width="100%"></video>
+<video src="https://github.com/user-attachments/assets/75652346-93cb-4261-9210-6a24b883d44a" controls width="100%"></video>
 
 > **v0.x**: tapflow is under active development. Breaking changes may appear in minor versions until v1.0.0. See [ROADMAP](./ROADMAP.md) for the full plan.
 
@@ -76,6 +76,7 @@ What's included:
 - **Screenshot REST endpoint** — `GET /api/v1/sessions/:sessionId/screenshot` for CI and AI agents
 - **Mac resource monitoring** — CPU & RAM per agent, spot overloaded hosts before assigning sessions
 - **Team management** — invite links, roles (Admin / Developer / QA / Viewer), Personal Access Tokens
+- **MCP Server** — `@tapflowio/mcp-server` lets Claude Code and other LLM agents control simulators as native tools.
 
 ## How it works
 
@@ -198,6 +199,9 @@ Full reference → [CLI docs](https://www.tapflow.dev/reference/cli)
 **Dashboard**
 - [First-time Setup](https://www.tapflow.dev/dashboard/setup)
 - [Dashboard Overview](https://www.tapflow.dev/dashboard/overview)
+
+**AI Agent**
+- [MCP Server](https://www.tapflow.dev/guide/mcp-server)
 
 **Reference**
 - [CLI Reference](https://www.tapflow.dev/reference/cli)
