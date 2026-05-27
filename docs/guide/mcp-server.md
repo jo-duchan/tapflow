@@ -12,7 +12,7 @@
 
 ## How it connects
 
-```
+```text
 LLM Agent (Claude Code, etc.)
     ↓  MCP protocol (stdio)
 @tapflowio/mcp-server
@@ -106,7 +106,7 @@ Any MCP-compatible client can use tapflow. Add the following to your MCP config 
 
 An LLM agent typically calls tools in this order:
 
-```
+```text
 list_devices       → get available devices and sessionIds
 connect_device     → join a session
 boot_device        → wait for the device to be ready (skip if already booted)

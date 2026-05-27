@@ -101,6 +101,11 @@ export function requireViewAuth(
     res.end(JSON.stringify({ error: 'Unauthorized' }))
     return null
   }
+  if (!pat.scope.split(',').map((s) => s.trim()).includes('view')) {
+    res.writeHead(403, { 'Content-Type': 'application/json' })
+    res.end(JSON.stringify({ error: 'Insufficient scope' }))
+    return null
+  }
   const user = getDb()
     .prepare('SELECT email, role FROM users WHERE id = ?')
     .get(pat.userId) as { email: string; role: string } | undefined

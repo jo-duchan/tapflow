@@ -53,8 +53,12 @@ export function registerTools(server: McpServer, client: TapflowClient): void {
       },
     },
     async ({ sessionId }) => {
-      client.disconnectDevice(sessionId)
-      return ok(JSON.stringify({ disconnected: true, sessionId }))
+      try {
+        client.disconnectDevice(sessionId)
+        return ok(JSON.stringify({ disconnected: true, sessionId }))
+      } catch (e) {
+        return err(`disconnect_device failed: ${(e as Error).message}`)
+      }
     },
   )
 

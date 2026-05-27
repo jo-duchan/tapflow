@@ -33,12 +33,16 @@ function createMockRelay(): {
   }
 }
 
-function waitForMessage(relay: ReturnType<typeof createMockRelay>, type: string) {
-  return new Promise<Record<string, unknown>>((resolve) => {
+function waitForMessage(relay: ReturnType<typeof createMockRelay>, type: string, timeoutMs = 2000) {
+  return new Promise<Record<string, unknown>>((resolve, reject) => {
     const check = setInterval(() => {
       const found = relay.sentMessages().find((m) => m['type'] === type)
-      if (found) { clearInterval(check); resolve(found) }
+      if (found) { clearInterval(check); clearTimeout(timer); resolve(found) }
     }, 10)
+    const timer = setTimeout(() => {
+      clearInterval(check)
+      reject(new Error(`waitForMessage: timed out waiting for type "${type}"`))
+    }, timeoutMs)
   })
 }
 

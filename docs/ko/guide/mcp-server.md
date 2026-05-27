@@ -12,7 +12,7 @@
 
 ## 연결 구조
 
-```
+```text
 LLM 에이전트 (Claude Code 등)
     ↓  MCP 프로토콜 (stdio)
 @tapflowio/mcp-server
@@ -106,7 +106,7 @@ MCP를 지원하는 클라이언트라면 모두 tapflow를 사용할 수 있습
 
 LLM 에이전트는 보통 아래 순서로 도구를 호출합니다.
 
-```
+```text
 list_devices       → 사용 가능한 디바이스와 sessionId 확인
 connect_device     → 세션 참여
 boot_device        → 부팅 대기 (이미 부팅 중이면 생략 가능)

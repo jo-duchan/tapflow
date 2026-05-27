@@ -31,7 +31,7 @@ export async function handleCreateToken(req: http.IncomingMessage, res: http.Ser
   const db = getDb()
   db.prepare(
     'INSERT INTO personal_access_tokens (user_id, name, token_hash, scope, expires_at) VALUES (?, ?, ?, ?, ?)'
-  ).run(auth.userId, body.name.trim(), tokenHash, 'builds:write', expiresAt)
+  ).run(auth.userId, body.name.trim(), tokenHash, 'view,builds:write', expiresAt)
 
   json(res, 201, { token: rawToken })
 }

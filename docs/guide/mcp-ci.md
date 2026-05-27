@@ -6,7 +6,7 @@ Run automated smoke tests against a real simulator on every build — no Seleniu
 
 A CI job installs `@tapflowio/mcp-server`, configures it to point at your always-on relay, then invokes `claude` (Claude Code CLI) with a natural-language test prompt. The agent controls the simulator via MCP tools and exits with a non-zero code if it detects a failure.
 
-```
+```text
 CI runner
   → installs @tapflowio/mcp-server
   → runs: claude --mcp-config .mcp.json -p "<test prompt>"
@@ -117,7 +117,7 @@ jobs:
 Write prompts that describe outcomes, not steps. The agent figures out the navigation.
 
 **Login flow:**
-```
+```text
 Connect to the first available simulator.
 Install and launch the sandbox build.
 Navigate to the login screen, enter email test@example.com and password test1234,
@@ -126,14 +126,14 @@ Screenshot the result. If login fails or an error appears, report the error text
 ```
 
 **Onboarding:**
-```
+```text
 Fresh-install the app and walk through the onboarding flow.
 Screenshot each step. Verify all buttons are tappable and no screens are blank.
 Report any step where the UI appears broken.
 ```
 
 **Post-deploy sanity check:**
-```
+```text
 Launch the latest installed build.
 Visit the three main tabs: Home, Search, and Profile.
 Screenshot each tab and confirm they load without errors or empty states.

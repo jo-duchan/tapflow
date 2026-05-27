@@ -107,7 +107,7 @@ export class TapflowClient {
     const msg = await this.waitFor(
       (m) =>
         (m['type'] === 'session:joined' && m['sessionId'] === sessionId) ||
-        (m['type'] === 'error' && !m['sessionId']),
+        (m['type'] === 'error' && (m['sessionId'] === undefined || m['sessionId'] === sessionId)),
       5_000,
     )
     if (msg['type'] === 'error') throw new Error((msg['message'] as string) ?? 'Connect failed')
@@ -210,8 +210,14 @@ export class TapflowClient {
       headers: { Authorization: `Bearer ${this.token}` },
     })
     if (!res.ok) {
-      const body = (await res.json()) as { error?: string }
-      throw new Error(body.error ?? `Screenshot failed: ${res.status}`)
+      let message: string
+      try {
+        const body = (await res.json()) as { error?: string }
+        message = body.error ?? `Screenshot failed: ${res.status}`
+      } catch {
+        message = (await res.text().catch(() => '')) || `Screenshot failed: ${res.status}`
+      }
+      throw new Error(message)
     }
     return Buffer.from(await res.arrayBuffer())
   }
