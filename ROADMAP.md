@@ -2,7 +2,7 @@
 
 > Live tracking → [GitHub Projects](https://github.com/users/jo-duchan/projects/1)
 
-tapflow is currently in **alpha** (`v0.x`). The roadmap below reflects the path to a stable `v1.0.0`.
+tapflow is currently at `v0.x`. The roadmap below reflects the path to a stable `v1.0.0`.
 Breaking changes may appear in minor versions until `v1.0.0` is tagged.
 
 ---
