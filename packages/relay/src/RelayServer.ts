@@ -6,7 +6,7 @@ import { WebSocketServer, WebSocket } from 'ws'
 import { SessionManager } from './SessionManager.js'
 import type { RelayMessage } from './types.js'
 import { Router, json } from './router.js'
-import { requireAuth } from './middleware/auth.js'
+import { requireAuth, requireViewAuth } from './middleware/auth.js'
 import { getDb } from './db.js'
 import { handleLogin, handleLogout, handleMe, handleChangePassword, handleInit } from './api/auth.js'
 import { handleVerify, handleAccept } from './api/invitations.js'
@@ -520,7 +520,7 @@ export class RelayServer {
     res: http.ServerResponse,
     params: Record<string, string>,
   ): Promise<void> {
-    if (!requireAuth(req, res)) return
+    if (!requireViewAuth(req, res)) return
 
     const { sessionId } = params
     const session = this.sessions.get(sessionId)

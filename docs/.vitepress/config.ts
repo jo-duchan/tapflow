@@ -29,6 +29,12 @@ const enSidebar = [
     ],
   },
   {
+    text: 'AI Agent',
+    items: [
+      { text: 'MCP Server', link: '/guide/mcp-server' },
+    ],
+  },
+  {
     text: 'Reference',
     items: [
       { text: 'CLI Reference', link: '/reference/cli' },
@@ -73,6 +79,12 @@ const koSidebar = [
     items: [
       { text: '최초 설정', link: '/ko/dashboard/setup' },
       { text: '대시보드 개요', link: '/ko/dashboard/overview' },
+    ],
+  },
+  {
+    text: 'AI 에이전트',
+    items: [
+      { text: 'MCP 서버', link: '/ko/guide/mcp-server' },
     ],
   },
   {

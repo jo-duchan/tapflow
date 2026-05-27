@@ -72,6 +72,7 @@ So we built tapflow.
 - **Session Recordings** — record QA sessions, share with your team. Retained for 72 hours.
 - **Mac Resources** — CPU & RAM monitoring per agent. Spot overloaded hosts before assigning sessions.
 - **Team management** — invite links, roles (Admin / Developer / QA / Viewer), Personal Access Tokens for CI/CD.
+- **MCP Server** — `@tapflowio/mcp-server` lets Claude Code and other LLM agents control simulators as native tools.
 - **Self-hosted** — deploy anywhere. No cloud dependency.
 
 ## How it works
@@ -200,6 +201,9 @@ Full reference → [CLI docs](https://www.tapflow.dev/reference/cli)
 - [CLI Reference](https://www.tapflow.dev/reference/cli)
 - [Configuration](https://www.tapflow.dev/reference/configuration)
 - [REST API](https://www.tapflow.dev/reference/api)
+
+**AI Agent**
+- [MCP Server](https://www.tapflow.dev/guide/mcp-server)
 
 **[Troubleshooting](https://www.tapflow.dev/guide/troubleshooting)**
 

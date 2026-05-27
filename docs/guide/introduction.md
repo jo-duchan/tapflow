@@ -45,3 +45,4 @@ Visual quality and latency may differ between the two.
 - **Relay** — the central server. Routes traffic between agents and browsers. Deploy once.
 - **Agent** — runs on Mac (iOS and Android). Connects to the relay.
 - **Dashboard** — the React SPA served by the relay. No separate deploy needed. Includes App Center (build management), Mac Resources (agent monitoring), and more.
+- **MCP Server** — exposes tapflow as a tool for LLM agents. Claude Code and other MCP-compatible agents can control simulators directly. → [MCP Server guide](/guide/mcp-server)
