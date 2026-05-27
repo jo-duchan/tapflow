@@ -208,6 +208,13 @@ describe('extractAppZipInfo', () => {
     expect(info!.appName).toBe('Coffee App')
   })
 
+  it('extracts metadata when .app name contains spaces', () => {
+    const spacedZip = makeTestZip(tmpDir, 'Food Truck', XML_PLIST)
+    const info = extractAppZipInfo(spacedZip)
+    expect(info).not.toBeNull()
+    expect(info!.bundleId).toBe('com.example.coffee')
+  })
+
   it('returns null for a zip with no .app directory', () => {
     const emptyZip = path.join(tmpDir, 'empty.zip')
     fs.writeFileSync(path.join(tmpDir, 'readme.txt'), 'hello')
