@@ -68,8 +68,11 @@ So we built tapflow.
 - **iOS Simulator** — JPEG frame streaming at ~30 fps via SimulatorKit IOSurface. No WebDriverAgent required.
 - **Android Emulator** — H.264 streaming via [scrcpy](https://github.com/Genymobile/scrcpy) at ~30 fps.
 - **Touch, swipe & pinch** — real-time input forwarded to the simulator.
+- **Deeplink** — enter a URL from the QA toolbar to jump directly to a specific screen without manual navigation.
+- **Keyboard shortcuts** — simulator toolbar actions available as keyboard shortcuts for faster interactions.
 - **App Center** — upload `.app.zip` (iOS) or `.apk` (Android), manage builds by status (Backlog / In Progress / Done / Rejected).
 - **Session Recordings** — record QA sessions, share with your team. Retained for 72 hours.
+- **Screenshot REST endpoint** — `GET /api/v1/sessions/:sessionId/screenshot` for programmatic capture and AI agent integration.
 - **Mac Resources** — CPU & RAM monitoring per agent. Spot overloaded hosts before assigning sessions.
 - **Team management** — invite links, roles (Admin / Developer / QA / Viewer), Personal Access Tokens for CI/CD.
 - **Self-hosted** — deploy anywhere. No cloud dependency.

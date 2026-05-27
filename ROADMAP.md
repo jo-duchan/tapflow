@@ -57,7 +57,7 @@ Scalability, extensibility, and CI/CD integration.
 - [x] WebSocket backpressure — check `ws.bufferedAmount` before sending frames; drop or queue frames for slow clients
 - [x] Runtime platform registration — replace `'ios' | 'android'` literal union with a dynamic registry so new platforms require zero changes to `agent-core`, CLI, or Dashboard
 - [ ] CI/CD integration guide — end-to-end walkthrough: upload `.app.zip` / `.apk` via REST API from CI → view results in the dashboard
-- [ ] PAT scope enforcement — apply `scope` checks consistently across all endpoints
+- [x] PAT scope enforcement — apply `scope` checks consistently across all endpoints
 - [ ] Tier 2 integration tests — real simulator / emulator touch and stream smoke tests in GitHub Actions (`macos-latest` for iOS, `ubuntu-latest` + `reactivecircus/android-emulator-runner` for Android)
 
 ---
@@ -68,7 +68,8 @@ Streaming performance, resource-aware scheduling, and AI agent integration.
 
 - [ ] Streaming performance improvements — encoding and transport optimization for iOS (JPEG pipeline) and Android (scrcpy parameters)
 - [ ] Block new session when agent resource usage is high — prevent overloading the host Mac
-- [ ] AI agent integration — LLM-driven simulator control via screenshot REST endpoint + MCP server package (`@tapflowio/mcp-server`)
+- [x] Screenshot REST endpoint — `GET /api/v1/sessions/:sessionId/screenshot` for programmatic screen capture and LLM perception-action loops
+- [ ] MCP server package (`@tapflowio/mcp-server`) — LLM-driven simulator control via MCP tools; prerequisite: screenshot REST endpoint ✅
 
 ---
 
