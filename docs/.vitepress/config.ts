@@ -116,6 +116,10 @@ export default withMermaid(defineConfig({
   description: 'Self-hosted iOS/Android simulator streaming for QA',
   cleanUrls: true,
 
+  sitemap: {
+    hostname: 'https://tapflow.dev',
+  },
+
   locales: {
     root: {
       label: 'English',
