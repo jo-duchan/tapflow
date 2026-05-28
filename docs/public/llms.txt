@@ -1,0 +1,43 @@
+# tapflow
+
+> tapflow is an open-source, self-hosted tool that lets your entire team — PO, PM, designers, backend engineers, and QA — run iOS simulators and Android emulators directly in the browser. No IDE, no device setup, no data leaving your network.
+>
+> Architecture: a Mac Agent connects outbound to a Relay server; team members open the dashboard in any browser and interact with the simulator in real time. The Relay also exposes a REST API and an MCP server for LLM-based automation.
+>
+> Two testing paths:
+> - Manual review (primary): CI uploads a build → team tests in the browser
+> - AI Agent via MCP (experimental): an LLM agent controls the simulator using @tapflowio/mcp-server
+
+## Getting Started
+
+- [Introduction](https://tapflow.dev/guide/introduction): Architecture overview, key concepts (Relay, Agent, Dashboard, MCP Server), and streaming format by platform.
+- [Quick Start](https://tapflow.dev/guide/getting-started): Install tapflow, start the relay and agent, create the admin account, and open the dashboard — under 10 minutes.
+- [Requirements](https://tapflow.dev/guide/requirements): Node.js ≥ 20 for relay and agent; Xcode for iOS; Android SDK + AVD for Android; any modern browser for the dashboard.
+
+## Setup
+
+- [Self-Hosting the Relay](https://tapflow.dev/guide/self-hosting): Deploy the relay locally, on a Linux server, or behind nginx/Caddy. Includes JWT_SECRET setup, ngrok for quick demos, and PM2 for production.
+- [Agent Setup](https://tapflow.dev/guide/agent): Start the Mac agent and connect it to the relay. iOS prerequisites (Xcode, Simulator Runtime) and Android prerequisites (AVD with google_apis/arm64-v8a image).
+- [Uploading Builds](https://tapflow.dev/guide/upload-builds): Upload iOS (.app.zip) or Android (.apk) builds from the dashboard. Builds are linked to apps by bundle ID automatically.
+- [Build Distribution](https://tapflow.dev/guide/build-distribution): Connect your CI pipeline to upload builds automatically. Includes Personal Access Token setup, curl examples, GitHub Actions full example with branch/commit metadata, and build status reference.
+- [Scaling Mac Resources](https://tapflow.dev/guide/scaling): Add more Mac hosts to the same relay for a larger device pool. Agent naming, per-Mac device limits, and monitoring via Mac Resources tab.
+
+## Dashboard
+
+- [First-time Setup](https://tapflow.dev/dashboard/setup): Create the admin account, sign in, invite teammates with roles (Admin / Developer / QA / Viewer), add the first app, and start a session.
+- [Dashboard Overview](https://tapflow.dev/dashboard/overview): Reference for every dashboard section — App Center, testing sessions, recordings (72h retention), Mac Resources monitoring, and Settings (profile, team, tokens).
+
+## AI Agent (MCP — Experimental)
+
+- [MCP Server](https://tapflow.dev/guide/mcp-server): Install and configure @tapflowio/mcp-server. Supports Claude Code, Codex, Cursor, and any MCP-compatible client. Available tools: list_devices, connect_device, disconnect_device, boot_device, screenshot, tap, swipe, type_text, press_key, press_button, install_app, launch_app.
+- [MCP in CI/CD](https://tapflow.dev/guide/mcp-ci): Run automated smoke tests on every build using claude CLI + MCP. Includes GitHub Actions example, multi-device matrix, example test prompts, and tips for reliable agentic test scripts.
+
+## Reference
+
+- [CLI Reference](https://tapflow.dev/reference/cli): All tapflow CLI commands — init, start, relay start, agent start, doctor, devices, boot, reset, status, logs.
+- [Configuration](https://tapflow.dev/reference/configuration): tapflow.config.json schema and environment variable overrides (JWT_SECRET, TAPFLOW_PORT, TAPFLOW_DATA_DIR, SMTP_*, etc.).
+- [REST API](https://tapflow.dev/reference/api): Full REST API reference — Auth, Invitations, Password reset, Apps, Builds, Comments, Team, Tokens, Profile, Settings, Recordings, Agents, Logs. Base path: /api/v1/.
+
+## Troubleshooting
+
+- [Troubleshooting](https://tapflow.dev/guide/troubleshooting): Agent connection issues, iOS CoreSimulator version mismatch, Korean IME bug on iOS 17, iOS build upload errors (.ipa vs .app.zip), Android AVD image issues, INSTALL_FAILED_NO_MATCHING_ABIS on Apple Silicon, session timeouts, auth issues.
