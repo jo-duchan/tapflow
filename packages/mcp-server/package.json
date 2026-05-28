@@ -15,7 +15,7 @@
   "bugs": "https://github.com/jo-duchan/tapflow/issues",
   "repository": {
     "type": "git",
-    "url": "https://github.com/jo-duchan/tapflow.git",
+    "url": "git+https://github.com/jo-duchan/tapflow.git",
     "directory": "packages/mcp-server"
   },
   "license": "MIT",
@@ -24,7 +24,7 @@
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "bin": {
-    "tapflow-mcp": "./dist/index.js"
+    "tapflow-mcp": "dist/index.js"
   },
   "files": [
     "dist"
@@ -34,7 +34,7 @@
     "access": "public"
   },
   "scripts": {
-    "build": "tsc",
+    "build": "tsc && chmod +x dist/index.js",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "lint": "eslint src"
