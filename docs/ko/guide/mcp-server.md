@@ -1,5 +1,12 @@
 # MCP 서버
 
+::: warning 실험적 기능
+`@tapflowio/mcp-server`는 실험적 기능입니다. API와 툴 스키마는 릴리즈 간에 변경될 수 있습니다. `experimental` 태그로 설치하세요:
+```sh
+npm install @tapflowio/mcp-server@experimental
+```
+:::
+
 `@tapflowio/mcp-server`는 tapflow를 [Model Context Protocol(MCP)](https://modelcontextprotocol.io) 서버로 노출합니다. Claude Code, Codex 등 MCP를 지원하는 LLM 에이전트가 iOS 시뮬레이터와 Android 에뮬레이터를 네이티브 도구로 직접 제어할 수 있습니다. 스크립팅도, 좌표 하드코딩도 필요 없습니다.
 
 ## 이럴 때 쓰세요
