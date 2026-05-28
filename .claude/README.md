@@ -11,15 +11,16 @@ Claude Code project configuration directory.
 
 ```
 .claude/
-├── commands/             # Custom slash commands (team-shared)
-│   ├── compound.md       # /compound
-│   ├── deep-research.md  # /deep-research
-│   ├── doc-sync.md       # /doc-sync
-│   ├── qa.md             # /qa
-│   └── work-plan.md      # /work-plan
-├── settings.json         # Team settings (hooks, statusLine, etc.)
-├── settings.local.json   # Personal settings — gitignored (permissions, etc.)
-└── README.md             # This file
+├── commands/               # Custom slash commands (team-shared)
+│   ├── compound.md         # /compound
+│   ├── deep-research.md    # /deep-research
+│   ├── doc-sync.md         # /doc-sync
+│   ├── qa.md               # /qa
+│   ├── work-plan.md        # /work-plan
+│   └── write-docs.md       # /write-docs
+├── settings.json           # Team settings (hooks, statusLine, etc.)
+├── settings.local.json     # Personal settings — gitignored (permissions, etc.)
+└── README.md               # This file
 ```
 
 ---
@@ -35,6 +36,7 @@ Invoke with `/` in Claude Code.
 | `/qa {target}` | Plan and write tests for the target code. Potemkin and flaky tests prohibited. |
 | `/doc-sync` | Audit and fix consistency between CLAUDE.md / INDEX.md / `.work/` and the codebase. |
 | `/compound` | Extract reusable patterns from the current session and update CLAUDE.md. |
+| `/write-docs {topic}` | Write a VitePress docs page — EN/KO simultaneously, sidebar registration, build verification. |
 
 ---
 
