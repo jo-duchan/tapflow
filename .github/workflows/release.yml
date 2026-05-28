@@ -30,13 +30,17 @@ jobs:
 
       - run: pnpm build
 
-      - run: pnpm changeset publish --no-git-tag
+      - name: Publish stable packages
+        run: |
+          node -e "const fs=require('fs'),p=JSON.parse(fs.readFileSync('packages/mcp-server/package.json','utf8'));p.private=true;fs.writeFileSync('packages/mcp-server/package.json',JSON.stringify(p,null,2))"
+          pnpm changeset publish --no-git-tag
+          node -e "const fs=require('fs'),p=JSON.parse(fs.readFileSync('packages/mcp-server/package.json','utf8'));delete p.private;fs.writeFileSync('packages/mcp-server/package.json',JSON.stringify(p,null,2))"
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
       - name: Publish mcp-server (experimental)
-        run: pnpm --filter @tapflowio/mcp-server publish --tag experimental --access public --no-git-checks
+        run: pnpm --filter @tapflowio/mcp-server exec npm publish --tag experimental --access public
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
