@@ -1,6 +1,6 @@
 # 빌드 업로드
 
-QA를 진행할 수 있도록 iOS 또는 Android 빌드를 업로드합니다.
+팀이 직접 확인할 수 있도록 iOS 또는 Android 빌드를 업로드합니다.
 
 ## 대시보드에서 업로드
 
@@ -57,5 +57,5 @@ curl -X POST https://your-relay/api/v1/builds \
 |------|------|
 | Backlog | 테스트 준비 전 |
 | In Progress | 개발 진행 중 |
-| Done | QA 통과 |
-| Rejected | 수정 필요 |
+| Done | 이해관계자 승인 완료 |
+| Rejected | 문제 발견, 수정 필요 |

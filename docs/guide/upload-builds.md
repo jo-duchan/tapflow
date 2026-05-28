@@ -1,6 +1,6 @@
 # Uploading Builds
 
-Upload iOS or Android builds so your QA can test them.
+Upload iOS or Android builds so your team can test them.
 
 ## Dashboard upload
 
@@ -57,5 +57,5 @@ curl -X POST https://your-relay/api/v1/builds \
 |--------|---------|
 | Backlog | Not ready for testing |
 | In Progress | Under active development |
-| Done | QA passed |
-| Rejected | Needs fixes |
+| Done | Stakeholders approved |
+| Rejected | Issues found, needs fixes |
