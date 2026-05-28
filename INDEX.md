@@ -15,6 +15,7 @@ Common rules are in the root [CLAUDE.md](./CLAUDE.md).
 | relay | [packages/relay/CLAUDE.md](./packages/relay/CLAUDE.md) | WebSocket relay server rules |
 | dashboard | [packages/dashboard/CLAUDE.md](./packages/dashboard/CLAUDE.md) | Vite + React SPA UI rules |
 | cli | [packages/cli/CLAUDE.md](./packages/cli/CLAUDE.md) | CLI UX rules |
+| mcp-server | [packages/mcp-server/CLAUDE.md](./packages/mcp-server/CLAUDE.md) | MCP server bridging tapflow to LLM agents — experimental |
 
 ## Local Only
 
@@ -46,6 +47,7 @@ CLAUDE.md (common rules — WHAT/WHY/HOW/HOW NOT)
     ├── packages/relay/CLAUDE.md
     ├── packages/dashboard/CLAUDE.md
     ├── packages/cli/CLAUDE.md
+    ├── packages/mcp-server/CLAUDE.md
     ├── playground/CLAUDE.md
     ├── .work/CLAUDE.md
     ├── .internal/marketing/CLAUDE.md

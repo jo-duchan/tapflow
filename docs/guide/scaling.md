@@ -43,7 +43,7 @@ The agent name is derived from the Mac's system hostname (`scutil --get Computer
 
 iOS Simulator and Android Emulator are memory-intensive. Each Mac can typically run 2–4 simultaneously depending on available RAM.
 
-Simulators are booted and managed through the dashboard. The agent reports only booted simulators to the relay, so QA sees exactly what's available.
+Simulators are booted and managed through the dashboard. The agent reports only booted simulators to the relay, so the team sees exactly what's available.
 
 ## Monitoring
 

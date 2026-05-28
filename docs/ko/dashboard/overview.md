@@ -6,7 +6,7 @@ tapflow 대시보드의 각 섹션을 간략히 설명합니다.
 
 **경로**: `/app-center`
 
-QA의 주요 작업 공간입니다. 업로드된 모든 빌드를 앱별로 정리해 보여줍니다.
+팀의 주요 작업 공간입니다. 업로드된 모든 빌드를 앱별로 정리해 보여줍니다.
 
 | UI 요소 | 기능 |
 |---------|------|
@@ -93,4 +93,4 @@ CI/CD 스크립트와 API 접근을 위한 Personal Access Token (PAT)을 관리
 - **Create token** — 이름과 선택적 만료일을 입력합니다. 토큰은 생성 직후 한 번만 표시됩니다. 즉시 복사하세요.
 - **Revoke** — 즉시 토큰을 무효화합니다.
 
-CI에서 빌드를 업로드할 때 `Authorization: Bearer tflw_pat_<token>` 헤더로 사용합니다. [빌드 업로드 (CI/CD)](/ko/guide/upload-builds)를 참고하세요.
+CI에서 빌드를 업로드할 때 `Authorization: Bearer tflw_pat_<token>` 헤더로 사용합니다. [빌드 업로드](/ko/guide/upload-builds)를 참고하세요.

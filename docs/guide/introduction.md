@@ -1,6 +1,6 @@
 # Introduction
 
-**tapflow** lets your entire team run mobile QA directly in the browser — no Xcode, no device management, no external cloud.
+**tapflow** lets your entire team run mobile QA directly in the browser — no developer tools, no device management, no external cloud.
 
 <VideoPlayer src="/tapflow-demo.mp4" poster="/demo-thumbnail.png" />
 
@@ -10,14 +10,14 @@
 |----------|---------|
 | Appetize / BrowserStack | Expensive, app data leaves your network |
 | Physical devices | Cost, loss, management overhead |
-| Xcode / Android Studio directly | Every QA member needs their own Mac + Xcode or Android Studio setup |
+| Xcode / Android Studio directly | Every team member needs their own Mac + Xcode or Android Studio setup |
 | tapflow | Use infra you already own, data stays on-prem |
 
 ## How it works
 
 ```mermaid
 flowchart TD
-    B["Browser (QA)"]
+    B["Browser (Team)"]
     R["Relay Server<br/>Linux server or Mac"]
     A1["Mac Agent 1<br/>iOS · Android simulators"]
     A2["Mac Agent 2<br/>iOS · Android simulators"]
@@ -30,7 +30,7 @@ flowchart TD
 ```
 
 1. A **Mac Agent** connects outbound to the relay — no inbound firewall rules needed.
-2. QA opens the dashboard in any browser and sees all available devices.
+2. Team opens the dashboard in any browser and sees all available devices.
 3. Touch events are forwarded in real time; the screen streams back to the browser.
 
 ::: info Streaming format by platform

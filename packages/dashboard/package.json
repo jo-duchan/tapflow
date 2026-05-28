@@ -1,7 +1,7 @@
 {
   "name": "@tapflowio/dashboard",
   "version": "0.1.1",
-  "description": "React SPA dashboard for QA teams",
+  "description": "React SPA dashboard for tapflow — browser-based mobile app review for the whole team",
   "private": true,
   "license": "MIT",
   "scripts": {

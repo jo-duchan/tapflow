@@ -6,8 +6,19 @@
 
 ## WHAT
 
-tapflow is an **open-source self-hosted library** that lets QA teams control iOS/Android simulators and emulators directly from a browser.
+tapflow is an **open-source self-hosted library** that lets the entire team — PO, PM, designers, backend engineers, and QA — test iOS/Android apps directly from a browser.
 It uses the Mac you already own — no external cloud dependency.
+
+### Core value
+
+Remove friction. Anyone on the team can open a browser and test the app on a real simulator, without Xcode, without device setup, without accounts on external services.
+
+### Two testing modes
+
+- **Manual testing** (primary): CI uploads a build → team reviews in the browser. This is tapflow's main use case.
+- **AI Agent via MCP** (experimental): An LLM agent controls the simulator automatically using `@tapflowio/mcp-server`. This is a separate, opt-in feature — it does not affect the manual testing path.
+
+When designing features or writing docs, default to the manual testing perspective. The AI Agent path is additive, not a replacement.
 
 ## WHY
 

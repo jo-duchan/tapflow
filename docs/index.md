@@ -3,7 +3,7 @@ layout: home
 
 hero:
   name: tapflow
-  text: 'Self-hosted simulator <span style="white-space: nowrap">streaming for mobile QA</span>'
+  text: 'Self-hosted simulator <span style="white-space: nowrap">streaming for your whole team</span>'
   tagline: Run iOS & Android simulators in the browser — no complicated setup, no device management, no data leaving your network.
   actions:
     - theme: brand

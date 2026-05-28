@@ -50,7 +50,7 @@ tapflow init
 
 ## `tapflow start`
 
-**로컬 개발 전용 shortcut.** 릴레이와 에이전트를 같은 Mac에서 한번에 시작합니다.
+**로컬 개발 전용 shortcut.** 릴레이와 에이전트를 같은 Mac에서 한 번에 시작합니다.
 
 ```sh
 tapflow start

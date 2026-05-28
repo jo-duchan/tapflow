@@ -66,6 +66,4 @@ If an App with the same bundle ID already exists for the other platform, the two
 
 From App Center, select a build and click a device card to start a session. The device streams to your browser in real time.
 
----
-
 **Next:** Learn what each dashboard section does → [Dashboard Overview](/dashboard/overview)

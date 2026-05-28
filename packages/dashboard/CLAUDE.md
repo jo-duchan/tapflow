@@ -10,7 +10,8 @@ Before any design or frontend work, read **[DESIGN.md](./DESIGN.md)** and follow
 
 ## WHAT
 
-React SPA QA dashboard: provides the simulator viewer, bug reports, and team invite screens.
+React SPA team dashboard: provides the simulator viewer, build comments, and team invite screens.
+The audience is the whole team (PO, PM, designers, backend, QA) — not just QA. See root [CLAUDE.md](../../CLAUDE.md) for the two testing modes (manual vs. AI Agent via MCP).
 **No standalone deployment** — bundled to `dist/` via `vite build`, then copied to the relay package's `public/` directory and served directly by the relay server.
 
 ### App Center Structure
