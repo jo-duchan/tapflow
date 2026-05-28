@@ -1,7 +1,7 @@
 {
   "name": "tapflow",
   "version": "0.1.0",
-  "description": "Self-hosted iOS/Android simulator streaming and remote control for QA teams.",
+  "description": "Self-hosted iOS/Android simulator streaming and remote control for the whole team.",
   "license": "MIT",
   "private": true,
   "packageManager": "pnpm@9.15.1",
