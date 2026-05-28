@@ -1,5 +1,11 @@
 # @tapflowio/agent-core
 
+## 0.3.1
+
+### Patch Changes
+
+- Fix mcp-server release: add publishConfig for experimental tag and public access
+
 ## 0.3.0
 
 ### Minor Changes
