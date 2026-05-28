@@ -98,10 +98,10 @@ describe('TapflowClient', () => {
   })
 
   describe('disconnectDevice', () => {
-    it('sends session:end', async () => {
+    it('sends session:leave', async () => {
       client.disconnectDevice('sess-1')
-      const msg = await waitForMessage(relay, 'session:end')
-      expect(msg).toMatchObject({ type: 'session:end', sessionId: 'sess-1' })
+      const msg = await waitForMessage(relay, 'session:leave')
+      expect(msg).toMatchObject({ type: 'session:leave', sessionId: 'sess-1' })
     })
   })
 
