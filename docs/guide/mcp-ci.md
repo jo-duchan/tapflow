@@ -53,10 +53,11 @@ jobs:
           TAPFLOW_RELAY_URL: ${{ secrets.TAPFLOW_RELAY_URL }}
           TAPFLOW_TOKEN: ${{ secrets.TAPFLOW_TOKEN }}
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          WORKSPACE: ${{ github.workspace }}
         run: |
           claude --mcp-config .mcp.json -p "
             List available devices and pick the first booted iOS simulator.
-            Connect to it and install the build at ${{ github.workspace }}/MyApp.app.zip.
+            Connect to it and install the build at $WORKSPACE/MyApp.app.zip.
             Launch the app and take a screenshot.
             Verify the main screen loaded correctly — no error messages, no blank screens.
             If anything looks wrong, describe the issue and exit with a failure.

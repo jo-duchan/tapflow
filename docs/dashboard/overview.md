@@ -6,7 +6,7 @@ A quick reference for every section in the tapflow dashboard.
 
 **Route**: `/app-center`
 
-The main workspace for QA. Shows all uploaded builds organised by app.
+The main workspace for the team. Shows all uploaded builds organised by app.
 
 | UI element | What it does |
 |---|---|
@@ -93,4 +93,4 @@ Personal Access Tokens (PATs) for CI/CD scripts and API access.
 - **Create token** — enter a name and optional expiry. The token is shown once — copy it immediately.
 - **Revoke** — instantly invalidates the token.
 
-Use PATs with the `Authorization: Bearer tflw_pat_<token>` header to upload builds from CI. See [Uploading Builds (CI/CD)](/guide/upload-builds).
+Use PATs with the `Authorization: Bearer tflw_pat_<token>` header to upload builds from CI. See [Uploading Builds](/guide/upload-builds).

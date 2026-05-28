@@ -44,9 +44,12 @@ curl -X POST https://your-relay/api/v1/builds \
 
 ```yaml
 - name: Upload to tapflow
+  env:
+    TAPFLOW_RELAY_URL: ${{ secrets.TAPFLOW_RELAY_URL }}
+    TAPFLOW_PAT: ${{ secrets.TAPFLOW_PAT }}
   run: |
-    curl -X POST ${{ secrets.TAPFLOW_RELAY_URL }}/api/v1/builds \
-      -H "Authorization: Bearer ${{ secrets.TAPFLOW_PAT }}" \
+    curl -X POST "$TAPFLOW_RELAY_URL/api/v1/builds" \
+      -H "Authorization: Bearer $TAPFLOW_PAT" \
       -F "file=@MyApp.app.zip" \
       -F "status=In Progress"
 ```
@@ -55,7 +58,7 @@ curl -X POST https://your-relay/api/v1/builds \
 
 | 상태 | 의미 |
 |------|------|
-| Backlog | 테스트 준비 전 |
-| In Progress | 개발 진행 중 |
+| Backlog | 리뷰 준비 전 |
+| In Progress | 리뷰 준비 완료 |
 | Done | 이해관계자 승인 완료 |
 | Rejected | 문제 발견, 수정 필요 |

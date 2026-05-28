@@ -10,7 +10,7 @@
 |--------|--------|
 | Appetize / BrowserStack | 비용이 비싸고, 앱 데이터가 외부 네트워크로 유출됨 |
 | 실제 디바이스 | 구매 비용, 분실·파손 위험, 관리 오버헤드 |
-| Xcode / Android Studio 직접 사용 | QA 각자 Mac + Xcode 또는 Android Studio 설정 필요 |
+| Xcode / Android Studio 직접 사용 | 각 팀원이 Mac + Xcode 또는 Android Studio 설정 필요 |
 | tapflow | 이미 보유한 인프라 활용, 데이터 온-프레미스 유지 |
 
 ## 동작 원리

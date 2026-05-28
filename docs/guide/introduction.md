@@ -10,7 +10,7 @@
 |----------|---------|
 | Appetize / BrowserStack | Expensive, app data leaves your network |
 | Physical devices | Cost, loss, management overhead |
-| Xcode / Android Studio directly | Every QA member needs their own Mac + Xcode or Android Studio setup |
+| Xcode / Android Studio directly | Every team member needs their own Mac + Xcode or Android Studio setup |
 | tapflow | Use infra you already own, data stays on-prem |
 
 ## How it works

@@ -1,6 +1,6 @@
 # Build Distribution
 
-Connect your CI pipeline to tapflow so every build is instantly available for your whole team to review in the browser — no IDE, no device setup, no manual file sharing.
+Connect your CI pipeline so every build lands in App Center automatically — no manual uploads.
 
 ## How it works
 
