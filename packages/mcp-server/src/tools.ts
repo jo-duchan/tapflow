@@ -1,6 +1,23 @@
 import * as z from 'zod'
+import fs from 'fs'
+import os from 'os'
+import path from 'path'
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import type { TapflowClient } from './client.js'
+
+function getImageDimensions(buf: Buffer, format: string): { width: number; height: number } | null {
+  if (format === 'png' && buf.length >= 24) {
+    return { width: buf.readUInt32BE(16), height: buf.readUInt32BE(20) }
+  }
+  if (format === 'jpeg') {
+    for (let i = 2; i < buf.length - 8; i++) {
+      if (buf[i] === 0xff && buf[i + 1] === 0xc0) {
+        return { height: buf.readUInt16BE(i + 5), width: buf.readUInt16BE(i + 7) }
+      }
+    }
+  }
+  return null
+}
 
 type ToolResult = { content: Array<{ type: 'text'; text: string } | { type: 'image'; data: string; mimeType: string }>; isError?: boolean }
 
@@ -13,6 +30,19 @@ function err(text: string): ToolResult {
 }
 
 export function registerTools(server: McpServer, client: TapflowClient): void {
+  server.registerTool(
+    'list_builds',
+    { description: 'List all apps and their builds available on the relay. Use this to find buildId before calling install_app or launch_app.' },
+    async () => {
+      try {
+        const apps = await client.listBuilds()
+        return ok(JSON.stringify(apps, null, 2))
+      } catch (e) {
+        return err(`list_builds failed: ${(e as Error).message}`)
+      }
+    },
+  )
+
   server.registerTool(
     'list_devices',
     { description: 'List all available simulators and emulators registered on the tapflow relay.' },
@@ -92,10 +122,20 @@ export function registerTools(server: McpServer, client: TapflowClient): void {
     },
     async ({ sessionId, format }) => {
       try {
-        const buf = await client.screenshot(sessionId, format ?? 'png')
-        const mimeType = format === 'jpeg' ? 'image/jpeg' : 'image/png'
+        const fmt = format ?? 'png'
+        const buf = await client.screenshot(sessionId, fmt)
+        const mimeType = fmt === 'jpeg' ? 'image/jpeg' : 'image/png'
+        const ext = fmt === 'jpeg' ? 'jpg' : 'png'
+        const filename = `tapflow-${sessionId.slice(0, 8)}-${Date.now()}.${ext}`
+        const filePath = path.join(os.tmpdir(), filename)
+        fs.writeFileSync(filePath, buf)
+        const dims = getImageDimensions(buf, fmt)
+        const dimText = dims ? ` (${dims.width}×${dims.height}px)` : ''
         return {
-          content: [{ type: 'image' as const, data: buf.toString('base64'), mimeType }],
+          content: [
+            { type: 'image' as const, data: buf.toString('base64'), mimeType },
+            { type: 'text' as const, text: `Screenshot saved: ${filePath}${dimText}` },
+          ],
         }
       } catch (e) {
         return err(`screenshot failed: ${(e as Error).message}`)
@@ -106,16 +146,18 @@ export function registerTools(server: McpServer, client: TapflowClient): void {
   server.registerTool(
     'tap',
     {
-      description: 'Tap at a screen coordinate.',
+      description: 'Tap at a pixel coordinate matching the screenshot. Use the width and height from the screenshot tool response.',
       inputSchema: {
         sessionId: z.string().describe('Session ID from list_devices'),
-        x: z.number().describe('X coordinate in points'),
-        y: z.number().describe('Y coordinate in points'),
+        x: z.number().describe('X pixel coordinate (from screenshot)'),
+        y: z.number().describe('Y pixel coordinate (from screenshot, 0 = top)'),
+        screenshotWidth: z.number().int().describe('Screenshot width in pixels (from screenshot tool)'),
+        screenshotHeight: z.number().int().describe('Screenshot height in pixels (from screenshot tool)'),
       },
     },
-    async ({ sessionId, x, y }) => {
+    async ({ sessionId, x, y, screenshotWidth, screenshotHeight }) => {
       try {
-        client.tap(sessionId, x, y)
+        client.tap(sessionId, x / screenshotWidth, y / screenshotHeight)
         return ok(JSON.stringify({ tapped: true, x, y }))
       } catch (e) {
         return err(`tap failed: ${(e as Error).message}`)
@@ -126,19 +168,28 @@ export function registerTools(server: McpServer, client: TapflowClient): void {
   server.registerTool(
     'swipe',
     {
-      description: 'Swipe from one coordinate to another.',
+      description: 'Swipe from one pixel coordinate to another. Use the width and height from the screenshot tool response.',
       inputSchema: {
         sessionId: z.string().describe('Session ID from list_devices'),
-        startX: z.number().describe('Start X coordinate'),
-        startY: z.number().describe('Start Y coordinate'),
-        endX: z.number().describe('End X coordinate'),
-        endY: z.number().describe('End Y coordinate'),
+        startX: z.number().describe('Start X pixel coordinate (from screenshot)'),
+        startY: z.number().describe('Start Y pixel coordinate (from screenshot, 0 = top)'),
+        endX: z.number().describe('End X pixel coordinate (from screenshot)'),
+        endY: z.number().describe('End Y pixel coordinate (from screenshot)'),
+        screenshotWidth: z.number().int().describe('Screenshot width in pixels (from screenshot tool)'),
+        screenshotHeight: z.number().int().describe('Screenshot height in pixels (from screenshot tool)'),
         durationMs: z.number().optional().describe('Swipe duration in milliseconds (default: 300)'),
       },
     },
-    async ({ sessionId, startX, startY, endX, endY, durationMs }) => {
+    async ({ sessionId, startX, startY, endX, endY, screenshotWidth, screenshotHeight, durationMs }) => {
       try {
-        await client.swipe(sessionId, startX, startY, endX, endY, durationMs)
+        await client.swipe(
+          sessionId,
+          startX / screenshotWidth,
+          startY / screenshotHeight,
+          endX / screenshotWidth,
+          endY / screenshotHeight,
+          durationMs,
+        )
         return ok(JSON.stringify({ swiped: true, from: { x: startX, y: startY }, to: { x: endX, y: endY } }))
       } catch (e) {
         return err(`swipe failed: ${(e as Error).message}`)

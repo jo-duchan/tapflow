@@ -16,6 +16,23 @@ export interface AgentSession {
   devices: DeviceInfo[]
 }
 
+export interface BuildInfo {
+  id: number
+  versionName: string
+  buildNumber: string
+  platform: string
+  statusLabel: string | null
+  createdAt: string
+}
+
+export interface AppInfo {
+  id: number
+  name: string
+  bundleId: string
+  platform: string
+  builds: BuildInfo[]
+}
+
 type RelayMsg = Record<string, unknown>
 
 interface Waiter {
@@ -114,7 +131,7 @@ export class TapflowClient {
   }
 
   disconnectDevice(sessionId: string): void {
-    this.send({ type: 'session:end', sessionId })
+    this.send({ type: 'session:leave', sessionId })
   }
 
   async bootDevice(sessionId: string, deviceId: string): Promise<void> {
@@ -220,5 +237,46 @@ export class TapflowClient {
       throw new Error(message)
     }
     return Buffer.from(await res.arrayBuffer())
+  }
+
+  async listBuilds(): Promise<AppInfo[]> {
+    const httpBase = this.relayUrl.replace(/^wss?/, (p) => (p === 'wss' ? 'https' : 'http'))
+    const headers = { Authorization: `Bearer ${this.token}` }
+
+    const [appsRes, buildsRes] = await Promise.all([
+      fetch(new URL('/api/v1/apps', httpBase).toString(), { headers }),
+      fetch(new URL('/api/v1/builds', httpBase).toString(), { headers }),
+    ])
+
+    if (!appsRes.ok) throw new Error(`Failed to fetch apps: ${appsRes.status}`)
+    if (!buildsRes.ok) throw new Error(`Failed to fetch builds: ${buildsRes.status}`)
+
+    const apps = (await appsRes.json()) as Array<{ id: number; name: string; bundle_id: string; platform: string }>
+    const builds = (await buildsRes.json()) as Array<{
+      id: number
+      app_id: number
+      version_name: string
+      build_number: string
+      platform: string
+      status_label: string | null
+      created_at: string
+    }>
+
+    return apps.map((app) => ({
+      id: app.id,
+      name: app.name,
+      bundleId: app.bundle_id,
+      platform: app.platform,
+      builds: builds
+        .filter((b) => b.app_id === app.id)
+        .map((b) => ({
+          id: b.id,
+          versionName: b.version_name,
+          buildNumber: b.build_number,
+          platform: b.platform,
+          statusLabel: b.status_label,
+          createdAt: b.created_at,
+        })),
+    }))
   }
 }

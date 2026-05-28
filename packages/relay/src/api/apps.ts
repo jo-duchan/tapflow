@@ -1,10 +1,10 @@
 import http from 'http'
 import { getDb } from '../db.js'
-import { requireAuth } from '../middleware/auth.js'
+import { requireAuth, requireViewAuth } from '../middleware/auth.js'
 import { json, readJson } from '../router.js'
 
 export function handleListApps(req: http.IncomingMessage, res: http.ServerResponse): void {
-  const auth = requireAuth(req, res)
+  const auth = requireViewAuth(req, res)
   if (!auth) return
 
   const items = getDb().prepare(`

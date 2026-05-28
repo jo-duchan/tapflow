@@ -9,6 +9,7 @@ export type MessageType =
   | 'session:chrome'
   | 'session:deviceInfo'
   | 'session:end'
+  | 'session:leave'
   | 'stream:register'
   | 'stream:registered'
   | 'device:boot'

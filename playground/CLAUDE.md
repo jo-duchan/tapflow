@@ -38,6 +38,8 @@ pnpm relay                              # 릴레이 단독
 pnpm ios-agent                          # 첫 번째 booted 시뮬레이터
 pnpm ios-agent -- --device "iPhone 16" # 디바이스 지정
 pnpm android-agent
+pnpm mock-agent                         # 시뮬레이터 없이 테스트할 때 사용하는 mock 에이전트
+TAPFLOW_TOKEN=<pat> pnpm mcp            # MCP 서버 (빌드 없이 소스에서 직접 실행)
 ```
 
 ### 진단 · 초기화

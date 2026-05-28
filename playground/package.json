@@ -13,6 +13,7 @@
     "dev:reset": "tsx --conditions=source ../packages/cli/src/index.ts reset",
     "mock-agent": "tsx --conditions=source mock-agent.ts",
     "mock-agents": "tsx --conditions=source multi-agent.ts",
+    "mcp": "tsx --conditions=source ../packages/mcp-server/src/index.ts",
     "dev:up": "concurrently -n relay,agent -c cyan,green \"pnpm relay\" \"pnpm ios-agent\"",
     "dev:up:full": "concurrently -k -n relay,ios,android -c cyan,green,yellow \"pnpm relay\" \"pnpm ios-agent\" \"pnpm android-agent\"",
     "dev:up:pool": "concurrently -k -n relay,ios,mocks -c cyan,green,yellow \"pnpm relay\" \"pnpm ios-agent\" \"pnpm mock-agents\""

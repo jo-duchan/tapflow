@@ -299,6 +299,13 @@ export class RelayServer {
         }
         break
       }
+      case 'session:leave': {
+        if (msg.sessionId) {
+          this.sessions.clearBrowser(msg.sessionId)
+          this.dropHandlers.delete(msg.sessionId)
+        }
+        break
+      }
       case 'stream:register': {
         const session = this.sessions.get(msg.sessionId!)
         if (session) {
