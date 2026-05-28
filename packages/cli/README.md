@@ -78,7 +78,7 @@ What's included:
 - **Screenshot REST endpoint** — `GET /api/v1/sessions/:sessionId/screenshot` for CI and AI agents
 - **Mac resource monitoring** — CPU & RAM per agent, spot overloaded hosts before assigning sessions
 - **Team management** — invite links, roles (Admin / Developer / QA / Viewer), Personal Access Tokens
-- **MCP Server** — `@tapflowio/mcp-server` lets Claude Code and other LLM agents control simulators as native tools.
+- **MCP Server** *(experimental)* — `@tapflowio/mcp-server` lets Claude Code and other LLM agents control simulators as native tools.
 
 ## How it works
 
@@ -208,7 +208,7 @@ Full reference → [CLI docs](https://www.tapflow.dev/reference/cli)
 - [REST API](https://www.tapflow.dev/reference/api)
 
 **AI Agent**
-- [MCP Server](https://www.tapflow.dev/guide/mcp-server)
+- [MCP Server](https://www.tapflow.dev/guide/mcp-server) *(experimental)*
 
 **[Troubleshooting](https://www.tapflow.dev/guide/troubleshooting)**
 
