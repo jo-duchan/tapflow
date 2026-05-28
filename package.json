@@ -9,7 +9,7 @@
     "node": ">=20"
   },
   "scripts": {
-    "build": "pnpm --filter @tapflowio/agent-core build && pnpm --filter @tapflowio/dashboard build && pnpm --filter @tapflowio/relay build && pnpm --filter @tapflowio/ios-agent build && pnpm --filter @tapflowio/android-agent build && pnpm --filter tapflow build",
+    "build": "pnpm --filter @tapflowio/agent-core build && pnpm --filter @tapflowio/dashboard build && pnpm --filter @tapflowio/relay build && pnpm --filter @tapflowio/ios-agent build && pnpm --filter @tapflowio/android-agent build && pnpm --filter tapflow build && pnpm --filter @tapflowio/mcp-server build",
     "test": "pnpm -r test --if-present",
     "lint": "pnpm -r --if-present lint",
     "typecheck": "pnpm -r --if-present typecheck",
