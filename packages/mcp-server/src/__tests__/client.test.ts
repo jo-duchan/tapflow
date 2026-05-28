@@ -66,10 +66,13 @@ describe('TapflowClient', () => {
       const sessions = [{ agentName: 'MyMac', devices: [{ id: 'dev-1', name: 'iPhone', sessionId: 'sess-1', platform: 'ios', status: 'shutdown', busy: false }] }]
       setTimeout(() => relay.send({ type: 'agents:listed', sessions }), 10)
 
-      const result = await client.listDevices()
+      const [result, msg] = await Promise.all([
+        client.listDevices(),
+        waitForMessage(relay, 'agents:list'),
+      ])
 
       expect(result).toEqual(sessions)
-      expect(relay.sentMessages()[0]).toMatchObject({ type: 'agents:list' })
+      expect(msg).toMatchObject({ type: 'agents:list' })
     })
 
     it('returns empty array when sessions is missing', async () => {
