@@ -29,6 +29,10 @@
   "files": [
     "dist"
   ],
+  "publishConfig": {
+    "tag": "experimental",
+    "access": "public"
+  },
   "scripts": {
     "build": "tsc",
     "typecheck": "tsc --noEmit",

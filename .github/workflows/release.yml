@@ -33,12 +33,6 @@ jobs:
       - run: pnpm changeset publish --no-git-tag
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
-
-      - name: Publish mcp-server (experimental)
-        run: pnpm --filter @tapflowio/mcp-server publish --tag experimental --access public --no-git-checks
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
       - uses: softprops/action-gh-release@v2
         with:
