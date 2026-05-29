@@ -8,6 +8,10 @@ export const YELLOW = '\x1b[33m'
 const MAX_WIDTH = 72
 
 export function wrap(line: string, maxWidth: number): string[] {
+  if (!Number.isInteger(maxWidth) || maxWidth < 1) {
+    throw new Error('maxWidth must be a positive integer')
+  }
+
   if (line.length <= maxWidth) return [line]
   const chunks: string[] = []
 
