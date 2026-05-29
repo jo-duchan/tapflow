@@ -46,6 +46,9 @@ const MIME_TYPES: Record<string, string> = {
   '.woff': 'font/woff',
 }
 
+const _parsedThreshold = parseInt(process.env['TAPFLOW_RESOURCE_THRESHOLD_PERCENT'] ?? '80', 10)
+const RESOURCE_THRESHOLD = Number.isFinite(_parsedThreshold) ? _parsedThreshold : 80
+
 export class RelayServer {
   private httpServer: http.Server
   private wss: WebSocketServer
@@ -456,6 +459,14 @@ export class RelayServer {
     if (!session) {
       ws.send(JSON.stringify({ type: 'error', message: 'Session not found' }))
       return
+    }
+    const resources = this.sessions.getResources(session.agentSocket)
+    if (resources) {
+      const memPercent = (resources.memUsedMB / resources.memTotalMB) * 100
+      if (resources.cpuPercent > RESOURCE_THRESHOLD || memPercent > RESOURCE_THRESHOLD) {
+        ws.send(JSON.stringify({ type: 'error', message: 'Agent resources exhausted' }))
+        return
+      }
     }
     try {
       this.sessions.join(msg.sessionId!, ws)

@@ -123,6 +123,10 @@ export class SessionManager {
     this.agentResources.set(agentSocket, resources)
   }
 
+  getResources(agentSocket: WebSocket): AgentResources | undefined {
+    return this.agentResources.get(agentSocket)
+  }
+
   removeResources(agentSocket: WebSocket): void {
     this.agentResources.delete(agentSocket)
   }

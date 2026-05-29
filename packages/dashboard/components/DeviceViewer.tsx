@@ -97,6 +97,11 @@ export function DeviceViewer({ sessionId, deviceId, buildId, resetMode, onRecord
     }
     if (msg.type === 'open-url:done') { toast.success('Deeplink opened'); }
     if (msg.type === 'open-url:error') { toast.error(msg.message); }
+    if (msg.type === 'error' && msg.message === 'Agent resources exhausted') {
+      toast.error('Could not start session — this Mac is currently overloaded.', {
+        description: 'Go back and select a different Mac.',
+      })
+    }
   }, [sessionId, deviceId, buildId]);
 
   const handleBinaryFrame = useCallback((data: ArrayBuffer) => {
