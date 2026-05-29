@@ -252,43 +252,56 @@ export function QASession() {
                     const health = getResourceHealth(res, isStale)
                     const isOverloaded = health === 'overloaded'
                     return (
-                      <button
-                        key={s.agentName}
-                        disabled={isOverloaded}
-                        onClick={() => setSelectedAgent(s.agentName ?? null)}
-                        title={isOverloaded ? 'This Mac is currently overloaded. Try again later.' : undefined}
-                        className={cn(
-                          'flex flex-col gap-3 rounded-lg border p-3 text-left transition-colors min-h-[100px]',
-                          isOverloaded ? 'cursor-not-allowed' : 'hover:bg-accent',
-                        )}
-                      >
-                        <div className="flex items-start justify-between gap-2">
-                          <div className="flex items-center gap-2 min-w-0">
-                            <ResourceHealthDot health={health} />
-                            <span className="text-sm font-medium leading-tight truncate">
-                              {s.agentName ?? 'Unknown'}
+                      <TooltipProvider key={s.agentName}>
+                        <Tooltip>
+                          <TooltipTrigger asChild>
+                            <span
+                              tabIndex={isOverloaded ? 0 : undefined}
+                              className={isOverloaded ? 'cursor-not-allowed' : undefined}
+                            >
+                              <button
+                                disabled={isOverloaded}
+                                aria-disabled={isOverloaded}
+                                onClick={() => setSelectedAgent(s.agentName ?? null)}
+                                className={cn(
+                                  'flex flex-col gap-3 rounded-lg border p-3 text-left transition-colors min-h-[100px] w-full',
+                                  isOverloaded ? 'pointer-events-none' : 'hover:bg-accent',
+                                )}
+                              >
+                                <div className="flex items-start justify-between gap-2">
+                                  <div className="flex items-center gap-2 min-w-0">
+                                    <ResourceHealthDot health={health} />
+                                    <span className="text-sm font-medium leading-tight truncate">
+                                      {s.agentName ?? 'Unknown'}
+                                    </span>
+                                  </div>
+                                  {isStale && (
+                                    <span className="shrink-0 text-[10px] font-medium text-amber-500">Stale</span>
+                                  )}
+                                </div>
+                                <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                                  <span>{deviceCount} device{deviceCount !== 1 ? 's' : ''}</span>
+                                  {res && (
+                                    <>
+                                      <span>·</span>
+                                      <span>{res.slotsAvailable}/{res.slotsTotal} slots</span>
+                                    </>
+                                  )}
+                                </div>
+                                {res && !isStale && (
+                                  <div className="flex flex-col gap-1.5 w-full">
+                                    <ResourceBar label="CPU" percent={cpuPercent} colorClass="bg-blue-400" />
+                                    <ResourceBar label="RAM" percent={memPercent} colorClass="bg-violet-400" />
+                                  </div>
+                                )}
+                              </button>
                             </span>
-                          </div>
-                          {isStale && (
-                            <span className="shrink-0 text-[10px] font-medium text-amber-500">Stale</span>
+                          </TooltipTrigger>
+                          {isOverloaded && (
+                            <TooltipContent>This Mac is currently overloaded. Try again later.</TooltipContent>
                           )}
-                        </div>
-                        <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
-                          <span>{deviceCount} device{deviceCount !== 1 ? 's' : ''}</span>
-                          {res && (
-                            <>
-                              <span>·</span>
-                              <span>{res.slotsAvailable}/{res.slotsTotal} slots</span>
-                            </>
-                          )}
-                        </div>
-                        {res && !isStale && (
-                          <div className="flex flex-col gap-1.5 w-full">
-                            <ResourceBar label="CPU" percent={cpuPercent} colorClass="bg-blue-400" />
-                            <ResourceBar label="RAM" percent={memPercent} colorClass="bg-violet-400" />
-                          </div>
-                        )}
-                      </button>
+                        </Tooltip>
+                      </TooltipProvider>
                     )
                   })}
                 </div>

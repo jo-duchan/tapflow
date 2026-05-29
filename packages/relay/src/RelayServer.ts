@@ -46,7 +46,8 @@ const MIME_TYPES: Record<string, string> = {
   '.woff': 'font/woff',
 }
 
-const RESOURCE_THRESHOLD = parseInt(process.env['TAPFLOW_RESOURCE_THRESHOLD_PERCENT'] ?? '80')
+const _parsedThreshold = parseInt(process.env['TAPFLOW_RESOURCE_THRESHOLD_PERCENT'] ?? '80', 10)
+const RESOURCE_THRESHOLD = Number.isFinite(_parsedThreshold) ? _parsedThreshold : 80
 
 export class RelayServer {
   private httpServer: http.Server
