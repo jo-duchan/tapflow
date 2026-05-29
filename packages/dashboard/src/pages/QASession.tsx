@@ -26,7 +26,21 @@ import { Switch } from '@/components/ui/switch';
 import { Label } from '@/components/ui/label';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { SearchInput } from '@/components/ui/search-input';
-import type { AgentDevice, SessionInfo } from '@/lib/types';
+import type { AgentDevice, AgentResources, SessionInfo } from '@/lib/types';
+
+const RESOURCE_WARN_THRESHOLD = 70
+const RESOURCE_BLOCK_THRESHOLD = 80
+
+export function getResourceHealth(
+  res: AgentResources | undefined,
+  isStale: boolean,
+): 'unknown' | 'healthy' | 'warning' | 'overloaded' {
+  if (!res || isStale) return 'unknown'
+  const memPercent = (res.memUsedMB / res.memTotalMB) * 100
+  if (res.cpuPercent > RESOURCE_BLOCK_THRESHOLD || memPercent > RESOURCE_BLOCK_THRESHOLD) return 'overloaded'
+  if (res.cpuPercent >= RESOURCE_WARN_THRESHOLD || memPercent >= RESOURCE_WARN_THRESHOLD) return 'warning'
+  return 'healthy'
+}
 
 export function QASession() {
   const [searchParams] = useSearchParams();
@@ -248,19 +262,26 @@ export function QASession() {
                     const deviceCount = s.devices.filter((d) => d.platform === os).length
                     const cpuPercent = res?.cpuPercent ?? 0
                     const memPercent = res ? (res.memUsedMB / res.memTotalMB) * 100 : 0
+                    const health = getResourceHealth(res, isStale)
+                    const isOverloaded = health === 'overloaded'
                     return (
                       <button
                         key={s.agentName}
+                        disabled={isOverloaded}
                         onClick={() => setSelectedAgent(s.agentName ?? null)}
+                        title={isOverloaded ? 'This Mac is currently overloaded. Try again later.' : undefined}
                         className={cn(
                           'flex flex-col gap-3 rounded-lg border p-3 text-left transition-colors min-h-[100px]',
-                          'hover:bg-accent',
+                          isOverloaded ? 'opacity-50 cursor-not-allowed' : 'hover:bg-accent',
                         )}
                       >
                         <div className="flex items-start justify-between gap-2">
-                          <span className="text-sm font-medium leading-tight truncate">
-                            {s.agentName ?? 'Unknown'}
-                          </span>
+                          <div className="flex items-center gap-2 min-w-0">
+                            <ResourceHealthDot health={health} />
+                            <span className="text-sm font-medium leading-tight truncate">
+                              {s.agentName ?? 'Unknown'}
+                            </span>
+                          </div>
                           {isStale && (
                             <span className="shrink-0 text-[10px] font-medium text-amber-500">Stale</span>
                           )}
@@ -303,6 +324,16 @@ export function QASession() {
       )}
     </div>
   );
+}
+
+function ResourceHealthDot({ health }: { health: ReturnType<typeof getResourceHealth> }) {
+  const colorClass = {
+    unknown: 'bg-muted-foreground/40',
+    healthy: 'bg-emerald-400',
+    warning: 'bg-amber-400',
+    overloaded: 'bg-red-500',
+  }[health]
+  return <span data-testid="resource-health-dot" className={cn('inline-block h-2 w-2 shrink-0 rounded-full', colorClass)} />
 }
 
 function ResourceBar({ label, percent, colorClass }: { label: string; percent: number; colorClass: string }) {

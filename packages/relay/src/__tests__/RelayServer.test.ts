@@ -956,6 +956,93 @@ describe('RelayServer', () => {
     browser.close()
   })
 
+  describe('resource-based session rejection', () => {
+    async function setupAgentWithSession(p: number) {
+      const devices = [{ id: 'devA', name: 'iPhone A', platform: 'ios', status: 'shutdown' }]
+      const agent = new WebSocket(`ws://localhost:${p}`)
+      await waitForOpen(agent)
+      agent.send(JSON.stringify({ type: 'agent:register', devices }))
+      const { registeredSessions } = await waitForMessage(agent)
+      const sessionId = registeredSessions![0].sessionId
+      return { agent, sessionId }
+    }
+
+    it('rejects session:start when CPU exceeds threshold', async () => {
+      const { agent, sessionId } = await setupAgentWithSession(port)
+      agent.send(JSON.stringify({ type: 'agent:resources', resources: { cpuPercent: 85, memUsedMB: 4000, memTotalMB: 16000, slotsAvailable: 2, slotsTotal: 4, reportedAt: Date.now() } }))
+      await new Promise((r) => setTimeout(r, 50))
+
+      const browser = new WebSocket(`ws://localhost:${port}`)
+      await waitForOpen(browser)
+      browser.send(JSON.stringify({ type: 'session:start', sessionId }))
+      const msg = await waitForMessage(browser)
+      expect(msg.type).toBe('error')
+      expect(msg.message).toBe('Agent resources exhausted')
+
+      agent.close()
+      browser.close()
+    })
+
+    it('rejects session:start when RAM exceeds threshold', async () => {
+      const { agent, sessionId } = await setupAgentWithSession(port)
+      agent.send(JSON.stringify({ type: 'agent:resources', resources: { cpuPercent: 20, memUsedMB: 15000, memTotalMB: 16000, slotsAvailable: 2, slotsTotal: 4, reportedAt: Date.now() } }))
+      await new Promise((r) => setTimeout(r, 50))
+
+      const browser = new WebSocket(`ws://localhost:${port}`)
+      await waitForOpen(browser)
+      browser.send(JSON.stringify({ type: 'session:start', sessionId }))
+      const msg = await waitForMessage(browser)
+      expect(msg.type).toBe('error')
+      expect(msg.message).toBe('Agent resources exhausted')
+
+      agent.close()
+      browser.close()
+    })
+
+    it('allows session:start when both CPU and RAM are within threshold', async () => {
+      const { agent, sessionId } = await setupAgentWithSession(port)
+      agent.send(JSON.stringify({ type: 'agent:resources', resources: { cpuPercent: 50, memUsedMB: 6000, memTotalMB: 16000, slotsAvailable: 2, slotsTotal: 4, reportedAt: Date.now() } }))
+      await new Promise((r) => setTimeout(r, 50))
+
+      const browser = new WebSocket(`ws://localhost:${port}`)
+      await waitForOpen(browser)
+      browser.send(JSON.stringify({ type: 'session:start', sessionId }))
+      const msg = await waitForMessage(browser)
+      expect(msg.type).toBe('session:joined')
+
+      agent.close()
+      browser.close()
+    })
+
+    it('allows session:start when CPU is exactly at threshold (> not >=)', async () => {
+      const { agent, sessionId } = await setupAgentWithSession(port)
+      agent.send(JSON.stringify({ type: 'agent:resources', resources: { cpuPercent: 80, memUsedMB: 4000, memTotalMB: 16000, slotsAvailable: 2, slotsTotal: 4, reportedAt: Date.now() } }))
+      await new Promise((r) => setTimeout(r, 50))
+
+      const browser = new WebSocket(`ws://localhost:${port}`)
+      await waitForOpen(browser)
+      browser.send(JSON.stringify({ type: 'session:start', sessionId }))
+      const msg = await waitForMessage(browser)
+      expect(msg.type).toBe('session:joined')
+
+      agent.close()
+      browser.close()
+    })
+
+    it('allows session:start (fail-open) when no resource data reported yet', async () => {
+      const { agent, sessionId } = await setupAgentWithSession(port)
+
+      const browser = new WebSocket(`ws://localhost:${port}`)
+      await waitForOpen(browser)
+      browser.send(JSON.stringify({ type: 'session:start', sessionId }))
+      const msg = await waitForMessage(browser)
+      expect(msg.type).toBe('session:joined')
+
+      agent.close()
+      browser.close()
+    })
+  })
+
   describe('stop', () => {
     let stopServer: RelayServer
 

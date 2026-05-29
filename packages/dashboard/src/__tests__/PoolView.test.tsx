@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import { render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
+import { getResourceHealth } from '@/src/pages/QASession'
 
 // ResourceBar를 직접 inline으로 정의 — QASession.tsx와 동일한 로직
 function ResourceBar({ label, percent, colorClass }: { label: string; percent: number; colorClass: string }) {
@@ -37,9 +38,17 @@ function MacCard({ session, onClick }: { session: SessionInfo; onClick?: () => v
   const cpuPercent = res?.cpuPercent ?? 0
   const memPercent = res ? (res.memUsedMB / res.memTotalMB) * 100 : 0
   const deviceCount = session.devices.length
+  const health = getResourceHealth(res, isStale)
+  const isOverloaded = health === 'overloaded'
 
   return (
-    <button data-testid="mac-card" onClick={onClick}>
+    <button
+      data-testid="mac-card"
+      disabled={isOverloaded}
+      onClick={onClick}
+      title={isOverloaded ? 'This Mac is currently overloaded. Try again later.' : undefined}
+    >
+      <span data-testid="health-dot" data-health={health} />
       <span data-testid="agent-name">{session.agentName ?? 'Unknown'}</span>
       {isStale && <span data-testid="stale-label">Stale</span>}
       <span data-testid="device-count">{deviceCount} device{deviceCount !== 1 ? 's' : ''}</span>
@@ -53,6 +62,49 @@ function MacCard({ session, onClick }: { session: SessionInfo; onClick?: () => v
     </button>
   )
 }
+
+const makeResources = (cpuPercent: number, memPercent: number, stale = false) => ({
+  cpuPercent,
+  memUsedMB: Math.round(memPercent * 160),
+  memTotalMB: 16000,
+  slotsAvailable: 2,
+  slotsTotal: 4,
+  reportedAt: stale ? Date.now() - 31_000 : Date.now(),
+})
+
+describe('getResourceHealth', () => {
+  it('resources가 없으면 unknown을 반환한다', () => {
+    expect(getResourceHealth(undefined, false)).toBe('unknown')
+  })
+
+  it('stale이면 unknown을 반환한다', () => {
+    expect(getResourceHealth(makeResources(10, 10), true)).toBe('unknown')
+  })
+
+  it('CPU와 RAM 모두 70% 미만이면 healthy를 반환한다', () => {
+    expect(getResourceHealth(makeResources(50, 50), false)).toBe('healthy')
+  })
+
+  it('CPU가 70% 이상이면 warning을 반환한다', () => {
+    expect(getResourceHealth(makeResources(70, 30), false)).toBe('warning')
+  })
+
+  it('RAM이 70% 이상이면 warning을 반환한다', () => {
+    expect(getResourceHealth(makeResources(30, 70), false)).toBe('warning')
+  })
+
+  it('CPU가 80%를 초과하면 overloaded를 반환한다', () => {
+    expect(getResourceHealth(makeResources(81, 30), false)).toBe('overloaded')
+  })
+
+  it('RAM이 80%를 초과하면 overloaded를 반환한다', () => {
+    expect(getResourceHealth(makeResources(30, 81), false)).toBe('overloaded')
+  })
+
+  it('CPU가 정확히 80%이면 블록하지 않는다 (relay와 동일한 > 기준)', () => {
+    expect(getResourceHealth(makeResources(80, 30), false)).toBe('warning')
+  })
+})
 
 describe('ResourceBar', () => {
   it('레이블과 퍼센트를 렌더링한다', () => {
@@ -150,5 +202,45 @@ describe('MacCard', () => {
     render(<MacCard session={baseSession} onClick={() => { clicked = true }} />)
     await user.click(screen.getByTestId('mac-card'))
     expect(clicked).toBe(true)
+  })
+
+  it('healthy 상태에서 health-dot이 healthy로 렌더링된다', () => {
+    render(<MacCard session={baseSession} />)
+    expect(screen.getByTestId('health-dot')).toHaveAttribute('data-health', 'healthy')
+  })
+
+  it('CPU 71%일 때 warning 상태 닷을 렌더링한다', () => {
+    const session = { ...baseSession, resources: makeResources(71, 30) }
+    render(<MacCard session={session} />)
+    expect(screen.getByTestId('health-dot')).toHaveAttribute('data-health', 'warning')
+  })
+
+  it('CPU 81%일 때 overloaded 상태 닷을 렌더링하고 카드를 disable한다', () => {
+    const session = { ...baseSession, resources: makeResources(81, 30) }
+    render(<MacCard session={session} />)
+    expect(screen.getByTestId('health-dot')).toHaveAttribute('data-health', 'overloaded')
+    expect(screen.getByTestId('mac-card')).toBeDisabled()
+  })
+
+  it('overloaded 카드에 tooltip title이 있다', () => {
+    const session = { ...baseSession, resources: makeResources(81, 30) }
+    render(<MacCard session={session} />)
+    expect(screen.getByTestId('mac-card')).toHaveAttribute('title', 'This Mac is currently overloaded. Try again later.')
+  })
+
+  it('overloaded 카드는 클릭해도 onClick이 호출되지 않는다', async () => {
+    const user = userEvent.setup()
+    let clicked = false
+    const session = { ...baseSession, resources: makeResources(81, 30) }
+    render(<MacCard session={session} onClick={() => { clicked = true }} />)
+    await user.click(screen.getByTestId('mac-card'))
+    expect(clicked).toBe(false)
+  })
+
+  it('resources 없으면 unknown 닷을 렌더링하고 카드는 활성 상태다', () => {
+    const session: SessionInfo = { agentName: 'Mac-B', devices: [], resources: undefined }
+    render(<MacCard session={session} />)
+    expect(screen.getByTestId('health-dot')).toHaveAttribute('data-health', 'unknown')
+    expect(screen.getByTestId('mac-card')).not.toBeDisabled()
   })
 })
