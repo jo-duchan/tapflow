@@ -259,7 +259,7 @@ export function QASession() {
                         title={isOverloaded ? 'This Mac is currently overloaded. Try again later.' : undefined}
                         className={cn(
                           'flex flex-col gap-3 rounded-lg border p-3 text-left transition-colors min-h-[100px]',
-                          isOverloaded ? 'opacity-50 cursor-not-allowed' : 'hover:bg-accent',
+                          isOverloaded ? 'cursor-not-allowed' : 'hover:bg-accent',
                         )}
                       >
                         <div className="flex items-start justify-between gap-2">
