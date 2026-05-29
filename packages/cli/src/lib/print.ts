@@ -7,12 +7,24 @@ export const YELLOW = '\x1b[33m'
 
 const MAX_WIDTH = 72
 
-function wrap(line: string, maxWidth: number): string[] {
+export function wrap(line: string, maxWidth: number): string[] {
   if (line.length <= maxWidth) return [line]
   const chunks: string[] = []
-  for (let i = 0; i < line.length; i += maxWidth) {
-    chunks.push(line.slice(i, i + maxWidth))
+
+  let remaining = line
+  while (remaining.length > maxWidth) {
+    const breakAt = remaining.lastIndexOf(' ', maxWidth)
+    if (breakAt > 0) {
+      chunks.push(remaining.slice(0, breakAt))
+      remaining = remaining.slice(breakAt + 1).trimStart()
+      continue
+    }
+
+    chunks.push(remaining.slice(0, maxWidth))
+    remaining = remaining.slice(maxWidth)
   }
+
+  if (remaining.length > 0) chunks.push(remaining)
   return chunks
 }
 
