@@ -1,6 +1,6 @@
 ---
 description: 해결이 어려운 구현·버그·설계 문제를 Opus로 깊게 분석한다
-model: claude-opus-4-7
+model: claude-opus-4-8
 ---
 
 아래 문제를 깊이 분석한다: **$ARGUMENTS**

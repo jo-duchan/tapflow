@@ -1,6 +1,6 @@
 ---
 description: 코드베이스와 CLAUDE.md·INDEX.md·.work 문서들의 최신성·정합성을 검토하고 수정한다
-model: claude-opus-4-7
+model: claude-opus-4-8
 allowed-tools: Read, Edit, Bash, Glob, Grep
 ---
 
