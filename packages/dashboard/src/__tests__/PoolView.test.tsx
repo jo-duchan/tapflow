@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import { render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { getResourceHealth } from '@/src/pages/QASession'
+import { getResourceHealth } from '@/lib/resource-health'
 
 // ResourceBar를 직접 inline으로 정의 — QASession.tsx와 동일한 로직
 function ResourceBar({ label, percent, colorClass }: { label: string; percent: number; colorClass: string }) {

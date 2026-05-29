@@ -26,21 +26,8 @@ import { Switch } from '@/components/ui/switch';
 import { Label } from '@/components/ui/label';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { SearchInput } from '@/components/ui/search-input';
-import type { AgentDevice, AgentResources, SessionInfo } from '@/lib/types';
-
-const RESOURCE_WARN_THRESHOLD = 70
-const RESOURCE_BLOCK_THRESHOLD = 80
-
-export function getResourceHealth(
-  res: AgentResources | undefined,
-  isStale: boolean,
-): 'unknown' | 'healthy' | 'warning' | 'overloaded' {
-  if (!res || isStale) return 'unknown'
-  const memPercent = (res.memUsedMB / res.memTotalMB) * 100
-  if (res.cpuPercent > RESOURCE_BLOCK_THRESHOLD || memPercent > RESOURCE_BLOCK_THRESHOLD) return 'overloaded'
-  if (res.cpuPercent >= RESOURCE_WARN_THRESHOLD || memPercent >= RESOURCE_WARN_THRESHOLD) return 'warning'
-  return 'healthy'
-}
+import type { AgentDevice, SessionInfo } from '@/lib/types';
+import { getResourceHealth, type ResourceHealth } from '@/lib/resource-health';
 
 export function QASession() {
   const [searchParams] = useSearchParams();
@@ -326,7 +313,7 @@ export function QASession() {
   );
 }
 
-function ResourceHealthDot({ health }: { health: ReturnType<typeof getResourceHealth> }) {
+function ResourceHealthDot({ health }: { health: ResourceHealth }) {
   const colorClass = {
     unknown: 'bg-muted-foreground/40',
     healthy: 'bg-emerald-400',
