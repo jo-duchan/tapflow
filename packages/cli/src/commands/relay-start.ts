@@ -8,7 +8,7 @@ export interface RelayStartOptions {
   port?: number
 }
 
-const DEFAULT_PORT = 4000
+const DEFAULT_PORT = config.server.port
 
 const portSchema = z.number().int().min(1).max(65535, 'port must be between 1 and 65535')
 

@@ -1,5 +1,6 @@
 import { z } from 'zod'
 import { AgentRegistry } from '@tapflowio/agent-core'
+import { config } from '@tapflowio/relay'
 import '@tapflowio/ios-agent'
 import '@tapflowio/android-agent'
 import { banner, createSpinner } from '../lib/print.js'
@@ -10,7 +11,7 @@ export interface AgentStartOptions {
   platform?: string
 }
 
-const DEFAULT_RELAY = 'ws://localhost:4000'
+const DEFAULT_RELAY = `ws://localhost:${config.server.port}`
 
 const relayUrlSchema = z
   .string()
