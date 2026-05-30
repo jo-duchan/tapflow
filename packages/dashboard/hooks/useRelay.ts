@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { RelayMessage } from '@/lib/types'
 
-const RELAY_URL = import.meta.env.VITE_RELAY_URL ?? `ws://${location.host}`
+const wsProtocol = location.protocol === 'https:' ? 'wss:' : 'ws:'
+const RELAY_URL = import.meta.env.VITE_RELAY_URL ?? `${wsProtocol}//${location.host}`
 const RECONNECT_DELAY = 2000
 
 export function useRelay(
