@@ -8,10 +8,13 @@ const logger = createLogger('relay:config')
 const DEV_DEFAULT_SECRET = 'tapflow-dev-secret-change-in-production'
 
 const configSchema = z.object({
-  server: z.object({
+  local: z.object({
     port: z.number().int().min(1).max(65535),
     dataDir: z.string().min(1),
     wsBackpressureBytes: z.number().int().min(1),
+  }),
+  relay: z.object({
+    url: z.string().nullable(),
   }),
   smtp: z.object({
     host: z.string(),
@@ -28,10 +31,13 @@ export type TapflowConfig = z.infer<typeof configSchema>
 type DeepPartial<T> = { [K in keyof T]?: T[K] extends object ? DeepPartial<T[K]> : T[K] }
 
 const DEFAULTS = {
-  server: {
+  local: {
     port: 4000,
     dataDir: '.tapflow-data',
     wsBackpressureBytes: 1_048_576,
+  },
+  relay: {
+    url: null,
   },
   smtp: {
     host: '',
@@ -48,7 +54,7 @@ function resolveDataDir(raw: string): string {
 }
 
 function load(): TapflowConfig {
-  let file: DeepPartial<TapflowConfig> & { server?: { jwtSecret?: unknown } } = {}
+  let file: DeepPartial<TapflowConfig> & { local?: { jwtSecret?: unknown } } = {}
 
   const configPath = path.join(process.cwd(), 'tapflow.config.json')
   if (fs.existsSync(configPath)) {
@@ -59,15 +65,18 @@ function load(): TapflowConfig {
     }
   }
 
-  if (file.server != null && 'jwtSecret' in file.server) {
-    logger.warn('server.jwtSecret in tapflow.config.json is deprecated — use JWT_SECRET env var instead')
+  if (file.local != null && 'jwtSecret' in file.local) {
+    logger.warn('local.jwtSecret in tapflow.config.json is deprecated — use JWT_SECRET env var instead')
   }
 
   const cfg: TapflowConfig = {
-    server: {
-      port: file.server?.port ?? DEFAULTS.server.port,
-      dataDir: resolveDataDir(file.server?.dataDir ?? DEFAULTS.server.dataDir),
-      wsBackpressureBytes: DEFAULTS.server.wsBackpressureBytes,
+    local: {
+      port: file.local?.port ?? DEFAULTS.local.port,
+      dataDir: resolveDataDir(file.local?.dataDir ?? DEFAULTS.local.dataDir),
+      wsBackpressureBytes: DEFAULTS.local.wsBackpressureBytes,
+    },
+    relay: {
+      url: file.relay?.url || null,
     },
     smtp: {
       host: file.smtp?.host ?? DEFAULTS.smtp.host,
@@ -79,9 +88,10 @@ function load(): TapflowConfig {
     },
   }
 
-  if (process.env.TAPFLOW_PORT) cfg.server.port = Number(process.env.TAPFLOW_PORT)
-  if (process.env.TAPFLOW_DATA_DIR) cfg.server.dataDir = resolveDataDir(process.env.TAPFLOW_DATA_DIR)
-  if (process.env.TAPFLOW_WS_BACKPRESSURE_BYTES) cfg.server.wsBackpressureBytes = Number(process.env.TAPFLOW_WS_BACKPRESSURE_BYTES)
+  if (process.env.TAPFLOW_PORT) cfg.local.port = Number(process.env.TAPFLOW_PORT)
+  if (process.env.TAPFLOW_DATA_DIR) cfg.local.dataDir = resolveDataDir(process.env.TAPFLOW_DATA_DIR)
+  if (process.env.TAPFLOW_WS_BACKPRESSURE_BYTES) cfg.local.wsBackpressureBytes = Number(process.env.TAPFLOW_WS_BACKPRESSURE_BYTES)
+  if (process.env.TAPFLOW_RELAY_URL) cfg.relay.url = process.env.TAPFLOW_RELAY_URL || null
   if (process.env.SMTP_HOST) cfg.smtp.host = process.env.SMTP_HOST
   if (process.env.SMTP_PORT) cfg.smtp.port = Number(process.env.SMTP_PORT)
   if (process.env.SMTP_SECURE) cfg.smtp.secure = process.env.SMTP_SECURE === 'true'

@@ -1,5 +1,6 @@
 import * as readline from 'node:readline/promises'
 import { stdin as input, stdout as output } from 'node:process'
+import { config } from '@tapflowio/relay'
 import { createSpinner, banner, step } from '../lib/print.js'
 
 export interface InitOptions {
@@ -42,7 +43,8 @@ function readPassword(prompt: string): Promise<string> {
 }
 
 export async function cmdInit(opts: InitOptions): Promise<void> {
-  const baseUrl = (opts.relay ?? 'http://localhost:4000').replace(/^wss?:\/\//, 'http://')
+  const defaultRelay = config.relay.url ?? `http://localhost:${config.local.port}`
+  const baseUrl = (opts.relay ?? defaultRelay).replace(/^wss:\/\//, 'https://').replace(/^ws:\/\//, 'http://')
 
   const rl = readline.createInterface({ input, output })
   const email = (await rl.question('  ? Admin email: ')).trim()

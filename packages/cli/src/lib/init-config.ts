@@ -2,9 +2,12 @@ import fs from 'fs'
 import path from 'path'
 
 const DEFAULT_CONFIG = {
-  server: {
+  local: {
     port: 4000,
     dataDir: '.tapflow-data',
+  },
+  relay: {
+    url: '',
   },
   smtp: {
     host: '',

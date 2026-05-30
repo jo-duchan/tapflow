@@ -11,7 +11,7 @@ export interface StartOptions {
   platform?: string
 }
 
-const RELAY_PORT = config.server.port
+const RELAY_PORT = config.local.port
 
 export async function cmdStart(opts: StartOptions): Promise<void> {
   const relayUrl = `ws://localhost:${RELAY_PORT}`
@@ -33,8 +33,8 @@ export async function cmdStart(opts: StartOptions): Promise<void> {
 
   // ── 1. Relay (always local) ───────────────────────────────────────────────
   initConfigFile()
-  initDb(path.join(config.server.dataDir, 'tapflow.db'))
-  const server = new RelayServer({ port: RELAY_PORT, uploadsDir: path.join(config.server.dataDir, 'uploads'), wsBackpressureBytes: config.server.wsBackpressureBytes })
+  initDb(path.join(config.local.dataDir, 'tapflow.db'))
+  const server = new RelayServer({ port: RELAY_PORT, uploadsDir: path.join(config.local.dataDir, 'uploads'), wsBackpressureBytes: config.local.wsBackpressureBytes })
   await server.start()
   step(`Relay started on ws://localhost:${RELAY_PORT}`)
 

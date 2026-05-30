@@ -6,9 +6,12 @@ The relay reads `tapflow.config.json` from the directory where it is started. Th
 
 ```json
 {
-  "server": {
+  "local": {
     "port": 4000,
     "dataDir": ".tapflow-data"
+  },
+  "relay": {
+    "url": "https://your-relay-url"
   },
   "smtp": {
     "host": "smtp.example.com",
@@ -20,6 +23,12 @@ The relay reads `tapflow.config.json` from the directory where it is started. Th
 }
 ```
 
+| Key | Description |
+|-----|-------------|
+| `local` | Settings for the relay server running on this machine. |
+| `relay.url` | URL of the relay to connect to. Used by `tapflow agent start`, `tapflow init`, `tapflow status`, and `tapflow logs` as the default — no `--relay` flag needed when this is set. Leave empty for local mode (`ws://localhost:[local.port]`). |
+| `smtp` | SMTP settings for sending invitation and password reset emails. |
+
 `smtp.from` defaults to `tapflow <smtp.user>` when `smtp.user` is set. Override it explicitly if you need a different sender address.
 
 ## Environment variable overrides
@@ -28,9 +37,10 @@ Environment variables always take precedence over the config file — useful for
 
 | Variable | Config key | Default | Description |
 |----------|------------|---------|-------------|
-| `TAPFLOW_PORT` | `server.port` | `4000` | Server port |
+| `TAPFLOW_PORT` | `local.port` | `4000` | Server port |
 | `JWT_SECRET` | — | *(dev default)* | JWT signing key (env only) |
-| `TAPFLOW_DATA_DIR` | `server.dataDir` | `.tapflow-data` | DB and uploads directory (supports relative paths) |
+| `TAPFLOW_DATA_DIR` | `local.dataDir` | `.tapflow-data` | DB and uploads directory (supports relative paths) |
+| `TAPFLOW_RELAY_URL` | `relay.url` | *(empty)* | Relay URL used as default by CLI commands |
 | `TAPFLOW_BUILD_TTL_DAYS` | — | `7` | Days before a Done build's files and record are automatically deleted. Set to a small value (e.g. `0.001`) to verify cleanup quickly in local testing. |
 | `TAPFLOW_WS_BACKPRESSURE_BYTES` | — | `1048576` (1 MB) | Binary frame drop threshold per browser socket. Frames are silently dropped when the socket buffer exceeds this value. |
 | `SMTP_HOST` | `smtp.host` | `` | SMTP host |
@@ -65,7 +75,7 @@ your-directory/
       comments/
 ```
 
-To change the data directory location, set `TAPFLOW_DATA_DIR` or `server.dataDir`. Back up `.tapflow-data/` to preserve all data.
+To change the data directory location, set `TAPFLOW_DATA_DIR` or `local.dataDir`. Back up `.tapflow-data/` to preserve all data.
 
 ## SMTP
 

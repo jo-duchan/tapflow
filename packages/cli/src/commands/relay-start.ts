@@ -8,7 +8,7 @@ export interface RelayStartOptions {
   port?: number
 }
 
-const DEFAULT_PORT = config.server.port
+const DEFAULT_PORT = config.local.port
 
 const portSchema = z.number().int().min(1).max(65535, 'port must be between 1 and 65535')
 
@@ -21,8 +21,8 @@ export async function cmdRelayStart(opts: RelayStartOptions): Promise<void> {
   }
   const port = portResult.data
   initConfigFile()
-  initDb(path.join(config.server.dataDir, 'tapflow.db'))
-  const server = new RelayServer({ port, uploadsDir: path.join(config.server.dataDir, 'uploads'), wsBackpressureBytes: config.server.wsBackpressureBytes })
+  initDb(path.join(config.local.dataDir, 'tapflow.db'))
+  const server = new RelayServer({ port, uploadsDir: path.join(config.local.dataDir, 'uploads'), wsBackpressureBytes: config.local.wsBackpressureBytes })
   await server.start()
   step(`Relay started on ws://localhost:${port}`)
 
