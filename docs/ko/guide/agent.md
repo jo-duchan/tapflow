@@ -4,15 +4,27 @@
 
 ## 에이전트 시작
 
+에이전트와 릴레이가 같은 Mac에서 실행될 때는 별도 플래그가 필요 없습니다. 포트는 `tapflow.config.json`에서 읽습니다 (기본값 `4000`):
+
+```sh
+tapflow agent start
+```
+
+릴레이가 다른 머신에서 실행 중이라면 URL을 명시합니다:
+
 ```sh
 tapflow agent start --relay wss://your-relay-url
 ```
 
 | 옵션 | 기본값 | 설명 |
 |------|--------|------|
-| `--relay` | `ws://localhost:4000` | 릴레이 WebSocket URL |
+| `--relay` | `ws://localhost:[port]` | 릴레이 WebSocket URL. 포트는 `tapflow.config.json`에서 읽습니다. |
 | `--platform` | 자동 감지 | `ios` \| `android` \| `all` |
 | `--device` | 부팅된 첫 번째 시뮬레이터 | iOS 시뮬레이터 이름 또는 UDID |
+
+::: tip 에이전트와 릴레이는 같은 네트워크에 두세요
+에이전트는 릴레이로 영상 프레임을 지속적으로 전송합니다. 최적의 스트리밍 품질을 위해 에이전트와 릴레이를 같은 Mac 또는 같은 LAN에서 실행하세요. 서로 다른 네트워크에 연결하면 레이턴시가 높아지고 프레임 드롭이 발생할 수 있습니다.
+:::
 
 ## iOS
 

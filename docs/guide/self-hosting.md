@@ -21,6 +21,10 @@ tapflow start
 
 Run the relay on a Linux server or dedicated Mac; run the agent on each Mac with a simulator.
 
+::: tip Keep agents on the same LAN as the relay
+The agent streams video frames to the relay continuously. Place agent Macs on the same LAN as the relay server — or on the same Mac — for the best streaming quality. Connecting across different networks increases latency and may cause frame drops.
+:::
+
 **On the server** (PM2 or plain Node.js — see below):
 
 ```sh
@@ -68,7 +72,7 @@ npm install -g tapflow
 JWT_SECRET=YOUR_JWT_SECRET tapflow relay start
 ```
 
-Teammates connect to `http://MACHINE_LOCAL_IP:4000` in their browser.
+Teammates connect to `http://MACHINE_LOCAL_IP:4000` in their browser. The port matches `server.port` in `tapflow.config.json` (default `4000`).
 
 ## External access
 

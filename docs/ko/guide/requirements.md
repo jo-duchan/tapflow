@@ -15,7 +15,8 @@
 
 ### iOS
 
-- iOS Simulator Runtime이 설치된 Xcode
+- macOS 26 이상
+- iOS Simulator Runtime이 설치된 Xcode 26 이상
 
 ### Android
 
