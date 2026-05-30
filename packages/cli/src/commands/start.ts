@@ -11,7 +11,7 @@ export interface StartOptions {
   platform?: string
 }
 
-const RELAY_PORT = config.server.port
+const RELAY_PORT = config.local.port
 
 export async function cmdStart(opts: StartOptions): Promise<void> {
   const relayUrl = `ws://localhost:${RELAY_PORT}`

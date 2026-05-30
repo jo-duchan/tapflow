@@ -44,7 +44,7 @@ function readPassword(prompt: string): Promise<string> {
 
 export async function cmdInit(opts: InitOptions): Promise<void> {
   const defaultRelay = config.relay.url ?? `http://localhost:${config.local.port}`
-  const baseUrl = (opts.relay ?? defaultRelay).replace(/^wss?:\/\//, 'http://')
+  const baseUrl = (opts.relay ?? defaultRelay).replace(/^wss:\/\//, 'https://').replace(/^ws:\/\//, 'http://')
 
   const rl = readline.createInterface({ input, output })
   const email = (await rl.question('  ? Admin email: ')).trim()
