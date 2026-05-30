@@ -19,19 +19,19 @@ tapflow start
 
 ### 팀 운영 (릴레이 서버 분리)
 
-릴레이는 Linux 서버 또는 Mac에서, 에이전트는 시뮬레이터가 연결된 각 Mac에서 실행합니다.
+릴레이는 전용 Mac에서, 에이전트는 시뮬레이터가 연결된 각 Mac에서 실행합니다.
 
-::: tip 에이전트는 릴레이와 같은 LAN에 두세요
-에이전트는 릴레이로 영상 프레임을 지속적으로 전송합니다. 최적의 스트리밍 품질을 위해 에이전트 Mac을 릴레이 서버와 같은 LAN에 두세요. 서로 다른 네트워크에 연결하면 레이턴시가 높아지고 프레임 드롭이 발생할 수 있습니다.
+::: tip 에이전트와 릴레이는 같은 내부 네트워크에 두세요
+에이전트는 릴레이로 영상 프레임을 지속적으로 전송합니다. 층이 다르거나 VLAN이 분리돼 있어도 같은 사무실 건물 내 내부 네트워크라면 충분합니다. 에이전트를 인터넷 너머 다른 네트워크에 두면 RTT가 높아져 프레임 드롭이 발생합니다.
 :::
 
-**서버에서** (아래 PM2 또는 Node.js 방식 중 하나):
+**릴레이 Mac에서:**
 
 ```sh
 tapflow relay start
 ```
 
-**각 Mac에서**:
+**각 에이전트 Mac에서:**
 
 ```sh
 tapflow agent start --relay wss://your-relay-url
@@ -63,89 +63,44 @@ JWT_SECRET=YOUR_JWT_SECRET tapflow relay start
 
 릴레이는 현재 디렉토리에서 `tapflow.config.json`을 읽습니다. [설정 파일](/ko/reference/configuration)을 참고하세요.
 
-## 내부 공유
+## 내부 접속 (같은 네트워크)
 
-같은 네트워크의 팀원이 대시보드에 접근하는 가장 간단한 방법입니다.
+같은 사무실 건물 내 팀원이 대시보드에 접근하는 가장 간단한 방법입니다.
 
 ```sh
 npm install -g tapflow
 JWT_SECRET=YOUR_JWT_SECRET tapflow relay start
 ```
 
-팀원은 `http://MAC_LOCAL_IP:4000`으로 대시보드에 접속합니다. 포트는 `tapflow.config.json`의 `server.port` 값을 따릅니다 (기본값 `4000`).
+팀원은 `http://MAC_LOCAL_IP:4000`으로 대시보드에 접속합니다. 포트는 `tapflow.config.json`의 `local.port` 값을 따릅니다 (기본값 `4000`).
 
-## 외부 공유
+## 외부 접속
 
-로컬 네트워크 밖에서 팀원이 대시보드에 접근하거나 에이전트가 다른 네트워크에서 연결하려면 외부 URL이 필요합니다.
+릴레이와 에이전트는 항상 같은 내부 네트워크에 유지합니다. 외부 접속은 릴레이 Mac에서 외부로 아웃바운드 터널을 열어 브라우저가 공개 URL로 접근하도록 합니다.
 
-### ngrok (빠른 시작)
+### VPS + Tunnel (권장)
 
-도메인·서버 설정 없이 즉시 공개 URL을 얻는 가장 쉬운 방법입니다.
+가장 안정적인 외부 접속 방법입니다. 트래픽이 팀 소유 VPS를 경유하므로 tapflow의 "데이터가 팀 인프라 안에" 원칙을 유지합니다.
 
-```sh
-# 터미널 1: 릴레이 시작
-tapflow relay start
-
-# 터미널 2: ngrok으로 외부 URL 생성
-ngrok http 4000
+```
+브라우저 → VPS (공개 URL) → 터널 → 릴레이 Mac (사무실)
+                                      ↑
+                                 에이전트 Mac (같은 내부 네트워크)
 ```
 
-ngrok이 `https://abc123.ngrok-free.app` 형태의 URL을 출력합니다. 이 URL이 릴레이 주소이자 대시보드 주소입니다.
+릴레이 Mac에서 VPS로 아웃바운드 터널을 열기 때문에 포트 포워딩이나 CGNAT 없이도 외부 접속이 가능합니다.
 
-에이전트를 연결할 때는 `wss://` 스킴을 사용합니다:
-
-```sh
-tapflow agent start --relay wss://abc123.ngrok-free.app
-```
-
-::: warning ngrok 무료 플랜 제약
-- 재시작할 때마다 URL이 바뀝니다 (고정 URL은 유료 플랜).
-- 영상 스트림을 포함한 모든 트래픽이 ngrok 서버를 경유합니다. tapflow의 "데이터가 팀 인프라 안에" 원칙에 맞지 않습니다.
-- **테스트·데모 용도**로만 사용하세요. 팀 운영 환경에서는 아래 리버스 프록시를 사용하세요.
+::: info 준비 중
+`tapflow relay start --tunnel` 옵션으로 터널을 자동으로 시작하는 기능을 준비 중입니다.
 :::
 
-### nginx 예시
-
-::: warning WebSocket upgrade 헤더 필수
-`Upgrade`와 `Connection` 헤더가 없으면 에이전트의 WebSocket 연결이 실패합니다.
+::: danger 릴레이를 클라우드에 직접 배포하지 마세요
+fly.io, Railway 등 클라우드 서비스에 릴레이를 올리면 에이전트→릴레이 구간이 인터넷을 타게 됩니다. 이 경우 RTT가 30fps 기준(33ms/frame)을 초과해 프레임 드롭이 발생하며 스트리밍 품질을 보장할 수 없습니다. tapflow는 이 구성을 지원하지 않습니다.
 :::
 
-```nginx
-server {
-    listen 443 ssl;
-    server_name tapflow.myteam.example.com;
+## PM2 (릴레이 Mac 상시 운영)
 
-    ssl_certificate     /etc/letsencrypt/live/tapflow.myteam.example.com/fullchain.pem;
-    ssl_certificate_key /etc/letsencrypt/live/tapflow.myteam.example.com/privkey.pem;
-
-    location / {
-        proxy_pass http://localhost:4000;
-        proxy_http_version 1.1;
-
-        proxy_set_header Upgrade $http_upgrade;
-        proxy_set_header Connection "upgrade";
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-
-        proxy_read_timeout 3600s;
-    }
-}
-```
-
-### Caddy 예시
-
-```
-tapflow.myteam.example.com {
-    reverse_proxy localhost:4000
-}
-```
-
-Caddy는 TLS와 WebSocket 업그레이드를 자동으로 처리합니다.
-
-## PM2 (서버 운영 권장)
-
-크래시 시 자동 재시작, 서버 재부팅 후 자동 시작, 로그 관리를 처리합니다.
+릴레이 Mac에서 크래시 시 자동 재시작, 재부팅 후 자동 시작, 로그 관리를 처리합니다.
 
 ```sh
 npm install -g pm2 tapflow

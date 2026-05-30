@@ -112,6 +112,10 @@
     width: 48px;
     height: 34px;
   }
+
+  .VPHero .text span {
+    white-space: normal !important;
+  }
 }
 
 .VPHero .text {
@@ -166,12 +170,6 @@
 }
 
 /* ─── Nav ────────────────────────────────────────────────── */
-/* desktop: frosted glass */
-@media (min-width: 960px) {
-  .VPNav {
-    backdrop-filter: blur(8px);
-  }
-}
 
 /* ─── Mobile sidebar: nav always on top (same pattern as desktop) ── */
 /* Lower sidebar/backdrop z-index below nav(30) so tapflow brand
@@ -185,9 +183,9 @@
 
   .VPSidebar {
     padding-top: var(--vp-nav-height) !important;
+    overscroll-behavior: none;
   }
 
-  /* Curtain masks sidebar items that scroll into the nav area */
   .VPSidebar .curtain {
     position: sticky;
     top: calc(var(--vp-nav-height) * -1);

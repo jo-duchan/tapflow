@@ -34,7 +34,7 @@ tapflow init
 
 | 옵션 | 설명 |
 |------|------|
-| `--relay <url>` | 릴레이 URL (기본값: `http://localhost:4000`) |
+| `--relay <url>` | 릴레이 URL (기본값: config의 `relay.url`, 없으면 `http://localhost:4000`) |
 
 실행 예시:
 
@@ -89,7 +89,7 @@ tapflow agent start --relay wss://relay.myteam.example.com
 
 | 옵션 | 기본값 | 설명 |
 |------|--------|------|
-| `--relay <url>` | `ws://localhost:4000` | 릴레이 WebSocket URL |
+| `--relay <url>` | config의 `relay.url`, 없으면 `ws://localhost:4000` | 릴레이 WebSocket URL. `tapflow.config.json`에 `relay.url`이 있으면 생략 가능. |
 | `--platform <ios\|android\|all>` | 자동 감지 | 시작할 플랫폼 |
 | `--device <name>` | 첫 번째 부팅된 시뮬레이터 | iOS 시뮬레이터 이름 또는 UDID |
 
@@ -157,7 +157,7 @@ tapflow status
 
 | 옵션 | 기본값 | 설명 |
 |------|--------|------|
-| `--relay <url>` | `ws://localhost:4000` | 릴레이 WebSocket URL |
+| `--relay <url>` | config의 `relay.url`, 없으면 `ws://localhost:4000` | 릴레이 WebSocket URL. `tapflow.config.json`에 `relay.url`이 있으면 생략 가능. |
 
 ::: info 연결 방식
 `tapflow status`는 릴레이에 WebSocket으로 연결해 정보를 가져옵니다. 5초 안에 응답이 없으면 타임아웃됩니다. 원격 릴레이를 사용한다면 `--relay` 옵션이 필요합니다.
@@ -184,5 +184,5 @@ tapflow logs
 
 | 옵션 | 기본값 | 설명 |
 |------|--------|------|
-| `--relay <url>` | `http://localhost:4000` | 릴레이 URL |
+| `--relay <url>` | config의 `relay.url`, 없으면 `http://localhost:4000` | 릴레이 URL. `tapflow.config.json`에 `relay.url`이 있으면 생략 가능. |
 | `--lines <n>` | `100` | 표시할 로그 줄 수 (최대 500) |
