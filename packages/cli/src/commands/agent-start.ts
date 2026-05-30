@@ -11,7 +11,7 @@ export interface AgentStartOptions {
   platform?: string
 }
 
-const DEFAULT_RELAY = `ws://localhost:${config.server.port}`
+const DEFAULT_RELAY = config.relay.url ?? `ws://localhost:${config.local.port}`
 
 const relayUrlSchema = z
   .string()

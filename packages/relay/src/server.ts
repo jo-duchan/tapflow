@@ -6,13 +6,13 @@ import { createLogger } from '@tapflowio/agent-core'
 
 const logger = createLogger('relay')
 
-const { port, dataDir } = config.server
+const { port, dataDir } = config.local
 const dbPath = path.join(dataDir, 'tapflow.db')
 const uploadsDir = path.join(dataDir, 'uploads')
 
 initDb(dbPath)
 
-const server = new RelayServer({ port, uploadsDir, wsBackpressureBytes: config.server.wsBackpressureBytes })
+const server = new RelayServer({ port, uploadsDir, wsBackpressureBytes: config.local.wsBackpressureBytes })
 
 void server.start().then(() => {
   logger.info(`tapflow relay running on port ${port}`)

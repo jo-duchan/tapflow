@@ -1,8 +1,10 @@
 import { WebSocket } from 'ws'
+import { config } from '@tapflowio/relay'
 import { DIM, BOLD, GREEN, YELLOW, RED, R } from '../lib/print.js'
 
 export async function cmdStatus(opts: { relay?: string }): Promise<void> {
-  const relayUrl = (opts.relay ?? 'ws://localhost:4000').replace(/^http/, 'ws')
+  const defaultRelay = config.relay.url ?? `ws://localhost:${config.local.port}`
+  const relayUrl = (opts.relay ?? defaultRelay).replace(/^http/, 'ws')
 
   console.log(`\n  Connecting to ${relayUrl}…\n`)
   console.log(`  ${DIM}● agent  ◉ in use  ○ idle${R}\n`)

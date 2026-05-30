@@ -6,9 +6,12 @@
 
 ```json
 {
-  "server": {
+  "local": {
     "port": 4000,
     "dataDir": ".tapflow-data"
+  },
+  "relay": {
+    "url": "https://your-relay-url"
   },
   "smtp": {
     "host": "smtp.example.com",
@@ -20,6 +23,12 @@
 }
 ```
 
+| 키 | 설명 |
+|----|------|
+| `local` | 이 머신에서 실행하는 relay 서버 설정 |
+| `relay.url` | 연결할 relay URL. `tapflow agent start`, `tapflow init`, `tapflow status`, `tapflow logs`의 기본값으로 사용됩니다. 설정 시 `--relay` 플래그 없이 동작합니다. 비어있으면 로컬 모드(`ws://localhost:[local.port]`)를 사용합니다. |
+| `smtp` | 초대·비밀번호 재설정 이메일 발송을 위한 SMTP 설정 |
+
 `smtp.from`은 `smtp.user`가 설정되어 있으면 `tapflow <smtp.user>` 형태로 자동 설정됩니다. 발신자 주소를 다르게 지정하려면 명시적으로 입력합니다.
 
 ## 환경변수 오버라이드
@@ -28,9 +37,10 @@
 
 | 환경변수 | Config 키 | 기본값 | 설명 |
 |---------|-----------|--------|------|
-| `TAPFLOW_PORT` | `server.port` | `4000` | 서버 포트 |
+| `TAPFLOW_PORT` | `local.port` | `4000` | 서버 포트 |
 | `JWT_SECRET` | — | *(개발용 기본값)* | JWT 서명 키 (환경변수 전용) |
-| `TAPFLOW_DATA_DIR` | `server.dataDir` | `.tapflow-data` | DB·업로드 디렉토리 (상대 경로 지원) |
+| `TAPFLOW_DATA_DIR` | `local.dataDir` | `.tapflow-data` | DB·업로드 디렉토리 (상대 경로 지원) |
+| `TAPFLOW_RELAY_URL` | `relay.url` | *(비어있음)* | CLI 명령어의 기본 relay URL |
 | `TAPFLOW_BUILD_TTL_DAYS` | — | `7` | Done 빌드 파일·레코드 자동 삭제 기간(일). 로컬 테스트 시 `0.001` 등 작은 값으로 즉시 확인 가능. |
 | `TAPFLOW_WS_BACKPRESSURE_BYTES` | — | `1048576` (1 MB) | 브라우저 소켓당 바이너리 프레임 드롭 임계값. 버퍼가 이 값을 초과하면 프레임이 드롭됩니다. |
 | `SMTP_HOST` | `smtp.host` | `` | SMTP 호스트 |
@@ -65,7 +75,7 @@ your-directory/
       comments/
 ```
 
-데이터 디렉토리 위치를 변경하려면 `TAPFLOW_DATA_DIR` 환경변수 또는 `server.dataDir`을 사용합니다. `.tapflow-data/`를 백업하면 모든 데이터가 보존됩니다.
+데이터 디렉토리 위치를 변경하려면 `TAPFLOW_DATA_DIR` 환경변수 또는 `local.dataDir`을 사용합니다. `.tapflow-data/`를 백업하면 모든 데이터가 보존됩니다.
 
 ## SMTP 설정
 
