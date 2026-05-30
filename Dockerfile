@@ -8,15 +8,15 @@ COPY packages/agent-core/package.json packages/agent-core/
 COPY packages/relay/package.json packages/relay/
 COPY packages/dashboard/package.json packages/dashboard/
 
-RUN pnpm install --frozen-lockfile --filter @tapflow/relay --filter @tapflow/dashboard --filter @tapflow/agent-core
+RUN pnpm install --frozen-lockfile --filter @tapflowio/relay --filter @tapflowio/dashboard --filter @tapflowio/agent-core
 
 COPY packages/agent-core packages/agent-core
 COPY packages/dashboard packages/dashboard
 COPY packages/relay packages/relay
 
-RUN pnpm --filter @tapflow/agent-core build
-RUN pnpm --filter @tapflow/dashboard build
-RUN pnpm --filter @tapflow/relay build
+RUN pnpm --filter @tapflowio/agent-core build
+RUN pnpm --filter @tapflowio/dashboard build
+RUN pnpm --filter @tapflowio/relay build
 
 # ── Runtime ─────────────────────────────────────────────────────────────────
 FROM node:20-slim
