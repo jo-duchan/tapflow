@@ -25,8 +25,8 @@ describe('relay config validation', () => {
   it('유효한 기본값 → 정상 로드', async () => {
     vi.spyOn(console, 'warn').mockImplementation(() => {})
     const { config } = await import('../lib/config.js')
-    expect(config.server.port).toBe(4000)
-    expect(config.server.wsBackpressureBytes).toBe(1_048_576)
+    expect(config.local.port).toBe(4000)
+    expect(config.local.wsBackpressureBytes).toBe(1_048_576)
     expect(exitSpy).not.toHaveBeenCalled()
   })
 
@@ -34,7 +34,7 @@ describe('relay config validation', () => {
     vi.spyOn(console, 'warn').mockImplementation(() => {})
     vi.stubEnv('TAPFLOW_WS_BACKPRESSURE_BYTES', '524288')
     const { config } = await import('../lib/config.js')
-    expect(config.server.wsBackpressureBytes).toBe(524288)
+    expect(config.local.wsBackpressureBytes).toBe(524288)
     expect(exitSpy).not.toHaveBeenCalled()
   })
 
@@ -49,7 +49,7 @@ describe('relay config validation', () => {
     vi.stubEnv('TAPFLOW_PORT', 'abc')
     await expect(import('../lib/config.js')).rejects.toThrow('process.exit')
     expect(exitSpy).toHaveBeenCalledWith(1)
-    expect(errorSpy).toHaveBeenCalledWith(expect.stringContaining('server.port'))
+    expect(errorSpy).toHaveBeenCalledWith(expect.stringContaining('local.port'))
   })
 
   it('TAPFLOW_PORT=99999 → exit(1)', async () => {
@@ -83,7 +83,7 @@ describe('relay config validation', () => {
     const fs = await import('fs')
     vi.mocked(fs.default.existsSync).mockReturnValue(true)
     vi.mocked(fs.default.readFileSync).mockReturnValue(
-      JSON.stringify({ server: { jwtSecret: 'old-secret-value-from-config-file' } })
+      JSON.stringify({ local: { jwtSecret: 'old-secret-value-from-config-file' } })
     )
     const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
     await import('../lib/config.js')
