@@ -4,15 +4,27 @@ The agent runs on a Mac and streams simulator and emulator screens to the relay.
 
 ## Start the agent
 
+When the agent and relay run on the same Mac, no flags are needed — the port is read from `tapflow.config.json` (default `4000`):
+
+```sh
+tapflow agent start
+```
+
+When the relay runs on a separate machine, pass its URL explicitly:
+
 ```sh
 tapflow agent start --relay wss://your-relay-url
 ```
 
 | Option | Default | Description |
 |--------|---------|-------------|
-| `--relay` | `ws://localhost:4000` | Relay WebSocket URL |
+| `--relay` | `ws://localhost:[port]` | Relay WebSocket URL. Port is read from `tapflow.config.json`. |
 | `--platform` | auto-detect | `ios` \| `android` \| `all` |
 | `--device` | first booted simulator | iOS Simulator name or UDID |
+
+::: tip Keep the agent and relay on the same network
+The agent streams video frames to the relay continuously. For the best streaming quality, run the agent and relay on the same Mac or the same LAN. Connecting across different networks increases latency and may cause frame drops.
+:::
 
 ## iOS
 

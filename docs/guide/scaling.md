@@ -2,6 +2,10 @@
 
 tapflow scales horizontally — add more Mac hosts to the same relay to expand your device pool. Each Mac runs its own agent and connects outbound to the relay, so no firewall changes are required.
 
+::: warning Keep agents and the relay on the same LAN
+The agent streams video frames to the relay continuously. For the best streaming quality, all agent Macs and the relay must be on the same LAN. Connecting across different networks significantly increases latency and causes frame drops — this applies even when the physical distance seems small.
+:::
+
 See [Introduction — How it works](/guide/introduction#how-it-works) for a diagram.
 
 ## Adding a second Mac

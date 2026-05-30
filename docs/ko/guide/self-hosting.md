@@ -21,6 +21,10 @@ tapflow start
 
 릴레이는 Linux 서버 또는 Mac에서, 에이전트는 시뮬레이터가 연결된 각 Mac에서 실행합니다.
 
+::: tip 에이전트는 릴레이와 같은 LAN에 두세요
+에이전트는 릴레이로 영상 프레임을 지속적으로 전송합니다. 최적의 스트리밍 품질을 위해 에이전트 Mac을 릴레이 서버와 같은 LAN에 두세요. 서로 다른 네트워크에 연결하면 레이턴시가 높아지고 프레임 드롭이 발생할 수 있습니다.
+:::
+
 **서버에서** (아래 PM2 또는 Node.js 방식 중 하나):
 
 ```sh
@@ -68,7 +72,7 @@ npm install -g tapflow
 JWT_SECRET=YOUR_JWT_SECRET tapflow relay start
 ```
 
-팀원은 `http://MAC_LOCAL_IP:4000`으로 대시보드에 접속합니다.
+팀원은 `http://MAC_LOCAL_IP:4000`으로 대시보드에 접속합니다. 포트는 `tapflow.config.json`의 `server.port` 값을 따릅니다 (기본값 `4000`).
 
 ## 외부 공유
 
