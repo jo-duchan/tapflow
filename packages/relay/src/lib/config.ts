@@ -76,7 +76,7 @@ function load(): TapflowConfig {
       wsBackpressureBytes: DEFAULTS.local.wsBackpressureBytes,
     },
     relay: {
-      url: file.relay?.url ?? DEFAULTS.relay.url,
+      url: file.relay?.url || null,
     },
     smtp: {
       host: file.smtp?.host ?? DEFAULTS.smtp.host,
@@ -91,7 +91,7 @@ function load(): TapflowConfig {
   if (process.env.TAPFLOW_PORT) cfg.local.port = Number(process.env.TAPFLOW_PORT)
   if (process.env.TAPFLOW_DATA_DIR) cfg.local.dataDir = resolveDataDir(process.env.TAPFLOW_DATA_DIR)
   if (process.env.TAPFLOW_WS_BACKPRESSURE_BYTES) cfg.local.wsBackpressureBytes = Number(process.env.TAPFLOW_WS_BACKPRESSURE_BYTES)
-  if (process.env.TAPFLOW_RELAY_URL) cfg.relay.url = process.env.TAPFLOW_RELAY_URL
+  if (process.env.TAPFLOW_RELAY_URL) cfg.relay.url = process.env.TAPFLOW_RELAY_URL || null
   if (process.env.SMTP_HOST) cfg.smtp.host = process.env.SMTP_HOST
   if (process.env.SMTP_PORT) cfg.smtp.port = Number(process.env.SMTP_PORT)
   if (process.env.SMTP_SECURE) cfg.smtp.secure = process.env.SMTP_SECURE === 'true'
