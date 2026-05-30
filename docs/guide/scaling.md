@@ -2,8 +2,10 @@
 
 tapflow scales horizontally — add more Mac hosts to the same relay to expand your device pool. Each Mac runs its own agent and connects outbound to the relay, so no firewall changes are required.
 
-::: warning Keep agents and the relay on the same LAN
-The agent streams video frames to the relay continuously. For the best streaming quality, all agent Macs and the relay must be on the same LAN. Connecting across different networks significantly increases latency and causes frame drops — this applies even when the physical distance seems small.
+::: warning Keep agents and the relay on the same internal network
+The agent streams video frames to the relay continuously. The latency (RTT) between the agent Mac and the relay must stay low to avoid frame drops.
+
+Within the same office building, agents and relay can be on different floors or VLANs — internal routing keeps RTT low enough. Placing agents on a different network across the internet significantly increases latency and causes frame drops.
 :::
 
 See [Introduction — How it works](/guide/introduction#how-it-works) for a diagram.
@@ -11,7 +13,7 @@ See [Introduction — How it works](/guide/introduction#how-it-works) for a diag
 ## Adding a second Mac
 
 ::: tip The relay must be reachable from all Macs
-When running `tapflow agent start` on another Mac, `ws://localhost:4000` resolves to that Mac's own localhost — not the relay machine. Use the relay's actual network address: a local IP (`ws://192.168.x.x:4000`) for the same LAN, or a public URL for agents on different networks. See [Self-Hosting the Relay](/guide/self-hosting).
+When running `tapflow agent start` on another Mac, `ws://localhost:4000` resolves to that Mac's own localhost — not the relay machine. Use the relay's actual network address: a local IP (`ws://192.168.x.x:4000`) for the same internal network, or a public URL for agents on different networks. See [Self-Hosting the Relay](/guide/self-hosting).
 :::
 
 On the new Mac, install tapflow and point it at your existing relay:
@@ -28,7 +30,7 @@ That's it. The new Mac registers itself and its devices become visible in the da
 Each agent uses the Mac's hostname as its display name in the dashboard. To see which agent is which:
 
 ```sh
-tapflow status --relay wss://your-relay-url
+tapflow status
 ```
 
 ```
@@ -57,5 +59,5 @@ Each host appears as a separate card with a time-series chart (1h / 6h / 24h / 7
 For a quick CLI check:
 
 ```sh
-tapflow status --relay wss://your-relay-url
+tapflow status
 ```
