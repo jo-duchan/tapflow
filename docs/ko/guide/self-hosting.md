@@ -78,9 +78,56 @@ JWT_SECRET=YOUR_JWT_SECRET tapflow relay start
 
 릴레이와 에이전트는 항상 같은 내부 네트워크에 유지합니다. 외부 접속은 릴레이 Mac에서 외부로 아웃바운드 터널을 열어 브라우저가 공개 URL로 접근하도록 합니다.
 
-### VPS + Tunnel (권장)
+### Tailscale (권장)
 
-가장 안정적인 외부 접속 방법입니다. 트래픽이 팀 소유 VPS를 경유하므로 tapflow의 "데이터가 팀 인프라 안에" 원칙을 유지합니다.
+외부 접속 방법 중 가장 간편하고 프라이빗한 옵션입니다. Tailscale은 WireGuard 기반 메시 VPN으로 팀원을 연결합니다 — VPS, 포트 포워딩, 공인 IP가 필요 없습니다.
+
+```text
+브라우저 (tailnet) ──[WireGuard E2E]──► 릴레이 Mac (tailnet)
+                                               ↑
+                                       에이전트 Mac (같은 내부 네트워크)
+```
+
+트래픽이 평문으로 팀 인프라를 벗어나지 않습니다. Tailscale의 DERP 릴레이를 폴백으로 사용하더라도 암호화된 WireGuard 패킷만 중계되며 Tailscale 서버도 복호화할 수 없습니다.
+
+**사전 조건**: 릴레이 Mac과 접속할 브라우저 머신에 Tailscale을 설치합니다. 무료 플랜은 최대 3인, 더 큰 팀은 유료 플랜을 사용합니다.
+
+1. Tailscale 설치 및 연결:
+
+```sh
+brew install tailscale   # macOS
+sudo tailscale up
+```
+
+2. `tapflow.config.json`에 `tunnel` 섹션 추가:
+
+```json
+{
+  "tunnel": {
+    "provider": "tailscale"
+  }
+}
+```
+
+3. 릴레이 시작:
+
+```sh
+tapflow relay start
+```
+
+tapflow가 Tailscale MagicDNS 호스트명(또는 tailnet IP)을 자동으로 읽어 배너에 공개 URL을 출력합니다. Tailscale이 설치된 팀원은 그 URL로 브라우저에서 접속합니다.
+
+::: tip 커스텀 URL
+config의 `tunnel` 섹션에 `"publicUrl": "http://your-hostname.tailnet.ts.net:4000"` 을 추가하면 자동 감지 URL을 덮어쓸 수 있습니다.
+:::
+
+::: info 에이전트는 내부 네트워크 유지
+Tailscale은 브라우저→릴레이 경로만 제공합니다. 에이전트(시뮬레이터 Mac)는 계속 LAN 내부 IP로 릴레이에 연결합니다 — 에이전트 설정 변경 없이 사용 가능합니다.
+:::
+
+### VPS + Tunnel
+
+외부 협력사, 익명 데모, 또는 Tailscale을 사용할 수 없을 때 완전한 공개 URL이 필요한 경우에 사용합니다. 트래픽은 팀 소유 VPS를 경유합니다.
 
 ```text
 브라우저 → VPS (공개 URL) → 터널 → 릴레이 Mac (사무실)
@@ -88,7 +135,7 @@ JWT_SECRET=YOUR_JWT_SECRET tapflow relay start
                                  에이전트 Mac (같은 내부 네트워크)
 ```
 
-릴레이 Mac에서 VPS로 아웃바운드 터널을 열기 때문에 포트 포워딩이나 CGNAT 없이도 외부 접속이 가능합니다.
+릴레이 Mac에서 SSH를 통해 VPS로 아웃바운드 터널을 열기 때문에 포트 포워딩이나 CGNAT 없이도 외부 접속이 가능합니다.
 
 #### 1. VPS에 Caddy 설치
 

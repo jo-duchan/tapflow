@@ -12,9 +12,13 @@ const mockTunnel = { setupServer: vi.fn(), start: vi.fn(), stop: vi.fn() }
 vi.mock('../../lib/rathole-tunnel.js', () => ({
   RatholeTunnel: vi.fn().mockImplementation(() => mockTunnel),
 }))
+vi.mock('../../lib/tailscale-tunnel.js', () => ({
+  TailscaleTunnel: vi.fn().mockImplementation(() => mockTunnel),
+}))
 
 import { RelayServer, initDb, config } from '@tapflowio/relay'
 import { RatholeTunnel } from '../../lib/rathole-tunnel.js'
+import { TailscaleTunnel } from '../../lib/tailscale-tunnel.js'
 import { cmdRelayStart } from '../../commands/relay-start.js'
 
 describe('cmdRelayStart', () => {
@@ -33,6 +37,7 @@ describe('cmdRelayStart', () => {
     mockTunnel.start.mockResolvedValue({ publicUrl: 'https://vps.example.com' })
     mockTunnel.stop.mockResolvedValue(undefined)
     vi.mocked(RatholeTunnel).mockImplementation(() => mockTunnel as never)
+    vi.mocked(TailscaleTunnel).mockImplementation(() => mockTunnel as never)
     vi.mocked(config).tunnel = null
   })
 
@@ -100,7 +105,7 @@ describe('cmdRelayStart', () => {
   describe('--tunnel 옵션', () => {
     beforeEach(() => {
       vi.stubEnv('TAPFLOW_TUNNEL_TOKEN', 'secret-token')
-      vi.mocked(config).tunnel = { provider: 'rathole', serverAddr: 'vps.example.com:2333', publicUrl: 'https://vps.example.com' }
+      vi.mocked(config).tunnel = { provider: 'rathole', serverAddr: 'vps.example.com:2333', publicUrl: 'https://vps.example.com', ssh: null }
     })
 
     afterEach(() => vi.unstubAllEnvs())
@@ -142,6 +147,25 @@ describe('cmdRelayStart', () => {
       await cmdRelayStart({})
       expect(RelayServer).toHaveBeenCalled()
       expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('connection refused'))
+    })
+  })
+
+  describe('tailscale 터널', () => {
+    beforeEach(() => {
+      vi.mocked(config).tunnel = { provider: 'tailscale' }
+      mockTunnel.start.mockResolvedValue({ publicUrl: 'http://my-mac.tailnet.ts.net:4000' })
+    })
+
+    it('provider tailscale → TailscaleTunnel 생성, 토큰 불필요', async () => {
+      await cmdRelayStart({})
+      expect(TailscaleTunnel).toHaveBeenCalledWith({ publicUrl: undefined })
+      expect(RatholeTunnel).not.toHaveBeenCalled()
+      expect(output.join('\n')).toContain('my-mac.tailnet.ts.net')
+    })
+
+    it('TAPFLOW_TUNNEL_TOKEN 없어도 Tailscale 정상 기동', async () => {
+      await expect(cmdRelayStart({})).resolves.toBeUndefined()
+      expect(TailscaleTunnel).toHaveBeenCalled()
     })
   })
 })

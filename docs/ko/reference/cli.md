@@ -77,9 +77,27 @@ tapflow relay start
 | 옵션 | 기본값 | 설명 |
 |------|--------|------|
 | `--port <n>` | `4000` | 리슨 포트 |
-| `--tunnel <provider>` | — | 사용할 터널 프로바이더 (예: `rathole`). `tapflow.config.json`의 `tunnel` 섹션과 `TAPFLOW_TUNNEL_TOKEN` 환경변수가 필요합니다 |
+| `--tunnel <provider>` | — | 사용할 터널 프로바이더 (`tailscale` 또는 `rathole`). `tapflow.config.json`의 `tunnel` 섹션이 필요합니다 |
 
-**터널 사용**
+**Tailscale (권장)**
+
+```sh
+tapflow relay start
+```
+
+`tapflow.config.json`:
+
+```json
+{
+  "tunnel": {
+    "provider": "tailscale"
+  }
+}
+```
+
+tapflow가 Tailscale MagicDNS 호스트명을 자동으로 읽어 URL을 구성합니다. `"publicUrl"`을 설정하면 자동 감지 URL을 덮어씁니다.
+
+**VPS + rathole**
 
 ```sh
 TAPFLOW_TUNNEL_TOKEN=your-secret tapflow relay start
@@ -106,7 +124,7 @@ TAPFLOW_TUNNEL_TOKEN=your-secret tapflow relay start
 
 터널이 연결되면 배너에 공개 URL이 출력됩니다. 터널 연결에 실패해도 릴레이는 계속 동작합니다 — 터널만 사용 불가 상태가 됩니다.
 
-VPS 전체 세팅 방법은 [릴레이 배포 — VPS + Tunnel](/ko/guide/self-hosting#vps-tunnel-권장)을 참고하세요.
+전체 세팅 방법은 [릴레이 배포](/ko/guide/self-hosting)를 참고하세요.
 
 
 ## `tapflow agent start`

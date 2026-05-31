@@ -77,9 +77,27 @@ tapflow relay start
 | Option | Default | Description |
 |--------|---------|-------------|
 | `--port <n>` | `4000` | Port to listen on |
-| `--tunnel <provider>` | — | Tunnel provider to use (e.g. `rathole`). Requires a `tunnel` section in `tapflow.config.json` and `TAPFLOW_TUNNEL_TOKEN` env var |
+| `--tunnel <provider>` | — | Tunnel provider to use (`tailscale` or `rathole`). Requires a `tunnel` section in `tapflow.config.json` |
 
-**Tunnel usage**
+**Tailscale (recommended)**
+
+```sh
+tapflow relay start
+```
+
+`tapflow.config.json`:
+
+```json
+{
+  "tunnel": {
+    "provider": "tailscale"
+  }
+}
+```
+
+tapflow reads the Tailscale MagicDNS hostname automatically. Set `"publicUrl"` to override the auto-detected URL.
+
+**VPS + rathole**
 
 ```sh
 TAPFLOW_TUNNEL_TOKEN=your-secret tapflow relay start
@@ -106,7 +124,7 @@ The `ssh` section lets tapflow connect to the VPS and manage the rathole server 
 
 When the tunnel is ready, the public URL is printed in the banner. If the tunnel fails to connect, the relay continues to run — only the tunnel is unavailable.
 
-See [Self-Hosting — VPS + Tunnel](/guide/self-hosting#vps-tunnel-recommended) for full VPS setup instructions.
+See [Self-Hosting](/guide/self-hosting) for full setup instructions.
 
 
 ## `tapflow agent start`

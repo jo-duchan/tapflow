@@ -13,12 +13,19 @@ const tunnelSshSchema = z.object({
   keyPath: z.string().optional(),
 })
 
-const tunnelSchema = z.object({
-  provider: z.enum(['rathole']),
+const ratholeTunnelSchema = z.object({
+  provider: z.literal('rathole'),
   serverAddr: z.string().min(1),
   publicUrl: z.string().min(1),
   ssh: tunnelSshSchema.nullable(),
 })
+
+const tailscaleTunnelSchema = z.object({
+  provider: z.literal('tailscale'),
+  publicUrl: z.string().optional(),
+})
+
+const tunnelSchema = z.discriminatedUnion('provider', [ratholeTunnelSchema, tailscaleTunnelSchema])
 
 const configSchema = z.object({
   local: z.object({
@@ -93,20 +100,22 @@ function load(): TapflowConfig {
     relay: {
       url: file.relay?.url || null,
     },
-    tunnel: file.tunnel != null
-      ? {
-          provider: file.tunnel.provider as 'rathole',
-          serverAddr: file.tunnel.serverAddr ?? '',
-          publicUrl: file.tunnel.publicUrl ?? '',
-          ssh: (file.tunnel as { ssh?: { host?: string; user?: string; keyPath?: string } }).ssh != null
-            ? {
-                host: (file.tunnel as { ssh?: { host?: string } }).ssh?.host ?? '',
-                user: (file.tunnel as { ssh?: { user?: string } }).ssh?.user ?? '',
-                keyPath: (file.tunnel as { ssh?: { keyPath?: string } }).ssh?.keyPath,
-              }
-            : null,
-        }
-      : null,
+    tunnel: (() => {
+      if (file.tunnel == null) return null
+      const t = file.tunnel as { provider?: string; serverAddr?: string; publicUrl?: string; ssh?: { host?: string; user?: string; keyPath?: string } | null }
+      if (t.provider === 'tailscale') {
+        return { provider: 'tailscale' as const, publicUrl: t.publicUrl }
+      }
+      // Pass the actual provider value so zod's discriminated union rejects unknown values
+      return {
+        provider: t.provider as 'rathole',
+        serverAddr: t.serverAddr ?? '',
+        publicUrl: t.publicUrl ?? '',
+        ssh: t.ssh != null
+          ? { host: t.ssh.host ?? '', user: t.ssh.user ?? '', keyPath: t.ssh.keyPath }
+          : null,
+      }
+    })(),
     smtp: {
       host: file.smtp?.host ?? DEFAULTS.smtp.host,
       port: file.smtp?.port ?? DEFAULTS.smtp.port,
