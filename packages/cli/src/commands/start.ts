@@ -1,5 +1,6 @@
 import { RelayServer, initDb, config } from '@tapflowio/relay'
 import { AgentRegistry } from '@tapflowio/agent-core'
+import fs from 'fs'
 import path from 'path'
 import '@tapflowio/ios-agent'
 import '@tapflowio/android-agent'
@@ -31,6 +32,9 @@ export async function cmdStart(opts: StartOptions): Promise<void> {
   }
 
   // ── 1. Relay (always local) ───────────────────────────────────────────────
+  if (!fs.existsSync(path.join(process.cwd(), 'tapflow.config.json'))) {
+    console.warn('  ⚠  tapflow.config.json not found — using defaults. Run tapflow init to configure.')
+  }
   initDb(path.join(config.local.dataDir, 'tapflow.db'))
   const server = new RelayServer({ port: RELAY_PORT, uploadsDir: path.join(config.local.dataDir, 'uploads'), wsBackpressureBytes: config.local.wsBackpressureBytes })
   await server.start()
