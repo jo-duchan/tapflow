@@ -5,7 +5,7 @@ app = 'tapflow-relay-test'
 primary_region = 'sin'
 
 [build]
-  dockerfile = "Dockerfile"
+  dockerfile = "playground/Dockerfile"
 
 [http_service]
   internal_port = 4000
@@ -18,7 +18,6 @@ primary_region = 'sin'
 [[vm]]
   memory = '1gb'
   cpus = 1
-  memory_mb = 1024
 
 [[mounts]]
   source = 'tapflow_data'
