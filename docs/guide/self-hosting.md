@@ -83,7 +83,7 @@ tapflow supports two tunnel providers:
 | | Tailscale | VPS + rathole |
 |---|-----------|---------------|
 | **Setup** | Install app + sign in | VPS with SSH access required |
-| **Cost** | Free (≤ 3 users) or paid | VPS running cost |
+| **Cost** | Free (≤ 6 users) or paid | VPS running cost |
 | **Who can connect** | Tailscale tailnet members only | Anyone with the URL |
 | **Best for** | Internal teams | External collaborators, public demos |
 
@@ -102,7 +102,7 @@ Traffic never leaves your infrastructure in plaintext. Even when Tailscale's DER
 **Prerequisites**: Install Tailscale on the relay Mac and on every browser machine that needs access.
 
 - [Download Tailscale →](https://tailscale.com/download) — macOS, Windows, Linux, iOS, Android
-- Free plan: up to 3 users · [Pricing →](https://tailscale.com/pricing)
+- Free plan: up to 6 users · [Pricing →](https://tailscale.com/pricing)
 
 1. Install and connect Tailscale on the relay Mac:
 

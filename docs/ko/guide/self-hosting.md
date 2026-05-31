@@ -83,7 +83,7 @@ tapflow는 두 가지 터널 프로바이더를 지원합니다:
 | | Tailscale | VPS + rathole |
 |---|-----------|---------------|
 | **설정** | 앱 설치 + 로그인 | SSH 접근 가능한 VPS 필요 |
-| **비용** | 무료 (3인 이하) 또는 유료 | VPS 운영 비용 |
+| **비용** | 무료 (6인 이하) 또는 유료 | VPS 운영 비용 |
 | **접속 가능 대상** | Tailscale tailnet 멤버만 | URL을 아는 누구나 |
 | **적합한 경우** | 내부 팀 | 외부 협력사, 공개 데모 |
 
@@ -102,7 +102,7 @@ tapflow는 두 가지 터널 프로바이더를 지원합니다:
 **사전 조건**: 릴레이 Mac과 접속할 브라우저 머신 모두에 Tailscale을 설치해야 합니다.
 
 - [Tailscale 다운로드 →](https://tailscale.com/download) — macOS, Windows, Linux, iOS, Android
-- 무료 플랜: 최대 3인 · [요금제 →](https://tailscale.com/pricing)
+- 무료 플랜: 최대 6인 · [요금제 →](https://tailscale.com/pricing)
 
 1. 릴레이 Mac에서 Tailscale을 설치하고 연결합니다:
 
