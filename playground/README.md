@@ -5,9 +5,17 @@
 ## 로컬 개발
 
 ```sh
-pnpm dev:up          # relay + ios-agent
+pnpm dev:up          # relay + ios-agent (Vite dev server 별도 — localhost:3001)
 pnpm dev:up:full     # relay + ios-agent + android-agent
 pnpm mock-agent      # 시뮬레이터 없이 mock으로 테스트
+```
+
+## pre-release 검증 (외부 유저 경험 그대로)
+
+dashboard를 빌드한 뒤 relay가 단독으로 서빙하는 방식 — 실제 설치 사용자가 겪는 경험과 동일하다.
+
+```sh
+pnpm pre-release     # dashboard 빌드 → relay 기동
 ```
 
 브라우저: `http://localhost:4000`

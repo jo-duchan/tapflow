@@ -28,7 +28,17 @@ tsx ../packages/cli/src/index.ts start --device "iPhone 16"
 # 브라우저 → http://localhost:4000
 ```
 
+### pre-release 검증 (외부 유저 경험과 동일)
+
+dashboard 빌드 후 relay가 단독 서빙 — 실제 설치 사용자가 겪는 흐름을 그대로 재현한다.
+
+```bash
+pnpm pre-release   # dashboard 빌드 → relay 기동 → localhost:4000
+```
+
 ### Playground 스크립트 (개발·디버깅용)
+
+dashboard 소스를 수정하면서 HMR로 빠르게 확인할 때 사용한다. relay API는 4000, dashboard는 3001(Vite dev server).
 
 ```bash
 pnpm dev:up        # relay + ios-agent를 concurrently로 기동

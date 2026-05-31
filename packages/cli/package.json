@@ -51,6 +51,7 @@
     "postinstall": "node bin/postinstall.js"
   },
   "dependencies": {
+    "@clack/prompts": "^1.5.0",
     "@tapflowio/agent-core": "workspace:*",
     "@tapflowio/android-agent": "workspace:*",
     "@tapflowio/ios-agent": "workspace:*",

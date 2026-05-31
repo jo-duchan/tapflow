@@ -1,5 +1,4 @@
-import * as readline from 'node:readline/promises'
-import { stdin as input, stdout as output } from 'node:process'
+import { text, password, isCancel, cancel } from '@clack/prompts'
 import { config } from '@tapflowio/relay'
 import { createSpinner, banner, step } from '../lib/print.js'
 
@@ -7,59 +6,22 @@ export interface InitOptions {
   relay?: string
 }
 
-function readPassword(prompt: string): Promise<string> {
-  if (!process.stdin.isTTY) {
-    const rl = readline.createInterface({ input, output })
-    return rl.question(prompt).then((v) => { rl.close(); return v.trim() })
-  }
-  return new Promise((resolve) => {
-    process.stdout.write(prompt)
-    const chars: string[] = []
-    process.stdin.setRawMode(true)
-    process.stdin.resume()
-    process.stdin.setEncoding('utf8')
-    const onData = (ch: string) => {
-      if (ch === '\r' || ch === '\n') {
-        process.stdin.setRawMode(false)
-        process.stdin.pause()
-        process.stdin.removeListener('data', onData)
-        process.stdout.write('\n')
-        resolve(chars.join(''))
-      } else if (ch === '') {
-        process.stdout.write('\n')
-        process.exit(0)
-      } else if (ch === '' || ch === '\b') {
-        if (chars.length > 0) {
-          chars.pop()
-          process.stdout.write('\b \b')
-        }
-      } else if (ch >= ' ') {
-        chars.push(ch)
-        process.stdout.write('*')
-      }
-    }
-    process.stdin.on('data', onData)
-  })
-}
-
 export async function cmdAdminInit(opts: InitOptions): Promise<void> {
   const defaultRelay = config.relay.url ?? `http://localhost:${config.local.port}`
   const baseUrl = (opts.relay ?? defaultRelay).replace(/^wss:\/\//, 'https://').replace(/^ws:\/\//, 'http://')
 
-  const rl = readline.createInterface({ input, output })
-  const email = (await rl.question('  ? Admin email: ')).trim()
-  rl.close()
+  const email = await text({
+    message: 'Admin email',
+    placeholder: 'admin@yourteam.com',
+    validate: (v) => !v?.trim() ? 'Required' : undefined,
+  })
+  if (isCancel(email)) { cancel('Cancelled.'); process.exit(0) }
 
-  const password = await readPassword('  ? Password: ')
-
-  if (!email) {
-    banner('error', 'INVALID INPUT', ['Email is required.'])
-    process.exit(1)
-  }
-  if (!password || password.length < 8) {
-    banner('error', 'INVALID INPUT', ['Password must be at least 8 characters.'])
-    process.exit(1)
-  }
+  const pw = await password({
+    message: 'Password',
+    validate: (v) => (v?.length ?? 0) < 8 ? 'Must be at least 8 characters' : undefined,
+  })
+  if (isCancel(pw)) { cancel('Cancelled.'); process.exit(0) }
 
   const spinner = createSpinner('Creating admin account...')
   spinner.start()
@@ -69,7 +31,7 @@ export async function cmdAdminInit(opts: InitOptions): Promise<void> {
     res = await fetch(`${baseUrl}/api/v1/auth/init`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ email, password }),
+      body: JSON.stringify({ email: email.trim(), password: pw }),
     })
   } catch {
     spinner.stop(false)
@@ -102,6 +64,6 @@ export async function cmdAdminInit(opts: InitOptions): Promise<void> {
   }
 
   spinner.stop(true)
-  banner('success', 'Admin account created', [`Email: ${email}`])
+  banner('success', 'Admin account created', [`Email: ${email.trim()}`])
   step(`Open ${baseUrl} to sign in`)
 }

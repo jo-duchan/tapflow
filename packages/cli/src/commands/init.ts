@@ -1,8 +1,7 @@
 import fs from 'fs'
 import path from 'path'
-import * as readline from 'node:readline/promises'
-import { stdin as input, stdout as output } from 'node:process'
-import { banner } from '../lib/print.js'
+import { select, text, isCancel, cancel } from '@clack/prompts'
+import { banner, warn } from '../lib/print.js'
 
 export interface InitConfigOptions {
   tunnel?: string
@@ -19,27 +18,83 @@ type TunnelConfig =
   | { provider: 'tailscale'; publicUrl?: string }
   | { provider: 'rathole'; serverAddr: string; publicUrl: string; ssh: { host: string; user: string; keyPath: string } | null }
 
-async function promptTunnel(): Promise<TunnelConfig | null> {
-  const rl = readline.createInterface({ input, output })
-  process.stdout.write('\n  Tunnel provider:\n  [1] none (local only)\n  [2] tailscale (recommended)\n  [3] rathole (VPS)\n')
-  const choice = (await rl.question('  Select [1-3]: ')).trim()
-  rl.close()
-
-  if (choice === '2') return { provider: 'tailscale' }
-  if (choice !== '3') return null
-
-  const rl2 = readline.createInterface({ input, output })
-  const serverAddr = (await rl2.question('  VPS server address (e.g. example.com:2333): ')).trim()
-  const publicUrl = (await rl2.question('  Public URL (e.g. https://example.com): ')).trim()
-  const sshHost = (await rl2.question('  SSH host (leave blank to skip): ')).trim()
-  let ssh: { host: string; user: string; keyPath: string } | null = null
-  if (sshHost) {
-    const sshUser = (await rl2.question('  SSH user [ubuntu]: ')).trim() || 'ubuntu'
-    const sshKeyPath = (await rl2.question('  SSH key path [~/.ssh/id_ed25519]: ')).trim() || '~/.ssh/id_ed25519'
-    ssh = { host: sshHost, user: sshUser, keyPath: sshKeyPath }
+function isInsideGitRepo(dir: string): boolean {
+  let current = dir
+  while (true) {
+    if (fs.existsSync(path.join(current, '.git'))) return true
+    const parent = path.dirname(current)
+    if (parent === current) return false
+    current = parent
   }
-  rl2.close()
-  return { provider: 'rathole', serverAddr, publicUrl, ssh }
+}
+
+function addToGitignore(dir: string, entry: string): 'created' | 'appended' | 'already-present' {
+  const gitignorePath = path.join(dir, '.gitignore')
+  if (fs.existsSync(gitignorePath)) {
+    const content = fs.readFileSync(gitignorePath, 'utf-8')
+    if (content.split('\n').some((line) => line.trim() === entry)) return 'already-present'
+    const separator = content.endsWith('\n') ? '' : '\n'
+    fs.appendFileSync(gitignorePath, `${separator}\n# tapflow runtime data\n${entry}\n`, 'utf-8')
+    return 'appended'
+  }
+  fs.writeFileSync(gitignorePath, `# tapflow runtime data\n${entry}\n`, 'utf-8')
+  return 'created'
+}
+
+async function promptTunnel(): Promise<TunnelConfig | null> {
+  const provider = await select({
+    message: 'Tunnel provider',
+    options: [
+      { value: 'none', label: 'None', hint: 'local only' },
+      { value: 'tailscale', label: 'Tailscale', hint: 'recommended — E2E encrypted, no VPS required' },
+      { value: 'rathole', label: 'rathole', hint: 'VPS required' },
+    ],
+  })
+
+  if (isCancel(provider)) { cancel('Cancelled.'); process.exit(0) }
+  if (provider === 'tailscale') return { provider: 'tailscale' }
+  if (provider !== 'rathole') return null
+
+  const serverAddr = await text({
+    message: 'VPS server address',
+    placeholder: 'example.com:2333',
+    validate: (v) => !v?.trim() ? 'Required' : undefined,
+  })
+  if (isCancel(serverAddr)) { cancel('Cancelled.'); process.exit(0) }
+
+  const publicUrl = await text({
+    message: 'Public URL',
+    placeholder: 'https://example.com',
+    validate: (v) => !v?.trim() ? 'Required' : undefined,
+  })
+  if (isCancel(publicUrl)) { cancel('Cancelled.'); process.exit(0) }
+
+  const sshHost = await text({
+    message: 'SSH host',
+    placeholder: 'example.com  (leave blank to skip)',
+  })
+  if (isCancel(sshHost)) { cancel('Cancelled.'); process.exit(0) }
+
+  let ssh: { host: string; user: string; keyPath: string } | null = null
+  if (sshHost && sshHost.trim()) {
+    const sshUser = await text({
+      message: 'SSH user',
+      placeholder: 'ubuntu',
+      defaultValue: 'ubuntu',
+    })
+    if (isCancel(sshUser)) { cancel('Cancelled.'); process.exit(0) }
+
+    const sshKeyPath = await text({
+      message: 'SSH key path',
+      placeholder: '~/.ssh/id_ed25519',
+      defaultValue: '~/.ssh/id_ed25519',
+    })
+    if (isCancel(sshKeyPath)) { cancel('Cancelled.'); process.exit(0) }
+
+    ssh = { host: sshHost.trim(), user: sshUser || 'ubuntu', keyPath: sshKeyPath || '~/.ssh/id_ed25519' }
+  }
+
+  return { provider: 'rathole', serverAddr: serverAddr.trim(), publicUrl: publicUrl.trim(), ssh }
 }
 
 export async function cmdInitConfig(opts: InitConfigOptions): Promise<void> {
@@ -66,12 +121,7 @@ export async function cmdInitConfig(opts: InitConfigOptions): Promise<void> {
   if (opts.tunnel === 'tailscale') {
     tunnel = { provider: 'tailscale' }
   } else if (opts.tunnel === 'rathole') {
-    tunnel = {
-      provider: 'rathole',
-      serverAddr: '',
-      publicUrl: '',
-      ssh: null,
-    }
+    tunnel = { provider: 'rathole', serverAddr: '', publicUrl: '', ssh: null }
   } else if (process.stdin.isTTY) {
     tunnel = await promptTunnel()
   }
@@ -86,7 +136,18 @@ export async function cmdInitConfig(opts: InitConfigOptions): Promise<void> {
     process.exit(1)
   }
 
+  let gitignoreUpdated: 'created' | 'appended' | 'already-present' | 'skipped' = 'skipped'
+  if (isInsideGitRepo(process.cwd())) {
+    try {
+      gitignoreUpdated = addToGitignore(process.cwd(), '.tapflow-data/')
+    } catch (err) {
+      warn(`Could not update .gitignore: ${err instanceof Error ? err.message : String(err)}`)
+    }
+  }
+
   const lines: string[] = ['tapflow.config.json created.']
+  if (gitignoreUpdated === 'created') lines.push('.gitignore created (.tapflow-data/ added).')
+  else if (gitignoreUpdated === 'appended') lines.push('.tapflow-data/ added to .gitignore.')
   if (tunnel?.provider === 'rathole' && (!tunnel.serverAddr || !tunnel.publicUrl)) {
     lines.push('Fill in tunnel.serverAddr and tunnel.publicUrl in tapflow.config.json.')
   }
