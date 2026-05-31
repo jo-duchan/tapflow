@@ -78,9 +78,18 @@ Teammates connect to `http://MACHINE_LOCAL_IP:4000` in their browser. The port m
 
 Keep the relay and agents on the same internal network at all times. External access works by opening an outbound tunnel from the relay Mac to a public endpoint — browsers connect to the public URL, which forwards traffic back to the relay.
 
+tapflow supports two tunnel providers:
+
+| | Tailscale | VPS + rathole |
+|---|-----------|---------------|
+| **Setup** | Install app + sign in | VPS with SSH access required |
+| **Cost** | Free (≤ 3 users) or paid | VPS running cost |
+| **Who can connect** | Tailscale tailnet members only | Anyone with the URL |
+| **Best for** | Internal teams | External collaborators, public demos |
+
 ### Tailscale (recommended)
 
-The easiest and most private option for external access. Tailscale connects team members through a WireGuard-based mesh VPN — no VPS, no port forwarding, no static IP required.
+[Tailscale](https://tailscale.com) is a zero-config VPN built on WireGuard. It creates an encrypted overlay network (a "tailnet") across your devices — no VPS, no port forwarding, no static IP required.
 
 ```text
 browser (tailnet) ──[WireGuard E2E]──► relay Mac (tailnet)
@@ -90,9 +99,12 @@ browser (tailnet) ──[WireGuard E2E]──► relay Mac (tailnet)
 
 Traffic never leaves your infrastructure in plaintext. Even when Tailscale's DERP relay is used as a fallback, only encrypted WireGuard packets pass through — Tailscale servers cannot decrypt them.
 
-**Prerequisites**: Install Tailscale on the relay Mac and on any browser machine that needs access. Free plan supports up to 3 users; paid plans for larger teams.
+**Prerequisites**: Install Tailscale on the relay Mac and on every browser machine that needs access.
 
-1. Install and connect Tailscale:
+- [Download Tailscale →](https://tailscale.com/download) — macOS, Windows, Linux, iOS, Android
+- Free plan: up to 3 users · [Pricing →](https://tailscale.com/pricing)
+
+1. Install and connect Tailscale on the relay Mac:
 
 ```sh
 brew install tailscale   # macOS
@@ -125,7 +137,7 @@ Set `"publicUrl": "http://your-hostname.tailnet.ts.net:4000"` in the tunnel conf
 Tailscale only provides the browser→relay path. Agents (simulator Macs) still connect to the relay's internal IP over your LAN — no change needed there.
 :::
 
-### VPS + Tunnel
+### VPS + rathole
 
 Use this when you need a fully public URL — for external collaborators, anonymous demos, or when Tailscale isn't an option. Traffic is routed through a VPS you own.
 
@@ -134,6 +146,13 @@ browser → VPS (public URL) → tunnel → relay Mac (office)
                                         ↑
                                  agent Macs (same internal network)
 ```
+
+tapflow uses [rathole](https://github.com/rapiz1/rathole) — a lightweight reverse tunnel — to open an outbound connection from the relay Mac to your VPS. tapflow manages rathole automatically: it downloads, installs, and starts rathole on the VPS on first run. No manual setup on the VPS is needed.
+
+**Prerequisites**:
+- A VPS with SSH access. Any provider works (1 vCPU + 512 MB RAM is enough). Popular choices: [Hetzner](https://www.hetzner.com), [DigitalOcean](https://www.digitalocean.com), [Vultr](https://www.vultr.com).
+- A domain or [sslip.io](https://sslip.io) for HTTPS (handled by [Caddy](https://caddyserver.com)).
+- `TAPFLOW_TUNNEL_TOKEN` — a secret string you choose. This is shared between the relay Mac and the rathole server to authenticate the tunnel. Pick any random value; keep it private.
 
 The relay Mac opens an outbound tunnel to the VPS over SSH, so no port forwarding or static IP is required — CGNAT is not a problem.
 
