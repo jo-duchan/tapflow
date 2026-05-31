@@ -25,29 +25,48 @@ export function cachedBinaryPath(platform: Platform, arch: string): string {
 function releaseUrl(platform: Platform, arch: string): string {
   const base = `https://github.com/rathole-org/rathole/releases/download/${RATHOLE_VERSION}`
   if (platform === 'darwin') {
-    const a = arch === 'arm64' || arch === 'aarch64' ? 'aarch64' : 'x86_64'
-    return `${base}/rathole-${a}-apple-darwin.zip`
+    // v0.5.0 기준 aarch64-apple-darwin 없음 — x86_64로 통일 (Rosetta 2 실행)
+    return `${base}/rathole-x86_64-apple-darwin.zip`
   }
   const a = arch === 'arm64' || arch === 'aarch64' ? 'aarch64' : 'x86_64'
-  return `${base}/rathole-${a}-unknown-linux-musl.zip`
+  // aarch64는 musl, x86_64는 gnu
+  const suffix = a === 'aarch64' ? 'unknown-linux-musl' : 'unknown-linux-gnu'
+  return `${base}/rathole-${a}-${suffix}.zip`
 }
 
 function fetchZip(url: string, dest: string): Promise<void> {
   return new Promise((resolve, reject) => {
-    const follow = (u: string) => {
+    const follow = (u: string, redirectCount = 0) => {
+      if (redirectCount > 5) { reject(new Error('Too many redirects')); return }
       https.get(u, (res) => {
         if (res.statusCode && res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
-          follow(res.headers.location)
+          res.resume() // 이전 response body 소비 (socket hang 방지)
+          follow(res.headers.location, redirectCount + 1)
           return
         }
         if (res.statusCode !== 200) {
+          res.resume()
           reject(new Error(`Failed to download rathole: HTTP ${res.statusCode}`))
           return
         }
+        const total = parseInt(res.headers['content-length'] ?? '0', 10)
+        let downloaded = 0
+        process.stdout.write(`  Downloading rathole (0%)`)
+        res.on('data', (chunk: Buffer) => {
+          downloaded += chunk.length
+          if (total > 0) {
+            const pct = Math.floor((downloaded / total) * 100)
+            process.stdout.write(`\r  Downloading rathole (${pct}%)`)
+          }
+        })
         const ws = fs.createWriteStream(dest)
         res.pipe(ws)
-        ws.on('finish', resolve)
+        ws.on('finish', () => {
+          process.stdout.write('\r  Downloading rathole (100%)\n')
+          resolve()
+        })
         ws.on('error', reject)
+        res.on('error', reject)
       }).on('error', reject)
     }
     follow(url)

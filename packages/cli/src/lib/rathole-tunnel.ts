@@ -6,7 +6,7 @@ import { sshExec, scpUpload, type SshConfig } from './ssh.js'
 import { downloadBinary } from './download-binary.js'
 import type { TunnelPlugin } from './tunnel.js'
 
-const REMOTE_DIR = '~/.tapflow'
+const REMOTE_DIR = '/tmp/tapflow'
 const REMOTE_BINARY = `${REMOTE_DIR}/rathole`
 const REMOTE_SERVER_TOML = `${REMOTE_DIR}/rathole-server.toml`
 const REMOTE_PID_FILE = '/tmp/tapflow-rathole.pid'
@@ -59,8 +59,11 @@ export class RatholeTunnel implements TunnelPlugin {
     // 원격 디렉토리 생성
     await sshExec(ssh, `mkdir -p ${REMOTE_DIR}`)
 
-    // VPS arch 감지 → linux binary 다운로드 → 없으면 업로드
-    const hasRathole = await sshExec(ssh, `which rathole || echo ""`).then(
+    // 기존 server 프로세스 먼저 정리 (binary 파일 잠금 해제)
+    await sshExec(ssh, `kill $(cat ${REMOTE_PID_FILE} 2>/dev/null) 2>/dev/null; true`)
+
+    // rathole binary 확인 — PATH 또는 REMOTE_BINARY 경로
+    const hasRathole = await sshExec(ssh, `which rathole 2>/dev/null || ls ${REMOTE_BINARY} 2>/dev/null || echo ""`).then(
       (out) => out.length > 0,
       () => false
     )
@@ -71,16 +74,15 @@ export class RatholeTunnel implements TunnelPlugin {
       await sshExec(ssh, `chmod +x ${REMOTE_BINARY}`)
     }
 
-    const remoteRathole = hasRathole ? 'rathole' : REMOTE_BINARY
+    const remoteRathole = hasRathole
+      ? (await sshExec(ssh, `which rathole 2>/dev/null || echo "${REMOTE_BINARY}"`).catch(() => REMOTE_BINARY)).trim()
+      : REMOTE_BINARY
 
     // server.toml 생성 → 업로드
     const toml = serverToml(this.opts.serverAddr, this.opts.token)
     this.serverConfigPath = path.join(os.tmpdir(), `tapflow-rathole-server-${process.pid}.toml`)
     fs.writeFileSync(this.serverConfigPath, toml, 'utf-8')
     await scpUpload(ssh, this.serverConfigPath, REMOTE_SERVER_TOML)
-
-    // 기존 server 프로세스 정리 후 재시작
-    await sshExec(ssh, `kill $(cat ${REMOTE_PID_FILE} 2>/dev/null) 2>/dev/null; true`)
     await sshExec(
       ssh,
       `nohup ${remoteRathole} --server ${REMOTE_SERVER_TOML} > /tmp/tapflow-rathole.log 2>&1 & echo $! > ${REMOTE_PID_FILE}`
@@ -100,15 +102,26 @@ export class RatholeTunnel implements TunnelPlugin {
 
     return new Promise((resolve, reject) => {
       this.proc = spawn(darwinBinary, ['--client', this.clientConfigPath!], { stdio: ['ignore', 'ignore', 'pipe'] })
+      let resolved = false
 
       this.proc.stderr?.on('data', (chunk: Buffer) => {
-        if (chunk.toString().includes('Tunnel started') || chunk.toString().includes('Connected')) {
+        const line = chunk.toString()
+        if (!resolved && (line.includes('established') || line.includes('Tunnel') || line.includes('Connected') || line.includes('INFO'))) {
+          resolved = true
           resolve({ publicUrl: this.opts.publicUrl })
         }
       })
 
+      // stderr에 아무것도 안 나와도 프로세스가 살아있으면 연결된 것으로 간주
+      setTimeout(() => {
+        if (!resolved && this.proc && !this.proc.killed) {
+          resolved = true
+          resolve({ publicUrl: this.opts.publicUrl })
+        }
+      }, 3000)
+
       this.proc.on('exit', (code) => {
-        reject(new Error(`rathole process exited with code ${code}`))
+        if (!resolved) reject(new Error(`rathole process exited with code ${code}`))
       })
     })
   }

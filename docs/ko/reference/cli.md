@@ -92,10 +92,17 @@ TAPFLOW_TUNNEL_TOKEN=your-secret tapflow relay start
   "tunnel": {
     "provider": "rathole",
     "serverAddr": "your-vps.com:2333",
-    "publicUrl": "https://your-vps.com"
+    "publicUrl": "https://your-vps.com",
+    "ssh": {
+      "host": "your-vps.com",
+      "user": "ubuntu",
+      "keyPath": "~/.ssh/id_ed25519"
+    }
   }
 }
 ```
+
+`ssh` 섹션을 설정하면 tapflow가 SSH로 VPS에 접속해 rathole 서버를 자동으로 관리합니다 — 첫 실행 시 다운로드·설치·시작까지 처리합니다. `ssh`를 생략하면 VPS에 rathole 서버가 이미 실행 중인 것으로 간주합니다.
 
 터널이 연결되면 배너에 공개 URL이 출력됩니다. 터널 연결에 실패해도 릴레이는 계속 동작합니다 — 터널만 사용 불가 상태가 됩니다.
 
