@@ -23,6 +23,14 @@ const RUNNING_WITHOUT_DNS = JSON.stringify({
   },
 })
 
+const RUNNING_IPV6_ONLY = JSON.stringify({
+  BackendState: 'Running',
+  Self: {
+    DNSName: '',
+    TailscaleIPs: ['fd7a:115c:a1e0::1'],
+  },
+})
+
 describe('TailscaleTunnel', () => {
   beforeEach(() => {
     vi.resetAllMocks()
@@ -69,6 +77,28 @@ describe('TailscaleTunnel', () => {
     vi.mocked(execSync)
       .mockReturnValueOnce(Buffer.from('1.0.0') as never)
       .mockReturnValueOnce(Buffer.from(RUNNING_WITHOUT_DNS) as never)
+    const tunnel = new TailscaleTunnel({})
+    const result = await tunnel.start(4000)
+    expect(result.publicUrl).toBe('http://100.64.1.2:4000')
+  })
+
+  it('start() — IPv6 전용 → 브래킷 URL 반환', async () => {
+    vi.mocked(execSync)
+      .mockReturnValueOnce(Buffer.from('1.0.0') as never)
+      .mockReturnValueOnce(Buffer.from(RUNNING_IPV6_ONLY) as never)
+    const tunnel = new TailscaleTunnel({})
+    const result = await tunnel.start(4000)
+    expect(result.publicUrl).toBe('http://[fd7a:115c:a1e0::1]:4000')
+  })
+
+  it('start() — IPv4 + IPv6 혼재 → IPv4 우선 선택', async () => {
+    const mixed = JSON.stringify({
+      BackendState: 'Running',
+      Self: { DNSName: '', TailscaleIPs: ['fd7a::1', '100.64.1.2'] },
+    })
+    vi.mocked(execSync)
+      .mockReturnValueOnce(Buffer.from('1.0.0') as never)
+      .mockReturnValueOnce(Buffer.from(mixed) as never)
     const tunnel = new TailscaleTunnel({})
     const result = await tunnel.start(4000)
     expect(result.publicUrl).toBe('http://100.64.1.2:4000')

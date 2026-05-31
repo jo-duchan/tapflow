@@ -53,8 +53,12 @@ export class TailscaleTunnel implements TunnelPlugin {
     const dnsName = status.Self?.DNSName?.replace(/\.$/, '')
     if (dnsName) return { publicUrl: `http://${dnsName}:${relayPort}` }
 
-    const ip = status.Self?.TailscaleIPs?.[0]
-    if (ip) return { publicUrl: `http://${ip}:${relayPort}` }
+    const ips = status.Self?.TailscaleIPs ?? []
+    const ip = ips.find(a => !a.includes(':')) ?? ips[0]
+    if (ip) {
+      const host = ip.includes(':') ? `[${ip}]` : ip
+      return { publicUrl: `http://${host}:${relayPort}` }
+    }
 
     throw new Error('Could not determine Tailscale IP. Make sure Tailscale is connected: tailscale up')
   }
