@@ -90,8 +90,74 @@ browser → VPS (public URL) → tunnel → relay Mac (office)
 
 The relay Mac opens an outbound tunnel to the VPS, so no port forwarding or static IP is required — CGNAT is not a problem.
 
-::: info Coming soon
-`tapflow relay start --tunnel` support is in development. It will start and manage the tunnel automatically.
+#### 1. Install rathole on the VPS
+
+```sh
+curl -sL https://github.com/rathole-org/rathole/releases/download/dev-latest/rathole-dev-x86_64-unknown-linux-musl.tar.gz | tar -xz
+sudo mv rathole /usr/local/bin/
+```
+
+Create the server config:
+
+```toml
+# /etc/rathole-server.toml
+[server]
+bind_addr = "0.0.0.0:2333"
+
+[server.services.tapflow-relay]
+token = "your-secret-token"
+bind_addr = "0.0.0.0:4000"
+```
+
+Run it (add to systemd or a process manager for persistence):
+
+```sh
+rathole --server /etc/rathole-server.toml
+```
+
+#### 2. Set up Caddy for HTTPS
+
+Caddy handles TLS automatically — no certbot needed.
+
+```sh
+sudo apt install -y caddy
+```
+
+```
+# /etc/caddy/Caddyfile
+your-vps.com {
+    reverse_proxy localhost:4000
+}
+```
+
+```sh
+sudo systemctl reload caddy
+```
+
+#### 3. Configure tapflow on the relay Mac
+
+Add the `tunnel` section to `tapflow.config.json`:
+
+```json
+{
+  "tunnel": {
+    "provider": "rathole",
+    "serverAddr": "your-vps.com:2333",
+    "publicUrl": "https://your-vps.com"
+  }
+}
+```
+
+Pass the token as an environment variable and start:
+
+```sh
+TAPFLOW_TUNNEL_TOKEN=your-secret-token tapflow relay start
+```
+
+The public URL is printed in the banner when the tunnel is ready. Browsers connect to `https://your-vps.com`; agents still connect to the relay's internal IP (`ws://192.168.x.x:4000`).
+
+::: tip VPS firewall
+Open ports `2333/tcp` (rathole) and `443/tcp` (Caddy) on the VPS. Port `4000` does not need to be public — Caddy proxies it internally.
 :::
 
 ::: danger Do not deploy the relay directly to a cloud service
