@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.1] - 2026-06-01
+
+### Security
+
+- relay: fix path traversal in `/uploads/` — `serveUpload` now validates that the resolved file path stays within `uploadsDir`; requests that escape the directory return 403.
+- relay: `/uploads/` route now requires view authentication — unauthenticated requests return 401 before file serving.
+- relay: WebSocket connections from non-localhost clients without a valid JWT cookie or PAT are rejected with close code 1008.
+- relay: WebSocket role gating — browser-role sockets that send agent-only messages (`agent:register`, `agent:resources`, etc.) are disconnected immediately.
+
 ## [0.4.0] - 2026-06-01
 
 ### Breaking Changes
@@ -30,5 +39,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Automatic `tapflow.config.json` creation as a side effect of `tapflow start` / `tapflow relay start`.
 
-[Unreleased]: https://github.com/jo-duchan/tapflow/compare/v0.4.0...HEAD
+[Unreleased]: https://github.com/jo-duchan/tapflow/compare/v0.4.1...HEAD
+[0.4.1]: https://github.com/jo-duchan/tapflow/compare/v0.4.0...v0.4.1
 [0.4.0]: https://github.com/jo-duchan/tapflow/compare/v0.3.1...v0.4.0
