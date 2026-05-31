@@ -5,7 +5,8 @@ import { cac } from 'cac'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const { version } = JSON.parse(readFileSync(join(__dirname, '..', 'package.json'), 'utf-8')) as { version: string }
-import { cmdInit } from './commands/init.js'
+import { cmdInitConfig } from './commands/init.js'
+import { cmdAdminInit } from './commands/admin-init.js'
 import { cmdDoctor } from './commands/doctor.js'
 import { cmdDevices } from './commands/devices.js'
 import { cmdBoot } from './commands/boot.js'
@@ -24,18 +25,16 @@ process.on('unhandledRejection', (err) => {
 const cli = cac('tapflow')
 
 cli
-  .command('init', 'Create the first admin account (deprecated: use "tapflow admin init")')
-  .option('--relay <url>', 'Relay URL (default: http://localhost:4000)')
-  .action((opts: { relay?: string }) => {
-    console.warn('⚠️  tapflow init is deprecated. Use: tapflow admin init')
-    return cmdInit(opts)
-  })
+  .command('init', 'Scaffold tapflow.config.json interactively')
+  .option('--tunnel <provider>', 'Tunnel provider: tailscale or rathole')
+  .option('--force', 'Overwrite existing tapflow.config.json')
+  .action((opts: { tunnel?: string; force?: boolean }) => cmdInitConfig(opts))
 
 cli
   .command('admin <subcommand>', 'Admin account commands (subcommand: init)')
   .option('--relay <url>', 'Relay URL (default: http://localhost:4000)')
   .action((subcommand: string, opts: { relay?: string }) => {
-    if (subcommand === 'init') return cmdInit(opts)
+    if (subcommand === 'init') return cmdAdminInit(opts)
     console.error(`Unknown subcommand: admin ${subcommand}`)
     process.exit(1)
   })

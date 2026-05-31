@@ -8,25 +8,19 @@
 
 ## 1. 관리자 계정 생성
 
-tapflow는 기본 인증 정보가 없습니다. 최초 관리자 계정을 생성합니다:
+tapflow는 기본 인증 정보가 없습니다. 최초 실행 시 대시보드가 설정 페이지로 자동 이동합니다.
 
-```sh
-tapflow init
-  ? Admin email: admin@yourteam.com
-  ? Password: ********
-  ✓ Admin account created
-  →  Open http://localhost:4000 to sign in
-```
-
-::: tip 원격 릴레이인 경우
-릴레이가 별도 서버에서 실행 중이라면 URL을 지정합니다:
-```sh
-tapflow init --relay https://your-relay-url
-```
-:::
+1. 브라우저에서 `http://localhost:4000` (또는 릴레이 URL)을 엽니다.
+2. `/setup` 페이지로 자동으로 이동합니다.
+3. 이메일과 비밀번호(최소 8자)를 입력합니다.
+4. **Create admin account**를 클릭합니다.
 
 ::: warning 최초 1회만 가능
-`tapflow init`은 계정이 하나도 없을 때만 실행 가능합니다. 이후 팀원 추가는 **Settings → Team**에서 초대로 진행합니다.
+설정 페이지는 계정이 하나도 없을 때만 표시됩니다. 이후 팀원 추가는 **Settings → Team**에서 초대로 진행합니다.
+:::
+
+::: tip 브라우저 없는 서버 환경이라면?
+브라우저를 사용할 수 없는 경우 `tapflow admin init`으로 CLI에서 최초 관리자 계정을 생성할 수 있습니다. 릴레이가 먼저 구동 중이어야 합니다.
 :::
 
 ## 2. 로그인

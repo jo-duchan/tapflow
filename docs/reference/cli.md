@@ -26,10 +26,47 @@ npm update -g tapflow
 
 ## `tapflow init`
 
-Create the first admin account on the relay. Only works when no accounts exist yet.
+Scaffold `tapflow.config.json` interactively. Run this once before `tapflow start`.
+
+If `tapflow.config.json` already exists, the command exits with an error unless `--force` is passed.
+
+If no tunnel flag is given and the terminal is interactive, a prompt guides you through tunnel selection. In a non-interactive environment with no `--tunnel` flag, a config file with no tunnel section is created.
 
 ```sh
 tapflow init
+```
+
+| Option | Description |
+|--------|-------------|
+| `--tunnel <provider>` | Tunnel provider: `tailscale` or `rathole` |
+| `--force` | Overwrite existing `tapflow.config.json` |
+
+Example (Tailscale):
+
+```sh
+tapflow init --tunnel tailscale
+# ✓ tapflow.config.json created.
+# Tunnel: tailscale
+# → Next: tapflow start
+```
+
+Generating config with no tunnel (defaults):
+
+```sh
+tapflow init
+# ✓ tapflow.config.json created.
+# → Next: tapflow start
+```
+
+
+## `tapflow admin init`
+
+Create the first admin account on the relay via CLI. Use this as a fallback when a browser is not available (headless servers, CI).
+
+The relay must be running before executing this command.
+
+```sh
+tapflow admin init
 ```
 
 | Option | Description |
@@ -46,6 +83,10 @@ Example:
 ```
 
 Password must be at least 8 characters.
+
+::: tip Web onboarding
+On first launch, the dashboard automatically redirects to `/setup` where you can create the admin account in the browser — no CLI required. Use `tapflow admin init` only when a browser is not available.
+:::
 
 
 ## `tapflow start`

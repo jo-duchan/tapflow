@@ -2,7 +2,6 @@ import path from 'path'
 import { z } from 'zod'
 import { RelayServer, initDb, config } from '@tapflowio/relay'
 import { banner, step } from '../lib/print.js'
-import { initConfigFile } from '../lib/init-config.js'
 import { RatholeTunnel } from '../lib/rathole-tunnel.js'
 import { TailscaleTunnel } from '../lib/tailscale-tunnel.js'
 import type { TunnelPlugin } from '../lib/tunnel.js'
@@ -24,7 +23,6 @@ export async function cmdRelayStart(opts: RelayStartOptions): Promise<void> {
     process.exit(1)
   }
   const port = portResult.data
-  initConfigFile()
   initDb(path.join(config.local.dataDir, 'tapflow.db'))
   const server = new RelayServer({ port, uploadsDir: path.join(config.local.dataDir, 'uploads'), wsBackpressureBytes: config.local.wsBackpressureBytes })
   await server.start()

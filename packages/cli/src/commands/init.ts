@@ -1,100 +1,97 @@
+import fs from 'fs'
+import path from 'path'
 import * as readline from 'node:readline/promises'
 import { stdin as input, stdout as output } from 'node:process'
-import { config } from '@tapflowio/relay'
-import { createSpinner, banner, step } from '../lib/print.js'
+import { banner } from '../lib/print.js'
 
-export interface InitOptions {
-  relay?: string
+export interface InitConfigOptions {
+  tunnel?: string
+  force?: boolean
 }
 
-function readPassword(prompt: string): Promise<string> {
-  if (!process.stdin.isTTY) {
-    const rl = readline.createInterface({ input, output })
-    return rl.question(prompt).then((v) => { rl.close(); return v.trim() })
-  }
-  return new Promise((resolve) => {
-    process.stdout.write(prompt)
-    const chars: string[] = []
-    process.stdin.setRawMode(true)
-    process.stdin.resume()
-    process.stdin.setEncoding('utf8')
-    const onData = (ch: string) => {
-      if (ch === '\r' || ch === '\n') {
-        process.stdin.setRawMode(false)
-        process.stdin.pause()
-        process.stdin.removeListener('data', onData)
-        process.stdout.write('\n')
-        resolve(chars.join(''))
-      } else if (ch === '') {
-        process.stdout.write('\n')
-        process.exit(0)
-      } else if (ch === '' || ch === '\b') {
-        if (chars.length > 0) {
-          chars.pop()
-          process.stdout.write('\b \b')
-        }
-      } else if (ch >= ' ') {
-        chars.push(ch)
-        process.stdout.write('*')
-      }
-    }
-    process.stdin.on('data', onData)
-  })
+const BASE_CONFIG = {
+  local: { port: 4000, dataDir: '.tapflow-data' },
+  relay: { url: '' },
+  smtp: { host: '', port: 587, secure: false, user: '', pass: '' },
 }
 
-export async function cmdInit(opts: InitOptions): Promise<void> {
-  const defaultRelay = config.relay.url ?? `http://localhost:${config.local.port}`
-  const baseUrl = (opts.relay ?? defaultRelay).replace(/^wss:\/\//, 'https://').replace(/^ws:\/\//, 'http://')
+type TunnelConfig =
+  | { provider: 'tailscale'; publicUrl?: string }
+  | { provider: 'rathole'; serverAddr: string; publicUrl: string; ssh: { host: string; user: string; keyPath: string } | null }
 
+async function promptTunnel(): Promise<TunnelConfig | null> {
   const rl = readline.createInterface({ input, output })
-  const email = (await rl.question('  ? Admin email: ')).trim()
+  process.stdout.write('\n  Tunnel provider:\n  [1] none (local only)\n  [2] tailscale (recommended)\n  [3] rathole (VPS)\n')
+  const choice = (await rl.question('  Select [1-3]: ')).trim()
   rl.close()
 
-  const password = await readPassword('  ? Password: ')
+  if (choice === '2') return { provider: 'tailscale' }
+  if (choice !== '3') return null
 
-  if (!email) {
-    banner('error', 'INVALID INPUT', ['Email is required.'])
-    process.exit(1)
+  const rl2 = readline.createInterface({ input, output })
+  const serverAddr = (await rl2.question('  VPS server address (e.g. example.com:2333): ')).trim()
+  const publicUrl = (await rl2.question('  Public URL (e.g. https://example.com): ')).trim()
+  const sshHost = (await rl2.question('  SSH host (leave blank to skip): ')).trim()
+  let ssh: { host: string; user: string; keyPath: string } | null = null
+  if (sshHost) {
+    const sshUser = (await rl2.question('  SSH user [ubuntu]: ')).trim() || 'ubuntu'
+    const sshKeyPath = (await rl2.question('  SSH key path [~/.ssh/id_ed25519]: ')).trim() || '~/.ssh/id_ed25519'
+    ssh = { host: sshHost, user: sshUser, keyPath: sshKeyPath }
   }
-  if (!password || password.length < 8) {
-    banner('error', 'INVALID INPUT', ['Password must be at least 8 characters.'])
-    process.exit(1)
-  }
+  rl2.close()
+  return { provider: 'rathole', serverAddr, publicUrl, ssh }
+}
 
-  const spinner = createSpinner('Creating admin account...')
-  spinner.start()
+export async function cmdInitConfig(opts: InitConfigOptions): Promise<void> {
+  const configPath = path.join(process.cwd(), 'tapflow.config.json')
 
-  let res: Response | null = null
-  try {
-    res = await fetch(`${baseUrl}/api/v1/auth/init`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ email, password }),
-    })
-  } catch {
-    spinner.stop(false)
-    banner('error', 'Could not connect to relay', [
-      `Relay not found at ${baseUrl}`,
-      'Run tapflow start first, then tapflow init.',
+  if (fs.existsSync(configPath) && !opts.force) {
+    banner('error', 'ALREADY INITIALIZED', [
+      'tapflow.config.json already exists.',
+      'Use --force to overwrite.',
     ])
     process.exit(1)
   }
 
-  if (!res.ok) {
-    spinner.stop(false)
-    const data = await res.json() as { error?: string }
-    if (res.status === 403) {
-      banner('error', 'Already initialized', [
-        'An admin account already exists.',
-        'Use Settings → Team in the dashboard to manage users.',
-      ])
-    } else {
-      banner('error', 'Failed to create admin', [data.error ?? `HTTP ${res.status}`])
-    }
+  const SUPPORTED = ['tailscale', 'rathole']
+  if (opts.tunnel && !SUPPORTED.includes(opts.tunnel)) {
+    banner('error', 'INVALID TUNNEL', [
+      `Unknown tunnel provider: "${opts.tunnel}". Supported: tailscale, rathole`,
+    ])
     process.exit(1)
   }
 
-  spinner.stop(true)
-  banner('success', 'Admin account created', [`Email: ${email}`])
-  step(`Open ${baseUrl} to sign in`)
+  let tunnel: TunnelConfig | null = null
+
+  if (opts.tunnel === 'tailscale') {
+    tunnel = { provider: 'tailscale' }
+  } else if (opts.tunnel === 'rathole') {
+    tunnel = {
+      provider: 'rathole',
+      serverAddr: '',
+      publicUrl: '',
+      ssh: null,
+    }
+  } else if (process.stdin.isTTY) {
+    tunnel = await promptTunnel()
+  }
+
+  const configOut = tunnel != null ? { ...BASE_CONFIG, tunnel } : BASE_CONFIG
+  try {
+    fs.writeFileSync(configPath, JSON.stringify(configOut, null, 2) + '\n', 'utf-8')
+  } catch (err) {
+    banner('error', 'WRITE FAILED', [
+      `Could not write tapflow.config.json: ${err instanceof Error ? err.message : String(err)}`,
+    ])
+    process.exit(1)
+  }
+
+  const lines: string[] = ['tapflow.config.json created.']
+  if (tunnel?.provider === 'rathole' && (!tunnel.serverAddr || !tunnel.publicUrl)) {
+    lines.push('Fill in tunnel.serverAddr and tunnel.publicUrl in tapflow.config.json.')
+  }
+  if (tunnel) lines.push(`Tunnel: ${tunnel.provider}`)
+  lines.push('Next: tapflow start')
+
+  banner('success', 'CONFIG CREATED', lines)
 }
