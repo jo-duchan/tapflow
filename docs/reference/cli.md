@@ -74,9 +74,32 @@ Start the relay server only. Used when deploying the relay to a server.
 tapflow relay start
 ```
 
-| Option | Description |
-|--------|-------------|
-| `--port <n>` | Port (default: `4000`) |
+| Option | Default | Description |
+|--------|---------|-------------|
+| `--port <n>` | `4000` | Port to listen on |
+| `--tunnel <provider>` | — | Tunnel provider to use (e.g. `rathole`). Requires a `tunnel` section in `tapflow.config.json` and `TAPFLOW_TUNNEL_TOKEN` env var |
+
+**Tunnel usage**
+
+```sh
+TAPFLOW_TUNNEL_TOKEN=your-secret tapflow relay start
+```
+
+`tapflow.config.json`:
+
+```json
+{
+  "tunnel": {
+    "provider": "rathole",
+    "serverAddr": "your-vps.com:2333",
+    "publicUrl": "https://your-vps.com"
+  }
+}
+```
+
+When the tunnel is ready, the public URL is printed in the banner. If the tunnel fails to connect, the relay continues to run — only the tunnel is unavailable.
+
+See [Self-Hosting — VPS + Tunnel](/guide/self-hosting#vps-tunnel-recommended) for full VPS setup instructions.
 
 
 ## `tapflow agent start`
