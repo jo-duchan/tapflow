@@ -77,3 +77,7 @@ export function createSpinner(msg: string) {
 export function step(msg: string): void {
   console.log(`  ${DIM}→${R}  ${msg}`)
 }
+
+export function warn(msg: string): void {
+  console.warn(`${YELLOW}${BOLD}  ⚠  ${msg}${R}`)
+}

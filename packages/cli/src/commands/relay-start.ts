@@ -2,7 +2,7 @@ import fs from 'fs'
 import path from 'path'
 import { z } from 'zod'
 import { RelayServer, initDb, config } from '@tapflowio/relay'
-import { banner, step, YELLOW, BOLD, R } from '../lib/print.js'
+import { banner, step, warn } from '../lib/print.js'
 import { RatholeTunnel } from '../lib/rathole-tunnel.js'
 import { TailscaleTunnel } from '../lib/tailscale-tunnel.js'
 import type { TunnelPlugin } from '../lib/tunnel.js'
@@ -25,7 +25,7 @@ export async function cmdRelayStart(opts: RelayStartOptions): Promise<void> {
   }
   const port = portResult.data
   if (!fs.existsSync(path.join(process.cwd(), 'tapflow.config.json'))) {
-    console.warn(`${YELLOW}${BOLD}  ⚠  tapflow.config.json not found — using defaults. Run tapflow init to configure.${R}`)
+    warn('tapflow.config.json not found — using defaults. Run tapflow init to configure.')
   }
   initDb(path.join(config.local.dataDir, 'tapflow.db'))
   const server = new RelayServer({ port, uploadsDir: path.join(config.local.dataDir, 'uploads'), wsBackpressureBytes: config.local.wsBackpressureBytes })
