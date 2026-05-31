@@ -111,13 +111,13 @@ describe('RatholeTunnel', () => {
     const tunnel = new RatholeTunnel({ ...BASE_OPTS, ssh: SSH })
     await tunnel.setupServer()
     expect(downloadBinary).toHaveBeenCalledWith('linux', 'x86_64')
-    expect(scpUpload).toHaveBeenCalledWith(SSH, '/home/user/.tapflow/bin/rathole-linux-x86_64', '~/.tapflow/rathole')
+    expect(scpUpload).toHaveBeenCalledWith(SSH, '/home/user/.tapflow/bin/rathole-linux-x86_64', '/tmp/tapflow/rathole')
   })
 
   it('setupServer() — server.toml scp 업로드 + 서버 실행', async () => {
     const tunnel = new RatholeTunnel({ ...BASE_OPTS, ssh: SSH })
     await tunnel.setupServer()
-    expect(scpUpload).toHaveBeenCalledWith(SSH, expect.any(String), '~/.tapflow/rathole-server.toml')
+    expect(scpUpload).toHaveBeenCalledWith(SSH, expect.any(String), '/tmp/tapflow/rathole-server.toml')
     expect(sshExec).toHaveBeenCalledWith(SSH, expect.stringContaining('rathole'))
   })
 
