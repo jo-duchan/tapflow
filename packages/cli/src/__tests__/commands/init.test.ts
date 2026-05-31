@@ -127,6 +127,10 @@ describe('cmdInitConfig', () => {
   })
 
   describe('.gitignore', () => {
+    beforeEach(() => {
+      fs.mkdirSync(path.join(tmpDir, '.git'))
+    })
+
     it('.gitignore 없음 → 새로 생성되고 .tapflow-data/ 포함', async () => {
       await cmdInitConfig({ tunnel: 'tailscale' })
 

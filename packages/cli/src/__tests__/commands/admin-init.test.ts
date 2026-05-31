@@ -79,15 +79,16 @@ describe('cmdAdminInit', () => {
     expect(output.join('\n')).toContain('Already initialized')
   })
 
-  it('비밀번호 8자 미만 시 clack validate에서 에러 반환', () => {
-    // clack의 password validate 함수가 올바르게 정의됐는지 확인
-    // (실제 clack은 validate 통과 전까지 입력을 막음 — 여기선 함수 시그니처만 검증)
-    mockInputs('admin@test.com', 'short')
+  it('비밀번호 8자 미만 시 clack validate에서 에러 반환', async () => {
+    mockInputs('admin@test.com', 'password123')
+    mockFetch(201, { ok: true })
+
+    await cmdAdminInit({})
+
     const validateFn = mockPassword.mock.calls[0]?.[0]?.validate
-    if (validateFn) {
-      expect(validateFn('short')).toMatch(/8 characters/)
-      expect(validateFn('password123')).toBeUndefined()
-    }
+    expect(validateFn).toBeDefined()
+    expect(validateFn!('short')).toMatch(/8 characters/)
+    expect(validateFn!('password123')).toBeUndefined()
   })
 
   it('--relay 옵션 URL로 요청', async () => {

@@ -1,7 +1,7 @@
 import fs from 'fs'
 import path from 'path'
 import { select, text, isCancel, cancel } from '@clack/prompts'
-import { banner } from '../lib/print.js'
+import { banner, warn } from '../lib/print.js'
 
 export interface InitConfigOptions {
   tunnel?: string
@@ -17,6 +17,16 @@ const BASE_CONFIG = {
 type TunnelConfig =
   | { provider: 'tailscale'; publicUrl?: string }
   | { provider: 'rathole'; serverAddr: string; publicUrl: string; ssh: { host: string; user: string; keyPath: string } | null }
+
+function isInsideGitRepo(dir: string): boolean {
+  let current = dir
+  while (true) {
+    if (fs.existsSync(path.join(current, '.git'))) return true
+    const parent = path.dirname(current)
+    if (parent === current) return false
+    current = parent
+  }
+}
 
 function addToGitignore(dir: string, entry: string): 'created' | 'appended' | 'already-present' {
   const gitignorePath = path.join(dir, '.gitignore')
@@ -126,7 +136,14 @@ export async function cmdInitConfig(opts: InitConfigOptions): Promise<void> {
     process.exit(1)
   }
 
-  const gitignoreUpdated = addToGitignore(process.cwd(), '.tapflow-data/')
+  let gitignoreUpdated: 'created' | 'appended' | 'already-present' | 'skipped' = 'skipped'
+  if (isInsideGitRepo(process.cwd())) {
+    try {
+      gitignoreUpdated = addToGitignore(process.cwd(), '.tapflow-data/')
+    } catch (err) {
+      warn(`Could not update .gitignore: ${err instanceof Error ? err.message : String(err)}`)
+    }
+  }
 
   const lines: string[] = ['tapflow.config.json created.']
   if (gitignoreUpdated === 'created') lines.push('.gitignore created (.tapflow-data/ added).')

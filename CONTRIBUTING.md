@@ -81,7 +81,7 @@ v0.3.0-rc.1      # release candidate, no new features
 
 **At release time**, rename `## [Unreleased]` to `## [x.y.z] - YYYY-MM-DD`, add a fresh empty `## [Unreleased]` above it, and append a comparison link at the bottom:
 
-```
+```markdown
 [x.y.z]: https://github.com/jo-duchan/tapflow/compare/vPREV...vx.y.z
 [Unreleased]: https://github.com/jo-duchan/tapflow/compare/vx.y.z...HEAD
 ```
