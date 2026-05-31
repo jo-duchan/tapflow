@@ -2,22 +2,14 @@ import { spawn, type ChildProcess } from 'child_process'
 import fs from 'fs'
 import os from 'os'
 import path from 'path'
-import { fileURLToPath } from 'url'
-import { dirname } from 'path'
 import { sshExec, scpUpload, type SshConfig } from './ssh.js'
+import { downloadBinary, cachedBinaryPath } from './download-binary.js'
 import type { TunnelPlugin } from './tunnel.js'
-
-const __dirname = dirname(fileURLToPath(import.meta.url))
 
 const REMOTE_DIR = '~/.tapflow'
 const REMOTE_BINARY = `${REMOTE_DIR}/rathole`
 const REMOTE_SERVER_TOML = `${REMOTE_DIR}/rathole-server.toml`
 const REMOTE_PID_FILE = '/tmp/tapflow-rathole.pid'
-
-function ratholeBinary(): string {
-  const arch = process.arch === 'arm64' ? 'arm64' : 'x64'
-  return path.join(__dirname, '..', '..', 'bin', `rathole-darwin-${arch}`)
-}
 
 function serverToml(serverAddr: string, token: string): string {
   return [
@@ -67,13 +59,15 @@ export class RatholeTunnel implements TunnelPlugin {
     // 원격 디렉토리 생성
     await sshExec(ssh, `mkdir -p ${REMOTE_DIR}`)
 
-    // rathole binary — 없으면 업로드
+    // VPS arch 감지 → linux binary 다운로드 → 없으면 업로드
     const hasRathole = await sshExec(ssh, `which rathole || echo ""`).then(
       (out) => out.length > 0,
       () => false
     )
     if (!hasRathole) {
-      await scpUpload(ssh, ratholeBinary(), REMOTE_BINARY)
+      const vpsArch = await sshExec(ssh, 'uname -m').catch(() => 'x86_64')
+      const linuxBinary = await downloadBinary('linux', vpsArch.trim())
+      await scpUpload(ssh, linuxBinary, REMOTE_BINARY)
       await sshExec(ssh, `chmod +x ${REMOTE_BINARY}`)
     }
 
@@ -97,13 +91,15 @@ export class RatholeTunnel implements TunnelPlugin {
     if (!this.opts.token) throw new Error('TAPFLOW_TUNNEL_TOKEN is required for tunnel mode')
     if (!this.opts.serverAddr) throw new Error('tunnel.serverAddr is required in tapflow.config.json')
 
+    const darwinBinary = await downloadBinary('darwin', process.arch)
+
     const toml = clientToml(this.opts.serverAddr, this.opts.token, relayPort)
     this.clientConfigPath = path.join(os.tmpdir(), `tapflow-rathole-client-${process.pid}.toml`)
     fs.mkdirSync(path.dirname(this.clientConfigPath), { recursive: true })
     fs.writeFileSync(this.clientConfigPath, toml, 'utf-8')
 
     return new Promise((resolve, reject) => {
-      this.proc = spawn(ratholeBinary(), ['--client', this.clientConfigPath!], { stdio: ['ignore', 'ignore', 'pipe'] })
+      this.proc = spawn(darwinBinary, ['--client', this.clientConfigPath!], { stdio: ['ignore', 'ignore', 'pipe'] })
 
       this.proc.stderr?.on('data', (chunk: Buffer) => {
         if (chunk.toString().includes('Tunnel started') || chunk.toString().includes('Connected')) {

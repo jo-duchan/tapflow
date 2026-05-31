@@ -1,13 +1,9 @@
 #!/usr/bin/env node
-import { readFileSync, chmodSync, existsSync } from 'fs'
+import { readFileSync } from 'fs'
 import { fileURLToPath } from 'url'
 import { dirname, join } from 'path'
 
 const __dirname_top = dirname(fileURLToPath(import.meta.url))
-for (const bin of ['rathole-darwin-arm64', 'rathole-darwin-x64']) {
-  const p = join(__dirname_top, bin)
-  if (existsSync(p)) chmodSync(p, 0o755)
-}
 
 try {
   if (!process.stdout.isTTY) process.exit(0)

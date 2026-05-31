@@ -22,9 +22,14 @@ vi.mock('../../lib/ssh.js', () => ({
   sshExec: vi.fn(),
   scpUpload: vi.fn(),
 }))
+vi.mock('../../lib/download-binary.js', () => ({
+  downloadBinary: vi.fn().mockResolvedValue('/home/user/.tapflow/bin/rathole-darwin-arm64'),
+  cachedBinaryPath: vi.fn().mockReturnValue('/home/user/.tapflow/bin/rathole-darwin-arm64'),
+}))
 
 import { spawn } from 'child_process'
 import { sshExec, scpUpload } from '../../lib/ssh.js'
+import { downloadBinary } from '../../lib/download-binary.js'
 import { RatholeTunnel } from '../../lib/rathole-tunnel.js'
 
 const SSH = { host: 'vps.example.com', user: 'ubuntu', keyPath: '~/.ssh/id_rsa' }
@@ -44,6 +49,7 @@ describe('RatholeTunnel', () => {
     vi.mocked(spawn).mockReturnValue(proc as never)
     vi.mocked(sshExec).mockResolvedValue('')
     vi.mocked(scpUpload).mockResolvedValue(undefined)
+    vi.mocked(downloadBinary).mockResolvedValue('/home/user/.tapflow/bin/rathole-darwin-arm64')
   })
 
   afterEach(() => vi.restoreAllMocks())
@@ -52,6 +58,7 @@ describe('RatholeTunnel', () => {
   it('start() — rathole client spawn 후 publicUrl 반환', async () => {
     const tunnel = new RatholeTunnel(BASE_OPTS)
     const startPromise = tunnel.start(4000)
+    await Promise.resolve() // downloadBinary microtask 완료 대기
     proc.stderr.emit('data', Buffer.from('[INFO] Tunnel started\n'))
     const result = await startPromise
     expect(spawn).toHaveBeenCalled()
@@ -71,6 +78,7 @@ describe('RatholeTunnel', () => {
   it('프로세스 exit(1) → start() reject', async () => {
     const tunnel = new RatholeTunnel(BASE_OPTS)
     const startPromise = tunnel.start(4000)
+    await Promise.resolve() // downloadBinary microtask 완료 대기
     proc.emit('exit', 1)
     await expect(startPromise).rejects.toThrow(/exited/)
   })
@@ -93,14 +101,17 @@ describe('RatholeTunnel', () => {
     expect(scpUpload).not.toHaveBeenCalledWith(SSH, expect.stringContaining('rathole-darwin-'), expect.anything())
   })
 
-  it('setupServer() — rathole 없으면 binary scp 업로드', async () => {
+  it('setupServer() — rathole 없으면 linux binary 다운로드 후 scp 업로드', async () => {
     vi.mocked(sshExec).mockImplementation(async (_ssh, cmd) => {
       if (cmd.includes('which rathole')) throw new Error('not found')
+      if (cmd.includes('uname -m')) return 'x86_64'
       return ''
     })
+    vi.mocked(downloadBinary).mockResolvedValue('/home/user/.tapflow/bin/rathole-linux-x86_64')
     const tunnel = new RatholeTunnel({ ...BASE_OPTS, ssh: SSH })
     await tunnel.setupServer()
-    expect(scpUpload).toHaveBeenCalledWith(SSH, expect.stringContaining('rathole-darwin-'), '~/.tapflow/rathole')
+    expect(downloadBinary).toHaveBeenCalledWith('linux', 'x86_64')
+    expect(scpUpload).toHaveBeenCalledWith(SSH, '/home/user/.tapflow/bin/rathole-linux-x86_64', '~/.tapflow/rathole')
   })
 
   it('setupServer() — server.toml scp 업로드 + 서버 실행', async () => {
@@ -115,6 +126,7 @@ describe('RatholeTunnel', () => {
     const fs = await import('fs')
     const tunnel = new RatholeTunnel(BASE_OPTS)
     const startPromise = tunnel.start(4000)
+    await Promise.resolve()
     proc.stderr.emit('data', Buffer.from('[INFO] Tunnel started\n'))
     await startPromise
     await tunnel.stop()
@@ -126,6 +138,7 @@ describe('RatholeTunnel', () => {
     const tunnel = new RatholeTunnel({ ...BASE_OPTS, ssh: SSH })
     await tunnel.setupServer()
     const startPromise = tunnel.start(4000)
+    await Promise.resolve()
     proc.stderr.emit('data', Buffer.from('[INFO] Tunnel started\n'))
     await startPromise
     await tunnel.stop()
