@@ -1,5 +1,11 @@
 # @tapflowio/agent-core
 
+## 0.4.0
+
+### Minor Changes
+
+- feat!: tapflow init redesign, Tailscale tunnel, web onboarding, and UX improvements
+
 ## 0.3.1
 
 ### Patch Changes
