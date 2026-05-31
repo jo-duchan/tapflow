@@ -1,3 +1,4 @@
+import { useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useTheme } from 'next-themes'
 import { useForm } from 'react-hook-form'
@@ -19,6 +20,13 @@ export function Login() {
   const navigate = useNavigate()
   const { resolvedTheme } = useTheme()
   const defaultLogo = resolvedTheme === 'dark' ? '/logo-dark.svg' : '/logo.svg'
+
+  useEffect(() => {
+    fetch('/api/v1/auth/status')
+      .then((r) => r.json() as Promise<{ initialized: boolean }>)
+      .then(({ initialized }) => { if (!initialized) navigate('/setup', { replace: true }) })
+      .catch(() => {})
+  }, [navigate])
 
   const { register, handleSubmit, setError, formState: { errors, isSubmitting } } = useForm<FormData>({
     resolver: zodResolver(schema),
@@ -74,12 +82,6 @@ export function Login() {
             <Button type="submit" size="pill" disabled={isSubmitting} className="w-full mt-1">
               {isSubmitting ? 'Signing in…' : 'Sign in'}
             </Button>
-            <p className="text-center text-sm text-muted-foreground">
-              First time here?{' '}
-              <a href="https://www.tapflow.dev/dashboard/setup.html" target="_blank" rel="noopener noreferrer" className="underline underline-offset-4 hover:text-foreground transition-colors">
-                Set up your workspace
-              </a>
-            </p>
           </form>
         </CardContent>
         </Card>

@@ -24,9 +24,21 @@ process.on('unhandledRejection', (err) => {
 const cli = cac('tapflow')
 
 cli
-  .command('init', 'Create the first admin account on the relay')
+  .command('init', 'Create the first admin account (deprecated: use "tapflow admin init")')
   .option('--relay <url>', 'Relay URL (default: http://localhost:4000)')
-  .action((opts: { relay?: string }) => cmdInit(opts))
+  .action((opts: { relay?: string }) => {
+    console.warn('⚠️  tapflow init is deprecated. Use: tapflow admin init')
+    return cmdInit(opts)
+  })
+
+cli
+  .command('admin <subcommand>', 'Admin account commands (subcommand: init)')
+  .option('--relay <url>', 'Relay URL (default: http://localhost:4000)')
+  .action((subcommand: string, opts: { relay?: string }) => {
+    if (subcommand === 'init') return cmdInit(opts)
+    console.error(`Unknown subcommand: admin ${subcommand}`)
+    process.exit(1)
+  })
 
 cli
   .command('doctor', 'Check system prerequisites')
