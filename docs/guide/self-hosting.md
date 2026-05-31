@@ -19,19 +19,19 @@ tapflow start
 
 ### Team (separate relay server)
 
-Run the relay on a Linux server or dedicated Mac; run the agent on each Mac with a simulator.
+Run the relay on a dedicated Mac; run the agent on each Mac with a simulator.
 
-::: tip Keep agents on the same LAN as the relay
-The agent streams video frames to the relay continuously. Place agent Macs on the same LAN as the relay server — or on the same Mac — for the best streaming quality. Connecting across different networks increases latency and may cause frame drops.
+::: tip Keep agents and the relay on the same internal network
+The agent streams video frames to the relay continuously. Agents and relay can be on different floors or VLANs within the same office building — internal routing keeps latency low enough. Placing agents across the internet on a different network increases RTT and causes frame drops.
 :::
 
-**On the server** (PM2 or plain Node.js — see below):
+**On the relay Mac:**
 
 ```sh
 tapflow relay start
 ```
 
-**On each Mac:**
+**On each agent Mac:**
 
 ```sh
 tapflow agent start --relay wss://your-relay-url
@@ -63,89 +63,44 @@ Once set, keep this value stable — changing it invalidates all active sessions
 
 The relay reads `tapflow.config.json` from the working directory. See [Configuration](/reference/configuration).
 
-## Internal access
+## Internal access (same network)
 
-The simplest way for teammates on the same network to reach the dashboard.
+The simplest way for teammates on the same office network to reach the dashboard.
 
 ```sh
 npm install -g tapflow
 JWT_SECRET=YOUR_JWT_SECRET tapflow relay start
 ```
 
-Teammates connect to `http://MACHINE_LOCAL_IP:4000` in their browser. The port matches `server.port` in `tapflow.config.json` (default `4000`).
+Teammates connect to `http://MACHINE_LOCAL_IP:4000` in their browser. The port matches `local.port` in `tapflow.config.json` (default `4000`).
 
 ## External access
 
-You need an external URL when teammates access the dashboard from outside your local network, or when agents connect from a different network.
+Keep the relay and agents on the same internal network at all times. External access works by opening an outbound tunnel from the relay Mac to a public endpoint — browsers connect to the public URL, which forwards traffic back to the relay.
 
-### ngrok (quick start)
+### VPS + Tunnel (recommended)
 
-The fastest way to get a public URL without setting up a domain or server.
+The most reliable option for external access. Traffic passes through your own VPS, so the "data stays in your infrastructure" principle is maintained.
 
-```sh
-# Terminal 1: start the relay
-tapflow relay start
-
-# Terminal 2: expose with ngrok
-ngrok http 4000
+```text
+browser → VPS (public URL) → tunnel → relay Mac (office)
+                                        ↑
+                                 agent Macs (same internal network)
 ```
 
-ngrok prints a URL like `https://abc123.ngrok-free.app`. That URL is both the relay address and the dashboard address.
+The relay Mac opens an outbound tunnel to the VPS, so no port forwarding or static IP is required — CGNAT is not a problem.
 
-When connecting agents, use the `wss://` scheme:
-
-```sh
-tapflow agent start --relay wss://abc123.ngrok-free.app
-```
-
-::: warning ngrok free plan limitations
-- The URL changes on every restart (fixed URL requires a paid plan).
-- All traffic — including video streams — passes through ngrok servers. This conflicts with tapflow's "data stays in your infrastructure" principle.
-- Use ngrok for **testing and demos only**. Use a reverse proxy for team production environments.
+::: info Coming soon
+`tapflow relay start --tunnel` support is in development. It will start and manage the tunnel automatically.
 :::
 
-### nginx example
-
-::: warning WebSocket upgrade headers required
-Without `Upgrade` and `Connection` headers, the agent's WebSocket connection will fail.
+::: danger Do not deploy the relay directly to a cloud service
+Deploying the relay to fly.io, Railway, or similar services puts the agent→relay path over the internet. RTT then exceeds the 30fps threshold (33ms/frame), causing persistent frame drops with no way to recover. tapflow does not support this configuration.
 :::
 
-```nginx
-server {
-    listen 443 ssl;
-    server_name tapflow.myteam.example.com;
+## PM2 (keeping the relay Mac always on)
 
-    ssl_certificate     /etc/letsencrypt/live/tapflow.myteam.example.com/fullchain.pem;
-    ssl_certificate_key /etc/letsencrypt/live/tapflow.myteam.example.com/privkey.pem;
-
-    location / {
-        proxy_pass http://localhost:4000;
-        proxy_http_version 1.1;
-
-        proxy_set_header Upgrade $http_upgrade;
-        proxy_set_header Connection "upgrade";
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-
-        proxy_read_timeout 3600s;
-    }
-}
-```
-
-### Caddy example
-
-```
-tapflow.myteam.example.com {
-    reverse_proxy localhost:4000
-}
-```
-
-Caddy handles TLS and WebSocket upgrades automatically.
-
-## PM2 (recommended for servers)
-
-Handles automatic restart on crash, restart on server reboot, and log management.
+Handles automatic restart on crash, restart on server reboot, and log management — run this on the relay Mac.
 
 ```sh
 npm install -g pm2 tapflow

@@ -85,8 +85,11 @@ describe('TapflowClient', () => {
   describe('connectDevice', () => {
     it('sends session:start and resolves on session:joined', async () => {
       setTimeout(() => relay.send({ type: 'session:joined', sessionId: 'sess-1' }), 10)
-      await expect(client.connectDevice('sess-1')).resolves.toBeUndefined()
-      expect(relay.sentMessages()[0]).toMatchObject({ type: 'session:start', sessionId: 'sess-1' })
+      const [, msg] = await Promise.all([
+        client.connectDevice('sess-1'),
+        waitForMessage(relay, 'session:start'),
+      ])
+      expect(msg).toMatchObject({ type: 'session:start', sessionId: 'sess-1' })
     })
 
     it('throws on session busy error', async () => {

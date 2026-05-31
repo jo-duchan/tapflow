@@ -34,7 +34,7 @@ tapflow init
 
 | Option | Description |
 |--------|-------------|
-| `--relay <url>` | Relay URL (default: `http://localhost:4000`) |
+| `--relay <url>` | Relay URL (default: `relay.url` in config, or `http://localhost:4000`) |
 
 Example:
 
@@ -89,7 +89,7 @@ tapflow agent start --relay wss://relay.myteam.example.com
 
 | Option | Default | Description |
 |--------|---------|-------------|
-| `--relay <url>` | `ws://localhost:4000` | Relay WebSocket URL |
+| `--relay <url>` | `relay.url` in config, or `ws://localhost:4000` | Relay WebSocket URL. Omit if `relay.url` is set in `tapflow.config.json`. |
 | `--platform <ios\|android\|all>` | auto-detect | Platform to start |
 | `--device <name>` | first booted simulator | iOS Simulator name or UDID |
 
@@ -157,7 +157,7 @@ tapflow status
 
 | Option | Default | Description |
 |--------|---------|-------------|
-| `--relay <url>` | `ws://localhost:4000` | Relay WebSocket URL |
+| `--relay <url>` | `relay.url` in config, or `ws://localhost:4000` | Relay WebSocket URL. Omit if `relay.url` is set in `tapflow.config.json`. |
 
 ::: info How it connects
 `tapflow status` connects to the relay over WebSocket to fetch information. Times out after 5 seconds if there is no response. Use the `--relay` option when connecting to a remote relay.
@@ -184,5 +184,5 @@ tapflow logs
 
 | Option | Default | Description |
 |--------|---------|-------------|
-| `--relay <url>` | `http://localhost:4000` | Relay URL |
+| `--relay <url>` | `relay.url` in config, or `http://localhost:4000` | Relay URL. Omit if `relay.url` is set in `tapflow.config.json`. |
 | `--lines <n>` | `100` | Number of log lines to show (max 500) |
