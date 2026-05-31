@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeAll, afterAll, beforeEach, afterEach } from 'vitest'
 import fs from 'fs'
+import net from 'net'
 import os from 'os'
 import path from 'path'
 import { WebSocket } from 'ws'
@@ -7,6 +8,21 @@ import { RelayServer } from '../RelayServer'
 import { initDb, closeDb } from '../db'
 import type { RelayMessage } from '../types'
 import { writeEnvelopeHeader, HEADER_SIZE } from '@tapflowio/agent-core/utils'
+
+// Sends a raw HTTP request, bypassing client-side URL normalization.
+const rawHttpGet = (targetPort: number, rawPath: string): Promise<number> =>
+  new Promise((resolve, reject) => {
+    const socket = net.createConnection(targetPort, '127.0.0.1')
+    socket.once('connect', () => {
+      socket.write(`GET ${rawPath} HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n`)
+    })
+    socket.once('data', (data) => {
+      const match = /HTTP\/1\.\d (\d{3})/.exec(data.toString())
+      resolve(match ? parseInt(match[1]) : 0)
+      socket.destroy()
+    })
+    socket.on('error', reject)
+  })
 
 const waitForOpen = (ws: WebSocket) =>
   new Promise<void>((resolve) => ws.once('open', resolve))
@@ -1040,6 +1056,37 @@ describe('RelayServer', () => {
 
       agent.close()
       browser.close()
+    })
+  })
+
+  describe('security', () => {
+    it('path traversal: /uploads/../ is blocked (auth blocks before containment check reaches)', async () => {
+      // fetch normalizes URLs, so use a raw socket to preserve the `..` segment.
+      // Without auth, the relay returns 401 (auth check) before the containment check —
+      // either way the traversal is blocked and the response is never 200.
+      const status = await rawHttpGet(port, '/uploads/../package.json')
+      expect(status).not.toBe(200)
+    })
+
+    it('/uploads/ without auth returns 401', async () => {
+      const res = await fetch(`http://localhost:${port}/uploads/file.zip`)
+      expect(res.status).toBe(401)
+    })
+
+    it('browser socket sending agent:register is disconnected (role gating)', async () => {
+      // Establish browser role by sending a browser-type message first
+      const ws = new WebSocket(`ws://localhost:${port}`)
+      await waitForOpen(ws)
+      ws.send(JSON.stringify({ type: 'session:start', sessionId: 'nonexistent' }))
+      await waitForMessage(ws) // error: Session not found — browser role assigned
+
+      // Agent-only message from a browser-role socket must close the connection
+      const closePromise = new Promise<number>((resolve) =>
+        ws.once('close', (code) => resolve(code))
+      )
+      ws.send(JSON.stringify({ type: 'agent:register', devices: [] }))
+      const code = await closePromise
+      expect(code).toBe(1008)
     })
   })
 
