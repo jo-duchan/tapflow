@@ -1,5 +1,13 @@
 # @tapflowio/ios-agent
 
+## 0.4.1
+
+### Patch Changes
+
+- 17b8615: fix: path traversal in /uploads/ and unauthenticated WebSocket access
+- Updated dependencies [17b8615]
+  - @tapflowio/agent-core@0.4.1
+
 ## 0.4.0
 
 ### Minor Changes
