@@ -3,7 +3,10 @@ node_modules
 **/.tapflow
 **/dist
 playground
+!playground/package.json
+!playground/server.js
 docs
+!docs/package.json
 contributing
 .work
 .git

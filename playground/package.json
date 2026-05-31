@@ -7,6 +7,7 @@
     "test": "echo 'No tests for playground'",
     "relay": "tsx --conditions=source relay.ts",
     "seed": "tsx --conditions=source seed.ts",
+    "demo-seed": "tsx --conditions=source demo-seed.ts",
     "ios-agent": "tsx --conditions=source ios-agent.ts",
     "android-agent": "tsx --conditions=source android-agent.ts",
     "dev:doctor": "tsx --conditions=source ../packages/cli/src/index.ts doctor",
