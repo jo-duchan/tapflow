@@ -90,32 +90,7 @@ browser → VPS (public URL) → tunnel → relay Mac (office)
 
 The relay Mac opens an outbound tunnel to the VPS, so no port forwarding or static IP is required — CGNAT is not a problem.
 
-#### 1. Install rathole on the VPS
-
-```sh
-curl -sL https://github.com/rathole-org/rathole/releases/download/dev-latest/rathole-dev-x86_64-unknown-linux-musl.tar.gz | tar -xz
-sudo mv rathole /usr/local/bin/
-```
-
-Create the server config:
-
-```toml
-# /etc/rathole-server.toml
-[server]
-bind_addr = "0.0.0.0:2333"
-
-[server.services.tapflow-relay]
-token = "your-secret-token"
-bind_addr = "0.0.0.0:4000"
-```
-
-Run it (add to systemd or a process manager for persistence):
-
-```sh
-rathole --server /etc/rathole-server.toml
-```
-
-#### 2. Set up Caddy for HTTPS
+#### 1. Set up Caddy for HTTPS on the VPS
 
 Caddy handles TLS automatically — no certbot needed.
 
@@ -123,7 +98,7 @@ Caddy handles TLS automatically — no certbot needed.
 sudo apt install -y caddy
 ```
 
-```
+```caddyfile
 # /etc/caddy/Caddyfile
 your-vps.com {
     reverse_proxy localhost:4000
@@ -134,7 +109,11 @@ your-vps.com {
 sudo systemctl reload caddy
 ```
 
-#### 3. Configure tapflow on the relay Mac
+::: tip No domain? Use sslip.io
+If you don't own a domain, `<YOUR_VPS_IP>.sslip.io` works as a free HTTPS endpoint — for example `https://1.2.3.4.sslip.io`. Caddy issues a Let's Encrypt certificate automatically.
+:::
+
+#### 2. Configure tapflow on the relay Mac
 
 Add the `tunnel` section to `tapflow.config.json`:
 
@@ -143,7 +122,12 @@ Add the `tunnel` section to `tapflow.config.json`:
   "tunnel": {
     "provider": "rathole",
     "serverAddr": "your-vps.com:2333",
-    "publicUrl": "https://your-vps.com"
+    "publicUrl": "https://your-vps.com",
+    "ssh": {
+      "host": "your-vps.com",
+      "user": "ubuntu",
+      "keyPath": "~/.ssh/id_ed25519"
+    }
   }
 }
 ```
@@ -154,7 +138,9 @@ Pass the token as an environment variable and start:
 TAPFLOW_TUNNEL_TOKEN=your-secret-token tapflow relay start
 ```
 
-The public URL is printed in the banner when the tunnel is ready. Browsers connect to `https://your-vps.com`; agents still connect to the relay's internal IP (`ws://192.168.x.x:4000`).
+tapflow connects to the VPS over SSH, downloads and installs rathole automatically on first run, then starts both the VPS-side server and the local tunnel client. The public URL is printed in the banner when the tunnel is ready.
+
+Browsers connect to `https://your-vps.com`; agents still connect to the relay's internal IP (`ws://192.168.x.x:4000`).
 
 ::: tip VPS firewall
 Open ports `2333/tcp` (rathole) and `443/tcp` (Caddy) on the VPS. Port `4000` does not need to be public — Caddy proxies it internally.

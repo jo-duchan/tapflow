@@ -49,7 +49,8 @@ cli
 cli
   .command('relay <subcommand>', 'Relay server commands (subcommand: start)')
   .option('--port <n>', 'Port to listen on (default: 4000)')
-  .action((subcommand: string, opts: { port?: number }) => {
+  .option('--tunnel <provider>', 'Tunnel provider to use (e.g. rathole). Requires tunnel config in tapflow.config.json')
+  .action((subcommand: string, opts: { port?: number; tunnel?: string }) => {
     if (subcommand === 'start') return cmdRelayStart(opts)
     console.error(`Unknown subcommand: relay ${subcommand}`)
     process.exit(1)

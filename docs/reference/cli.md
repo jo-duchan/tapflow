@@ -92,10 +92,17 @@ TAPFLOW_TUNNEL_TOKEN=your-secret tapflow relay start
   "tunnel": {
     "provider": "rathole",
     "serverAddr": "your-vps.com:2333",
-    "publicUrl": "https://your-vps.com"
+    "publicUrl": "https://your-vps.com",
+    "ssh": {
+      "host": "your-vps.com",
+      "user": "ubuntu",
+      "keyPath": "~/.ssh/id_ed25519"
+    }
   }
 }
 ```
+
+The `ssh` section lets tapflow connect to the VPS and manage the rathole server automatically — downloading, installing, and starting it on first run. If `ssh` is omitted, tapflow assumes the rathole server is already running on the VPS.
 
 When the tunnel is ready, the public URL is printed in the banner. If the tunnel fails to connect, the relay continues to run — only the tunnel is unavailable.
 

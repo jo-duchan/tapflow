@@ -5,12 +5,16 @@ vi.mock('@tapflowio/relay', () => ({
     start: vi.fn().mockResolvedValue(undefined),
   })),
   initDb: vi.fn(),
-
-
-  config: { local: { port: 4000, dataDir: '/tmp/tapflow-test', wsBackpressureBytes: 1048576 }, relay: { url: null } },
+  config: { local: { port: 4000, dataDir: '/tmp/tapflow-test', wsBackpressureBytes: 1048576 }, relay: { url: null }, tunnel: null },
 }))
 
-import { RelayServer, initDb } from '@tapflowio/relay'
+const mockTunnel = { setupServer: vi.fn(), start: vi.fn(), stop: vi.fn() }
+vi.mock('../../lib/rathole-tunnel.js', () => ({
+  RatholeTunnel: vi.fn().mockImplementation(() => mockTunnel),
+}))
+
+import { RelayServer, initDb, config } from '@tapflowio/relay'
+import { RatholeTunnel } from '../../lib/rathole-tunnel.js'
 import { cmdRelayStart } from '../../commands/relay-start.js'
 
 describe('cmdRelayStart', () => {
@@ -25,6 +29,11 @@ describe('cmdRelayStart', () => {
     vi.mocked(RelayServer).mockImplementation(() => ({
       start: vi.fn().mockResolvedValue(undefined),
     } as never))
+    mockTunnel.setupServer.mockResolvedValue(undefined)
+    mockTunnel.start.mockResolvedValue({ publicUrl: 'https://vps.example.com' })
+    mockTunnel.stop.mockResolvedValue(undefined)
+    vi.mocked(RatholeTunnel).mockImplementation(() => mockTunnel as never)
+    vi.mocked(config).tunnel = null
   })
 
   afterEach(() => vi.restoreAllMocks())
@@ -86,5 +95,53 @@ describe('cmdRelayStart', () => {
   it('NaN 포트 → exit(1)', async () => {
     await expect(cmdRelayStart({ port: NaN })).rejects.toThrow('process.exit')
     expect(exitSpy).toHaveBeenCalledWith(1)
+  })
+
+  describe('--tunnel 옵션', () => {
+    beforeEach(() => {
+      vi.stubEnv('TAPFLOW_TUNNEL_TOKEN', 'secret-token')
+      vi.mocked(config).tunnel = { provider: 'rathole', serverAddr: 'vps.example.com:2333', publicUrl: 'https://vps.example.com' }
+    })
+
+    afterEach(() => vi.unstubAllEnvs())
+
+    it('config.tunnel 설정 → setupServer → start 순서 + 공개 URL 출력', async () => {
+      const order: string[] = []
+      mockTunnel.setupServer.mockImplementation(async () => { order.push('setupServer') })
+      mockTunnel.start.mockImplementation(async () => { order.push('start'); return { publicUrl: 'https://vps.example.com' } })
+      await cmdRelayStart({})
+      expect(RatholeTunnel).toHaveBeenCalledWith(expect.objectContaining({ serverAddr: 'vps.example.com:2333', token: 'secret-token' }))
+      expect(order).toEqual(['setupServer', 'start'])
+      expect(output.join('\n')).toContain('https://vps.example.com')
+    })
+
+    it('--tunnel 플래그 없고 config.tunnel도 없음 → 터널 기동 안 함', async () => {
+      vi.mocked(config).tunnel = null
+      await cmdRelayStart({})
+      expect(RatholeTunnel).not.toHaveBeenCalled()
+    })
+
+    it('TAPFLOW_TUNNEL_TOKEN 없음 → exit(1)', async () => {
+      vi.unstubAllEnvs()
+      await expect(cmdRelayStart({})).rejects.toThrow('process.exit')
+      expect(exitSpy).toHaveBeenCalledWith(1)
+    })
+
+    it('SIGINT 시 relay + tunnel 모두 종료', async () => {
+      const onSpy = vi.spyOn(process, 'on')
+      await cmdRelayStart({})
+      const call = onSpy.mock.calls.find(([event]) => event === 'SIGINT')
+      const handler = call![1] as () => void
+      expect(() => handler()).toThrow('process.exit')
+      expect(mockTunnel.stop).toHaveBeenCalled()
+    })
+
+    it('터널 기동 실패 → relay는 계속 동작', async () => {
+      mockTunnel.start.mockRejectedValue(new Error('connection refused'))
+      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+      await cmdRelayStart({})
+      expect(RelayServer).toHaveBeenCalled()
+      expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('connection refused'))
+    })
   })
 })

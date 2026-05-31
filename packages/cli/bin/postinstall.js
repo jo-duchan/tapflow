@@ -3,12 +3,14 @@ import { readFileSync } from 'fs'
 import { fileURLToPath } from 'url'
 import { dirname, join } from 'path'
 
+const __dirname_top = dirname(fileURLToPath(import.meta.url))
+
 try {
   if (!process.stdout.isTTY) process.exit(0)
   if (process.env.CI) process.exit(0)
   if (process.env.npm_config_global !== 'true') process.exit(0)
 
-  const __dirname = dirname(fileURLToPath(import.meta.url))
+  const __dirname = __dirname_top
   const { version } = JSON.parse(readFileSync(join(__dirname, '..', 'package.json'), 'utf-8'))
 
   const R = '\x1b[0m'
