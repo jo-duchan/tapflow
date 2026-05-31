@@ -79,6 +79,12 @@ export function handleLogout(_req: http.IncomingMessage, res: http.ServerRespons
   res.end(JSON.stringify({ ok: true }))
 }
 
+export function handleAuthStatus(_req: http.IncomingMessage, res: http.ServerResponse): void {
+  const db = getDb()
+  const { n } = db.prepare('SELECT COUNT(*) as n FROM users').get() as { n: number }
+  json(res, 200, { initialized: n > 0 })
+}
+
 export async function handleInit(req: http.IncomingMessage, res: http.ServerResponse): Promise<void> {
   const db = getDb()
   const { n } = db.prepare('SELECT COUNT(*) as n FROM users').get() as { n: number }

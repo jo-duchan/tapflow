@@ -8,7 +8,7 @@ import type { RelayMessage } from './types.js'
 import { Router, json } from './router.js'
 import { requireViewAuth } from './middleware/auth.js'
 import { getDb } from './db.js'
-import { handleLogin, handleLogout, handleMe, handleChangePassword, handleInit } from './api/auth.js'
+import { handleLogin, handleLogout, handleMe, handleChangePassword, handleInit, handleAuthStatus } from './api/auth.js'
 import { handleVerify, handleAccept } from './api/invitations.js'
 import { createLogger } from '@tapflowio/agent-core'
 import {
@@ -91,6 +91,7 @@ export class RelayServer {
     const u = this.uploadsDir
 
     // auth
+    this.router.get('/api/v1/auth/status', handleAuthStatus)
     this.router.post('/api/v1/auth/init', handleInit)
     this.router.get('/api/v1/auth/me', handleMe)
     this.router.post('/api/v1/auth/login', handleLogin)

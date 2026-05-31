@@ -3,6 +3,7 @@ import { Toaster, type ToasterProps } from 'sonner'
 import { useTheme } from 'next-themes'
 import { DashboardLayout } from './layouts/DashboardLayout'
 import { Login } from './pages/Login'
+import { Setup } from './pages/Setup'
 import { Invite } from './pages/Invite'
 import { ResetPassword } from './pages/ResetPassword'
 import { AppCenter } from './pages/AppCenter'
@@ -18,6 +19,7 @@ export function App() {
     <BrowserRouter>
       <Routes>
         <Route path="/login" element={<Login />} />
+        <Route path="/setup" element={<Setup />} />
         <Route path="/invite" element={<Invite />} />
         <Route path="/reset-password" element={<ResetPassword />} />
         <Route element={<DashboardLayout />}>
