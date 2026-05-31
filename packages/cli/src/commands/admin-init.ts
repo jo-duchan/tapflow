@@ -75,21 +75,28 @@ export async function cmdAdminInit(opts: InitOptions): Promise<void> {
     spinner.stop(false)
     banner('error', 'Could not connect to relay', [
       `Relay not found at ${baseUrl}`,
-      'Run tapflow start first, then tapflow init.',
+      'Run tapflow start first, then tapflow admin init.',
     ])
     process.exit(1)
   }
 
   if (!res.ok) {
     spinner.stop(false)
-    const data = await res.json() as { error?: string }
+    let errorMsg: string | undefined
+    try {
+      const ct = res.headers.get('content-type') ?? ''
+      if (ct.includes('application/json')) {
+        const data = await res.json() as { error?: string }
+        errorMsg = data.error
+      }
+    } catch { /* non-JSON body — ignore */ }
     if (res.status === 403) {
       banner('error', 'Already initialized', [
         'An admin account already exists.',
         'Use Settings → Team in the dashboard to manage users.',
       ])
     } else {
-      banner('error', 'Failed to create admin', [data.error ?? `HTTP ${res.status}`])
+      banner('error', 'Failed to create admin', [errorMsg ?? `HTTP ${res.status}`])
     }
     process.exit(1)
   }

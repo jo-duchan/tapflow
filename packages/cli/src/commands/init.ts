@@ -77,10 +77,17 @@ export async function cmdInitConfig(opts: InitConfigOptions): Promise<void> {
   }
 
   const configOut = tunnel != null ? { ...BASE_CONFIG, tunnel } : BASE_CONFIG
-  fs.writeFileSync(configPath, JSON.stringify(configOut, null, 2) + '\n', 'utf-8')
+  try {
+    fs.writeFileSync(configPath, JSON.stringify(configOut, null, 2) + '\n', 'utf-8')
+  } catch (err) {
+    banner('error', 'WRITE FAILED', [
+      `Could not write tapflow.config.json: ${err instanceof Error ? err.message : String(err)}`,
+    ])
+    process.exit(1)
+  }
 
   const lines: string[] = ['tapflow.config.json created.']
-  if (tunnel?.provider === 'rathole' && !tunnel.serverAddr) {
+  if (tunnel?.provider === 'rathole' && (!tunnel.serverAddr || !tunnel.publicUrl)) {
     lines.push('Fill in tunnel.serverAddr and tunnel.publicUrl in tapflow.config.json.')
   }
   if (tunnel) lines.push(`Tunnel: ${tunnel.provider}`)
