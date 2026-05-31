@@ -77,5 +77,5 @@ Sign in at `http://localhost:4000` with the account you just created.
 For the full onboarding flow — team invitations and your first build upload — see [First-time Setup](/dashboard/setup).
 
 ::: tip Environment check
-If you run into issues during setup, run `tapflow doctor`. It automatically diagnoses prerequisites like Node.js version, Xcode, and adb.
+If you run into issues during setup, run `tapflow doctor`. It automatically diagnoses prerequisites — Node.js version and platform-specific tools.
 :::

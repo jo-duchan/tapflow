@@ -1,6 +1,6 @@
 # 설정 파일
 
-릴레이는 시작 디렉토리에서 `tapflow.config.json`을 읽습니다. 파일은 최초 실행 시 자동 생성됩니다. 설정을 변경한 뒤에는 릴레이를 재시작해야 적용됩니다.
+릴레이는 시작 디렉토리에서 `tapflow.config.json`을 읽습니다. `tapflow init`을 실행해 파일을 생성하고, 설정을 변경한 뒤에는 릴레이를 재시작해야 적용됩니다.
 
 ## 예시
 
@@ -26,7 +26,7 @@
 | 키 | 설명 |
 |----|------|
 | `local` | 이 머신에서 실행하는 relay 서버 설정 |
-| `relay.url` | 연결할 relay URL. `tapflow agent start`, `tapflow init`, `tapflow status`, `tapflow logs`의 기본값으로 사용됩니다. 설정 시 `--relay` 플래그 없이 동작합니다. 비어있으면 로컬 모드(`ws://localhost:[local.port]`)를 사용합니다. |
+| `relay.url` | 연결할 relay URL. `tapflow agent start`, `tapflow admin init`, `tapflow status`, `tapflow logs`의 기본값으로 사용됩니다. 설정 시 `--relay` 플래그 없이 동작합니다. 비어있으면 로컬 모드(`ws://localhost:[local.port]`)를 사용합니다. |
 | `smtp` | 초대·비밀번호 재설정 이메일 발송을 위한 SMTP 설정 |
 
 `smtp.from`은 `smtp.user`가 설정되어 있으면 `tapflow <smtp.user>` 형태로 자동 설정됩니다. 발신자 주소를 다르게 지정하려면 명시적으로 입력합니다.
@@ -66,7 +66,7 @@ openssl rand -hex 32
 
 ```text
 your-directory/
-  tapflow.config.json   ← 릴레이 설정 파일 (자동 생성)
+  tapflow.config.json   ← 릴레이 설정 파일 (tapflow init으로 생성)
   .tapflow-data/
     tapflow.db          ← SQLite 데이터베이스
     uploads/
