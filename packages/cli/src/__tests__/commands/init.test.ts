@@ -1,122 +1,112 @@
 import { describe, it, expect, vi, beforeEach, afterEach, type MockInstance } from 'vitest'
+import fs from 'fs'
+import path from 'path'
+import os from 'os'
 
 vi.mock('node:readline/promises', () => ({
   createInterface: vi.fn(),
 }))
 
 import * as readline from 'node:readline/promises'
-import { cmdInit } from '../../commands/init.js'
+import { cmdInitConfig } from '../../commands/init.js'
 
 const mockCreateInterface = vi.mocked(readline.createInterface)
 
-function mockRl(email: string, password: string) {
-  mockCreateInterface.mockReturnValue({
-    question: vi.fn()
-      .mockResolvedValueOnce(email)
-      .mockResolvedValueOnce(password),
-    close: vi.fn(),
-  } as never)
-}
-
-function mockFetch(status: number, body: unknown) {
-  vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
-    ok: status >= 200 && status < 300,
-    status,
-    json: vi.fn().mockResolvedValue(body),
-  }))
-}
-
-describe('cmdInit', () => {
+describe('cmdInitConfig', () => {
   let output: string[]
   let exitSpy: MockInstance
+  let tmpDir: string
 
   beforeEach(() => {
     vi.resetAllMocks()
-    mockCreateInterface.mockReturnValue({
-      question: vi.fn().mockResolvedValue(''),
-      close: vi.fn(),
-    } as never)
     output = []
     vi.spyOn(console, 'log').mockImplementation((...args) => output.push(args.join(' ')))
     vi.spyOn(console, 'error').mockImplementation((...args) => output.push(args.join(' ')))
     vi.spyOn(process.stdout, 'write').mockImplementation(() => true)
     exitSpy = vi.spyOn(process, 'exit').mockImplementation(() => { throw new Error('process.exit') })
+
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'tapflow-init-test-'))
+    vi.spyOn(process, 'cwd').mockReturnValue(tmpDir)
   })
 
   afterEach(() => {
     vi.restoreAllMocks()
-    vi.unstubAllGlobals()
+    fs.rmSync(tmpDir, { recursive: true, force: true })
   })
 
-  it('성공 시 "Admin account created" 출력', async () => {
-    mockRl('admin@test.com', 'password123')
-    mockFetch(201, { ok: true })
+  it('--tunnel tailscale → tailscale 섹션 포함 config 생성', async () => {
+    await cmdInitConfig({ tunnel: 'tailscale' })
 
-    await cmdInit({})
-    expect(output.join('\n')).toContain('Admin account created')
+    const cfg = JSON.parse(fs.readFileSync(path.join(tmpDir, 'tapflow.config.json'), 'utf-8'))
+    expect(cfg.tunnel).toEqual({ provider: 'tailscale' })
+    expect(output.join('\n')).toContain('CONFIG CREATED')
   })
 
-  it('성공 시 입력한 email 표시', async () => {
-    mockRl('admin@test.com', 'password123')
-    mockFetch(201, { ok: true })
+  it('--tunnel rathole → rathole placeholder config 생성', async () => {
+    await cmdInitConfig({ tunnel: 'rathole' })
 
-    await cmdInit({})
-    expect(output.join('\n')).toContain('admin@test.com')
+    const cfg = JSON.parse(fs.readFileSync(path.join(tmpDir, 'tapflow.config.json'), 'utf-8'))
+    expect(cfg.tunnel.provider).toBe('rathole')
+    expect(cfg.tunnel.serverAddr).toBe('')
+    expect(cfg.tunnel.ssh).toBeNull()
   })
 
-  it('relay 연결 실패 시 exit(1)', async () => {
-    mockRl('admin@test.com', 'password123')
-    vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('ECONNREFUSED')))
+  it('tunnel 없음 → 기본 config 생성 (tunnel 섹션 없음)', async () => {
+    Object.defineProperty(process.stdin, 'isTTY', { value: false, configurable: true })
 
-    await expect(cmdInit({})).rejects.toThrow('process.exit')
+    await cmdInitConfig({})
+
+    const cfg = JSON.parse(fs.readFileSync(path.join(tmpDir, 'tapflow.config.json'), 'utf-8'))
+    expect(cfg.tunnel).toBeUndefined()
+    expect(cfg.local.port).toBe(4000)
+  })
+
+  it('이미 config 존재 → --force 없으면 exit(1)', async () => {
+    fs.writeFileSync(path.join(tmpDir, 'tapflow.config.json'), '{}', 'utf-8')
+
+    await expect(cmdInitConfig({})).rejects.toThrow('process.exit')
     expect(exitSpy).toHaveBeenCalledWith(1)
+    expect(output.join('\n')).toContain('ALREADY INITIALIZED')
   })
 
-  it('이미 초기화된 경우(403) exit(1) + 안내 메시지', async () => {
-    mockRl('admin@test.com', 'password123')
-    mockFetch(403, { error: 'Already initialized' })
+  it('이미 config 존재 + --force → 덮어쓰기', async () => {
+    fs.writeFileSync(path.join(tmpDir, 'tapflow.config.json'), '{}', 'utf-8')
 
-    await expect(cmdInit({})).rejects.toThrow('process.exit')
+    await cmdInitConfig({ tunnel: 'tailscale', force: true })
+
+    const cfg = JSON.parse(fs.readFileSync(path.join(tmpDir, 'tapflow.config.json'), 'utf-8'))
+    expect(cfg.tunnel.provider).toBe('tailscale')
+  })
+
+  it('알 수 없는 tunnel provider → exit(1)', async () => {
+    await expect(cmdInitConfig({ tunnel: 'unknown' })).rejects.toThrow('process.exit')
     expect(exitSpy).toHaveBeenCalledWith(1)
-    expect(output.join('\n')).toContain('Already initialized')
+    expect(output.join('\n')).toContain('INVALID TUNNEL')
   })
 
-  it('비밀번호 8자 미만 시 exit(1)', async () => {
-    mockRl('admin@test.com', 'short')
+  it('인터랙티브 모드 tailscale 선택 → tailscale config 생성', async () => {
+    Object.defineProperty(process.stdin, 'isTTY', { value: true, configurable: true })
+    mockCreateInterface.mockReturnValueOnce({
+      question: vi.fn().mockResolvedValue('2'),
+      close: vi.fn(),
+    } as never)
 
-    await expect(cmdInit({})).rejects.toThrow('process.exit')
-    expect(exitSpy).toHaveBeenCalledWith(1)
-    expect(output.join('\n')).toContain('8 characters')
+    await cmdInitConfig({})
+
+    const cfg = JSON.parse(fs.readFileSync(path.join(tmpDir, 'tapflow.config.json'), 'utf-8'))
+    expect(cfg.tunnel.provider).toBe('tailscale')
   })
 
-  it('이메일 미입력 시 exit(1)', async () => {
-    mockRl('', 'password123')
+  it('인터랙티브 모드 none 선택 → tunnel 없는 config 생성', async () => {
+    Object.defineProperty(process.stdin, 'isTTY', { value: true, configurable: true })
+    mockCreateInterface.mockReturnValueOnce({
+      question: vi.fn().mockResolvedValue('1'),
+      close: vi.fn(),
+    } as never)
 
-    await expect(cmdInit({})).rejects.toThrow('process.exit')
-    expect(exitSpy).toHaveBeenCalledWith(1)
-  })
+    await cmdInitConfig({})
 
-  it('--relay 옵션 URL로 요청', async () => {
-    mockRl('admin@test.com', 'password123')
-    const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: vi.fn().mockResolvedValue({ ok: true }) })
-    vi.stubGlobal('fetch', fetchMock)
-
-    await cmdInit({ relay: 'http://remote:4000' })
-    expect(fetchMock).toHaveBeenCalledWith(
-      expect.stringContaining('http://remote:4000'),
-      expect.anything(),
-    )
-  })
-
-  it('ws:// relay URL을 http://로 변환', async () => {
-    mockRl('admin@test.com', 'password123')
-    const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: vi.fn().mockResolvedValue({ ok: true }) })
-    vi.stubGlobal('fetch', fetchMock)
-
-    await cmdInit({ relay: 'ws://remote:4000' })
-    expect(fetchMock).toHaveBeenCalledWith(
-      expect.stringContaining('http://remote:4000'),
-      expect.anything(),
-    )
+    const cfg = JSON.parse(fs.readFileSync(path.join(tmpDir, 'tapflow.config.json'), 'utf-8'))
+    expect(cfg.tunnel).toBeUndefined()
   })
 })

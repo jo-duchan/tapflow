@@ -113,12 +113,9 @@ This starts both the relay and the agent on the same Mac (local mode).
 
 ### 3. Create the first admin account
 
-```sh
-tapflow init
-# ? Admin email: admin@yourteam.com
-# ? Password: ********
-# ✓ Admin account created
-```
+Open `http://localhost:4000` in your browser. tapflow redirects you to `/setup` where you can create the admin account.
+
+> **Headless server?** Use `tapflow admin init` to create the admin account via CLI instead.
 
 ### 4. Open the dashboard
 
@@ -173,7 +170,8 @@ tapflow agent start --relay wss://your-relay-url
 | `tapflow start`                     | Start relay + agent together (local mode)       |
 | `tapflow relay start`               | Start relay only                                |
 | `tapflow agent start --relay <url>` | Start agent and connect to a relay              |
-| `tapflow init`                      | Create the first admin account                  |
+| `tapflow init`                      | Scaffold `tapflow.config.json`                  |
+| `tapflow admin init`                | Create the first admin account (CLI fallback)   |
 | `tapflow doctor`                    | Diagnose environment (Node, Xcode, adb…)        |
 | `tapflow devices`                   | List available simulators and emulators         |
 | `tapflow boot <name\|udid>`         | Boot a simulator or emulator                    |

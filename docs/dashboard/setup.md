@@ -8,25 +8,19 @@ If you haven't set up the relay yet, see [Self-Hosting the Relay](/guide/self-ho
 
 ## 1. Create the admin account
 
-tapflow has no default credentials. Create the first admin account:
+tapflow has no default credentials. On first launch, the dashboard automatically redirects to the setup page.
 
-```sh
-tapflow init
-  ? Admin email: admin@yourteam.com
-  ? Password: ********
-  ✓ Admin account created
-  →  Open http://localhost:4000 to sign in
-```
-
-::: tip Remote relay
-If your relay runs on a separate server, pass its URL:
-```sh
-tapflow init --relay https://your-relay-url
-```
-:::
+1. Open `http://localhost:4000` (or your relay URL) in any browser.
+2. You are redirected to `/setup` automatically.
+3. Enter your email and a password (minimum 8 characters).
+4. Click **Create admin account**.
 
 ::: warning One-time only
-`tapflow init` only works when no accounts exist yet. After this step, use **Settings → Team** to invite additional users.
+The setup page only appears when no accounts exist. After this step, use **Settings → Team** to invite additional users.
+:::
+
+::: tip Headless server or CI?
+If a browser is not available, use `tapflow admin init` to create the first admin account via CLI. The relay must be running first.
 :::
 
 ## 2. Sign in

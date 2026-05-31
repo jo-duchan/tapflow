@@ -26,10 +26,47 @@ npm update -g tapflow
 
 ## `tapflow init`
 
-릴레이에 최초 관리자 계정을 생성합니다. 계정이 하나도 없을 때만 실행 가능합니다.
+`tapflow.config.json`을 인터랙티브하게 생성합니다. `tapflow start` 전에 한 번 실행합니다.
+
+`tapflow.config.json`이 이미 존재하면 `--force` 없이는 오류로 종료합니다.
+
+터널 플래그 없이 대화형 터미널에서 실행하면 터널 선택을 안내합니다. 비대화형 환경에서 `--tunnel` 없이 실행하면 터널 없는 기본 설정 파일이 생성됩니다.
 
 ```sh
 tapflow init
+```
+
+| 옵션 | 설명 |
+|------|------|
+| `--tunnel <provider>` | 터널 프로바이더: `tailscale` 또는 `rathole` |
+| `--force` | 기존 `tapflow.config.json` 덮어쓰기 |
+
+Tailscale 예시:
+
+```sh
+tapflow init --tunnel tailscale
+# ✓ tapflow.config.json created.
+# Tunnel: tailscale
+# → Next: tapflow start
+```
+
+터널 없이 기본 설정 생성:
+
+```sh
+tapflow init
+# ✓ tapflow.config.json created.
+# → Next: tapflow start
+```
+
+
+## `tapflow admin init`
+
+CLI에서 최초 관리자 계정을 생성합니다. 브라우저를 사용할 수 없는 환경(헤드리스 서버, CI)에서 폴백으로 사용합니다.
+
+이 명령어 실행 전에 릴레이가 먼저 구동 중이어야 합니다.
+
+```sh
+tapflow admin init
 ```
 
 | 옵션 | 설명 |
@@ -46,6 +83,10 @@ tapflow init
 ```
 
 비밀번호는 최소 8자 이상이어야 합니다.
+
+::: tip 웹 온보딩
+최초 실행 시 대시보드가 `/setup` 페이지로 자동 이동하며, 브라우저에서 관리자 계정을 생성할 수 있습니다. CLI가 필요 없습니다. 브라우저를 사용할 수 없는 경우에만 `tapflow admin init`을 사용하세요.
+:::
 
 
 ## `tapflow start`
