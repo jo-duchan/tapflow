@@ -145,6 +145,28 @@ describe('relay config validation', () => {
     expect(exitSpy).toHaveBeenCalledWith(1)
   })
 
+  it('tunnel.provider tailscale → 파싱됨 (publicUrl 선택)', async () => {
+    const fs = await import('fs')
+    vi.mocked(fs.default.existsSync).mockReturnValue(true)
+    vi.mocked(fs.default.readFileSync).mockReturnValue(
+      JSON.stringify({ tunnel: { provider: 'tailscale' } })
+    )
+    vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const { config } = await import('../lib/config.js')
+    expect(config.tunnel).toMatchObject({ provider: 'tailscale' })
+  })
+
+  it('tunnel.provider tailscale + publicUrl → publicUrl 파싱됨', async () => {
+    const fs = await import('fs')
+    vi.mocked(fs.default.existsSync).mockReturnValue(true)
+    vi.mocked(fs.default.readFileSync).mockReturnValue(
+      JSON.stringify({ tunnel: { provider: 'tailscale', publicUrl: 'http://my-mac.tailnet.ts.net:4000' } })
+    )
+    vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const { config } = await import('../lib/config.js')
+    expect(config.tunnel).toMatchObject({ provider: 'tailscale', publicUrl: 'http://my-mac.tailnet.ts.net:4000' })
+  })
+
   it('tunnel.provider 미지원 값 → exit(1)', async () => {
     const fs = await import('fs')
     vi.mocked(fs.default.existsSync).mockReturnValue(true)

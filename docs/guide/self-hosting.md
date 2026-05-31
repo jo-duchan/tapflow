@@ -78,9 +78,56 @@ Teammates connect to `http://MACHINE_LOCAL_IP:4000` in their browser. The port m
 
 Keep the relay and agents on the same internal network at all times. External access works by opening an outbound tunnel from the relay Mac to a public endpoint — browsers connect to the public URL, which forwards traffic back to the relay.
 
-### VPS + Tunnel (recommended)
+### Tailscale (recommended)
 
-The most reliable option for external access. Traffic passes through your own VPS, so the "data stays in your infrastructure" principle is maintained.
+The easiest and most private option for external access. Tailscale connects team members through a WireGuard-based mesh VPN — no VPS, no port forwarding, no static IP required.
+
+```text
+browser (tailnet) ──[WireGuard E2E]──► relay Mac (tailnet)
+                                             ↑
+                                      agent Macs (same internal network)
+```
+
+Traffic never leaves your infrastructure in plaintext. Even when Tailscale's DERP relay is used as a fallback, only encrypted WireGuard packets pass through — Tailscale servers cannot decrypt them.
+
+**Prerequisites**: Install Tailscale on the relay Mac and on any browser machine that needs access. Free plan supports up to 3 users; paid plans for larger teams.
+
+1. Install and connect Tailscale:
+
+```sh
+brew install tailscale   # macOS
+sudo tailscale up
+```
+
+2. Add the `tunnel` section to `tapflow.config.json`:
+
+```json
+{
+  "tunnel": {
+    "provider": "tailscale"
+  }
+}
+```
+
+3. Start the relay:
+
+```sh
+tapflow relay start
+```
+
+tapflow reads the Tailscale MagicDNS hostname (or tailnet IP) automatically and prints the public URL in the banner. Teammates with Tailscale installed connect to that URL in their browser.
+
+::: tip Custom URL
+Set `"publicUrl": "http://your-hostname.tailnet.ts.net:4000"` in the tunnel config to override the auto-detected URL.
+:::
+
+::: info Agents stay on the internal network
+Tailscale only provides the browser→relay path. Agents (simulator Macs) still connect to the relay's internal IP over your LAN — no change needed there.
+:::
+
+### VPS + Tunnel
+
+Use this when you need a fully public URL — for external collaborators, anonymous demos, or when Tailscale isn't an option. Traffic is routed through a VPS you own.
 
 ```text
 browser → VPS (public URL) → tunnel → relay Mac (office)
@@ -88,7 +135,7 @@ browser → VPS (public URL) → tunnel → relay Mac (office)
                                  agent Macs (same internal network)
 ```
 
-The relay Mac opens an outbound tunnel to the VPS, so no port forwarding or static IP is required — CGNAT is not a problem.
+The relay Mac opens an outbound tunnel to the VPS over SSH, so no port forwarding or static IP is required — CGNAT is not a problem.
 
 #### 1. Set up Caddy for HTTPS on the VPS
 

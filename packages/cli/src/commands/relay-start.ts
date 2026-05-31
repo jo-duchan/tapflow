@@ -4,6 +4,7 @@ import { RelayServer, initDb, config } from '@tapflowio/relay'
 import { banner, step } from '../lib/print.js'
 import { initConfigFile } from '../lib/init-config.js'
 import { RatholeTunnel } from '../lib/rathole-tunnel.js'
+import { TailscaleTunnel } from '../lib/tailscale-tunnel.js'
 import type { TunnelPlugin } from '../lib/tunnel.js'
 
 export interface RelayStartOptions {
@@ -29,7 +30,7 @@ export async function cmdRelayStart(opts: RelayStartOptions): Promise<void> {
   await server.start()
   step(`Relay started on ws://localhost:${port}`)
 
-  const SUPPORTED_PROVIDERS = ['rathole']
+  const SUPPORTED_PROVIDERS = ['rathole', 'tailscale']
   if (opts.tunnel && !SUPPORTED_PROVIDERS.includes(opts.tunnel)) {
     banner('error', 'TUNNEL CONFIG ERROR', [`Unsupported tunnel provider: "${opts.tunnel}". Supported: ${SUPPORTED_PROVIDERS.join(', ')}`])
     process.exit(1)
@@ -43,12 +44,16 @@ export async function cmdRelayStart(opts: RelayStartOptions): Promise<void> {
       banner('error', 'TUNNEL CONFIG ERROR', ['tunnel section is required in tapflow.config.json when using --tunnel'])
       process.exit(1)
     }
-    const token = process.env.TAPFLOW_TUNNEL_TOKEN ?? ''
-    if (!token) {
-      banner('error', 'TUNNEL CONFIG ERROR', ['TAPFLOW_TUNNEL_TOKEN env var is required when tunnel is configured'])
-      process.exit(1)
+    if (tunnelCfg.provider === 'tailscale') {
+      tunnel = new TailscaleTunnel({ publicUrl: tunnelCfg.publicUrl })
+    } else {
+      const token = process.env.TAPFLOW_TUNNEL_TOKEN ?? ''
+      if (!token) {
+        banner('error', 'TUNNEL CONFIG ERROR', ['TAPFLOW_TUNNEL_TOKEN env var is required for rathole tunnel'])
+        process.exit(1)
+      }
+      tunnel = new RatholeTunnel({ serverAddr: tunnelCfg.serverAddr, publicUrl: tunnelCfg.publicUrl, token, ssh: tunnelCfg.ssh ?? undefined })
     }
-    tunnel = new RatholeTunnel({ serverAddr: tunnelCfg.serverAddr, publicUrl: tunnelCfg.publicUrl, token, ssh: tunnelCfg.ssh ?? undefined })
     try {
       await tunnel.setupServer()
       const { publicUrl } = await tunnel.start(port)
