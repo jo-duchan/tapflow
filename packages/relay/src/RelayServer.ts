@@ -6,7 +6,7 @@ import { WebSocketServer, WebSocket } from 'ws'
 import { SessionManager } from './SessionManager.js'
 import type { RelayMessage } from './types.js'
 import { Router, json } from './router.js'
-import { requireViewAuth } from './middleware/auth.js'
+import { requireViewAuth, getAuth, verifyPat } from './middleware/auth.js'
 import { getDb } from './db.js'
 import { handleLogin, handleLogout, handleMe, handleChangePassword, handleInit, handleAuthStatus } from './api/auth.js'
 import { handleVerify, handleAccept } from './api/invitations.js'
@@ -49,6 +49,16 @@ const MIME_TYPES: Record<string, string> = {
 const _parsedThreshold = parseInt(process.env['TAPFLOW_RESOURCE_THRESHOLD_PERCENT'] ?? '80', 10)
 const RESOURCE_THRESHOLD = Number.isFinite(_parsedThreshold) ? _parsedThreshold : 80
 
+// Messages that only agents are allowed to send. Authenticated browser sockets
+// that send any of these are disconnected immediately.
+const AGENT_MSG_TYPES = new Set([
+  'agent:register', 'agent:resources', 'screenshot:done', 'screenshot:error',
+  'device:booting', 'device:boot-error', 'device:shutdown-done', 'device:ready',
+  'device:rotate', 'session:chrome', 'session:deviceInfo',
+  'app:install-done', 'app:install-error', 'app:launch-done', 'app:launch-error',
+  'open-url:done', 'open-url:error', 'keyboard:toggled',
+])
+
 export class RelayServer {
   private httpServer: http.Server
   private wss: WebSocketServer
@@ -64,6 +74,7 @@ export class RelayServer {
   private purgeBuildsTimer: ReturnType<typeof setInterval> | null = null
   private flushResourcesTimer: ReturnType<typeof setInterval> | null = null
   private dropHandlers = new Map<string, () => void>()
+  private wsRoles = new Map<WebSocket, 'agent' | 'browser' | 'stream'>()
   private readonly backpressureBytes: number
   private readonly screenshotTimeoutMs: number
   private pendingScreenshots = new Map<string, {
@@ -83,7 +94,7 @@ export class RelayServer {
     this.registerRoutes()
     this.httpServer = http.createServer((req, res) => this.handleRequest(req, res))
     this.wss = new WebSocketServer({ server: this.httpServer })
-    this.wss.on('connection', (ws) => this.handleConnection(ws))
+    this.wss.on('connection', (ws, request) => this.handleConnection(ws, request))
     this.wss.on('error', () => { /* propagated from httpServer */ })
   }
 
@@ -216,7 +227,23 @@ export class RelayServer {
     return this.httpServer.address()
   }
 
-  private handleConnection(ws: WebSocket): void {
+  private handleConnection(ws: WebSocket, request: http.IncomingMessage): void {
+    const addr = request.socket.remoteAddress ?? ''
+    const isLocal = addr === '127.0.0.1' || addr === '::1' || addr === '::ffff:127.0.0.1'
+
+    if (!isLocal) {
+      // Remote connections require a valid session cookie or PAT
+      if (!getAuth(request) && !verifyPat(request)) {
+        ws.close(1008, 'Unauthorized')
+        return
+      }
+      this.wsRoles.set(ws, 'browser')
+    } else if (getAuth(request)) {
+      // Local browser (dashboard running on the same machine) — has a session cookie
+      this.wsRoles.set(ws, 'browser')
+    }
+    // Local + no auth → role is determined by the first message (agent:register / stream:register)
+
     ws.on('message', (data, isBinary) => {
       if (isBinary) {
         // Binary frames arrive on the dedicated stream WS, route to the session's browser
@@ -242,6 +269,7 @@ export class RelayServer {
     })
 
     ws.on('close', () => {
+      this.wsRoles.delete(ws)
       // Agent main socket disconnected → remove all device sessions for this agent
       const agentSessions = this.sessions.getAllByAgentSocket(ws)
       if (agentSessions.length > 0) {
@@ -283,6 +311,25 @@ export class RelayServer {
   }
 
   private route(ws: WebSocket, msg: RelayMessage): void {
+    // Assign role on the first message for local no-auth connections (agents / streams)
+    if (!this.wsRoles.has(ws)) {
+      if (msg.type === 'agent:register') {
+        this.wsRoles.set(ws, 'agent')
+      } else if (msg.type === 'stream:register') {
+        this.wsRoles.set(ws, 'stream')
+      } else {
+        // Local connection whose first message is not an agent/stream handshake —
+        // treat it as a browser (e.g. dashboard opened on the same machine).
+        this.wsRoles.set(ws, 'browser')
+      }
+    }
+
+    // Browser sockets must not spoof agent control messages
+    if (this.wsRoles.get(ws) === 'browser' && AGENT_MSG_TYPES.has(msg.type)) {
+      ws.close(1008, 'Forbidden')
+      return
+    }
+
     switch (msg.type) {
       // ── Agent → Relay ─────────────────────────────────────────────────────
       case 'agent:resources':    this.handleAgentResources(ws, msg); break
@@ -637,6 +684,7 @@ export class RelayServer {
       res.setHeader('Cache-Control', 'no-store')
     }
     if (url.startsWith('/uploads/')) {
+      if (!requireViewAuth(req, res)) return
       this.serveUpload(req, res)
       return
     }
@@ -652,6 +700,10 @@ export class RelayServer {
   private serveUpload(req: http.IncomingMessage, res: http.ServerResponse): void {
     const urlPath = (req.url ?? '/').split('?')[0]
     const filePath = path.join(this.uploadsDir, urlPath.replace('/uploads/', ''))
+    const resolved = path.resolve(filePath)
+    if (!resolved.startsWith(path.resolve(this.uploadsDir) + path.sep)) {
+      res.writeHead(403); res.end('Forbidden'); return
+    }
     if (!fs.existsSync(filePath)) {
       res.writeHead(404); res.end('Not found'); return
     }
