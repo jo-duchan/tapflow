@@ -7,6 +7,12 @@ const logger = createLogger('relay:config')
 
 const DEV_DEFAULT_SECRET = 'tapflow-dev-secret-change-in-production'
 
+const tunnelSchema = z.object({
+  provider: z.enum(['rathole']),
+  serverAddr: z.string().min(1),
+  publicUrl: z.string().min(1),
+})
+
 const configSchema = z.object({
   local: z.object({
     port: z.number().int().min(1).max(65535),
@@ -16,6 +22,7 @@ const configSchema = z.object({
   relay: z.object({
     url: z.string().nullable(),
   }),
+  tunnel: tunnelSchema.nullable(),
   smtp: z.object({
     host: z.string(),
     port: z.number().int().min(1).max(65535),
@@ -39,6 +46,7 @@ const DEFAULTS = {
   relay: {
     url: null,
   },
+  tunnel: null,
   smtp: {
     host: '',
     port: 587,
@@ -78,6 +86,9 @@ function load(): TapflowConfig {
     relay: {
       url: file.relay?.url || null,
     },
+    tunnel: file.tunnel != null
+      ? { provider: file.tunnel.provider as 'rathole', serverAddr: file.tunnel.serverAddr ?? '', publicUrl: file.tunnel.publicUrl ?? '' }
+      : null,
     smtp: {
       host: file.smtp?.host ?? DEFAULTS.smtp.host,
       port: file.smtp?.port ?? DEFAULTS.smtp.port,
