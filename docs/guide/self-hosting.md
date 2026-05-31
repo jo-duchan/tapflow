@@ -82,7 +82,7 @@ Keep the relay and agents on the same internal network at all times. External ac
 
 The most reliable option for external access. Traffic passes through your own VPS, so the "data stays in your infrastructure" principle is maintained.
 
-```
+```text
 browser → VPS (public URL) → tunnel → relay Mac (office)
                                         ↑
                                  agent Macs (same internal network)
