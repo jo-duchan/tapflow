@@ -15,6 +15,19 @@ const BASE_CONFIG = {
   smtp: { host: '', port: 587, secure: false, user: '', pass: '' },
 }
 
+function addToGitignore(dir: string, entry: string): 'created' | 'appended' | 'already-present' {
+  const gitignorePath = path.join(dir, '.gitignore')
+  if (fs.existsSync(gitignorePath)) {
+    const content = fs.readFileSync(gitignorePath, 'utf-8')
+    if (content.split('\n').some((line) => line.trim() === entry)) return 'already-present'
+    const separator = content.endsWith('\n') ? '' : '\n'
+    fs.appendFileSync(gitignorePath, `${separator}\n# tapflow runtime data\n${entry}\n`, 'utf-8')
+    return 'appended'
+  }
+  fs.writeFileSync(gitignorePath, `# tapflow runtime data\n${entry}\n`, 'utf-8')
+  return 'created'
+}
+
 type TunnelConfig =
   | { provider: 'tailscale'; publicUrl?: string }
   | { provider: 'rathole'; serverAddr: string; publicUrl: string; ssh: { host: string; user: string; keyPath: string } | null }
@@ -86,7 +99,11 @@ export async function cmdInitConfig(opts: InitConfigOptions): Promise<void> {
     process.exit(1)
   }
 
+  const gitignoreUpdated = addToGitignore(process.cwd(), '.tapflow-data/')
+
   const lines: string[] = ['tapflow.config.json created.']
+  if (gitignoreUpdated === 'created') lines.push('.gitignore created (.tapflow-data/ added).')
+  else if (gitignoreUpdated === 'appended') lines.push('.tapflow-data/ added to .gitignore.')
   if (tunnel?.provider === 'rathole' && (!tunnel.serverAddr || !tunnel.publicUrl)) {
     lines.push('Fill in tunnel.serverAddr and tunnel.publicUrl in tapflow.config.json.')
   }

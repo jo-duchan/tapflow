@@ -27,6 +27,7 @@ tapflow start          # starts relay (no longer creates config as a side effect
 
 ### New
 
+- `tapflow init` now updates `.gitignore` automatically — creates the file if absent, appends `.tapflow-data/` if not already present.
 - `tapflow init --tunnel tailscale` — scaffold config with Tailscale tunnel section
 - `tapflow init --tunnel rathole` — scaffold config with rathole tunnel section placeholder
 - `tapflow init --force` — overwrite existing `tapflow.config.json`

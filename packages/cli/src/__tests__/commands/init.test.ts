@@ -109,4 +109,35 @@ describe('cmdInitConfig', () => {
     const cfg = JSON.parse(fs.readFileSync(path.join(tmpDir, 'tapflow.config.json'), 'utf-8'))
     expect(cfg.tunnel).toBeUndefined()
   })
+
+  describe('.gitignore', () => {
+    it('.gitignore 없음 → 새로 생성되고 .tapflow-data/ 포함', async () => {
+      await cmdInitConfig({ tunnel: 'tailscale' })
+
+      const content = fs.readFileSync(path.join(tmpDir, '.gitignore'), 'utf-8')
+      expect(content).toContain('.tapflow-data/')
+      expect(output.join('\n')).toContain('.gitignore created')
+    })
+
+    it('.gitignore 있고 항목 없음 → .tapflow-data/ 추가', async () => {
+      fs.writeFileSync(path.join(tmpDir, '.gitignore'), 'node_modules/\n', 'utf-8')
+
+      await cmdInitConfig({ tunnel: 'tailscale' })
+
+      const content = fs.readFileSync(path.join(tmpDir, '.gitignore'), 'utf-8')
+      expect(content).toContain('node_modules/')
+      expect(content).toContain('.tapflow-data/')
+      expect(output.join('\n')).toContain('.tapflow-data/ added to .gitignore')
+    })
+
+    it('.gitignore에 이미 .tapflow-data/ 있음 → 중복 추가 안 됨', async () => {
+      fs.writeFileSync(path.join(tmpDir, '.gitignore'), '.tapflow-data/\n', 'utf-8')
+
+      await cmdInitConfig({ tunnel: 'tailscale' })
+
+      const content = fs.readFileSync(path.join(tmpDir, '.gitignore'), 'utf-8')
+      const count = content.split('\n').filter((l) => l.trim() === '.tapflow-data/').length
+      expect(count).toBe(1)
+    })
+  })
 })
