@@ -74,9 +74,32 @@ tapflow start
 tapflow relay start
 ```
 
-| 옵션 | 설명 |
-|------|------|
-| `--port <n>` | 포트 (기본값: `4000`) |
+| 옵션 | 기본값 | 설명 |
+|------|--------|------|
+| `--port <n>` | `4000` | 리슨 포트 |
+| `--tunnel <provider>` | — | 사용할 터널 프로바이더 (예: `rathole`). `tapflow.config.json`의 `tunnel` 섹션과 `TAPFLOW_TUNNEL_TOKEN` 환경변수가 필요합니다 |
+
+**터널 사용**
+
+```sh
+TAPFLOW_TUNNEL_TOKEN=your-secret tapflow relay start
+```
+
+`tapflow.config.json`:
+
+```json
+{
+  "tunnel": {
+    "provider": "rathole",
+    "serverAddr": "your-vps.com:2333",
+    "publicUrl": "https://your-vps.com"
+  }
+}
+```
+
+터널이 연결되면 배너에 공개 URL이 출력됩니다. 터널 연결에 실패해도 릴레이는 계속 동작합니다 — 터널만 사용 불가 상태가 됩니다.
+
+VPS 전체 세팅 방법은 [릴레이 배포 — VPS + Tunnel](/ko/guide/self-hosting#vps-tunnel-권장)을 참고하세요.
 
 
 ## `tapflow agent start`

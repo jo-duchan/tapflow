@@ -90,8 +90,74 @@ JWT_SECRET=YOUR_JWT_SECRET tapflow relay start
 
 릴레이 Mac에서 VPS로 아웃바운드 터널을 열기 때문에 포트 포워딩이나 CGNAT 없이도 외부 접속이 가능합니다.
 
-::: info 준비 중
-`tapflow relay start --tunnel` 옵션으로 터널을 자동으로 시작하는 기능을 준비 중입니다.
+#### 1. VPS에 rathole 설치
+
+```sh
+curl -sL https://github.com/rathole-org/rathole/releases/download/dev-latest/rathole-dev-x86_64-unknown-linux-musl.tar.gz | tar -xz
+sudo mv rathole /usr/local/bin/
+```
+
+서버 설정 파일을 작성합니다:
+
+```toml
+# /etc/rathole-server.toml
+[server]
+bind_addr = "0.0.0.0:2333"
+
+[server.services.tapflow-relay]
+token = "your-secret-token"
+bind_addr = "0.0.0.0:4000"
+```
+
+실행합니다 (영구 운영은 systemd나 프로세스 매니저에 등록):
+
+```sh
+rathole --server /etc/rathole-server.toml
+```
+
+#### 2. Caddy로 HTTPS 설정
+
+Caddy는 TLS 인증서를 자동으로 발급·갱신합니다 — certbot 별도 설치가 필요 없습니다.
+
+```sh
+sudo apt install -y caddy
+```
+
+```
+# /etc/caddy/Caddyfile
+your-vps.com {
+    reverse_proxy localhost:4000
+}
+```
+
+```sh
+sudo systemctl reload caddy
+```
+
+#### 3. 릴레이 Mac에서 tapflow 설정
+
+`tapflow.config.json`에 `tunnel` 섹션을 추가합니다:
+
+```json
+{
+  "tunnel": {
+    "provider": "rathole",
+    "serverAddr": "your-vps.com:2333",
+    "publicUrl": "https://your-vps.com"
+  }
+}
+```
+
+토큰을 환경변수로 전달하고 시작합니다:
+
+```sh
+TAPFLOW_TUNNEL_TOKEN=your-secret-token tapflow relay start
+```
+
+터널이 연결되면 배너에 공개 URL이 출력됩니다. 브라우저는 `https://your-vps.com`으로 접속하고, 에이전트는 릴레이의 내부 IP(`ws://192.168.x.x:4000`)로 연결합니다.
+
+::: tip VPS 방화벽
+VPS에서 `2333/tcp`(rathole)와 `443/tcp`(Caddy)를 열어야 합니다. `4000` 포트는 공개할 필요 없습니다 — Caddy가 내부에서 프록시합니다.
 :::
 
 ::: danger 릴레이를 클라우드에 직접 배포하지 마세요
