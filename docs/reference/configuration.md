@@ -1,6 +1,6 @@
 # Configuration
 
-The relay reads `tapflow.config.json` from the directory where it is started. The file is auto-generated on first run — edit it and restart the relay to apply changes.
+The relay reads `tapflow.config.json` from the directory where it is started. Generate it by running `tapflow init`, then restart the relay after any changes.
 
 ## Example
 
@@ -26,7 +26,7 @@ The relay reads `tapflow.config.json` from the directory where it is started. Th
 | Key | Description |
 |-----|-------------|
 | `local` | Settings for the relay server running on this machine. |
-| `relay.url` | URL of the relay to connect to. Used by `tapflow agent start`, `tapflow init`, `tapflow status`, and `tapflow logs` as the default — no `--relay` flag needed when this is set. Leave empty for local mode (`ws://localhost:[local.port]`). |
+| `relay.url` | URL of the relay to connect to. Used by `tapflow agent start`, `tapflow admin init`, `tapflow status`, and `tapflow logs` as the default — no `--relay` flag needed when this is set. Leave empty for local mode (`ws://localhost:[local.port]`). |
 | `smtp` | SMTP settings for sending invitation and password reset emails. |
 
 `smtp.from` defaults to `tapflow <smtp.user>` when `smtp.user` is set. Override it explicitly if you need a different sender address.
@@ -66,7 +66,7 @@ The relay creates these files in the working directory on first run:
 
 ```text
 your-directory/
-  tapflow.config.json   ← relay configuration (auto-generated)
+  tapflow.config.json   ← relay configuration (run tapflow init to generate)
   .tapflow-data/
     tapflow.db          ← SQLite database
     uploads/

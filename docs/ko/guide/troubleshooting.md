@@ -148,9 +148,13 @@ export PATH=$PATH:$ANDROID_HOME/platform-tools
 
 ## 인증 관련
 
-### `tapflow init` 실패 (`Already initialized`)
+### `tapflow init` 실패 (`ALREADY INITIALIZED`)
 
-`tapflow init`은 계정이 하나도 없을 때만 실행 가능합니다. 이미 관리자 계정이 있으면 대시보드 로그인 후 **Settings → Team**에서 팀원을 초대하세요.
+현재 디렉토리에 `tapflow.config.json`이 이미 존재합니다. `--force` 옵션을 사용해 덮어쓰거나, 기존 파일을 직접 편집하세요.
+
+### `tapflow admin init` 실패 (`Already initialized`)
+
+릴레이에 이미 관리자 계정이 존재합니다. 대시보드에 로그인한 뒤 **Settings → Team**에서 팀원을 초대하세요.
 
 ### 초대 링크가 만료됨
 

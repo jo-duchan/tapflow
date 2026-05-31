@@ -221,5 +221,5 @@ pm2 restart relay
 ```
 
 ::: tip Next step
-Once the relay is running, create the first admin account with `tapflow init`. For team invitations and your first build upload, see [First-time Setup](/dashboard/setup).
+Once the relay is running, open `http://your-relay-url` in a browser — the dashboard redirects to the setup page automatically. For headless servers, use `tapflow admin init` instead. For team invitations and your first build upload, see [First-time Setup](/dashboard/setup).
 :::

@@ -148,9 +148,13 @@ Sessions auto-close after 30 minutes of inactivity. This timeout cannot be chang
 
 ## Auth issues
 
-### `tapflow init` fails (`Already initialized`)
+### `tapflow init` fails (`ALREADY INITIALIZED`)
 
-`tapflow init` only works when no accounts exist. If an admin account already exists, sign in and invite teammates from **Settings → Team**.
+`tapflow.config.json` already exists in the current directory. Use `--force` to overwrite it, or edit the existing file directly.
+
+### `tapflow admin init` fails (`Already initialized`)
+
+An admin account already exists on the relay. Sign in and invite teammates from **Settings → Team**.
 
 ### Invitation link expired
 

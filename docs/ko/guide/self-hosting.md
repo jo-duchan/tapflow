@@ -221,5 +221,5 @@ pm2 restart relay
 ```
 
 ::: tip 다음 단계
-릴레이가 실행되면 `tapflow init`으로 최초 관리자 계정을 생성합니다. 이후 팀원 초대와 첫 빌드 업로드는 [대시보드 최초 설정](/ko/dashboard/setup)을 참고하세요.
+릴레이가 실행되면 브라우저에서 `http://your-relay-url`을 열면 설정 페이지로 자동 이동합니다. 브라우저를 사용할 수 없는 서버 환경이라면 `tapflow admin init`을 사용하세요. 팀원 초대와 첫 빌드 업로드는 [대시보드 최초 설정](/ko/dashboard/setup)을 참고하세요.
 :::
