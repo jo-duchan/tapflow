@@ -13,7 +13,7 @@ See [Introduction — How it works](/guide/introduction#how-it-works) for a diag
 ## Adding a second Mac
 
 ::: tip The relay must be reachable from all Macs
-When running `tapflow agent start` on another Mac, `ws://localhost:4000` resolves to that Mac's own localhost — not the relay machine. Use the relay's actual network address: a local IP (`ws://192.168.x.x:4000`) for the same internal network, or a public URL for agents on different networks. See [Self-Hosting the Relay](/guide/self-hosting).
+When running `tapflow agent start` on another Mac, `ws://localhost:4000` resolves to that Mac's own localhost — not the relay machine. Use the relay's local IP address (`ws://192.168.x.x:4000`). Agents must stay on the same internal network as the relay — see [Self-Hosting the Relay](/guide/self-hosting) for network requirements.
 :::
 
 On the new Mac, install tapflow and point it at your existing relay:

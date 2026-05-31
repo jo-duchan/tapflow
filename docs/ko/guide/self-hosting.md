@@ -82,7 +82,7 @@ JWT_SECRET=YOUR_JWT_SECRET tapflow relay start
 
 가장 안정적인 외부 접속 방법입니다. 트래픽이 팀 소유 VPS를 경유하므로 tapflow의 "데이터가 팀 인프라 안에" 원칙을 유지합니다.
 
-```
+```text
 브라우저 → VPS (공개 URL) → 터널 → 릴레이 Mac (사무실)
                                       ↑
                                  에이전트 Mac (같은 내부 네트워크)
