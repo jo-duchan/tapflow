@@ -98,7 +98,7 @@ Caddy handles TLS automatically — no certbot needed.
 sudo apt install -y caddy
 ```
 
-```
+```caddyfile
 # /etc/caddy/Caddyfile
 your-vps.com {
     reverse_proxy localhost:4000
