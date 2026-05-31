@@ -1,43 +1,31 @@
 # Changelog
 
-## Unreleased
+All notable changes to this project will be documented in this file.
+
+The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
+and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+
+## [Unreleased]
 
 ### Breaking Changes
 
-#### `tapflow init` — config scaffolding (was: admin creation)
+- `tapflow init` no longer creates an admin account. It now scaffolds `tapflow.config.json`.
+  - **Before:** `tapflow start` (auto-created config) → `tapflow init` (admin creation via CLI)
+  - **After:** `tapflow init` (scaffold config) → `tapflow start` → open `/setup` in browser (admin creation)
+  - **Migrate:** use the `/setup` page on first launch, or `tapflow admin init` in headless environments.
+- `tapflow start` and `tapflow relay start` no longer create `tapflow.config.json` as a side effect. Run `tapflow init` explicitly, or skip it to use built-in defaults (port 4000, `.tapflow-data/`).
 
-`tapflow init` now creates `tapflow.config.json` instead of creating the first admin account.
+### Added
 
-**Before:**
-```sh
-tapflow start          # starts relay (also created tapflow.config.json as a side effect)
-tapflow init           # created the first admin account via CLI
-```
+- `tapflow init` — scaffold `tapflow.config.json` interactively; `--tunnel tailscale|rathole` for non-interactive mode; `--force` to overwrite.
+- `tapflow init` auto-updates `.gitignore` — creates the file if absent, appends `.tapflow-data/` if not already present.
+- `tapflow admin init` — create the first admin account via CLI (headless / CI fallback).
+- Dashboard `/setup` page — web-based first admin account creation; auto-redirected from `/login` when no accounts exist.
+- `GET /api/v1/auth/status` — public endpoint returning `{ initialized: boolean }`.
+- Tailscale tunnel provider (`tunnel.provider: "tailscale"`) — E2E encrypted, no VPS required.
 
-**After:**
-```sh
-tapflow init           # scaffolds tapflow.config.json
-tapflow start          # starts relay (no longer creates config as a side effect)
-# open http://localhost:4000 → /setup page creates the first admin account in the browser
-```
+### Removed
 
-**Migration:**
-- Admin account creation: use the web onboarding page (`/setup`) or `tapflow admin init`.
-- Config file: run `tapflow init` once before `tapflow start`. If you skip it, tapflow uses built-in defaults (port 4000, `.tapflow-data/`).
+- Automatic `tapflow.config.json` creation as a side effect of `tapflow start` / `tapflow relay start`.
 
-### New
-
-- `tapflow init` now updates `.gitignore` automatically — creates the file if absent, appends `.tapflow-data/` if not already present.
-- `tapflow init --tunnel tailscale` — scaffold config with Tailscale tunnel section
-- `tapflow init --tunnel rathole` — scaffold config with rathole tunnel section placeholder
-- `tapflow init --force` — overwrite existing `tapflow.config.json`
-- `tapflow init` (interactive TTY) — guided tunnel provider selection
-- `tapflow admin init` — create the first admin account via CLI (headless / fallback path)
-- Dashboard `/setup` page — web-based first admin account creation (GitLab/Grafana style)
-- `GET /api/v1/auth/status` — public endpoint returning `{ initialized: boolean }`
-- Tailscale tunnel provider (`tunnel.provider: "tailscale"`) — E2E encrypted, no VPS required
-
-### Changed
-
-- `tapflow start` and `tapflow relay start` no longer create `tapflow.config.json` as a hidden side effect.
-- `tapflow init` is now a config scaffolding command, not an admin creation command.
+[Unreleased]: https://github.com/jo-duchan/tapflow/compare/v0.1.0...HEAD

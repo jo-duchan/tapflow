@@ -59,6 +59,33 @@ v0.3.0-beta.1    # feature-complete, external testing
 v0.3.0-rc.1      # release candidate, no new features
 ```
 
+### CHANGELOG
+
+`CHANGELOG.md` follows the [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) format.
+
+**Sections** (use only what applies — omit empty ones):
+
+| Section | When to use |
+|---------|-------------|
+| `### Breaking Changes` | Any change requiring user action to migrate |
+| `### Added` | New features or commands |
+| `### Changed` | Changes to existing behaviour |
+| `### Deprecated` | Features that will be removed in a future release |
+| `### Removed` | Features removed in this release |
+| `### Fixed` | Bug fixes |
+| `### Security` | Security-related fixes |
+
+**On every PR that touches user-facing behaviour**, add an entry under `## [Unreleased]`. Keep entries concise — one line per item, starting with a backtick-quoted identifier when applicable.
+
+**Breaking Changes** go in `### Breaking Changes` with a one-line description and a `Migrate:` hint. For complex migrations, a separate `MIGRATION.md` may be added, but prefer keeping it inline unless the guide exceeds ~10 lines.
+
+**At release time**, rename `## [Unreleased]` to `## [x.y.z] - YYYY-MM-DD`, add a fresh empty `## [Unreleased]` above it, and append a comparison link at the bottom:
+
+```
+[x.y.z]: https://github.com/jo-duchan/tapflow/compare/vPREV...vx.y.z
+[Unreleased]: https://github.com/jo-duchan/tapflow/compare/vx.y.z...HEAD
+```
+
 ## Tests
 
 All packages:
