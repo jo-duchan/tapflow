@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-06-01
+
 ### Breaking Changes
 
 - `tapflow init` no longer creates an admin account. It now scaffolds `tapflow.config.json`.
@@ -28,4 +30,5 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Automatic `tapflow.config.json` creation as a side effect of `tapflow start` / `tapflow relay start`.
 
-[Unreleased]: https://github.com/jo-duchan/tapflow/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/jo-duchan/tapflow/compare/v0.4.0...HEAD
+[0.4.0]: https://github.com/jo-duchan/tapflow/compare/v0.3.1...v0.4.0

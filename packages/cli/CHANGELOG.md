@@ -1,5 +1,19 @@
 # tapflow
 
+## 0.4.0
+
+### Minor Changes
+
+- feat!: tapflow init redesign, Tailscale tunnel, web onboarding, and UX improvements
+
+### Patch Changes
+
+- Updated dependencies
+  - @tapflowio/agent-core@0.4.0
+  - @tapflowio/ios-agent@0.4.0
+  - @tapflowio/android-agent@0.4.0
+  - @tapflowio/relay@0.4.0
+
 ## 0.3.1
 
 ### Patch Changes
