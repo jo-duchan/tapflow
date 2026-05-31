@@ -106,7 +106,43 @@ describe('relay config validation', () => {
     )
     vi.spyOn(console, 'warn').mockImplementation(() => {})
     const { config } = await import('../lib/config.js')
-    expect(config.tunnel).toEqual({ provider: 'rathole', serverAddr: 'vps.example.com:2333', publicUrl: 'https://vps.example.com' })
+    expect(config.tunnel).toMatchObject({ provider: 'rathole', serverAddr: 'vps.example.com:2333', publicUrl: 'https://vps.example.com', ssh: null })
+  })
+
+  it('tunnel.ssh 섹션 → 파싱됨', async () => {
+    const fs = await import('fs')
+    vi.mocked(fs.default.existsSync).mockReturnValue(true)
+    vi.mocked(fs.default.readFileSync).mockReturnValue(
+      JSON.stringify({
+        tunnel: {
+          provider: 'rathole',
+          serverAddr: 'vps.example.com:2333',
+          publicUrl: 'https://vps.example.com',
+          ssh: { host: 'vps.example.com', user: 'ubuntu', keyPath: '~/.ssh/id_rsa' },
+        },
+      })
+    )
+    vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const { config } = await import('../lib/config.js')
+    expect(config.tunnel?.ssh).toEqual({ host: 'vps.example.com', user: 'ubuntu', keyPath: '~/.ssh/id_rsa' })
+  })
+
+  it('tunnel.ssh.host 없음 → exit(1)', async () => {
+    const fs = await import('fs')
+    vi.mocked(fs.default.existsSync).mockReturnValue(true)
+    vi.mocked(fs.default.readFileSync).mockReturnValue(
+      JSON.stringify({
+        tunnel: {
+          provider: 'rathole',
+          serverAddr: 'vps.example.com:2333',
+          publicUrl: 'https://vps.example.com',
+          ssh: { host: '', user: 'ubuntu' },
+        },
+      })
+    )
+    vi.spyOn(console, 'warn').mockImplementation(() => {})
+    await expect(import('../lib/config.js')).rejects.toThrow('process.exit')
+    expect(exitSpy).toHaveBeenCalledWith(1)
   })
 
   it('tunnel.provider 미지원 값 → exit(1)', async () => {

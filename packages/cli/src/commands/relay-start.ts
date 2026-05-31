@@ -48,8 +48,9 @@ export async function cmdRelayStart(opts: RelayStartOptions): Promise<void> {
       banner('error', 'TUNNEL CONFIG ERROR', ['TAPFLOW_TUNNEL_TOKEN env var is required when tunnel is configured'])
       process.exit(1)
     }
-    tunnel = new RatholeTunnel({ serverAddr: tunnelCfg.serverAddr, publicUrl: tunnelCfg.publicUrl, token })
+    tunnel = new RatholeTunnel({ serverAddr: tunnelCfg.serverAddr, publicUrl: tunnelCfg.publicUrl, token, ssh: tunnelCfg.ssh ?? undefined })
     try {
+      await tunnel.setupServer()
       const { publicUrl } = await tunnel.start(port)
       step(`Tunnel ready — Public URL: ${publicUrl}`)
       banner('success', 'TAPFLOW RELAY READY', [

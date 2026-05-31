@@ -18,9 +18,22 @@ vi.mock('fs', () => ({
   },
 }))
 vi.mock('os', () => ({ default: { tmpdir: () => '/tmp' } }))
+vi.mock('../../lib/ssh.js', () => ({
+  sshExec: vi.fn(),
+  scpUpload: vi.fn(),
+}))
 
 import { spawn } from 'child_process'
+import { sshExec, scpUpload } from '../../lib/ssh.js'
 import { RatholeTunnel } from '../../lib/rathole-tunnel.js'
+
+const SSH = { host: 'vps.example.com', user: 'ubuntu', keyPath: '~/.ssh/id_rsa' }
+
+const BASE_OPTS = {
+  serverAddr: 'vps.example.com:2333',
+  publicUrl: 'https://vps.example.com',
+  token: 'secret',
+}
 
 describe('RatholeTunnel', () => {
   let proc: ReturnType<typeof mockProcess>
@@ -29,12 +42,15 @@ describe('RatholeTunnel', () => {
     vi.resetAllMocks()
     proc = mockProcess()
     vi.mocked(spawn).mockReturnValue(proc as never)
+    vi.mocked(sshExec).mockResolvedValue('')
+    vi.mocked(scpUpload).mockResolvedValue(undefined)
   })
 
   afterEach(() => vi.restoreAllMocks())
 
-  it('start() — rathole 프로세스를 spawn하고 publicUrl 반환', async () => {
-    const tunnel = new RatholeTunnel({ serverAddr: 'vps.example.com:2333', publicUrl: 'https://vps.example.com', token: 'secret' })
+  // ── start() ──────────────────────────────────────────
+  it('start() — rathole client spawn 후 publicUrl 반환', async () => {
+    const tunnel = new RatholeTunnel(BASE_OPTS)
     const startPromise = tunnel.start(4000)
     proc.stderr.emit('data', Buffer.from('[INFO] Tunnel started\n'))
     const result = await startPromise
@@ -43,18 +59,61 @@ describe('RatholeTunnel', () => {
   })
 
   it('start() — 토큰 누락 시 에러', async () => {
-    const tunnel = new RatholeTunnel({ serverAddr: 'vps.example.com:2333', publicUrl: 'https://vps.example.com', token: '' })
+    const tunnel = new RatholeTunnel({ ...BASE_OPTS, token: '' })
     await expect(tunnel.start(4000)).rejects.toThrow(/TAPFLOW_TUNNEL_TOKEN/)
   })
 
   it('start() — serverAddr 누락 시 에러', async () => {
-    const tunnel = new RatholeTunnel({ serverAddr: '', publicUrl: 'https://vps.example.com', token: 'secret' })
+    const tunnel = new RatholeTunnel({ ...BASE_OPTS, serverAddr: '' })
     await expect(tunnel.start(4000)).rejects.toThrow(/serverAddr/)
   })
 
-  it('stop() — 프로세스를 kill하고 임시 설정 파일을 삭제', async () => {
+  it('프로세스 exit(1) → start() reject', async () => {
+    const tunnel = new RatholeTunnel(BASE_OPTS)
+    const startPromise = tunnel.start(4000)
+    proc.emit('exit', 1)
+    await expect(startPromise).rejects.toThrow(/exited/)
+  })
+
+  // ── setupServer() ─────────────────────────────────────
+  it('setupServer() — ssh 없으면 no-op', async () => {
+    const tunnel = new RatholeTunnel(BASE_OPTS)
+    await tunnel.setupServer()
+    expect(sshExec).not.toHaveBeenCalled()
+    expect(scpUpload).not.toHaveBeenCalled()
+  })
+
+  it('setupServer() — rathole 이미 있으면 binary 업로드 생략', async () => {
+    vi.mocked(sshExec).mockImplementation(async (_ssh, cmd) => {
+      if (cmd.includes('which rathole')) return '/usr/local/bin/rathole'
+      return ''
+    })
+    const tunnel = new RatholeTunnel({ ...BASE_OPTS, ssh: SSH })
+    await tunnel.setupServer()
+    expect(scpUpload).not.toHaveBeenCalledWith(SSH, expect.stringContaining('rathole-darwin-'), expect.anything())
+  })
+
+  it('setupServer() — rathole 없으면 binary scp 업로드', async () => {
+    vi.mocked(sshExec).mockImplementation(async (_ssh, cmd) => {
+      if (cmd.includes('which rathole')) throw new Error('not found')
+      return ''
+    })
+    const tunnel = new RatholeTunnel({ ...BASE_OPTS, ssh: SSH })
+    await tunnel.setupServer()
+    expect(scpUpload).toHaveBeenCalledWith(SSH, expect.stringContaining('rathole-darwin-'), '~/.tapflow/rathole')
+  })
+
+  it('setupServer() — server.toml scp 업로드 + 서버 실행', async () => {
+    const tunnel = new RatholeTunnel({ ...BASE_OPTS, ssh: SSH })
+    await tunnel.setupServer()
+    expect(scpUpload).toHaveBeenCalledWith(SSH, expect.any(String), '~/.tapflow/rathole-server.toml')
+    expect(sshExec).toHaveBeenCalledWith(SSH, expect.stringContaining('rathole'))
+  })
+
+  // ── stop() ────────────────────────────────────────────
+  it('stop() — client kill + 임시 파일 삭제', async () => {
     const fs = await import('fs')
-    const tunnel = new RatholeTunnel({ serverAddr: 'vps.example.com:2333', publicUrl: 'https://vps.example.com', token: 'secret' })
+    const tunnel = new RatholeTunnel(BASE_OPTS)
     const startPromise = tunnel.start(4000)
     proc.stderr.emit('data', Buffer.from('[INFO] Tunnel started\n'))
     await startPromise
@@ -63,15 +122,18 @@ describe('RatholeTunnel', () => {
     expect(fs.default.unlinkSync).toHaveBeenCalled()
   })
 
-  it('stop() — start 전에 호출해도 에러 없음', async () => {
-    const tunnel = new RatholeTunnel({ serverAddr: 'vps.example.com:2333', publicUrl: 'https://vps.example.com', token: 'secret' })
-    await expect(tunnel.stop()).resolves.toBeUndefined()
+  it('stop() — ssh 있으면 VPS server도 종료', async () => {
+    const tunnel = new RatholeTunnel({ ...BASE_OPTS, ssh: SSH })
+    await tunnel.setupServer()
+    const startPromise = tunnel.start(4000)
+    proc.stderr.emit('data', Buffer.from('[INFO] Tunnel started\n'))
+    await startPromise
+    await tunnel.stop()
+    expect(sshExec).toHaveBeenCalledWith(SSH, expect.stringContaining('tapflow-rathole.pid'))
   })
 
-  it('프로세스가 exit(1) → start()가 reject', async () => {
-    const tunnel = new RatholeTunnel({ serverAddr: 'vps.example.com:2333', publicUrl: 'https://vps.example.com', token: 'secret' })
-    const startPromise = tunnel.start(4000)
-    proc.emit('exit', 1)
-    await expect(startPromise).rejects.toThrow(/exited/)
+  it('stop() — start 전 호출해도 에러 없음', async () => {
+    const tunnel = new RatholeTunnel(BASE_OPTS)
+    await expect(tunnel.stop()).resolves.toBeUndefined()
   })
 })

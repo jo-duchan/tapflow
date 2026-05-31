@@ -8,7 +8,7 @@ vi.mock('@tapflowio/relay', () => ({
   config: { local: { port: 4000, dataDir: '/tmp/tapflow-test', wsBackpressureBytes: 1048576 }, relay: { url: null }, tunnel: null },
 }))
 
-const mockTunnel = { start: vi.fn(), stop: vi.fn() }
+const mockTunnel = { setupServer: vi.fn(), start: vi.fn(), stop: vi.fn() }
 vi.mock('../../lib/rathole-tunnel.js', () => ({
   RatholeTunnel: vi.fn().mockImplementation(() => mockTunnel),
 }))
@@ -29,6 +29,7 @@ describe('cmdRelayStart', () => {
     vi.mocked(RelayServer).mockImplementation(() => ({
       start: vi.fn().mockResolvedValue(undefined),
     } as never))
+    mockTunnel.setupServer.mockResolvedValue(undefined)
     mockTunnel.start.mockResolvedValue({ publicUrl: 'https://vps.example.com' })
     mockTunnel.stop.mockResolvedValue(undefined)
     vi.mocked(RatholeTunnel).mockImplementation(() => mockTunnel as never)
@@ -104,10 +105,13 @@ describe('cmdRelayStart', () => {
 
     afterEach(() => vi.unstubAllEnvs())
 
-    it('config.tunnel 설정 → RatholeTunnel 기동 + 공개 URL 출력', async () => {
+    it('config.tunnel 설정 → setupServer → start 순서 + 공개 URL 출력', async () => {
+      const order: string[] = []
+      mockTunnel.setupServer.mockImplementation(async () => { order.push('setupServer') })
+      mockTunnel.start.mockImplementation(async () => { order.push('start'); return { publicUrl: 'https://vps.example.com' } })
       await cmdRelayStart({})
       expect(RatholeTunnel).toHaveBeenCalledWith(expect.objectContaining({ serverAddr: 'vps.example.com:2333', token: 'secret-token' }))
-      expect(mockTunnel.start).toHaveBeenCalledWith(4000)
+      expect(order).toEqual(['setupServer', 'start'])
       expect(output.join('\n')).toContain('https://vps.example.com')
     })
 
