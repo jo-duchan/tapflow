@@ -9,7 +9,6 @@ export const RATHOLE_VERSION = 'v0.5.0'
 const CACHE_DIR = path.join(os.homedir(), '.tapflow', 'bin')
 
 type Platform = 'darwin' | 'linux'
-type Arch = 'arm64' | 'x64' | 'x86_64' | 'aarch64'
 
 function normalizeArch(arch: string): string {
   if (arch === 'arm64' || arch === 'aarch64') return 'arm64'

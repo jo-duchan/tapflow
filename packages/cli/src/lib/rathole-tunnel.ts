@@ -3,7 +3,7 @@ import fs from 'fs'
 import os from 'os'
 import path from 'path'
 import { sshExec, scpUpload, type SshConfig } from './ssh.js'
-import { downloadBinary, cachedBinaryPath } from './download-binary.js'
+import { downloadBinary } from './download-binary.js'
 import type { TunnelPlugin } from './tunnel.js'
 
 const REMOTE_DIR = '~/.tapflow'
