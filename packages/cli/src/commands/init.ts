@@ -1,7 +1,6 @@
 import fs from 'fs'
 import path from 'path'
-import * as readline from 'node:readline/promises'
-import { stdin as input, stdout as output } from 'node:process'
+import { select, text, isCancel, cancel } from '@clack/prompts'
 import { banner } from '../lib/print.js'
 
 export interface InitConfigOptions {
@@ -14,6 +13,10 @@ const BASE_CONFIG = {
   relay: { url: '' },
   smtp: { host: '', port: 587, secure: false, user: '', pass: '' },
 }
+
+type TunnelConfig =
+  | { provider: 'tailscale'; publicUrl?: string }
+  | { provider: 'rathole'; serverAddr: string; publicUrl: string; ssh: { host: string; user: string; keyPath: string } | null }
 
 function addToGitignore(dir: string, entry: string): 'created' | 'appended' | 'already-present' {
   const gitignorePath = path.join(dir, '.gitignore')
@@ -28,31 +31,60 @@ function addToGitignore(dir: string, entry: string): 'created' | 'appended' | 'a
   return 'created'
 }
 
-type TunnelConfig =
-  | { provider: 'tailscale'; publicUrl?: string }
-  | { provider: 'rathole'; serverAddr: string; publicUrl: string; ssh: { host: string; user: string; keyPath: string } | null }
-
 async function promptTunnel(): Promise<TunnelConfig | null> {
-  const rl = readline.createInterface({ input, output })
-  process.stdout.write('\n  Tunnel provider:\n  [1] none (local only)\n  [2] tailscale (recommended)\n  [3] rathole (VPS)\n')
-  const choice = (await rl.question('  Select [1-3]: ')).trim()
-  rl.close()
+  const provider = await select({
+    message: 'Tunnel provider',
+    options: [
+      { value: 'none', label: 'None', hint: 'local only' },
+      { value: 'tailscale', label: 'Tailscale', hint: 'recommended — E2E encrypted, no VPS required' },
+      { value: 'rathole', label: 'rathole', hint: 'VPS required' },
+    ],
+  })
 
-  if (choice === '2') return { provider: 'tailscale' }
-  if (choice !== '3') return null
+  if (isCancel(provider)) { cancel('Cancelled.'); process.exit(0) }
+  if (provider === 'tailscale') return { provider: 'tailscale' }
+  if (provider !== 'rathole') return null
 
-  const rl2 = readline.createInterface({ input, output })
-  const serverAddr = (await rl2.question('  VPS server address (e.g. example.com:2333): ')).trim()
-  const publicUrl = (await rl2.question('  Public URL (e.g. https://example.com): ')).trim()
-  const sshHost = (await rl2.question('  SSH host (leave blank to skip): ')).trim()
+  const serverAddr = await text({
+    message: 'VPS server address',
+    placeholder: 'example.com:2333',
+    validate: (v) => !v?.trim() ? 'Required' : undefined,
+  })
+  if (isCancel(serverAddr)) { cancel('Cancelled.'); process.exit(0) }
+
+  const publicUrl = await text({
+    message: 'Public URL',
+    placeholder: 'https://example.com',
+    validate: (v) => !v?.trim() ? 'Required' : undefined,
+  })
+  if (isCancel(publicUrl)) { cancel('Cancelled.'); process.exit(0) }
+
+  const sshHost = await text({
+    message: 'SSH host',
+    placeholder: 'example.com  (leave blank to skip)',
+  })
+  if (isCancel(sshHost)) { cancel('Cancelled.'); process.exit(0) }
+
   let ssh: { host: string; user: string; keyPath: string } | null = null
-  if (sshHost) {
-    const sshUser = (await rl2.question('  SSH user [ubuntu]: ')).trim() || 'ubuntu'
-    const sshKeyPath = (await rl2.question('  SSH key path [~/.ssh/id_ed25519]: ')).trim() || '~/.ssh/id_ed25519'
-    ssh = { host: sshHost, user: sshUser, keyPath: sshKeyPath }
+  if (sshHost && sshHost.trim()) {
+    const sshUser = await text({
+      message: 'SSH user',
+      placeholder: 'ubuntu',
+      defaultValue: 'ubuntu',
+    })
+    if (isCancel(sshUser)) { cancel('Cancelled.'); process.exit(0) }
+
+    const sshKeyPath = await text({
+      message: 'SSH key path',
+      placeholder: '~/.ssh/id_ed25519',
+      defaultValue: '~/.ssh/id_ed25519',
+    })
+    if (isCancel(sshKeyPath)) { cancel('Cancelled.'); process.exit(0) }
+
+    ssh = { host: sshHost.trim(), user: sshUser || 'ubuntu', keyPath: sshKeyPath || '~/.ssh/id_ed25519' }
   }
-  rl2.close()
-  return { provider: 'rathole', serverAddr, publicUrl, ssh }
+
+  return { provider: 'rathole', serverAddr: serverAddr.trim(), publicUrl: publicUrl.trim(), ssh }
 }
 
 export async function cmdInitConfig(opts: InitConfigOptions): Promise<void> {
@@ -79,12 +111,7 @@ export async function cmdInitConfig(opts: InitConfigOptions): Promise<void> {
   if (opts.tunnel === 'tailscale') {
     tunnel = { provider: 'tailscale' }
   } else if (opts.tunnel === 'rathole') {
-    tunnel = {
-      provider: 'rathole',
-      serverAddr: '',
-      publicUrl: '',
-      ssh: null,
-    }
+    tunnel = { provider: 'rathole', serverAddr: '', publicUrl: '', ssh: null }
   } else if (process.stdin.isTTY) {
     tunnel = await promptTunnel()
   }

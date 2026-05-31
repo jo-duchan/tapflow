@@ -3,14 +3,18 @@ import fs from 'fs'
 import path from 'path'
 import os from 'os'
 
-vi.mock('node:readline/promises', () => ({
-  createInterface: vi.fn(),
+vi.mock('@clack/prompts', () => ({
+  select: vi.fn(),
+  text: vi.fn(),
+  isCancel: vi.fn().mockReturnValue(false),
+  cancel: vi.fn(),
 }))
 
-import * as readline from 'node:readline/promises'
+import * as clack from '@clack/prompts'
 import { cmdInitConfig } from '../../commands/init.js'
 
-const mockCreateInterface = vi.mocked(readline.createInterface)
+const mockSelect = vi.mocked(clack.select)
+const mockText = vi.mocked(clack.text)
 
 describe('cmdInitConfig', () => {
   let output: string[]
@@ -19,6 +23,7 @@ describe('cmdInitConfig', () => {
 
   beforeEach(() => {
     vi.resetAllMocks()
+    vi.mocked(clack.isCancel).mockReturnValue(false)
     output = []
     vi.spyOn(console, 'log').mockImplementation((...args) => output.push(args.join(' ')))
     vi.spyOn(console, 'error').mockImplementation((...args) => output.push(args.join(' ')))
@@ -86,10 +91,7 @@ describe('cmdInitConfig', () => {
 
   it('인터랙티브 모드 tailscale 선택 → tailscale config 생성', async () => {
     Object.defineProperty(process.stdin, 'isTTY', { value: true, configurable: true })
-    mockCreateInterface.mockReturnValueOnce({
-      question: vi.fn().mockResolvedValue('2'),
-      close: vi.fn(),
-    } as never)
+    mockSelect.mockResolvedValue('tailscale')
 
     await cmdInitConfig({})
 
@@ -99,15 +101,29 @@ describe('cmdInitConfig', () => {
 
   it('인터랙티브 모드 none 선택 → tunnel 없는 config 생성', async () => {
     Object.defineProperty(process.stdin, 'isTTY', { value: true, configurable: true })
-    mockCreateInterface.mockReturnValueOnce({
-      question: vi.fn().mockResolvedValue('1'),
-      close: vi.fn(),
-    } as never)
+    mockSelect.mockResolvedValue('none')
 
     await cmdInitConfig({})
 
     const cfg = JSON.parse(fs.readFileSync(path.join(tmpDir, 'tapflow.config.json'), 'utf-8'))
     expect(cfg.tunnel).toBeUndefined()
+  })
+
+  it('인터랙티브 모드 rathole 선택 → serverAddr/publicUrl 입력 → rathole config 생성', async () => {
+    Object.defineProperty(process.stdin, 'isTTY', { value: true, configurable: true })
+    mockSelect.mockResolvedValue('rathole')
+    mockText
+      .mockResolvedValueOnce('vps.example.com:2333')
+      .mockResolvedValueOnce('https://vps.example.com')
+      .mockResolvedValueOnce('')  // ssh host blank → skip
+
+    await cmdInitConfig({})
+
+    const cfg = JSON.parse(fs.readFileSync(path.join(tmpDir, 'tapflow.config.json'), 'utf-8'))
+    expect(cfg.tunnel.provider).toBe('rathole')
+    expect(cfg.tunnel.serverAddr).toBe('vps.example.com:2333')
+    expect(cfg.tunnel.publicUrl).toBe('https://vps.example.com')
+    expect(cfg.tunnel.ssh).toBeNull()
   })
 
   describe('.gitignore', () => {
