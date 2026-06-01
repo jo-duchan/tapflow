@@ -8,14 +8,20 @@ vi.mock('@tapflowio/relay', () => ({
   initDb: vi.fn(),
 
 
-  config: { local: { port: 4000, dataDir: '/tmp/tapflow-test', wsBackpressureBytes: 1048576 }, relay: { url: null } },
+  config: { local: { port: 4000, dataDir: '/tmp/tapflow-test', wsBackpressureBytes: 1048576 }, relay: { url: null }, tunnel: null },
 }))
 vi.mock('@tapflowio/ios-agent', () => ({}))
 vi.mock('@tapflowio/android-agent', () => ({}))
 
+const mockTunnel = { stop: vi.fn() }
+vi.mock('../../lib/tunnel-runner.js', () => ({
+  startConfiguredTunnel: vi.fn(),
+}))
+
 import { execSync } from 'node:child_process'
-import { RelayServer, initDb } from '@tapflowio/relay'
+import { RelayServer, initDb, config } from '@tapflowio/relay'
 import { AgentRegistry } from '@tapflowio/agent-core'
+import { startConfiguredTunnel } from '../../lib/tunnel-runner.js'
 import { cmdStart } from '../../commands/start.js'
 
 const mockExecSync = vi.mocked(execSync)
@@ -66,6 +72,9 @@ describe('cmdStart', () => {
       if ((cmd as string) === 'which adb') return '/usr/local/bin/adb\n'
       return ''
     })
+
+    vi.mocked(config).tunnel = null
+    vi.mocked(startConfiguredTunnel).mockResolvedValue({ tunnel: mockTunnel as never, publicUrl: 'http://my-mac.tailnet.ts.net:4000' })
   })
 
   afterEach(() => {
@@ -163,5 +172,49 @@ describe('cmdStart', () => {
     const exitSpy = vi.spyOn(process, 'exit').mockImplementation(() => { throw new Error('process.exit') })
     await expect(cmdStart({ platform: 'web' })).rejects.toThrow('process.exit')
     expect(exitSpy).toHaveBeenCalledWith(1)
+  })
+
+  describe('터널', () => {
+    it('config.tunnel 없으면 터널 기동 안 함', async () => {
+      await cmdStart({})
+      expect(startConfiguredTunnel).not.toHaveBeenCalled()
+    })
+
+    it('config.tunnel 있으면 터널 기동 + 공개 URL이 배너에 출력', async () => {
+      vi.mocked(config).tunnel = { provider: 'tailscale' }
+      const output: string[] = []
+      vi.spyOn(console, 'log').mockImplementation((...args) => output.push(args.join(' ')))
+
+      await cmdStart({})
+
+      expect(startConfiguredTunnel).toHaveBeenCalledWith({ provider: 'tailscale' }, 4000)
+      expect(output.join('\n')).toContain('my-mac.tailnet.ts.net')
+    })
+
+    it('SIGINT 시 에이전트와 터널 모두 종료', async () => {
+      vi.mocked(config).tunnel = { provider: 'tailscale' }
+      const onSpy = vi.spyOn(process, 'on')
+      vi.spyOn(process, 'exit').mockImplementation(() => undefined as never)
+
+      await cmdStart({ platform: 'ios' })
+
+      const call = onSpy.mock.calls.find(([event]) => event === 'SIGINT')
+      const handler = call![1] as () => void
+      handler()
+      expect(iosDisconnectSpy).toHaveBeenCalled()
+      expect(mockTunnel.stop).toHaveBeenCalled()
+    })
+
+    it('터널 기동 실패(publicUrl null)면 localhost 배너 유지', async () => {
+      vi.mocked(config).tunnel = { provider: 'tailscale' }
+      vi.mocked(startConfiguredTunnel).mockResolvedValue({ tunnel: null, publicUrl: null })
+      const output: string[] = []
+      vi.spyOn(console, 'log').mockImplementation((...args) => output.push(args.join(' ')))
+
+      await cmdStart({ platform: 'ios' })
+
+      expect(output.join('\n')).toContain('localhost:4000')
+      expect(output.join('\n')).not.toContain('Public :')
+    })
   })
 })

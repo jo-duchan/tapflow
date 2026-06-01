@@ -3,8 +3,7 @@ import path from 'path'
 import { z } from 'zod'
 import { RelayServer, initDb, config } from '@tapflowio/relay'
 import { banner, step, warn } from '../lib/print.js'
-import { RatholeTunnel } from '../lib/rathole-tunnel.js'
-import { TailscaleTunnel } from '../lib/tailscale-tunnel.js'
+import { startConfiguredTunnel } from '../lib/tunnel-runner.js'
 import type { TunnelPlugin } from '../lib/tunnel.js'
 
 export interface RelayStartOptions {
@@ -41,47 +40,23 @@ export async function cmdRelayStart(opts: RelayStartOptions): Promise<void> {
   const tunnelCfg = config.tunnel
   let tunnel: TunnelPlugin | null = null
 
+  let publicUrl: string | null = null
   if (tunnelCfg != null || opts.tunnel) {
     if (!tunnelCfg) {
       banner('error', 'TUNNEL CONFIG ERROR', ['tunnel section is required in tapflow.config.json when using --tunnel'])
       process.exit(1)
     }
-    if (tunnelCfg.provider === 'tailscale') {
-      tunnel = new TailscaleTunnel({ publicUrl: tunnelCfg.publicUrl })
-    } else {
-      const token = process.env.TAPFLOW_TUNNEL_TOKEN ?? ''
-      if (!token) {
-        banner('error', 'TUNNEL CONFIG ERROR', ['TAPFLOW_TUNNEL_TOKEN env var is required for rathole tunnel'])
-        process.exit(1)
-      }
-      tunnel = new RatholeTunnel({ serverAddr: tunnelCfg.serverAddr, publicUrl: tunnelCfg.publicUrl, token, ssh: tunnelCfg.ssh ?? undefined })
-    }
-    try {
-      await tunnel.setupServer()
-      const { publicUrl } = await tunnel.start(port)
-      step(`Tunnel ready — Public URL: ${publicUrl}`)
-      banner('success', 'TAPFLOW RELAY READY', [
-        `Relay  : http://localhost:${port}`,
-        `Public : ${publicUrl}`,
-        `Connect Mac agents:  tapflow agent start --relay ws://<host>:${port}`,
-        'Press Ctrl+C to stop.',
-      ])
-    } catch (err) {
-      console.warn(`Tunnel failed to start: ${err instanceof Error ? err.message : String(err)}`)
-      tunnel = null
-      banner('success', 'TAPFLOW RELAY READY', [
-        `Relay  : http://localhost:${port}`,
-        `Connect Mac agents:  tapflow agent start --relay ws://<host>:${port}`,
-        'Press Ctrl+C to stop.',
-      ])
-    }
-  } else {
-    banner('success', 'TAPFLOW RELAY READY', [
-      `Relay  : http://localhost:${port}`,
-      `Connect Mac agents:  tapflow agent start --relay ws://<host>:${port}`,
-      'Press Ctrl+C to stop.',
-    ])
+    const started = await startConfiguredTunnel(tunnelCfg, port)
+    tunnel = started.tunnel
+    publicUrl = started.publicUrl
   }
+
+  banner('success', 'TAPFLOW RELAY READY', [
+    `Relay  : http://localhost:${port}`,
+    ...(publicUrl ? [`Public : ${publicUrl}`] : []),
+    `Connect Mac agents:  tapflow agent start --relay ws://<host>:${port}`,
+    'Press Ctrl+C to stop.',
+  ])
 
   process.on('SIGINT', () => {
     void tunnel?.stop()
