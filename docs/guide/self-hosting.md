@@ -3,8 +3,8 @@
 The relay is a lightweight Node.js server. It only routes WebSocket traffic and serves the dashboard — no heavy compute needed.
 
 ::: info The relay URL has two uses
-- **Dashboard**: Open `http://your-relay-url` in a browser to reach the dashboard.
-- **Agent connection**: `tapflow agent start --relay wss://your-relay-url`
+- **Dashboard** — open in a browser: `http://localhost:4000` (local) or `http://192.168.x.x:4000` (team on same LAN)
+- **Agent connection** — when the relay is on a separate Mac: `tapflow agent start --relay ws://192.168.x.x:4000`. The agent→relay path always uses LAN `ws://`.
 :::
 
 ## Deployment scenarios
@@ -34,7 +34,7 @@ tapflow relay start
 **On each agent Mac:**
 
 ```sh
-tapflow agent start --relay wss://your-relay-url
+tapflow agent start --relay ws://192.168.x.x:4000
 ```
 
 ## Deployment configuration
@@ -240,5 +240,5 @@ pm2 restart relay
 ```
 
 ::: tip Next step
-Once the relay is running, open `http://your-relay-url` in a browser — the dashboard redirects to the setup page automatically. For headless servers, use `tapflow admin init` instead. For team invitations and your first build upload, see [First-time Setup](/dashboard/setup).
+Once the relay is running, open `http://localhost:4000` in a browser — the dashboard redirects to the setup page automatically. For headless servers, use `tapflow admin init` instead. For team invitations and your first build upload, see [First-time Setup](/dashboard/setup).
 :::

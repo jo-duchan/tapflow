@@ -42,7 +42,7 @@ flowchart TD
 
 ## 핵심 개념
 
-- **Relay** — 중앙 서버. 에이전트와 브라우저 사이의 트래픽을 라우팅합니다. 한 번만 배포하면 됩니다.
+- **Relay** — 중앙 서버. 에이전트와 브라우저 사이의 트래픽을 라우팅합니다. 한 번만 실행하면 됩니다.
 - **Agent** — Mac에서 실행됩니다 (iOS 및 Android). 릴레이에 연결합니다.
 - **Dashboard** — 릴레이가 서빙하는 React SPA. 별도 배포가 필요 없습니다. App Center(빌드 관리), Mac Resources(에이전트 모니터링) 등의 페이지로 구성됩니다.
-- **MCP Server** — tapflow를 LLM 에이전트 도구로 노출합니다. Claude Code 등에서 시뮬레이터를 직접 조작할 수 있습니다. → [MCP 서버 가이드](/ko/guide/mcp-server)
+- **MCP Server** — tapflow를 LLM 에이전트 도구로 제공합니다. Claude Code 등에서 시뮬레이터를 직접 조작할 수 있습니다. → [MCP 서버 가이드](/ko/guide/mcp-server)

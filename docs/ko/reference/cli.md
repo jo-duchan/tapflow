@@ -173,7 +173,7 @@ TAPFLOW_TUNNEL_TOKEN=your-secret tapflow relay start
 에이전트만 시작해 릴레이에 연결합니다. 로컬 릴레이를 띄우지 않습니다.
 
 ```sh
-tapflow agent start --relay wss://relay.myteam.example.com
+tapflow agent start --relay ws://192.168.x.x:4000
 ```
 
 | 옵션 | 기본값 | 설명 |

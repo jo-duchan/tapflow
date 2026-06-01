@@ -27,3 +27,7 @@ The agent runs on macOS. iOS and Android can run together on the same Mac.
 
 - Any modern browser (Chrome, Firefox, Safari, Edge)
 - No extensions or plugins required
+
+::: tip When using Tailscale tunnel
+Every device that needs dashboard access must have Tailscale installed. → [Tailscale setup](/guide/self-hosting#tailscale-recommended)
+:::

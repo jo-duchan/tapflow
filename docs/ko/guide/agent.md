@@ -10,16 +10,15 @@
 tapflow agent start
 ```
 
-릴레이가 다른 머신에서 실행 중이라면 URL을 명시합니다:
+릴레이가 다른 Mac에서 실행 중이라면 URL을 명시합니다. `192.168.x.x`는 릴레이 Mac의 LAN IP입니다:
 
 ```sh
-tapflow agent start --relay wss://your-relay-url
+tapflow agent start --relay ws://192.168.x.x:4000
 ```
 
 | 옵션 | 기본값 | 설명 |
 |------|--------|------|
 | `--relay` | `ws://localhost:[port]` | 릴레이 WebSocket URL. 포트는 `tapflow.config.json`에서 읽습니다. |
-| `--platform` | 자동 감지 | `ios` \| `android` \| `all` |
 | `--device` | 부팅된 첫 번째 시뮬레이터 | iOS 시뮬레이터 이름 또는 UDID |
 
 ::: tip 에이전트와 릴레이는 같은 네트워크에 두세요

@@ -1,6 +1,6 @@
 # 빠른 시작
 
-tapflow는 10분 안에 실행할 수 있습니다.
+tapflow는 5분 안에 실행할 수 있습니다.
 
 ## 1. tapflow 설치
 
@@ -24,17 +24,21 @@ pnpm add -g tapflow
 
 `tapflow init`을 실행해 `tapflow.config.json`을 생성합니다. 기본값(포트 4000, 터널 없음)으로 충분하다면 이 단계를 건너뛸 수 있습니다.
 
+실행하면 터널 프로바이더를 선택하는 프롬프트가 표시됩니다:
+
 ```sh
 tapflow init
+# ◆ Tunnel provider
+# ● None  (local only)
+# ○ Tailscale  (recommended — E2E encrypted, no VPS required)
+# ○ rathole  (VPS required)
+#
 # ✓ tapflow.config.json created.
-# → Next: tapflow start
 ```
 
-터널도 함께 설정하려면:
-
-```sh
-tapflow init --tunnel tailscale
-```
+::: tip 비대화형 환경(CI)에서는 플래그로 지정하세요
+`tapflow init --tunnel tailscale` 또는 `tapflow init --tunnel rathole`로 프롬프트 없이 바로 생성할 수 있습니다.
+:::
 
 ::: tip 이미 설정 파일이 있다면?
 `tapflow.config.json`이 이미 존재하면 `tapflow init`은 오류로 종료합니다. 덮어쓰려면 `--force` 옵션을 사용하세요.
