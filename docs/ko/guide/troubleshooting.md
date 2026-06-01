@@ -115,24 +115,45 @@ aapt dump badging your-app.apk | grep native-code
 
 iOS 에이전트는 macOS에서만 실행됩니다 (Apple 정책). Linux나 Windows에서는 iOS 에이전트를 시작할 수 없습니다.
 
-### `Xcode not found` 또는 `xcrun simctl not found`
+### `Xcode not found` — Xcode가 설치되어 있지 않은 경우
 
-Xcode가 설치되어 있어도 커맨드라인 도구가 설정되지 않으면 발생합니다:
+Mac App Store 또는 Apple Developer 사이트에서 Xcode를 설치한 뒤 아래 명령어를 실행합니다:
 
 ```sh
-xcode-select --install
-# 또는
-sudo xcode-select --switch /Applications/Xcode.app/Contents/Developer
+sudo xcode-select -s /Applications/Xcode.app/Contents/Developer
+```
+
+### `Xcode not found` — Xcode는 설치되어 있지만 `xcode-select`가 설정되지 않은 경우
+
+Mac App Store에서 Xcode를 설치한 후 흔히 발생합니다. Xcode는 있지만 개발자 도구 경로가 등록되지 않은 상태입니다:
+
+```sh
+sudo xcode-select -s /Applications/Xcode.app/Contents/Developer
+```
+
+이후 `tapflow doctor`를 다시 실행해 체크가 통과되는지 확인합니다.
+
+### 실행 중인 시뮬레이터가 없는 경우
+
+부팅된 시뮬레이터가 없으면 `tapflow doctor`에서 경고를 표시합니다. 이 경고는 `tapflow start` 실행을 막지 않으며 참고용입니다.
+
+시작 전에 시뮬레이터를 미리 부팅하려면:
+
+```sh
+tapflow devices        # 사용 가능한 시뮬레이터 목록 확인
+tapflow boot "iPhone 16 Pro"
 ```
 
 ### `adb not found`
 
-Android SDK의 `platform-tools`가 `$PATH`에 없는 경우입니다. `ANDROID_HOME`을 설정합니다:
+Android Studio는 설치되어 있지만 `adb`가 `$PATH`에 없는 경우입니다. 셸 프로필에 Android SDK `platform-tools` 경로를 추가합니다:
 
 ```sh
 export ANDROID_HOME=$HOME/Library/Android/sdk
 export PATH=$PATH:$ANDROID_HOME/platform-tools
 ```
+
+`~/.zshrc`(또는 `~/.bashrc`)에 위 내용을 추가하면 영구적으로 적용됩니다. 추가 후 `source ~/.zshrc`를 실행합니다.
 
 ## 세션 관련
 

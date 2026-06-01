@@ -115,24 +115,45 @@ If `arm64-v8a` is missing, the app was built targeting 32-bit ARM or Intel emula
 
 The iOS agent only runs on macOS (Apple policy). You cannot start an iOS agent on Linux or Windows.
 
-### `Xcode not found` or `xcrun simctl not found`
+### `Xcode not found` — Xcode is not installed
 
-Xcode is installed but the command-line tools are not configured:
+Install Xcode from the Mac App Store or the Apple Developer site, then run:
 
 ```sh
-xcode-select --install
-# or
-sudo xcode-select --switch /Applications/Xcode.app/Contents/Developer
+sudo xcode-select -s /Applications/Xcode.app/Contents/Developer
+```
+
+### `Xcode not found` — Xcode is installed but `xcode-select` is not configured
+
+This commonly happens after installing Xcode from the Mac App Store. Xcode is present but the developer tools path is not registered:
+
+```sh
+sudo xcode-select -s /Applications/Xcode.app/Contents/Developer
+```
+
+Run `tapflow doctor` again to confirm the check passes.
+
+### No simulator is running
+
+`tapflow doctor` shows a warning when no simulator is booted. This does not block `tapflow start` — the warning is informational.
+
+To boot a simulator before starting:
+
+```sh
+tapflow devices        # list available simulators
+tapflow boot "iPhone 16 Pro"
 ```
 
 ### `adb not found`
 
-The Android SDK's `platform-tools` are not in `$PATH`. Set `ANDROID_HOME`:
+Android Studio is installed but `adb` is not in `$PATH`. Add the Android SDK `platform-tools` directory to your shell profile:
 
 ```sh
 export ANDROID_HOME=$HOME/Library/Android/sdk
 export PATH=$PATH:$ANDROID_HOME/platform-tools
 ```
+
+Add these lines to `~/.zshrc` (or `~/.bashrc`) to make the change permanent, then run `source ~/.zshrc`.
 
 ## Session issues
 
