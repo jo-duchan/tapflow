@@ -126,10 +126,14 @@ describe('cmdRelayStart', () => {
       expect(RatholeTunnel).not.toHaveBeenCalled()
     })
 
-    it('TAPFLOW_TUNNEL_TOKEN 없음 → exit(1)', async () => {
+    it('TAPFLOW_TUNNEL_TOKEN 없음 → 터널 없이 relay 계속 (exit 안 함)', async () => {
       vi.unstubAllEnvs()
-      await expect(cmdRelayStart({})).rejects.toThrow('process.exit')
-      expect(exitSpy).toHaveBeenCalledWith(1)
+      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+      await cmdRelayStart({})
+      expect(exitSpy).not.toHaveBeenCalled()
+      expect(RatholeTunnel).not.toHaveBeenCalled()
+      expect(RelayServer).toHaveBeenCalled()
+      expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('TAPFLOW_TUNNEL_TOKEN'))
     })
 
     it('SIGINT 시 relay + tunnel 모두 종료', async () => {

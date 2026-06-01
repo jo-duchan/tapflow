@@ -1,7 +1,7 @@
 import type { TapflowConfig } from '@tapflowio/relay'
 import { RatholeTunnel } from './rathole-tunnel.js'
 import { TailscaleTunnel } from './tailscale-tunnel.js'
-import { banner, step } from './print.js'
+import { step, warn } from './print.js'
 import type { TunnelPlugin } from './tunnel.js'
 
 export type TunnelConfig = NonNullable<TapflowConfig['tunnel']>
@@ -22,8 +22,8 @@ export async function startConfiguredTunnel(tunnelCfg: TunnelConfig, port: numbe
   } else {
     const token = process.env.TAPFLOW_TUNNEL_TOKEN ?? ''
     if (!token) {
-      banner('error', 'TUNNEL CONFIG ERROR', ['TAPFLOW_TUNNEL_TOKEN env var is required for rathole tunnel'])
-      process.exit(1)
+      warn('TAPFLOW_TUNNEL_TOKEN env var is required for rathole tunnel — continuing without a public tunnel.')
+      return { tunnel: null, publicUrl: null }
     }
     tunnel = new RatholeTunnel({ serverAddr: tunnelCfg.serverAddr, publicUrl: tunnelCfg.publicUrl, token, ssh: tunnelCfg.ssh ?? undefined })
   }

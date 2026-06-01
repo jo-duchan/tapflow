@@ -54,12 +54,19 @@ describe('startConfiguredTunnel', () => {
     vi.unstubAllEnvs()
   })
 
-  it('rathole: TAPFLOW_TUNNEL_TOKEN 없으면 exit(1)', async () => {
+  it('rathole: TAPFLOW_TUNNEL_TOKEN 없으면 warn 후 fallback 반환 (exit 안 함)', async () => {
     vi.unstubAllEnvs()
-    await expect(
-      startConfiguredTunnel({ provider: 'rathole', serverAddr: 'a:1', publicUrl: 'https://a', ssh: null }, 4000),
-    ).rejects.toThrow('process.exit')
-    expect(exitSpy).toHaveBeenCalledWith(1)
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+
+    const res = await startConfiguredTunnel(
+      { provider: 'rathole', serverAddr: 'a:1', publicUrl: 'https://a', ssh: null },
+      4000,
+    )
+
+    expect(exitSpy).not.toHaveBeenCalled()
+    expect(RatholeTunnel).not.toHaveBeenCalled()
+    expect(res).toEqual({ tunnel: null, publicUrl: null })
+    expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('TAPFLOW_TUNNEL_TOKEN'))
   })
 
   it('터널 기동 실패 시 warn 후 { tunnel: null, publicUrl: null } 반환', async () => {
