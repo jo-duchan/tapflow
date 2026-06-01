@@ -1,15 +1,15 @@
 /**
- * Wraps the WebCodecs VideoDecoder API to decode H.264 NAL unit streams.
+ * Low-level H.264 NAL → VideoFrame decoder via the WebCodecs VideoDecoder API.
  *
- * Usage:
- *   const decoder = new H264Decoder((frame) => { ctx.drawImage(frame); frame.close() })
- *   decoder.decode(nalUnitBuffer)
- *   decoder.close()
+ * Emits decoded frames through the `onFrame` callback. Callers own rendering and
+ * must call `frame.close()` once done (the WebGL renderer does this).
  *
  * The first two NAL units from scrcpy are SPS and PPS (parameter sets).
  * We buffer them and configure the decoder lazily on the first IDR frame.
+ *
+ * Used as the decode core of WebCodecsDecoder (which adds a render surface).
  */
-export class H264Decoder {
+export class WebCodecsCore {
   private decoder: VideoDecoder | null = null
   private sps: Uint8Array | null = null
   private pps: Uint8Array | null = null
@@ -72,7 +72,7 @@ export class H264Decoder {
 
     this.decoder = new VideoDecoder({
       output: (frame) => this.onFrame(frame),
-      error: (e) => console.error('[H264Decoder]', e),
+      error: (e) => console.error('[WebCodecsCore]', e),
     })
 
     this.decoder.configure({ codec, description, optimizeForLatency: true })

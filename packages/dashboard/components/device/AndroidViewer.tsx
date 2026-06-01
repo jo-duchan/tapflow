@@ -3,8 +3,9 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { useClientRecording } from '@/hooks/useClientRecording';
 import { ArrowLeft, Home, LayoutGrid, Loader2, Play, Power, Volume1, Volume2 } from 'lucide-react';
-import { H264Decoder } from '@/lib/H264Decoder';
-import { useWebGLRenderer } from '@/lib/WebGLVideoRenderer';
+import { pickDecoder } from '@/lib/decoders/pickDecoder';
+import { createJMuxer } from '@/lib/decoders/createJMuxer';
+import type { Decoder } from '@/lib/decoders/types';
 import { useFps } from '@/hooks/useFps';
 import { SimulatorToolbar } from './shared/SimulatorToolbar';
 import { SimulatorInfoCard } from './shared/SimulatorInfoCard';
@@ -52,16 +53,15 @@ export function AndroidViewer({
   screenWidth, screenHeight, deviceRotation = 0,
   perfHookRef,
 }: AndroidViewerProps) {
-  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const surfaceHostRef = useRef<HTMLDivElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
-  const { init: glInit, dispose: glDispose, drawFrame: glDrawFrame } = useWebGLRenderer(canvasRef);
+  const decoderRef = useRef<Decoder | null>(null);
   const { fps, frameCount } = useFps();
-  const lastRecvAtRef = useRef<number>(0);
   const { recordState, recordCanvasRef, startClientRecording, stopClientRecording } = useClientRecording({ sessionId, buildId, onRecordingUploaded });
 
   const [deepLinkOpen, setDeepLinkOpen] = useState(false);
   const [canvasReady, setCanvasReady] = useState(false);
-  const [glError, setGlError] = useState(false);
+  const [decoderUnsupported, setDecoderUnsupported] = useState(false);
   const videoSizeRef = useRef<{ width: number; height: number } | null>(null);
   const [videoSize, setVideoSize] = useState<{ width: number; height: number } | null>(null);
 
@@ -82,52 +82,47 @@ export function AndroidViewer({
   const cursorStateRef = useRef<'idle' | 'down' | 'release'>('idle');
   const releaseAnimRef = useRef<{ startTime: number } | null>(null);
 
-  // ── WebGL init + H264Decoder lifecycle ───────────────────────────────────
+  // ── Decoder init + surface mount ──────────────────────────────────────────
+  // pickDecoder selects WebCodecs (secure context) or MSE (plain HTTP/LAN). Each
+  // decoder owns its render surface (canvas vs video), mounted into the host div.
   useEffect(() => {
-    const ok = glInit()
-    if (!ok) { setGlError(true); return }
+    const decoder = pickDecoder(createJMuxer)
+    if (!decoder) { setDecoderUnsupported(true); return }
+    decoderRef.current = decoder
 
-    const decoder = new H264Decoder((frame) => {
-      const renderStart = performance.now()
-      const size = glDrawFrame(frame)
-      const paintMs = performance.now() - renderStart
-      if (!size) return
-      frameCount.current += 1
+    const surface = decoder.surface
+    surface.style.display = 'block'
+    surface.style.width = '100%'
+    surface.style.height = '100%'
+    surface.style.objectFit = 'fill'
+    surfaceHostRef.current?.appendChild(surface)
+
+    decoder.onResize((size) => {
       setCanvasReady(true)
       const prev = videoSizeRef.current
       if (!prev || prev.width !== size.width || prev.height !== size.height) {
         videoSizeRef.current = size
         setVideoSize(size)
       }
-      if (import.meta.env.DEV) {
-        const recvAt = lastRecvAtRef.current
-        perfHookRef?.current?.onFrameEnd({
-          recvAt,
-          recvInterval: 0,
-          decodeMs: renderStart - recvAt,
-          paintMs,
-        })
-      }
     })
 
     binaryFrameHandlerRef.current = (data) => {
-      if (import.meta.env.DEV) {
-        lastRecvAtRef.current = performance.now()
-        perfHookRef?.current?.onFrameBegin()
-      }
+      if (import.meta.env.DEV) perfHookRef?.current?.onFrameBegin()
+      frameCount.current += 1
       decoder.decode(data)
     }
 
     return () => {
       binaryFrameHandlerRef.current = undefined
       decoder.close()
-      glDispose()
+      surface.remove()
+      decoderRef.current = null
     }
-  }, [glInit, glDispose, glDrawFrame, frameCount, binaryFrameHandlerRef, perfHookRef])
+  }, [frameCount, binaryFrameHandlerRef, perfHookRef])
 
   // ── Recording (composeFrame only — state/refs/lifecycle in useClientRecording) ──
   const composeFrame = useCallback(() => {
-    const rc = recordCanvasRef.current; const fc = canvasRef.current
+    const rc = recordCanvasRef.current; const fc = decoderRef.current?.surface
     if (!rc || !fc) return
     const ctx = rc.getContext('2d')
     if (!ctx) return
@@ -181,9 +176,10 @@ export function AndroidViewer({
   }, [])
 
   const handleScreenshot = useCallback(() => {
-    const src = canvasRef.current; if (!src) return
+    const src = decoderRef.current?.surface; const size = videoSizeRef.current
+    if (!src || !size) return
     const c = document.createElement('canvas'); const ctx = c.getContext('2d'); if (!ctx) return
-    c.width = src.width; c.height = src.height; ctx.drawImage(src, 0, 0)
+    c.width = size.width; c.height = size.height; ctx.drawImage(src, 0, 0, size.width, size.height)
     c.toBlob((blob) => {
       if (!blob) return
       const url = URL.createObjectURL(blob)
@@ -198,7 +194,7 @@ export function AndroidViewer({
       const dpr = window.devicePixelRatio || 1
       const container = containerRef.current
       if (container && container.clientWidth > 0) { rc.width = container.clientWidth * dpr; rc.height = container.clientHeight * dpr }
-      else { const fc = canvasRef.current; if (fc && fc.width > 0) { rc.width = fc.width; rc.height = fc.height } else return }
+      else { const size = videoSizeRef.current; if (size) { rc.width = size.width; rc.height = size.height } else return }
       startClientRecording(composeFrame)
     } else if (recordState === 'recording') {
       stopClientRecording()
@@ -250,7 +246,7 @@ export function AndroidViewer({
   useEffect(() => {
     if (!keyboardActive) return
     const onDown = (e: PointerEvent) => {
-      const area = containerRef.current ?? canvasRef.current
+      const area = containerRef.current ?? surfaceHostRef.current
       if (area && !area.contains(e.target as Node)) setKeyboardActive(false)
     }
     document.addEventListener('pointerdown', onDown)
@@ -261,9 +257,9 @@ export function AndroidViewer({
   const needsCSSRotationRef = useRef(false)
 
   const toNorm = useCallback((e: { clientX: number; clientY: number }) => {
-    const canvas = canvasRef.current
-    if (!canvas) return null
-    const rect = canvas.getBoundingClientRect()
+    const host = surfaceHostRef.current
+    if (!host) return null
+    const rect = host.getBoundingClientRect()
     return toNormPure({ x: e.clientX, y: e.clientY }, rect, needsCSSRotationRef.current)
   }, [])
 
@@ -482,14 +478,16 @@ export function AndroidViewer({
           className="relative"
           style={{ width: containerW, height: containerH, backgroundColor: '#010101', borderRadius: '22px', overflow: 'hidden' }}
         >
-          {glError ? (
-            <div className="absolute inset-0 flex items-center justify-center">
-              <span style={{ color: 'rgba(255,255,255,0.6)', fontSize: '0.875rem' }}>WebGL2 not supported</span>
+          {decoderUnsupported ? (
+            <div className="absolute inset-0 flex items-center justify-center p-4 text-center">
+              <span style={{ color: 'rgba(255,255,255,0.6)', fontSize: '0.875rem' }}>
+                이 환경에서는 스트리밍을 표시할 수 없습니다.<br />Chrome/Edge 또는 HTTPS 환경에서 다시 시도해 주세요.
+              </span>
             </div>
           ) : (
             <>
-              <canvas
-                ref={canvasRef}
+              <div
+                ref={surfaceHostRef}
                 className={needsCSSRotation ? undefined : 'block w-full h-full'}
                 style={rotatedCanvasStyle}
                 onPointerDown={handlePointerDown}
