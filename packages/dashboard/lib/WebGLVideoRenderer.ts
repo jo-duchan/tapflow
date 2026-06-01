@@ -103,23 +103,26 @@ export class WebGLVideoRenderer {
 
     const fw = frame.displayWidth
     const fh = frame.displayHeight
-    if (this.canvas.width !== fw || this.canvas.height !== fh) {
-      this.canvas.width = fw
-      this.canvas.height = fh
-      s.gl.viewport(0, 0, fw, fh)
+    try {
+      if (this.canvas.width !== fw || this.canvas.height !== fh) {
+        this.canvas.width = fw
+        this.canvas.height = fh
+        s.gl.viewport(0, 0, fw, fh)
+      }
+
+      s.gl.activeTexture(s.gl.TEXTURE0)
+      s.gl.bindTexture(s.gl.TEXTURE_2D, s.tex)
+      s.gl.texImage2D(s.gl.TEXTURE_2D, 0, s.gl.RGBA, s.gl.RGBA, s.gl.UNSIGNED_BYTE, frame)
+
+      s.gl.bindVertexArray(s.vao)
+      s.gl.drawArrays(s.gl.TRIANGLES, 0, 6)
+      s.gl.bindVertexArray(null)
+      s.gl.bindTexture(s.gl.TEXTURE_2D, null)
+
+      return { width: fw, height: fh }
+    } finally {
+      frame.close() // always release the GPU frame, even if a GL call throws
     }
-
-    s.gl.activeTexture(s.gl.TEXTURE0)
-    s.gl.bindTexture(s.gl.TEXTURE_2D, s.tex)
-    s.gl.texImage2D(s.gl.TEXTURE_2D, 0, s.gl.RGBA, s.gl.RGBA, s.gl.UNSIGNED_BYTE, frame)
-    frame.close()
-
-    s.gl.bindVertexArray(s.vao)
-    s.gl.drawArrays(s.gl.TRIANGLES, 0, 6)
-    s.gl.bindVertexArray(null)
-    s.gl.bindTexture(s.gl.TEXTURE_2D, null)
-
-    return { width: fw, height: fh }
   }
 
   dispose(): void {

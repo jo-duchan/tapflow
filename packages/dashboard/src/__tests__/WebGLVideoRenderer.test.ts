@@ -3,7 +3,7 @@ import { WebGLVideoRenderer } from '@/lib/WebGLVideoRenderer'
 
 // ── WebGL2 목 (jsdom은 webgl2 컨텍스트를 제공하지 않음) ──────────────────────
 // Proxy로 모든 gl.* 호출을 기록하고, 상수는 이름 문자열로, create*는 truthy 객체로 반환.
-function mockGL() {
+function mockGL(throwOn?: string) {
   const calls: Record<string, unknown[][]> = {}
   const gl = new Proxy({} as Record<string, unknown>, {
     get(_t, prop) {
@@ -11,6 +11,7 @@ function mockGL() {
       if (/^[A-Z0-9_]+$/.test(prop)) return prop // GL 상수
       return (...args: unknown[]) => {
         ;(calls[prop] ??= []).push(args)
+        if (prop === throwOn) throw new Error(`GL ${prop} threw`)
         if (prop.startsWith('create')) return { tag: prop }
         if (prop === 'getAttribLocation' || prop === 'getUniformLocation') return 0
         return undefined
@@ -85,6 +86,14 @@ describe('WebGLVideoRenderer — drawFrame', () => {
     const r = new WebGLVideoRenderer(mockCanvas(mockGL().gl)) // init 미호출
     const frame = mockFrame(100, 200)
     expect(r.drawFrame(frame)).toBeNull()
+    expect(frame.close).toHaveBeenCalledOnce()
+  })
+
+  it('drawFrame 중 GL 예외가 나도 frame.close()를 호출한다(누수 방지)', () => {
+    const r = new WebGLVideoRenderer(mockCanvas(mockGL('texImage2D').gl))
+    r.init()
+    const frame = mockFrame(100, 200)
+    expect(() => r.drawFrame(frame)).toThrow()
     expect(frame.close).toHaveBeenCalledOnce()
   })
 })

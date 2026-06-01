@@ -4,6 +4,7 @@ import { WebGLVideoRenderer } from '../WebGLVideoRenderer'
 
 /** Minimal renderer seam — satisfied by WebGLVideoRenderer, mockable in tests. */
 export interface FrameRenderer {
+  /** Takes ownership of `frame` and closes it — callers must not close it. */
   drawFrame(frame: VideoFrame): { width: number; height: number } | null
   dispose(): void
 }
