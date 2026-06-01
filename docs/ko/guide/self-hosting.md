@@ -2,9 +2,9 @@
 
 릴레이는 경량 Node.js 서버입니다. WebSocket 트래픽 라우팅과 대시보드 서빙만 담당하므로 무거운 컴퓨팅 자원이 필요하지 않습니다.
 
-::: info 릴레이 URL은 두 가지 용도로 사용합니다
-- **대시보드 접속**: 브라우저에서 `http://your-relay-url`로 접속하면 대시보드가 열립니다.
-- **에이전트 연결**: `tapflow agent start --relay wss://your-relay-url`로 에이전트를 연결합니다.
+::: info 릴레이 URL 두 가지 역할
+- **대시보드 접속** — 브라우저에서 `http://localhost:4000` (로컬) 또는 `http://192.168.x.x:4000` (팀 내 접속)
+- **에이전트 연결** — 릴레이가 다른 Mac에 있을 때: `tapflow agent start --relay ws://192.168.x.x:4000`. 에이전트→릴레이 구간은 항상 LAN 내부 `ws://`를 사용합니다.
 :::
 
 ## 배포 시나리오
@@ -34,7 +34,7 @@ tapflow relay start
 **각 에이전트 Mac에서:**
 
 ```sh
-tapflow agent start --relay wss://your-relay-url
+tapflow agent start --relay ws://192.168.x.x:4000
 ```
 
 ## 배포 설정
@@ -240,5 +240,5 @@ pm2 restart relay
 ```
 
 ::: tip 다음 단계
-릴레이가 실행되면 브라우저에서 `http://your-relay-url`을 열면 설정 페이지로 자동 이동합니다. 브라우저를 사용할 수 없는 서버 환경이라면 `tapflow admin init`을 사용하세요. 팀원 초대와 첫 빌드 업로드는 [대시보드 최초 설정](/ko/dashboard/setup)을 참고하세요.
+릴레이가 실행되면 브라우저에서 `http://localhost:4000`을 열면 설정 페이지로 자동 이동합니다. 브라우저를 사용할 수 없는 서버 환경이라면 `tapflow admin init`을 사용하세요. 팀원 초대와 첫 빌드 업로드는 [대시보드 최초 설정](/ko/dashboard/setup)을 참고하세요.
 :::

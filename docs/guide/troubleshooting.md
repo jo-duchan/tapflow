@@ -5,7 +5,7 @@
 ### Agent cannot connect to the relay
 
 1. Verify the relay is running.
-2. Check that the URL in the `--relay` option is correct (`ws://` for local, `wss://` for TLS).
+2. Check that the URL in the `--relay` option uses `ws://` — agents always connect over the local network.
 3. Run `tapflow doctor` to inspect your environment.
 
 ### Connection drops when using a reverse proxy (nginx, etc.)

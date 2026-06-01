@@ -10,16 +10,15 @@ When the agent and relay run on the same Mac, no flags are needed — the port i
 tapflow agent start
 ```
 
-When the relay runs on a separate machine, pass its URL explicitly:
+When the relay runs on a separate machine, pass its URL explicitly. `192.168.x.x` is the relay Mac's LAN IP:
 
 ```sh
-tapflow agent start --relay wss://your-relay-url
+tapflow agent start --relay ws://192.168.x.x:4000
 ```
 
 | Option | Default | Description |
 |--------|---------|-------------|
 | `--relay` | `ws://localhost:[port]` | Relay WebSocket URL. Port is read from `tapflow.config.json`. |
-| `--platform` | auto-detect | `ios` \| `android` \| `all` |
 | `--device` | first booted simulator | iOS Simulator name or UDID |
 
 ::: tip Keep the agent and relay on the same network

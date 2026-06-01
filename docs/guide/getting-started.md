@@ -1,6 +1,6 @@
 # Quick Start
 
-Get tapflow running in under 10 minutes.
+Get tapflow running in under 5 minutes.
 
 ## 1. Install tapflow
 
@@ -24,17 +24,21 @@ pnpm add -g tapflow
 
 Run `tapflow init` to generate `tapflow.config.json`. Skip this step if you are happy with the defaults (port 4000, no tunnel).
 
+The command prompts you to select a tunnel provider:
+
 ```sh
 tapflow init
+# ◆ Tunnel provider
+# ● None  (local only)
+# ○ Tailscale  (recommended — E2E encrypted, no VPS required)
+# ○ rathole  (VPS required)
+#
 # ✓ tapflow.config.json created.
-# → Next: tapflow start
 ```
 
-To set up a tunnel at the same time:
-
-```sh
-tapflow init --tunnel tailscale
-```
+::: tip Non-interactive environments (CI)
+Pass the provider as a flag to skip the prompt: `tapflow init --tunnel tailscale` or `tapflow init --tunnel rathole`.
+:::
 
 ::: tip Already have a config file?
 `tapflow init` exits with an error if `tapflow.config.json` already exists. Use `--force` to overwrite.

@@ -63,7 +63,7 @@ export async function cmdRelayStart(opts: RelayStartOptions): Promise<void> {
       banner('success', 'TAPFLOW RELAY READY', [
         `Relay  : http://localhost:${port}`,
         `Public : ${publicUrl}`,
-        `Connect Mac agents:  tapflow start --relay ws://<host>:${port}`,
+        `Connect Mac agents:  tapflow agent start --relay ws://<host>:${port}`,
         'Press Ctrl+C to stop.',
       ])
     } catch (err) {
@@ -71,14 +71,14 @@ export async function cmdRelayStart(opts: RelayStartOptions): Promise<void> {
       tunnel = null
       banner('success', 'TAPFLOW RELAY READY', [
         `Relay  : http://localhost:${port}`,
-        `Connect Mac agents:  tapflow start --relay ws://<host>:${port}`,
+        `Connect Mac agents:  tapflow agent start --relay ws://<host>:${port}`,
         'Press Ctrl+C to stop.',
       ])
     }
   } else {
     banner('success', 'TAPFLOW RELAY READY', [
       `Relay  : http://localhost:${port}`,
-      `Connect Mac agents:  tapflow start --relay ws://<host>:${port}`,
+      `Connect Mac agents:  tapflow agent start --relay ws://<host>:${port}`,
       'Press Ctrl+C to stop.',
     ])
   }

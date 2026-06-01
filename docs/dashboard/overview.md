@@ -29,24 +29,14 @@ The full-screen simulator view. Opened when you click a device card in App Cente
 | Swipe | Click and drag to swipe. |
 | Pinch | Two-finger pinch gesture on trackpad. |
 | Home / Back | Buttons in the control bar (platform-specific). |
+| Deep link | Enter a deep link URL to open a specific screen in the app directly. |
+| Start / Stop recording | Start and stop recording from the session control bar. Recordings are listed per build and can be downloaded. |
 | FPS indicator | Shows current frames-per-second in the top-right corner. |
 | End session | Disconnects your browser from the device and returns the device to available state. |
 
 The screen streams at ~30 fps. Frame rate adapts to your network automatically.
 
-## Recordings
-
-**Route**: `/app-center/build` (during a session)
-
-Record QA sessions and share them with your team.
-
-| Element | Description |
-|---|---|
-| Start / Stop recording | Start and stop recording from the session control bar. |
-| Recording list | View saved recordings per build. |
-| Download | Save a recording to your local machine. |
-
-::: info Retention
+::: info Recording retention
 Recordings are kept for **72 hours** after creation. Download them before they expire if you need them long-term.
 :::
 

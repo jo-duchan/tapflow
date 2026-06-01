@@ -27,3 +27,7 @@
 
 - 최신 브라우저 (Chrome, Firefox, Safari, Edge)
 - 별도 확장 프로그램 불필요
+
+::: tip Tailscale 터널 사용 시
+대시보드에 접근하는 모든 기기에 Tailscale을 설치해야 합니다. → [Tailscale 설정](/ko/guide/self-hosting#tailscale-권장)
+:::
