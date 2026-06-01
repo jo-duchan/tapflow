@@ -109,6 +109,27 @@ If `arm64-v8a` is missing, the app was built targeting 32-bit ARM or Intel emula
 
 :::
 
+### Colors look different from the emulator (less saturated)
+
+Colors in tapflow may look slightly less saturated than the Android emulator window. **This is expected — and tapflow is actually the more faithful reference.**
+
+- **tapflow** renders the pixel values from the agent's H.264 stream as-is, so it stays close to your design source (Figma, etc.).
+- **The emulator window** runs the image through an extra display color-processing step when drawing to the screen, which boosts saturation above the source.
+
+For reviewing design colors, **tapflow is the more trustworthy reference**.
+
+::: details Measured example
+Measuring a flat solid orange swatch with a color picker:
+
+| Source (Figma) | tapflow | Emulator |
+|----------------|---------|----------|
+| `#FF8000` (G=128) | `#FF7700` (G=119) | `#FF6C00` (G=108) |
+
+tapflow (G=119) stays closer to the source (G=128), while the emulator (G=108) drifts further from it, rendering a more saturated orange.
+
+Black (`#000000`), white (`#FFFFFF`), and pure R/G/B are identical across all three — the difference appears only in midtone saturation, not from a corrupted stream.
+:::
+
 ## `tapflow doctor` failures
 
 ### All iOS checks fail
