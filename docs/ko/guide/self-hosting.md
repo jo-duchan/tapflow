@@ -51,10 +51,10 @@ tapflow agent start --relay ws://192.168.x.x:4000
 openssl rand -hex 32
 ```
 
-생성된 값을 환경변수로 주입해 릴레이를 시작합니다:
+생성된 값을 환경변수로 주입해 시작합니다:
 
 ```sh
-JWT_SECRET=YOUR_JWT_SECRET tapflow relay start
+JWT_SECRET=YOUR_JWT_SECRET tapflow start
 ```
 
 한 번 설정한 후에는 값을 유지하세요. 변경하면 기존 세션이 즉시 모두 만료됩니다. 시크릿이 유출됐거나 의도적으로 전체 세션을 초기화할 때만 교체하면 됩니다.
@@ -69,7 +69,7 @@ JWT_SECRET=YOUR_JWT_SECRET tapflow relay start
 
 ```sh
 npm install -g tapflow
-JWT_SECRET=YOUR_JWT_SECRET tapflow relay start
+JWT_SECRET=YOUR_JWT_SECRET tapflow start
 ```
 
 팀원은 `http://MAC_LOCAL_IP:4000`으로 대시보드에 접속합니다. 포트는 `tapflow.config.json`의 `local.port` 값을 따릅니다 (기본값 `4000`).
@@ -121,7 +121,15 @@ sudo tailscale up
 }
 ```
 
-3. 릴레이 시작:
+3. 시작합니다. 배포 시나리오에 따라 명령이 다릅니다.
+
+Mac 한 대로 릴레이와 에이전트를 함께 운영 중이라면:
+
+```sh
+tapflow start
+```
+
+릴레이를 전용 Mac에서 따로 운영 중이라면:
 
 ```sh
 tapflow relay start
@@ -198,7 +206,13 @@ sudo systemctl reload caddy
 }
 ```
 
-토큰을 환경변수로 전달하고 시작합니다:
+토큰을 환경변수로 전달하고 시작합니다. Mac 한 대로 운영 중이라면:
+
+```sh
+TAPFLOW_TUNNEL_TOKEN=your-secret-token tapflow start
+```
+
+릴레이를 전용 Mac에서 따로 운영 중이라면:
 
 ```sh
 TAPFLOW_TUNNEL_TOKEN=your-secret-token tapflow relay start

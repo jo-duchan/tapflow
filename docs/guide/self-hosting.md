@@ -51,10 +51,10 @@ Generate a secure random secret:
 openssl rand -hex 32
 ```
 
-Inject the generated value as an environment variable when starting the relay:
+Inject the generated value as an environment variable when starting:
 
 ```sh
-JWT_SECRET=YOUR_JWT_SECRET tapflow relay start
+JWT_SECRET=YOUR_JWT_SECRET tapflow start
 ```
 
 Once set, keep this value stable — changing it invalidates all active sessions immediately. Only rotate if the secret is compromised or you want to force everyone to log out.
@@ -69,7 +69,7 @@ The simplest way for teammates on the same office network to reach the dashboard
 
 ```sh
 npm install -g tapflow
-JWT_SECRET=YOUR_JWT_SECRET tapflow relay start
+JWT_SECRET=YOUR_JWT_SECRET tapflow start
 ```
 
 Teammates connect to `http://MACHINE_LOCAL_IP:4000` in their browser. The port matches `local.port` in `tapflow.config.json` (default `4000`).
@@ -121,7 +121,15 @@ sudo tailscale up
 }
 ```
 
-3. Start the relay:
+3. Start. The command depends on your deployment scenario.
+
+If you run the relay and agent on the same Mac:
+
+```sh
+tapflow start
+```
+
+If the relay runs on a dedicated Mac:
 
 ```sh
 tapflow relay start
@@ -198,7 +206,13 @@ Add the `tunnel` section to `tapflow.config.json`:
 }
 ```
 
-Pass the token as an environment variable and start:
+Pass the token as an environment variable and start. If you run the relay and agent on the same Mac:
+
+```sh
+TAPFLOW_TUNNEL_TOKEN=your-secret-token tapflow start
+```
+
+If the relay runs on a dedicated Mac:
 
 ```sh
 TAPFLOW_TUNNEL_TOKEN=your-secret-token tapflow relay start
