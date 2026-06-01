@@ -79,38 +79,33 @@ function initGLState(canvas: HTMLCanvasElement): GLState | null {
   return { gl, program: prog, tex, vao }
 }
 
-export function useWebGLRenderer(canvasRef: RefObject<HTMLCanvasElement | null>) {
-  const stateRef = useRef<GLState | null>(null)
+/**
+ * Renders H.264 VideoFrames (from WebCodecs) to a canvas via WebGL2.
+ *
+ * Plain class so a decoder can own its render surface. The React hook
+ * `useWebGLRenderer` below is a thin wrapper for components that hold a canvas ref.
+ */
+export class WebGLVideoRenderer {
+  private state: GLState | null = null
 
-  const init = useCallback((): boolean => {
-    const canvas = canvasRef.current
-    if (!canvas) return false
-    const s = initGLState(canvas)
-    stateRef.current = s
-    return s !== null
-  }, [canvasRef])
+  constructor(private readonly canvas: HTMLCanvasElement) {}
 
-  const dispose = useCallback(() => {
-    const s = stateRef.current
-    if (!s) return
-    s.gl.deleteTexture(s.tex)
-    s.gl.deleteVertexArray(s.vao)
-    s.gl.deleteProgram(s.program)
-    stateRef.current = null
-  }, [])
+  init(): boolean {
+    this.state = initGLState(this.canvas)
+    return this.state !== null
+  }
 
   // Uploads VideoFrame directly to GPU texture (no CPU copy) and renders.
   // Returns the frame dimensions on success so callers can track videoSize.
-  const drawFrame = useCallback((frame: VideoFrame): { width: number; height: number } | null => {
-    const canvas = canvasRef.current
-    const s = stateRef.current
-    if (!canvas || !s) { frame.close(); return null }
+  drawFrame(frame: VideoFrame): { width: number; height: number } | null {
+    const s = this.state
+    if (!s) { frame.close(); return null }
 
     const fw = frame.displayWidth
     const fh = frame.displayHeight
-    if (canvas.width !== fw || canvas.height !== fh) {
-      canvas.width = fw
-      canvas.height = fh
+    if (this.canvas.width !== fw || this.canvas.height !== fh) {
+      this.canvas.width = fw
+      this.canvas.height = fh
       s.gl.viewport(0, 0, fw, fh)
     }
 
@@ -125,7 +120,40 @@ export function useWebGLRenderer(canvasRef: RefObject<HTMLCanvasElement | null>)
     s.gl.bindTexture(s.gl.TEXTURE_2D, null)
 
     return { width: fw, height: fh }
+  }
+
+  dispose(): void {
+    const s = this.state
+    if (!s) return
+    s.gl.deleteTexture(s.tex)
+    s.gl.deleteVertexArray(s.vao)
+    s.gl.deleteProgram(s.program)
+    this.state = null
+  }
+}
+
+export function useWebGLRenderer(canvasRef: RefObject<HTMLCanvasElement | null>) {
+  const rendererRef = useRef<WebGLVideoRenderer | null>(null)
+
+  const init = useCallback((): boolean => {
+    const canvas = canvasRef.current
+    if (!canvas) return false
+    const r = new WebGLVideoRenderer(canvas)
+    const ok = r.init()
+    rendererRef.current = ok ? r : null
+    return ok
   }, [canvasRef])
+
+  const dispose = useCallback(() => {
+    rendererRef.current?.dispose()
+    rendererRef.current = null
+  }, [])
+
+  const drawFrame = useCallback((frame: VideoFrame): { width: number; height: number } | null => {
+    const r = rendererRef.current
+    if (!r) { frame.close(); return null }
+    return r.drawFrame(frame)
+  }, [])
 
   return { init, dispose, drawFrame }
 }
