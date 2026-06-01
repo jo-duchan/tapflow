@@ -15,6 +15,22 @@ pnpm dev
 
 `pnpm dev` starts the relay, dashboard, iOS agent, and Android agent concurrently.
 
+### Dev & test commands
+
+All dev/test commands run **from the repo root**. The `playground/` package holds the underlying implementations (relay, agents, seeders) — you do not run them from there directly.
+
+| Command | What it runs |
+|---------|--------------|
+| `pnpm dev` | relay + dashboard + iOS agent + Android agent |
+| `pnpm dev:pool` | relay + iOS agent + mock agents (multi-device testing without real simulators) |
+| `pnpm dev:relay` / `pnpm dev:ios` / `pnpm dev:android` | a single component |
+| `pnpm seed` / `pnpm seed:demo` | seed the local DB with test / demo data |
+| `pnpm doctor` / `pnpm reset` | run the CLI `doctor` / `reset` against your local environment |
+| `pnpm mcp` | start the MCP server (AI-agent path) |
+| `pnpm pre-release` | build the dashboard and serve it from the relay — mirrors the installed-user experience at `http://localhost:4000` |
+
+The dashboard runs on `http://localhost:3001` (Vite dev server) and the relay API on `http://localhost:4000`.
+
 ## Project structure
 
 ```text

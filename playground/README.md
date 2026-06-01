@@ -4,10 +4,13 @@
 
 ## 로컬 개발
 
+> dev/test 커맨드는 **모노레포 루트에서** 실행한다. 이 패키지의 스크립트는 루트가 호출하는 구현(leaf)일 뿐, 여기서 직접 타이핑하지 않는다. 전체 목록은 루트 [CONTRIBUTING.md](../CONTRIBUTING.md#dev--test-commands) 참고.
+
 ```sh
-pnpm dev:up          # relay + ios-agent (Vite dev server 별도 — localhost:3001)
-pnpm dev:up:full     # relay + ios-agent + android-agent
-pnpm mock-agent      # 시뮬레이터 없이 mock으로 테스트
+# 루트에서
+pnpm dev           # relay + dashboard + ios + android
+pnpm dev:pool      # relay + ios + mock agents (시뮬레이터 없이 다중 기기 테스트)
+pnpm dev:relay     # 단일 컴포넌트 (dev:ios / dev:android 도 동일)
 ```
 
 ## pre-release 검증 (외부 유저 경험 그대로)
@@ -15,12 +18,11 @@ pnpm mock-agent      # 시뮬레이터 없이 mock으로 테스트
 dashboard를 빌드한 뒤 relay가 단독으로 서빙하는 방식 — 실제 설치 사용자가 겪는 경험과 동일하다.
 
 ```sh
-pnpm pre-release     # dashboard 빌드 → relay 기동
+# 루트에서
+pnpm pre-release   # dashboard 빌드 → relay 기동
 ```
 
 브라우저: `http://localhost:4000`
-
-전체 스크립트 목록은 `package.json`의 `scripts` 참고.
 
 ## fly.io 배포 (pre-release 테스트 베드)
 
