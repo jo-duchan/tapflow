@@ -71,7 +71,7 @@ function checkBootedSimulator(): DoctorCheck {
     const available = allDevices.find((d) => d.state === 'Shutdown')
     const hint = available
       ? `No simulator is running. Run: tapflow boot "${available.name}"`
-      : 'No simulator is running. Run: tapflow devices  to see available simulators, then: tapflow boot "<name>"'
+      : 'No simulator is running. Run: tapflow devices to see available simulators, then: tapflow boot "<name>"'
     return { label: 'Simulator', ok: false, warn: true, detail: hint }
   } catch {
     return { label: 'Simulator', ok: false, detail: 'Could not query simulators. Is Xcode installed?' }
