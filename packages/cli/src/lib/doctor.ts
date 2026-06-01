@@ -1,4 +1,5 @@
 import { execSync } from 'node:child_process'
+import { existsSync } from 'node:fs'
 
 export interface DoctorCheck {
   label: string
@@ -30,6 +31,13 @@ function checkXcode(): DoctorCheck {
     const version = out.split('\n')[0]?.replace('Xcode ', '') ?? ''
     return { label: `Xcode ${version}`, ok: true }
   } catch {
+    if (existsSync('/Applications/Xcode.app')) {
+      return {
+        label: 'Xcode',
+        ok: false,
+        detail: 'Xcode is installed but xcode-select is not configured. Run: sudo xcode-select -s /Applications/Xcode.app/Contents/Developer',
+      }
+    }
     return {
       label: 'Xcode',
       ok: false,
@@ -62,9 +70,9 @@ function checkBootedSimulator(): DoctorCheck {
     }
     const available = allDevices.find((d) => d.state === 'Shutdown')
     const hint = available
-      ? `Run: tapflow boot "${available.name}"`
-      : 'Run: tapflow devices  to see available simulators, then: tapflow boot "<name>"'
-    return { label: 'Simulator', ok: false, detail: hint }
+      ? `No simulator is running. Run: tapflow boot "${available.name}"`
+      : 'No simulator is running. Run: tapflow devices  to see available simulators, then: tapflow boot "<name>"'
+    return { label: 'Simulator', ok: false, warn: true, detail: hint }
   } catch {
     return { label: 'Simulator', ok: false, detail: 'Could not query simulators. Is Xcode installed?' }
   }

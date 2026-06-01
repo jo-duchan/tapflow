@@ -1,9 +1,13 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 
 vi.mock('node:child_process')
+vi.mock('node:fs')
 
 import { execSync } from 'node:child_process'
+import { existsSync } from 'node:fs'
 import { runDoctorChecks } from '../../lib/doctor.js'
+
+const mockExistsSync = vi.mocked(existsSync)
 
 const mockExecSync = vi.mocked(execSync)
 
@@ -23,7 +27,10 @@ const simctlNoneBooted = JSON.stringify({
 })
 
 describe('runDoctorChecks', () => {
-  beforeEach(() => vi.resetAllMocks())
+  beforeEach(() => {
+    vi.resetAllMocks()
+    mockExistsSync.mockReturnValue(false)
+  })
   afterEach(() => vi.restoreAllMocks())
 
   it('iOS 섹션은 macOS에서만 포함', async () => {
@@ -109,7 +116,7 @@ describe('runDoctorChecks', () => {
     expect(result.ios?.some((c) => c.label.includes('iPhone 16 Pro'))).toBe(true)
   })
 
-  it('booted 없으면 사용 가능한 시뮬레이터 이름으로 hint 생성', async () => {
+  it('booted 없으면 warn + 사용 가능한 시뮬레이터 이름으로 hint 생성', async () => {
     vi.spyOn(process, 'platform', 'get').mockReturnValue('darwin')
     mockExecSync.mockImplementation((cmd) => {
       const c = cmd as string
@@ -122,11 +129,13 @@ describe('runDoctorChecks', () => {
     const result = await runDoctorChecks()
     const simCheck = result.ios?.find((c) => c.label === 'Simulator')
     expect(simCheck?.ok).toBe(false)
+    expect(simCheck?.warn).toBe(true)
     expect(simCheck?.detail).toContain('iPhone 16 Pro')
   })
 
   it('Xcode 미설치 시 실패 + 링크 포함', async () => {
     vi.spyOn(process, 'platform', 'get').mockReturnValue('darwin')
+    mockExistsSync.mockReturnValue(false)
     mockExecSync.mockImplementation((cmd) => {
       const c = cmd as string
       if (c === 'xcodebuild -version') throw new Error('not found')
@@ -139,5 +148,22 @@ describe('runDoctorChecks', () => {
     const xcodeCheck = result.ios?.find((c) => c.label === 'Xcode')
     expect(xcodeCheck?.ok).toBe(false)
     expect(xcodeCheck?.detail).toContain('developer.apple.com')
+  })
+
+  it('Xcode.app 존재하지만 xcode-select 미설정 시 경로 설정 힌트 포함', async () => {
+    vi.spyOn(process, 'platform', 'get').mockReturnValue('darwin')
+    mockExistsSync.mockReturnValue(true)
+    mockExecSync.mockImplementation((cmd) => {
+      const c = cmd as string
+      if (c === 'xcodebuild -version') throw new Error('not found')
+      if (c.startsWith('xcrun simctl')) return simctlBooted
+      if (c === 'which adb') throw new Error('not found')
+      return ''
+    })
+
+    const result = await runDoctorChecks()
+    const xcodeCheck = result.ios?.find((c) => c.label === 'Xcode')
+    expect(xcodeCheck?.ok).toBe(false)
+    expect(xcodeCheck?.detail).toContain('xcode-select -s')
   })
 })
