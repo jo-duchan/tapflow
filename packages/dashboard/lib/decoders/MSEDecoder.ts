@@ -22,11 +22,14 @@ export interface Muxer {
  */
 export class MSEDecoder implements Decoder {
   private readonly video: HTMLVideoElement
-  private readonly muxer: Muxer
+  private readonly createMuxer: (video: HTMLVideoElement) => Muxer
+  private muxer: Muxer
+  private sps: Uint8Array | null = null
   private _size: DecoderSize | null = null
   private resizeCb?: (size: DecoderSize) => void
 
   constructor(createMuxer: (video: HTMLVideoElement) => Muxer) {
+    this.createMuxer = createMuxer
     this.video = document.createElement('video')
     this.video.muted = true
     this.video.autoplay = true
@@ -41,7 +44,24 @@ export class MSEDecoder implements Decoder {
   onResize(cb: (size: DecoderSize) => void): void { this.resizeCb = cb }
 
   decode(data: ArrayBuffer): void {
+    this.reinitOnResolutionChange(data)
     this.muxer.feed({ video: new Uint8Array(data) })
+  }
+
+  // MSE cannot switch resolution mid-stream (a new init segment is required).
+  // When the SPS changes — e.g. device rotation in a landscape-capable app flips
+  // the encoded size — rebuild the muxer/MediaSource so decoding doesn't stall.
+  private reinitOnResolutionChange(data: ArrayBuffer): void {
+    const nal = new Uint8Array(data)
+    const startCode = nal[0] === 0 && nal[1] === 0 && nal[2] === 0 && nal[3] === 1
+    const nalType = (startCode ? nal[4] : nal[0]) & 0x1f
+    if (nalType !== 7) return // SPS only
+    const changed = !this.sps || nal.length !== this.sps.length || nal.some((b, i) => b !== this.sps![i])
+    if (this.sps && changed) {
+      this.muxer.destroy()
+      this.muxer = this.createMuxer(this.video)
+    }
+    this.sps = nal
   }
 
   close(): void {

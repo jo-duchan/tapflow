@@ -117,3 +117,49 @@ describe('MSEDecoder — close', () => {
     expect(onResize).not.toHaveBeenCalled()
   })
 })
+
+// ── 해상도 변경(SPS 변경) 시 재초기화 ─────────────────────────────────────────
+// MSE는 스트림 중간 해상도 변경을 못 버티므로, SPS가 바뀌면 muxer/MediaSource를 재생성한다.
+function trackingFactory() {
+  const muxers: ReturnType<typeof mockMuxer>[] = []
+  const factory = (_v: HTMLVideoElement) => { const m = mockMuxer(); muxers.push(m); return m }
+  return { factory, muxers }
+}
+// SPS(type 7): level 바이트만 바꿔 "다른 해상도" 시뮬레이트
+const SPS = (level = 0x1f) => new Uint8Array([0, 0, 0, 1, 0x67, 0x42, 0x00, level, 0xaa]).buffer
+const IDR = () => new Uint8Array([0, 0, 0, 1, 0x65, 0x11, 0x22]).buffer
+
+describe('MSEDecoder — 해상도 변경(SPS 변경) 시 재초기화', () => {
+  it('초기 SPS는 muxer를 재생성하지 않는다', () => {
+    const { factory, muxers } = trackingFactory()
+    const d = new MSEDecoder(factory)
+    d.decode(SPS())
+    expect(muxers).toHaveLength(1) // 생성자에서 만든 1개뿐
+  })
+
+  it('동일 SPS 재수신은 재생성하지 않는다', () => {
+    const { factory, muxers } = trackingFactory()
+    const d = new MSEDecoder(factory)
+    d.decode(SPS()); d.decode(IDR()); d.decode(SPS())
+    expect(muxers).toHaveLength(1)
+  })
+
+  it('다른 SPS(해상도 변경)는 기존 muxer를 destroy하고 새로 만든다', () => {
+    const { factory, muxers } = trackingFactory()
+    const d = new MSEDecoder(factory)
+    d.decode(SPS(0x1f))
+    d.decode(SPS(0x28)) // 다른 level → 다른 SPS
+    expect(muxers).toHaveLength(2)
+    expect(muxers[0].destroy).toHaveBeenCalledOnce()
+  })
+
+  it('재생성 후 새 SPS는 새 muxer로 feed된다', () => {
+    const { factory, muxers } = trackingFactory()
+    const d = new MSEDecoder(factory)
+    d.decode(SPS(0x1f))
+    d.decode(SPS(0x28))
+    expect(muxers[1].feed).toHaveBeenCalledOnce()
+    expect(Array.from(muxers[1].feed.mock.calls[0][0].video))
+      .toEqual([0, 0, 0, 1, 0x67, 0x42, 0x00, 0x28, 0xaa])
+  })
+})
