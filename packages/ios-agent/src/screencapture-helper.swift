@@ -292,13 +292,11 @@ func setupH264Session(width: Int, height: Int) -> Bool {
                          value: NSNumber(value: Int(fps) * 2))
     VTSessionSetProperty(s, key: kVTCompressionPropertyKey_MaxKeyFrameIntervalDuration,
                          value: NSNumber(value: 2.0))
-    // Cap bitrate so scroll bursts fit the LAN link (avoids sustained relay backpressure).
+    // Cap the average bitrate so scroll bursts fit the LAN link (avoids sustained relay
+    // backpressure). AverageBitRate is a soft target — we intentionally do NOT set the
+    // hard DataRateLimits cap, which corrupts frames (visible tearing) under high motion.
     VTSessionSetProperty(s, key: kVTCompressionPropertyKey_AverageBitRate,
                          value: NSNumber(value: h264Bitrate))
-    // Also cap short-term bursts: at most ~1.5x the average over a 1s window. [bytes, seconds].
-    let burstBytes = h264Bitrate / 8 * 3 / 2
-    VTSessionSetProperty(s, key: kVTCompressionPropertyKey_DataRateLimits,
-                         value: [NSNumber(value: burstBytes), NSNumber(value: 1.0)] as CFArray)
     // BT.709 color — keep the design-faithful colour signalling (see android color-fidelity note).
     VTSessionSetProperty(s, key: kVTCompressionPropertyKey_ColorPrimaries,
                          value: kCVImageBufferColorPrimaries_ITU_R_709_2)
