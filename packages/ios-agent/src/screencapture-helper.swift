@@ -42,6 +42,15 @@ let jpegQuality: Double = {
     return q
 }()
 
+// H.264 target bitrate (bits/s). Caps scroll bursts so they fit a typical WiFi LAN;
+// without a cap VideoToolbox lets motion spike ~20+ Mbps → sustained relay backpressure.
+// Tunable via TAPFLOW_IOS_H264_BITRATE (default 8 Mbps, matching the Android scrcpy cap).
+let h264Bitrate: Int = {
+    guard let raw = ProcessInfo.processInfo.environment["TAPFLOW_IOS_H264_BITRATE"],
+          let b = Int(raw), b > 0 else { return 8_000_000 }
+    return b
+}()
+
 // MARK: - Framework loading
 
 func findDeveloperDir() -> String {
@@ -198,6 +207,9 @@ var h264Width = 0
 var h264Height = 0
 var h264FrameIndex: Int64 = 0
 var didForceInitialIDR = false
+// Set from the stdin command reader (relay IDR-on-drop), consumed in encodeH264.
+// Only ever touched on captureQueue, so no lock is needed.
+var pendingForceKeyFrame = false
 let h264Timescale = Int32(max(1, Int(fps)))
 
 let h264OutputCallback: VTCompressionOutputCallback = { _, _, status, _, sampleBuffer in
@@ -280,6 +292,13 @@ func setupH264Session(width: Int, height: Int) -> Bool {
                          value: NSNumber(value: Int(fps) * 2))
     VTSessionSetProperty(s, key: kVTCompressionPropertyKey_MaxKeyFrameIntervalDuration,
                          value: NSNumber(value: 2.0))
+    // Cap bitrate so scroll bursts fit the LAN link (avoids sustained relay backpressure).
+    VTSessionSetProperty(s, key: kVTCompressionPropertyKey_AverageBitRate,
+                         value: NSNumber(value: h264Bitrate))
+    // Also cap short-term bursts: at most ~1.5x the average over a 1s window. [bytes, seconds].
+    let burstBytes = h264Bitrate / 8 * 3 / 2
+    VTSessionSetProperty(s, key: kVTCompressionPropertyKey_DataRateLimits,
+                         value: [NSNumber(value: burstBytes), NSNumber(value: 1.0)] as CFArray)
     // BT.709 color — keep the design-faithful colour signalling (see android color-fidelity note).
     VTSessionSetProperty(s, key: kVTCompressionPropertyKey_ColorPrimaries,
                          value: kCVImageBufferColorPrimaries_ITU_R_709_2)
@@ -313,10 +332,12 @@ func encodeH264(_ surface: IOSurface) {
 
     let pts = CMTime(value: h264FrameIndex, timescale: h264Timescale)
     h264FrameIndex += 1
+    // Force an IDR on the first frame, or on demand (relay IDR-on-drop recovery).
     var frameProps: CFDictionary?
-    if !didForceInitialIDR {
+    if !didForceInitialIDR || pendingForceKeyFrame {
         frameProps = [kVTEncodeFrameOptionKey_ForceKeyFrame: true] as CFDictionary
         didForceInitialIDR = true
+        pendingForceKeyFrame = false
     }
     VTCompressionSessionEncodeFrame(
         session, imageBuffer: pb, presentationTimeStamp: pts,
@@ -477,6 +498,18 @@ timer.setEventHandler {
     }
 }
 timer.resume()
+
+// stdin command channel (H.264 only): a 0x01 byte forces an IDR on the next frame.
+// The relay sends this for drop-to-keyframe recovery so the stream resyncs fast
+// instead of waiting for the periodic IDR. Set the flag on captureQueue so it is
+// only ever touched there (same queue as encodeH264).
+if useH264 {
+    FileHandle.standardInput.readabilityHandler = { handle in
+        let data = handle.availableData
+        if data.isEmpty { handle.readabilityHandler = nil; return } // stdin closed
+        if data.contains(0x01) { captureQueue.async { pendingForceKeyFrame = true } }
+    }
+}
 
 fputs("info: streaming started (\(Int(fps))fps, udid=\(targetUDID))\n", stderr)
 RunLoop.main.run()

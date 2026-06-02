@@ -1,4 +1,5 @@
 import { spawn, execFileSync } from 'child_process'
+import type { ChildProcessWithoutNullStreams } from 'child_process'
 import { existsSync, statSync, unlinkSync } from 'fs'
 import { join } from 'path'
 import { createLogger, PlatformError } from '@tapflowio/agent-core'
@@ -60,18 +61,31 @@ export function parseStreamFrames(
 }
 
 export class ScreenCaptureStreamer {
+  private proc: ChildProcessWithoutNullStreams | null = null
+
   constructor(
     private readonly fps: number = 30,
     private readonly udid: string = 'booted',
     private readonly codec: 'jpeg' | 'h264' = 'jpeg',
   ) {}
 
+  /**
+   * Forces an IDR on the next H.264 frame (1-byte stdin command to the helper).
+   * Used by the relay's drop-to-keyframe recovery to resync fast. No-op for JPEG.
+   */
+  requestKeyframe(): void {
+    if (this.codec !== 'h264') return
+    const stdin = this.proc?.stdin
+    if (stdin?.writable) stdin.write(Buffer.from([0x01]))
+  }
+
   start(): ReadableStream<StreamFrame> {
     ensureCompiled()
 
     const proc = spawn(BINARY, [String(this.fps), this.udid, this.codec], {
-      stdio: ['ignore', 'pipe', 'pipe'],
+      stdio: ['pipe', 'pipe', 'pipe'],
     })
+    this.proc = proc
 
     proc.stderr.on('data', (d: Buffer) => process.stderr.write(d))
 

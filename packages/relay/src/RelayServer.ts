@@ -23,6 +23,9 @@ import {
 import type { KeyframeAwareSender } from '@tapflowio/agent-core/utils'
 
 const logger = createLogger('relay')
+// Min gap between IDR requests per session — one IDR resyncs the stream, so avoid
+// spamming the agent in the frames between request and the IDR arriving.
+const IDR_REQUEST_THROTTLE_MS = 500
 import { handleVerifyReset, handleDoReset, handleSendMemberReset } from './api/passwordReset.js'
 import { handleListBuilds, handleGetBuild, handleUpdateBuild, handleUploadBuild, purgeExpiredBuilds } from './api/builds.js'
 import { handleListApps, handleCreateApp, handleUpdateApp, handleDeleteApp } from './api/apps.js'
@@ -80,6 +83,8 @@ export class RelayServer {
   // Per-session keyframe-aware sender — drops to the next keyframe under backpressure
   // so dropped H.264 P-frames never tear the stream until the next IDR.
   private droppers = new Map<string, KeyframeAwareSender>()
+  // Per-session throttled "request an IDR from the agent" callbacks (drop recovery).
+  private idrRequesters = new Map<string, () => void>()
   private wsRoles = new Map<WebSocket, 'agent' | 'browser' | 'stream'>()
   private readonly backpressureBytes: number
   private readonly screenshotTimeoutMs: number
@@ -233,6 +238,22 @@ export class RelayServer {
     return this.httpServer.address()
   }
 
+  // Throttled callback that asks the session's agent to emit an IDR — used by the
+  // keyframe-aware sender to recover fast after a drop instead of waiting for the
+  // periodic keyframe. Agents that don't support on-demand IDR ignore the message.
+  private makeIdrRequester(sessionId: string): () => void {
+    let lastAt = 0
+    return () => {
+      const now = Date.now()
+      if (now - lastAt < IDR_REQUEST_THROTTLE_MS) return
+      lastAt = now
+      const session = this.sessions.get(sessionId)
+      if (session?.agentSocket.readyState === WebSocket.OPEN) {
+        session.agentSocket.send(JSON.stringify({ type: 'stream:request-idr', sessionId }))
+      }
+    }
+  }
+
   private handleConnection(ws: WebSocket, request: http.IncomingMessage): void {
     const addr = request.socket.remoteAddress ?? ''
     const isLocal = addr === '127.0.0.1' || addr === '::1' || addr === '::ffff:127.0.0.1'
@@ -265,6 +286,11 @@ export class RelayServer {
             dropper = createKeyframeAwareSender()
             this.droppers.set(session.id, dropper)
           }
+          let requestIdr = this.idrRequesters.get(session.id)
+          if (!requestIdr) {
+            requestIdr = this.makeIdrRequester(session.id)
+            this.idrRequesters.set(session.id, requestIdr)
+          }
           const frame = data as Buffer
           // Independent frames (JPEG) and H.264 IDRs are safe resync points; only
           // H.264 P-frames must wait for the next keyframe after a drop.
@@ -274,7 +300,7 @@ export class RelayServer {
             const flags = readEnvelopeFlags(frame)
             isKeyframe = flags.codec === CODEC_JPEG || flags.keyframe
           }
-          dropper.send(session.browserSocket, frame, this.backpressureBytes, isKeyframe, onDrop)
+          dropper.send(session.browserSocket, frame, this.backpressureBytes, isKeyframe, onDrop, requestIdr)
         }
         return
       }
@@ -366,6 +392,7 @@ export class RelayServer {
           this.sessions.remove(msg.sessionId)
           this.dropHandlers.delete(msg.sessionId)
           this.droppers.delete(msg.sessionId)
+          this.idrRequesters.delete(msg.sessionId)
         }
         break
       }
@@ -374,6 +401,7 @@ export class RelayServer {
           this.sessions.clearBrowser(msg.sessionId)
           this.dropHandlers.delete(msg.sessionId)
           this.droppers.delete(msg.sessionId)
+          this.idrRequesters.delete(msg.sessionId)
         }
         break
       }

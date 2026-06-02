@@ -40,6 +40,9 @@ interface DeviceState {
   touchHelper: TouchHelper | null
   streamWs: WebSocket | null
   streamReader: ReadableStreamDefaultReader<StreamFrame> | null
+  // Current capture streamer (ScreenCaptureStreamer path only) — lets the relay
+  // request an on-demand IDR for drop-to-keyframe recovery. null on the MjpegStreamer path.
+  captureStreamer: ScreenCaptureStreamer | null
   bootSeq: number
   orientation: 'portrait' | 'landscapeRight'
   loadedChrome: ChromeData | null
@@ -134,6 +137,7 @@ export class IOSAgent implements DeviceAgent {
         touchHelper: null,
         streamWs: null,
         streamReader: null,
+        captureStreamer: null,
         bootSeq: 0,
         orientation: 'portrait',
         loadedChrome: null,
@@ -235,9 +239,15 @@ export class IOSAgent implements DeviceAgent {
     // the MjpegStreamer fallback always produces JPEG.
     const useH264 = this.intervalMs === undefined && process.env.TAPFLOW_IOS_CODEC === 'h264'
     const codec = useH264 ? CODEC_H264 : CODEC_JPEG
-    const stream = this.intervalMs !== undefined
-      ? new MjpegStreamer(this.simctl, this.intervalMs).start()
-      : new ScreenCaptureStreamer(this.fps, state.deviceId, useH264 ? 'h264' : 'jpeg').start()
+    let stream: ReadableStream<StreamFrame>
+    if (this.intervalMs !== undefined) {
+      state.captureStreamer = null
+      stream = new MjpegStreamer(this.simctl, this.intervalMs).start()
+    } else {
+      const capture = new ScreenCaptureStreamer(this.fps, state.deviceId, useH264 ? 'h264' : 'jpeg')
+      state.captureStreamer = capture
+      stream = capture.start()
+    }
 
     const reader = stream.getReader()
     state.streamReader = reader
@@ -464,6 +474,11 @@ export class IOSAgent implements DeviceAgent {
         state.orientation = state.orientation === 'portrait' ? 'landscapeRight' : 'portrait'
         this.simctl.rotate(state.deviceId, state.orientation)
           .catch((e) => logger.error('rotate failed:', e))
+        break
+      }
+      case 'stream:request-idr': {
+        // Relay drop-to-keyframe recovery: force an IDR so the stream resyncs fast.
+        this.deviceStates.get(msg.sessionId!)?.captureStreamer?.requestKeyframe()
         break
       }
       case 'input:keyboard:toggle': {

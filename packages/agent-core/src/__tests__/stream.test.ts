@@ -198,6 +198,25 @@ describe('createKeyframeAwareSender — drop-to-keyframe', () => {
     expect(ws.send).not.toHaveBeenCalled()
     expect(onDrop).not.toHaveBeenCalled()
   })
+
+  it('onWantKeyframe: dropping + 버퍼 회복 + delta → IDR 요청 발화', () => {
+    const ws = makeMockWs({ bufferedAmount: THRESHOLD })
+    const s = createKeyframeAwareSender()
+    const onWant = vi.fn()
+    s.send(ws, frame, THRESHOLD, DELTA, vi.fn(), onWant) // enter dropping (full)
+    expect(onWant).not.toHaveBeenCalled()                // full → 아직 요청 안 함
+    ws.bufferedAmount = 0
+    s.send(ws, frame, THRESHOLD, DELTA, vi.fn(), onWant) // 회복했지만 키프레임 없음 → 요청
+    expect(onWant).toHaveBeenCalledOnce()
+  })
+
+  it('onWantKeyframe: 정상(드롭 아님)일 땐 발화 안 함', () => {
+    const ws = makeMockWs({ bufferedAmount: 0 })
+    const s = createKeyframeAwareSender()
+    const onWant = vi.fn()
+    s.send(ws, frame, THRESHOLD, DELTA, vi.fn(), onWant)
+    expect(onWant).not.toHaveBeenCalled()
+  })
 })
 
 describe('createRateLimitedDropWarn', () => {

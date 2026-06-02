@@ -31,6 +31,9 @@ export interface KeyframeAwareSender {
     threshold: number,
     isKeyframe: boolean,
     onDrop: () => void,
+    /** Fired while dropping when the socket has room but no keyframe has arrived —
+     *  the moment to request an on-demand IDR to resync faster. */
+    onWantKeyframe?: () => void,
   ): boolean
 }
 
@@ -47,7 +50,7 @@ export interface KeyframeAwareSender {
 export function createKeyframeAwareSender(): KeyframeAwareSender {
   let dropping = false
   return {
-    send(ws, frame, threshold, isKeyframe, onDrop) {
+    send(ws, frame, threshold, isKeyframe, onDrop, onWantKeyframe) {
       if (ws.readyState !== WebSocket.OPEN) return false
       const full = ws.bufferedAmount >= threshold
 
@@ -59,6 +62,8 @@ export function createKeyframeAwareSender(): KeyframeAwareSender {
           return true
         }
         onDrop()
+        // Buffer drained but still no keyframe — ask the source for an IDR to resync.
+        if (!full) onWantKeyframe?.()
         return false
       }
 
