@@ -9,6 +9,30 @@
  *
  * Used as the decode core of WebCodecsDecoder (which adds a render surface).
  */
+
+// Splits an Annex B buffer into individual NAL units (without start codes).
+// Handles both 3- and 4-byte start codes, and a single buffer that bundles
+// multiple NALs (e.g. iOS sends SPS+PPS+IDR together; scrcpy sends them apart).
+function splitNALUnits(buf: Uint8Array): Uint8Array[] {
+  const nals: Uint8Array[] = []
+  const n = buf.length
+  let start = -1
+  let p = 0
+  while (p + 2 < n) {
+    const sc4 = p + 3 < n && buf[p] === 0 && buf[p + 1] === 0 && buf[p + 2] === 0 && buf[p + 3] === 1
+    const sc3 = buf[p] === 0 && buf[p + 1] === 0 && buf[p + 2] === 1
+    if (sc4 || sc3) {
+      if (start >= 0) nals.push(buf.subarray(start, p))
+      p += sc4 ? 4 : 3
+      start = p
+    } else {
+      p++
+    }
+  }
+  if (start >= 0) nals.push(buf.subarray(start, n))
+  return nals
+}
+
 export class WebCodecsCore {
   private decoder: VideoDecoder | null = null
   private sps: Uint8Array | null = null
@@ -18,39 +42,48 @@ export class WebCodecsCore {
   constructor(private readonly onFrame: (frame: VideoFrame) => void) {}
 
   decode(data: ArrayBuffer): void {
-    const nal = new Uint8Array(data)
-    // Strip Annex B start code (4 bytes: 00 00 00 01) to get raw NAL data
-    const startCode = nal[0] === 0 && nal[1] === 0 && nal[2] === 0 && nal[3] === 1
-    const nalData = startCode ? nal.subarray(4) : nal
-    const nalType = nalData[0] & 0x1f
+    // A single buffer may bundle multiple NALs (iOS: SPS+PPS+IDR together) or carry
+    // just one (scrcpy). Split and process each; SPS/PPS feed the config, VCL slices
+    // (types 1–5) are collected into one AVCC access unit for the decoder.
+    const vcl: Uint8Array[] = []
+    let hasIDR = false
 
-    if (nalType === 7) { // SPS
-      const changed = !this.sps || nal.length !== this.sps.length || nal.some((b, i) => b !== this.sps![i])
-      this.sps = nal
-      if (changed && this.decoder) {
-        this.decoder.close()
-        this.decoder = null
+    for (const nalData of splitNALUnits(new Uint8Array(data))) {
+      const nalType = nalData[0] & 0x1f
+      if (nalType === 7) { // SPS
+        const changed = !this.sps || nalData.length !== this.sps.length || nalData.some((b, i) => b !== this.sps![i])
+        this.sps = nalData
+        if (changed && this.decoder) {
+          this.decoder.close()
+          this.decoder = null
+        }
+      } else if (nalType === 8) { // PPS
+        this.pps = nalData
+      } else if (nalType >= 1 && nalType <= 5) { // VCL slice
+        if (nalType === 5) hasIDR = true
+        vcl.push(nalData)
       }
-      return
     }
-    if (nalType === 8) { // PPS
-      this.pps = nal
-      return
-    }
-    if (nalType === 5 && this.sps && this.pps && !this.decoder) { // IDR
+
+    if (hasIDR && this.sps && this.pps && !this.decoder) {
       this.initDecoder(this.sps, this.pps)
     }
+    if (!this.decoder || vcl.length === 0) return
 
-    if (!this.decoder) return
-
-    // avc1 + description requires AVCC format: 4-byte big-endian length prefix, not Annex B start codes
-    const avcc = new Uint8Array(4 + nalData.length)
-    new DataView(avcc.buffer).setUint32(0, nalData.length, false)
-    avcc.set(nalData, 4)
+    // avc1 + description requires AVCC: each NAL prefixed by a 4-byte big-endian length.
+    let total = 0
+    for (const n of vcl) total += 4 + n.length
+    const avcc = new Uint8Array(total)
+    const view = new DataView(avcc.buffer)
+    let off = 0
+    for (const n of vcl) {
+      view.setUint32(off, n.length, false); off += 4
+      avcc.set(n, off); off += n.length
+    }
 
     try {
       this.decoder.decode(new EncodedVideoChunk({
-        type: nalType === 5 ? 'key' : 'delta',
+        type: hasIDR ? 'key' : 'delta',
         timestamp: this.frameCount++ * (1_000_000 / 30),
         data: avcc,
       }))

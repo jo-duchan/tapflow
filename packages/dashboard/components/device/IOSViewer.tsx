@@ -109,10 +109,21 @@ export function IOSViewer({
       if (!d) { console.warn('[IOSViewer] no H.264 decoder available — set up HTTPS or use a supported browser'); return null }
       decoder = d
       const surface = d.surface
+      // Display the <video> directly over the screen area (like AndroidViewer) so the
+      // browser compositor presents it smoothly. Copy the canvas's screen-rect position
+      // so it overlays exactly; the canvas stays behind for recording/screenshot blits.
+      const c = canvasRef.current
       surface.style.position = 'absolute'
-      surface.style.width = '1px'; surface.style.height = '1px'
-      surface.style.opacity = '0'; surface.style.pointerEvents = 'none'
-      surface.style.left = '0'; surface.style.top = '0'; surface.style.zIndex = '-1'
+      if (c) {
+        surface.style.left = c.style.left
+        surface.style.top = c.style.top
+        surface.style.width = c.style.width
+        surface.style.height = c.style.height
+        surface.style.borderRadius = c.style.borderRadius
+      }
+      surface.style.objectFit = 'fill'
+      surface.style.zIndex = '3'
+      surface.style.pointerEvents = 'none'
       containerRef.current?.appendChild(surface)
       d.onResize((size) => {
         const canvas = canvasRef.current
@@ -125,11 +136,14 @@ export function IOSViewer({
         }
         setCanvasReady(true)
       })
+      // The <video> is the live display; the canvas mirrors it (behind) only so the
+      // existing recording/screenshot paths, which read canvasRef, keep working.
       const blit = () => {
         const canvas = canvasRef.current
         const ctx = canvas?.getContext('2d')
-        if (canvas && ctx && decoder?.size) {
-          try { ctx.drawImage(decoder.surface, 0, 0, canvas.width, canvas.height) } catch { /* surface not paintable yet */ }
+        const surface = decoder?.surface
+        if (canvas && ctx && surface && decoder?.size) {
+          try { ctx.drawImage(surface, 0, 0, canvas.width, canvas.height) } catch { /* surface not paintable yet */ }
         }
         raf = requestAnimationFrame(blit)
       }
