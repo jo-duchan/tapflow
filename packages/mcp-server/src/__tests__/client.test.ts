@@ -115,7 +115,9 @@ describe('TapflowClient', () => {
     it('sends device:boot and resolves on device:ready', async () => {
       setTimeout(() => relay.send({ type: 'device:ready', sessionId: 'sess-1' }), 10)
       await expect(client.bootDevice('sess-1', 'dev-1')).resolves.toBeUndefined()
-      expect(relay.sentMessages()[0]).toMatchObject({
+      // Await outbound device:boot arrival; device:ready resolving doesn't guarantee it was recorded (CI race).
+      const bootMsg = await waitForMessage(relay, 'device:boot')
+      expect(bootMsg).toMatchObject({
         type: 'device:boot',
         sessionId: 'sess-1',
         payload: { deviceId: 'dev-1' },
@@ -186,7 +188,8 @@ describe('TapflowClient', () => {
     it('sends app:install and resolves on app:install-done', async () => {
       setTimeout(() => relay.send({ type: 'app:install-done', sessionId: 'sess-1' }), 10)
       await expect(client.installApp('sess-1', 42)).resolves.toBeUndefined()
-      expect(relay.sentMessages()[0]).toMatchObject({ type: 'app:install', sessionId: 'sess-1', buildId: 42 })
+      // Await the outbound message's arrival (same ws race as bootDevice above).
+      expect(await waitForMessage(relay, 'app:install')).toMatchObject({ type: 'app:install', sessionId: 'sess-1', buildId: 42 })
     })
 
     it('throws on app:install-error', async () => {

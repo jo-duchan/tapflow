@@ -15,10 +15,12 @@ function makeFakeProc() {
   const proc = new EventEmitter() as EventEmitter & {
     stdout: EventEmitter
     stderr: EventEmitter
+    stdin: EventEmitter & { writable: boolean; write: ReturnType<typeof vi.fn> }
     kill: ReturnType<typeof vi.fn>
   }
   proc.stdout = new EventEmitter()
   proc.stderr = new EventEmitter()
+  proc.stdin = Object.assign(new EventEmitter(), { writable: true, write: vi.fn() }) as EventEmitter & { writable: boolean; write: ReturnType<typeof vi.fn> }
   proc.kill = vi.fn()
   return proc
 }

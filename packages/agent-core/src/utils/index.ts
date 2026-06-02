@@ -2,9 +2,11 @@ export { createResourceSampler } from './resources.js'
 export {
   registerStreamWs,
   sendBinaryWithBackpressure,
+  createKeyframeAwareSender,
   createRateLimitedDropWarn,
   DEFAULT_BACKPRESSURE_BYTES,
 } from './stream.js'
+export type { KeyframeAwareSender } from './stream.js'
 export {
   TFFE_MAGIC,
   HEADER_SIZE,
