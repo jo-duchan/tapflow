@@ -63,23 +63,28 @@ cd packages/ios-agent && swiftc src/touch-helper.swift -o bin/touch-helper
 ### screencapture-helper interface
 
 ```
-screencapture-helper <fps> <udid|booted>
+screencapture-helper <fps> <udid|booted> [jpeg|h264]
 ```
 
-Reads the `com.apple.framebuffer.display` port directly via SimulatorKit IOSurface callbacks.  
-Output: `[4-byte BE uint32 frame length][JPEG bytes] ...`
+Reads the `com.apple.framebuffer.display` port directly via SimulatorKit IOSurface callbacks. The 3rd arg picks the codec (default `jpeg`); `h264` uses VideoToolbox (`VTCompressionSession`, baseline, B-frames off, periodic IDR, BT.709).
 
-**Env**: `TAPFLOW_JPEG_QUALITY` (0–1, default `0.8`) tunes the JPEG quality — the LAN bandwidth ↔ design-QA fidelity trade-off. Lower = fewer relay→browser drops on LAN, but more compression artifacts.
+Output framing (length-prefixed):
+- **jpeg**: `[4-byte BE len][JPEG bytes] ...`
+- **h264**: `[4-byte BE len][flags:u8][Annex B NAL] ...` — `len` counts the flags byte; flags bit0 = keyframe (IDR). Keyframes carry SPS+PPS prepended.
+
+**Env**:
+- `TAPFLOW_JPEG_QUALITY` (0–1, default `0.8`) — JPEG quality; the LAN bandwidth ↔ design-QA fidelity trade-off. Lower = fewer relay→browser drops on LAN, but more artifacts.
+- `TAPFLOW_IOS_CODEC=h264` (default `jpeg`) — opt into H.264 (only on the IOSurface path, not the MjpegStreamer fallback). Set on the agent process. The codec is signalled per frame in the TFFE envelope (byte5 bit0).
 
 When the Swift binary interface changes, **always update both locations simultaneously**:
 1. `src/screencapture-helper.swift` — argument parsing changes
-2. `src/ScreenCaptureStreamer.ts` — `args` array changes
+2. `src/ScreenCaptureStreamer.ts` — `args` array + frame parsing
 
 Requires a TypeScript dist rebuild after compilation:
 ```bash
 cd packages/ios-agent
 swiftc src/screencapture-helper.swift -o bin/screencapture-helper \
-  -framework CoreVideo -framework ImageIO
+  -framework CoreVideo -framework ImageIO -framework VideoToolbox -framework CoreMedia
 pnpm build
 ```
 

@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, afterEach } from 'vitest'
 import { EventEmitter } from 'events'
 import { existsSync } from 'fs'
+import { parseStreamFrames } from '../ScreenCaptureStreamer'
 
 vi.mock('child_process', () => ({ spawn: vi.fn(), execFileSync: vi.fn() }))
 vi.mock('fs', async (importOriginal) => ({
@@ -69,5 +70,81 @@ describe('ScreenCaptureStreamer', () => {
 
     expect(proc.kill).toHaveBeenCalledWith('SIGTERM')
     expect(proc.kill).toHaveBeenCalledWith('SIGKILL')
+  })
+})
+
+// [4-byte len BE][payload]
+function jpegFrame(payload: number[]): Buffer {
+  const len = Buffer.alloc(4)
+  len.writeUInt32BE(payload.length, 0)
+  return Buffer.concat([len, Buffer.from(payload)])
+}
+
+// [4-byte len BE][flags:u8][payload]  (len counts the flags byte)
+function h264Frame(payload: number[], keyframe: boolean): Buffer {
+  const len = Buffer.alloc(4)
+  len.writeUInt32BE(payload.length + 1, 0)
+  return Buffer.concat([len, Buffer.from([keyframe ? 0x01 : 0x00]), Buffer.from(payload)])
+}
+
+describe('parseStreamFrames — JPEG', () => {
+  it('parses a single complete frame and drains the buffer', () => {
+    const { frames, rest } = parseStreamFrames(jpegFrame([0xFF, 0xD8, 0xAA]), false)
+    expect(frames).toHaveLength(1)
+    expect([...frames[0].payload]).toEqual([0xFF, 0xD8, 0xAA])
+    expect(frames[0].keyframe).toBe(false)
+    expect(rest.length).toBe(0)
+  })
+
+  it('parses multiple frames in one buffer', () => {
+    const buf = Buffer.concat([jpegFrame([0x01]), jpegFrame([0x02, 0x03])])
+    const { frames, rest } = parseStreamFrames(buf, false)
+    expect(frames.map((f) => [...f.payload])).toEqual([[0x01], [0x02, 0x03]])
+    expect(rest.length).toBe(0)
+  })
+
+  it('keeps an incomplete frame as the remainder', () => {
+    const partial = jpegFrame([0x01, 0x02, 0x03]).subarray(0, 5) // header + 1 of 3 bytes
+    const { frames, rest } = parseStreamFrames(partial, false)
+    expect(frames).toHaveLength(0)
+    expect(rest).toEqual(partial)
+  })
+
+  it('returns a complete frame and keeps the trailing partial frame', () => {
+    const buf = Buffer.concat([jpegFrame([0x01]), jpegFrame([0x02, 0x03]).subarray(0, 5)])
+    const { frames, rest } = parseStreamFrames(buf, false)
+    expect(frames).toHaveLength(1)
+    expect([...frames[0].payload]).toEqual([0x01])
+    expect(rest.length).toBe(5)
+  })
+
+  it('returns no frames when fewer than 4 bytes are buffered', () => {
+    const buf = Buffer.from([0x00, 0x00])
+    const { frames, rest } = parseStreamFrames(buf, false)
+    expect(frames).toHaveLength(0)
+    expect(rest).toEqual(buf)
+  })
+})
+
+describe('parseStreamFrames — H.264', () => {
+  it('strips the flags byte and marks a keyframe', () => {
+    const { frames } = parseStreamFrames(h264Frame([0x67, 0x42, 0x00], true), true)
+    expect(frames).toHaveLength(1)
+    expect([...frames[0].payload]).toEqual([0x67, 0x42, 0x00])
+    expect(frames[0].keyframe).toBe(true)
+  })
+
+  it('marks a non-keyframe (flags bit0 clear)', () => {
+    const { frames } = parseStreamFrames(h264Frame([0x41, 0x9A], false), true)
+    expect([...frames[0].payload]).toEqual([0x41, 0x9A])
+    expect(frames[0].keyframe).toBe(false)
+  })
+
+  it('parses a keyframe followed by a delta frame', () => {
+    const buf = Buffer.concat([h264Frame([0x67], true), h264Frame([0x41], false)])
+    const { frames, rest } = parseStreamFrames(buf, true)
+    expect(frames.map((f) => f.keyframe)).toEqual([true, false])
+    expect(frames.map((f) => [...f.payload])).toEqual([[0x67], [0x41]])
+    expect(rest.length).toBe(0)
   })
 })

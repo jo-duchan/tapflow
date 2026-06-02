@@ -17,9 +17,11 @@ import {
   createThroughputSampler,
   DEFAULT_BACKPRESSURE_BYTES,
   writeEnvelopeHeader,
+  CODEC_JPEG,
+  CODEC_H264,
 } from '@tapflowio/agent-core/utils'
 import { SimctlWrapper } from './SimctlWrapper.js'
-import { ScreenCaptureStreamer } from './ScreenCaptureStreamer.js'
+import { ScreenCaptureStreamer, type StreamFrame } from './ScreenCaptureStreamer.js'
 import { MjpegStreamer } from './MjpegStreamer.js'
 import { TouchHelper } from './TouchHelper.js'
 import { DeviceChromeLoader, type ChromeData } from './DeviceChromeLoader.js'
@@ -36,7 +38,7 @@ interface DeviceState {
   deviceId: string
   touchHelper: TouchHelper | null
   streamWs: WebSocket | null
-  streamReader: ReadableStreamDefaultReader<Buffer> | null
+  streamReader: ReadableStreamDefaultReader<StreamFrame> | null
   bootSeq: number
   orientation: 'portrait' | 'landscapeRight'
   loadedChrome: ChromeData | null
@@ -228,9 +230,13 @@ export class IOSAgent implements DeviceAgent {
   }
 
   private startBinaryStream(state: DeviceState, streamWs: WebSocket): void {
+    // H.264 is opt-in (TAPFLOW_IOS_CODEC=h264) and only on the ScreenCaptureStreamer path;
+    // the MjpegStreamer fallback always produces JPEG.
+    const useH264 = this.intervalMs === undefined && process.env.TAPFLOW_IOS_CODEC === 'h264'
+    const codec = useH264 ? CODEC_H264 : CODEC_JPEG
     const stream = this.intervalMs !== undefined
       ? new MjpegStreamer(this.simctl, this.intervalMs).start()
-      : new ScreenCaptureStreamer(this.fps, state.deviceId).start()
+      : new ScreenCaptureStreamer(this.fps, state.deviceId, useH264 ? 'h264' : 'jpeg').start()
 
     const reader = stream.getReader()
     state.streamReader = reader
@@ -258,8 +264,9 @@ export class IOSAgent implements DeviceAgent {
         while (true) {
           const { value, done } = await reader.read()
           if (done) break
-          const sent = sendBinaryWithBackpressure(streamWs, writeEnvelopeHeader(value, Date.now()), threshold, onDrop)
-          if (sent) metrics?.recordSent(value.length)
+          const frame = writeEnvelopeHeader(value.payload, Date.now(), { codec, keyframe: value.keyframe })
+          const sent = sendBinaryWithBackpressure(streamWs, frame, threshold, onDrop)
+          if (sent) metrics?.recordSent(value.payload.length)
         }
       } catch {
         // stream cancelled or ws closed — expected on disconnect
@@ -586,7 +593,11 @@ export class IOSAgent implements DeviceAgent {
   stream(): ReadableStream<Buffer> {
     const first = this.deviceStates.values().next().value
     if (!first) throw new ValidationError('no booted device — call connect() first')
+    // DeviceAgent.stream() is the platform-neutral Buffer contract; unwrap StreamFrame payloads.
     return new ScreenCaptureStreamer(this.fps, first.deviceId).start()
+      .pipeThrough(new TransformStream<StreamFrame, Buffer>({
+        transform(frame, controller) { controller.enqueue(frame.payload) },
+      }))
   }
 
   touchStart(x: number, y: number): void {

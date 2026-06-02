@@ -13,17 +13,20 @@ import CoreVideo
 import CoreGraphics
 import ImageIO
 import ObjectiveC
+import VideoToolbox
+import CoreMedia
 
 // MARK: - Args
 
-guard CommandLine.arguments.count == 3,
+guard CommandLine.arguments.count >= 3,
       let fps = Double(CommandLine.arguments[1]),
       fps > 0
 else {
-    fputs("usage: screencapture-helper <fps> <udid>\n", stderr)
+    fputs("usage: screencapture-helper <fps> <udid> [jpeg|h264]\n", stderr)
     exit(1)
 }
 let targetUDID = CommandLine.arguments[2]
+let useH264 = CommandLine.arguments.count >= 4 && CommandLine.arguments[3] == "h264"
 
 // JPEG quality (0–1). Tunable for the LAN bandwidth/fidelity trade-off via TAPFLOW_JPEG_QUALITY.
 // Default 0.8: cuts ~40% off the previous 0.95 while keeping color/text fidelity for design QA.
@@ -164,6 +167,155 @@ func writeFrame(_ jpeg: Data) {
     }
 }
 
+// H.264 framing: [4-byte len][flags:u8][payload]. flags bit0 = keyframe (IDR).
+// len counts the flags byte + payload. The JPEG path above stays byte-identical.
+func writeFrameWithFlags(_ payload: Data, flags: UInt8) {
+    writeQueue.async {
+        var len = UInt32(payload.count + 1).bigEndian
+        withUnsafeBytes(of: &len) { stdoutFH.write(Data($0)) }
+        stdoutFH.write(Data([flags]))
+        stdoutFH.write(payload)
+    }
+}
+
+// Set true once any frame reaches stdout — read by the 8s startup watchdog.
+var firstFrameSent = false
+
+// MARK: - IOSurface → H.264 (VideoToolbox)
+//
+// VTCompressionSession encodes the IOSurface-backed BGRA pixel buffer to H.264.
+// Output is async (compressionOutputCallback), converted from AVCC length-prefixed
+// NALs to Annex B (00 00 00 01 start codes) and tagged with the keyframe flag.
+
+var h264Session: VTCompressionSession?
+var h264Width = 0
+var h264Height = 0
+var h264FrameIndex: Int64 = 0
+var didForceInitialIDR = false
+let h264Timescale = Int32(max(1, Int(fps)))
+
+let h264OutputCallback: VTCompressionOutputCallback = { _, _, status, _, sampleBuffer in
+    guard status == noErr, let sample = sampleBuffer, CMSampleBufferDataIsReady(sample) else { return }
+
+    // A sync sample (IDR) has no kCMSampleAttachmentKey_NotSync = true attachment.
+    var keyframe = true
+    if let attachments = CMSampleBufferGetSampleAttachmentsArray(sample, createIfNecessary: false)
+        as? [[CFString: Any]], let first = attachments.first,
+       let notSync = first[kCMSampleAttachmentKey_NotSync] as? Bool {
+        keyframe = !notSync
+    }
+
+    let startCode: [UInt8] = [0x00, 0x00, 0x00, 0x01]
+    var out = Data()
+
+    // On a keyframe, prepend SPS/PPS (parameter sets) from the format description.
+    if keyframe, let fmt = CMSampleBufferGetFormatDescription(sample) {
+        var idx = 0
+        var setCount = 0
+        repeat {
+            var ptr: UnsafePointer<UInt8>?
+            var size = 0
+            let s = CMVideoFormatDescriptionGetH264ParameterSetAtIndex(
+                fmt, parameterSetIndex: idx,
+                parameterSetPointerOut: &ptr, parameterSetSizeOut: &size,
+                parameterSetCountOut: &setCount, nalUnitHeaderLengthOut: nil)
+            if s != noErr || ptr == nil { break }
+            out.append(contentsOf: startCode)
+            out.append(ptr!, count: size)
+            idx += 1
+        } while idx < setCount
+    }
+
+    // Convert AVCC (4-byte length-prefixed) NALs to Annex B.
+    guard let block = CMSampleBufferGetDataBuffer(sample) else { return }
+    var totalLength = 0
+    var dataPtr: UnsafeMutablePointer<Int8>?
+    guard CMBlockBufferGetDataPointer(block, atOffset: 0, lengthAtOffsetOut: nil,
+            totalLengthOut: &totalLength, dataPointerOut: &dataPtr) == noErr,
+          let base = dataPtr else { return }
+    let bytes = UnsafeRawPointer(base).assumingMemoryBound(to: UInt8.self)
+    var offset = 0
+    while offset + 4 <= totalLength {
+        var nalLen: UInt32 = 0
+        memcpy(&nalLen, bytes + offset, 4)
+        nalLen = CFSwapInt32BigToHost(nalLen)
+        offset += 4
+        if nalLen == 0 || offset + Int(nalLen) > totalLength { break }
+        out.append(contentsOf: startCode)
+        out.append(UnsafeBufferPointer(start: bytes + offset, count: Int(nalLen)))
+        offset += Int(nalLen)
+    }
+
+    firstFrameSent = true
+    writeFrameWithFlags(out, flags: keyframe ? 0x01 : 0x00)
+}
+
+func setupH264Session(width: Int, height: Int) -> Bool {
+    var session: VTCompressionSession?
+    let status = VTCompressionSessionCreate(
+        allocator: kCFAllocatorDefault,
+        width: Int32(width), height: Int32(height),
+        codecType: kCMVideoCodecType_H264,
+        encoderSpecification: nil, imageBufferAttributes: nil,
+        compressedDataAllocator: nil,
+        outputCallback: h264OutputCallback, refcon: nil,
+        compressionSessionOut: &session)
+    guard status == noErr, let s = session else {
+        fputs("error: VTCompressionSessionCreate failed (\(status))\n", stderr)
+        return false
+    }
+    VTSessionSetProperty(s, key: kVTCompressionPropertyKey_RealTime, value: kCFBooleanTrue)
+    VTSessionSetProperty(s, key: kVTCompressionPropertyKey_AllowFrameReordering, value: kCFBooleanFalse)
+    VTSessionSetProperty(s, key: kVTCompressionPropertyKey_ProfileLevel,
+                         value: kVTProfileLevel_H264_Baseline_AutoLevel)
+    VTSessionSetProperty(s, key: kVTCompressionPropertyKey_MaxKeyFrameInterval,
+                         value: NSNumber(value: Int(fps) * 2))
+    VTSessionSetProperty(s, key: kVTCompressionPropertyKey_MaxKeyFrameIntervalDuration,
+                         value: NSNumber(value: 2.0))
+    // BT.709 color — keep the design-faithful colour signalling (see android color-fidelity note).
+    VTSessionSetProperty(s, key: kVTCompressionPropertyKey_ColorPrimaries,
+                         value: kCVImageBufferColorPrimaries_ITU_R_709_2)
+    VTSessionSetProperty(s, key: kVTCompressionPropertyKey_TransferFunction,
+                         value: kCVImageBufferTransferFunction_ITU_R_709_2)
+    VTSessionSetProperty(s, key: kVTCompressionPropertyKey_YCbCrMatrix,
+                         value: kCVImageBufferYCbCrMatrix_ITU_R_709_2)
+    VTCompressionSessionPrepareToEncodeFrames(s)
+    h264Session = s
+    h264Width = width
+    h264Height = height
+    return true
+}
+
+func encodeH264(_ surface: IOSurface) {
+    let w = IOSurfaceGetWidth(surface)
+    let h = IOSurfaceGetHeight(surface)
+    // Recreate the session on first frame or resolution change (rotation).
+    if h264Session == nil || w != h264Width || h != h264Height {
+        if let old = h264Session { VTCompressionSessionInvalidate(old); h264Session = nil }
+        didForceInitialIDR = false
+        guard setupH264Session(width: w, height: h) else { return }
+    }
+    guard let session = h264Session else { return }
+
+    var pbRaw: Unmanaged<CVPixelBuffer>?
+    guard CVPixelBufferCreateWithIOSurface(
+        kCFAllocatorDefault, surface,
+        [kCVPixelBufferPixelFormatTypeKey: kCVPixelFormatType_32BGRA] as CFDictionary,
+        &pbRaw) == kCVReturnSuccess, let pb = pbRaw?.takeRetainedValue() else { return }
+
+    let pts = CMTime(value: h264FrameIndex, timescale: h264Timescale)
+    h264FrameIndex += 1
+    var frameProps: CFDictionary?
+    if !didForceInitialIDR {
+        frameProps = [kVTEncodeFrameOptionKey_ForceKeyFrame: true] as CFDictionary
+        didForceInitialIDR = true
+    }
+    VTCompressionSessionEncodeFrame(
+        session, imageBuffer: pb, presentationTimeStamp: pts,
+        duration: CMTime(value: 1, timescale: h264Timescale),
+        frameProperties: frameProps, sourceFrameRefcon: nil, infoFlagsOut: nil)
+}
+
 // MARK: - Framebuffer setup
 
 guard let device = resolveDevice(udid: targetUDID) else {
@@ -279,7 +431,6 @@ if latestSurface == nil {
 
 // Watchdog: exit(1) if no frames produced within 8 seconds of startup.
 // This lets ScreenCaptureStreamer surface the error so the agent can clean up.
-var firstFrameSent = false
 DispatchQueue.global().asyncAfter(deadline: .now() + 8) {
     guard !firstFrameSent else { return }
     fputs("error: no frames produced within 8s — framebuffer may be unavailable\n", stderr)
@@ -301,11 +452,17 @@ timer.setEventHandler {
     let nowNs = DispatchTime.now().uptimeNanoseconds
     let elapsedMs = Double(nowNs - lastSentNs) / 1_000_000
     if seed == lastSeed && elapsedMs < 100 { return }
-    guard let jpeg = encodeJPEG(surf) else { return }
-    lastSeed = seed
-    lastSentNs = nowNs
-    firstFrameSent = true
-    writeFrame(jpeg)
+    if useH264 {
+        lastSeed = seed
+        lastSentNs = nowNs
+        encodeH264(surf)  // firstFrameSent is set in the compression output callback
+    } else {
+        guard let jpeg = encodeJPEG(surf) else { return }
+        lastSeed = seed
+        lastSentNs = nowNs
+        firstFrameSent = true
+        writeFrame(jpeg)
+    }
 }
 timer.resume()
 
