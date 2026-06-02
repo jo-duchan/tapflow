@@ -4,7 +4,6 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react
 import { useClientRecording } from '@/hooks/useClientRecording';
 import { ArrowLeft, Home, LayoutGrid, Loader2, Play, Power, Volume1, Volume2 } from 'lucide-react';
 import { pickDecoder } from '@/lib/decoders/pickDecoder';
-import { createJMuxer } from '@/lib/decoders/createJMuxer';
 import type { Decoder } from '@/lib/decoders/types';
 import { useFps } from '@/hooks/useFps';
 import { SimulatorToolbar } from './shared/SimulatorToolbar';
@@ -84,10 +83,10 @@ export function AndroidViewer({
   const releaseAnimRef = useRef<{ startTime: number } | null>(null);
 
   // ── Decoder init + surface mount ──────────────────────────────────────────
-  // pickDecoder selects WebCodecs (secure context) or MSE (plain HTTP/LAN). Each
-  // decoder owns its render surface (canvas vs video), mounted into the host div.
+  // pickDecoder selects WebCodecs (secure context) or WASM (plain HTTP/LAN). Each
+  // decoder owns its render surface, mounted into the host div.
   useEffect(() => {
-    const decoder = pickDecoder(createJMuxer)
+    const decoder = pickDecoder()
     if (!decoder) { setDecoderUnsupported(true); return }
     decoderRef.current = decoder
 

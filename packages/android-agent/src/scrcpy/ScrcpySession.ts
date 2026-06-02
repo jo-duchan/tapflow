@@ -86,7 +86,10 @@ export class ScrcpySession {
       'send_device_meta=true',   // 64-byte name + codec-id + width + height header
       'send_frame_meta=false',   // raw Annex B stream (no length prefix per frame)
       'send_dummy_byte=false',   // skip the 1-byte connection-check byte
-      'video_codec_options=i-frame-interval:int=1', // 1s IDR interval for faster keyframe recovery after restart
+      // profile=1 (AVCProfileBaseline): the browser WASM decoder (tinyh264) only
+      // decodes (constrained-)baseline — force it so Android shares the HTTP→WASM path.
+      // i-frame-interval=1s for faster keyframe recovery after restart.
+      'video_codec_options=profile:int=1,i-frame-interval:int=1',
     ], { stdio: ['ignore', 'pipe', 'ignore'] })
 
     this.serverProc = serverProc

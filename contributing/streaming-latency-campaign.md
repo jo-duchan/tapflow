@@ -43,15 +43,18 @@
 
 ---
 
-## 3. 디코더 tier 모델 (목표)
+## 3. 디코더 tier 모델 (확정 — 2-tier, MSE 제거)
 
-`pickDecoder`가 환경별로 자동 선택. **WASM이 빠진 조각** — LAN-HTTP의 MSE를 대체:
+`pickDecoder`가 환경별로 자동 선택. **MSE를 완전 제거**하고 2-tier로 단순화 — secure면 WebCodecs, 아니면 WASM. iOS·Android **동일 파이프라인**:
 
-| tier | 환경 | 디코더 | 특성 |
-|------|------|--------|------|
-| 2 | HTTPS / localhost | WebCodecs | HW, 최저지연 |
-| **1** | **LAN-HTTP** | **WASM (tinyh264)** ✅ 측정 PASS | CPU, 저지연·버퍼0 (secure 불필요) |
-| fallback | 그 외 | MSE | 버퍼(지연) |
+| 환경 | 디코더 | 특성 |
+|------|--------|------|
+| HTTPS / localhost (secure) | WebCodecs | HW, 최저지연, 전 프로파일 |
+| **HTTP (비-secure)** | **WASM (tinyh264)** ✅ 측정 PASS | CPU, 저지연·버퍼0, baseline only |
+| WebGL2/WASM 불가 | null (안내) | — |
+
+> **MSE 제거 근거(2026-06-02):** MSE는 `<video>` 버퍼로 구조적 ~235ms — 북극성 불가. WebCodecs(secure)+WASM(HTTP)가 전 환경을 덮으므로 MSE 폴백은 불필요한 복잡도. jmuxer 의존성도 제거.
+> **Android baseline 전제:** WASM(tinyh264)은 (constrained-)baseline만 디코드 → **scrcpy를 baseline(`profile:int=1`)로 고정**해 Android도 HTTP→WASM 경로 공유. (High profile은 WebCodecs=secure 경로에서만, 평문 HTTP에선 baseline 보장.) iOS는 VideoToolbox baseline.
 
 WASM이 매력적인 이유: **secure context 불필요 + 미디어버퍼 없음** = JPEG의 즉시성 + H.264의 저대역폭을 LAN-HTTP에서 동시에. 대가는 **소프트웨어(CPU) 디코드** — 해상도×fps가 높으면 CPU 한계. 완화: **인코딩 해상도 다운스케일**(표시는 작음 → 대역폭·CPU·지연 삼중↓). 선례: ws-scrcpy가 tinyh264로 폰 해상도 baseline H.264 디코드.
 
@@ -121,13 +124,14 @@ WASM이 매력적인 이유: **secure context 불필요 + 미디어버퍼 없음
 |---|------|------|------|
 | **0** | per-stage 지연 계측 (capture→display, 인코더 시간) | 병목 수치 랭킹. localhost-WebCodecs-H.264 부검 | ✅ 완료 — 범인=SPS reorder 미선언 |
 | **1** | SPS reorder=0 주입으로 디코더 DPB 버퍼 제거 | WebCodecs를 localhost-JPEG급으로 | ✅ 완료 — 브라우저 검증(267→2.5ms) + **인코더 이전**(ios-agent가 SPS 재작성 → 전 디코더 혜택, localhost e2e 확인 `bitstreamRestriction:true`) |
-| 2 | **WASM 디코더** → LAN-HTTP MSE 대체 (tinyh264 첫 후보, 교체 가능) | 버퍼0·secure불필요 → LAN 저지연 | ✅ **구현+측정 PASS** — decode→present 정지 8.7/스크롤 14.3ms(MSE 대비 ~27x·~16x↓), localhost-JPEG급. pickDecoder flip(PR#2) 대기 |
+| 2 | **WASM 디코더** + **MSE 제거 → 2-tier**(HTTPS=WebCodecs/HTTP=WASM, iOS·Android 동일) | 버퍼0·secure불필요 → LAN 저지연 | ✅ **완료** — PR#1 머지, PR#2 스모크 PASS(8.7/14.3ms, 양 플랫폼 LAN-HTTP WASM). 잔여 찢어짐 → 아래 PR-D |
+| 2.5 | **relay drop-to-keyframe (PR-D)** | LAN 드롭 시 P 폐기→다음 IDR까지, 찢어짐 제거 | 🔜 **다음** — MSE 이탈로 unblock. WASM=버퍼0라 relay drop이 찢어짐으로 노출됨 |
 | 3 | 인코딩 해상도 다운스케일 | 대역폭·CPU·지연 삼중↓ | ☐ |
 | 4 | 캡처 이벤트화/고fps, 터치 경로 최적화 | 바닥 더 깎기 | ☐ |
 
 ### 기반 (완료/진행)
 - H.264 인코더 (VideoToolbox, baseline, MaxFrameDelayCount=0, steady cadence, BT.709) — ios-agent, 옵트인 `TAPFLOW_IOS_CODEC=h264`.
-- envelope 코덱/키프레임 마커 (byte5) — relay 키프레임 인지 드롭(PR-D, 보류) 대비.
+- envelope 코덱/키프레임 마커 (byte5) — relay 키프레임 인지 드롭(PR-D, **unblock — 다음 단계**) 대비.
 - 디코더 계층 `pickDecoder`(WebCodecs/MSE) + IOSViewer가 video 직접 표시 + WebCodecs 멀티-NAL 디코드.
 
 ---
@@ -174,6 +178,7 @@ http://localhost:3001?perf=1&decoder=mse     # MSE 강제 (LAN tier 측정)
 
 ## 7. 결정 로그 (시간순 누적)
 
+- **2026-06-03 — 디코더 2-tier 단순화 (MSE 완전 제거, PR#2):** 방향 확정 — **HTTPS→WebCodecs / HTTP→WASM, iOS·Android 동일 파이프라인.** MSEDecoder·createJMuxer·jmuxer.d.ts·jmuxer 의존성 삭제, `pickDecoder`는 createMuxer 인자 제거 후 2-tier(secure→WebCodecs, else wasm-capable→WASM, else null). 두 뷰어 `pickDecoder()` 무인자. **Android baseline 강제**(`ScrcpySession` video_codec_options `profile:int=1`) — WASM이 baseline only라 MSE 안전망 제거 시 필수. (핀된 `OMX.google.h264.encoder`는 소프트 인코더라 이미 baseline일 가능성 높음 — 명시 고정으로 결정화. 에뮬 스모크로 인코더가 profile 옵션 수용하는지 확인 필요.) dashboard 169 테스트·tsc·build 통과. **스모크 PASS(2026-06-03):** ① localhost iOS `[sps-vui] profileIdc:66` + decode→present 2.3ms 유지 ② scrcpy가 `profile:int=1` 수용·정상 스트리밍 ③ **:4000 평문 HTTP에서 Android(1080×2424)가 WASM으로 정상 렌더 = baseline 간접 확증**, iOS도 정상. **발견:** iOS 스크롤 시 relay `ws backpressure` 드롭 → **간헐 화면 찢어짐**(WASM은 버퍼가 없어 MSE보다 드롭이 적나라). 이 PR 회귀 아님 = relay drop-to-latest의 H.264 손상. → **PR-D(drop-to-keyframe) unblock**(MSE 이탈 완료) = 다음 단계.
 - **2026-06-02 — 2단계 WASM 구현 완료 + 측정 게이트 PASS (북극성 도달):** PR#1(R1~R3+R5 오버라이드) 구현 — `tinyh264@0.0.7`(baseline·I/P only, wasm는 data-URI 인라인=별도 에셋 불필요) + `WASMDecoder`(worker 캡슐화, AU 그대로 transfer) + 신규 `YUVWebGLRenderer`(I420 3-텍스처 BT.709 limited) + IOSViewer `?decoder=wasm` 오버라이드. 단위테스트 17개, 전체 183 통과, `vite build` worker 청크 173KB 검증. **localhost `?perf=1&decoder=wasm` 실측: decode→present 정지 8.7/p95 30.4, 스크롤 14.3/p95 37.9; glass→glass 정지 9.6, 스크롤 16ms.** MSE(239/229) 대비 **~27x·~16x↓**, localhost-JPEG(12.4/9.4) 동급 — **비-secure 경로로 북극성 달성.** 색·체감 양호, CPU 여유(localhost=워스트케이스). → **Q4: 다운스케일 불필요 확정.** 다음: pickDecoder flip(R4=PR#2)로 비-secure 기본을 WASM으로.
 - **2026-06-02 — H.264 마이그레이션 (Phase 2):** JPEG 풀프레임 대역폭 문제 확정(정지 3.3MB/s, LAN 스크롤 드롭 16–27/s) → VideoToolbox H.264 도입. 대역폭은 ~140x(정지)/~5x(스크롤) 해결, 드롭 거의 제거.
 - **2026-06-02 — 그러나 지연 발견:** H.264는 코덱 파이프라인 + LAN MSE 버퍼로 **JPEG보다 반응 느림**. localhost-JPEG가 "직접 조작 대등" 기준임을 확립. → "H.264로 갈아타기"가 아니라 **"저지연 디코드/전송 경로"가 진짜 과제**로 재정의.
