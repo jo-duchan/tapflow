@@ -41,6 +41,7 @@
     "recharts": "2.15.4",
     "sonner": "^2.0.7",
     "tailwind-merge": "^2.5.4",
+    "tinyh264": "^0.0.7",
     "zod": "^4.4.3"
   },
   "devDependencies": {
