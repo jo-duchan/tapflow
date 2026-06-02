@@ -13,6 +13,7 @@ import { DeepLinkDialog } from './DeepLinkDialog';
 import { Button } from '@/components/ui/button';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import type { AndroidButton } from '@/lib/types'
+import type { BinaryFrameHandler } from '@/lib/envelope'
 import { androidToNorm as toNormPure, toPinchFingers as makePinchFingers } from '@/lib/coordinate-transform';
 import type { MutableRefObject } from 'react';
 import type { PerfHook } from '@/components/perf/types';
@@ -37,7 +38,7 @@ interface AndroidViewerProps {
   launching: boolean;
   setLaunching: (v: boolean) => void;
   androidButtons: AndroidButton[] | null;
-  binaryFrameHandlerRef: React.RefObject<((data: ArrayBuffer) => void) | undefined>;
+  binaryFrameHandlerRef: React.RefObject<BinaryFrameHandler | undefined>;
   onRecordingUploaded?: () => void;
   screenWidth?: number;
   screenHeight?: number;

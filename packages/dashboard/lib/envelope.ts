@@ -16,6 +16,15 @@ export interface EnvelopeHeader {
   keyframe: boolean
 }
 
+// Per-frame codec/keyframe info passed from DeviceViewer to the active viewer's
+// binary frame handler so it can route JPEG vs H.264 frames.
+export interface FrameMeta {
+  codec: number
+  keyframe: boolean
+}
+
+export type BinaryFrameHandler = (data: ArrayBuffer, meta?: FrameMeta) => void
+
 export function parseEnvelopeHeader(frame: ArrayBuffer): EnvelopeHeader | null {
   if (frame.byteLength < HEADER_SIZE) return null
   const view = new DataView(frame)
