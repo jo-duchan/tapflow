@@ -17,6 +17,7 @@ import {
   createThroughputSampler,
   DEFAULT_BACKPRESSURE_BYTES,
   writeEnvelopeHeader,
+  rewriteLowLatencySpsInFrame,
   CODEC_JPEG,
   CODEC_H264,
 } from '@tapflowio/agent-core/utils'
@@ -264,7 +265,13 @@ export class IOSAgent implements DeviceAgent {
         while (true) {
           const { value, done } = await reader.read()
           if (done) break
-          const frame = writeEnvelopeHeader(value.payload, Date.now(), { codec, keyframe: value.keyframe })
+          // Declare reorder=0 on the keyframe SPS so every decoder (WebCodecs, MSE,
+          // WASM) emits frames immediately instead of buffering the level's max DPB
+          // (~8 frames ≈ 250ms). Keyframe-only (SPS lives there); no-op otherwise.
+          const payload = codec === CODEC_H264 && value.keyframe
+            ? rewriteLowLatencySpsInFrame(value.payload)
+            : value.payload
+          const frame = writeEnvelopeHeader(payload as Buffer, Date.now(), { codec, keyframe: value.keyframe })
           const sent = sendBinaryWithBackpressure(streamWs, frame, threshold, onDrop)
           if (sent) metrics?.recordSent(value.payload.length)
         }
