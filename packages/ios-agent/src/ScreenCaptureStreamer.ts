@@ -39,10 +39,7 @@ export interface StreamFrame {
   keyframe: boolean
 }
 
-// Parses length-prefixed frames from a rolling buffer.
-//   JPEG : [4-byte len][payload]
-//   H.264: [4-byte len][flags:u8][payload]   (flags bit0 = keyframe; len counts the flags byte)
-// Returns the parsed frames and the unconsumed remainder.
+// Parses length-prefixed frames (jpeg: [len][payload]; h264: [len][flags][payload], see CLAUDE.md) → frames + remainder.
 export function parseStreamFrames(
   buf: Buffer,
   h264: boolean,

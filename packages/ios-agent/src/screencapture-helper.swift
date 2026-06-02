@@ -18,15 +18,21 @@ import CoreMedia
 
 // MARK: - Args
 
-guard CommandLine.arguments.count >= 3,
-      let fps = Double(CommandLine.arguments[1]),
-      fps > 0
+let args = CommandLine.arguments
+guard args.count == 3 || args.count == 4,
+      let fps = Double(args[1]), fps > 0
 else {
     fputs("usage: screencapture-helper <fps> <udid> [jpeg|h264]\n", stderr)
     exit(1)
 }
-let targetUDID = CommandLine.arguments[2]
-let useH264 = CommandLine.arguments.count >= 4 && CommandLine.arguments[3] == "h264"
+let targetUDID = args[2]
+// Fail closed on an unknown codec rather than silently emitting JPEG framing.
+let codec = args.count == 4 ? args[3] : "jpeg"
+guard codec == "jpeg" || codec == "h264" else {
+    fputs("error: unknown codec '\(codec)' — expected jpeg or h264\n", stderr)
+    exit(1)
+}
+let useH264 = codec == "h264"
 
 // JPEG quality (0–1). Tunable for the LAN bandwidth/fidelity trade-off via TAPFLOW_JPEG_QUALITY.
 // Default 0.8: cuts ~40% off the previous 0.95 while keeping color/text fidelity for design QA.
