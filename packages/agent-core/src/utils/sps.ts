@@ -4,12 +4,12 @@
  *
  * Why: a decoder buffers up to max_num_reorder_frames before emitting output. If
  * the encoder doesn't declare 0 (VUI bitstream_restriction), the decoder assumes
- * the level's max DPB and adds frames of latency even with no B-frames.
- * `rewriteSpsLowLatency` injects "reorder=0" so the decoder emits immediately.
+ * the level's max DPB and adds frames of latency even with no B-frames (~250ms on
+ * an iPhone at Level 5.0). VideoToolbox omits this even with B-frames off, so we
+ * inject "reorder=0" on the keyframe SPS before sending.
  *
- * Mirror: packages/agent-core/src/utils/sps.ts is the canonical copy (the agent
- * rewrites the SPS at the source). This browser copy is defense-in-depth for an
- * unpatched agent and becomes a no-op once the SPS already declares it. Keep in sync.
+ * Mirror: packages/dashboard/lib/decoders/parseSpsVui.ts keeps a browser copy
+ * (defense-in-depth when the agent is unpatched). Keep the two in sync.
  */
 
 export interface SpsVuiInfo {
@@ -218,7 +218,7 @@ export function parseSpsVui(spsNal: Uint8Array): SpsVuiInfo {
 
 /**
  * Rewrites the SPS to declare bitstream_restriction with max_num_reorder_frames=0
- * (and max_dec_frame_buffering = max_num_ref_frames) so the decoder emits frames
+ * (and max_dec_frame_buffering = max_num_ref_frames) so decoders emit frames
  * immediately. Returns null when it can't safely rewrite (no VUI, or restriction
  * already declared) — caller falls back to the original SPS.
  */
@@ -239,4 +239,59 @@ export function rewriteSpsLowLatency(spsNal: Uint8Array): Uint8Array | null {
   w.bit(1) // rbsp_stop_one_bit (toBytes zero-pads the rest)
 
   return Uint8Array.from([0x67, ...addEmulation(w.toBytes())])
+}
+
+const START_CODE = Uint8Array.of(0, 0, 0, 1)
+
+// Splits an Annex B buffer (3- or 4-byte start codes) into NAL units (no start codes).
+function splitNalUnits(buf: Uint8Array): Uint8Array[] {
+  const nals: Uint8Array[] = []
+  const n = buf.length
+  let start = -1
+  let p = 0
+  while (p + 2 < n) {
+    const sc4 = p + 3 < n && buf[p] === 0 && buf[p + 1] === 0 && buf[p + 2] === 0 && buf[p + 3] === 1
+    const sc3 = buf[p] === 0 && buf[p + 1] === 0 && buf[p + 2] === 1
+    if (sc4 || sc3) {
+      if (start >= 0) nals.push(buf.subarray(start, p))
+      p += sc4 ? 4 : 3
+      start = p
+    } else {
+      p++
+    }
+  }
+  if (start >= 0) nals.push(buf.subarray(start, n))
+  return nals
+}
+
+/**
+ * Rewrites the SPS NAL inside an Annex B frame to declare reorder=0. Returns the
+ * SAME reference when there's nothing to change (no SPS, or already declared), so
+ * P-frames are zero-cost; only keyframes carry an SPS. Reassembles with 4-byte
+ * start codes.
+ */
+export function rewriteLowLatencySpsInFrame(frame: Uint8Array): Uint8Array {
+  const nals = splitNalUnits(frame)
+  if (nals.length === 0) return frame
+
+  let changed = false
+  const out: Uint8Array[] = []
+  for (const nal of nals) {
+    if ((nal[0] & 0x1f) === 7) { // SPS
+      const rewritten = rewriteSpsLowLatency(nal)
+      if (rewritten) { out.push(rewritten); changed = true; continue }
+    }
+    out.push(nal)
+  }
+  if (!changed) return frame
+
+  let total = 0
+  for (const nal of out) total += START_CODE.length + nal.length
+  const result = new Uint8Array(total)
+  let off = 0
+  for (const nal of out) {
+    result.set(START_CODE, off); off += START_CODE.length
+    result.set(nal, off); off += nal.length
+  }
+  return result
 }
