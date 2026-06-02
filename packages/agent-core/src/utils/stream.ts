@@ -19,6 +19,62 @@ export function sendBinaryWithBackpressure(
   return true
 }
 
+export interface KeyframeAwareSender {
+  /**
+   * Sends `frame`, or drops it to keep the H.264 reference chain intact.
+   * `isKeyframe` must be true for IDR frames and for independent frames (JPEG).
+   * Returns true if sent, false if dropped.
+   */
+  send(
+    ws: WebSocket,
+    frame: Parameters<WebSocket['send']>[0],
+    threshold: number,
+    isKeyframe: boolean,
+    onDrop: () => void,
+  ): boolean
+}
+
+/**
+ * Stateful, keyframe-aware backpressure sender (one per session/stream).
+ *
+ * Unlike sendBinaryWithBackpressure (drop-to-latest, fine for independent JPEG
+ * frames), this preserves the H.264 reference chain: once a frame is dropped under
+ * backpressure it enters a "dropping" state and discards every frame until a keyframe
+ * (IDR) can be sent — so the decoder never receives a P-frame that references a
+ * dropped frame, which would tear until the next IDR. Independent frames (JPEG) pass
+ * isKeyframe=true every frame, reproducing drop-to-latest exactly.
+ */
+export function createKeyframeAwareSender(): KeyframeAwareSender {
+  let dropping = false
+  return {
+    send(ws, frame, threshold, isKeyframe, onDrop) {
+      if (ws.readyState !== WebSocket.OPEN) return false
+      const full = ws.bufferedAmount >= threshold
+
+      if (dropping) {
+        // Resync only on a keyframe we can actually send; otherwise keep dropping.
+        if (isKeyframe && !full) {
+          dropping = false
+          ws.send(frame, { binary: true })
+          return true
+        }
+        onDrop()
+        return false
+      }
+
+      if (full) {
+        // Drop this frame and stop forwarding until the next sendable keyframe.
+        dropping = true
+        onDrop()
+        return false
+      }
+
+      ws.send(frame, { binary: true })
+      return true
+    },
+  }
+}
+
 // Returns a rate-limited warn callback for use as onDrop.
 // At most one warn per intervalMs per call site; resets the drop counter after each warn.
 export function createRateLimitedDropWarn(

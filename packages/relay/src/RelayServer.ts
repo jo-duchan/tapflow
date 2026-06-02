@@ -12,12 +12,15 @@ import { handleLogin, handleLogout, handleMe, handleChangePassword, handleInit, 
 import { handleVerify, handleAccept } from './api/invitations.js'
 import { createLogger } from '@tapflowio/agent-core'
 import {
-  sendBinaryWithBackpressure,
+  createKeyframeAwareSender,
   createRateLimitedDropWarn,
   DEFAULT_BACKPRESSURE_BYTES,
   hasEnvelope,
   patchRelayedAt,
+  readEnvelopeFlags,
+  CODEC_JPEG,
 } from '@tapflowio/agent-core/utils'
+import type { KeyframeAwareSender } from '@tapflowio/agent-core/utils'
 
 const logger = createLogger('relay')
 import { handleVerifyReset, handleDoReset, handleSendMemberReset } from './api/passwordReset.js'
@@ -74,6 +77,9 @@ export class RelayServer {
   private purgeBuildsTimer: ReturnType<typeof setInterval> | null = null
   private flushResourcesTimer: ReturnType<typeof setInterval> | null = null
   private dropHandlers = new Map<string, () => void>()
+  // Per-session keyframe-aware sender — drops to the next keyframe under backpressure
+  // so dropped H.264 P-frames never tear the stream until the next IDR.
+  private droppers = new Map<string, KeyframeAwareSender>()
   private wsRoles = new Map<WebSocket, 'agent' | 'browser' | 'stream'>()
   private readonly backpressureBytes: number
   private readonly screenshotTimeoutMs: number
@@ -254,9 +260,21 @@ export class RelayServer {
             onDrop = createRateLimitedDropWarn(logger, session.id)
             this.dropHandlers.set(session.id, onDrop)
           }
+          let dropper = this.droppers.get(session.id)
+          if (!dropper) {
+            dropper = createKeyframeAwareSender()
+            this.droppers.set(session.id, dropper)
+          }
           const frame = data as Buffer
-          if (hasEnvelope(frame)) patchRelayedAt(frame, Date.now())
-          sendBinaryWithBackpressure(session.browserSocket, frame, this.backpressureBytes, onDrop)
+          // Independent frames (JPEG) and H.264 IDRs are safe resync points; only
+          // H.264 P-frames must wait for the next keyframe after a drop.
+          let isKeyframe = true
+          if (hasEnvelope(frame)) {
+            patchRelayedAt(frame, Date.now())
+            const flags = readEnvelopeFlags(frame)
+            isKeyframe = flags.codec === CODEC_JPEG || flags.keyframe
+          }
+          dropper.send(session.browserSocket, frame, this.backpressureBytes, isKeyframe, onDrop)
         }
         return
       }
@@ -347,6 +365,7 @@ export class RelayServer {
         if (msg.sessionId) {
           this.sessions.remove(msg.sessionId)
           this.dropHandlers.delete(msg.sessionId)
+          this.droppers.delete(msg.sessionId)
         }
         break
       }
@@ -354,6 +373,7 @@ export class RelayServer {
         if (msg.sessionId) {
           this.sessions.clearBrowser(msg.sessionId)
           this.dropHandlers.delete(msg.sessionId)
+          this.droppers.delete(msg.sessionId)
         }
         break
       }
