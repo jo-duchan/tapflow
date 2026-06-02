@@ -115,9 +115,7 @@ describe('TapflowClient', () => {
     it('sends device:boot and resolves on device:ready', async () => {
       setTimeout(() => relay.send({ type: 'device:ready', sessionId: 'sess-1' }), 10)
       await expect(client.bootDevice('sess-1', 'dev-1')).resolves.toBeUndefined()
-      // The outbound device:boot travels over a real ws; await its arrival at the
-      // relay before asserting. Resolving on device:ready does not guarantee the
-      // boot message was already recorded (CI-flaky otherwise).
+      // Await outbound device:boot arrival; device:ready resolving doesn't guarantee it was recorded (CI race).
       const bootMsg = await waitForMessage(relay, 'device:boot')
       expect(bootMsg).toMatchObject({
         type: 'device:boot',

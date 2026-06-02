@@ -86,6 +86,7 @@ export class ScreenCaptureStreamer {
       stdio: ['pipe', 'pipe', 'pipe'],
     })
     this.proc = proc
+    proc.stdin.on('error', () => {}) // swallow EPIPE if a requestKeyframe() write races the helper exit
 
     proc.stderr.on('data', (d: Buffer) => process.stderr.write(d))
 

@@ -80,8 +80,7 @@ export class RelayServer {
   private purgeBuildsTimer: ReturnType<typeof setInterval> | null = null
   private flushResourcesTimer: ReturnType<typeof setInterval> | null = null
   private dropHandlers = new Map<string, () => void>()
-  // Per-session keyframe-aware sender — drops to the next keyframe under backpressure
-  // so dropped H.264 P-frames never tear the stream until the next IDR.
+  // Per-session keyframe-aware sender: drops to the next keyframe under backpressure (no H.264 P-frame tearing).
   private droppers = new Map<string, KeyframeAwareSender>()
   // Per-session throttled "request an IDR from the agent" callbacks (drop recovery).
   private idrRequesters = new Map<string, () => void>()
@@ -238,9 +237,7 @@ export class RelayServer {
     return this.httpServer.address()
   }
 
-  // Throttled callback that asks the session's agent to emit an IDR — used by the
-  // keyframe-aware sender to recover fast after a drop instead of waiting for the
-  // periodic keyframe. Agents that don't support on-demand IDR ignore the message.
+  // Throttled callback asking the session's agent for an on-demand IDR (fast drop recovery); ignored by agents that don't support it.
   private makeIdrRequester(sessionId: string): () => void {
     let lastAt = 0
     return () => {
@@ -292,8 +289,7 @@ export class RelayServer {
             this.idrRequesters.set(session.id, requestIdr)
           }
           const frame = data as Buffer
-          // Independent frames (JPEG) and H.264 IDRs are safe resync points; only
-          // H.264 P-frames must wait for the next keyframe after a drop.
+          // JPEG and H.264 IDRs are resync points; only P-frames must wait for a keyframe after a drop.
           let isKeyframe = true
           if (hasEnvelope(frame)) {
             patchRelayedAt(frame, Date.now())
