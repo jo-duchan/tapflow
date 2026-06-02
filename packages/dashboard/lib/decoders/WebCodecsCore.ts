@@ -10,6 +10,9 @@
  * Used as the decode core of WebCodecsDecoder (which adds a render surface).
  */
 
+import type { DecodeSample } from './types'
+import { parseSpsVui, rewriteSpsLowLatency } from './parseSpsVui'
+
 // Splits an Annex B buffer into individual NAL units (without start codes).
 // Handles both 3- and 4-byte start codes, and a single buffer that bundles
 // multiple NALs (e.g. iOS sends SPS+PPS+IDR together; scrcpy sends them apart).
@@ -38,8 +41,14 @@ export class WebCodecsCore {
   private sps: Uint8Array | null = null
   private pps: Uint8Array | null = null
   private frameCount = 0
+  // Diagnostics: submit time keyed by chunk timestamp → exact, drop-immune decodeMs.
+  private decodeSampler?: (sample: DecodeSample) => void
+  private readonly submitAt = new Map<number, number>()
+  private spsLogged = false
 
   constructor(private readonly onFrame: (frame: VideoFrame) => void) {}
+
+  setDecodeSampler(cb: (sample: DecodeSample) => void): void { this.decodeSampler = cb }
 
   decode(data: ArrayBuffer): void {
     // A single buffer may bundle multiple NALs (iOS: SPS+PPS+IDR together) or carry
@@ -81,15 +90,33 @@ export class WebCodecsCore {
       avcc.set(n, off); off += n.length
     }
 
+    // Integer µs so the decoder echoes the exact timestamp back on output (map key).
+    const timestamp = Math.round(this.frameCount++ * (1_000_000 / 30))
+    if (this.decodeSampler) {
+      this.submitAt.set(timestamp, performance.now())
+      // Bound the map if some submits never output (drops): drop the oldest.
+      if (this.submitAt.size > 120) {
+        const oldest = this.submitAt.keys().next().value
+        if (oldest !== undefined) this.submitAt.delete(oldest)
+      }
+    }
+
     try {
-      this.decoder.decode(new EncodedVideoChunk({
-        type: hasIDR ? 'key' : 'delta',
-        timestamp: this.frameCount++ * (1_000_000 / 30),
-        data: avcc,
-      }))
+      this.decoder.decode(new EncodedVideoChunk({ type: hasIDR ? 'key' : 'delta', timestamp, data: avcc }))
     } catch {
       // Decoder may be closed or in error state — ignore
     }
+  }
+
+  private sampleDecode(frame: VideoFrame): void {
+    if (!this.decodeSampler) return
+    const submittedAt = this.submitAt.get(frame.timestamp)
+    if (submittedAt === undefined) return
+    this.submitAt.delete(frame.timestamp)
+    this.decodeSampler({
+      decodeMs: performance.now() - submittedAt,
+      queueSize: this.decoder?.decodeQueueSize ?? 0,
+    })
   }
 
   close(): void {
@@ -97,14 +124,30 @@ export class WebCodecsCore {
     this.decoder = null
   }
 
-  private initDecoder(sps: Uint8Array, pps: Uint8Array): void {
+  // Logs what the encoder advertises for decoder reorder/DPB — the lever behind
+  // H.264 decode latency. Only when diagnostics are active (decodeSampler set).
+  private logSpsVui(sps: Uint8Array): void {
+    if (this.spsLogged || !this.decodeSampler) return
+    this.spsLogged = true
+    try {
+      console.log('[sps-vui]', JSON.stringify(parseSpsVui(sps)))
+    } catch (e) {
+      console.warn('[sps-vui] parse failed', e)
+    }
+  }
+
+  private initDecoder(rawSps: Uint8Array, pps: Uint8Array): void {
+    this.logSpsVui(rawSps)
+    // Force max_num_reorder_frames=0 so the decoder emits immediately instead of
+    // buffering up to the level's max DPB (~8 frames @ 30fps ≈ 250ms of latency).
+    const sps = rewriteSpsLowLatency(rawSps) ?? rawSps
     const spsData = sps[0] === 0 ? sps.subarray(4) : sps
     // Build codec string from actual SPS bytes: avc1.PPCCLL (profile, constraints, level)
     const codec = `avc1.${spsData[1].toString(16).padStart(2, '0')}${spsData[2].toString(16).padStart(2, '0')}${spsData[3].toString(16).padStart(2, '0')}`
     const description = this.buildAVCC(sps, pps)
 
     this.decoder = new VideoDecoder({
-      output: (frame) => this.onFrame(frame),
+      output: (frame) => { this.sampleDecode(frame); this.onFrame(frame) },
       error: (e) => console.error('[WebCodecsCore]', e),
     })
 

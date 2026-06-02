@@ -5,6 +5,8 @@ export interface FrameTiming {
   paintMs: number
   capturedAt?: number
   relayedAt?: number
+  /** Present(epoch) − capturedAt. Single-clock environments (localhost) only; undefined otherwise. */
+  glassToGlassMs?: number
 }
 
 export interface PerfHook {

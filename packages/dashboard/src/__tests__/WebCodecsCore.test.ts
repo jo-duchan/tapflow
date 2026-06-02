@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from 'vitest'
+import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { WebCodecsCore } from '@/lib/decoders/WebCodecsCore'
 
 // ── WebCodecs 글로벌 목 (jsdom에 없음) ───────────────────────────────────────
@@ -8,6 +8,7 @@ class MockVideoDecoder {
   static instances: MockVideoDecoder[] = []
   configureCalls: { codec: string; description: Uint8Array; optimizeForLatency?: boolean }[] = []
   decodeCalls: CapturedChunk[] = []
+  decodeQueueSize = 0
   closed = false
   constructor(public init: { output: (f: unknown) => void; error: (e: unknown) => void }) {
     MockVideoDecoder.instances.push(this)
@@ -114,6 +115,41 @@ describe('WebCodecsCore — chunk 타입 (key/delta)', () => {
     // IDR nalData = [0x65,0x11,0x22] → length 3 → [00 00 00 03 65 11 22]
     expect(Array.from(MockVideoDecoder.instances[0].decodeCalls[0].data))
       .toEqual([0x00, 0x00, 0x00, 0x03, 0x65, 0x11, 0x22])
+  })
+})
+
+// ── decode sampler (진단 계측) ────────────────────────────────────────────────
+describe('WebCodecsCore — decode sampler', () => {
+  it('출력 프레임을 timestamp로 매칭해 decodeMs/queueSize를 보고한다', () => {
+    const samples: { decodeMs: number; queueSize: number }[] = []
+    const d = new WebCodecsCore(() => {})
+    d.setDecodeSampler((s) => samples.push(s))
+    feedReady(d)
+    const dec = MockVideoDecoder.instances[0]
+    dec.decodeQueueSize = 3
+    const ts = dec.decodeCalls[0].timestamp
+    dec.init.output({ timestamp: ts, close() {} }) // decoder emits the decoded frame
+    expect(samples).toHaveLength(1)
+    expect(samples[0].queueSize).toBe(3)
+    expect(samples[0].decodeMs).toBeGreaterThanOrEqual(0)
+  })
+
+  it('알 수 없는 timestamp의 출력은 무시한다 (드롭/유실 프레임)', () => {
+    const samples: unknown[] = []
+    const d = new WebCodecsCore(() => {})
+    d.setDecodeSampler((s) => samples.push(s))
+    feedReady(d)
+    MockVideoDecoder.instances[0].init.output({ timestamp: 999_999, close() {} })
+    expect(samples).toHaveLength(0)
+  })
+
+  it('sampler 미설정이면 출력이 와도 onFrame만 호출된다 (계측 오버헤드 0)', () => {
+    const onFrame = vi.fn()
+    const d = new WebCodecsCore(onFrame)
+    feedReady(d)
+    const dec = MockVideoDecoder.instances[0]
+    dec.init.output({ timestamp: dec.decodeCalls[0].timestamp, close() {} })
+    expect(onFrame).toHaveBeenCalledTimes(1)
   })
 })
 

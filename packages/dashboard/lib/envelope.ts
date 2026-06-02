@@ -21,6 +21,9 @@ export interface EnvelopeHeader {
 export interface FrameMeta {
   codec: number
   keyframe: boolean
+  /** Envelope wall-clock hops (epoch ms) for latency correlation; undefined when no envelope. */
+  capturedAt?: number
+  relayedAt?: number
 }
 
 export type BinaryFrameHandler = (data: ArrayBuffer, meta?: FrameMeta) => void

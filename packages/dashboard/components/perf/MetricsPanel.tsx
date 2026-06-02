@@ -1,6 +1,10 @@
 import { useEffect } from 'react'
 import type { MutableRefObject } from 'react'
 import type { FrameTiming } from './types'
+import { summarizeLatency, type Percentiles } from './latencyStats'
+
+const fmtPct = (p: Percentiles | null): string =>
+  p ? `${p.p50.toFixed(0)}/${p.p95.toFixed(0)} (max ${p.max.toFixed(0)})` : '—'
 
 interface Props {
   pushRef: MutableRefObject<((t: FrameTiming) => void) | null>
@@ -19,7 +23,10 @@ export function MetricsPanel({ pushRef }: Props) {
     document.body.appendChild(container)
 
     const params = { recvFps: 0, decodeMs: 0, paintMs: 0 }
+    // p50/p95/max readouts — the numbers to paste into the campaign §4 table.
+    const summary = { glassToGlass: '—', decode: '—', agentRelay: '—' }
     const traceBuffer: FrameTiming[] = []
+    let sinceSummary = 0
     let dispose: (() => void) | null = null
 
     import('tweakpane').then(({ Pane }) => {
@@ -40,6 +47,15 @@ export function MetricsPanel({ pushRef }: Props) {
       })
       folder.addBinding(params, 'paintMs', {
         readonly: true, view: 'graph', label: 'paint ms', min: 0, max: 10,
+      })
+
+      const sumFolder = pane.addFolder({ title: 'p50/p95 ms', expanded })
+      sumFolder.addBinding(summary, 'glassToGlass', { readonly: true, label: 'glass→glass' })
+      sumFolder.addBinding(summary, 'decode', { readonly: true, label: 'decode→present' })
+      sumFolder.addBinding(summary, 'agentRelay', { readonly: true, label: 'agent→relay' })
+
+      pane.addButton({ title: 'Log latency summary' }).on('click', () => {
+        console.log('[latency]', JSON.stringify(summarizeLatency(traceBuffer)))
       })
 
       pane.addButton({ title: 'Export trace' }).on('click', () => {
@@ -82,9 +98,17 @@ export function MetricsPanel({ pushRef }: Props) {
         params.recvFps = t.recvInterval > 0 ? 1000 / t.recvInterval : 0
         params.decodeMs = t.decodeMs
         params.paintMs = t.paintMs
-        pane.refresh()
         if (traceBuffer.length >= MAX_TRACE_FRAMES) traceBuffer.shift()
         traceBuffer.push(t)
+        // Recompute percentiles ~1x/sec over the recent window (cheap, not per-frame).
+        if (++sinceSummary >= 30) {
+          sinceSummary = 0
+          const s = summarizeLatency(traceBuffer.slice(-300))
+          summary.decode = fmtPct(s.decodeMs)
+          summary.glassToGlass = fmtPct(s.glassToGlassMs)
+          summary.agentRelay = fmtPct(s.agentRelayMs)
+        }
+        pane.refresh()
       }
     })
 
