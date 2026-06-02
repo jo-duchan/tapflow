@@ -266,6 +266,8 @@ func setupH264Session(width: Int, height: Int) -> Bool {
     }
     VTSessionSetProperty(s, key: kVTCompressionPropertyKey_RealTime, value: kCFBooleanTrue)
     VTSessionSetProperty(s, key: kVTCompressionPropertyKey_AllowFrameReordering, value: kCFBooleanFalse)
+    // Emit each encoded frame immediately — no output-pipeline delay (lowest latency).
+    VTSessionSetProperty(s, key: kVTCompressionPropertyKey_MaxFrameDelayCount, value: NSNumber(value: 0))
     VTSessionSetProperty(s, key: kVTCompressionPropertyKey_ProfileLevel,
                          value: kVTProfileLevel_H264_Baseline_AutoLevel)
     VTSessionSetProperty(s, key: kVTCompressionPropertyKey_MaxKeyFrameInterval,
@@ -448,15 +450,19 @@ let timer = DispatchSource.makeTimerSource(queue: captureQueue)
 timer.schedule(deadline: .now(), repeating: 1.0 / fps)
 timer.setEventHandler {
     guard let surf = latestSurface else { return }
-    let seed = IOSurfaceGetSeed(surf)
     let nowNs = DispatchTime.now().uptimeNanoseconds
-    let elapsedMs = Double(nowNs - lastSentNs) / 1_000_000
-    if seed == lastSeed && elapsedMs < 100 { return }
     if useH264 {
-        lastSeed = seed
+        // Steady cadence: encode every tick (no static-skip). P-frames on an
+        // unchanged screen are tiny, and a regular ~fps stream keeps the browser's
+        // MSE media timeline smooth (matching scrcpy's continuous output).
         lastSentNs = nowNs
         encodeH264(surf)  // firstFrameSent is set in the compression output callback
     } else {
+        // JPEG frames are large, so skip re-encoding an unchanged screen (keep-alive
+        // every 100ms). seed = IOSurface generation counter.
+        let seed = IOSurfaceGetSeed(surf)
+        let elapsedMs = Double(nowNs - lastSentNs) / 1_000_000
+        if seed == lastSeed && elapsedMs < 100 { return }
         guard let jpeg = encodeJPEG(surf) else { return }
         lastSeed = seed
         lastSentNs = nowNs
