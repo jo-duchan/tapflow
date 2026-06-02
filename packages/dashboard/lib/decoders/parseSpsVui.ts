@@ -238,5 +238,6 @@ export function rewriteSpsLowLatency(spsNal: Uint8Array): Uint8Array | null {
   w.ue(walk.numRefFrames) // max_dec_frame_buffering ≥ max_num_ref_frames (valid)
   w.bit(1) // rbsp_stop_one_bit (toBytes zero-pads the rest)
 
-  return Uint8Array.from([0x67, ...addEmulation(w.toBytes())])
+  // Preserve the original NAL header byte (nal_ref_idc may differ from 0x67).
+  return Uint8Array.from([spsNal[0], ...addEmulation(w.toBytes())])
 }

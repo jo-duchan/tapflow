@@ -46,12 +46,13 @@ function vuiNoRestrictionSps(numRef: number): Uint8Array {
   return w.toNal()
 }
 
-const START = [0, 0, 0, 1]
-function annexB(...nals: Uint8Array[]): Uint8Array {
+function annexB(start: number[], ...nals: Uint8Array[]): Uint8Array {
   const parts: number[] = []
-  for (const n of nals) { parts.push(...START); parts.push(...n) }
+  for (const n of nals) { parts.push(...start); parts.push(...n) }
   return new Uint8Array(parts)
 }
+const FOUR = [0, 0, 0, 1]
+const THREE = [0, 0, 1]
 // Split 4-byte-start-code Annex B back into NAL units (no start codes).
 function splitFourByte(buf: Uint8Array): Uint8Array[] {
   const nals: Uint8Array[] = []
@@ -87,18 +88,27 @@ describe('rewriteSpsLowLatency (agent-core)', () => {
     w.bit(0) // vui present = 0
     expect(rewriteSpsLowLatency(w.toNal())).toBeNull()
   })
+
+  it('preserves the original NAL header byte (nal_ref_idc != 3)', () => {
+    const sps = vuiNoRestrictionSps(1)
+    sps[0] = 0x47 // nal_ref_idc=2, type=7 — still an SPS, not 0x67
+    expect(rewriteSpsLowLatency(sps)![0]).toBe(0x47)
+  })
 })
 
 describe('rewriteLowLatencySpsInFrame (agent-core)', () => {
   const PPS = new Uint8Array([0x68, 0xce, 0x3c, 0x80])
   const IDR = new Uint8Array([0x65, 0x11, 0x22, 0x33])
 
-  it('rewrites the SPS in a keyframe and preserves PPS / IDR NALs', () => {
-    const frame = annexB(vuiNoRestrictionSps(1), PPS, IDR)
+  it.each([
+    ['4-byte start codes', FOUR],
+    ['3-byte start codes', THREE],
+  ])('rewrites the SPS and preserves PPS / IDR NALs (%s)', (_label, start) => {
+    const frame = annexB(start, vuiNoRestrictionSps(1), PPS, IDR)
     const out = rewriteLowLatencySpsInFrame(frame)
     expect(out).not.toBe(frame) // changed
 
-    const nals = splitFourByte(out)
+    const nals = splitFourByte(out) // output is always reassembled with 4-byte codes
     expect(nals).toHaveLength(3)
     // SPS now declares reorder=0
     const info = parseSpsVui(nals[0])
@@ -110,13 +120,13 @@ describe('rewriteLowLatencySpsInFrame (agent-core)', () => {
   })
 
   it('returns the same reference for a frame with no SPS (P-frame, zero-cost)', () => {
-    const frame = annexB(IDR) // VCL only, no SPS
+    const frame = annexB(FOUR, IDR) // VCL only, no SPS
     expect(rewriteLowLatencySpsInFrame(frame)).toBe(frame)
   })
 
   it('leaves a frame whose SPS already declares restriction unchanged', () => {
     const restricted = rewriteSpsLowLatency(vuiNoRestrictionSps(1))!
-    const frame = annexB(restricted, PPS, IDR)
+    const frame = annexB(FOUR, restricted, PPS, IDR)
     expect(rewriteLowLatencySpsInFrame(frame)).toBe(frame)
   })
 })
