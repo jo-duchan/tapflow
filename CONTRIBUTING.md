@@ -135,6 +135,7 @@ Platform-specific implementation notes for contributors:
 
 - [Android video streaming diagnosis](./contributing/android-video-streaming-diagnosis.md) — scrcpy H.264 encoder investigation notes
 - [SimulatorKit internals](./contributing/simkit-internals.md) — iOS touch injection reverse-engineering notes
+- [iOS streaming — JPEG → H.264](./contributing/ios-streaming-h264.md) — full-frame JPEG bandwidth measurements and the VideoToolbox H.264 migration
 
 ## Commit messages — Conventional Commits
 
