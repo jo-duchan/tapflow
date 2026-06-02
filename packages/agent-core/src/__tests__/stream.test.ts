@@ -88,17 +88,19 @@ describe('sendBinaryWithBackpressure', () => {
   it('정상 클라이언트: bufferedAmount < threshold → send 호출', () => {
     const ws = makeMockWs({ readyState: 1, bufferedAmount: 0 })
     const onDrop = vi.fn()
-    sendBinaryWithBackpressure(ws, frame, THRESHOLD, onDrop)
+    const sent = sendBinaryWithBackpressure(ws, frame, THRESHOLD, onDrop)
     expect(ws.send).toHaveBeenCalledOnce()
     expect(onDrop).not.toHaveBeenCalled()
+    expect(sent).toBe(true)
   })
 
   it('느린 클라이언트: bufferedAmount >= threshold → drop, send 없음', () => {
     const ws = makeMockWs({ readyState: 1, bufferedAmount: THRESHOLD })
     const onDrop = vi.fn()
-    sendBinaryWithBackpressure(ws, frame, THRESHOLD, onDrop)
+    const sent = sendBinaryWithBackpressure(ws, frame, THRESHOLD, onDrop)
     expect(ws.send).not.toHaveBeenCalled()
     expect(onDrop).toHaveBeenCalledOnce()
+    expect(sent).toBe(false)
   })
 
   it('임계치 바로 아래 (threshold - 1) → send 호출', () => {
@@ -112,9 +114,10 @@ describe('sendBinaryWithBackpressure', () => {
   it('닫힌 소켓(CLOSED): send도 drop도 호출하지 않는다', () => {
     const ws = makeMockWs({ readyState: 3, bufferedAmount: 0 })
     const onDrop = vi.fn()
-    sendBinaryWithBackpressure(ws, frame, THRESHOLD, onDrop)
+    const sent = sendBinaryWithBackpressure(ws, frame, THRESHOLD, onDrop)
     expect(ws.send).not.toHaveBeenCalled()
     expect(onDrop).not.toHaveBeenCalled()
+    expect(sent).toBe(false)
   })
 
   it('DEFAULT_BACKPRESSURE_BYTES는 1MB(1_048_576)이다', () => {

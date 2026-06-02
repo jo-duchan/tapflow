@@ -12,3 +12,5 @@ export {
   writeEnvelopeHeader,
   patchRelayedAt,
 } from './envelope.js'
+export { createThroughputSampler } from './throughput.js'
+export type { ThroughputSample } from './throughput.js'

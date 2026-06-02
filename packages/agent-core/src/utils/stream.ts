@@ -3,18 +3,20 @@ import type { Logger } from '../logger.js'
 
 export const DEFAULT_BACKPRESSURE_BYTES = 1_048_576 // 1 MB
 
+// Returns true if the frame was sent, false if it was dropped (backpressure or closed socket).
 export function sendBinaryWithBackpressure(
   ws: WebSocket,
   data: Parameters<WebSocket['send']>[0],
   threshold: number,
   onDrop: () => void,
-): void {
-  if (ws.readyState !== WebSocket.OPEN) return
+): boolean {
+  if (ws.readyState !== WebSocket.OPEN) return false
   if (ws.bufferedAmount >= threshold) {
     onDrop()
-    return
+    return false
   }
   ws.send(data, { binary: true })
+  return true
 }
 
 // Returns a rate-limited warn callback for use as onDrop.
