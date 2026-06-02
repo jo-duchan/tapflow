@@ -49,6 +49,12 @@ describe('parseEnvelopeHeader', () => {
     expect(env?.keyframe).toBe(true)
   })
 
+  it('normalizes a stray keyframe bit on a JPEG frame to false', () => {
+    const env = parseEnvelopeHeader(makeFrame({ flags: 0x02 }))
+    expect(env?.codec).toBe(CODEC_JPEG)
+    expect(env?.keyframe).toBe(false)
+  })
+
   it('returns null for a frame shorter than the header', () => {
     expect(parseEnvelopeHeader(new ArrayBuffer(HEADER_SIZE - 1))).toBeNull()
   })

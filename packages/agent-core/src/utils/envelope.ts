@@ -32,7 +32,9 @@ export function writeEnvelopeHeader(
   const header = Buffer.allocUnsafe(HEADER_SIZE)
   header[0] = 0x54; header[1] = 0x46; header[2] = 0x46; header[3] = 0x45
   header[4] = 1   // version
-  header[5] = (opts?.codec === CODEC_H264 ? FLAG_H264 : 0) | (opts?.keyframe ? FLAG_KEYFRAME : 0)
+  // keyframe is an H.264 IDR marker — only set it when the codec is H.264.
+  const isH264 = opts?.codec === CODEC_H264
+  header[5] = (isH264 ? FLAG_H264 : 0) | (isH264 && opts?.keyframe ? FLAG_KEYFRAME : 0)
   header.writeBigUInt64BE(BigInt(capturedAt), 6)
   header.writeBigUInt64BE(0n, 14) // relayedAt: filled in by relay
   return Buffer.concat([header, payload])
@@ -41,9 +43,11 @@ export function writeEnvelopeHeader(
 // Reads the codec/keyframe flags from byte 5. Caller must ensure hasEnvelope(frame).
 export function readEnvelopeFlags(frame: Buffer): EnvelopeFlags {
   const flags = frame[5]
+  const codec = flags & FLAG_H264 ? CODEC_H264 : CODEC_JPEG
   return {
-    codec: flags & FLAG_H264 ? CODEC_H264 : CODEC_JPEG,
-    keyframe: (flags & FLAG_KEYFRAME) !== 0,
+    codec,
+    // keyframe is only valid for H.264; normalize JPEG frames to false.
+    keyframe: codec === CODEC_H264 && (flags & FLAG_KEYFRAME) !== 0,
   }
 }
 

@@ -61,9 +61,9 @@ describe('writeEnvelopeHeader', () => {
     expect(result[5]).toBe(0x01)
   })
 
-  it('sets bit1 for keyframe', () => {
+  it('ignores keyframe without the H.264 codec (keyframe is an IDR marker)', () => {
     const result = writeEnvelopeHeader(Buffer.alloc(0), 0, { keyframe: true })
-    expect(result[5]).toBe(0x02)
+    expect(result[5]).toBe(0)
   })
 
   it('sets both bits for an H.264 keyframe', () => {
@@ -97,6 +97,12 @@ describe('readEnvelopeFlags', () => {
     const frame = writeEnvelopeHeader(Buffer.alloc(2), 1000, { codec: CODEC_H264, keyframe: true })
     patchRelayedAt(frame, 2000)
     expect(readEnvelopeFlags(frame)).toEqual({ codec: CODEC_H264, keyframe: true })
+  })
+
+  it('normalizes a stray keyframe bit on a JPEG frame to false', () => {
+    const frame = writeEnvelopeHeader(Buffer.alloc(0), 0)
+    frame[5] = 0x02 // keyframe bit set but codec bit clear (malformed)
+    expect(readEnvelopeFlags(frame)).toEqual({ codec: CODEC_JPEG, keyframe: false })
   })
 })
 

@@ -24,10 +24,12 @@ export function parseEnvelopeHeader(frame: ArrayBuffer): EnvelopeHeader | null {
   }
   if (view.getUint8(4) !== SUPPORTED_VERSION) return null
   const flags = view.getUint8(5)
+  const codec = flags & FLAG_H264 ? CODEC_H264 : CODEC_JPEG
   return {
     capturedAt: Number(view.getBigUint64(6)),
     relayedAt: Number(view.getBigUint64(14)),
-    codec: flags & FLAG_H264 ? CODEC_H264 : CODEC_JPEG,
-    keyframe: (flags & FLAG_KEYFRAME) !== 0,
+    codec,
+    // keyframe is only valid for H.264; normalize JPEG frames to false.
+    keyframe: codec === CODEC_H264 && (flags & FLAG_KEYFRAME) !== 0,
   }
 }
