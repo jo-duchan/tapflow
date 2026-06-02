@@ -95,23 +95,21 @@ export function IOSViewer({
     img.src = `data:image/png;base64,${chrome.framePng}`
   }, [chrome.framePng])
 
-  // ── Binary frame handler (JPEG via createImageBitmap, H.264 via pickDecoder) ──
-  // H.264 frames feed a decoder (WebCodecs/MSE — Phase 1) whose surface is kept
-  // off-view and blitted onto canvasRef each frame, so the chrome overlay, cursor,
-  // recording and screenshot paths (all canvasRef-based) stay unchanged.
+  // ── Binary frame handler: JPEG via createImageBitmap, H.264 via pickDecoder ──
   useEffect(() => {
     let decoder: Decoder | null = null
+    let decoderFailed = false
     let raf: number | null = null
 
     const ensureDecoder = (): Decoder | null => {
       if (decoder) return decoder
+      if (decoderFailed) return null // latch: don't re-pick/re-warn on every frame
       const d = pickDecoder(createJMuxer)
-      if (!d) { console.warn('[IOSViewer] no H.264 decoder available — set up HTTPS or use a supported browser'); return null }
+      if (!d) { decoderFailed = true; console.warn('[IOSViewer] no H.264 decoder available — set up HTTPS or use a supported browser'); return null }
       decoder = d
       const surface = d.surface
-      // Display the <video> directly over the screen area (like AndroidViewer) so the
-      // browser compositor presents it smoothly. Copy the canvas's screen-rect position
-      // so it overlays exactly; the canvas stays behind for recording/screenshot blits.
+      // Display the decoder surface directly (like AndroidViewer) for smooth compositing;
+      // it overlays the canvas, which stays behind, mirrored, for recording/screenshot.
       const c = canvasRef.current
       surface.style.position = 'absolute'
       if (c) {
