@@ -12,7 +12,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip
 import { Kbd, KbdGroup } from '@/components/ui/kbd';
 import type { ChromeData } from '@/lib/types'
 import { iosToNormScreen, toPinchFingers as makePinchFingers, iosDisplayScale } from '@/lib/coordinate-transform';
-import { pickDecoder } from '@/lib/decoders/pickDecoder';
+import { pickDecoder, detectCapabilities } from '@/lib/decoders/pickDecoder';
 import { createJMuxer } from '@/lib/decoders/createJMuxer';
 import type { Decoder } from '@/lib/decoders/types';
 import { CODEC_H264, type BinaryFrameHandler } from '@/lib/envelope';
@@ -111,10 +111,16 @@ export function IOSViewer({
     const ensureDecoder = (): Decoder | null => {
       if (decoder) return decoder
       if (decoderFailed) return null // latch: don't re-pick/re-warn on every frame
-      const d = pickDecoder(createJMuxer)
+      // Dev override: ?decoder=mse forces the MSE tier on localhost (drop secure
+      // context + WebCodecs) so it can be measured without a non-secure LAN context.
+      const forced = import.meta.env.DEV ? new URLSearchParams(location.search).get('decoder') : null
+      const d = forced === 'mse'
+        ? pickDecoder(createJMuxer, { ...detectCapabilities(), secureContext: false, webCodecs: false })
+        : pickDecoder(createJMuxer)
       if (!d) { decoderFailed = true; console.warn('[IOSViewer] no H.264 decoder available — set up HTTPS or use a supported browser'); return null }
       decoder = d
       if (import.meta.env.DEV) {
+        console.log(`[decoder] using ${d.surface instanceof HTMLVideoElement ? 'MSE' : 'WebCodecs'}${forced ? ` (forced: ${forced})` : ''}`)
         let diagN = 0
         d.onDecodedFrame?.((presentTime, sample) => {
           const timing = tracker.onPresented(
