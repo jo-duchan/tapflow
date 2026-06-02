@@ -1,4 +1,5 @@
 import type { SimctlWrapper } from './SimctlWrapper.js'
+import type { StreamFrame } from './ScreenCaptureStreamer.js'
 
 type Screenshottable = Pick<SimctlWrapper, 'screenshot'>
 
@@ -8,18 +9,18 @@ export class MjpegStreamer {
     private readonly intervalMs: number = 100,
   ) {}
 
-  start(): ReadableStream<Buffer> {
+  start(): ReadableStream<StreamFrame> {
     let timer: ReturnType<typeof setInterval> | null = null
     let capturing = false
 
-    return new ReadableStream<Buffer>({
+    return new ReadableStream<StreamFrame>({
       start: (controller) => {
         const capture = async () => {
           if (capturing) return
           capturing = true
           try {
             const frame = await this.simctl.screenshot()
-            controller.enqueue(frame)
+            controller.enqueue({ payload: frame, keyframe: false })
           } catch (err) {
             controller.error(err)
           } finally {

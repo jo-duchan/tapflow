@@ -20,7 +20,7 @@ describe('MjpegStreamer', () => {
     const reader = stream.getReader()
     const { value } = await reader.read()
 
-    expect(value).toEqual(frame)
+    expect(value).toEqual({ payload: frame, keyframe: false })
     await reader.cancel()
   })
 
