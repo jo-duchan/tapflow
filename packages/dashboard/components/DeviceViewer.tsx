@@ -8,7 +8,7 @@ import { AndroidViewer } from './device/AndroidViewer';
 import { SimulatorInfoCard } from './device/shared/SimulatorInfoCard';
 import type { AndroidButton, ChromeData, RelayMessage } from '@/lib/types';
 import type { FrameTiming, PerfHook } from './perf/types';
-import { parseEnvelopeHeader, HEADER_SIZE } from '@/lib/envelope';
+import { parseEnvelopeHeader, HEADER_SIZE, type BinaryFrameHandler } from '@/lib/envelope';
 import { StatsOverlay } from './perf/StatsOverlay';
 import { MetricsPanel } from './perf/MetricsPanel';
 import { toast } from 'sonner';
@@ -59,7 +59,7 @@ export function DeviceViewer({ sessionId, deviceId, buildId, resetMode, onRecord
 
   // Active viewer registers its binary frame decoder here.
   // SimulatorViewer routes incoming binary frames to whichever viewer is mounted.
-  const binaryFrameHandlerRef = useRef<((data: ArrayBuffer) => void) | undefined>(undefined);
+  const binaryFrameHandlerRef = useRef<BinaryFrameHandler | undefined>(undefined);
 
   const handleMessage = useCallback((msg: RelayMessage) => {
     if (msg.type === 'session:joined') {
@@ -108,7 +108,8 @@ export function DeviceViewer({ sessionId, deviceId, buildId, resetMode, onRecord
     const envelope = parseEnvelopeHeader(data);
     envelopeQueueRef.current.push(envelope);
     const payload = envelope ? data.slice(HEADER_SIZE) : data;
-    binaryFrameHandlerRef.current?.(payload);
+    const meta = envelope ? { codec: envelope.codec, keyframe: envelope.keyframe } : undefined;
+    binaryFrameHandlerRef.current?.(payload, meta);
   }, []);
 
   const { send, connected } = useRelay(handleMessage, handleBinaryFrame);

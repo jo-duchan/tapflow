@@ -12,6 +12,10 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip
 import { Kbd, KbdGroup } from '@/components/ui/kbd';
 import type { ChromeData } from '@/lib/types'
 import { iosToNormScreen, toPinchFingers as makePinchFingers, iosDisplayScale } from '@/lib/coordinate-transform';
+import { pickDecoder } from '@/lib/decoders/pickDecoder';
+import { createJMuxer } from '@/lib/decoders/createJMuxer';
+import type { Decoder } from '@/lib/decoders/types';
+import { CODEC_H264, type BinaryFrameHandler } from '@/lib/envelope';
 import type { MutableRefObject } from 'react';
 import type { PerfHook } from '@/components/perf/types';
 
@@ -35,7 +39,7 @@ interface IOSViewerProps {
   launching: boolean;
   setLaunching: (v: boolean) => void;
   chrome: ChromeData;
-  binaryFrameHandlerRef: React.MutableRefObject<((data: ArrayBuffer) => void) | undefined>;
+  binaryFrameHandlerRef: React.MutableRefObject<BinaryFrameHandler | undefined>;
   onRecordingUploaded?: () => void;
   swKeyboardVisible: boolean;
   swKeyboardPending: boolean;
@@ -91,9 +95,61 @@ export function IOSViewer({
     img.src = `data:image/png;base64,${chrome.framePng}`
   }, [chrome.framePng])
 
-  // ── Binary frame handler (MJPEG) ─────────────────────────────────────────
+  // ── Binary frame handler (JPEG via createImageBitmap, H.264 via pickDecoder) ──
+  // H.264 frames feed a decoder (WebCodecs/MSE — Phase 1) whose surface is kept
+  // off-view and blitted onto canvasRef each frame, so the chrome overlay, cursor,
+  // recording and screenshot paths (all canvasRef-based) stay unchanged.
   useEffect(() => {
-    binaryFrameHandlerRef.current = (data: ArrayBuffer) => {
+    let decoder: Decoder | null = null
+    let raf: number | null = null
+
+    const ensureDecoder = (): Decoder | null => {
+      if (decoder) return decoder
+      const d = pickDecoder(createJMuxer)
+      if (!d) { console.warn('[IOSViewer] no H.264 decoder available — set up HTTPS or use a supported browser'); return null }
+      decoder = d
+      const surface = d.surface
+      surface.style.position = 'absolute'
+      surface.style.width = '1px'; surface.style.height = '1px'
+      surface.style.opacity = '0'; surface.style.pointerEvents = 'none'
+      surface.style.left = '0'; surface.style.top = '0'; surface.style.zIndex = '-1'
+      containerRef.current?.appendChild(surface)
+      d.onResize((size) => {
+        const canvas = canvasRef.current
+        if (canvas && (canvas.width !== size.width || canvas.height !== size.height)) {
+          canvas.width = size.width; canvas.height = size.height
+          if (!chromeRef.current) {
+            const rc = recordCanvasRef.current
+            if (rc) { rc.width = size.width; rc.height = size.height }
+          }
+        }
+        setCanvasReady(true)
+      })
+      const blit = () => {
+        const canvas = canvasRef.current
+        const ctx = canvas?.getContext('2d')
+        if (canvas && ctx && decoder?.size) {
+          try { ctx.drawImage(decoder.surface, 0, 0, canvas.width, canvas.height) } catch { /* surface not paintable yet */ }
+        }
+        raf = requestAnimationFrame(blit)
+      }
+      raf = requestAnimationFrame(blit)
+      return d
+    }
+
+    binaryFrameHandlerRef.current = (data: ArrayBuffer, meta) => {
+      if (meta?.codec === CODEC_H264) {
+        const d = ensureDecoder()
+        if (!d) return
+        if (import.meta.env.DEV) perfHookRef?.current?.onFrameBegin()
+        d.decode(data)
+        frameCount.current += 1
+        if (import.meta.env.DEV) {
+          perfHookRef?.current?.onFrameEnd({ recvAt: performance.now(), recvInterval: 0, decodeMs: 0, paintMs: 0 })
+        }
+        return
+      }
+
       const recvAt = performance.now()
       const recvInterval = lastFrameRecvAtRef.current ? recvAt - lastFrameRecvAtRef.current : 0
       lastFrameRecvAtRef.current = recvAt
@@ -126,7 +182,13 @@ export function IOSViewer({
         })
         .catch(() => {})
     }
-    return () => { binaryFrameHandlerRef.current = undefined }
+    return () => {
+      binaryFrameHandlerRef.current = undefined
+      if (raf !== null) cancelAnimationFrame(raf)
+      decoder?.close()
+      decoder?.surface.remove()
+      decoder = null
+    }
   }, [binaryFrameHandlerRef, frameCount, perfHookRef])
 
   // Sync record canvas size when chrome arrives
