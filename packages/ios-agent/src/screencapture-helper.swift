@@ -25,6 +25,14 @@ else {
 }
 let targetUDID = CommandLine.arguments[2]
 
+// JPEG quality (0–1). Tunable for the LAN bandwidth/fidelity trade-off via TAPFLOW_JPEG_QUALITY.
+// Default 0.8: cuts ~40% off the previous 0.95 while keeping color/text fidelity for design QA.
+let jpegQuality: Double = {
+    guard let raw = ProcessInfo.processInfo.environment["TAPFLOW_JPEG_QUALITY"],
+          let q = Double(raw), q > 0, q <= 1 else { return 0.8 }
+    return q
+}()
+
 // MARK: - Framework loading
 
 func findDeveloperDir() -> String {
@@ -139,7 +147,7 @@ func encodeJPEG(_ surface: IOSurface) -> Data? {
     guard let dest = CGImageDestinationCreateWithData(out, "public.jpeg" as CFString, 1, nil)
     else { return nil }
     CGImageDestinationAddImage(dest, image,
-        [kCGImageDestinationLossyCompressionQuality: 0.95] as CFDictionary)
+        [kCGImageDestinationLossyCompressionQuality: jpegQuality] as CFDictionary)
     return CGImageDestinationFinalize(dest) ? (out as Data) : nil
 }
 

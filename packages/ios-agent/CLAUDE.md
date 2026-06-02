@@ -69,6 +69,8 @@ screencapture-helper <fps> <udid|booted>
 Reads the `com.apple.framebuffer.display` port directly via SimulatorKit IOSurface callbacks.  
 Output: `[4-byte BE uint32 frame length][JPEG bytes] ...`
 
+**Env**: `TAPFLOW_JPEG_QUALITY` (0–1, default `0.8`) tunes the JPEG quality — the LAN bandwidth ↔ design-QA fidelity trade-off. Lower = fewer relay→browser drops on LAN, but more compression artifacts.
+
 When the Swift binary interface changes, **always update both locations simultaneously**:
 1. `src/screencapture-helper.swift` — argument parsing changes
 2. `src/ScreenCaptureStreamer.ts` — `args` array changes

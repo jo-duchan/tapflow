@@ -14,6 +14,7 @@ import {
   registerStreamWs,
   sendBinaryWithBackpressure,
   createRateLimitedDropWarn,
+  createThroughputSampler,
   DEFAULT_BACKPRESSURE_BYTES,
   writeEnvelopeHeader,
 } from '@tapflowio/agent-core/utils'
@@ -235,18 +236,35 @@ export class IOSAgent implements DeviceAgent {
     state.streamReader = reader
 
     const threshold = Number(process.env.TAPFLOW_WS_BACKPRESSURE_BYTES) || DEFAULT_BACKPRESSURE_BYTES
-    const onDrop = createRateLimitedDropWarn(logger, state.deviceId)
+    const warnDrop = createRateLimitedDropWarn(logger, state.deviceId)
+
+    // Opt-in JPEG baseline measurement (TAPFLOW_STREAM_METRICS=1): logs throughput
+    // every 5s so the iOS JPEG bandwidth/drop baseline can be compared against H.264.
+    const metrics = process.env.TAPFLOW_STREAM_METRICS === '1' ? createThroughputSampler() : null
+    const metricsTimer = metrics
+      ? setInterval(() => {
+          const s = metrics.sample()
+          logger.info(
+            `stream metrics [${state.deviceId}] ${s.fpsSent}fps ${s.kbPerSec}KB/s avg=${s.avgFrameKB}KB drop=${(s.dropRate * 100).toFixed(1)}% (${s.droppedFrames}/${s.producedFrames})`,
+          )
+        }, 5000)
+      : undefined
+    metricsTimer?.unref()
+
+    const onDrop = metrics ? () => { metrics.recordDropped(); warnDrop() } : warnDrop
 
     const pump = async () => {
       try {
         while (true) {
           const { value, done } = await reader.read()
           if (done) break
-          sendBinaryWithBackpressure(streamWs, writeEnvelopeHeader(value, Date.now()), threshold, onDrop)
+          const sent = sendBinaryWithBackpressure(streamWs, writeEnvelopeHeader(value, Date.now()), threshold, onDrop)
+          if (sent) metrics?.recordSent(value.length)
         }
       } catch {
         // stream cancelled or ws closed — expected on disconnect
       }
+      if (metricsTimer) clearInterval(metricsTimer)
       if (state.streamReader === reader && streamWs.readyState === WebSocket.OPEN) {
         this.startBinaryStream(state, streamWs)
       }
