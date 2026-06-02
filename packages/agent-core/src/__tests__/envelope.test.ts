@@ -2,8 +2,11 @@ import { describe, it, expect } from 'vitest'
 import {
   HEADER_SIZE,
   TFFE_MAGIC,
+  CODEC_JPEG,
+  CODEC_H264,
   hasEnvelope,
   writeEnvelopeHeader,
+  readEnvelopeFlags,
   patchRelayedAt,
 } from '../utils/envelope'
 
@@ -46,6 +49,54 @@ describe('writeEnvelopeHeader', () => {
     const payload = Buffer.from([0xAA, 0xBB, 0xCC])
     const result = writeEnvelopeHeader(payload, 0)
     expect(result.subarray(HEADER_SIZE)).toEqual(payload)
+  })
+
+  it('defaults to flags=0 (JPEG, non-keyframe) when opts omitted', () => {
+    const result = writeEnvelopeHeader(Buffer.alloc(0), 0)
+    expect(result[5]).toBe(0)
+  })
+
+  it('sets bit0 for H.264 codec', () => {
+    const result = writeEnvelopeHeader(Buffer.alloc(0), 0, { codec: CODEC_H264 })
+    expect(result[5]).toBe(0x01)
+  })
+
+  it('sets bit1 for keyframe', () => {
+    const result = writeEnvelopeHeader(Buffer.alloc(0), 0, { keyframe: true })
+    expect(result[5]).toBe(0x02)
+  })
+
+  it('sets both bits for an H.264 keyframe', () => {
+    const result = writeEnvelopeHeader(Buffer.alloc(0), 0, { codec: CODEC_H264, keyframe: true })
+    expect(result[5]).toBe(0x03)
+  })
+
+  it('JPEG codec leaves bit0 clear', () => {
+    const result = writeEnvelopeHeader(Buffer.alloc(0), 0, { codec: CODEC_JPEG })
+    expect(result[5] & 0x01).toBe(0)
+  })
+})
+
+describe('readEnvelopeFlags', () => {
+  it('reads JPEG / non-keyframe from a default header (backward compatible)', () => {
+    const frame = writeEnvelopeHeader(Buffer.from([0xFF, 0xD8]), 1000)
+    expect(readEnvelopeFlags(frame)).toEqual({ codec: CODEC_JPEG, keyframe: false })
+  })
+
+  it('reads H.264 codec', () => {
+    const frame = writeEnvelopeHeader(Buffer.alloc(0), 0, { codec: CODEC_H264 })
+    expect(readEnvelopeFlags(frame)).toEqual({ codec: CODEC_H264, keyframe: false })
+  })
+
+  it('reads an H.264 keyframe', () => {
+    const frame = writeEnvelopeHeader(Buffer.alloc(0), 0, { codec: CODEC_H264, keyframe: true })
+    expect(readEnvelopeFlags(frame)).toEqual({ codec: CODEC_H264, keyframe: true })
+  })
+
+  it('round-trips through patchRelayedAt without disturbing flags', () => {
+    const frame = writeEnvelopeHeader(Buffer.alloc(2), 1000, { codec: CODEC_H264, keyframe: true })
+    patchRelayedAt(frame, 2000)
+    expect(readEnvelopeFlags(frame)).toEqual({ codec: CODEC_H264, keyframe: true })
   })
 })
 
