@@ -179,9 +179,6 @@ importers:
       clsx:
         specifier: ^2.1.1
         version: 2.1.1
-      jmuxer:
-        specifier: ^2.1.0
-        version: 2.1.0
       lucide-react:
         specifier: ^0.468.0
         version: 0.468.0(react@19.2.6)
@@ -3467,9 +3464,6 @@ packages:
   jiti@1.21.7:
     resolution: {integrity: sha512-/imKNG4EbWNrVjoNC/1H5/9GFy+tqjGBHCaSsN+P2RnPqjsLmv6UD3Ej+Kj8nBWaRAwyk7kK5ZUc+OEatnTR3A==}
     hasBin: true
-
-  jmuxer@2.1.0:
-    resolution: {integrity: sha512-iizwBTIV11RFKrOp0s/SKrb00yz2epwSOdWxdphSfV7gWlAi9ZXpDdNk/m67Dp0M3+4uGL0AcBQmhB2THxABpQ==}
 
   jose@6.2.3:
     resolution: {integrity: sha512-YYVDInQKFJfR/xa3ojUTl8c2KoTwiL1R5Wg9YCydwH0x0B9grbzlg5HC7mMjCtUJjbQ/YnGEZIhI5tCgfTb4Hw==}
@@ -8060,8 +8054,6 @@ snapshots:
       istanbul-lib-report: 3.0.1
 
   jiti@1.21.7: {}
-
-  jmuxer@2.1.0: {}
 
   jose@6.2.3: {}
 

@@ -18,7 +18,7 @@ function defaultRenderer(canvas: HTMLCanvasElement): FrameRenderer {
 /**
  * H.264 decoder for secure contexts (HTTPS/localhost). Lowest latency: decodes
  * via WebCodecs and renders VideoFrames straight to its own WebGL <canvas> — no
- * media-element buffering. For plain-HTTP LAN access use MSEDecoder.
+ * media-element buffering. For plain-HTTP LAN access use WASMDecoder.
  *
  * Owns its render surface so the viewer stays decoder-agnostic.
  */

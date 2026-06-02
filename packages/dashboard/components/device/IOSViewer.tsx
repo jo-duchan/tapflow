@@ -12,8 +12,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip
 import { Kbd, KbdGroup } from '@/components/ui/kbd';
 import type { ChromeData } from '@/lib/types'
 import { iosToNormScreen, toPinchFingers as makePinchFingers, iosDisplayScale } from '@/lib/coordinate-transform';
-import { pickDecoder, detectCapabilities } from '@/lib/decoders/pickDecoder';
-import { createJMuxer } from '@/lib/decoders/createJMuxer';
+import { pickDecoder } from '@/lib/decoders/pickDecoder';
 import type { Decoder } from '@/lib/decoders/types';
 import { WASMDecoder } from '@/lib/decoders/WASMDecoder';
 import { CODEC_H264, type BinaryFrameHandler } from '@/lib/envelope';
@@ -112,19 +111,14 @@ export function IOSViewer({
     const ensureDecoder = (): Decoder | null => {
       if (decoder) return decoder
       if (decoderFailed) return null // latch: don't re-pick/re-warn on every frame
-      // Dev override: ?decoder=mse|wasm forces a tier on localhost (single clock,
-      // perf panel) so it can be measured without a non-secure LAN context. wasm is
-      // built directly (pickDecoder priority is unchanged until the tier flip lands).
+      // Dev override: ?decoder=wasm forces the WASM tier on localhost (which is a
+      // secure context, so it would otherwise auto-pick WebCodecs) for measurement.
       const forced = import.meta.env.DEV ? new URLSearchParams(location.search).get('decoder') : null
-      const d = forced === 'wasm'
-        ? new WASMDecoder()
-        : forced === 'mse'
-        ? pickDecoder(createJMuxer, { ...detectCapabilities(), secureContext: false, webCodecs: false })
-        : pickDecoder(createJMuxer)
+      const d = forced === 'wasm' ? new WASMDecoder() : pickDecoder()
       if (!d) { decoderFailed = true; console.warn('[IOSViewer] no H.264 decoder available — set up HTTPS or use a supported browser'); return null }
       decoder = d
       if (import.meta.env.DEV) {
-        console.log(`[decoder] using ${d instanceof WASMDecoder ? 'WASM' : d.surface instanceof HTMLVideoElement ? 'MSE' : 'WebCodecs'}${forced ? ` (forced: ${forced})` : ''}`)
+        console.log(`[decoder] using ${d instanceof WASMDecoder ? 'WASM' : 'WebCodecs'}${forced ? ` (forced: ${forced})` : ''}`)
         let diagN = 0
         d.onDecodedFrame?.((presentTime, sample) => {
           const timing = tracker.onPresented(

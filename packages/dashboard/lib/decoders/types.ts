@@ -3,7 +3,7 @@
  *
  * Each implementation owns its render surface so the viewer stays decoder-agnostic:
  * - WebCodecsDecoder — VideoDecoder → WebGL <canvas> (lowest latency, secure context only)
- * - MSEDecoder — Media Source Extensions → <video> (works over plain HTTP)
+ * - WASMDecoder — tinyh264 (Web Worker) → WebGL <canvas> (works over plain HTTP, no buffer)
  *
  * `pickDecoder()` selects an implementation at runtime based on capability.
  */
