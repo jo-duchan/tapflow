@@ -15,6 +15,7 @@ import { iosToNormScreen, toPinchFingers as makePinchFingers, iosDisplayScale } 
 import { pickDecoder, detectCapabilities } from '@/lib/decoders/pickDecoder';
 import { createJMuxer } from '@/lib/decoders/createJMuxer';
 import type { Decoder } from '@/lib/decoders/types';
+import { WASMDecoder } from '@/lib/decoders/WASMDecoder';
 import { CODEC_H264, type BinaryFrameHandler } from '@/lib/envelope';
 import { FrameLatencyTracker } from '@/components/perf/FrameLatencyTracker';
 import type { MutableRefObject } from 'react';
@@ -111,16 +112,19 @@ export function IOSViewer({
     const ensureDecoder = (): Decoder | null => {
       if (decoder) return decoder
       if (decoderFailed) return null // latch: don't re-pick/re-warn on every frame
-      // Dev override: ?decoder=mse forces the MSE tier on localhost (drop secure
-      // context + WebCodecs) so it can be measured without a non-secure LAN context.
+      // Dev override: ?decoder=mse|wasm forces a tier on localhost (single clock,
+      // perf panel) so it can be measured without a non-secure LAN context. wasm is
+      // built directly (pickDecoder priority is unchanged until the tier flip lands).
       const forced = import.meta.env.DEV ? new URLSearchParams(location.search).get('decoder') : null
-      const d = forced === 'mse'
+      const d = forced === 'wasm'
+        ? new WASMDecoder()
+        : forced === 'mse'
         ? pickDecoder(createJMuxer, { ...detectCapabilities(), secureContext: false, webCodecs: false })
         : pickDecoder(createJMuxer)
       if (!d) { decoderFailed = true; console.warn('[IOSViewer] no H.264 decoder available — set up HTTPS or use a supported browser'); return null }
       decoder = d
       if (import.meta.env.DEV) {
-        console.log(`[decoder] using ${d.surface instanceof HTMLVideoElement ? 'MSE' : 'WebCodecs'}${forced ? ` (forced: ${forced})` : ''}`)
+        console.log(`[decoder] using ${d instanceof WASMDecoder ? 'WASM' : d.surface instanceof HTMLVideoElement ? 'MSE' : 'WebCodecs'}${forced ? ` (forced: ${forced})` : ''}`)
         let diagN = 0
         d.onDecodedFrame?.((presentTime, sample) => {
           const timing = tracker.onPresented(

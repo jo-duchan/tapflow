@@ -10,6 +10,11 @@ export default defineConfig({
   build: {
     outDir: 'dist',
   },
+  // ESM worker (tinyh264.worker imports tinyh264) — 'es' format so the worker chunk
+  // can code-split its static imports. Default 'iife' breaks on code-split workers.
+  worker: {
+    format: 'es',
+  },
   server: {
     proxy: {
       '/api': 'http://localhost:4000',
