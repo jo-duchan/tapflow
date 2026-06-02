@@ -1,4 +1,4 @@
-import type { Decoder, DecoderSize } from './types'
+import type { Decoder, DecoderSize, DecodeSample } from './types'
 import { WebCodecsCore } from './WebCodecsCore'
 import { WebGLVideoRenderer } from '../WebGLVideoRenderer'
 
@@ -28,6 +28,8 @@ export class WebCodecsDecoder implements Decoder {
   private readonly core: WebCodecsCore
   private _size: DecoderSize | null = null
   private resizeCb?: (size: DecoderSize) => void
+  private decodedCb?: (presentTime: number, sample?: DecodeSample) => void
+  private lastSample?: DecodeSample
 
   constructor(createRenderer: (canvas: HTMLCanvasElement) => FrameRenderer = defaultRenderer) {
     this.canvas = document.createElement('canvas')
@@ -39,6 +41,10 @@ export class WebCodecsDecoder implements Decoder {
   get size(): DecoderSize | null { return this._size }
 
   onResize(cb: (size: DecoderSize) => void): void { this.resizeCb = cb }
+  onDecodedFrame(cb: (presentTime: number, sample?: DecodeSample) => void): void {
+    this.decodedCb = cb
+    this.core.setDecodeSampler((s) => { this.lastSample = s })
+  }
 
   decode(data: ArrayBuffer): void { this.core.decode(data) }
 
@@ -50,6 +56,8 @@ export class WebCodecsDecoder implements Decoder {
   private render(frame: VideoFrame): void {
     const size = this.renderer.drawFrame(frame)
     if (!size) return
+    this.decodedCb?.(performance.now(), this.lastSample)
+    this.lastSample = undefined
     if (!this._size || this._size.width !== size.width || this._size.height !== size.height) {
       this._size = size
       this.resizeCb?.(size)

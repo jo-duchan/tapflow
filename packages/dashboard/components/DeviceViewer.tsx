@@ -8,7 +8,7 @@ import { AndroidViewer } from './device/AndroidViewer';
 import { SimulatorInfoCard } from './device/shared/SimulatorInfoCard';
 import type { AndroidButton, ChromeData, RelayMessage } from '@/lib/types';
 import type { FrameTiming, PerfHook } from './perf/types';
-import { parseEnvelopeHeader, HEADER_SIZE, type BinaryFrameHandler } from '@/lib/envelope';
+import { parseEnvelopeHeader, HEADER_SIZE, CODEC_H264, type BinaryFrameHandler } from '@/lib/envelope';
 import { StatsOverlay } from './perf/StatsOverlay';
 import { MetricsPanel } from './perf/MetricsPanel';
 import { toast } from 'sonner';
@@ -106,9 +106,17 @@ export function DeviceViewer({ sessionId, deviceId, buildId, resetMode, onRecord
 
   const handleBinaryFrame = useCallback((data: ArrayBuffer) => {
     const envelope = parseEnvelopeHeader(data);
-    envelopeQueueRef.current.push(envelope);
+    // iOS H.264 presents asynchronously through a decoder surface; its viewer's
+    // FrameLatencyTracker owns capturedAt/relayedAt correlation (via meta), so it
+    // must not also go through this FIFO — a dropped frame would desync it forever.
+    // JPEG (iOS) and Android stay synchronous/FIFO-matched here.
+    if (!(envelope && envelope.codec === CODEC_H264)) {
+      envelopeQueueRef.current.push(envelope);
+    }
     const payload = envelope ? data.slice(HEADER_SIZE) : data;
-    const meta = envelope ? { codec: envelope.codec, keyframe: envelope.keyframe } : undefined;
+    const meta = envelope
+      ? { codec: envelope.codec, keyframe: envelope.keyframe, capturedAt: envelope.capturedAt, relayedAt: envelope.relayedAt }
+      : undefined;
     binaryFrameHandlerRef.current?.(payload, meta);
   }, []);
 

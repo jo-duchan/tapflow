@@ -27,6 +27,8 @@ export class MSEDecoder implements Decoder {
   private sps: Uint8Array | null = null
   private _size: DecoderSize | null = null
   private resizeCb?: (size: DecoderSize) => void
+  private decodedCb?: (presentTime: number) => void
+  private rvfcHandle?: number
 
   constructor(createMuxer: (video: HTMLVideoElement) => Muxer) {
     this.createMuxer = createMuxer
@@ -42,6 +44,24 @@ export class MSEDecoder implements Decoder {
   get size(): DecoderSize | null { return this._size }
 
   onResize(cb: (size: DecoderSize) => void): void { this.resizeCb = cb }
+
+  // requestVideoFrameCallback fires when the <video> actually presents a new
+  // frame — the true glass moment, with MSE media-element buffering included.
+  onDecodedFrame(cb: (presentTime: number) => void): void {
+    this.decodedCb = cb
+    this.scheduleFrameCallback()
+  }
+
+  private scheduleFrameCallback(): void {
+    const v = this.video as HTMLVideoElement & {
+      requestVideoFrameCallback?: (cb: (now: number) => void) => number
+    }
+    if (typeof v.requestVideoFrameCallback !== 'function') return
+    this.rvfcHandle = v.requestVideoFrameCallback((now) => {
+      this.decodedCb?.(now)
+      this.scheduleFrameCallback()
+    })
+  }
 
   decode(data: ArrayBuffer): void {
     this.reinitOnResolutionChange(data)
@@ -66,6 +86,8 @@ export class MSEDecoder implements Decoder {
 
   close(): void {
     this.video.removeEventListener('resize', this.handleResize)
+    const v = this.video as HTMLVideoElement & { cancelVideoFrameCallback?: (h: number) => void }
+    if (this.rvfcHandle !== undefined) v.cancelVideoFrameCallback?.(this.rvfcHandle)
     this.muxer.destroy()
   }
 
