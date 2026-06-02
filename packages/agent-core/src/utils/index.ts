@@ -8,9 +8,13 @@ export {
 export {
   TFFE_MAGIC,
   HEADER_SIZE,
+  CODEC_JPEG,
+  CODEC_H264,
   hasEnvelope,
   writeEnvelopeHeader,
+  readEnvelopeFlags,
   patchRelayedAt,
 } from './envelope.js'
+export type { EnvelopeFlags } from './envelope.js'
 export { createThroughputSampler } from './throughput.js'
 export type { ThroughputSample } from './throughput.js'
