@@ -50,6 +50,9 @@ interface DeviceState {
   // in the correct direction. reset to false on any hardware key event because
   // iOS auto-hides the software keyboard whenever a hardware key is pressed.
   softKeyboardVisible: boolean
+  // Browser-reported H.264 decode capability from device:boot. false (default) =
+  // stream JPEG. Persisted so a stream reconnect re-picks the same codec.
+  acceptH264: boolean
 }
 
 export class IOSAgent implements DeviceAgent {
@@ -142,6 +145,7 @@ export class IOSAgent implements DeviceAgent {
         orientation: 'portrait',
         loadedChrome: null,
         softKeyboardVisible: false,
+        acceptH264: false,
       })
     })
   }
@@ -235,9 +239,11 @@ export class IOSAgent implements DeviceAgent {
   }
 
   private startBinaryStream(state: DeviceState, streamWs: WebSocket): void {
-    // H.264 is opt-in (TAPFLOW_IOS_CODEC=h264) and only on the ScreenCaptureStreamer path;
-    // the MjpegStreamer fallback always produces JPEG.
-    const useH264 = this.intervalMs === undefined && process.env.TAPFLOW_IOS_CODEC === 'h264'
+    // H.264 is the default; opt out per-agent with TAPFLOW_IOS_CODEC=jpeg. It also needs
+    // a browser that reported it can decode it (device:boot acceptH264) — otherwise JPEG.
+    // Only on the ScreenCaptureStreamer path — the MjpegStreamer fallback is always JPEG.
+    const envAllowsH264 = process.env.TAPFLOW_IOS_CODEC !== 'jpeg'
+    const useH264 = this.intervalMs === undefined && envAllowsH264 && state.acceptH264
     const codec = useH264 ? CODEC_H264 : CODEC_JPEG
     let stream: ReadableStream<StreamFrame>
     if (this.intervalMs !== undefined) {
@@ -304,10 +310,11 @@ export class IOSAgent implements DeviceAgent {
     return streamWs
   }
 
-  private async handleDeviceBoot(sessionId: string, deviceId: string, fullErase = false): Promise<void> {
+  private async handleDeviceBoot(sessionId: string, deviceId: string, fullErase = false, acceptH264 = false): Promise<void> {
     const state = this.deviceStates.get(sessionId)
     if (!state || !this.ws) return
 
+    state.acceptH264 = acceptH264
     const seq = ++state.bootSeq
 
     void state.streamReader?.cancel()
@@ -394,9 +401,9 @@ export class IOSAgent implements DeviceAgent {
   private handleRelayMessage(msg: { type: string; sessionId?: string; payload?: unknown }): void {
     switch (msg.type) {
       case 'device:boot': {
-        const { deviceId, resetMode } = msg.payload as { deviceId: string; resetMode?: string }
+        const { deviceId, resetMode, acceptH264 } = msg.payload as { deviceId: string; resetMode?: string; acceptH264?: boolean }
         const sessionId = msg.sessionId!
-        this.handleDeviceBoot(sessionId, deviceId, resetMode === 'full-erase')
+        this.handleDeviceBoot(sessionId, deviceId, resetMode === 'full-erase', acceptH264 === true)
           .catch((e) => logger.error('handleDeviceBoot failed:', e))
         break
       }

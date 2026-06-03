@@ -48,3 +48,13 @@ export function pickDecoder(caps: DecoderCapabilities = detectCapabilities()): D
   if (caps.wasm && caps.webgl2) return new WASMDecoder()
   return null
 }
+
+/**
+ * Whether this environment can decode H.264 — same condition as pickDecoder, but
+ * evaluates capabilities without constructing a decoder (no worker spawn). Sent to the
+ * agent as `acceptH264` at boot so it picks H.264 only when the browser can show it;
+ * false → agent falls back to JPEG. WebGL2 is the floor (~95%); the rest get JPEG.
+ */
+export function canDecodeH264(caps: DecoderCapabilities = detectCapabilities()): boolean {
+  return (caps.secureContext && caps.webCodecs && caps.webgl2) || (caps.wasm && caps.webgl2)
+}

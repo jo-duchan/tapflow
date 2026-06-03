@@ -9,6 +9,7 @@ import { SimulatorInfoCard } from './device/shared/SimulatorInfoCard';
 import type { AndroidButton, ChromeData, RelayMessage } from '@/lib/types';
 import type { FrameTiming, PerfHook } from './perf/types';
 import { parseEnvelopeHeader, HEADER_SIZE, CODEC_H264, type BinaryFrameHandler } from '@/lib/envelope';
+import { canDecodeH264 } from '@/lib/decoders/pickDecoder';
 import { StatsOverlay } from './perf/StatsOverlay';
 import { MetricsPanel } from './perf/MetricsPanel';
 import { toast } from 'sonner';
@@ -64,7 +65,9 @@ export function DeviceViewer({ sessionId, deviceId, buildId, resetMode, onRecord
   const handleMessage = useCallback((msg: RelayMessage) => {
     if (msg.type === 'session:joined') {
       setJoined(true);
-      sendRef.current({ type: 'device:boot', sessionId, payload: { deviceId, resetMode } });
+      // Tell the agent up front whether this browser can decode H.264 so it picks the
+      // codec accordingly; false (old/unsupported browser) → agent streams JPEG.
+      sendRef.current({ type: 'device:boot', sessionId, payload: { deviceId, resetMode, acceptH264: canDecodeH264() } });
     }
     if (msg.type === 'device:boot-error') {
       setBootError((msg as unknown as { message: string }).message);

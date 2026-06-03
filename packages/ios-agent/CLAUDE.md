@@ -76,7 +76,7 @@ Output framing (length-prefixed):
 
 **Env**:
 - `TAPFLOW_JPEG_QUALITY` (0–1, default `0.8`) — JPEG quality; the LAN bandwidth ↔ design-QA fidelity trade-off. Lower = fewer relay→browser drops on LAN, but more artifacts.
-- `TAPFLOW_IOS_CODEC=h264` (default `jpeg`) — opt into H.264 (only on the IOSurface path, not the MjpegStreamer fallback). Set on the agent process. The codec is signalled per frame in the TFFE envelope (byte5 bit0).
+- `TAPFLOW_IOS_CODEC` (default `h264`) — H.264 is the default on the IOSurface path; set `TAPFLOW_IOS_CODEC=jpeg` to opt out (force JPEG). H.264 also requires the browser to report it can decode it (`device:boot` `acceptH264`, from `canDecodeH264()`); old/unsupported browsers (~5%, no WebGL2) fall back to JPEG automatically. The MjpegStreamer fallback is always JPEG. Set on the agent process. The codec is signalled per frame in the TFFE envelope (byte5 bit0).
 - `TAPFLOW_IOS_H264_BITRATE` (bits/s, default `8_000_000`) — H.264 `AverageBitRate` (soft target). Reduces scroll bandwidth to fit a WiFi LAN and avoid sustained relay backpressure; matches the Android scrcpy 8 Mbps cap. Lower = fewer LAN drops, more motion blockiness. **Do not add `DataRateLimits` (hard cap)** — it corrupts frames (tearing) under high motion.
 
 When the Swift binary interface changes, **always update both locations simultaneously**:
