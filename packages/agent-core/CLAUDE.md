@@ -24,4 +24,4 @@ The sole contract that platform implementations (ios-agent, android-agent) depen
 ## Directory Structure
 
 - `src/` — `DeviceAgent` interface, `AgentRegistry`, shared types, `createLogger` (leveled console logger)
-- `src/utils/` — shared implementation utils for ios-agent and android-agent. Currently: `createResourceSampler` (CPU & memory sampling, `resources.ts`) and `registerStreamWs` (stream:register handshake helper, `stream.ts`). Not exposed through the interface.
+- `src/utils/` — shared implementation utils for ios-agent, android-agent, and the relay. Currently: `createResourceSampler` (CPU & memory sampling, `resources.ts`); and in `stream.ts`: `registerStreamWs` (stream:register handshake helper), `sendBinaryWithBackpressure` (drop-to-latest), and `createKeyframeAwareSender` (drop-to-keyframe — preserves the H.264 reference chain under backpressure). Not exposed through the `DeviceAgent` interface.
