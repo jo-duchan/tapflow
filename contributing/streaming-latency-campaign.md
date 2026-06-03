@@ -1,194 +1,207 @@
-# 스트리밍 저지연 캠페인 — tier1 = "직접 조작 대등"
+# Streaming latency engineering log — tier1 goal: feels-like-direct responsiveness
 
-> **북극성:** tier1(localhost + LAN)에서 **localhost-JPEG급 반응성**(브라우저에서 시뮬/에뮬을 직접 만지는 것과 거의 대등한 glass-to-glass 저지연)을 달성한다. 이게 tapflow의 핵심 가치(무설치·사용 편의·저지연 원격조작)의 시작이다.
+A running, append-only engineering log for tapflow's glass-to-glass latency work on tier1
+(localhost + LAN). It records pipeline analysis, measurements, attempts, and decisions in
+chronological order — useful context for anyone touching the streaming render path. Unlike
+`.work/` (local, throwaway) it is committed and kept.
+
+> **Goal:** on tier1 (localhost + LAN), reach **localhost-JPEG-class responsiveness** (glass-to-glass
+> latency where operating the simulator/emulator in the browser feels nearly as direct as touching
+> it locally). This is the start of tapflow's core value: no-install, low-friction, low-latency
+> remote control.
 >
-> 이 문서는 **사라지지 않는 캠페인 로그**다. 파이프라인 분석 · 측정 수치 · 병목별 시도와 결과 · 결정을 **시간순으로 누적**한다. `.work/`(로컬·휘발)와 달리 커밋되어 영구 보존된다.
+> **Where it stands:** MSE was dropped for a 2-tier decoder path — WebCodecs on secure contexts
+> (HTTPS/localhost), WASM (tinyh264) on plain HTTP — reaching localhost-JPEG-class latency with no
+> media-element buffer. relay drop-to-keyframe removes tearing under LAN backpressure, and H.264 is
+> now the negotiated default. Same pipeline on iOS and Android.
 >
-> 측정 도구: `TAPFLOW_STREAM_METRICS=1`(agent 처리량) · relay `ws backpressure`(드롭) · (예정) capture→display 지연 계측. 환경: LAN + HTTP / localhost, iPhone 16 Pro, macOS.
+> **Measurement tools:** `TAPFLOW_STREAM_METRICS=1` (agent throughput) · relay `ws backpressure`
+> (drops) · the per-stage `?perf=1` panel (capture→display). Environment: LAN + HTTP / localhost,
+> iPhone 16 Pro, macOS.
 
 ---
 
-## 1. 문제 — 두 요구를 동시에
+## 1. The problem — two demands at once
 
-"wow"(직접 조작 대등)에는 **둘 다** 필요하다:
-1. **저지연**(반응성) — 쓸어넘기면 화면이 즉시 따라옴.
-2. **무드롭**(매끈) — 백프레셔 드롭으로 인한 찢김 없음.
+Feels-like-direct responsiveness needs **both**:
+1. **Low latency** (responsiveness) — the screen follows the instant you swipe.
+2. **No drops** (smoothness) — no tearing from backpressure drops.
 
-지금까지 어느 경로도 둘을 동시에 못 줬다:
+So far no path has delivered both at once:
 
-| 경로 | 지연 | 드롭(대역폭) |
+| Path | Latency | Drops (bandwidth) |
 |------|------|--------------|
-| **JPEG** | ✅ 낮음 (프레임 독립·즉시 디코드) | ❌ 큼 → LAN 스크롤 relay 드롭 16–27/s (찢김) |
-| **H.264** | ❌ 높음 (인코더+HW디코더 파이프라인, LAN은 +MSE 버퍼) | ✅ 작음 → 드롭 1–11/s |
+| **JPEG** | ✅ low (frame-independent, instant decode) | ❌ large → LAN scroll relay drops 16–27/s (tearing) |
+| **H.264** | ❌ high (encoder + HW-decoder pipeline; on LAN, + MSE buffer) | ✅ small → drops 1–11/s |
 
-→ **localhost-JPEG만 기준(wow)을 만족.** LAN-JPEG=찢김, H.264(local/LAN)=지연으로 기준치 미달.
+→ **Only localhost-JPEG meets the bar.** LAN-JPEG tears; H.264 (local/LAN) misses the bar on latency.
 
 ---
 
-## 2. 파이프라인 & 병목 (glass-to-glass)
+## 2. Pipeline & bottleneck (glass-to-glass)
 
-| 단계 | JPEG | H.264 (우리) | 클라우드 게이밍 |
+| Stage | JPEG | H.264 (ours) | Cloud gaming |
 |------|------|--------------|------------------|
-| 터치 전송 (브라우저→relay→agent→HID) | 동일 | 동일 | 동일 |
-| 시뮬레이터 스크롤 렌더 | 동일 (시뮬 고유) | 동일 | — |
-| 캡처 (30fps 폴링) | 0–33ms | 0–33ms | — |
-| 인코더 파이프 | 0 (즉시) | VT (MaxFrameDelayCount=0로 최소화) | NVENC 저지연 프리셋 |
-| **전송 + 버퍼** | 즉시 | **LAN = MSE 미디어버퍼 ← 핵심 villain** | UDP/WebRTC 미니 지터버퍼 |
-| 디코더 | createImageBitmap 즉시 | WebCodecs(저지연) / **MSE(버퍼)** | HW 저지연 디코드 |
+| Touch send (browser→relay→agent→HID) | same | same | same |
+| Simulator scroll render | same (simulator-inherent) | same | — |
+| Capture (30fps polling) | 0–33ms | 0–33ms | — |
+| Encoder pipe | 0 (instant) | VT (minimized with MaxFrameDelayCount=0) | NVENC low-latency preset |
+| **Transport + buffer** | instant | **LAN = MSE media buffer ← the core bottleneck** | UDP/WebRTC mini jitter buffer |
+| Decoder | createImageBitmap, instant | WebCodecs (low-latency) / **MSE (buffered)** | HW low-latency decode |
 
-**핵심 통찰:**
-- 병목은 "H.264 vs JPEG"가 아니라 **디코드/전송 경로**다. **클라우드 게이밍이 H.264로 glass-to-glass <50ms를 내는 게 존재 증명** — H.264는 저대역폭+저지연을 동시에 낼 수 있다.
-- **LAN-HTTP에서 MSE를 쓴다는 게 진짜 문제.** MSE는 본질이 버퍼링이라 구조적 지연. 클라우드 게이밍은 MSE를 안 쓴다.
-- **왜 MSE에 갇혔나 = secure context 벽:** WebCodecs(버퍼0·HW)는 HTTPS/localhost에서만 동작 → LAN-HTTP는 비secure라 MSE로 강등.
+**Key insights:**
+- The bottleneck is not "H.264 vs JPEG" but the **decode/transport path**. **Cloud gaming hitting glass-to-glass <50ms with H.264 is the existence proof** — H.264 can deliver low bandwidth and low latency together.
+- **The real problem is using MSE on LAN-HTTP.** MSE is buffering by nature, so it is structural latency. Cloud gaming does not use MSE.
+- **Why we were stuck with MSE = the secure-context wall:** WebCodecs (zero-buffer, HW) only works on HTTPS/localhost → LAN-HTTP is non-secure, so it gets demoted to MSE.
 
 ---
 
-## 3. 디코더 tier 모델 (확정 — 2-tier, MSE 제거)
+## 3. Decoder tier model (decided — 2-tier, MSE removed)
 
-`pickDecoder`가 환경별로 자동 선택. **MSE를 완전 제거**하고 2-tier로 단순화 — secure면 WebCodecs, 아니면 WASM. iOS·Android **동일 파이프라인**:
+`pickDecoder` selects automatically per environment. **MSE is fully removed** and simplified to 2 tiers — WebCodecs if secure, else WASM. **Same pipeline** on iOS and Android:
 
-| 환경 | 디코더 | 특성 |
+| Environment | Decoder | Characteristics |
 |------|--------|------|
-| HTTPS / localhost (secure) | WebCodecs | HW, 최저지연, 전 프로파일 |
-| **HTTP (비-secure)** | **WASM (tinyh264)** ✅ 측정 PASS | CPU, 저지연·버퍼0, baseline only |
-| WebGL2/WASM 불가 | null (안내) | — |
+| HTTPS / localhost (secure) | WebCodecs | HW, lowest latency, all profiles |
+| **HTTP (non-secure)** | **WASM (tinyh264)** ✅ measured PASS | CPU, low-latency, zero-buffer, baseline only |
+| WebGL2/WASM unavailable | null (notice) | — |
 
-> **MSE 제거 근거(2026-06-02):** MSE는 `<video>` 버퍼로 구조적 ~235ms — 북극성 불가. WebCodecs(secure)+WASM(HTTP)가 전 환경을 덮으므로 MSE 폴백은 불필요한 복잡도. jmuxer 의존성도 제거.
-> **Android baseline 전제:** WASM(tinyh264)은 (constrained-)baseline만 디코드 → **scrcpy를 baseline(`profile:int=1`)로 고정**해 Android도 HTTP→WASM 경로 공유. (High profile은 WebCodecs=secure 경로에서만, 평문 HTTP에선 baseline 보장.) iOS는 VideoToolbox baseline.
+> **Why MSE was removed (2026-06-02):** MSE has a structural ~235ms from the `<video>` buffer — goal unreachable. WebCodecs (secure) + WASM (HTTP) cover every environment, so an MSE fallback is needless complexity. The jmuxer dependency is dropped too.
+> **Android baseline premise:** WASM (tinyh264) only decodes (constrained-)baseline → **pin scrcpy to baseline (`profile:int=1`)** so Android shares the HTTP→WASM path. (High profile only on the WebCodecs=secure path; on plain HTTP, baseline is guaranteed.) iOS uses VideoToolbox baseline.
 
-WASM이 매력적인 이유: **secure context 불필요 + 미디어버퍼 없음** = JPEG의 즉시성 + H.264의 저대역폭을 LAN-HTTP에서 동시에. 대가는 **소프트웨어(CPU) 디코드** — 해상도×fps가 높으면 CPU 한계. 완화: **인코딩 해상도 다운스케일**(표시는 작음 → 대역폭·CPU·지연 삼중↓). 선례: ws-scrcpy가 tinyh264로 폰 해상도 baseline H.264 디코드.
+Why WASM is attractive: **no secure context needed + no media buffer** = JPEG's immediacy + H.264's low bandwidth, both on LAN-HTTP. The cost is **software (CPU) decode** — at high resolution×fps it hits a CPU ceiling. Mitigation: **downscale the encode resolution** (display is small → a triple win on bandwidth, CPU, latency). Precedent: ws-scrcpy decodes phone-resolution baseline H.264 with tinyh264.
 
 ---
 
-## 4. 측정 로그 (누적)
+## 4. Measurement log (accumulated)
 
-### JPEG 베이스라인 (LAN, throughput sampler)
+### JPEG baseline (LAN, throughput sampler)
 
-| 시나리오 | 품질 | avg/frame | 대역폭 | relay 드롭/초 |
+| Scenario | Quality | avg/frame | Bandwidth | relay drops/s |
 |----------|------|-----------|--------|---------------|
-| 정지 | 0.95 | 427 KB | ~3.3 MB/s | 0 (localhost 착시) |
-| 정지 | 0.8 | 235 KB | ~1.97 MB/s | 0 |
-| 스크롤 | 0.8 | ~590 KB | 12–16 MB/s | **16–27** |
+| Still | 0.95 | 427 KB | ~3.3 MB/s | 0 (localhost illusion) |
+| Still | 0.8 | 235 KB | ~1.97 MB/s | 0 |
+| Scroll | 0.8 | ~590 KB | 12–16 MB/s | **16–27** |
 
 ### H.264 (VideoToolbox, steady 30fps)
 
-| 시나리오 | avg/frame | 대역폭 | relay 드롭/초 |
+| Scenario | avg/frame | Bandwidth | relay drops/s |
 |----------|-----------|--------|---------------|
-| 정지 | ~1.8 KB | ~14 KB/s (**~140x↓** vs JPEG) | 0 |
-| 스크롤 | ~90–110 KB | ~2.6 MB/s (**~5x↓**) | **1–11** |
+| Still | ~1.8 KB | ~14 KB/s (**~140x↓** vs JPEG) | 0 |
+| Scroll | ~90–110 KB | ~2.6 MB/s (**~5x↓**) | **1–11** |
 
-→ H.264는 **대역폭/드롭은 압도적으로 해결**. 그러나 **체감 지연은 JPEG보다 나쁨**(아래).
+→ H.264 **decisively solves bandwidth/drops**. But **perceived latency is worse than JPEG** (below).
 
-### 지연 (체감, 정성)
+### Latency (perceived, qualitative)
 
-| 경로 | 체감 |
+| Path | Feel |
 |------|------|
-| localhost JPEG | **기준(wow)** — 직접 조작 대등 |
-| localhost H.264 (WebCodecs) | 반박자 지연 — 기준치 미달 |
-| LAN JPEG | 반응 빠르나 스크롤 찢김 |
-| LAN H.264 (MSE) | 드롭 0에 가깝지만 지연 가장 큼 |
+| localhost JPEG | **baseline** — feels like direct manipulation |
+| localhost H.264 (WebCodecs) | half-beat lag — misses the bar |
+| LAN JPEG | responsive but scroll tears |
+| LAN H.264 (MSE) | near-zero drops but the largest latency |
 
-> ⚠️ **정밀 per-stage 지연(ms)은 아직 미측정.** 캠페인 0단계에서 capture→display + 인코더 시간을 실측해 병목을 수치로 랭킹한다. (특히 *왜 localhost-WebCodecs-H.264조차 JPEG에 미달인가* — 인코더/디코더/표시경로 중 어디인지)
+> ⚠️ **Precise per-stage latency (ms) not yet measured.** In step 0, measure capture→display + encoder time to rank bottlenecks by number. (Especially *why even localhost-WebCodecs-H.264 misses JPEG* — encoder, decoder, or display path.)
 
-### per-stage 지연 (0단계 계측 — 2026-06-02 실측, localhost)
+### per-stage latency (step-0 instrumentation — measured 2026-06-02, localhost)
 
-`?perf=1` 패널의 `p50/p95 ms` 폴더 + `[wc-diag]`(정확 timestamp 매칭) 콘솔에서 읽음.
+Read from the `?perf=1` panel's `p50/p95 ms` folder + the `[wc-diag]` console (exact timestamp matching).
 
-| 경로 | decode→present p50/p95 | glass→glass p50/p95 | agent→relay | 비고 |
+| Path | decode→present p50/p95 | glass→glass p50/p95 | agent→relay | Note |
 |------|----------------------:|--------------------:|------------:|------|
-| JPEG 정지 | 12.4 / 15.4 | (≈13)* | 1 | wow 기준선 |
-| JPEG 스크롤 | 9.4 / 11.6 | (≈11)* | 1 | |
-| **H.264 정지 (수정 전)** | **267 / 274** | **235 / 239** | 0–1 | 디코더가 ~8프레임 버퍼 |
-| **H.264 WebCodecs 정지 (수정 후)** | **2.5 / 4** | **3.9 / 7.9** | 0–1 | reorder=0 주입 |
-| **H.264 WebCodecs 스크롤 (수정 후)** | **2.1 / 3.9** | **3.4 / 7.9** | 0–1 | |
-| **H.264 MSE 정지** | **239 / 254** | **240 / 255** | 0–1 | reorder=0 받아도 `<video>` 버퍼 잔존 |
-| **H.264 MSE 스크롤** | **229 / 244** | **230 / 245** | 0–1 | jmuxer `flushingTime:0`에도 구조적 |
-| **H.264 WASM 정지** | **8.7 / 30.4** | **9.6 / 31.5** | 0–1 | tinyh264, 미디어버퍼 없음 — JPEG급 |
-| **H.264 WASM 스크롤** | **14.3 / 37.9** | **16 / 40.3** | 1–2 | localhost-JPEG급 반응성 |
+| JPEG still | 12.4 / 15.4 | (≈13)* | 1 | baseline |
+| JPEG scroll | 9.4 / 11.6 | (≈11)* | 1 | |
+| **H.264 still (before fix)** | **267 / 274** | **235 / 239** | 0–1 | decoder buffers ~8 frames |
+| **H.264 WebCodecs still (after fix)** | **2.5 / 4** | **3.9 / 7.9** | 0–1 | reorder=0 injected |
+| **H.264 WebCodecs scroll (after fix)** | **2.1 / 3.9** | **3.4 / 7.9** | 0–1 | |
+| **H.264 MSE still** | **239 / 254** | **240 / 255** | 0–1 | `<video>` buffer remains even with reorder=0 |
+| **H.264 MSE scroll** | **229 / 244** | **230 / 245** | 0–1 | structural even with jmuxer `flushingTime:0` |
+| **H.264 WASM still** | **8.7 / 30.4** | **9.6 / 31.5** | 0–1 | tinyh264, no media buffer — JPEG-class |
+| **H.264 WASM scroll** | **14.3 / 37.9** | **16 / 40.3** | 1–2 | localhost-JPEG-class responsiveness |
 
-→ **WebCodecs는 수정으로 decode→present 267→2.5ms (~100x↓), 북극성(localhost-JPEG급) 도달.** 그러나 **MSE는 같은 reorder=0 스트림에도 ~235ms** — SPS 수정이 닿지 않는 **미디어-엘리먼트(`<video>`) 버퍼**(이미 `flushingTime:0` 튜닝됨, 더 못 깎음). → **tier1 LAN-HTTP(비-secure, MSE)엔 WASM(tinyh264) 필요**가 측정으로 확정. (`?decoder=mse` dev 오버라이드로 localhost 단일클럭 측정 — MSE는 드롭 대신 버퍼링이라 FIFO tracker가 정확.)
+→ **WebCodecs: the fix took decode→present 267→2.5ms (~100x↓), reaching the goal (localhost-JPEG-class).** But **MSE stays ~235ms even on the same reorder=0 stream** — the **media-element (`<video>`) buffer** the SPS fix can't reach (already tuned to `flushingTime:0`, can't shave more). → Measurements confirm **tier1 LAN-HTTP (non-secure, MSE) needs WASM (tinyh264)**. (Measured on localhost single-clock via the `?decoder=mse` dev override — MSE buffers instead of dropping, so the FIFO tracker is accurate.)
 
-→ **2단계 WASM 실측(2026-06-02, `?decoder=wasm`): 게이트 PASS.** tinyh264가 MSE의 `<video>` 버퍼를 완전히 회피 → decode→present **정지 8.7ms / 스크롤 14.3ms**(MSE 239/229 대비 **~27x·~16x↓**), glass→glass 9.6/16ms. **localhost-JPEG(북극성 12.4/9.4) 동급** — 정지는 JPEG보다 빠름. 색·체감 양호, CPU 여유(localhost는 인코더+디코더 한 Mac = 워스트케이스라 실 LAN은 더 여유). → **비-secure 경로로 북극성 도달 확정, 다운스케일(3단계) 현재 불필요.** 다음: pickDecoder 티어 flip(비-secure→WASM 우선).
+→ **Step-2 WASM measurement (2026-06-02, `?decoder=wasm`): gate PASS.** tinyh264 fully avoids MSE's `<video>` buffer → decode→present **still 8.7ms / scroll 14.3ms** (**~27x·~16x↓** vs MSE 239/229), glass→glass 9.6/16ms. **On par with localhost-JPEG (goal 12.4/9.4)** — still is faster than JPEG. Color and feel are good, with CPU headroom (localhost = encoder + decoder on one Mac = worst case, so real LAN has more headroom). → **Goal reached on the non-secure path; downscale (step 3) not needed for now.** Next: flip the pickDecoder tier (non-secure → WASM first).
 
-> \* JPEG glass→glass는 패널 미산출(`null`) — H.264 tracker 경로에서만 계산. decode(~10ms)+agent→relay(~1ms)로 ≈11–13ms.
-> **clock 유효성:** glass→glass = present(epoch) − capturedAt → **localhost 단일 클럭에서만**. decode→present(델타)·agent→relay(둘 다 Mac)는 모든 환경 유효.
-> **근본 원인:** iOS 인코더 SPS가 `bitstream_restriction`을 안 박음(VUI 확인: `bitstreamRestriction:false`, Level 5.0). 디코더가 레벨 max DPB(110400/~13800MB ≈ 8프레임)만큼 안전 버퍼링 → 267ms. baseline(66)이라 실제 리오더는 0인데 **신호만 누락**. → SPS에 `max_num_reorder_frames=0` 선언 주입으로 해결.
+> \* JPEG glass→glass isn't computed by the panel (`null`) — only on the H.264 tracker path. ≈11–13ms from decode (~10ms) + agent→relay (~1ms).
+> **Clock validity:** glass→glass = present(epoch) − capturedAt → **only on a localhost single clock**. decode→present (a delta) and agent→relay (both on the Mac) are valid in every environment.
+> **Root cause:** the iOS encoder's SPS does not set `bitstream_restriction` (VUI check: `bitstreamRestriction:false`, Level 5.0). The decoder safely buffers up to the level's max DPB (110400/~13800MB ≈ 8 frames) → 267ms. It's baseline (66) so the actual reorder is 0 — **only the signal is missing**. → Fixed by injecting a `max_num_reorder_frames=0` declaration into the SPS.
 
 ---
 
-## 5. 캠페인 로드맵 (측정 게이트로 연결)
+## 5. Work roadmap (gated by measurement)
 
-각 단계는 **측정으로 효과 확인 후 다음**. 안 되면 롤백/재설계.
+Each step **confirms its effect by measurement before the next**. If it fails, roll back/redesign.
 
-| # | 단계 | 목적 | 상태 |
+| # | Step | Goal | Status |
 |---|------|------|------|
-| **0** | per-stage 지연 계측 (capture→display, 인코더 시간) | 병목 수치 랭킹. localhost-WebCodecs-H.264 부검 | ✅ 완료 — 범인=SPS reorder 미선언 |
-| **1** | SPS reorder=0 주입으로 디코더 DPB 버퍼 제거 | WebCodecs를 localhost-JPEG급으로 | ✅ 완료 — 브라우저 검증(267→2.5ms) + **인코더 이전**(ios-agent가 SPS 재작성 → 전 디코더 혜택, localhost e2e 확인 `bitstreamRestriction:true`) |
-| 2 | **WASM 디코더** + **MSE 제거 → 2-tier**(HTTPS=WebCodecs/HTTP=WASM, iOS·Android 동일) | 버퍼0·secure불필요 → LAN 저지연 | ✅ **완료** — PR#1 머지, PR#2 스모크 PASS(8.7/14.3ms, 양 플랫폼 LAN-HTTP WASM). 잔여 찢어짐 → 아래 PR-D |
-| 2.5 | **relay drop-to-keyframe (PR-D)** | LAN 드롭 시 P 폐기→다음 IDR까지, 찢어짐 제거 | ✅ **구현+스모크**(찢어짐→짧은 freeze). PR #194 |
-| 2.6 | **freeze 단축** = iOS 비트레이트 캡(A) + IDR-on-drop(B) | freeze의 ①혼잡 + ②IDR 대기 둘 다 축소 | ✅ **구현+검증** — A: VT `AverageBitRate` 8Mbps(env, **DataRateLimits는 찢어짐 유발→제거**). B: relay→agent `stream:request-idr`→swift stdin `0x01` force IDR. LAN: 찢어짐 없음·freeze 짧음 |
-| 2.7 | **코덱 협상 + H.264 기본 승격** | 디코더 없는 브라우저 자동 JPEG 폴백 → 안전하게 기본 H.264 | ✅ **구현+테스트** — 브라우저 `canDecodeH264()`→`device:boot acceptH264`, agent 우선순위 `env=jpeg > capability > 기본`. 기본 `TAPFLOW_IOS_CODEC` jpeg→**h264**(jpeg opt-out 유지). fallback 대상 ~5%(WebGL2 없는 구버전). 단위테스트 ios +5·dashboard +5 |
-| 3 | 인코딩 해상도 다운스케일 | 대역폭·CPU·지연 삼중↓ | ☐ |
-| 4 | 캡처 이벤트화/고fps, 터치 경로 최적화 | 바닥 더 깎기 | ☐ |
+| **0** | per-stage latency instrumentation (capture→display, encoder time) | rank bottlenecks by number; analyze localhost-WebCodecs-H.264 | ✅ done — cause = SPS reorder not declared |
+| **1** | inject SPS reorder=0 to remove the decoder DPB buffer | bring WebCodecs to localhost-JPEG-class | ✅ done — browser-verified (267→2.5ms) + **moved into the encoder** (ios-agent rewrites the SPS → every decoder benefits; localhost e2e confirms `bitstreamRestriction:true`) |
+| 2 | **WASM decoder** + **remove MSE → 2-tier** (HTTPS=WebCodecs/HTTP=WASM, iOS·Android identical) | zero-buffer, no secure context → LAN low latency | ✅ **done** — PR#1 merged, PR#2 smoke PASS (8.7/14.3ms, both platforms LAN-HTTP WASM). Residual tearing → PR-D below |
+| 2.5 | **relay drop-to-keyframe (PR-D)** | on LAN drop, discard P up to the next IDR, removing tearing | ✅ **implemented + smoke** (tearing → short freeze). PR #194 |
+| 2.6 | **shorten the freeze** = iOS bitrate cap (A) + IDR-on-drop (B) | shrink both ① congestion and ② IDR-wait of the freeze | ✅ **implemented + verified** — A: VT `AverageBitRate` 8Mbps (env; **DataRateLimits caused tearing → removed**). B: relay→agent `stream:request-idr`→swift stdin `0x01` force IDR. LAN: no tearing, short freeze |
+| 2.7 | **codec negotiation + promote H.264 to default** | browsers without a decoder auto-fall back to JPEG → safe to default to H.264 | ✅ **implemented + tested** — browser `canDecodeH264()` → `device:boot acceptH264`, agent priority `env=jpeg > capability > default`. Default `TAPFLOW_IOS_CODEC` jpeg→**h264** (jpeg opt-out kept). Fallback target ~5% (old browsers without WebGL2). Unit tests ios +5, dashboard +5 |
+| 3 | downscale the encode resolution | a triple win on bandwidth, CPU, latency | ☐ |
+| 4 | event-driven/high-fps capture, optimize the touch path | shave the floor further | ☐ [#195](https://github.com/jo-duchan/tapflow/issues/195) (priority: low) |
 
-### 기반 (완료/진행)
-- H.264 인코더 (VideoToolbox, baseline, MaxFrameDelayCount=0, steady cadence, BT.709) — ios-agent, **기본** `TAPFLOW_IOS_CODEC=h264`(jpeg opt-out, 2.7에서 승격).
-- envelope 코덱/키프레임 마커 (byte5) — relay 키프레임 인지 드롭(PR-D, **unblock — 다음 단계**) 대비.
-- 디코더 계층 `pickDecoder`(WebCodecs/MSE) + IOSViewer가 video 직접 표시 + WebCodecs 멀티-NAL 디코드.
+### Foundation (done/in progress)
+- H.264 encoder (VideoToolbox, baseline, MaxFrameDelayCount=0, steady cadence, BT.709) — ios-agent, now the **default** `TAPFLOW_IOS_CODEC=h264` (jpeg opt-out, promoted in 2.7).
+- envelope codec/keyframe marker (byte5) — for relay keyframe-aware dropping (PR-D, **unblock — next step**).
+- decoder layer `pickDecoder` (WebCodecs/MSE) + IOSViewer shows video directly + WebCodecs multi-NAL decode.
 
 ---
 
-## 6. 측정 방법 (재현)
+## 6. How to measure (reproduce)
 
 ```bash
 TAPFLOW_STREAM_METRICS=1 TAPFLOW_IOS_CODEC=h264 pnpm dev     # H.264
-TAPFLOW_STREAM_METRICS=1                       pnpm dev     # JPEG(기본)
-TAPFLOW_STREAM_METRICS=1 TAPFLOW_JPEG_QUALITY=0.95 pnpm dev  # JPEG 품질 비교
+TAPFLOW_STREAM_METRICS=1                       pnpm dev     # JPEG (default)
+TAPFLOW_STREAM_METRICS=1 TAPFLOW_JPEG_QUALITY=0.95 pnpm dev  # JPEG quality comparison
 ```
 
-| 읽는 곳 | 로그 | 의미 |
+| Where to read | Log | Meaning |
 |---------|------|------|
-| **ios-agent** | `stream metrics ... NNfps NNKB/s avg=NNKB drop=N%` | 인코더 출력(원인) — 대역폭·평균 프레임 |
-| **relay** | `ws backpressure: N frame(s) dropped` | LAN 실제 드롭(결과). drop은 relay→browser 홉 |
+| **ios-agent** | `stream metrics ... NNfps NNKB/s avg=NNKB drop=N%` | encoder output (cause) — bandwidth, average frame |
+| **relay** | `ws backpressure: N frame(s) dropped` | actual LAN drops (effect). Drops are on the relay→browser hop |
 
-#### per-stage 지연 패널 (0단계)
+#### per-stage latency panel (step 0)
 
-브라우저에서 `?perf=1`로 perf 오버레이를 띄운다 (`Ctrl+Shift+P` 토글). `tweakpane`의 `p50/p95 ms` 폴더에 **glass→glass · decode→present · agent→relay** 가 실시간으로 뜬다. `Log latency summary` 버튼은 현재 누적 트레이스의 요약(JSON)을 콘솔에 찍어 §4 표에 붙여넣게 한다. `Export trace`는 `chrome://tracing` 호환 trace로 내보낸다.
+In the browser, open the perf overlay with `?perf=1` (toggle `Ctrl+Shift+P`). The `tweakpane` `p50/p95 ms` folder shows **glass→glass · decode→present · agent→relay** live. The `Log latency summary` button prints a summary (JSON) of the current accumulated trace to the console, to paste into the §4 table. `Export trace` exports a `chrome://tracing`-compatible trace.
 
 ```bash
-# 0단계 부검은 localhost(단일 클럭)에서. Vite :3001 = DEV 빌드라 계측이 켜진다.
+# Step-0 analysis on localhost (single clock). Vite :3001 = DEV build, so instrumentation is on.
 TAPFLOW_IOS_CODEC=h264 pnpm dev   # :3001?perf=1 → H.264 per-stage
-                       pnpm dev   # :3001?perf=1 → JPEG 기준선
+                       pnpm dev   # :3001?perf=1 → JPEG baseline
 ```
 
-> ⚠️ **계측은 DEV 빌드 전용**(`import.meta.env.DEV`). Vite 개발 서버(`:3001`)에서만 켜지고, **빌드된 LAN(`:4000`)에는 없다.** 0단계는 localhost 단일-클럭 부검이라 `:3001`이 정확히 맞는 환경 — glass→glass도 여기서만 유효하다.
+> ⚠️ **Instrumentation is DEV-build only** (`import.meta.env.DEV`). It is on only in the Vite dev server (`:3001`), **not in the built LAN (`:4000`)**. Step 0 is a localhost single-clock analysis, so `:3001` is exactly the right environment — glass→glass is valid only here.
 
-#### 디코더 tier 강제 (dev 오버라이드)
+#### force a decoder tier (dev override)
 
-URL 쿼리 `?decoder=`로 디코더를 강제해 **localhost(단일 클럭·패널)에서 tier별 비교**가 된다 (비-secure LAN 컨텍스트 불필요). IOSViewer가 DEV에서만 읽고, 선택된 디코더를 `[decoder] using <…>` 콘솔에 찍는다.
+The URL query `?decoder=` forces a decoder so you can **compare tiers on localhost (single clock + panel)** (no non-secure LAN context needed). IOSViewer reads it only in DEV and logs the chosen decoder to `[decoder] using <…>`.
 
 ```
-http://localhost:3001?perf=1                 # 자동 선택 (localhost=WebCodecs)
-http://localhost:3001?perf=1&decoder=mse     # MSE 강제 (LAN tier 측정)
+http://localhost:3001?perf=1                 # auto-select (localhost = WebCodecs)
+http://localhost:3001?perf=1&decoder=mse     # force MSE (measure the LAN tier)
 ```
 
-> MSE는 드롭이 아니라 **버퍼링**이라 FIFO tracker(submit↔present)가 1:1로 정확하다 — WebCodecs의 정확 timestamp 매칭이 없어도 신뢰 가능. (WASM 추가 시 `?decoder=wasm`도 같은 지점에 들어온다.)
+> MSE **buffers** rather than dropping, so the FIFO tracker (submit↔present) is accurate 1:1 — trustworthy even without WebCodecs's exact timestamp matching. (When WASM is added, `?decoder=wasm` enters the same point.)
 
-> **LAN 테스트 주의:** LAN(`:4000`)은 relay가 빌드된 `packages/relay/public/`를 서빙한다. 대시보드 소스 변경은 `pnpm --filter @tapflowio/dashboard build` 후 `:4000` 새로고침해야 반영된다 (Vite `:3001`은 localhost 전용).
+> **LAN testing note:** the LAN (`:4000`) relay serves the built `packages/relay/public/`. Dashboard source changes need `pnpm --filter @tapflowio/dashboard build` then a `:4000` refresh to apply (Vite `:3001` is localhost-only).
 
 ---
 
-## 7. 결정 로그 (시간순 누적)
+## 7. Decision log (accumulated chronologically)
 
-- **2026-06-03 — 코덱 협상 + H.264 기본 승격:** WASM 경로까지 측정으로 북극성 도달했으나 인코더 기본은 여전히 JPEG였음. 그냥 기본을 H.264로 올리면 **디코더 없는 브라우저는 검은 화면**(agent가 일방 H.264 송출, 협상 부재). → **사전 코덱 협상** 먼저: 브라우저가 `canDecodeH264()`(=`pickDecoder` 동일 조건, 인스턴스 생성 없이 capability만 평가)로 판정해 `device:boot` payload에 `acceptH264`를 실어 보냄 → agent가 우선순위 **`env=jpeg` > `acceptH264` > 기본**으로 코덱 결정(`DeviceState`에 저장 → reconnect 시 동일 코덱). 필드 누락(버전 스큐)=JPEG 안전 폴백. relay는 payload가 `unknown`이라 그대로 forward(변경 0). **조사(caniuse): H.264 가능 ~95%(WebGL2가 하한선), fallback 필요 ~5%(iOS14↓·IE11/레거시Edge·Chrome56↓)** — 사전 feature-detect로 100% 결정론적으로 잡힘 → **런타임 디코드-실패 폴백은 과투자라 Out of Scope**. 그 뒤 **기본 승격**: `TAPFLOW_IOS_CODEC` 기본 `jpeg`→`h264`, `=jpeg` opt-out 유지. JPEG 경로(MjpegStreamer·createImageBitmap·relay JPEG=keyframe 가정) 전부 보존. 단위테스트 ios +5(코덱 결정 분기)·dashboard +5(`canDecodeH264`), ios 158·dashboard pickDecoder 13 통과, 양 패키지 tsc·lint 통과. PR-D 스모크에서 찢어짐은 사라졌으나 드롭 후 **짧은 freeze(렉 체감)** 잔존. 진단: freeze = ①**혼잡 지속**(iOS 인코더에 비트레이트 캡 부재 → 스크롤 ~20Mbps 버스트가 LAN 초과 → 지속 백프레셔) + ②**다음 IDR까지 대기**(주기 2s). **A:** VideoToolbox `AverageBitRate`+`DataRateLimits` 캡(`TAPFLOW_IOS_H264_BITRATE`, 기본 8Mbps=Android와 동일) → 혼잡 자체 축소. **B:** relay의 keyframe-aware sender가 버퍼 회복했는데 키프레임 없으면 `onWantKeyframe`→relay가 agent에 `stream:request-idr`(throttle 500ms)→ios-agent→swift stdin `0x01`→다음 프레임 강제 IDR(기존 ForceKeyFrame 재사용) → 혼잡 풀리면 ~즉시 재동기(2s 대기 제거). Android는 scrcpy 프로토콜이라 IDR 요청 미지원(메시지 무시, 무해). 단위테스트 +2(onWantKeyframe), 전 패키지 tsc/lint·테스트 통과(agent-core 23·relay 168·ios 153). swift 재컴파일. **디바이스 검증(2026-06-03): freeze 사라짐. 단 `DataRateLimits`(하드 캡)가 고모션에서 프레임 손상(찢어짐) 유발 → 제거하고 `AverageBitRate`(소프트 타겟)만 유지.** 재검증: 찢어짐 없음·freeze 짧음. 교훈: **하드 비트레이트 캡(DataRateLimits) 금지, AverageBitRate만.**
-- **2026-06-03 — PR-D relay drop-to-keyframe 구현:** WASM(버퍼0) 전환으로 노출된 LAN 스크롤 찢어짐 해결. relay의 drop-to-latest(`sendBinaryWithBackpressure`)는 H.264 P-frame을 버리면 다음 IDR까지 손상 → **세션별 `createKeyframeAwareSender`**(agent-core/stream.ts) 도입: 백프레셔로 한 번 드롭하면 **다음 키프레임(IDR)이 보낼 수 있을 때까지 전부 드롭** → 디코더가 끊긴 참조의 P를 절대 안 받음(찢어짐 대신 1–2s 내 IDR로 재동기). 키프레임 판별은 **envelope byte5 플래그**(NAL 파싱 0). JPEG/무-envelope=항상 키프레임 → 기존 drop-to-latest 동일 보존. agent-core 단위테스트 7개(상태머신)·relay tsc/168테스트 통과. **검증 남음: LAN 스크롤 재현(찢어짐→짧은 freeze)**. (선택 후속: 드롭 시 agent에 IDR 재요청 `stream:request-idr`로 복구 단축 — 현재는 주기 IDR 의존.)
-- **2026-06-03 — 디코더 2-tier 단순화 (MSE 완전 제거, PR#2):** 방향 확정 — **HTTPS→WebCodecs / HTTP→WASM, iOS·Android 동일 파이프라인.** MSEDecoder·createJMuxer·jmuxer.d.ts·jmuxer 의존성 삭제, `pickDecoder`는 createMuxer 인자 제거 후 2-tier(secure→WebCodecs, else wasm-capable→WASM, else null). 두 뷰어 `pickDecoder()` 무인자. **Android baseline 강제**(`ScrcpySession` video_codec_options `profile:int=1`) — WASM이 baseline only라 MSE 안전망 제거 시 필수. (핀된 `OMX.google.h264.encoder`는 소프트 인코더라 이미 baseline일 가능성 높음 — 명시 고정으로 결정화. 에뮬 스모크로 인코더가 profile 옵션 수용하는지 확인 필요.) dashboard 169 테스트·tsc·build 통과. **스모크 PASS(2026-06-03):** ① localhost iOS `[sps-vui] profileIdc:66` + decode→present 2.3ms 유지 ② scrcpy가 `profile:int=1` 수용·정상 스트리밍 ③ **:4000 평문 HTTP에서 Android(1080×2424)가 WASM으로 정상 렌더 = baseline 간접 확증**, iOS도 정상. **발견:** iOS 스크롤 시 relay `ws backpressure` 드롭 → **간헐 화면 찢어짐**(WASM은 버퍼가 없어 MSE보다 드롭이 적나라). 이 PR 회귀 아님 = relay drop-to-latest의 H.264 손상. → **PR-D(drop-to-keyframe) unblock**(MSE 이탈 완료) = 다음 단계.
-- **2026-06-02 — 2단계 WASM 구현 완료 + 측정 게이트 PASS (북극성 도달):** PR#1(R1~R3+R5 오버라이드) 구현 — `tinyh264@0.0.7`(baseline·I/P only, wasm는 data-URI 인라인=별도 에셋 불필요) + `WASMDecoder`(worker 캡슐화, AU 그대로 transfer) + 신규 `YUVWebGLRenderer`(I420 3-텍스처 BT.709 limited) + IOSViewer `?decoder=wasm` 오버라이드. 단위테스트 17개, 전체 183 통과, `vite build` worker 청크 173KB 검증. **localhost `?perf=1&decoder=wasm` 실측: decode→present 정지 8.7/p95 30.4, 스크롤 14.3/p95 37.9; glass→glass 정지 9.6, 스크롤 16ms.** MSE(239/229) 대비 **~27x·~16x↓**, localhost-JPEG(12.4/9.4) 동급 — **비-secure 경로로 북극성 달성.** 색·체감 양호, CPU 여유(localhost=워스트케이스). → **Q4: 다운스케일 불필요 확정.** 다음: pickDecoder flip(R4=PR#2)로 비-secure 기본을 WASM으로.
-- **2026-06-02 — H.264 마이그레이션 (Phase 2):** JPEG 풀프레임 대역폭 문제 확정(정지 3.3MB/s, LAN 스크롤 드롭 16–27/s) → VideoToolbox H.264 도입. 대역폭은 ~140x(정지)/~5x(스크롤) 해결, 드롭 거의 제거.
-- **2026-06-02 — 그러나 지연 발견:** H.264는 코덱 파이프라인 + LAN MSE 버퍼로 **JPEG보다 반응 느림**. localhost-JPEG가 "직접 조작 대등" 기준임을 확립. → "H.264로 갈아타기"가 아니라 **"저지연 디코드/전송 경로"가 진짜 과제**로 재정의.
-- **2026-06-02 — 캠페인 시작:** 측정 기반으로 병목을 하나씩. WASM 디코더(tier1 LAN-HTTP)를 핵심 레버로. PR-D(drop-to-keyframe)는 MSE 이탈 가능성으로 보류.
-- **2026-06-02 — 2단계 WASM plan 확정(설계 결정):** 구현 plan 작성(`.work/2026-06-02-wasm-tinyh264-decoder-plan.md`, 로컬). 핵심 결정 ① **디코더-불가지 경계** — `WASMDecoder`(Decoder 구현) + 신규 `YUVWebGLRenderer` 뒤에 구체 디코더를 캡슐화. **tinyh264 첫 후보지만 락인 아님**: 우리가 인코더=VideoToolbox baseline 소유 → baseline-only 디코더 제약이 무의미하고, full-res CPU 한계 시 렌더러/pickDecoder 불변 상태로 SIMD 빌드(ffmpeg.wasm·OpenH264)로 디코더만 교체. ② **기존 `WebGLVideoRenderer` 재사용 불가** — `texImage2D(VideoFrame)`은 WebCodecs=secure 전용인데 WASM 티어는 비-secure가 존재 이유 + tinyh264는 I420 YUV 출력 → **Y/U/V 3-텍스처 BT.709 셰이더 렌더러 신규 필요**(저지연 이득은 디코더 내부가 아니라 `<video>` 버퍼 부재에서 옴 → 디코더 무관 구조적). ③ **PR=옵션 A(2 PR)** — PR#1=구현 전부를 `?decoder=wasm` dev 오버라이드 뒤에만(pickDecoder 불변=프로덕션 0영향, 여기서 게이트 측정), PR#2=pickDecoder flip(비-secure→WASM 우선)은 **게이트 통과 후에만**. R1(Vite .wasm+worker 에셋 배선) 막히면 선행 분리. ④ Q4(full-res CPU 시퀀싱: 다운스케일/SIMD교체/롤백)=**R5 게이트 측정 보고 결정**. → **다음: R1 착수.**
-- **2026-06-02 — MSE 실측 → WASM 정당화(2단계 진입):** reorder=0 수정이 모든 디코더에 적용된 뒤 MSE 경로를 `?decoder=mse` dev 오버라이드로 localhost(단일클럭) 측정 → decode→present p50 **~235ms**(WebCodecs ~2.5ms 대비). jmuxer `flushingTime:0`이 이미 적용된 상태라 이건 `<video>` 미디어-엘리먼트 버퍼 = **구조적·MSE 고유**(SPS·reorder와 무관). MSE는 드롭이 아니라 버퍼링이라 FIFO tracker가 정확(드리프트 없음). → **tier1 LAN-HTTP는 MSE로 북극성 불가**가 데이터로 확정 → **WASM(미디어엘리먼트·버퍼 없음, secure 불필요) 착수**. dev 디코더 강제: IOSViewer `?decoder=mse|webcodecs`(WASM 추가 시 `wasm`도 동일 지점).
-- **2026-06-02 — 1단계 인코더 이전 완료:** SPS reorder=0 재작성을 **ios-agent로 이전**(`agent-core/utils/sps.ts` canonical, 키프레임 SPS만 `rewriteLowLatencySpsInFrame`). 인코더가 소스에서 reorder=0을 선언해 **WebCodecs·MSE·향후 WASM 전 경로**가 혜택. localhost e2e 확인: 브라우저 `[sps-vui]`가 `bitstreamRestriction:true, maxNumReorderFrames:0`(agent 재작성본 수신), decode→present p50 2.2ms 유지. 브라우저 사본은 방어선(no-op). **다음(2단계 진입): MSE 잔여 지연 실측** — `pnpm --filter @tapflowio/dashboard dev --host` 후 mac에서 `http://<mac-LAN-IP>:3001?perf=1`(비-secure→MSE, 같은 기기→단일클럭)로 MSE 미디어버퍼가 얼마 남는지 측정 → WASM 투자 판단.
-- **2026-06-02 — 0단계 부검 완료 + 1단계 검증 (핵심 돌파):** localhost-WebCodecs-H.264 지연 ~267ms의 범인 확정 — 전송/relay(~1ms)·입력 백로그(queueSize=0) 모두 무죄, **디코더가 max DPB(~8프레임) 버퍼링**. SPS VUI 파싱으로 `bitstreamRestriction:false`(Level 5.0) 확인 → 인코더가 "리오더 0"을 안 알려줘 디코더가 최악 가정. baseline이라 실제 리오더는 0인 **순수 신호 누락**. **수정:** WebCodecsCore가 configure 직전 SPS에 `max_num_reorder_frames=0`/`max_dec_frame_buffering=num_ref` 주입(`rewriteSpsLowLatency`). **결과: decode→present 267→2.5ms(~100x), glass→glass 235→3.5ms, 체감 localhost-JPEG급 도달.** (이 시점엔 WebCodecs 경로만 — 이후 인코더 이전으로 전 경로 확대, 위 항목 참조.)
-- **2026-06-02 — 0단계 계측 착수:** 기존 `perf` 시스템(`?perf=1`, FrameTiming, trace export)을 **재활용**(신규 샘플러 폐기). 핵심 공백은 H.264 경로가 `decodeMs/paintMs=0`으로 찍히던 것 — 디코더 surface로 fire-and-forget이라 부검 대상이 사각지대였음. 해결: Decoder에 `onDecodedFrame`(WebCodecs=output 콜백, MSE=`requestVideoFrameCallback`) 추가 + `FrameLatencyTracker`(submit↔present FIFO 상관, **baseline·B-frame OFF라 재정렬 없음→정확**)로 decode→present·glass→glass 복원. glass→glass는 epoch present−capturedAt이라 **localhost 단일 클럭에서만** 산출. 프로토콜/envelope 불변, 인터페이스 변경은 dashboard 내부(비 breaking). 측정 수치는 §4에 누적.
+- **2026-06-03 — codec negotiation + promote H.264 to default:** WASM brought every path to the goal by measurement, but the encoder default was still JPEG. Simply defaulting to H.264 would give **a black screen on browsers without a decoder** (the agent sends H.264 one-way, no negotiation). → **Negotiate the codec up front** first: the browser decides via `canDecodeH264()` (= the same conditions as `pickDecoder`, evaluating capability only without creating an instance) and sends `acceptH264` in the `device:boot` payload → the agent decides the codec by priority **`env=jpeg` > `acceptH264` > default** (stored in `DeviceState` → same codec on reconnect). A missing field (version skew) = safe JPEG fallback. The relay forwards the payload as `unknown` (zero changes). **Research (caniuse): H.264 possible ~95% (WebGL2 is the floor), fallback needed ~5% (iOS14↓, IE11/legacy Edge, Chrome56↓)** — caught deterministically 100% by up-front feature-detect → **a runtime decode-failure fallback is over-investment, so Out of Scope.** Then **promote the default**: `TAPFLOW_IOS_CODEC` default `jpeg`→`h264`, `=jpeg` opt-out kept. The JPEG path (MjpegStreamer, createImageBitmap, relay's JPEG=keyframe assumption) is fully preserved. Unit tests ios +5 (codec-decision branches), dashboard +5 (`canDecodeH264`); ios 158, dashboard pickDecoder 13 pass; both packages tsc·lint pass. In the PR-D smoke, tearing was gone but a **short freeze (felt as lag)** remained after a drop. Diagnosis: freeze = ① **persistent congestion** (no bitrate cap on the iOS encoder → a ~20Mbps scroll burst exceeds the LAN → sustained backpressure) + ② **waiting for the next IDR** (2s period). **A:** VideoToolbox `AverageBitRate` + `DataRateLimits` cap (`TAPFLOW_IOS_H264_BITRATE`, default 8Mbps = same as Android) → reduces the congestion itself. **B:** when the relay's keyframe-aware sender recovers buffer but has no keyframe, `onWantKeyframe` → the relay sends the agent `stream:request-idr` (throttle 500ms) → ios-agent → swift stdin `0x01` → forces an IDR on the next frame (reusing the existing ForceKeyFrame) → once congestion clears, re-syncs ~immediately (removing the 2s wait). Android uses the scrcpy protocol so IDR requests aren't supported (the message is ignored, harmless). Unit tests +2 (onWantKeyframe); all packages tsc/lint·tests pass (agent-core 23, relay 168, ios 153). swift recompiled. **Device verification (2026-06-03): freeze gone. But `DataRateLimits` (a hard cap) caused frame corruption (tearing) under high motion → removed it, keeping only `AverageBitRate` (a soft target).** Re-verified: no tearing, short freeze. Lesson: **no hard bitrate cap (DataRateLimits), only AverageBitRate.**
+- **2026-06-03 — PR-D relay drop-to-keyframe:** Fixes the LAN scroll tearing exposed by the WASM (zero-buffer) switch. The relay's drop-to-latest (`sendBinaryWithBackpressure`) corrupts H.264 up to the next IDR if it drops a P-frame → introduced a per-session **`createKeyframeAwareSender`** (agent-core/stream.ts): once it drops under backpressure, it **drops everything until the next keyframe (IDR) can be sent** → the decoder never receives a P referencing a broken chain (re-syncs via IDR within 1–2s instead of tearing). Keyframe detection uses the **envelope byte5 flag** (zero NAL parsing). JPEG/no-envelope = always a keyframe → existing drop-to-latest is preserved identically. agent-core unit tests 7 (state machine), relay tsc/168 tests pass. **Verification remaining: reproduce LAN scroll (tearing → short freeze).** (Optional follow-up: shorten recovery by re-requesting an IDR from the agent on drop via `stream:request-idr` — currently relies on the periodic IDR.)
+- **2026-06-03 — 2-tier decoder simplification (MSE fully removed, PR#2):** Direction settled — **HTTPS→WebCodecs / HTTP→WASM, iOS·Android identical pipeline.** Deleted MSEDecoder, createJMuxer, jmuxer.d.ts, the jmuxer dependency; `pickDecoder` drops the createMuxer argument and is 2-tier (secure→WebCodecs, else wasm-capable→WASM, else null). Both viewers call `pickDecoder()` with no argument. **Force Android baseline** (`ScrcpySession` video_codec_options `profile:int=1`) — required once the MSE safety net is removed since WASM is baseline only. (The pinned `OMX.google.h264.encoder` is a software encoder so it's likely already baseline — pinning it explicitly crystallizes the decision. Emulator smoke needed to confirm the encoder accepts the profile option.) dashboard 169 tests·tsc·build pass. **Smoke PASS (2026-06-03):** ① localhost iOS `[sps-vui] profileIdc:66` + decode→present 2.3ms held ② scrcpy accepts `profile:int=1` and streams fine ③ **on plaintext HTTP at :4000, Android (1080×2424) renders fine via WASM = indirect proof of baseline**, iOS fine too. **Finding:** on iOS scroll, relay `ws backpressure` drops → **intermittent screen tearing** (WASM has no buffer so drops are more exposed than MSE). Not a regression from this PR = H.264 corruption from relay drop-to-latest. → **PR-D (drop-to-keyframe) unblocked** (MSE exit complete) = next step.
+- **2026-06-02 — step-2 WASM done + measurement gate PASS (goal reached):** PR#1 (R1–R3 + R5 override) implemented — `tinyh264@0.0.7` (baseline, I/P only; wasm inlined as a data-URI = no separate asset) + `WASMDecoder` (worker-encapsulated, transfers the AU as-is) + a new `YUVWebGLRenderer` (I420 3-texture BT.709 limited) + IOSViewer `?decoder=wasm` override. Unit tests 17, full suite 183 pass, `vite build` worker chunk 173KB verified. **localhost `?perf=1&decoder=wasm` measured: decode→present still 8.7/p95 30.4, scroll 14.3/p95 37.9; glass→glass still 9.6, scroll 16ms.** **~27x·~16x↓** vs MSE (239/229), on par with localhost-JPEG (12.4/9.4) — **goal achieved on the non-secure path.** Color and feel good, CPU headroom (localhost = worst case). → **Q4: downscale confirmed not needed.** Next: pickDecoder flip (R4=PR#2) to make WASM the non-secure default.
+- **2026-06-02 — H.264 migration (Phase 2):** Confirmed the JPEG full-frame bandwidth problem (still 3.3MB/s, LAN scroll drops 16–27/s) → introduced VideoToolbox H.264. Bandwidth solved ~140x (still) / ~5x (scroll), drops nearly eliminated.
+- **2026-06-02 — but latency discovered:** H.264 is **slower to respond than JPEG** due to the codec pipeline + the LAN MSE buffer. Established localhost-JPEG as the "feels-like-direct" bar. → Redefined the real task as **"a low-latency decode/transport path"**, not "switching to H.264".
+- **2026-06-02 — work begins:** Tackle bottlenecks one at a time, measurement-driven. The WASM decoder (tier1 LAN-HTTP) is the key lever. PR-D (drop-to-keyframe) held off given a possible MSE exit.
+- **2026-06-02 — step-2 WASM plan locked (design decision):** Wrote the implementation plan (`.work/2026-06-02-wasm-tinyh264-decoder-plan.md`, local). Key decisions: ① **decoder-agnostic boundary** — encapsulate the concrete decoder behind `WASMDecoder` (a Decoder impl) + the new `YUVWebGLRenderer`. **tinyh264 is the first candidate but not a lock-in**: since we own the encoder = VideoToolbox baseline, a baseline-only decoder constraint is moot, and at a full-res CPU ceiling we can swap only the decoder for a SIMD build (ffmpeg.wasm/OpenH264) with the renderer/pickDecoder unchanged. ② **can't reuse the existing `WebGLVideoRenderer`** — `texImage2D(VideoFrame)` is WebCodecs=secure-only, but the WASM tier exists precisely for non-secure, and tinyh264 outputs I420 YUV → **a new Y/U/V 3-texture BT.709 shader renderer is needed** (the latency win comes not from inside the decoder but from the absence of the `<video>` buffer → structural, decoder-independent). ③ **PR = option A (2 PRs)** — PR#1 = the whole implementation behind the `?decoder=wasm` dev override only (pickDecoder unchanged = zero production impact, gate-measure here), PR#2 = the pickDecoder flip (non-secure → WASM first) **only after the gate passes.** If R1 (wiring Vite .wasm + worker assets) blocks, split it out first. ④ Q4 (full-res CPU sequencing: downscale/SIMD-swap/rollback) = **decided after the R5 gate measurement.** → **Next: start R1.**
+- **2026-06-02 — MSE measured → WASM justified (entering step 2):** After the reorder=0 fix applied to every decoder, measured the MSE path on localhost (single clock) via the `?decoder=mse` dev override → decode→present p50 **~235ms** (vs WebCodecs ~2.5ms). With jmuxer `flushingTime:0` already applied, this is the `<video>` media-element buffer = **structural and MSE-inherent** (unrelated to SPS/reorder). MSE buffers rather than dropping, so the FIFO tracker is accurate (no drift). → Data confirms **tier1 LAN-HTTP can't reach the goal with MSE** → **started WASM** (no media element, no buffer, no secure context needed). dev decoder force: IOSViewer `?decoder=mse|webcodecs` (when WASM is added, `wasm` at the same point).
+- **2026-06-02 — step-1 encoder migration done:** Moved the SPS reorder=0 rewrite **into ios-agent** (`agent-core/utils/sps.ts` canonical, only keyframe SPS via `rewriteLowLatencySpsInFrame`). The encoder declaring reorder=0 at the source benefits **every path — WebCodecs, MSE, and future WASM**. localhost e2e confirmed: the browser `[sps-vui]` shows `bitstreamRestriction:true, maxNumReorderFrames:0` (receiving the agent's rewrite), decode→present p50 2.2ms held. The browser copy is a defensive line (no-op). **Next (entering step 2): measure residual MSE latency** — after `pnpm --filter @tapflowio/dashboard dev --host`, from the Mac open `http://<mac-LAN-IP>:3001?perf=1` (non-secure→MSE, same device→single clock) to measure how much MSE media buffer remains → decide the WASM investment.
+- **2026-06-02 — step-0 analysis done + step-1 verified (key progress):** Pinned the cause of the ~267ms localhost-WebCodecs-H.264 latency — transport/relay (~1ms) and input backlog (queueSize=0) are clean, **the decoder buffers max DPB (~8 frames)**. SPS VUI parsing confirmed `bitstreamRestriction:false` (Level 5.0) → the encoder doesn't tell the decoder "reorder 0", so it assumes the worst. It's baseline so the actual reorder is 0 — **a pure missing signal**. **Fix:** WebCodecsCore injects `max_num_reorder_frames=0` / `max_dec_frame_buffering=num_ref` into the SPS just before configure (`rewriteSpsLowLatency`). **Result: decode→present 267→2.5ms (~100x), glass→glass 235→3.5ms, feel reaches localhost-JPEG-class.** (Only the WebCodecs path at this point — later widened to all paths via the encoder migration; see the entry above.)
+- **2026-06-02 — step-0 instrumentation begins:** **Reused** the existing `perf` system (`?perf=1`, FrameTiming, trace export) (discarding a new sampler). The key gap was the H.264 path logging `decodeMs/paintMs=0` — fire-and-forget to the decoder surface left the analysis target in a blind spot. Fix: added `onDecodedFrame` to Decoder (WebCodecs = output callback, MSE = `requestVideoFrameCallback`) + a `FrameLatencyTracker` (submit↔present FIFO correlation, **accurate because baseline·B-frame OFF means no reordering**) to recover decode→present and glass→glass. glass→glass is epoch present−capturedAt, so it's only computed **on a localhost single clock**. Protocol/envelope unchanged; the interface change is internal to the dashboard (non-breaking). Measured numbers accumulate in §4.
