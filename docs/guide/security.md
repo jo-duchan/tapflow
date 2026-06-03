@@ -20,7 +20,7 @@ Unlike Appetize or BrowserStack, there is no step where you upload your app bina
 
 tapflow's recommended deployment keeps the agent and relay **on the same LAN**.
 
-```
+```text
 browser (anywhere) ──WAN──▶ relay ◀──LAN──▶ agent
                               │
                               └── SQLite DB, build files

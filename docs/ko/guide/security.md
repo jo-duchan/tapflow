@@ -20,7 +20,7 @@ Appetize나 BrowserStack처럼 앱 바이너리를 외부 서버에 업로드할
 
 tapflow의 권장 배포 구조는 agent와 relay가 **같은 LAN 안에 있는 것**입니다.
 
-```
+```text
 브라우저 (어디서든) ──WAN──▶ relay ◀──LAN──▶ agent
                               │
                               └── SQLite DB, 빌드 파일
