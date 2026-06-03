@@ -10,7 +10,7 @@ tapflow does not route anything through an external cloud service.
 |------|----------------|-----------------|
 | Build files (.ipa / .apk) | Local storage on the Mac running the relay | ❌ |
 | Device stream (video · touch) | Browser ↔ relay ↔ agent — all internal | ❌ |
-| Session recordings | Stored on the relay's Mac, auto-deleted after 72h | ❌ |
+| Session recordings | Stored on the relay's Mac; expire after 72h and are purged automatically | ❌ |
 | Logs | The Mac running the relay and agents | ❌ |
 | Account & team data | SQLite DB on the relay's Mac | ❌ |
 
