@@ -171,7 +171,7 @@ Apply via the `level` prop on the `Card` component:
 | `rounded-sm` | 4px | Badges, tight inset elements |
 | `rounded-md` | 6px | Form inputs, nav buttons, dropdowns |
 | `rounded-lg` | 8px | Cards (`--radius` default) |
-| `rounded-pill` | 100px | Marketing-scale CTA buttons (Login Sign in) |
+| `rounded-pill` | 100px | Marketing-scale CTA buttons |
 | `rounded-pill-sm` | 64px | Tab ghost pills |
 | `rounded-full` | 9999px | Icon buttons, avatars |
 
@@ -200,9 +200,9 @@ Apply via the `level` prop on the `Card` component:
 |------|--------|-----|
 | `default` | h-10 (40px) | General buttons |
 | `sm` | h-9 (36px) | Form submit, inline actions |
-| `lg` | h-11 (44px) | Emphasized buttons |
+| `lg` | h-11 (44px) | Emphasized buttons, auth form submit (Login, Setup) |
 | `icon` | h-10 w-10 | Square icon buttons |
-| `pill` | h-12 (48px) + `rounded-pill` | Marketing-scale CTA (Login, etc.) |
+| `pill` | h-12 (48px) + `rounded-pill` | Marketing-scale CTA |
 | `nav` | h-7 (28px) + `text-xs` | Table inline, navigation |
 
 ### Cards

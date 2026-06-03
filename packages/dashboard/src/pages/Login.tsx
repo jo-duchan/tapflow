@@ -79,7 +79,7 @@ export function Login() {
               {errors.password && <p className="text-sm text-destructive">{errors.password.message}</p>}
             </div>
             {errors.root && <p className="text-sm text-destructive">{errors.root.message}</p>}
-            <Button type="submit" size="pill" disabled={isSubmitting} className="w-full mt-1">
+            <Button type="submit" size="lg" disabled={isSubmitting} className="w-full mt-1">
               {isSubmitting ? 'Signing in…' : 'Sign in'}
             </Button>
           </form>
