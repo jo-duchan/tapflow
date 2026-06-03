@@ -720,7 +720,7 @@ export function IOSViewer({
                     <img src={`data:image/png;base64,${btn.pressedPng}`} style={{
                       position: 'absolute', zIndex: btn.onTop ? 3 : 1,
                       left: `${isTopAnchor ? rolloverLeftPct : isHovered ? hoverLeftPct : rolloverLeftPct}%`,
-                      top: `${isTopAnchor ? (isHovered ? hoverTopPct : imgTopPct) : (btn.pressedRect.y / chrome.compositeHeight) * 100}%`,
+                      top: `${isTopAnchor ? (isHovered ? hoverTopPct : imgTopPct) : imgTopPct}%`,
                       width: `${(btn.pressedRect.width / chrome.compositeWidth) * 100}%`,
                       height: `${(btn.pressedRect.height / chrome.compositeHeight) * 100}%`,
                       pointerEvents: 'none', userSelect: 'none',
