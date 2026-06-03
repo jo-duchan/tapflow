@@ -10,7 +10,7 @@ tapflow does not route anything through an external cloud service.
 |------|----------------|-----------------|
 | Build files (.ipa / .apk) | Local storage on the Mac running the relay | ❌ |
 | Device stream (video · touch) | Browser ↔ relay ↔ agent — all internal | ❌ |
-| Session recordings | Saved locally in the browser (no server upload) | ❌ |
+| Session recordings | Stored on the relay's Mac, auto-deleted after 72h | ❌ |
 | Logs | The Mac running the relay and agents | ❌ |
 | Account & team data | SQLite DB on the relay's Mac | ❌ |
 
@@ -32,18 +32,13 @@ To apply TLS to the browser ↔ relay leg (WAN), use a reverse proxy or tunnel i
 
 ## PAT-based authentication
 
-Every API call in tapflow is controlled by a **Personal Access Token (PAT)**.
+Programmatic access to tapflow is controlled by **Personal Access Tokens (PAT)**.
 
-- Tokens are issued per team member. When someone leaves, revoke only their token.
-- Each token carries a **scope** — a `read-only` token can view streams but cannot upload builds or send device input.
-- CI/CD pipeline tokens can be scoped to `upload` only, keeping permissions minimal.
-
-| Scope | Permitted actions |
-|-------|-------------------|
-| `admin` | Team management, token issuance, all settings |
-| `upload` | Upload build files |
-| `stream` | Access device sessions, send touch input |
-| `read` | List builds, take screenshots |
+- Tokens are issued per user. When someone leaves, revoke their token.
+- Each token carries a **scope** that limits what it can do:
+  - `builds:write` — upload builds, for CI/CD pipelines (issued from the dashboard under Settings → Tokens)
+  - `view` — read and device-stream access
+- Dashboard access for team members is governed separately by **roles** (Admin / Developer / QA / Viewer), not by PATs.
 
 ## Access control boundaries
 
