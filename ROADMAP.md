@@ -84,6 +84,7 @@ drop-to-keyframe — and it continues here.
 
 - [#102](https://github.com/jo-duchan/tapflow/issues/102) — streaming performance improvements (encoding + transport)
 - [#195](https://github.com/jo-duchan/tapflow/issues/195) — optimize capture cadence + touch input path
+- [#202](https://github.com/jo-duchan/tapflow/issues/202) — iOS session recording at native resolution (match Android fidelity)
 - [#156](https://github.com/jo-duchan/tapflow/issues/156) — evaluate WebTransport for relay→browser streaming
 - [#153](https://github.com/jo-duchan/tapflow/issues/153) — app log viewer in the QA session
 
