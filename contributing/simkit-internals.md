@@ -1,103 +1,103 @@
-# SimulatorKit 내부 구조 역공학 노트
+# SimulatorKit Internals — Reverse-Engineering Notes
 
-> 이 문서는 tapflow의 iOS 터치·버튼 주입 구현 과정에서 수행한 SimulatorKit 역공학 결과를 기록한 참고 자료다.
-> Xcode 26 (SimulatorKit 버전 기준) 기반이며, 향후 Xcode 업그레이드 시 변경될 수 있다.
+> This document records the SimulatorKit reverse-engineering done while implementing iOS touch/button injection for tapflow. It is a reference.
+> It is based on Xcode 26 (the SimulatorKit version at that time) and may change with future Xcode upgrades.
 >
-> 역공학 과정에서 [tddworks/baguette](https://github.com/tddworks/baguette) (Apache-2.0) 의 분석 결과를 참고했다.
+> During the reverse engineering we referenced the analysis from [tddworks/baguette](https://github.com/tddworks/baguette) (Apache-2.0).
 
 ---
 
-## 1. 바이너리 개요
+## 1. Binary overview
 
-**경로:** `$DEVELOPER_DIR/Library/PrivateFrameworks/SimulatorKit.framework/SimulatorKit`
+**Path:** `$DEVELOPER_DIR/Library/PrivateFrameworks/SimulatorKit.framework/SimulatorKit`
 
-- **형식:** Fat binary (Universal)
+- **Format:** Fat binary (Universal)
   - slice 0: x86_64, file offset `0x4000`, size `0x113e70`
   - slice 1: ARM64e, file offset `0x118000`, size `0x133740`
-- **언어:** Swift + ObjC 혼합 (Swift 클래스는 mangled name으로 노출)
-- **공개 헤더:** 없음 — `nm`, `otool`, `strings`로 심볼 추출
+- **Language:** mixed Swift + ObjC (Swift classes are exposed under mangled names)
+- **Public headers:** none — extract symbols with `nm`, `otool`, `strings`
 
-심볼 추출 기본 명령:
+Basic symbol-extraction commands:
 
 ```bash
-# ARM64 글로벌 심볼 목록 (Fat binary에서도 동작)
+# List ARM64 global symbols (works even on the Fat binary)
 nm -gU $SIMKIT | grep <keyword>
 
-# C 함수 원형 추출 (strings가 실제 파라미터 타입까지 기록해둔 경우)
+# Extract C function prototypes (when strings captured the actual parameter types)
 strings $SIMKIT | grep "IndigoHIDMessage \*"
-# 예시 출력:
+# Example output:
 #   IndigoHIDMessage *IndigoHIDMessageForHIDArbitrary(IndigoHIDTarget, uint32_t, uint32_t, IndigoHIDButtonOp)
 #   IndigoHIDMessage *IndigoHIDMessageForButton(IndigoHIDButtonKeyCode, IndigoHIDButtonOp, IndigoHIDTarget)
 #   IndigoHIDMessage *IndigoHIDMessageForMouseNSEvent(CGPoint *, CGPoint *, IndigoHIDTarget, NSEventType, NSSize, IndigoHIDEdge)
 
-# ObjC 메서드 목록 (런타임에서)
-# object_getClass(instance) → class_copyMethodList 로 열거
+# List ObjC methods (at runtime)
+# object_getClass(instance) → enumerate via class_copyMethodList
 ```
 
-> **팁**: `strings $SIMKIT | grep "IndigoHIDMessage \*"` 한 줄로 C 함수 원형과 파라미터 타입을 한꺼번에 확인할 수 있다. 디스어셈블 없이도 시그니처를 신뢰할 수 있는 빠른 방법.
+> **Tip**: a single line, `strings $SIMKIT | grep "IndigoHIDMessage \*"`, reveals C prototypes together with parameter types. A fast way to trust a signature without disassembling.
 
 ---
 
-## 2. 터치 주입 아키텍처 (Xcode 26)
+## 2. Touch-injection architecture (Xcode 26)
 
-### 2-1. 구버전 방식 (Xcode 25 이전, 삭제됨)
+### 2-1. Old approach (before Xcode 25, removed)
 
 ```
 SimDevice.sendHIDEvent:(IOHIDEventRef)
 ```
 
-Xcode 26에서 `SimDevice`에 해당 셀렉터가 존재하지 않는다. `responds(to:)` 체크 없이 `class_getMethodImplementation`으로 IMP를 얻으면 NULL이 아닌 **포워딩 트램펄린**이 반환되어, 호출 시 `unrecognized selector` crash가 발생한다.
+On Xcode 26 that selector no longer exists on `SimDevice`. If you obtain the IMP via `class_getMethodImplementation` without a `responds(to:)` check, you get a non-NULL **forwarding trampoline**, and calling it crashes with `unrecognized selector`.
 
-> **교훈:** `class_getMethodImplementation`은 셀렉터 존재 여부 확인에 사용하면 안 된다. 반드시 `responds(to:)` + `class_getInstanceMethod`를 함께 사용해야 한다.
+> **Lesson:** `class_getMethodImplementation` must not be used to check whether a selector exists. Always use `responds(to:)` together with `class_getInstanceMethod`.
 
-### 2-2. 신버전 방식 (Xcode 26+) — 실제 동작 확인
+### 2-2. New approach (Xcode 26+) — confirmed working
 
 ```
 IndigoHIDMessageForMouseNSEvent(position, delta=zero, target=0x32, NSEventType, size=(1,1), edge=0)
   └─ SimDeviceLegacyHIDClient.sendWithMessage:freeWhenDone:completionQueue:completion:
 ```
 
-- **좌표**: 정규화된 0.0–1.0 값. `NSSize(1.0, 1.0)`을 size로 전달해 좌표 공간을 선언.
-- **target**: `0x32` (digitizer) — `0x35`(trackpad)가 아님.
+- **Coordinates**: normalized 0.0–1.0 values. Pass `NSSize(1.0, 1.0)` as the size to declare the coordinate space.
+- **target**: `0x32` (digitizer) — not `0x35` (trackpad).
 - **NSEventType**: `1`=leftMouseDown, `2`=leftMouseUp, `6`=leftMouseDragged
-- IOHIDEvent 계층(parent/child) 불필요 — 이 함수가 직접 IndigoHIDMessageStruct를 생성한다.
+- No IOHIDEvent hierarchy (parent/child) needed — this function builds the IndigoHIDMessageStruct directly.
 
-#### ⚠️ Mouse-class의 한계: UIBackdropView 등 시스템 레이어 터치 불가
+#### ⚠️ Limitation of the mouse class: cannot touch system layers like UIBackdropView
 
-`IndigoHIDMessageForMouseNSEvent`(mouse-class)는 일반 UIKit 뷰에는 동작하지만, 아래 레이어에서 이벤트를 무시한다:
+`IndigoHIDMessageForMouseNSEvent` (mouse-class) works on ordinary UIKit views but is ignored by the layers below:
 
-- `UIBackdropView` — 폴더 블러 배경, 알림·컨트롤 센터 dismiss 영역
-- Notification Center / Control Center 제스처 레이어
+- `UIBackdropView` — folder blur background, the dismiss area for notifications / Control Center
+- Notification Center / Control Center gesture layers
 
-이 레이어들은 **digitizer-class 이벤트**만 수용한다. §2-3의 IOHIDDigitizerDispatch 경로를 사용해야 한다.
+These layers accept **digitizer-class events only**. You must use the IOHIDDigitizerDispatch path in §2-3.
 
-#### ⚠️ 이전의 실패한 접근 (3가지 오류)
+#### ⚠️ Earlier failed approach (three mistakes)
 
-초기 시도에서 `IndigoHIDMessageForTrackpadEventFromHIDEventRef`가 nil을 반환했던 원인은 세 가지가 겹쳐 있었다:
+In the initial attempt, `IndigoHIDMessageForTrackpadEventFromHIDEventRef` returned nil due to three overlapping causes:
 
-1. **부모 이벤트 생성 함수 오류**: `IOHIDEventCreate(type=0xB)` → `IOHIDEventCreateDigitizerEvent` 로 교체해야 한다.
-2. **래퍼 함수 인자 수 오류**: `IndigoHIDMessageForTrackpadEventFromHIDEventRef`는 인자 1개(`event`)만 받는다. `target=0x35`를 2번째 인자로 추가한 것이 오호출이었다.
-3. **routing tag 패치 누락**: 반환된 메시지에 `storeBytes(of: UInt32(0x32), toByteOffset: 0x6c)` 패치를 하지 않으면 iOS가 이벤트를 digitizer subsystem으로 라우팅하지 않아 **모든 터치가 무시된다** (UIBackdropView뿐만 아니라 일반 UI도 동작 안 함).
+1. **Wrong parent-event creation function**: `IOHIDEventCreate(type=0xB)` must be replaced with `IOHIDEventCreateDigitizerEvent`.
+2. **Wrong argument count for the wrapper**: `IndigoHIDMessageForTrackpadEventFromHIDEventRef` takes only one argument (`event`). Adding `target=0x35` as a second argument was a miscall.
+3. **Missing routing-tag patch**: without patching the returned message with `storeBytes(of: UInt32(0x32), toByteOffset: 0x6c)`, iOS does not route the event to the digitizer subsystem and **every touch is ignored** (not just UIBackdropView — ordinary UI stops working too).
 
-### 2-3. UIBackdropView / 시스템 제스처 레이어 — IOHIDDigitizerDispatch 경로 (2026-05-18 검증)
+### 2-3. UIBackdropView / system gesture layers — IOHIDDigitizerDispatch path (verified 2026-05-18)
 
 ```
 IOHIDEventCreateDigitizerEvent(parent, transducerType=2, ...)
   └─ IOHIDEventCreateDigitizerFingerEvent(finger, ...)
        └─ IOHIDEventAppendEvent(parent, finger, 0)
             └─ IndigoHIDMessageForTrackpadEventFromHIDEventRef(parent)  → msgPtr
-                 └─ storeBytes(UInt32(0x32), offset: 0x6c)  ← routing tag 필수
+                 └─ storeBytes(UInt32(0x32), offset: 0x6c)  ← routing tag required
                       └─ SimDeviceLegacyHIDClient.sendWithMessage:freeWhenDone:
 ```
 
-#### 심볼 로드
+#### Loading symbols
 
-IOKit 심볼은 dyld shared cache에 있으므로 `dlopen`으로 먼저 꺼낸 뒤 해당 핸들로 `dlsym` 한다.  
-`RTLD_DEFAULT`는 Swift에서 `UnsafeMutableRawPointer(bitPattern: -2)`로 표현하거나, `dlopen` 반환값을 직접 사용한다.
+IOKit symbols live in the dyld shared cache, so `dlopen` them first and `dlsym` against that handle.
+`RTLD_DEFAULT` can be expressed in Swift as `UnsafeMutableRawPointer(bitPattern: -2)`, or just use the `dlopen` return value directly.
 
 ```swift
 let ioKitHandle = dlopen("/System/Library/Frameworks/IOKit.framework/IOKit", RTLD_NOW | RTLD_GLOBAL)
-// skHandle = SimulatorKit handle (이미 로드됨)
+// skHandle = SimulatorKit handle (already loaded)
 ```
 
 #### Swift typealias
@@ -135,7 +135,7 @@ typealias TrackpadWrapFn  = @convention(c) (OpaquePointer) -> UnsafeMutableRawPo
 | move  | `0x07` | 1 | 1 |
 | up    | `0x06` (Touch\|Position) | 0 | 0 |
 
-#### 전체 구현 패턴
+#### Full implementation pattern
 
 ```swift
 let ts       = mach_absolute_time()
@@ -148,7 +148,7 @@ guard let parent = createDigitizer(nil, ts, 2, 0, 1, mask, 0, x, y, 0, 0, 0, con
 appendEvent(parent, finger, 0)
 
 guard let msgPtr = trackpadWrap(parent) else { return }
-// routing tag: iOS가 이 값을 읽어 digitizer subsystem으로 라우팅한다
+// routing tag: iOS reads this value to route to the digitizer subsystem
 msgPtr.storeBytes(of: UInt32(0x32), toByteOffset: 0x6c, as: UInt32.self)
 if malloc_size(msgPtr) >= 0x110 {
     msgPtr.storeBytes(of: UInt32(0x32), toByteOffset: 0x10c, as: UInt32.self)
@@ -156,34 +156,34 @@ if malloc_size(msgPtr) >= 0x110 {
 sendMsg(hidClient, sendSel, msgPtr, true, nil, nil)
 ```
 
-#### 핵심 주의사항
+#### Key cautions
 
-- **`bytes[0x6c] = 0x32` (UInt8 1바이트 쓰기)는 부족하다.** `storeBytes(of: UInt32(0x32), ...)` (4바이트)로 써야 한다.
-- **사이즈 확인은 `malloc_size(msgPtr)` 사용.** 메시지 헤더 offset 4를 읽으면 size 필드가 아닌 다른 값이 반환되어 패치가 건너뛰어진다.
-- routing tag 패치 없이 메시지를 전송하면 UIBackdropView뿐만 아니라 **일반 UI 터치도 모두 무시**된다.
-- `IOHIDEventCreateDigitizerEvent` / `IOHIDEventCreateDigitizerFingerEvent`가 없는 환경(심볼 미존재)을 위해 `IndigoHIDMessageForMouseNSEvent` fallback을 유지한다.
+- **`bytes[0x6c] = 0x32` (a 1-byte UInt8 write) is not enough.** You must write with `storeBytes(of: UInt32(0x32), ...)` (4 bytes).
+- **Check size with `malloc_size(msgPtr)`.** Reading the message-header offset 4 returns something other than the size field, causing the patch to be skipped.
+- Sending the message without the routing-tag patch makes iOS **ignore all touches**, ordinary UI as well as UIBackdropView.
+- Keep an `IndigoHIDMessageForMouseNSEvent` fallback for environments where `IOHIDEventCreateDigitizerEvent` / `IOHIDEventCreateDigitizerFingerEvent` are absent (symbols missing).
 
-**참고**: `IndigoHIDMessageForMouseNSEvent` + target=`0x32` 조합은 일반 UIKit 터치에서 여전히 동작한다. UIBackdropView 문제가 없다면 mouse-class도 충분하다.
+**Note**: the `IndigoHIDMessageForMouseNSEvent` + target=`0x32` combination still works for ordinary UIKit touches. If there is no UIBackdropView problem, the mouse class is sufficient.
 
 ---
 
-## 3. 핵심 클래스: SimDeviceLegacyHIDClient
+## 3. Core class: SimDeviceLegacyHIDClient
 
-### 심볼명
+### Symbol name
 
-Swift mangled: `_TtC12SimulatorKit24SimDeviceLegacyHIDClient`  
-ObjC 노출: `NSClassFromString("_TtC12SimulatorKit24SimDeviceLegacyHIDClient")`
+Swift mangled: `_TtC12SimulatorKit24SimDeviceLegacyHIDClient`
+ObjC exposure: `NSClassFromString("_TtC12SimulatorKit24SimDeviceLegacyHIDClient")`
 
-### 주요 메서드
+### Main methods
 
-| 메서드 | 설명 |
+| Method | Description |
 |--------|------|
-| `-initWithDevice:error:` | SimDevice로 클라이언트 생성 |
-| `-initWithDevice:sessionResetQueue:error:sessionResetHandler:` | 세션 리셋 핸들러 포함 생성 |
-| `-sendWithMessage:freeWhenDone:completionQueue:completion:` | IndigoHIDMessageStruct 전송 |
-| `-resetHIDSession` | HID 세션 리셋 |
+| `-initWithDevice:error:` | create a client from a SimDevice |
+| `-initWithDevice:sessionResetQueue:error:sessionResetHandler:` | create with a session-reset handler |
+| `-sendWithMessage:freeWhenDone:completionQueue:completion:` | send an IndigoHIDMessageStruct |
+| `-resetHIDSession` | reset the HID session |
 
-### 생성 방법 (ObjC 런타임)
+### Creation (ObjC runtime)
 
 ```swift
 let cls = NSClassFromString("_TtC12SimulatorKit24SimDeviceLegacyHIDClient")!
@@ -203,57 +203,57 @@ var err: NSError?
 let client = unsafeBitCast(initImp, to: InitFn.self)(allocated, initSel, simDevice, &err)
 ```
 
-### sendWithMessage: 호출
+### Calling sendWithMessage:
 
 ```swift
 let sendSel = NSSelectorFromString("sendWithMessage:freeWhenDone:completionQueue:completion:")
 let sendImp = class_getMethodImplementation(type(of: client), sendSel)!
 typealias SendFn = @convention(c) (NSObject, Selector, UnsafeMutableRawPointer, Bool,
                                    AnyObject?, AnyObject?) -> Void
-// freeWhenDone:YES → SimulatorKit이 메시지 버퍼 메모리를 직접 해제
+// freeWhenDone:YES → SimulatorKit frees the message-buffer memory itself
 unsafeBitCast(sendImp, to: SendFn.self)(client, sendSel, msgPtr, true, nil, nil)
 ```
 
 ---
 
-## 4. IndigoHIDMessage 함수들
+## 4. The IndigoHIDMessage functions
 
-SimulatorKit이 내부적으로 사용하는 C 함수들. `dlsym`으로 접근 가능.  
-`strings $SIMKIT | grep "IndigoHIDMessage \*"` 로 파라미터 타입까지 포함한 원형을 확인할 수 있다.
+C functions SimulatorKit uses internally. Reachable via `dlsym`.
+`strings $SIMKIT | grep "IndigoHIDMessage \*"` reveals the prototypes including parameter types.
 
-| 함수 | C 원형 | 용도 |
+| Function | C prototype | Purpose |
 |------|--------|------|
-| `IndigoHIDMessageForMouseNSEvent` | `(CGPoint*, CGPoint*, IndigoHIDTarget, NSEventType, NSSize, IndigoHIDEdge)` | 터치/마우스 (Xcode 26 기준 6인자) |
-| `IndigoHIDMessageForHIDArbitrary` | `(IndigoHIDTarget, uint32_t usagePage, uint32_t usage, IndigoHIDButtonOp)` | 물리버튼 (볼륨·전원·액션·음소거) |
-| `IndigoHIDMessageForButton` | `(IndigoHIDButtonKeyCode, IndigoHIDButtonOp, IndigoHIDTarget)` | 레거시 버튼 (홈·잠금) |
-| `IndigoHIDMessageForKeyboardArbitrary` | `(uint32_t keycode, IndigoHIDButtonOp)` | 키보드 임의 키 |
-| `IndigoHIDMessageForTrackpadEventFromHIDEventRef` | `(IOHIDEventRef)` | Digitizer(0xB) 이벤트 → IndigoHIDMessage (§2-3) |
-| `IndigoHIDMessageForPointerEventFromHIDEventRef` | `(IOHIDEventRef, IndigoHIDTarget)` | Collection(0x11) 이벤트 → 포인터 |
-| `IndigoHIDMessageForScrollEventFromHIDEventRef` | `(IOHIDEventRef, IndigoHIDTarget)` | 스크롤 |
-| `IndigoHIDMessageForTrackpadMoveEvent` | `(CGPoint, IndigoHIDTarget)` | 트랙패드 이동 |
+| `IndigoHIDMessageForMouseNSEvent` | `(CGPoint*, CGPoint*, IndigoHIDTarget, NSEventType, NSSize, IndigoHIDEdge)` | touch/mouse (6 args on Xcode 26) |
+| `IndigoHIDMessageForHIDArbitrary` | `(IndigoHIDTarget, uint32_t usagePage, uint32_t usage, IndigoHIDButtonOp)` | physical buttons (volume/power/action/mute) |
+| `IndigoHIDMessageForButton` | `(IndigoHIDButtonKeyCode, IndigoHIDButtonOp, IndigoHIDTarget)` | legacy buttons (home/lock) |
+| `IndigoHIDMessageForKeyboardArbitrary` | `(uint32_t keycode, IndigoHIDButtonOp)` | arbitrary keyboard key |
+| `IndigoHIDMessageForTrackpadEventFromHIDEventRef` | `(IOHIDEventRef)` | Digitizer (0xB) event → IndigoHIDMessage (§2-3) |
+| `IndigoHIDMessageForPointerEventFromHIDEventRef` | `(IOHIDEventRef, IndigoHIDTarget)` | Collection (0x11) event → pointer |
+| `IndigoHIDMessageForScrollEventFromHIDEventRef` | `(IOHIDEventRef, IndigoHIDTarget)` | scroll |
+| `IndigoHIDMessageForTrackpadMoveEvent` | `(CGPoint, IndigoHIDTarget)` | trackpad move |
 
-모든 함수는 `calloc`으로 할당한 `IndigoHIDMessageStruct*`를 반환한다.  
-`sendWithMessage:freeWhenDone:YES`로 전달하면 SimulatorKit이 해제를 담당한다.
+Every function returns an `IndigoHIDMessageStruct*` allocated with `calloc`.
+If you pass it with `sendWithMessage:freeWhenDone:YES`, SimulatorKit takes care of freeing it.
 
 ### IndigoHIDButtonOp
 
-`UInt32` 타입. **1 = 누름(down), 2 = 뗌(up)**. `Bool` 이 아니다.
+A `UInt32` type. **1 = down, 2 = up**. It is not a `Bool`.
 
 ```swift
 let kHIDOpDown: UInt32 = 1
 let kHIDOpUp:   UInt32 = 2
 ```
 
-### 물리버튼 주입 — HIDArbitrary 경로 (볼륨·전원·액션·음소거)
+### Physical-button injection — HIDArbitrary path (volume/power/action/mute)
 
 ```swift
 typealias IndigoHIDArbitraryFn = @convention(c) (UInt32, UInt32, UInt32, UInt32) -> UnsafeMutableRawPointer?
 let indigoArbitrary: IndigoHIDArbitraryFn = requireSym(skHandle, "IndigoHIDMessageForHIDArbitrary")
 
-// usagePage, usage 는 chrome.json inputs[].usagePage / .usage 에서 읽음
-// 예: 볼륨+ usagePage=12(0x0C), usage=233(0xE9)
-//     전원   usagePage=12(0x0C), usage=48(0x30)
-//     액션   usagePage=11(0x0B), usage=45(0x2D)
+// usagePage, usage are read from chrome.json inputs[].usagePage / .usage
+// e.g. volume+ usagePage=12(0x0C), usage=233(0xE9)
+//      power   usagePage=12(0x0C), usage=48(0x30)
+//      action  usagePage=11(0x0B), usage=45(0x2D)
 if let msgDown = indigoArbitrary(0x32, usagePage, usage, 1) {   // target=0x32, op=down
     sendMsg(hidClient, sendSel, msgDown, true, nil, nil)
 }
@@ -263,16 +263,16 @@ if let msgUp = indigoArbitrary(0x32, usagePage, usage, 2) {     // op=up
 }
 ```
 
-> **주의**: 파라미터 순서가 `(target, usagePage, usage, op)` 이다. `(usagePage, usage, Bool)` 로 잘못 구현하면 메시지가 잘못된 서비스로 라우팅되어 아무 반응이 없다.
+> **Caution**: the parameter order is `(target, usagePage, usage, op)`. Implementing it wrong as `(usagePage, usage, Bool)` routes the message to the wrong service and nothing responds.
 
-### 물리버튼 주입 — 레거시 경로 (홈·잠금)
+### Physical-button injection — legacy path (home/lock)
 
 ```swift
 typealias IndigoHIDButtonFn = @convention(c) (UInt32, UInt32, UInt32) -> UnsafeMutableRawPointer?
 let indigoButton: IndigoHIDButtonFn = requireSym(skHandle, "IndigoHIDMessageForButton")
 
 // IndigoHIDButtonKeyCode: home=0x0, lock=0x1
-// target: 0x33 (레거시 버튼 서비스) — 0x32(digitizer)와 다름
+// target: 0x33 (legacy button service) — different from 0x32 (digitizer)
 if let msgDown = indigoButton(0x0, 1, 0x33) {   // home down
     sendMsg(hidClient, sendSel, msgDown, true, nil, nil)
 }
@@ -282,50 +282,50 @@ if let msgUp = indigoButton(0x0, 2, 0x33) {     // home up
 }
 ```
 
-> **주의**: iOS 26.4 기준 레거시 경로(`IndigoHIDMessageForButton`)는 홈·잠금만 동작 확인됨. 볼륨·전원은 HIDArbitrary 경로를 사용해야 한다.
+> **Caution**: as of Xcode 26 the legacy path (`IndigoHIDMessageForButton`) is confirmed working only for home/lock. Volume/power must use the HIDArbitrary path.
 
 ---
 
-## 5. 키보드 주입 — keyboard service target
+## 5. Keyboard injection — keyboard service target
 
-### 핵심 발견: target에 따라 iOS 인식이 달라진다
+### Key finding: iOS recognition depends on the target
 
-IndigoHID 함수는 용도별로 내부 HID 서비스 target이 다르다. **함수 이름만 보고 target을 혼동하면 iOS가 이벤트를 잘못 인식한다.**
+IndigoHID functions use different internal HID service targets per purpose. **Confusing the target by going on the function name alone makes iOS misrecognize the event.**
 
-| 함수 | 내부 target | iOS 인식 |
+| Function | Internal target | iOS recognition |
 |------|-------------|---------|
-| `IndigoHIDMessageForHIDArbitrary(0x32, 0x07, usage, op)` | 0x32 = digitizer | ❌ 터치 경로 — 하드웨어 키보드로 인식 안 함 |
-| `IndigoHIDMessageForKeyboardArbitrary(usage, op)` | keyboard service (내장) | ✅ 하드웨어 키보드 경로 |
-| `IndigoHIDMessageForKeyboardNSEvent(NSEvent*)` | keyboard service (내장) | ✅ 하드웨어 키보드 경로 |
-| `IndigoHIDMessageForModifierKeyBit(bit, op)` | keyboard service (내장) | ✅ modifier 전용 |
+| `IndigoHIDMessageForHIDArbitrary(0x32, 0x07, usage, op)` | 0x32 = digitizer | ❌ touch path — not recognized as a hardware keyboard |
+| `IndigoHIDMessageForKeyboardArbitrary(usage, op)` | keyboard service (built-in) | ✅ hardware-keyboard path |
+| `IndigoHIDMessageForKeyboardNSEvent(NSEvent*)` | keyboard service (built-in) | ✅ hardware-keyboard path |
+| `IndigoHIDMessageForModifierKeyBit(bit, op)` | keyboard service (built-in) | ✅ modifiers only |
 
-`IndigoHIDMessageForKeyboardArbitrary`는 target 파라미터가 없다 — 올바른 keyboard service target이 함수 내부에 하드코딩되어 있다. `IndigoHIDMessageForHIDArbitrary`처럼 호출자가 target을 지정하는 방식이 아니다.
+`IndigoHIDMessageForKeyboardArbitrary` has no target parameter — the correct keyboard-service target is hardcoded inside the function. It is not caller-specified the way `IndigoHIDMessageForHIDArbitrary` is.
 
-### 왜 target이 중요한가
+### Why the target matters
 
-iOS는 HID 이벤트의 서비스 target에 따라 문자 변환 캐시(input source 매핑)를 관리한다.
+iOS manages its character-conversion cache (input-source mapping) according to the HID event's service target.
 
-- **digitizer target(0x32)으로 keyboard usage code를 보낼 경우**: iOS가 하드웨어 키보드로 인식하지 않음 → input source 전환 무시 → 문자 변환 캐시 미갱신 → 소프트웨어 키보드 언어와 무관하게 고정된 언어로 입력됨
-- **keyboard service target으로 보낼 경우**: iOS가 진짜 하드웨어 키보드 이벤트로 처리 → CapsLock/Lang1 토글 → 한/영 전환 HUD 표시 → active input source에 따라 문자 전환
+- **Sending keyboard usage codes to the digitizer target (0x32)**: iOS does not recognize a hardware keyboard → input-source switching is ignored → the character-conversion cache is not refreshed → input is locked to a fixed language regardless of the software-keyboard language.
+- **Sending to the keyboard-service target**: iOS treats it as a genuine hardware-keyboard event → CapsLock/Lang1 toggle → the Korean/English switch HUD appears → characters switch with the active input source.
 
-### digitizer target 오용 시 증상 패턴
+### Symptom pattern when the digitizer target is misused
 
-- CapsLock을 눌러도 한/영 전환 HUD가 뜨지 않음
-- Ctrl+Space로 소프트웨어 키 레이아웃은 바뀌지만 하드웨어 키 입력 언어는 안 바뀜
-- 소프트웨어 키를 직접 탭하면 하드웨어 키도 그 언어로 입력됨 — 소프트키가 올바른 keyboard service 경로로 캐시를 업데이트하기 때문
-- 소프트웨어 키가 한글일 때 자모 조합이 됨, 영어일 때 자모가 분리됨 (캐시 불일치)
+- Pressing CapsLock does not show the Korean/English switch HUD.
+- Ctrl+Space changes the software key layout but not the hardware-key input language.
+- Tapping a software key directly makes the hardware key type that language too — because the soft key updates the cache through the correct keyboard-service path.
+- When the software key is Korean, jamo combine; when English, jamo separate (cache mismatch).
 
-### touch-helper.swift에서의 사용
+### Usage in touch-helper.swift
 
 ```swift
-// ❌ 잘못된 방법 (digitizer 경로 — 한/영 전환 불가)
+// ❌ wrong way (digitizer path — Korean/English switch impossible)
 indigoArbitrary(0x32, 0x07, usage, kHIDOpDown)
 
-// ✅ 올바른 방법 (keyboard service 경로)
+// ✅ correct way (keyboard-service path)
 indigoKeyboard(usage, kHIDOpDown)   // IndigoHIDMessageForKeyboardArbitrary
 ```
 
-fallback 구조 (`indigoKeyboard`가 nil이면 `indigoArbitrary`로 폴백):
+Fallback structure (fall back to `indigoArbitrary` if `indigoKeyboard` is nil):
 ```swift
 func kbdMsg(_ u: UInt32, _ op: UInt32) {
     let ptr: UnsafeMutableRawPointer?
@@ -340,142 +340,142 @@ func kbdMsg(_ u: UInt32, _ op: UInt32) {
 
 ### SimKeyboardInputController / SimKeyboardInputDefaultDelegate
 
-Simulator.app이 "Connect Hardware Keyboard" 모드에서 사용하는 공식 SimulatorKit 클래스.  
-`IndigoHIDMessageForKeyboardArbitrary` 대신 NSEvent 기반 경로가 필요할 때 참고.
+The official SimulatorKit classes that Simulator.app uses in "Connect Hardware Keyboard" mode.
+Reference when an NSEvent-based path is needed instead of `IndigoHIDMessageForKeyboardArbitrary`.
 
-**심볼** (Xcode 26, `nm -gU $SIMKIT | xcrun swift-demangle | grep -i keyboard`로 확인):
+**Symbols** (Xcode 26, found via `nm -gU $SIMKIT | xcrun swift-demangle | grep -i keyboard`):
 
-| 심볼 | ObjC 셀렉터 | 설명 |
+| Symbol | ObjC selector | Description |
 |------|------------|------|
-| `SimKeyboardInputDefaultDelegate.init(hidClient:)` | — (pure Swift) | hidClient를 받아 초기화 |
+| `SimKeyboardInputDefaultDelegate.init(hidClient:)` | — (pure Swift) | initialize with a hidClient |
 | `SimKeyboardInputDefaultDelegate.handleEvent(_ event: NSEvent) -> NSEvent?` | `handleEvent:` | NSEvent → keyboard HID → hidClient |
 | `SimKeyboardInputDefaultDelegate.isEnabled: Bool` | `isEnabled` | |
-| `SimKeyboardInputController.init()` | — (pure Swift) | 인자 없음 |
-| `SimKeyboardInputController.handle(event: NSEvent) -> NSEvent?` | `handleWithEvent:` | NSEvent를 delegate로 라우팅 |
+| `SimKeyboardInputController.init()` | — (pure Swift) | no arguments |
+| `SimKeyboardInputController.handle(event: NSEvent) -> NSEvent?` | `handleWithEvent:` | route an NSEvent to the delegate |
 | `SimKeyboardInputController.isEnabled: Bool` | `isEnabled` | |
 | `SimKeyboardInputController.delegate: SimKeyboardInputControllerDelegate?` | `delegate` | |
-| `SimKeyboardInputController.clearModifiers()` | | modifier 상태 초기화 |
+| `SimKeyboardInputController.clearModifiers()` | | reset modifier state |
 
-ObjC 클래스 이름:
+ObjC class names:
 - `_TtC12SimulatorKit31SimKeyboardInputDefaultDelegate`
 - `_TtC12SimulatorKit26SimKeyboardInputController`
 
-**직접 사용 방법** (`SimKeyboardInputDefaultDelegate.handleEvent:` 경로):
+**Direct usage** (the `SimKeyboardInputDefaultDelegate.handleEvent:` path):
 ```swift
-// init(hidClient:) 는 pure Swift — ObjC 런타임으로 직접 접근 불가
-// NSClassFromString + alloc 으로 인스턴스 생성 후
-// initWithHidClient: selector (Swift→ObjC 브리지명) 가 등록되어 있지 않으므로
-// SimKeyboardInputDefaultDelegate 사용이 필요하다면 반드시 nm으로 재확인 후 접근할 것
+// init(hidClient:) is pure Swift — not directly reachable via the ObjC runtime.
+// Create the instance via NSClassFromString + alloc, then note that the
+// initWithHidClient: selector (the Swift→ObjC bridged name) is not registered,
+// so if you need SimKeyboardInputDefaultDelegate, re-verify with nm before accessing.
 ```
 
-> **현재 tapflow는 `IndigoHIDMessageForKeyboardArbitrary` 직접 사용으로 한/영 전환 문제가 해결되었다. SimKeyboardInputController/Delegate 경로는 NSEvent 레벨의 제어가 필요할 때 검토한다.**
+> **tapflow currently solves the Korean/English switch problem by using `IndigoHIDMessageForKeyboardArbitrary` directly. The SimKeyboardInputController/Delegate path is considered only when NSEvent-level control is needed.**
 
 ---
 
 ## 6. IndigoHIDTarget
 
-`UInt32` 타입. 입력 디바이스 유형과 스크린을 인코딩한다.
+A `UInt32` type. Encodes the input-device type and the screen.
 
-### 값 목록 (역공학으로 확인)
+### Value list (confirmed via reverse engineering)
 
-| 값 | 의미 | 확인 방법 |
+| Value | Meaning | How confirmed |
 |----|------|-----------|
-| `0x32` (50) | 디지타이저/터치 (`IndigoHIDMessageForMouseNSEvent` 기본 타겟) | touch-helper.swift 동작 확인 |
-| `0x33` (51) | 레거시 버튼 서비스 (홈·잠금) | 실제 동작 확인 |
-| `0x35` (53) | 트랙패드 (Digitizer IOHIDEvent 경로) | `_hidEventFilterCallback`: `cinc w25, #0x35, ne` |
-| `0x36` (54) | 마우스 / 기타 포인터 | `_hidEventFilterCallback`: `ne` 조건으로 increment |
-| `0x40000000 \| screenID` | 스크린 기반 타겟 | `IndigoHIDTargetForScreen(screenID)` — 아래 참조 |
+| `0x32` (50) | digitizer/touch (`IndigoHIDMessageForMouseNSEvent` default target) | confirmed working in touch-helper.swift |
+| `0x33` (51) | legacy button service (home/lock) | confirmed working |
+| `0x35` (53) | trackpad (Digitizer IOHIDEvent path) | `_hidEventFilterCallback`: `cinc w25, #0x35, ne` |
+| `0x36` (54) | mouse / other pointer | `_hidEventFilterCallback`: increment on the `ne` condition |
+| `0x40000000 \| screenID` | screen-based target | `IndigoHIDTargetForScreen(screenID)` — see below |
 
-> **정리**: 터치·HIDArbitrary 볼륨/전원 → `0x32`, 홈·잠금 레거시 → `0x33`. 두 값을 혼동하면 이벤트가 라우팅되지 않는다.
+> **Summary**: touch and HIDArbitrary volume/power → `0x32`, home/lock legacy → `0x33`. Confusing the two leaves the event unrouted.
 
-### 스크린 기반 타겟 (참고)
+### Screen-based target (reference)
 
 ```swift
 func IndigoHIDTargetForScreen(_ screenID: UInt32) -> UInt32 {
     return screenID | 0x40000000
 }
-// 메인 스크린(ID=0) → target = 0x40000000
+// main screen (ID=0) → target = 0x40000000
 ```
 
-이 함수는 바이너리에서 딱 2줄로 구현되어 있다:
+This function is implemented in exactly two lines in the binary:
 ```asm
 _IndigoHIDTargetForScreen:
     orr w0, w0, #0x40000000
     ret
 ```
 
-`SimDeviceScreen.buttonTarget` 프로퍼티가 이 값을 반환한다.  
-단, `SimDevice` 에서 `screen` 프로퍼티는 **KVC로 접근 불가** (NSUnknownKeyException). ObjC 런타임으로 직접 접근해야 한다.
+The `SimDeviceScreen.buttonTarget` property returns this value.
+However, the `screen` property on `SimDevice` is **not reachable via KVC** (NSUnknownKeyException). Access it directly via the ObjC runtime.
 
-### _hidEventFilterCallback 흐름 요약
+### _hidEventFilterCallback flow summary
 
 ```
-이벤트 타입 확인 (w23)
+Check the event type (w23)
   ├─ 0x11 (Collection): IndigoHIDMessageForPointerEventFromHIDEventRef(event, x25)
-  │                      x25 = trackpadSenders 포함이면 0x35, mouseSenders면 0x36
-  ├─ 0xB  (Digitizer):  IndigoHIDMessageForTrackpadEventFromHIDEventRef(event, 0x35) ← 하드코딩
+  │                      x25 = 0x35 if it includes trackpadSenders, 0x36 if mouseSenders
+  ├─ 0xB  (Digitizer):  IndigoHIDMessageForTrackpadEventFromHIDEventRef(event, 0x35) ← hardcoded
   └─ 0x6  (Scroll):     IndigoHIDMessageForScrollEventFromHIDEventRef(event, x25)
 ```
 
 ---
 
-## 7. ROCK Remote Proxy 이슈
+## 7. ROCK Remote Proxy issue
 
-`com.apple.CoreSimulator.HID.LegacyHID` IO 포트의 descriptor를 얻으면 ROCK 프록시가 반환된다:
+Obtaining the descriptor of the `com.apple.CoreSimulator.HID.LegacyHID` IO port returns a ROCK proxy:
 
 ```
 ROCKRemoteProxy-{UUID}-ROCKImpersonateable-SimDeviceIOPortDescriptorInterface-SimLegacyHIDDescriptor-SimEnvironmentProvider
 ```
 
-**ROCK(Remote Objects Communications Kit)**은 Mach port 기반 XPC 유사 IPC 프레임워크로, 프록시 객체가 메시지를 원격 프로세스로 포워딩한다.
+**ROCK (Remote Objects Communications Kit)** is a Mach-port-based, XPC-like IPC framework where a proxy object forwards messages to a remote process.
 
-### 문제점
+### Problem
 
-`responds(to:)` 가 ROCK 프록시에서 항상 `false`를 반환한다.  
-→ 기존의 셀렉터 탐색 방식(`trySelectors`)으로는 메서드를 찾을 수 없다.
+`responds(to:)` always returns `false` on the ROCK proxy.
+→ The existing selector-discovery approach (`trySelectors`) cannot find the methods.
 
-### 결론
+### Conclusion
 
-ROCK 프록시 대신 `SimDeviceLegacyHIDClient`를 직접 생성해서 사용하는 것이 올바른 접근이다. ROCK 프록시는 Simulator.app 내부의 뷰 레이어에서 사용하는 구조이며, 외부 프로세스에서 직접 사용하는 공개 경로가 아니다.
+The correct approach is to create and use `SimDeviceLegacyHIDClient` directly instead of the ROCK proxy. The ROCK proxy is a structure used by Simulator.app's internal view layer; it is not a public path for external processes to use directly.
 
 ---
 
-## 8. 현황 및 미확인 항목
+## 8. Status and unverified items
 
-| 항목 | 현황 |
+| Item | Status |
 |------|------|
-| 터치 단일 포인터 (일반 UI) | ✅ **구현 완료** — IOHIDDigitizerDispatch 경로 (§2-3). mouse-class fallback 유지. |
-| 터치 단일 포인터 (UIBackdropView·시스템 레이어) | ✅ **구현 완료** — IOHIDDigitizerDispatch + routing tag 패치 (§2-3). 2026-05-18 검증. |
-| 멀티터치 / 핀치 | ✅ **구현 완료** — `IndigoHIDMessageForMouseNSEvent` 9인자 버전(two-finger form). |
-| 물리 버튼 (볼륨·전원·액션) | ✅ **구현 완료** — `IndigoHIDMessageForHIDArbitrary(0x32, usagePage, usage, op)` |
-| 물리 버튼 (홈·잠금) | ✅ **구현 완료** — `IndigoHIDMessageForButton(code, op, 0x33)`. home=code 0, lock=code 1 |
-| 키보드 (한/영 전환 포함) | ✅ **구현 완료** — `IndigoHIDMessageForKeyboardArbitrary(usage, op)`. §5 참조. |
-| 기기 회전 | ✅ **구현 완료** — `rotation-helper`: `GSEventTypeDeviceOrientationChanged` mach 메시지를 `PurpleWorkspacePort`로 직접 전송. Simulator.app 불필요. |
-| 스크롤 | 미구현 — `IndigoHIDMessageForScrollEventFromHIDEventRef` 경로 확인됨 |
-| Xcode 버전 호환성 | `SimDeviceLegacyHIDClient` + IOHIDDigitizerDispatch는 Xcode 26 기준. 이전 버전에서는 `SimDevice.sendHIDEvent:` 사용 |
+| Single-pointer touch (ordinary UI) | ✅ **implemented** — IOHIDDigitizerDispatch path (§2-3). mouse-class fallback kept. |
+| Single-pointer touch (UIBackdropView / system layers) | ✅ **implemented** — IOHIDDigitizerDispatch + routing-tag patch (§2-3). Verified 2026-05-18. |
+| Multi-touch / pinch | ✅ **implemented** — the 9-arg version of `IndigoHIDMessageForMouseNSEvent` (two-finger form). |
+| Physical buttons (volume/power/action) | ✅ **implemented** — `IndigoHIDMessageForHIDArbitrary(0x32, usagePage, usage, op)` |
+| Physical buttons (home/lock) | ✅ **implemented** — `IndigoHIDMessageForButton(code, op, 0x33)`. home=code 0, lock=code 1 |
+| Keyboard (including Korean/English switch) | ✅ **implemented** — `IndigoHIDMessageForKeyboardArbitrary(usage, op)`. See §5. |
+| Device rotation | ✅ **implemented** — `rotation-helper`: sends a `GSEventTypeDeviceOrientationChanged` mach message directly to `PurpleWorkspacePort`. No Simulator.app needed. |
+| Scroll | not implemented — the `IndigoHIDMessageForScrollEventFromHIDEventRef` path is confirmed |
+| Xcode version compatibility | `SimDeviceLegacyHIDClient` + IOHIDDigitizerDispatch are for Xcode 26. Earlier versions use `SimDevice.sendHIDEvent:` |
 
 ---
 
-## 9. 탐색 방법론
+## 9. Exploration methodology
 
-향후 SimulatorKit 변경 시 재탐색할 때 참고하는 순서:
+Reference order for re-exploring when SimulatorKit changes in the future:
 
 ```bash
-# 1. 핵심 클래스/함수 존재 확인
+# 1. Confirm the core class/function exists
 lipo -thin arm64e $SIMKIT -output /tmp/simkit_arm64e
 nm -U /tmp/simkit_arm64e | grep <keyword>
 
-# 2. 함수 signature 파악 (인자 수, 타입)
+# 2. Determine the function signature (arg count, types)
 otool -tv /tmp/simkit_arm64e | awk '/^_FunctionName:/{found=1} found{print; ...}'
 
-# 3. ObjC 프로토콜 메서드 목록
+# 3. List ObjC protocol methods
 otool -oV /tmp/simkit_arm64e | grep -A 20 <ProtocolName>
 
-# 4. 실제 호출 흐름 추적
-# — 어떤 함수가 다른 함수를 호출하는지 역으로 추적
+# 4. Trace the actual call flow
+# — trace backward which function calls which
 otool -tv /tmp/simkit_arm64e | grep <target_function>
-# → 호출하는 함수명 확인 → 그 함수 디스어셈블
+# → identify the calling function → disassemble that function
 
-# 5. 런타임 검증 (Swift 테스트 바이너리)
-# dlopen + dlsym으로 심볼 존재 확인 후 호출 테스트
+# 5. Runtime verification (Swift test binary)
+# dlopen + dlsym to confirm a symbol exists, then test the call
 ```

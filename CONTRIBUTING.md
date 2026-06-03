@@ -135,7 +135,7 @@ Platform-specific implementation notes for contributors:
 
 - [Android video streaming diagnosis](./contributing/android-video-streaming-diagnosis.md) — scrcpy H.264 encoder investigation notes
 - [SimulatorKit internals](./contributing/simkit-internals.md) — iOS touch injection reverse-engineering notes
-- [Streaming latency campaign](./contributing/streaming-latency-campaign.md) — the running log toward tier1 "feels-like-direct" latency: pipeline/bottleneck analysis, accumulated measurements, and decisions (JPEG vs H.264, MSE vs WebCodecs vs WASM)
+- [Streaming latency engineering log](./contributing/streaming-latency-log.md) — glass-to-glass low-latency render-path log: pipeline/bottleneck analysis, measurements, and decisions (JPEG vs H.264, MSE vs WebCodecs vs WASM)
 
 ## Commit messages — Conventional Commits
 
