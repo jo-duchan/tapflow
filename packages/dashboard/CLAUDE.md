@@ -52,28 +52,12 @@ The audience is the whole team (PO, PM, designers, backend, QA) — not just QA.
 
 ## Compound
 
-### WebSocket Binary Frame Reception Pattern
+### WebSocket Binary Frame Reception
 
-**When**: handling binary stream frames in `useRelay`
+**When**: receiving and rendering binary stream frames
 
-**How**:
-```typescript
-// useRelay.ts — inside connect()
-socket.binaryType = 'arraybuffer'
-socket.onmessage = (e) => {
-  if (e.data instanceof ArrayBuffer) {
-    onBinaryFrameRef.current?.(e.data)
-    return
-  }
-  try { onMessageRef.current(JSON.parse(e.data)) } catch { }
-}
+**How**: `useRelay` receives binary frames (set `socket.binaryType = 'arraybuffer'`, else `e.data` is a `Blob`); `IOSViewer` / `AndroidViewer` render via a decoder chosen by `pickDecoder` (`lib/decoders/`) — WebCodecs on secure contexts, WASM (tinyh264) on plain HTTP, `createImageBitmap` for the JPEG fallback.
 
-// IOSViewer.tsx — frame rendering
-createImageBitmap(new Blob([data], { type: 'image/jpeg' }))
-  .then((bitmap) => {
-    ctx.drawImage(bitmap, 0, 0)
-    bitmap.close()  // release GPU texture memory
-  })
-```
-
-**Why**: Without `binaryType = 'arraybuffer'`, `e.data` becomes a `Blob` requiring extra async handling. Omitting `bitmap.close()` leaks GPU texture memory every frame. `createImageBitmap` is CPU-based decoding — no hardware acceleration unlike a WebRTC Video Track.
+**Why** (not obvious from the code):
+- The 2-tier decoder avoids the MSE `<video>` media buffer → low latency. Only the JPEG path is CPU-decoded (`createImageBitmap`); H.264 is hardware-decoded via WebCodecs. (The old "HW decode needs a WebRTC Video Track" is no longer true.)
+- Release the GPU texture/frame every frame (`bitmap.close()` / `VideoFrame.close()`) — otherwise GPU memory leaks per frame.

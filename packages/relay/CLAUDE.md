@@ -70,30 +70,10 @@ iOS build format: `.app.zip` (simulator builds). `.ipa` uploads return 400.
 
 **When**: relaying WebSocket binary messages from the Agent to the Browser
 
-**How**:
-```typescript
-ws.on('message', (data, isBinary) => {
-  if (isBinary) {
-    const session = this.sessions.getByStreamSocket(ws)
-    if (session?.browserSocket) {
-      let onDrop = this.dropHandlers.get(session.id)
-      if (!onDrop) {
-        onDrop = createRateLimitedDropWarn(logger, session.id)
-        this.dropHandlers.set(session.id, onDrop)
-      }
-      sendBinaryWithBackpressure(session.browserSocket, data as Buffer, this.backpressureBytes, onDrop)
-    }
-    return
-  }
-  try {
-    const msg: RelayMessage = JSON.parse(data.toString())
-    this.route(ws, msg)
-  } catch { }
-})
-```
+**How**: the binary branch of the `ws.on('message')` handler in `RelayServer.ts` — a per-session `createKeyframeAwareSender` (`@tapflowio/agent-core` `utils/stream.ts`) handles backpressure. Core call: `dropper.send(browserSocket, frame, threshold, isKeyframe, onDrop, requestIdr)`. `isKeyframe` comes from `readEnvelopeFlags(frame)` (JPEG, or H.264 IDR).
 
-**Why**:
-- Omitting `{ binary: true }` causes the `ws` library to send the Buffer as UTF-8 text, making `e.data` a string in the browser. The relay must be content-agnostic and incur zero parsing cost.
-- `sendBinaryWithBackpressure` checks `ws.bufferedAmount` before sending. If it exceeds `wsBackpressureBytes` (default 1 MB, override via `TAPFLOW_WS_BACKPRESSURE_BYTES`), the frame is silently dropped. This prevents unbounded memory growth when a browser client is slow.
-- Drop handlers are stored per session (`this.dropHandlers`) and rate-limit warn logs to at most once per second to avoid log flooding.
-- Drop handlers must be deleted from the map on `session:end`.
+**Why** (not obvious from the code):
+- Omitting `{ binary: true }` makes `ws` send the Buffer as UTF-8 text → `e.data` becomes a string in the browser. The relay must be content-agnostic, with zero parsing cost.
+- **drop-to-keyframe**: a dropped H.264 P-frame tears the stream until the next IDR, so once it drops under backpressure it keeps dropping until a keyframe can be sent — the decoder never receives a P referencing a dropped frame. JPEG / no-envelope frames pass `isKeyframe=true`, reproducing drop-to-latest exactly.
+- On a drop with no sendable keyframe, `requestIdr` sends a throttled `stream:request-idr` for an on-demand IDR (unsupported agents ignore it) → fast resync instead of waiting for the periodic IDR.
+- Threshold default 1 MB (`TAPFLOW_WS_BACKPRESSURE_BYTES`). Per-session dropper / drop-warn (one warn/sec) / IDR-requester must be cleared on `session:end`.

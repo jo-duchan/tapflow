@@ -12,7 +12,7 @@
 
 - Assume macOS only. Throw a clear error on non-macOS environments.
 - Wrap all xcrun/simctl calls in dedicated functions so they can be swapped with mocks in tests.
-- Capture frames via SimulatorKit IOSurface and stream JPEG frames as WebSocket binary messages (≤30 fps).
+- Capture frames via SimulatorKit IOSurface and stream H.264 (default) or JPEG frames as WebSocket binary messages (≤30 fps).
 
 ## HOW NOT
 
@@ -196,14 +196,14 @@ bezelInset  = max(leftWidth, topHeight)   // chrome.json images.sizing
 
 ---
 
-### WebSocket Binary MJPEG — streaming protocol
+### WebSocket Binary streaming — transport choice
 
-`ws.send(Buffer)` → Relay → `ws.send(data, { binary: true })` → Browser `e.data instanceof ArrayBuffer`
+`ws.send(Buffer)` → Relay → `ws.send(data, { binary: true })` → Browser `e.data instanceof ArrayBuffer`. The codec is negotiated per frame via the TFFE envelope (H.264 default, JPEG fallback).
 
-Why WebSocket instead of DataChannel:
+Why WebSocket instead of a WebRTC DataChannel:
 1. **DataChannel instability**: `@roamhq/wrtc` silently closes the channel on messages ~236KB+.
-2. **No GPU benefit**: DataChannel + JPEG uses `createImageBitmap` which is CPU-based — hardware decoding requires a WebRTC Video Track.
-3. **No P2P benefit**: tapflow has a fixed Agent → Relay → Browser path.
+2. **No P2P benefit**: tapflow has a fixed Agent → Relay → Browser path.
+3. **HW decode doesn't need a Video Track here**: the browser decodes WebSocket frames directly — H.264 via WebCodecs (see dashboard), JPEG via `createImageBitmap`.
 
 ---
 
