@@ -1,39 +1,39 @@
-# Android 비디오 스트리밍 진단 — 인사이트
+# Android Video Streaming Diagnosis — Insights
 
-> 이 문서는 Android 에뮬레이터 스트리밍 과정에서 만난 문제들의 진단·해결 기록이다. 이슈별로 섹션을 추가한다.
+> This document records the diagnosis and resolution of problems encountered while streaming the Android emulator. Add a section per issue.
 
 ---
 
 ## Issue 1 — c2.android.avc.encoder crash (google_apis_playstore)
 
-### 결론
+### Conclusion
 
-`google_apis_playstore/arm64-v8a` 이미지에서 `c2.android.avc.encoder`가 크래시한다. scrcpy 방식 자체는 옳다. **해결: `google_apis/arm64-v8a` 이미지로 교체.**
+On the `google_apis_playstore/arm64-v8a` image, `c2.android.avc.encoder` crashes. The scrcpy approach itself is correct. **Fix: switch to the `google_apis/arm64-v8a` image.**
 
-### 원인
+### Cause
 
-`c2.android.avc.encoder`는 Codec2 기반 소프트웨어 H.264 인코더(AOSP libavc). `google_apis_playstore` 이미지에서 그래픽 버퍼 홀수 너비 체크 실패 또는 SurfaceControl 상태 불일치로 abort.
+`c2.android.avc.encoder` is a Codec2-based software H.264 encoder (AOSP libavc). On the `google_apis_playstore` image it aborts due to a failed odd-width graphics-buffer check or a SurfaceControl state mismatch.
 
-진단 로그:
+Diagnostic log:
 ```
 Abort message: 'Codec2BufferUtils.cpp:214] Check failed: (src.width() & 1) == 0'
 E CCodec: Codec2 component "c2.android.avc.encoder" died.
 E MediaCodec: Codec reported err 0xffffffe0
 ```
 
-scrcpy 공식 FAQ에도 동일 에러가 명시됨 ("then try with another encoder"). `google_apis_playstore` 이미지에는 대안 인코더(H.265/AV1)가 없으므로 이미지 교체가 유일한 해결책.
+The scrcpy official FAQ documents the same error ("then try with another encoder"). The `google_apis_playstore` image has no alternative encoder (H.265/AV1), so swapping the image is the only fix.
 
-### AVD 이미지 선택 가이드
+### AVD image selection guide
 
-| 이미지 태그 | 미디어 코덱 | tapflow 권장 |
+| Image tag | Media codec | tapflow recommendation |
 |---|---|---|
-| `google_apis_playstore` | `c2.android.avc.encoder` — crash 발생 | ❌ |
-| `google_apis` | 안정적, H.264 정상 동작 | ✅ |
-| `default` (AOSP) | 최소 구성 | - |
+| `google_apis_playstore` | `c2.android.avc.encoder` — crashes | ❌ |
+| `google_apis` | stable, H.264 works correctly | ✅ |
+| `default` (AOSP) | minimal configuration | - |
 
-Apple Silicon: `system-images;android-34;google_apis;arm64-v8a` 사용.
+Apple Silicon: use `system-images;android-34;google_apis;arm64-v8a`.
 
-### 인코더 목록 확인 커맨드
+### Command to list available encoders
 
 ```bash
 adb push scrcpy-server.jar /data/local/tmp/scrcpy-server.jar
@@ -46,139 +46,139 @@ adb logcat -d | grep -i "encoder\|scrcpy"
 
 ---
 
-## Issue 2 — macOS 윈도우 오클루전으로 인한 FPS 저하 (2026-05-18 해결)
+## Issue 2 — FPS drop from macOS window occlusion (resolved 2026-05-18)
 
-### 핵심 결론 (먼저 읽어라)
+### Key conclusion (read this first)
 
-`-no-window -gpu host` 조합으로 에뮬레이터를 기동하면 해결된다.  
-에뮬레이터 창이 없으면 macOS가 오클루전 상태를 판정할 대상이 사라지고,  
-`-gpu host`는 `-no-window`와 함께 써도 Metal 가속을 그대로 유지한다.
+Launching the emulator with the `-no-window -gpu host` combination resolves it.
+With no emulator window, macOS has nothing to judge an occlusion state against, and
+`-gpu host` keeps Metal acceleration even when used together with `-no-window`.
 
 ```bash
 emulator -avd <name> -no-window -gpu host -no-audio -no-snapshot
 ```
 
-검증:
+Verification:
 ```bash
-adb shell getprop ro.hardware.egl     # "emulation" → goldfish GL (host Metal), SwiftShader 아님
-adb shell getprop debug.hwui.renderer # "skiagl"    → 정상 가속 상태
+adb shell getprop ro.hardware.egl     # "emulation" → goldfish GL (host Metal), not SwiftShader
+adb shell getprop debug.hwui.renderer # "skiagl"    → properly accelerated
 ```
 
 ---
 
-### 증상
+### Symptoms
 
-- 에뮬레이터 창이 브라우저 창 뒤에 완전히 가려지면 수십 초 내로 FPS가 7~9 수준으로 떨어짐
-- 브라우저와 에뮬레이터를 나란히 놓으면(side-by-side) FPS 저하 없음
-- 에뮬레이터를 직접 터치하면 FPS가 일시 회복
-- idle과는 무관 — 에뮬레이터 화면이 바뀌지 않아도 가려지지만 않으면 정상
+- When the emulator window is completely hidden behind the browser window, FPS drops to ~7–9 within tens of seconds.
+- Placing browser and emulator side-by-side shows no FPS drop.
+- Touching the emulator directly temporarily restores FPS.
+- Unrelated to idle — even if the emulator screen does not change, it stays normal as long as it is not occluded.
 
-### 근본 원인
+### Root cause
 
-macOS는 `NSWindowOcclusionState` API를 통해 완전히 가려진 윈도우의 GPU 렌더링을 의도적으로 스로틀링한다. 에뮬레이터(QEMU)가 Metal swap buffer / vsync에 동기화되어 있으므로:
+macOS deliberately throttles GPU rendering of fully occluded windows via the `NSWindowOcclusionState` API. Because the emulator (QEMU) is synchronized to Metal swap-buffer / vsync:
 
 ```
-macOS Metal 콜백 감소
-  → QEMU Choreographer VSYNC 슬로우다운
-    → SurfaceFlinger 60Hz 유지 불가
-      → scrcpy MediaCodec에 도달하는 프레임 수 감소
+Fewer macOS Metal callbacks
+  → QEMU Choreographer VSYNC slowdown
+    → SurfaceFlinger can't sustain 60Hz
+      → fewer frames reaching scrcpy's MediaCodec
 ```
 
-이것은 scrcpy 문제도, 인코더 문제도 아니다. **QEMU가 창이 가려졌을 때 프레임을 덜 만든다**는 설계 충돌이다.
+This is neither a scrcpy problem nor an encoder problem. It is a design conflict: **QEMU produces fewer frames when its window is occluded.**
 
-### 시도했지만 실패한 방법들
+### Approaches tried that failed
 
-| 접근 | 결과 | 이유 |
+| Approach | Result | Why |
 |---|---|---|
-| `event tap 0 0` (emulator 콘솔 keepalive, 3초마다) | **화면 동결** 부작용 | scrcpy 터치 입력 파이프라인과 충돌 |
-| `repeat-previous-frame-after:long=33333` codec 옵션 | 효과 없음 | SurfaceFlinger 프레임 부재를 인코더 레이어에서 해결 불가 |
-| `stay_awake=true` (이미 적용 중) | 효과 없음 | 디스플레이 sleep과 별개 문제 |
-| `-gpu swiftshader_indirect` (SW 렌더링) | 너무 느림 | CPU 전용, Metal 미사용 |
-| 윈도우 off-screen 이동, minimize | 효과 없음 | macOS가 동일하게 occluded로 처리 |
+| `event tap 0 0` (emulator console keepalive, every 3s) | **screen freeze** side effect | conflicts with the scrcpy touch-input pipeline |
+| `repeat-previous-frame-after:long=33333` codec option | no effect | a missing SurfaceFlinger frame can't be fixed at the encoder layer |
+| `stay_awake=true` (already applied) | no effect | a separate problem from display sleep |
+| `-gpu swiftshader_indirect` (SW rendering) | too slow | CPU-only, no Metal |
+| moving the window off-screen, minimizing | no effect | macOS treats it as occluded all the same |
 
-### macOS 오클루전의 특성 (중요)
+### Characteristics of macOS occlusion (important)
 
-Apple 공식 문서에 따르면 다음은 **모두 occluded로 처리**된다:
-- 다른 창에 완전히 가려진 경우
-- Dock으로 최소화된 경우
-- 다른 Space(데스크탑)에 있는 경우
-- 화면 밖 좌표로 이동한 경우
+Per Apple's official docs, all of the following are **treated as occluded**:
+- fully hidden behind another window
+- minimized to the Dock
+- on a different Space (desktop)
+- moved to off-screen coordinates
 
-`NSWindowOcclusionState`는 **read-only**이므로 외부에서 강제로 "항상 visible" 상태로 만들 수 없다.
+`NSWindowOcclusionState` is **read-only**, so it cannot be forced into an "always visible" state from the outside.
 
-### 왜 `-no-window -gpu host`가 작동하는가
+### Why `-no-window -gpu host` works
 
-- `-no-window`: 에뮬레이터가 macOS 창을 생성하지 않음 → 오클루전 판정 대상 자체가 없어짐
-- `-gpu host`: Metal 하드웨어 가속 유지 (금속 렌더링이 창의 swap과 분리되어 계속 동작)
+- `-no-window`: the emulator creates no macOS window → there is no occlusion-judgment target at all.
+- `-gpu host`: Metal hardware acceleration is preserved (Metal rendering keeps running, decoupled from the window's swap).
 
-**흔한 오해**: "`-no-window`를 쓰면 자동으로 SwiftShader로 전환된다."  
-→ 오래된 emulator(v28.x 이전)의 동작이 입소문으로 퍼진 것. 최신 emulator(v33+)에서는 거짓.
+**Common misconception**: "Using `-no-window` automatically switches to SwiftShader."
+→ That's behavior of old emulators (before v28.x) spread by word of mouth. False on recent emulators (v33+).
 
 ### Code
 
-`EmulatorLauncher.ts` — `launch()` 메서드:
+`EmulatorLauncher.ts` — `launch()` method:
 
 ```typescript
 const proc = spawn(getEmulatorPath(), [
   '-avd', avdName,
   '-no-audio',
   '-no-snapshot',
-  '-no-window',   // macOS 오클루전 회피
-  '-gpu', 'host', // Metal 가속 유지
+  '-no-window',   // avoid macOS occlusion
+  '-gpu', 'host', // keep Metal acceleration
 ], { detached: true, stdio: 'ignore' })
 ```
 
-### 리서치 과정에서 얻은 참고 정보
+### Reference notes gathered during research
 
-- pupil-labs는 자신들의 앱(PyOpenGL)에서 동일 증상을 `glfw.swap_interval(0)` 한 줄로 해결했다. QEMU/emulator에 같은 패치를 적용하려면 소스 fork가 필요하고 그 비용 대비 `-no-window`가 훨씬 현실적이다.
-- Google의 `android-emulator-webrtc`(gRPC + WebRTC로 emulator 스트리밍)는 2025년 9월 archive 처리됐고, 처음부터 Linux + NVIDIA 전용이었다. Google조차 macOS에서 이 문제를 해결하지 않고 Linux로 회피한 것.
-- `NSWindowOcclusionState`를 끄는 plist 키나 system API는 존재하지 않는다 (Apple 의도적 설계).
-- `-gpu angle_indirect`, `-gpu auto-no-window` 등은 macOS에서 미지원이거나 존재하지 않는 옵션이다.
+- pupil-labs solved the same symptom in their own app (PyOpenGL) with a single line, `glfw.swap_interval(0)`. Applying the same patch to QEMU/emulator would require forking the source, and given that cost `-no-window` is far more practical.
+- Google's `android-emulator-webrtc` (emulator streaming over gRPC + WebRTC) was archived in September 2025 and was Linux + NVIDIA only from the start. Even Google avoided this problem on macOS by going to Linux.
+- There is no plist key or system API to disable `NSWindowOcclusionState` (deliberate Apple design).
+- `-gpu angle_indirect`, `-gpu auto-no-window`, etc. are unsupported on macOS or are non-existent options.
 
-### 대안 접근 (만약 `-no-window`가 요구사항과 충돌할 경우)
+### Alternative approach (if `-no-window` conflicts with a requirement)
 
-emulator gRPC API의 `streamScreenshot` RPC를 사용해 scrcpy를 완전히 대체하는 방법이 있다. emulator 프로세스 내부에서 프레임을 직접 생성하므로 SurfaceFlinger의 vsync 경로를 우회할 가능성이 있다. 검증은 아직 미진행.
+You can use the emulator gRPC API's `streamScreenshot` RPC to replace scrcpy entirely. Because frames are produced directly inside the emulator process, it may bypass SurfaceFlinger's vsync path. Not yet verified.
 
 ---
 
-## Issue 3 — SDK 스킨 오버레이 시도 및 롤백 (PR #110 → revert PR #113)
+## Issue 3 — SDK skin overlay attempt and rollback (PR #110 → revert PR #113)
 
-### 결론
+### Conclusion
 
-Android SDK 스킨(`back.webp` + `mask.webp`)을 디바이스 프레임 오버레이로 렌더링하는 작업을 시도했으나 **`google_apis` 에뮬레이터의 구조적 한계**로 인해 전면 롤백했다.
+We attempted to render the Android SDK skin (`back.webp` + `mask.webp`) as a device-frame overlay, but rolled it back entirely due to a **structural limitation of the `google_apis` emulator**.
 
-**핵심**: 어떤 코너 마스킹 방식을 써도 status bar 아이콘이 잘린다. 코드 문제가 아닌 에뮬레이터 이미지 한계다.
+**Key point**: with any corner-masking approach, status-bar icons get clipped. This is not a code problem but an emulator-image limitation.
 
-### 근본 원인
+### Root cause
 
-실제 Pixel 디바이스 펌웨어는 SurfaceFlinger에 `ro.surface_flinger.rounded_corner_radius`를 설정해 Android OS가 화면 모서리 곡률을 인식하게 한다. SystemUI(status bar)는 `WindowInsets.getRoundedCorner()`로 이 값을 읽어 아이콘·시간 표시를 모서리 안쪽으로 자동 inset한다.
+Real Pixel device firmware sets `ro.surface_flinger.rounded_corner_radius` on SurfaceFlinger so that the Android OS is aware of the screen's corner curvature. SystemUI (the status bar) reads this value via `WindowInsets.getRoundedCorner()` and automatically insets icons and the clock inside the corners.
 
-`google_apis/arm64-v8a` 에뮬레이터 이미지에는 이 프로퍼티가 없다. 따라서:
+The `google_apis/arm64-v8a` emulator image lacks this property. Therefore:
 
 ```
-에뮬레이터 프레임버퍼 → SystemUI가 rounded corner inset 없이 status bar를 직사각형 기준으로 그림
-→ WiFi·배터리·시계가 화면 최외각 모서리에 위치
-→ 어떤 코너 마스킹(border-radius / mask.webp / back.webp 오버레이)을 씌워도 해당 픽셀이 가려짐
+Emulator framebuffer → SystemUI draws the status bar against a rectangular baseline, without rounded-corner inset
+→ WiFi / battery / clock sit at the outermost screen corners
+→ any corner masking (border-radius / mask.webp / back.webp overlay) hides those pixels
 ```
 
-Android Studio 단독 에뮬레이터 창(`emulator` 바이너리)도 같은 스킨을 씌우면 동일하게 잘린다.
+Applying the same skin to Android Studio's standalone emulator window (the `emulator` binary) clips it identically.
 
-### 시도했지만 실패한 수정 방법
+### Fix methods tried that failed
 
-| 방법 | 결과 |
+| Method | Result |
 |---|---|
-| `adb shell settings put secure sysui_rounded_size 87` | 무시됨 — `google_apis` 이미지에서 sysui secure setting이 적용되지 않음 |
-| `adb shell settings put secure sysui_rounded_content_padding 24` | 동일하게 무시됨 |
-| `adb shell am crash com.android.systemui` (SystemUI 재시작) | SystemUI가 재시작되어도 설정값 반영 없음 |
-| `adb shell settings put secure sysui_display_cutout corner` (Display Cutout 시뮬레이션) | 카메라 노치 시뮬레이션용 설정으로 rounded corner inset과 무관, 효과 없음 |
-| `stop surfaceflinger && start surfaceflinger` (**금지**) | 에뮬레이터 부팅 루프 발생 — 절대 실행하지 말 것 |
+| `adb shell settings put secure sysui_rounded_size 87` | ignored — the sysui secure setting is not applied on the `google_apis` image |
+| `adb shell settings put secure sysui_rounded_content_padding 24` | ignored the same way |
+| `adb shell am crash com.android.systemui` (restart SystemUI) | even after SystemUI restarts, the setting is not reflected |
+| `adb shell settings put secure sysui_display_cutout corner` (simulate a display cutout) | a camera-notch simulation setting, unrelated to rounded-corner inset; no effect |
+| `stop surfaceflinger && start surfaceflinger` (**forbidden**) | causes an emulator boot loop — never run this |
 
-### 왜 스킨 없이도 괜찮은가
+### Why it's fine without a skin
 
-- scrcpy(데스크탑), Genymotion 등 대부분의 에뮬레이터 미러링 도구는 디바이스 프레임을 기본 제공하지 않는다.
-- tapflow는 QA 도구이므로 status bar 가시성이 디바이스 외형 연출보다 중요하다.
-- scrcpy 스트림 자체는 원시 직사각형 프레임버퍼이며 코너 마스킹은 표시 레이어의 순수 시각 효과다.
+- Most emulator-mirroring tools (scrcpy on desktop, Genymotion, etc.) do not provide a device frame by default.
+- tapflow is a QA tool, so status-bar visibility matters more than dressing up the device's appearance.
+- The scrcpy stream itself is a raw rectangular framebuffer; corner masking is a pure visual effect of the display layer.
 
-### 향후 재시도 조건
+### Conditions for a future retry
 
-`google_apis` 이미지가 `ro.surface_flinger.rounded_corner_radius`를 설정하도록 AOSP/Google이 업데이트하거나, SystemUI에 rounded corner inset을 외부에서 주입하는 공식 방법이 생기면 재검토할 수 있다.
+We can revisit this if AOSP/Google updates the `google_apis` image to set `ro.surface_flinger.rounded_corner_radius`, or if an official way appears to inject a rounded-corner inset into SystemUI from outside.
