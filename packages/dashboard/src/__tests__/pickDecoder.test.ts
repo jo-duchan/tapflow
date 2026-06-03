@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest'
-import { pickDecoder, detectCapabilities, type DecoderCapabilities } from '@/lib/decoders/pickDecoder'
+import { pickDecoder, canDecodeH264, detectCapabilities, type DecoderCapabilities } from '@/lib/decoders/pickDecoder'
 import { WebCodecsDecoder } from '@/lib/decoders/WebCodecsDecoder'
 import { WASMDecoder } from '@/lib/decoders/WASMDecoder'
 
@@ -57,6 +57,29 @@ describe('pickDecoder — 디코더 없음', () => {
 
   it('아무 것도 불가 → null', () => {
     expect(pickDecoder(caps())).toBeNull()
+  })
+})
+
+// ── canDecodeH264 (사전 코덱 협상 판정) ─────────────────────────────────────────────
+describe('canDecodeH264 — boot acceptH264 판정 (pickDecoder와 동일 조건)', () => {
+  it('secure + WebCodecs + WebGL2 → true', () => {
+    expect(canDecodeH264(caps({ secureContext: true, webCodecs: true, webgl2: true }))).toBe(true)
+  })
+
+  it('비-secure + wasm + WebGL2 → true', () => {
+    expect(canDecodeH264(caps({ wasm: true, webgl2: true }))).toBe(true)
+  })
+
+  it('WebGL2 없으면 false (디코드 불가 → agent가 JPEG)', () => {
+    expect(canDecodeH264(caps({ secureContext: true, webCodecs: true, wasm: true, webgl2: false }))).toBe(false)
+  })
+
+  it('wasm 미지원 + 비-secure → false', () => {
+    expect(canDecodeH264(caps({ wasm: false, webgl2: true }))).toBe(false)
+  })
+
+  it('아무 것도 불가 → false', () => {
+    expect(canDecodeH264(caps())).toBe(false)
   })
 })
 

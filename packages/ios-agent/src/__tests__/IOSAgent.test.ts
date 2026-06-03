@@ -20,9 +20,24 @@ vi.mock('../TouchHelper', () => ({
   })),
 }))
 
+// Mock the capture streamer so codec-negotiation tests can read the codec arg the
+// agent picked, without spawning the real helper binary. start() returns a stream
+// that never closes — mirroring a live capture and avoiding the pump's restart loop.
+vi.mock('../ScreenCaptureStreamer', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../ScreenCaptureStreamer')>()
+  return {
+    ...actual,
+    ScreenCaptureStreamer: vi.fn(() => ({
+      start: () => new ReadableStream({ start() {} }),
+      requestKeyframe: vi.fn(),
+    })),
+  }
+})
+
 import { WebSocket } from 'ws'
 import { RelayServer, initDb, closeDb } from '@tapflowio/relay'
 import { IOSAgent } from '../IOSAgent'
+import { ScreenCaptureStreamer } from '../ScreenCaptureStreamer'
 import { SimctlWrapper } from '../SimctlWrapper'
 // eslint-disable-next-line @typescript-eslint/no-unused-vars
 import { TouchHelper } from '../TouchHelper'
@@ -558,6 +573,68 @@ describe('IOSAgent', () => {
       }, { timeout: 2000 })
 
       agent.disconnect()
+    })
+  })
+
+  // Codec negotiation: H.264 only when the agent opts in (env) AND the browser reported
+  // it can decode it (device:boot acceptH264). Otherwise JPEG. Uses the ScreenCaptureStreamer
+  // path (no intervalMs) and reads the codec arg the mocked streamer was constructed with.
+  describe('codec negotiation', () => {
+    const ORIG_CODEC = process.env.TAPFLOW_IOS_CODEC
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const MockCapture = ScreenCaptureStreamer as any
+
+    afterEach(() => {
+      if (ORIG_CODEC === undefined) delete process.env.TAPFLOW_IOS_CODEC
+      else process.env.TAPFLOW_IOS_CODEC = ORIG_CODEC
+    })
+
+    // Boots via the ScreenCaptureStreamer path and returns the codec the streamer got.
+    async function bootAndGetCodec(bootPayload: Record<string, unknown>): Promise<string> {
+      MockCapture.mockClear()
+      const agent = new IOSAgent({}, mockSimctl(true)) // no intervalMs → ScreenCaptureStreamer
+      await agent.connect(`ws://localhost:${port}`)
+      const browser = new WebSocket(`ws://localhost:${port}`)
+      await waitForOpen(browser)
+      browser.send(JSON.stringify({ type: 'session:start', sessionId: agent.sessionId }))
+      await waitForType(browser, 'session:joined')
+      browser.send(JSON.stringify({
+        type: 'device:boot',
+        sessionId: agent.sessionId,
+        payload: { deviceId: 'dev-1', ...bootPayload },
+      }))
+      await waitForType(browser, 'device:ready')
+      const calls = MockCapture.mock.calls
+      const codec = calls[calls.length - 1]?.[2] as string
+      agent.disconnect()
+      browser.close()
+      return codec
+    }
+
+    it('streams H.264 when env=h264 and the browser accepts it', async () => {
+      process.env.TAPFLOW_IOS_CODEC = 'h264'
+      expect(await bootAndGetCodec({ acceptH264: true })).toBe('h264')
+    })
+
+    it('falls back to JPEG when the browser cannot decode H.264', async () => {
+      process.env.TAPFLOW_IOS_CODEC = 'h264'
+      expect(await bootAndGetCodec({ acceptH264: false })).toBe('jpeg')
+    })
+
+    it('defaults to JPEG when acceptH264 is absent (old browser / version skew)', async () => {
+      process.env.TAPFLOW_IOS_CODEC = 'h264'
+      expect(await bootAndGetCodec({})).toBe('jpeg')
+    })
+
+    it('forces JPEG when env=jpeg even if the browser accepts H.264', async () => {
+      process.env.TAPFLOW_IOS_CODEC = 'jpeg'
+      expect(await bootAndGetCodec({ acceptH264: true })).toBe('jpeg')
+    })
+
+    // H.264 is the default: env unset + a capable browser streams H.264 without any opt-in.
+    it('streams H.264 by default when env is unset and the browser accepts it', async () => {
+      delete process.env.TAPFLOW_IOS_CODEC
+      expect(await bootAndGetCodec({ acceptH264: true })).toBe('h264')
     })
   })
 
