@@ -12,9 +12,9 @@
 
   Backward compatible: the envelope codec/keyframe marker reuses a previously zero flag byte, so older clients read frames as JPEG and the relay forwards payloads untouched. Agents without `acceptH264` (version skew) default to JPEG. Opt out of H.264 anytime with `TAPFLOW_IOS_CODEC=jpeg`.
 
-- 267447c: feat(cli): `tapflow start`가 `tapflow.config.json`의 tunnel 설정을 읽어 공개 URL을 배너에 출력합니다.
+- 267447c: feat(cli): `tapflow start` now reads the tunnel config from `tapflow.config.json` and prints the public URL in the startup banner.
 
-  기존에는 `tapflow relay start`에서만 터널(Tailscale/rathole)을 기동했습니다. 이제 로컬 올인원 명령인 `tapflow start`도 동일하게 터널을 띄우고, Tailscale MagicDNS 호스트명(또는 tailnet IP)을 자동 감지해 배너에 `Public :` URL을 표시합니다. 터널 기동 로직은 `lib/tunnel-runner.ts`로 공통화했습니다.
+  Previously only `tapflow relay start` brought up the tunnel (Tailscale/rathole). Now the local all-in-one `tapflow start` starts the tunnel too, auto-detecting the Tailscale MagicDNS hostname (or tailnet IP) and showing a `Public :` URL in the banner. Tunnel startup logic was consolidated into `lib/tunnel-runner.ts`.
 
 ### Patch Changes
 
