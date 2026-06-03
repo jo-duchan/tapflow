@@ -99,7 +99,7 @@ export function Setup() {
                 {errors.confirm && <p className="text-sm text-destructive">{errors.confirm.message}</p>}
               </div>
               {errors.root && <p className="text-sm text-destructive">{errors.root.message}</p>}
-              <Button type="submit" size="pill" disabled={isSubmitting} className="w-full mt-1">
+              <Button type="submit" size="lg" disabled={isSubmitting} className="w-full mt-1">
                 {isSubmitting ? 'Creating account…' : 'Create admin account'}
               </Button>
             </form>

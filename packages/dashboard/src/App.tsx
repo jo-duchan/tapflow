@@ -12,6 +12,7 @@ import { MacResources } from './pages/MacResources'
 import { DefaultSettings } from './pages/settings/Default'
 import { TeamSettings } from './pages/settings/Team'
 import { TokenSettings } from './pages/settings/Tokens'
+import { NotFound } from './pages/NotFound'
 
 export function App() {
   const { resolvedTheme } = useTheme()
@@ -30,8 +31,8 @@ export function App() {
           <Route path="/settings/default" element={<DefaultSettings />} />
           <Route path="/settings/team" element={<TeamSettings />} />
           <Route path="/settings/tokens" element={<TokenSettings />} />
-          <Route path="*" element={<Navigate to="/app-center" replace />} />
         </Route>
+        <Route path="*" element={<NotFound />} />
       </Routes>
       <Toaster position="bottom-right" richColors theme={resolvedTheme as ToasterProps['theme']} />
     </BrowserRouter>
