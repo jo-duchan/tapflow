@@ -63,7 +63,7 @@ export class ScrcpySession {
     return this._control
   }
 
-  async start(serial: string, onRotation?: (rotation: number) => void): Promise<ScrcpyDeviceInfo> {
+  async start(serial: string): Promise<ScrcpyDeviceInfo> {
     const adb = getAdbPath()
     const port = allocatePort()
     this.port = port
@@ -83,6 +83,11 @@ export class ScrcpySession {
       'max_fps=30',
       'audio=false',
       'stay_awake=true',         // prevent device display from sleeping during capture
+      // Lock the captured stream to portrait so device rotation never resizes it (no SPS
+      // re-init → no decoder reset / black flash). Rotation is shown client-side via CSS,
+      // matching the iOS viewer; rotation-capable apps still re-layout (we set user_rotation)
+      // and scrcpy rotates that content into the locked portrait frame, which CSS undoes.
+      'capture_orientation=@0',
       'send_device_meta=true',   // 64-byte name + codec-id + width + height header
       'send_frame_meta=false',   // raw Annex B stream (no length prefix per frame)
       'send_dummy_byte=false',   // skip the 1-byte connection-check byte
@@ -114,7 +119,7 @@ export class ScrcpySession {
       this._video = new ScrcpyVideo(this.videoSocket)
       const info = await this._video.deviceInfo()
 
-      this._control = new ScrcpyControl(this.controlSocket, info.width, info.height, onRotation)
+      this._control = new ScrcpyControl(this.controlSocket, info.width, info.height)
       logger.info(`ready — ${info.deviceName} ${info.width}×${info.height}`)
       return info
     } catch (e) {

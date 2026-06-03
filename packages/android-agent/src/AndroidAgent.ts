@@ -114,7 +114,7 @@ interface DeviceState {
   displayHeight: number
   videoWidth: number   // actual scrcpy video frame dimensions — used for touch coordinates
   videoHeight: number
-  deviceRotation: number
+  landscape: boolean   // rotation intent toggle — only to request device rotation on input:rotate
   lastTouchPx: { x: number; y: number }
   bootSeq: number
   restarting: boolean
@@ -218,7 +218,7 @@ export class AndroidAgent implements DeviceAgent {
         displayHeight: 0,
         videoWidth: 0,
         videoHeight: 0,
-        deviceRotation: 0,
+        landscape: false,
         lastTouchPx: { x: 0, y: 0 },
         bootSeq: 0,
         restarting: false,
@@ -314,9 +314,9 @@ export class AndroidAgent implements DeviceAgent {
     state.touchHelper = touchHelper
 
     const session = new ScrcpySession()
-    const info = await session.start(serial, (rotation) => this.handleRotationNotification(state, rotation))
+    const info = await session.start(serial)
     state.scrcpySession = session
-    state.deviceRotation = 0
+    state.landscape = false
 
     state.displayWidth = info.width
     state.displayHeight = info.height
@@ -390,30 +390,6 @@ export class AndroidAgent implements DeviceAgent {
     } finally {
       state.restarting = false
     }
-  }
-
-  private handleRotationNotification(state: DeviceState, rotation: number): void {
-    if (rotation === state.deviceRotation) return
-    const prevRotation = state.deviceRotation
-    state.deviceRotation = rotation
-
-    // Swap displayW/H when rotation changes by an odd number of 90° steps.
-    // Do NOT call control.updateScreenSize here — scrcpy screenWidth/Height must match
-    // the actual video frame dimensions set in the ScrcpyControl constructor, not the
-    // display orientation. Portrait-locked apps keep portrait video even on a landscape
-    // device; mismatching screenSize causes scrcpy to silently drop all touch events.
-    const quarters = ((rotation - prevRotation) + 4) % 4
-    if (quarters === 1 || quarters === 3) {
-      ;[state.displayWidth, state.displayHeight] = [state.displayHeight, state.displayWidth]
-    }
-
-    logger.info(`rotation ${prevRotation}→${rotation} displaySize=${state.displayWidth}×${state.displayHeight}`)
-
-    this.ws?.send(JSON.stringify({
-      type: 'device:rotate',
-      sessionId: state.sessionId,
-      payload: { rotation, displayWidth: state.displayWidth, displayHeight: state.displayHeight },
-    }))
   }
 
   private async openStreamWs(state: DeviceState): Promise<WebSocket> {
@@ -643,13 +619,13 @@ export class AndroidAgent implements DeviceAgent {
         if (!state) break
         const serial = this.adb.getSerial(state.deviceId)
         if (!serial) break
-        // Toggle portrait (0) ↔ landscape (1); optimistic update — roll back if ADB fails.
-        const prevRotation = state.deviceRotation
-        const targetRotation: 0 | 1 = prevRotation % 2 === 1 ? 0 : 1
-        this.handleRotationNotification(state, targetRotation)
-        this.adb.setRotation(serial, targetRotation).catch(() => {
-          this.handleRotationNotification(state, prevRotation)
-        })
+        // The viewer owns rotation intent locally (CSS); here we only ask the device to
+        // rotate so rotation-capable apps re-layout. user_rotation=3 = canonical landscape
+        // (home-left/punch-right). Portrait-locked apps ignore it — the viewer's CSS handles
+        // their cosmetic rotation, so we don't track or sync device rotation back.
+        const next = !state.landscape
+        state.landscape = next
+        this.adb.setRotation(serial, next ? 3 : 0).catch(() => { state.landscape = !next })
         break
       }
       case 'input:button': {

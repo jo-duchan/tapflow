@@ -138,7 +138,6 @@ export type RelayMessage =
   | { type: 'device:booting' }
   | { type: 'device:ready'; payload: { deviceId: string } }
   | { type: 'device:boot-error'; message: string }
-  | { type: 'device:rotate'; payload: { rotation: number; displayWidth: number; displayHeight: number } }
   | { type: 'device:shutdown'; sessionId: string; payload: { deviceId: string } }
   | { type: 'device:shutdown-done'; payload: { deviceId: string } }
   | { type: 'input:touch:start'; sessionId: string; payload: { x: number; y: number } }

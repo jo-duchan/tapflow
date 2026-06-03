@@ -41,7 +41,6 @@ interface AndroidViewerProps {
   onRecordingUploaded?: () => void;
   screenWidth?: number;
   screenHeight?: number;
-  deviceRotation?: number;
   perfHookRef?: MutableRefObject<PerfHook>;
 }
 
@@ -50,7 +49,7 @@ export function AndroidViewer({
   deviceReady, installing, installed, installError, bootError,
   launching, setLaunching, androidButtons,
   binaryFrameHandlerRef, onRecordingUploaded,
-  screenWidth, screenHeight, deviceRotation = 0,
+  screenWidth, screenHeight,
   perfHookRef,
 }: AndroidViewerProps) {
   const surfaceHostRef = useRef<HTMLDivElement>(null);
@@ -64,6 +63,9 @@ export function AndroidViewer({
   const [decoderUnsupported, setDecoderUnsupported] = useState(false);
   const videoSizeRef = useRef<{ width: number; height: number } | null>(null);
   const [videoSize, setVideoSize] = useState<{ width: number; height: number } | null>(null);
+  // Rotation intent is owned locally (iOS IOSViewer pattern). It only drives CSS shell
+  // rotation for portrait-locked apps; rotation-capable apps follow the actual stream.
+  const [userWantsLandscape, setUserWantsLandscape] = useState(false);
 
   const [keyboardActive, setKeyboardActive] = useState(false);
   const [pinchActive, setPinchActive] = useState(false);
@@ -123,55 +125,63 @@ export function AndroidViewer({
   // ── Recording (composeFrame only — state/refs/lifecycle in useClientRecording) ──
   const composeFrame = useCallback(() => {
     const rc = recordCanvasRef.current; const fc = decoderRef.current?.surface
-    if (!rc || !fc) return
+    const size = videoSizeRef.current
+    if (!rc || !fc || !size) return
     const ctx = rc.getContext('2d')
     if (!ctx) return
 
-    ctx.drawImage(fc, 0, 0, rc.width, rc.height)
+    // rc was sized to the displayed orientation at record start (handleRecordToggle; MediaRecorder
+    // fixed the dimensions then). If rc's orientation differs from the frame's, the shell was
+    // CSS-rotated — bake the same rotation so the recording is landscape too; otherwise draw 1:1.
+    const fw = size.width; const fh = size.height
+    const css = (rc.width > rc.height) !== (fw > fh)
 
-    // Draw overlays in CSS pixel space so coordinates/radii match the display
-    const dpr = window.devicePixelRatio || 1
-    const cssW = rc.width / dpr; const cssH = rc.height / dpr
     ctx.save()
-    ctx.scale(dpr, dpr)
+    if (css) { ctx.translate(rc.width, 0); ctx.rotate(Math.PI / 2) } // CSS rotate(90deg) = clockwise
+    ctx.drawImage(fc, 0, 0, fw, fh)
+
+    // Overlays in normalized × frame space; radii scaled CSS-px → native-px to match the live view.
+    const longSide = Math.max(fw, fh)
+    const s = longSide > MAX_ANDROID_LONG ? longSide / MAX_ANDROID_LONG : 1
+    const ringR = CURSOR_RING_R * s; const dotR = CURSOR_DOT_R * s
 
     const ph = pinchHintRef.current
     if (ph) {
       for (const f of [ph.f0, ph.f1]) {
-        const cx = f.x * cssW; const cy = f.y * cssH
+        const cx = f.x * fw; const cy = f.y * fh
         if (isPinchMode.current) {
-          ctx.beginPath(); ctx.arc(cx, cy, CURSOR_DOT_R, 0, Math.PI * 2)
+          ctx.beginPath(); ctx.arc(cx, cy, dotR, 0, Math.PI * 2)
           ctx.fillStyle = 'rgba(255,255,255,0.92)'; ctx.fill()
-          ctx.strokeStyle = 'rgba(0,0,0,0.2)'; ctx.lineWidth = 1; ctx.stroke()
+          ctx.strokeStyle = 'rgba(0,0,0,0.2)'; ctx.lineWidth = s; ctx.stroke()
         } else {
-          ctx.beginPath(); ctx.arc(cx, cy, CURSOR_RING_R, 0, Math.PI * 2)
-          ctx.strokeStyle = 'rgba(0,0,0,0.3)'; ctx.lineWidth = 3; ctx.stroke()
-          ctx.beginPath(); ctx.arc(cx, cy, CURSOR_RING_R, 0, Math.PI * 2)
-          ctx.strokeStyle = 'rgba(255,255,255,0.65)'; ctx.lineWidth = 1.5; ctx.stroke()
+          ctx.beginPath(); ctx.arc(cx, cy, ringR, 0, Math.PI * 2)
+          ctx.strokeStyle = 'rgba(0,0,0,0.3)'; ctx.lineWidth = 3 * s; ctx.stroke()
+          ctx.beginPath(); ctx.arc(cx, cy, ringR, 0, Math.PI * 2)
+          ctx.strokeStyle = 'rgba(255,255,255,0.65)'; ctx.lineWidth = 1.5 * s; ctx.stroke()
         }
       }
     }
 
     const cp = cursorPosRef.current
     if (cp) {
+      const cx = cp.x * fw; const cy = cp.y * fh
       const state = cursorStateRef.current; const ra = releaseAnimRef.current
       if (state === 'down') {
-        ctx.beginPath(); ctx.arc(cp.x, cp.y, CURSOR_DOT_R, 0, Math.PI * 2)
+        ctx.beginPath(); ctx.arc(cx, cy, dotR, 0, Math.PI * 2)
         ctx.fillStyle = 'rgba(255,255,255,0.92)'; ctx.fill()
-        ctx.strokeStyle = 'rgba(0,0,0,0.2)'; ctx.lineWidth = 1; ctx.stroke()
+        ctx.strokeStyle = 'rgba(0,0,0,0.2)'; ctx.lineWidth = s; ctx.stroke()
       } else if (state === 'release' && ra) {
         const t = Math.min((performance.now() - ra.startTime) / 350, 1)
-        ctx.beginPath(); ctx.arc(cp.x, cp.y, CURSOR_DOT_R + 26 * t, 0, Math.PI * 2)
-        ctx.strokeStyle = `rgba(255,255,255,${(1 - t) * 0.55})`; ctx.lineWidth = 1.5; ctx.stroke()
+        ctx.beginPath(); ctx.arc(cx, cy, dotR + 26 * s * t, 0, Math.PI * 2)
+        ctx.strokeStyle = `rgba(255,255,255,${(1 - t) * 0.55})`; ctx.lineWidth = 1.5 * s; ctx.stroke()
         if (t >= 1) { cursorStateRef.current = 'idle'; releaseAnimRef.current = null }
       } else {
-        ctx.beginPath(); ctx.arc(cp.x, cp.y, CURSOR_RING_R, 0, Math.PI * 2)
-        ctx.strokeStyle = 'rgba(0,0,0,0.3)'; ctx.lineWidth = 3; ctx.stroke()
-        ctx.beginPath(); ctx.arc(cp.x, cp.y, CURSOR_RING_R, 0, Math.PI * 2)
-        ctx.strokeStyle = 'rgba(255,255,255,0.65)'; ctx.lineWidth = 1.5; ctx.stroke()
+        ctx.beginPath(); ctx.arc(cx, cy, ringR, 0, Math.PI * 2)
+        ctx.strokeStyle = 'rgba(0,0,0,0.3)'; ctx.lineWidth = 3 * s; ctx.stroke()
+        ctx.beginPath(); ctx.arc(cx, cy, ringR, 0, Math.PI * 2)
+        ctx.strokeStyle = 'rgba(255,255,255,0.65)'; ctx.lineWidth = 1.5 * s; ctx.stroke()
       }
     }
-
     ctx.restore()
   }, [])
 
@@ -191,10 +201,12 @@ export function AndroidViewer({
   const handleRecordToggle = useCallback(() => {
     if (recordState === 'idle') {
       const rc = recordCanvasRef.current; if (!rc) return
-      const dpr = window.devicePixelRatio || 1
-      const container = containerRef.current
-      if (container && container.clientWidth > 0) { rc.width = container.clientWidth * dpr; rc.height = container.clientHeight * dpr }
-      else { const size = videoSizeRef.current; if (size) { rc.width = size.width; rc.height = size.height } else return }
+      // Size the record canvas to the displayed orientation (frame-native, swapped when the
+      // shell is CSS-rotated) so the recording keeps aspect AND matches what's on screen (#179).
+      const size = videoSizeRef.current; if (!size) return
+      const css = needsCSSRotationRef.current
+      rc.width = css ? size.height : size.width
+      rc.height = css ? size.width : size.height
       startClientRecording(composeFrame)
     } else if (recordState === 'recording') {
       stopClientRecording()
@@ -203,7 +215,16 @@ export function AndroidViewer({
 
   const handleRotate = useCallback(() => {
     send({ type: 'input:rotate', sessionId })
+    setUserWantsLandscape((prev) => !prev)
   }, [send, sessionId])
+
+  // Reset device orientation to portrait on unmount if we left it in landscape (iOS pattern).
+  const userWantsLandscapeRef = useRef(userWantsLandscape)
+  useEffect(() => { userWantsLandscapeRef.current = userWantsLandscape }, [userWantsLandscape])
+  useEffect(() => {
+    return () => { if (userWantsLandscapeRef.current) send({ type: 'input:rotate', sessionId }) }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   // ── Keyboard forwarding ───────────────────────────────────────────────────
   useEffect(() => {
@@ -286,7 +307,7 @@ export function AndroidViewer({
     touchStartPos.current = pos
     ;(e.target as Element).setPointerCapture(e.pointerId)
     const _rect = (e.currentTarget as Element).getBoundingClientRect()
-    cursorPosRef.current = { x: e.clientX - _rect.left, y: e.clientY - _rect.top }
+    cursorPosRef.current = pos // normalized — composeFrame maps to record-canvas (native) space
     cursorStateRef.current = 'down'; releaseAnimRef.current = null
     const _lc = liveCursorRef.current
     if (_lc) {
@@ -310,7 +331,7 @@ export function AndroidViewer({
       const _r = (e.currentTarget as Element).getBoundingClientRect()
       const _lc = liveCursorRef.current
       if (norm) {
-        cursorPosRef.current = { x: e.clientX - _r.left, y: e.clientY - _r.top }
+        cursorPosRef.current = norm // normalized — see composeFrame
         if (cursorStateRef.current !== 'down') cursorStateRef.current = 'idle'
         if (_lc) {
           _lc.style.display = 'block'
@@ -343,7 +364,7 @@ export function AndroidViewer({
     if (now - lastMoveSentAt.current < MOVE_THROTTLE_MS) return
     lastMoveSentAt.current = now
     const _r = (e.currentTarget as Element).getBoundingClientRect()
-    cursorPosRef.current = { x: e.clientX - _r.left, y: e.clientY - _r.top }
+    cursorPosRef.current = pos // normalized — see composeFrame
     const _lc = liveCursorRef.current
     if (_lc && _lc.style.display !== 'none') {
       _lc.style.left = `${e.clientX - _r.left}px`; _lc.style.top = `${e.clientY - _r.top}px`
@@ -393,11 +414,12 @@ export function AndroidViewer({
   const androidDisplayW = effectiveSize ? Math.round(effectiveSize.width * androidScale) : 324;
   const androidDisplayH = effectiveSize ? Math.round(effectiveSize.height * androidScale) : 720;
 
-  // CSS rotation: applied when device is landscape but video content is portrait (portrait-locked app).
-  // Matches native Android emulator behavior — chrome rotates even when app content stays portrait.
-  const isLandscapeDevice = deviceRotation === 1 || deviceRotation === 3;
+  // CSS rotation: applied when the user requested landscape but the video content is still
+  // portrait (portrait-locked app). Matches native Android emulator — the shell rotates even
+  // when app content stays portrait. Rotation-capable apps make the stream landscape, so they
+  // display naturally (any landscape direction stays upright — scrcpy mirrors the real display).
   const isLandscapeContent = effectiveSize ? effectiveSize.width > effectiveSize.height : false;
-  const needsCSSRotation = isLandscapeDevice && !isLandscapeContent;
+  const needsCSSRotation = userWantsLandscape && !isLandscapeContent;
   useLayoutEffect(() => { needsCSSRotationRef.current = needsCSSRotation }, [needsCSSRotation])
   // Container uses landscape dims; canvas inside rotated 90° to show portrait content in landscape shell
   const containerW = needsCSSRotation ? androidDisplayH : androidDisplayW;
