@@ -65,4 +65,16 @@ model: claude-opus-4-8
 
 - `git push -u origin release/vX.Y.Z`
 - `gh pr create --base main` — 본문에 버전 표 + 릴리즈노트 + 호환성 근거.
-- **PR을 머지하지 않는다.** 머지는 사용자 몫. 머지 후 `changeset publish`가 npm publish + 태그를 처리한다(mcp-server는 experimental dist-tag로 별도 publish).
+- **PR을 머지하지 않는다.** 머지는 사용자 몫.
+
+## 11. 머지 후 — 태그 push로 발행 트리거 (놓치면 발행이 안 됨)
+
+`.github/workflows/release.yml`은 **`vX.Y.Z` 태그 push로만** 발동한다. **main 머지만으로는 npm 발행이 일어나지 않는다** — 머지 후 태그를 직접 달아야 한다.
+
+- PR 머지를 확인한 뒤, **머지 커밋에** 태그를 단다(이전 릴리즈와 동일한 방식):
+  `git fetch origin main && git tag vX.Y.Z <머지 커밋 SHA>`
+- **STOP** — 태그 push는 즉시 npm 발행을 유발하는 되돌리기 어려운 작업이다. 사용자 확인 후 진행한다.
+- `git push origin vX.Y.Z`
+- 워크플로우가 처리하는 것: `pnpm build` → `changeset publish`(stable 5종) → `mcp-server`는 experimental dist-tag로 별도 publish → GitHub Release 생성.
+- npm 인증은 **GitHub OIDC(trusted publishing)** 로 동작한다 — NPM_TOKEN 등 별도 토큰이 필요 없다.
+- 발행 확인: Actions의 Release 워크플로우 `success`, `npm view tapflow version`, GitHub Releases 페이지.
