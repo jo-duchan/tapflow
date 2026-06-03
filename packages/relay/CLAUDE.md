@@ -27,7 +27,7 @@ iOS build format: `.app.zip` (simulator builds). `.ipa` uploads return 400.
 
 - The agent connects to the relay via outbound WebSocket first (the key to NAT traversal).
 - JSON messages and binary frames share the same WebSocket connection, branched by the `isBinary` flag.
-- Control message protocol: `input:touch:*`, `input:pinch:*`, `input:button`, `input:key`, `input:type`, `input:rotate`, `input:keyboard:toggle`, `device:boot`, `device:rotate`, `device:shutdown`, `session:start`, `session:end`.
+- Control message protocol: `input:touch:*`, `input:pinch:*`, `input:button`, `input:key`, `input:type`, `input:rotate`, `input:keyboard:toggle`, `device:boot`, `device:shutdown`, `session:start`, `session:end`.
 - JWTs are issued based on team invite links.
 - Serves the `public/` directory as HTTP static files (dashboard build output).
 - The relay does not buffer stream data — it forwards immediately on arrival.

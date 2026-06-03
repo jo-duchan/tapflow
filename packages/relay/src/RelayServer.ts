@@ -60,7 +60,7 @@ const RESOURCE_THRESHOLD = Number.isFinite(_parsedThreshold) ? _parsedThreshold 
 const AGENT_MSG_TYPES = new Set([
   'agent:register', 'agent:resources', 'screenshot:done', 'screenshot:error',
   'device:booting', 'device:boot-error', 'device:shutdown-done', 'device:ready',
-  'device:rotate', 'session:chrome', 'session:deviceInfo',
+  'session:chrome', 'session:deviceInfo',
   'app:install-done', 'app:install-error', 'app:launch-done', 'app:launch-error',
   'open-url:done', 'open-url:error', 'keyboard:toggled',
 ])
@@ -460,13 +460,6 @@ export class RelayServer {
         if (!session) break
         this.sessions.updateDeviceStatus(session.id, 'booted')
         if (session.browserSocket?.readyState === WebSocket.OPEN) {
-          session.browserSocket.send(JSON.stringify(msg))
-        }
-        break
-      }
-      case 'device:rotate': {
-        const session = this.sessions.get(msg.sessionId!)
-        if (session?.browserSocket?.readyState === WebSocket.OPEN) {
           session.browserSocket.send(JSON.stringify(msg))
         }
         break

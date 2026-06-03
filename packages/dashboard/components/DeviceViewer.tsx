@@ -54,7 +54,6 @@ export function DeviceViewer({ sessionId, deviceId, buildId, resetMode, onRecord
   const [installError, setInstallError] = useState<string | null>(null);
   const [bootError, setBootError] = useState<string | null>(null);
   const [launching, setLaunching] = useState(false);
-  const [deviceRotation, setDeviceRotation] = useState(0);
   const [swKeyboardVisible, setSwKeyboardVisible] = useState(false);
   const [swKeyboardPending, setSwKeyboardPending] = useState(false);
 
@@ -79,10 +78,6 @@ export function DeviceViewer({ sessionId, deviceId, buildId, resetMode, onRecord
       setInstallError(null);
       setBootError(null);
       setChrome(null); // causes active viewer to unmount → cleanup
-      setDeviceRotation(0);
-    }
-    if (msg.type === 'device:rotate') {
-      setDeviceRotation(msg.payload.rotation);
     }
     if (msg.type === 'device:ready') {
       setDeviceReady(true);
@@ -179,7 +174,7 @@ export function DeviceViewer({ sessionId, deviceId, buildId, resetMode, onRecord
   return (
     <>
       {iosChrome && <IOSViewer {...commonProps} chrome={iosChrome} perfHookRef={devPerfHookRef} />}
-      {androidChrome && <AndroidViewer {...commonProps} androidButtons={androidChrome.buttons} screenWidth={androidChrome.screenWidth} screenHeight={androidChrome.screenHeight} deviceRotation={deviceRotation} perfHookRef={devPerfHookRef} />}
+      {androidChrome && <AndroidViewer {...commonProps} androidButtons={androidChrome.buttons} screenWidth={androidChrome.screenWidth} screenHeight={androidChrome.screenHeight} perfHookRef={devPerfHookRef} />}
       {import.meta.env.DEV && perfMode && perfVisible && (
         <>
           <StatsOverlay perfHookRef={statsRef} />

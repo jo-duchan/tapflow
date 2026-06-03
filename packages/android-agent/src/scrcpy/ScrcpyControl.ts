@@ -7,24 +7,12 @@ const ACTION_DOWN = 0
 const ACTION_UP = 1
 const ACTION_MOVE = 2
 
-// Server → client device message types
-const DEVICE_MSG_CLIPBOARD = 0
-const DEVICE_MSG_ACK_CLIPBOARD = 1
-const DEVICE_MSG_ROTATION_NOTIFICATION = 4
-
 export class ScrcpyControl {
-  private parseBuf = Buffer.alloc(0)
-
   constructor(
     private readonly socket: Socket,
     private screenWidth: number,
     private screenHeight: number,
-    private readonly onRotation?: (rotation: number) => void,
-  ) {
-    if (onRotation) {
-      socket.on('data', (data: Buffer) => this.handleServerMessage(data))
-    }
-  }
+  ) {}
 
   updateScreenSize(width: number, height: number): void {
     this.screenWidth = width
@@ -66,34 +54,6 @@ export class ScrcpyControl {
     buf.writeInt32BE(0, 6)        // repeat
     buf.writeInt32BE(0, 10)       // metaState
     this.socket.write(buf)
-  }
-
-  private handleServerMessage(data: Buffer): void {
-    this.parseBuf = Buffer.concat([this.parseBuf, data])
-    while (this.parseBuf.length > 0) {
-      const type = this.parseBuf[0]
-      if (type === DEVICE_MSG_ROTATION_NOTIFICATION) {
-        // [type(1), rotation(1)] — total 2 bytes
-        if (this.parseBuf.length < 2) return
-        const rotation = this.parseBuf[1]
-        this.parseBuf = Buffer.from(this.parseBuf.subarray(2))
-        this.onRotation!(rotation)
-      } else if (type === DEVICE_MSG_CLIPBOARD) {
-        // [type(1), seq(8), clip_len(4), clip(N)]
-        if (this.parseBuf.length < 13) return
-        const clipLen = this.parseBuf.readUInt32BE(9)
-        if (this.parseBuf.length < 13 + clipLen) return
-        this.parseBuf = Buffer.from(this.parseBuf.subarray(13 + clipLen))
-      } else if (type === DEVICE_MSG_ACK_CLIPBOARD) {
-        // [type(1), seq(8)] — total 9 bytes
-        if (this.parseBuf.length < 9) return
-        this.parseBuf = Buffer.from(this.parseBuf.subarray(9))
-      } else {
-        // Unknown type — discard buffer to avoid getting stuck
-        this.parseBuf = Buffer.alloc(0)
-        return
-      }
-    }
   }
 
   private writeTouchEvent(action: number, pointerId: number, x: number, y: number): void {
