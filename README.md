@@ -138,7 +138,7 @@ What's included:
 - **Deeplink toolbar** — open supported deeplinks directly from the QA toolbar.
 - **Keyboard shortcuts** — trigger simulator toolbar actions from the keyboard.
 - **App Center** — upload `.app.zip` / `.apk` and track builds by status (Backlog / In Progress / Done / Rejected).
-- **Session recordings** — record and share QA sessions, kept on the relay for 72 hours, then auto-deleted.
+- **Session recordings** — record and share QA sessions, kept on the relay for ~72 hours, then purged automatically.
 - **Screenshot REST endpoint** — `GET /api/v1/sessions/:sessionId/screenshot` for CI and AI agents.
 - **Mac resource monitoring** — CPU & RAM per agent, to spot overloaded hosts before assigning sessions.
 - **Team management** — invite links, roles (Admin / Developer / QA / Viewer), and Personal Access Tokens.
@@ -155,7 +155,7 @@ tapflow is self-hosted by design — build files, device streams, and session re
 |------|----------------|
 | App binaries (`.app.zip` / `.apk`) | Relay storage |
 | Device streams (video · touch) | The relay ↔ browser path you host |
-| Session recordings | Relay storage, auto-deleted after 72 hours |
+| Session recordings | Relay storage; expire after 72h, then purged |
 | Account & team data | The relay's SQLite DB |
 | Third-party simulator cloud | Not required |
 
