@@ -1,5 +1,13 @@
 # @tapflowio/android-agent
 
+## 0.5.0
+
+### Patch Changes
+
+- 7e4023a: fix(android): landscape rotation and recording via a locked stream + local intent.
+- Updated dependencies
+  - @tapflowio/agent-core@0.5.0
+
 ## 0.4.1
 
 ### Patch Changes

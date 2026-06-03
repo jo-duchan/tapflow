@@ -1,5 +1,29 @@
 # tapflow
 
+## 0.5.0
+
+### Minor Changes
+
+- H.264 streaming pipeline with automatic codec negotiation.
+
+  - iOS streams H.264 by default (VideoToolbox encoder), cutting bandwidth ~10× vs JPEG (~16–27 KB/frame vs ~235 KB) for noticeably lower latency. Android streaming moves to a runtime decoder layer.
+  - The browser advertises its decode capability (`acceptH264`) at boot; the agent picks H.264 only when the client can decode it, otherwise falls back to JPEG — no black screens on older browsers.
+  - Tiered browser decoders: HTTPS → WebCodecs, plain-HTTP LAN → WASM (tinyh264), both WebGL2-rendered.
+
+  Backward compatible: the envelope codec/keyframe marker reuses a previously zero flag byte, so older clients read frames as JPEG and the relay forwards payloads untouched. Agents without `acceptH264` (version skew) default to JPEG. Opt out of H.264 anytime with `TAPFLOW_IOS_CODEC=jpeg`.
+
+- 267447c: feat(cli): `tapflow start` now reads the tunnel config from `tapflow.config.json` and prints the public URL in the startup banner.
+
+  Previously only `tapflow relay start` brought up the tunnel (Tailscale/rathole). Now the local all-in-one `tapflow start` starts the tunnel too, auto-detecting the Tailscale MagicDNS hostname (or tailnet IP) and showing a `Public :` URL in the banner. Tunnel startup logic was consolidated into `lib/tunnel-runner.ts`.
+
+### Patch Changes
+
+- Updated dependencies
+  - @tapflowio/agent-core@0.5.0
+  - @tapflowio/ios-agent@0.5.0
+  - @tapflowio/relay@0.5.0
+  - @tapflowio/android-agent@0.5.0
+
 ## 0.4.1
 
 ### Patch Changes
