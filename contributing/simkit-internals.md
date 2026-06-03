@@ -282,7 +282,7 @@ if let msgUp = indigoButton(0x0, 2, 0x33) {     // home up
 }
 ```
 
-> **Caution**: as of iOS 26.4 the legacy path (`IndigoHIDMessageForButton`) is confirmed working only for home/lock. Volume/power must use the HIDArbitrary path.
+> **Caution**: as of Xcode 26 the legacy path (`IndigoHIDMessageForButton`) is confirmed working only for home/lock. Volume/power must use the HIDArbitrary path.
 
 ---
 
