@@ -1,18 +1,20 @@
 <div align="center">
-  <img src="docs/public/logo-hero.svg" height="72" alt="tapflow" />
+  <img src="https://raw.githubusercontent.com/jo-duchan/tapflow/main/docs/public/logo-hero.svg" height="72" alt="tapflow" />
 
   <h3>A self-hosted Appetize / BrowserStack alternative for mobile QA teams</h3>
 
   <p>
-    Run iOS simulators and Android emulators in any browser — no toolchain setup, no device management, no cloud uploads.<br />
-    App data never leaves your network.
+    Run iOS simulators and Android emulators in any browser — no toolchain setup, no device pool, no cloud uploads.<br />
+    Your builds, streams, and recordings stay on infrastructure you control.
   </p>
 
   <p>
-    <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-blue.svg" alt="MIT License" /></a>
+    <a href="https://github.com/jo-duchan/tapflow/blob/main/LICENSE"><img src="https://img.shields.io/badge/License-MIT-blue.svg" alt="MIT License" /></a>
     <a href="https://nodejs.org"><img src="https://img.shields.io/badge/node-%3E%3D20-brightgreen" alt="Node.js ≥ 20" /></a>
-    <img src="https://img.shields.io/badge/platform-macOS-lightgrey" alt="macOS Agent" />
-    <a href="https://github.com/jo-duchan/tapflow/blob/main/CONTRIBUTING.md"><img src="https://img.shields.io/badge/PRs-welcome-brightgreen.svg" alt="PRs welcome" /></a>
+    <img src="https://img.shields.io/badge/platform-macOS%20agent-lightgrey" alt="macOS Agent" />
+    <a href="https://github.com/jo-duchan/tapflow/releases"><img src="https://img.shields.io/github/v/release/jo-duchan/tapflow?include_prereleases&sort=semver" alt="Latest release" /></a>
+    <a href="https://github.com/jo-duchan/tapflow/commits/main"><img src="https://img.shields.io/github/last-commit/jo-duchan/tapflow" alt="Last commit" /></a>
+    <a href="https://github.com/jo-duchan/tapflow/blob/main/ROADMAP.md"><img src="https://img.shields.io/badge/roadmap-v0.x→v1.0-blueviolet" alt="Roadmap" /></a>
   </p>
 
   <p>
@@ -35,56 +37,46 @@
 
 ## Why tapflow?
 
-If you work on a mobile product, you've probably seen this.
+Mobile QA usually depends on access to simulators, emulators, or physical devices — and that access is uneven across a team.
 
-Physical devices are never enough. Covering every OS version is even harder — iOS doesn't support downgrading, so maintaining a range of versions means managing a pool of locked devices, which is overhead nobody wants.
+For mobile developers it means opening Xcode or Android Studio on a Mac. For everyone else, it often means asking a mobile developer every single time:
 
-But the bigger friction is access. Simulators only run on a developer's Mac, behind complex developer toolchains. Anyone on the team who isn't a mobile developer has to ask one every single time they need to verify something:
-
-> **Server / FE developer** — "How do I install the sandbox build to check what was deployed?"
+> **Backend developer** — "How do I install the sandbox build to check what was deployed?"
 >
-> **Product manager** — "I keep having to install and remove different versions just to compare behavior."
+> **Product manager** — "I keep installing and removing versions just to compare behavior."
 >
 > **Designer** — "I need to check the layout across screen sizes, but I don't have the right devices."
 
-Cloud simulator services exist. But uploading internal app builds to an external service — and paying monthly fees for simulators already running on Macs you own — was never something we wanted to do.
+Physical devices add their own overhead — OS-version coverage, availability, charging, storage, handoff. Cloud simulator services solve access, but they require uploading internal builds to a third-party service and paying for remote devices while your own Macs can already run the same simulators.
 
-So we built tapflow.
+We hit this exact problem, so we built tapflow.
 
-| Solution                | Problem                                                                  |
-| ----------------------- | ------------------------------------------------------------------------ |
-| Appetize / BrowserStack | Expensive — app data leaves your network                                 |
-| Physical devices        | Cost, loss, management overhead                                          |
-| Xcode / Android Studio  | Every QA member needs their own Mac + full toolchain setup               |
-| **tapflow**             | Use the Mac you already own — data stays on-prem, whole team does QA from a browser |
+| Solution | The catch |
+|----------|-----------|
+| Appetize / BrowserStack | Recurring cost — and app builds are uploaded to a third-party cloud |
+| Physical devices | Cost, availability, OS coverage, management overhead |
+| Xcode / Android Studio | Each teammate needs a Mac and a full mobile toolchain |
+| **tapflow** | Reuse your own Macs — data stays on infrastructure you control, and the whole team does QA from a browser |
 
-## Features
+## What tapflow does
 
-tapflow focuses on:
+tapflow connects three parts:
 
-- **Zero setup for QA** — any browser, no toolchain. Designers, PMs, and server devs test without asking a mobile developer.
-- **Data on-premises** — app binaries and session recordings never leave your network.
-- **Your existing Mac** — no new hardware, no monthly cloud subscription.
-- **API-first** — REST endpoints and PATs built in, ready for CI/CD and AI agent workflows.
+1. A **self-hosted relay** server (Linux or Mac)
+2. A **macOS agent** that drives iOS simulators and Android emulators
+3. A **browser dashboard** for the rest of the team
 
-What's included:
+The agent connects outbound to the relay. Teammates open the dashboard, pick an available device, and interact with it remotely — while the simulators and emulators keep running on your own Macs.
 
-- **iOS & Android streaming** — ~30 fps, no additional app required on the device
-- **Touch, swipe & pinch** — real-time input forwarded to the simulator
-- **Deeplink** — jump directly to any screen from the QA toolbar, no manual navigation
-- **Keyboard shortcuts** — simulator toolbar actions without leaving the keyboard
-- **App Center** — upload `.app.zip` / `.apk`, track builds by status (Backlog / In Progress / Done / Rejected)
-- **Session recordings** — record and share QA sessions, retained 72 hours
-- **Screenshot REST endpoint** — `GET /api/v1/sessions/:sessionId/screenshot` for CI and AI agents
-- **Mac resource monitoring** — CPU & RAM per agent, spot overloaded hosts before assigning sessions
-- **Team management** — invite links, roles (Admin / Developer / QA / Viewer), Personal Access Tokens
-- **MCP Server** *(experimental)* — `@tapflowio/mcp-server` lets Claude Code and other LLM agents control simulators as native tools.
+## What tapflow is not
+
+tapflow doesn't replace native mobile development tools. Mobile developers still use Xcode, Android Studio, and their build tooling. tapflow makes the *running* simulators and emulators accessible to the rest of the team through a browser — it isn't an automation framework or a device farm.
 
 ## How it works
 
 ```
-Browser (your team)  ← WebSocket →  Relay Server  ← WebSocket (outbound) →  Mac Agent
-                                   (Linux / Mac)                           (iOS · Android)
+Browser (your team)  ←─ WebSocket ─→  Relay Server  ←─ WebSocket (outbound) ─→  Mac Agent
+                                    (Linux / Mac)                           (iOS · Android)
 ```
 
 1. The **Mac Agent** connects _outbound_ to the relay — no inbound firewall rules needed.
@@ -113,7 +105,7 @@ This starts both the relay and the agent on the same Mac (local mode).
 
 ### 3. Create the first admin account
 
-Open `http://localhost:4000` in your browser. tapflow redirects you to `/setup` where you can create the admin account.
+Open `http://localhost:4000` in your browser. tapflow redirects you to `/setup` to create the admin account.
 
 > **Headless server?** Use `tapflow admin init` to create the admin account via CLI instead.
 
@@ -121,16 +113,59 @@ Open `http://localhost:4000` in your browser. tapflow redirects you to `/setup` 
 
 Navigate to `http://localhost:4000` and sign in with the account you just created.
 
-> **Having issues?** Run `tapflow doctor` to auto-diagnose Node.js, Xcode, `adb`, and other prerequisites.
+> **Having issues?** Run `tapflow doctor` to auto-diagnose Node.js, the iOS toolchain, `adb`, and other prerequisites.
 
 ## Requirements
 
-| Component         | Requirements                                                                                                              |
-| ----------------- | ------------------------------------------------------------------------------------------------------------------------- |
-| **Relay server**  | Node.js ≥ 20, any OS (Linux/macOS), ~512 MB RAM                                                                           |
-| **iOS Agent**     | macOS, Xcode with iOS Simulator Runtime, Node.js ≥ 20                                                                     |
-| **Android Agent** | macOS, Android SDK (`adb` in `$PATH` or `$ANDROID_HOME` set), AVD with `google_apis/arm64-v8a` (android-34), Node.js ≥ 20 |
-| **Browser**       | Any modern browser — Chrome, Firefox, Safari, Edge                                                                        |
+| Component | Requirements |
+|-----------|-------------|
+| **Relay server** | Node.js ≥ 20, any OS (Linux/macOS), ~512 MB RAM |
+| **iOS Agent** | macOS, Xcode with the iOS Simulator runtime, Node.js ≥ 20 |
+| **Android Agent** | macOS, Android SDK (`adb` in `$PATH` or `$ANDROID_HOME` set), an AVD with `google_apis/arm64-v8a` (android-34), Node.js ≥ 20 |
+| **Browser (QA)** | Any modern browser — Chrome, Firefox, Safari, Edge |
+
+> Agents run on **macOS only** (they drive the iOS Simulator and Android emulator on a Mac). The relay runs anywhere.
+
+## Features
+
+- **No mobile toolchain for QA users** — teammates test from a browser without installing Xcode, Android Studio, or local simulator tooling.
+- **Self-hosted by default** — app builds, device streams, recordings, and account data stay on infrastructure you control.
+- **Use your existing Mac setup** — run agents on Macs that already have the iOS Simulator or Android emulator available.
+- **API-first** — REST endpoints and Personal Access Tokens support CI/CD and AI-agent workflows.
+
+What's included:
+
+- **Browser streaming** — iOS & Android at ~30 fps, no extra app on the device. The iOS pipeline streams H.264 through a 2-tier decoder (WebCodecs on secure contexts, WASM/tinyh264 on plain HTTP), which removes the media-element buffer from the decode path.<sup>[1](#latency-note)</sup>
+- **Codec fallback** — the stream negotiates the codec per client and falls back to JPEG when a hardware or WASM decoder isn't available, so older browsers still work.
+- **Touch, swipe & pinch** — real-time input forwarded to the simulator or emulator.
+- **Deeplink toolbar** — open supported deeplinks directly from the QA toolbar.
+- **Keyboard shortcuts** — trigger simulator toolbar actions from the keyboard.
+- **App Center** — upload `.app.zip` / `.apk` and track builds by status (Backlog / In Progress / Done / Rejected).
+- **Session recordings** — record and share QA sessions, kept on the relay for ~72 hours, then purged automatically.
+- **Screenshot REST endpoint** — `GET /api/v1/sessions/:sessionId/screenshot` for CI and AI agents.
+- **Mac resource monitoring** — CPU & RAM per agent, to spot overloaded hosts before assigning sessions.
+- **Team management** — invite links, roles (Admin / Developer / QA / Viewer), and Personal Access Tokens.
+- **MCP Server** *(experimental)* — `@tapflowio/mcp-server` lets Claude Code and other LLM agents control simulators as native tools.
+
+<a name="latency-note"></a>
+> <sup>1</sup> On localhost, decode-to-present is in the single-to-low-double-digit milliseconds (WebCodecs ~2.5 ms, WASM ~9–14 ms); end-to-end "glass-to-glass" latency also depends on your network. See the [streaming latency log](https://github.com/jo-duchan/tapflow/blob/main/contributing/streaming-latency-log.md) for the full pipeline analysis and measurements.
+
+## Security & Privacy
+
+tapflow is self-hosted by design — build files, device streams, and session recordings stay on infrastructure you control, never sent to a third-party service.
+
+| Data | Where it stays |
+|------|----------------|
+| App binaries (`.app.zip` / `.apk`) | Relay storage |
+| Device streams (video · touch) | The relay ↔ browser path you host |
+| Session recordings | Relay storage; expire after 72h, then purged |
+| Account & team data | The relay's SQLite DB |
+| Third-party simulator cloud | Not required |
+
+- **LAN-first** — the agent ↔ relay leg is internal traffic; the device stream never transits a third party.
+- **PAT + roles** — Personal Access Tokens carry scopes (e.g. `builds:write` for CI uploads), and team roles (Admin / Developer / QA / Viewer) govern dashboard access.
+
+Found a vulnerability? See [SECURITY.md](https://github.com/jo-duchan/tapflow/blob/main/SECURITY.md). For the full model, read [Security & Privacy](https://www.tapflow.dev/guide/security).
 
 ## Self-Hosting
 
@@ -165,19 +200,19 @@ tapflow agent start --relay wss://your-relay-url
 
 ## CLI Reference
 
-| Command                             | Description                                     |
-| ----------------------------------- | ----------------------------------------------- |
-| `tapflow start`                     | Start relay + agent together (local mode)       |
-| `tapflow relay start`               | Start relay only                                |
-| `tapflow agent start --relay <url>` | Start agent and connect to a relay              |
-| `tapflow init`                      | Scaffold `tapflow.config.json`                  |
-| `tapflow admin init`                | Create the first admin account (CLI fallback)   |
-| `tapflow doctor`                    | Diagnose environment (Node, Xcode, adb…)        |
-| `tapflow devices`                   | List available simulators and emulators         |
-| `tapflow boot <name\|udid>`         | Boot a simulator or emulator                    |
-| `tapflow status`                    | Show connected agents, devices, active sessions |
-| `tapflow reset`                     | Shut down all simulators and emulators          |
-| `tapflow logs`                      | Show recent relay log entries                   |
+| Command | Description |
+|---------|-------------|
+| `tapflow start` | Start relay + agent together (local mode) |
+| `tapflow relay start` | Start relay only |
+| `tapflow agent start --relay <url>` | Start agent and connect to a relay |
+| `tapflow init` | Scaffold `tapflow.config.json` |
+| `tapflow admin init` | Create the first admin account (CLI fallback) |
+| `tapflow doctor` | Diagnose environment (Node, iOS toolchain, adb…) |
+| `tapflow devices` | List available simulators and emulators |
+| `tapflow boot <name\|udid>` | Boot a simulator or emulator |
+| `tapflow status` | Show connected agents, devices, active sessions |
+| `tapflow reset` | Shut down all simulators and emulators |
+| `tapflow logs` | Show recent relay log entries |
 
 Full reference → [CLI docs](https://www.tapflow.dev/reference/cli)
 
@@ -192,6 +227,7 @@ Full reference → [CLI docs](https://www.tapflow.dev/reference/cli)
 
 **Setup**
 - [Self-Hosting the Relay](https://www.tapflow.dev/guide/self-hosting)
+- [Security & Privacy](https://www.tapflow.dev/guide/security)
 - [Agent Setup](https://www.tapflow.dev/guide/agent)
 - [Uploading Builds (CI/CD)](https://www.tapflow.dev/guide/upload-builds)
 - [Scaling Mac Resources](https://www.tapflow.dev/guide/scaling)
@@ -200,17 +236,19 @@ Full reference → [CLI docs](https://www.tapflow.dev/reference/cli)
 - [First-time Setup](https://www.tapflow.dev/dashboard/setup)
 - [Dashboard Overview](https://www.tapflow.dev/dashboard/overview)
 
+**AI Agent**
+- [MCP Server](https://www.tapflow.dev/guide/mcp-server) *(experimental)*
+
 **Reference**
 - [CLI Reference](https://www.tapflow.dev/reference/cli)
 - [Configuration](https://www.tapflow.dev/reference/configuration)
 - [REST API](https://www.tapflow.dev/reference/api)
 
-**AI Agent**
-- [MCP Server](https://www.tapflow.dev/guide/mcp-server) *(experimental)*
-
 **[Troubleshooting](https://www.tapflow.dev/guide/troubleshooting)**
 
-## Development
+## Contributing
+
+tapflow is actively developed and PRs are welcome — see [CONTRIBUTING.md](https://github.com/jo-duchan/tapflow/blob/main/CONTRIBUTING.md) for branch strategy, commit conventions, and an architecture overview.
 
 **Requirements**: Node.js ≥ 20, pnpm ≥ 9
 
@@ -221,10 +259,8 @@ pnpm install
 pnpm dev
 ```
 
-See [CONTRIBUTING.md](CONTRIBUTING.md) for branch strategy, commit conventions, and architecture overview.
-
 ## License
 
-[MIT](LICENSE) — Copyright © 2025-present tapflow contributors
+[MIT](https://github.com/jo-duchan/tapflow/blob/main/LICENSE) — Copyright © 2026-present tapflow contributors
 
-> tapflow bundles [scrcpy-server](https://github.com/Genymobile/scrcpy) (Apache-2.0) for Android screen streaming. See [NOTICE](NOTICE) for full attribution.
+> tapflow bundles [scrcpy-server](https://github.com/Genymobile/scrcpy) (Apache-2.0) for Android screen streaming. See [NOTICE](https://github.com/jo-duchan/tapflow/blob/main/NOTICE) for full attribution.
