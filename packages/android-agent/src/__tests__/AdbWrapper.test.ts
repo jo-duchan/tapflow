@@ -171,4 +171,36 @@ describe('AdbWrapper', () => {
       )
     })
   })
+
+  describe('setRotation', () => {
+    it('locks display to landscape via wm user-rotation', async () => {
+      const runner = mockRunner()
+      const wrapper = new AdbWrapper(runner)
+      await wrapper.setRotation('emulator-5554', 3)
+      expect(runner.exec).toHaveBeenCalledWith(
+        '-s', 'emulator-5554', 'shell', 'wm', 'user-rotation', 'lock', '3',
+      )
+    })
+
+    it('locks display back to portrait via wm user-rotation', async () => {
+      const runner = mockRunner()
+      const wrapper = new AdbWrapper(runner)
+      await wrapper.setRotation('emulator-5554', 0)
+      expect(runner.exec).toHaveBeenCalledWith(
+        '-s', 'emulator-5554', 'shell', 'wm', 'user-rotation', 'lock', '0',
+      )
+    })
+
+    // Legacy `settings put system user_rotation` is silently ignored on newer Android
+    // (API 37): the display does not rotate, only a rotation-suggestion appears. wm
+    // user-rotation lock works on API 34 and 37, and locks regardless of auto-rotate,
+    // so the legacy settings writes are dropped entirely.
+    it('does not use legacy settings user_rotation / accelerometer_rotation', async () => {
+      const runner = mockRunner()
+      const wrapper = new AdbWrapper(runner)
+      await wrapper.setRotation('emulator-5554', 3)
+      const calls = (runner.exec as ReturnType<typeof vi.fn>).mock.calls
+      expect(calls.every((c) => !c.includes('user_rotation') && !c.includes('accelerometer_rotation'))).toBe(true)
+    })
+  })
 })
