@@ -34,8 +34,8 @@ Invoke with `/` in Claude Code.
 | `/work-plan {topic}` | Create a `.work/` plan document with requirements and test cases. |
 | `/deep-research {problem}` | Deep analysis of implementation, bug, or design problems using Opus. |
 | `/qa {target}` | Plan and write tests for the target code. Potemkin and flaky tests prohibited. |
-| `/doc-sync` | Audit and fix consistency between CLAUDE.md / INDEX.md / `.work/` and the codebase. |
-| `/compound` | Extract reusable patterns from the current session and update CLAUDE.md. |
+| `/doc-sync` | Audit and fix consistency between AGENTS.md / INDEX.md / `.work/` and the codebase. |
+| `/compound` | Extract reusable patterns from the current session and update AGENTS.md. |
 | `/write-docs {topic}` | Write a VitePress docs page — EN/KO simultaneously, sidebar registration, build verification. |
 
 ---
@@ -55,5 +55,5 @@ If `settings.local.json` doesn't exist, create it as an empty `{}` or omit it en
 ## References
 
 - Custom command authoring: [Claude Code slash commands](https://docs.anthropic.com/en/docs/claude-code/slash-commands)
-- Project context: [`CLAUDE.md`](../CLAUDE.md), [`INDEX.md`](../INDEX.md)
+- Project context: [`AGENTS.md`](../AGENTS.md), [`INDEX.md`](../INDEX.md)
 - Work logs: [`.work/`](../.work/)

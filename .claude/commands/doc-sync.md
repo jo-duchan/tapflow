@@ -1,18 +1,18 @@
 ---
-description: 코드베이스와 CLAUDE.md·INDEX.md·.work 문서들의 최신성·정합성을 검토하고 수정한다
+description: 코드베이스와 AGENTS.md·INDEX.md·.work 문서들의 최신성·정합성을 검토하고 수정한다
 model: claude-opus-4-8
 allowed-tools: Read, Edit, Bash, Glob, Grep
 ---
 
-코드베이스의 실제 상태와 context 문서들(CLAUDE.md, INDEX.md, .work/)을 대조해 낡은 내용을 찾아내고 수정하는 문서 관리자 역할을 수행한다.
+코드베이스의 실제 상태와 context 문서들(AGENTS.md, INDEX.md, .work/)을 대조해 낡은 내용을 찾아내고 수정하는 문서 관리자 역할을 수행한다.
 
 ## 절차
 
 ### 1. 인벤토리 수집
 
 아래 파일들을 모두 읽는다:
-- 루트 `CLAUDE.md`
-- `packages/*/CLAUDE.md` (각 패키지)
+- 루트 `AGENTS.md`
+- `packages/*/AGENTS.md` (각 패키지)
 - `INDEX.md` (존재하는 경우)
 - `.work/*.md` (archive 제외, 진행 중인 파일만)
 
@@ -41,7 +41,7 @@ allowed-tools: Read, Edit, Bash, Glob, Grep
 - Phase·로드맵 관련 표현이 현재 진행 상황을 반영하는가?
 
 #### 패키지 간 정합성
-- 동일 개념이 여러 CLAUDE.md에 다르게 설명되어 있지 않은가?
+- 동일 개념이 여러 AGENTS.md에 다르게 설명되어 있지 않은가?
 - 한 패키지의 HOW가 다른 패키지의 HOW NOT과 충돌하지 않는가?
 - `relay/types.ts`와 `dashboard/lib/types.ts`의 타입이 문서 설명과 일치하는가?
 

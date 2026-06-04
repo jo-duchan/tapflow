@@ -9,7 +9,7 @@ allowed-tools: Read, Edit, Write, Bash, Glob, Grep
 ## 사전 준비
 
 작성 전 아래 파일을 반드시 읽는다:
-- `docs/CLAUDE.md` — VitePress 코드블럭 규칙, CSS 주의사항
+- `docs/AGENTS.md` — VitePress 코드블럭 규칙, CSS 주의사항
 - `docs/.vitepress/config.ts` — 현재 사이드바 구조 파악
 
 ---
@@ -76,7 +76,7 @@ LLM 에이전트가 시뮬레이터를 자동으로 조작하는 방식은 [CI/C
 | In Progress | Ready for review | 리뷰 준비 완료 |
 | Backlog | Not yet ready | 준비 전 |
 
-### VitePress 코드블럭 규칙 (`docs/CLAUDE.md` 요약)
+### VitePress 코드블럭 규칙 (`docs/AGENTS.md` 요약)
 
 - `sh`/`bash` 블럭에 `<placeholder>` 쓰지 않는다 — shiki가 HTML 태그로 파싱해 색이 깨진다. 플레이스홀더는 테이블 셀 인라인 코드로만 표기한다.
 - 섹션 구분에 `---` 쓰지 않는다 — h2 border-top이 이미 구분선 역할을 한다.
@@ -121,7 +121,7 @@ run: |
 
 ## 작업 순서
 
-1. `docs/CLAUDE.md`와 `docs/.vitepress/config.ts` 읽기
+1. `docs/AGENTS.md`와 `docs/.vitepress/config.ts` 읽기
 2. KO 파일 작성 (`docs/ko/guide/{slug}.md`)
 3. EN 파일 작성 (`docs/guide/{slug}.md`) — KO 기반 번역
 4. `docs/.vitepress/config.ts` 사이드바 업데이트 (EN + KO)
