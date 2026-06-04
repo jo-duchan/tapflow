@@ -9,7 +9,7 @@ import { fileURLToPath } from 'url'
 import path from 'path'
 import https from 'https'
 
-const VERSION = '3.1'
+const VERSION = '3.3'
 const URL = `https://github.com/Genymobile/scrcpy/releases/download/v${VERSION}/scrcpy-server-v${VERSION}`
 const DEST = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../bin/scrcpy-server.jar')
 

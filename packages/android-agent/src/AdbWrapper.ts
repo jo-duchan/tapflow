@@ -140,8 +140,8 @@ export class AdbWrapper {
 
   // rotation is an Android user_rotation value (0=portrait, 3=canonical landscape home-left/punch-right).
   // `wm user-rotation lock` over legacy `settings put system user_rotation`: the latter is silently
-  // ignored on newer Android (API 37) — the display never rotates, only a rotation-suggestion appears.
-  // wm user-rotation locks regardless of auto-rotate and works on API 34 and 37 alike.
+  // ignored on newer Android (API 35+) — the display never rotates, only a rotation-suggestion appears.
+  // wm user-rotation locks regardless of auto-rotate and works on API 34 through 37 alike.
   async setRotation(serial: string, rotation: 0 | 1 | 2 | 3): Promise<void> {
     await this.runner.exec('-s', serial, 'shell', 'wm', 'user-rotation', 'lock', String(rotation))
   }
