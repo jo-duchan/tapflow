@@ -27,7 +27,7 @@
 
 ### touch-helper interface
 
-```
+```bash
 touch-helper <udid|booted>
 ```
 
@@ -62,7 +62,7 @@ cd packages/ios-agent && swiftc src/touch-helper.swift -o bin/touch-helper
 
 ### screencapture-helper interface
 
-```
+```bash
 screencapture-helper <fps> <udid|booted> [jpeg|h264]
 ```
 
@@ -95,7 +95,7 @@ pnpm build
 
 ### keyboard-helper interface
 
-```
+```bash
 keyboard-helper <show|hide> <udid|booted>
 ```
 
@@ -116,7 +116,7 @@ swiftc packages/ios-agent/src/keyboard-helper.swift \
 
 ### rotation-helper interface
 
-```
+```bash
 rotation-helper <portrait|landscapeLeft|landscapeRight|portraitUpsideDown> <udid|booted>
 ```
 
@@ -178,7 +178,7 @@ Keyboard injection uses `IndigoHIDMessageForKeyboardArbitrary(usage, op)`.
 **Button layout**: `PhoneComposite.pdf` contains no physical buttons. Buttons are separate PDF assets; placement data is in `chrome.json`'s `inputs[]`.
 
 Margin calculation (same logic as baguette `computeMargins`):
-```
+```text
 left-anchor button:  margin.left  = max(imgWidth - rollover.x, 0)
 right-anchor button: margin.right = max(imgWidth + rollover.x, 0)
 ```
@@ -188,7 +188,7 @@ Render order: `behindBtns → composite → onTopBtns`
 Cache key: `tapflow-frame-v2-{chromeName}.png`
 
 **Screen corner radius**: outer radius is read from `paths.simpleOutsideBorder.cornerRadiusX` in `chrome.json`.
-```
+```text
 innerRadius = max(outerRadius - bezelInset, 0)
 bezelInset  = max(leftWidth, topHeight)   // chrome.json images.sizing
 ```

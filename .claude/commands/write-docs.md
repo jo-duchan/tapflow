@@ -1,5 +1,5 @@
 ---
-description: tapflow VitePress 문서 작성 — EN/KO 동시, 사이드바 등록, 빌드 검증
+description: tapflow VitePress 문서 작성 — EN/KO 동시, 사이드바 등록, 빌드 검증. 사용자 대상 가이드·레퍼런스를 새로 쓰거나 갱신할 때 사용. 내부 AGENTS.md·작업로그에는 쓰지 않는다.
 model: claude-sonnet-4-6
 allowed-tools: Read, Edit, Write, Bash, Glob, Grep
 ---

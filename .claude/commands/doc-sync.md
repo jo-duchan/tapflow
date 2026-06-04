@@ -1,5 +1,5 @@
 ---
-description: 코드베이스와 AGENTS.md·INDEX.md·.work 문서들의 최신성·정합성을 검토하고 수정한다
+description: 코드베이스와 AGENTS.md·INDEX.md·.work 문서들의 최신성·정합성을 검토하고 수정한다. 인터페이스·CLI·구조가 바뀐 뒤나 문서가 코드와 어긋났다고 의심될 때 사용.
 model: claude-opus-4-8
 allowed-tools: Read, Edit, Bash, Glob, Grep
 ---

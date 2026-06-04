@@ -38,7 +38,7 @@ Common rules are in the root [AGENTS.md](./AGENTS.md).
 
 ## Hierarchy
 
-```
+```text
 AGENTS.md (common rules — WHAT/WHY/HOW/HOW NOT)
 └── INDEX.md (this file — package & doc reference index)
     ├── packages/agent-core/AGENTS.md
