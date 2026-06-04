@@ -16,7 +16,6 @@ const enSidebar = [
     text: 'Setup',
     items: [
       { text: 'Self-Hosting the Relay', link: '/guide/self-hosting' },
-      { text: 'Security & Privacy', link: '/guide/security' },
       { text: 'Agent Setup', link: '/guide/agent' },
       { text: 'Uploading Builds', link: '/guide/upload-builds' },
       { text: 'Build Distribution', link: '/guide/build-distribution' },
@@ -43,6 +42,7 @@ const enSidebar = [
       { text: 'CLI Reference', link: '/reference/cli' },
       { text: 'Configuration', link: '/reference/configuration' },
       { text: 'REST API', link: '/reference/api' },
+      { text: 'Security & Privacy', link: '/reference/security' },
     ],
   },
   {
@@ -72,7 +72,6 @@ const koSidebar = [
     text: '설정',
     items: [
       { text: '릴레이 배포', link: '/ko/guide/self-hosting' },
-      { text: '보안 및 개인정보', link: '/ko/guide/security' },
       { text: '에이전트 설정', link: '/ko/guide/agent' },
       { text: '빌드 업로드', link: '/ko/guide/upload-builds' },
       { text: '빌드 배포', link: '/ko/guide/build-distribution' },
@@ -99,6 +98,7 @@ const koSidebar = [
       { text: 'CLI 레퍼런스', link: '/ko/reference/cli' },
       { text: '설정 파일', link: '/ko/reference/configuration' },
       { text: 'REST API', link: '/ko/reference/api' },
+      { text: '보안 및 개인정보', link: '/ko/reference/security' },
     ],
   },
   {
