@@ -14,7 +14,10 @@ const logger = createLogger('android-agent:scrcpy')
 
 const execFileAsync = promisify(execFile)
 
-const SCRCPY_SERVER_VERSION = '3.1'
+// 3.3 fixes the locked capture_orientation direction on Android 15+ (scrcpy #6010):
+// 3.1 captured rotated content in the wrong direction on API 35+, so the client-side CSS
+// rotation showed it sideways. Keep this in sync with download-scrcpy-server.mjs.
+const SCRCPY_SERVER_VERSION = '3.3'
 const DEVICE_PATH = '/data/local/tmp/scrcpy-server.jar'
 
 function getAdbPath(): string {
