@@ -16,7 +16,6 @@ const enSidebar = [
     text: 'Setup',
     items: [
       { text: 'Self-Hosting the Relay', link: '/guide/self-hosting' },
-      { text: 'Security & Privacy', link: '/guide/security' },
       { text: 'Agent Setup', link: '/guide/agent' },
       { text: 'Uploading Builds', link: '/guide/upload-builds' },
       { text: 'Build Distribution', link: '/guide/build-distribution' },
@@ -43,6 +42,7 @@ const enSidebar = [
       { text: 'CLI Reference', link: '/reference/cli' },
       { text: 'Configuration', link: '/reference/configuration' },
       { text: 'REST API', link: '/reference/api' },
+      { text: 'Security & Privacy', link: '/reference/security' },
     ],
   },
   {
@@ -72,7 +72,6 @@ const koSidebar = [
     text: '설정',
     items: [
       { text: '릴레이 배포', link: '/ko/guide/self-hosting' },
-      { text: '보안 및 개인정보', link: '/ko/guide/security' },
       { text: '에이전트 설정', link: '/ko/guide/agent' },
       { text: '빌드 업로드', link: '/ko/guide/upload-builds' },
       { text: '빌드 배포', link: '/ko/guide/build-distribution' },
@@ -99,6 +98,7 @@ const koSidebar = [
       { text: 'CLI 레퍼런스', link: '/ko/reference/cli' },
       { text: '설정 파일', link: '/ko/reference/configuration' },
       { text: 'REST API', link: '/ko/reference/api' },
+      { text: '보안 및 개인정보', link: '/ko/reference/security' },
     ],
   },
   {
@@ -161,6 +161,47 @@ export default withMermaid(defineConfig({
         rel: 'stylesheet',
       },
     ],
+    [
+      'script',
+      { type: 'application/ld+json' },
+      JSON.stringify({
+        '@context': 'https://schema.org',
+        '@type': 'SoftwareApplication',
+        name: 'tapflow',
+        applicationCategory: 'DeveloperApplication',
+        operatingSystem: 'macOS, Linux',
+        description:
+          'Open-source, self-hosted alternative to Appetize and BrowserStack App Live. Run iOS simulators and Android emulators in the browser for your whole team — app binaries never leave your network.',
+        url: 'https://tapflow.dev',
+        license: 'https://opensource.org/licenses/MIT',
+        isAccessibleForFree: true,
+        offers: { '@type': 'Offer', price: '0', priceCurrency: 'USD' },
+        sameAs: ['https://github.com/jo-duchan/tapflow'],
+      }),
+    ],
+    ['meta', { property: 'og:type', content: 'website' }],
+    ['meta', { property: 'og:url', content: 'https://tapflow.dev' }],
+    ['meta', { property: 'og:title', content: 'tapflow — Self-hosted simulator streaming for your whole team' }],
+    [
+      'meta',
+      {
+        property: 'og:description',
+        content:
+          'Open-source, self-hosted alternative to Appetize and BrowserStack App Live. Run iOS & Android simulators in the browser — no data leaving your network.',
+      },
+    ],
+    ['meta', { property: 'og:image', content: 'https://tapflow.dev/demo-thumbnail.png' }],
+    ['meta', { name: 'twitter:card', content: 'summary_large_image' }],
+    ['meta', { name: 'twitter:title', content: 'tapflow — Self-hosted simulator streaming for your whole team' }],
+    [
+      'meta',
+      {
+        name: 'twitter:description',
+        content:
+          'Open-source, self-hosted alternative to Appetize and BrowserStack App Live. Run iOS & Android simulators in the browser — no data leaving your network.',
+      },
+    ],
+    ['meta', { name: 'twitter:image', content: 'https://tapflow.dev/demo-thumbnail.png' }],
   ],
 
   markdown: {

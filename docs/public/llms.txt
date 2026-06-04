@@ -2,6 +2,8 @@
 
 > tapflow is an open-source, self-hosted tool that lets your entire team — PO, PM, designers, backend engineers, and QA — run iOS simulators and Android emulators directly in the browser. No IDE, no device setup, no data leaving your network.
 >
+> It is a self-hosted, open-source alternative to cloud testing services like Appetize and BrowserStack App Live. Unlike those services, tapflow runs on Macs your team already owns, so your app binaries and test data never leave your network.
+>
 > Architecture: a Mac Agent connects outbound to a Relay server; team members open the dashboard in any browser and interact with the simulator in real time. The Relay also exposes a REST API and an MCP server for LLM-based automation.
 >
 > Two testing paths:
@@ -37,6 +39,7 @@
 - [CLI Reference](https://tapflow.dev/reference/cli): All tapflow CLI commands — init, start, relay start, agent start, doctor, devices, boot, reset, status, logs.
 - [Configuration](https://tapflow.dev/reference/configuration): tapflow.config.json schema and environment variable overrides (JWT_SECRET, TAPFLOW_PORT, TAPFLOW_DATA_DIR, SMTP_*, etc.).
 - [REST API](https://tapflow.dev/reference/api): Full REST API reference — Auth, Invitations, Password reset, Apps, Builds, Comments, Team, Tokens, Profile, Settings, Recordings, Agents, Logs. Base path: /api/v1/.
+- [Security & Privacy](https://tapflow.dev/reference/security): How tapflow keeps data on-prem — build files, device streams, and session recordings never leave your network. LAN-first architecture, PAT-based authentication with scopes, and TLS via reverse proxy.
 
 ## Troubleshooting
 
