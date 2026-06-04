@@ -161,6 +161,47 @@ export default withMermaid(defineConfig({
         rel: 'stylesheet',
       },
     ],
+    [
+      'script',
+      { type: 'application/ld+json' },
+      JSON.stringify({
+        '@context': 'https://schema.org',
+        '@type': 'SoftwareApplication',
+        name: 'tapflow',
+        applicationCategory: 'DeveloperApplication',
+        operatingSystem: 'macOS',
+        description:
+          'Open-source, self-hosted alternative to Appetize and BrowserStack App Live. Run iOS simulators and Android emulators in the browser for your whole team — app binaries never leave your network.',
+        url: 'https://tapflow.dev',
+        license: 'https://opensource.org/licenses/MIT',
+        isAccessibleForFree: true,
+        offers: { '@type': 'Offer', price: '0', priceCurrency: 'USD' },
+        sameAs: ['https://github.com/jo-duchan/tapflow'],
+      }),
+    ],
+    ['meta', { property: 'og:type', content: 'website' }],
+    ['meta', { property: 'og:url', content: 'https://tapflow.dev' }],
+    ['meta', { property: 'og:title', content: 'tapflow — Self-hosted simulator streaming for your whole team' }],
+    [
+      'meta',
+      {
+        property: 'og:description',
+        content:
+          'Open-source, self-hosted alternative to Appetize and BrowserStack App Live. Run iOS & Android simulators in the browser — no data leaving your network.',
+      },
+    ],
+    ['meta', { property: 'og:image', content: 'https://tapflow.dev/demo-thumbnail.png' }],
+    ['meta', { name: 'twitter:card', content: 'summary_large_image' }],
+    ['meta', { name: 'twitter:title', content: 'tapflow — Self-hosted simulator streaming for your whole team' }],
+    [
+      'meta',
+      {
+        name: 'twitter:description',
+        content:
+          'Open-source, self-hosted alternative to Appetize and BrowserStack App Live. Run iOS & Android simulators in the browser — no data leaving your network.',
+      },
+    ],
+    ['meta', { name: 'twitter:image', content: 'https://tapflow.dev/demo-thumbnail.png' }],
   ],
 
   markdown: {

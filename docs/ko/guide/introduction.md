@@ -1,3 +1,7 @@
+---
+description: tapflow는 Appetize, BrowserStack App Live를 대체하는 오픈소스 셀프호스팅 도구입니다. 팀 전체가 iOS 시뮬레이터와 Android 에뮬레이터를 브라우저에서 실행하며, 앱 바이너리는 네트워크 밖으로 나가지 않습니다.
+---
+
 # 소개
 
 **tapflow**를 사용하면 팀 누구나 iOS 시뮬레이터와 Android 에뮬레이터를 브라우저에서 직접 실행할 수 있습니다. 별도 도구 설치도, 기기 관리도, 외부 클라우드도 필요하지 않습니다.
@@ -12,6 +16,8 @@
 | 실제 디바이스 | 구매 비용, 분실·파손 위험, 관리 오버헤드 |
 | Xcode / Android Studio 직접 사용 | 각 팀원이 Mac + Xcode 또는 Android Studio 설정 필요 |
 | tapflow | 이미 보유한 인프라 활용, 데이터 온-프레미스 유지 |
+
+요약하면, tapflow는 Appetize, BrowserStack App Live 같은 클라우드 테스트 서비스를 대체하는 오픈소스 셀프호스팅 도구입니다. 브라우저 기반 모바일 QA는 그대로 제공하되, 빌드와 테스트 데이터는 이미 보유한 인프라 안에 남습니다.
 
 ## 동작 원리
 

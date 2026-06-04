@@ -1,3 +1,7 @@
+---
+description: tapflow is an open-source, self-hosted alternative to Appetize and BrowserStack App Live. Run iOS simulators and Android emulators in the browser for your whole team — your app binaries never leave your network.
+---
+
 # Introduction
 
 **tapflow** lets your entire team run mobile QA directly in the browser — no developer tools, no device management, no external cloud.
@@ -12,6 +16,8 @@
 | Physical devices | Cost, loss, management overhead |
 | Xcode / Android Studio directly | Every team member needs their own Mac + Xcode or Android Studio setup |
 | tapflow | Use infra you already own, data stays on-prem |
+
+In short, tapflow is a self-hosted, open-source alternative to cloud testing services like Appetize and BrowserStack App Live — the same browser-based mobile QA, but builds and test data stay on infrastructure you already own.
 
 ## How it works
 
