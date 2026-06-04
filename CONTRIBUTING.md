@@ -1,6 +1,6 @@
 # Contributing to tapflow
 
-> Common rules: [CLAUDE.md](./CLAUDE.md) | Full index: [INDEX.md](./INDEX.md)
+> Common rules: [AGENTS.md](./AGENTS.md) | Full index: [INDEX.md](./INDEX.md)
 
 ## Development setup
 
@@ -59,7 +59,7 @@ Versions follow `MAJOR.MINOR.PATCH`. Determine the bump from the commits since t
 |------|------|
 | `patch` | `fix`, `perf`, `docs`, `chore`, `refactor` — no API change |
 | `minor` | `feat` — new functionality, backward-compatible |
-| `major` | Any breaking change (see [CLAUDE.md](./CLAUDE.md) Principle 4 for scope) |
+| `major` | Any breaking change (see [AGENTS.md](./AGENTS.md) Principle 4 for scope) |
 
 **Before `v1.0.0`:** breaking changes may land in `minor` versions. Once `v1.0.0` is tagged, the table above is strictly enforced.
 

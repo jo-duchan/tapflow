@@ -40,7 +40,7 @@ export interface StreamFrame {
   keyframe: boolean
 }
 
-// Parses length-prefixed frames (jpeg: [len][payload]; h264: [len][flags][payload], see CLAUDE.md) → frames + remainder.
+// Parses length-prefixed frames (jpeg: [len][payload]; h264: [len][flags][payload], see AGENTS.md) → frames + remainder.
 export function parseStreamFrames(
   buf: Buffer,
   h264: boolean,
