@@ -169,7 +169,7 @@ export default withMermaid(defineConfig({
         '@type': 'SoftwareApplication',
         name: 'tapflow',
         applicationCategory: 'DeveloperApplication',
-        operatingSystem: 'macOS',
+        operatingSystem: 'macOS, Linux',
         description:
           'Open-source, self-hosted alternative to Appetize and BrowserStack App Live. Run iOS simulators and Android emulators in the browser for your whole team — app binaries never leave your network.',
         url: 'https://tapflow.dev',
