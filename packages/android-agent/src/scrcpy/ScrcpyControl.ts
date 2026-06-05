@@ -2,6 +2,7 @@ import type { Socket } from 'net'
 
 const TYPE_INJECT_KEYCODE = 0
 const TYPE_INJECT_TOUCH_EVENT = 2
+const TYPE_RESET_VIDEO = 17
 
 const ACTION_DOWN = 0
 const ACTION_UP = 1
@@ -44,6 +45,13 @@ export class ScrcpyControl {
   pinchEnd(): void {
     this.touchUp(0)
     this.touchUp(1)
+  }
+
+  // Forces the scrcpy server to reset the video encoder, which re-emits codec config
+  // (SPS/PPS) + a keyframe (IDR). Used for relay drop-to-keyframe recovery so the stream
+  // resyncs fast instead of waiting for the periodic IDR. (scrcpy v3.3: 1-byte message.)
+  resetVideo(): void {
+    this.socket.write(Buffer.from([TYPE_RESET_VIDEO]))
   }
 
   keyEvent(keyCode: number): void {

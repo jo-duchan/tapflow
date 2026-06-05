@@ -47,6 +47,7 @@ vi.mock('../scrcpy/ScrcpySession', () => ({
       pinchStart: vi.fn(),
       pinchMove: vi.fn(),
       pinchEnd: vi.fn(),
+      resetVideo: vi.fn(),
     },
   })),
 }))
@@ -414,6 +415,32 @@ describe('AndroidAgent', () => {
         // Regression guard: the pre-fix bug marked H.264 frames as JPEG (→ relay treated
         // every frame as a keyframe, degrading drop-to-keyframe into tearing drop-to-latest).
         expect(flags[0].codec).not.toBe(CODEC_JPEG)
+      })
+    })
+
+    describe('stream:request-idr (B-3)', () => {
+      it('resets the scrcpy video encoder to force an on-demand IDR', async () => {
+        browser.send(JSON.stringify({
+          type: 'device:boot',
+          sessionId: agent.sessionId,
+          payload: { deviceId: 'avd:Pixel_8_API_34' },
+        }))
+        await waitForType(browser, 'device:ready')
+
+        const control = (getState() as any).scrcpySession.control
+        expect(control.resetVideo).not.toHaveBeenCalled()
+
+        // Relay sends this agent-ward during drop-to-keyframe recovery.
+        ;(agent as any).handleRelayMessage({ type: 'stream:request-idr', sessionId: agent.sessionId })
+
+        expect(control.resetVideo).toHaveBeenCalledOnce()
+      })
+
+      it('ignores stream:request-idr when no scrcpy session is active', () => {
+        // No device booted → no session; handler must not throw.
+        expect(() =>
+          (agent as any).handleRelayMessage({ type: 'stream:request-idr', sessionId: agent.sessionId }),
+        ).not.toThrow()
       })
     })
 

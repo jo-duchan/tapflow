@@ -641,6 +641,12 @@ export class AndroidAgent implements DeviceAgent {
         state.touchHelper.pressButton(name)
         break
       }
+      case 'stream:request-idr': {
+        // Relay drop-to-keyframe recovery: reset the encoder so it re-emits SPS/PPS + IDR,
+        // resyncing fast instead of waiting for the periodic IDR. Throttled by the relay.
+        this.deviceStates.get(msg.sessionId!)?.scrcpySession?.control.resetVideo()
+        break
+      }
       case 'open-url': {
         const { url } = msg.payload as { url: string }
         const sessionId = msg.sessionId
