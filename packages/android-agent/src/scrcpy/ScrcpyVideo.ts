@@ -1,6 +1,6 @@
 import type { Socket } from 'net'
 
-// Header layout (send_device_meta=true, send_stream_meta=true default):
+// Device meta header (send_device_meta=true):
 //   [0..63]  device name, null-padded (64 bytes)
 //   [64..67] codec ID as ASCII ("h264")  (4 bytes)
 //   [68..71] width   uint32 BE           (4 bytes)
@@ -8,19 +8,41 @@ import type { Socket } from 'net'
 const HEADER_SIZE = 76
 const DEVICE_NAME_SIZE = 64
 
+// Frame meta header (send_frame_meta=true), one per packet:
+//   [0..7] pts_flags uint64 BE — bit63 = CONFIG (codec config / SPS+PPS),
+//                                bit62 = KEY_FRAME (IDR); low 62 bits = PTS
+//   [8..11] packet length uint32 BE
+// (Verified against scrcpy v3.3 app/src/demuxer.c: SC_PACKET_HEADER_SIZE 12,
+//  SC_PACKET_FLAG_CONFIG=1<<63, SC_PACKET_FLAG_KEY_FRAME=1<<62.)
+const PACKET_HEADER_SIZE = 12
+const FLAG_CONFIG = 0x80000000 // bit63, tested on the high 32 bits
+const FLAG_KEY_FRAME = 0x40000000 // bit62
+
 export interface ScrcpyDeviceInfo {
   deviceName: string
   width: number
   height: number
 }
 
+/** One H.264 access unit. Mirrors ios-agent's StreamFrame so the relay's
+ *  keyframe-aware backpressure can preserve the reference chain. */
+export interface ScrcpyFrame {
+  payload: Buffer
+  /** True for IDR access units (config packet merged in). */
+  keyframe: boolean
+}
+
 export class ScrcpyVideo {
   private headerBuf: Buffer | null = null
-  private readonly dataChunks: Buffer[] = []
+  private readonly dataFrames: ScrcpyFrame[] = []
   private headerResolve: ((info: ScrcpyDeviceInfo) => void) | null = null
   private headerReject: ((e: Error) => void) | null = null
-  private streamController: ReadableStreamDefaultController<Buffer> | null = null
+  private streamController: ReadableStreamDefaultController<ScrcpyFrame> | null = null
   private pending = Buffer.alloc(0)
+  // CONFIG packet (SPS+PPS) buffered until the next packet (the IDR) so the keyframe
+  // access unit carries its parameter sets — the relay then never forwards an IDR whose
+  // config was dropped, and the browser decoder can always (re)initialize.
+  private pendingConfig: Buffer | null = null
   private headerConsumed = false
   private endReceived = false
 
@@ -33,16 +55,7 @@ export class ScrcpyVideo {
         this.headerReject = null
         return
       }
-      // Flush the last NAL unit (Annex B: last unit has no following start code)
-      if (this.pending.length > 0) {
-        const last = Buffer.from(this.pending)
-        this.pending = Buffer.alloc(0)
-        if (this.streamController) {
-          this.streamController.enqueue(last)
-        } else {
-          this.dataChunks.push(last)
-        }
-      }
+      // Length-prefixed framing: a partial trailing packet is incomplete → discard.
       this.streamController?.close()
     })
     socket.on('close', () => {
@@ -66,13 +79,13 @@ export class ScrcpyVideo {
     })
   }
 
-  start(): ReadableStream<Buffer> {
-    return new ReadableStream<Buffer>({
+  start(): ReadableStream<ScrcpyFrame> {
+    return new ReadableStream<ScrcpyFrame>({
       start: (controller) => {
         this.streamController = controller
-        // Flush any NAL units that arrived before start() was called
-        for (const chunk of this.dataChunks) controller.enqueue(chunk)
-        this.dataChunks.length = 0
+        // Flush frames that arrived before start() was called
+        for (const frame of this.dataFrames) controller.enqueue(frame)
+        this.dataFrames.length = 0
         if (this.endReceived) controller.close()
       },
       cancel: () => {
@@ -96,20 +109,37 @@ export class ScrcpyVideo {
       this.headerReject = null
     }
 
-    this.drainNalUnits()
+    this.drainPackets()
   }
 
-  private drainNalUnits(): void {
-    // send_frame_meta=false → raw H.264 Annex B stream (no length prefix)
-    const { units, remaining } = extractAnnexBNals(this.pending)
-    this.pending = Buffer.from(remaining)
-    for (const nal of units) {
-      if (this.streamController) {
-        this.streamController.enqueue(nal)
-      } else {
-        this.dataChunks.push(nal)
+  private drainPackets(): void {
+    while (this.pending.length >= PACKET_HEADER_SIZE) {
+      const flagsHi = this.pending.readUInt32BE(0) // high 32 bits of pts_flags
+      const len = this.pending.readUInt32BE(8)
+      if (this.pending.length < PACKET_HEADER_SIZE + len) break // wait for the rest
+
+      const payload = Buffer.from(this.pending.subarray(PACKET_HEADER_SIZE, PACKET_HEADER_SIZE + len))
+      this.pending = this.pending.subarray(PACKET_HEADER_SIZE + len)
+
+      if ((flagsHi & FLAG_CONFIG) !== 0) {
+        // Hold SPS/PPS until the next (key)frame packet; do not emit alone.
+        this.pendingConfig = this.pendingConfig ? Buffer.concat([this.pendingConfig, payload]) : payload
+        continue
       }
+
+      const keyframe = (flagsHi & FLAG_KEY_FRAME) !== 0
+      let frame = payload
+      if (this.pendingConfig) {
+        frame = Buffer.concat([this.pendingConfig, payload])
+        this.pendingConfig = null
+      }
+      this.emit({ payload: frame, keyframe })
     }
+  }
+
+  private emit(frame: ScrcpyFrame): void {
+    if (this.streamController) this.streamController.enqueue(frame)
+    else this.dataFrames.push(frame)
   }
 
   private parseHeader(buf: Buffer): ScrcpyDeviceInfo {
@@ -122,30 +152,4 @@ export class ScrcpyVideo {
     const height = buf.readUInt32BE(72)
     return { deviceName, width, height }
   }
-}
-
-function findStartCode(buf: Buffer, from: number): { pos: number; len: number } | null {
-  for (let i = from; i + 2 < buf.length; i++) {
-    if (buf[i] === 0 && buf[i + 1] === 0) {
-      if (buf[i + 2] === 1) return { pos: i, len: 3 }
-      if (i + 3 < buf.length && buf[i + 2] === 0 && buf[i + 3] === 1) return { pos: i, len: 4 }
-    }
-  }
-  return null
-}
-
-function extractAnnexBNals(buf: Buffer): { units: Buffer[]; remaining: Buffer } {
-  const units: Buffer[] = []
-  const first = findStartCode(buf, 0)
-  if (!first) return { units, remaining: buf }
-  let nalStart = first.pos
-  let searchFrom = first.pos + first.len
-  while (true) {
-    const next = findStartCode(buf, searchFrom)
-    if (!next) break
-    units.push(Buffer.from(buf.subarray(nalStart, next.pos)))
-    nalStart = next.pos
-    searchFrom = next.pos + next.len
-  }
-  return { units, remaining: buf.subarray(nalStart) }
 }

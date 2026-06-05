@@ -20,7 +20,7 @@ vi.mock('../AndroidTouchHelper', () => ({
 // Shared state for per-test stream control (captured by inner factory closure)
 let scrcpyCloseOnCreate = false
 let scrcpyStartError: Error | null = null
-let scrcpyStreamController: ReadableStreamDefaultController<Buffer> | null = null
+let scrcpyStreamController: ReadableStreamDefaultController<ScrcpyFrame> | null = null
 
 vi.mock('../scrcpy/ScrcpySession', () => ({
   ScrcpySession: vi.fn(() => ({
@@ -33,7 +33,7 @@ vi.mock('../scrcpy/ScrcpySession', () => ({
     }),
     stop: vi.fn(),
     video: {
-      start: vi.fn(() => new ReadableStream<Buffer>({
+      start: vi.fn(() => new ReadableStream<ScrcpyFrame>({
         start(c) {
           scrcpyStreamController = c
           if (scrcpyCloseOnCreate) c.close()
@@ -61,9 +61,11 @@ vi.mock('../EmulatorLauncher', () => ({
 
 import { WebSocket } from 'ws'
 import { RelayServer, initDb, closeDb } from '@tapflowio/relay'
+import { hasEnvelope, readEnvelopeFlags, CODEC_H264, CODEC_JPEG } from '@tapflowio/agent-core/utils'
 import { AndroidAgent } from '../AndroidAgent'
 import { AdbWrapper } from '../AdbWrapper'
 import { ScrcpySession } from '../scrcpy/ScrcpySession'
+import type { ScrcpyFrame } from '../scrcpy/ScrcpyVideo'
 import type { AdbRunner } from '../adb'
 
 function mockAdb(booted = false): AdbWrapper {
@@ -385,6 +387,33 @@ describe('AndroidAgent', () => {
         scrcpyStreamController?.close()
 
         await vi.waitFor(() => expect(restartSpy).not.toHaveBeenCalled(), { timeout: 200 })
+      })
+    })
+
+    describe('envelope marking (B-2)', () => {
+      it('marks codec=H.264 + per-AU keyframe so the relay stays keyframe-aware', async () => {
+        browser.send(JSON.stringify({
+          type: 'device:boot',
+          sessionId: agent.sessionId,
+          payload: { deviceId: 'avd:Pixel_8_API_34' },
+        }))
+        await waitForType(browser, 'device:ready')
+
+        const flags: Array<{ codec: number; keyframe: boolean }> = []
+        browser.on('message', (d: Buffer) => {
+          if (Buffer.isBuffer(d) && hasEnvelope(d)) flags.push(readEnvelopeFlags(d))
+        })
+
+        // A keyframe access unit (SPS+PPS merged) followed by a P-frame access unit.
+        scrcpyStreamController!.enqueue({ payload: Buffer.from([0x67, 0x42, 0xc0, 0x1f, 0x65, 0x88]), keyframe: true })
+        scrcpyStreamController!.enqueue({ payload: Buffer.from([0x41, 0x9a, 0x00, 0x20]), keyframe: false })
+
+        await vi.waitFor(() => expect(flags).toHaveLength(2), { timeout: 1000 })
+        expect(flags[0]).toEqual({ codec: CODEC_H264, keyframe: true })
+        expect(flags[1]).toEqual({ codec: CODEC_H264, keyframe: false })
+        // Regression guard: the pre-fix bug marked H.264 frames as JPEG (→ relay treated
+        // every frame as a keyframe, degrading drop-to-keyframe into tearing drop-to-latest).
+        expect(flags[0].codec).not.toBe(CODEC_JPEG)
       })
     })
 
