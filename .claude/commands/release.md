@@ -49,6 +49,7 @@ model: claude-opus-4-8
 
 - **mcp-server**: `.changeset` `ignore` 대상이라 자동 bump 안 됨 → `package.json` version을 **`X.Y.Z-experimental.1`** 로 수동 변경(experimental dist-tag, graduation 전까지 수동).
 - **루트 `CHANGELOG.md`**: changeset 관리 밖(Keep a Changelog 수동) → `[Unreleased]`를 `[X.Y.Z] - YYYY-MM-DD`(오늘 날짜)로 승격하고 Added/Changed/Fixed를 채운다.
+  - **하단 compare 링크도 함께 갱신**(놓치기 쉬움): `[Unreleased]`를 `vX.Y.Z...HEAD`로 바꾸고, `[X.Y.Z]: .../compare/v{직전}...vX.Y.Z` 링크를 새로 추가한다. 직전 릴리즈 링크가 빠져 있으면 이번에 함께 메운다.
 - **dashboard**: private + `ignore` → 건드리지 않는다.
 
 ## 8. 검증
