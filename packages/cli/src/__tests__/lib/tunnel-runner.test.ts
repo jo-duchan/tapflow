@@ -2,10 +2,10 @@ import { describe, it, expect, vi, beforeEach, afterEach, type MockInstance } fr
 
 const mockTunnel = { setupServer: vi.fn(), start: vi.fn(), stop: vi.fn() }
 vi.mock('../../lib/rathole-tunnel.js', () => ({
-  RatholeTunnel: vi.fn().mockImplementation(() => mockTunnel),
+  RatholeTunnel: vi.fn().mockImplementation(function () { return mockTunnel }),
 }))
 vi.mock('../../lib/tailscale-tunnel.js', () => ({
-  TailscaleTunnel: vi.fn().mockImplementation(() => mockTunnel),
+  TailscaleTunnel: vi.fn().mockImplementation(function () { return mockTunnel }),
 }))
 
 import { RatholeTunnel } from '../../lib/rathole-tunnel.js'
@@ -22,8 +22,8 @@ describe('startConfiguredTunnel', () => {
     mockTunnel.setupServer.mockResolvedValue(undefined)
     mockTunnel.start.mockResolvedValue({ publicUrl: 'https://vps.example.com' })
     mockTunnel.stop.mockResolvedValue(undefined)
-    vi.mocked(RatholeTunnel).mockImplementation(() => mockTunnel as never)
-    vi.mocked(TailscaleTunnel).mockImplementation(() => mockTunnel as never)
+    vi.mocked(RatholeTunnel).mockImplementation(function () { return mockTunnel as never })
+    vi.mocked(TailscaleTunnel).mockImplementation(function () { return mockTunnel as never })
   })
 
   afterEach(() => vi.restoreAllMocks())
