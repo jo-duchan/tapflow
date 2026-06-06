@@ -90,7 +90,7 @@ adb shell getprop debug.hwui.renderer # "skiagl"    → properly accelerated
 
 macOS deliberately throttles GPU rendering of fully occluded windows via the `NSWindowOcclusionState` API. Because the emulator (QEMU) is synchronized to Metal swap-buffer / vsync:
 
-```
+```text
 Fewer macOS Metal callbacks
   → QEMU Choreographer VSYNC slowdown
     → SurfaceFlinger can't sustain 60Hz
@@ -213,7 +213,7 @@ This is a **second, distinct** throttle from [Issue 2](#issue-2--fps-drop-from-m
 
 `EmulatorLauncher` already passes `-no-window`, so Issue 2's occlusion throttle does not apply. The remaining throttle is plain **macOS idle/system sleep**: with no local user activity (the reviewer is on another Mac over the LAN), the host idles and macOS down-clocks / suspends background work, starving the **software** H.264 encoder (`OMX.google.h264.encoder`) that scrcpy drives. The iOS path is less affected because it encodes via **hardware** VideoToolbox.
 
-```
+```text
 Unattended host Mac idles
   → macOS reduces background CPU / heads toward sleep
     → software H.264 encoder can't sustain 30fps
@@ -237,5 +237,5 @@ User-facing guidance lives in `docs/guide/troubleshooting.md` (#emulator-is-slow
 
 | Approach | Result | Why |
 |---|---|---|
-| macOS Energy setting "prevent sleeping when display off" | works but manual | `caffeinate -i` does the same automatically while the agent runs (and also covers battery, unlike the AC-only `-s`) — no user setup needed |
+| macOS Energy setting "prevent sleeping when display off" | works but manual | `caffeinate -i` does the same automatically while the agent runs (works on battery too, unlike AC-only `-s`; still does not override battery CPU scaling) — no user setup needed |
 | `caffeinate -d` (display) | unnecessary | the display can sleep; only system idle matters (verified: fast with display off) |
