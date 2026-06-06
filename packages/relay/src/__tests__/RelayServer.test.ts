@@ -648,13 +648,12 @@ describe('RelayServer', () => {
       observer.send(JSON.stringify({ type: 'agents:list' }))
       const listed = await waitForMessage(observer)
 
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const sessions = listed.sessions as any[]
+      const sessions = listed.sessions!
       expect(sessions).toHaveLength(2)
       const macA = sessions.find((s) => s.agentName === 'Mac-A')
       const macB = sessions.find((s) => s.agentName === 'Mac-B')
-      expect(macA.devices).toHaveLength(2)
-      expect(macB.devices).toHaveLength(1)
+      expect(macA?.devices).toHaveLength(2)
+      expect(macB?.devices).toHaveLength(1)
 
       agentA.close()
       agentB.close()
@@ -679,10 +678,9 @@ describe('RelayServer', () => {
       await vi.waitFor(async () => {
         observer.send(JSON.stringify({ type: 'agents:list' }))
         const listed = await waitForMessage(observer)
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const sessions = listed.sessions as any[]
-        const macA = sessions.find((s: { agentName: string }) => s.agentName === 'Mac-A')
-        const macB = sessions.find((s: { agentName: string }) => s.agentName === 'Mac-B')
+        const sessions = listed.sessions!
+        const macA = sessions.find((s) => s.agentName === 'Mac-A')
+        const macB = sessions.find((s) => s.agentName === 'Mac-B')
         expect(macA?.resources?.cpuPercent).toBe(30)
         expect(macB?.resources?.cpuPercent).toBe(70)
       }, { timeout: 500 })
@@ -710,8 +708,7 @@ describe('RelayServer', () => {
       await vi.waitFor(async () => {
         observer.send(JSON.stringify({ type: 'agents:list' }))
         const listed = await waitForMessage(observer)
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const sessions = listed.sessions as any[]
+        const sessions = listed.sessions!
         expect(sessions).toHaveLength(1)
         expect(sessions[0].agentName).toBe('Mac-B')
       }, { timeout: 2000 })
@@ -848,8 +845,7 @@ describe('RelayServer', () => {
     await vi.waitFor(async () => {
       tmpObs.send(JSON.stringify({ type: 'agents:list' }))
       const listed = await waitForMessage(tmpObs)
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      expect((listed.sessions as any[])[0].devices[0].busy).toBe(false)
+      expect(listed.sessions![0].devices[0].busy).toBe(false)
     }, { timeout: 2000 })
     tmpObs.close()
 
