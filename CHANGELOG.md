@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-06-06
+
+### Added
+
+- android: opt-in stream throughput metrics (`TAPFLOW_STREAM_METRICS=1`) logging fps / KB·s / drop every 5s, matching the iOS agent.
+- agents: hold a macOS power assertion (`caffeinate -i`) while connected so an unattended/idle Mac doesn't throttle the simulator/emulator. macOS-only; no-op elsewhere.
+
+### Changed
+
+- android: H.264 frames now carry the codec/keyframe flags in the stream envelope, so the relay's keyframe-aware backpressure drops to the next keyframe under LAN congestion instead of forwarding P-frames that tear. (scrcpy `send_frame_meta=true`; the public `stream()` contract is unchanged.)
+- android: on-demand IDR recovery — `stream:request-idr` now resets the scrcpy encoder (RESET_VIDEO), resyncing fast instead of waiting for the periodic IDR (parity with iOS).
+
+### Fixed
+
+- android: the scrcpy stream now terminates on socket close, so the agent's pump and its timers no longer leak after a device shuts down.
+
 ## [0.5.1] - 2026-06-06
 
 ### Fixed
@@ -64,7 +80,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Automatic `tapflow.config.json` creation as a side effect of `tapflow start` / `tapflow relay start`.
 
-[Unreleased]: https://github.com/jo-duchan/tapflow/compare/v0.5.1...HEAD
+[Unreleased]: https://github.com/jo-duchan/tapflow/compare/v0.6.0...HEAD
+[0.6.0]: https://github.com/jo-duchan/tapflow/compare/v0.5.1...v0.6.0
 [0.5.1]: https://github.com/jo-duchan/tapflow/compare/v0.5.0...v0.5.1
 [0.5.0]: https://github.com/jo-duchan/tapflow/compare/v0.4.1...v0.5.0
 [0.4.1]: https://github.com/jo-duchan/tapflow/compare/v0.4.0...v0.4.1
