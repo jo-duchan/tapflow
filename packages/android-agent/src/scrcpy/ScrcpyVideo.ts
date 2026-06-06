@@ -70,8 +70,12 @@ export class ScrcpyVideo {
       return
     }
     if (!this.streamController) return // start() will close once it observes endReceived
-    if (err) this.streamController.error(err)
-    else this.streamController.close()
+    // The controller may already be closed (e.g. a late socket event after another
+    // settle path) — closing/erroring twice throws, so swallow it.
+    try {
+      if (err) this.streamController.error(err)
+      else this.streamController.close()
+    } catch { /* already closed */ }
   }
 
   deviceInfo(): Promise<ScrcpyDeviceInfo> {
@@ -92,6 +96,9 @@ export class ScrcpyVideo {
         if (this.endReceived) controller.close()
       },
       cancel: () => {
+        // The consumer cancelled — the stream is already settled by the ReadableStream
+        // itself, so the socket 'close'/'error' that destroy() triggers must not re-close it.
+        this.streamSettled = true
         this.socket.destroy()
       },
     })

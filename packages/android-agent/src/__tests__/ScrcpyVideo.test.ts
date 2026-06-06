@@ -156,4 +156,26 @@ describe('ScrcpyVideo (send_frame_meta=true)', () => {
     const video = new ScrcpyVideo(socket)
     await expect(video.deviceInfo()).rejects.toThrow()
   })
+
+  // Regression: cancelling the reader closes the stream; cancel() then runs socket.destroy()
+  // which emits 'close' → finish() must NOT call controller.close()/error() on the already-
+  // closed controller (throws ERR_INVALID_STATE in the socket event handler otherwise).
+  it.each(['close', 'error'] as const)(
+    'does not throw when the socket emits %s after the reader is cancelled',
+    async (event) => {
+      const emitter = new EventEmitter() as EventEmitter & { destroy: () => void }
+      emitter.destroy = () => emitter.emit(event) // scrcpy's cancel path: socket.destroy()
+      const socket = emitter as unknown as Socket
+      const video = new ScrcpyVideo(socket)
+      process.nextTick(() => {
+        emitter.emit('data', makeHeader('t', 576, 1280))
+        emitter.emit('data', makePacket(annexB(PSLICE)))
+      })
+      await video.deviceInfo()
+      const reader = video.start().getReader()
+      await reader.read()
+      // With the bug, cancel()'s destroy → finish() → controller.close() throws → cancel rejects.
+      await expect(reader.cancel()).resolves.toBeUndefined()
+    },
+  )
 })
