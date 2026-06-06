@@ -1,5 +1,12 @@
 # @tapflowio/android-agent
 
+## 0.6.1
+
+### Patch Changes
+
+- Fix a crash when the scrcpy video stream is cancelled. The v0.6.0 socket-close cleanup could call `close()`/`error()` on an already-closed ReadableStream controller (after the consumer cancelled the reader), throwing `ERR_INVALID_STATE` inside the socket event handler. The stream is now marked settled on cancel and the close/error is guarded.
+  - @tapflowio/agent-core@0.6.1
+
 ## 0.6.0
 
 ### Minor Changes
