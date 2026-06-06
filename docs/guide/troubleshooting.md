@@ -68,7 +68,7 @@ Install it from Xcode → Settings → Platforms.
 
 ### Stream does not start or encoder crashes
 
-Occurs when the AVD uses the `google_apis_playstore` image. Recreate the AVD with the `google_apis/arm64-v8a` image:
+Most often the AVD uses an untested `google_apis_playstore` image. Recreate the AVD with the tested `google_apis/arm64-v8a` image:
 
 ```sh
 sdkmanager "system-images;android-34;google_apis;arm64-v8a"

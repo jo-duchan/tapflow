@@ -13,8 +13,8 @@ Runs alongside `ios-agent` on the same Mac.
 
 - ADB commands are isolated in `AdbWrapper`, swappable with an `AdbRunner` mock in tests.
 - On emulator boot: `EmulatorLauncher.waitForBoot(serial)` — polls `sys.boot_completed=1`.
-- Screen streaming: `ScrcpySession` → `ScrcpyVideo` — pushes the scrcpy server to the device, runs it, and receives an H.264 Annex B stream over a TCP socket. AVD image must be `google_apis/arm64-v8a` (android-34) — `google_apis_playstore` images crash the H.264 encoder.
-- **Encoder**: `OMX.google.h264.encoder` (pure software) is pinned. The default `c2.android.avc.encoder` (Codec 2.0) stalls silently when GPU processes such as Chrome are running under the virtualized GPU layer — neither the scrcpy server nor the pump loop can detect the stall. On emulators there is no performance difference since everything is software-emulated anyway.
+- Screen streaming: `ScrcpySession` → `ScrcpyVideo` — pushes the scrcpy server to the device, runs it, and receives an H.264 Annex B stream over a TCP socket. Use a `google_apis/arm64-v8a` (android-34) image — the tested/recommended config; `google_apis_playstore` is untested (see `contributing/android-video-streaming-diagnosis.md`).
+- **Encoder**: `OMX.google.h264.encoder` (pure software) is pinned — the tested encoder. The default `c2.android.avc.encoder` (Codec 2.0) has shown silent stalls / encoder errors under GPU load (e.g. Chrome) on the virtualized GPU layer that neither the scrcpy server nor the pump loop can detect; the software encoder avoids that, with no emulator perf difference since everything is software-emulated anyway. Encoder availability and config success vary by image/environment — `google_apis` is the verified one.
 - scrcpy protocol: two connections in order — video socket (1st) + control socket (2nd) — before the server begins streaming. `ScrcpyControl` keeps the control socket open and serves as the foundation for the binary touch protocol.
 - Touch: `ScrcpyControl.touchDown/touchMove/touchUp` takes priority when a scrcpy session is active (low-latency binary protocol). Falls back to `AndroidTouchHelper` (`adb input tap/swipe`) only when no scrcpy session is running.
 - AVD name is the stable key for `Device.id` (`"avd:<name>"`). ADB serial is kept only in the internal `serialMap`.
@@ -25,8 +25,8 @@ Runs alongside `ios-agent` on the same Mac.
 
 - Do not hardcode the ADB path — use `$ANDROID_HOME/platform-tools/adb` or `$ADB_PATH`.
 - Do not run ADB commands before confirming emulator boot is complete.
-- Do not use `google_apis_playstore` AVD images — H.264 encoder crashes.
-- Do not revert to `video_encoder=c2.android.avc.encoder` — stalls silently with Chrome and other GPU-heavy apps.
+- Don't switch to `google_apis_playstore` AVD images without testing — untested, with historical H.264 encoder crashes (odd-width capture). `google_apis` is the verified image.
+- Do not revert to `video_encoder=c2.android.avc.encoder` — it has shown silent stalls / encoder errors under GPU load; the pinned `OMX.google` software encoder is the tested one.
 - Do not open only the video socket in `ScrcpySession.start()` and skip the control socket — violates the scrcpy protocol and the server will not start streaming.
 - Do not break the `AndroidTouchHelper` interface to add low-latency touch — replace only the internal implementation.
 - Do not pollute the `agent-core` `DeviceAgent` interface with Android-specific methods.

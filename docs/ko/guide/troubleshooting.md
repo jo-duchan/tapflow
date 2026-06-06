@@ -68,7 +68,7 @@ Xcode → Settings → Platforms에서 iOS 18+ 런타임을 설치합니다.
 
 ### 스트림이 시작되지 않거나 인코더 크래시
 
-AVD가 `google_apis_playstore` 이미지를 사용하고 있는 경우 발생합니다. `google_apis/arm64-v8a` 이미지로 AVD를 다시 생성하세요.
+대개 AVD가 테스트되지 않은 `google_apis_playstore` 이미지를 사용할 때 발생합니다. 테스트된 `google_apis/arm64-v8a` 이미지로 AVD를 다시 생성하세요.
 
 ```sh
 sdkmanager "system-images;android-34;google_apis;arm64-v8a"
