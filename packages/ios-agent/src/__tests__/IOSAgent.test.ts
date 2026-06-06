@@ -39,10 +39,18 @@ import { RelayServer, initDb, closeDb } from '@tapflowio/relay'
 import { IOSAgent } from '../IOSAgent'
 import { ScreenCaptureStreamer } from '../ScreenCaptureStreamer'
 import { SimctlWrapper } from '../SimctlWrapper'
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
 import { TouchHelper } from '../TouchHelper'
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-const MockTouchHelper = TouchHelper as any
+const MockTouchHelper = vi.mocked(TouchHelper)
+
+// Test-only view of IOSAgent internals (reconnect state lives behind private fields).
+interface IOSAgentInternals {
+  ws: WebSocket | null
+  _stopping: boolean
+  _reconnectTimer: ReturnType<typeof setTimeout> | null
+  _reconnectAttempt: number
+  _scheduleReconnect(): void
+}
+const internals = (agent: IOSAgent): IOSAgentInternals => agent as unknown as IOSAgentInternals
 
 // HID usage codes from KeyCodeMap (duplicated here so tests are self-contained)
 const HID_BACKSPACE = 0x2A
@@ -549,23 +557,23 @@ describe('IOSAgent', () => {
       const agent = new IOSAgent({}, mockSimctl())
       await agent.connect(`ws://localhost:${port}`)
 
-      ;(agent as any)._reconnectTimer = setTimeout(() => {}, 10000)
+      internals(agent)._reconnectTimer = setTimeout(() => {}, 10000)
 
       agent.disconnect()
 
-      expect((agent as any)._stopping).toBe(true)
-      expect((agent as any)._reconnectTimer).toBeNull()
+      expect(internals(agent)._stopping).toBe(true)
+      expect(internals(agent)._reconnectTimer).toBeNull()
     })
 
     it('_scheduleReconnect() is no-op when _stopping is true', async () => {
       const agent = new IOSAgent({}, mockSimctl())
       await agent.connect(`ws://localhost:${port}`)
 
-      ;(agent as any)._stopping = true
-      ;(agent as any)._scheduleReconnect()
+      internals(agent)._stopping = true
+      internals(agent)._scheduleReconnect()
 
-      expect((agent as any)._reconnectTimer).toBeNull()
-      expect((agent as any)._reconnectAttempt).toBe(0)
+      expect(internals(agent)._reconnectTimer).toBeNull()
+      expect(internals(agent)._reconnectAttempt).toBe(0)
 
       agent.disconnect()
     })
@@ -574,11 +582,11 @@ describe('IOSAgent', () => {
       const agent = new IOSAgent({ reconnectDelays: [0] }, mockSimctl())
       await agent.connect(`ws://localhost:${port}`)
 
-      const oldWs = (agent as any).ws as WebSocket
+      const oldWs = internals(agent).ws!
       oldWs.terminate()
 
       await vi.waitFor(() => {
-        const ws = (agent as any).ws as WebSocket | null
+        const ws = internals(agent).ws
         expect(ws).not.toBeNull()
         expect(ws).not.toBe(oldWs)       // 새 연결 객체여야 함
         expect(ws!.readyState).toBe(WebSocket.OPEN)
@@ -593,8 +601,7 @@ describe('IOSAgent', () => {
   // path (no intervalMs) and reads the codec arg the mocked streamer was constructed with.
   describe('codec negotiation', () => {
     const ORIG_CODEC = process.env.TAPFLOW_IOS_CODEC
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const MockCapture = ScreenCaptureStreamer as any
+    const MockCapture = vi.mocked(ScreenCaptureStreamer)
 
     afterEach(() => {
       if (ORIG_CODEC === undefined) delete process.env.TAPFLOW_IOS_CODEC

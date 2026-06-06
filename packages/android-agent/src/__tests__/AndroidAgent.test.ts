@@ -66,8 +66,32 @@ import { hasEnvelope, readEnvelopeFlags, CODEC_H264, CODEC_JPEG } from '@tapflow
 import { AndroidAgent } from '../AndroidAgent'
 import { AdbWrapper } from '../AdbWrapper'
 import { ScrcpySession } from '../scrcpy/ScrcpySession'
+import type { ScrcpyControl } from '../scrcpy/ScrcpyControl'
 import type { ScrcpyFrame } from '../scrcpy/ScrcpyVideo'
 import type { AdbRunner } from '../adb'
+
+// Test-only view of a per-device state entry (the real DeviceState is not exported).
+interface TestState {
+  restarting: boolean
+  scrcpySession: { control: ScrcpyControl } | null
+  streamWs: WebSocket | null
+}
+
+// Test-only view of AndroidAgent internals (device state + reconnect fields are private).
+interface AndroidAgentInternals {
+  ws: WebSocket | null
+  adb: AdbWrapper
+  deviceStates: Map<string, TestState>
+  _stopping: boolean
+  _reconnectTimer: ReturnType<typeof setTimeout> | null
+  _reconnectAttempt: number
+  _scheduleReconnect(): void
+  restartVideoStream(state: TestState): Promise<void>
+  cleanupDeviceState(state: TestState): void
+  handleRelayMessage(msg: unknown): void
+}
+const internals = (agent: AndroidAgent): AndroidAgentInternals =>
+  agent as unknown as AndroidAgentInternals
 
 function mockAdb(booted = false): AdbWrapper {
   const runner: AdbRunner = {
@@ -319,17 +343,11 @@ describe('AndroidAgent', () => {
   })
 
   describe('auto-restart', () => {
-    interface TestState {
-      restarting: boolean
-      scrcpySession: object | null
-      streamWs: WebSocket | null
-    }
-
     let agent: AndroidAgent
     let browser: WebSocket
 
     function getState(): TestState {
-      return (agent as any).deviceStates.values().next().value as TestState
+      return internals(agent).deviceStates.values().next().value!
     }
 
     beforeEach(async () => {
@@ -354,7 +372,7 @@ describe('AndroidAgent', () => {
     describe('pump exit guard', () => {
       it('calls restartVideoStream when stream ends unexpectedly', async () => {
         scrcpyCloseOnCreate = true
-        const restartSpy = vi.spyOn(agent as any, 'restartVideoStream').mockResolvedValue(undefined)
+        const restartSpy = vi.spyOn(internals(agent), 'restartVideoStream').mockResolvedValue(undefined)
 
         browser.send(JSON.stringify({
           type: 'device:boot',
@@ -367,7 +385,7 @@ describe('AndroidAgent', () => {
       })
 
       it('skips restartVideoStream when restarting flag is already set', async () => {
-        const restartSpy = vi.spyOn(agent as any, 'restartVideoStream').mockResolvedValue(undefined)
+        const restartSpy = vi.spyOn(internals(agent), 'restartVideoStream').mockResolvedValue(undefined)
 
         browser.send(JSON.stringify({
           type: 'device:boot',
@@ -385,7 +403,7 @@ describe('AndroidAgent', () => {
       })
 
       it('skips restartVideoStream when session was intentionally stopped', async () => {
-        const restartSpy = vi.spyOn(agent as any, 'restartVideoStream').mockResolvedValue(undefined)
+        const restartSpy = vi.spyOn(internals(agent), 'restartVideoStream').mockResolvedValue(undefined)
 
         browser.send(JSON.stringify({
           type: 'device:boot',
@@ -395,7 +413,7 @@ describe('AndroidAgent', () => {
         await waitForType(browser, 'device:ready')
 
         const state = getState()
-        ;(agent as any).cleanupDeviceState(state) // sets scrcpySession = null
+        internals(agent).cleanupDeviceState(state) // sets scrcpySession = null
         scrcpyStreamController?.close()
 
         await vi.waitFor(() => expect(restartSpy).not.toHaveBeenCalled(), { timeout: 200 })
@@ -437,11 +455,11 @@ describe('AndroidAgent', () => {
         }))
         await waitForType(browser, 'device:ready')
 
-        const control = (getState() as any).scrcpySession.control
+        const control = getState().scrcpySession!.control
         expect(control.resetVideo).not.toHaveBeenCalled()
 
         // Relay sends this agent-ward during drop-to-keyframe recovery.
-        ;(agent as any).handleRelayMessage({ type: 'stream:request-idr', sessionId: agent.sessionId })
+        internals(agent).handleRelayMessage({ type: 'stream:request-idr', sessionId: agent.sessionId })
 
         expect(control.resetVideo).toHaveBeenCalledOnce()
       })
@@ -449,7 +467,7 @@ describe('AndroidAgent', () => {
       it('ignores stream:request-idr when no scrcpy session is active', () => {
         // No device booted → no session; handler must not throw.
         expect(() =>
-          (agent as any).handleRelayMessage({ type: 'stream:request-idr', sessionId: agent.sessionId }),
+          internals(agent).handleRelayMessage({ type: 'stream:request-idr', sessionId: agent.sessionId }),
         ).not.toThrow()
       })
     })
@@ -466,11 +484,11 @@ describe('AndroidAgent', () => {
       })
 
       it('resets restarting flag when serial is not found', async () => {
-        vi.spyOn((agent as any).adb as AdbWrapper, 'getSerial').mockReturnValue(undefined)
+        vi.spyOn(internals(agent).adb, 'getSerial').mockReturnValue(undefined)
 
         const state = getState()
         state.restarting = true
-        await (agent as any).restartVideoStream(state)
+        await internals(agent).restartVideoStream(state)
 
         expect(state.restarting).toBe(false)
       })
@@ -480,7 +498,7 @@ describe('AndroidAgent', () => {
         state.streamWs = null
         state.restarting = true
 
-        await (agent as any).restartVideoStream(state)
+        await internals(agent).restartVideoStream(state)
 
         expect(state.restarting).toBe(false)
       })
@@ -493,7 +511,7 @@ describe('AndroidAgent', () => {
         state.restarting = true
 
         const bootErrPromise = waitForType(browser, 'device:boot-error')
-        const restartPromise = (agent as any).restartVideoStream(state)
+        const restartPromise = internals(agent).restartVideoStream(state)
         await vi.runAllTimersAsync()
         await restartPromise
 
@@ -508,7 +526,7 @@ describe('AndroidAgent', () => {
         const state = getState()
         state.restarting = true
 
-        const restartPromise = (agent as any).restartVideoStream(state)
+        const restartPromise = internals(agent).restartVideoStream(state)
         await vi.runAllTimersAsync()
         await restartPromise
 
@@ -524,23 +542,23 @@ describe('AndroidAgent', () => {
       const agent = new AndroidAgent({}, mockAdb())
       await agent.connect(`ws://localhost:${port}`)
 
-      ;(agent as any)._reconnectTimer = setTimeout(() => {}, 10000)
+      internals(agent)._reconnectTimer = setTimeout(() => {}, 10000)
 
       agent.disconnect()
 
-      expect((agent as any)._stopping).toBe(true)
-      expect((agent as any)._reconnectTimer).toBeNull()
+      expect(internals(agent)._stopping).toBe(true)
+      expect(internals(agent)._reconnectTimer).toBeNull()
     })
 
     it('_scheduleReconnect() is no-op when _stopping is true', async () => {
       const agent = new AndroidAgent({}, mockAdb())
       await agent.connect(`ws://localhost:${port}`)
 
-      ;(agent as any)._stopping = true
-      ;(agent as any)._scheduleReconnect()
+      internals(agent)._stopping = true
+      internals(agent)._scheduleReconnect()
 
-      expect((agent as any)._reconnectTimer).toBeNull()
-      expect((agent as any)._reconnectAttempt).toBe(0)
+      expect(internals(agent)._reconnectTimer).toBeNull()
+      expect(internals(agent)._reconnectAttempt).toBe(0)
 
       agent.disconnect()
     })
@@ -549,11 +567,11 @@ describe('AndroidAgent', () => {
       const agent = new AndroidAgent({ reconnectDelays: [0] }, mockAdb())
       await agent.connect(`ws://localhost:${port}`)
 
-      const oldWs = (agent as any).ws as WebSocket
+      const oldWs = internals(agent).ws!
       oldWs.terminate()
 
       await vi.waitFor(() => {
-        const ws = (agent as any).ws as WebSocket | null
+        const ws = internals(agent).ws
         expect(ws).not.toBeNull()
         expect(ws).not.toBe(oldWs)       // 새 연결 객체여야 함
         expect(ws!.readyState).toBe(WebSocket.OPEN)
