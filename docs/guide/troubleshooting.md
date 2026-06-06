@@ -130,6 +130,21 @@ tapflow (G=119) stays closer to the source (G=128), while the emulator (G=108) d
 Black (`#000000`), white (`#FFFFFF`), and pure R/G/B are identical across all three — the difference appears only in midtone saturation, not from a corrupted stream.
 :::
 
+### Emulator is slow when the Mac is unattended
+
+tapflow automatically prevents the host Mac from idle-sleeping while the agent is running (`caffeinate -i`). The assertion is acquired when the agent connects and released when it exits.
+
+If the emulator is still slow when the Mac is unattended, check the following.
+
+| Check | Why it matters |
+|-------|----------------|
+| **Power adapter connected** | Battery mode lowers CPU performance — `caffeinate` does not override this scaling. |
+| **Laptop lid is open** | Closing the lid triggers clamshell sleep, which `caffeinate` cannot prevent. |
+
+::: details Technical background
+The Android emulator's H.264 encoder runs in software on the CPU. When the Mac throttles, the encoder can't keep up and fps drops. The iOS Simulator uses a hardware encoder (VideoToolbox) and is less affected.
+:::
+
 ## `tapflow doctor` failures
 
 ### All iOS checks fail
