@@ -2,9 +2,9 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 
 vi.mock('node:child_process')
 vi.mock('@tapflowio/relay', () => ({
-  RelayServer: vi.fn().mockImplementation(() => ({
+  RelayServer: vi.fn().mockImplementation(function () { return ({
     start: vi.fn().mockResolvedValue(undefined),
-  })),
+  }) }),
   initDb: vi.fn(),
 
 
@@ -60,9 +60,9 @@ describe('cmdStart', () => {
       connect: androidConnectSpy,
     })
 
-    vi.mocked(RelayServer).mockImplementation(() => ({
+    vi.mocked(RelayServer).mockImplementation(function () { return ({
       start: vi.fn().mockResolvedValue(undefined),
-    } as never))
+    } as never) })
 
     vi.spyOn(console, 'log').mockImplementation(() => {})
     vi.spyOn(process, 'on').mockImplementation(() => process)
@@ -91,7 +91,7 @@ describe('cmdStart', () => {
   it('initDb가 RelayServer 생성 전에 호출됨', async () => {
     const callOrder: string[] = []
     vi.mocked(initDb).mockImplementation(() => { callOrder.push('initDb') })
-    vi.mocked(RelayServer).mockImplementation(() => {
+    vi.mocked(RelayServer).mockImplementation(function () {
       callOrder.push('RelayServer')
       return { start: vi.fn().mockResolvedValue(undefined) } as never
     })

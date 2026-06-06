@@ -1,19 +1,19 @@
 import { describe, it, expect, vi, beforeEach, afterEach, type MockInstance } from 'vitest'
 
 vi.mock('@tapflowio/relay', () => ({
-  RelayServer: vi.fn().mockImplementation(() => ({
+  RelayServer: vi.fn().mockImplementation(function () { return ({
     start: vi.fn().mockResolvedValue(undefined),
-  })),
+  }) }),
   initDb: vi.fn(),
   config: { local: { port: 4000, dataDir: '/tmp/tapflow-test', wsBackpressureBytes: 1048576 }, relay: { url: null }, tunnel: null },
 }))
 
 const mockTunnel = { setupServer: vi.fn(), start: vi.fn(), stop: vi.fn() }
 vi.mock('../../lib/rathole-tunnel.js', () => ({
-  RatholeTunnel: vi.fn().mockImplementation(() => mockTunnel),
+  RatholeTunnel: vi.fn().mockImplementation(function () { return mockTunnel }),
 }))
 vi.mock('../../lib/tailscale-tunnel.js', () => ({
-  TailscaleTunnel: vi.fn().mockImplementation(() => mockTunnel),
+  TailscaleTunnel: vi.fn().mockImplementation(function () { return mockTunnel }),
 }))
 
 import { RelayServer, initDb, config } from '@tapflowio/relay'
@@ -30,14 +30,14 @@ describe('cmdRelayStart', () => {
     output = []
     vi.spyOn(console, 'log').mockImplementation((...args) => output.push(args.join(' ')))
     exitSpy = vi.spyOn(process, 'exit').mockImplementation(() => { throw new Error('process.exit') })
-    vi.mocked(RelayServer).mockImplementation(() => ({
+    vi.mocked(RelayServer).mockImplementation(function () { return ({
       start: vi.fn().mockResolvedValue(undefined),
-    } as never))
+    } as never) })
     mockTunnel.setupServer.mockResolvedValue(undefined)
     mockTunnel.start.mockResolvedValue({ publicUrl: 'https://vps.example.com' })
     mockTunnel.stop.mockResolvedValue(undefined)
-    vi.mocked(RatholeTunnel).mockImplementation(() => mockTunnel as never)
-    vi.mocked(TailscaleTunnel).mockImplementation(() => mockTunnel as never)
+    vi.mocked(RatholeTunnel).mockImplementation(function () { return mockTunnel as never })
+    vi.mocked(TailscaleTunnel).mockImplementation(function () { return mockTunnel as never })
     vi.mocked(config).tunnel = null
   })
 
@@ -52,7 +52,7 @@ describe('cmdRelayStart', () => {
   it('initDb가 RelayServer 생성 전에 호출됨', async () => {
     const callOrder: string[] = []
     vi.mocked(initDb).mockImplementation(() => { callOrder.push('initDb') })
-    vi.mocked(RelayServer).mockImplementation(() => {
+    vi.mocked(RelayServer).mockImplementation(function () {
       callOrder.push('RelayServer')
       return { start: vi.fn().mockResolvedValue(undefined) } as never
     })

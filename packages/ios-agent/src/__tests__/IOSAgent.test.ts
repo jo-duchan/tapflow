@@ -5,7 +5,7 @@ import path from 'path'
 import { ValidationError } from '@tapflowio/agent-core'
 
 vi.mock('../TouchHelper', () => ({
-  TouchHelper: vi.fn(() => ({
+  TouchHelper: vi.fn(function () { return ({
     start: vi.fn(),
     stop: vi.fn(),
     touchStart: vi.fn(),
@@ -17,7 +17,7 @@ vi.mock('../TouchHelper', () => ({
     pinchMove: vi.fn(),
     pinchEnd: vi.fn(),
     sendKey: vi.fn(),
-  })),
+  }) }),
 }))
 
 // Mock the capture streamer so codec-negotiation tests can read the codec arg the
@@ -27,10 +27,10 @@ vi.mock('../ScreenCaptureStreamer', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../ScreenCaptureStreamer')>()
   return {
     ...actual,
-    ScreenCaptureStreamer: vi.fn(() => ({
+    ScreenCaptureStreamer: vi.fn(function () { return ({
       start: () => new ReadableStream({ start() {} }),
       requestKeyframe: vi.fn(),
-    })),
+    }) }),
   }
 })
 

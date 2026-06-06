@@ -4,7 +4,7 @@ import os from 'os'
 import path from 'path'
 
 vi.mock('../AndroidTouchHelper', () => ({
-  AndroidTouchHelper: vi.fn(() => ({
+  AndroidTouchHelper: vi.fn(function () { return ({
     start: vi.fn(),
     stop: vi.fn(),
     touchStart: vi.fn(),
@@ -14,7 +14,7 @@ vi.mock('../AndroidTouchHelper', () => ({
     pinchMove: vi.fn(),
     pinchEnd: vi.fn(),
     pressButton: vi.fn(),
-  })),
+  }) }),
 }))
 
 // Shared state for per-test stream control (captured by inner factory closure)
@@ -23,7 +23,7 @@ let scrcpyStartError: Error | null = null
 let scrcpyStreamController: ReadableStreamDefaultController<ScrcpyFrame> | null = null
 
 vi.mock('../scrcpy/ScrcpySession', () => ({
-  ScrcpySession: vi.fn(() => ({
+  ScrcpySession: vi.fn(function () { return ({
     start: vi.fn().mockImplementation(() => {
       const err = scrcpyStartError
       scrcpyStartError = null
@@ -49,15 +49,15 @@ vi.mock('../scrcpy/ScrcpySession', () => ({
       pinchEnd: vi.fn(),
       resetVideo: vi.fn(),
     },
-  })),
+  }) }),
 }))
 
 vi.mock('../EmulatorLauncher', () => ({
-  EmulatorLauncher: vi.fn(() => ({
+  EmulatorLauncher: vi.fn(function () { return ({
     launch: vi.fn(),
     findSerial: vi.fn().mockResolvedValue('emulator-5554'),
     waitForBoot: vi.fn().mockResolvedValue(undefined),
-  })),
+  }) }),
 }))
 
 import { WebSocket } from 'ws'

@@ -19,7 +19,7 @@ function createMockWs(behavior: (handlers: WsEventMap) => void) {
     close: vi.fn(),
     terminate: vi.fn(),
   }
-  vi.mocked(WebSocket).mockImplementation(() => {
+  vi.mocked(WebSocket).mockImplementation(function () {
     setTimeout(() => behavior(handlers as WsEventMap), 0)
     return instance as never
   })
