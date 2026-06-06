@@ -45,30 +45,33 @@ export class ScrcpyVideo {
   private pendingConfig: Buffer | null = null
   private headerConsumed = false
   private endReceived = false
+  private streamSettled = false
 
   constructor(private readonly socket: Socket) {
     socket.on('data', (chunk: Buffer) => this.onData(chunk))
-    socket.on('end', () => {
-      this.endReceived = true
-      if (!this.headerConsumed) {
-        this.headerReject?.(new Error('scrcpy server closed before sending device info'))
-        this.headerReject = null
-        return
-      }
-      // Length-prefixed framing: a partial trailing packet is incomplete → discard.
-      this.streamController?.close()
-    })
-    socket.on('close', () => {
-      if (!this.headerConsumed) {
-        this.headerReject?.(new Error('scrcpy server connection closed'))
-        this.headerReject = null
-      }
-    })
-    socket.on('error', (e) => {
-      this.headerReject?.(e)
+    // 'end' = clean FIN; 'close' = socket torn down without a FIN (e.g. ScrcpySession.stop()
+    // → videoSocket.destroy(), or device shutdown). BOTH must terminate the stream, else the
+    // agent pump blocks forever on reader.read() and its metrics timer leaks.
+    socket.on('end', () => this.finish())
+    socket.on('close', () => this.finish())
+    socket.on('error', (e) => this.finish(e))
+  }
+
+  // Settles the stream exactly once: rejects deviceInfo() if the header never arrived,
+  // otherwise closes (or errors) the ReadableStream so the consumer's reader sees `done`.
+  // Length-prefixed framing means a partial trailing packet is incomplete → discarded.
+  private finish(err?: Error): void {
+    if (this.streamSettled) return
+    this.streamSettled = true
+    this.endReceived = true
+    if (!this.headerConsumed) {
+      this.headerReject?.(err ?? new Error('scrcpy server connection closed before sending device info'))
       this.headerReject = null
-      this.streamController?.error(e)
-    })
+      return
+    }
+    if (!this.streamController) return // start() will close once it observes endReceived
+    if (err) this.streamController.error(err)
+    else this.streamController.close()
   }
 
   deviceInfo(): Promise<ScrcpyDeviceInfo> {
