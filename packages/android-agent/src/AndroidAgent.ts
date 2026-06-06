@@ -9,11 +9,13 @@ import {
   createRateLimitedDropWarn,
   DEFAULT_BACKPRESSURE_BYTES,
   writeEnvelopeHeader,
+  CODEC_H264,
 } from '@tapflowio/agent-core/utils'
 import { AdbWrapper } from './AdbWrapper.js'
 import { EmulatorLauncher } from './EmulatorLauncher.js'
 import { AndroidTouchHelper } from './AndroidTouchHelper.js'
 import { ScrcpySession } from './scrcpy/ScrcpySession.js'
+import type { ScrcpyFrame } from './scrcpy/ScrcpyVideo.js'
 
 const logger = createLogger('android-agent')
 
@@ -336,14 +338,18 @@ export class AndroidAgent implements DeviceAgent {
           if (done) break
           // Detect video size changes via H.264 SPS so ScrcpyControl.screenSize always
           // matches what scrcpy server is actually encoding (landscape-aware vs portrait-locked).
-          const parsed = parseSpsFromNal(value)
+          // The SPS leads the keyframe access unit, so parsing value.payload finds it.
+          const parsed = parseSpsFromNal(value.payload)
           if (parsed && (parsed.width !== state.videoWidth || parsed.height !== state.videoHeight)) {
             state.videoWidth = parsed.width
             state.videoHeight = parsed.height
             state.scrcpySession?.control.updateScreenSize(parsed.width, parsed.height)
             logger.info(`video size → ${parsed.width}×${parsed.height}`)
           }
-          sendBinaryWithBackpressure(streamWs, writeEnvelopeHeader(value, Date.now()), threshold, onDrop)
+          // Mark codec=H.264 + per-AU keyframe so the relay's keyframe-aware backpressure
+          // preserves the reference chain (drops to the next IDR instead of tearing).
+          const frame = writeEnvelopeHeader(value.payload, Date.now(), { codec: CODEC_H264, keyframe: value.keyframe })
+          sendBinaryWithBackpressure(streamWs, frame, threshold, onDrop)
         }
       } catch {
         // stream cancelled or ws closed — expected on disconnect
@@ -635,6 +641,12 @@ export class AndroidAgent implements DeviceAgent {
         state.touchHelper.pressButton(name)
         break
       }
+      case 'stream:request-idr': {
+        // Relay drop-to-keyframe recovery: reset the encoder so it re-emits SPS/PPS + IDR,
+        // resyncing fast instead of waiting for the periodic IDR. Throttled by the relay.
+        this.deviceStates.get(msg.sessionId!)?.scrcpySession?.control.resetVideo()
+        break
+      }
       case 'open-url': {
         const { url } = msg.payload as { url: string }
         const sessionId = msg.sessionId
@@ -770,7 +782,11 @@ export class AndroidAgent implements DeviceAgent {
   stream(): ReadableStream<Buffer> {
     const state = this.deviceStates.values().next().value
     if (!state?.scrcpySession) throw new ValidationError('no active scrcpy session — call connect() first')
+    // DeviceAgent.stream() is the platform-neutral Buffer contract; unwrap ScrcpyFrame payloads.
     return state.scrcpySession.video.start()
+      .pipeThrough(new TransformStream<ScrcpyFrame, Buffer>({
+        transform(frame, controller) { controller.enqueue(frame.payload) },
+      }))
   }
 
   touchStart(x: number, y: number): void {

@@ -113,4 +113,15 @@ describe('ScrcpyControl', () => {
       expect(buf.readInt32BE(2)).toBe(4)
     })
   })
+
+  describe('resetVideo', () => {
+    it('writes the single-byte TYPE_RESET_VIDEO control message', () => {
+      // scrcpy v3.3 control_msg.c: RESET_VIDEO (type 17) serializes to 1 byte, no payload.
+      ctrl.resetVideo()
+      expect(socket.write).toHaveBeenCalledOnce()
+      const buf: Buffer = (socket.write as ReturnType<typeof vi.fn>).mock.calls[0][0]
+      expect(buf.length).toBe(1)
+      expect(buf.readUInt8(0)).toBe(17)
+    })
+  })
 })

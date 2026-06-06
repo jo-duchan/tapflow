@@ -92,7 +92,11 @@ export class ScrcpySession {
       // and scrcpy rotates that content into the locked portrait frame, which CSS undoes.
       'capture_orientation=@0',
       'send_device_meta=true',   // 64-byte name + codec-id + width + height header
-      'send_frame_meta=false',   // raw Annex B stream (no length prefix per frame)
+      // 12-byte frame header per packet (pts + config/keyframe flags + length). Gives
+      // authoritative keyframe/config boundaries so the agent marks the TFFE envelope
+      // (codec=H.264, keyframe) correctly → relay keyframe-aware backpressure works
+      // (no P-frame tearing under LAN congestion). See ScrcpyVideo packet framer.
+      'send_frame_meta=true',
       'send_dummy_byte=false',   // skip the 1-byte connection-check byte
       // profile=1 (AVCProfileBaseline): the browser WASM decoder (tinyh264) only
       // decodes (constrained-)baseline — force it so Android shares the HTTP→WASM path.
