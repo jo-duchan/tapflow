@@ -7,6 +7,7 @@ import {
   registerStreamWs,
   sendBinaryWithBackpressure,
   createRateLimitedDropWarn,
+  createThroughputSampler,
   DEFAULT_BACKPRESSURE_BYTES,
   writeEnvelopeHeader,
   CODEC_H264,
@@ -329,7 +330,23 @@ export class AndroidAgent implements DeviceAgent {
     const reader = stream.getReader()
 
     const threshold = Number(process.env.TAPFLOW_WS_BACKPRESSURE_BYTES) || DEFAULT_BACKPRESSURE_BYTES
-    const onDrop = createRateLimitedDropWarn(logger, state.deviceId)
+    const warnDrop = createRateLimitedDropWarn(logger, state.deviceId)
+
+    // Opt-in throughput baseline (TAPFLOW_STREAM_METRICS=1): logs fps/KB·s/drop every 5s,
+    // so the Android source rate can be compared against the relay→browser drop logs and
+    // against the iOS agent (which already samples). Distinguishes source-bound (low fpsSent)
+    // from decode/LAN-bound (high fpsSent, high dropRate).
+    const metrics = process.env.TAPFLOW_STREAM_METRICS === '1' ? createThroughputSampler() : null
+    const metricsTimer = metrics
+      ? setInterval(() => {
+          const s = metrics.sample()
+          logger.info(
+            `stream metrics [${state.deviceId}] ${s.fpsSent}fps ${s.kbPerSec}KB/s avg=${s.avgFrameKB}KB drop=${(s.dropRate * 100).toFixed(1)}% (${s.droppedFrames}/${s.producedFrames})`,
+          )
+        }, 5000)
+      : undefined
+    metricsTimer?.unref()
+    const onDrop = metrics ? () => { metrics.recordDropped(); warnDrop() } : warnDrop
 
     const pump = async () => {
       try {
@@ -349,11 +366,13 @@ export class AndroidAgent implements DeviceAgent {
           // Mark codec=H.264 + per-AU keyframe so the relay's keyframe-aware backpressure
           // preserves the reference chain (drops to the next IDR instead of tearing).
           const frame = writeEnvelopeHeader(value.payload, Date.now(), { codec: CODEC_H264, keyframe: value.keyframe })
-          sendBinaryWithBackpressure(streamWs, frame, threshold, onDrop)
+          const sent = sendBinaryWithBackpressure(streamWs, frame, threshold, onDrop)
+          if (sent) metrics?.recordSent(value.payload.length)
         }
       } catch {
         // stream cancelled or ws closed — expected on disconnect
       }
+      if (metricsTimer) clearInterval(metricsTimer)
       if (state.scrcpySession === session && !state.restarting) {
         state.restarting = true
         void this.restartVideoStream(state)
