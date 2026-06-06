@@ -1,14 +1,14 @@
-## 변경 내용
+## Summary
 
-<!-- 무엇을 왜 변경했는지 간략히 -->
+<!-- What changed and why, briefly -->
 
-## 체크리스트
+## Checklist
 
-- [ ] 테스트 작성 및 통과 확인
-- [ ] `any` 미사용
-- [ ] 인터페이스 변경 시 `agent-core` 먼저 수정
-- [ ] 민감 정보(토큰, 경로, 자격증명) 미포함
+- [ ] Tests written and passing
+- [ ] No `any`
+- [ ] Interface changes land in `agent-core` first
+- [ ] No sensitive info (tokens, paths, credentials)
 
-## 관련 `.work/` 문서
+## Related `.work/` docs
 
-<!-- plan/review 파일 있으면 이름 기재 -->
+<!-- Name the plan/review file, if any -->
