@@ -69,7 +69,7 @@ Create an AVD using Android Studio's AVD Manager. See [Create and manage virtual
 When selecting the system image, note the following:
 
 ::: warning AVD image matters
-Use `google_apis/arm64-v8a` — **not** `google_apis_playstore`. The Play Store image causes the H.264 encoder to crash silently.
+Use a `google_apis/arm64-v8a` image — the tested and recommended configuration. The `google_apis_playstore` image is not tested and has shown H.264 encoder issues.
 :::
 
 The agent boots the emulator automatically, waits for `sys.boot_completed`, then begins streaming.

@@ -33,6 +33,19 @@ The scrcpy official FAQ documents the same error ("then try with another encoder
 
 Apple Silicon: use `system-images;android-34;google_apis;arm64-v8a`.
 
+### Re-verification (2026-06-06, scrcpy 3.3)
+
+Re-tested the 2×2 (encoder × image) on current emulators with scrcpy 3.3 at native 1080×2424:
+
+| Image | `c2.android.avc.encoder` | `OMX.google.h264.encoder` (pinned) |
+|---|---|---|
+| `google_apis_playstore` (android-36) | STREAMS | STREAMS |
+| `google_apis` (android-34) | STREAMS | STREAMS |
+
+All four stream with no crash. The original crash is the H.264 **even-width requirement** (`(src.width() & 1) == 0`) — a general encoder constraint triggered by an **odd capture width**, not a playstore-specific defect; it did not reproduce at native even width. `OMX.google` can itself fail MediaCodec config in some environments (scrcpy [#6275](https://github.com/genymobile/scrcpy/issues/6275)).
+
+**Takeaway**: `google_apis` stays the tested/recommended image (CI). Playstore isn't fundamentally broken on current images, but it's untested. The real risk to guard is **odd-width capture** (rotation / `max_size`) — keep capture dimensions even.
+
 ### Command to list available encoders
 
 ```bash

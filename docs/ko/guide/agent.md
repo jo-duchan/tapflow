@@ -69,7 +69,7 @@ Android Studio의 AVD Manager에서 AVD를 생성합니다. 자세한 방법은 
 AVD를 생성할 때 시스템 이미지 선택에 주의하세요:
 
 ::: warning AVD 이미지 선택이 중요합니다
-`google_apis/arm64-v8a`를 사용하세요. **`google_apis_playstore` 이미지는 사용하지 마세요.** Play Store 이미지는 H.264 인코더가 조용히 크래시합니다.
+`google_apis/arm64-v8a` 이미지를 사용하세요. 이것이 테스트된 권장 구성입니다. `google_apis_playstore` 이미지는 테스트되지 않았으며 H.264 인코더 문제가 보고되었습니다.
 :::
 
 에이전트가 에뮬레이터를 자동으로 부팅하고, `sys.boot_completed`를 기다린 뒤 스트리밍을 시작합니다.
