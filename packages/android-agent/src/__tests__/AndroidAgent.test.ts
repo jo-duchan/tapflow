@@ -412,8 +412,7 @@ describe('AndroidAgent', () => {
         await vi.waitFor(() => expect(flags).toHaveLength(2), { timeout: 1000 })
         expect(flags[0]).toEqual({ codec: CODEC_H264, keyframe: true })
         expect(flags[1]).toEqual({ codec: CODEC_H264, keyframe: false })
-        // Regression guard: the pre-fix bug marked H.264 frames as JPEG (→ relay treated
-        // every frame as a keyframe, degrading drop-to-keyframe into tearing drop-to-latest).
+        // Regression guard: the pre-fix bug marked H.264 frames as JPEG → relay saw every frame as a keyframe, degrading drop-to-keyframe into tearing drop-to-latest.
         expect(flags[0].codec).not.toBe(CODEC_JPEG)
       })
     })
