@@ -146,6 +146,10 @@ Platform-specific implementation notes for contributors:
 - type: `feat` · `fix` · `test` · `refactor` · `docs` · `chore` · `perf`
 - scope: the changed package name (`agent-core` · `ios-agent` · `android-agent` · `relay` · `dashboard` · `cli` · `playground`)
 
+## Language
+
+Write PRs, issues, and commit messages in English (internal `.work/` and `CLAUDE.md` docs may be in any language).
+
 ## Reporting bugs
 
 Use the [Bug Report](https://github.com/jo-duchan/tapflow/issues/new?template=bug_report.yml) issue template. Include steps to reproduce, expected vs. actual behavior, and your environment (tapflow version, Node.js version, and Xcode version for iOS issues).
