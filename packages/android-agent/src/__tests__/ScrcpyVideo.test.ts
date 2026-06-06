@@ -131,6 +131,24 @@ describe('ScrcpyVideo (send_frame_meta=true)', () => {
     expect(frames.every((f) => f.keyframe === false)).toBe(true)
   })
 
+  // Regression: ScrcpySession.stop()/device shutdown does socket.destroy() → 'close' (no FIN).
+  // The stream must terminate so the agent pump (and its metrics timer) stop instead of
+  // blocking forever on reader.read().
+  it('terminates the stream when the socket closes without a FIN', async () => {
+    const emitter = new EventEmitter()
+    const socket = emitter as unknown as Socket
+    const video = new ScrcpyVideo(socket)
+    process.nextTick(() => {
+      emitter.emit('data', makeHeader('t', 576, 1280))
+      emitter.emit('data', makePacket(annexB(PSLICE)))
+      emitter.emit('close') // destroy() emits 'close', not 'end'
+    })
+    await video.deviceInfo()
+    // Must resolve (reader observes `done`), not hang.
+    const frames = await collect(video)
+    expect(frames).toHaveLength(1)
+  })
+
   it('rejects deviceInfo when the server closes before the header arrives', async () => {
     const emitter = new EventEmitter()
     const socket = emitter as unknown as Socket

@@ -7,6 +7,9 @@ import {
   registerStreamWs,
   sendBinaryWithBackpressure,
   createRateLimitedDropWarn,
+  createThroughputSampler,
+  createSleepBlocker,
+  type SleepBlocker,
   DEFAULT_BACKPRESSURE_BYTES,
   writeEnvelopeHeader,
   CODEC_H264,
@@ -127,6 +130,8 @@ export interface AndroidAgentOptions {
   /** AVD name or emulator serial to expose. Omit to expose all detected devices. */
   deviceFilter?: string
   reconnectDelays?: number[]
+  /** Injectable for tests; defaults to a real macOS power assertion (no-op under vitest). */
+  sleepBlocker?: SleepBlocker
 }
 
 export class AndroidAgent implements DeviceAgent {
@@ -134,6 +139,9 @@ export class AndroidAgent implements DeviceAgent {
   private readonly launcher: EmulatorLauncher
   private ws: WebSocket | null = null
   private deviceStates = new Map<string, DeviceState>()
+  // Holds a macOS power assertion while connected so the host doesn't idle-throttle the
+  // emulator (its software H.264 encoder starves badly when the Mac idles). No-op off macOS.
+  private readonly sleepBlocker: SleepBlocker
   private relayUrl: string | null = null
   private resourcesTimer: ReturnType<typeof setInterval> | null = null
   private readonly resources = createResourceSampler()
@@ -149,6 +157,8 @@ export class AndroidAgent implements DeviceAgent {
     this.launcher = new EmulatorLauncher()
     this.deviceFilter = options.deviceFilter
     this.reconnectDelays = options.reconnectDelays ?? [1000, 2000, 4000, 8000, 16000, 30000]
+    // No-op under vitest so the suite never spawns real `caffeinate` processes.
+    this.sleepBlocker = options.sleepBlocker ?? (process.env.VITEST ? { acquire() {}, release() {} } : createSleepBlocker())
   }
 
   get sessionId(): string | null {
@@ -187,6 +197,7 @@ export class AndroidAgent implements DeviceAgent {
         const msg = JSON.parse(data.toString())
         if (msg.type === 'agent:registered') {
           this.ws = ws
+          this.sleepBlocker.acquire() // idempotent across reconnects
           this.initDeviceStates(
             msg.registeredSessions as Array<{ deviceId: string; sessionId: string }>,
           )
@@ -236,6 +247,7 @@ export class AndroidAgent implements DeviceAgent {
       this.cleanupDeviceState(state)
     }
     this.deviceStates.clear()
+    this.sleepBlocker.release()
     this.ws?.close()
     this.ws = null
     this.relayUrl = null
@@ -329,7 +341,23 @@ export class AndroidAgent implements DeviceAgent {
     const reader = stream.getReader()
 
     const threshold = Number(process.env.TAPFLOW_WS_BACKPRESSURE_BYTES) || DEFAULT_BACKPRESSURE_BYTES
-    const onDrop = createRateLimitedDropWarn(logger, state.deviceId)
+    const warnDrop = createRateLimitedDropWarn(logger, state.deviceId)
+
+    // Opt-in throughput baseline (TAPFLOW_STREAM_METRICS=1): logs fps/KB·s/drop every 5s,
+    // so the Android source rate can be compared against the relay→browser drop logs and
+    // against the iOS agent (which already samples). Distinguishes source-bound (low fpsSent)
+    // from decode/LAN-bound (high fpsSent, high dropRate).
+    const metrics = process.env.TAPFLOW_STREAM_METRICS === '1' ? createThroughputSampler() : null
+    const metricsTimer = metrics
+      ? setInterval(() => {
+          const s = metrics.sample()
+          logger.info(
+            `stream metrics [${state.deviceId}] ${s.fpsSent}fps ${s.kbPerSec}KB/s avg=${s.avgFrameKB}KB drop=${(s.dropRate * 100).toFixed(1)}% (${s.droppedFrames}/${s.producedFrames})`,
+          )
+        }, 5000)
+      : undefined
+    metricsTimer?.unref()
+    const onDrop = metrics ? () => { metrics.recordDropped(); warnDrop() } : warnDrop
 
     const pump = async () => {
       try {
@@ -349,11 +377,13 @@ export class AndroidAgent implements DeviceAgent {
           // Mark codec=H.264 + per-AU keyframe so the relay's keyframe-aware backpressure
           // preserves the reference chain (drops to the next IDR instead of tearing).
           const frame = writeEnvelopeHeader(value.payload, Date.now(), { codec: CODEC_H264, keyframe: value.keyframe })
-          sendBinaryWithBackpressure(streamWs, frame, threshold, onDrop)
+          const sent = sendBinaryWithBackpressure(streamWs, frame, threshold, onDrop)
+          if (sent) metrics?.recordSent(value.payload.length)
         }
       } catch {
         // stream cancelled or ws closed — expected on disconnect
       }
+      if (metricsTimer) clearInterval(metricsTimer)
       if (state.scrcpySession === session && !state.restarting) {
         state.restarting = true
         void this.restartVideoStream(state)

@@ -15,6 +15,8 @@ import {
   sendBinaryWithBackpressure,
   createRateLimitedDropWarn,
   createThroughputSampler,
+  createSleepBlocker,
+  type SleepBlocker,
   DEFAULT_BACKPRESSURE_BYTES,
   writeEnvelopeHeader,
   rewriteLowLatencySpsInFrame,
@@ -32,6 +34,8 @@ export interface IOSAgentOptions {
   fps?: number
   intervalMs?: number
   reconnectDelays?: number[]
+  /** Injectable for tests; defaults to a real macOS power assertion (no-op under vitest). */
+  sleepBlocker?: SleepBlocker
 }
 
 interface DeviceState {
@@ -63,6 +67,9 @@ export class IOSAgent implements DeviceAgent {
   private readonly chromeLoader: DeviceChromeLoader
   private ws: WebSocket | null = null
   private deviceStates = new Map<string, DeviceState>()
+  // Holds a macOS power assertion while connected so the host doesn't idle-throttle the
+  // simulator capture/encode when the Mac is unattended. No-op off macOS.
+  private readonly sleepBlocker: SleepBlocker
   private relayUrl: string | null = null
   private resourcesTimer: ReturnType<typeof setInterval> | null = null
   private readonly resources = createResourceSampler()
@@ -76,6 +83,8 @@ export class IOSAgent implements DeviceAgent {
     this.intervalMs = options.intervalMs
     this.reconnectDelays = options.reconnectDelays ?? [1000, 2000, 4000, 8000, 16000, 30000]
     this.chromeLoader = new DeviceChromeLoader()
+    // No-op under vitest so the suite never spawns real `caffeinate` processes.
+    this.sleepBlocker = options.sleepBlocker ?? (process.env.VITEST ? { acquire() {}, release() {} } : createSleepBlocker())
   }
 
   get sessionId(): string | null {
@@ -111,6 +120,7 @@ export class IOSAgent implements DeviceAgent {
         const msg = JSON.parse(data.toString())
         if (msg.type === 'agent:registered') {
           this.ws = ws
+          this.sleepBlocker.acquire() // idempotent across reconnects
           this.initDeviceStates(
             msg.registeredSessions as Array<{ deviceId: string; sessionId: string }>,
           )
@@ -158,6 +168,7 @@ export class IOSAgent implements DeviceAgent {
       this.cleanupDeviceState(state)
     }
     this.deviceStates.clear()
+    this.sleepBlocker.release()
     this.ws?.close()
     this.ws = null
     this.relayUrl = null

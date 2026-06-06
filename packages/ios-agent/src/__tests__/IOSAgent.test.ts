@@ -152,6 +152,18 @@ describe('IOSAgent', () => {
     })
   })
 
+  describe('power assertion', () => {
+    it('acquires on connect and releases on disconnect', async () => {
+      const sleepBlocker = { acquire: vi.fn(), release: vi.fn() }
+      const agent = new IOSAgent({ sleepBlocker }, mockSimctl())
+      await agent.connect(`ws://localhost:${port}`)
+      expect(sleepBlocker.acquire).toHaveBeenCalled()
+      expect(sleepBlocker.release).not.toHaveBeenCalled()
+      agent.disconnect()
+      expect(sleepBlocker.release).toHaveBeenCalled()
+    })
+  })
+
   describe('pinch relay messages', () => {
     beforeEach(() => { MockTouchHelper.mockClear() })
 

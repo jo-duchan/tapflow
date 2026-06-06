@@ -158,6 +158,17 @@ describe('AndroidAgent', () => {
       expect(agent.sessionId).toBeTruthy()
       agent.disconnect()
     })
+
+    it('holds a power assertion while connected (acquire on connect, release on disconnect)', async () => {
+      const adb = mockAdb()
+      const sleepBlocker = { acquire: vi.fn(), release: vi.fn() }
+      const agent = new AndroidAgent({ sleepBlocker }, adb)
+      await agent.connect(`ws://localhost:${port}`)
+      expect(sleepBlocker.acquire).toHaveBeenCalled()
+      expect(sleepBlocker.release).not.toHaveBeenCalled()
+      agent.disconnect()
+      expect(sleepBlocker.release).toHaveBeenCalled()
+    })
   })
 
   describe('device:boot flow', () => {
