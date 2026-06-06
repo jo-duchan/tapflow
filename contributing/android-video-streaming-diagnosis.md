@@ -90,7 +90,7 @@ adb shell getprop debug.hwui.renderer # "skiagl"    → properly accelerated
 
 macOS deliberately throttles GPU rendering of fully occluded windows via the `NSWindowOcclusionState` API. Because the emulator (QEMU) is synchronized to Metal swap-buffer / vsync:
 
-```
+```text
 Fewer macOS Metal callbacks
   → QEMU Choreographer VSYNC slowdown
     → SurfaceFlinger can't sustain 60Hz
@@ -195,3 +195,47 @@ Applying the same skin to Android Studio's standalone emulator window (the `emul
 ### Conditions for a future retry
 
 We can revisit this if AOSP/Google updates the `google_apis` image to set `ro.surface_flinger.rounded_corner_radius`, or if an official way appears to inject a rounded-corner inset into SystemUI from outside.
+
+---
+
+## Issue 4 — FPS drop from macOS system idle throttle (resolved 2026-06-06)
+
+### Key conclusion (read this first)
+
+This is a **second, distinct** throttle from [Issue 2](#issue-2--fps-drop-from-macos-window-occlusion-resolved-2026-05-18). Issue 2 is **window occlusion** (the emulator window hidden behind the browser), fixed by `-no-window`. Issue 4 is **system idle sleep** of the *host Mac itself*, fixed by holding a `caffeinate -i` power assertion while an agent is connected (shipped v0.6.1). Both can apply at once and are unrelated.
+
+### Symptoms
+
+- Reported in the cross-Mac LAN setup: the agent Mac (e.g. an unattended Mac mini) streams Android at an erratic ~4–18fps; iOS on the same Mac stays at a steady 30fps.
+- Worse the longer the Mac is unattended, on battery, or backgrounded; recovers when the Mac is actively used.
+
+### Root cause
+
+`EmulatorLauncher` already passes `-no-window`, so Issue 2's occlusion throttle does not apply. The remaining throttle is plain **macOS idle/system sleep**: with no local user activity (the reviewer is on another Mac over the LAN), the host idles and macOS down-clocks / suspends background work, starving the **software** H.264 encoder (`OMX.google.h264.encoder`) that scrcpy drives. The iOS path is less affected because it encodes via **hardware** VideoToolbox.
+
+```text
+Unattended host Mac idles
+  → macOS reduces background CPU / heads toward sleep
+    → software H.264 encoder can't sustain 30fps
+      → fewer frames reach the relay → erratic / low fps
+```
+
+### Fix
+
+`agent-core` `createSleepBlocker()` spawns `caffeinate -i` (prevents idle/system sleep). Both agents acquire it on connect and release on disconnect, held across reconnects. macOS-only; a complete no-op elsewhere (and under vitest). Verified: with `caffeinate -i pnpm dev`, Android stays fast even with the host's display off.
+
+### Limits (what caffeinate does NOT cover)
+
+| Not covered | Why |
+|---|---|
+| **Battery CPU scaling** | macOS lowers peak CPU on battery regardless of the assertion — caffeinate prevents sleep, not down-clocking. |
+| **Clamshell sleep** | Closing a laptop lid sleeps the Mac; `caffeinate -i` cannot prevent it. |
+
+User-facing guidance lives in `docs/guide/troubleshooting.md` (#emulator-is-slow-when-the-mac-is-unattended).
+
+### Approaches considered
+
+| Approach | Result | Why |
+|---|---|---|
+| macOS Energy setting "prevent sleeping when display off" | works but manual | `caffeinate -i` does the same automatically while the agent runs (works on battery too, unlike AC-only `-s`; still does not override battery CPU scaling) — no user setup needed |
+| `caffeinate -d` (display) | unnecessary | the display can sleep; only system idle matters (verified: fast with display off) |
