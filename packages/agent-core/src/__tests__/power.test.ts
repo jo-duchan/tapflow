@@ -46,13 +46,28 @@ describe('createSleepBlocker', () => {
     expect(spawnFn).toHaveBeenCalledTimes(2)
   })
 
-  it('re-acquires after the process emits error (caffeinate missing)', () => {
+  it.each(['error', 'close', 'exit'] as const)(
+    're-acquires after the process emits %s (caffeinate died externally)',
+    (event) => {
+      const procs: ReturnType<typeof fakeProc>[] = []
+      const spawnFn = vi.fn(() => { const p = fakeProc(); procs.push(p); return p })
+      const b = createSleepBlocker('darwin', spawnFn as never)
+      b.acquire()
+      procs[0].emit(event) // handle should be dropped
+      b.acquire()
+      expect(spawnFn).toHaveBeenCalledTimes(2)
+    },
+  )
+
+  it("a stale child's late termination does not clear a newer process", () => {
     const procs: ReturnType<typeof fakeProc>[] = []
     const spawnFn = vi.fn(() => { const p = fakeProc(); procs.push(p); return p })
     const b = createSleepBlocker('darwin', spawnFn as never)
-    b.acquire()
-    procs[0].emit('error', new Error('ENOENT')) // handle dropped
-    b.acquire()
+    b.acquire()           // procs[0] held
+    b.release()           // proc cleared
+    b.acquire()           // procs[1] now held
+    procs[0].emit('exit') // late event from the released child — must be ignored
+    b.acquire()           // should be a no-op: procs[1] is still current
     expect(spawnFn).toHaveBeenCalledTimes(2)
   })
 

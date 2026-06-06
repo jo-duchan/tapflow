@@ -27,10 +27,16 @@ export function createSleepBlocker(
     acquire(): void {
       if (proc || platform !== 'darwin') return
       try {
-        proc = spawnFn('caffeinate', ['-i'], { stdio: 'ignore' })
-        // caffeinate missing or failed — drop the handle so a later acquire retries.
-        proc.on('error', () => { proc = null })
-        proc.unref()
+        const child = spawnFn('caffeinate', ['-i'], { stdio: 'ignore' })
+        proc = child
+        // Drop the handle on any termination (missing binary, external kill, exit) so a
+        // later acquire() re-spawns. Guard on identity so a stale child's late event can't
+        // null out a newer one.
+        const clear = (): void => { if (proc === child) proc = null }
+        child.once('error', clear)
+        child.once('close', clear)
+        child.once('exit', clear)
+        child.unref()
       } catch {
         proc = null
       }
