@@ -40,8 +40,8 @@ flowchart TD
 3. Touch events are forwarded in real time; the screen streams back to the browser.
 
 ::: info Streaming format by platform
-- **iOS** Simulator: JPEG frames (~30 fps)
-- **Android** Emulator: H.264 stream (~30 fps, scrcpy-based)
+- **iOS** Simulator: H.264 stream (~30 fps; JPEG fallback on older browsers)
+- **Android** Emulator: H.264 stream (~30 fps)
 
 Visual quality and latency may differ between the two.
 :::

@@ -141,10 +141,6 @@ If the emulator is still slow when the Mac is unattended, check the following.
 | **Power adapter connected** | Battery mode lowers CPU performance — `caffeinate` does not override this scaling. |
 | **Laptop lid is open** | Closing the lid triggers clamshell sleep, which `caffeinate` cannot prevent. |
 
-::: details Technical background
-The Android emulator's H.264 encoder runs in software on the CPU. When the Mac throttles, the encoder can't keep up and fps drops. The iOS Simulator uses a hardware encoder (VideoToolbox) and is less affected.
-:::
-
 ## `tapflow doctor` failures
 
 ### All iOS checks fail

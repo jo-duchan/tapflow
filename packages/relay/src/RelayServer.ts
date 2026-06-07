@@ -23,6 +23,19 @@ import {
 import type { KeyframeAwareSender } from '@tapflowio/agent-core/utils'
 
 const logger = createLogger('relay')
+
+// True when a remote IP is public — i.e. not loopback, private LAN, or link-local. Used to pick the
+// downscale tier (external viewers are bandwidth-constrained). Behind a reverse proxy the relay sees
+// the proxy's address, so set TAPFLOW_MAX_SIZE_EXTERNAL=0 / a global override for those deployments.
+export function isExternalAddress(addr: string): boolean {
+  if (!addr) return false
+  const a = addr.replace(/^::ffff:/, '') // unwrap IPv4-mapped IPv6
+  if (a === '127.0.0.1' || a === '::1' || a === 'localhost') return false
+  if (/^10\./.test(a) || /^192\.168\./.test(a) || /^169\.254\./.test(a)) return false
+  if (/^172\.(1[6-9]|2\d|3[01])\./.test(a)) return false
+  if (/^(f[cd]|fe80)/i.test(a)) return false // IPv6 ULA / link-local
+  return true
+}
 // Min gap between IDR requests per session — one IDR resyncs the stream, so avoid
 // spamming the agent in the frames between request and the IDR arriving.
 const IDR_REQUEST_THROTTLE_MS = 500
@@ -85,6 +98,9 @@ export class RelayServer {
   // Per-session throttled "request an IDR from the agent" callbacks (drop recovery).
   private idrRequesters = new Map<string, () => void>()
   private wsRoles = new Map<WebSocket, 'agent' | 'browser' | 'stream'>()
+  // True when the connection's remote IP is public (not loopback / private LAN) — the agent uses
+  // this to downscale harder for bandwidth on external viewers.
+  private wsExternal = new Map<WebSocket, boolean>()
   private readonly backpressureBytes: number
   private readonly screenshotTimeoutMs: number
   private pendingScreenshots = new Map<string, {
@@ -103,6 +119,9 @@ export class RelayServer {
     this.router = new Router()
     this.registerRoutes()
     this.httpServer = http.createServer((req, res) => this.handleRequest(req, res))
+    // Disable Nagle on every accepted socket (browsers + agents): small writes (touch, frame tails)
+    // must not be held waiting for an ACK. Negligible on localhost, but ~40ms stalls on LAN.
+    this.httpServer.on('connection', (socket) => socket.setNoDelay(true))
     this.wss = new WebSocketServer({ server: this.httpServer })
     this.wss.on('connection', (ws, request) => this.handleConnection(ws, request))
     this.wss.on('error', () => { /* propagated from httpServer */ })
@@ -254,6 +273,7 @@ export class RelayServer {
   private handleConnection(ws: WebSocket, request: http.IncomingMessage): void {
     const addr = request.socket.remoteAddress ?? ''
     const isLocal = addr === '127.0.0.1' || addr === '::1' || addr === '::ffff:127.0.0.1'
+    this.wsExternal.set(ws, isExternalAddress(addr))
 
     if (!isLocal) {
       // Remote connections require a valid session cookie or PAT
@@ -310,6 +330,7 @@ export class RelayServer {
 
     ws.on('close', () => {
       this.wsRoles.delete(ws)
+      this.wsExternal.delete(ws)
       // Agent main socket disconnected → remove all device sessions for this agent
       const agentSessions = this.sessions.getAllByAgentSocket(ws)
       if (agentSessions.length > 0) {
@@ -483,6 +504,11 @@ export class RelayServer {
       case 'device:shutdown': {
         const session = this.sessions.get(msg.sessionId!)
         if (session?.agentSocket.readyState === WebSocket.OPEN) {
+          // Tag the boot with whether the viewer is external (public IP) so the agent can pick the
+          // downscale tier. The browser already reports secureContext in the payload.
+          if (msg.type === 'device:boot' && msg.payload && typeof msg.payload === 'object') {
+            (msg.payload as Record<string, unknown>).external = this.wsExternal.get(ws) ?? false
+          }
           session.agentSocket.send(JSON.stringify(msg))
         }
         break
@@ -569,6 +595,13 @@ export class RelayServer {
     // Replay device:ready if the device is already booted (browser WS blip reconnect)
     if (session.deviceStatus === 'booted') {
       ws.send(JSON.stringify({ type: 'device:ready', payload: { deviceId: session.deviceId } }))
+      // (Re)joining a live stream: ask the agent for an IDR so this viewer gets a decodable
+      // keyframe immediately, instead of waiting for the next periodic one — and so it isn't
+      // left blank when the encoder is static-skipping an unchanged screen. Agents that don't
+      // support on-demand IDR ignore the message.
+      if (session.agentSocket.readyState === WebSocket.OPEN) {
+        session.agentSocket.send(JSON.stringify({ type: 'stream:request-idr', sessionId: session.id }))
+      }
     }
   }
 

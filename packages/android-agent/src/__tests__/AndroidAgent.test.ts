@@ -132,13 +132,19 @@ describe('AndroidAgent', () => {
   let relay: RelayServer
   let port: number
   let tmpDir: string
+  const prevBackend = process.env.TAPFLOW_ANDROID_BACKEND
 
   beforeAll(() => {
+    // These tests exercise the scrcpy backend; pin it so the emulator serial doesn't auto-select
+    // the gRPC path (which would spawn a real encoder / hit 127.0.0.1:8554 and be environment-flaky).
+    process.env.TAPFLOW_ANDROID_BACKEND = 'scrcpy'
     tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'tapflow-android-test-'))
     initDb(path.join(tmpDir, 'test.db'))
   })
 
   afterAll(() => {
+    if (prevBackend === undefined) delete process.env.TAPFLOW_ANDROID_BACKEND
+    else process.env.TAPFLOW_ANDROID_BACKEND = prevBackend
     closeDb()
     fs.rmSync(tmpDir, { recursive: true })
   })

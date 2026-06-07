@@ -1,6 +1,7 @@
 export { createResourceSampler } from './resources.js'
 export {
   registerStreamWs,
+  disableNagle,
   sendBinaryWithBackpressure,
   createKeyframeAwareSender,
   createRateLimitedDropWarn,
@@ -22,6 +23,7 @@ export { createThroughputSampler } from './throughput.js'
 export type { ThroughputSample } from './throughput.js'
 export { createSleepBlocker } from './power.js'
 export type { SleepBlocker } from './power.js'
+export { pickMaxSize } from './resolution.js'
 export {
   parseSpsVui,
   rewriteSpsLowLatency,

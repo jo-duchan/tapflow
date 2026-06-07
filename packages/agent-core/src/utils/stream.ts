@@ -3,6 +3,13 @@ import type { Logger } from '../logger.js'
 
 export const DEFAULT_BACKPRESSURE_BYTES = 1_048_576 // 1 MB
 
+/** Disable Nagle on a ws client's TCP socket so small writes (touch, frame tails) aren't held
+ *  waiting for an ACK — negligible on localhost, but ~40ms stalls on LAN. Safe to call after open. */
+export function disableNagle(ws: WebSocket): void {
+  const sock = (ws as unknown as { _socket?: { setNoDelay?(b: boolean): void } })._socket
+  sock?.setNoDelay?.(true)
+}
+
 // Returns true if the frame was sent, false if it was dropped (backpressure or closed socket).
 export function sendBinaryWithBackpressure(
   ws: WebSocket,
@@ -105,6 +112,7 @@ export function createRateLimitedDropWarn(
 export function registerStreamWs(ws: WebSocket, sessionId: string): Promise<void> {
   return new Promise((resolve, reject) => {
     ws.once('open', () => {
+      disableNagle(ws) // stream socket carries the video frames — keep it un-delayed on LAN
       ws.send(JSON.stringify({ type: 'stream:register', sessionId }))
     })
 

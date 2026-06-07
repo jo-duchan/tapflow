@@ -59,5 +59,5 @@ The audience is the whole team (PO, PM, designers, backend, QA) — not just QA.
 **How**: `useRelay` receives binary frames (set `socket.binaryType = 'arraybuffer'`, else `e.data` is a `Blob`); `IOSViewer` / `AndroidViewer` render via a decoder chosen by `pickDecoder` (`lib/decoders/`) — WebCodecs on secure contexts, WASM (tinyh264) on plain HTTP, `createImageBitmap` for the JPEG fallback.
 
 **Why** (not obvious from the code):
-- The 2-tier decoder avoids the MSE `<video>` media buffer → low latency. Only the JPEG path is CPU-decoded (`createImageBitmap`); H.264 is hardware-decoded via WebCodecs. (The old "HW decode needs a WebRTC Video Track" is no longer true.)
+- Both H.264 tiers paint **straight to a canvas with no `<video>` media element** — WebCodecs decodes to a `VideoFrame`, WASM (tinyh264) decodes to I420 rendered by `YUVWebGLRenderer` — so there is no media-element buffer adding latency. H.264 is hardware-decoded (WebCodecs) on secure contexts; only the JPEG fallback is CPU-decoded (`createImageBitmap`).
 - Release the GPU texture/frame every frame (`bitmap.close()` / `VideoFrame.close()`) — otherwise GPU memory leaks per frame.

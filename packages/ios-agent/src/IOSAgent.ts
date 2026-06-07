@@ -12,7 +12,9 @@ const logger = createLogger('ios-agent')
 import {
   createResourceSampler,
   registerStreamWs,
-  sendBinaryWithBackpressure,
+  disableNagle,
+  createKeyframeAwareSender,
+  pickMaxSize,
   createRateLimitedDropWarn,
   createThroughputSampler,
   createSleepBlocker,
@@ -57,6 +59,9 @@ interface DeviceState {
   // Browser-reported H.264 decode capability from device:boot. false (default) =
   // stream JPEG. Persisted so a stream reconnect re-picks the same codec.
   acceptH264: boolean
+  // Viewer context from device:boot → downscale tier (native / 1280 / 1000).
+  secureContext: boolean
+  external: boolean
 }
 
 export class IOSAgent implements DeviceAgent {
@@ -102,6 +107,7 @@ export class IOSAgent implements DeviceAgent {
       const ws = new WebSocket(relayUrl)
 
       ws.once('open', () => {
+        disableNagle(ws)
         ws.send(JSON.stringify({
           type: 'agent:register',
           platform: 'ios',
@@ -156,6 +162,8 @@ export class IOSAgent implements DeviceAgent {
         loadedChrome: null,
         softKeyboardVisible: false,
         acceptH264: false,
+        secureContext: false,
+        external: false,
       })
     })
   }
@@ -222,6 +230,7 @@ export class IOSAgent implements DeviceAgent {
   private cleanupDeviceState(state: DeviceState): void {
     void state.streamReader?.cancel()
     state.streamReader = null
+    state.captureStreamer = null // reader.cancel() kills the helper proc; drop the ref so a stale requestKeyframe() no-ops
     state.touchHelper?.stop()
     state.touchHelper = null
     state.streamWs?.close()
@@ -261,7 +270,12 @@ export class IOSAgent implements DeviceAgent {
       state.captureStreamer = null
       stream = new MjpegStreamer(this.simctl, this.intervalMs).start()
     } else {
-      const capture = new ScreenCaptureStreamer(this.fps, state.deviceId, useH264 ? 'h264' : 'jpeg')
+      const maxSize = pickMaxSize({
+        secureContext: state.secureContext,
+        external: state.external,
+        override: process.env.TAPFLOW_IOS_MAX_SIZE ?? process.env.TAPFLOW_MAX_SIZE,
+      })
+      const capture = new ScreenCaptureStreamer(this.fps, state.deviceId, useH264 ? 'h264' : 'jpeg', maxSize)
       state.captureStreamer = capture
       stream = capture.start()
     }
@@ -286,6 +300,12 @@ export class IOSAgent implements DeviceAgent {
     metricsTimer?.unref()
 
     const onDrop = metrics ? () => { metrics.recordDropped(); warnDrop() } : warnDrop
+    // Keyframe-aware backpressure: drop whole GOPs to the next keyframe (never an orphan P-frame,
+    // which decodes to a sheared frame on WASM) and force an IDR on a drop (throttled). JPEG frames
+    // are self-contained, so each counts as a keyframe.
+    const dropper = createKeyframeAwareSender()
+    let lastIdrReq = 0
+    const onWantKeyframe = () => { const now = Date.now(); if (now - lastIdrReq >= 500) { lastIdrReq = now; state.captureStreamer?.requestKeyframe() } }
 
     const pump = async () => {
       try {
@@ -299,7 +319,7 @@ export class IOSAgent implements DeviceAgent {
             ? rewriteLowLatencySpsInFrame(value.payload)
             : value.payload
           const frame = writeEnvelopeHeader(payload as Buffer, Date.now(), { codec, keyframe: value.keyframe })
-          const sent = sendBinaryWithBackpressure(streamWs, frame, threshold, onDrop)
+          const sent = dropper.send(streamWs, frame, threshold, codec === CODEC_JPEG || value.keyframe, onDrop, onWantKeyframe)
           if (sent) metrics?.recordSent(value.payload.length)
         }
       } catch {
@@ -321,15 +341,17 @@ export class IOSAgent implements DeviceAgent {
     return streamWs
   }
 
-  private async handleDeviceBoot(sessionId: string, deviceId: string, fullErase = false, acceptH264 = false): Promise<void> {
+  private async handleDeviceBoot(sessionId: string, deviceId: string, fullErase = false, acceptH264 = false, tier?: { secureContext: boolean; external: boolean }): Promise<void> {
     const state = this.deviceStates.get(sessionId)
     if (!state || !this.ws) return
 
     state.acceptH264 = acceptH264
+    if (tier) { state.secureContext = tier.secureContext; state.external = tier.external }
     const seq = ++state.bootSeq
 
     void state.streamReader?.cancel()
     state.streamReader = null
+    state.captureStreamer = null // reader.cancel() kills the helper proc; drop the ref so a stale requestKeyframe() no-ops
     state.touchHelper?.stop()
     state.touchHelper = null
     state.streamWs?.close()
@@ -391,6 +413,7 @@ export class IOSAgent implements DeviceAgent {
     state.bootSeq++
     void state.streamReader?.cancel()
     state.streamReader = null
+    state.captureStreamer = null // reader.cancel() kills the helper proc; drop the ref so a stale requestKeyframe() no-ops
     state.touchHelper?.stop()
     state.touchHelper = null
     state.streamWs?.close()
@@ -412,9 +435,9 @@ export class IOSAgent implements DeviceAgent {
   private handleRelayMessage(msg: { type: string; sessionId?: string; payload?: unknown }): void {
     switch (msg.type) {
       case 'device:boot': {
-        const { deviceId, resetMode, acceptH264 } = msg.payload as { deviceId: string; resetMode?: string; acceptH264?: boolean }
+        const { deviceId, resetMode, acceptH264, secureContext, external } = msg.payload as { deviceId: string; resetMode?: string; acceptH264?: boolean; secureContext?: boolean; external?: boolean }
         const sessionId = msg.sessionId!
-        this.handleDeviceBoot(sessionId, deviceId, resetMode === 'full-erase', acceptH264 === true)
+        this.handleDeviceBoot(sessionId, deviceId, resetMode === 'full-erase', acceptH264 === true, { secureContext: !!secureContext, external: !!external })
           .catch((e) => logger.error('handleDeviceBoot failed:', e))
         break
       }

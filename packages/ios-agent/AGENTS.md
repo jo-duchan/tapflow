@@ -77,7 +77,7 @@ Output framing (length-prefixed):
 **Env**:
 - `TAPFLOW_JPEG_QUALITY` (0–1, default `0.8`) — JPEG quality; the LAN bandwidth ↔ design-QA fidelity trade-off. Lower = fewer relay→browser drops on LAN, but more artifacts.
 - `TAPFLOW_IOS_CODEC` (default `h264`) — H.264 is the default on the IOSurface path; set `TAPFLOW_IOS_CODEC=jpeg` to opt out (force JPEG). H.264 also requires the browser to report it can decode it (`device:boot` `acceptH264`, from `canDecodeH264()`); old/unsupported browsers (~5%, no WebGL2) fall back to JPEG automatically. The MjpegStreamer fallback is always JPEG. Set on the agent process. The codec is signalled per frame in the TFFE envelope (byte5 bit0).
-- `TAPFLOW_IOS_H264_BITRATE` (bits/s, default `8_000_000`) — H.264 `AverageBitRate` (soft target). Reduces scroll bandwidth to fit a WiFi LAN and avoid sustained relay backpressure; matches the Android scrcpy 8 Mbps cap. Lower = fewer LAN drops, more motion blockiness. **Do not add `DataRateLimits` (hard cap)** — it corrupts frames (tearing) under high motion.
+- `TAPFLOW_IOS_H264_BITRATE` (bits/s, default `8_000_000`) — H.264 `AverageBitRate` (soft target). Reduces scroll bandwidth to fit a WiFi LAN and avoid sustained relay backpressure; matches the Android 8 Mbps cap (scrcpy and the emulator gRPC encoder). Lower = fewer LAN drops, more motion blockiness. **Do not add `DataRateLimits` (hard cap)** — it corrupts frames (tearing) under high motion.
 
 When the Swift binary interface changes, **always update both locations simultaneously**:
 1. `src/screencapture-helper.swift` — argument parsing changes
@@ -155,6 +155,35 @@ timer.setEventHandler {
     writeFrame(jpeg)
 }
 ```
+
+---
+
+### Tear-free framebuffer snapshot (`copySurfaceStable`)
+
+**When**: reading the framebuffer IOSurface to encode (both the H.264 and JPEG paths go through it).
+
+**How**: don't encode the live surface. `copySurfaceStable` memcpys it into a private, reused
+buffer and brackets the copy with `IOSurfaceGetSeed`; if the seed moved, the simulator drew
+during the copy (possibly sheared) → retry (budget 4). `encodeH264`/`encodeJPEG` then read that
+snapshot.
+
+**Why** (not obvious from the code):
+- The simulator draws into a **single IOSurface in place** (the static-skip seed relies on that),
+  asynchronously to our 30fps timer. Reading it mid-draw bakes a **horizontal tear** — top = old
+  frame, bottom = new — into the encoded frame. It shows on **every tier and decoder** (native:
+  VTEncode reads the surface directly; downscale: vImage reads it) and recovers on the next frame,
+  so it reads as "intermittent scroll tearing." Measured during heavy scroll: **~40% of frames
+  raced** a write; all resolved within the retry budget.
+- `IOSurfaceLock(.readOnly)` (and `CVPixelBufferLockBaseAddress`, which calls it) is **cooperative**
+  — it does not block the sim's GPU writes, so locking alone does **not** prevent the tear. The
+  seed check is what makes the snapshot coherent. **Do not "simplify" the copy back to reading the
+  live surface.**
+- This is distinct from the relay/agent **keyframe-aware backpressure** fix (orphan P-frames under
+  drop): that is a transport-drop artifact; this is a source-pixel tear. Both can look like scroll
+  tearing; they need separate fixes.
+- Reuse safety: downscale reads the snapshot synchronously (vImage) before the next tick; native
+  hands it to VTEncode but full-res encode is far slower than the frame interval, so the in-flight
+  encode never overlaps the next copy. `TAPFLOW_STREAM_METRICS=1` logs the retry/exhausted counts.
 
 ---
 

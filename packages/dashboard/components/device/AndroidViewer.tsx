@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { useClientRecording } from '@/hooks/useClientRecording';
 import { ArrowLeft, Home, LayoutGrid, Loader2, Play, Power, Volume1, Volume2 } from 'lucide-react';
-import { pickDecoder } from '@/lib/decoders/pickDecoder';
+import { useDecoderStream } from '@/hooks/useDecoderStream';
 import type { Decoder } from '@/lib/decoders/types';
 import { useFps } from '@/hooks/useFps';
 import { SimulatorToolbar } from './shared/SimulatorToolbar';
@@ -41,6 +41,9 @@ interface AndroidViewerProps {
   onRecordingUploaded?: () => void;
   screenWidth?: number;
   screenHeight?: number;
+  /** Rounded-corner radius as a fraction of width — the emulator bakes the device's corners into
+   *  the framebuffer as black; we clip them so they don't show inside the screen bezel. 0 = square. */
+  cornerRadius?: number;
   perfHookRef?: MutableRefObject<PerfHook>;
 }
 
@@ -49,7 +52,7 @@ export function AndroidViewer({
   deviceReady, installing, installed, installError, bootError,
   launching, setLaunching, androidButtons,
   binaryFrameHandlerRef, onRecordingUploaded,
-  screenWidth, screenHeight,
+  screenWidth, screenHeight, cornerRadius,
   perfHookRef,
 }: AndroidViewerProps) {
   const surfaceHostRef = useRef<HTMLDivElement>(null);
@@ -84,43 +87,33 @@ export function AndroidViewer({
   const cursorStateRef = useRef<'idle' | 'down' | 'release'>('idle');
   const releaseAnimRef = useRef<{ startTime: number } | null>(null);
 
-  // ── Decoder init + surface mount ──────────────────────────────────────────
-  // pickDecoder selects WebCodecs (secure context) or WASM (plain HTTP/LAN). Each
-  // decoder owns its render surface, mounted into the host div.
-  useEffect(() => {
-    const decoder = pickDecoder()
-    if (!decoder) { setDecoderUnsupported(true); return }
-    decoderRef.current = decoder
-
-    const surface = decoder.surface
-    surface.style.display = 'block'
-    surface.style.width = '100%'
-    surface.style.height = '100%'
-    surface.style.objectFit = 'fill'
-    surfaceHostRef.current?.appendChild(surface)
-
-    decoder.onResize((size) => {
+  // ── Decoder init + surface mount (shared render pipeline) ─────────────────
+  // useDecoderStream owns decoder selection (+ the DEV ?decoder= override), decode→present
+  // perf tracking, and frame routing — same wiring as IOSViewer. The viewer only mounts the
+  // surface and reacts to resize. (Android is H.264-only, so no JPEG handler.)
+  useDecoderStream({
+    binaryFrameHandlerRef,
+    perfHookRef,
+    frameCount,
+    onUnsupported: () => setDecoderUnsupported(true),
+    onResize: (size) => {
       setCanvasReady(true)
       const prev = videoSizeRef.current
       if (!prev || prev.width !== size.width || prev.height !== size.height) {
         videoSizeRef.current = size
         setVideoSize(size)
       }
-    })
-
-    binaryFrameHandlerRef.current = (data) => {
-      if (import.meta.env.DEV) perfHookRef?.current?.onFrameBegin()
-      frameCount.current += 1
-      decoder.decode(data)
-    }
-
-    return () => {
-      binaryFrameHandlerRef.current = undefined
-      decoder.close()
-      surface.remove()
-      decoderRef.current = null
-    }
-  }, [frameCount, binaryFrameHandlerRef, perfHookRef])
+    },
+    onDecoderReady: (decoder) => {
+      decoderRef.current = decoder
+      const surface = decoder.surface
+      surface.style.display = 'block'
+      surface.style.width = '100%'
+      surface.style.height = '100%'
+      surface.style.objectFit = 'fill'
+      surfaceHostRef.current?.appendChild(surface)
+    },
+  })
 
   // ── Recording (composeFrame only — state/refs/lifecycle in useClientRecording) ──
   const composeFrame = useCallback(() => {
@@ -424,6 +417,11 @@ export function AndroidViewer({
   // Container uses landscape dims; canvas inside rotated 90° to show portrait content in landscape shell
   const containerW = needsCSSRotation ? androidDisplayH : androidDisplayW;
   const containerH = needsCSSRotation ? androidDisplayW : androidDisplayH;
+  // Screen-opening radius: when the emulator bakes the device's rounded corners into the frame as
+  // black, round the screen container to that radius so overflow:hidden clips the black away (the
+  // content rounds at the same radius → no dark corner). Falls back to the design default 22px.
+  // `cornerRadius == null` = unknown → design default; an explicit 0 (square screen) must stay 0.
+  const screenRadius = cornerRadius != null ? Math.round(cornerRadius * androidDisplayW) : 22;
   const rotatedCanvasStyle: React.CSSProperties = needsCSSRotation ? {
     position: 'absolute',
     width: androidDisplayW,
@@ -493,12 +491,12 @@ export function AndroidViewer({
       />
 
       <div className="flex items-start gap-8">
-        {/* phone body bezel */}
-        <div style={{ background: '#1c1c1e', borderRadius: '34px', padding: '12px', flexShrink: 0, boxShadow: '0 8px 32px rgba(0,0,0,0.45), inset 0 1px 0 rgba(255,255,255,0.06)' }}>
+        {/* phone body bezel — outer radius stays concentric with the screen (screenRadius + 12px padding) */}
+        <div style={{ background: '#1c1c1e', borderRadius: `${screenRadius + 12}px`, padding: '12px', flexShrink: 0, boxShadow: '0 8px 32px rgba(0,0,0,0.45), inset 0 1px 0 rgba(255,255,255,0.06)' }}>
         <div
           ref={containerRef}
           className="relative"
-          style={{ width: containerW, height: containerH, backgroundColor: '#010101', borderRadius: '22px', overflow: 'hidden' }}
+          style={{ width: containerW, height: containerH, backgroundColor: '#010101', borderRadius: `${screenRadius}px`, overflow: 'hidden' }}
         >
           {decoderUnsupported ? (
             <div className="absolute inset-0 flex items-center justify-center p-4 text-center">
