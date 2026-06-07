@@ -72,7 +72,7 @@ AVD를 생성할 때 시스템 이미지 선택에 주의하세요:
 `google_apis/arm64-v8a` 이미지를 사용하세요. 이것이 테스트된 권장 구성입니다. `google_apis_playstore` 이미지는 테스트되지 않았으며 H.264 인코더 문제가 보고되었습니다.
 :::
 
-에이전트가 에뮬레이터를 자동으로 부팅하고, `sys.boot_completed`를 기다린 뒤 스트리밍을 시작합니다.
+에이전트가 에뮬레이터를 자동으로 부팅하고, `sys.boot_completed`를 기다린 뒤 스트리밍을 시작합니다. Apple Silicon Mac의 에뮬레이터는 Mac 호스트에서 H.264 인코딩(VideoToolbox)을 수행하며, 30fps로 제한됩니다. 에뮬레이터 자체에 GPU 부하가 없습니다.
 
 ### 트러블슈팅
 
@@ -87,3 +87,29 @@ tapflow doctor
 ```
 
 더 자세한 문제 해결 방법은 [문제 해결](/ko/guide/troubleshooting)을 참고하세요.
+
+## 스트림 품질
+
+tapflow는 브라우저의 연결 컨텍스트에 따라 스트리밍 해상도를 자동으로 선택합니다.
+
+| 연결 유형 | 해상도 제한 | 디코더 |
+|-----------|------------|--------|
+| Secure (localhost / LAN HTTPS) | 원본 해상도 | WebCodecs (하드웨어) |
+| LAN HTTP | 가장 긴 변 1280px | WASM |
+| 외부 연결 | 가장 긴 변 1000px | WASM |
+
+**Secure 컨텍스트**(localhost 또는 HTTPS)에서는 브라우저가 WebCodecs로 H.264를 하드웨어 디코딩하므로, 시뮬레이터 원본 해상도를 낮은 CPU 부하로 받을 수 있습니다. 비보안 LAN HTTP 연결에서는 WASM 소프트웨어 디코더로 전환되며, 디코딩 부하를 줄이기 위해 해상도를 1280px로 제한합니다.
+
+LAN에서 최고 화질을 원한다면 **릴레이를 HTTPS로 제공**하세요 — [릴레이 배포](/ko/guide/self-hosting) 참고. HTTPS 연결에서는 브라우저가 자동으로 하드웨어 디코딩과 원본 해상도로 전환됩니다.
+
+### 환경변수 오버라이드
+
+에이전트가 실행되는 Mac에서 아래 환경변수를 설정하면 기본값을 재정의할 수 있습니다.
+
+| 환경변수 | 기본값 | 설명 |
+|---------|--------|------|
+| `TAPFLOW_MAX_SIZE` | *(티어별)* | 전 플랫폼 공통 해상도 제한 (px, 가장 긴 변). `0`으로 설정하면 모든 연결에서 원본 해상도를 강제합니다. |
+| `TAPFLOW_MAX_SIZE_LAN` | `1280` | LAN HTTP 연결 제한값 |
+| `TAPFLOW_MAX_SIZE_EXTERNAL` | `1000` | 외부 연결 제한값 |
+| `TAPFLOW_IOS_MAX_SIZE` | *(티어별)* | iOS 전용 오버라이드. `TAPFLOW_MAX_SIZE`보다 우선 적용됩니다. |
+| `TAPFLOW_ANDROID_MAX_SIZE` | *(티어별)* | Android 전용 오버라이드. `TAPFLOW_MAX_SIZE`보다 우선 적용됩니다. |

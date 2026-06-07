@@ -72,7 +72,7 @@ When selecting the system image, note the following:
 Use a `google_apis/arm64-v8a` image — the tested and recommended configuration. The `google_apis_playstore` image is not tested and has shown H.264 encoder issues.
 :::
 
-The agent boots the emulator automatically, waits for `sys.boot_completed`, then begins streaming.
+The agent boots the emulator automatically, waits for `sys.boot_completed`, then begins streaming. For emulators on Apple Silicon, the agent encodes H.264 on the Mac host (VideoToolbox), capped at 30 fps — no GPU load on the emulator itself.
 
 ### Troubleshooting
 
@@ -87,3 +87,29 @@ tapflow doctor
 ```
 
 See [Troubleshooting](/guide/troubleshooting) for more detailed solutions.
+
+## Stream quality
+
+tapflow automatically picks a stream resolution based on your browser's connection context:
+
+| Connection | Resolution cap | Decoder |
+|------------|---------------|---------|
+| Secure (localhost / LAN HTTPS) | native | WebCodecs (hardware) |
+| LAN HTTP | 1280 px longest side | WASM |
+| External | 1000 px longest side | WASM |
+
+On a **secure context** (localhost or HTTPS), the browser uses WebCodecs to decode H.264 in hardware — full simulator resolution with minimal CPU cost. On a non-secure LAN HTTP connection, the stream falls back to a software WASM decoder; tapflow caps the resolution at 1280 px to keep decode overhead manageable.
+
+To get the sharpest stream on a shared LAN, **serve the relay over HTTPS** — see [Self-Hosting the Relay](/guide/self-hosting). Browsers on HTTPS switch to hardware decoding at native resolution automatically.
+
+### Override environment variables
+
+Set these on the Mac running the agent to override the defaults.
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `TAPFLOW_MAX_SIZE` | *(per tier)* | Cap for all platforms (px, longest side). `0` forces native resolution on all connections. |
+| `TAPFLOW_MAX_SIZE_LAN` | `1280` | LAN HTTP cap. |
+| `TAPFLOW_MAX_SIZE_EXTERNAL` | `1000` | External connection cap. |
+| `TAPFLOW_IOS_MAX_SIZE` | *(per tier)* | iOS-specific override. Takes precedence over `TAPFLOW_MAX_SIZE`. |
+| `TAPFLOW_ANDROID_MAX_SIZE` | *(per tier)* | Android-specific override. Takes precedence over `TAPFLOW_MAX_SIZE`. |
