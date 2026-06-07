@@ -24,8 +24,13 @@ function getEmulatorPath(): string {
 }
 
 export class EmulatorLauncher {
-  launch(avdName: string): void {
-    const proc = spawn(getEmulatorPath(), ['-avd', avdName, '-no-audio', '-no-snapshot', '-no-window', '-gpu', 'host'], {
+  /** `grpcPort`, when set, opens the emulator's unprotected localhost gRPC endpoint
+   *  (`-grpc <port>`) for host-side screen capture + input — the same trust boundary as
+   *  scrcpy's localhost ADB. Verified to work under `-no-window` headless. */
+  launch(avdName: string, grpcPort?: number): void {
+    const args = ['-avd', avdName, '-no-audio', '-no-snapshot', '-no-window', '-gpu', 'host']
+    if (grpcPort !== undefined) args.push('-grpc', String(grpcPort))
+    const proc = spawn(getEmulatorPath(), args, {
       detached: true,
       stdio: 'ignore',
     })
