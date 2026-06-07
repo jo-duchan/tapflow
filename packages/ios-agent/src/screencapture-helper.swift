@@ -465,9 +465,12 @@ DispatchQueue.global().asyncAfter(deadline: .now() + 8) {
 }
 
 // Timer-driven emission: fires at the target FPS and encodes the latest surface.
-// Skips encoding when the IOSurface seed is unchanged (screen static) unless
-// 100ms have passed since the last sent frame — matching Android scrcpy's
-// KEY_REPEAT_PREVIOUS_FRAME_AFTER keep-alive behaviour.
+// Static-skip: when the IOSurface seed is unchanged (screen static), the frame is not
+// re-encoded — the decoder holds the last (pixel-identical) frame — until a keep-alive
+// interval elapses. JPEG keep-alive is 100ms (large frames). H.264 keep-alive is 1s: a
+// forced keyframe on viewer (re)join (relay → stream:request-idr) covers new viewers, so the
+// idle heartbeat can be sparse to spare the client's decode CPU. Safe now that MSE is gone.
+let h264KeepAliveMs = 1000.0
 var lastSeed: UInt32 = 0
 var lastSentNs: UInt64 = 0
 
@@ -477,9 +480,15 @@ timer.setEventHandler {
     guard let surf = latestSurface else { return }
     let nowNs = DispatchTime.now().uptimeNanoseconds
     if useH264 {
-        // Steady cadence: encode every tick (no static-skip). P-frames on an
-        // unchanged screen are tiny, and a regular ~fps stream keeps the browser's
-        // MSE media timeline smooth (matching scrcpy's continuous output).
+        // Static-skip an unchanged screen so idle viewers stop decoding (the decoder holds the
+        // last, identical frame). With no frames generated during the gap, the next P-frame
+        // still references the last *sent* frame, so the chain stays intact. A pending forced
+        // keyframe (set on viewer (re)join / drop recovery via the relay) bypasses the skip so
+        // (re)joiners get a decodable keyframe even on a static screen.
+        let seed = IOSurfaceGetSeed(surf)
+        let elapsedMs = Double(nowNs - lastSentNs) / 1_000_000
+        if seed == lastSeed && elapsedMs < h264KeepAliveMs && !pendingForceKeyFrame { return }
+        lastSeed = seed
         lastSentNs = nowNs
         encodeH264(surf)  // firstFrameSent is set in the compression output callback
     } else {
