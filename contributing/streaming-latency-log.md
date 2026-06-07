@@ -294,7 +294,7 @@ clean). Decode/transport levers (a faster decoder, noDelay) would not help Andro
 
 Confirmed the emulator has **no hardware H.264 encoder** (`list_encoders`: only `c2.android.avc.encoder (sw)`; `OMX.google.h264.encoder` is an alias of it; h265/av1 also sw). So scrcpy (guest MediaCodec) is capped at the software encoder. Probed the host-side raw-capture path — the emulator gRPC `streamScreenshot` (relaunched with `-grpc 8554`, unprotected; what Android Studio's embedded emulator uses) — with continuous scroll, native 1080×2424 RGBA8888:
 
-```
+```text
 recvFps 59.6 · producedFps(seq) 60.1 · droppedBeforeUs 5/602 (0.8%)
 avgFrame 10.2MB · throughput 596 MB/s (loopback) · interFrame p50 17.4 / p95 19.6 ms
 ```
@@ -314,7 +314,7 @@ a host-side Swift VT encoder (`emulator-encoder`, reusing the iOS VT config — 
 MaxFrameDelay=0, BT.709, 8Mbps soft) → Annex B → same TFFE envelope as scrcpy. Input via gRPC
 `sendTouch` (display-resolution px, top-left origin). Continuous scroll, encoded fps out of the agent:
 
-```
+```text
 native 1080×2424   : encodedFps 34.3 · avgFrame 5.3KB · 1.5 Mbps
 downscale 712×1600 : encodedFps 59.4 · avgFrame 2.7KB · 1.3 Mbps   (server-side resize, W3 free)
 ```
@@ -387,7 +387,7 @@ TAPFLOW_IOS_CODEC=h264 pnpm dev   # :3001?perf=1 → H.264 per-stage
 
 The URL query `?decoder=` forces a decoder so you can **compare tiers on localhost (single clock + panel)** (no non-secure LAN context needed). IOSViewer reads it only in DEV and logs the chosen decoder to `[decoder] using <…>`.
 
-```
+```text
 http://localhost:3001?perf=1                 # auto-select (localhost = WebCodecs)
 http://localhost:3001?perf=1&decoder=mse     # force MSE (measure the LAN tier)
 ```
@@ -416,7 +416,7 @@ VITE_RELAY_URL=ws://192.168.0.42:4000 \
   pnpm --filter @tapflowio/dashboard dev --host          # --host binds :3001 to the LAN
 ```
 
-```
+```text
 # on the remote viewer (Mac mini), in the browser:
 http://192.168.0.42:3001/?perf=1&decoder=wasm      # tinyh264
 http://192.168.0.42:3001/?perf=1&decoder=ffmpeg    # FFmpeg (@tapflowio/ffmpeg-h264-wasm)

@@ -420,7 +420,8 @@ export function AndroidViewer({
   // Screen-opening radius: when the emulator bakes the device's rounded corners into the frame as
   // black, round the screen container to that radius so overflow:hidden clips the black away (the
   // content rounds at the same radius → no dark corner). Falls back to the design default 22px.
-  const screenRadius = cornerRadius ? Math.round(cornerRadius * androidDisplayW) : 22;
+  // `cornerRadius == null` = unknown → design default; an explicit 0 (square screen) must stay 0.
+  const screenRadius = cornerRadius != null ? Math.round(cornerRadius * androidDisplayW) : 22;
   const rotatedCanvasStyle: React.CSSProperties = needsCSSRotation ? {
     position: 'absolute',
     width: androidDisplayW,

@@ -35,7 +35,7 @@ export function detectCornerRadius(image: Buffer, w: number, h: number): number 
 // The bits of the encoder child process this class touches — narrowed so tests can inject a fake
 // without a real subprocess. ChildProcessWithoutNullStreams satisfies it structurally.
 export interface EncoderProcess {
-  readonly stdin: { write(chunk: Buffer): boolean; end(): void; destroyed: boolean; on(event: 'error', cb: (e: Error) => void): void }
+  readonly stdin: { write(chunk: Buffer): boolean; end(): void; destroyed: boolean; on(event: 'error', cb: (e: Error) => void): void; once(event: 'drain', cb: () => void): void }
   readonly stdout: { on(event: 'data', cb: (chunk: Buffer) => void): void; removeAllListeners(event: 'data'): void }
   readonly stderr: { on(event: 'data', cb: (chunk: Buffer) => void): void }
   on(event: 'exit', cb: (code: number | null) => void): this
@@ -69,6 +69,7 @@ export class EmulatorVideo {
   private height = 0
   private stopped = false
   private outputClosed = false
+  private encoderBusy = false // encoder stdin is saturated → drop frames until 'drain' (no unbounded buffering)
   private flushTimer: ReturnType<typeof setTimeout> | null = null
 
   constructor(private readonly client: EmulatorGrpcClient, private readonly options: EmulatorVideoOptions = {}) {}
@@ -80,18 +81,23 @@ export class EmulatorVideo {
     this.encoder = spawnEncoder(fps)
     this.encoder.stderr.on('data', (d: Buffer) => logger.info(`encoder: ${d.toString().trim()}`))
     this.encoder.stdout.on('data', (chunk: Buffer) => this.onEncoderOutput(chunk))
-    this.encoder.on('exit', (code) => { if (!this.stopped) logger.warn(`encoder exited (${code})`) })
     // Writes racing teardown (the encoder is killed while the pump still has a frame) surface as
     // EPIPE on stdin; without a handler that's an uncaught error that crashes the agent.
     this.encoder.stdin.on('error', (e) => { if (!this.stopped) logger.warn(`encoder stdin: ${e.message}`) })
-    this.encoder.on('error', (e) => { if (!this.stopped) logger.warn(`encoder process: ${e.message}`) })
 
     this.capture = this.client.streamScreenshot({ width: this.options.maxWidth ?? 0, height: this.options.maxHeight ?? 0 })
 
-    // Pump raw frames into the encoder; the first one fixes the reported size. Rejects if the
-    // capture errors before any frame (e.g. auth failure) so the caller can fall back to scrcpy.
+    // Pump raw frames into the encoder; the first one fixes the reported size. start() rejects if the
+    // capture errors (e.g. auth failure) OR the encoder dies before any frame — either way the caller
+    // falls back to scrcpy instead of being left with a silently dead stream.
     return new Promise<EmulatorVideoInfo>((resolve, reject) => {
-      void this.pump(resolve, reject)
+      let settled = false
+      const ok = (info: EmulatorVideoInfo) => { if (!settled) { settled = true; resolve(info) } }
+      const fail = (e: Error) => { if (!settled) { settled = true; reject(e) } }
+      const onDead = (msg: string) => { if (this.stopped) return; logger.warn(msg); fail(new Error(msg)) }
+      this.encoder!.on('exit', (code) => onDead(`encoder exited (${code})`))
+      this.encoder!.on('error', (e) => onDead(`encoder process: ${e.message}`))
+      void this.pump(ok, fail)
     })
   }
 
@@ -175,11 +181,17 @@ export class EmulatorVideo {
     if (this.stopped) return
     const stdin = this.encoder?.stdin
     if (!stdin || stdin.destroyed) return
+    // Backpressure: the encoder is behind. Drop this frame rather than queue another ~12MB RGBA
+    // buffer in Node's stdin (which would balloon memory at 30fps). Resume once it drains.
+    if (this.encoderBusy) return
     const hdr = Buffer.allocUnsafe(13)
     hdr[0] = 0x00
     hdr.writeUInt32BE(w, 1); hdr.writeUInt32BE(h, 5); hdr.writeUInt32BE(rgba.length, 9)
     stdin.write(hdr)
-    stdin.write(rgba)
+    if (!stdin.write(rgba)) {
+      this.encoderBusy = true
+      stdin.once('drain', () => { this.encoderBusy = false })
+    }
   }
 
   // Length-delimited Annex B from the encoder: [len:u32][flags:u8][payload]; flags bit0 = keyframe.

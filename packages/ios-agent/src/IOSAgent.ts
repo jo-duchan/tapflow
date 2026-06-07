@@ -230,6 +230,7 @@ export class IOSAgent implements DeviceAgent {
   private cleanupDeviceState(state: DeviceState): void {
     void state.streamReader?.cancel()
     state.streamReader = null
+    state.captureStreamer = null // reader.cancel() kills the helper proc; drop the ref so a stale requestKeyframe() no-ops
     state.touchHelper?.stop()
     state.touchHelper = null
     state.streamWs?.close()
@@ -350,6 +351,7 @@ export class IOSAgent implements DeviceAgent {
 
     void state.streamReader?.cancel()
     state.streamReader = null
+    state.captureStreamer = null // reader.cancel() kills the helper proc; drop the ref so a stale requestKeyframe() no-ops
     state.touchHelper?.stop()
     state.touchHelper = null
     state.streamWs?.close()
@@ -411,6 +413,7 @@ export class IOSAgent implements DeviceAgent {
     state.bootSeq++
     void state.streamReader?.cancel()
     state.streamReader = null
+    state.captureStreamer = null // reader.cancel() kills the helper proc; drop the ref so a stale requestKeyframe() no-ops
     state.touchHelper?.stop()
     state.touchHelper = null
     state.streamWs?.close()

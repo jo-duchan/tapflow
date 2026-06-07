@@ -538,7 +538,14 @@ export class AndroidAgent implements DeviceAgent {
     state.cornerRadius = info.cornerRadius
 
     const reader = video.frames().getReader()
-    void this.pumpVideo(state, streamWs, reader, undefined, () => video.requestIdr())
+    // If the gRPC video ends unexpectedly (emulator crash / disconnect), restart the stream so the
+    // session recovers instead of going dead — mirrors the scrcpy pump's auto-restart.
+    void this.pumpVideo(state, streamWs, reader, undefined, () => video.requestIdr()).then(() => {
+      if (state.emulatorVideo === video && !state.restarting) {
+        state.restarting = true
+        void this.restartVideoStream(state)
+      }
+    })
   }
 
   private async restartVideoStream(state: DeviceState): Promise<void> {
@@ -547,6 +554,10 @@ export class AndroidAgent implements DeviceAgent {
 
     state.scrcpySession?.stop(serial)
     state.scrcpySession = null
+    state.emulatorVideo?.stop()
+    state.emulatorVideo = null
+    state.grpcClient?.close()
+    state.grpcClient = null
     state.touchHelper?.stop()
     state.touchHelper = null
 
@@ -969,12 +980,13 @@ export class AndroidAgent implements DeviceAgent {
 
   stream(): ReadableStream<Buffer> {
     const state = this.deviceStates.values().next().value
-    if (!state?.scrcpySession) throw new ValidationError('no active scrcpy session — call connect() first')
+    // Works on either video backend (scrcpy for real devices, gRPC host-encode for emulators).
+    const frames = state?.scrcpySession?.video.start() ?? state?.emulatorVideo?.frames()
+    if (!frames) throw new ValidationError('no active video stream — call connect() first')
     // DeviceAgent.stream() is the platform-neutral Buffer contract; unwrap ScrcpyFrame payloads.
-    return state.scrcpySession.video.start()
-      .pipeThrough(new TransformStream<ScrcpyFrame, Buffer>({
-        transform(frame, controller) { controller.enqueue(frame.payload) },
-      }))
+    return frames.pipeThrough(new TransformStream<ScrcpyFrame, Buffer>({
+      transform(frame, controller) { controller.enqueue(frame.payload) },
+    }))
   }
 
   touchStart(x: number, y: number): void {

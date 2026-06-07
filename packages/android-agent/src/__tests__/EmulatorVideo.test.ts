@@ -29,17 +29,34 @@ function fakeClient(frames: Array<{ image: Buffer; width: number; height: number
 // A fake encoder: records stdin writes (frame headers), and lets the test push stdout chunks. It
 // deliberately does NOT clear its data listener on removeAllListeners, so a "late" stdout chunk
 // after stop() still reaches onEncoderOutput — exercising EmulatorVideo's enqueue-after-close guard.
-function fakeEncoder() {
+// `writeReturns:false` simulates a saturated stdin (backpressure); exit()/error()/drain() let a test
+// fire the corresponding encoder events.
+function fakeEncoder(opts: { writeReturns?: boolean } = {}) {
   let dataCb: ((c: Buffer) => void) | null = null
+  let exitCb: ((code: number | null) => void) | null = null
+  let errorCb: ((e: Error) => void) | null = null
+  let drainCb: (() => void) | null = null
   const stdinWrites: Buffer[] = []
   const enc = {
-    stdin: { write: (c: Buffer) => { stdinWrites.push(c); return true }, end: () => {}, destroyed: false, on: () => {} },
+    stdin: {
+      write: (c: Buffer) => { stdinWrites.push(c); return opts.writeReturns ?? true },
+      end: () => {}, destroyed: false,
+      on: () => {},
+      once: (_e: string, cb: () => void) => { drainCb = cb },
+    },
     stdout: { on: (_e: string, cb: (c: Buffer) => void) => { dataCb = cb }, removeAllListeners: () => {} },
     stderr: { on: () => {} },
-    on: () => enc,
+    on: (e: string, cb: (arg: never) => void) => { if (e === 'exit') exitCb = cb as never; else if (e === 'error') errorCb = cb as never; return enc },
     kill: vi.fn(),
   }
-  return { enc: enc as unknown as EncoderProcess, stdinWrites, push: (b: Buffer) => dataCb?.(b) }
+  return {
+    enc: enc as unknown as EncoderProcess,
+    stdinWrites,
+    push: (b: Buffer) => dataCb?.(b),
+    exit: (code: number | null) => exitCb?.(code),
+    error: (e: Error) => errorCb?.(e),
+    drain: () => drainCb?.(),
+  }
 }
 
 // Build the encoder's Annex B output framing: [len:u32][flags:u8][payload].
@@ -126,21 +143,24 @@ describe('EmulatorVideo', () => {
 
   it('flushes the trailing frame when the source goes static (no freeze on small changes)', async () => {
     vi.useFakeTimers()
-    const fe = fakeEncoder()
-    // 3 frames arrive ~together then the source hangs (static). Frames 2 & 3 fall inside the 30fps
-    // interval — a plain drop would lose the final update; the trailing flush must still deliver it.
-    const client = fakeClient([
-      { image: rgba(8, 16), width: 8, height: 16 },
-      { image: rgba(8, 16), width: 8, height: 16 },
-      { image: rgba(8, 16), width: 8, height: 16 },
-    ])
-    const video = new EmulatorVideo(client, { fps: 30, spawnEncoder: () => fe.enc })
-    await video.start()
-    await vi.advanceTimersByTimeAsync(40) // let the pump consume 2 & 3, then fire the flush timer
-    const framesWritten = fe.stdinWrites.filter((b) => b.length === 13 && b[0] === 0x00).length
-    expect(framesWritten).toBe(2) // leading frame 1 + trailing-flushed frame 3 (frame 2 superseded)
-    video.stop()
-    vi.useRealTimers()
+    try {
+      const fe = fakeEncoder()
+      // 3 frames arrive ~together then the source hangs (static). Frames 2 & 3 fall inside the 30fps
+      // interval — a plain drop would lose the final update; the trailing flush must still deliver it.
+      const client = fakeClient([
+        { image: rgba(8, 16), width: 8, height: 16 },
+        { image: rgba(8, 16), width: 8, height: 16 },
+        { image: rgba(8, 16), width: 8, height: 16 },
+      ])
+      const video = new EmulatorVideo(client, { fps: 30, spawnEncoder: () => fe.enc })
+      await video.start()
+      await vi.advanceTimersByTimeAsync(40) // let the pump consume 2 & 3, then fire the flush timer
+      const framesWritten = fe.stdinWrites.filter((b) => b.length === 13 && b[0] === 0x00).length
+      expect(framesWritten).toBe(2) // leading frame 1 + trailing-flushed frame 3 (frame 2 superseded)
+      video.stop()
+    } finally {
+      vi.useRealTimers()
+    }
   })
 
   it('rejects start() when the capture errors before the first frame (→ scrcpy fallback)', async () => {
@@ -153,5 +173,34 @@ describe('EmulatorVideo', () => {
     const fe = fakeEncoder()
     const video = new EmulatorVideo(new EmulatorGrpcClient('x', raw), { spawnEncoder: () => fe.enc })
     await expect(video.start()).rejects.toThrow('UNAUTHENTICATED')
+  })
+
+  it('rejects start() when the encoder dies before the first frame (→ scrcpy fallback)', async () => {
+    const fe = fakeEncoder()
+    // Capture yields nothing then blocks (live emulator), so only the encoder-exit path can settle.
+    const video = new EmulatorVideo(fakeClient([]), { spawnEncoder: () => fe.enc })
+    const started = video.start()
+    fe.exit(1)
+    await expect(started).rejects.toThrow('encoder exited (1)')
+    video.stop()
+  })
+
+  it('drops frames while the encoder stdin is saturated (backpressure, no unbounded buffering)', async () => {
+    vi.useFakeTimers()
+    try {
+      const fe = fakeEncoder({ writeReturns: false }) // stdin never drains on its own
+      const video = new EmulatorVideo(fakeClient([
+        { image: rgba(8, 16), width: 8, height: 16 },
+        { image: rgba(8, 16), width: 8, height: 16 },
+        { image: rgba(8, 16), width: 8, height: 16 },
+      ]), { fps: 30, spawnEncoder: () => fe.enc })
+      await video.start()                    // frame 1 writes; write()=false → busy
+      await vi.advanceTimersByTimeAsync(40)   // trailing flush fires but the encoder is busy → dropped
+      const framesWritten = fe.stdinWrites.filter((b) => b.length === 13 && b[0] === 0x00).length
+      expect(framesWritten).toBe(1)           // only frame 1; the rest dropped instead of buffered
+      video.stop()
+    } finally {
+      vi.useRealTimers()
+    }
   })
 })

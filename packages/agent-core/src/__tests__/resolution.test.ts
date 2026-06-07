@@ -29,4 +29,18 @@ describe('pickMaxSize', () => {
     expect(pickMaxSize({ secureContext: false, external: false })).toBe(1440)
     expect(pickMaxSize({ secureContext: false, external: true })).toBe(800)
   })
+
+  it('env "0" forces native (not swallowed as falsy)', () => {
+    process.env.TAPFLOW_MAX_SIZE_LAN = '0'
+    process.env.TAPFLOW_MAX_SIZE_EXTERNAL = '0'
+    expect(pickMaxSize({ secureContext: false, external: false })).toBe(0)
+    expect(pickMaxSize({ secureContext: false, external: true })).toBe(0)
+  })
+
+  it('invalid / negative env falls back to the default', () => {
+    process.env.TAPFLOW_MAX_SIZE_LAN = 'abc'
+    process.env.TAPFLOW_MAX_SIZE_EXTERNAL = '-5'
+    expect(pickMaxSize({ secureContext: false, external: false })).toBe(1280)
+    expect(pickMaxSize({ secureContext: false, external: true })).toBe(1000)
+  })
 })
