@@ -6,7 +6,7 @@ import {
   createResourceSampler,
   registerStreamWs,
   disableNagle,
-  sendBinaryWithBackpressure,
+  createKeyframeAwareSender,
   createRateLimitedDropWarn,
   createThroughputSampler,
   createSleepBlocker,
@@ -432,7 +432,7 @@ export class AndroidAgent implements DeviceAgent {
       }
     }
 
-    void this.pumpVideo(state, streamWs, reader, onFrame).then(() => {
+    void this.pumpVideo(state, streamWs, reader, onFrame, () => session.control.resetVideo()).then(() => {
       if (state.scrcpySession === session && !state.restarting) {
         state.restarting = true
         void this.restartVideoStream(state)
@@ -449,9 +449,19 @@ export class AndroidAgent implements DeviceAgent {
     streamWs: WebSocket,
     reader: ReadableStreamDefaultReader<ScrcpyFrame>,
     onFrame?: (frame: ScrcpyFrame) => void,
+    requestIdr?: () => void,
   ): Promise<void> {
     const threshold = Number(process.env.TAPFLOW_WS_BACKPRESSURE_BYTES) || DEFAULT_BACKPRESSURE_BYTES
     const warnDrop = createRateLimitedDropWarn(logger, state.deviceId)
+    // Keyframe-aware backpressure: when the agent→relay socket fills, drop whole GOPs to the next
+    // keyframe (never forward an orphan P-frame whose reference was dropped — that decodes to a
+    // sheared/ghosted frame until the next IDR). On a drop with no keyframe, ask the encoder for an
+    // IDR (throttled) so the stream resyncs fast instead of waiting for the periodic one.
+    const dropper = createKeyframeAwareSender()
+    let lastIdrReq = 0
+    const onWantKeyframe = requestIdr
+      ? () => { const now = Date.now(); if (now - lastIdrReq >= 500) { lastIdrReq = now; requestIdr() } }
+      : undefined
     // Opt-in throughput baseline (TAPFLOW_STREAM_METRICS=1): logs fps/KB·s/drop every 5s, so the
     // Android source rate can be compared against the relay→browser drop logs and the iOS agent.
     const metrics = process.env.TAPFLOW_STREAM_METRICS === '1' ? createThroughputSampler() : null
@@ -476,7 +486,7 @@ export class AndroidAgent implements DeviceAgent {
         // frame). The gRPC/VideoToolbox SPS omits bitstream_restriction; scrcpy's is a no-op.
         const payload = value.keyframe ? (rewriteLowLatencySpsInFrame(value.payload) as Buffer) : value.payload
         const frame = writeEnvelopeHeader(payload, Date.now(), { codec: CODEC_H264, keyframe: value.keyframe })
-        const sent = sendBinaryWithBackpressure(streamWs, frame, threshold, onDrop)
+        const sent = dropper.send(streamWs, frame, threshold, value.keyframe, onDrop, onWantKeyframe)
         if (sent) metrics?.recordSent(value.payload.length)
       }
     } catch {
@@ -519,7 +529,7 @@ export class AndroidAgent implements DeviceAgent {
     state.cornerRadius = info.cornerRadius
 
     const reader = video.frames().getReader()
-    void this.pumpVideo(state, streamWs, reader)
+    void this.pumpVideo(state, streamWs, reader, undefined, () => video.requestIdr())
   }
 
   private async restartVideoStream(state: DeviceState): Promise<void> {
