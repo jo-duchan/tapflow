@@ -348,7 +348,7 @@ Each step **confirms its effect by measurement before the next**. If it fails, r
 | 2.5 | **relay drop-to-keyframe (PR-D)** | on LAN drop, discard P up to the next IDR, removing tearing | ✅ **implemented + smoke** (tearing → short freeze). PR #194 |
 | 2.6 | **shorten the freeze** = iOS bitrate cap (A) + IDR-on-drop (B) | shrink both ① congestion and ② IDR-wait of the freeze | ✅ **implemented + verified** — A: VT `AverageBitRate` 8Mbps (env; **DataRateLimits caused tearing → removed**). B: relay→agent `stream:request-idr`→swift stdin `0x01` force IDR. LAN: no tearing, short freeze |
 | 2.7 | **codec negotiation + promote H.264 to default** | browsers without a decoder auto-fall back to JPEG → safe to default to H.264 | ✅ **implemented + tested** — browser `canDecodeH264()` → `device:boot acceptH264`, agent priority `env=jpeg > capability > default`. Default `TAPFLOW_IOS_CODEC` jpeg→**h264** (jpeg opt-out kept). Fallback target ~5% (old browsers without WebGL2). Unit tests ios +5, dashboard +5 |
-| 3 | downscale the encode resolution | a triple win on bandwidth, CPU, latency | ☐ |
+| 3 | downscale the encode resolution | a triple win on bandwidth, CPU, latency | ✅ **implemented + measured** — both platforms via `TAPFLOW_MAX_SIZE` (iOS vImage scale; Android gRPC server-side resize). Tuning data + recommended `1280`: [downscale-tuning.md](./downscale-tuning.md). Finding: **bandwidth floors at ~1280; below that only decode load drops (fidelity cost).** decode→present column pending (viewer-side WASM, manual overlay) |
 | 4 | event-driven/high-fps capture, optimize the touch path | shave the floor further | ☐ [#195](https://github.com/jo-duchan/tapflow/issues/195) (priority: low) |
 
 ### Foundation (done/in progress)
