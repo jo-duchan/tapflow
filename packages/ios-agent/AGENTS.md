@@ -158,6 +158,35 @@ timer.setEventHandler {
 
 ---
 
+### Tear-free framebuffer snapshot (`copySurfaceStable`)
+
+**When**: reading the framebuffer IOSurface to encode (both the H.264 and JPEG paths go through it).
+
+**How**: don't encode the live surface. `copySurfaceStable` memcpys it into a private, reused
+buffer and brackets the copy with `IOSurfaceGetSeed`; if the seed moved, the simulator drew
+during the copy (possibly sheared) → retry (budget 4). `encodeH264`/`encodeJPEG` then read that
+snapshot.
+
+**Why** (not obvious from the code):
+- The simulator draws into a **single IOSurface in place** (the static-skip seed relies on that),
+  asynchronously to our 30fps timer. Reading it mid-draw bakes a **horizontal tear** — top = old
+  frame, bottom = new — into the encoded frame. It shows on **every tier and decoder** (native:
+  VTEncode reads the surface directly; downscale: vImage reads it) and recovers on the next frame,
+  so it reads as "intermittent scroll tearing." Measured during heavy scroll: **~40% of frames
+  raced** a write; all resolved within the retry budget.
+- `IOSurfaceLock(.readOnly)` (and `CVPixelBufferLockBaseAddress`, which calls it) is **cooperative**
+  — it does not block the sim's GPU writes, so locking alone does **not** prevent the tear. The
+  seed check is what makes the snapshot coherent. **Do not "simplify" the copy back to reading the
+  live surface.**
+- This is distinct from the relay/agent **keyframe-aware backpressure** fix (orphan P-frames under
+  drop): that is a transport-drop artifact; this is a source-pixel tear. Both can look like scroll
+  tearing; they need separate fixes.
+- Reuse safety: downscale reads the snapshot synchronously (vImage) before the next tick; native
+  hands it to VTEncode but full-res encode is far slower than the frame interval, so the in-flight
+  encode never overlaps the next copy. `TAPFLOW_STREAM_METRICS=1` logs the retry/exhausted counts.
+
+---
+
 ### Keyboard HID path
 
 Keyboard injection uses `IndigoHIDMessageForKeyboardArbitrary(usage, op)`.  
