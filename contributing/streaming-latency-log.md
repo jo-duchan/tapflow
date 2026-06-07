@@ -270,6 +270,70 @@ heavier per-frame path on a bandwidth-bound machine vs h264bsd's lean baseline p
 p95 ~50ms on **both** (vs ~25 localhost) reconfirms the real gap is **load/transport, not the
 decoder** → next levers: H.264 static-skip (iOS) + downscale.
 
+### Android bottleneck localize (2026-06-07, localhost, Pixel_9 emulator 1080×2424)
+
+First Android measurement on the shared perf harness (AndroidViewer now uses useDecoderStream
+→ decode→present + recv fps). `TAPFLOW_STREAM_METRICS=1` gives agent `fpsSent`.
+
+| phase | agent fpsSent | drop | relay bp | decode→present p50/p95 (WebCodecs) |
+|-------|--------------:|-----:|---------:|----------------------------------:|
+| still  | 6 → **0** | 0% | 0 | 2.2 / 3.7 (n=30) |
+| scroll | **~22–29** (avg ~25, max 28.8) | 0% | 0 | 1.8 / 2.6 |
+
+→ **Android is source/encode-bound, not decode/transport.** Idle = 0 fps (scrcpy is
+surface-driven — already a static-skip equivalent). Under scroll the agent only produces
+~22–29 fps (can't sustain the 30 cap) while **decode is trivial (1.8ms) and there are zero
+drops/backpressure** — i.e. the emulator's software H.264 encoder + QEMU is the limit on frame
+production, not the pipeline downstream. (Plus QEMU's own input→render latency, unfixable
+downstream.) **Android lever = reduce the emulator encoder's pixel load** — preferably a lower
+**AVD native resolution** (no scaling step) over scrcpy `max_size` (whose earlier 30→4fps
+backfire was GPU-bound scaling, but under a possibly zombie-polluted session → re-measure
+clean). Decode/transport levers (a faster decoder, noDelay) would not help Android here.
+
+### Android host-encode feasibility spike (W7, 2026-06-07, emulator gRPC streamScreenshot)
+
+Confirmed the emulator has **no hardware H.264 encoder** (`list_encoders`: only `c2.android.avc.encoder (sw)`; `OMX.google.h264.encoder` is an alias of it; h265/av1 also sw). So scrcpy (guest MediaCodec) is capped at the software encoder. Probed the host-side raw-capture path — the emulator gRPC `streamScreenshot` (relaunched with `-grpc 8554`, unprotected; what Android Studio's embedded emulator uses) — with continuous scroll, native 1080×2424 RGBA8888:
+
+```
+recvFps 59.6 · producedFps(seq) 60.1 · droppedBeforeUs 5/602 (0.8%)
+avgFrame 10.2MB · throughput 596 MB/s (loopback) · interFrame p50 17.4 / p95 19.6 ms
+```
+
+→ **Key insight: the emulator renders at 60fps; the ~22–29fps we saw via scrcpy was purely the
+guest software H.264 encoder.** Raw capture over gRPC delivers full 60fps native with ~0% drops
+(naive bytes transport, no shared-mem needed) on macOS. **W7 (capture raw via gRPC → encode on
+the Mac with VideoToolbox, reusing the iOS encoder) is strongly viable** — capture is not a
+bottleneck, and VT hardware-encodes 1080p@60 trivially. Would make the Android emulator iOS-class
+(or better, 60fps). Remaining: RGBA→CVPixelBuffer→VTCompressionSession→Annex B→envelope, and the
+input path (gRPC sendTouch/sendKey vs keep scrcpy control).
+
+### Android host-encode — implemented + payoff (W7, 2026-06-07, emulator gRPC → Mac VideoToolbox)
+
+Built the backend: TS `EmulatorGrpcClient` (grpc-js) captures RGBA via `streamScreenshot`; pipes to
+a host-side Swift VT encoder (`emulator-encoder`, reusing the iOS VT config — baseline, B-off,
+MaxFrameDelay=0, BT.709, 8Mbps soft) → Annex B → same TFFE envelope as scrcpy. Input via gRPC
+`sendTouch` (display-resolution px, top-left origin). Continuous scroll, encoded fps out of the agent:
+
+```
+native 1080×2424   : encodedFps 34.3 · avgFrame 5.3KB · 1.5 Mbps
+downscale 712×1600 : encodedFps 59.4 · avgFrame 2.7KB · 1.3 Mbps   (server-side resize, W3 free)
+```
+
+→ **scrcpy scroll 22–29fps (guest SW encoder) → gRPC+VT 59.4fps downscaled (2×+, near 60).** The
+native 34fps cap is **pixel-volume bound** (10MB/frame gRPC recv + pipe + R/B swizzle = the predicted
+B-architecture copy cost); downscale resolves it. The gRPC `streamScreenshot` is **frame-driven**
+(idle = 0 frames = free static-skip; iOS needs an explicit seed-skip). Orientation: the stream is
+delivered **top-down** (proto's "bottom up" note is pre-orientation-transform — verified visually),
+so no flip; only R↔B swizzle for the BGRA pixel buffer VT wants.
+
+**Default policy (2026-06-07):** emulators auto-select the gRPC backend (`pickAndroidBackend`),
+**capped at 30fps** (iOS parity) — at 60fps the LAN-HTTP WASM decoder pays 2× decode/transport, the
+tier1 bottleneck; 30fps halves it. 60fps headroom stays available for localhost/LAN-HTTPS (WebCodecs
+hw decode) via `TAPFLOW_ANDROID_FPS`. Real devices keep scrcpy (HW encoder); gRPC failure → scrcpy
+fallback. **Auth:** a plain `-grpc <port>` endpoint is unsecured (localhost, = scrcpy's localhost adb
+trust); the agent launches emulators with it. The default (no flag) gRPC port requires a token →
+`UNAUTHENTICATED`, hence the agent owns the `-grpc` launch.
+
 ---
 
 ## 5. Work roadmap (gated by measurement)
