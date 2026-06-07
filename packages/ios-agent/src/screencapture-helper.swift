@@ -163,12 +163,10 @@ func resolveDevice(udid: String) -> NSObject? {
 // MARK: - IOSurface → JPEG
 
 func encodeJPEG(_ surface: IOSurface) -> Data? {
-    var raw: Unmanaged<CVPixelBuffer>?
-    guard CVPixelBufferCreateWithIOSurface(
-        kCFAllocatorDefault, surface,
-        [kCVPixelBufferPixelFormatTypeKey: kCVPixelFormatType_32BGRA] as CFDictionary,
-        &raw) == kCVReturnSuccess,
-          let buf = raw?.takeRetainedValue() else { return nil }
+    // Read a tear-free snapshot, not the live surface (see copySurfaceStable) — otherwise a
+    // mid-draw read bakes a horizontal tear into the JPEG, same as the H.264 path. makeImage()
+    // copies the pixels synchronously, so reusing the snapshot buffer next frame is safe.
+    guard let buf = copySurfaceStable(surface) else { return nil }
 
     CVPixelBufferLockBaseAddress(buf, .readOnly)
     defer { CVPixelBufferUnlockBaseAddress(buf, .readOnly) }
@@ -232,6 +230,11 @@ var h264Height = 0
 var h264SrcWidth = 0        // source IOSurface dimensions — drives session recreation on rotation
 var h264SrcHeight = 0
 var scaledBuffer: CVPixelBuffer?  // reused downscale target; nil when encoding at native size
+var srcCopyBuffer: CVPixelBuffer? // reused tear-free CPU snapshot of the live framebuffer surface
+var srcCopyW = 0, srcCopyH = 0
+var tearRetries = 0               // copies that raced a sim write (seed changed) and were retried
+var tearExhausted = 0             // copies still racing after the retry budget (best-effort frame)
+let logTearStats = ProcessInfo.processInfo.environment["TAPFLOW_STREAM_METRICS"] == "1"
 var h264FrameIndex: Int64 = 0
 var didForceInitialIDR = false
 // Set from the stdin command reader (relay IDR-on-drop), consumed in encodeH264.
@@ -363,6 +366,47 @@ func scaleToTarget(_ src: CVPixelBuffer) -> CVPixelBuffer? {
     return dst
 }
 
+// Tear-free CPU snapshot of the live framebuffer surface. The simulator draws into a single
+// IOSurface in place (the static-skip seed relies on that), asynchronously to our 30fps timer.
+// Reading the surface mid-draw (native: VTEncode reads it directly; downscale: vImage reads it)
+// bakes a horizontal tear (top = old frame, bottom = new) into the H.264 frame — visible on every
+// tier and decoder, recovering on the next frame. IOSurfaceLock(.readOnly) is cooperative and does
+// not block the sim's GPU writes, so it alone does not prevent the tear.
+//
+// Fix: memcpy the surface into a private buffer and bracket the copy with IOSurfaceGetSeed; if the
+// seed moved, the sim drew during the copy → it may be sheared → retry. memcpy ≈ 1ms vs ≈ 16ms write
+// interval, so 1–2 tries land a coherent snapshot even during continuous scroll.
+func copySurfaceStable(_ surface: IOSurface) -> CVPixelBuffer? {
+    let w = IOSurfaceGetWidth(surface)
+    let h = IOSurfaceGetHeight(surface)
+    if srcCopyBuffer == nil || w != srcCopyW || h != srcCopyH {
+        var pb: CVPixelBuffer?
+        CVPixelBufferCreate(kCFAllocatorDefault, w, h, kCVPixelFormatType_32BGRA,
+            [kCVPixelBufferIOSurfacePropertiesKey: [:]] as CFDictionary, &pb)
+        srcCopyBuffer = pb; srcCopyW = w; srcCopyH = h
+    }
+    guard let dst = srcCopyBuffer else { return nil }
+    CVPixelBufferLockBaseAddress(dst, [])
+    defer { CVPixelBufferUnlockBaseAddress(dst, []) }
+    guard let dstBase = CVPixelBufferGetBaseAddress(dst) else { return nil }
+    let dstStride = CVPixelBufferGetBytesPerRow(dst)
+
+    for attempt in 0...3 {
+        let seed0 = IOSurfaceGetSeed(surface)
+        IOSurfaceLock(surface, .readOnly, nil)
+        let srcStride = IOSurfaceGetBytesPerRow(surface)
+        let srcBase = IOSurfaceGetBaseAddress(surface)
+        let rowBytes = min(srcStride, dstStride)
+        for row in 0..<h {
+            memcpy(dstBase + row * dstStride, srcBase + row * srcStride, rowBytes)
+        }
+        IOSurfaceUnlock(surface, .readOnly, nil)
+        if IOSurfaceGetSeed(surface) == seed0 { return dst }  // no write during the copy → coherent
+        if attempt < 3 { tearRetries += 1 } else { tearExhausted += 1 }  // racing; retry or give up
+    }
+    return dst  // best-effort: a (possibly torn) frame beats a frozen stream
+}
+
 func encodeH264(_ surface: IOSurface) {
     let w = IOSurfaceGetWidth(surface)
     let h = IOSurfaceGetHeight(surface)
@@ -385,12 +429,10 @@ func encodeH264(_ surface: IOSurface) {
     }
     guard let session = h264Session else { return }
 
-    var pbRaw: Unmanaged<CVPixelBuffer>?
-    guard CVPixelBufferCreateWithIOSurface(
-        kCFAllocatorDefault, surface,
-        [kCVPixelBufferPixelFormatTypeKey: kCVPixelFormatType_32BGRA] as CFDictionary,
-        &pbRaw) == kCVReturnSuccess, let pb = pbRaw?.takeRetainedValue() else { return }
-    guard let frameBuffer = scaleToTarget(pb) else { return }
+    // Encode a tear-free CPU snapshot, not the live surface (see copySurfaceStable). scaleToTarget
+    // then downscales the snapshot, or returns it as-is at native size.
+    guard let srcCopy = copySurfaceStable(surface) else { return }
+    guard let frameBuffer = scaleToTarget(srcCopy) else { return }
 
     let pts = CMTime(value: h264FrameIndex, timescale: h264Timescale)
     h264FrameIndex += 1
@@ -555,6 +597,10 @@ timer.setEventHandler {
         lastSeed = seed
         lastSentNs = nowNs
         encodeH264(surf)  // firstFrameSent is set in the compression output callback
+        // tear-guard stats (TAPFLOW_STREAM_METRICS=1): retries climb during scroll, flat when static.
+        if logTearStats && h264FrameIndex % 150 == 0 {
+            fputs("info: tear-guard retries=\(tearRetries) exhausted=\(tearExhausted) frames=\(h264FrameIndex)\n", stderr)
+        }
     } else {
         // JPEG frames are large, so skip re-encoding an unchanged screen (keep-alive
         // every 100ms). seed = IOSurface generation counter.
