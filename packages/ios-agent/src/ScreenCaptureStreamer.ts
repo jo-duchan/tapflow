@@ -67,6 +67,9 @@ export class ScreenCaptureStreamer {
     private readonly fps: number = 30,
     private readonly udid: string = 'booted',
     private readonly codec: 'jpeg' | 'h264' = 'jpeg',
+    // Downscale cap (longest side, px) the helper encodes at; 0 = native. Passed to the Swift helper
+    // as TAPFLOW_IOS_MAX_SIZE so the per-session tier wins over any inherited env value.
+    private readonly maxSize: number = 0,
   ) {}
 
   /**
@@ -84,6 +87,7 @@ export class ScreenCaptureStreamer {
 
     const proc = spawn(BINARY, [String(this.fps), this.udid, this.codec], {
       stdio: ['pipe', 'pipe', 'pipe'],
+      env: { ...process.env, TAPFLOW_IOS_MAX_SIZE: String(this.maxSize) },
     })
     this.proc = proc
     proc.stdin.on('error', () => {}) // swallow EPIPE if a requestKeyframe() write races the helper exit

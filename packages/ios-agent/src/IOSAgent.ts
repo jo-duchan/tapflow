@@ -14,6 +14,7 @@ import {
   registerStreamWs,
   disableNagle,
   createKeyframeAwareSender,
+  pickMaxSize,
   createRateLimitedDropWarn,
   createThroughputSampler,
   createSleepBlocker,
@@ -58,6 +59,9 @@ interface DeviceState {
   // Browser-reported H.264 decode capability from device:boot. false (default) =
   // stream JPEG. Persisted so a stream reconnect re-picks the same codec.
   acceptH264: boolean
+  // Viewer context from device:boot → downscale tier (native / 1280 / 1000).
+  secureContext: boolean
+  external: boolean
 }
 
 export class IOSAgent implements DeviceAgent {
@@ -158,6 +162,8 @@ export class IOSAgent implements DeviceAgent {
         loadedChrome: null,
         softKeyboardVisible: false,
         acceptH264: false,
+        secureContext: false,
+        external: false,
       })
     })
   }
@@ -263,7 +269,12 @@ export class IOSAgent implements DeviceAgent {
       state.captureStreamer = null
       stream = new MjpegStreamer(this.simctl, this.intervalMs).start()
     } else {
-      const capture = new ScreenCaptureStreamer(this.fps, state.deviceId, useH264 ? 'h264' : 'jpeg')
+      const maxSize = pickMaxSize({
+        secureContext: state.secureContext,
+        external: state.external,
+        override: process.env.TAPFLOW_IOS_MAX_SIZE ?? process.env.TAPFLOW_MAX_SIZE,
+      })
+      const capture = new ScreenCaptureStreamer(this.fps, state.deviceId, useH264 ? 'h264' : 'jpeg', maxSize)
       state.captureStreamer = capture
       stream = capture.start()
     }
@@ -329,11 +340,12 @@ export class IOSAgent implements DeviceAgent {
     return streamWs
   }
 
-  private async handleDeviceBoot(sessionId: string, deviceId: string, fullErase = false, acceptH264 = false): Promise<void> {
+  private async handleDeviceBoot(sessionId: string, deviceId: string, fullErase = false, acceptH264 = false, tier?: { secureContext: boolean; external: boolean }): Promise<void> {
     const state = this.deviceStates.get(sessionId)
     if (!state || !this.ws) return
 
     state.acceptH264 = acceptH264
+    if (tier) { state.secureContext = tier.secureContext; state.external = tier.external }
     const seq = ++state.bootSeq
 
     void state.streamReader?.cancel()
@@ -420,9 +432,9 @@ export class IOSAgent implements DeviceAgent {
   private handleRelayMessage(msg: { type: string; sessionId?: string; payload?: unknown }): void {
     switch (msg.type) {
       case 'device:boot': {
-        const { deviceId, resetMode, acceptH264 } = msg.payload as { deviceId: string; resetMode?: string; acceptH264?: boolean }
+        const { deviceId, resetMode, acceptH264, secureContext, external } = msg.payload as { deviceId: string; resetMode?: string; acceptH264?: boolean; secureContext?: boolean; external?: boolean }
         const sessionId = msg.sessionId!
-        this.handleDeviceBoot(sessionId, deviceId, resetMode === 'full-erase', acceptH264 === true)
+        this.handleDeviceBoot(sessionId, deviceId, resetMode === 'full-erase', acceptH264 === true, { secureContext: !!secureContext, external: !!external })
           .catch((e) => logger.error('handleDeviceBoot failed:', e))
         break
       }

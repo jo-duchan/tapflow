@@ -66,7 +66,9 @@ export function DeviceViewer({ sessionId, deviceId, buildId, resetMode, onRecord
       setJoined(true);
       // Tell the agent up front whether this browser can decode H.264 so it picks the
       // codec accordingly; false (old/unsupported browser) → agent streams JPEG.
-      sendRef.current({ type: 'device:boot', sessionId, payload: { deviceId, resetMode, acceptH264: canDecodeH264() } });
+      // secureContext (localhost/HTTPS) → the agent can stream full res (WebCodecs hw-decodes it);
+      // non-secure (LAN-HTTP) → it downscales for the WASM decoder. The relay adds `external`.
+      sendRef.current({ type: 'device:boot', sessionId, payload: { deviceId, resetMode, acceptH264: canDecodeH264(), secureContext: window.isSecureContext } });
     }
     if (msg.type === 'device:boot-error') {
       setBootError((msg as unknown as { message: string }).message);

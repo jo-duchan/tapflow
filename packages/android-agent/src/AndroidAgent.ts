@@ -7,6 +7,7 @@ import {
   registerStreamWs,
   disableNagle,
   createKeyframeAwareSender,
+  pickMaxSize,
   createRateLimitedDropWarn,
   createThroughputSampler,
   createSleepBlocker,
@@ -122,6 +123,8 @@ interface DeviceState {
   emulatorVideo: EmulatorVideo | null
   grpcClient: EmulatorGrpcClient | null
   cornerRadius: number   // baked rounded-corner radius as a fraction of width (0 = square)
+  secureContext: boolean // viewer context → downscale tier (native / 1280 / 1000)
+  external: boolean
   displayWidth: number
   displayHeight: number
   videoWidth: number   // actual scrcpy video frame dimensions — used for touch coordinates
@@ -259,6 +262,8 @@ export class AndroidAgent implements DeviceAgent {
         emulatorVideo: null,
         grpcClient: null,
         cornerRadius: 0,
+        secureContext: false,
+        external: false,
         displayWidth: 0,
         displayHeight: 0,
         videoWidth: 0,
@@ -500,10 +505,14 @@ export class AndroidAgent implements DeviceAgent {
   // the backend is torn down with the device state.
   private async startGrpcVideoStream(state: DeviceState, streamWs: WebSocket, serial: string): Promise<void> {
     const port = this.grpcPort() ?? 8554
-    // Downscale box (longest side), server-side resize: also lifts encoded fps since native is
-    // pixel-volume bound. Aspect is preserved within the box. 0 = native. TAPFLOW_ANDROID_MAX_SIZE
-    // overrides the cross-platform TAPFLOW_MAX_SIZE.
-    const maxSize = Number(process.env.TAPFLOW_ANDROID_MAX_SIZE || process.env.TAPFLOW_MAX_SIZE) || 0
+    // Downscale box (longest side), server-side resize. Per-session tier from the viewer context
+    // (secure→native / LAN-HTTP→1280 / external→1000); TAPFLOW_ANDROID_MAX_SIZE | TAPFLOW_MAX_SIZE
+    // is a hard override.
+    const maxSize = pickMaxSize({
+      secureContext: state.secureContext,
+      external: state.external,
+      override: process.env.TAPFLOW_ANDROID_MAX_SIZE ?? process.env.TAPFLOW_MAX_SIZE,
+    })
     // Default 30fps (iOS parity) — caps source 60fps to halve decode/transport for LAN-HTTP.
     const fps = Number(process.env.TAPFLOW_ANDROID_FPS) || 30
 
@@ -574,13 +583,14 @@ export class AndroidAgent implements DeviceAgent {
     return streamWs
   }
 
-  private async handleDeviceBoot(sessionId: string, avdId: string): Promise<void> {
+  private async handleDeviceBoot(sessionId: string, avdId: string, tier?: { secureContext: boolean; external: boolean }): Promise<void> {
     const state = this.deviceStates.get(sessionId)
     if (!state || !this.ws) return
 
     const seq = ++state.bootSeq
 
     this.cleanupDeviceState(state)
+    if (tier) { state.secureContext = tier.secureContext; state.external = tier.external }
     this.ws.send(JSON.stringify({ type: 'device:booting', sessionId }))
 
     try {
@@ -659,8 +669,8 @@ export class AndroidAgent implements DeviceAgent {
   private handleRelayMessage(msg: { type: string; sessionId?: string; payload?: unknown }): void {
     switch (msg.type) {
       case 'device:boot': {
-        const { deviceId } = msg.payload as { deviceId: string }
-        this.handleDeviceBoot(msg.sessionId!, deviceId)
+        const { deviceId, secureContext, external } = msg.payload as { deviceId: string; secureContext?: boolean; external?: boolean }
+        this.handleDeviceBoot(msg.sessionId!, deviceId, { secureContext: !!secureContext, external: !!external })
           .catch((e) => logger.error('handleDeviceBoot failed:', e))
         break
       }
