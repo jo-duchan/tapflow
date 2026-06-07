@@ -13,7 +13,7 @@ import {
   createResourceSampler,
   registerStreamWs,
   disableNagle,
-  sendBinaryWithBackpressure,
+  createKeyframeAwareSender,
   createRateLimitedDropWarn,
   createThroughputSampler,
   createSleepBlocker,
@@ -288,6 +288,12 @@ export class IOSAgent implements DeviceAgent {
     metricsTimer?.unref()
 
     const onDrop = metrics ? () => { metrics.recordDropped(); warnDrop() } : warnDrop
+    // Keyframe-aware backpressure: drop whole GOPs to the next keyframe (never an orphan P-frame,
+    // which decodes to a sheared frame on WASM) and force an IDR on a drop (throttled). JPEG frames
+    // are self-contained, so each counts as a keyframe.
+    const dropper = createKeyframeAwareSender()
+    let lastIdrReq = 0
+    const onWantKeyframe = () => { const now = Date.now(); if (now - lastIdrReq >= 500) { lastIdrReq = now; state.captureStreamer?.requestKeyframe() } }
 
     const pump = async () => {
       try {
@@ -301,7 +307,7 @@ export class IOSAgent implements DeviceAgent {
             ? rewriteLowLatencySpsInFrame(value.payload)
             : value.payload
           const frame = writeEnvelopeHeader(payload as Buffer, Date.now(), { codec, keyframe: value.keyframe })
-          const sent = sendBinaryWithBackpressure(streamWs, frame, threshold, onDrop)
+          const sent = dropper.send(streamWs, frame, threshold, codec === CODEC_JPEG || value.keyframe, onDrop, onWantKeyframe)
           if (sent) metrics?.recordSent(value.payload.length)
         }
       } catch {
