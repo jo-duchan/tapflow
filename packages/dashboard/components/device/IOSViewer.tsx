@@ -12,11 +12,8 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip
 import { Kbd, KbdGroup } from '@/components/ui/kbd';
 import type { ChromeData } from '@/lib/types'
 import { iosToNormScreen, toPinchFingers as makePinchFingers, iosDisplayScale } from '@/lib/coordinate-transform';
-import { pickDecoder } from '@/lib/decoders/pickDecoder';
-import type { Decoder } from '@/lib/decoders/types';
-import { WASMDecoder } from '@/lib/decoders/WASMDecoder';
-import { CODEC_H264, type BinaryFrameHandler } from '@/lib/envelope';
-import { FrameLatencyTracker } from '@/components/perf/FrameLatencyTracker';
+import { useDecoderStream } from '@/hooks/useDecoderStream';
+import type { BinaryFrameHandler } from '@/lib/envelope';
 import type { MutableRefObject } from 'react';
 import type { PerfHook } from '@/components/perf/types';
 
@@ -96,50 +93,31 @@ export function IOSViewer({
     img.src = `data:image/png;base64,${chrome.framePng}`
   }, [chrome.framePng])
 
-  // ── Binary frame handler: JPEG via createImageBitmap, H.264 via pickDecoder ──
-  useEffect(() => {
-    let decoder: Decoder | null = null
-    let decoderFailed = false
-    let raf: number | null = null
-    // Correlates the decoder's async present back to its submit so the H.264 path
-    // reports decodeMs / glass-to-glass like the synchronous JPEG path.
-    const tracker = new FrameLatencyTracker()
-    // glass-to-glass needs agent and browser on one clock — true only on localhost.
-    const singleClock = typeof location !== 'undefined'
-      && (location.hostname === 'localhost' || location.hostname === '127.0.0.1')
-
-    const ensureDecoder = (): Decoder | null => {
-      if (decoder) return decoder
-      if (decoderFailed) return null // latch: don't re-pick/re-warn on every frame
-      // Dev override: ?decoder=wasm forces the WASM tier on localhost (which is a
-      // secure context, so it would otherwise auto-pick WebCodecs) for measurement.
-      const forced = import.meta.env.DEV ? new URLSearchParams(location.search).get('decoder') : null
-      const d = forced === 'wasm' ? new WASMDecoder() : pickDecoder()
-      if (!d) { decoderFailed = true; console.warn('[IOSViewer] no H.264 decoder available — set up HTTPS or use a supported browser'); return null }
-      decoder = d
-      if (import.meta.env.DEV) {
-        console.log(`[decoder] using ${d instanceof WASMDecoder ? 'WASM' : 'WebCodecs'}${forced ? ` (forced: ${forced})` : ''}`)
-        let diagN = 0
-        d.onDecodedFrame?.((presentTime, sample) => {
-          const timing = tracker.onPresented(
-            presentTime,
-            singleClock ? performance.timeOrigin + presentTime : undefined,
-          )
-          if (timing) {
-            // Prefer the decoder's exact, timestamp-matched decodeMs (drop-immune)
-            // over the FIFO estimate — distinguishes real decode latency from drift.
-            if (sample) timing.decodeMs = sample.decodeMs
-            perfHookRef?.current?.onFrameEnd(timing)
-          }
-          // Diagnostic: queueSize ~0 ⇒ FIFO artifact; steadily high ⇒ real backlog.
-          if (sample && diagN++ % 30 === 0) {
-            console.log(`[wc-diag] decodeMs=${sample.decodeMs.toFixed(1)} queueSize=${sample.queueSize}`)
-          }
-        })
+  // ── Decoder + frame routing (shared render pipeline) ──────────────────────
+  // useDecoderStream owns decoder selection (+ the DEV ?decoder= override) and decode→present
+  // perf tracking — same wiring as AndroidViewer. iOS-specific bits stay here: the H.264
+  // surface mounts over the device chrome (mirrored to canvasRef for recording/screenshot),
+  // and the JPEG path decodes via createImageBitmap onto that canvas.
+  useDecoderStream({
+    binaryFrameHandlerRef,
+    perfHookRef,
+    frameCount,
+    onUnsupported: () => { /* iOS has no separate unsupported UI; the hook warns */ },
+    onResize: (size) => {
+      const canvas = canvasRef.current
+      if (canvas && (canvas.width !== size.width || canvas.height !== size.height)) {
+        canvas.width = size.width; canvas.height = size.height
+        if (!chromeRef.current) {
+          const rc = recordCanvasRef.current
+          if (rc) { rc.width = size.width; rc.height = size.height }
+        }
       }
+      setCanvasReady(true)
+    },
+    onDecoderReady: (d) => {
+      // Display the decoder surface directly over the chrome; the canvas stays behind,
+      // mirrored, so the existing recording/screenshot paths (which read canvasRef) keep working.
       const surface = d.surface
-      // Display the decoder surface directly (like AndroidViewer) for smooth compositing;
-      // it overlays the canvas, which stays behind, mirrored, for recording/screenshot.
       const c = canvasRef.current
       surface.style.position = 'absolute'
       if (c) {
@@ -153,49 +131,19 @@ export function IOSViewer({
       surface.style.zIndex = '3'
       surface.style.pointerEvents = 'none'
       containerRef.current?.appendChild(surface)
-      d.onResize((size) => {
-        const canvas = canvasRef.current
-        if (canvas && (canvas.width !== size.width || canvas.height !== size.height)) {
-          canvas.width = size.width; canvas.height = size.height
-          if (!chromeRef.current) {
-            const rc = recordCanvasRef.current
-            if (rc) { rc.width = size.width; rc.height = size.height }
-          }
-        }
-        setCanvasReady(true)
-      })
-      // The <video> is the live display; the canvas mirrors it (behind) only so the
-      // existing recording/screenshot paths, which read canvasRef, keep working.
+      let raf: number | null = null
       const blit = () => {
         const canvas = canvasRef.current
         const ctx = canvas?.getContext('2d')
-        const surface = decoder?.surface
-        if (canvas && ctx && surface && decoder?.size) {
-          try { ctx.drawImage(surface, 0, 0, canvas.width, canvas.height) } catch { /* surface not paintable yet */ }
+        if (canvas && ctx && d.size) {
+          try { ctx.drawImage(d.surface, 0, 0, canvas.width, canvas.height) } catch { /* surface not paintable yet */ }
         }
         raf = requestAnimationFrame(blit)
       }
       raf = requestAnimationFrame(blit)
-      return d
-    }
-
-    binaryFrameHandlerRef.current = (data: ArrayBuffer, meta) => {
-      if (meta?.codec === CODEC_H264) {
-        const d = ensureDecoder()
-        if (!d) return
-        const recvAt = performance.now()
-        const recvInterval = lastFrameRecvAtRef.current ? recvAt - lastFrameRecvAtRef.current : 0
-        lastFrameRecvAtRef.current = recvAt
-        if (import.meta.env.DEV) {
-          perfHookRef?.current?.onFrameBegin()
-          // onFrameEnd fires later, from onDecodedFrame, once this frame presents.
-          tracker.onSubmit({ submitTime: recvAt, recvAt, recvInterval, capturedAt: meta.capturedAt, relayedAt: meta.relayedAt })
-        }
-        d.decode(data)
-        frameCount.current += 1
-        return
-      }
-
+      return () => { if (raf !== null) cancelAnimationFrame(raf) }
+    },
+    onJpegFrame: (data) => {
       const recvAt = performance.now()
       const recvInterval = lastFrameRecvAtRef.current ? recvAt - lastFrameRecvAtRef.current : 0
       lastFrameRecvAtRef.current = recvAt
@@ -227,15 +175,8 @@ export function IOSViewer({
           }
         })
         .catch(() => {})
-    }
-    return () => {
-      binaryFrameHandlerRef.current = undefined
-      if (raf !== null) cancelAnimationFrame(raf)
-      decoder?.close()
-      decoder?.surface.remove()
-      decoder = null
-    }
-  }, [binaryFrameHandlerRef, frameCount, perfHookRef])
+    },
+  })
 
   // Sync record canvas size when chrome arrives
   useEffect(() => {

@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { useClientRecording } from '@/hooks/useClientRecording';
 import { ArrowLeft, Home, LayoutGrid, Loader2, Play, Power, Volume1, Volume2 } from 'lucide-react';
-import { pickDecoder } from '@/lib/decoders/pickDecoder';
+import { useDecoderStream } from '@/hooks/useDecoderStream';
 import type { Decoder } from '@/lib/decoders/types';
 import { useFps } from '@/hooks/useFps';
 import { SimulatorToolbar } from './shared/SimulatorToolbar';
@@ -84,43 +84,33 @@ export function AndroidViewer({
   const cursorStateRef = useRef<'idle' | 'down' | 'release'>('idle');
   const releaseAnimRef = useRef<{ startTime: number } | null>(null);
 
-  // ── Decoder init + surface mount ──────────────────────────────────────────
-  // pickDecoder selects WebCodecs (secure context) or WASM (plain HTTP/LAN). Each
-  // decoder owns its render surface, mounted into the host div.
-  useEffect(() => {
-    const decoder = pickDecoder()
-    if (!decoder) { setDecoderUnsupported(true); return }
-    decoderRef.current = decoder
-
-    const surface = decoder.surface
-    surface.style.display = 'block'
-    surface.style.width = '100%'
-    surface.style.height = '100%'
-    surface.style.objectFit = 'fill'
-    surfaceHostRef.current?.appendChild(surface)
-
-    decoder.onResize((size) => {
+  // ── Decoder init + surface mount (shared render pipeline) ─────────────────
+  // useDecoderStream owns decoder selection (+ the DEV ?decoder= override), decode→present
+  // perf tracking, and frame routing — same wiring as IOSViewer. The viewer only mounts the
+  // surface and reacts to resize. (Android is H.264-only, so no JPEG handler.)
+  useDecoderStream({
+    binaryFrameHandlerRef,
+    perfHookRef,
+    frameCount,
+    onUnsupported: () => setDecoderUnsupported(true),
+    onResize: (size) => {
       setCanvasReady(true)
       const prev = videoSizeRef.current
       if (!prev || prev.width !== size.width || prev.height !== size.height) {
         videoSizeRef.current = size
         setVideoSize(size)
       }
-    })
-
-    binaryFrameHandlerRef.current = (data) => {
-      if (import.meta.env.DEV) perfHookRef?.current?.onFrameBegin()
-      frameCount.current += 1
-      decoder.decode(data)
-    }
-
-    return () => {
-      binaryFrameHandlerRef.current = undefined
-      decoder.close()
-      surface.remove()
-      decoderRef.current = null
-    }
-  }, [frameCount, binaryFrameHandlerRef, perfHookRef])
+    },
+    onDecoderReady: (decoder) => {
+      decoderRef.current = decoder
+      const surface = decoder.surface
+      surface.style.display = 'block'
+      surface.style.width = '100%'
+      surface.style.height = '100%'
+      surface.style.objectFit = 'fill'
+      surfaceHostRef.current?.appendChild(surface)
+    },
+  })
 
   // ── Recording (composeFrame only — state/refs/lifecycle in useClientRecording) ──
   const composeFrame = useCallback(() => {
