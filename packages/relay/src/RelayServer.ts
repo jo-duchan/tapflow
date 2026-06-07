@@ -569,6 +569,13 @@ export class RelayServer {
     // Replay device:ready if the device is already booted (browser WS blip reconnect)
     if (session.deviceStatus === 'booted') {
       ws.send(JSON.stringify({ type: 'device:ready', payload: { deviceId: session.deviceId } }))
+      // (Re)joining a live stream: ask the agent for an IDR so this viewer gets a decodable
+      // keyframe immediately, instead of waiting for the next periodic one — and so it isn't
+      // left blank when the encoder is static-skipping an unchanged screen. Agents that don't
+      // support on-demand IDR ignore the message.
+      if (session.agentSocket.readyState === WebSocket.OPEN) {
+        session.agentSocket.send(JSON.stringify({ type: 'stream:request-idr', sessionId: session.id }))
+      }
     }
   }
 

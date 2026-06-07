@@ -879,11 +879,32 @@ describe('RelayServer', () => {
     browser.send(JSON.stringify({ type: 'session:start', sessionId }))
     await waitForMessage(browser)
 
-    const msgPromise = waitForMessage(agent)
+    // session:start on a booted device now also sends the agent a join-IDR (stream:request-idr),
+    // so wait specifically for open-url rather than the next message.
+    const msgPromise = waitForType(agent, 'open-url')
     browser.send(JSON.stringify({ type: 'open-url', sessionId, payload: { url: 'myapp://home' } }))
     const received = await msgPromise
     expect(received.type).toBe('open-url')
     expect((received.payload as { url: string }).url).toBe('myapp://home')
+
+    agent.close()
+    browser.close()
+  })
+
+  it('requests an IDR from the agent when a browser joins a booted device', async () => {
+    const devices = [{ id: 'devA', name: 'iPhone A', platform: 'ios', status: 'booted' }]
+    const agent = new WebSocket(`ws://localhost:${port}`)
+    await waitForOpen(agent)
+    agent.send(JSON.stringify({ type: 'agent:register', devices }))
+    const { registeredSessions } = await waitForMessage(agent)
+    const sessionId = registeredSessions![0].sessionId
+
+    const idrPromise = waitForType(agent, 'stream:request-idr')
+    const browser = new WebSocket(`ws://localhost:${port}`)
+    await waitForOpen(browser)
+    browser.send(JSON.stringify({ type: 'session:start', sessionId }))
+    const idr = await idrPromise
+    expect(idr.sessionId).toBe(sessionId)
 
     agent.close()
     browser.close()
