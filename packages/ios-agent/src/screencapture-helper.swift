@@ -15,6 +15,7 @@ import ImageIO
 import ObjectiveC
 import VideoToolbox
 import CoreMedia
+import Accelerate
 
 // MARK: - Args
 
@@ -50,6 +51,29 @@ let h264Bitrate: Int = {
           let b = Int(raw), b > 0 else { return 8_000_000 }
     return b
 }()
+
+// Downscale cap (longest side, px). Trades design-QA fidelity for LAN bandwidth + viewer decode
+// load — the tier1 lever for LAN-HTTP (WASM decode). 0 = native. TAPFLOW_IOS_MAX_SIZE overrides
+// the cross-platform TAPFLOW_MAX_SIZE.
+let maxSize: Int = {
+    let env = ProcessInfo.processInfo.environment
+    for key in ["TAPFLOW_IOS_MAX_SIZE", "TAPFLOW_MAX_SIZE"] {
+        if let raw = env[key], let m = Int(raw), m > 0 { return m }
+    }
+    return 0
+}()
+
+// Target encode dimensions: scale so the longest side ≤ maxSize, preserving aspect, rounded to even
+// (H.264 requires even dimensions). Returns the source dims unchanged when no downscale applies.
+func targetDims(_ w: Int, _ h: Int) -> (Int, Int) {
+    guard maxSize > 0 else { return (w, h) }
+    let longest = max(w, h)
+    guard longest > maxSize else { return (w, h) }
+    let scale = Double(maxSize) / Double(longest)
+    let tw = max(2, Int((Double(w) * scale).rounded()) & ~1)
+    let th = max(2, Int((Double(h) * scale).rounded()) & ~1)
+    return (tw, th)
+}
 
 // MARK: - Framework loading
 
@@ -203,8 +227,11 @@ var firstFrameSent = false
 // NALs to Annex B (00 00 00 01 start codes) and tagged with the keyframe flag.
 
 var h264Session: VTCompressionSession?
-var h264Width = 0
+var h264Width = 0           // encode (target) dimensions — may be downscaled from the source
 var h264Height = 0
+var h264SrcWidth = 0        // source IOSurface dimensions — drives session recreation on rotation
+var h264SrcHeight = 0
+var scaledBuffer: CVPixelBuffer?  // reused downscale target; nil when encoding at native size
 var h264FrameIndex: Int64 = 0
 var didForceInitialIDR = false
 // Set from the stdin command reader (relay IDR-on-drop), consumed in encodeH264.
@@ -311,14 +338,50 @@ func setupH264Session(width: Int, height: Int) -> Bool {
     return true
 }
 
+// Downscale a source BGRA pixel buffer into `scaledBuffer` via Accelerate (high-quality resampling),
+// preserving design fidelity better than a nearest-neighbour shrink. Returns the buffer to encode.
+func scaleToTarget(_ src: CVPixelBuffer) -> CVPixelBuffer? {
+    guard let dst = scaledBuffer else { return src }  // no downscale → encode the source directly
+    CVPixelBufferLockBaseAddress(src, .readOnly)
+    CVPixelBufferLockBaseAddress(dst, [])
+    defer {
+        CVPixelBufferUnlockBaseAddress(src, .readOnly)
+        CVPixelBufferUnlockBaseAddress(dst, [])
+    }
+    guard let srcBase = CVPixelBufferGetBaseAddress(src),
+          let dstBase = CVPixelBufferGetBaseAddress(dst) else { return src }
+    var srcBuf = vImage_Buffer(data: srcBase,
+        height: vImagePixelCount(CVPixelBufferGetHeight(src)),
+        width: vImagePixelCount(CVPixelBufferGetWidth(src)),
+        rowBytes: CVPixelBufferGetBytesPerRow(src))
+    var dstBuf = vImage_Buffer(data: dstBase,
+        height: vImagePixelCount(CVPixelBufferGetHeight(dst)),
+        width: vImagePixelCount(CVPixelBufferGetWidth(dst)),
+        rowBytes: CVPixelBufferGetBytesPerRow(dst))
+    guard vImageScale_ARGB8888(&srcBuf, &dstBuf, nil, vImage_Flags(kvImageHighQualityResampling)) == kvImageNoError
+    else { return src }
+    return dst
+}
+
 func encodeH264(_ surface: IOSurface) {
     let w = IOSurfaceGetWidth(surface)
     let h = IOSurfaceGetHeight(surface)
-    // Recreate the session on first frame or resolution change (rotation).
-    if h264Session == nil || w != h264Width || h != h264Height {
+    let (tw, th) = targetDims(w, h)
+    // Recreate the session on first frame or source-resolution change (rotation). The session
+    // encodes at the (possibly downscaled) target size; `scaledBuffer` is the reused scale target.
+    if h264Session == nil || w != h264SrcWidth || h != h264SrcHeight {
         if let old = h264Session { VTCompressionSessionInvalidate(old); h264Session = nil }
         didForceInitialIDR = false
-        guard setupH264Session(width: w, height: h) else { return }
+        guard setupH264Session(width: tw, height: th) else { return }
+        h264SrcWidth = w; h264SrcHeight = h
+        if tw != w || th != h {
+            var pb: CVPixelBuffer?
+            CVPixelBufferCreate(kCFAllocatorDefault, tw, th, kCVPixelFormatType_32BGRA,
+                [kCVPixelBufferIOSurfacePropertiesKey: [:]] as CFDictionary, &pb)
+            scaledBuffer = pb
+        } else {
+            scaledBuffer = nil
+        }
     }
     guard let session = h264Session else { return }
 
@@ -327,6 +390,7 @@ func encodeH264(_ surface: IOSurface) {
         kCFAllocatorDefault, surface,
         [kCVPixelBufferPixelFormatTypeKey: kCVPixelFormatType_32BGRA] as CFDictionary,
         &pbRaw) == kCVReturnSuccess, let pb = pbRaw?.takeRetainedValue() else { return }
+    guard let frameBuffer = scaleToTarget(pb) else { return }
 
     let pts = CMTime(value: h264FrameIndex, timescale: h264Timescale)
     h264FrameIndex += 1
@@ -338,7 +402,7 @@ func encodeH264(_ surface: IOSurface) {
         pendingForceKeyFrame = false
     }
     VTCompressionSessionEncodeFrame(
-        session, imageBuffer: pb, presentationTimeStamp: pts,
+        session, imageBuffer: frameBuffer, presentationTimeStamp: pts,
         duration: CMTime(value: 1, timescale: h264Timescale),
         frameProperties: frameProps, sourceFrameRefcon: nil, infoFlagsOut: nil)
 }

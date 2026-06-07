@@ -481,8 +481,9 @@ export class AndroidAgent implements DeviceAgent {
   private async startGrpcVideoStream(state: DeviceState, streamWs: WebSocket, serial: string): Promise<void> {
     const port = this.grpcPort() ?? 8554
     // Downscale box (longest side), server-side resize: also lifts encoded fps since native is
-    // pixel-volume bound. Aspect is preserved within the box. 0 = native.
-    const maxSize = Number(process.env.TAPFLOW_ANDROID_MAX_SIZE) || 0
+    // pixel-volume bound. Aspect is preserved within the box. 0 = native. TAPFLOW_ANDROID_MAX_SIZE
+    // overrides the cross-platform TAPFLOW_MAX_SIZE.
+    const maxSize = Number(process.env.TAPFLOW_ANDROID_MAX_SIZE || process.env.TAPFLOW_MAX_SIZE) || 0
     // Default 30fps (iOS parity) — caps source 60fps to halve decode/transport for LAN-HTTP.
     const fps = Number(process.env.TAPFLOW_ANDROID_FPS) || 30
 
