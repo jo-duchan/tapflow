@@ -154,11 +154,17 @@ func setupH264Session(width: Int, height: Int) -> Bool {
 // up" note is pre-orientation-transform; verified visually it arrives upright). We build a BGRA
 // CVPixelBuffer — the format VideoToolbox is proven to hw-encode (same as iOS) — swizzling R↔B.
 func makePixelBuffer(_ rgba: Data, width: Int, height: Int) -> CVPixelBuffer? {
+    // H.264 codes in 16px macroblocks; non-multiple-of-16 sizes (e.g. 1080×2424) make the encoder
+    // pad and signal frame-cropping. Some software decoders (tinyh264) ignore the crop and show the
+    // padding (square right/bottom edge). Crop to a multiple of 16 so the stream needs no cropping —
+    // the lost ≤15px is the very screen edge (the baked rounded-corner black area).
+    let cw = width & ~15
+    let ch = height & ~15
     var pbRaw: CVPixelBuffer?
     let attrs: [CFString: Any] = [
         kCVPixelBufferIOSurfacePropertiesKey: [:],  // IOSurface-backed → enables the hw encode path
     ]
-    guard CVPixelBufferCreate(kCFAllocatorDefault, width, height,
+    guard cw > 0, ch > 0, CVPixelBufferCreate(kCFAllocatorDefault, cw, ch,
             kCVPixelFormatType_32BGRA, attrs as CFDictionary, &pbRaw) == kCVReturnSuccess,
           let pb = pbRaw else { return nil }
 
@@ -167,15 +173,15 @@ func makePixelBuffer(_ rgba: Data, width: Int, height: Int) -> CVPixelBuffer? {
     guard let dstBase = CVPixelBufferGetBaseAddress(pb) else { return nil }
     let dst = dstBase.assumingMemoryBound(to: UInt8.self)
     let dstStride = CVPixelBufferGetBytesPerRow(pb)
-    let srcStride = width * 4
+    let srcStride = width * 4  // source rows keep their original width; we copy the cw×ch top-left
 
     rgba.withUnsafeBytes { (raw: UnsafeRawBufferPointer) in
         guard let src = raw.bindMemory(to: UInt8.self).baseAddress else { return }
-        for row in 0..<height {
+        for row in 0..<ch {
             let srcRow = src + row * srcStride
             let dstRow = dst + row * dstStride
             var x = 0
-            while x < width {
+            while x < cw {
                 let s = srcRow + x * 4
                 let d = dstRow + x * 4
                 d[0] = s[2]  // B ← src.B
@@ -255,7 +261,8 @@ while let typeData = readExactly(1) {
     }
     guard let pb = makePixelBuffer(rgba, width: w, height: h) else { continue }
     lastBuffer = pb
-    encode(pb, width: w, height: h, forceIDR: false)
+    // The buffer is cropped to a 16-aligned size — encode at its actual dimensions.
+    encode(pb, width: CVPixelBufferGetWidth(pb), height: CVPixelBufferGetHeight(pb), forceIDR: false)
 }
 
 // Drain any in-flight encodes before exiting so the last frames reach stdout.
