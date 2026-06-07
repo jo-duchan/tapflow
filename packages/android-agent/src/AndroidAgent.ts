@@ -5,6 +5,7 @@ import { createLogger, PlatformError, ValidationError } from '@tapflowio/agent-c
 import {
   createResourceSampler,
   registerStreamWs,
+  disableNagle,
   sendBinaryWithBackpressure,
   createRateLimitedDropWarn,
   createThroughputSampler,
@@ -12,6 +13,7 @@ import {
   type SleepBlocker,
   DEFAULT_BACKPRESSURE_BYTES,
   writeEnvelopeHeader,
+  rewriteLowLatencySpsInFrame,
   CODEC_H264,
 } from '@tapflowio/agent-core/utils'
 import { AdbWrapper } from './AdbWrapper.js'
@@ -119,6 +121,7 @@ interface DeviceState {
   scrcpySession: ScrcpySession | null
   emulatorVideo: EmulatorVideo | null
   grpcClient: EmulatorGrpcClient | null
+  cornerRadius: number   // baked rounded-corner radius as a fraction of width (0 = square)
   displayWidth: number
   displayHeight: number
   videoWidth: number   // actual scrcpy video frame dimensions — used for touch coordinates
@@ -204,6 +207,7 @@ export class AndroidAgent implements DeviceAgent {
       const ws = new WebSocket(relayUrl)
 
       ws.once('open', () => {
+        disableNagle(ws)
         ws.send(JSON.stringify({
           type: 'agent:register',
           platform: 'android',
@@ -254,6 +258,7 @@ export class AndroidAgent implements DeviceAgent {
         scrcpySession: null,
         emulatorVideo: null,
         grpcClient: null,
+        cornerRadius: 0,
         displayWidth: 0,
         displayHeight: 0,
         videoWidth: 0,
@@ -332,6 +337,7 @@ export class AndroidAgent implements DeviceAgent {
     state.emulatorVideo = null
     state.grpcClient?.close()
     state.grpcClient = null
+    state.cornerRadius = 0
     state.touchHelper?.stop()
     state.touchHelper = null
     state.streamWs?.close()
@@ -465,7 +471,11 @@ export class AndroidAgent implements DeviceAgent {
         const { value, done } = await reader.read()
         if (done) break
         onFrame?.(value)
-        const frame = writeEnvelopeHeader(value.payload, Date.now(), { codec: CODEC_H264, keyframe: value.keyframe })
+        // Declare reorder=0 on the keyframe SPS so the decoder (WASM/WebCodecs) emits frames
+        // immediately instead of buffering the level's max DPB (~hundreds of ms of latency on every
+        // frame). The gRPC/VideoToolbox SPS omits bitstream_restriction; scrcpy's is a no-op.
+        const payload = value.keyframe ? (rewriteLowLatencySpsInFrame(value.payload) as Buffer) : value.payload
+        const frame = writeEnvelopeHeader(payload, Date.now(), { codec: CODEC_H264, keyframe: value.keyframe })
         const sent = sendBinaryWithBackpressure(streamWs, frame, threshold, onDrop)
         if (sent) metrics?.recordSent(value.payload.length)
       }
@@ -506,6 +516,7 @@ export class AndroidAgent implements DeviceAgent {
     state.displayHeight = native.height
     state.videoWidth = native.width
     state.videoHeight = native.height
+    state.cornerRadius = info.cornerRadius
 
     const reader = video.frames().getReader()
     void this.pumpVideo(state, streamWs, reader)
@@ -601,6 +612,7 @@ export class AndroidAgent implements DeviceAgent {
           streamType: 'h264',
           screenWidth: state.displayWidth,
           screenHeight: state.displayHeight,
+          cornerRadius: state.cornerRadius,
         },
       }))
       this.ws?.send(JSON.stringify({ type: 'device:ready', sessionId, payload: { deviceId: avdId } }))

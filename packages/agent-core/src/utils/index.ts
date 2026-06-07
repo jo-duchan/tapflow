@@ -1,6 +1,7 @@
 export { createResourceSampler } from './resources.js'
 export {
   registerStreamWs,
+  disableNagle,
   sendBinaryWithBackpressure,
   createKeyframeAwareSender,
   createRateLimitedDropWarn,

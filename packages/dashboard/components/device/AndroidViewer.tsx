@@ -41,6 +41,9 @@ interface AndroidViewerProps {
   onRecordingUploaded?: () => void;
   screenWidth?: number;
   screenHeight?: number;
+  /** Rounded-corner radius as a fraction of width — the emulator bakes the device's corners into
+   *  the framebuffer as black; we clip them so they don't show inside the screen bezel. 0 = square. */
+  cornerRadius?: number;
   perfHookRef?: MutableRefObject<PerfHook>;
 }
 
@@ -49,7 +52,7 @@ export function AndroidViewer({
   deviceReady, installing, installed, installError, bootError,
   launching, setLaunching, androidButtons,
   binaryFrameHandlerRef, onRecordingUploaded,
-  screenWidth, screenHeight,
+  screenWidth, screenHeight, cornerRadius,
   perfHookRef,
 }: AndroidViewerProps) {
   const surfaceHostRef = useRef<HTMLDivElement>(null);
@@ -414,6 +417,10 @@ export function AndroidViewer({
   // Container uses landscape dims; canvas inside rotated 90° to show portrait content in landscape shell
   const containerW = needsCSSRotation ? androidDisplayH : androidDisplayW;
   const containerH = needsCSSRotation ? androidDisplayW : androidDisplayH;
+  // Screen-opening radius: when the emulator bakes the device's rounded corners into the frame as
+  // black, round the screen container to that radius so overflow:hidden clips the black away (the
+  // content rounds at the same radius → no dark corner). Falls back to the design default 22px.
+  const screenRadius = cornerRadius ? Math.round(cornerRadius * androidDisplayW) : 22;
   const rotatedCanvasStyle: React.CSSProperties = needsCSSRotation ? {
     position: 'absolute',
     width: androidDisplayW,
@@ -483,12 +490,12 @@ export function AndroidViewer({
       />
 
       <div className="flex items-start gap-8">
-        {/* phone body bezel */}
-        <div style={{ background: '#1c1c1e', borderRadius: '34px', padding: '12px', flexShrink: 0, boxShadow: '0 8px 32px rgba(0,0,0,0.45), inset 0 1px 0 rgba(255,255,255,0.06)' }}>
+        {/* phone body bezel — outer radius stays concentric with the screen (screenRadius + 12px padding) */}
+        <div style={{ background: '#1c1c1e', borderRadius: `${screenRadius + 12}px`, padding: '12px', flexShrink: 0, boxShadow: '0 8px 32px rgba(0,0,0,0.45), inset 0 1px 0 rgba(255,255,255,0.06)' }}>
         <div
           ref={containerRef}
           className="relative"
-          style={{ width: containerW, height: containerH, backgroundColor: '#010101', borderRadius: '22px', overflow: 'hidden' }}
+          style={{ width: containerW, height: containerH, backgroundColor: '#010101', borderRadius: `${screenRadius}px`, overflow: 'hidden' }}
         >
           {decoderUnsupported ? (
             <div className="absolute inset-0 flex items-center justify-center p-4 text-center">

@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest'
-import { EmulatorVideo, type EncoderProcess } from '../emulator/EmulatorVideo'
+import { EmulatorVideo, detectCornerRadius, type EncoderProcess } from '../emulator/EmulatorVideo'
 import { EmulatorGrpcClient, type RawEmulatorController } from '../emulator/EmulatorGrpcClient'
 import type { ScrcpyFrame } from '../scrcpy/ScrcpyVideo'
 
@@ -52,6 +52,27 @@ function framed(payload: Buffer, keyframe: boolean): Buffer {
 
 function rgba(w: number, h: number): Buffer { return Buffer.alloc(w * h * 4) }
 
+describe('detectCornerRadius', () => {
+  // left edge black for the top `r` rows (the baked rounded corner is exact 0,0,0), rest white.
+  function withCorner(w: number, h: number, r: number): Buffer {
+    const b = Buffer.alloc(w * h * 4, 255)
+    for (let y = 0; y < r; y++) { const o = (y * w) * 4; b[o] = 0; b[o + 1] = 0; b[o + 2] = 0 }
+    return b
+  }
+
+  it('measures the black corner run as a fraction of width', () => {
+    expect(detectCornerRadius(withCorner(40, 80, 6), 40, 80)).toBeCloseTo(6 / 40)
+  })
+
+  it('returns 0 for square content (no black corner)', () => {
+    expect(detectCornerRadius(Buffer.alloc(40 * 80 * 4, 255), 40, 80)).toBe(0)
+  })
+
+  it('returns 0 when the whole edge is black (runaway → not a corner)', () => {
+    expect(detectCornerRadius(Buffer.alloc(40 * 80 * 4, 0), 40, 80)).toBe(0)
+  })
+})
+
 describe('EmulatorVideo', () => {
   it('resolves start() with the first frame dimensions and pipes RGBA to the encoder', async () => {
     const fe = fakeEncoder()
@@ -59,7 +80,7 @@ describe('EmulatorVideo', () => {
       spawnEncoder: () => fe.enc,
     })
     const info = await video.start()
-    expect(info).toEqual({ width: 8, height: 16 })
+    expect(info).toEqual({ width: 8, height: 16, cornerRadius: 0 })
     // The first frame is written: [0x00][w][h][len] header + RGBA payload.
     expect(fe.stdinWrites.length).toBeGreaterThanOrEqual(2)
     expect(fe.stdinWrites[0][0]).toBe(0x00)
@@ -101,6 +122,25 @@ describe('EmulatorVideo', () => {
     video.stop()
     // A late stdout chunk (the encoder flushes asynchronously) must be dropped, not enqueued.
     expect(() => fe.push(framed(Buffer.from([9, 9]), true))).not.toThrow()
+  })
+
+  it('flushes the trailing frame when the source goes static (no freeze on small changes)', async () => {
+    vi.useFakeTimers()
+    const fe = fakeEncoder()
+    // 3 frames arrive ~together then the source hangs (static). Frames 2 & 3 fall inside the 30fps
+    // interval — a plain drop would lose the final update; the trailing flush must still deliver it.
+    const client = fakeClient([
+      { image: rgba(8, 16), width: 8, height: 16 },
+      { image: rgba(8, 16), width: 8, height: 16 },
+      { image: rgba(8, 16), width: 8, height: 16 },
+    ])
+    const video = new EmulatorVideo(client, { fps: 30, spawnEncoder: () => fe.enc })
+    await video.start()
+    await vi.advanceTimersByTimeAsync(40) // let the pump consume 2 & 3, then fire the flush timer
+    const framesWritten = fe.stdinWrites.filter((b) => b.length === 13 && b[0] === 0x00).length
+    expect(framesWritten).toBe(2) // leading frame 1 + trailing-flushed frame 3 (frame 2 superseded)
+    video.stop()
+    vi.useRealTimers()
   })
 
   it('rejects start() when the capture errors before the first frame (→ scrcpy fallback)', async () => {

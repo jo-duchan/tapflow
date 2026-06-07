@@ -13,6 +13,23 @@ const ENCODER_BIN = path.join(path.dirname(fileURLToPath(import.meta.url)), '..'
 export interface EmulatorVideoInfo {
   width: number
   height: number
+  /** Rounded-corner radius as a fraction of width (0 = square). The emulator bakes the device's
+   *  rounded corners into the framebuffer as opaque black; the viewer clips them with border-radius. */
+  cornerRadius: number
+}
+
+/** Detect the baked-in corner radius from an RGBA frame: the rounded corner is exact (0,0,0), so the
+ *  run of black down the left edge from the top = the radius. Returns a fraction of width (0 = none). */
+export function detectCornerRadius(image: Buffer, w: number, h: number): number {
+  const isBlack = (x: number, y: number) => {
+    const o = (y * w + x) * 4
+    return image[o] === 0 && image[o + 1] === 0 && image[o + 2] === 0
+  }
+  if (w <= 0 || h <= 0 || !isBlack(0, 0)) return 0 // square content (e.g. scrcpy) → no rounding
+  const cap = Math.floor(w * 0.25) // a radius beyond 25% of width isn't a corner — bail to 0
+  let r = 0
+  while (r < cap && isBlack(0, r)) r++
+  return r >= cap ? 0 : r / w
 }
 
 // The bits of the encoder child process this class touches — narrowed so tests can inject a fake
@@ -52,6 +69,7 @@ export class EmulatorVideo {
   private height = 0
   private stopped = false
   private outputClosed = false
+  private flushTimer: ReturnType<typeof setTimeout> | null = null
 
   constructor(private readonly client: EmulatorGrpcClient, private readonly options: EmulatorVideoOptions = {}) {}
 
@@ -86,6 +104,7 @@ export class EmulatorVideo {
     // goes through; -2ms tolerates source jitter so 60→30 doesn't accidentally drop to 20.
     const minIntervalMs = 1000 / (this.options.fps ?? 30) - 2
     let lastFwdMs = 0
+    let pendingFrame: { image: Buffer; width: number; height: number; seq: number } | null = null
     let first = true
     let captureError: Error | undefined
     try {
@@ -97,9 +116,28 @@ export class EmulatorVideo {
           logger.info(`video size → ${f.width}×${f.height}`)
         }
         const now = performance.now()
-        if (!first && now - lastFwdMs < minIntervalMs) continue
+        if (!first && now - lastFwdMs < minIntervalMs) {
+          // Throttled: hold the latest frame and flush it at the interval boundary if nothing newer
+          // arrives. The source is frame-driven (no frames while static), so a plain drop would lose
+          // the final update of a small change → the viewer freezes on the pre-change frame.
+          pendingFrame = f
+          if (!this.flushTimer) {
+            this.flushTimer = setTimeout(() => {
+              this.flushTimer = null
+              if (pendingFrame && !this.stopped) {
+                lastFwdMs = performance.now()
+                this.writeToEncoder(pendingFrame.image, pendingFrame.width, pendingFrame.height)
+                pendingFrame = null
+              }
+            }, minIntervalMs - (now - lastFwdMs))
+            this.flushTimer.unref?.()
+          }
+          continue
+        }
+        if (this.flushTimer) { clearTimeout(this.flushTimer); this.flushTimer = null }
+        pendingFrame = null
         lastFwdMs = now
-        if (first) { first = false; onFirst({ width: f.width, height: f.height }) }
+        if (first) { first = false; onFirst({ width: f.width, height: f.height, cornerRadius: detectCornerRadius(f.image, f.width, f.height) }) }
         this.writeToEncoder(f.image, f.width, f.height)
       }
     } catch (e) {
@@ -113,11 +151,12 @@ export class EmulatorVideo {
         }
       }
     }
+    if (this.flushTimer) { clearTimeout(this.flushTimer); this.flushTimer = null }
     // Settle start()'s promise: reject on a pre-first-frame error (→ scrcpy fallback), else resolve
     // (a clean early end, e.g. stopped during boot, reports the last-known dims).
     if (first) {
       if (captureError) onError(captureError)
-      else onFirst({ width: this.width, height: this.height })
+      else onFirst({ width: this.width, height: this.height, cornerRadius: 0 })
     }
     // Source ended (cancelled / emulator gone) — settle the output stream.
     this.closeOutput()
@@ -187,6 +226,7 @@ export class EmulatorVideo {
   stop(): void {
     if (this.stopped) return
     this.stopped = true
+    if (this.flushTimer) { clearTimeout(this.flushTimer); this.flushTimer = null }
     this.closeOutput()
     this.capture?.cancel()
     if (this.encoder) {

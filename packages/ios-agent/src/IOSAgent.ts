@@ -12,6 +12,7 @@ const logger = createLogger('ios-agent')
 import {
   createResourceSampler,
   registerStreamWs,
+  disableNagle,
   sendBinaryWithBackpressure,
   createRateLimitedDropWarn,
   createThroughputSampler,
@@ -102,6 +103,7 @@ export class IOSAgent implements DeviceAgent {
       const ws = new WebSocket(relayUrl)
 
       ws.once('open', () => {
+        disableNagle(ws)
         ws.send(JSON.stringify({
           type: 'agent:register',
           platform: 'ios',

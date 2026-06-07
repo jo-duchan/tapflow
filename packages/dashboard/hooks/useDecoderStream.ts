@@ -41,6 +41,10 @@ export function useDecoderStream(opts: UseDecoderStreamOptions): void {
   useEffect(() => {
     let decoder: Decoder | null = null
     let decoderFailed = false
+    // Drop H.264 frames until the first keyframe: a viewer can join mid-GOP (the relay forwards the
+    // live stream), and feeding P-frames to the decoder before any IDR renders uninitialized green
+    // garbage. The relay's join-IDR request brings a keyframe shortly; until then, skip.
+    let seenKeyframe = false
     let lastRecvAt = 0
     let readyCleanup: void | (() => void)
     // Correlates the decoder's async present back to its submit so the H.264 path reports
@@ -92,6 +96,10 @@ export function useDecoderStream(opts: UseDecoderStreamOptions): void {
       if (jpeg && meta?.codec !== CODEC_H264) { jpeg(data, meta); return }
       const d = ensureDecoder()
       if (!d) return
+      if (!seenKeyframe) {
+        if (!meta?.keyframe) return // wait for the first IDR before decoding (avoids green garbage)
+        seenKeyframe = true
+      }
       if (import.meta.env.DEV) {
         const recvAt = performance.now()
         const recvInterval = lastRecvAt ? recvAt - lastRecvAt : 0

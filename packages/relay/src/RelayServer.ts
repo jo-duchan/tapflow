@@ -103,6 +103,9 @@ export class RelayServer {
     this.router = new Router()
     this.registerRoutes()
     this.httpServer = http.createServer((req, res) => this.handleRequest(req, res))
+    // Disable Nagle on every accepted socket (browsers + agents): small writes (touch, frame tails)
+    // must not be held waiting for an ACK. Negligible on localhost, but ~40ms stalls on LAN.
+    this.httpServer.on('connection', (socket) => socket.setNoDelay(true))
     this.wss = new WebSocketServer({ server: this.httpServer })
     this.wss.on('connection', (ws, request) => this.handleConnection(ws, request))
     this.wss.on('error', () => { /* propagated from httpServer */ })

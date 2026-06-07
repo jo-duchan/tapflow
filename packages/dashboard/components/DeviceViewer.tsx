@@ -22,7 +22,7 @@ interface Props {
   onRecordingUploaded?: () => void;
 }
 
-type AndroidChrome = { buttons: AndroidButton[]; streamType: 'h264'; screenWidth?: number; screenHeight?: number };
+type AndroidChrome = { buttons: AndroidButton[]; streamType: 'h264'; screenWidth?: number; screenHeight?: number; cornerRadius?: number };
 
 export function DeviceViewer({ sessionId, deviceId, buildId, resetMode, onRecordingUploaded }: Props) {
   const sendRef = useRef<(msg: object) => void>(() => {});
@@ -174,7 +174,7 @@ export function DeviceViewer({ sessionId, deviceId, buildId, resetMode, onRecord
   return (
     <>
       {iosChrome && <IOSViewer {...commonProps} chrome={iosChrome} perfHookRef={devPerfHookRef} />}
-      {androidChrome && <AndroidViewer {...commonProps} androidButtons={androidChrome.buttons} screenWidth={androidChrome.screenWidth} screenHeight={androidChrome.screenHeight} perfHookRef={devPerfHookRef} />}
+      {androidChrome && <AndroidViewer {...commonProps} androidButtons={androidChrome.buttons} screenWidth={androidChrome.screenWidth} screenHeight={androidChrome.screenHeight} cornerRadius={androidChrome.cornerRadius} perfHookRef={devPerfHookRef} />}
       {import.meta.env.DEV && perfMode && perfVisible && (
         <>
           <StatsOverlay perfHookRef={statsRef} />
