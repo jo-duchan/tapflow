@@ -127,6 +127,149 @@ Read from the `?perf=1` panel's `p50/p95 ms` folder + the `[wc-diag]` console (e
 > **Clock validity:** glass→glass = present(epoch) − capturedAt → **only on a localhost single clock**. decode→present (a delta) and agent→relay (both on the Mac) are valid in every environment.
 > **Root cause:** the iOS encoder's SPS does not set `bitstream_restriction` (VUI check: `bitstreamRestriction:false`, Level 5.0). The decoder safely buffers up to the level's max DPB (110400/~13800MB ≈ 8 frames) → 267ms. It's baseline (66) so the actual reorder is 0 — **only the signal is missing**. → Fixed by injecting a `max_num_reorder_frames=0` declaration into the SPS.
 
+### render/decode isolation (spike a — measured 2026-06-06, localhost `?perf=1&decoder=wasm`)
+
+Isolated `drawI420` (GPU plane upload + YUV→RGB shader) from the worker decode+transfer
+portion of the WASM `decode→present`, to locate the bottleneck before an openh264-wasm swap.
+`[wasm-render]` (WASMDecoder DEV diag) logs drawI420 duration; the panel's `Log latency
+summary` gives the full-session decodeMs. iOS path (only viewer with `?decoder=wasm`).
+
+| Phase | decodeMs p50/p95/max (full) | drawI420 p50/p95 (render) | glass→glass p50/p95 |
+|-------|----------------------------:|--------------------------:|--------------------:|
+| still (n=1090)  | **8.6 / 18.8 / 64.8** | **~0.25 / ~0.5** | 9.7 / 23.0 |
+| scroll (n=996)  | **12.7 / 26.3 / 96.5** | **~0.20 / ~0.5** | 14.4 / 28.8 |
+
+→ **Render is ~2–3% of decode→present** (drawI420 p50 ~0.25ms vs decodeMs p50 8.6–12.7) and
+**content-independent** — flat still↔scroll, while decodeMs rises with motion (p50 +4.1, p95
++7.5). So the scroll increase and the entire p95/max tail are **decode+transfer, not render**.
+**Conclusion: the WASM bottleneck is the software decode (h264bsd, scalar) — renderer ruled
+out.** Justifies the openh264-wasm spike; gate = shrink the decode p95 tail. The renderer is
+shared across decoders, so this isolation transfers (a swap's gate = decodeMs − ~0.5ms render).
+
+### FFmpeg-h264 (scalar wasm) vs tinyh264 — engine probe (c-0, measured 2026-06-07, localhost)
+
+Probed whether a "better-engineered" decoder (FFmpeg h264, libavcodec) beats tinyh264
+(h264bsd) on the non-secure WASM tier. Built FFmpeg n5.1.2 `--disable-asm` (scalar) to wasm,
+wired behind `?decoder=ffmpeg` reusing WASMDecoder/YUVWebGLRenderer (packed I420 via
+av_image_copy_to_buffer). Both measured same session (machine state drifts, so the tinyh264
+baseline was re-measured alongside, not reused from the spike-a numbers above).
+
+| metric | tinyh264 (fresh) | FFmpeg | delta |
+|--------|-----------------:|-------:|------:|
+| still p50/p95  | 10.2 / 22.5 | **8.7 / 13.4** | p95 **−40%** ✓ |
+| scroll p50/p95 | 14.8 / 27.2 | **16.3 / 29.7** | p95 **+9%** ✗ |
+
+→ **Mixed, not a clear win.** FFmpeg crushes the *still* p95 tail (13.4 vs 22.5) but is
+slightly *worse* on *scroll* (the high-motion case that matters most) on both p50 and p95.
+Confirms the earlier thesis: FFmpeg's native lead is asm-derived; stripped to scalar C in
+wasm, it doesn't beat the leaner baseline-only h264bsd on heavy P-frame/motion-comp loops.
+**By the success gate (shrink the scroll p95 tail), FFmpeg-scalar fails.** Caveats before a
+verdict: (1) the FFmpeg *core* was built without explicit `-msimd128` (only the glue + final
+LTO link had it) — autovectorizing the decode hot loops is an untested lever; (2) the packed
+repack adds one extra heap memcpy/frame vs tinyh264 (minor scroll handicap). Next: rebuild
+FFmpeg core with `-msimd128` as the decisive test before accepting/rejecting the engine swap.
+
+**Follow-up — FFmpeg core rebuilt WITH `-msimd128` (`--extra-cflags`, 2026-06-07):** the
+SIMD autovectorization flipped the scroll result. FFmpeg now beats tinyh264 on *all four*:
+
+| metric | tinyh264 | FFmpeg (no SIMD) | **FFmpeg +SIMD** | vs tinyh264 |
+|--------|---------:|-----------------:|-----------------:|------------:|
+| still p50/p95  | 10.2 / 22.5 | 8.7 / 13.4 | **8.5 / 12.9** | p95 **−43%** |
+| scroll p50/p95 | 14.8 / 27.2 | 16.3 / 29.7 | **11.7 / 25.5** | p50 **−21%**, p95 **−6%** |
+
+→ `-msimd128` cut scroll p50 16.3→11.7 (−28%) — the heavy motion-comp/IDCT loops *do*
+autovectorize. **Gate passes (scroll p95 25.5 < 27.2).** Validates the original "WASM SIMD"
+thesis, but narrowly: needs a decoder whose C loops autovectorize (FFmpeg) **plus** explicit
+`-msimd128` on the core. Verdict so far: FFmpeg+SIMD is faster everywhere — strongest on still
+p95 (−43%) and scroll p50 (−21%); scroll p95 (the hardest tail) only −6%. **Open cost question:
+1.9MB worker vs tinyh264's 173KB (11×).** Before committing, test whether tinyh264+`-msimd128`
+(spike b) closes the gap at 1/11 the size — SIMD now demonstrably matters, so b is freshly
+motivated (was predicted marginal; worth an empirical check).
+
+**openh264 instead of b (2026-06-07):** skipped b (h264bsd is not perf-engineered → low
+ceiling) and built openh264 v2.4.1 decoder-only to wasm (`--disable asm` = scalar C++, all
+sources `-msimd128`) as the "good engine + compact" candidate to dethrone FFmpeg. Compiled the
+decoder/common .cpp directly with em++ (skip the Makefile's platform/asm machinery) + a
+`decode_to_i420` glue (ISVCDecoder → packed I420), reusing the same worker/renderer. Artifact
+**557KB** — 3.4× smaller than FFmpeg's 1.9MB (compact claim ✓). But on speed:
+
+| metric | tinyh264 (173KB) | FFmpeg+SIMD (1.9MB) | openh264+SIMD (557KB) |
+|--------|-----------------:|--------------------:|----------------------:|
+| still p50/p95  | 10.2 / 22.5 | **8.5 / 12.9** | 9.2 / 17.8 |
+| scroll p50/p95 | 14.8 / 27.2 | **11.7 / 25.5** | 18.4 / 32.9 |
+
+→ **openh264 is the *worst* of the three on scroll** (18.4/32.9 — slower than even tinyh264),
+better than tinyh264 only on still. The "good engine + compact = best of both" thesis **fails
+empirically**: openh264's scalar-C fallback (+`-msimd128`) doesn't autovectorize/optimize like
+FFmpeg's, and on heavy motion it trails the simple h264bsd. **openh264 eliminated (dominated:
+bigger than tinyh264 yet slower on scroll; smaller than FFmpeg yet slower everywhere).**
+
+**Decision reduces to FFmpeg+SIMD vs keeping tinyh264** — a size/maintenance vs speed call:
+FFmpeg wins decode (still p95 −43%, scroll p50 −21%, scroll p95 −6%) at 11× the bundle (1.9MB,
+one-time load, non-secure tier only) plus a custom ffmpeg-wasm build to maintain; tinyh264 is
+173KB and a plain npm dep. No clear dominant — a product judgment on whether the (mostly
+still/scroll-p50) latency win is worth the size + build-maintenance cost.
+
+**spike b finally measured — tinyh264+`-msimd128` (2026-06-07):** rebuilt h264bsd with
+`-msimd128` (emsdk 3.1.51), vendored, `?decoder=tinysimd`. Result: still 10.8/27.4, scroll
+16.5/32.5 — **no better than (slightly worse than) the plain npm tinyh264** (10.2/22.5,
+14.8/27.2). **h264bsd's C does not autovectorize** — `-msimd128` only added codegen overhead.
+Confirms the prediction; b eliminated. (Caveat: the npm baseline used a different emsdk, so
+part of the regression is version noise — but even best-case b ≈ plain tinyh264, nowhere near
+FFmpeg.) Full four-way (localhost, decode→present ms):
+
+| metric | tinyh264 (173KB) | tinyh264+SIMD (159KB) | openh264+SIMD (557KB) | FFmpeg+SIMD (1.9MB) |
+|--------|-----------------:|----------------------:|----------------------:|--------------------:|
+| still p50/p95  | 10.2 / 22.5 | 10.8 / 27.4 | 9.2 / 17.8 | **8.5 / 12.9** |
+| scroll p50/p95 | 14.8 / 27.2 | 16.5 / 32.5 | 18.4 / 32.9 | **11.7 / 25.5** |
+
+→ **Exhaustive result: FFmpeg+SIMD is the *only* decoder that beats plain tinyh264 on every
+metric.** Both "compact + fast" hopes failed (openh264 dominated; SIMD doesn't help h264bsd). So
+the final choice is genuinely binary — **FFmpeg+SIMD (fastest, 1.9MB, custom build) vs keep
+tinyh264 (good-enough, 173KB, npm dep)** — with no free lunch in between. Decode bottleneck
+remains the lever (render isolated at ~0.5ms throughout). Pending: product decision + real-LAN
+re-measure (these are localhost single-clock; remote LAN runs the decoder on a separate Mac
+with different CPU headroom, which may widen or narrow the FFmpeg gap).
+
+### real-LAN re-measure (W2 — measured 2026-06-07, host MacBook → remote Mac mini, `:3001` cross-machine)
+
+Decoder runs on the **Mac mini's** CPU over a real LAN hop (glass→glass null = two clocks;
+decode→present valid). Same `?decoder=ffmpeg` vs `?decoder=wasm`:
+
+| metric | tinyh264 | FFmpeg+SIMD | delta |
+|--------|---------:|------------:|------:|
+| still p50/p95  | 11.4 / 43.4 | **10.2 / 33.8** | ffmpeg −11% / **−22%** |
+| scroll p50/p95 | **15.3** / 53.0 | 17.6 / 53.3 | ffmpeg **+15%** / ~tie |
+
+→ **The localhost FFmpeg scroll win did NOT hold on real LAN — it reversed.** ffmpeg still wins
+*still* (idle smoothness) but is *slower* on *scroll* p50 (the stress case) and tied on scroll
+p95. And **both decoders' scroll p95 blew up to ~53ms** (vs ~25–27 on localhost) — the real
+tier1 gap is **largely decoder-independent**. Read: FFmpeg's `-msimd128` win is **CPU-dependent**
+(helped the MacBook, not the Mac mini), and remote viewers are uncontrolled heterogeneous
+hardware. **Verdict: W2 does not justify adopting FFmpeg** — an idle-only, hardware-dependent
+win is not worth 11× bundle + a custom build to maintain. **Keep tinyh264; do not flip
+pickDecoder.** The ~53ms scroll-p95 (shared by both) points to **load-reduction levers
+(downscale, H.264 static-skip) over a decoder swap.** (Caveat: single ~960-frame runs; scroll
+p50 gap is median-robust, p95 noisier.)
+
+**Confirmed — paired 4-round re-measure (2026-06-07, Mac mini, ~950 frames each):** variance
+turned out tiny, so the trade-off is real, not noise. Means over 4 rounds:
+
+| metric | tinyh264 | FFmpeg+SIMD | winner (4/4 rounds) |
+|--------|---------:|------------:|:-------------------|
+| still p50/p95  | 11.3 / 43.9 | **9.8 / 33.0** | **ffmpeg** (−13% / −25%) |
+| scroll p50/p95 | **16.6 / 49.9** | 18.5 / 53.5 | **tinyh264** (ffmpeg +11% / +7%) |
+
+Every round split the same way: **ffmpeg wins idle (still), tinyh264 wins motion (scroll)** —
+per-round scroll deltas all favor tinyh264 (p50 −1.1…−2.9, p95 −0.8…−5.0). Per the
+pre-registered rule (adopt ffmpeg only on a consistent scroll win, given its 11× bundle +
+custom-build cost), **ffmpeg is rejected: it loses the scroll case (the interaction
+responsiveness that defines "feels-direct") in all 4 rounds.** **DECISION: keep tinyh264;
+W1 ffmpeg package removed.** (Likely cause of the scroll loss: ffmpeg's repack memcpy +
+heavier per-frame path on a bandwidth-bound machine vs h264bsd's lean baseline path.) Scroll
+p95 ~50ms on **both** (vs ~25 localhost) reconfirms the real gap is **load/transport, not the
+decoder** → next levers: H.264 static-skip (iOS) + downscale.
+
 ---
 
 ## 5. Work roadmap (gated by measurement)
@@ -187,7 +330,41 @@ http://localhost:3001?perf=1&decoder=mse     # force MSE (measure the LAN tier)
 
 > MSE **buffers** rather than dropping, so the FIFO tracker (submit↔present) is accurate 1:1 — trustworthy even without WebCodecs's exact timestamp matching. (When WASM is added, `?decoder=wasm` enters the same point.)
 
-> **LAN testing note:** the LAN (`:4000`) relay serves the built `packages/relay/public/`. Dashboard source changes need `pnpm --filter @tapflowio/dashboard build` then a `:4000` refresh to apply (Vite `:3001` is localhost-only).
+> **LAN testing note:** the LAN (`:4000`) relay serves the built `packages/relay/public/`. Dashboard source changes need `pnpm --filter @tapflowio/dashboard build` then a `:4000` refresh to apply.
+
+#### cross-machine LAN measurement (remote viewer — e.g. a Mac mini)
+
+To measure the decode on a **real remote machine** (decoder runs on the viewer's CPU, real
+network hop), the viewer must hit the **Vite dev server (`:3001`)**, not the built `:4000` —
+because **both the `?perf=1` panel and the `?decoder=` override are DEV-only**
+(`import.meta.env.DEV`); the built `:4000` has neither. So cross-machine perf == open `:3001`
+from the remote machine.
+
+Catch: the dashboard's WS target is `VITE_RELAY_URL`, hardcoded to `ws://localhost:4000` in
+`packages/dashboard/.env.development`. A remote browser would resolve that to *its own*
+localhost and never reach the relay. Override it with the **host's LAN IP**:
+
+```bash
+# on the host (where the relay + agent + simulator run):
+pnpm dev:relay   # + pnpm dev:ios   (or the full `pnpm dev`)
+ipconfig getifaddr en0                                   # host LAN IP, e.g. 192.168.0.42
+VITE_RELAY_URL=ws://192.168.0.42:4000 \
+  pnpm --filter @tapflowio/dashboard dev --host          # --host binds :3001 to the LAN
+```
+
+```
+# on the remote viewer (Mac mini), in the browser:
+http://192.168.0.42:3001/?perf=1&decoder=wasm      # tinyh264
+http://192.168.0.42:3001/?perf=1&decoder=ffmpeg    # FFmpeg (@tapflowio/ffmpeg-h264-wasm)
+```
+
+`/api` is proxied `:3001 → host localhost:4000`; the WS goes **direct** to the host relay via
+the `VITE_RELAY_URL` override. The host firewall must allow `:3001` and `:4000` on the LAN
+(Node `http` binds 0.0.0.0 by default, so `:4000` is already LAN-exposed).
+
+> **Clock caveat:** across two machines the clocks differ, so **glass→glass is invalid** —
+> compare **decode→present** (a same-machine delta, valid anywhere) plus relay backpressure
+> drops and felt smoothness. iOS only (AndroidViewer has no `?decoder=` override).
 
 ---
 
