@@ -1,0 +1,1813 @@
+// Copyright (C) 2018 The Android Open Source Project
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+// Note that if you add/remove methods in this file you must update
+// the metrics sql as well ./android/scripts/gen-grpc-sql.py
+//
+// Please group deleted methods in a block including the date (MM/DD/YY)
+// it was removed. This enables us to easily keep metrics around after removal
+//
+// List of deleted methods
+// rpc iWasDeleted (03/12/12)
+// ...
+syntax = "proto3";
+
+option java_multiple_files = true;
+option java_package = "com.android.emulator.control";
+option objc_class_prefix = "AEC";
+
+package android.emulation.control;
+import "google/protobuf/empty.proto";
+
+// An EmulatorController service lets you control the emulator.
+// Note that this is currently an experimental feature, and that the
+// service definition might change without notice. Use at your own risk!
+//
+// We use the following rough conventions:
+//
+// streamXXX --> streams values XXX (usually for emulator lifetime). Values
+//               are updated as soon as they become available.
+// getXXX    --> gets a single value XXX
+// setXXX    --> sets a single value XXX, does not returning state, these
+//               usually have an observable lasting side effect.
+// sendXXX   --> send a single event XXX, possibly returning state information.
+//               android usually responds to these events.
+service EmulatorController {
+    // set/get/stream the sensor data
+    // This RPC is not implemented in EmulatorController and will return an unimplemented error.
+    rpc streamSensor(SensorValue) returns (stream SensorValue) {}
+    // Gets the current value of a specified sensor.
+    //
+    // The following gRPC error codes can be returned:
+    // -  INTERNAL (code 13) if `getSensorSize` fails to retrieve sensor dimensions.
+    //
+    // The `status` field in the `SensorValue` reply indicates the operational state:
+    // -  `OK` (0): Sensor data retrieved successfully.
+    // -  `UNKNOWN` (2): Unknown sensor type (should not happen if using valid `SensorType`).
+    // -  `DISABLED` (3): The sensor is disabled.
+    // -  `NO_SERVICE` (4): The `qemud` service responsible for sensors is not available or initiated.
+    rpc getSensor(SensorValue) returns (SensorValue) {}
+    // Sets the override value for a specified sensor. This operation is asynchronous
+    // and executed on the emulator's main looper. An immediate subsequent `getSensor`
+    // call might not reflect the newly set value.
+    //
+    // This method returns `OK` (code 0) upon successful asynchronous scheduling of the operation.
+    // No specific gRPC error codes are returned by this method itself, but underlying
+    // operations might log warnings if the sensor agent is unavailable.
+    rpc setSensor(SensorValue) returns (google.protobuf.Empty) {}
+
+    // set/get/stream the physical model, this is likely the one you are
+    // looking for when you wish to modify the device state.
+    //
+    // This operation is asynchronous and executed on the emulator's main looper. An immediate subsequent `getPhysicalModel`
+    // call might not reflect the newly set value. The `interpolation` field from the request is used to determine the
+    // physical interpolation method, mapped using `abs((static_cast<int>(physicalValue.interpolation())) - 1)`.
+    //
+    // This method returns `OK` (code 0) upon successful asynchronous scheduling of the operation.
+    rpc setPhysicalModel(PhysicalModelValue) returns (google.protobuf.Empty) {}
+    // Gets the current value of a specified physical model parameter.
+    //
+    // The `status` field in the `PhysicalModelValue` reply indicates the operational state:
+    // -  `OK` (0): Physical model data retrieved successfully.
+    // -  `UNKNOWN` (2): Unknown physical type (should not happen if using valid `PhysicalType`).
+    // -  `NO_SERVICE` (3): The `qemud` service responsible for physical parameters is not available or initiated.
+    rpc getPhysicalModel(PhysicalModelValue) returns (PhysicalModelValue) {}
+    // This RPC is not implemented in EmulatorController and will return an unimplemented error.
+    rpc streamPhysicalModel(PhysicalModelValue)
+            returns (stream PhysicalModelValue) {}
+
+    // Atomically sets the current primary clipboard data. This operation is asynchronous
+    // and executed on the emulator's main looper. It triggers a `ClipboardEvent`
+    // to all listeners (except the originating channel) indicating the new content.
+    //
+    // This method returns `OK` (code 0) upon successful asynchronous scheduling of the operation.
+    rpc setClipboard(ClipData) returns (google.protobuf.Empty) {}
+    // Retrieves the current primary clipboard data. This is a synchronous operation.
+    //
+    // This method returns `OK` (code 0) and the current `ClipData` upon success.
+    rpc getClipboard(google.protobuf.Empty) returns (ClipData) {}
+
+    // Streams real-time updates of the clipboard content. Upon subscription,
+    // it immediately sends the current clipboard state. Subsequent updates are
+    // streamed as new content becomes available from the guest or is set via `setClipboard`
+    // from a different client. Events originating from the same client that initiated
+    // the stream are filtered out to prevent echoing.
+    //
+    // It is possible to miss very rapid clipboard updates. The stream will block
+    // awaiting new events after the initial state is sent.
+    //
+    // This method returns a server-side streaming reactor.
+    rpc streamClipboard(google.protobuf.Empty) returns (stream ClipData) {}
+
+    // Sets the emulator's battery state to the provided values. This operation is
+    // executed asynchronously on the main looper.
+    //
+    // This method returns `OK` (code 0) upon successful asynchronous scheduling
+    // of the operation. No explicit gRPC error codes are returned by this method.
+    rpc setBattery(BatteryState) returns (google.protobuf.Empty) {}
+    // Retrieves the current battery state from the emulator. This is a
+    // synchronous operation that waits for completion.
+    //
+    // This method returns `OK` (code 0) and populates the `BatteryState` reply
+    // with the current information upon success. No explicit gRPC error codes
+    // are returned by this method.
+    rpc getBattery(google.protobuf.Empty) returns (BatteryState) {}
+
+    // Sets the state of the GPS in the emulator. This operation is asynchronous
+    // and executed on the main looper. It updates the emulator's GPS location
+    // (latitude, longitude, altitude, speed, bearing, and satellites) and sets
+    // the timestamp.
+    //
+    // Note: Setting the GPS position will not be immediately reflected in the user
+    // interface. Android typically samples GPS at 1 Hz.
+    // This method returns `OK` (code 0) upon successful asynchronous scheduling
+    // of the operation.
+    rpc setGps(GpsState) returns (google.protobuf.Empty) {}
+
+    // Gets the latest GPS state as reported by the emulator. This includes data
+    // delivered by previous `setGps` calls or from the location UI if active.
+    // This is a synchronous operation that waits for completion.
+    //
+    // Note: The returned GPS state is not necessarily the exact coordinate
+    // visible at the time due to Android's typical 1 Hz GPS sample frequency.
+    //
+    // This method returns `OK` (code 0) and populates the `GpsState` reply
+    // with the retrieved information upon success. No explicit gRPC error codes
+    // are returned by this method.
+    rpc getGps(google.protobuf.Empty) returns (GpsState) {}
+
+    // Simulates a touch event on the fingerprint sensor. This operation is
+    // executed asynchronously on the main looper.
+    //
+    // The `isTouching` field indicates whether the fingerprint sensor is being
+    // touched, and `touchId` specifies the identifier of the registered
+    // fingerprint. The `setTouch` agent function is used to apply these values.
+    //
+    // This method returns `OK` (code 0) upon successful asynchronous scheduling
+    // of the operation. No explicit gRPC error codes are returned by this method.
+    rpc sendFingerprint(Fingerprint) returns (google.protobuf.Empty) {}
+
+    // Sends a keyboard event to the emulator. This operation is asynchronous
+    // and executed on the main looper.
+    //
+    // The `KeyboardEvent` message allows specifying input using `keyCode`, `key` (W3C standard string), or `text` (UTF-8 string).
+    // The `KeyEventSender` prioritizes `key`, then `keyCode`, then `text`.
+    // - If `key` is a non-printable W3C key string (e.g., "Backspace", "ArrowUp"), it's translated to an evdev keycode and sent.
+    // - If `key` is a printable Unicode character, it's converted to a sequence of evdev keydown/keyup events, handling modifiers.
+    // - If `keyCode` is provided, it's translated from its `codeType` (Usb, Evdev, XKB, Win, Mac) to an evdev keycode and sent as keydown/keyup pairs.
+    // - If `text` is provided, each UTF-8 character is converted to evdev keypress (keydown then keyup) events.
+    //
+    // This method returns `OK` (code 0) upon successful asynchronous scheduling of the operation.
+    rpc sendKey(KeyboardEvent) returns (google.protobuf.Empty) {}
+    // Sends touch events to the emulator. This operation is asynchronous and executed on the main looper.
+    //
+    // The `TouchEvent` contains a list of `Touch` objects, each with `x`, `y` coordinates, `identifier`, `pressure`, `touch_major`, `touch_minor`, `expiration`, and `orientation`.
+    // Coordinates are scaled to the emulator's display resolution. Each `Touch` `identifier` is mapped to an internal Linux multitouch slot.
+    // Expiration handling ensures that inactive touch events are properly "lifted" after 120 seconds.
+    //
+    // This method returns `OK` (code 0) upon successful asynchronous scheduling of the operation. Warnings are logged if no touch slots are available.
+    rpc sendTouch(TouchEvent) returns (google.protobuf.Empty) {}
+    // Sends mouse events to the emulator. This operation is asynchronous and executed on the main looper.
+    //
+    // The `MouseEvent` specifies `x`, `y` coordinates, `buttons` state (bitmask: 1 for left, 2 for right), and `display` ID.
+    // In certain virtual input configurations (VirtioInput enabled, but VirtioMouse and VirtioTablet disabled), `buttons` may be masked to only consider the primary button.
+    // The event is sent to the emulator's `user_event_agent`.
+    //
+    // This method returns `OK` (code 0) upon successful asynchronous scheduling of the operation.
+    rpc sendMouse(MouseEvent) returns (google.protobuf.Empty) {}
+    // Injects a stream of wheel events into the emulator. This is a server-side streaming RPC.
+    //
+    // Each `WheelEvent` contains `dx`, `dy` (delta values, `dy` is pre-multiplied by 120 for scroll clicks), and `display` ID.
+    // If the emulator's input device has rotary capabilities (e.g., AVD_WEAR flavor), `dy` is scaled and sent as a rotary event.
+    // Otherwise, it's sent as a standard mouse wheel event.
+    //
+    // This method returns a server-side streaming reactor.
+    rpc injectWheel(stream WheelEvent) returns (google.protobuf.Empty) {}
+
+    // Streams a series of generic input events to the emulator. The events are processed in the order they arrive.
+    // This is a server-side streaming RPC that supports various input types encapsulated within `InputEvent`'s `oneof type` field.
+    //
+    // Supported input types:
+    // - `key_event` (KeyboardEvent): Processed by `KeyEventSender` as described in `sendKey`.
+    // - `touch_event` (TouchEvent): Processed by `TouchEventSender` as described in `sendTouch`.
+    // - `mouse_event` (MouseEvent): Processed by `MouseEventSender` as described in `sendMouse`.
+    // - `android_event` (AndroidEvent): Raw Linux input events (`type`, `code`, `value`) sent directly to the kernel.
+    // - `pen_event` (PenEvent): Processed by `PenEventSender` for pen input, including pressure, orientation, and button state.
+    // - `wheel_event` (WheelEvent): Processed by `WheelEventSender` as described in `injectWheel`.
+    // - `xr_command` (XrCommand): Executes XR-specific commands (e.g., `RECENTER` to recenter the viewport). Unknown actions are logged as warnings.
+    // - `xr_head_rotation_event` (RotationRadian): Sends head rotation data in radians. Logs an error if the agent call fails.
+    // - `xr_head_movement_event` (Translation): Sends head movement data in meters. Logs an error if the agent call fails.
+    // - `xr_head_angular_velocity_event` (AngularVelocity): Sends head angular velocity data in radians per second. Logs an error if the agent call fails.
+    // - `xr_head_velocity_event` (Velocity): Sends head velocity data in meters per second. Logs an error if the agent call fails.
+    // - `touchpad_event` (TouchpadEvent): Processed by `TouchpadEventSender` for touchpad input, similar to touch events but for a touchpad device.
+    //
+    // All underlying input sending operations for XR events are executed asynchronously on the main looper.
+    //
+    // Returns `INVALID_ARGUMENT` (code 3) if an unrecognized input event type is received, indicating a potential out-of-date emulator.
+    // The stream reactor automatically deletes itself upon completion.
+    rpc streamInputEvent(stream InputEvent) returns (google.protobuf.Empty) {}
+
+    // Initiates or manipulates a phone call in the emulator. This is a synchronous
+    // operation executed on the main looper.
+    //
+    // The `PhoneCall` message specifies the `operation` (e.g., InitCall, AcceptCall)
+    // and the target phone `number`. The `telephonyCmd` agent function handles the
+    // actual call action.
+    //
+    // Returns a `PhoneResponse` indicating the outcome:
+    // - `OK` (0): The operation was successful.
+    // - `BadOperation` (1): The provided `operation` enum is out of range.
+    // - `BadNumber` (2): The provided `number` is malformed.
+    // - `InvalidAction` (3): The requested `operation` is invalid given the current call state (e.g., disconnecting when no call is active).
+    // - `ActionFailed` (4): An internal error occurred, typically if the modem agent is unavailable.
+    // - `RadioOff` (5): The emulator's radio is turned off.
+    rpc sendPhone(PhoneCall) returns (PhoneResponse) {}
+
+    // Sends an SMS message to the emulator. This is a synchronous operation.
+    //
+    // The `SmsMessage` contains the `srcAddress` (source phone number) and the `text` of the message.
+    // The `srcAddress` is validated for GSM formatting. The message `text` is converted into SMS PDUs
+    // (Protocol Data Units) and delivered via the modem agent.
+    //
+    // Returns a `PhoneResponse` indicating the outcome:
+    // - `OK` (0): The SMS message was successfully delivered.
+    // - `BadNumber` (2): The `srcAddress` is malformed.
+    // - `ActionFailed` (4): An internal error occurred, e.g., if the modem agent is unavailable or PDU creation fails.
+    //
+    // Other error cases from PDU creation (e.g., invalid characters in text) also result in `ActionFailed`.
+    rpc sendSms(SmsMessage) returns (PhoneResponse) {}
+
+    // Sets the emulator's phone number. This is a synchronous operation.
+    //
+    // The `PhoneNumber` message contains the new `number` to be set. The modem agent's
+    // `amodem_update_phone_number` function is used for this update.
+    //
+    // Returns a `PhoneResponse` indicating the outcome:
+    // - `OK` (0): The phone number was successfully updated.
+    // - `BadNumber` (2): The provided `number` is invalid for the modem.
+    // - `ActionFailed` (4): An internal error occurred, typically if the modem agent is unavailable.
+    rpc setPhoneNumber(PhoneNumber) returns (PhoneResponse) {}
+
+    // Retrieves the current status of the emulator. This includes comprehensive
+    // information about the virtual machine's configuration and the guest operating system's state.
+    //
+    // The `EmulatorStatus` reply contains:
+    // - `version`: The emulator version string.
+    // - `uptime`: The time the emulator has been active in milliseconds.
+    // - `booted`: A boolean indicating if the device has completed booting.
+    // - `vmConfig`: Detailed `VmConfiguration` (hypervisor type, CPU cores, RAM size).
+    // - `hardwareConfig`: Key-value pairs describing the emulator's hardware configuration.
+    // - `heartbeat`: A monotonically increasing number indicating guest activity (incremented approximately once per second).
+    // - `guestConfig`: A map of key-value pairs with guest-specific configurations, including:
+    //    - "multidisplay": "available" or "unavailable" based on display pipe readiness.
+    //    - "androidVersion": The Android version of the guest OS.
+    //    - "hypervisorVersion": The hypervisor version used by the guest.
+    //
+    // This method returns `OK` (code 0) upon successful retrieval of the emulator status.
+    rpc getStatus(google.protobuf.Empty) returns (EmulatorStatus) {}
+
+    // Retrieves a single screenshot in the desired format.
+    //
+    // The image will be scaled to the `desiredWidth` and `desiredHeight` specified in `ImageFormat`, while maintaining
+    // the aspect ratio. If `width` or `height` are 0, the device's current display dimensions are used.
+    // The returned image will never exceed the device's actual display resolution, but can be smaller.
+    //
+    // The `display` field in `ImageFormat` specifies the target display; 0 (or omitted) indicates the main display.
+    // For folded Pixel Fold devices, the display ID might be internally remapped, and `foldedDisplay` information will be populated.
+    // The resulting image is properly oriented based on the device's coarse-grained orientation, derived from sensor state.
+    //
+    // The `transport` field in `ImageFormat` can specify `MMAP` for shared memory delivery, but if the shared memory region
+    // is too small, a `FAILED_PRECONDITION` error will be returned.
+    //
+    // This method returns:
+    // - `OK` (code 0) and an `Image` object upon success.
+    // - `INVALID_ARGUMENT` (code 3) if the specified `display` ID is invalid or disabled.
+    // - `CANCELLED` (code 1) if the gRPC context is cancelled during the operation (an expensive operation).
+    // - `FAILED_PRECONDITION` (code 9) if the guest has not posted a new frame yet (for non-PNG formats when fast path is used).
+    //
+    // This method will return an image with width 0 and height 0 if the display is not visible.
+    rpc getScreenshot(ImageFormat) returns (Image) {}
+
+    // Streams a series of screenshots in the desired format. This is a server-side streaming RPC.
+    //
+    // A new frame is delivered whenever the device produces a new frame or when sensor changes occur.
+    // Initial state: The first frame delivered might be an empty image (width 0, height 0) if the display is inactive.
+    // Subsequent frames are delivered when new content is available or a sensor event triggers an update.
+    // If the display becomes inactive, an empty image will be delivered again. Images resume when the display becomes active.
+    //
+    // `ImageFormat` parameters (format, width, height, display) behave as described in `getScreenshot`.
+    // The `transport` field in `ImageFormat` can specify `MMAP` for shared memory delivery. If `MMAP` is used and the
+    // provided shared memory handle is valid and mapped, pixel data will be written directly to it.
+    // The `image` field in the `Image` reply will be empty if `MMAP` transport is used.
+    //
+    // Performance considerations:
+    // - Streaming can produce a significant amount of data.
+    // - `PNG` format is CPU-intensive due to encoding overhead.
+    // - Using `MMAP` transport can significantly reduce gRPC overhead for pixel data.
+    //
+    // This method returns:
+    // - A server-side streaming reactor.
+    // - `INVALID_ARGUMENT` (code 3) if the specified `display` ID is invalid or disabled.
+    // - `CANCELLED` (code 1) if the gRPC context is cancelled during the operation.
+    rpc streamScreenshot(ImageFormat) returns (stream Image) {}
+
+    // Streams a series of audio packets in the desired format. This is a server-side streaming RPC.
+    // A new frame is delivered approximately every 20-30ms when the emulated device produces audio.
+    // If `samplingRate` is 0, it defaults to 44100 Hz.
+    // The stream may block indefinitely if the emulator ceases to produce audio.
+    // Packets are allocated with a buffer size calculated based on the audio format and a 30ms frame time.
+    //
+    // This method returns `OK` (code 0) upon successful streaming initiation.
+    rpc streamAudio(AudioFormat) returns (stream AudioPacket) {}
+
+    // Injects a series of audio packets into the Android microphone. This is a client-side streaming RPC.
+    // Audio packets are processed at a rate determined by the emulator's request for frames.
+    // An internal buffer can hold approximately 300ms of audio.
+    //
+    // Notes:
+    //  - Only the `AudioFormat` from the first received packet is honored. Subsequent `AudioFormat` changes are ignored.
+    //  - `MODE_REAL_TIME` is experimental: incoming data may overwrite existing data if the client does not control timing properly.
+    //  - The circular buffer attempts to deliver all queued samples upon stream closure by writing silence for up to 300ms.
+    //
+    // Returns the following gRPC error codes:
+    // - `FAILED_PRECONDITION` (code 9): If another microphone is already active, or if unable to register the microphone.
+    // - `INVALID_ARGUMENT` (code 3): If the desired `samplingRate` exceeds 48kHz, or if an `AudioPacket` is too large for the internal buffer.
+    //
+    // This method returns `OK` (code 0) upon successful completion of the stream.
+    rpc injectAudio(stream AudioPacket) returns (google.protobuf.Empty) {}
+
+    // Retrieves the current settings for the microphone
+    rpc getMicrophoneState(google.protobuf.Empty) returns (MicrophoneState) {}
+
+    // Sets the state for the microphone
+    rpc setMicrophoneState(MicrophoneState) returns (google.protobuf.Empty) {}
+
+    // Deprecated, please use the streamLogcat method instead.
+    rpc getLogcat(LogMessage) returns (LogMessage) {
+        option deprecated = true;
+    }
+
+    // Streams the logcat output from the emulator in real-time. This is a server-side streaming RPC.
+    // The stream sources its data from the `logcat` command executed via `AdbShellStream` in the Android guest.
+    // Log lines are processed individually as they arrive.
+    //
+    // The `LogMessage.sort` field determines the output format:
+    // - If `LogMessage.sort` is `Parsed`, each incoming log line is parsed into a structured `LogcatEntry` object,
+    //   and these entries are returned in the `LogMessage.entries` field. Structured parsing is typically
+    //   available for Android API Level 23 (Marshmallow) and later.
+    // - If `LogMessage.sort` is `Text` (or unspecified), the raw log line is returned in the `LogMessage.contents` field.
+    //
+    // The stream continues as long as the underlying `logcat` process is running and the client is connected.
+    // The stream will naturally terminate if the `logcat` process stops or the connection is lost.
+    // No explicit gRPC error codes are returned by this method during active streaming.
+    rpc streamLogcat(LogMessage) returns (stream LogMessage) {}
+
+    // Transitions the virtual machine to the desired state. This operation is asynchronous
+    // and executed on the QEMU looper to handle necessary IO locks. Note that some states
+    // (e.g., `UNKNOWN`, `RESTORE_VM`, `SAVE_VM`, `INTERNAL_ERROR`) are purely observable
+    // and cannot be set directly.
+    //
+    // The `VmRunState.state` field triggers specific VM operations:
+    // - `RESET`: Calls `vmReset()` to reset the VM.
+    // - `SHUTDOWN`: Calls `skin_winsys_quit_request()` for a graceful shutdown, similar to closing the emulator GUI.
+    // - `TERMINATE`: Forcefully kills the emulator process. This can lead to system corruption and should be used with extreme caution.
+    // - `PAUSED`: Calls `vmPause()` to pause the VM, halting CPU cycles.
+    // - `RUNNING`: Calls `vmResume()` to resume the VM.
+    // - `RESTART`: Calls `ui->requestRestart()` to perform a full emulator restart.
+    // - `START`: Calls `vmStart()` to resume a stopped emulator.
+    // - `STOP`: Calls `vmStop()` to stop (pause) a running emulator.
+    //
+    // This method returns `OK` (code 0) upon successful asynchronous scheduling of the operation.
+    rpc setVmState(VmRunState) returns (google.protobuf.Empty) {}
+
+    // Retrieves the current run state of the virtual machine. This is a synchronous operation.
+    //
+    // Internal QEMU run states are mapped to `VmRunState.RunState` as follows:
+    // - `QEMU_RUN_STATE_PAUSED` and `QEMU_RUN_STATE_SUSPENDED` map to `PAUSED`.
+    // - `QEMU_RUN_STATE_RESTORE_VM` maps to `RESTORE_VM`.
+    // - `QEMU_RUN_STATE_RUNNING` maps to `RUNNING`.
+    // - `QEMU_RUN_STATE_SAVE_VM` maps to `SAVE_VM`.
+    // - `QEMU_RUN_STATE_SHUTDOWN` maps to `SHUTDOWN`.
+    // - `QEMU_RUN_STATE_GUEST_PANICKED`, `QEMU_RUN_STATE_INTERNAL_ERROR`, and `QEMU_RUN_STATE_IO_ERROR` map to `INTERNAL_ERROR`.
+    // - Any other states default to `UNKNOWN`.
+    //
+    // This method returns `OK` (code 0) and populates the `VmRunState` reply with the current VM state.
+    rpc getVmState(google.protobuf.Empty) returns (VmRunState) {}
+
+    // Atomically changes the current multi-display configuration. This operation applies
+    // the provided `DisplayConfigurations`, with special handling for secondary displays.
+    // Display ID 0 (the primary display) cannot be modified via this RPC.
+    //
+    // Preconditions:
+    // - The `android::featurecontrol::MultiDisplay` feature must be enabled.
+    //
+    // Input Validation:
+    // - `INVALID_ARGUMENT` (code 3): If duplicate `display` IDs are found in the request.
+    // - `INVALID_ARGUMENT` (code 3): If any `DisplayConfiguration` (width, height, dpi, flags)
+    //   is outside valid ranges as determined by `multiDisplayParamValidate`.
+    // - `INVALID_ARGUMENT` (code 3): If any `display` ID is outside the configurable range
+    //   `[1, userConfigurable]`.
+    //
+    // Atomic Update and Rollback:
+    // The system attempts to apply each display configuration. If any update fails
+    // (e.g., after multiple retries for transient pipe errors), a rollback mechanism
+    // is initiated: successfully updated displays are reverted to their previous state,
+    // and newly added displays are deleted. In such cases, an `INTERNAL` error is returned.
+    //
+    // Deletion of Unrequested Displays:
+    // Any displays that were active before this call but are not present in the new
+    // `request.displays` (and are not display ID 0) will be deleted.
+    //
+    // Notifications:
+    // Upon successful completion, `notifyDisplayChanges()` is called to inform
+    // third-party subscribers.
+    //
+    // Returns the following gRPC error codes:
+    // - `OK` (code 0): Upon successful application of all configurations, returning the final active `DisplayConfigurations`.
+    // - `FAILED_PRECONDITION` (code 9): If the multi-display feature is not available.
+    // - `INTERNAL` (code 13): If an internal emulator failure occurs during display modification or rollback.
+    rpc setDisplayConfigurations(DisplayConfigurations)
+            returns (DisplayConfigurations) {}
+
+    // Returns all currently valid logical displays configured in the emulator. This is a synchronous operation.
+    //
+    // Preconditions:
+    // - The `android::featurecontrol::MultiDisplay` feature must be enabled.
+    //
+    // The `DisplayConfigurations` reply contains:
+    // - `displays`: A repeated field of `DisplayConfiguration` objects, each detailing
+    //   the width, height, DPI, flags, and ID of an active display.
+    //   For Pixel Fold devices, only the main display configuration might be relevant.
+    // - `userConfigurable`: The maximum number of user-configurable displays (IDs from 1 up to this value).
+    // - `maxDisplays`: The total maximum number of displays the emulator supports.
+    //
+    // This method returns:
+    // - `OK` (code 0) and the current `DisplayConfigurations` upon success.
+    // - `FAILED_PRECONDITION` (code 9): If the AVD does not support the multi-display feature.
+    rpc getDisplayConfigurations(google.protobuf.Empty)
+            returns (DisplayConfigurations) {}
+
+    // Notifies the client of various emulator state changes in real-time. This is a server-side streaming RPC.
+    // Upon subscription, the current states of virtual scene camera, foldable posture, boot completion,
+    // and XR options are immediately sent. The stream then continuously delivers new notifications
+    // when relevant events occur. `UniqueEventStreamWriter` ensures that only distinct state changes are streamed.
+    //
+    // Notifications include:
+    // - `CameraNotification`: Reports virtual scene camera activation/deactivation and associated display.
+    // - `DisplayConfigurationsChangedNotification`: Triggered when display configurations are modified via the extended UI. Does not fire for changes made through console or gRPC.
+    // - `Posture`: Reports changes in the device's foldable posture.
+    // - `BootCompletedNotification`: Indicates when the emulator has finished booting.
+    // - `BrightnessValue`: Reports changes in backlight brightness (LCD, keyboard, or button).
+    // - `TextViewFocus`: Sent when a text view gains or loses focus, or immediately on subscription.
+    // - `XrOptions`: Reports changes in XR-related settings (environment, passthrough coefficient), or immediately on subscription.
+    // - `MicrophoneState` : Reports changes in the microphone state (currently whether host microphone access is allowed)
+    //
+    // This method returns a server-side streaming reactor.
+    rpc streamNotification(google.protobuf.Empty)
+            returns (stream Notification) {}
+
+    // Rotates the virtual scene camera relative to its current orientation. This operation is asynchronous
+    // and executed on the main looper.
+    //
+    // The `RotationRadian` message specifies angles in radians around the x, y, and z axes. The z component of rotation is currently unused.
+    // The coordinate system is right-handed: x-axis points right, y-axis points up, and z-axis points towards the viewer.
+    // This operation only succeeds if the virtual scene camera is actively connected.
+    //
+    // This method returns `OK` (code 0) upon successful asynchronous scheduling of the operation.
+    rpc rotateVirtualSceneCamera(RotationRadian)
+            returns (google.protobuf.Empty) {}
+    // Sets the absolute velocity of the virtual scene camera. This operation is asynchronous
+    // and executed on the main looper.
+    //
+    // The `Velocity` message specifies components in meters per second along the x, y, and z axes.
+    // The coordinate system is right-handed: x-axis points right, y-axis points up, and z-axis points towards the viewer.
+    // The transition to these target velocity values may be smoothed over time by the implementation.
+    // This operation only succeeds if the virtual scene camera is actively connected.
+    //
+    // This method returns `OK` (code 0) upon successful asynchronous scheduling of the operation.
+    rpc setVirtualSceneCameraVelocity(Velocity)
+            returns (google.protobuf.Empty) {}
+    // Sets the foldable posture of the device. This operation is asynchronous
+    // and executed on the main looper.
+    //
+    // The `Posture` message contains a `PostureValue` enum, defining the desired
+    // physical configuration of the foldable device.
+    //
+    // Returns the following gRPC error codes:
+    // - `OK` (code 0): Upon successful asynchronous scheduling of the operation.
+    // - `FAILED_PRECONDITION` (code 9): If the emulator is unable to set the specified posture.
+    rpc setPosture(Posture) returns (google.protobuf.Empty) {}
+
+    // Retrieves the current backlight brightness for a specified light type. This is a synchronous operation.
+    //
+    // The `BrightnessValue.target` field (e.g., `LCD`, `KEYBOARD`, `BUTTON`) determines which light's brightness is queried.
+    // Internal mapping converts these to string names like "lcd_backlight".
+    //
+    // Returns the following gRPC error codes:
+    // - `OK` (code 0): Upon successful retrieval, populating the `BrightnessValue` reply with the `target` and current `value`.
+    // - `FAILED_PRECONDITION` (code 9): If the AVD does not support the `hw-control` agent or its `getBrightness` function is unavailable.
+    rpc getBrightness(BrightnessValue) returns (BrightnessValue) {}
+
+    // Sets the backlight brightness for a specified light type. This operation is asynchronous
+    // and executed on the main looper.
+    //
+    // The `BrightnessValue.target` field (e.g., `LCD`, `KEYBOARD`, `BUTTON`) determines which light's brightness is set.
+    // The `BrightnessValue.value` specifies the desired intensity, ranging from 0 to 255.
+    // Internal mapping converts `LightType` to string names like "lcd_backlight".
+    //
+    // Returns the following gRPC error codes:
+    // - `OK` (code 0): Upon successful asynchronous scheduling of the operation.
+    // - `FAILED_PRECONDITION` (code 9): If the AVD does not support the `hw-control` agent or its `setBrightness` function is unavailable.
+    // - `INVALID_ARGUMENT` (code 3): If the `brightness` value exceeds the valid range (0-255).
+    rpc setBrightness(BrightnessValue) returns (google.protobuf.Empty) {}
+
+    // Returns the current mode of the primary display of a resizable AVD. This is a synchronous operation.
+    //
+    // Preconditions:
+    // - The AVD must be configured to support resizable displays (`resizableEnabled()` must be true).
+    //
+    // The `DisplayMode.value` field will be populated with the current `DisplayModeValue`,
+    // derived from the `getResizableActiveConfigId()`.
+    //
+    // Returns the following gRPC error codes:
+    // - `OK` (code 0): Upon successful retrieval of the display mode.
+    // - `FAILED_PRECONDITION` (code 9): If the AVD is not resizable.
+    rpc getDisplayMode(google.protobuf.Empty) returns (DisplayMode) {}
+
+    // Sets the size of the primary display of a resizable AVD to the specified `DisplayModeValue`. This operation is asynchronous
+    // and executed on the main looper.
+    //
+    // Preconditions:
+    // - The AVD must be configured to support resizable displays (`resizableEnabled()` must be true).
+    // - The emulator's `changeResizableDisplay` agent function must be available.
+    //
+    // The `DisplayMode.value` field specifies the desired display configuration (e.g., `PHONE`, `FOLDABLE`, `TABLET`, `DESKTOP`).
+    //
+    // Returns the following gRPC error codes:
+    // - `OK` (code 0): Upon successful asynchronous scheduling of the operation.
+    // - `FAILED_PRECONDITION` (code 9): If the AVD is not resizable.
+    // - `INTERNAL` (code 13): If the internal window agent function `changeResizableDisplay` is not available.
+    rpc setDisplayMode(DisplayMode) returns (google.protobuf.Empty) {}
+
+    // Changes the XR-related settings of the emulator. This operation is asynchronous
+    // and executed on the main looper.
+    //
+    // The `XrOptions` message specifies the `environment` (e.g., `LIVING_ROOM_DAY`, `LIVING_ROOM_NIGHT`)
+    // and `passthrough_coefficient` (a float between 0.0 and 1.0 for real/artificial environment visibility).
+    // Values for `passthrough_coefficient` outside [0.0, 1.0] are ignored.
+    //
+    // Returns the following gRPC error codes:
+    // - `OK` (code 0): Upon successful asynchronous scheduling of the operation.
+    // - `FAILED_PRECONDITION` (code 9): If the `setXrOptions` agent function fails (e.g., if XR is not supported).
+    rpc setXrOptions(XrOptions) returns (google.protobuf.Empty) {}
+
+    // Retrieves the current state of XR-related settings from the emulator. This is a synchronous operation.
+    //
+    // Preconditions:
+    // - XR mode must be supported in the current AVD (`isXrGuestOs()` must be true).
+    //   (Note: Current implementation of `isXrGuestOs()` always returns true).
+    //
+    // The `XrOptions` reply contains the current `environment` and `passthrough_coefficient`.
+    //
+    // Returns the following gRPC error codes:
+    // - `OK` (code 0): Upon successful retrieval of the XR options.
+    // - `FAILED_PRECONDITION` (code 9): If XR mode is not supported in the current AVD or if the `getXrOptions` agent function fails.
+    rpc getXrOptions(google.protobuf.Empty) returns (XrOptions) {}
+
+    // Sets the environment background for AI glasses.
+    rpc setEnvironment(Environment) returns (google.protobuf.Empty) {}
+}
+
+// A Run State that describes the state of the Virtual Machine.
+message VmRunState {
+    enum RunState {
+        // The emulator is in an unknown state. You cannot transition to this
+        // state.
+        UNKNOWN = 0;
+        // Guest is actively running. You can transition to this state from the
+        // paused state.
+        RUNNING = 1;
+        // Guest is paused to load a snapshot. You cannot transition to this
+        // state.
+        RESTORE_VM = 2;
+        // Guest has been paused. Transitioning to this state will pause the
+        // emulator the guest will not be consuming any cpu cycles.
+        PAUSED = 3;
+        // Guest is paused to take or export a snapshot. You cannot
+        // transition to this state.
+        SAVE_VM = 4;
+        // System shutdown, note that it is similar to power off. It tries to
+        // set the system status and notify guest. The system is likely going to
+        // disappear soon and do proper cleanup of resources, possibly taking
+        // a snapshot. This is the same behavior as closing the emulator by
+        // clicking the X (close) in the user interface.
+        SHUTDOWN = 5;
+        // Immediately terminate the emulator. No resource cleanup will take
+        // place. There is a good change to corrupt the system.
+        TERMINATE = 7;
+        // Will cause the emulator to reset. This is not a state you can
+        // observe.
+        RESET = 9;
+        // Guest experienced some error state, you cannot transition to this
+        // state.
+        INTERNAL_ERROR = 10;
+        // Completely restart the emulator.
+        RESTART = 11;
+        // Resume a stopped emulator
+        START = 12;
+        // Stop (pause) a running emulator
+        STOP = 13;
+    }
+
+    RunState state = 1;
+}
+
+message ParameterValue {
+    repeated float data = 1 [packed = true];
+}
+
+message PhysicalModelValue {
+    enum State {
+        OK = 0;
+        NO_SERVICE = -3;  // qemud service is not available/initiated.
+        DISABLED = -2;    // Sensor is disabled.
+        UNKNOWN = -1;     // Unknown sensor (should not happen)
+    }
+
+    // Details on the sensors documentation can be found here:
+    // https://developer.android.com/reference/android/hardware/Sensor.html#TYPE_
+    // The types must follow the order defined in
+    // "external/qemu/android/hw-sensors.h"
+    enum PhysicalType {
+        POSITION = 0;
+
+        // All values are angles in degrees.
+        // values = [x,y,z]
+        ROTATION = 1;
+
+        MAGNETIC_FIELD = 2;
+
+        // Temperature in °C
+        TEMPERATURE = 3;
+
+        // Proximity sensor distance measured in centimeters
+        PROXIMITY = 4;
+
+        // Ambient light level in SI lux units
+        LIGHT = 5;
+
+        // Atmospheric pressure in hPa (millibar)
+        PRESSURE = 6;
+
+        // Relative ambient air humidity in percent
+        HUMIDITY = 7;
+
+        VELOCITY = 8;
+        AMBIENT_MOTION = 9;
+
+        // Describing a hinge angle sensor in degrees.
+        HINGE_ANGLE0 = 10;
+        HINGE_ANGLE1 = 11;
+        HINGE_ANGLE2 = 12;
+
+        ROLLABLE0 = 13;
+        ROLLABLE1 = 14;
+        ROLLABLE2 = 15;
+
+        // Describing the device posture; the value should be an enum defined
+        // in Posture::PostureValue.
+        POSTURE = 16;
+
+        // Heart rate in bpm
+        HEART_RATE = 17;
+
+        // Ambient RGBC light intensity. Values are in order (Red, Green, Blue,
+        // Clear).
+        RGBC_LIGHT = 18;
+
+        // Wrist tilt gesture (1 = gaze, 0 = ungaze)
+        WRIST_TILT = 19;
+    }
+    PhysicalType target = 1;
+
+    // [Output Only]
+    State status = 2;
+
+    // Value interpretation depends on sensor.
+    ParameterValue value = 3;
+
+    enum Interpolation {
+        SMOOTH = 0;
+        STEP = 1;
+    }
+
+    // [Input Only] How to transition to the target value.
+    Interpolation interpolation = 4;
+}
+
+// A single sensor value.
+message SensorValue {
+    enum State {
+        OK = 0;
+        NO_SERVICE = -3;  // qemud service is not available/initiated.
+        DISABLED = -2;    // Sensor is disabled.
+        UNKNOWN = -1;     // Unknown sensor (should not happen)
+    }
+
+    // These are the various sensors that can be available in an emulated
+    // devices.
+    enum SensorType {
+        // Measures the acceleration force in m/s2 that is applied to a device
+        // on all three physical axes (x, y, and z), including the force of
+        // gravity.
+        ACCELERATION = 0;
+        // Measures a device's rate of rotation in rad/s around each of the
+        // three physical axes (x, y, and z).
+        GYROSCOPE = 1;
+        // Measures the ambient geomagnetic field for all three physical axes
+        // (x, y, z) in μT.
+        MAGNETIC_FIELD = 2;
+        // Measures degrees of rotation that a device makes around all three
+        // physical axes (x, y, z)
+        ORIENTATION = 3;
+        // Measures the temperature of the device in degrees Celsius (°C).
+        TEMPERATURE = 4;
+        // Measures the proximity of an object in cm relative to the view screen
+        // of a device. This sensor is typically used to determine whether a
+        // handset is being held up to a person's ear.
+        PROXIMITY = 5;
+        // Measures the ambient light level (illumination) in lx.
+        LIGHT = 6;
+        // Measures the ambient air pressure in hPa or mbar.
+        PRESSURE = 7;
+        // Measures the relative ambient humidity in percent (%).
+        HUMIDITY = 8;
+        MAGNETIC_FIELD_UNCALIBRATED = 9;
+        GYROSCOPE_UNCALIBRATED = 10;
+
+        // HINGE_ANGLE0 (11), HINGE_ANGLE1 (12), HINGE_ANGLE2 (13) are
+        // skipped; clients should use get/setPhysicalModel() instead for these
+        // "sensors".
+
+        // Measures the heart rate in bpm.
+        HEART_RATE = 14;
+        // Measures the ambient RGBC light intensity.
+        // Values are in order (Red, Green, Blue, Clear).
+        RGBC_LIGHT = 15;
+        // WIRST_TILT (16) is skipped; clients should use get/setPhysicalModel()
+        // instead.
+        // Measures acceleration force and provides bias data.
+        ACCELERATION_UNCALIBRATED = 17;
+        // A sensor of this type measures the direction in which the device is
+        // pointing relative to true north in degrees.
+        HEADING = 18;
+    }
+
+    // Type of sensor
+    SensorType target = 1;
+
+    // [Output Only]
+    State status = 2;
+
+    // Value interpretation depends on sensor enum.
+    ParameterValue value = 3;
+}
+
+// A single backlight brightness value.
+message BrightnessValue {
+    enum LightType {
+        // Display backlight. This will affect all displays.
+        LCD = 0;
+        KEYBOARD = 1;
+        BUTTON = 2;
+    }
+
+    // Type of light
+    LightType target = 1;
+
+    // Light intensity, ranges from 0-255.
+    uint32 value = 2;
+}
+
+// in line with android/emulation/resizable_display_config.h
+enum DisplayModeValue {
+    PHONE = 0;
+    FOLDABLE = 1;
+    TABLET = 2;
+    DESKTOP = 3;
+}
+
+message DisplayMode {
+    DisplayModeValue value = 1;
+}
+
+message XrOptions {
+    enum Environment {
+        LIVING_ROOM_DAY = 0;
+        LIVING_ROOM_NIGHT = 1;
+        // More environments may be added later.
+    }
+
+    // The currently active artificial surrounding environment (a.k.a.
+    // passthrough environment).
+    Environment environment = 1;
+
+    // A value of 0.0 means that the real or artificial surrounding environment
+    // (a.k.a. passthrough environment) is not visible. A value of 1.0 means
+    // that the passthrough environment is fully visible. Any value outside of
+    // the range [0.0-1.0] is ignored and leaves the state of passthrough
+    // unchanged. For simplicity of the implementation, this number may be
+    // rounded to an integer before applying.
+    float passthrough_coefficient = 2;
+
+    float dimming_value = 4;
+}
+
+message LogMessage {
+    // [Output Only] The contents of the log output.
+    string contents = 1;
+    // The starting byte position of the output that was returned. This
+    // should match the start parameter sent with the request. If the serial
+    // console output exceeds the size of the buffer, older output will be
+    // overwritten by newer content and the start values will be mismatched.
+    int64 start = 2 [deprecated = true];
+    //[Output Only] The position of the next byte of content from the serial
+    // console output. Use this value in the next request as the start
+    // parameter.
+    int64 next = 3 [deprecated = true];
+
+    // Set the sort of response you are interested it in.
+    // It the type is "Parsed" the entries field will contain the parsed
+    // results. otherwise the contents field will be set.
+    LogType sort = 4;
+
+    // [Output Only] The parsed logcat entries so far. Only set if sort is
+    // set to Parsed
+    repeated LogcatEntry entries = 5;
+
+    enum LogType {
+        Text = 0;
+        Parsed = 1;
+    }
+}
+
+// A parsed logcat entry.
+message LogcatEntry {
+    // The possible log levels.
+    enum LogLevel {
+        UNKNOWN = 0;
+        DEFAULT = 1;
+        VERBOSE = 2;
+        DEBUG = 3;
+        INFO = 4;
+        WARN = 5;
+        ERR = 6;
+        FATAL = 7;
+        SILENT = 8;
+    }
+
+    // A Unix timestamps in  milliseconds (The number of milliseconds that
+    // have elapsed since January 1, 1970 (midnight UTC/GMT), not counting
+    // leap seconds)
+    uint64 timestamp = 1;
+
+    // Process id.
+    uint32 pid = 2;
+
+    // Thread id.
+    uint32 tid = 3;
+    LogLevel level = 4;
+    string tag = 5;
+    string msg = 6;
+}
+
+// Information about the hypervisor that is currently in use.
+message VmConfiguration {
+    enum VmHypervisorType {
+        // An unknown hypervisor
+        UNKNOWN = 0;
+
+        // No hypervisor is in use. This usually means that the guest is
+        // running on a different CPU than the host, or you are using a
+        // platform where no hypervisor is available.
+        NONE = 1;
+
+        // The Kernel based Virtual Machine
+        // (https://www.linux-kvm.org/page/Main_Page)
+        KVM = 2;
+
+        // Intel® Hardware Accelerated Execution Manager (Intel® HAXM)
+        HAXM = 3 [deprecated = true];
+
+        // Hypervisor Framework.
+        // https://developer.apple.com/documentation/hypervisor
+        HVF = 4;
+
+        // Window Hypervisor Platform
+        // https://docs.microsoft.com/en-us/virtualization/api/
+        WHPX = 5;
+
+        AEHD = 6;
+    }
+
+    VmHypervisorType hypervisorType = 1;
+    int32 numberOfCpuCores = 2;
+    int64 ramSizeBytes = 3;
+}
+
+// Representation of a clipped data object on the clipboard.
+message ClipData {
+    // UTF-8 Encoded text.
+    string text = 1;
+}
+
+// The Touch interface represents a single contact point on a
+// touch-sensitive device. The contact point is commonly a finger or stylus
+// and the device may be a touchscreen or trackpad.
+message Touch {
+    // The horizontal coordinate. This is the physical location on the
+    // screen For example 0 indicates the leftmost coordinate.
+    int32 x = 1;
+
+    // The vertical coordinate. This is the physical location on the screen
+    // For example 0 indicates the top left coordinate.
+    int32 y = 2;
+
+    // The identifier is an arbitrary non-negative integer that is used to
+    // identify and track each tool independently when multiple tools are
+    // active. For example, when multiple fingers are touching the device,
+    // each finger should be assigned a distinct tracking id that is used as
+    // long as the finger remains in contact. Tracking ids may be reused
+    // when their associated tools move out of range.
+    //
+    // The emulator currently supports up to 10 concurrent touch events. The
+    // identifier can be any uninque value and will be mapped to the next
+    // available internal identifier.
+    int32 identifier = 3;
+
+    // Reports the physical pressure applied to the tip of the tool or the
+    // signal strength of the touch contact.
+    //
+    // The values reported must be non-zero when the tool is touching the
+    // device and zero otherwise to indicate that the touch event is
+    // completed.
+    //
+    // Make sure to deliver a pressure of 0 for the given identifier when
+    // the touch event is completed, otherwise the touch identifier will not
+    // be unregistered!
+    int32 pressure = 4;
+
+    // Optionally reports the cross-sectional area of the touch contact, or
+    // the length of the longer dimension of the touch contact.
+    int32 touch_major = 5;
+
+    // Optionally reports the length of the shorter dimension of the touch
+    // contact. This axis will be ignored if touch_major is reporting an
+    // area measurement greater than 0.
+    int32 touch_minor = 6;
+
+    enum EventExpiration {
+        // The system will use the default time of 120s to track
+        // the touch event with the given identifier. If no update happens
+        // within this timeframe the identifier is considered expired
+        // and can be made available for re-use. This means that a touch event
+        // with pressure 0 for this identifier will be send to the emulator.
+        EVENT_EXPIRATION_UNSPECIFIED = 0;
+
+        // Never expire the given slot. You must *ALWAYS* close the identifier
+        // by sending a touch event with 0 pressure.
+        NEVER_EXPIRE = 1;
+    }
+
+    EventExpiration expiration = 7;
+
+    // The orientation of the contact, if any.
+    int32 orientation = 8;
+}
+
+// A Pen is similar to a touch, with the addition
+// of button and rubber information.
+message Pen {
+    Touch location = 1;
+
+    // True if the button is pressed or not
+    bool button_pressed = 2;
+
+    // True if it is a rubber pointer.
+    bool rubber_pointer = 3;
+}
+
+// A TouchEvent contains a list of Touch objects that are in contact with
+// the touch surface.
+//
+// Touch events are delivered in sequence as specified in the touchList.
+//
+// TouchEvents are delivered to the emulated devices using ["Protocol
+// B"](https://www.kernel.org/doc/Documentation/input/multi-touch-protocol.txt)
+message TouchEvent {
+    // The list of Touch objects, note that these do not need to be unique
+    repeated Touch touches = 1;
+
+    // The display device where the touch event occurred.
+    // Omitting or using the value 0 indicates the main display.
+    int32 display = 2;
+}
+
+// A TouchpadEvent contains a list of Touch objects that are in contact with
+// the touchpad surface.
+//
+// Touchpad events are delivered in sequence as specified in the touchList.
+//
+// TouchpadEvents are delivered to the emulated devices using ["Protocol
+// B"](https://www.kernel.org/doc/Documentation/input/multi-touch-protocol.txt)
+message TouchpadEvent {
+    // The list of Touch objects, note that these do not need to be unique
+    repeated Touch touches = 1;
+
+    // The touchpad device where the touch event occurred.
+    // Omitting or using the value 0 indicates the main touchpad.
+    int32 touchpad = 2;
+}
+
+message PenEvent {
+    // The list of Pen objects, note that these do not need to be unique
+    repeated Pen events = 1;
+
+    // The display device where the pen event occurred.
+    // Omitting or using the value 0 indicates the main display.
+    int32 display = 2;
+}
+
+// The MouseEvent interface represents events that occur due to the user
+// interacting with a pointing device (such as a mouse).
+message MouseEvent {
+    // The horizontal coordinate. This is the physical location on the
+    // screen, where 0 indicates the leftmost coordinate.
+    int32 x = 1;
+
+    // The vertical coordinate. This is the physical location on the screen,
+    // where 0 indicates the topmost coordinate.
+    int32 y = 2;
+
+    // Indicates which buttons are pressed.
+    // 0: No button was pressed
+    // 1: Primary button (left)
+    // 2: Secondary button (right)
+    int32 buttons = 3;
+
+    // The display device where the mouse event occurred.
+    // Omitting or using the value 0 indicates the main display.
+    int32 display = 4;
+}
+
+message WheelEvent {
+    // The value indicating how much the mouse wheel is rotated. Scaled so that
+    // 120 equals to 1 wheel click. (120 is chosen as a multiplier often used to
+    // represent wheel movements less than 1 wheel click. e.g.
+    // https://doc.qt.io/qt-5/qwheelevent.html#angleDelta) Positive delta value
+    // is assigned to dx when the top of wheel is moved to left. Similarly
+    // positive delta value is assigned to dy when the top of wheel is moved
+    // away from the user.
+    int32 dx = 1;
+    int32 dy = 2;
+
+    // The display device where the mouse event occurred.
+    // Omitting or using the value 0 indicates the main display.
+    int32 display = 3;
+}
+
+// KeyboardEvent objects describe a user interaction with the keyboard; each
+// event describes a single interaction between the user and a key (or
+// combination of a key with modifier keys) on the keyboard.
+// This follows the pattern as set by
+// (javascript)[https://developer.mozilla.org/en-US/docs/Web/API/KeyboardEvent]
+//
+// Note: that only keyCode, key, or text can be set and that the semantics
+// will slightly vary.
+message KeyboardEvent {
+    // Code types that the emulator can receive. Note that the emulator
+    // will do its best to translate the code to an evdev value that
+    // will be send to the emulator. This translation is based on
+    // the chromium translation tables. See
+    // (this)[https://android.googlesource.com/platform/external/qemu/+/refs/heads/emu-master-dev/android/android-grpc/android/emulation/control/keyboard/keycode_converter_data.inc]
+    // for details on the translation.
+    enum KeyCodeType {
+        Usb = 0;
+        Evdev = 1;
+        XKB = 2;
+        Win = 3;
+        Mac = 4;
+    }
+
+    enum KeyEventType {
+        // Indicates that this keyevent should be send to the emulator
+        // as a key down event. Meaning that the key event will be
+        // translated to an EvDev event type and bit 11 (0x400) will be
+        // set before it is sent to the emulator.
+        keydown = 0;
+
+        // Indicates that the keyevent should be send to the emulator
+        // as a key up event. Meaning that the key event will be
+        // translated to an EvDev event type and
+        // sent to the emulator.
+        keyup = 1;
+
+        // Indicates that the keyevent will be send to the emulator
+        // as e key down event and immediately followed by a keyup event.
+        keypress = 2;
+    }
+
+    // Type of keycode contained in the keyCode field.
+    KeyCodeType codeType = 1;
+
+    // The type of keyboard event that should be sent to the emulator
+    KeyEventType eventType = 2;
+
+    // This property represents a physical key on the keyboard (as opposed
+    // to the character generated by pressing the key). In other words, this
+    // property is a value which isn't altered by keyboard layout or the
+    // state of the modifier keys. This value will be interpreted by the
+    // emulator depending on the KeyCodeType. The incoming key code will be
+    // translated to an evdev code type and send to the emulator.
+    // The values in key and text will be ignored.
+    int32 keyCode = 3;
+
+    // The value of the key pressed by the user, taking into consideration
+    // the state of modifier keys such as Shift as well as the keyboard
+    // locale and layout. This follows the w3c standard used in browsers.
+    // You can find an accurate description of valid values
+    // [here](https://developer.mozilla.org/en-US/docs/Web/API/KeyboardEvent/key/Key_Values)
+    //
+    // Note that some keys can result in multiple evdev events that are
+    // delivered to the emulator. for example the Key "A" will result in a
+    // sequence:
+    // ["Shift", "a"] -> [0x2a, 0x1e] whereas "a" results in ["a"] -> [0x1e].
+    //
+    // Not all documented keys are understood by android, and only printable
+    // ASCII [32-127) characters are properly translated.
+    //
+    // Keep in mind that there are a set of key values that result in android
+    // specific behavior
+    // [see](https://developer.mozilla.org/en-US/docs/Web/API/KeyboardEvent/key/Key_Values#Phone_keys):
+    //
+    // - "AppSwitch": Behaves as the "Overview" button in android.
+    // - "GoBack": The Back button.
+    // - "GoHome": The Home button, which takes the user to the phone's main
+    //             screen (usually an application launcher).
+    // - "Power":  The Power button.
+    string key = 4;
+
+    // Series of utf8 encoded characters to send to the emulator. An attempt
+    // will be made to translate every character will an EvDev event type and
+    // send to the emulator as a keypress event. The values in keyCode,
+    // eventType, codeType and key will be ignored.
+    //
+    // Note that most printable ASCII characters (range [32-127) can be send
+    // individually with the "key" param. Do not expect arbitrary UTF symbols to
+    // arrive in the emulator (most will be ignored).
+    //
+    // Note that it is possible to overrun the keyboard buffer by slamming this
+    // endpoint with large quantities of text (>1kb). The clipboard api is
+    // better suited for transferring large quantities of text.
+    string text = 5;
+}
+
+message XrCommand {
+    enum Action {
+        // Recenter the viewport position and rotation.
+        RECENTER = 0;
+    }
+
+    Action action = 1;
+}
+
+// An input event that can be delivered to the emulator.
+message InputEvent {
+    oneof type {
+        KeyboardEvent key_event = 1;
+        TouchEvent touch_event = 2;
+        MouseEvent mouse_event = 3;
+        AndroidEvent android_event = 4;
+        PenEvent pen_event = 5;
+        WheelEvent wheel_event = 6;
+        MouseEvent xr_hand_event = 7;
+        MouseEvent xr_eye_event = 8;
+        XrCommand xr_command = 9;
+        RotationRadian xr_head_rotation_event = 10;
+        Translation xr_head_movement_event = 11;
+        AngularVelocity xr_head_angular_velocity_event = 12;
+        Velocity xr_head_velocity_event = 13;
+        TouchpadEvent touchpad_event = 14;
+    }
+};
+
+// The android input event system is a framework for handling input from a
+// variety of devices by generating events that describe changes in the
+// state of the devices and forwarding them to user space applications.
+//
+// An AndroidEvents will be delivered directly to the kernel as is.
+message AndroidEvent {
+    // The type of the event. The types of the event are specified
+    // by the android kernel. Some examples are:
+    // EV_SYN, EV_KEY, EV_SW, etc..
+    // The exact definitions can be found in the input.h header file.
+    int32 type = 1;
+
+    // The actual code to be send to the kernel. The actual meaning
+    // of the code depends on the type definition.
+    int32 code = 2;
+
+    // The actual value of the event.
+    int32 value = 3;
+
+    // The display id associated with this input event.
+    int32 display = 4;
+};
+
+message Fingerprint {
+    // True when the fingprint is touched.
+    bool isTouching = 1;
+
+    // The identifier of the registered fingerprint.
+    int32 touchId = 2;
+}
+
+message GpsState {
+    // Setting this to false will disable auto updating  from the LocationUI,
+    // otherwise the location UI will override the location at a frequency of
+    // 1hz.
+    //
+    // - This is unused if the emulator is launched with -no-window, or when he
+    //   location ui is disabled.
+    // - This will BREAK the location ui experience if it is set to false. For
+    //    example routing will no longer function.
+    bool passiveUpdate = 1;
+
+    // The latitude, in degrees.
+    double latitude = 2;
+
+    // The longitude, in degrees.
+    double longitude = 3;
+
+    // The speed if it is available, in meters/second over ground
+    double speed = 4;
+
+    // gets the horizontal direction of travel of this device, and is not
+    // related to the device orientation. It is guaranteed to be in the
+    // range [0.0, 360.0] if the device has a bearing. 0=North, 90=East,
+    // 180=South, etc..
+    double bearing = 5;
+
+    // The altitude if available, in meters above the WGS 84 reference
+    // ellipsoid.
+    double altitude = 6;
+
+    // The number of satellites used to derive the fix
+    int32 satellites = 7;
+}
+
+message BatteryState {
+    enum BatteryStatus {
+        UNKNOWN = 0;
+        CHARGING = 1;
+        DISCHARGING = 2;
+        NOT_CHARGING = 3;
+        FULL = 4;
+    }
+
+    enum BatteryCharger {
+        NONE = 0;
+        AC = 1;
+        USB = 2;
+        WIRELESS = 3;
+    }
+
+    enum BatteryHealth {
+        GOOD = 0;
+        FAILED = 1;
+        DEAD = 2;
+        OVERVOLTAGE = 3;
+        OVERHEATED = 4;
+    }
+
+    bool hasBattery = 1;
+    bool isPresent = 2;
+    BatteryCharger charger = 3;
+    int32 chargeLevel = 4;
+    BatteryHealth health = 5;
+    BatteryStatus status = 6;
+}
+
+// An ImageTransport allows for specifying a side channel for
+// delivering image frames versus using the standard bytes array that is
+// returned with the gRPC request.
+message ImageTransport {
+    enum TransportChannel {
+        // Return full frames over the gRPC transport
+        TRANSPORT_CHANNEL_UNSPECIFIED = 0;
+
+        // Write images to the a file/shared memory handle.
+        MMAP = 1;
+    }
+
+    // The desired transport channel used for delivering image frames. Only
+    // relevant when streaming screenshots.
+    TransportChannel channel = 1;
+
+    // Handle used for writing image frames if transport is mmap. The client
+    // sets and owns this handle. It can be either a shm region, or a mmap. A
+    // mmap should be a url that starts with `file:///` Note: the mmap can
+    // result in tearing.
+    string handle = 2;
+}
+
+// The aspect ratio (width/height) will be different from the one
+// where the device is unfolded.
+message FoldedDisplay {
+    uint32 width = 1;
+    uint32 height = 2;
+    // It is possible for the screen to be folded in different ways depending
+    // on which surface is shown to the user. So xOffset and yOffset indicate
+    // the top left corner of the folded screen within the original unfolded
+    // screen.
+    uint32 xOffset = 3;
+    uint32 yOffset = 4;
+}
+
+message ImageFormat {
+    enum ImgFormat {
+        // Portable Network Graphics format
+        // (https://en.wikipedia.org/wiki/Portable_Network_Graphics)
+        PNG = 0;
+
+        // Three-channel RGB color model supplemented with a fourth alpha
+        // channel. https://en.wikipedia.org/wiki/RGBA_color_model
+        // Each pixel consists of 4 bytes.
+        RGBA8888 = 1;
+
+        // Three-channel RGB color model, each pixel consists of 3 bytes
+        RGB888 = 2;
+    }
+
+    // The (desired) format of the resulting bytes.
+    ImgFormat format = 1;
+
+    // [Output Only] The rotation of the image. The image will be rotated
+    // based upon the coarse grained orientation of the device.
+    Rotation rotation = 2;
+
+    // The (desired) width of the image. When passed as input
+    // the image will be scaled to match the given
+    // width, while maintaining the aspect ratio of the device.
+    // The returned image will never exceed the given width, but can be less.
+    // Omitting this value (or passing in 0) will result in no scaling,
+    // and the width of the actual device will be used.
+    uint32 width = 3;
+
+    // The (desired) height of the image.  When passed as input
+    // the image will be scaled to match the given
+    // height, while maintaining the aspect ratio of the device.
+    // The returned image will never exceed the given height, but can be less.
+    // Omitting this value (or passing in 0) will result in no scaling,
+    // and the height of the actual device will be used.
+    uint32 height = 4;
+
+    // The (desired) display id of the device. Setting this to 0 (or omitting)
+    // indicates the main display.
+    uint32 display = 5;
+
+    // Set this if you wish to use a different transport channel to deliver
+    // image frames.
+    ImageTransport transport = 6;
+
+    // [Output Only] Display configuration when screen is folded. The value is
+    // the original configuration before scaling.
+    FoldedDisplay foldedDisplay = 7;
+
+    // [Output Only] Display mode when AVD is resizable.
+    DisplayModeValue displayMode = 8;
+}
+
+message Image {
+    ImageFormat format = 1;
+
+    uint32 width = 2 [deprecated = true];   // width is contained in format.
+    uint32 height = 3 [deprecated = true];  // height is contained in format.
+
+    // The organization of the pixels in the image buffer is from left to
+    // right and bottom up. This will be empty if an alternative image transport
+    // is requested in the image format. In that case the side channel should
+    // be used to obtain the image data.
+    bytes image = 4;
+
+    // [Output Only] Monotonically increasing sequence number in a stream of
+    // screenshots. The first screenshot will have a sequence of 0. A single
+    // screenshot will always have a sequence number of 0. The sequence is not
+    // necessarily contiguous, and can be used to detect how many frames were
+    // dropped. An example sequence could be: [0, 3, 5, 7, 9, 11].
+    uint32 seq = 5;
+
+    // [Output Only] Unix timestamp in microseconds when the emulator estimates
+    // the frame was generated. The timestamp is before the actual frame is
+    // copied and transformed. This can be used to calculate variance between
+    // frame production time, and frame depiction time.
+    uint64 timestampUs = 6;
+}
+
+message Rotation {
+    enum SkinRotation {
+        PORTRAIT = 0;           // 0 degrees
+        LANDSCAPE = 1;          // 90 degrees
+        REVERSE_PORTRAIT = 2;   // -180 degrees
+        REVERSE_LANDSCAPE = 3;  // -90 degrees
+    }
+
+    // The rotation of the device, derived from the sensor state
+    // of the emulator. The derivation reflects how android observes
+    // the rotation state.
+    SkinRotation rotation = 1;
+
+    // Specifies the angle of rotation, in degrees [-180, 180]
+    double xAxis = 2;
+    double yAxis = 3;
+    double zAxis = 4;
+}
+
+message PhoneCall {
+    enum Operation {
+        InitCall = 0;
+        AcceptCall = 1;
+        RejectCallExplicit = 2;
+        RejectCallBusy = 3;
+        DisconnectCall = 4;
+        PlaceCallOnHold = 5;
+        TakeCallOffHold = 6;
+    }
+    Operation operation = 1;
+    string number = 2;
+}
+
+message PhoneResponse {
+    enum Response {
+        OK = 0;
+        BadOperation = 1;   // Enum out of range
+        BadNumber = 2;      // Mal-formed telephone number
+        InvalidAction = 3;  // E.g., disconnect when no call is in progress
+        ActionFailed = 4;   // Internal error
+        RadioOff = 5;       // Radio power off
+    }
+    Response response = 1;
+}
+
+message Entry {
+    string key = 1;
+    string value = 2;
+}
+
+message EntryList {
+    repeated Entry entry = 1;
+}
+
+message EmulatorStatus {
+    // The emulator version string.
+    string version = 1;
+
+    // The time the emulator has been active in .ms
+    uint64 uptime = 2;
+
+    // True if the device has completed booting.
+    // For P and later this information will accurate,
+    // for older images we rely on adb.
+    bool booted = 3;
+
+    // The current vm configuration
+    VmConfiguration vmConfig = 4;
+
+    // Use platformConfig instead
+    EntryList hardwareConfig = 5 [deprecated = true];
+
+    // Some guests will produce a heart beat, that can be used to
+    // detect if the guest is active.
+    // This is a monotonically increasing number that gets incremented
+    // around once a second.
+    uint64 heartbeat = 6;
+
+    // The configuration of services in the guest, this map
+    // contains key value pairs that are specific to the image
+    // used by the guest.
+    map<string, string> guestConfig = 7;
+
+    // Configuration of the emulator hardware
+    map<string, string> platformConfig = 8;
+}
+
+message AudioFormat {
+    enum SampleFormat {
+        AUD_FMT_U8 = 0;   // Unsigned 8 bit
+        AUD_FMT_S16 = 1;  // Signed 16 bit (little endian)
+    }
+
+    enum Channels {
+        Mono = 0;
+        Stereo = 1;
+    }
+
+    enum DeliveryMode {
+        // The audio queue will block and wait until the emulator requests
+        // packets. The client does not have to throttle and can push packets at
+        // will. This can result in the client falling behind.
+        MODE_UNSPECIFIED = 0;
+        // Audio packets will be delivered in real time (when possible). The
+        // audio queue will be overwritten with incoming data if data is made
+        // available. This means the client needs to control timing properly, or
+        // packets will get overwritten.
+        MODE_REAL_TIME = 1;  //
+    }
+    // Sampling rate to use, defaulting to 44100 if this is not set.
+    // Note, that android devices typically will not use a sampling
+    // rate higher than 48kHz. See
+    // https://developer.android.com/ndk/guides/audio.
+    uint64 samplingRate = 1;
+    Channels channels = 2;
+    SampleFormat format = 3;
+
+    // [Input Only]
+    // The mode used when delivering audio packets.
+    DeliveryMode mode = 4;
+}
+
+message AudioPacket {
+    AudioFormat format = 1;
+
+    // Unix epoch in us when this frame was captured.
+    uint64 timestamp = 2;
+
+    // Contains a sample in the given audio format.
+    bytes audio = 3;
+}
+
+message MicrophoneState {
+    // Whether or not host microphone access is enabled
+    bool realAudioEnabled = 1;
+}
+
+message SmsMessage {
+    // The source address where this message came from.
+    //
+    // The address should be a valid GSM-formatted address as specified by
+    // 3GPP 23.040 Sec 9.1.2.5.
+    //
+    // For example: +3106225412 or (650) 555-1221
+    string srcAddress = 1;
+
+    // A utf8 encoded text message that should be delivered.
+    string text = 2;
+}
+
+// A DisplayConfiguration describes a primary or secondary
+// display available to the emulator. The screen aspect ratio
+// cannot be longer (or wider) than 21:9 (or 9:21). Screen sizes
+// larger than 4k will be rejected.
+//
+// Common configurations (w x h) are:
+// - 480p  (480x720)   142 dpi
+// - 720p  (720x1280)  213 dpi
+// - 1080p (1080x1920) 320 dpi
+// - 4K  (2160x3840) 320 dpi
+// - 4K  (2160x3840) 640 dpi (upscaled)
+//
+// The behavior of the virtual display depends on the flags that are provided to
+// this method. By default, virtual displays are created to be private,
+// non-presentation and unsecure.
+message DisplayConfiguration {
+    // These are the set of known android flags and their respective values.
+    // you can combine the int values to (de)construct the flags field below.
+    enum DisplayFlags {
+        DISPLAYFLAGS_UNSPECIFIED = 0;
+
+        // When this flag is set, the virtual display is public.
+        // A public virtual display behaves just like most any other display
+        // that is connected to the system such as an external or wireless
+        // display. Applications can open windows on the display and the system
+        // may mirror the contents of other displays onto it. see:
+        // https://developer.android.com/reference/android/hardware/display/DisplayManager#VIRTUAL_DISPLAY_FLAG_PUBLIC
+        VIRTUAL_DISPLAY_FLAG_PUBLIC = 1;
+
+        // When this flag is set, the virtual display is registered as a
+        // presentation display in the presentation display category.
+        // Applications may automatically project their content to presentation
+        // displays to provide richer second screen experiences.
+        // https://developer.android.com/reference/android/hardware/display/DisplayManager#VIRTUAL_DISPLAY_FLAG_PRESENTATION
+        VIRTUAL_DISPLAY_FLAG_PRESENTATION = 2;
+
+        // When this flag is set, the virtual display is considered secure as
+        // defined by the Display#FLAG_SECURE display flag. The caller promises
+        // to take reasonable measures, such as over-the-air encryption, to
+        // prevent the contents of the display from being intercepted or
+        // recorded on a persistent medium.
+        // see:
+        // https://developer.android.com/reference/android/hardware/display/DisplayManager#VIRTUAL_DISPLAY_FLAG_SECURE
+        VIRTUAL_DISPLAY_FLAG_SECURE = 4;
+
+        // This flag is used in conjunction with VIRTUAL_DISPLAY_FLAG_PUBLIC.
+        // Ordinarily public virtual displays will automatically mirror the
+        // content of the default display if they have no windows of their own.
+        // When this flag is specified, the virtual display will only ever show
+        // its own content and will be blanked instead if it has no windows. See
+        // https://developer.android.com/reference/android/hardware/display/DisplayManager#VIRTUAL_DISPLAY_FLAG_OWN_CONTENT_ONLY
+        VIRTUAL_DISPLAY_FLAG_OWN_CONTENT_ONLY = 8;
+
+        // Allows content to be mirrored on private displays when no content is
+        // being shown.
+        // This flag is mutually exclusive with
+        // VIRTUAL_DISPLAY_FLAG_OWN_CONTENT_ONLY. If both flags are specified
+        // then the own-content only behavior will be applied.
+        // see:
+        // https://developer.android.com/reference/android/hardware/display/DisplayManager#VIRTUAL_DISPLAY_FLAG_AUTO_MIRROR)
+        VIRTUAL_DISPLAY_FLAG_AUTO_MIRROR = 16;
+    }
+
+    // The width of the display, restricted to:
+    // 320 * (dpi / 160) <= width
+    uint32 width = 1;
+
+    // The heigh of the display, restricted to:
+    // * 320 * (dpi / 160) <= height
+    uint32 height = 2;
+
+    // The pixel density (dpi).
+    // See https://developer.android.com/training/multiscreen/screendensities
+    // for details. This value should be in the range [120, ..., 640]
+    uint32 dpi = 3;
+
+    // A combination of virtual display flags. These flags can be constructed
+    // by combining the DisplayFlags enum described above.
+    //
+    // The behavior of the virtual display depends on the flags. By default
+    // virtual displays are created to be private, non-presentation and
+    // unsecure.
+    uint32 flags = 4;
+
+    // The id of the display.
+    // The primary (default) display has the display ID of 0.
+    // A secondary display has a display ID not 0.
+    //
+    // A display with the id in the range [1, userConfigurable]
+    // can be modified. See DisplayConfigurations below for details.
+    //
+    // The id can be used to get or stream a screenshot.
+    uint32 display = 5;
+}
+// Provides information about all the displays that can be attached
+// to the emulator. The emulator will always have at least one display.
+//
+// The emulator usually has the following display configurations:
+// 0:      The default display.
+// 1 - 3:  User configurable displays. These can be added/removed.
+//         For example the standalone emulator allows you to modify these
+//         in the extended controls.
+// 6 - 11: Fixed external displays. For example Android Auto uses fixed
+//         displays in this range.
+message DisplayConfigurations {
+    repeated DisplayConfiguration displays = 1;
+
+    // Display configurations with id [1, userConfigurable] are
+    // user configurable, that is they can be added, removed or
+    // updated.
+    uint32 userConfigurable = 2;
+
+    // The maximum number of attached displays this emulator supports.
+    // This is the total number of displays that can be attached to
+    // the emulator.
+    //
+    // Note: A display with an id that is larger than userConfigurable cannot
+    // be modified.
+    uint32 maxDisplays = 3;
+}
+
+message Notification {
+    // Detailed notification information.
+    oneof type {
+        CameraNotification cameraNotification = 2;
+        DisplayConfigurationsChangedNotification
+                displayConfigurationsChangedNotification = 3;
+        Posture posture = 4;
+        BootCompletedNotification booted = 5;
+        BrightnessValue brightness = 6;
+
+        // This notification is sent when a TextView receives or loses focus.
+        // It is also sent immediately in response to the streamNotification
+        // call.
+        TextViewFocus textViewFocus = 7;
+        // This notification is sent when XrOptions change.
+        // It is also sent immediately in response to the streamNotification
+        // call.
+        XrOptions xrOptions = 8;
+        MicrophoneState microphoneState = 9;
+    }
+}
+
+message BootCompletedNotification {
+    // The time in milliseconds it took for the boot to complete.
+    // Note that this value can be 0 when you are loading from a snapshot.
+    int32 time = 1;
+}
+
+// Fired when the virtual scene camera is activated or deactivated and also in
+// response to the streamNotification call.
+message CameraNotification {
+    // Indicates whether the camera app was activated or deactivated.
+    bool active = 1;
+    // The display the camera app is associated with.
+    int32 display = 2;
+}
+
+message TextViewFocus {
+    // Indicates whether a text view currently has focus.
+    bool textViewHasFocus = 1;
+
+    // If a text view has focus, the display where the text view is located.
+    // Otherwise, unset.
+    int32 display = 2;
+}
+
+// Fired when an update to a display event has been fired through the extended
+// ui. This does not fire events when the display is changed through the console
+// or the gRPC endpoint.
+message DisplayConfigurationsChangedNotification {
+    DisplayConfigurations displayConfigurations = 1;
+}
+
+message RotationRadian {
+    // Components of the rotation vector in radians.
+    // Rotation angles are relative to the current orientation.
+    float x = 1;  // Angle of rotation around the x axis in right-handed direction.
+    float y = 2;  // Angle of rotation around the y axis in right-handed direction.
+    float z = 3;  // Angle of rotation around the z axis in right-handed direction.
+}
+
+message Translation {
+    // Components of the translation vector in meters.
+    float delta_x = 1;
+    float delta_y = 2;
+    float delta_z = 3;
+}
+
+message AngularVelocity {
+    // Components of the target angular velocity vector in radians per second.
+    // Transition to these values is implementation dependent, and may be
+    // smoothed over time.
+    float omega_x = 1;
+    float omega_y = 2;
+    float omega_z = 3;
+}
+
+message Velocity {
+    // Components of the target velocity vector in meters per second.
+    // Transition to these values is implementation dependent, and may be
+    // smoothed over time.
+    float x = 1;
+    float y = 2;
+    float z = 3;
+}
+
+// Must follow the definition in "external/qemu/android/hw-sensors.h"
+message Posture {
+    enum PostureValue {
+        POSTURE_UNKNOWN = 0;
+        POSTURE_CLOSED = 1;
+        POSTURE_HALF_OPENED = 2;
+        POSTURE_OPENED = 3;
+        POSTURE_FLIPPED = 4;
+        POSTURE_TENT = 5;
+        POSTURE_MAX = 6;
+    }
+    PostureValue value = 3;
+}
+
+message PhoneNumber {
+    //
+    // The phone number should be a valid GSM-formatted number as specified by
+    // 3GPP 23.040 Sec 9.1.2.5.
+    //
+    // For example: +3106225412 or (650) 555-1221
+    string number = 1;
+}
+
+// Specifies environment background for AI glasses.
+message Environment {
+   // Key/value pairs corresponing to the contents of the environment.ini file.
+   // An empty map means no environment.
+   map<string, string> environment = 1;
+}

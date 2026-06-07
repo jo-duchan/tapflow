@@ -35,6 +35,7 @@
   "files": [
     "dist",
     "bin",
+    "proto",
     "README.md",
     "LICENSE"
   ],
@@ -52,6 +53,8 @@
     "download-scrcpy-server": "node scripts/download-scrcpy-server.mjs"
   },
   "dependencies": {
+    "@grpc/grpc-js": "^1.14.4",
+    "@grpc/proto-loader": "^0.8.1",
     "@tapflowio/agent-core": "workspace:*",
     "ws": "^8.0.0"
   },
