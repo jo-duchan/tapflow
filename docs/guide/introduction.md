@@ -43,7 +43,7 @@ flowchart TD
 - **iOS** Simulator: H.264 stream (~30 fps; JPEG fallback on older browsers)
 - **Android** Emulator: H.264 stream (~30 fps)
 
-Visual quality and latency may differ between the two.
+Visual quality and latency may differ between the two. Resolution and decoder adapt to each viewer's connection — see [Streaming Quality](/guide/streaming).
 :::
 
 ## Key concepts

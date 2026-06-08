@@ -6,7 +6,6 @@
 - 대시보드 사용자: 세션 쿠키 (`tapflow_token`, 로그인 시 자동 설정)
 - CI/CD 스크립트: `Authorization: Bearer tflw_pat_<token>` 헤더
 
----
 
 ## 에러 응답
 
@@ -23,7 +22,6 @@
 
 삭제 성공은 `204`에 본문 없이 반환됩니다.
 
----
 
 ## 인증 (Auth)
 
@@ -45,7 +43,6 @@ Body (JSON):
 
 계정이 이미 존재하면 `403 { "error": "Already initialized" }`를 반환합니다.
 
----
 
 ### `POST /api/v1/auth/login`
 
@@ -63,7 +60,6 @@ Body (JSON):
 { "ok": true, "role": "Admin" }
 ```
 
----
 
 ### `POST /api/v1/auth/logout`
 
@@ -75,7 +71,6 @@ Body (JSON):
 { "ok": true }
 ```
 
----
 
 ### `GET /api/v1/auth/me`
 
@@ -93,7 +88,6 @@ Body (JSON):
 }
 ```
 
----
 
 ### `POST /api/v1/auth/change-password`
 
@@ -111,7 +105,6 @@ Body (JSON):
 { "ok": true }
 ```
 
----
 
 ## 초대 (Invitations)
 
@@ -132,7 +125,6 @@ Query:
 
 만료되었거나 존재하지 않으면 `410`을 반환합니다.
 
----
 
 ### `POST /api/v1/invitations/accept`
 
@@ -155,7 +147,6 @@ File:
 { "ok": true }
 ```
 
----
 
 ## 비밀번호 재설정
 
@@ -176,7 +167,6 @@ Query:
 
 만료되었으면 `410`을 반환합니다.
 
----
 
 ### `POST /api/v1/auth/reset-password`
 
@@ -194,7 +184,6 @@ Body (JSON):
 { "ok": true }
 ```
 
----
 
 ### `POST /api/v1/team/members/:id/send-reset`
 
@@ -208,7 +197,6 @@ Body (JSON):
 
 SMTP가 설정되지 않은 경우 `emailSent: false`가 반환되며, 재설정 링크는 Admin이 직접 공유해야 합니다.
 
----
 
 ## 앱 (Apps)
 
@@ -237,7 +225,6 @@ SMTP가 설정되지 않은 경우 `emailSent: false`가 반환되며, 재설정
 }
 ```
 
----
 
 ### `POST /api/v1/apps`
 
@@ -256,7 +243,6 @@ Body (JSON):
 { "id": 7, "ok": true }
 ```
 
----
 
 ### `PATCH /api/v1/apps/:id`
 
@@ -273,7 +259,6 @@ Body (JSON):
 { "ok": true }
 ```
 
----
 
 ### `DELETE /api/v1/apps/:id`
 
@@ -285,7 +270,6 @@ Body (JSON):
 { "ok": true }
 ```
 
----
 
 ## 빌드 (Builds)
 
@@ -324,7 +308,6 @@ Fields:
 }
 ```
 
----
 
 ### `GET /api/v1/builds`
 
@@ -351,7 +334,6 @@ Query:
 }
 ```
 
----
 
 ### `GET /api/v1/builds/:id`
 
@@ -374,7 +356,6 @@ Query:
 }
 ```
 
----
 
 ### `PATCH /api/v1/builds/:id`
 
@@ -392,7 +373,6 @@ Body (JSON):
 { "ok": true }
 ```
 
----
 
 ## 댓글 (Comments)
 
@@ -422,7 +402,6 @@ Query:
 ]
 ```
 
----
 
 ### `POST /api/v1/comments`
 
@@ -449,7 +428,6 @@ File:
 }
 ```
 
----
 
 ### `DELETE /api/v1/comments/:id`
 
@@ -457,7 +435,6 @@ File:
 
 **응답 `204`** (본문 없음)
 
----
 
 ## 팀 (Team)
 
@@ -479,7 +456,6 @@ File:
 ]
 ```
 
----
 
 ### `POST /api/v1/team/invite`
 
@@ -499,7 +475,6 @@ Body (JSON):
 
 SMTP가 설정되지 않은 경우 `emailSent: false`가 반환됩니다. `token` 값을 사용해 `<relay-url>/invite?token=<token>` 링크를 직접 공유하세요.
 
----
 
 ### `PATCH /api/v1/team/members/:id`
 
@@ -516,7 +491,6 @@ Body (JSON):
 { "ok": true }
 ```
 
----
 
 ### `DELETE /api/v1/team/members/:id`
 
@@ -524,7 +498,6 @@ Body (JSON):
 
 **응답 `204`** (본문 없음)
 
----
 
 ## 토큰 (Personal Access Tokens)
 
@@ -547,7 +520,6 @@ PAT 목록을 반환합니다.
 ]
 ```
 
----
 
 ### `POST /api/v1/tokens`
 
@@ -565,7 +537,6 @@ Body (JSON):
 { "token": "tflw_pat_abc123..." }
 ```
 
----
 
 ### `DELETE /api/v1/tokens/:id`
 
@@ -573,7 +544,6 @@ PAT를 즉시 무효화합니다.
 
 **응답 `204`** (본문 없음)
 
----
 
 ## 프로필 (Profile)
 
@@ -596,7 +566,6 @@ File:
 { "ok": true }
 ```
 
----
 
 ## 설정 (Settings)
 
@@ -610,7 +579,6 @@ File:
 { "team_name": "My Team", "logo_url": "..." }
 ```
 
----
 
 ### `PATCH /api/v1/settings`
 
@@ -631,7 +599,6 @@ File:
 { "ok": true }
 ```
 
----
 
 ## 녹화 (Recordings)
 
@@ -655,7 +622,6 @@ File:
 { "url": "/api/v1/recordings/abc123.webm" }
 ```
 
----
 
 ### `GET /api/v1/recordings`
 
@@ -682,13 +648,11 @@ Query:
 ]
 ```
 
----
 
 ### `GET /api/v1/recordings/:filename`
 
 녹화 파일을 다운로드합니다. 만료된 파일은 `404`를 반환합니다.
 
----
 
 ## 에이전트 (Agents)
 
@@ -702,7 +666,6 @@ Query:
 ["mac-mini-office", "mac-mini-lab"]
 ```
 
----
 
 ### `GET /api/v1/agents/:name/resources`
 
@@ -723,7 +686,6 @@ Query:
 
 데이터는 1분마다 샘플링되며 30일간 보관됩니다.
 
----
 
 ## 로그 (Logs)
 

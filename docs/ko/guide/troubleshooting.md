@@ -8,20 +8,6 @@
 2. `--relay` 옵션의 URL이 `ws://`인지 확인합니다. 에이전트는 항상 내부 네트워크로 연결합니다.
 3. `tapflow doctor`를 실행해 환경을 점검합니다.
 
-### 리버스 프록시(nginx 등) 사용 시 연결이 끊김
-
-tapflow는 에이전트와 브라우저 모두 WebSocket을 사용합니다. nginx 등의 리버스 프록시는 기본적으로 HTTP upgrade를 처리하지 않습니다.
-
-nginx 설정에 아래 헤더가 포함되어 있는지 확인합니다:
-
-```nginx
-proxy_set_header Upgrade $http_upgrade;
-proxy_set_header Connection "upgrade";
-proxy_read_timeout 3600s;
-```
-
-설정 예시는 [릴레이 배포](/ko/guide/self-hosting#nginx-예시)를 참고하세요.
-
 ## iOS 시뮬레이터 서비스 버전 불일치 {#ios-simulator-service-version-mismatch}
 
 Xcode를 업데이트한 후 다음과 같은 macOS 알림이 표시될 수 있습니다:
@@ -199,7 +185,7 @@ export PATH=$PATH:$ANDROID_HOME/platform-tools
 - 대시보드 **Mac Resources** 탭에서 해당 Mac의 CPU·RAM 사용량을 확인합니다.
 - 한 Mac에서 동시에 실행하는 디바이스 수를 줄입니다.
 
-**LAN에서 스트림이 흐릿하거나 해상도가 낮게 보이는 경우:** 비보안 HTTP 연결에서 tapflow는 WASM 디코더 부하를 줄이기 위해 스트림을 1280px(가장 긴 변)로 제한합니다. 시뮬레이터 원본 해상도로 스트리밍하려면 릴레이를 HTTPS로 제공하세요 — [릴레이 배포](/ko/guide/self-hosting) 참고. HTTPS 없이 제한값만 높이려면 에이전트에서 `TAPFLOW_MAX_SIZE_LAN` 환경변수를 설정합니다 — [스트림 품질](/ko/guide/agent#스트림-품질) 참고.
+**LAN에서 스트림이 흐릿하거나 해상도가 낮게 보이는 경우:** 평문 HTTP의 LAN 연결은 **Standard** 프로파일을 사용하며, WASM 디코더의 반응성을 유지하기 위해 스트림을 1280px(가장 긴 변)로 제한합니다. 시뮬레이터 원본 해상도로 스트리밍하려면 릴레이를 HTTPS로 제공하세요 — 그러면 **Sharp** 프로파일(하드웨어 디코딩, 원본 해상도)로 전환됩니다. [릴레이 배포](/ko/guide/self-hosting) 참고. HTTPS 없이 제한값만 높이려면 에이전트에서 `TAPFLOW_MAX_SIZE_LAN` 환경변수를 설정합니다 — [스트림 품질](/ko/guide/streaming) 참고.
 
 ## 인증 관련
 

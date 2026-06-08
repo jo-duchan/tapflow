@@ -22,7 +22,7 @@ tapflow agent start --relay ws://192.168.x.x:4000
 | `--device` | first booted simulator | iOS Simulator name or UDID |
 
 ::: tip Keep the agent and relay on the same network
-The agent streams video frames to the relay continuously. For the best streaming quality, run the agent and relay on the same Mac or the same LAN. Connecting across different networks increases latency and may cause frame drops.
+The agent streams video frames to the relay continuously, so it must sit on the same LAN as the relay over a stable connection — **wired Ethernet is recommended**, Wi-Fi is fine if the signal is steady. Connecting across different networks, or over an unstable link, increases latency and causes frame drops.
 :::
 
 ## iOS
@@ -50,7 +50,7 @@ Common
   ✓ Node v20.x
 
 iOS
-  ✓ Xcode 16.2
+  ✓ Xcode 26.0
   ✓ xcrun simctl
   ✓ Simulator booted: iPhone 16 Pro
 ```
@@ -90,26 +90,4 @@ See [Troubleshooting](/guide/troubleshooting) for more detailed solutions.
 
 ## Stream quality
 
-tapflow automatically picks a stream resolution based on your browser's connection context:
-
-| Connection | Resolution cap | Decoder |
-|------------|---------------|---------|
-| Secure (localhost / LAN HTTPS) | native | WebCodecs (hardware) |
-| LAN HTTP | 1280 px longest side | WASM |
-| External | 1000 px longest side | WASM |
-
-On a **secure context** (localhost or HTTPS), the browser uses WebCodecs to decode H.264 in hardware — full simulator resolution with minimal CPU cost. On a non-secure LAN HTTP connection, the stream falls back to a software WASM decoder; tapflow caps the resolution at 1280 px to keep decode overhead manageable.
-
-To get the sharpest stream on a shared LAN, **serve the relay over HTTPS** — see [Self-Hosting the Relay](/guide/self-hosting). Browsers on HTTPS switch to hardware decoding at native resolution automatically.
-
-### Override environment variables
-
-Set these on the Mac running the agent to override the defaults.
-
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `TAPFLOW_MAX_SIZE` | *(per tier)* | Cap for all platforms (px, longest side). `0` forces native resolution on all connections. |
-| `TAPFLOW_MAX_SIZE_LAN` | `1280` | LAN HTTP cap. |
-| `TAPFLOW_MAX_SIZE_EXTERNAL` | `1000` | External connection cap. |
-| `TAPFLOW_IOS_MAX_SIZE` | *(per tier)* | iOS-specific override. Takes precedence over `TAPFLOW_MAX_SIZE`. |
-| `TAPFLOW_ANDROID_MAX_SIZE` | *(per tier)* | Android-specific override. Takes precedence over `TAPFLOW_MAX_SIZE`. |
+Resolution and decoder are chosen automatically per viewer connection — tapflow streams in a **Standard**, **Sharp**, or **Remote** profile depending on how each viewer reaches the relay. See [Streaming Quality](/guide/streaming) for the profiles and how to tune them.

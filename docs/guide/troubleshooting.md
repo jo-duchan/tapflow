@@ -8,20 +8,6 @@
 2. Check that the URL in the `--relay` option uses `ws://` — agents always connect over the local network.
 3. Run `tapflow doctor` to inspect your environment.
 
-### Connection drops when using a reverse proxy (nginx, etc.)
-
-tapflow uses WebSocket for both the agent and the browser. nginx and similar reverse proxies do not handle HTTP upgrade by default.
-
-Verify these headers are present in your nginx config:
-
-```nginx
-proxy_set_header Upgrade $http_upgrade;
-proxy_set_header Connection "upgrade";
-proxy_read_timeout 3600s;
-```
-
-See the configuration example in [Self-Hosting the Relay](/guide/self-hosting#nginx-example).
-
 ## iOS Simulator service version mismatch {#ios-simulator-service-version-mismatch}
 
 After updating Xcode, you may see a macOS alert:
@@ -199,7 +185,7 @@ Sessions auto-close after 30 minutes of inactivity. This timeout cannot be chang
 - Check CPU and RAM usage for the affected Mac in the **Mac Resources** tab.
 - Reduce the number of simulators running simultaneously on one Mac.
 
-**Blurry or low-resolution stream on LAN:** On non-secure HTTP connections, tapflow caps the stream at 1280 px (longest side) to keep WASM decoder load manageable. To stream at the simulator's native resolution, serve the relay over HTTPS — see [Self-Hosting the Relay](/guide/self-hosting). You can also raise the cap without HTTPS by setting `TAPFLOW_MAX_SIZE_LAN` on the agent; see [Stream quality](/guide/agent#stream-quality).
+**Blurry or low-resolution stream on LAN:** A plain-HTTP LAN connection uses the **Standard** profile, which caps the stream at 1280 px (longest side) so the WASM decoder stays responsive. To stream at the simulator's native resolution, serve the relay over HTTPS — that moves you to the **Sharp** profile (hardware decoding, native resolution). See [Self-Hosting the Relay](/guide/self-hosting). You can also raise the cap without HTTPS by setting `TAPFLOW_MAX_SIZE_LAN` on the agent; see [Streaming Quality](/guide/streaming).
 
 ## Auth issues
 

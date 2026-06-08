@@ -53,7 +53,7 @@ tapflow가 제공하는 보호 범위와 여러분이 직접 관리해야 하는
 - relay가 실행되는 Mac의 OS 및 네트워크 보안
 - WAN 구간 TLS (reverse proxy 또는 터널 설정)
 - relay 서버에 대한 네트워크 접근 제어 (방화벽, VPN 등)
-- `tapflow.config.json`의 `jwtSecret` 등 환경 변수 관리
+- 릴레이에서 사용하는 `JWT_SECRET` 등 환경변수 관리
 
 ::: tip 내부 네트워크 전용으로 운영하는 경우
 relay를 내부 LAN에서만 접근 가능하게 구성하면 WAN 구간 TLS 없이도 운영할 수 있습니다. 팀원 전체가 같은 네트워크(오피스 Wi-Fi, VPN)를 사용하는 경우에 적합합니다.
