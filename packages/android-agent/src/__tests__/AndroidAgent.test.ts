@@ -60,12 +60,42 @@ vi.mock('../EmulatorLauncher', () => ({
   }) }),
 }))
 
-import { WebSocket } from 'ws'
+// gRPC backend mocks (emulator host-encode path). Inert for the scrcpy-pinned tests; exercised by
+// the 'gRPC backend' describe, which unpins TAPFLOW_ANDROID_BACKEND.
+let grpcStartError: Error | null = null
+let grpcFramesController: ReadableStreamDefaultController<ScrcpyFrame> | null = null
+
+vi.mock('../emulator/EmulatorGrpcClient', () => ({
+  EmulatorGrpcClient: vi.fn(function () { return ({
+    close: vi.fn(),
+    touchDown: vi.fn(), touchMove: vi.fn(), touchUp: vi.fn(),
+    pinchStart: vi.fn(), pinchMove: vi.fn(), pinchEnd: vi.fn(),
+  }) }),
+}))
+
+vi.mock('../emulator/EmulatorVideo', () => ({
+  EmulatorVideo: vi.fn(function () { return ({
+    start: vi.fn().mockImplementation(() => {
+      const err = grpcStartError
+      grpcStartError = null
+      return err
+        ? Promise.reject(err)
+        : Promise.resolve({ width: 1080, height: 2400, cornerRadius: 0 })
+    }),
+    frames: vi.fn(() => new ReadableStream<ScrcpyFrame>({ start(c) { grpcFramesController = c } })),
+    requestIdr: vi.fn(),
+    stop: vi.fn(),
+  }) }),
+}))
+
+import { WebSocket, WebSocketServer } from 'ws'
 import { RelayServer, initDb, closeDb } from '@tapflowio/relay'
 import { hasEnvelope, readEnvelopeFlags, CODEC_H264, CODEC_JPEG } from '@tapflowio/agent-core/utils'
-import { AndroidAgent } from '../AndroidAgent'
+import { AndroidAgent, pickAndroidBackend, parseSpsFromNal } from '../AndroidAgent'
 import { AdbWrapper } from '../AdbWrapper'
 import { ScrcpySession } from '../scrcpy/ScrcpySession'
+import { EmulatorVideo } from '../emulator/EmulatorVideo'
+import { EmulatorGrpcClient } from '../emulator/EmulatorGrpcClient'
 import type { ScrcpyControl } from '../scrcpy/ScrcpyControl'
 import type { ScrcpyFrame } from '../scrcpy/ScrcpyVideo'
 import type { AdbRunner } from '../adb'
@@ -74,7 +104,13 @@ import type { AdbRunner } from '../adb'
 interface TestState {
   restarting: boolean
   scrcpySession: { control: ScrcpyControl } | null
+  emulatorVideo: unknown | null
+  grpcClient: unknown | null
   streamWs: WebSocket | null
+  touchHelper: { pressButton: (name: string) => void } | null
+  videoWidth: number
+  videoHeight: number
+  landscape: boolean
 }
 
 // Test-only view of AndroidAgent internals (device state + reconnect fields are private).
@@ -357,6 +393,12 @@ describe('AndroidAgent', () => {
     }
 
     beforeEach(async () => {
+      // Reset the module-level mock state to a clean slate *before* booting, so any async work
+      // that settled late from a previous test (a leaked pump/restart) can't carry stale values in.
+      scrcpyCloseOnCreate = false
+      scrcpyStartError = null
+      scrcpyStreamController = null
+
       agent = new AndroidAgent({}, mockAdb(true))
       await agent.connect(`ws://localhost:${port}`)
 
@@ -366,13 +408,20 @@ describe('AndroidAgent', () => {
       await waitForType(browser, 'session:joined')
     })
 
-    afterEach(() => {
+    afterEach(async () => {
       vi.useRealTimers()
+      // disconnect() clears deviceStates, so any in-flight auto-restart hits its
+      // `deviceStates.has(...)` guard and returns without spawning a new scrcpy session — this is
+      // what neutralizes the pump→restart chain instead of letting it bleed into the next test.
+      agent.disconnect()
+      browser.close()
+      // End the active video stream so its pump loop resolves now, then let pending microtasks +
+      // timer callbacks drain on the real clock before the next test starts from a clean slate.
+      try { scrcpyStreamController?.close() } catch { /* already closed by the test or the mock */ }
+      await new Promise((r) => setImmediate(r))
       scrcpyCloseOnCreate = false
       scrcpyStartError = null
       scrcpyStreamController = null
-      agent.disconnect()
-      browser.close()
     })
 
     describe('pump exit guard', () => {
@@ -440,9 +489,14 @@ describe('AndroidAgent', () => {
           if (Buffer.isBuffer(d) && hasEnvelope(d)) flags.push(readEnvelopeFlags(d))
         })
 
+        // The stream controller is assigned during startVideoStream; wait for it before enqueueing
+        // so this test never reads it mid-(re)start when it is transiently null.
+        await vi.waitFor(() => expect(scrcpyStreamController).not.toBeNull(), { timeout: 1000 })
+        const controller = scrcpyStreamController!
+
         // A keyframe access unit (SPS+PPS merged) followed by a P-frame access unit.
-        scrcpyStreamController!.enqueue({ payload: Buffer.from([0x67, 0x42, 0xc0, 0x1f, 0x65, 0x88]), keyframe: true })
-        scrcpyStreamController!.enqueue({ payload: Buffer.from([0x41, 0x9a, 0x00, 0x20]), keyframe: false })
+        controller.enqueue({ payload: Buffer.from([0x67, 0x42, 0xc0, 0x1f, 0x65, 0x88]), keyframe: true })
+        controller.enqueue({ payload: Buffer.from([0x41, 0x9a, 0x00, 0x20]), keyframe: false })
 
         await vi.waitFor(() => expect(flags).toHaveLength(2), { timeout: 1000 })
         expect(flags[0]).toEqual({ codec: CODEC_H264, keyframe: true })
@@ -461,6 +515,9 @@ describe('AndroidAgent', () => {
         }))
         await waitForType(browser, 'device:ready')
 
+        // Wait for the scrcpy session to settle before reading it — guards against reading during a
+        // transient null window if a (re)start is still in flight.
+        await vi.waitFor(() => expect(getState().scrcpySession).not.toBeNull(), { timeout: 1000 })
         const control = getState().scrcpySession!.control
         expect(control.resetVideo).not.toHaveBeenCalled()
 
@@ -486,6 +543,10 @@ describe('AndroidAgent', () => {
           payload: { deviceId: 'avd:Pixel_8_API_34' },
         }))
         await waitForType(browser, 'device:ready')
+        // restartVideoStream bails early if the stream WS isn't OPEN. Its registration is a real
+        // relay round-trip that can lag device:ready under load, so wait for OPEN to make the
+        // precondition deterministic before any restart test reads it.
+        await vi.waitFor(() => expect(getState().streamWs?.readyState).toBe(WebSocket.OPEN), { timeout: 1000 })
         vi.clearAllMocks() // reset call counts; implementations remain
       })
 
@@ -585,5 +646,471 @@ describe('AndroidAgent', () => {
 
       agent.disconnect()
     })
+  })
+
+  // Input + misc relay-message handlers. Boot once over the scrcpy backend (pinned in beforeAll),
+  // then inject relay messages directly via handleRelayMessage and assert on the backend control /
+  // adb spies — the synchronous fire path means pointer calls land before the handler returns.
+  describe('relay message handlers', () => {
+    let agent: AndroidAgent
+    let adb: AdbWrapper
+    let browser: WebSocket
+
+    function getState(): TestState {
+      return internals(agent).deviceStates.values().next().value!
+    }
+
+    function inject(msg: Record<string, unknown>): void {
+      internals(agent).handleRelayMessage({ sessionId: agent.sessionId, ...msg })
+    }
+
+    beforeEach(async () => {
+      scrcpyCloseOnCreate = false
+      scrcpyStartError = null
+      scrcpyStreamController = null
+
+      adb = mockAdb(true)
+      agent = new AndroidAgent({}, adb)
+      await agent.connect(`ws://localhost:${port}`)
+
+      browser = new WebSocket(`ws://localhost:${port}`)
+      await waitForOpen(browser)
+      browser.send(JSON.stringify({ type: 'session:start', sessionId: agent.sessionId }))
+      await waitForType(browser, 'session:joined')
+
+      browser.send(JSON.stringify({
+        type: 'device:boot',
+        sessionId: agent.sessionId,
+        payload: { deviceId: 'avd:Pixel_8_API_34' },
+      }))
+      await waitForType(browser, 'device:ready')
+      // scrcpy mock reports a 1080×2400 display; touch coords map against these.
+      await vi.waitFor(() => expect(getState().scrcpySession).not.toBeNull(), { timeout: 1000 })
+      expect(getState().videoWidth).toBe(1080)
+      expect(getState().videoHeight).toBe(2400)
+    })
+
+    afterEach(async () => {
+      vi.useRealTimers()
+      agent.disconnect()
+      browser.close()
+      try { scrcpyStreamController?.close() } catch { /* already closed */ }
+      await new Promise((r) => setImmediate(r))
+      scrcpyStreamController = null
+    })
+
+    describe('input — touch', () => {
+      it('maps normalized touch:start to device px via scrcpy control', () => {
+        const control = getState().scrcpySession!.control
+        inject({ type: 'input:touch:start', payload: { x: 0.25, y: 0.75 } })
+        // 0.25*1080 = 270, 0.75*2400 = 1800
+        expect(control.touchDown).toHaveBeenCalledWith(0, 270, 1800)
+      })
+
+      it('maps touch:move to device px', () => {
+        const control = getState().scrcpySession!.control
+        inject({ type: 'input:touch:move', payload: { x: 0.5, y: 0.5 } })
+        expect(control.touchMove).toHaveBeenCalledWith(0, 540, 1200)
+      })
+
+      it('touch:end lifts at the last touched px', () => {
+        const control = getState().scrcpySession!.control
+        inject({ type: 'input:touch:start', payload: { x: 0.1, y: 0.2 } })
+        inject({ type: 'input:touch:end' })
+        // last px from start: 0.1*1080 = 108, 0.2*2400 = 480
+        expect(control.touchUp).toHaveBeenCalledWith(0, 108, 480)
+      })
+    })
+
+    describe('input — pinch', () => {
+      it('maps pinch:start two-finger coords to device px', () => {
+        const control = getState().scrcpySession!.control
+        inject({ type: 'input:pinch:start', payload: { f0: { x: 0.2, y: 0.3 }, f1: { x: 0.8, y: 0.9 } } })
+        // f0: (216, 720), f1: (864, 2160)
+        expect(control.pinchStart).toHaveBeenCalledWith(216, 720, 864, 2160)
+      })
+
+      it('maps pinch:move and pinch:end', () => {
+        const control = getState().scrcpySession!.control
+        inject({ type: 'input:pinch:move', payload: { f0: { x: 0.5, y: 0.5 }, f1: { x: 0.5, y: 0.5 } } })
+        expect(control.pinchMove).toHaveBeenCalledWith(540, 1200, 540, 1200)
+        inject({ type: 'input:pinch:end' })
+        expect(control.pinchEnd).toHaveBeenCalledOnce()
+      })
+    })
+
+    describe('input — rotate', () => {
+      it('toggles landscape and asks the device to rotate to canonical landscape (3)', () => {
+        const rotateSpy = vi.spyOn(adb, 'setRotation')
+        expect(getState().landscape).toBe(false)
+
+        inject({ type: 'input:rotate' })
+        expect(rotateSpy).toHaveBeenCalledWith('emulator-5554', 3)
+        expect(getState().landscape).toBe(true)
+      })
+
+      it('rotates back to portrait (0) on the second toggle', () => {
+        const rotateSpy = vi.spyOn(adb, 'setRotation')
+        inject({ type: 'input:rotate' })
+        inject({ type: 'input:rotate' })
+        expect(rotateSpy).toHaveBeenNthCalledWith(2, 'emulator-5554', 0)
+        expect(getState().landscape).toBe(false)
+      })
+    })
+
+    describe('input — button', () => {
+      it('forwards a named button press to the touch helper', () => {
+        const helper = getState().touchHelper!
+        inject({ type: 'input:button', payload: { name: 'home' } })
+        expect(helper.pressButton).toHaveBeenCalledWith('home')
+      })
+    })
+
+    describe('input — keyboard', () => {
+      it('sends a keyevent for a special key (Enter → 66)', () => {
+        const keyEvSpy = vi.spyOn(adb, 'sendKeyEvent')
+        inject({ type: 'input:key', payload: { code: 'Enter', modifiers: 0 } })
+        expect(keyEvSpy).toHaveBeenCalledWith('emulator-5554', '66')
+      })
+
+      it('types a lowercase character for a letter key with no shift', () => {
+        const inputSpy = vi.spyOn(adb, 'sendInput')
+        inject({ type: 'input:key', payload: { code: 'KeyA', modifiers: 0 } })
+        expect(inputSpy).toHaveBeenCalledWith('emulator-5554', 'text', 'a')
+      })
+
+      it('types an uppercase character when shift modifier is set', () => {
+        const inputSpy = vi.spyOn(adb, 'sendInput')
+        inject({ type: 'input:key', payload: { code: 'KeyA', modifiers: 0x02 } })
+        expect(inputSpy).toHaveBeenCalledWith('emulator-5554', 'text', 'A')
+      })
+
+      it('maps a shifted digit to its symbol (Digit1 + shift → !)', () => {
+        const inputSpy = vi.spyOn(adb, 'sendInput')
+        inject({ type: 'input:key', payload: { code: 'Digit1', modifiers: 0x02 } })
+        expect(inputSpy).toHaveBeenCalledWith('emulator-5554', 'text', '!')
+      })
+
+      it('keyboard:toggle is a client-side no-op (no adb side effect, no throw)', () => {
+        const keyEvSpy = vi.spyOn(adb, 'sendKeyEvent')
+        const inputSpy = vi.spyOn(adb, 'sendInput')
+        expect(() => inject({ type: 'input:keyboard:toggle' })).not.toThrow()
+        expect(keyEvSpy).not.toHaveBeenCalled()
+        expect(inputSpy).not.toHaveBeenCalled()
+      })
+    })
+
+    describe('input — no session', () => {
+      it('ignores touch input for an unknown session without throwing', () => {
+        expect(() =>
+          internals(agent).handleRelayMessage({ type: 'input:touch:start', sessionId: 'nope', payload: { x: 0.5, y: 0.5 } }),
+        ).not.toThrow()
+      })
+    })
+
+    describe('misc — device:shutdown', () => {
+      it('tears down the device and acks with device:shutdown-done', async () => {
+        const shutdownSpy = vi.spyOn(adb, 'shutdown')
+        const done = waitForType(browser, 'device:shutdown-done')
+        inject({ type: 'device:shutdown', payload: { deviceId: 'avd:Pixel_8_API_34' } })
+        const msg = await done
+        expect(msg['payload']).toMatchObject({ deviceId: 'avd:Pixel_8_API_34' })
+        expect(shutdownSpy).toHaveBeenCalledWith('emulator-5554')
+        expect(adb.getSerial('avd:Pixel_8_API_34')).toBeUndefined() // serial cleared
+      })
+    })
+
+    describe('misc — app:launch', () => {
+      it('launches the package and acks with app:launch-done', async () => {
+        const launchSpy = vi.spyOn(adb, 'launchApp')
+        const done = waitForType(browser, 'app:launch-done')
+        inject({ type: 'app:launch', payload: { bundleId: 'com.example.app' } })
+        await done
+        expect(launchSpy).toHaveBeenCalledWith('emulator-5554', 'com.example.app')
+      })
+    })
+
+    describe('misc — open-url', () => {
+      it('opens the URL on the device and acks with open-url:done', async () => {
+        const urlSpy = vi.spyOn(adb, 'openUrl')
+        const done = waitForType(browser, 'open-url:done')
+        inject({ type: 'open-url', payload: { url: 'https://example.com' } })
+        await done
+        expect(urlSpy).toHaveBeenCalledWith('emulator-5554', 'https://example.com')
+      })
+
+      it('reports open-url:error with the failure message when adb rejects', async () => {
+        vi.spyOn(adb, 'openUrl').mockRejectedValue(new Error('activity not found'))
+        const err = waitForType(browser, 'open-url:error')
+        inject({ type: 'open-url', payload: { url: 'https://example.com' } })
+        const msg = await err
+        expect(msg['message']).toBe('activity not found')
+      })
+    })
+
+    describe('misc — screenshot:request', () => {
+      // The relay routes screenshot:done back to a pending HTTP request by requestId (not to the
+      // session browser), so assert the agent's own outgoing reply on its relay socket.
+      it('captures a screenshot and replies with base64 data + requestId', async () => {
+        vi.spyOn(adb, 'screenshot').mockResolvedValue(Buffer.from('PNGDATA'))
+        const sendSpy = vi.spyOn(internals(agent).ws!, 'send')
+
+        inject({ type: 'screenshot:request', requestId: 'req-1', format: 'png' })
+
+        const sent = await vi.waitFor(() => {
+          const msg = sendSpy.mock.calls
+            .map((c) => JSON.parse(c[0] as string) as Record<string, unknown>)
+            .find((m) => m['type'] === 'screenshot:done')
+          expect(msg).toBeDefined()
+          return msg!
+        }, { timeout: 1000 })
+
+        expect(sent['requestId']).toBe('req-1')
+        expect(sent['format']).toBe('png')
+        expect(sent['data']).toBe(Buffer.from('PNGDATA').toString('base64'))
+      })
+    })
+  })
+
+  // gRPC host-encode backend (emulator default). Unpin the backend to 'grpc' so an emulator serial
+  // takes the gRPC path; the rest of the suite stays pinned to scrcpy via beforeAll.
+  describe('gRPC backend', () => {
+    let agent: AndroidAgent
+    let adb: AdbWrapper
+    let browser: WebSocket
+    let pinned: string | undefined
+
+    function getState(): TestState {
+      return internals(agent).deviceStates.values().next().value!
+    }
+
+    async function bootDevice(): Promise<void> {
+      browser = new WebSocket(`ws://localhost:${port}`)
+      await waitForOpen(browser)
+      browser.send(JSON.stringify({ type: 'session:start', sessionId: agent.sessionId }))
+      await waitForType(browser, 'session:joined')
+      browser.send(JSON.stringify({
+        type: 'device:boot',
+        sessionId: agent.sessionId,
+        payload: { deviceId: 'avd:Pixel_8_API_34' },
+      }))
+      await waitForType(browser, 'device:ready')
+    }
+
+    beforeEach(async () => {
+      pinned = process.env.TAPFLOW_ANDROID_BACKEND // live value (scrcpy, from the suite beforeAll)
+      process.env.TAPFLOW_ANDROID_BACKEND = 'grpc'
+      grpcStartError = null
+      grpcFramesController = null
+      scrcpyStreamController = null
+
+      adb = mockAdb(true)
+      vi.spyOn(adb, 'getScreenSize').mockResolvedValue({ width: 1080, height: 2400 })
+      agent = new AndroidAgent({}, adb)
+      await agent.connect(`ws://localhost:${port}`)
+    })
+
+    afterEach(async () => {
+      agent.disconnect()
+      browser?.close()
+      try { grpcFramesController?.close() } catch { /* already closed */ }
+      try { scrcpyStreamController?.close() } catch { /* already closed */ }
+      await new Promise((r) => setImmediate(r))
+      grpcStartError = null
+      grpcFramesController = null
+      scrcpyStreamController = null
+      if (pinned === undefined) delete process.env.TAPFLOW_ANDROID_BACKEND
+      else process.env.TAPFLOW_ANDROID_BACKEND = pinned
+    })
+
+    it('routes an emulator serial through the gRPC video path (no scrcpy session)', async () => {
+      await bootDevice()
+      await vi.waitFor(() => expect(getState().emulatorVideo).not.toBeNull(), { timeout: 1000 })
+
+      expect(vi.mocked(EmulatorVideo)).toHaveBeenCalled()
+      expect(vi.mocked(EmulatorGrpcClient)).toHaveBeenCalled()
+      expect(getState().grpcClient).not.toBeNull()
+      expect(getState().scrcpySession).toBeNull() // gRPC path never opens scrcpy
+      // native screen size from adb drives the touch-mapping dimensions
+      expect(getState().videoWidth).toBe(1080)
+      expect(getState().videoHeight).toBe(2400)
+    })
+
+    it('falls back to scrcpy when the gRPC video stream fails to start', async () => {
+      grpcStartError = new Error('emulator -grpc not available')
+
+      await bootDevice()
+      await vi.waitFor(() => expect(getState().scrcpySession).not.toBeNull(), { timeout: 1000 })
+
+      // gRPC was attempted then torn down, scrcpy took over so streaming still works.
+      expect(vi.mocked(EmulatorVideo)).toHaveBeenCalled()
+      expect(vi.mocked(ScrcpySession)).toHaveBeenCalled()
+      expect(getState().emulatorVideo).toBeNull()
+      expect(getState().grpcClient).toBeNull()
+    })
+  })
+})
+
+describe('pickAndroidBackend', () => {
+  it('honors TAPFLOW_ANDROID_BACKEND=scrcpy even for an emulator serial', () => {
+    expect(pickAndroidBackend('emulator-5554', { TAPFLOW_ANDROID_BACKEND: 'scrcpy' })).toBe('scrcpy')
+  })
+
+  it('honors TAPFLOW_ANDROID_BACKEND=grpc even for a real-device serial', () => {
+    expect(pickAndroidBackend('39021FDH2003ZZ', { TAPFLOW_ANDROID_BACKEND: 'grpc' })).toBe('grpc')
+  })
+
+  it('defaults an emulator-* serial to grpc when unset', () => {
+    expect(pickAndroidBackend('emulator-5556', {})).toBe('grpc')
+  })
+
+  it('defaults a real-device serial to scrcpy when unset', () => {
+    expect(pickAndroidBackend('39021FDH2003ZZ', {})).toBe('scrcpy')
+  })
+})
+
+describe('parseSpsFromNal', () => {
+  // Independent Exp-Golomb SPS writer — a separate implementation of the H.264 SPS bit layout, so
+  // the dimensions we assert come from the values WE encode, not from re-running the parser.
+  class SpsBuilder {
+    private bits: number[] = []
+    u(n: number, val: number): this {
+      for (let i = n - 1; i >= 0; i--) this.bits.push((val >> i) & 1)
+      return this
+    }
+    ue(val: number): this {
+      const code = val + 1
+      const nb = Math.floor(Math.log2(code))
+      for (let i = 0; i < nb; i++) this.bits.push(0)
+      for (let i = nb; i >= 0; i--) this.bits.push((code >> i) & 1)
+      return this
+    }
+    annexB(): Buffer {
+      const padded = [...this.bits]
+      while (padded.length % 8 !== 0) padded.push(0)
+      const body: number[] = []
+      for (let i = 0; i < padded.length; i += 8) {
+        let b = 0
+        for (let j = 0; j < 8; j++) b = (b << 1) | padded[i + j]!
+        body.push(b)
+      }
+      // 4-byte Annex B start code + NAL header byte (0x67 = ref_idc 3, type 7 = SPS)
+      return Buffer.concat([Buffer.from([0, 0, 0, 1, 0x67]), Buffer.from(body)])
+    }
+  }
+
+  // Common SPS prefix up to (and including) gaps_in_frame_num_value_allowed_flag for a baseline
+  // (profile_idc 66) stream — baseline skips the high-profile chroma_format block.
+  function baselineHead(b: SpsBuilder): SpsBuilder {
+    return b
+      .u(8, 66)    // profile_idc = 66 (baseline → no chroma block)
+      .u(8, 0xc0)  // constraint flags (consumed, value irrelevant)
+      .u(8, 31)    // level_idc
+      .ue(0)       // seq_parameter_set_id
+      .ue(0)       // log2_max_frame_num_minus4
+      .ue(0)       // pic_order_cnt_type = 0
+      .ue(0)       // log2_max_pic_order_cnt_lsb_minus4 (poc_type 0)
+      .ue(1)       // max_num_ref_frames
+      .u(1, 0)     // gaps_in_frame_num_value_allowed_flag
+  }
+
+  it('parses width/height from a 1280×720 baseline SPS (no cropping)', () => {
+    const sps = baselineHead(new SpsBuilder())
+      .ue(79)   // pic_width_in_mbs_minus1 → (79+1)*16 = 1280
+      .ue(44)   // pic_height_in_map_units_minus1 → (44+1)*16 = 720
+      .u(1, 1)  // frame_mbs_only_flag = 1
+      .u(1, 1)  // direct_8x8_inference_flag
+      .u(1, 0)  // frame_cropping_flag = 0
+      .annexB()
+
+    expect(parseSpsFromNal(sps)).toEqual({ width: 1280, height: 720 })
+  })
+
+  it('applies frame cropping (1920×1080 from a 1088-tall coded frame)', () => {
+    const sps = baselineHead(new SpsBuilder())
+      .ue(119)  // width → (119+1)*16 = 1920
+      .ue(67)   // map units → (67+1)*16 = 1088 coded height
+      .u(1, 1)  // frame_mbs_only_flag = 1
+      .u(1, 1)  // direct_8x8_inference_flag
+      .u(1, 1)  // frame_cropping_flag = 1
+      .ue(0).ue(0).ue(0) // crop left/right/top = 0
+      .ue(4)    // crop_bottom = 4 → 1088 - 4*2(subHeightC) = 1080
+      .annexB()
+
+    expect(parseSpsFromNal(sps)).toEqual({ width: 1920, height: 1080 })
+  })
+
+  it('returns null for a NAL with no Annex B start code', () => {
+    expect(parseSpsFromNal(Buffer.from([0x67, 0x42, 0xc0, 0x1f]))).toBeNull()
+  })
+
+  it('returns null for a non-SPS NAL unit (type ≠ 7)', () => {
+    // start code + 0x41 (nal_unit_type = 1, a P-slice) → not an SPS
+    expect(parseSpsFromNal(Buffer.from([0, 0, 0, 1, 0x41, 0x9a, 0x00]))).toBeNull()
+  })
+
+  it('returns null for a truncated SPS instead of throwing', () => {
+    // start code + SPS header but no dimension fields → bit reader runs out → caught → null
+    expect(parseSpsFromNal(Buffer.from([0, 0, 0, 1, 0x67]))).toBeNull()
+  })
+})
+
+describe('connect — error paths', () => {
+  let server: WebSocketServer
+  let url: string
+
+  async function startServer(onConnection: (ws: WebSocket) => void): Promise<void> {
+    server = new WebSocketServer({ port: 0 })
+    await new Promise<void>((r) => server.once('listening', r))
+    url = `ws://localhost:${(server.address() as { port: number }).port}`
+    server.on('connection', (ws) => onConnection(ws as unknown as WebSocket))
+  }
+
+  afterEach(async () => {
+    // A rejected handshake leaves the agent's raw socket open, which would block server.close();
+    // terminate any lingering clients first.
+    for (const client of server.clients) client.terminate()
+    await new Promise<void>((r) => server.close(() => r()))
+  })
+
+  it('rejects with a PlatformError when the handshake reply is not agent:registered', async () => {
+    await startServer((ws) => {
+      ws.on('message', () => ws.send(JSON.stringify({ type: 'agent:rejected' })))
+    })
+    const agent = new AndroidAgent({}, mockAdb())
+
+    await expect(agent.connect(url)).rejects.toThrow(/Unexpected message during handshake/)
+    agent.disconnect()
+  })
+
+  it('ignores a malformed (non-JSON) frame and keeps handling subsequent messages', async () => {
+    let serverWs: WebSocket
+    await startServer((ws) => {
+      serverWs = ws
+      ws.on('message', (data) => {
+        const msg = JSON.parse(data.toString())
+        if (msg.type === 'agent:register') {
+          ws.send(JSON.stringify({ type: 'agent:registered', registeredSessions: [] }))
+        }
+      })
+    })
+    const agent = new AndroidAgent({}, mockAdb())
+    await agent.connect(url) // resolves once agent:registered arrives
+
+    // The agent's message loop must swallow a malformed frame without tearing down the connection.
+    serverWs!.send('this is not json {{{')
+
+    // Prove the connection still works: a valid request after the bad frame still gets a reply.
+    const reply = new Promise<Record<string, unknown>>((resolve) => {
+      serverWs!.on('message', (d) => {
+        const m = JSON.parse(d.toString())
+        if (m.type === 'app:install-error') resolve(m)
+      })
+    })
+    serverWs!.send(JSON.stringify({ type: 'app:install', sessionId: 'unknown', payload: { filePath: '/tmp/app.apk' } }))
+
+    const m = await reply
+    expect(m['message']).toBe('No booted device')
+    agent.disconnect()
   })
 })
