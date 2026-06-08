@@ -145,7 +145,7 @@ What's included:
 - **MCP Server** *(experimental)* — `@tapflowio/mcp-server` lets Claude Code and other LLM agents control simulators as native tools.
 
 <a name="latency-note"></a>
-> <sup>1</sup> On localhost, decode-to-present is in the single-to-low-double-digit milliseconds (WebCodecs ~2.5 ms, WASM ~9–14 ms); end-to-end "glass-to-glass" latency also depends on your network. See the [streaming latency log](contributing/streaming-latency-log.md) for the full pipeline analysis and measurements.
+> <sup>1</sup> On a real LAN, decode-to-present measures in the low tens of milliseconds (p50 ~11–17 ms with the WASM software decoder; faster with WebCodecs on HTTPS); end-to-end "glass-to-glass" latency adds your network's round trip on top. See the [performance & latency reference](https://www.tapflow.dev/reference/performance) for the full measurements, conditions, and known limitations.
 
 ## Security & Privacy
 
