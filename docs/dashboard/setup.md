@@ -60,4 +60,28 @@ If an App with the same bundle ID already exists for the other platform, the two
 
 From App Center, select a build and click a device card to start a session. The device streams to your browser in real time.
 
+## 6. Share access with your team
+
+Now hand off access so the team can test on their own. Teammates don't install tapflow — all they need is a browser.
+
+**Send the right URL.** The URL you share depends on the deployment (`localhost` only works on the relay Mac itself, so it can't be shared).
+
+| Deployment | URL teammates open |
+|------------|--------------------|
+| Same office network | The relay Mac's LAN IP, e.g. `http://192.168.0.10:4000` |
+| Tailscale tunnel | The tailnet URL printed in the startup banner (teammates need Tailscale installed too) |
+| VPS + rathole tunnel | The public URL printed in the startup banner, e.g. `https://your-vps.com` |
+
+See [Self-Hosting the Relay](/guide/self-hosting) for the details of each deployment. Which path a teammate connects over also decides the stream quality they get — on the same LAN, plain HTTP gives the **Standard** profile, while HTTPS gives the sharper **Sharp** profile. See [Streaming Quality](/guide/streaming) for the profile each setup maps to.
+
+**Have them accept the invite.** When a teammate accepts the invitation you sent in [step 3](#_3-invite-your-team), they set a password and sign in. If SMTP isn't configured, share the invite link directly.
+
+**What teammates do.** Once signed in, a teammate can test without installing anything:
+
+1. Pick a build in App Center.
+2. Click a device card to start a session.
+3. Control the simulator or emulator in the browser and leave feedback as comments on the build.
+
+What each person can do depends on the role you assigned when inviting them (Admin / Developer / QA / Viewer). See [3. Invite your team](#_3-invite-your-team) above for the role descriptions.
+
 **Next:** Learn what each dashboard section does → [Dashboard Overview](/dashboard/overview)
