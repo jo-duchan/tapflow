@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-06-08
+
+### Added
+
+- android: emulators now capture over gRPC and encode H.264 on the Mac host (VideoToolbox). The gRPC backend is the default for emulators (auto-detected, 30fps cap), with automatic scrcpy fallback; real devices continue to use scrcpy.
+- streaming: unified per-session downscale. Resolution is chosen from the viewer's connection context — native on a secure context, 1280px on LAN-HTTP, 1000px external — and is tunable via `TAPFLOW_MAX_SIZE` and the per-platform / `_LAN` / `_EXTERNAL` overrides.
+- relay: request an IDR keyframe when a browser (re)joins a booted device, so a late joiner paints immediately.
+
+### Changed
+
+- dashboard: iOS/Android decoding and perf telemetry are unified behind a single `useDecoderStream` hook (hardware WebCodecs on a secure context, WASM fallback otherwise).
+- ios-agent: static-frame skip — unchanged H.264 frames are no longer re-sent.
+
+### Fixed
+
+- ios: tear-free framebuffer snapshots via a seed-stable copy, and keyframe-aware backpressure on the agent→relay stream.
+- android: keyframe-aware backpressure on the agent→relay stream, and 16-aligned encode sizing to avoid macroblock padding on the WASM decoder.
+
 ## [0.6.1] - 2026-06-06
 
 ### Fixed
@@ -86,7 +104,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Automatic `tapflow.config.json` creation as a side effect of `tapflow start` / `tapflow relay start`.
 
-[Unreleased]: https://github.com/jo-duchan/tapflow/compare/v0.6.1...HEAD
+[Unreleased]: https://github.com/jo-duchan/tapflow/compare/v0.7.0...HEAD
+[0.7.0]: https://github.com/jo-duchan/tapflow/compare/v0.6.1...v0.7.0
 [0.6.1]: https://github.com/jo-duchan/tapflow/compare/v0.6.0...v0.6.1
 [0.6.0]: https://github.com/jo-duchan/tapflow/compare/v0.5.1...v0.6.0
 [0.5.1]: https://github.com/jo-duchan/tapflow/compare/v0.5.0...v0.5.1
