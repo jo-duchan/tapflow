@@ -15,8 +15,12 @@ The agent runs on macOS. iOS and Android can run together on the same Mac.
 
 ### iOS
 
-- macOS 26 or later
-- Xcode 26 or later with iOS Simulator Runtime installed
+- macOS 26 (26.x)
+- Xcode 26 (26.x) with iOS Simulator Runtime installed
+
+::: tip Newer versions
+When a new major version (e.g. Xcode 27) is released, supporting it is our top priority. Until that support lands, please stay on the verified versions above.
+:::
 
 ### Android
 

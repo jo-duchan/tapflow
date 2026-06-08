@@ -15,8 +15,12 @@
 
 ### iOS
 
-- macOS 26 이상
-- iOS Simulator Runtime이 설치된 Xcode 26 이상
+- macOS 26 (26.x)
+- iOS Simulator Runtime이 설치된 Xcode 26 (26.x)
+
+::: tip 새 버전 지원
+새로운 메이저 버전(예: Xcode 27)이 출시되면 버전 지원을 최우선으로 작업합니다. 지원이 추가되기 전까지는 위 검증된 버전을 사용해 주세요.
+:::
 
 ### Android
 
