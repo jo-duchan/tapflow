@@ -135,7 +135,7 @@ Navigate to `http://localhost:4000` and sign in with the account you just create
 
 What's included:
 
-- **Browser streaming** — iOS & Android at ~30 fps, no extra app on the device. The iOS pipeline streams H.264 through a 2-tier decoder (WebCodecs on secure contexts, WASM/tinyh264 on plain HTTP), which removes the media-element buffer from the decode path.<sup>[1](#latency-note)</sup>
+- **Browser streaming** — iOS & Android at ~30 fps, no extra app on the device. Both stream H.264 through a 2-tier decoder (WebCodecs on secure contexts, WASM/tinyh264 on plain HTTP), which removes the media-element buffer from the decode path. Resolution adapts to the connection — native on a secure context, downscaled on plain-HTTP LAN.<sup>[1](#latency-note)</sup>
 - **Codec fallback** — the stream negotiates the codec per client and falls back to JPEG when a hardware or WASM decoder isn't available, so older browsers still work.
 - **Touch, swipe & pinch** — real-time input forwarded to the simulator or emulator.
 - **Deeplink toolbar** — open supported deeplinks directly from the QA toolbar.
