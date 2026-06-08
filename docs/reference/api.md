@@ -6,7 +6,6 @@ All endpoints are served by the relay at `http(s)://<relay-host>/api/v1/`.
 - Dashboard users: session cookie (`tapflow_token`, set automatically on login)
 - CI/CD scripts: `Authorization: Bearer tflw_pat_<token>` header
 
----
 
 ## Error responses
 
@@ -23,7 +22,6 @@ All errors return JSON in the form `{ "error": "..." }`.
 
 Successful deletes return `204` with no body.
 
----
 
 ## Auth
 
@@ -45,7 +43,6 @@ Body (JSON):
 
 Returns `403 { "error": "Already initialized" }` if an account already exists.
 
----
 
 ### `POST /api/v1/auth/login`
 
@@ -63,7 +60,6 @@ Body (JSON):
 { "ok": true, "role": "Admin" }
 ```
 
----
 
 ### `POST /api/v1/auth/logout`
 
@@ -75,7 +71,6 @@ Sign out. Clears the session cookie.
 { "ok": true }
 ```
 
----
 
 ### `GET /api/v1/auth/me`
 
@@ -93,7 +88,6 @@ Return the currently signed-in user's info.
 }
 ```
 
----
 
 ### `POST /api/v1/auth/change-password`
 
@@ -111,7 +105,6 @@ Body (JSON):
 { "ok": true }
 ```
 
----
 
 ## Invitations
 
@@ -132,7 +125,6 @@ Query:
 
 Returns `410` if expired or not found.
 
----
 
 ### `POST /api/v1/invitations/accept`
 
@@ -155,7 +147,6 @@ File:
 { "ok": true }
 ```
 
----
 
 ## Password reset
 
@@ -176,7 +167,6 @@ Query:
 
 Returns `410` if expired.
 
----
 
 ### `POST /api/v1/auth/reset-password`
 
@@ -194,7 +184,6 @@ Body (JSON):
 { "ok": true }
 ```
 
----
 
 ### `POST /api/v1/team/members/:id/send-reset`
 
@@ -208,7 +197,6 @@ Send a password reset email to a specific member. **Admin only**.
 
 If SMTP is not configured, `emailSent: false` is returned and the Admin must share the reset link manually.
 
----
 
 ## Apps
 
@@ -237,7 +225,6 @@ Return all apps. Each app includes a summary of its latest build.
 }
 ```
 
----
 
 ### `POST /api/v1/apps`
 
@@ -256,7 +243,6 @@ Body (JSON):
 { "id": 7, "ok": true }
 ```
 
----
 
 ### `PATCH /api/v1/apps/:id`
 
@@ -273,7 +259,6 @@ Body (JSON):
 { "ok": true }
 ```
 
----
 
 ### `DELETE /api/v1/apps/:id`
 
@@ -285,7 +270,6 @@ Delete an app and all its builds and comments. Requires **Admin or Developer** r
 { "ok": true }
 ```
 
----
 
 ## Builds
 
@@ -324,7 +308,6 @@ Build with `xcodebuild -sdk iphonesimulator`, then zip the `.app` folder.
 }
 ```
 
----
 
 ### `GET /api/v1/builds`
 
@@ -351,7 +334,6 @@ Query:
 }
 ```
 
----
 
 ### `GET /api/v1/builds/:id`
 
@@ -374,7 +356,6 @@ Return a single build.
 }
 ```
 
----
 
 ### `PATCH /api/v1/builds/:id`
 
@@ -392,7 +373,6 @@ Body (JSON):
 { "ok": true }
 ```
 
----
 
 ## Comments
 
@@ -422,7 +402,6 @@ Query:
 ]
 ```
 
----
 
 ### `POST /api/v1/comments`
 
@@ -449,7 +428,6 @@ File:
 }
 ```
 
----
 
 ### `DELETE /api/v1/comments/:id`
 
@@ -457,7 +435,6 @@ Delete a comment. Only the author or an Admin can delete.
 
 **Response `204`** (no body)
 
----
 
 ## Team
 
@@ -479,7 +456,6 @@ Return all members. **Admin only**.
 ]
 ```
 
----
 
 ### `POST /api/v1/team/invite`
 
@@ -499,7 +475,6 @@ Body (JSON):
 
 If SMTP is not configured, `emailSent: false` is returned. Use the `token` to build the invite link: `<relay-url>/invite?token=<token>`.
 
----
 
 ### `PATCH /api/v1/team/members/:id`
 
@@ -516,7 +491,6 @@ Body (JSON):
 { "ok": true }
 ```
 
----
 
 ### `DELETE /api/v1/team/members/:id`
 
@@ -524,7 +498,6 @@ Delete a member. **Admin only**. You cannot delete yourself.
 
 **Response `204`** (no body)
 
----
 
 ## Tokens (Personal Access Tokens)
 
@@ -547,7 +520,6 @@ Return the current user's PAT list.
 ]
 ```
 
----
 
 ### `POST /api/v1/tokens`
 
@@ -565,7 +537,6 @@ Body (JSON):
 { "token": "tflw_pat_abc123..." }
 ```
 
----
 
 ### `DELETE /api/v1/tokens/:id`
 
@@ -573,7 +544,6 @@ Immediately revoke a PAT.
 
 **Response `204`** (no body)
 
----
 
 ## Profile
 
@@ -596,7 +566,6 @@ File:
 { "ok": true }
 ```
 
----
 
 ## Settings
 
@@ -610,7 +579,6 @@ Return team settings.
 { "team_name": "My Team", "logo_url": "..." }
 ```
 
----
 
 ### `PATCH /api/v1/settings`
 
@@ -631,7 +599,6 @@ File:
 { "ok": true }
 ```
 
----
 
 ## Recordings
 
@@ -655,7 +622,6 @@ File:
 { "url": "/api/v1/recordings/abc123.webm" }
 ```
 
----
 
 ### `GET /api/v1/recordings`
 
@@ -682,13 +648,11 @@ Query:
 ]
 ```
 
----
 
 ### `GET /api/v1/recordings/:filename`
 
 Download a recording file. Returns `404` for expired files.
 
----
 
 ## Agents
 
@@ -702,7 +666,6 @@ Return the list of connected agent names.
 ["mac-mini-office", "mac-mini-lab"]
 ```
 
----
 
 ### `GET /api/v1/agents/:name/resources`
 
@@ -723,7 +686,6 @@ Query:
 
 Data is sampled once per minute and retained for 30 days.
 
----
 
 ## Logs
 

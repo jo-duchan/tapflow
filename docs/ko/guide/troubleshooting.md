@@ -8,20 +8,6 @@
 2. `--relay` 옵션의 URL이 `ws://`인지 확인합니다. 에이전트는 항상 내부 네트워크로 연결합니다.
 3. `tapflow doctor`를 실행해 환경을 점검합니다.
 
-### 리버스 프록시(nginx 등) 사용 시 연결이 끊김
-
-tapflow는 에이전트와 브라우저 모두 WebSocket을 사용합니다. nginx 등의 리버스 프록시는 기본적으로 HTTP upgrade를 처리하지 않습니다.
-
-nginx 설정에 아래 헤더가 포함되어 있는지 확인합니다:
-
-```nginx
-proxy_set_header Upgrade $http_upgrade;
-proxy_set_header Connection "upgrade";
-proxy_read_timeout 3600s;
-```
-
-설정 예시는 [릴레이 배포](/ko/guide/self-hosting#nginx-예시)를 참고하세요.
-
 ## iOS 시뮬레이터 서비스 버전 불일치 {#ios-simulator-service-version-mismatch}
 
 Xcode를 업데이트한 후 다음과 같은 macOS 알림이 표시될 수 있습니다:

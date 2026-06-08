@@ -53,7 +53,7 @@ Here is what tapflow handles and what you manage as the infrastructure operator.
 - OS and network security of the Mac running the relay
 - TLS on the WAN leg (reverse proxy or tunnel configuration)
 - Network access control to the relay host (firewall, VPN, etc.)
-- Managing environment variables such as `jwtSecret` in `tapflow.config.json`
+- Managing `JWT_SECRET` and other environment variables for the relay
 
 ::: tip Running on an internal network only
 If the relay is only reachable within your internal LAN, you can operate without WAN-leg TLS. This is appropriate when every team member is on the same network — office Wi-Fi or a shared VPN.

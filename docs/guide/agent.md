@@ -50,7 +50,7 @@ Common
   ✓ Node v20.x
 
 iOS
-  ✓ Xcode 16.2
+  ✓ Xcode 26.0
   ✓ xcrun simctl
   ✓ Simulator booted: iPhone 16 Pro
 ```

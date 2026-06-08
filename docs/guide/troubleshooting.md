@@ -8,20 +8,6 @@
 2. Check that the URL in the `--relay` option uses `ws://` — agents always connect over the local network.
 3. Run `tapflow doctor` to inspect your environment.
 
-### Connection drops when using a reverse proxy (nginx, etc.)
-
-tapflow uses WebSocket for both the agent and the browser. nginx and similar reverse proxies do not handle HTTP upgrade by default.
-
-Verify these headers are present in your nginx config:
-
-```nginx
-proxy_set_header Upgrade $http_upgrade;
-proxy_set_header Connection "upgrade";
-proxy_read_timeout 3600s;
-```
-
-See the configuration example in [Self-Hosting the Relay](/guide/self-hosting#nginx-example).
-
 ## iOS Simulator service version mismatch {#ios-simulator-service-version-mismatch}
 
 After updating Xcode, you may see a macOS alert:
