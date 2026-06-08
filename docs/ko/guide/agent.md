@@ -90,26 +90,32 @@ tapflow doctor
 
 ## 스트림 품질
 
-tapflow는 브라우저의 연결 컨텍스트에 따라 스트리밍 해상도를 자동으로 선택합니다.
+tapflow는 세 가지 프로파일 중 하나로 스트리밍합니다. 사용자가 직접 고르는 것이 아니라, 각 시청자가 어떻게 접속했는지에 따라 에이전트가 해상도와 디코더 부하의 균형을 맞춰 프로파일을 자동으로 선택합니다.
 
-| 연결 유형 | 해상도 제한 | 디코더 |
-|-----------|------------|--------|
-| Secure (localhost / LAN HTTPS) | 원본 해상도 | WebCodecs (하드웨어) |
-| LAN HTTP | 가장 긴 변 1280px | WASM |
-| 외부 연결 | 가장 긴 변 1000px | WASM |
+| 프로파일 | 연결 유형 | 해상도 | 디코더 | 체감 |
+|---------|-----------|--------|--------|------|
+| **Standard** *(권장)* | LAN + HTTP | 1280px | WASM (tinyh264) | localhost에 준하는 반응 속도 |
+| **Sharp** | LAN + HTTPS *(또는 localhost)* | 원본 해상도 | WebCodecs (하드웨어) | localhost급 |
+| **Remote** | 외부 + HTTPS | 1000px | WebCodecs (하드웨어) | QA 가능한 임계 수준 |
 
-**Secure 컨텍스트**(localhost 또는 HTTPS)에서는 브라우저가 WebCodecs로 H.264를 하드웨어 디코딩하므로, 시뮬레이터 원본 해상도를 낮은 CPU 부하로 받을 수 있습니다. 비보안 LAN HTTP 연결에서는 WASM 소프트웨어 디코더로 전환되며, 디코딩 부하를 줄이기 위해 해상도를 1280px로 제한합니다.
+**Standard**는 대부분의 팀이 일상적으로 쓰는 환경으로, LAN의 평문 HTTP 릴레이입니다. 브라우저가 WASM 소프트웨어 디코더로 H.264를 디코딩하기 때문에, tapflow는 디코딩 부하를 낮게 유지하면서도 반응 속도를 localhost에 가깝게 유지하기 위해 해상도를 1280px로 제한합니다.
 
-LAN에서 최고 화질을 원한다면 **릴레이를 HTTPS로 제공**하세요 — [릴레이 배포](/ko/guide/self-hosting) 참고. HTTPS 연결에서는 브라우저가 자동으로 하드웨어 디코딩과 원본 해상도로 전환됩니다.
+**Sharp**는 tapflow가 제공할 수 있는 가장 나은 환경입니다. [secure 컨텍스트](https://developer.mozilla.org/ko/docs/Web/Security/Secure_Contexts)(LAN의 HTTPS 또는 localhost)에서는 브라우저가 WebCodecs를 사용할 수 있어 하드웨어로 디코딩하므로, 에이전트가 낮은 CPU 부하로 원본 해상도를 전송합니다. 공유 LAN을 Standard에서 Sharp로 올리려면 **릴레이를 HTTPS로 제공**하세요 — [릴레이 배포](/ko/guide/self-hosting) 참고.
+
+**Remote**는 LAN 외부(공인 IP)에서 접속하는 시청자를 위한 환경입니다. HTTPS이므로 하드웨어 디코딩은 유지되지만, 대역폭이 제한적이라 해상도를 1000px로 낮춥니다. QA에는 충분하지만 쾌적함의 경계 수준입니다.
+
+::: tip HTTPS가 하드웨어 디코딩을 여는 이유
+WebCodecs는 [secure 컨텍스트](https://developer.mozilla.org/ko/docs/Web/Security/Secure_Contexts)에서만 사용할 수 있습니다. LAN의 평문 HTTP는 secure가 아니므로 브라우저가 WASM 디코더로 폴백합니다. 그래서 **Standard**는 해상도를 제한하고, **Sharp**(HTTPS)는 제한하지 않습니다.
+:::
 
 ### 환경변수 오버라이드
 
-에이전트가 실행되는 Mac에서 아래 환경변수를 설정하면 기본값을 재정의할 수 있습니다.
+프로파일은 자동으로 선택되지만, 해상도 제한값은 직접 재정의할 수 있습니다. 에이전트가 실행되는 Mac에서 아래 환경변수를 설정하세요.
 
 | 환경변수 | 기본값 | 설명 |
 |---------|--------|------|
-| `TAPFLOW_MAX_SIZE` | *(티어별)* | 전 플랫폼 공통 해상도 제한 (px, 가장 긴 변). `0`으로 설정하면 모든 연결에서 원본 해상도를 강제합니다. |
-| `TAPFLOW_MAX_SIZE_LAN` | `1280` | LAN HTTP 연결 제한값 |
-| `TAPFLOW_MAX_SIZE_EXTERNAL` | `1000` | 외부 연결 제한값 |
-| `TAPFLOW_IOS_MAX_SIZE` | *(티어별)* | iOS 전용 오버라이드. `TAPFLOW_MAX_SIZE`보다 우선 적용됩니다. |
-| `TAPFLOW_ANDROID_MAX_SIZE` | *(티어별)* | Android 전용 오버라이드. `TAPFLOW_MAX_SIZE`보다 우선 적용됩니다. |
+| `TAPFLOW_MAX_SIZE` | *(프로파일별)* | 전 플랫폼 공통 해상도 제한 (px, 가장 긴 변). `0`으로 설정하면 모든 연결에서 원본 해상도를 강제합니다. |
+| `TAPFLOW_MAX_SIZE_LAN` | `1280` | Standard(LAN HTTP) 제한값 |
+| `TAPFLOW_MAX_SIZE_EXTERNAL` | `1000` | Remote(외부) 제한값 |
+| `TAPFLOW_IOS_MAX_SIZE` | *(프로파일별)* | iOS 전용 오버라이드. `TAPFLOW_MAX_SIZE`보다 우선 적용됩니다. |
+| `TAPFLOW_ANDROID_MAX_SIZE` | *(프로파일별)* | Android 전용 오버라이드. `TAPFLOW_MAX_SIZE`보다 우선 적용됩니다. |

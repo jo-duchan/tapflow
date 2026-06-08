@@ -90,26 +90,32 @@ See [Troubleshooting](/guide/troubleshooting) for more detailed solutions.
 
 ## Stream quality
 
-tapflow automatically picks a stream resolution based on your browser's connection context:
+tapflow streams in one of three profiles. You don't choose it — the agent picks the profile from how each viewer connects, balancing resolution and decoder cost for that path.
 
-| Connection | Resolution cap | Decoder |
-|------------|---------------|---------|
-| Secure (localhost / LAN HTTPS) | native | WebCodecs (hardware) |
-| LAN HTTP | 1280 px longest side | WASM |
-| External | 1000 px longest side | WASM |
+| Profile | Connection | Resolution | Decoder | Experience |
+|---------|------------|------------|---------|------------|
+| **Standard** *(recommended)* | LAN over HTTP | 1280 px | WASM (tinyh264) | Near-localhost responsiveness |
+| **Sharp** | LAN over HTTPS *(or localhost)* | Native | WebCodecs (hardware) | Localhost-grade |
+| **Remote** | External over HTTPS | 1000 px | WebCodecs (hardware) | Usable QA threshold |
 
-On a **secure context** (localhost or HTTPS), the browser uses WebCodecs to decode H.264 in hardware — full simulator resolution with minimal CPU cost. On a non-secure LAN HTTP connection, the stream falls back to a software WASM decoder; tapflow caps the resolution at 1280 px to keep decode overhead manageable.
+**Standard** is what most teams use day to day — a plain-HTTP relay on the LAN. The browser decodes H.264 with the software WASM decoder, so tapflow caps the resolution at 1280 px to keep decode load low while keeping responsiveness close to localhost.
 
-To get the sharpest stream on a shared LAN, **serve the relay over HTTPS** — see [Self-Hosting the Relay](/guide/self-hosting). Browsers on HTTPS switch to hardware decoding at native resolution automatically.
+**Sharp** is the best tapflow can offer. On a [secure context](https://developer.mozilla.org/en-US/docs/Web/Security/Secure_Contexts) — HTTPS on the LAN, or localhost — the browser unlocks WebCodecs and decodes in hardware, so the agent sends native resolution at minimal CPU cost. To move a shared LAN from Standard to Sharp, **serve the relay over HTTPS** — see [Self-Hosting the Relay](/guide/self-hosting).
+
+**Remote** covers viewers connecting from outside the LAN (a public IP). HTTPS keeps hardware decoding, but the resolution is trimmed to 1000 px because the link is bandwidth-constrained — enough for QA, at the edge of comfortable.
+
+::: tip Why HTTPS unlocks hardware decoding
+WebCodecs is only available in a [secure context](https://developer.mozilla.org/en-US/docs/Web/Security/Secure_Contexts). Plain HTTP on the LAN is not secure, so the browser falls back to the WASM decoder — which is why **Standard** caps resolution and **Sharp** (HTTPS) doesn't.
+:::
 
 ### Override environment variables
 
-Set these on the Mac running the agent to override the defaults.
+The profile is automatic, but you can override the resolution caps. Set these on the Mac running the agent.
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `TAPFLOW_MAX_SIZE` | *(per tier)* | Cap for all platforms (px, longest side). `0` forces native resolution on all connections. |
-| `TAPFLOW_MAX_SIZE_LAN` | `1280` | LAN HTTP cap. |
-| `TAPFLOW_MAX_SIZE_EXTERNAL` | `1000` | External connection cap. |
-| `TAPFLOW_IOS_MAX_SIZE` | *(per tier)* | iOS-specific override. Takes precedence over `TAPFLOW_MAX_SIZE`. |
-| `TAPFLOW_ANDROID_MAX_SIZE` | *(per tier)* | Android-specific override. Takes precedence over `TAPFLOW_MAX_SIZE`. |
+| `TAPFLOW_MAX_SIZE` | *(per profile)* | Cap for all platforms (px, longest side). `0` forces native resolution on every connection. |
+| `TAPFLOW_MAX_SIZE_LAN` | `1280` | Standard (LAN HTTP) cap. |
+| `TAPFLOW_MAX_SIZE_EXTERNAL` | `1000` | Remote (external) cap. |
+| `TAPFLOW_IOS_MAX_SIZE` | *(per profile)* | iOS-specific override. Takes precedence over `TAPFLOW_MAX_SIZE`. |
+| `TAPFLOW_ANDROID_MAX_SIZE` | *(per profile)* | Android-specific override. Takes precedence over `TAPFLOW_MAX_SIZE`. |

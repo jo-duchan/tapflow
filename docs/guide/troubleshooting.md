@@ -199,7 +199,7 @@ Sessions auto-close after 30 minutes of inactivity. This timeout cannot be chang
 - Check CPU and RAM usage for the affected Mac in the **Mac Resources** tab.
 - Reduce the number of simulators running simultaneously on one Mac.
 
-**Blurry or low-resolution stream on LAN:** On non-secure HTTP connections, tapflow caps the stream at 1280 px (longest side) to keep WASM decoder load manageable. To stream at the simulator's native resolution, serve the relay over HTTPS — see [Self-Hosting the Relay](/guide/self-hosting). You can also raise the cap without HTTPS by setting `TAPFLOW_MAX_SIZE_LAN` on the agent; see [Stream quality](/guide/agent#stream-quality).
+**Blurry or low-resolution stream on LAN:** A plain-HTTP LAN connection uses the **Standard** profile, which caps the stream at 1280 px (longest side) so the WASM decoder stays responsive. To stream at the simulator's native resolution, serve the relay over HTTPS — that moves you to the **Sharp** profile (hardware decoding, native resolution). See [Self-Hosting the Relay](/guide/self-hosting). You can also raise the cap without HTTPS by setting `TAPFLOW_MAX_SIZE_LAN` on the agent; see [Stream quality](/guide/agent#stream-quality).
 
 ## Auth issues
 

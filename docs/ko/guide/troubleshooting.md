@@ -199,7 +199,7 @@ export PATH=$PATH:$ANDROID_HOME/platform-tools
 - 대시보드 **Mac Resources** 탭에서 해당 Mac의 CPU·RAM 사용량을 확인합니다.
 - 한 Mac에서 동시에 실행하는 디바이스 수를 줄입니다.
 
-**LAN에서 스트림이 흐릿하거나 해상도가 낮게 보이는 경우:** 비보안 HTTP 연결에서 tapflow는 WASM 디코더 부하를 줄이기 위해 스트림을 1280px(가장 긴 변)로 제한합니다. 시뮬레이터 원본 해상도로 스트리밍하려면 릴레이를 HTTPS로 제공하세요 — [릴레이 배포](/ko/guide/self-hosting) 참고. HTTPS 없이 제한값만 높이려면 에이전트에서 `TAPFLOW_MAX_SIZE_LAN` 환경변수를 설정합니다 — [스트림 품질](/ko/guide/agent#스트림-품질) 참고.
+**LAN에서 스트림이 흐릿하거나 해상도가 낮게 보이는 경우:** 평문 HTTP의 LAN 연결은 **Standard** 프로파일을 사용하며, WASM 디코더의 반응성을 유지하기 위해 스트림을 1280px(가장 긴 변)로 제한합니다. 시뮬레이터 원본 해상도로 스트리밍하려면 릴레이를 HTTPS로 제공하세요 — 그러면 **Sharp** 프로파일(하드웨어 디코딩, 원본 해상도)로 전환됩니다. [릴레이 배포](/ko/guide/self-hosting) 참고. HTTPS 없이 제한값만 높이려면 에이전트에서 `TAPFLOW_MAX_SIZE_LAN` 환경변수를 설정합니다 — [스트림 품질](/ko/guide/agent#스트림-품질) 참고.
 
 ## 인증 관련
 
