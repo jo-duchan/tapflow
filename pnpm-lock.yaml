@@ -11,6 +11,9 @@ importers:
       '@changesets/cli':
         specifier: ^2.31.0
         version: 2.31.0(@types/node@20.19.41)
+      '@vitest/coverage-v8':
+        specifier: ^4.1.6
+        version: 4.1.6(vitest@4.1.8)
       concurrently:
         specifier: ^9.0.0
         version: 9.2.1
@@ -56,7 +59,7 @@ importers:
         version: 5.9.3
       vitest:
         specifier: ^4.1.8
-        version: 4.1.8(@types/node@20.19.41)(jsdom@29.1.1)(vite@6.4.2(@types/node@20.19.41)(jiti@1.21.7)(tsx@4.22.0))
+        version: 4.1.8(@types/node@20.19.41)(@vitest/coverage-v8@4.1.6(vitest@4.1.8))(jsdom@29.1.1)(vite@6.4.2(@types/node@20.19.41)(jiti@1.21.7)(tsx@4.22.0))
 
   packages/android-agent:
     dependencies:
@@ -87,7 +90,7 @@ importers:
         version: 5.9.3
       vitest:
         specifier: ^4.1.8
-        version: 4.1.8(@types/node@20.19.41)(jsdom@29.1.1)(vite@6.4.2(@types/node@20.19.41)(jiti@1.21.7)(tsx@4.22.0))
+        version: 4.1.8(@types/node@20.19.41)(@vitest/coverage-v8@4.1.6(vitest@4.1.8))(jsdom@29.1.1)(vite@6.4.2(@types/node@20.19.41)(jiti@1.21.7)(tsx@4.22.0))
 
   packages/cli:
     dependencies:
@@ -130,7 +133,7 @@ importers:
         version: 5.9.3
       vitest:
         specifier: ^4.1.8
-        version: 4.1.8(@types/node@20.19.41)(jsdom@29.1.1)(vite@6.4.2(@types/node@20.19.41)(jiti@1.21.7)(tsx@4.22.0))
+        version: 4.1.8(@types/node@20.19.41)(@vitest/coverage-v8@4.1.6(vitest@4.1.8))(jsdom@29.1.1)(vite@6.4.2(@types/node@20.19.41)(jiti@1.21.7)(tsx@4.22.0))
 
   packages/dashboard:
     dependencies:
@@ -306,7 +309,7 @@ importers:
         version: 5.9.3
       vitest:
         specifier: ^4.1.8
-        version: 4.1.8(@types/node@20.19.41)(jsdom@29.1.1)(vite@6.4.2(@types/node@20.19.41)(jiti@1.21.7)(tsx@4.22.0))
+        version: 4.1.8(@types/node@20.19.41)(@vitest/coverage-v8@4.1.6(vitest@4.1.8))(jsdom@29.1.1)(vite@6.4.2(@types/node@20.19.41)(jiti@1.21.7)(tsx@4.22.0))
 
   packages/mcp-server:
     dependencies:
@@ -331,7 +334,7 @@ importers:
         version: 5.9.3
       vitest:
         specifier: ^4.1.8
-        version: 4.1.8(@types/node@20.19.41)(jsdom@29.1.1)(vite@6.4.2(@types/node@20.19.41)(jiti@1.21.7)(tsx@4.22.0))
+        version: 4.1.8(@types/node@20.19.41)(@vitest/coverage-v8@4.1.6(vitest@4.1.8))(jsdom@29.1.1)(vite@6.4.2(@types/node@20.19.41)(jiti@1.21.7)(tsx@4.22.0))
 
   packages/relay:
     dependencies:
@@ -380,7 +383,7 @@ importers:
         version: 5.9.3
       vitest:
         specifier: ^4.1.8
-        version: 4.1.8(@types/node@20.19.41)(jsdom@29.1.1)(vite@6.4.2(@types/node@20.19.41)(jiti@1.21.7)(tsx@4.22.0))
+        version: 4.1.8(@types/node@20.19.41)(@vitest/coverage-v8@4.1.6(vitest@4.1.8))(jsdom@29.1.1)(vite@6.4.2(@types/node@20.19.41)(jiti@1.21.7)(tsx@4.22.0))
 
   playground:
     dependencies:
@@ -6804,6 +6807,20 @@ snapshots:
       tinyrainbow: 3.1.0
       vitest: 4.1.6(@types/node@20.19.41)(@vitest/coverage-v8@4.1.6)(jsdom@29.1.1)(vite@6.4.2(@types/node@20.19.41)(jiti@1.21.7)(tsx@4.22.0))
 
+  '@vitest/coverage-v8@4.1.6(vitest@4.1.8)':
+    dependencies:
+      '@bcoe/v8-coverage': 1.0.2
+      '@vitest/utils': 4.1.6
+      ast-v8-to-istanbul: 1.0.0
+      istanbul-lib-coverage: 3.2.2
+      istanbul-lib-report: 3.0.1
+      istanbul-reports: 3.2.0
+      magicast: 0.5.3
+      obug: 2.1.1
+      std-env: 4.1.0
+      tinyrainbow: 3.1.0
+      vitest: 4.1.8(@types/node@20.19.41)(@vitest/coverage-v8@4.1.6(vitest@4.1.8))(jsdom@29.1.1)(vite@6.4.2(@types/node@20.19.41)(jiti@1.21.7)(tsx@4.22.0))
+
   '@vitest/expect@4.1.6':
     dependencies:
       '@standard-schema/spec': 1.1.0
@@ -9415,7 +9432,7 @@ snapshots:
     transitivePeerDependencies:
       - msw
 
-  vitest@4.1.8(@types/node@20.19.41)(jsdom@29.1.1)(vite@6.4.2(@types/node@20.19.41)(jiti@1.21.7)(tsx@4.22.0)):
+  vitest@4.1.8(@types/node@20.19.41)(@vitest/coverage-v8@4.1.6(vitest@4.1.8))(jsdom@29.1.1)(vite@6.4.2(@types/node@20.19.41)(jiti@1.21.7)(tsx@4.22.0)):
     dependencies:
       '@vitest/expect': 4.1.8
       '@vitest/mocker': 4.1.8(vite@6.4.2(@types/node@20.19.41)(jiti@1.21.7)(tsx@4.22.0))
@@ -9439,6 +9456,7 @@ snapshots:
       why-is-node-running: 2.3.0
     optionalDependencies:
       '@types/node': 20.19.41
+      '@vitest/coverage-v8': 4.1.6(vitest@4.1.8)
       jsdom: 29.1.1
     transitivePeerDependencies:
       - msw

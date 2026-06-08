@@ -31,7 +31,7 @@ const logger = createLogger('android-agent')
 // scrcpy sends a new SPS (inside an IDR keyframe) whenever the capture size changes —
 // e.g. portrait→landscape for landscape-aware apps. This lets the agent track the
 // actual video dimensions and keep ScrcpyControl.screenSize in sync without guessing.
-function parseSpsFromNal(nal: Buffer): { width: number; height: number } | null {
+export function parseSpsFromNal(nal: Buffer): { width: number; height: number } | null {
   // Locate NAL header byte after Annex B start code
   let offset = 0
   if (nal.length >= 4 && nal[0] === 0 && nal[1] === 0 && nal[2] === 0 && nal[3] === 1) offset = 4
