@@ -22,7 +22,7 @@ tapflow agent start --relay ws://192.168.x.x:4000
 | `--device` | first booted simulator | iOS Simulator name or UDID |
 
 ::: tip Keep the agent and relay on the same network
-The agent streams video frames to the relay continuously. For the best streaming quality, run the agent and relay on the same Mac or the same LAN. Connecting across different networks increases latency and may cause frame drops.
+The agent streams video frames to the relay continuously, so it must sit on the same LAN as the relay over a stable connection — **wired Ethernet is recommended**, Wi-Fi is fine if the signal is steady. Connecting across different networks, or over an unstable link, increases latency and causes frame drops.
 :::
 
 ## iOS
@@ -90,32 +90,4 @@ See [Troubleshooting](/guide/troubleshooting) for more detailed solutions.
 
 ## Stream quality
 
-tapflow streams in one of three profiles. You don't choose it — the agent picks the profile from how each viewer connects, balancing resolution and decoder cost for that path.
-
-| Profile | Connection | Resolution | Decoder | Experience |
-|---------|------------|------------|---------|------------|
-| **Standard** *(recommended)* | LAN over HTTP | 1280 px | WASM (tinyh264) | Near-localhost responsiveness |
-| **Sharp** | LAN over HTTPS *(or localhost)* | Native | WebCodecs (hardware) | Localhost-grade |
-| **Remote** | External over HTTPS | 1000 px | WebCodecs (hardware) | Usable QA threshold |
-
-**Standard** is what most teams use day to day — a plain-HTTP relay on the LAN. The browser decodes H.264 with the software WASM decoder, so tapflow caps the resolution at 1280 px to keep decode load low while keeping responsiveness close to localhost.
-
-**Sharp** is the best tapflow can offer. On a [secure context](https://developer.mozilla.org/en-US/docs/Web/Security/Secure_Contexts) — HTTPS on the LAN, or localhost — the browser unlocks WebCodecs and decodes in hardware, so the agent sends native resolution at minimal CPU cost. To move a shared LAN from Standard to Sharp, **serve the relay over HTTPS** — see [Self-Hosting the Relay](/guide/self-hosting).
-
-**Remote** covers viewers connecting from outside the LAN (a public IP). HTTPS keeps hardware decoding, but the resolution is trimmed to 1000 px because the link is bandwidth-constrained — enough for QA, at the edge of comfortable.
-
-::: tip Why HTTPS unlocks hardware decoding
-WebCodecs is only available in a [secure context](https://developer.mozilla.org/en-US/docs/Web/Security/Secure_Contexts). Plain HTTP on the LAN is not secure, so the browser falls back to the WASM decoder — which is why **Standard** caps resolution and **Sharp** (HTTPS) doesn't.
-:::
-
-### Override environment variables
-
-The profile is automatic, but you can override the resolution caps. Set these on the Mac running the agent.
-
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `TAPFLOW_MAX_SIZE` | *(per profile)* | Cap for all platforms (px, longest side). `0` forces native resolution on every connection. |
-| `TAPFLOW_MAX_SIZE_LAN` | `1280` | Standard (LAN HTTP) cap. |
-| `TAPFLOW_MAX_SIZE_EXTERNAL` | `1000` | Remote (external) cap. |
-| `TAPFLOW_IOS_MAX_SIZE` | *(per profile)* | iOS-specific override. Takes precedence over `TAPFLOW_MAX_SIZE`. |
-| `TAPFLOW_ANDROID_MAX_SIZE` | *(per profile)* | Android-specific override. Takes precedence over `TAPFLOW_MAX_SIZE`. |
+Resolution and decoder are chosen automatically per viewer connection — tapflow streams in a **Standard**, **Sharp**, or **Remote** profile depending on how each viewer reaches the relay. See [Streaming Quality](/guide/streaming) for the profiles and how to tune them.
