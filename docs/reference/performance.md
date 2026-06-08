@@ -1,6 +1,6 @@
 # Performance & Latency
 
-This page is a record of how tapflow streaming **actually measures**. Every number comes with its measurement conditions, and you can run the same measurements yourself via [Reproduce it](#reproduce-it) at the end. These aren't marketing figures — they're what came out, under what conditions.
+This page is a record of how tapflow streaming **actually measures**. To run the same measurements yourself, see [Reproduce it](#reproduce) below.
 
 ::: tip In one line
 Bandwidth is not a bottleneck (it uses a single-digit percentage of a home Wi-Fi link), and decode latency on a real LAN is single-digit to a few tens of milliseconds. Glass-to-glass — finger to screen — adds a network round trip on top, and that sum is **estimated** to fit within the ~100 ms budget known as the limit where people feel they are "directly manipulating" objects<sup><a href="#ref-nielsen">1</a></sup>.
@@ -17,7 +17,7 @@ We track two distinct metrics.
 | **decode→present** | from the viewer receiving a frame, to decoding and drawing it on screen | valid everywhere (a delta within one machine) |
 | **glass-to-glass** | from the moment the screen is captured, to it being shown in the viewer | **valid only on a single clock (localhost)** |
 
-`glass-to-glass` is a subtraction between the capture time (agent machine) and the present time (viewer machine), so it cannot be measured directly on a LAN where the two machines run different clocks. On a LAN we therefore measure `decode→present` (valid in any environment) and treat the full perceived latency as an [estimate](#end-to-end-estimate).
+`glass-to-glass` is a subtraction between the capture time (agent machine) and the present time (viewer machine), so it cannot be measured directly on a LAN where the two machines run different clocks. On a LAN we therefore measure `decode→present` (valid in any environment) and treat the full perceived latency as an [estimate](#estimate).
 
 ## Bandwidth
 
@@ -41,7 +41,7 @@ A real-LAN measurement. The agent (build machine) and the viewer sit on **two di
 
 For reference, on **localhost (single clock)** — with the network factored out — the full `glass-to-glass` can be measured, and there the WASM path was 9.6 ms still / 16 ms scroll, on par with localhost JPEG (the closest baseline to direct manipulation). In other words, decode itself floors at single-digit to low-double-digit milliseconds as the network approaches zero.
 
-## End-to-end estimate
+## End-to-end estimate {#estimate}
 
 ::: warning This is an estimate (not a measurement)
 The following is a **component sum** — the measured `decode→present` plus published network-latency specs. The LAN `glass-to-glass` cannot be measured directly because of the two-clock problem described above, so we do not assert it.
@@ -63,10 +63,10 @@ The exact value varies by environment. The most honest approach is to **run `pin
 - Scroll **p95 climbs to ~50 ms**. In moments of heavy motion, more so than on a still screen, the budget can get tight. Measurements show this tail comes from load and transport, not the decoder.
 - There is no real-LAN measurement of the HTTPS (WebCodecs) path yet — only a localhost proxy (3.9 ms still / 3.4 ms scroll `glass-to-glass`).
 - About 5% of older browsers (no WebGL2) fall back to JPEG. Bandwidth rises, but it works.
-- Resolution downscaling reduces bandwidth and decode load at the cost of some fidelity (optional; native by default).
+- Resolution downscaling trades some fidelity for lower bandwidth and decode load (optional; native by default).
 - Android emulators are bound by a software H.264 encoder, which limits frame production. A host-encode path mitigates this, and real devices use a hardware encoder.
 
-## Reproduce it
+## Reproduce it {#reproduce}
 
 Performance instrumentation is on only in the dev build (Vite `:3001`); you force a decoder via a URL query and read p50/p95 from the `?perf=1` panel.
 
