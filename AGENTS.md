@@ -78,6 +78,8 @@ Get user confirmation before any hard-to-reverse operation.
 ### Branches, Commits & Releases
 → [CONTRIBUTING.md](./CONTRIBUTING.md)
 
+Write GitHub PR and issue titles/bodies in **English**. (Conversation, code comments, and docs follow the existing KO/EN rules — only GitHub artifacts default to English.)
+
 Before starting any task that requires code changes:
 1. `git checkout main && git pull origin main` — always start from the latest main.
 2. `git checkout -b <branch-name>` — work on a new branch, never directly on main.
