@@ -5,6 +5,8 @@ vi.mock('node:fs')
 
 import { execSync } from 'node:child_process'
 import { existsSync } from 'node:fs'
+import { homedir } from 'node:os'
+import { join } from 'node:path'
 import { runDoctorChecks } from '../../lib/doctor.js'
 
 const mockExistsSync = vi.mocked(existsSync)
@@ -31,7 +33,10 @@ describe('runDoctorChecks', () => {
     vi.resetAllMocks()
     mockExistsSync.mockReturnValue(false)
   })
-  afterEach(() => vi.restoreAllMocks())
+  afterEach(() => {
+    vi.restoreAllMocks()
+    vi.unstubAllEnvs()
+  })
 
   it('iOS 섹션은 macOS에서만 포함', async () => {
     vi.spyOn(process, 'platform', 'get').mockReturnValue('darwin')
@@ -165,5 +170,61 @@ describe('runDoctorChecks', () => {
     const xcodeCheck = result.ios?.find((c) => c.label === 'Xcode')
     expect(xcodeCheck?.ok).toBe(false)
     expect(xcodeCheck?.detail).toContain('xcode-select -s')
+  })
+
+  it('adb가 PATH엔 없지만 표준 SDK 위치에 있으면 not-in-PATH 진단', async () => {
+    vi.spyOn(process, 'platform', 'get').mockReturnValue('linux')
+    vi.stubEnv('ANDROID_HOME', '')
+    vi.stubEnv('ANDROID_SDK_ROOT', '')
+    const sdkAdb = join(homedir(), 'Library/Android/sdk/platform-tools/adb')
+    mockExistsSync.mockImplementation((p) => p === sdkAdb)
+    mockExecSync.mockImplementation((cmd) => {
+      const c = cmd as string
+      if (c === 'which adb') throw new Error('not found')
+      if (c.startsWith(sdkAdb) && c.includes('devices')) return 'List of devices attached\n'
+      if (c === 'emulator -list-avds') throw new Error('not found')
+      return ''
+    })
+
+    const result = await runDoctorChecks()
+    expect(result.android).not.toBeNull()
+    const adbCheck = result.android?.find((c) => c.label.includes('not in PATH'))
+    expect(adbCheck?.warn).toBe(true)
+    expect(adbCheck?.detail).toContain('setup android')
+    expect(adbCheck?.detail).toContain(sdkAdb)
+  })
+
+  it('adb가 PATH/표준 위치 모두 없으면 Android 섹션 null', async () => {
+    vi.spyOn(process, 'platform', 'get').mockReturnValue('linux')
+    vi.stubEnv('ANDROID_HOME', '')
+    vi.stubEnv('ANDROID_SDK_ROOT', '')
+    mockExistsSync.mockReturnValue(false)
+    mockExecSync.mockImplementation((cmd) => {
+      if ((cmd as string) === 'which adb') throw new Error('not found')
+      return ''
+    })
+
+    const result = await runDoctorChecks()
+    expect(result.android).toBeNull()
+  })
+
+  it('ANDROID_HOME 지정 시 해당 경로의 adb로 진단', async () => {
+    vi.spyOn(process, 'platform', 'get').mockReturnValue('linux')
+    const customSdk = '/opt/android-sdk'
+    const customAdb = join(customSdk, 'platform-tools', 'adb')
+    vi.stubEnv('ANDROID_HOME', customSdk)
+    vi.stubEnv('ANDROID_SDK_ROOT', '')
+    mockExistsSync.mockImplementation((p) => p === customAdb)
+    mockExecSync.mockImplementation((cmd) => {
+      const c = cmd as string
+      if (c === 'which adb') throw new Error('not found')
+      if (c.startsWith(customAdb)) return 'List of devices attached\n'
+      if (c === 'emulator -list-avds') throw new Error('not found')
+      return ''
+    })
+
+    const result = await runDoctorChecks()
+    const adbCheck = result.android?.find((c) => c.label.includes('not in PATH'))
+    expect(adbCheck?.detail).toContain(customAdb)
   })
 })

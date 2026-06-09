@@ -41,7 +41,8 @@ cli
 
 cli
   .command('doctor', 'Check system prerequisites')
-  .action(() => cmdDoctor())
+  .option('--json', 'Output machine-readable JSON')
+  .action((opts: { json?: boolean }) => cmdDoctor(opts))
 
 cli
   .command('devices', 'List available iOS simulators and Android AVDs')
