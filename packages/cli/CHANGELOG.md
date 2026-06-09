@@ -1,5 +1,48 @@
 # tapflow
 
+## 0.8.0-next.0
+
+### Minor Changes
+
+- 2552e53: feat(cli): add `tapflow doctor --json` and diagnose adb installed-but-not-in-PATH
+
+  - `tapflow doctor --json` emits machine-readable `{ ok, common, ios, android }` with no ANSI color, exiting 1 on failure — usable from CI and automation without screen-scraping.
+  - `doctor` now detects adb present in a standard SDK location (`$ANDROID_HOME`, `$ANDROID_SDK_ROOT`, `~/Library/Android/sdk`, `~/Android/Sdk`) but missing from PATH, instead of silently dropping the entire Android section. It surfaces an `adb (not in PATH)` warning hinting `tapflow setup android`.
+
+- 78743d4: feat(cli): add `tapflow setup android` — guided Android environment setup
+
+  `tapflow doctor` diagnoses problems; `tapflow setup android` fixes them. It walks through the required Android dependencies and applies fixes where safe:
+
+  - **Homebrew** — checks `which brew`, prints the install URL if missing (cannot auto-install).
+  - **adb** — if present in PATH it passes; if found in a standard SDK location but missing from PATH it registers the `platform-tools` directory in your shell rc (`.zshrc`/`.bashrc`) inside an idempotent marker block; if absent it runs `brew install android-platform-tools`.
+  - **Android Studio** — checks `/Applications/Android Studio.app`; since the cask is large (~1GB+) it asks for confirmation before `brew install --cask android-studio`, and skips with guidance in non-interactive shells.
+  - **Emulator** — reports running emulators and hints how to start an AVD.
+
+  Each step is idempotent — re-running on a configured machine prints ✓ and makes no changes.
+
+- e21902e: feat(cli): `tapflow setup` can install Homebrew after confirmation
+
+  When Homebrew is missing, `tapflow setup android` (and upcoming `setup ios`) now offers to install it via the official script after an explicit confirmation prompt, instead of only printing the install URL. In non-interactive shells it still just prints guidance — no remote script runs without consent. This makes Homebrew the shared first step for all platform setups.
+
+- 64d9a59: feat(cli): add `tapflow setup ios` and unify the setup command
+
+  `tapflow setup ios` guides iOS environment setup: Homebrew → Xcode → Xcode activation → Simulator.
+
+  - **Xcode** — since Xcode is App-Store-only, an interactive flow opens the App Store and waits for you to finish installing, then re-checks. Non-interactive shells print the App Store link instead.
+  - **Xcode activation** — detects the "installed but not usable" case (active developer dir on CommandLineTools, missing license, or first-launch) and prints the exact `sudo xcode-select -s …` / `xcodebuild -license accept` / `-runFirstLaunch` commands (these need sudo, so setup guides rather than auto-runs them).
+  - **Simulator** — boots the first available simulator if none is running.
+
+  The `setup` command now takes an optional platform: `tapflow setup ios`, `tapflow setup android`, or `tapflow setup` to auto-detect and run every supported platform (iOS on macOS, Android when adb is found).
+
+  Closes #144 (and completes #142 together with `setup android`).
+
+### Patch Changes
+
+- @tapflowio/agent-core@0.8.0-next.0
+- @tapflowio/ios-agent@0.8.0-next.0
+- @tapflowio/android-agent@0.8.0-next.0
+- @tapflowio/relay@0.8.0-next.0
+
 ## 0.7.0
 
 ### Minor Changes
