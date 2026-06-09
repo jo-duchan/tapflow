@@ -46,8 +46,8 @@ cli
   .action((opts: { json?: boolean }) => cmdDoctor(opts))
 
 cli
-  .command('setup <platform>', 'Set up the environment for a platform (android)')
-  .action((platform: string) => cmdSetup(platform))
+  .command('setup [platform]', 'Set up the environment (ios | android; omit to auto-detect)')
+  .action((platform?: string) => cmdSetup(platform))
 
 cli
   .command('devices', 'List available iOS simulators and Android AVDs')

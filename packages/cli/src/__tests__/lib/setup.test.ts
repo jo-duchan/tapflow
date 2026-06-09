@@ -4,6 +4,7 @@ vi.mock('node:child_process')
 vi.mock('node:fs')
 vi.mock('@clack/prompts', () => ({
   confirm: vi.fn(),
+  text: vi.fn(),
   isCancel: vi.fn(() => false),
 }))
 
@@ -11,8 +12,8 @@ import { execSync, spawnSync } from 'node:child_process'
 import { existsSync, readFileSync, appendFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
-import { confirm } from '@clack/prompts'
-import { runSetupAndroid } from '../../lib/setup.js'
+import { confirm, text } from '@clack/prompts'
+import { runSetupAndroid, runSetupIos } from '../../lib/setup.js'
 
 const mockExecSync = vi.mocked(execSync)
 const mockSpawnSync = vi.mocked(spawnSync)
@@ -20,6 +21,8 @@ const mockExistsSync = vi.mocked(existsSync)
 const mockReadFileSync = vi.mocked(readFileSync)
 const mockAppendFileSync = vi.mocked(appendFileSync)
 const mockConfirm = vi.mocked(confirm)
+const mockText = vi.mocked(text)
+const XCODE_APP = '/Applications/Xcode.app'
 
 const STUDIO_APP = '/Applications/Android Studio.app'
 const sdkAdb = join(homedir(), 'Library', 'Android', 'sdk', 'platform-tools', 'adb')
@@ -304,6 +307,125 @@ describe('runSetupAndroid', () => {
     const results = await runSetupAndroid()
     expect(results.every((r) => r.ok)).toBe(true)
     expect(mockAppendFileSync).not.toHaveBeenCalled()
+    expect(mockSpawnSync).not.toHaveBeenCalled()
+  })
+})
+
+describe('runSetupIos', () => {
+  const simctlBooted = JSON.stringify({
+    devices: { 'iOS-18': [{ udid: 'AAA', name: 'iPhone 16 Pro', state: 'Booted' }] },
+  })
+  const simctlShutdown = JSON.stringify({
+    devices: { 'iOS-18': [{ udid: 'BBB', name: 'iPhone 15', state: 'Shutdown' }] },
+  })
+  const simctlEmpty = JSON.stringify({ devices: {} })
+
+  beforeEach(() => {
+    vi.resetAllMocks()
+    mockSpawnSync.mockReturnValue(okSpawn as never)
+    mockConfirm.mockResolvedValue(true as never)
+    mockText.mockResolvedValue('' as never)
+    // 기본: 완전히 구성된 macOS (brew·Xcode·활성화·Booted 시뮬)
+    mockExistsSync.mockImplementation((p) => p === XCODE_APP)
+    mockExecSync.mockImplementation((cmd) => {
+      const c = cmd as string
+      if (c === 'which brew') return '/opt/homebrew/bin/brew\n'
+      if (c === 'xcode-select -p') return '/Applications/Xcode.app/Contents/Developer\n'
+      if (c === 'xcodebuild -version') return 'Xcode 26.5\n'
+      if (c.includes('simctl list devices')) return simctlBooted
+      return ''
+    })
+  })
+
+  afterEach(() => {
+    vi.restoreAllMocks()
+    vi.unstubAllEnvs()
+    setTTY(undefined)
+  })
+
+  it('Xcode 설치돼 있으면 ok', async () => {
+    const results = await runSetupIos()
+    expect(findStep(results, 'xcode')?.ok).toBe(true)
+  })
+
+  it('Xcode 미설치 + 비대화형이면 warn + App Store 링크', async () => {
+    setTTY(false)
+    mockExistsSync.mockReturnValue(false)
+
+    const results = await runSetupIos()
+    const xcode = findStep(results, 'xcode')
+    expect(xcode?.warn).toBe(true)
+    expect(xcode?.detail).toContain('apps.apple.com')
+    expect(mockText).not.toHaveBeenCalled()
+  })
+
+  it('Xcode 미설치 + TTY → App Store 열고 재확인 후 설치되면 ok', async () => {
+    setTTY(true)
+    // 처음엔 미설치, 두 번째 호출(재확인)부터 설치됨
+    let calls = 0
+    mockExistsSync.mockImplementation((p) => {
+      if (p === XCODE_APP) return calls++ > 0
+      return false
+    })
+
+    const results = await runSetupIos()
+    expect(mockText).toHaveBeenCalled()
+    expect(mockSpawnSync).toHaveBeenCalledWith('open', [expect.stringContaining('apps.apple.com')], expect.anything())
+    expect(findStep(results, 'xcode')?.ok).toBe(true)
+  })
+
+  it('active dir이 CommandLineTools면 활성화 단계 warn + xcode-select 안내', async () => {
+    mockExecSync.mockImplementation((cmd) => {
+      const c = cmd as string
+      if (c === 'which brew') return '/opt/homebrew/bin/brew\n'
+      if (c === 'xcode-select -p') return '/Library/Developer/CommandLineTools\n'
+      if (c.includes('simctl list devices')) return simctlBooted
+      return ''
+    })
+
+    const results = await runSetupIos()
+    const act = results.find((r) => r.detail?.includes('xcode-select -s'))
+    expect(act?.warn).toBe(true)
+  })
+
+  it('시뮬레이터 Booted면 ok', async () => {
+    const results = await runSetupIos()
+    expect(findStep(results, 'simulator')?.ok).toBe(true)
+  })
+
+  it('Booted 없고 Shutdown 후보 있으면 simctl boot 실행', async () => {
+    mockExecSync.mockImplementation((cmd) => {
+      const c = cmd as string
+      if (c === 'which brew') return '/opt/homebrew/bin/brew\n'
+      if (c === 'xcode-select -p') return '/Applications/Xcode.app/Contents/Developer\n'
+      if (c === 'xcodebuild -version') return 'Xcode 26.5\n'
+      if (c.includes('simctl list devices')) return simctlShutdown
+      if (c.includes('simctl boot')) return ''
+      return ''
+    })
+
+    const results = await runSetupIos()
+    expect(mockExecSync).toHaveBeenCalledWith(expect.stringContaining('simctl boot BBB'), expect.anything())
+    expect(findStep(results, 'simulator')?.ok).toBe(true)
+  })
+
+  it('사용 가능한 시뮬레이터가 없으면 warn', async () => {
+    mockExecSync.mockImplementation((cmd) => {
+      const c = cmd as string
+      if (c === 'which brew') return '/opt/homebrew/bin/brew\n'
+      if (c === 'xcode-select -p') return '/Applications/Xcode.app/Contents/Developer\n'
+      if (c === 'xcodebuild -version') return 'Xcode 26.5\n'
+      if (c.includes('simctl list devices')) return simctlEmpty
+      return ''
+    })
+
+    const results = await runSetupIos()
+    expect(findStep(results, 'simulator')?.warn).toBe(true)
+  })
+
+  it('멱등 — 완전 구성 머신은 전부 ok, 부작용 없음', async () => {
+    const results = await runSetupIos()
+    expect(results.every((r) => r.ok)).toBe(true)
     expect(mockSpawnSync).not.toHaveBeenCalled()
   })
 })
