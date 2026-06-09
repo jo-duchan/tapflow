@@ -41,9 +41,9 @@ cli
   })
 
 cli
-  .command('doctor', 'Check system prerequisites')
+  .command('doctor [platform]', 'Check system prerequisites (ios | android; omit for all)')
   .option('--json', 'Output machine-readable JSON')
-  .action((opts: { json?: boolean }) => cmdDoctor(opts))
+  .action((platform: string | undefined, opts: { json?: boolean }) => cmdDoctor({ ...opts, platform }))
 
 cli
   .command('setup [platform]', 'Set up the environment (ios | android; omit to auto-detect)')

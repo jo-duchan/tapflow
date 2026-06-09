@@ -16,18 +16,38 @@ export interface DoctorResult {
   android: DoctorCheck[] | null
 }
 
-export async function runDoctorChecks(): Promise<DoctorResult> {
+// platform: 'ios' | 'android' 지정 시 해당 플랫폼만. 없으면 자동(iOS는 macOS에서만, Android은 항상).
+export async function runDoctorChecks(platform?: string): Promise<DoctorResult> {
   const isMac = process.platform === 'darwin'
-  const adb = resolveAdb()
+  const wantIos = platform === 'ios' || (!platform && isMac)
+  const wantAndroid = platform === 'android' || !platform
 
   return {
     common: [checkNodeVersion()],
-    ios: isMac ? [checkXcode(), checkSimctl(), checkBootedSimulator()] : null,
-    android: adb !== null ? buildAndroidChecks(adb) : null,
+    ios: wantIos ? buildIosChecks(isMac) : null,
+    android: wantAndroid ? buildAndroidChecks(resolveAdb()) : null,
   }
 }
 
-function buildAndroidChecks(adb: AdbResolution): DoctorCheck[] {
+function buildIosChecks(isMac: boolean): DoctorCheck[] {
+  if (!isMac) {
+    return [{ label: 'iOS', ok: false, warn: true, detail: 'iOS testing requires macOS.' }]
+  }
+  return [checkXcode(), checkSimctl(), checkBootedSimulator()]
+}
+
+// adb가 없어도 섹션을 숨기지 않고 진단을 노출한다(Android를 세팅하려는 사용자가 볼 수 있도록).
+function buildAndroidChecks(adb: AdbResolution | null): DoctorCheck[] {
+  if (!adb) {
+    return [
+      {
+        label: 'adb',
+        ok: false,
+        warn: true,
+        detail: 'adb not found. Run: tapflow setup android',
+      },
+    ]
+  }
   // adb가 PATH에 있으면 명령은 그대로 'adb', 표준 위치 fallback이면 절대경로로 실행
   if (adb.inPath) {
     return [checkAdb(adb.path), checkBootedAvd('adb')]
