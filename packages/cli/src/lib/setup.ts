@@ -24,8 +24,9 @@ export async function runSetupAndroid(): Promise<SetupStepResult[]> {
   return results
 }
 
+// eval "$(...)"로 감싸 명령 치환 결과(설치 스크립트)가 word splitting 없이 단일 평가되게 한다.
 const HOMEBREW_INSTALL =
-  '$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)'
+  'eval "$(/usr/bin/curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"'
 
 async function checkAndFixHomebrew(): Promise<SetupStepResult> {
   try {
@@ -52,7 +53,12 @@ async function checkAndFixHomebrew(): Promise<SetupStepResult> {
   console.log()
   const r = spawnSync('/bin/bash', ['-c', HOMEBREW_INSTALL], { stdio: 'inherit' })
   if (r.status === 0) {
-    return { label: 'Homebrew installed', ok: true }
+    // 방금 설치한 brew는 현재 프로세스 PATH에 아직 없을 수 있다(셸 재시작 전).
+    return {
+      label: 'Homebrew installed',
+      ok: true,
+      detail: "If later steps can't find brew, open a new terminal and re-run tapflow setup.",
+    }
   }
   return {
     label: 'Homebrew',
