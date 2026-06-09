@@ -125,8 +125,9 @@ run: |
 2. KO 파일 작성 (`docs/ko/guide/{slug}.md`)
 3. EN 파일 작성 (`docs/guide/{slug}.md`) — KO 기반 번역
 4. `docs/.vitepress/config.ts` 사이드바 업데이트 (EN + KO)
-5. `pnpm docs:build` 실행해 빌드 오류 확인
-6. 오류 있으면 수정 후 재빌드
+5. `pnpm docs:build` 실행해 빌드 오류 확인 — 오류 있으면 수정 후 재빌드
+6. **AI tells detect 게이트** — `.claude/ai-tells/rules-ko.md`로 작성한 KO 산문을, `.claude/ai-tells/rules-en.md`로 EN 산문을 각각 `detect`한다. 두 파일의 **docs carve-out**(격식체 종결 균일·glossary 볼드·`~할 수 있습니다` 기능서술·em dash 단문 closing)을 적용한다. 코드·수치·테이블·frontmatter는 불가침.
+   - **detect는 게이트일 뿐 자동 수정하지 않는다. `rewrite` 자동 호출 금지.** P0/P1(EN)·S1(KO)을 완료 보고에 표기하고 **사람 판단**을 받는다. (정책: `.internal/marketing/OVERVIEW.md`)
 
 ---
 
@@ -142,4 +143,9 @@ run: |
 
 ## 빌드
 - ✅ pnpm docs:build 통과
+
+## AI tells detect (게이트)
+- EN: P0/P1 N건 — {인용 또는 "없음(클린)"}
+- KO: S1 N건 — {인용 또는 "없음(클린)"}
+- 판단 필요 항목은 사람이 확인 (자동 수정 안 함)
 ```
