@@ -18,7 +18,7 @@ allowed-tools: Read, Edit, Write, Glob, Grep
 
 - **린트/게이트지 "세탁기"가 아니다.** AI로 생성 → 톤 세탁 → 게시는 이 도구의 용도가 **아니다.** *사람이 쓴 글*의 자가점검이 1차 용도다.
 - **신호지 증거가 아니다.** 플래그된 패턴은 LLM 출력에 더 흔할 뿐, 비원어민·마감에 쫓긴 사람·기술 장르도 같은 모양을 만든다. 상용 AI 탐지기는 비원어민 영어에 오탐률 60%+. 점수를 "이건 AI다"의 단독 근거로 쓰지 않는다.
-- **정책 단일 소스**: `.internal/marketing/OVERVIEW.md`의 "AI 글쓰기 정책 (de-ai)" 섹션.
+- **운영 정책 (이 커맨드가 단일 소스)** — 아래 규칙이 authoritative. 마케팅 채널별 상세는 로컬 `.internal/marketing/OVERVIEW.md`(비공개·gitignore, 클론엔 없을 수 있음)에 있고, 없으면 아래를 따른다.
   - `detect` = 기본. 커스텀 커맨드에서 자동 호출 가능.
   - `rewrite` = 수동. 자동 연결은 docs 경로(`/write-docs` 등) 한정. **마케팅·외부 포스트엔 자동 호출 금지.**
   - **HN·Reddit = 손작성.** 외부 발견 채널 글은 `detect` 자가점검만, `rewrite` 쓰지 않는다.
