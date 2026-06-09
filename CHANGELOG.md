@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- cli: `tapflow doctor --json` emits machine-readable `{ ok, common, ios, android }` for CI/automation; `doctor` also diagnoses adb that is installed in a standard SDK location but missing from PATH.
+- cli: `tapflow setup [platform]` guides iOS/Android environment setup — Homebrew, adb/Xcode, simulator/emulator — applying safe fixes. Run without an argument to auto-detect and set up every supported platform. Homebrew can be installed via the official script after confirmation.
+
 ## [0.7.0] - 2026-06-08
 
 ### Added

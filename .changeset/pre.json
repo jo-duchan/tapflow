@@ -1,0 +1,21 @@
+{
+  "mode": "pre",
+  "tag": "next",
+  "initialVersions": {
+    "@tapflowio/docs": "0.0.0",
+    "@tapflowio/agent-core": "0.7.0",
+    "@tapflowio/android-agent": "0.7.0",
+    "tapflow": "0.7.0",
+    "@tapflowio/dashboard": "0.1.1",
+    "@tapflowio/ios-agent": "0.7.0",
+    "@tapflowio/mcp-server": "0.7.0-experimental.1",
+    "@tapflowio/relay": "0.7.0",
+    "@tapflowio/playground": "0.0.0"
+  },
+  "changesets": [
+    "doctor-json-flag",
+    "setup-android",
+    "setup-homebrew-autoinstall",
+    "setup-ios-and-unify"
+  ]
+}
