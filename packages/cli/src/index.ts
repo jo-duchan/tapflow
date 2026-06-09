@@ -8,6 +8,7 @@ const { version } = JSON.parse(readFileSync(join(__dirname, '..', 'package.json'
 import { cmdInitConfig } from './commands/init.js'
 import { cmdAdminInit } from './commands/admin-init.js'
 import { cmdDoctor } from './commands/doctor.js'
+import { cmdSetup } from './commands/setup.js'
 import { cmdDevices } from './commands/devices.js'
 import { cmdBoot } from './commands/boot.js'
 import { cmdStart } from './commands/start.js'
@@ -43,6 +44,10 @@ cli
   .command('doctor', 'Check system prerequisites')
   .option('--json', 'Output machine-readable JSON')
   .action((opts: { json?: boolean }) => cmdDoctor(opts))
+
+cli
+  .command('setup <platform>', 'Set up the environment for a platform (android)')
+  .action((platform: string) => cmdSetup(platform))
 
 cli
   .command('devices', 'List available iOS simulators and Android AVDs')
