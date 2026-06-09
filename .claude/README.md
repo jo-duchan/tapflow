@@ -12,12 +12,14 @@ Claude Code project configuration directory.
 ```
 .claude/
 ├── commands/               # Custom slash commands (team-shared)
+│   ├── ai-tells.md         # /ai-tells
 │   ├── compound.md         # /compound
 │   ├── deep-research.md    # /deep-research
 │   ├── doc-sync.md         # /doc-sync
 │   ├── qa.md               # /qa
 │   ├── work-plan.md        # /work-plan
 │   └── write-docs.md       # /write-docs
+├── ai-tells/               # /ai-tells rule data (ko/en taxonomy + MIT NOTICE)
 ├── settings.json           # Team settings (hooks, statusLine, etc.)
 ├── settings.local.json     # Personal settings — gitignored (permissions, etc.)
 └── README.md               # This file
@@ -31,6 +33,7 @@ Invoke with `/` in Claude Code.
 
 | Command | Description |
 |---------|-------------|
+| `/ai-tells {ko\|en} {detect\|rewrite} [target]` | Detect/fix AI writing tells. `detect` is the default lint/gate (not a laundering tool). External posts (HN/Reddit) = `detect` only — see marketing OVERVIEW.md policy. |
 | `/work-plan {topic}` | Create a `.work/` plan document with requirements and test cases. |
 | `/deep-research {problem}` | Deep analysis of implementation, bug, or design problems using Opus. |
 | `/qa {target}` | Plan and write tests for the target code. Potemkin and flaky tests prohibited. |
