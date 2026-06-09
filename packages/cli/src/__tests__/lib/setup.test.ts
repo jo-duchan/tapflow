@@ -67,7 +67,8 @@ describe('runSetupAndroid', () => {
     expect(findStep(results, 'homebrew')?.ok).toBe(true)
   })
 
-  it('Homebrew 없으면 warn + 설치 URL, brew install 미호출', async () => {
+  it('Homebrew 없음 + 비대화형이면 confirm 없이 warn + 안내', async () => {
+    setTTY(false)
     mockExecSync.mockImplementation((cmd) => {
       const c = cmd as string
       if (c === 'which brew') throw new Error('not found')
@@ -81,7 +82,46 @@ describe('runSetupAndroid', () => {
     expect(brew?.ok).toBe(false)
     expect(brew?.warn).toBe(true)
     expect(brew?.detail).toContain('brew.sh')
-    expect(mockSpawnSync).not.toHaveBeenCalled()
+    expect(mockConfirm).not.toHaveBeenCalled()
+    expect(mockSpawnSync).not.toHaveBeenCalledWith('/bin/bash', expect.any(Array), expect.anything())
+  })
+
+  it('Homebrew 없음 + TTY + 수락 시 공식 스크립트 설치', async () => {
+    setTTY(true)
+    mockConfirm.mockResolvedValue(true as never)
+    mockExecSync.mockImplementation((cmd) => {
+      const c = cmd as string
+      if (c === 'which brew') throw new Error('not found')
+      if (c === 'which adb') return '/opt/homebrew/bin/adb\n'
+      if (c.includes('devices')) return 'List of devices attached\nemulator-5554\tdevice\n'
+      return ''
+    })
+
+    const results = await runSetupAndroid()
+    expect(mockConfirm).toHaveBeenCalled()
+    expect(mockSpawnSync).toHaveBeenCalledWith(
+      '/bin/bash',
+      ['-c', expect.stringContaining('Homebrew/install')],
+      expect.anything(),
+    )
+    expect(findStep(results, 'homebrew')?.ok).toBe(true)
+  })
+
+  it('Homebrew 없음 + TTY + 거절 시 warn + 설치 미실행', async () => {
+    setTTY(true)
+    mockConfirm.mockResolvedValue(false as never)
+    mockExecSync.mockImplementation((cmd) => {
+      const c = cmd as string
+      if (c === 'which brew') throw new Error('not found')
+      if (c === 'which adb') return '/opt/homebrew/bin/adb\n'
+      if (c.includes('devices')) return 'List of devices attached\nemulator-5554\tdevice\n'
+      return ''
+    })
+
+    const results = await runSetupAndroid()
+    const brew = findStep(results, 'homebrew')
+    expect(brew?.warn).toBe(true)
+    expect(mockSpawnSync).not.toHaveBeenCalledWith('/bin/bash', expect.any(Array), expect.anything())
   })
 
   it('adb가 PATH에 있으면 ok, 설치/등록 미호출', async () => {

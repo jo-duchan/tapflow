@@ -16,7 +16,7 @@ const STUDIO_APP = '/Applications/Android Studio.app'
 
 export async function runSetupAndroid(): Promise<SetupStepResult[]> {
   const results: SetupStepResult[] = []
-  const brew = checkAndFixHomebrew()
+  const brew = await checkAndFixHomebrew()
   results.push(brew)
   results.push(checkAndFixAdb(brew.ok))
   results.push(await checkAndFixAndroidStudio(brew.ok))
@@ -24,17 +24,47 @@ export async function runSetupAndroid(): Promise<SetupStepResult[]> {
   return results
 }
 
-function checkAndFixHomebrew(): SetupStepResult {
+// eval "$(...)"로 감싸 명령 치환 결과(설치 스크립트)가 word splitting 없이 단일 평가되게 한다.
+const HOMEBREW_INSTALL =
+  'eval "$(/usr/bin/curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"'
+
+async function checkAndFixHomebrew(): Promise<SetupStepResult> {
   try {
     execSync('which brew', { stdio: 'pipe' })
     return { label: 'Homebrew installed', ok: true }
   } catch {
+    // 미설치 — 아래에서 확인 후 설치
+  }
+  // 원격 스크립트 자동 실행은 명시적 동의가 있을 때만. 비대화형이면 안내만.
+  if (!process.stdout.isTTY) {
     return {
       label: 'Homebrew',
       ok: false,
       warn: true,
-      detail: 'Install Homebrew first: https://brew.sh (cannot auto-install)',
+      detail: 'Install Homebrew: https://brew.sh (skipped in non-interactive mode)',
     }
+  }
+  const proceed = await confirm({
+    message: 'Homebrew not found. Install it now via the official script? (may prompt for sudo)',
+  })
+  if (isCancel(proceed) || !proceed) {
+    return { label: 'Homebrew', ok: false, warn: true, detail: 'Skipped. Install Homebrew: https://brew.sh' }
+  }
+  console.log()
+  const r = spawnSync('/bin/bash', ['-c', HOMEBREW_INSTALL], { stdio: 'inherit' })
+  if (r.status === 0) {
+    // 방금 설치한 brew는 현재 프로세스 PATH에 아직 없을 수 있다(셸 재시작 전).
+    return {
+      label: 'Homebrew installed',
+      ok: true,
+      detail: "If later steps can't find brew, open a new terminal and re-run tapflow setup.",
+    }
+  }
+  return {
+    label: 'Homebrew',
+    ok: false,
+    warn: true,
+    detail: 'Homebrew install failed. Install manually: https://brew.sh',
   }
 }
 
