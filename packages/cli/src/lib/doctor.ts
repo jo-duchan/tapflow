@@ -107,12 +107,12 @@ function checkNodeVersion(): DoctorCheck {
   }
 }
 
-interface AdbResolution {
+export interface AdbResolution {
   path: string
   inPath: boolean
 }
 
-function resolveAdb(): AdbResolution | null {
+export function resolveAdb(): AdbResolution | null {
   try {
     const found = execSync('which adb', { encoding: 'utf8', stdio: 'pipe' }).trim()
     if (found) return { path: found, inPath: true }
