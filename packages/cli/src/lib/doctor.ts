@@ -1,5 +1,7 @@
 import { execSync } from 'node:child_process'
 import { existsSync } from 'node:fs'
+import { homedir } from 'node:os'
+import { join } from 'node:path'
 
 export interface DoctorCheck {
   label: string
@@ -16,13 +18,29 @@ export interface DoctorResult {
 
 export async function runDoctorChecks(): Promise<DoctorResult> {
   const isMac = process.platform === 'darwin'
-  const adbPath = resolveAdb()
+  const adb = resolveAdb()
 
   return {
     common: [checkNodeVersion()],
     ios: isMac ? [checkXcode(), checkSimctl(), checkBootedSimulator()] : null,
-    android: adbPath !== null ? [checkAdb(adbPath), checkBootedAvd()] : null,
+    android: adb !== null ? buildAndroidChecks(adb) : null,
   }
+}
+
+function buildAndroidChecks(adb: AdbResolution): DoctorCheck[] {
+  // adb가 PATH에 있으면 명령은 그대로 'adb', 표준 위치 fallback이면 절대경로로 실행
+  if (adb.inPath) {
+    return [checkAdb(adb.path), checkBootedAvd('adb')]
+  }
+  return [
+    {
+      label: 'adb (not in PATH)',
+      ok: false,
+      warn: true,
+      detail: `adb found at ${adb.path} but not in PATH. Run: tapflow setup android`,
+    },
+    checkBootedAvd(adb.path),
+  ]
 }
 
 function checkXcode(): DoctorCheck {
@@ -89,22 +107,41 @@ function checkNodeVersion(): DoctorCheck {
   }
 }
 
-function resolveAdb(): string | null {
+interface AdbResolution {
+  path: string
+  inPath: boolean
+}
+
+function resolveAdb(): AdbResolution | null {
   try {
-    const path = execSync('which adb', { encoding: 'utf8', stdio: 'pipe' }).trim()
-    return path || null
+    const found = execSync('which adb', { encoding: 'utf8', stdio: 'pipe' }).trim()
+    if (found) return { path: found, inPath: true }
   } catch {
-    return null
+    // PATH에 없으면 표준 SDK 위치 탐색으로 진행
   }
+  for (const candidate of standardAdbPaths()) {
+    if (existsSync(candidate)) return { path: candidate, inPath: false }
+  }
+  return null
+}
+
+function standardAdbPaths(): string[] {
+  const paths: string[] = []
+  if (process.env.ANDROID_HOME) paths.push(join(process.env.ANDROID_HOME, 'platform-tools', 'adb'))
+  if (process.env.ANDROID_SDK_ROOT) paths.push(join(process.env.ANDROID_SDK_ROOT, 'platform-tools', 'adb'))
+  const home = homedir()
+  paths.push(join(home, 'Library', 'Android', 'sdk', 'platform-tools', 'adb')) // macOS
+  paths.push(join(home, 'Android', 'Sdk', 'platform-tools', 'adb')) // Linux
+  return paths
 }
 
 function checkAdb(path: string): DoctorCheck {
   return { label: `adb found: ${path}`, ok: true }
 }
 
-function checkBootedAvd(): DoctorCheck {
+function checkBootedAvd(adbCmd: string): DoctorCheck {
   try {
-    const out = execSync('adb devices', { encoding: 'utf8', stdio: 'pipe' })
+    const out = execSync(`${adbCmd} devices`, { encoding: 'utf8', stdio: 'pipe' })
     const lines = out.trim().split('\n').slice(1).filter(Boolean)
     const emulator = lines.find((l) => l.startsWith('emulator-'))
     if (!emulator) {
@@ -121,7 +158,7 @@ function checkBootedAvd(): DoctorCheck {
 
     const serial = emulator.split('\t')[0]?.trim() ?? ''
     try {
-      const avdName = execSync(`adb -s ${serial} emu avd name`, { encoding: 'utf8', stdio: 'pipe' })
+      const avdName = execSync(`${adbCmd} -s ${serial} emu avd name`, { encoding: 'utf8', stdio: 'pipe' })
         .split('\n')[0]
         ?.trim() ?? serial
       return { label: `AVD: ${avdName}`, ok: true }
