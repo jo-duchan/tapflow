@@ -127,7 +127,7 @@ describe('runDoctorChecks', () => {
     expect(result.ios?.some((c) => c.label.includes('iPhone 16 Pro'))).toBe(true)
   })
 
-  it('booted 없으면 warn + 사용 가능한 시뮬레이터 이름으로 hint 생성', async () => {
+  it('booted 안 됐어도 디바이스가 있으면 ok (부팅은 on-demand)', async () => {
     vi.spyOn(process, 'platform', 'get').mockReturnValue('darwin')
     mockExecSync.mockImplementation((cmd) => {
       const c = cmd as string
@@ -138,10 +138,8 @@ describe('runDoctorChecks', () => {
     })
 
     const result = await runDoctorChecks()
-    const simCheck = result.ios?.find((c) => c.label === 'Simulator')
-    expect(simCheck?.ok).toBe(false)
-    expect(simCheck?.warn).toBe(true)
-    expect(simCheck?.detail).toContain('iPhone 16 Pro')
+    const simCheck = result.ios?.find((c) => c.label.includes('Simulator'))
+    expect(simCheck?.ok).toBe(true)
   })
 
   it('Xcode 미설치 시 실패 + 링크 포함', async () => {

@@ -48,9 +48,8 @@ function buildAndroidChecks(adb: AdbResolution | null): DoctorCheck[] {
       },
     ]
   }
-  // adb가 PATH에 있으면 명령은 그대로 'adb', 표준 위치 fallback이면 절대경로로 실행
   if (adb.inPath) {
-    return [checkAdb(adb.path), checkBootedAvd('adb')]
+    return [checkAdb(adb.path), checkAvdAvailable()]
   }
   return [
     {
@@ -59,7 +58,7 @@ function buildAndroidChecks(adb: AdbResolution | null): DoctorCheck[] {
       warn: true,
       detail: `adb found at ${adb.path} but not in PATH. Run: tapflow setup android`,
     },
-    checkBootedAvd(adb.path),
+    checkAvdAvailable(),
   ]
 }
 
@@ -97,20 +96,20 @@ function checkSimctl(): DoctorCheck {
   }
 }
 
+// 부팅은 QA Session 접속 시 relay가 on-demand로 한다 — 미부팅은 정상, 디바이스 존재만 확인.
 function checkBootedSimulator(): DoctorCheck {
   try {
     const raw = execSync('xcrun simctl list devices --json', { encoding: 'utf8', stdio: 'pipe' })
     const data = JSON.parse(raw) as { devices: Record<string, Array<{ name: string; state: string; udid: string }>> }
     const allDevices = Object.values(data.devices).flat()
-    const booted = allDevices.find((d) => d.state === 'Booted')
-    if (booted) {
-      return { label: `Simulator booted: ${booted.name}`, ok: true }
+    if (allDevices.length === 0) {
+      return { label: 'Simulator', ok: false, warn: true, detail: 'No simulator available. Run: tapflow setup ios' }
     }
-    const available = allDevices.find((d) => d.state === 'Shutdown')
-    const hint = available
-      ? `No simulator is running. Run: tapflow boot "${available.name}"`
-      : 'No simulator is running. Run: tapflow devices to see available simulators, then: tapflow boot "<name>"'
-    return { label: 'Simulator', ok: false, warn: true, detail: hint }
+    const booted = allDevices.find((d) => d.state === 'Booted')
+    return {
+      label: booted ? `Simulator: ${booted.name} (booted)` : `Simulator available (${allDevices.length})`,
+      ok: true,
+    }
   } catch {
     return { label: 'Simulator', ok: false, detail: 'Could not query simulators. Is Xcode installed?' }
   }
@@ -159,42 +158,16 @@ function checkAdb(path: string): DoctorCheck {
   return { label: `adb found: ${path}`, ok: true }
 }
 
-function checkBootedAvd(adbCmd: string): DoctorCheck {
-  try {
-    const out = execSync(`${adbCmd} devices`, { encoding: 'utf8', stdio: 'pipe' })
-    const lines = out.trim().split('\n').slice(1).filter(Boolean)
-    const emulator = lines.find((l) => l.startsWith('emulator-'))
-    if (!emulator) {
-      const hint = listAvdHint()
-      return {
-        label: 'AVD',
-        ok: false,
-        warn: true,
-        detail: hint
-          ? `No running emulator. Run: emulator @${hint}`
-          : 'No running emulator. Start an AVD from Android Studio > Device Manager.',
-      }
-    }
-
-    const serial = emulator.split('\t')[0]?.trim() ?? ''
-    try {
-      const avdName = execSync(`${adbCmd} -s ${serial} emu avd name`, { encoding: 'utf8', stdio: 'pipe' })
-        .split('\n')[0]
-        ?.trim() ?? serial
-      return { label: `AVD: ${avdName}`, ok: true }
-    } catch {
-      return { label: `AVD: ${serial}`, ok: true }
-    }
-  } catch {
-    return { label: 'AVD', ok: false, detail: 'Could not query running emulators.' }
-  }
-}
-
-function listAvdHint(): string | null {
+// 부팅은 relay on-demand가 한다 — AVD가 하나라도 존재하면 ok.
+function checkAvdAvailable(): DoctorCheck {
   try {
     const out = execSync('emulator -list-avds', { encoding: 'utf8', stdio: 'pipe' }).trim()
-    return out.split('\n')[0]?.trim() || null
+    const avds = out ? out.split('\n').map((l) => l.trim()).filter(Boolean) : []
+    if (avds.length > 0) {
+      return { label: `AVD available: ${avds[0]}`, ok: true }
+    }
   } catch {
-    return null
+    // emulator 미설치/조회 실패 — 아래 안내
   }
+  return { label: 'AVD', ok: false, warn: true, detail: 'No AVD found. Run: tapflow setup android' }
 }
