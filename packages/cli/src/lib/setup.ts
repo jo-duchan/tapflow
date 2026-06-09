@@ -51,9 +51,25 @@ async function checkAndFixXcode(): Promise<SetupStepResult> {
     }
   }
   step('Xcode can only be installed from the App Store.')
-  await text({ message: 'Press Enter to open the App Store…' })
-  spawnSync('open', [`macappstores://apps.apple.com/app/xcode/id497799835`], { stdio: 'ignore' })
-  await text({ message: 'Install Xcode, then press Enter to continue…' })
+  const openPrompt = await text({ message: 'Press Enter to open the App Store…' })
+  if (isCancel(openPrompt)) {
+    return {
+      label: 'Xcode',
+      ok: false,
+      warn: true,
+      detail: 'Cancelled. Install Xcode from the App Store and re-run `tapflow setup ios`.',
+    }
+  }
+  spawnSync('open', ['macappstores://apps.apple.com/app/xcode/id497799835'], { stdio: 'ignore' })
+  const continuePrompt = await text({ message: 'Install Xcode, then press Enter to continue…' })
+  if (isCancel(continuePrompt)) {
+    return {
+      label: 'Xcode',
+      ok: false,
+      warn: true,
+      detail: 'Cancelled. Re-run `tapflow setup ios` after installing Xcode.',
+    }
+  }
   if (existsSync(XCODE_APP)) {
     return { label: 'Xcode installed', ok: true }
   }
@@ -92,7 +108,7 @@ function checkXcodeActivation(xcodeInstalled: boolean): SetupStepResult {
       label: 'Xcode setup',
       ok: false,
       warn: true,
-      detail: 'Finish Xcode setup: sudo xcodebuild -license accept && xcodebuild -runFirstLaunch',
+      detail: 'Finish Xcode setup: sudo xcodebuild -license accept && sudo xcodebuild -runFirstLaunch',
     }
   }
 }
@@ -110,7 +126,8 @@ function checkAndFixSimulator(): SetupStepResult {
     }
     const candidate = all.find((d) => d.state === 'Shutdown')
     if (candidate) {
-      execSync(`xcrun simctl boot ${candidate.udid}`, { stdio: 'pipe' })
+      const boot = spawnSync('xcrun', ['simctl', 'boot', candidate.udid], { stdio: 'pipe' })
+      if (boot.status !== 0) throw new Error('simctl boot failed')
       return { label: `Simulator booted: ${candidate.name}`, ok: true }
     }
     return {

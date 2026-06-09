@@ -393,19 +393,18 @@ describe('runSetupIos', () => {
     expect(findStep(results, 'simulator')?.ok).toBe(true)
   })
 
-  it('Booted 없고 Shutdown 후보 있으면 simctl boot 실행', async () => {
+  it('Booted 없고 Shutdown 후보 있으면 simctl boot 실행 (spawnSync argv)', async () => {
     mockExecSync.mockImplementation((cmd) => {
       const c = cmd as string
       if (c === 'which brew') return '/opt/homebrew/bin/brew\n'
       if (c === 'xcode-select -p') return '/Applications/Xcode.app/Contents/Developer\n'
       if (c === 'xcodebuild -version') return 'Xcode 26.5\n'
       if (c.includes('simctl list devices')) return simctlShutdown
-      if (c.includes('simctl boot')) return ''
       return ''
     })
 
     const results = await runSetupIos()
-    expect(mockExecSync).toHaveBeenCalledWith(expect.stringContaining('simctl boot BBB'), expect.anything())
+    expect(mockSpawnSync).toHaveBeenCalledWith('xcrun', ['simctl', 'boot', 'BBB'], expect.anything())
     expect(findStep(results, 'simulator')?.ok).toBe(true)
   })
 
