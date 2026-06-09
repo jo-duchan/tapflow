@@ -4,6 +4,7 @@ on:
   push:
     tags:
       - 'v*.*.*'
+      - 'v*.*.*-*' # prerelease tags (e.g. v0.8.0-next.0)
 
 jobs:
   release:
