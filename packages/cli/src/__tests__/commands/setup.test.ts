@@ -7,14 +7,24 @@ vi.mock('../../lib/setup.js', () => ({
 vi.mock('../../lib/doctor.js', () => ({
   resolveAdb: vi.fn(),
 }))
+vi.mock('@clack/prompts', () => ({
+  confirm: vi.fn(),
+  isCancel: vi.fn(() => false),
+}))
 
 import { runSetupAndroid, runSetupIos } from '../../lib/setup.js'
 import { resolveAdb } from '../../lib/doctor.js'
+import { confirm } from '@clack/prompts'
 import { cmdSetup } from '../../commands/setup.js'
 
 const mockRunSetupAndroid = vi.mocked(runSetupAndroid)
 const mockRunSetupIos = vi.mocked(runSetupIos)
 const mockResolveAdb = vi.mocked(resolveAdb)
+const mockConfirm = vi.mocked(confirm)
+
+function setTTY(value: boolean | undefined) {
+  Object.defineProperty(process.stdout, 'isTTY', { value, configurable: true })
+}
 
 describe('cmdSetup', () => {
   let logLines: string[]
@@ -33,7 +43,10 @@ describe('cmdSetup', () => {
     mockRunSetupIos.mockResolvedValue([{ label: 'Xcode installed', ok: true }])
   })
 
-  afterEach(() => vi.restoreAllMocks())
+  afterEach(() => {
+    vi.restoreAllMocks()
+    setTTY(undefined)
+  })
 
   it('setup ios → runSetupIos만 호출', async () => {
     await cmdSetup('ios')
@@ -56,13 +69,56 @@ describe('cmdSetup', () => {
     expect(mockRunSetupAndroid).toHaveBeenCalled()
   })
 
-  it('인자 없음 + darwin + adb 없음 → ios만', async () => {
+  it('인자 없음 + darwin + adb 없음 + 비대화형 → ios만 (Android 안 물음)', async () => {
+    setTTY(false)
     vi.spyOn(process, 'platform', 'get').mockReturnValue('darwin')
     mockResolveAdb.mockReturnValue(null)
 
     await cmdSetup()
     expect(mockRunSetupIos).toHaveBeenCalled()
     expect(mockRunSetupAndroid).not.toHaveBeenCalled()
+    expect(mockConfirm).not.toHaveBeenCalled()
+  })
+
+  it('인자 없음 + darwin + adb 없음 + TTY + Android 수락 → 둘 다', async () => {
+    setTTY(true)
+    vi.spyOn(process, 'platform', 'get').mockReturnValue('darwin')
+    mockResolveAdb.mockReturnValue(null)
+    mockConfirm.mockResolvedValue(true as never)
+
+    await cmdSetup()
+    expect(mockConfirm).toHaveBeenCalled()
+    expect(mockRunSetupIos).toHaveBeenCalled()
+    expect(mockRunSetupAndroid).toHaveBeenCalled()
+  })
+
+  it('인자 없음 + darwin + adb 없음 + TTY + Android 거절 → ios만', async () => {
+    setTTY(true)
+    vi.spyOn(process, 'platform', 'get').mockReturnValue('darwin')
+    mockResolveAdb.mockReturnValue(null)
+    mockConfirm.mockResolvedValue(false as never)
+
+    await cmdSetup()
+    expect(mockRunSetupAndroid).not.toHaveBeenCalled()
+  })
+
+  it('전부 ready면 SETUP COMPLETE 배너', async () => {
+    mockRunSetupIos.mockResolvedValue([{ label: 'Xcode ready', ok: true }])
+
+    await cmdSetup('ios')
+    expect(logLines.join('\n')).toContain('SETUP COMPLETE')
+  })
+
+  it('미완 step 있으면 SETUP INCOMPLETE 배너 + 사유', async () => {
+    mockRunSetupIos.mockResolvedValue([
+      { label: 'Xcode ready', ok: true },
+      { label: 'Simulator', ok: false, warn: true, detail: '...' },
+    ])
+
+    await cmdSetup('ios')
+    const out = logLines.join('\n')
+    expect(out).toContain('SETUP INCOMPLETE')
+    expect(out).toContain('Simulator')
   })
 
   it('인자 없음 + 감지 0개 → 안내, exit 없음', async () => {
