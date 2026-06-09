@@ -20,6 +20,7 @@ describe('cmdSetup', () => {
     errLines = []
     vi.spyOn(console, 'log').mockImplementation((...args) => logLines.push(args.join(' ')))
     vi.spyOn(console, 'error').mockImplementation((...args) => errLines.push(args.join(' ')))
+    vi.spyOn(console, 'warn').mockImplementation((...args) => errLines.push(args.join(' ')))
     exitSpy = vi.spyOn(process, 'exit').mockImplementation(() => { throw new Error('process.exit') })
   })
 

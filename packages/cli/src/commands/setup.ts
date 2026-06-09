@@ -1,5 +1,5 @@
 import { runSetupAndroid, type SetupStepResult } from '../lib/setup.js'
-import { GREEN, RED, YELLOW, DIM, R } from '../lib/print.js'
+import { warn, GREEN, RED, YELLOW, DIM, R } from '../lib/print.js'
 
 function printResults(results: SetupStepResult[]): void {
   for (const r of results) {
@@ -24,6 +24,6 @@ export async function cmdSetup(platform: string): Promise<void> {
     return
   }
 
-  console.error(`Unknown or unsupported platform: ${platform}. Supported: android`)
+  warn(`Unknown or unsupported platform: ${platform}. Supported: android`)
   process.exit(1)
 }

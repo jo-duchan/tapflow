@@ -50,7 +50,7 @@ describe('runSetupAndroid', () => {
       const c = cmd as string
       if (c === 'which brew') return '/opt/homebrew/bin/brew\n'
       if (c === 'which adb') return '/opt/homebrew/bin/adb\n'
-      if (c === 'adb devices') return 'List of devices attached\nemulator-5554\tdevice\n'
+      if (c.includes('devices')) return 'List of devices attached\nemulator-5554\tdevice\n'
       if (c === 'emulator -list-avds') return 'Pixel_8\n'
       return ''
     })
@@ -72,7 +72,7 @@ describe('runSetupAndroid', () => {
       const c = cmd as string
       if (c === 'which brew') throw new Error('not found')
       if (c === 'which adb') return '/opt/homebrew/bin/adb\n'
-      if (c === 'adb devices') return 'List of devices attached\nemulator-5554\tdevice\n'
+      if (c.includes('devices')) return 'List of devices attached\nemulator-5554\tdevice\n'
       return ''
     })
 
@@ -96,7 +96,7 @@ describe('runSetupAndroid', () => {
       const c = cmd as string
       if (c === 'which brew') return '/opt/homebrew/bin/brew\n'
       if (c === 'which adb') throw new Error('not found')
-      if (c === 'adb devices') return 'List of devices attached\nemulator-5554\tdevice\n'
+      if (c.includes('devices')) return 'List of devices attached\nemulator-5554\tdevice\n'
       return ''
     })
     mockExistsSync.mockImplementation((p) => p === STUDIO_APP)
@@ -111,7 +111,7 @@ describe('runSetupAndroid', () => {
       const c = cmd as string
       if (c === 'which brew') return '/opt/homebrew/bin/brew\n'
       if (c === 'which adb') throw new Error('not found')
-      if (c === 'adb devices') return 'List of devices attached\nemulator-5554\tdevice\n'
+      if (c.includes('devices')) return 'List of devices attached\nemulator-5554\tdevice\n'
       return ''
     })
     mockExistsSync.mockImplementation((p) => p === sdkAdb || p === STUDIO_APP)
@@ -130,7 +130,7 @@ describe('runSetupAndroid', () => {
       const c = cmd as string
       if (c === 'which brew') return '/opt/homebrew/bin/brew\n'
       if (c === 'which adb') throw new Error('not found')
-      if (c === 'adb devices') return 'List of devices attached\nemulator-5554\tdevice\n'
+      if (c.includes('devices')) return 'List of devices attached\nemulator-5554\tdevice\n'
       return ''
     })
     mockExistsSync.mockImplementation((p) => p === sdkAdb || p === STUDIO_APP || p === zshrc)
@@ -149,7 +149,7 @@ describe('runSetupAndroid', () => {
       const c = cmd as string
       if (c === 'which brew') return '/opt/homebrew/bin/brew\n'
       if (c === 'which adb') throw new Error('not found')
-      if (c === 'adb devices') return 'List of devices attached\nemulator-5554\tdevice\n'
+      if (c.includes('devices')) return 'List of devices attached\nemulator-5554\tdevice\n'
       return ''
     })
     mockExistsSync.mockImplementation((p) => p === sdkAdb || p === STUDIO_APP)
@@ -211,7 +211,7 @@ describe('runSetupAndroid', () => {
       const c = cmd as string
       if (c === 'which brew') return '/opt/homebrew/bin/brew\n'
       if (c === 'which adb') return '/opt/homebrew/bin/adb\n'
-      if (c === 'adb devices') return 'List of devices attached\n'
+      if (c.includes('devices')) return 'List of devices attached\n'
       if (c === 'emulator -list-avds') return 'Pixel_8\n'
       return ''
     })
@@ -220,6 +220,42 @@ describe('runSetupAndroid', () => {
     const emu = findStep(results, 'emulator')
     expect(emu?.warn).toBe(true)
     expect(emu?.detail).toContain('Pixel_8')
+  })
+
+  it('adb가 PATH엔 없어도 SDK 경로로 해석해 에뮬레이터 감지 (PATH 미반영 회피)', async () => {
+    // 같은 실행에서 방금 PATH 등록한 adb는 현재 프로세스 PATH에 없다 → 절대경로로 조회해야 ok
+    mockExecSync.mockImplementation((cmd) => {
+      const c = cmd as string
+      if (c === 'which brew') return '/opt/homebrew/bin/brew\n'
+      if (c === 'which adb') throw new Error('not found')
+      if (c.includes(sdkAdb) && c.includes('devices')) {
+        return 'List of devices attached\nemulator-5554\tdevice\n'
+      }
+      if (c === 'adb devices') return 'List of devices attached\n' // PATH adb는 실패 시뮬
+      return ''
+    })
+    mockExistsSync.mockImplementation((p) => p === sdkAdb || p === STUDIO_APP)
+
+    const results = await runSetupAndroid()
+    expect(findStep(results, 'emulator')?.ok).toBe(true)
+  })
+
+  it('미지원 셸(fish 등)이면 자동 등록 대신 warn + 수동 export 안내', async () => {
+    vi.stubEnv('SHELL', '/usr/bin/fish')
+    mockExecSync.mockImplementation((cmd) => {
+      const c = cmd as string
+      if (c === 'which brew') return '/opt/homebrew/bin/brew\n'
+      if (c === 'which adb') throw new Error('not found')
+      if (c.includes('devices')) return 'List of devices attached\n'
+      return ''
+    })
+    mockExistsSync.mockImplementation((p) => p === sdkAdb || p === STUDIO_APP)
+
+    const results = await runSetupAndroid()
+    const adb = findStep(results, 'adb')
+    expect(adb?.warn).toBe(true)
+    expect(adb?.detail).toContain('export PATH')
+    expect(mockAppendFileSync).not.toHaveBeenCalled()
   })
 
   it('멱등 — 완전히 구성된 머신은 전부 ok, 부작용 없음', async () => {

@@ -50,6 +50,14 @@ function checkAndFixAdb(brewAvailable: boolean): SetupStepResult {
   if (adb) {
     const platformTools = dirname(adb.path)
     const registered = registerPathInShellRc(platformTools)
+    if (!registered) {
+      return {
+        label: 'adb (not in PATH)',
+        ok: false,
+        warn: true,
+        detail: `adb found at ${adb.path} but your shell ($SHELL) isn't auto-configurable. Add to your shell config: export PATH="${platformTools}:$PATH"`,
+      }
+    }
     if (registered.added) {
       return {
         label: 'adb added to PATH',
@@ -134,14 +142,25 @@ async function checkAndFixAndroidStudio(brewAvailable: boolean): Promise<SetupSt
 }
 
 function checkAndFixEmulator(): SetupStepResult {
+  // resolveAdb()로 해석한 경로를 쓴다. 직전 단계에서 PATH에 등록했어도 현재 프로세스
+  // PATH엔 반영되지 않으므로 'adb'를 그대로 부르면 오탐이 난다.
+  const adb = resolveAdb()
+  if (!adb) {
+    return {
+      label: 'No running emulator',
+      ok: false,
+      warn: true,
+      detail: 'adb not found. Install/configure adb first, then start an AVD.',
+    }
+  }
   try {
-    const out = execSync('adb devices', { encoding: 'utf8', stdio: 'pipe' })
+    const out = execSync(`"${adb.path}" devices`, { encoding: 'utf8', stdio: 'pipe' })
     const lines = out.trim().split('\n').slice(1).filter(Boolean)
     if (lines.some((l) => l.startsWith('emulator-'))) {
       return { label: 'Emulator running', ok: true }
     }
   } catch {
-    // adb 미설치/실패 — 아래 힌트로
+    // adb 실행 실패 — 아래 힌트로
   }
   let hint = 'Start an AVD from Android Studio > Device Manager'
   try {
@@ -156,15 +175,18 @@ function checkAndFixEmulator(): SetupStepResult {
   return { label: 'No running emulator', ok: false, warn: true, detail: hint }
 }
 
-function shellRcPath(): string {
+// 자동 등록을 지원하는 셸의 rc 경로. 그 외 셸은 null(수동 안내).
+function shellRcPath(): string | null {
   const shell = process.env.SHELL ?? ''
   const home = homedir()
+  if (shell.includes('zsh')) return join(home, '.zshrc')
   if (shell.includes('bash')) return join(home, '.bashrc')
-  return join(home, '.zshrc') // 기본 zsh
+  return null
 }
 
-function registerPathInShellRc(platformTools: string): { added: boolean; file: string } {
+function registerPathInShellRc(platformTools: string): { added: boolean; file: string } | null {
   const file = shellRcPath()
+  if (!file) return null
   const existing = existsSync(file) ? readFileSync(file, 'utf8') : ''
   if (existing.includes(PATH_MARKER_START)) {
     return { added: false, file }
