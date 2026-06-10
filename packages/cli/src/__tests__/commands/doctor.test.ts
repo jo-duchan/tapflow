@@ -11,12 +11,15 @@ const mockRunDoctorChecks = vi.mocked(runDoctorChecks)
 
 describe('cmdDoctor', () => {
   let logLines: string[]
+  let errLines: string[]
   let exitSpy: MockInstance
 
   beforeEach(() => {
     vi.resetAllMocks()
     logLines = []
+    errLines = []
     vi.spyOn(console, 'log').mockImplementation((...args) => logLines.push(args.join(' ')))
+    vi.spyOn(console, 'warn').mockImplementation((...args) => errLines.push(args.join(' ')))
     exitSpy = vi.spyOn(process, 'exit').mockImplementation(() => { throw new Error('process.exit') })
   })
 
@@ -31,6 +34,24 @@ describe('cmdDoctor', () => {
 
     await cmdDoctor()
     expect(logLines.join('\n')).toContain('All checks passed')
+  })
+
+  it('platform 인자를 runDoctorChecks에 전달', async () => {
+    mockRunDoctorChecks.mockResolvedValue({
+      common: [{ label: 'Node v20.0.0', ok: true }],
+      ios: null,
+      android: [{ label: 'adb found: /x', ok: true }],
+    })
+
+    await cmdDoctor({ platform: 'android' })
+    expect(mockRunDoctorChecks).toHaveBeenCalledWith('android')
+  })
+
+  it('알 수 없는 platform이면 warn + exit(1), 진단 미실행', async () => {
+    await expect(cmdDoctor({ platform: 'windows' })).rejects.toThrow('process.exit')
+    expect(exitSpy).toHaveBeenCalledWith(1)
+    expect(errLines.join('\n')).toMatch(/platform/i)
+    expect(mockRunDoctorChecks).not.toHaveBeenCalled()
   })
 
   it('실패 체크 있으면 "Some checks failed" 출력 후 exit(1)', async () => {

@@ -16,6 +16,54 @@ const STUDIO_APP = '/Applications/Android Studio.app'
 const XCODE_APP = '/Applications/Xcode.app'
 const XCODE_APPSTORE = 'https://apps.apple.com/app/xcode/id497799835'
 const XCODE_DEVELOPER_DIR = '/Applications/Xcode.app/Contents/Developer'
+// Play Store 이미지는 crash 이슈가 있어 google_apis(non-playstore)를 쓴다.
+const AVD_IMAGE_API = 'android-35'
+// 폼팩터별로 해상도가 골고루 분포하도록 4종. device id는 SDK마다 다르므로 후보 중 가용한 첫 id 선택.
+const AVD_SPECS: { name: string; deviceCandidates: string[] }[] = [
+  { name: 'tapflow-compact', deviceCandidates: ['pixel_5', 'pixel_4a', 'pixel_4'] },
+  { name: 'tapflow-phone', deviceCandidates: ['pixel_7', 'pixel_6', 'pixel'] },
+  { name: 'tapflow-large', deviceCandidates: ['pixel_7_pro', 'pixel_6_pro', 'pixel_4_xl'] },
+  { name: 'tapflow-tablet', deviceCandidates: ['pixel_tablet', 'pixel_c', 'Nexus 10'] },
+]
+
+function androidSystemImage(): string {
+  const abi = process.arch === 'arm64' ? 'arm64-v8a' : 'x86_64'
+  return `system-images;${AVD_IMAGE_API};google_apis;${abi}`
+}
+
+// 디바이스 부팅은 하지 않는다 — QA Session 접속 시 relay가 on-demand로 부팅한다.
+// setup은 "부팅 가능한 디바이스/AVD가 준비된 상태"까지만 보장한다.
+
+// confirm 후 sudo 명령들을 순차 실행(stdio 상속 → sudo가 비번 프롬프트를 직접 처리).
+async function runSudo(message: string, commands: string[][]): Promise<boolean> {
+  const proceed = await confirm({ message })
+  if (isCancel(proceed) || !proceed) return false
+  console.log()
+  for (const args of commands) {
+    const r = spawnSync('sudo', args, { stdio: 'inherit' })
+    if (r.status !== 0) return false
+  }
+  return true
+}
+
+function isXcodeReady(): boolean {
+  try {
+    execSync('xcodebuild -version', { stdio: 'pipe' })
+    return true
+  } catch {
+    return false
+  }
+}
+
+function hasIosDevice(): boolean {
+  try {
+    const raw = execSync('xcrun simctl list devices --json', { encoding: 'utf8', stdio: 'pipe' })
+    const data = JSON.parse(raw) as { devices: Record<string, unknown[]> }
+    return Object.values(data.devices).some((arr) => arr.length > 0)
+  } catch {
+    return false
+  }
+}
 
 export async function runSetupAndroid(): Promise<SetupStepResult[]> {
   const results: SetupStepResult[] = []
@@ -23,7 +71,7 @@ export async function runSetupAndroid(): Promise<SetupStepResult[]> {
   results.push(brew)
   results.push(checkAndFixAdb(brew.ok))
   results.push(await checkAndFixAndroidStudio(brew.ok))
-  results.push(checkAndFixEmulator())
+  results.push(await checkAndFixAvd())
   return results
 }
 
@@ -32,8 +80,8 @@ export async function runSetupIos(): Promise<SetupStepResult[]> {
   results.push(await checkAndFixHomebrew())
   const xcode = await checkAndFixXcode()
   results.push(xcode)
-  results.push(checkXcodeActivation(xcode.ok))
-  results.push(checkAndFixSimulator())
+  results.push(await checkXcodeActivation(xcode.ok))
+  results.push(await checkAndFixSimulator())
   return results
 }
 
@@ -81,69 +129,69 @@ async function checkAndFixXcode(): Promise<SetupStepResult> {
   }
 }
 
-// 설치됨 ≠ 사용 가능: active developer dir / 라이선스 / first-launch를 점검(sudo 작업은 안내만).
-function checkXcodeActivation(xcodeInstalled: boolean): SetupStepResult {
+// 설치됨 ≠ 사용 가능: active developer dir / 라이선스 / first-launch. sudo 조치를 동의 후 직접 실행.
+async function checkXcodeActivation(xcodeInstalled: boolean): Promise<SetupStepResult> {
   if (!xcodeInstalled) {
     return { label: 'Xcode activation', ok: false, warn: true, detail: 'Install Xcode first.' }
   }
+  const selectHint = `Run: sudo xcode-select -s ${XCODE_DEVELOPER_DIR}`
+
+  // 1. active developer dir이 Xcode를 가리키게
   let dir = ''
   try {
     dir = execSync('xcode-select -p', { encoding: 'utf8', stdio: 'pipe' }).trim()
   } catch {
-    // active dir 미설정 — 아래 안내
+    // 미설정 — 아래에서 조치
   }
   if (!dir.includes('Xcode.app')) {
-    return {
-      label: 'Xcode command-line tools',
-      ok: false,
-      warn: true,
-      detail: `Active developer dir points away from Xcode. Run: sudo xcode-select -s ${XCODE_DEVELOPER_DIR}`,
+    if (!process.stdout.isTTY) {
+      return { label: 'Xcode command-line tools', ok: false, warn: true, detail: selectHint }
+    }
+    const ok = await runSudo('Set Xcode as the active developer directory (needs sudo)?', [
+      ['xcode-select', '-s', XCODE_DEVELOPER_DIR],
+    ])
+    if (!ok) {
+      return { label: 'Xcode command-line tools', ok: false, warn: true, detail: selectHint }
     }
   }
-  try {
-    execSync('xcodebuild -version', { stdio: 'pipe' })
+
+  // 2. license / first-launch
+  if (isXcodeReady()) {
     return { label: 'Xcode ready', ok: true }
-  } catch {
-    return {
-      label: 'Xcode setup',
-      ok: false,
-      warn: true,
-      detail: 'Finish Xcode setup: sudo xcodebuild -license accept && sudo xcodebuild -runFirstLaunch',
-    }
   }
+  const finishHint = 'Finish Xcode setup: sudo xcodebuild -license accept && sudo xcodebuild -runFirstLaunch'
+  if (!process.stdout.isTTY) {
+    return { label: 'Xcode setup', ok: false, warn: true, detail: finishHint }
+  }
+  const ok = await runSudo('Accept the Xcode license and run first launch (needs sudo)?', [
+    ['xcodebuild', '-license', 'accept'],
+    ['xcodebuild', '-runFirstLaunch'],
+  ])
+  if (ok && isXcodeReady()) {
+    return { label: 'Xcode ready', ok: true }
+  }
+  return { label: 'Xcode setup', ok: false, warn: true, detail: finishHint }
 }
 
-function checkAndFixSimulator(): SetupStepResult {
-  try {
-    const raw = execSync('xcrun simctl list devices --json', { encoding: 'utf8', stdio: 'pipe' })
-    const data = JSON.parse(raw) as {
-      devices: Record<string, Array<{ name: string; state: string; udid: string }>>
-    }
-    const all = Object.values(data.devices).flat()
-    const booted = all.find((d) => d.state === 'Booted')
-    if (booted) {
-      return { label: `Simulator booted: ${booted.name}`, ok: true }
-    }
-    const candidate = all.find((d) => d.state === 'Shutdown')
-    if (candidate) {
-      const boot = spawnSync('xcrun', ['simctl', 'boot', candidate.udid], { stdio: 'pipe' })
-      if (boot.status !== 0) throw new Error('simctl boot failed')
-      return { label: `Simulator booted: ${candidate.name}`, ok: true }
-    }
-    return {
-      label: 'Simulator',
-      ok: false,
-      warn: true,
-      detail: 'No simulators available. Open Xcode to install a simulator runtime.',
-    }
-  } catch {
-    return {
-      label: 'Simulator',
-      ok: false,
-      warn: true,
-      detail: 'Could not query simulators. Finish Xcode setup first.',
-    }
+// 부팅하지 않는다 — 시뮬 런타임/디바이스가 준비됐는지만 보장(없으면 런타임 설치).
+async function checkAndFixSimulator(): Promise<SetupStepResult> {
+  if (hasIosDevice()) {
+    return { label: 'Simulator ready', ok: true }
   }
+  const hint = 'No simulator runtime. Run: xcodebuild -downloadPlatform iOS (or install one in Xcode).'
+  if (!process.stdout.isTTY) {
+    return { label: 'Simulator', ok: false, warn: true, detail: hint }
+  }
+  const proceed = await confirm({ message: 'No iOS simulator found. Download the iOS simulator runtime?' })
+  if (isCancel(proceed) || !proceed) {
+    return { label: 'Simulator', ok: false, warn: true, detail: `Skipped. ${hint}` }
+  }
+  console.log()
+  const r = spawnSync('xcodebuild', ['-downloadPlatform', 'iOS'], { stdio: 'inherit' })
+  if (r.status === 0 && hasIosDevice()) {
+    return { label: 'Simulator runtime installed', ok: true }
+  }
+  return { label: 'Simulator', ok: false, warn: true, detail: 'Could not prepare a simulator. Open Xcode to install a runtime.' }
 }
 
 // eval "$(...)"로 감싸 명령 치환 결과(설치 스크립트)가 word splitting 없이 단일 평가되게 한다.
@@ -293,38 +341,104 @@ async function checkAndFixAndroidStudio(brewAvailable: boolean): Promise<SetupSt
   }
 }
 
-function checkAndFixEmulator(): SetupStepResult {
-  // resolveAdb()로 해석한 경로를 쓴다. 직전 단계에서 PATH에 등록했어도 현재 프로세스
-  // PATH엔 반영되지 않으므로 'adb'를 그대로 부르면 오탐이 난다.
-  const adb = resolveAdb()
-  if (!adb) {
+// 부팅하지 않는다 — AVD가 하나라도 준비됐는지만 보장(없으면 시스템 이미지 + AVD 생성).
+async function checkAndFixAvd(): Promise<SetupStepResult> {
+  const avds = listAvds()
+  if (avds.length > 0) {
+    return { label: `AVD ready: ${avds[0]}`, ok: true }
+  }
+  const manualHint = 'Create an AVD in Android Studio > Device Manager.'
+  if (!process.stdout.isTTY) {
+    return { label: 'AVD', ok: false, warn: true, detail: `No AVD found. ${manualHint}` }
+  }
+  const proceed = await confirm({
+    message: 'No Android Virtual Device found. Create a set of AVDs now? (downloads a system image)',
+  })
+  if (isCancel(proceed) || !proceed) {
+    return { label: 'AVD', ok: false, warn: true, detail: `Skipped. ${manualHint}` }
+  }
+  const result = createAvds()
+  if (result.ok) {
+    return { label: `AVDs created: ${result.created.join(', ')}`, ok: true }
+  }
+  return { label: 'AVD', ok: false, warn: true, detail: result.detail ?? manualHint }
+}
+
+function listAvds(): string[] {
+  try {
+    const out = execSync('emulator -list-avds', { encoding: 'utf8', stdio: 'pipe' }).trim()
+    return out ? out.split('\n').map((l) => l.trim()).filter(Boolean) : []
+  } catch {
+    return []
+  }
+}
+
+function resolveAndroidSdk(): string | null {
+  const candidates = [
+    process.env.ANDROID_HOME,
+    process.env.ANDROID_SDK_ROOT,
+    join(homedir(), 'Library', 'Android', 'sdk'), // macOS
+    join(homedir(), 'Android', 'Sdk'), // Linux
+  ]
+  for (const c of candidates) {
+    if (c && existsSync(c)) return c
+  }
+  return null
+}
+
+function createAvds(): { ok: boolean; created: string[]; detail?: string } {
+  const sdk = resolveAndroidSdk()
+  if (!sdk) {
+    return { ok: false, created: [], detail: 'Android SDK not found. Install it via Android Studio.' }
+  }
+  const bin = join(sdk, 'cmdline-tools', 'latest', 'bin')
+  const sdkmanager = join(bin, 'sdkmanager')
+  const avdmanager = join(bin, 'avdmanager')
+  if (!existsSync(sdkmanager) || !existsSync(avdmanager)) {
     return {
-      label: 'No running emulator',
       ok: false,
-      warn: true,
-      detail: 'adb not found. Install/configure adb first, then start an AVD.',
+      created: [],
+      detail: 'Android command-line tools not found. Install "Android SDK Command-line Tools" in Android Studio > SDK Manager.',
     }
   }
+  const image = androidSystemImage()
+  console.log()
+  // 시스템 이미지 1회 설치 (모든 AVD가 공유). 라이선스는 'y'로 동의.
+  const img = spawnSync(sdkmanager, [image], { stdio: 'inherit', input: 'y\n' })
+  if (img.status !== 0) {
+    return { ok: false, created: [], detail: `Failed to install ${image}.` }
+  }
+  // 폼팩터별로 가용한 device id를 골라 AVD 생성. ('custom hardware profile?'에 'no')
+  const available = listDeviceIds(avdmanager)
+  const created: string[] = []
+  for (const spec of AVD_SPECS) {
+    const device = spec.deviceCandidates.find((d) => available.includes(d))
+    if (!device) continue
+    const r = spawnSync(
+      avdmanager,
+      ['create', 'avd', '-n', spec.name, '-k', image, '-d', device, '--force'],
+      { stdio: 'inherit', input: 'no\n' },
+    )
+    if (r.status === 0) created.push(spec.name)
+  }
+  if (created.length === 0) {
+    return { ok: false, created, detail: 'Could not create any AVD.' }
+  }
+  return { ok: true, created }
+}
+
+function listDeviceIds(avdmanager: string): string[] {
   try {
-    const out = execSync(`"${adb.path}" devices`, { encoding: 'utf8', stdio: 'pipe' })
-    const lines = out.trim().split('\n').slice(1).filter(Boolean)
-    if (lines.some((l) => l.startsWith('emulator-'))) {
-      return { label: 'Emulator running', ok: true }
+    const r = spawnSync(avdmanager, ['list', 'device'], { encoding: 'utf8' })
+    const out = r.stdout ?? ''
+    const ids: string[] = []
+    for (const m of out.matchAll(/id:\s*\d+\s+or\s+"([^"]+)"/g)) {
+      if (m[1]) ids.push(m[1])
     }
+    return ids
   } catch {
-    // adb 실행 실패 — 아래 힌트로
+    return []
   }
-  let hint = 'Start an AVD from Android Studio > Device Manager'
-  try {
-    const first = execSync('emulator -list-avds', { encoding: 'utf8', stdio: 'pipe' })
-      .trim()
-      .split('\n')[0]
-      ?.trim()
-    if (first) hint = `Start an AVD: emulator @${first} (or Android Studio > Device Manager)`
-  } catch {
-    // emulator 미설치 — 일반 힌트 유지
-  }
-  return { label: 'No running emulator', ok: false, warn: true, detail: hint }
 }
 
 // 자동 등록을 지원하는 셸의 rc 경로. 그 외 셸은 null(수동 안내).

@@ -76,15 +76,21 @@ describe('runDoctorChecks', () => {
     expect(result.android?.some((c) => c.label.includes('Pixel_8'))).toBe(true)
   })
 
-  it('adb 없으면 Android 섹션 null', async () => {
+  it('adb 없어도 Android 섹션은 숨기지 않고 adb warn 표시', async () => {
     vi.spyOn(process, 'platform', 'get').mockReturnValue('linux')
+    vi.stubEnv('ANDROID_HOME', '')
+    vi.stubEnv('ANDROID_SDK_ROOT', '')
+    mockExistsSync.mockReturnValue(false)
     mockExecSync.mockImplementation((cmd) => {
       if ((cmd as string) === 'which adb') throw new Error('not found')
       return ''
     })
 
     const result = await runDoctorChecks()
-    expect(result.android).toBeNull()
+    expect(result.android).not.toBeNull()
+    const adbCheck = result.android?.find((c) => c.label === 'adb')
+    expect(adbCheck?.warn).toBe(true)
+    expect(adbCheck?.detail).toContain('setup android')
   })
 
   it('Node 버전 >= 20이면 ok', async () => {
@@ -121,7 +127,7 @@ describe('runDoctorChecks', () => {
     expect(result.ios?.some((c) => c.label.includes('iPhone 16 Pro'))).toBe(true)
   })
 
-  it('booted 없으면 warn + 사용 가능한 시뮬레이터 이름으로 hint 생성', async () => {
+  it('booted 안 됐어도 디바이스가 있으면 ok (부팅은 on-demand)', async () => {
     vi.spyOn(process, 'platform', 'get').mockReturnValue('darwin')
     mockExecSync.mockImplementation((cmd) => {
       const c = cmd as string
@@ -132,10 +138,8 @@ describe('runDoctorChecks', () => {
     })
 
     const result = await runDoctorChecks()
-    const simCheck = result.ios?.find((c) => c.label === 'Simulator')
-    expect(simCheck?.ok).toBe(false)
-    expect(simCheck?.warn).toBe(true)
-    expect(simCheck?.detail).toContain('iPhone 16 Pro')
+    const simCheck = result.ios?.find((c) => c.label.includes('Simulator'))
+    expect(simCheck?.ok).toBe(true)
   })
 
   it('Xcode 미설치 시 실패 + 링크 포함', async () => {
@@ -194,18 +198,43 @@ describe('runDoctorChecks', () => {
     expect(adbCheck?.detail).toContain(sdkAdb)
   })
 
-  it('adb가 PATH/표준 위치 모두 없으면 Android 섹션 null', async () => {
-    vi.spyOn(process, 'platform', 'get').mockReturnValue('linux')
-    vi.stubEnv('ANDROID_HOME', '')
-    vi.stubEnv('ANDROID_SDK_ROOT', '')
-    mockExistsSync.mockReturnValue(false)
+  it("platform 'android' 지정 시 Android만 진단 (iOS null)", async () => {
+    vi.spyOn(process, 'platform', 'get').mockReturnValue('darwin')
     mockExecSync.mockImplementation((cmd) => {
-      if ((cmd as string) === 'which adb') throw new Error('not found')
+      const c = cmd as string
+      if (c === 'which adb') return '/usr/local/bin/adb\n'
+      if (c === 'adb devices') return 'List of devices attached\n'
+      if (c === 'emulator -list-avds') return 'Pixel_8\n'
       return ''
     })
 
-    const result = await runDoctorChecks()
+    const result = await runDoctorChecks('android')
+    expect(result.ios).toBeNull()
+    expect(result.android).not.toBeNull()
+  })
+
+  it("platform 'ios' 지정 시 iOS만 진단 (Android null)", async () => {
+    vi.spyOn(process, 'platform', 'get').mockReturnValue('darwin')
+    mockExecSync.mockImplementation((cmd) => {
+      const c = cmd as string
+      if (c === 'xcodebuild -version') return 'Xcode 26.5\n'
+      if (c.startsWith('xcrun simctl')) return simctlBooted
+      return ''
+    })
+
+    const result = await runDoctorChecks('ios')
     expect(result.android).toBeNull()
+    expect(result.ios).not.toBeNull()
+  })
+
+  it("platform 'ios'를 non-macOS에서 지정하면 macOS 필요 warn", async () => {
+    vi.spyOn(process, 'platform', 'get').mockReturnValue('linux')
+    mockExecSync.mockImplementation(() => { throw new Error('not found') })
+
+    const result = await runDoctorChecks('ios')
+    const iosCheck = result.ios?.[0]
+    expect(iosCheck?.warn).toBe(true)
+    expect(iosCheck?.detail).toContain('macOS')
   })
 
   it('ANDROID_HOME 지정 시 해당 경로의 adb로 진단', async () => {

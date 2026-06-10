@@ -1,5 +1,5 @@
 import { runDoctorChecks, type DoctorCheck, type DoctorResult } from '../lib/doctor.js'
-import { banner, step, GREEN, RED, YELLOW, BOLD, DIM, R } from '../lib/print.js'
+import { banner, step, warn, GREEN, RED, YELLOW, BOLD, DIM, R } from '../lib/print.js'
 
 function printChecks(checks: DoctorCheck[]): void {
   for (const check of checks) {
@@ -21,8 +21,12 @@ function hasFailures(result: DoctorResult): boolean {
   return all.some((c) => !c.ok && !c.warn)
 }
 
-export async function cmdDoctor(opts: { json?: boolean } = {}): Promise<void> {
-  const result = await runDoctorChecks()
+export async function cmdDoctor(opts: { json?: boolean; platform?: string } = {}): Promise<void> {
+  if (opts.platform && opts.platform !== 'ios' && opts.platform !== 'android') {
+    warn(`Unknown platform: ${opts.platform}. Supported: ios, android`)
+    process.exit(1)
+  }
+  const result = await runDoctorChecks(opts.platform)
 
   if (opts.json) {
     const ok = !hasFailures(result)

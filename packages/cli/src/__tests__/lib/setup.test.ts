@@ -244,43 +244,24 @@ describe('runSetupAndroid', () => {
     expect(findStep(results, 'android studio')?.warn).toBe(true)
   })
 
-  it('실행 중 에뮬레이터 있으면 ok', async () => {
+  it('AVD가 있으면 ok (부팅 안 함)', async () => {
     const results = await runSetupAndroid()
-    expect(findStep(results, 'emulator')?.ok).toBe(true)
+    expect(findStep(results, 'avd')?.ok).toBe(true)
   })
 
-  it('에뮬레이터 없으면 warn + AVD 힌트', async () => {
+  it('AVD가 없으면 비대화형에서 warn (생성 안 함)', async () => {
     mockExecSync.mockImplementation((cmd) => {
       const c = cmd as string
       if (c === 'which brew') return '/opt/homebrew/bin/brew\n'
       if (c === 'which adb') return '/opt/homebrew/bin/adb\n'
-      if (c.includes('devices')) return 'List of devices attached\n'
-      if (c === 'emulator -list-avds') return 'Pixel_8\n'
+      if (c === 'emulator -list-avds') return ''
       return ''
     })
+    mockExistsSync.mockImplementation((p) => p === STUDIO_APP)
 
     const results = await runSetupAndroid()
-    const emu = findStep(results, 'emulator')
-    expect(emu?.warn).toBe(true)
-    expect(emu?.detail).toContain('Pixel_8')
-  })
-
-  it('adb가 PATH엔 없어도 SDK 경로로 해석해 에뮬레이터 감지 (PATH 미반영 회피)', async () => {
-    // 같은 실행에서 방금 PATH 등록한 adb는 현재 프로세스 PATH에 없다 → 절대경로로 조회해야 ok
-    mockExecSync.mockImplementation((cmd) => {
-      const c = cmd as string
-      if (c === 'which brew') return '/opt/homebrew/bin/brew\n'
-      if (c === 'which adb') throw new Error('not found')
-      if (c.includes(sdkAdb) && c.includes('devices')) {
-        return 'List of devices attached\nemulator-5554\tdevice\n'
-      }
-      if (c === 'adb devices') return 'List of devices attached\n' // PATH adb는 실패 시뮬
-      return ''
-    })
-    mockExistsSync.mockImplementation((p) => p === sdkAdb || p === STUDIO_APP)
-
-    const results = await runSetupAndroid()
-    expect(findStep(results, 'emulator')?.ok).toBe(true)
+    expect(findStep(results, 'avd')?.warn).toBe(true)
+    expect(mockSpawnSync).not.toHaveBeenCalled()
   })
 
   it('미지원 셸(fish 등)이면 자동 등록 대신 warn + 수동 export 안내', async () => {
@@ -299,6 +280,44 @@ describe('runSetupAndroid', () => {
     expect(adb?.warn).toBe(true)
     expect(adb?.detail).toContain('export PATH')
     expect(mockAppendFileSync).not.toHaveBeenCalled()
+  })
+
+  it('AVD 없음 + TTY + 수락 시 시스템 이미지 1회 설치 + 폼팩터별 AVD 4개 생성', async () => {
+    setTTY(true)
+    vi.stubEnv('ANDROID_HOME', '/opt/android-sdk')
+    mockConfirm.mockResolvedValue(true as never)
+    const sdkmanager = join('/opt/android-sdk', 'cmdline-tools', 'latest', 'bin', 'sdkmanager')
+    const avdmanager = join('/opt/android-sdk', 'cmdline-tools', 'latest', 'bin', 'avdmanager')
+    mockExecSync.mockImplementation((cmd) => {
+      const c = cmd as string
+      if (c === 'which brew') return '/opt/homebrew/bin/brew\n'
+      if (c === 'which adb') return '/opt/homebrew/bin/adb\n'
+      if (c === 'emulator -list-avds') return ''
+      return ''
+    })
+    mockExistsSync.mockImplementation(
+      (p) => p === STUDIO_APP || p === '/opt/android-sdk' || p === sdkmanager || p === avdmanager,
+    )
+    // avdmanager list device → 폼팩터별 후보가 모두 가용하도록
+    mockSpawnSync.mockImplementation((cmd, args) => {
+      if (cmd === avdmanager && Array.isArray(args) && args.includes('device')) {
+        return {
+          ...okSpawn,
+          stdout: 'id: 0 or "pixel_5"\nid: 1 or "pixel_7"\nid: 2 or "pixel_7_pro"\nid: 3 or "pixel_c"\n',
+        } as never
+      }
+      return okSpawn as never
+    })
+
+    const results = await runSetupAndroid()
+    // 시스템 이미지 1회 설치
+    expect(mockSpawnSync).toHaveBeenCalledWith(sdkmanager, [expect.stringContaining('system-images')], expect.anything())
+    // AVD 4개 생성 (create avd 호출 횟수)
+    const createCalls = mockSpawnSync.mock.calls.filter(
+      (c) => c[0] === avdmanager && Array.isArray(c[1]) && c[1].includes('create'),
+    )
+    expect(createCalls).toHaveLength(4)
+    expect(findStep(results, 'avd')?.ok).toBe(true)
   })
 
   it('멱등 — 완전히 구성된 머신은 전부 ok, 부작용 없음', async () => {
@@ -388,27 +407,22 @@ describe('runSetupIos', () => {
     expect(act?.warn).toBe(true)
   })
 
-  it('시뮬레이터 Booted면 ok', async () => {
-    const results = await runSetupIos()
-    expect(findStep(results, 'simulator')?.ok).toBe(true)
-  })
-
-  it('Booted 없고 Shutdown 후보 있으면 simctl boot 실행 (spawnSync argv)', async () => {
+  it('디바이스가 있으면 부팅하지 않고 ready', async () => {
     mockExecSync.mockImplementation((cmd) => {
       const c = cmd as string
       if (c === 'which brew') return '/opt/homebrew/bin/brew\n'
       if (c === 'xcode-select -p') return '/Applications/Xcode.app/Contents/Developer\n'
       if (c === 'xcodebuild -version') return 'Xcode 26.5\n'
-      if (c.includes('simctl list devices')) return simctlShutdown
+      if (c.includes('simctl list devices')) return simctlShutdown // 미부팅 디바이스 존재
       return ''
     })
 
     const results = await runSetupIos()
-    expect(mockSpawnSync).toHaveBeenCalledWith('xcrun', ['simctl', 'boot', 'BBB'], expect.anything())
     expect(findStep(results, 'simulator')?.ok).toBe(true)
+    expect(mockSpawnSync).not.toHaveBeenCalledWith('xcrun', expect.anything(), expect.anything())
   })
 
-  it('사용 가능한 시뮬레이터가 없으면 warn', async () => {
+  it('사용 가능한 시뮬레이터가 없으면 비대화형에서 warn', async () => {
     mockExecSync.mockImplementation((cmd) => {
       const c = cmd as string
       if (c === 'which brew') return '/opt/homebrew/bin/brew\n'
@@ -420,6 +434,43 @@ describe('runSetupIos', () => {
 
     const results = await runSetupIos()
     expect(findStep(results, 'simulator')?.warn).toBe(true)
+  })
+
+  it('active dir이 CommandLineTools + TTY + 수락 시 sudo xcode-select 직접 실행', async () => {
+    setTTY(true)
+    mockConfirm.mockResolvedValue(true as never)
+    mockExecSync.mockImplementation((cmd) => {
+      const c = cmd as string
+      if (c === 'which brew') return '/opt/homebrew/bin/brew\n'
+      if (c === 'xcode-select -p') return '/Library/Developer/CommandLineTools\n'
+      if (c === 'xcodebuild -version') return 'Xcode 26.5\n'
+      if (c.includes('simctl list devices')) return simctlBooted
+      return ''
+    })
+
+    const results = await runSetupIos()
+    expect(mockSpawnSync).toHaveBeenCalledWith(
+      'sudo',
+      ['xcode-select', '-s', '/Applications/Xcode.app/Contents/Developer'],
+      expect.anything(),
+    )
+    expect(findStep(results, 'xcode ready')?.ok).toBe(true)
+  })
+
+  it('시뮬 디바이스 없음 + TTY + 수락 시 xcodebuild -downloadPlatform 실행', async () => {
+    setTTY(true)
+    mockConfirm.mockResolvedValue(true as never)
+    mockExecSync.mockImplementation((cmd) => {
+      const c = cmd as string
+      if (c === 'which brew') return '/opt/homebrew/bin/brew\n'
+      if (c === 'xcode-select -p') return '/Applications/Xcode.app/Contents/Developer\n'
+      if (c === 'xcodebuild -version') return 'Xcode 26.5\n'
+      if (c.includes('simctl list devices')) return simctlEmpty
+      return ''
+    })
+
+    await runSetupIos()
+    expect(mockSpawnSync).toHaveBeenCalledWith('xcodebuild', ['-downloadPlatform', 'iOS'], expect.anything())
   })
 
   it('멱등 — 완전 구성 머신은 전부 ok, 부작용 없음', async () => {
