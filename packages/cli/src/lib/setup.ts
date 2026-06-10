@@ -16,9 +16,20 @@ const STUDIO_APP = '/Applications/Android Studio.app'
 const XCODE_APP = '/Applications/Xcode.app'
 const XCODE_APPSTORE = 'https://apps.apple.com/app/xcode/id497799835'
 const XCODE_DEVELOPER_DIR = '/Applications/Xcode.app/Contents/Developer'
-const AVD_NAME = 'tapflow'
-const ANDROID_SYSTEM_IMAGE = 'system-images;android-35;google_apis;arm64-v8a'
-const AVD_DEVICE = 'pixel_7'
+// Play Store 이미지는 crash 이슈가 있어 google_apis(non-playstore)를 쓴다.
+const AVD_IMAGE_API = 'android-35'
+// 폼팩터별로 해상도가 골고루 분포하도록 4종. device id는 SDK마다 다르므로 후보 중 가용한 첫 id 선택.
+const AVD_SPECS: { name: string; deviceCandidates: string[] }[] = [
+  { name: 'tapflow-compact', deviceCandidates: ['pixel_5', 'pixel_4a', 'pixel_4'] },
+  { name: 'tapflow-phone', deviceCandidates: ['pixel_7', 'pixel_6', 'pixel'] },
+  { name: 'tapflow-large', deviceCandidates: ['pixel_7_pro', 'pixel_6_pro', 'pixel_4_xl'] },
+  { name: 'tapflow-tablet', deviceCandidates: ['pixel_tablet', 'pixel_c', 'Nexus 10'] },
+]
+
+function androidSystemImage(): string {
+  const abi = process.arch === 'arm64' ? 'arm64-v8a' : 'x86_64'
+  return `system-images;${AVD_IMAGE_API};google_apis;${abi}`
+}
 
 // 디바이스 부팅은 하지 않는다 — QA Session 접속 시 relay가 on-demand로 부팅한다.
 // setup은 "부팅 가능한 디바이스/AVD가 준비된 상태"까지만 보장한다.
@@ -341,16 +352,16 @@ async function checkAndFixAvd(): Promise<SetupStepResult> {
     return { label: 'AVD', ok: false, warn: true, detail: `No AVD found. ${manualHint}` }
   }
   const proceed = await confirm({
-    message: 'No Android Virtual Device found. Create one now? (downloads a system image)',
+    message: 'No Android Virtual Device found. Create a set of AVDs now? (downloads a system image)',
   })
   if (isCancel(proceed) || !proceed) {
     return { label: 'AVD', ok: false, warn: true, detail: `Skipped. ${manualHint}` }
   }
-  const created = createAvd()
-  if (created.ok) {
-    return { label: `AVD created: ${created.name}`, ok: true }
+  const result = createAvds()
+  if (result.ok) {
+    return { label: `AVDs created: ${result.created.join(', ')}`, ok: true }
   }
-  return { label: 'AVD', ok: false, warn: true, detail: created.detail ?? manualHint }
+  return { label: 'AVD', ok: false, warn: true, detail: result.detail ?? manualHint }
 }
 
 function listAvds(): string[] {
@@ -375,10 +386,10 @@ function resolveAndroidSdk(): string | null {
   return null
 }
 
-function createAvd(): { ok: boolean; name?: string; detail?: string } {
+function createAvds(): { ok: boolean; created: string[]; detail?: string } {
   const sdk = resolveAndroidSdk()
   if (!sdk) {
-    return { ok: false, detail: 'Android SDK not found. Install it via Android Studio.' }
+    return { ok: false, created: [], detail: 'Android SDK not found. Install it via Android Studio.' }
   }
   const bin = join(sdk, 'cmdline-tools', 'latest', 'bin')
   const sdkmanager = join(bin, 'sdkmanager')
@@ -386,25 +397,48 @@ function createAvd(): { ok: boolean; name?: string; detail?: string } {
   if (!existsSync(sdkmanager) || !existsSync(avdmanager)) {
     return {
       ok: false,
+      created: [],
       detail: 'Android command-line tools not found. Install "Android SDK Command-line Tools" in Android Studio > SDK Manager.',
     }
   }
+  const image = androidSystemImage()
   console.log()
-  // 시스템 이미지 설치 (라이선스는 'y' 입력으로 동의)
-  const img = spawnSync(sdkmanager, [ANDROID_SYSTEM_IMAGE], { stdio: 'inherit', input: 'y\n' })
+  // 시스템 이미지 1회 설치 (모든 AVD가 공유). 라이선스는 'y'로 동의.
+  const img = spawnSync(sdkmanager, [image], { stdio: 'inherit', input: 'y\n' })
   if (img.status !== 0) {
-    return { ok: false, detail: `Failed to install ${ANDROID_SYSTEM_IMAGE}.` }
+    return { ok: false, created: [], detail: `Failed to install ${image}.` }
   }
-  // AVD 생성 ('custom hardware profile?'에 'no' 입력)
-  const create = spawnSync(
-    avdmanager,
-    ['create', 'avd', '-n', AVD_NAME, '-k', ANDROID_SYSTEM_IMAGE, '-d', AVD_DEVICE, '--force'],
-    { stdio: 'inherit', input: 'no\n' },
-  )
-  if (create.status !== 0) {
-    return { ok: false, detail: 'avdmanager create failed.' }
+  // 폼팩터별로 가용한 device id를 골라 AVD 생성. ('custom hardware profile?'에 'no')
+  const available = listDeviceIds(avdmanager)
+  const created: string[] = []
+  for (const spec of AVD_SPECS) {
+    const device = spec.deviceCandidates.find((d) => available.includes(d))
+    if (!device) continue
+    const r = spawnSync(
+      avdmanager,
+      ['create', 'avd', '-n', spec.name, '-k', image, '-d', device, '--force'],
+      { stdio: 'inherit', input: 'no\n' },
+    )
+    if (r.status === 0) created.push(spec.name)
   }
-  return { ok: true, name: AVD_NAME }
+  if (created.length === 0) {
+    return { ok: false, created, detail: 'Could not create any AVD.' }
+  }
+  return { ok: true, created }
+}
+
+function listDeviceIds(avdmanager: string): string[] {
+  try {
+    const r = spawnSync(avdmanager, ['list', 'device'], { encoding: 'utf8' })
+    const out = r.stdout ?? ''
+    const ids: string[] = []
+    for (const m of out.matchAll(/id:\s*\d+\s+or\s+"([^"]+)"/g)) {
+      if (m[1]) ids.push(m[1])
+    }
+    return ids
+  } catch {
+    return []
+  }
 }
 
 // 자동 등록을 지원하는 셸의 rc 경로. 그 외 셸은 null(수동 안내).

@@ -282,7 +282,7 @@ describe('runSetupAndroid', () => {
     expect(mockAppendFileSync).not.toHaveBeenCalled()
   })
 
-  it('AVD 없음 + TTY + 수락 시 sdkmanager + avdmanager로 생성', async () => {
+  it('AVD 없음 + TTY + 수락 시 시스템 이미지 1회 설치 + 폼팩터별 AVD 4개 생성', async () => {
     setTTY(true)
     vi.stubEnv('ANDROID_HOME', '/opt/android-sdk')
     mockConfirm.mockResolvedValue(true as never)
@@ -298,10 +298,25 @@ describe('runSetupAndroid', () => {
     mockExistsSync.mockImplementation(
       (p) => p === STUDIO_APP || p === '/opt/android-sdk' || p === sdkmanager || p === avdmanager,
     )
+    // avdmanager list device → 폼팩터별 후보가 모두 가용하도록
+    mockSpawnSync.mockImplementation((cmd, args) => {
+      if (cmd === avdmanager && Array.isArray(args) && args.includes('device')) {
+        return {
+          ...okSpawn,
+          stdout: 'id: 0 or "pixel_5"\nid: 1 or "pixel_7"\nid: 2 or "pixel_7_pro"\nid: 3 or "pixel_c"\n',
+        } as never
+      }
+      return okSpawn as never
+    })
 
     const results = await runSetupAndroid()
+    // 시스템 이미지 1회 설치
     expect(mockSpawnSync).toHaveBeenCalledWith(sdkmanager, [expect.stringContaining('system-images')], expect.anything())
-    expect(mockSpawnSync).toHaveBeenCalledWith(avdmanager, expect.arrayContaining(['create', 'avd']), expect.anything())
+    // AVD 4개 생성 (create avd 호출 횟수)
+    const createCalls = mockSpawnSync.mock.calls.filter(
+      (c) => c[0] === avdmanager && Array.isArray(c[1]) && c[1].includes('create'),
+    )
+    expect(createCalls).toHaveLength(4)
     expect(findStep(results, 'avd')?.ok).toBe(true)
   })
 
