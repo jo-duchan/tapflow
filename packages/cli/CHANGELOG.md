@@ -1,5 +1,18 @@
 # tapflow
 
+## 0.8.0-next.4
+
+### Patch Changes
+
+- a593b9a: fix(cli): doctor no longer triggers the macOS "install Command Line Tools" popup
+
+  On a Mac without Xcode, `tapflow doctor` called `xcodebuild`/`xcrun`, which makes macOS pop up the Command Line Tools installer. doctor now checks for `/Applications/Xcode.app` first (no popup) and only invokes those tools when Xcode is present — otherwise it reports "Install Xcode / run tapflow setup ios" directly.
+
+  - @tapflowio/agent-core@0.8.0-next.4
+  - @tapflowio/ios-agent@0.8.0-next.4
+  - @tapflowio/android-agent@0.8.0-next.4
+  - @tapflowio/relay@0.8.0-next.4
+
 ## 0.8.0-next.3
 
 ### Patch Changes

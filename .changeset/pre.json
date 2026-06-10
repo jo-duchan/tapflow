@@ -16,6 +16,7 @@
     "doctor-adb-fail",
     "doctor-avd-fail-consistency",
     "doctor-json-flag",
+    "doctor-no-clt-popup",
     "doctor-platform",
     "setup-android-self-contained-sdk",
     "setup-android",
