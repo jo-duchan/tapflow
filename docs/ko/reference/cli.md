@@ -52,7 +52,7 @@ tapflow doctor android
 
 ## `tapflow setup`
 
-플랫폼을 실행할 수 있도록 로컬 환경을 설치·구성합니다. 플랫폼을 생략하면 자동 감지하고, `ios` / `android`를 지정할 수도 있습니다.
+플랫폼을 실행할 수 있도록 로컬 환경을 설치·구성합니다. 플랫폼을 생략하면 자동 감지하며 `ios` / `android`를 지정할 수도 있습니다.
 
 ```sh
 tapflow setup
@@ -60,12 +60,12 @@ tapflow setup ios
 tapflow setup android
 ```
 
-한 번 실행으로 끝까지 진행하며, 설치 단계마다 동의를 구합니다(대화형 터미널만 해당. 비대화형에서는 실행 대신 명령을 안내합니다).
+한 번 실행으로 끝까지 진행하면서 설치 단계마다 동의를 구합니다(대화형 터미널만 해당. 비대화형에서는 실행 대신 명령을 안내합니다).
 
-- **iOS**: App Store에서 Xcode 설치를 안내하고, 라이선스 동의·초기 설정을 실행하며(sudo 필요), 시뮬레이터 런타임을 내려받습니다.
-- **Android**: JDK를 설치하고, `~/Library/Android/sdk`에 자기완결 SDK(명령행 도구·platform-tools·에뮬레이터·시스템 이미지 — Android Studio GUI 불필요)를 구성한 뒤, 폼팩터별 AVD를 생성합니다.
+- **iOS**: App Store에서 Xcode 설치를 안내하고 라이선스 동의·초기 설정을 실행하며(sudo 필요) 시뮬레이터 런타임을 내려받습니다.
+- **Android**: JDK를 설치하고 `~/Library/Android/sdk`에 자기완결 SDK(명령행 도구·platform-tools·에뮬레이터·시스템 이미지 — Android Studio GUI 불필요)를 구성한 뒤 폼팩터별 AVD를 생성합니다.
 
-setup은 부팅 가능한 디바이스/AVD를 준비하는 데까지만 하며, 실제 부팅은 세션 접속 시 릴레이가 처리합니다. `ANDROID_HOME`/PATH를 등록한 뒤에는 새 터미널을 열거나 `exec $SHELL`을 실행하고 `tapflow doctor`를 돌리세요.
+setup은 부팅 가능한 디바이스/AVD를 준비하는 데까지만 하며 실제 부팅은 세션 접속 시 릴레이가 처리합니다. `ANDROID_HOME`/PATH를 등록한 뒤에는 새 터미널을 열거나 `exec $SHELL`을 실행하고 `tapflow doctor`를 돌리세요.
 
 | 옵션 | 설명 |
 |------|------|
