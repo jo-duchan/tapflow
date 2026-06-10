@@ -1,5 +1,31 @@
 # tapflow
 
+## 0.8.0-next.2
+
+### Minor Changes
+
+- 3991d68: feat(cli): setup android bootstraps a self-contained SDK (JDK + cmdline-tools), no Android Studio
+
+  `tapflow setup android` no longer relies on Android Studio (whose `.app` install doesn't include the SDK, breaking unattended setup). Instead it builds a self-contained SDK at `~/Library/Android/sdk`:
+
+  - installs a JDK via Temurin when missing (required by sdkmanager)
+  - bootstraps `cmdline-tools;latest` + `platform-tools` + `emulator` + a `google_apis` system image into the SDK with `sdkmanager --sdk_root`, auto-accepting licenses
+  - registers `ANDROID_HOME` and platform-tools/emulator on PATH
+  - creates the form-factor AVD set with the SDK's own avdmanager
+
+  Because cmdline-tools live inside the SDK, the avdmanager resolves the SDK root automatically — fixing the "Valid system image paths are: null" failure caused by a brew/SDK path split. Verified end-to-end on a clean Mac.
+
+### Patch Changes
+
+- 4f957e1: fix(cli): doctor reports missing adb as a failure, consistent with Xcode
+
+  `tapflow doctor` now marks a missing adb as a failure (✗) — the same as a missing Xcode — instead of a warning, so a clean machine shows its checks uniformly. `tapflow setup android` resolves it.
+
+  - @tapflowio/agent-core@0.8.0-next.2
+  - @tapflowio/ios-agent@0.8.0-next.2
+  - @tapflowio/android-agent@0.8.0-next.2
+  - @tapflowio/relay@0.8.0-next.2
+
 ## 0.8.0-next.1
 
 ### Minor Changes
