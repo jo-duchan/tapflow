@@ -76,7 +76,7 @@ describe('runDoctorChecks', () => {
     expect(result.android?.some((c) => c.label.includes('Pixel_8'))).toBe(true)
   })
 
-  it('adb 없어도 Android 섹션은 숨기지 않고 adb warn 표시', async () => {
+  it('adb 없으면 Android 섹션은 숨기지 않고 미설치를 fail로 표시', async () => {
     vi.spyOn(process, 'platform', 'get').mockReturnValue('linux')
     vi.stubEnv('ANDROID_HOME', '')
     vi.stubEnv('ANDROID_SDK_ROOT', '')
@@ -89,7 +89,8 @@ describe('runDoctorChecks', () => {
     const result = await runDoctorChecks()
     expect(result.android).not.toBeNull()
     const adbCheck = result.android?.find((c) => c.label === 'adb')
-    expect(adbCheck?.warn).toBe(true)
+    expect(adbCheck?.ok).toBe(false)
+    expect(adbCheck?.warn).toBeFalsy()
     expect(adbCheck?.detail).toContain('setup android')
   })
 
@@ -255,5 +256,37 @@ describe('runDoctorChecks', () => {
     const result = await runDoctorChecks()
     const adbCheck = result.android?.find((c) => c.label.includes('not in PATH'))
     expect(adbCheck?.detail).toContain(customAdb)
+  })
+
+  it('Android SDK(cmdline-tools)가 있으면 ok', async () => {
+    vi.spyOn(process, 'platform', 'get').mockReturnValue('linux')
+    vi.stubEnv('ANDROID_HOME', '')
+    vi.stubEnv('ANDROID_SDK_ROOT', '')
+    const sdkmanager = join(homedir(), 'Android', 'Sdk', 'cmdline-tools', 'latest', 'bin', 'sdkmanager')
+    mockExistsSync.mockImplementation((p) => p === sdkmanager)
+    mockExecSync.mockImplementation((cmd) => {
+      if ((cmd as string) === 'which adb') return '/usr/local/bin/adb\n'
+      return ''
+    })
+
+    const result = await runDoctorChecks('android')
+    const sdk = result.android?.find((c) => c.label.includes('Android SDK'))
+    expect(sdk?.ok).toBe(true)
+  })
+
+  it('Android SDK가 없으면 fail(✗)', async () => {
+    vi.spyOn(process, 'platform', 'get').mockReturnValue('linux')
+    vi.stubEnv('ANDROID_HOME', '')
+    vi.stubEnv('ANDROID_SDK_ROOT', '')
+    mockExistsSync.mockReturnValue(false)
+    mockExecSync.mockImplementation((cmd) => {
+      if ((cmd as string) === 'which adb') throw new Error('not found')
+      return ''
+    })
+
+    const result = await runDoctorChecks('android')
+    const sdk = result.android?.find((c) => c.label === 'Android SDK')
+    expect(sdk?.ok).toBe(false)
+    expect(sdk?.warn).toBeFalsy()
   })
 })
