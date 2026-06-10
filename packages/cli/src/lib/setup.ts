@@ -356,7 +356,8 @@ async function checkAndFixAndroidSdk(brewAvailable: boolean, javaOk: boolean): P
 
 // env를 방금 rc에 등록한 경우의 안내. cmdSetup이 이 문구('new terminal')를 감지해 배너 뒤에 강조한다.
 function newShellHint(file: string): string {
-  return `Added ANDROID_HOME/PATH to ${file} — open a new terminal (or run: exec zsh) to use them.`
+  const shell = file.endsWith('.zshrc') ? 'zsh' : file.endsWith('.bashrc') ? 'bash' : '$SHELL'
+  return `Added ANDROID_HOME/PATH to ${file} — open a new terminal (or run: exec ${shell}) to use them.`
 }
 
 // 부팅하지 않는다 — AVD가 준비됐는지만 보장(없으면 폼팩터별 AVD 생성). 시스템 이미지는 SDK 단계에서 설치됨.

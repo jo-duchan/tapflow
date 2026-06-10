@@ -74,6 +74,6 @@ export async function cmdSetup(platform?: string): Promise<void> {
 
   // env를 방금 등록했으면 현재 쉘엔 반영 안 됨 → 새 터미널 안내(doctor가 PATH 경고를 내지 않도록).
   if (needsNewShell) {
-    step('Open a new terminal (or run: exec zsh), then `tapflow doctor` to verify — ANDROID_HOME/PATH was just added to your shell config.')
+    step('Open a new terminal (or run: exec $SHELL), then `tapflow doctor` to verify — ANDROID_HOME/PATH was just added to your shell config.')
   }
 }
