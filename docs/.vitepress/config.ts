@@ -16,6 +16,7 @@ const enSidebar = [
     text: 'Setup',
     items: [
       { text: 'Self-Hosting the Relay', link: '/guide/self-hosting' },
+      { text: 'Environment Setup', link: '/guide/environment-setup' },
       { text: 'Agent Setup', link: '/guide/agent' },
       { text: 'Streaming Quality', link: '/guide/streaming' },
       { text: 'Uploading Builds', link: '/guide/upload-builds' },
@@ -74,6 +75,7 @@ const koSidebar = [
     text: '설정',
     items: [
       { text: '릴레이 배포', link: '/ko/guide/self-hosting' },
+      { text: '환경 준비', link: '/ko/guide/environment-setup' },
       { text: '에이전트 설정', link: '/ko/guide/agent' },
       { text: '스트림 품질', link: '/ko/guide/streaming' },
       { text: '빌드 업로드', link: '/ko/guide/upload-builds' },

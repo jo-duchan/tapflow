@@ -16,7 +16,8 @@ Commands are registered in `src/index.ts`:
 | `start [--device, --platform]` | Local-only shortcut — starts relay + agent together (same Mac) |
 | `relay start [--port, --tunnel]` | Start relay only (for Docker/Linux server) |
 | `agent start [--relay, --device, --platform]` | Start agent only — connects to an existing relay |
-| `doctor` | Check system prerequisites (Xcode, simctl, adb, etc.) |
+| `doctor [platform]` | Check system prerequisites (`ios` \| `android`; omit for all): iOS Xcode/simctl/Simulator, Android SDK/adb/AVD |
+| `setup [platform]` | Guided environment setup (`ios` \| `android`; omit to auto-detect): installs/repairs JDK, Android SDK (self-contained at `~/Library/Android/sdk`), simulator runtime / AVDs |
 | `devices` | List available simulators and AVDs |
 | `boot <name>` | Boot a simulator by name or UDID |
 | `reset` | Shut down all simulators and emulators |
@@ -28,6 +29,7 @@ Commands are registered in `src/index.ts`:
 Each command has exactly one responsibility. `tapflow start` is for local development only and does not accept a `--relay` option.
 "Connect to a relay" and "start a relay" are separate commands (`agent start` / `relay start`).
 "Scaffold config" and "create the admin account" are separate commands (`init` / `admin init`) — `init` never touches the relay or creates accounts.
+`doctor` diagnoses prerequisites; `setup` installs/fixes them. Both take an optional `[platform]` (`ios` | `android`) and mirror each other; device booting is left to the relay (on-demand on QA Session join), so `setup` only ensures a bootable device/AVD exists.
 
 ## HOW
 
@@ -39,4 +41,4 @@ Each command has exactly one responsibility. `tapflow start` is for local develo
 
 - Do not add commands that access external systems (cloud, remote infrastructure) — this is a local tool.
 - Do not hardcode credentials or tokens.
-- Do not make destructive state changes in any command other than `reset`.
+- Only `reset` tears down running state (shutting down simulators/emulators). `setup` may install/configure the local environment (Homebrew packages, JDK, Android SDK, shell rc) but only after explicit consent and only in interactive (TTY) sessions — non-interactive runs print guidance instead. No command deletes user data.
