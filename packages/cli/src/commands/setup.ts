@@ -1,7 +1,7 @@
 import { confirm, isCancel } from '@clack/prompts'
 import { runSetupAndroid, runSetupIos, type SetupStepResult } from '../lib/setup.js'
 import { resolveAdb } from '../lib/doctor.js'
-import { warn, banner, BOLD, GREEN, RED, YELLOW, DIM, R } from '../lib/print.js'
+import { warn, banner, step, BOLD, GREEN, RED, YELLOW, DIM, R } from '../lib/print.js'
 
 const RUNNERS: Record<string, () => Promise<SetupStepResult[]>> = {
   ios: runSetupIos,
@@ -56,10 +56,12 @@ export async function cmdSetup(platform?: string): Promise<void> {
   // 각 플랫폼 실행 후, 마지막에 relay/agent READY 톤의 요약 배너로 준비 상태를 알린다.
   const summary: string[] = []
   let allReady = true
+  let needsNewShell = false
   for (const t of targets) {
     console.log(`\n${BOLD}tapflow setup ${t}${R}\n`)
     const results = await RUNNERS[t]()
     printResults(results)
+    if (results.some((r) => r.detail?.includes('new terminal'))) needsNewShell = true
     const pending = results.filter((r) => !r.ok)
     if (pending.length === 0) {
       summary.push(`${t}: ready`)
@@ -69,4 +71,9 @@ export async function cmdSetup(platform?: string): Promise<void> {
     }
   }
   banner(allReady ? 'success' : 'error', allReady ? 'SETUP COMPLETE' : 'SETUP INCOMPLETE', summary)
+
+  // env를 방금 등록했으면 현재 쉘엔 반영 안 됨 → 새 터미널 안내(doctor가 PATH 경고를 내지 않도록).
+  if (needsNewShell) {
+    step('Open a new terminal (or run: exec zsh), then `tapflow doctor` to verify — ANDROID_HOME/PATH was just added to your shell config.')
+  }
 }

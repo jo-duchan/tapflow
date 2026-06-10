@@ -303,7 +303,7 @@ async function checkAndFixAndroidSdk(brewAvailable: boolean, javaOk: boolean): P
     return {
       label: 'Android SDK ready',
       ok: true,
-      detail: reg?.added ? `Registered ANDROID_HOME/PATH in ${reg.file}.` : undefined,
+      detail: reg?.added ? newShellHint(reg.file) : undefined,
     }
   }
   if (!javaOk) {
@@ -350,8 +350,13 @@ async function checkAndFixAndroidSdk(brewAvailable: boolean, javaOk: boolean): P
   return {
     label: 'Android SDK installed',
     ok: true,
-    detail: `SDK at ${ANDROID_SDK_DIR}.${reg?.added ? ` Restart your shell to pick up ANDROID_HOME/PATH (${reg.file}).` : ''}`,
+    detail: `SDK at ${ANDROID_SDK_DIR}.${reg?.added ? ` ${newShellHint(reg.file)}` : ''}`,
   }
+}
+
+// env를 방금 rc에 등록한 경우의 안내. cmdSetup이 이 문구('new terminal')를 감지해 배너 뒤에 강조한다.
+function newShellHint(file: string): string {
+  return `Added ANDROID_HOME/PATH to ${file} — open a new terminal (or run: exec zsh) to use them.`
 }
 
 // 부팅하지 않는다 — AVD가 준비됐는지만 보장(없으면 폼팩터별 AVD 생성). 시스템 이미지는 SDK 단계에서 설치됨.
