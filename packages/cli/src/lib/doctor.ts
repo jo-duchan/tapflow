@@ -33,6 +33,16 @@ function buildIosChecks(isMac: boolean): DoctorCheck[] {
   if (!isMac) {
     return [{ label: 'iOS', ok: false, warn: true, detail: 'iOS testing requires macOS.' }]
   }
+  // Xcode.app이 없으면 xcodebuild/xcrun을 부르지 않는다 — 호출 시 macOS가 CLT 설치 팝업을 띄운다.
+  if (!existsSync('/Applications/Xcode.app')) {
+    return [
+      {
+        label: 'Xcode',
+        ok: false,
+        detail: 'Install Xcode from https://developer.apple.com/xcode/ or the Mac App Store. Or run: tapflow setup ios',
+      },
+    ]
+  }
   return [checkXcode(), checkSimctl(), checkBootedSimulator()]
 }
 
