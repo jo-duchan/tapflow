@@ -7,10 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.0] - 2026-06-11
+
 ### Added
 
-- cli: `tapflow doctor --json` emits machine-readable `{ ok, common, ios, android }` for CI/automation; `doctor` also diagnoses adb that is installed in a standard SDK location but missing from PATH.
-- cli: `tapflow setup [platform]` guides iOS/Android environment setup — Homebrew, adb/Xcode, simulator/emulator — applying safe fixes. Run without an argument to auto-detect and set up every supported platform. Homebrew can be installed via the official script after confirmation.
+- cli: `tapflow setup [platform]` — guided, one-pass environment setup. Auto-detects platforms when run without an argument. iOS opens the App Store for Xcode, activates it (license / first-launch), and downloads a simulator runtime. Android installs a JDK and builds a self-contained SDK at `~/Library/Android/sdk` (command-line tools, platform-tools, emulator, system image — no Android Studio GUI), then creates a set of AVDs across form factors. Booting stays on-demand via the relay.
+- cli: `tapflow doctor [platform]` — checks a single platform or all. iOS shows Xcode / simctl / Simulator; Android shows SDK / adb / AVD (symmetric). `--json` emits machine-readable output; a device/AVD only needs to exist, not be running.
+
+### Changed
+
+- cli: `doctor` reports a missing prerequisite as a failure consistently across iOS and Android, and no longer triggers the macOS Command Line Tools install popup on a machine without Xcode.
 
 ## [0.7.0] - 2026-06-08
 
@@ -109,7 +115,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Automatic `tapflow.config.json` creation as a side effect of `tapflow start` / `tapflow relay start`.
 
-[Unreleased]: https://github.com/jo-duchan/tapflow/compare/v0.7.0...HEAD
+[Unreleased]: https://github.com/jo-duchan/tapflow/compare/v0.8.0...HEAD
+[0.8.0]: https://github.com/jo-duchan/tapflow/compare/v0.7.0...v0.8.0
 [0.7.0]: https://github.com/jo-duchan/tapflow/compare/v0.6.1...v0.7.0
 [0.6.1]: https://github.com/jo-duchan/tapflow/compare/v0.6.0...v0.6.1
 [0.6.0]: https://github.com/jo-duchan/tapflow/compare/v0.5.1...v0.6.0
