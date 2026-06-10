@@ -125,6 +125,7 @@ describe('runDoctorChecks', () => {
 
   it('booted 시뮬레이터가 있으면 이름 포함', async () => {
     vi.spyOn(process, 'platform', 'get').mockReturnValue('darwin')
+    mockExistsSync.mockImplementation((p) => p === '/Applications/Xcode.app')
     mockExecSync.mockImplementation((cmd) => {
       const c = cmd as string
       if (c === 'xcodebuild -version') return 'Xcode 15.0\n'
@@ -139,6 +140,7 @@ describe('runDoctorChecks', () => {
 
   it('booted 안 됐어도 디바이스가 있으면 ok (부팅은 on-demand)', async () => {
     vi.spyOn(process, 'platform', 'get').mockReturnValue('darwin')
+    mockExistsSync.mockImplementation((p) => p === '/Applications/Xcode.app')
     mockExecSync.mockImplementation((cmd) => {
       const c = cmd as string
       if (c === 'xcodebuild -version') return 'Xcode 15.0\n'
