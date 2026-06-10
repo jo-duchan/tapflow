@@ -1,5 +1,11 @@
 # @tapflowio/relay
 
+## 0.8.0-next.4
+
+### Patch Changes
+
+- @tapflowio/agent-core@0.8.0-next.4
+
 ## 0.8.0-next.3
 
 ### Patch Changes
