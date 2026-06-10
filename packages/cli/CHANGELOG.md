@@ -1,5 +1,22 @@
 # tapflow
 
+## 0.8.0-next.3
+
+### Patch Changes
+
+- 629741f: fix(cli): doctor AVD is a failure (not a warning) when the SDK/emulator is absent
+
+  On a clean machine, `tapflow doctor` showed Android SDK/adb as ✗ but AVD as ⚠. AVD now mirrors iOS Simulator: a missing SDK/emulator is a failure (✗, `tapflow setup android`), while a present emulator with no AVD stays a warning (⚠). The emulator is resolved from the SDK directory.
+
+- fc98ebd: feat(cli): setup highlights "open a new terminal" after registering ANDROID_HOME/PATH
+
+  When `tapflow setup android` adds `ANDROID_HOME`/PATH to your shell rc, the current shell doesn't pick them up — so running `tapflow doctor` right away showed confusing adb/AVD warnings. setup now prints a clear "open a new terminal (or run `exec zsh`), then `tapflow doctor`" note after the summary banner, only when the env was just registered.
+
+  - @tapflowio/agent-core@0.8.0-next.3
+  - @tapflowio/ios-agent@0.8.0-next.3
+  - @tapflowio/android-agent@0.8.0-next.3
+  - @tapflowio/relay@0.8.0-next.3
+
 ## 0.8.0-next.2
 
 ### Minor Changes

@@ -1,5 +1,11 @@
 # @tapflowio/ios-agent
 
+## 0.8.0-next.3
+
+### Patch Changes
+
+- @tapflowio/agent-core@0.8.0-next.3
+
 ## 0.8.0-next.2
 
 ### Patch Changes

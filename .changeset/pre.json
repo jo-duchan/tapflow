@@ -14,12 +14,14 @@
   },
   "changesets": [
     "doctor-adb-fail",
+    "doctor-avd-fail-consistency",
     "doctor-json-flag",
     "doctor-platform",
     "setup-android-self-contained-sdk",
     "setup-android",
     "setup-homebrew-autoinstall",
     "setup-ios-and-unify",
+    "setup-new-shell-hint",
     "setup-redesign"
   ]
 }
