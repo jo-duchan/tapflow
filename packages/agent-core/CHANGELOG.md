@@ -1,5 +1,7 @@
 # @tapflowio/agent-core
 
+## 0.8.0-next.1
+
 ## 0.8.0-next.0
 
 ## 0.7.0

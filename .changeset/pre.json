@@ -14,8 +14,10 @@
   },
   "changesets": [
     "doctor-json-flag",
+    "doctor-platform",
     "setup-android",
     "setup-homebrew-autoinstall",
-    "setup-ios-and-unify"
+    "setup-ios-and-unify",
+    "setup-redesign"
   ]
 }
