@@ -93,7 +93,17 @@ npm install -g tapflow
 # or: yarn global add tapflow  |  pnpm add -g tapflow
 ```
 
-### 2. Start relay + agent
+### 2. Set up the environment
+
+On the Mac that will run an agent, install the simulator/emulator prerequisites in one step:
+
+```sh
+tapflow setup
+```
+
+Skip this on a relay-only server (Linux). See [Environment Setup](https://www.tapflow.dev/guide/environment-setup) for details.
+
+### 3. Start relay + agent
 
 ```sh
 tapflow start
@@ -103,25 +113,25 @@ tapflow start
 
 This starts both the relay and the agent on the same Mac (local mode).
 
-### 3. Create the first admin account
+### 4. Create the first admin account
 
 Open `http://localhost:4000` in your browser. tapflow redirects you to `/setup` to create the admin account.
 
 > **Headless server?** Use `tapflow admin init` to create the admin account via CLI instead.
 
-### 4. Open the dashboard
+### 5. Open the dashboard
 
 Navigate to `http://localhost:4000` and sign in with the account you just created.
 
-> **Having issues?** Run `tapflow doctor` to auto-diagnose Node.js, the iOS toolchain, `adb`, and other prerequisites.
+> **Having issues?** Run `tapflow doctor` to re-check prerequisites at any time.
 
 ## Requirements
 
 | Component | Requirements |
 |-----------|-------------|
 | **Relay server** | Node.js ≥ 20, any OS (Linux/macOS), ~512 MB RAM |
-| **iOS Agent** | macOS, Xcode with the iOS Simulator runtime, Node.js ≥ 20 |
-| **Android Agent** | macOS, Android SDK (`adb` in `$PATH` or `$ANDROID_HOME` set), an AVD with `google_apis/arm64-v8a` (android-34), Node.js ≥ 20 |
+| **iOS Agent** | macOS, Xcode + iOS Simulator runtime (or run `tapflow setup ios`), Node.js ≥ 20 |
+| **Android Agent** | macOS, Java + Android SDK with an AVD (or run `tapflow setup android`), Node.js ≥ 20 |
 | **Browser (QA)** | Any modern browser — Chrome, Firefox, Safari, Edge |
 
 > Agents run on **macOS only** (they drive the iOS Simulator and Android emulator on a Mac). The relay runs anywhere.
@@ -207,7 +217,8 @@ tapflow agent start --relay wss://your-relay-url
 | `tapflow agent start --relay <url>` | Start agent and connect to a relay |
 | `tapflow init` | Scaffold `tapflow.config.json` |
 | `tapflow admin init` | Create the first admin account (CLI fallback) |
-| `tapflow doctor` | Diagnose environment (Node, iOS toolchain, adb…) |
+| `tapflow doctor [platform]` | Diagnose prerequisites (Node, iOS, Android) |
+| `tapflow setup [platform]` | Install & configure the local environment |
 | `tapflow devices` | List available simulators and emulators |
 | `tapflow boot <name\|udid>` | Boot a simulator or emulator |
 | `tapflow status` | Show connected agents, devices, active sessions |
