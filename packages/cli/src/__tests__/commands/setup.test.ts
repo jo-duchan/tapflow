@@ -121,6 +121,15 @@ describe('cmdSetup', () => {
     expect(out).toContain('Simulator')
   })
 
+  it('env를 방금 등록(detail에 new terminal)하면 새 터미널 안내 출력', async () => {
+    mockRunSetupAndroid.mockResolvedValue([
+      { label: 'Android SDK installed', ok: true, detail: 'SDK at /x. Added ANDROID_HOME/PATH to ~/.zshrc — open a new terminal (or run: exec zsh) to use them.' },
+    ])
+
+    await cmdSetup('android')
+    expect(logLines.join('\n')).toMatch(/new terminal/i)
+  })
+
   it('인자 없음 + 감지 0개 → 안내, exit 없음', async () => {
     vi.spyOn(process, 'platform', 'get').mockReturnValue('linux')
     mockResolveAdb.mockReturnValue(null)

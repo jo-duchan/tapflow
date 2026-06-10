@@ -1,4 +1,4 @@
-import { execSync } from 'node:child_process'
+import { execSync, spawnSync } from 'node:child_process'
 import { existsSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
@@ -176,15 +176,21 @@ function checkAdb(path: string): DoctorCheck {
 }
 
 // 부팅은 relay on-demand가 한다 — AVD가 하나라도 존재하면 ok.
+// iOS Simulator와 대칭: SDK/emulator 자체가 없으면 fail(✗), emulator는 있는데 AVD만 없으면 warn(⚠).
 function checkAvdAvailable(): DoctorCheck {
+  const dir = androidSdkDir()
+  const emulator = dir ? join(dir, 'emulator', 'emulator') : null
+  if (!emulator || !existsSync(emulator)) {
+    return { label: 'AVD', ok: false, detail: 'Android SDK/emulator not found. Run: tapflow setup android' }
+  }
   try {
-    const out = execSync('emulator -list-avds', { encoding: 'utf8', stdio: 'pipe' }).trim()
-    const avds = out ? out.split('\n').map((l) => l.trim()).filter(Boolean) : []
+    const out = spawnSync(emulator, ['-list-avds'], { encoding: 'utf8' }).stdout ?? ''
+    const avds = out.trim() ? out.trim().split('\n').map((l) => l.trim()).filter(Boolean) : []
     if (avds.length > 0) {
       return { label: `AVD available: ${avds[0]}`, ok: true }
     }
   } catch {
-    // emulator 미설치/조회 실패 — 아래 안내
+    // 조회 실패 — 아래 warn
   }
   return { label: 'AVD', ok: false, warn: true, detail: 'No AVD found. Run: tapflow setup android' }
 }
