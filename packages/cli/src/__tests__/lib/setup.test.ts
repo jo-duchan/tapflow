@@ -24,8 +24,11 @@ const mockConfirm = vi.mocked(confirm)
 const mockText = vi.mocked(text)
 const XCODE_APP = '/Applications/Xcode.app'
 
-const STUDIO_APP = '/Applications/Android Studio.app'
-const sdkAdb = join(homedir(), 'Library', 'Android', 'sdk', 'platform-tools', 'adb')
+const SDK_DIR = join(homedir(), 'Library', 'Android', 'sdk')
+const SDK_SDKMANAGER = join(SDK_DIR, 'cmdline-tools', 'latest', 'bin', 'sdkmanager')
+const SDK_AVDMANAGER = join(SDK_DIR, 'cmdline-tools', 'latest', 'bin', 'avdmanager')
+const SDK_ADB = join(SDK_DIR, 'platform-tools', 'adb')
+const SDK_EMULATOR = join(SDK_DIR, 'emulator', 'emulator')
 const zshrc = join(homedir(), '.zshrc')
 
 const okSpawn = { status: 0, stdout: '', stderr: '', pid: 1, output: [], signal: null }
@@ -42,20 +45,24 @@ describe('runSetupAndroid', () => {
   beforeEach(() => {
     vi.resetAllMocks()
     vi.stubEnv('SHELL', '/bin/zsh')
-    vi.stubEnv('ANDROID_HOME', '')
-    vi.stubEnv('ANDROID_SDK_ROOT', '')
-    mockExistsSync.mockReturnValue(false)
     mockReadFileSync.mockReturnValue('')
-    mockSpawnSync.mockReturnValue(okSpawn as never)
     mockConfirm.mockResolvedValue(true as never)
-    // 기본: 완전히 구성된 머신 (각 테스트에서 필요한 부분만 override)
+    // 기본: 완전히 구성된 머신 (brew·JDK·자기완결 SDK·AVD 모두 존재)
     mockExecSync.mockImplementation((cmd) => {
       const c = cmd as string
       if (c === 'which brew') return '/opt/homebrew/bin/brew\n'
-      if (c === 'which adb') return '/opt/homebrew/bin/adb\n'
-      if (c.includes('devices')) return 'List of devices attached\nemulator-5554\tdevice\n'
-      if (c === 'emulator -list-avds') return 'Pixel_8\n'
+      if (c === '/usr/libexec/java_home') return '/Library/Java/.../Home\n'
+      if (c === 'which sdkmanager') return '/opt/homebrew/bin/sdkmanager\n'
       return ''
+    })
+    mockExistsSync.mockImplementation(
+      (p) => p === SDK_SDKMANAGER || p === SDK_ADB || p === SDK_AVDMANAGER || p === SDK_EMULATOR,
+    )
+    mockSpawnSync.mockImplementation((cmd, args) => {
+      if (cmd === SDK_EMULATOR && Array.isArray(args) && args.includes('-list-avds')) {
+        return { ...okSpawn, stdout: 'tapflow-phone\n' } as never
+      }
+      return okSpawn as never
     })
   })
 
@@ -65,242 +72,116 @@ describe('runSetupAndroid', () => {
     setTTY(undefined)
   })
 
-  it('Homebrew 있으면 ok', async () => {
-    const results = await runSetupAndroid()
-    expect(findStep(results, 'homebrew')?.ok).toBe(true)
-  })
-
-  it('Homebrew 없음 + 비대화형이면 confirm 없이 warn + 안내', async () => {
+  it('Homebrew 없음 + 비대화형이면 confirm 없이 warn', async () => {
     setTTY(false)
     mockExecSync.mockImplementation((cmd) => {
       const c = cmd as string
       if (c === 'which brew') throw new Error('not found')
-      if (c === 'which adb') return '/opt/homebrew/bin/adb\n'
-      if (c.includes('devices')) return 'List of devices attached\nemulator-5554\tdevice\n'
+      if (c === '/usr/libexec/java_home') return '/x\n'
+      if (c === 'which sdkmanager') return '/opt/homebrew/bin/sdkmanager\n'
       return ''
     })
 
     const results = await runSetupAndroid()
-    const brew = findStep(results, 'homebrew')
-    expect(brew?.ok).toBe(false)
-    expect(brew?.warn).toBe(true)
-    expect(brew?.detail).toContain('brew.sh')
+    expect(findStep(results, 'homebrew')?.ok).toBe(false)
     expect(mockConfirm).not.toHaveBeenCalled()
-    expect(mockSpawnSync).not.toHaveBeenCalledWith('/bin/bash', expect.any(Array), expect.anything())
   })
 
-  it('Homebrew 없음 + TTY + 수락 시 공식 스크립트 설치', async () => {
+  it('JDK 없음 + TTY + 수락 시 temurin 설치 시도', async () => {
     setTTY(true)
-    mockConfirm.mockResolvedValue(true as never)
-    mockExecSync.mockImplementation((cmd) => {
-      const c = cmd as string
-      if (c === 'which brew') throw new Error('not found')
-      if (c === 'which adb') return '/opt/homebrew/bin/adb\n'
-      if (c.includes('devices')) return 'List of devices attached\nemulator-5554\tdevice\n'
-      return ''
-    })
-
-    const results = await runSetupAndroid()
-    expect(mockConfirm).toHaveBeenCalled()
-    expect(mockSpawnSync).toHaveBeenCalledWith(
-      '/bin/bash',
-      ['-c', expect.stringContaining('Homebrew/install')],
-      expect.anything(),
-    )
-    expect(findStep(results, 'homebrew')?.ok).toBe(true)
-  })
-
-  it('Homebrew 없음 + TTY + 거절 시 warn + 설치 미실행', async () => {
-    setTTY(true)
-    mockConfirm.mockResolvedValue(false as never)
-    mockExecSync.mockImplementation((cmd) => {
-      const c = cmd as string
-      if (c === 'which brew') throw new Error('not found')
-      if (c === 'which adb') return '/opt/homebrew/bin/adb\n'
-      if (c.includes('devices')) return 'List of devices attached\nemulator-5554\tdevice\n'
-      return ''
-    })
-
-    const results = await runSetupAndroid()
-    const brew = findStep(results, 'homebrew')
-    expect(brew?.warn).toBe(true)
-    expect(mockSpawnSync).not.toHaveBeenCalledWith('/bin/bash', expect.any(Array), expect.anything())
-  })
-
-  it('adb가 PATH에 있으면 ok, 설치/등록 미호출', async () => {
-    const results = await runSetupAndroid()
-    expect(findStep(results, 'adb')?.ok).toBe(true)
-    expect(mockAppendFileSync).not.toHaveBeenCalled()
-    expect(mockSpawnSync).not.toHaveBeenCalledWith('brew', ['install', 'android-platform-tools'], expect.anything())
-  })
-
-  it('adb 부재 시 brew install android-platform-tools 실행', async () => {
     mockExecSync.mockImplementation((cmd) => {
       const c = cmd as string
       if (c === 'which brew') return '/opt/homebrew/bin/brew\n'
-      if (c === 'which adb') throw new Error('not found')
-      if (c.includes('devices')) return 'List of devices attached\nemulator-5554\tdevice\n'
+      if (c === '/usr/libexec/java_home') throw new Error('no java')
+      if (c === 'which sdkmanager') return '/opt/homebrew/bin/sdkmanager\n'
       return ''
     })
-    mockExistsSync.mockImplementation((p) => p === STUDIO_APP)
-
-    const results = await runSetupAndroid()
-    expect(mockSpawnSync).toHaveBeenCalledWith('brew', ['install', 'android-platform-tools'], expect.anything())
-    expect(findStep(results, 'adb')?.ok).toBe(true)
-  })
-
-  it('adb가 SDK엔 있고 PATH 없으면 shell rc에 PATH 등록', async () => {
-    mockExecSync.mockImplementation((cmd) => {
-      const c = cmd as string
-      if (c === 'which brew') return '/opt/homebrew/bin/brew\n'
-      if (c === 'which adb') throw new Error('not found')
-      if (c.includes('devices')) return 'List of devices attached\nemulator-5554\tdevice\n'
-      return ''
-    })
-    mockExistsSync.mockImplementation((p) => p === sdkAdb || p === STUDIO_APP)
-
-    const results = await runSetupAndroid()
-    const adb = findStep(results, 'adb')
-    expect(adb?.ok).toBe(true)
-    expect(mockAppendFileSync).toHaveBeenCalledWith(zshrc, expect.stringContaining('platform-tools'))
-    expect(adb?.detail).toContain('.zshrc')
-    // brew install은 호출되지 않아야 (이미 SDK에 있음)
-    expect(mockSpawnSync).not.toHaveBeenCalledWith('brew', ['install', 'android-platform-tools'], expect.anything())
-  })
-
-  it('PATH 등록 멱등 — rc에 마커가 이미 있으면 append 안 함', async () => {
-    mockExecSync.mockImplementation((cmd) => {
-      const c = cmd as string
-      if (c === 'which brew') return '/opt/homebrew/bin/brew\n'
-      if (c === 'which adb') throw new Error('not found')
-      if (c.includes('devices')) return 'List of devices attached\nemulator-5554\tdevice\n'
-      return ''
-    })
-    mockExistsSync.mockImplementation((p) => p === sdkAdb || p === STUDIO_APP || p === zshrc)
-    mockReadFileSync.mockReturnValue(
-      '# >>> tapflow android sdk >>>\nexport PATH="x:$PATH"\n# <<< tapflow android sdk <<<\n',
-    )
-
-    const results = await runSetupAndroid()
-    expect(findStep(results, 'adb')?.ok).toBe(true)
-    expect(mockAppendFileSync).not.toHaveBeenCalled()
-  })
-
-  it('bash 셸이면 .bashrc에 등록', async () => {
-    vi.stubEnv('SHELL', '/bin/bash')
-    mockExecSync.mockImplementation((cmd) => {
-      const c = cmd as string
-      if (c === 'which brew') return '/opt/homebrew/bin/brew\n'
-      if (c === 'which adb') throw new Error('not found')
-      if (c.includes('devices')) return 'List of devices attached\nemulator-5554\tdevice\n'
-      return ''
-    })
-    mockExistsSync.mockImplementation((p) => p === sdkAdb || p === STUDIO_APP)
 
     await runSetupAndroid()
-    expect(mockAppendFileSync).toHaveBeenCalledWith(
-      join(homedir(), '.bashrc'),
-      expect.stringContaining('platform-tools'),
-    )
+    expect(mockSpawnSync).toHaveBeenCalledWith('brew', ['install', '--cask', 'temurin'], expect.anything())
   })
 
-  it('Android Studio 있으면 ok, cask 설치 미호출', async () => {
-    mockExistsSync.mockImplementation((p) => p === STUDIO_APP)
-
-    const results = await runSetupAndroid()
-    expect(findStep(results, 'android studio')?.ok).toBe(true)
-    expect(mockSpawnSync).not.toHaveBeenCalledWith('brew', ['install', '--cask', 'android-studio'], expect.anything())
-  })
-
-  it('Android Studio 없고 확인 수락 시 cask 설치', async () => {
-    setTTY(true)
-    mockExistsSync.mockReturnValue(false) // Android Studio 없음
-    mockConfirm.mockResolvedValue(true as never)
-
-    const results = await runSetupAndroid()
-    expect(mockConfirm).toHaveBeenCalled()
-    expect(mockSpawnSync).toHaveBeenCalledWith('brew', ['install', '--cask', 'android-studio'], expect.anything())
-    expect(findStep(results, 'android studio')?.ok).toBe(true)
-  })
-
-  it('Android Studio 확인 거절 시 warn + 설치 미실행', async () => {
-    setTTY(true)
-    mockExistsSync.mockReturnValue(false)
-    mockConfirm.mockResolvedValue(false as never)
-
-    const results = await runSetupAndroid()
-    const studio = findStep(results, 'android studio')
-    expect(studio?.warn).toBe(true)
-    expect(mockSpawnSync).not.toHaveBeenCalledWith('brew', ['install', '--cask', 'android-studio'], expect.anything())
-  })
-
-  it('비대화형(non-TTY)이면 cask 설치 skip + 안내', async () => {
+  it('JDK 없음 + 비대화형이면 warn (설치 안 함)', async () => {
     setTTY(false)
-    mockExistsSync.mockReturnValue(false)
+    mockExecSync.mockImplementation((cmd) => {
+      const c = cmd as string
+      if (c === 'which brew') return '/opt/homebrew/bin/brew\n'
+      if (c === '/usr/libexec/java_home') throw new Error('no java')
+      if (c === 'which sdkmanager') return '/opt/homebrew/bin/sdkmanager\n'
+      return ''
+    })
 
     const results = await runSetupAndroid()
-    expect(mockConfirm).not.toHaveBeenCalled()
-    expect(mockSpawnSync).not.toHaveBeenCalledWith('brew', ['install', '--cask', 'android-studio'], expect.anything())
-    expect(findStep(results, 'android studio')?.warn).toBe(true)
+    expect(findStep(results, 'java')?.warn).toBe(true)
+    expect(mockSpawnSync).not.toHaveBeenCalledWith('brew', ['install', '--cask', 'temurin'], expect.anything())
   })
 
-  it('AVD가 있으면 ok (부팅 안 함)', async () => {
+  it('자기완결 SDK가 있으면 ok + ANDROID_HOME 등록 (설치 안 함)', async () => {
+    const results = await runSetupAndroid()
+    expect(findStep(results, 'android sdk')?.ok).toBe(true)
+    expect(mockSpawnSync).not.toHaveBeenCalledWith(
+      'brew',
+      ['install', '--cask', 'android-commandlinetools'],
+      expect.anything(),
+    )
+    expect(mockAppendFileSync).toHaveBeenCalledWith(zshrc, expect.stringContaining('ANDROID_HOME'))
+  })
+
+  it('SDK 자기완결 아니면 sdkmanager로 자기완결 부트스트랩(cmdline-tools;latest 포함)', async () => {
+    setTTY(true)
+    let installed = false
+    mockExistsSync.mockImplementation((p) => {
+      if (p === SDK_SDKMANAGER || p === SDK_ADB) return installed
+      if (p === SDK_AVDMANAGER || p === SDK_EMULATOR) return true
+      return false
+    })
+    mockSpawnSync.mockImplementation((cmd, args) => {
+      const a = Array.isArray(args) ? args : []
+      if (typeof cmd === 'string' && cmd.includes('sdkmanager') && a.includes('cmdline-tools;latest')) {
+        installed = true
+        return okSpawn as never
+      }
+      if (cmd === SDK_EMULATOR && a.includes('-list-avds')) {
+        return { ...okSpawn, stdout: 'tapflow-phone\n' } as never
+      }
+      return okSpawn as never
+    })
+
+    const results = await runSetupAndroid()
+    expect(mockSpawnSync).toHaveBeenCalledWith(
+      '/opt/homebrew/bin/sdkmanager',
+      expect.arrayContaining([`--sdk_root=${SDK_DIR}`, 'cmdline-tools;latest', 'platform-tools', 'emulator']),
+      expect.anything(),
+    )
+    expect(findStep(results, 'android sdk')?.ok).toBe(true)
+  })
+
+  it('SDK 자기완결 아님 + 비대화형이면 warn', async () => {
+    setTTY(false)
+    mockExistsSync.mockImplementation((p) => p === SDK_EMULATOR)
+
+    const results = await runSetupAndroid()
+    expect(findStep(results, 'android sdk')?.warn).toBe(true)
+  })
+
+  it('AVD가 있으면 ok (생성 안 함)', async () => {
     const results = await runSetupAndroid()
     expect(findStep(results, 'avd')?.ok).toBe(true)
-  })
-
-  it('AVD가 없으면 비대화형에서 warn (생성 안 함)', async () => {
-    mockExecSync.mockImplementation((cmd) => {
-      const c = cmd as string
-      if (c === 'which brew') return '/opt/homebrew/bin/brew\n'
-      if (c === 'which adb') return '/opt/homebrew/bin/adb\n'
-      if (c === 'emulator -list-avds') return ''
-      return ''
-    })
-    mockExistsSync.mockImplementation((p) => p === STUDIO_APP)
-
-    const results = await runSetupAndroid()
-    expect(findStep(results, 'avd')?.warn).toBe(true)
-    expect(mockSpawnSync).not.toHaveBeenCalled()
-  })
-
-  it('미지원 셸(fish 등)이면 자동 등록 대신 warn + 수동 export 안내', async () => {
-    vi.stubEnv('SHELL', '/usr/bin/fish')
-    mockExecSync.mockImplementation((cmd) => {
-      const c = cmd as string
-      if (c === 'which brew') return '/opt/homebrew/bin/brew\n'
-      if (c === 'which adb') throw new Error('not found')
-      if (c.includes('devices')) return 'List of devices attached\n'
-      return ''
-    })
-    mockExistsSync.mockImplementation((p) => p === sdkAdb || p === STUDIO_APP)
-
-    const results = await runSetupAndroid()
-    const adb = findStep(results, 'adb')
-    expect(adb?.warn).toBe(true)
-    expect(adb?.detail).toContain('export PATH')
-    expect(mockAppendFileSync).not.toHaveBeenCalled()
-  })
-
-  it('AVD 없음 + TTY + 수락 시 시스템 이미지 1회 설치 + 폼팩터별 AVD 4개 생성', async () => {
-    setTTY(true)
-    vi.stubEnv('ANDROID_HOME', '/opt/android-sdk')
-    mockConfirm.mockResolvedValue(true as never)
-    const sdkmanager = join('/opt/android-sdk', 'cmdline-tools', 'latest', 'bin', 'sdkmanager')
-    const avdmanager = join('/opt/android-sdk', 'cmdline-tools', 'latest', 'bin', 'avdmanager')
-    mockExecSync.mockImplementation((cmd) => {
-      const c = cmd as string
-      if (c === 'which brew') return '/opt/homebrew/bin/brew\n'
-      if (c === 'which adb') return '/opt/homebrew/bin/adb\n'
-      if (c === 'emulator -list-avds') return ''
-      return ''
-    })
-    mockExistsSync.mockImplementation(
-      (p) => p === STUDIO_APP || p === '/opt/android-sdk' || p === sdkmanager || p === avdmanager,
+    expect(mockSpawnSync).not.toHaveBeenCalledWith(
+      SDK_AVDMANAGER,
+      expect.arrayContaining(['create']),
+      expect.anything(),
     )
-    // avdmanager list device → 폼팩터별 후보가 모두 가용하도록
+  })
+
+  it('AVD 없음 + TTY + 수락 시 폼팩터별 AVD 4개 생성', async () => {
+    setTTY(true)
     mockSpawnSync.mockImplementation((cmd, args) => {
-      if (cmd === avdmanager && Array.isArray(args) && args.includes('device')) {
+      const a = Array.isArray(args) ? args : []
+      if (cmd === SDK_EMULATOR && a.includes('-list-avds')) {
+        return { ...okSpawn, stdout: '' } as never
+      }
+      if (cmd === SDK_AVDMANAGER && a.includes('device')) {
         return {
           ...okSpawn,
           stdout: 'id: 0 or "pixel_5"\nid: 1 or "pixel_7"\nid: 2 or "pixel_7_pro"\nid: 3 or "pixel_c"\n',
@@ -310,23 +191,60 @@ describe('runSetupAndroid', () => {
     })
 
     const results = await runSetupAndroid()
-    // 시스템 이미지 1회 설치
-    expect(mockSpawnSync).toHaveBeenCalledWith(sdkmanager, [expect.stringContaining('system-images')], expect.anything())
-    // AVD 4개 생성 (create avd 호출 횟수)
     const createCalls = mockSpawnSync.mock.calls.filter(
-      (c) => c[0] === avdmanager && Array.isArray(c[1]) && c[1].includes('create'),
+      (c) => c[0] === SDK_AVDMANAGER && Array.isArray(c[1]) && c[1].includes('create'),
     )
     expect(createCalls).toHaveLength(4)
     expect(findStep(results, 'avd')?.ok).toBe(true)
   })
 
-  it('멱등 — 완전히 구성된 머신은 전부 ok, 부작용 없음', async () => {
-    mockExistsSync.mockImplementation((p) => p === STUDIO_APP)
+  it('AVD 없음 + 비대화형이면 warn (생성 안 함)', async () => {
+    setTTY(false)
+    mockSpawnSync.mockImplementation((cmd, args) => {
+      const a = Array.isArray(args) ? args : []
+      if (cmd === SDK_EMULATOR && a.includes('-list-avds')) return { ...okSpawn, stdout: '' } as never
+      return okSpawn as never
+    })
+
+    const results = await runSetupAndroid()
+    expect(findStep(results, 'avd')?.warn).toBe(true)
+    expect(mockSpawnSync).not.toHaveBeenCalledWith(
+      SDK_AVDMANAGER,
+      expect.arrayContaining(['create']),
+      expect.anything(),
+    )
+  })
+
+  it('미지원 셸이면 ANDROID_HOME 자동 등록 안 함 (SDK는 ready)', async () => {
+    vi.stubEnv('SHELL', '/usr/bin/fish')
+
+    const results = await runSetupAndroid()
+    expect(findStep(results, 'android sdk')?.ok).toBe(true)
+    expect(mockAppendFileSync).not.toHaveBeenCalled()
+  })
+
+  it('멱등 — 완전 구성 + env 등록됨이면 전부 ok, 설치/생성/append 없음', async () => {
+    mockReadFileSync.mockReturnValue(
+      '# >>> tapflow android sdk >>>\nexport ANDROID_HOME="x"\n# <<< tapflow android sdk <<<\n',
+    )
+    mockExistsSync.mockImplementation(
+      (p) =>
+        p === SDK_SDKMANAGER ||
+        p === SDK_ADB ||
+        p === SDK_AVDMANAGER ||
+        p === SDK_EMULATOR ||
+        p === zshrc,
+    )
 
     const results = await runSetupAndroid()
     expect(results.every((r) => r.ok)).toBe(true)
     expect(mockAppendFileSync).not.toHaveBeenCalled()
-    expect(mockSpawnSync).not.toHaveBeenCalled()
+    expect(mockSpawnSync).not.toHaveBeenCalledWith('brew', expect.anything(), expect.anything())
+    expect(mockSpawnSync).not.toHaveBeenCalledWith(
+      SDK_AVDMANAGER,
+      expect.arrayContaining(['create']),
+      expect.anything(),
+    )
   })
 })
 

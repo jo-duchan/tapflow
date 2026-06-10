@@ -1,10 +1,10 @@
 import { execSync, spawnSync } from 'node:child_process'
 import { existsSync, readFileSync, appendFileSync } from 'node:fs'
 import { homedir } from 'node:os'
-import { dirname, join } from 'node:path'
+import { join } from 'node:path'
 import { confirm, text, isCancel } from '@clack/prompts'
-import { resolveAdb, type DoctorCheck } from './doctor.js'
-import { createSpinner, step } from './print.js'
+import { type DoctorCheck } from './doctor.js'
+import { step } from './print.js'
 
 // setup 단계 결과는 진단 결과(DoctorCheck)와 같은 형태를 쓴다.
 // ok=true: 이미 OK이거나 방금 자동 수정함, warn=true: 수동 조치 필요(안내).
@@ -12,7 +12,8 @@ export type SetupStepResult = DoctorCheck
 
 const PATH_MARKER_START = '# >>> tapflow android sdk >>>'
 const PATH_MARKER_END = '# <<< tapflow android sdk <<<'
-const STUDIO_APP = '/Applications/Android Studio.app'
+// SDK를 표준 경로에 자기완결로 고정한다(cmdline-tools·platform-tools·emulator·system-image 모두 이 아래).
+const ANDROID_SDK_DIR = join(homedir(), 'Library', 'Android', 'sdk')
 const XCODE_APP = '/Applications/Xcode.app'
 const XCODE_APPSTORE = 'https://apps.apple.com/app/xcode/id497799835'
 const XCODE_DEVELOPER_DIR = '/Applications/Xcode.app/Contents/Developer'
@@ -69,10 +70,42 @@ export async function runSetupAndroid(): Promise<SetupStepResult[]> {
   const results: SetupStepResult[] = []
   const brew = await checkAndFixHomebrew()
   results.push(brew)
-  results.push(checkAndFixAdb(brew.ok))
-  results.push(await checkAndFixAndroidStudio(brew.ok))
-  results.push(await checkAndFixAvd())
+  const jdk = await checkAndFixJdk(brew.ok)
+  results.push(jdk)
+  const sdk = await checkAndFixAndroidSdk(brew.ok, jdk.ok)
+  results.push(sdk)
+  results.push(await checkAndFixAvd(sdk.ok))
   return results
+}
+
+// sdkmanager/avdmanager는 SDK 위치를 ANDROID_HOME으로 알아야 한다(자기완결 SDK 기준).
+function androidEnv(): NodeJS.ProcessEnv {
+  return { ...process.env, ANDROID_HOME: ANDROID_SDK_DIR, ANDROID_SDK_ROOT: ANDROID_SDK_DIR }
+}
+
+const SDK_CMDLINE_BIN = join(ANDROID_SDK_DIR, 'cmdline-tools', 'latest', 'bin')
+
+// cmdline-tools가 SDK 안에 있고 platform-tools(adb)까지 갖춘 자기완결 상태인지.
+function sdkSelfContained(): boolean {
+  return existsSync(join(SDK_CMDLINE_BIN, 'sdkmanager')) && existsSync(join(ANDROID_SDK_DIR, 'platform-tools', 'adb'))
+}
+
+function hasJava(): boolean {
+  try {
+    execSync('/usr/libexec/java_home', { stdio: 'pipe' })
+    return true
+  } catch {
+    return false
+  }
+}
+
+function whichSdkmanager(): string | null {
+  try {
+    const p = execSync('which sdkmanager', { encoding: 'utf8', stdio: 'pipe' }).trim()
+    return p || null
+  } catch {
+    return null
+  }
 }
 
 export async function runSetupIos(): Promise<SetupStepResult[]> {
@@ -238,122 +271,103 @@ async function checkAndFixHomebrew(): Promise<SetupStepResult> {
   }
 }
 
-function checkAndFixAdb(brewAvailable: boolean): SetupStepResult {
-  const adb = resolveAdb()
-
-  // 1. PATH에 있음
-  if (adb?.inPath) {
-    return { label: `adb in PATH: ${adb.path}`, ok: true }
-  }
-
-  // 2. 표준 SDK 위치엔 있지만 PATH에 없음 → shell rc에 등록
-  if (adb) {
-    const platformTools = dirname(adb.path)
-    const registered = registerPathInShellRc(platformTools)
-    if (!registered) {
-      return {
-        label: 'adb (not in PATH)',
-        ok: false,
-        warn: true,
-        detail: `adb found at ${adb.path} but your shell ($SHELL) isn't auto-configurable. Add to your shell config: export PATH="${platformTools}:$PATH"`,
-      }
-    }
-    if (registered.added) {
-      return {
-        label: 'adb added to PATH',
-        ok: true,
-        detail: `Added ${platformTools} to PATH in ${registered.file}. Restart your shell or run: source ${registered.file}`,
-      }
-    }
-    return {
-      label: 'adb PATH already configured',
-      ok: true,
-      detail: `${platformTools} already registered in ${registered.file}`,
-    }
-  }
-
-  // 3. 어디에도 없음 → brew 설치
-  if (!brewAvailable) {
-    return {
-      label: 'adb',
-      ok: false,
-      warn: true,
-      detail: 'Install Homebrew first, then: brew install android-platform-tools',
-    }
-  }
-  const spinner = createSpinner('Installing android-platform-tools via Homebrew…')
-  spinner.start()
-  const r = spawnSync('brew', ['install', 'android-platform-tools'], { stdio: 'pipe' })
-  spinner.stop(r.status === 0)
-  if (r.status === 0) {
-    return { label: 'adb installed via Homebrew', ok: true }
-  }
-  return {
-    label: 'adb',
-    ok: false,
-    warn: true,
-    detail: 'brew install android-platform-tools failed. Install manually.',
-  }
-}
-
-async function checkAndFixAndroidStudio(brewAvailable: boolean): Promise<SetupStepResult> {
-  if (existsSync(STUDIO_APP)) {
-    return { label: 'Android Studio installed', ok: true }
+// sdkmanager/avdmanager 실행에 JDK가 필요하다(없으면 'Unable to locate a Java Runtime').
+async function checkAndFixJdk(brewAvailable: boolean): Promise<SetupStepResult> {
+  if (hasJava()) {
+    return { label: 'Java (JDK)', ok: true }
   }
   if (!brewAvailable) {
-    return {
-      label: 'Android Studio',
-      ok: false,
-      warn: true,
-      detail: 'Install from https://developer.android.com/studio',
-    }
+    return { label: 'Java (JDK)', ok: false, detail: 'Install Homebrew first, then: brew install --cask temurin' }
   }
-  // 대용량(~1GB+)이라 확인 후 설치. 비대화형이면 안내만.
   if (!process.stdout.isTTY) {
-    return {
-      label: 'Android Studio',
-      ok: false,
-      warn: true,
-      detail: 'Run: brew install --cask android-studio (skipped in non-interactive mode)',
-    }
+    return { label: 'Java (JDK)', ok: false, warn: true, detail: 'Run: brew install --cask temurin (skipped in non-interactive mode)' }
   }
-  const proceed = await confirm({ message: 'Install Android Studio (~1GB) via Homebrew?' })
+  const proceed = await confirm({
+    message: 'A JDK is required for the Android SDK tools. Install Temurin now? (may prompt for sudo)',
+  })
   if (isCancel(proceed) || !proceed) {
+    return { label: 'Java (JDK)', ok: false, warn: true, detail: 'Skipped. Install: brew install --cask temurin' }
+  }
+  console.log()
+  const r = spawnSync('brew', ['install', '--cask', 'temurin'], { stdio: 'inherit' })
+  if (r.status === 0 && hasJava()) {
+    return { label: 'Java (JDK) installed', ok: true }
+  }
+  return { label: 'Java (JDK)', ok: false, detail: 'JDK install failed. Install manually: brew install --cask temurin' }
+}
+
+// Android SDK를 ~/Library/Android/sdk에 자기완결로 구성한다(Android Studio GUI 불필요).
+async function checkAndFixAndroidSdk(brewAvailable: boolean, javaOk: boolean): Promise<SetupStepResult> {
+  if (sdkSelfContained()) {
+    const reg = registerAndroidEnv()
     return {
-      label: 'Android Studio',
-      ok: false,
-      warn: true,
-      detail: 'Skipped. Run: brew install --cask android-studio',
+      label: 'Android SDK ready',
+      ok: true,
+      detail: reg?.added ? `Registered ANDROID_HOME/PATH in ${reg.file}.` : undefined,
     }
   }
-  const spinner = createSpinner('Installing Android Studio via Homebrew…')
-  spinner.start()
-  const r = spawnSync('brew', ['install', '--cask', 'android-studio'], { stdio: 'pipe' })
-  spinner.stop(r.status === 0)
-  if (r.status === 0) {
-    return { label: 'Android Studio installed via Homebrew', ok: true }
+  if (!javaOk) {
+    return { label: 'Android SDK', ok: false, detail: 'Install a JDK first (Android SDK tools need Java).' }
   }
+
+  // 부트스트랩 sdkmanager 확보: SDK 내부 → PATH(brew) → brew 설치
+  let bootSdkmanager = existsSync(join(SDK_CMDLINE_BIN, 'sdkmanager'))
+    ? join(SDK_CMDLINE_BIN, 'sdkmanager')
+    : whichSdkmanager()
+  if (!bootSdkmanager) {
+    if (!brewAvailable) {
+      return { label: 'Android SDK', ok: false, detail: 'Install Homebrew first, then: brew install --cask android-commandlinetools' }
+    }
+    if (!process.stdout.isTTY) {
+      return { label: 'Android SDK', ok: false, warn: true, detail: 'Run: brew install --cask android-commandlinetools (skipped in non-interactive mode)' }
+    }
+    console.log()
+    const b = spawnSync('brew', ['install', '--cask', 'android-commandlinetools'], { stdio: 'inherit' })
+    if (b.status !== 0) {
+      return { label: 'Android SDK', ok: false, detail: 'Failed to install android-commandlinetools.' }
+    }
+    bootSdkmanager = whichSdkmanager() ?? 'sdkmanager'
+  }
+
+  if (!process.stdout.isTTY) {
+    return { label: 'Android SDK', ok: false, warn: true, detail: 'Android SDK not installed (skipped in non-interactive mode).' }
+  }
+
+  // 자기완결 SDK 구성: cmdline-tools를 SDK 안에 넣어 이후 SDK 내부 바이너리만 쓰게 한다.
+  console.log()
+  const root = `--sdk_root=${ANDROID_SDK_DIR}`
+  const licenseInput = 'y\n'.repeat(50)
+  spawnSync(bootSdkmanager, [root, '--licenses'], { stdio: ['pipe', 'inherit', 'inherit'], input: licenseInput })
+  const inst = spawnSync(
+    bootSdkmanager,
+    [root, 'cmdline-tools;latest', 'platform-tools', 'emulator', androidSystemImage()],
+    { stdio: ['pipe', 'inherit', 'inherit'], input: licenseInput },
+  )
+  if (inst.status !== 0 || !sdkSelfContained()) {
+    return { label: 'Android SDK', ok: false, detail: 'Failed to set up the Android SDK.' }
+  }
+  const reg = registerAndroidEnv()
   return {
-    label: 'Android Studio',
-    ok: false,
-    warn: true,
-    detail: 'brew install --cask android-studio failed. Install manually.',
+    label: 'Android SDK installed',
+    ok: true,
+    detail: `SDK at ${ANDROID_SDK_DIR}.${reg?.added ? ` Restart your shell to pick up ANDROID_HOME/PATH (${reg.file}).` : ''}`,
   }
 }
 
-// 부팅하지 않는다 — AVD가 하나라도 준비됐는지만 보장(없으면 시스템 이미지 + AVD 생성).
-async function checkAndFixAvd(): Promise<SetupStepResult> {
+// 부팅하지 않는다 — AVD가 준비됐는지만 보장(없으면 폼팩터별 AVD 생성). 시스템 이미지는 SDK 단계에서 설치됨.
+async function checkAndFixAvd(sdkOk: boolean): Promise<SetupStepResult> {
+  if (!sdkOk) {
+    return { label: 'AVD', ok: false, detail: 'Set up the Android SDK first.' }
+  }
   const avds = listAvds()
   if (avds.length > 0) {
-    return { label: `AVD ready: ${avds[0]}`, ok: true }
+    return { label: `AVD ready: ${avds.length} device(s)`, ok: true }
   }
-  const manualHint = 'Create an AVD in Android Studio > Device Manager.'
+  const manualHint = 'Create an AVD with avdmanager (see Android docs).'
   if (!process.stdout.isTTY) {
     return { label: 'AVD', ok: false, warn: true, detail: `No AVD found. ${manualHint}` }
   }
-  const proceed = await confirm({
-    message: 'No Android Virtual Device found. Create a set of AVDs now? (downloads a system image)',
-  })
+  const proceed = await confirm({ message: 'No Android Virtual Device found. Create a set of AVDs now?' })
   if (isCancel(proceed) || !proceed) {
     return { label: 'AVD', ok: false, warn: true, detail: `Skipped. ${manualHint}` }
   }
@@ -365,59 +379,34 @@ async function checkAndFixAvd(): Promise<SetupStepResult> {
 }
 
 function listAvds(): string[] {
+  const emulator = join(ANDROID_SDK_DIR, 'emulator', 'emulator')
+  if (!existsSync(emulator)) return []
   try {
-    const out = execSync('emulator -list-avds', { encoding: 'utf8', stdio: 'pipe' }).trim()
+    const r = spawnSync(emulator, ['-list-avds'], { encoding: 'utf8', env: androidEnv() })
+    const out = (r.stdout ?? '').trim()
     return out ? out.split('\n').map((l) => l.trim()).filter(Boolean) : []
   } catch {
     return []
   }
 }
 
-function resolveAndroidSdk(): string | null {
-  const candidates = [
-    process.env.ANDROID_HOME,
-    process.env.ANDROID_SDK_ROOT,
-    join(homedir(), 'Library', 'Android', 'sdk'), // macOS
-    join(homedir(), 'Android', 'Sdk'), // Linux
-  ]
-  for (const c of candidates) {
-    if (c && existsSync(c)) return c
-  }
-  return null
-}
-
 function createAvds(): { ok: boolean; created: string[]; detail?: string } {
-  const sdk = resolveAndroidSdk()
-  if (!sdk) {
-    return { ok: false, created: [], detail: 'Android SDK not found. Install it via Android Studio.' }
-  }
-  const bin = join(sdk, 'cmdline-tools', 'latest', 'bin')
-  const sdkmanager = join(bin, 'sdkmanager')
-  const avdmanager = join(bin, 'avdmanager')
-  if (!existsSync(sdkmanager) || !existsSync(avdmanager)) {
-    return {
-      ok: false,
-      created: [],
-      detail: 'Android command-line tools not found. Install "Android SDK Command-line Tools" in Android Studio > SDK Manager.',
-    }
+  const avdmanager = join(SDK_CMDLINE_BIN, 'avdmanager')
+  if (!existsSync(avdmanager)) {
+    return { ok: false, created: [], detail: 'Android cmdline-tools not found in the SDK.' }
   }
   const image = androidSystemImage()
-  console.log()
-  // 시스템 이미지 1회 설치 (모든 AVD가 공유). 라이선스는 'y'로 동의.
-  const img = spawnSync(sdkmanager, [image], { stdio: 'inherit', input: 'y\n' })
-  if (img.status !== 0) {
-    return { ok: false, created: [], detail: `Failed to install ${image}.` }
-  }
   // 폼팩터별로 가용한 device id를 골라 AVD 생성. ('custom hardware profile?'에 'no')
   const available = listDeviceIds(avdmanager)
   const created: string[] = []
+  console.log()
   for (const spec of AVD_SPECS) {
     const device = spec.deviceCandidates.find((d) => available.includes(d))
     if (!device) continue
     const r = spawnSync(
       avdmanager,
       ['create', 'avd', '-n', spec.name, '-k', image, '-d', device, '--force'],
-      { stdio: 'inherit', input: 'no\n' },
+      { stdio: ['pipe', 'inherit', 'inherit'], input: 'no\n', env: androidEnv() },
     )
     if (r.status === 0) created.push(spec.name)
   }
@@ -429,7 +418,7 @@ function createAvds(): { ok: boolean; created: string[]; detail?: string } {
 
 function listDeviceIds(avdmanager: string): string[] {
   try {
-    const r = spawnSync(avdmanager, ['list', 'device'], { encoding: 'utf8' })
+    const r = spawnSync(avdmanager, ['list', 'device'], { encoding: 'utf8', env: androidEnv() })
     const out = r.stdout ?? ''
     const ids: string[] = []
     for (const m of out.matchAll(/id:\s*\d+\s+or\s+"([^"]+)"/g)) {
@@ -450,14 +439,19 @@ function shellRcPath(): string | null {
   return null
 }
 
-function registerPathInShellRc(platformTools: string): { added: boolean; file: string } | null {
+// ANDROID_HOME + platform-tools/emulator PATH를 rc에 멱등 등록(마커 블록).
+function registerAndroidEnv(): { added: boolean; file: string } | null {
   const file = shellRcPath()
   if (!file) return null
   const existing = existsSync(file) ? readFileSync(file, 'utf8') : ''
   if (existing.includes(PATH_MARKER_START)) {
     return { added: false, file }
   }
-  const block = `\n${PATH_MARKER_START}\nexport PATH="${platformTools}:$PATH"\n${PATH_MARKER_END}\n`
+  const block =
+    `\n${PATH_MARKER_START}\n` +
+    `export ANDROID_HOME="${ANDROID_SDK_DIR}"\n` +
+    `export PATH="$ANDROID_HOME/platform-tools:$ANDROID_HOME/emulator:$PATH"\n` +
+    `${PATH_MARKER_END}\n`
   appendFileSync(file, block)
   return { added: true, file }
 }
