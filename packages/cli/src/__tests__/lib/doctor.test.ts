@@ -3,7 +3,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 vi.mock('node:child_process')
 vi.mock('node:fs')
 
-import { execSync } from 'node:child_process'
+import { execSync, spawnSync } from 'node:child_process'
 import { existsSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
@@ -12,6 +12,9 @@ import { runDoctorChecks } from '../../lib/doctor.js'
 const mockExistsSync = vi.mocked(existsSync)
 
 const mockExecSync = vi.mocked(execSync)
+const mockSpawnSync = vi.mocked(spawnSync)
+const sdkmanagerLinux = join(homedir(), 'Android', 'Sdk', 'cmdline-tools', 'latest', 'bin', 'sdkmanager')
+const emulatorLinux = join(homedir(), 'Android', 'Sdk', 'emulator', 'emulator')
 
 const simctlBooted = JSON.stringify({
   devices: {
@@ -60,15 +63,21 @@ describe('runDoctorChecks', () => {
     expect(result.ios).toBeNull()
   })
 
-  it('adb 있으면 Android 섹션 포함', async () => {
+  it('adb 있으면 Android 섹션 포함 (SDK·AVD 존재)', async () => {
     vi.spyOn(process, 'platform', 'get').mockReturnValue('linux')
+    vi.stubEnv('ANDROID_HOME', '')
+    vi.stubEnv('ANDROID_SDK_ROOT', '')
+    mockExistsSync.mockImplementation((p) => p === sdkmanagerLinux || p === emulatorLinux)
     mockExecSync.mockImplementation((cmd) => {
       const c = cmd as string
       if (c === 'which adb') return '/usr/local/bin/adb\n'
-      if (c === 'adb devices') return 'List of devices attached\nemulator-5554\tdevice\n'
-      if (c.startsWith('adb -s emulator-5554')) return 'Pixel_8\nOK\n'
-      if (c === 'emulator -list-avds') return 'Pixel_8\n'
       return ''
+    })
+    mockSpawnSync.mockImplementation((cmd, args) => {
+      if (cmd === emulatorLinux && Array.isArray(args) && args.includes('-list-avds')) {
+        return { stdout: 'Pixel_8\n' } as never
+      }
+      return { stdout: '' } as never
     })
 
     const result = await runDoctorChecks()
