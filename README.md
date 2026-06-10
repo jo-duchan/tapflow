@@ -90,7 +90,17 @@ npm install -g tapflow
 # or: yarn global add tapflow  |  pnpm add -g tapflow
 ```
 
-### 2. Start relay + agent
+### 2. Set up the environment
+
+If this Mac will run an agent, install the simulator/emulator prerequisites in one step:
+
+```sh
+tapflow setup
+```
+
+Skip this on a relay-only server (Linux). See [Environment Setup](https://www.tapflow.dev/guide/environment-setup) for details.
+
+### 3. Start relay + agent
 
 ```sh
 tapflow start
@@ -100,17 +110,17 @@ tapflow start
 
 This starts both the relay and the agent on the same Mac (local mode).
 
-### 3. Create the first admin account
+### 4. Create the first admin account
 
 Open `http://localhost:4000` in your browser. tapflow redirects you to `/setup` to create the admin account.
 
 > **Headless server?** Use `tapflow admin init` to create the admin account via CLI instead.
 
-### 4. Open the dashboard
+### 5. Open the dashboard
 
 Navigate to `http://localhost:4000` and sign in with the account you just created.
 
-> **Having issues?** Run `tapflow doctor` to diagnose prerequisites, or `tapflow setup` to install and configure them automatically.
+> **Having issues?** Run `tapflow doctor` to re-check prerequisites at any time.
 
 ## Requirements
 

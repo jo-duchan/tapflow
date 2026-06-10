@@ -24,6 +24,56 @@ To update:
 npm update -g tapflow
 ```
 
+## `tapflow doctor`
+
+Diagnose environment issues. Omit the platform to check all, or pass `ios` / `android` to check one.
+
+```sh
+tapflow doctor
+tapflow doctor ios
+tapflow doctor android
+```
+
+Checks (a device/AVD only needs to *exist* — booting is on-demand via the relay):
+
+- **Common**: Node.js version
+- **iOS** (macOS only): Xcode, `xcrun simctl`, an available simulator
+- **Android**: Android SDK, adb, AVD
+
+Use `--json` for machine-readable output. Exits with code `1` if any check fails.
+
+| Option | Description |
+|--------|-------------|
+| `[platform]` | `ios` or `android`; omit to check all |
+| `--json` | Emit `{ ok, common, ios, android }` as JSON (no ANSI) |
+
+See [Environment Setup](/guide/environment-setup) for the full workflow.
+
+
+## `tapflow setup`
+
+Install and configure the local environment so a platform is ready to run. Omit the platform to auto-detect, or pass `ios` / `android`.
+
+```sh
+tapflow setup
+tapflow setup ios
+tapflow setup android
+```
+
+Runs in one pass, asking for consent before each install (interactive terminals only; non-interactive runs print the command instead):
+
+- **iOS**: opens the App Store for Xcode, accepts the license / runs first-launch (needs sudo), downloads a simulator runtime.
+- **Android**: installs a JDK, builds a self-contained SDK at `~/Library/Android/sdk` (command-line tools, platform-tools, emulator, system image — no Android Studio GUI), and creates a set of AVDs across form factors.
+
+setup only ensures a bootable device/AVD exists; the relay boots it on demand when a session opens. After it registers `ANDROID_HOME`/PATH, open a new terminal (or `exec $SHELL`) before running `tapflow doctor`.
+
+| Option | Description |
+|--------|-------------|
+| `[platform]` | `ios` or `android`; omit to auto-detect |
+
+See [Environment Setup](/guide/environment-setup) for the full workflow.
+
+
 ## `tapflow init`
 
 Scaffold `tapflow.config.json` interactively. Run this once before `tapflow start`.
@@ -181,56 +231,6 @@ tapflow agent start --relay ws://192.168.x.x:4000
 | `--relay <url>` | `relay.url` in config, or `ws://localhost:4000` | Relay WebSocket URL. Omit if `relay.url` is set in `tapflow.config.json`. |
 | `--platform <ios\|android\|all>` | auto-detect | Platform to start |
 | `--device <name>` | first booted simulator | iOS Simulator name or UDID |
-
-
-## `tapflow doctor`
-
-Diagnose environment issues. Omit the platform to check all, or pass `ios` / `android` to check one.
-
-```sh
-tapflow doctor
-tapflow doctor ios
-tapflow doctor android
-```
-
-Checks (a device/AVD only needs to *exist* — booting is on-demand via the relay):
-
-- **Common**: Node.js version
-- **iOS** (macOS only): Xcode, `xcrun simctl`, an available simulator
-- **Android**: Android SDK, adb, AVD
-
-Use `--json` for machine-readable output. Exits with code `1` if any check fails.
-
-| Option | Description |
-|--------|-------------|
-| `[platform]` | `ios` or `android`; omit to check all |
-| `--json` | Emit `{ ok, common, ios, android }` as JSON (no ANSI) |
-
-See [Environment Setup](/guide/environment-setup) for the full workflow.
-
-
-## `tapflow setup`
-
-Install and configure the local environment so a platform is ready to run. Omit the platform to auto-detect, or pass `ios` / `android`.
-
-```sh
-tapflow setup
-tapflow setup ios
-tapflow setup android
-```
-
-Runs in one pass, asking for consent before each install (interactive terminals only; non-interactive runs print the command instead):
-
-- **iOS**: opens the App Store for Xcode, accepts the license / runs first-launch (needs sudo), downloads a simulator runtime.
-- **Android**: installs a JDK, builds a self-contained SDK at `~/Library/Android/sdk` (command-line tools, platform-tools, emulator, system image — no Android Studio GUI), and creates a set of AVDs across form factors.
-
-setup only ensures a bootable device/AVD exists; the relay boots it on demand when a session opens. After it registers `ANDROID_HOME`/PATH, open a new terminal (or `exec $SHELL`) before running `tapflow doctor`.
-
-| Option | Description |
-|--------|-------------|
-| `[platform]` | `ios` or `android`; omit to auto-detect |
-
-See [Environment Setup](/guide/environment-setup) for the full workflow.
 
 
 ## `tapflow devices`
