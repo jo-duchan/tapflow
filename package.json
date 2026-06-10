@@ -40,5 +40,10 @@
     "globals": "^17.6.0",
     "lefthook": "^2.1.7",
     "typescript-eslint": "^8.59.3"
+  },
+  "pnpm": {
+    "overrides": {
+      "shell-quote@<1.8.4": "^1.8.4"
+    }
   }
 }
