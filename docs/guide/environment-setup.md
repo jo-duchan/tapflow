@@ -1,6 +1,6 @@
 # Environment Setup
 
-Before you start an agent, the Mac it runs on needs an environment that can launch iOS simulators or Android emulators. Use `tapflow doctor` to diagnose the current state, and `tapflow setup` to install and configure whatever is missing.
+The Mac that will run an agent needs an environment that can launch iOS simulators or Android emulators. Use `tapflow doctor` to diagnose the current state, and `tapflow setup` to install and configure whatever is missing.
 
 ## tapflow doctor
 

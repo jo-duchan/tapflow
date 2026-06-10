@@ -1,6 +1,6 @@
 # 환경 준비
 
-에이전트를 실행하기 전에 그 Mac에는 iOS 시뮬레이터나 Android 에뮬레이터를 띄울 수 있는 환경이 갖춰져 있어야 합니다. `tapflow doctor`로 현재 상태를 진단하고 `tapflow setup`으로 부족한 부분을 설치·구성할 수 있습니다.
+에이전트를 실행할 Mac은 iOS 시뮬레이터나 Android 에뮬레이터를 띄울 수 있는 환경이 갖춰져 있어야 합니다. `tapflow doctor`로 현재 상태를 진단하고 `tapflow setup`으로 부족한 부분을 설치·구성할 수 있습니다.
 
 ## tapflow doctor
 

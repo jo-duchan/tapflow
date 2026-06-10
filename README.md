@@ -92,7 +92,7 @@ npm install -g tapflow
 
 ### 2. Set up the environment
 
-If this Mac will run an agent, install the simulator/emulator prerequisites in one step:
+On the Mac that will run an agent, install the simulator/emulator prerequisites in one step:
 
 ```sh
 tapflow setup
