@@ -257,4 +257,36 @@ describe('runDoctorChecks', () => {
     const adbCheck = result.android?.find((c) => c.label.includes('not in PATH'))
     expect(adbCheck?.detail).toContain(customAdb)
   })
+
+  it('Android SDK(cmdline-tools)가 있으면 ok', async () => {
+    vi.spyOn(process, 'platform', 'get').mockReturnValue('linux')
+    vi.stubEnv('ANDROID_HOME', '')
+    vi.stubEnv('ANDROID_SDK_ROOT', '')
+    const sdkmanager = join(homedir(), 'Android', 'Sdk', 'cmdline-tools', 'latest', 'bin', 'sdkmanager')
+    mockExistsSync.mockImplementation((p) => p === sdkmanager)
+    mockExecSync.mockImplementation((cmd) => {
+      if ((cmd as string) === 'which adb') return '/usr/local/bin/adb\n'
+      return ''
+    })
+
+    const result = await runDoctorChecks('android')
+    const sdk = result.android?.find((c) => c.label.includes('Android SDK'))
+    expect(sdk?.ok).toBe(true)
+  })
+
+  it('Android SDK가 없으면 fail(✗)', async () => {
+    vi.spyOn(process, 'platform', 'get').mockReturnValue('linux')
+    vi.stubEnv('ANDROID_HOME', '')
+    vi.stubEnv('ANDROID_SDK_ROOT', '')
+    mockExistsSync.mockReturnValue(false)
+    mockExecSync.mockImplementation((cmd) => {
+      if ((cmd as string) === 'which adb') throw new Error('not found')
+      return ''
+    })
+
+    const result = await runDoctorChecks('android')
+    const sdk = result.android?.find((c) => c.label === 'Android SDK')
+    expect(sdk?.ok).toBe(false)
+    expect(sdk?.warn).toBeFalsy()
+  })
 })

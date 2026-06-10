@@ -37,29 +37,46 @@ function buildIosChecks(isMac: boolean): DoctorCheck[] {
 }
 
 // adb가 없어도 섹션을 숨기지 않고 진단을 노출한다(Android를 세팅하려는 사용자가 볼 수 있도록).
+// iOS(Xcode / simctl / Simulator)와 대칭: Android SDK / adb / AVD.
 function buildAndroidChecks(adb: AdbResolution | null): DoctorCheck[] {
+  return [checkAndroidSdk(), checkAdbStatus(adb), checkAvdAvailable()]
+}
+
+function androidSdkDir(): string | null {
+  const candidates = [
+    process.env.ANDROID_HOME,
+    process.env.ANDROID_SDK_ROOT,
+    join(homedir(), 'Library', 'Android', 'sdk'), // macOS
+    join(homedir(), 'Android', 'Sdk'), // Linux
+  ]
+  for (const c of candidates) {
+    if (c && existsSync(join(c, 'cmdline-tools', 'latest', 'bin', 'sdkmanager'))) return c
+  }
+  return null
+}
+
+function checkAndroidSdk(): DoctorCheck {
+  const dir = androidSdkDir()
+  if (dir) {
+    return { label: `Android SDK: ${dir}`, ok: true }
+  }
+  return { label: 'Android SDK', ok: false, detail: 'Android SDK not found. Run: tapflow setup android' }
+}
+
+function checkAdbStatus(adb: AdbResolution | null): DoctorCheck {
   if (!adb) {
     // 미설치는 iOS(Xcode)와 동일하게 fail(✗)로 — setup으로 해결 가능함을 안내.
-    return [
-      {
-        label: 'adb',
-        ok: false,
-        detail: 'adb not found. Run: tapflow setup android',
-      },
-    ]
+    return { label: 'adb', ok: false, detail: 'adb not found. Run: tapflow setup android' }
   }
   if (adb.inPath) {
-    return [checkAdb(adb.path), checkAvdAvailable()]
+    return checkAdb(adb.path)
   }
-  return [
-    {
-      label: 'adb (not in PATH)',
-      ok: false,
-      warn: true,
-      detail: `adb found at ${adb.path} but not in PATH. Run: tapflow setup android`,
-    },
-    checkAvdAvailable(),
-  ]
+  return {
+    label: 'adb (not in PATH)',
+    ok: false,
+    warn: true,
+    detail: `adb found at ${adb.path} but not in PATH. Run: tapflow setup android`,
+  }
 }
 
 function checkXcode(): DoctorCheck {
