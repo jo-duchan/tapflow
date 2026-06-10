@@ -1,5 +1,91 @@
 # tapflow
 
+## 0.8.0
+
+### Minor Changes
+
+- 2552e53: feat(cli): add `tapflow doctor --json` and diagnose adb installed-but-not-in-PATH
+
+  - `tapflow doctor --json` emits machine-readable `{ ok, common, ios, android }` with no ANSI color, exiting 1 on failure — usable from CI and automation without screen-scraping.
+  - `doctor` now detects adb present in a standard SDK location (`$ANDROID_HOME`, `$ANDROID_SDK_ROOT`, `~/Library/Android/sdk`, `~/Android/Sdk`) but missing from PATH, instead of silently dropping the entire Android section. It surfaces an `adb (not in PATH)` warning hinting `tapflow setup android`.
+
+- 5bd3381: fix(cli): `doctor` shows Android even without adb, and adds `doctor [platform]`
+
+  `tapflow doctor` no longer hides the Android section when adb is not found — it surfaces an `adb not found → tapflow setup android` warning so people setting up an Android-only agent can still diagnose it. Added `tapflow doctor ios|android` to check a single platform (mirrors `tapflow setup [platform]`); omit the argument to check all.
+
+- 3991d68: feat(cli): setup android bootstraps a self-contained SDK (JDK + cmdline-tools), no Android Studio
+
+  `tapflow setup android` no longer relies on Android Studio (whose `.app` install doesn't include the SDK, breaking unattended setup). Instead it builds a self-contained SDK at `~/Library/Android/sdk`:
+
+  - installs a JDK via Temurin when missing (required by sdkmanager)
+  - bootstraps `cmdline-tools;latest` + `platform-tools` + `emulator` + a `google_apis` system image into the SDK with `sdkmanager --sdk_root`, auto-accepting licenses
+  - registers `ANDROID_HOME` and platform-tools/emulator on PATH
+  - creates the form-factor AVD set with the SDK's own avdmanager
+
+  Because cmdline-tools live inside the SDK, the avdmanager resolves the SDK root automatically — fixing the "Valid system image paths are: null" failure caused by a brew/SDK path split. Verified end-to-end on a clean Mac.
+
+- 78743d4: feat(cli): add `tapflow setup android` — guided Android environment setup
+
+  `tapflow doctor` diagnoses problems; `tapflow setup android` fixes them. It walks through the required Android dependencies and applies fixes where safe:
+
+  - **Homebrew** — checks `which brew`, prints the install URL if missing (cannot auto-install).
+  - **adb** — if present in PATH it passes; if found in a standard SDK location but missing from PATH it registers the `platform-tools` directory in your shell rc (`.zshrc`/`.bashrc`) inside an idempotent marker block; if absent it runs `brew install android-platform-tools`.
+  - **Android Studio** — checks `/Applications/Android Studio.app`; since the cask is large (~1GB+) it asks for confirmation before `brew install --cask android-studio`, and skips with guidance in non-interactive shells.
+  - **Emulator** — reports running emulators and hints how to start an AVD.
+
+  Each step is idempotent — re-running on a configured machine prints ✓ and makes no changes.
+
+- e21902e: feat(cli): `tapflow setup` can install Homebrew after confirmation
+
+  When Homebrew is missing, `tapflow setup android` (and upcoming `setup ios`) now offers to install it via the official script after an explicit confirmation prompt, instead of only printing the install URL. In non-interactive shells it still just prints guidance — no remote script runs without consent. This makes Homebrew the shared first step for all platform setups.
+
+- 64d9a59: feat(cli): add `tapflow setup ios` and unify the setup command
+
+  `tapflow setup ios` guides iOS environment setup: Homebrew → Xcode → Xcode activation → Simulator.
+
+  - **Xcode** — since Xcode is App-Store-only, an interactive flow opens the App Store and waits for you to finish installing, then re-checks. Non-interactive shells print the App Store link instead.
+  - **Xcode activation** — detects the "installed but not usable" case (active developer dir on CommandLineTools, missing license, or first-launch) and prints the exact `sudo xcode-select -s …` / `xcodebuild -license accept` / `-runFirstLaunch` commands (these need sudo, so setup guides rather than auto-runs them).
+  - **Simulator** — boots the first available simulator if none is running.
+
+  The `setup` command now takes an optional platform: `tapflow setup ios`, `tapflow setup android`, or `tapflow setup` to auto-detect and run every supported platform (iOS on macOS, Android when adb is found).
+
+  Closes #144 (and completes #142 together with `setup android`).
+
+- 3b5b28e: feat(cli): setup completes in one run; doctor reflects on-demand boot
+
+  `tapflow setup` is now an end-to-end interactive wizard instead of stopping to print manual commands:
+
+  - runs sudo steps directly after confirmation (`xcode-select -s`, `xcodebuild -license accept`, `-runFirstLaunch`) — no more "run this and re-run setup" loop.
+  - iOS: downloads the simulator runtime when no device exists.
+  - Android: when no AVD exists, installs a `google_apis` system image once and creates a set of 4 AVDs across form factors (compact / phone / large / tablet) so the device list is comparable to iOS. Device ids are chosen per-environment from candidates; ABI matches the host arch.
+  - no longer boots devices — relay boots on-demand when a QA Session connects, so setup only ensures a bootable device/AVD exists.
+  - `tapflow setup` (no argument) offers to set up Android even when adb isn't found, and ends with a `SETUP COMPLETE` / `SETUP INCOMPLETE` summary banner (per-platform ready state).
+
+  `tapflow doctor` now passes when a simulator device or AVD _exists_ (any state) rather than requiring a _running_ one, matching the on-demand boot model.
+
+### Patch Changes
+
+- 4f957e1: fix(cli): doctor reports missing adb as a failure, consistent with Xcode
+
+  `tapflow doctor` now marks a missing adb as a failure (✗) — the same as a missing Xcode — instead of a warning, so a clean machine shows its checks uniformly. `tapflow setup android` resolves it.
+
+- 629741f: fix(cli): doctor AVD is a failure (not a warning) when the SDK/emulator is absent
+
+  On a clean machine, `tapflow doctor` showed Android SDK/adb as ✗ but AVD as ⚠. AVD now mirrors iOS Simulator: a missing SDK/emulator is a failure (✗, `tapflow setup android`), while a present emulator with no AVD stays a warning (⚠). The emulator is resolved from the SDK directory.
+
+- a593b9a: fix(cli): doctor no longer triggers the macOS "install Command Line Tools" popup
+
+  On a Mac without Xcode, `tapflow doctor` called `xcodebuild`/`xcrun`, which makes macOS pop up the Command Line Tools installer. doctor now checks for `/Applications/Xcode.app` first (no popup) and only invokes those tools when Xcode is present — otherwise it reports "Install Xcode / run tapflow setup ios" directly.
+
+- fc98ebd: feat(cli): setup highlights "open a new terminal" after registering ANDROID_HOME/PATH
+
+  When `tapflow setup android` adds `ANDROID_HOME`/PATH to your shell rc, the current shell doesn't pick them up — so running `tapflow doctor` right away showed confusing adb/AVD warnings. setup now prints a clear "open a new terminal (or run `exec zsh`), then `tapflow doctor`" note after the summary banner, only when the env was just registered.
+
+  - @tapflowio/agent-core@0.8.0
+  - @tapflowio/ios-agent@0.8.0
+  - @tapflowio/android-agent@0.8.0
+  - @tapflowio/relay@0.8.0
+
 ## 0.8.0-next.4
 
 ### Patch Changes
