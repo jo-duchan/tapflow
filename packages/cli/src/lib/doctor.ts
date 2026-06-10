@@ -39,11 +39,11 @@ function buildIosChecks(isMac: boolean): DoctorCheck[] {
 // adb가 없어도 섹션을 숨기지 않고 진단을 노출한다(Android를 세팅하려는 사용자가 볼 수 있도록).
 function buildAndroidChecks(adb: AdbResolution | null): DoctorCheck[] {
   if (!adb) {
+    // 미설치는 iOS(Xcode)와 동일하게 fail(✗)로 — setup으로 해결 가능함을 안내.
     return [
       {
         label: 'adb',
         ok: false,
-        warn: true,
         detail: 'adb not found. Run: tapflow setup android',
       },
     ]

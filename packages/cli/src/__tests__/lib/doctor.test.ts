@@ -76,7 +76,7 @@ describe('runDoctorChecks', () => {
     expect(result.android?.some((c) => c.label.includes('Pixel_8'))).toBe(true)
   })
 
-  it('adb 없어도 Android 섹션은 숨기지 않고 adb warn 표시', async () => {
+  it('adb 없으면 Android 섹션은 숨기지 않고 미설치를 fail로 표시', async () => {
     vi.spyOn(process, 'platform', 'get').mockReturnValue('linux')
     vi.stubEnv('ANDROID_HOME', '')
     vi.stubEnv('ANDROID_SDK_ROOT', '')
@@ -89,7 +89,8 @@ describe('runDoctorChecks', () => {
     const result = await runDoctorChecks()
     expect(result.android).not.toBeNull()
     const adbCheck = result.android?.find((c) => c.label === 'adb')
-    expect(adbCheck?.warn).toBe(true)
+    expect(adbCheck?.ok).toBe(false)
+    expect(adbCheck?.warn).toBeFalsy()
     expect(adbCheck?.detail).toContain('setup android')
   })
 
