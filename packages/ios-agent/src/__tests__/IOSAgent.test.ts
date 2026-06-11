@@ -318,6 +318,83 @@ describe('IOSAgent', () => {
       agent.disconnect()
       browser.close()
     })
+
+    it('erases then retries boot when the device data is missing on disk (zombie auto-recovery)', async () => {
+      const simctl = mockSimctl(false)
+      let bootCalls = 0
+      ;(simctl.boot as ReturnType<typeof vi.fn>).mockImplementation(async () => {
+        bootCalls += 1
+        if (bootCalls === 1) {
+          throw new Error("Unable to boot device because it cannot be located on disk. The device's data is no longer present")
+        }
+      })
+      const agent = new IOSAgent({ intervalMs: 50 }, simctl)
+      await agent.connect(`ws://localhost:${port}`)
+
+      const browser = new WebSocket(`ws://localhost:${port}`)
+      await waitForOpen(browser)
+      browser.send(JSON.stringify({ type: 'session:start', sessionId: agent.sessionId }))
+      await waitForType(browser, 'session:joined')
+
+      const readyPromise = waitForType(browser, 'device:ready')
+      browser.send(JSON.stringify({ type: 'device:boot', sessionId: agent.sessionId, payload: { deviceId: 'dev-1' } }))
+      await readyPromise
+
+      expect(simctl.erase).toHaveBeenCalledWith('dev-1')
+      expect(simctl.boot).toHaveBeenCalledTimes(2)
+      // erase must happen between the failed boot and the successful retry
+      const eraseOrder = (simctl.erase as ReturnType<typeof vi.fn>).mock.invocationCallOrder[0]!
+      const retryBootOrder = (simctl.boot as ReturnType<typeof vi.fn>).mock.invocationCallOrder[1]!
+      expect(eraseOrder).toBeLessThan(retryBootOrder)
+
+      agent.disconnect()
+      browser.close()
+    })
+
+    it('never erases on an unrelated boot failure (protects healthy devices)', async () => {
+      const simctl = mockSimctl(false)
+      ;(simctl.boot as ReturnType<typeof vi.fn>).mockRejectedValue(new Error('operation timed out'))
+      const agent = new IOSAgent({ intervalMs: 50 }, simctl)
+      await agent.connect(`ws://localhost:${port}`)
+
+      const browser = new WebSocket(`ws://localhost:${port}`)
+      await waitForOpen(browser)
+      browser.send(JSON.stringify({ type: 'session:start', sessionId: agent.sessionId }))
+      await waitForType(browser, 'session:joined')
+
+      const errPromise = waitForType(browser, 'device:boot-error')
+      browser.send(JSON.stringify({ type: 'device:boot', sessionId: agent.sessionId, payload: { deviceId: 'dev-1' } }))
+      const err = await errPromise
+
+      expect(simctl.erase).not.toHaveBeenCalled()
+      expect(err.message as string).toContain('operation timed out')
+
+      agent.disconnect()
+      browser.close()
+    })
+
+    it('reports boot-error without looping when erase recovery still fails', async () => {
+      const simctl = mockSimctl(false)
+      ;(simctl.boot as ReturnType<typeof vi.fn>).mockRejectedValue(new Error('cannot be located on disk'))
+      const agent = new IOSAgent({ intervalMs: 50 }, simctl)
+      await agent.connect(`ws://localhost:${port}`)
+
+      const browser = new WebSocket(`ws://localhost:${port}`)
+      await waitForOpen(browser)
+      browser.send(JSON.stringify({ type: 'session:start', sessionId: agent.sessionId }))
+      await waitForType(browser, 'session:joined')
+
+      const errPromise = waitForType(browser, 'device:boot-error')
+      browser.send(JSON.stringify({ type: 'device:boot', sessionId: agent.sessionId, payload: { deviceId: 'dev-1' } }))
+      await errPromise
+
+      // exactly one erase + one retry — bounded, no infinite loop
+      expect(simctl.erase).toHaveBeenCalledTimes(1)
+      expect(simctl.boot).toHaveBeenCalledTimes(2)
+
+      agent.disconnect()
+      browser.close()
+    })
   })
 
   describe('agent:register', () => {

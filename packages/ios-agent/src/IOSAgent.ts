@@ -25,7 +25,7 @@ import {
   CODEC_JPEG,
   CODEC_H264,
 } from '@tapflowio/agent-core/utils'
-import { SimctlWrapper } from './SimctlWrapper.js'
+import { SimctlWrapper, isDeviceMissingError } from './SimctlWrapper.js'
 import { ScreenCaptureStreamer, type StreamFrame } from './ScreenCaptureStreamer.js'
 import { MjpegStreamer } from './MjpegStreamer.js'
 import { TouchHelper } from './TouchHelper.js'
@@ -370,7 +370,7 @@ export class IOSAgent implements DeviceAgent {
         await this.simctl.erase(deviceId)
         await this.simctl.boot(deviceId)
       } else if (target.status !== 'booted') {
-        await this.simctl.boot(deviceId)
+        await this.bootWithZombieRecovery(deviceId)
       }
 
       if (seq !== state.bootSeq) return
@@ -403,6 +403,20 @@ export class IOSAgent implements DeviceAgent {
       if (seq !== state.bootSeq) return
       const message = e instanceof Error ? e.message : String(e)
       this.ws?.send(JSON.stringify({ type: 'device:boot-error', sessionId, message }))
+    }
+  }
+
+  // Boot a device, auto-recovering from a vanished data dir. simctl lists the device
+  // as available but `boot` fails; erase regenerates the data and we retry once. Guarded
+  // by isDeviceMissingError so an unrelated boot failure never erases a healthy device.
+  private async bootWithZombieRecovery(deviceId: string): Promise<void> {
+    try {
+      await this.simctl.boot(deviceId)
+    } catch (e) {
+      if (!isDeviceMissingError(e)) throw e
+      logger.warn(`iOS device ${deviceId} data missing on disk — erasing to recover, retrying boot once`)
+      await this.simctl.erase(deviceId)
+      await this.simctl.boot(deviceId)
     }
   }
 
