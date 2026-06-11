@@ -235,7 +235,9 @@ export class RelayServer {
           reject(err)
         }
       })
-      this.httpServer.listen(this.options.port, resolve)
+      // Bind dual-stack (IPv4 + IPv6). A bare listen(port) binds IPv6-only on some
+      // macOS/node setups, so LAN agents connecting over IPv4 (ws://<ipv4>:port) time out.
+      this.httpServer.listen({ port: this.options.port, host: '::', ipv6Only: false }, resolve)
     })
   }
 
