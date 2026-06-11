@@ -1,5 +1,11 @@
 # @tapflowio/android-agent
 
+## 0.8.1-next.0
+
+### Patch Changes
+
+- @tapflowio/agent-core@0.8.1-next.0
+
 ## 0.8.0
 
 ### Patch Changes
