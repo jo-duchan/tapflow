@@ -150,7 +150,7 @@ tapflow start
 | 옵션 | 설명 |
 |------|------|
 | `--platform <ios\|android\|all>` | 시작할 플랫폼 (기본값: 자동 감지) |
-| `--device <name>` | iOS 시뮬레이터 이름 또는 UDID (기본값: 첫 번째 부팅된 것) |
+| `--device <name>` | 릴레이에 노출할 iOS 시뮬레이터를 이름 또는 UDID로 한정합니다(기본값: 전체). 부팅은 대시보드에서 필요할 때 이뤄집니다. |
 
 ::: info 팀 운영 환경에서는
 릴레이를 서버에 따로 배포한다면 `tapflow relay start`와 `tapflow agent start`를 사용하세요.
@@ -230,7 +230,7 @@ tapflow agent start --relay ws://192.168.x.x:4000
 |------|--------|------|
 | `--relay <url>` | config의 `relay.url`, 없으면 `ws://localhost:4000` | 릴레이 WebSocket URL. `tapflow.config.json`에 `relay.url`이 있으면 생략 가능. |
 | `--platform <ios\|android\|all>` | 자동 감지 | 시작할 플랫폼 |
-| `--device <name>` | 첫 번째 부팅된 시뮬레이터 | iOS 시뮬레이터 이름 또는 UDID |
+| `--device <name>` | 전체 시뮬레이터 | 릴레이에 노출할 iOS 시뮬레이터를 이름 또는 UDID로 한정 |
 
 
 ## `tapflow devices`

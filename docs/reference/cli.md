@@ -150,7 +150,7 @@ tapflow start
 | Option | Description |
 |--------|-------------|
 | `--platform <ios\|android\|all>` | Platform to start (default: auto-detect) |
-| `--device <name>` | iOS Simulator name or UDID (default: first booted) |
+| `--device <name>` | Limit which iOS simulators are exposed to the relay, by name or UDID (default: all). The dashboard boots a device on demand. |
 
 ::: info For team deployments
 If you are running the relay on a separate server, use `tapflow relay start` and `tapflow agent start` instead.
@@ -230,7 +230,7 @@ tapflow agent start --relay ws://192.168.x.x:4000
 |--------|---------|-------------|
 | `--relay <url>` | `relay.url` in config, or `ws://localhost:4000` | Relay WebSocket URL. Omit if `relay.url` is set in `tapflow.config.json`. |
 | `--platform <ios\|android\|all>` | auto-detect | Platform to start |
-| `--device <name>` | first booted simulator | iOS Simulator name or UDID |
+| `--device <name>` | all simulators | Limit which iOS simulators are exposed to the relay, by name or UDID |
 
 
 ## `tapflow devices`

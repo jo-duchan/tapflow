@@ -19,7 +19,7 @@ tapflow agent start --relay ws://192.168.x.x:4000
 | Option | Default | Description |
 |--------|---------|-------------|
 | `--relay` | `ws://localhost:[port]` | Relay WebSocket URL. Port is read from `tapflow.config.json`. |
-| `--device` | first booted simulator | iOS Simulator name or UDID |
+| `--device` | all simulators | Limit which iOS simulators are exposed to the relay, by name or UDID |
 
 ::: tip Keep the agent and relay on the same network
 The agent streams video frames to the relay continuously, so it must sit on the same LAN as the relay over a stable connection — **wired Ethernet is recommended**, Wi-Fi is fine if the signal is steady. Connecting across different networks, or over an unstable link, increases latency and causes frame drops.
