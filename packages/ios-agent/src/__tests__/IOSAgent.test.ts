@@ -432,6 +432,33 @@ describe('IOSAgent', () => {
       agent.disconnect()
       browser.close()
     })
+
+    it('registers only the device matching deviceFilter (exposure filter, never boots)', async () => {
+      const simctl = {
+        ...mockSimctl(false),
+        listDevices: vi.fn().mockResolvedValue([
+          { id: 'dev-1', name: 'iPhone 15', platform: 'ios', status: 'shutdown', osVersion: 'iOS 18.3' },
+          { id: 'dev-2', name: 'iPhone 16', platform: 'ios', status: 'shutdown', osVersion: 'iOS 18.3' },
+        ]),
+      } as unknown as SimctlWrapper
+      const agent = new IOSAgent({ deviceFilter: 'iPhone 16' }, simctl)
+      await agent.connect(`ws://localhost:${port}`)
+
+      const browser = new WebSocket(`ws://localhost:${port}`)
+      await waitForOpen(browser)
+      browser.send(JSON.stringify({ type: 'agents:list' }))
+      const listed = await waitForType(browser, 'agents:listed')
+
+      const sessions = listed.sessions as Array<{ devices: Array<{ name: string }> }>
+      const registered = sessions.flatMap((s) => s.devices)
+      expect(registered).toHaveLength(1)
+      expect(registered[0].name).toBe('iPhone 16')
+      // connect registers only — booting is the dashboard/MCP's job (device:boot)
+      expect(simctl.boot).not.toHaveBeenCalled()
+
+      agent.disconnect()
+      browser.close()
+    })
   })
 
   describe('relay connection', () => {
