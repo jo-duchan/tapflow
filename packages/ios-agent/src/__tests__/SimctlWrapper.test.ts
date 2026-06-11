@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { SimctlWrapper } from '../SimctlWrapper'
+import { SimctlWrapper, isDeviceMissingError } from '../SimctlWrapper'
 import type { SimctlRunner } from '../simctl'
 
 vi.mock('child_process', () => ({
@@ -230,6 +230,40 @@ describe('SimctlWrapper', () => {
         expect.stringMatching(/tapflow-.+\.png$/)
       )
       expect(buf).toEqual(pngMagic)
+    })
+  })
+
+  describe('isDeviceMissingError', () => {
+    it('matches the "cannot be located on disk" signature', () => {
+      expect(isDeviceMissingError(new Error(
+        'Unable to boot device because it cannot be located on disk.',
+      ))).toBe(true)
+    })
+
+    it('matches the "data is no longer present" signature', () => {
+      expect(isDeviceMissingError(new Error(
+        "The device's data is no longer present at /Users/x/.../data.",
+      ))).toBe(true)
+    })
+
+    it('reads the signature from the error stderr field too', () => {
+      expect(isDeviceMissingError(
+        Object.assign(new Error('Command failed: xcrun simctl boot'), {
+          stderr: 'Unable to boot device because it cannot be located on disk.',
+        }),
+      )).toBe(true)
+    })
+
+    it('does NOT match unrelated boot failures (guards against erasing healthy devices)', () => {
+      expect(isDeviceMissingError(new Error('Unable to boot device in current state: Booted'))).toBe(false)
+      expect(isDeviceMissingError(new Error('operation timed out'))).toBe(false)
+      expect(isDeviceMissingError(new Error('xcrun: command not found'))).toBe(false)
+    })
+
+    it('returns false for non-error values', () => {
+      expect(isDeviceMissingError(undefined)).toBe(false)
+      expect(isDeviceMissingError(null)).toBe(false)
+      expect(isDeviceMissingError('cannot be located on disk')).toBe(false)
     })
   })
 })

@@ -13,6 +13,7 @@
 - Assume macOS only. Throw a clear error on non-macOS environments.
 - Wrap all xcrun/simctl calls in dedicated functions so they can be swapped with mocks in tests.
 - Capture frames via SimulatorKit IOSurface and stream H.264 (default) or JPEG frames as WebSocket binary messages (≤30 fps).
+- `connect` only registers devices with the relay — it never boots one. Booting is on-demand via `device:boot` (dashboard / MCP). The `deviceFilter` option (CLI `--device`) narrows which devices are exposed to the relay (parity with android-agent), not a boot target.
 
 ## HOW NOT
 
@@ -233,6 +234,24 @@ Why WebSocket instead of a WebRTC DataChannel:
 1. **DataChannel instability**: `@roamhq/wrtc` silently closes the channel on messages ~236KB+.
 2. **No P2P benefit**: tapflow has a fixed Agent → Relay → Browser path.
 3. **HW decode doesn't need a Video Track here**: the browser decodes WebSocket frames directly — H.264 via WebCodecs (see dashboard), JPEG via `createImageBitmap`.
+
+---
+
+### Zombie simulator auto-recovery
+
+A simulator's data dir can vanish from disk (an Xcode/macOS update prunes its runtime)
+while `simctl list` still reports it `isAvailable: true` — the loss only surfaces when
+`boot` runs, failing with "cannot be located on disk" / "data is no longer present".
+
+`handleDeviceBoot` recovers in place via `bootWithZombieRecovery`: when
+`isDeviceMissingError(e)` matches that signature it `erase`s the device (regenerating the
+data dir) and retries `boot` once. Bounded — a second failure surfaces as
+`device:boot-error`, never a loop.
+
+**Why the guard matters**: `erase` wipes a device, so it runs *only* on the missing-data
+signature — an unrelated boot failure (timeout, etc.) never erases a healthy device,
+locked down by a negative test. Keep the match text-only and conservative; widen the
+signature only with evidence.
 
 ---
 

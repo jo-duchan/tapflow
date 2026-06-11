@@ -25,7 +25,7 @@ import {
   CODEC_JPEG,
   CODEC_H264,
 } from '@tapflowio/agent-core/utils'
-import { SimctlWrapper } from './SimctlWrapper.js'
+import { SimctlWrapper, isDeviceMissingError } from './SimctlWrapper.js'
 import { ScreenCaptureStreamer, type StreamFrame } from './ScreenCaptureStreamer.js'
 import { MjpegStreamer } from './MjpegStreamer.js'
 import { TouchHelper } from './TouchHelper.js'
@@ -38,6 +38,8 @@ export interface IOSAgentOptions {
   reconnectDelays?: number[]
   /** Injectable for tests; defaults to a real macOS power assertion (no-op under vitest). */
   sleepBlocker?: SleepBlocker
+  /** Restrict the devices registered with the relay to this name or id (exposure filter). */
+  deviceFilter?: string
 }
 
 interface DeviceState {
@@ -70,6 +72,7 @@ export class IOSAgent implements DeviceAgent {
   private readonly intervalMs: number | undefined
   private readonly reconnectDelays: number[]
   private readonly chromeLoader: DeviceChromeLoader
+  private readonly deviceFilter?: string
   private ws: WebSocket | null = null
   private deviceStates = new Map<string, DeviceState>()
   // Holds a macOS power assertion while connected so the host doesn't idle-throttle the
@@ -88,6 +91,7 @@ export class IOSAgent implements DeviceAgent {
     this.intervalMs = options.intervalMs
     this.reconnectDelays = options.reconnectDelays ?? [1000, 2000, 4000, 8000, 16000, 30000]
     this.chromeLoader = new DeviceChromeLoader()
+    this.deviceFilter = options.deviceFilter
     // No-op under vitest so the suite never spawns real `caffeinate` processes.
     this.sleepBlocker = options.sleepBlocker ?? (process.env.VITEST ? { acquire() {}, release() {} } : createSleepBlocker())
   }
@@ -101,7 +105,10 @@ export class IOSAgent implements DeviceAgent {
     this._stopping = false
     if (this._reconnectTimer) { clearTimeout(this._reconnectTimer); this._reconnectTimer = null }
     this.relayUrl = relayUrl
-    const devices = await this.simctl.listDevices()
+    const allDevices = await this.simctl.listDevices()
+    const devices = this.deviceFilter
+      ? allDevices.filter((d) => d.name === this.deviceFilter || d.id === this.deviceFilter)
+      : allDevices
 
     return new Promise((resolve, reject) => {
       const ws = new WebSocket(relayUrl)
@@ -370,7 +377,7 @@ export class IOSAgent implements DeviceAgent {
         await this.simctl.erase(deviceId)
         await this.simctl.boot(deviceId)
       } else if (target.status !== 'booted') {
-        await this.simctl.boot(deviceId)
+        await this.bootWithZombieRecovery(deviceId)
       }
 
       if (seq !== state.bootSeq) return
@@ -403,6 +410,20 @@ export class IOSAgent implements DeviceAgent {
       if (seq !== state.bootSeq) return
       const message = e instanceof Error ? e.message : String(e)
       this.ws?.send(JSON.stringify({ type: 'device:boot-error', sessionId, message }))
+    }
+  }
+
+  // Boot a device, auto-recovering from a vanished data dir. simctl lists the device
+  // as available but `boot` fails; erase regenerates the data and we retry once. Guarded
+  // by isDeviceMissingError so an unrelated boot failure never erases a healthy device.
+  private async bootWithZombieRecovery(deviceId: string): Promise<void> {
+    try {
+      await this.simctl.boot(deviceId)
+    } catch (e) {
+      if (!isDeviceMissingError(e)) throw e
+      logger.warn(`iOS device ${deviceId} data missing on disk — erasing to recover, retrying boot once`)
+      await this.simctl.erase(deviceId)
+      await this.simctl.boot(deviceId)
     }
   }
 

@@ -59,6 +59,16 @@ function parseOsVersion(runtimeKey: string): string | undefined {
   return `${m[1]} ${m[2].replace(/-/g, '.')}`
 }
 
+// A device's data dir can vanish from disk (e.g. an Xcode/macOS update pruned its
+// runtime) while simctl still lists it as available — `boot` then fails with this
+// signature only. Matched conservatively (text only) so a healthy device is never erased.
+export function isDeviceMissingError(err: unknown): boolean {
+  if (!err || typeof err !== 'object') return false
+  const e = err as { message?: unknown; stderr?: unknown }
+  const text = [e.message, e.stderr].filter((s): s is string => typeof s === 'string').join(' ')
+  return /cannot be located on disk|data is no longer present/i.test(text)
+}
+
 export class SimctlWrapper {
   private readonly kbd = new KeyboardHelperDaemon()
 

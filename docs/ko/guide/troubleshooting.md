@@ -26,6 +26,26 @@ killall -9 com.apple.CoreSimulator.CoreSimulatorService
 Xcode 업데이트 시 새 버전의 `CoreSimulator.framework`가 설치되지만, 이전 세션에서 기동한 `CoreSimulatorService` 데몬은 그대로 남아 있습니다. `xcrun simctl`이 버전 불일치를 감지하면 tapflow가 데몬을 강제 종료해 `launchd`가 새 버전으로 재시작하도록 유도합니다. 데몬이 멈춰 있어 첫 번째 시도에 종료되지 않으면 위의 수동 명령어가 필요합니다.
 :::
 
+## iOS 시뮬레이터가 부팅되지 않음 — "cannot be located on disk" {#simulator-data-missing}
+
+Xcode나 macOS 업데이트가 오래된 런타임을 정리하면, 시뮬레이터가 목록에는 남아 있지만 디스크의 데이터 디렉토리는 사라진 상태가 될 수 있습니다. `simctl list`에는 여전히 사용 가능으로 표시되지만 부팅은 실패합니다:
+
+> Unable to boot device because it cannot be located on disk. The device's data is no longer present …
+
+tapflow는 이 상황을 자동으로 복구합니다. 대시보드에서 해당 디바이스를 열면 에이전트가 깨진 시뮬레이터를 erase해 데이터를 다시 생성한 뒤 부팅을 한 번 재시도합니다. 정상 시뮬레이터는 절대 erase하지 않습니다.
+
+자동 복구로 해결되지 않으면 남아 있는 디바이스를 직접 정리하세요. 아래 명령은 런타임이 사라진 시뮬레이터를 삭제합니다:
+
+```sh
+xcrun simctl delete unavailable
+```
+
+특정 시뮬레이터만 계속 실패하면 UDID로 삭제한 뒤 Xcode가 새로 만들도록 둡니다:
+
+```sh
+xcrun simctl delete 822F00B0-D9CF-4B78-8EDD-6322974E4079
+```
+
 ## iOS 17 이하 — 한글 입력 시 자모 분리
 
 iOS 17 이하 시뮬레이터에서 한글을 입력하면 음절로 조합되지 않고 자모가 분리됩니다 (예: "안녕" → "ㅇㅏㄴㄴㅕㅇ").

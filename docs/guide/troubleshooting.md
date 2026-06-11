@@ -26,6 +26,26 @@ killall -9 com.apple.CoreSimulator.CoreSimulatorService
 Xcode ships a newer `CoreSimulator.framework` but the old `CoreSimulatorService` daemon is still running from the previous session. After the first `xcrun simctl` call notices the version mismatch, tapflow force-kills the daemon so launchd can restart it with the new version. If the daemon is stuck and does not die on the first attempt, the manual `killall -9` above is needed.
 :::
 
+## iOS Simulator fails to boot — "cannot be located on disk" {#simulator-data-missing}
+
+When an Xcode or macOS update prunes an old runtime, a simulator can linger in the device list while its data directory is gone from disk. `simctl list` still reports it as available, but booting fails:
+
+> Unable to boot device because it cannot be located on disk. The device's data is no longer present …
+
+tapflow recovers from this automatically — when you open the device in the dashboard, the agent erases the broken simulator to regenerate its data and retries the boot once. A healthy simulator is never erased.
+
+If the automatic recovery does not clear it, remove the stale devices manually. This deletes simulators whose runtime is gone:
+
+```sh
+xcrun simctl delete unavailable
+```
+
+If one specific simulator still fails, delete it by UDID and let Xcode recreate a fresh one:
+
+```sh
+xcrun simctl delete 822F00B0-D9CF-4B78-8EDD-6322974E4079
+```
+
 ## iOS 17 and earlier — Korean text splits into individual characters
 
 On iOS 17 and earlier simulators, Korean input does not combine into syllables — characters appear separated (e.g., "안녕" → "ㅇㅏㄴㄴㅕㅇ").
