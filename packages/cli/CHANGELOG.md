@@ -1,5 +1,16 @@
 # tapflow
 
+## 0.8.1-next.0
+
+### Patch Changes
+
+- Updated dependencies [80f4d78]
+- Updated dependencies [129b5b1]
+  - @tapflowio/ios-agent@0.8.1-next.0
+  - @tapflowio/relay@0.8.1-next.0
+  - @tapflowio/android-agent@0.8.1-next.0
+  - @tapflowio/agent-core@0.8.1-next.0
+
 ## 0.8.0
 
 ### Minor Changes

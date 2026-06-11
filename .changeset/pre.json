@@ -1,0 +1,19 @@
+{
+  "mode": "pre",
+  "tag": "next",
+  "initialVersions": {
+    "@tapflowio/docs": "0.0.0",
+    "@tapflowio/agent-core": "0.8.0",
+    "@tapflowio/android-agent": "0.8.0",
+    "tapflow": "0.8.0",
+    "@tapflowio/dashboard": "0.1.2",
+    "@tapflowio/ios-agent": "0.8.0",
+    "@tapflowio/mcp-server": "0.8.0-experimental.1",
+    "@tapflowio/relay": "0.8.0",
+    "@tapflowio/playground": "0.0.0"
+  },
+  "changesets": [
+    "ios-simulator-auto-recovery",
+    "relay-dual-stack-bind"
+  ]
+}
