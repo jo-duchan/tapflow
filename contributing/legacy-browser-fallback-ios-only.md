@@ -43,7 +43,7 @@ const useH264 = this.intervalMs === undefined && envAllowsH264 && state.acceptH2
 
 "Can this browser decode H.264?" is decided by `canDecodeH264()` in `packages/dashboard/lib/decoders/pickDecoder.ts`:
 
-```
+```ts
 (secureContext && webCodecs && webgl2) || (wasm && webgl2)
 ```
 
@@ -66,7 +66,7 @@ Deleting the iOS JPEG path to "symmetrize" the platforms would require removing 
 
 1. the ~5% legacy-browser fallback — a product decision to drop low-spec browser support;
 2. the `TAPFLOW_IOS_CODEC=jpeg` opt-out — a documented env flag (removing it is a breaking change);
-3. the `intervalMs`/`MjpegStreamer` JPEG mode — currently **test-only** in production (`index.ts` constructs `new IOSAgent()` with no args, so `intervalMs` is always `undefined`), but its code and tests still exist.
+3. the `intervalMs`/`MjpegStreamer` JPEG mode — a supported `IOSAgentOptions` runtime option that the production entrypoint never passes, so `MjpegStreamer` runs only in tests (or when `intervalMs` is set explicitly); its code and tests still exist.
 
 The reverse direction — adding a JPEG capture path to Android to match iOS — is expensive (Android has no such pipeline) for ~5% of browsers.
 
