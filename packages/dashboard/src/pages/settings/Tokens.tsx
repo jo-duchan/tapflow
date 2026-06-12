@@ -25,6 +25,23 @@ import { Plus, Trash2 } from 'lucide-react'
 
 type TokenType = 'api' | 'agent'
 
+// agent 실행 커맨드에 박을 릴레이 WS 주소. 뷰어가 localhost로 접속했다면 그 주소는
+// 에이전트 Mac에서 자기 자신을 가리키므로, 릴레이가 알려주는 LAN 주소로 치환한다 (#271).
+async function resolveRelayWsBase(): Promise<string> {
+  const proto = window.location.protocol === 'https:' ? 'wss' : 'ws'
+  const viewerIsLocal = ['localhost', '127.0.0.1', '[::1]'].includes(window.location.hostname)
+  if (viewerIsLocal) {
+    try {
+      const res = await fetch('/api/v1/relay/host', { credentials: 'include' })
+      if (res.ok) {
+        const { lanHost, port } = await res.json() as { lanHost: string | null; port: number }
+        if (lanHost) return `${proto}://${lanHost}:${port}`
+      }
+    } catch { /* 폴백 */ }
+  }
+  return `${proto}://${window.location.host}`
+}
+
 type Token = { id: number; name: string; scope: string; last_used_at: string | null; expires_at: string | null; created_at: string }
 
 const schema = z.object({
@@ -41,6 +58,7 @@ export function TokenSettings() {
   const [open, setOpen] = useState(false)
   const [newToken, setNewToken] = useState('')
   const [tokenType, setTokenType] = useState<TokenType>('api')
+  const [agentWsBase, setAgentWsBase] = useState('')
   const [revokeTarget, setRevokeTarget] = useState<number | null>(null)
 
   const { register, handleSubmit, reset, formState: { errors, isSubmitting } } = useForm<FormData>({
@@ -74,6 +92,7 @@ export function TokenSettings() {
         return
       }
       const json = await res.json() as { token: string }
+      if (tokenType === 'agent') setAgentWsBase(await resolveRelayWsBase())
       toast.success('Token created')
       setNewToken(json.token)
       load()
@@ -84,7 +103,7 @@ export function TokenSettings() {
 
   function handleDialogClose(o: boolean) {
     setOpen(o)
-    if (!o) { setNewToken(''); setTokenType('api'); reset() }
+    if (!o) { setNewToken(''); setTokenType('api'); setAgentWsBase(''); reset() }
   }
 
   async function handleRevoke(id: number): Promise<boolean> {
@@ -118,11 +137,11 @@ export function TokenSettings() {
               <div className="flex flex-col gap-3 pt-2">
                 <p className="text-sm text-muted-foreground">Copy this token now — it won&apos;t be shown again.</p>
                 <code className="rounded bg-muted px-3 py-2 text-xs break-all font-mono">{newToken}</code>
-                {tokenType === 'agent' && (
+                {tokenType === 'agent' && agentWsBase && (
                   <>
                     <p className="text-sm text-muted-foreground">Run this on the agent Mac to connect it to this relay:</p>
                     <code className="rounded bg-muted px-3 py-2 text-xs break-all font-mono">
-                      {`tapflow agent start --relay ${window.location.protocol === 'https:' ? 'wss' : 'ws'}://${window.location.host} --token ${newToken}`}
+                      {`tapflow agent start --relay ${agentWsBase} --token ${newToken}`}
                     </code>
                   </>
                 )}

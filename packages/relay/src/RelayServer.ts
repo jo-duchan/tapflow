@@ -1,13 +1,15 @@
 import http from 'http'
 import fs from 'fs'
+import os from 'os'
 import path from 'path'
 import { randomUUID } from 'crypto'
 import { WebSocketServer, WebSocket } from 'ws'
 import { SessionManager } from './SessionManager.js'
 import type { RelayMessage } from './types.js'
 import { Router, json } from './router.js'
-import { requireViewAuth, getAuth, verifyPat } from './middleware/auth.js'
+import { requireViewAuth, requireAuth, getAuth, verifyPat } from './middleware/auth.js'
 import { classifyConnection } from './lib/connectionAuth.js'
+import { pickLanAddress } from './lib/lanAddress.js'
 import { getDb } from './db.js'
 import { handleLogin, handleLogout, handleMe, handleChangePassword, handleInit, handleAuthStatus } from './api/auth.js'
 import { handleVerify, handleAccept } from './api/invitations.js'
@@ -191,6 +193,15 @@ export class RelayServer {
       const lines = Math.min(Number(url.searchParams.get('lines') ?? 100), 500)
       res.writeHead(200, { 'Content-Type': 'application/json' })
       res.end(JSON.stringify(this.logBuffer.slice(-lines)))
+    })
+
+    // relay host — 대시보드가 agent 실행 커맨드에 박을 LAN 주소 (뷰어가 localhost로 접속한 경우의 치환용, #271)
+    this.router.get('/api/v1/relay/host', (req, res) => {
+      if (!requireAuth(req, res)) return
+      const addr = this.httpServer.address()
+      const port = typeof addr === 'object' && addr !== null ? addr.port : this.options.port
+      res.writeHead(200, { 'Content-Type': 'application/json' })
+      res.end(JSON.stringify({ lanHost: pickLanAddress(os.networkInterfaces()), port }))
     })
 
     // agent resources

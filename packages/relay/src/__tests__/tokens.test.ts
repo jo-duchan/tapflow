@@ -81,4 +81,21 @@ describe('POST /api/v1/tokens — scope', () => {
     const { token } = await res.json() as { token: string }
     expect(scopeOf(token)).toBe('view,agent')
   })
+
+  // #271 follow-up — 대시보드 agent 커맨드용 릴레이 LAN 주소 조회
+  describe('GET /api/v1/relay/host', () => {
+    it('인증 없으면 401', async () => {
+      const res = await fetch(`http://localhost:${port}/api/v1/relay/host`)
+      expect(res.status).toBe(401)
+    })
+
+    it('인증 시 lanHost(IPv4 또는 null)와 실제 포트를 반환한다', async () => {
+      const cookie = `tapflow_token=${signJwt({ userId: 1, email: 'admin@test.local', role: 'Admin' })}`
+      const res = await fetch(`http://localhost:${port}/api/v1/relay/host`, { headers: { cookie } })
+      expect(res.status).toBe(200)
+      const body = await res.json() as { lanHost: string | null; port: number }
+      expect(body.port).toBe(port)
+      if (body.lanHost !== null) expect(body.lanHost).toMatch(/^\d+\.\d+\.\d+\.\d+$/)
+    })
+  })
 })
