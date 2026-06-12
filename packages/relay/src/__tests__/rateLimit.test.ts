@@ -57,4 +57,19 @@ describe('createRateLimiter', () => {
     rl.reset('k')
     expect(rl.check('k', 0).allowed).toBe(true)
   })
+
+  it('retention 경과 후 항목 자동 만료 (메모리 누수 방지)', () => {
+    const rl = createRateLimiter({ maxAttempts: 1, retentionMs: 1000 })
+    rl.recordFailure('k', 0)
+    expect(rl.check('k', 0).allowed).toBe(false) // 잠김
+    expect(rl.check('k', 1001).allowed).toBe(true) // retention 경과 → 정리 후 허용
+  })
+
+  it('maxEntries 초과 시 가장 오래된 항목부터 폐기 (메모리 DoS 방지)', () => {
+    const rl = createRateLimiter({ maxAttempts: 1, maxEntries: 3, retentionMs: 9_999_999 })
+    for (const k of ['a', 'b', 'c', 'd', 'e']) rl.recordFailure(k, 0)
+    // 상한 3 → 가장 오래된 a, b는 폐기되고 c, d, e만 남는다
+    expect(rl.check('a', 0).allowed).toBe(true)  // 폐기됨
+    expect(rl.check('e', 0).allowed).toBe(false) // 최신, 잠김 유지
+  })
 })

@@ -62,6 +62,10 @@ openssl rand -hex 32
 ```
 :::
 
+::: warning 리버스 프록시 뒤에서는 TAPFLOW_TRUSTED_PROXIES를 설정하세요
+릴레이를 같은 호스트의 리버스 프록시(nginx, Caddy) 뒤에서 운영하면서 `TAPFLOW_TRUSTED_PROXIES`를 비워 두면, 프록시의 loopback 주소 때문에 **모든 원격 클라이언트가 localhost로 취급**됩니다. localhost는 무인증이므로 외부에 그대로 노출됩니다. 프록시 주소(예: `127.0.0.1,::1`)를 `TAPFLOW_TRUSTED_PROXIES`에 설정하고, 프록시가 `X-Forwarded-For`를 전달하도록 구성하세요.
+:::
+
 ## 데이터 디렉토리
 
 릴레이는 최초 실행 시 작업 디렉토리에 다음 파일들을 생성합니다:

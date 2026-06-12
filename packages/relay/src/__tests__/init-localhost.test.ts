@@ -90,8 +90,13 @@ describe('POST /api/v1/auth/init — localhost-only gate', () => {
       expect(r.status).toBe(403)
     })
 
-    it('프록시 경유 진짜 로컬(XFF 127.0.0.1) → 201', async () => {
-      const r = await httpPost(port, '/api/v1/auth/init', { email: 'admin@example.com', password: 'password123' }, { 'X-Forwarded-For': '127.0.0.1' })
+    it('스푸핑: 공격자가 XFF에 loopback 주입(프록시가 실제 IP를 append) → 403 (우측 실제 IP로 판정)', async () => {
+      const r = await httpPost(port, '/api/v1/auth/init', { email: 'evil@example.com', password: 'password123' }, { 'X-Forwarded-For': '127.0.0.1, 203.0.113.5' })
+      expect(r.status).toBe(403)
+    })
+
+    it('프록시 우회 직접 연결(XFF 없음) → 201 (프록시 뒤 배포에서도 호스트의 admin init은 직접 동작)', async () => {
+      const r = await httpPost(port, '/api/v1/auth/init', { email: 'admin@example.com', password: 'password123' })
       expect(r.status).toBe(201)
     })
   })

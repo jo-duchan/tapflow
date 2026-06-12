@@ -13,9 +13,11 @@ describe('resolveClientAddress', () => {
     expect(r).toEqual({ addr: '192.168.0.9', isLocal: false })
   })
 
-  it('3. 신뢰 프록시 + XFF loopback → 진짜 로컬 경유', () => {
+  it('3. 신뢰 프록시 목록에 loopback 포함 시 XFF loopback도 프록시로 간주 → 안전하게 원격', () => {
+    // trustedProxies=[127.0.0.1]이면 XFF의 127.0.0.1이 프록시인지 진짜 로컬인지 구분 불가.
+    // 안전 우선: 우측부터 벗겨내고 남는 게 없으면 원격으로 본다(스푸핑한 loopback을 신뢰하지 않는다).
     const r = resolveClientAddress({ socketAddr: '127.0.0.1', forwardedFor: '127.0.0.1', trustedProxies: ['127.0.0.1'] })
-    expect(r).toEqual({ addr: '127.0.0.1', isLocal: true })
+    expect(r).toEqual({ addr: '127.0.0.1', isLocal: false })
   })
 
   it('4. 비신뢰 출발지의 XFF 스푸핑 → XFF 무시', () => {
@@ -23,14 +25,15 @@ describe('resolveClientAddress', () => {
     expect(r).toEqual({ addr: '203.0.113.5', isLocal: false })
   })
 
-  it('5. 신뢰 프록시 + XFF 없음 → 안전 기본(원격 간주)', () => {
+  it('5. 신뢰 프록시 IP지만 XFF 없음 → 직접 접근으로 간주(프록시는 항상 XFF 추가), 소켓 판정', () => {
+    // 호스트에서 직접 붙는 admin init / CLI / agent가 막히지 않도록 loopback 소켓은 로컬.
     const r = resolveClientAddress({ socketAddr: '127.0.0.1', forwardedFor: undefined, trustedProxies: ['127.0.0.1'] })
-    expect(r).toEqual({ addr: '127.0.0.1', isLocal: false })
+    expect(r).toEqual({ addr: '127.0.0.1', isLocal: true })
   })
 
-  it('6. XFF 체인 다중 IP → 최좌측(원 클라이언트) 사용', () => {
+  it('6. XFF 체인 다중 IP → 우측(프록시 관찰)부터 비신뢰 첫 IP 사용 (최좌측은 클라이언트가 스푸핑 가능)', () => {
     const r = resolveClientAddress({ socketAddr: '127.0.0.1', forwardedFor: '192.168.0.9, 10.0.0.1', trustedProxies: ['127.0.0.1'] })
-    expect(r).toEqual({ addr: '192.168.0.9', isLocal: false })
+    expect(r).toEqual({ addr: '10.0.0.1', isLocal: false })
   })
 
   it('7. IPv4-mapped IPv6 소켓 → loopback으로 정규화', () => {
@@ -53,9 +56,19 @@ describe('resolveClientAddress', () => {
     expect(r).toEqual({ addr: '192.168.0.9', isLocal: false })
   })
 
-  it('신뢰 프록시 + XFF에 IPv4-mapped 원 IP → 정규화 후 판정', () => {
+  it('신뢰 프록시 + XFF가 정규화 후 신뢰 프록시와 동일(loopback) → 프록시로 간주, 원격', () => {
     const r = resolveClientAddress({ socketAddr: '127.0.0.1', forwardedFor: '::ffff:127.0.0.1', trustedProxies: ['127.0.0.1'] })
-    expect(r).toEqual({ addr: '127.0.0.1', isLocal: true })
+    expect(r).toEqual({ addr: '127.0.0.1', isLocal: false })
+  })
+
+  it('보안: 공격자가 XFF에 loopback 주입(프록시가 실제 IP를 append) → 우측 실제 IP 사용, 스푸핑 무력화', () => {
+    const r = resolveClientAddress({ socketAddr: '127.0.0.1', forwardedFor: '127.0.0.1, 203.0.113.5', trustedProxies: ['127.0.0.1'] })
+    expect(r).toEqual({ addr: '203.0.113.5', isLocal: false })
+  })
+
+  it('다중 신뢰 프록시 체인 → 우측부터 모두 벗기고 첫 비신뢰 IP', () => {
+    const r = resolveClientAddress({ socketAddr: '127.0.0.1', forwardedFor: '203.0.113.5, 10.0.0.1', trustedProxies: ['127.0.0.1', '10.0.0.1'] })
+    expect(r).toEqual({ addr: '203.0.113.5', isLocal: false })
   })
 })
 
