@@ -10,20 +10,46 @@
 tapflow agent start
 ```
 
-릴레이가 다른 Mac에서 실행 중이라면 URL을 명시합니다. `192.168.x.x`는 릴레이 Mac의 LAN IP입니다:
+릴레이가 다른 머신에서 실행 중이라면 URL과 인증 토큰을 함께 명시합니다. `192.168.x.x`는 릴레이 머신의 LAN IP입니다. 토큰 발급 방법은 [원격 릴레이 인증](#원격-릴레이-인증)을 참고하세요:
 
 ```sh
-tapflow agent start --relay ws://192.168.x.x:4000
+tapflow agent start --relay ws://192.168.x.x:4000 --token tflw_pat_xxxxxxxx
 ```
 
 | 옵션 | 기본값 | 설명 |
 |------|--------|------|
 | `--relay` | `ws://localhost:[port]` | 릴레이 WebSocket URL. 포트는 `tapflow.config.json`에서 읽습니다. |
 | `--device` | 전체 시뮬레이터 | 릴레이에 노출할 iOS 시뮬레이터를 이름 또는 UDID로 한정 |
+| `--token` | 없음 | 원격 릴레이 인증용 `agent` 스코프 토큰. `TAPFLOW_AGENT_TOKEN` 환경변수로도 전달할 수 있습니다. |
 
 ::: tip 에이전트와 릴레이는 같은 네트워크에 두세요
 에이전트는 릴레이로 영상 프레임을 지속적으로 전송하므로, 릴레이와 같은 LAN에 안정적인 연결로 두어야 합니다 — **유선 이더넷을 권장**하며, 신호가 안정적이라면 Wi-Fi도 괜찮습니다. 서로 다른 네트워크에 연결하거나 불안정한 연결을 사용하면 레이턴시가 높아지고 프레임 드롭이 발생합니다.
 :::
+
+## 원격 릴레이 인증
+
+에이전트가 같은 머신의 릴레이(`localhost`)에 연결할 때는 인증이 필요 없습니다. 릴레이가 다른 머신에서 실행 중이라면 `agent` 스코프 토큰을 제시한 에이전트만 받아들입니다. 같은 네트워크의 임의 기기가 에이전트로 위장해 테스트 세션에 화면을 공급하는 것을 막기 위한 보호 장치입니다.
+
+### 토큰 발급
+
+대시보드에서 **Settings → Tokens → New token**으로 이동해 Type을 **Agent**로 선택하고 토큰을 생성합니다. `agent` 스코프 토큰은 Admin 권한이 있는 계정만 발급할 수 있습니다. 생성 직후 화면에 에이전트 실행 커맨드가 함께 표시되므로 그대로 복사해 에이전트 머신에서 실행하면 됩니다.
+
+### 토큰 전달
+
+`--token` 플래그로 전달합니다:
+
+```sh
+tapflow agent start --relay ws://192.168.x.x:4000 --token tflw_pat_xxxxxxxx
+```
+
+셸 히스토리에 토큰을 남기고 싶지 않다면 `TAPFLOW_AGENT_TOKEN` 환경변수를 사용합니다. 둘 다 지정하면 플래그가 우선합니다:
+
+```sh
+export TAPFLOW_AGENT_TOKEN=tflw_pat_xxxxxxxx
+tapflow agent start --relay ws://192.168.x.x:4000
+```
+
+토큰 없이(또는 만료·폐기된 토큰으로) 원격 릴레이에 연결하면 에이전트는 거부 사유와 발급 절차 안내를 출력하고 종료합니다.
 
 ## iOS
 

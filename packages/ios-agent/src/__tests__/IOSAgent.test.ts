@@ -34,8 +34,9 @@ vi.mock('../ScreenCaptureStreamer', async (importOriginal) => {
   }
 })
 
-import { WebSocket } from 'ws'
-import { RelayServer, initDb, closeDb } from '@tapflowio/relay'
+import crypto from 'crypto'
+import { WebSocket, WebSocketServer } from 'ws'
+import { RelayServer, initDb, closeDb, getDb } from '@tapflowio/relay'
 import { IOSAgent } from '../IOSAgent'
 import { ScreenCaptureStreamer } from '../ScreenCaptureStreamer'
 import { SimctlWrapper } from '../SimctlWrapper'
@@ -758,6 +759,101 @@ describe('IOSAgent', () => {
     it('streams H.264 by default when env is unset and the browser accepts it', async () => {
       delete process.env.TAPFLOW_IOS_CODEC
       expect(await bootAndGetCodec({ acceptH264: true })).toBe('h264')
+    })
+  })
+
+  // #271 — 원격 릴레이 인증: token 옵션이 control/stream WS 업그레이드에 Bearer 헤더로 실린다.
+  describe('relay auth token (#271)', () => {
+    // 업그레이드 요청 헤더를 그대로 검증하기 위해 raw WebSocketServer 사용
+    async function captureAuthHeader(token?: string): Promise<string | undefined> {
+      const wss = new WebSocketServer({ port: 0 })
+      const wssPort = (wss.address() as { port: number }).port
+      const header = new Promise<string | undefined>((resolve) => {
+        wss.on('connection', (sock, req) => {
+          resolve(req.headers.authorization)
+          sock.on('message', () => sock.send(JSON.stringify({ type: 'agent:registered', registeredSessions: [] })))
+        })
+      })
+      const agent = new IOSAgent(token ? { token } : {}, mockSimctl())
+      await agent.connect(`ws://127.0.0.1:${wssPort}`)
+      const result = await header
+      agent.disconnect()
+      await new Promise<void>((r) => wss.close(() => r()))
+      return result
+    }
+
+    it('token 옵션이 있으면 control WS에 Authorization: Bearer 헤더가 실린다', async () => {
+      expect(await captureAuthHeader('tflw_pat_test123')).toBe('Bearer tflw_pat_test123')
+    })
+
+    it('token이 없으면 Authorization 헤더를 보내지 않는다 (localhost 무인증 유지)', async () => {
+      expect(await captureAuthHeader()).toBeUndefined()
+    })
+
+    it('원격 릴레이 + agent 스코프 PAT: control/stream WS 모두 인증되어 device:ready까지 도달한다', async () => {
+      // 모든 연결을 비-루프백 출발지로 가장 → 무인증이면 stream WS도 1008로 거절된다
+      const remoteSpy = vi
+        .spyOn(relay as unknown as { remoteAddressOf: () => string }, 'remoteAddressOf')
+        .mockReturnValue('192.168.0.77')
+      const token = `tflw_pat_${crypto.randomBytes(16).toString('hex')}`
+      const db = getDb()
+      db.prepare(
+        "INSERT OR IGNORE INTO users (id, email, display_name, role, password_hash) VALUES (9101, 'agent-e2e@test.local', 'E2E', 'Admin', 'x')",
+      ).run()
+      db.prepare(
+        'INSERT INTO personal_access_tokens (user_id, name, token_hash, scope, expires_at) VALUES (9101, ?, ?, ?, NULL)',
+      ).run(`e2e-${token.slice(-8)}`, crypto.createHash('sha256').update(token).digest('hex'), 'agent')
+
+      const agent = new IOSAgent({ token }, mockSimctl(true))
+      await agent.connect(`ws://127.0.0.1:${port}`)
+
+      const browser = new WebSocket(`ws://127.0.0.1:${port}`, { headers: { authorization: `Bearer ${token}` } })
+      await waitForOpen(browser)
+      browser.send(JSON.stringify({ type: 'session:start', sessionId: agent.sessionId }))
+      await waitForType(browser, 'session:joined')
+      browser.send(JSON.stringify({ type: 'device:boot', sessionId: agent.sessionId, payload: { deviceId: 'dev-1' } }))
+      await waitForType(browser, 'device:ready')
+
+      agent.disconnect()
+      browser.close()
+      remoteSpy.mockRestore()
+    })
+  })
+
+  // #271 — 핸드셰이크 견고성: 등록 전 close/무응답이 침묵 속에 영원히 멈추지 않는다.
+  describe('handshake robustness (#271)', () => {
+    async function withRawServer<T>(
+      onConnection: (sock: import('ws').WebSocket) => void,
+      run: (url: string) => Promise<T>,
+    ): Promise<T> {
+      const wss = new WebSocketServer({ port: 0 })
+      const wssPort = (wss.address() as { port: number }).port
+      wss.on('connection', onConnection)
+      try {
+        return await run(`ws://127.0.0.1:${wssPort}`)
+      } finally {
+        await new Promise<void>((r) => wss.close(() => r()))
+      }
+    }
+
+    it('등록 전 1008 close → code/reason을 담아 reject한다 (무한 대기 없음)', async () => {
+      await withRawServer(
+        (sock) => sock.close(1008, 'Unauthorized: agents need a PAT'),
+        async (url) => {
+          const agent = new IOSAgent({}, mockSimctl())
+          await expect(agent.connect(url)).rejects.toThrow(/code=1008.*Unauthorized: agents need a PAT/)
+        },
+      )
+    })
+
+    it('agent:registered 응답이 없으면 handshakeTimeoutMs 후 reject한다', async () => {
+      await withRawServer(
+        () => { /* 업그레이드만 수락하고 무응답 */ },
+        async (url) => {
+          const agent = new IOSAgent({ handshakeTimeoutMs: 150 }, mockSimctl())
+          await expect(agent.connect(url)).rejects.toThrow(/timed out after 150ms/)
+        },
+      )
     })
   })
 

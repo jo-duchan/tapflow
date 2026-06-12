@@ -1,11 +1,13 @@
 import { describe, it, expect, vi, beforeAll, afterAll, beforeEach, afterEach } from 'vitest'
+import crypto from 'crypto'
 import fs from 'fs'
 import net from 'net'
 import os from 'os'
 import path from 'path'
 import { WebSocket } from 'ws'
 import { RelayServer } from '../RelayServer'
-import { initDb, closeDb } from '../db'
+import { initDb, closeDb, getDb } from '../db'
+import { hashPat } from '../middleware/auth'
 import type { RelayMessage } from '../types'
 import { writeEnvelopeHeader, HEADER_SIZE } from '@tapflowio/agent-core/utils'
 
@@ -1104,6 +1106,96 @@ describe('RelayServer', () => {
       ws.send(JSON.stringify({ type: 'agent:register', devices: [] }))
       const code = await closePromise
       expect(code).toBe(1008)
+    })
+  })
+
+  // #271 — 원격(비-루프백) 에이전트는 agent 스코프 PAT로 인증한다.
+  // 테스트 연결은 전부 루프백이므로 remoteAddressOf를 스파이해 원격 출발지를 시뮬레이션한다.
+  describe('remote agent auth (#271)', () => {
+    const mockRemote = (addr = '192.168.0.99') =>
+      vi.spyOn(server as unknown as { remoteAddressOf: () => string }, 'remoteAddressOf')
+        .mockReturnValue(addr)
+
+    const insertPat = (scope: string, expiresAt: string | null = null): string => {
+      const raw = `tflw_pat_${crypto.randomBytes(16).toString('hex')}`
+      const db = getDb()
+      db.prepare(
+        "INSERT OR IGNORE INTO users (id, email, display_name, role, password_hash) VALUES (9001, 'agent-pat@test.local', 'Agent PAT', 'Admin', 'x')",
+      ).run()
+      db.prepare(
+        'INSERT INTO personal_access_tokens (user_id, name, token_hash, scope, expires_at) VALUES (9001, ?, ?, ?, ?)',
+      ).run(`t-${raw.slice(-8)}`, hashPat(raw), scope, expiresAt)
+      return raw
+    }
+
+    const agentWs = (token?: string) =>
+      new WebSocket(`ws://localhost:${port}`, token ? { headers: { authorization: `Bearer ${token}` } } : undefined)
+
+    const waitForClose = (ws: WebSocket) =>
+      new Promise<{ code: number; reason: string }>((resolve) =>
+        ws.once('close', (code, reason) => resolve({ code, reason: reason.toString() })))
+
+    afterEach(() => {
+      vi.restoreAllMocks()
+    })
+
+    it('토큰 없는 원격 연결은 업그레이드 직후 1008 + 진단 가능한 사유로 거절된다', async () => {
+      mockRemote()
+      const ws = agentWs()
+      const { code, reason } = await waitForClose(ws)
+      expect(code).toBe(1008)
+      expect(reason).toContain('agent')
+      expect(reason).toContain('--token')
+      const logBuffer = (server as unknown as { logBuffer: string[] }).logBuffer
+      expect(logBuffer.some((l) => l.includes('192.168.0.99'))).toBe(true)
+    })
+
+    it('agent 스코프 PAT를 가진 원격 에이전트는 등록에 성공한다', async () => {
+      mockRemote()
+      const token = insertPat('agent')
+      const ws = agentWs(token)
+      await waitForOpen(ws)
+      ws.send(JSON.stringify({ type: 'agent:register', devices: [{ id: 'devA', name: 'iPhone A', platform: 'ios', status: 'shutdown' }] }))
+      const msg = await waitForMessage(ws)
+      expect(msg.type).toBe('agent:registered')
+      expect(msg.registeredSessions).toHaveLength(1)
+      ws.close()
+    })
+
+    it('agent 스코프 없는 PAT는 browser 역할 — agent:register 시 1008 (스푸핑 가드 유지)', async () => {
+      mockRemote()
+      const token = insertPat('view,builds:write')
+      const ws = agentWs(token)
+      await waitForOpen(ws)
+      ws.send(JSON.stringify({ type: 'agent:register', devices: [] }))
+      const { code } = await waitForClose(ws)
+      expect(code).toBe(1008)
+    })
+
+    it('만료된 agent PAT는 업그레이드 직후 거절된다', async () => {
+      mockRemote()
+      const token = insertPat('agent', '2000-01-01T00:00:00Z')
+      const ws = agentWs(token)
+      const { code } = await waitForClose(ws)
+      expect(code).toBe(1008)
+    })
+
+    it('원격 stream WS도 같은 토큰으로 stream:register 할 수 있다', async () => {
+      mockRemote()
+      const token = insertPat('agent')
+      const agent = agentWs(token)
+      await waitForOpen(agent)
+      agent.send(JSON.stringify({ type: 'agent:register', devices: [{ id: 'devA', name: 'iPhone A', platform: 'ios', status: 'shutdown' }] }))
+      const { registeredSessions } = await waitForMessage(agent)
+      const sessionId = registeredSessions![0].sessionId
+
+      const stream = agentWs(token)
+      await waitForOpen(stream)
+      stream.send(JSON.stringify({ type: 'stream:register', sessionId }))
+      const msg = await waitForMessage(stream)
+      expect(msg.type).toBe('stream:registered')
+      agent.close()
+      stream.close()
     })
   })
 

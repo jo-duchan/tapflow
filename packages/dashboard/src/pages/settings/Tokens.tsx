@@ -16,9 +16,14 @@ import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger,
 } from '@/components/ui/dialog'
 import {
+  Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
+} from '@/components/ui/select'
+import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from '@/components/ui/table'
 import { Plus, Trash2 } from 'lucide-react'
+
+type TokenType = 'api' | 'agent'
 
 type Token = { id: number; name: string; scope: string; last_used_at: string | null; expires_at: string | null; created_at: string }
 
@@ -35,6 +40,7 @@ export function TokenSettings() {
   const [tokens, setTokens] = useState<Token[]>([])
   const [open, setOpen] = useState(false)
   const [newToken, setNewToken] = useState('')
+  const [tokenType, setTokenType] = useState<TokenType>('api')
   const [revokeTarget, setRevokeTarget] = useState<number | null>(null)
 
   const { register, handleSubmit, reset, formState: { errors, isSubmitting } } = useForm<FormData>({
@@ -55,9 +61,18 @@ export function TokenSettings() {
         method: 'POST',
         credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name: data.name, expires_in_days: parseInt(data.expiresDays, 10) }),
+        body: JSON.stringify({
+          name: data.name,
+          expires_in_days: parseInt(data.expiresDays, 10),
+          // api 타입은 scope를 보내지 않아 서버 기본값(view,builds:write)을 따른다
+          ...(tokenType === 'agent' ? { scope: 'agent' } : {}),
+        }),
       })
-      if (!res.ok) { toast.error('Failed to create token'); return }
+      if (!res.ok) {
+        const err = await res.json().catch(() => null) as { error?: string } | null
+        toast.error(err?.error ?? 'Failed to create token')
+        return
+      }
       const json = await res.json() as { token: string }
       toast.success('Token created')
       setNewToken(json.token)
@@ -69,7 +84,7 @@ export function TokenSettings() {
 
   function handleDialogClose(o: boolean) {
     setOpen(o)
-    if (!o) { setNewToken(''); reset() }
+    if (!o) { setNewToken(''); setTokenType('api'); reset() }
   }
 
   async function handleRevoke(id: number): Promise<boolean> {
@@ -103,6 +118,14 @@ export function TokenSettings() {
               <div className="flex flex-col gap-3 pt-2">
                 <p className="text-sm text-muted-foreground">Copy this token now — it won&apos;t be shown again.</p>
                 <code className="rounded bg-muted px-3 py-2 text-xs break-all font-mono">{newToken}</code>
+                {tokenType === 'agent' && (
+                  <>
+                    <p className="text-sm text-muted-foreground">Run this on the agent Mac to connect it to this relay:</p>
+                    <code className="rounded bg-muted px-3 py-2 text-xs break-all font-mono">
+                      {`tapflow agent start --relay ${window.location.protocol === 'https:' ? 'wss' : 'ws'}://${window.location.host} --token ${newToken}`}
+                    </code>
+                  </>
+                )}
                 <Button onClick={() => {
                   navigator.clipboard.writeText(newToken)
                     .then(() => { toast.success('Token copied to clipboard'); setOpen(false) })
@@ -123,7 +146,19 @@ export function TokenSettings() {
                   <Input id="expires" type="number" {...register('expiresDays')} />
                   {errors.expiresDays && <p className="text-sm text-destructive">{errors.expiresDays.message}</p>}
                 </div>
-                <p className="text-xs text-muted-foreground">Scope: <Badge variant="secondary">builds:write</Badge></p>
+                <div className="grid gap-2">
+                  <Label>Type</Label>
+                  <Select value={tokenType} onValueChange={(v) => setTokenType(v as TokenType)}>
+                    <SelectTrigger><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="api">API — CI uploads &amp; API access</SelectItem>
+                      <SelectItem value="agent">Agent — connect remote device agents (Admin only)</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  Scope: <Badge variant="secondary">{tokenType === 'agent' ? 'agent' : 'view, builds:write'}</Badge>
+                </p>
                 <Button type="submit" disabled={isSubmitting}>{isSubmitting ? 'Creating…' : 'Create token'}</Button>
               </form>
             )}

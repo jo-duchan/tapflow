@@ -3,6 +3,8 @@ import { PlatformError } from './errors.js'
 
 export interface AgentConnectOpts {
   deviceFilter?: string
+  /** Opaque credential for remote relays (sent as `Authorization: Bearer`). Local relays need none. */
+  token?: string
 }
 
 interface AgentRegistryOpts {

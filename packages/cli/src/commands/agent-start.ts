@@ -9,6 +9,7 @@ export interface AgentStartOptions {
   device?: string
   relay?: string
   platform?: string
+  token?: string
 }
 
 const DEFAULT_RELAY = config.relay.url ?? `ws://localhost:${config.local.port}`
@@ -27,6 +28,8 @@ export async function cmdAgentStart(opts: AgentStartOptions): Promise<void> {
     process.exit(1)
   }
   const relayUrl = relayResult.data
+  // 원격 릴레이 인증용 PAT (#271). 플래그가 환경변수보다 우선. localhost는 불필요.
+  const token = opts.token ?? process.env.TAPFLOW_AGENT_TOKEN
 
   const explicit = opts.platform
   let platformsToRun: string[]
@@ -58,15 +61,24 @@ export async function cmdAgentStart(opts: AgentStartOptions): Promise<void> {
     const spinner = createSpinner(`Connecting ${platform} agent…`)
     spinner.start()
     try {
-      const agent = await AgentRegistry.connect(platform, relayUrl, { deviceFilter: opts.device })
+      const agent = await AgentRegistry.connect(platform, relayUrl, { deviceFilter: opts.device, token })
       spinner.stop(true)
       agents.push(agent)
     } catch (e) {
       spinner.stop(false)
+      const message = (e as Error).message
+      // 릴레이의 1008 인증 거절(#271) — 사유만으로는 다음 행동을 모르니 발급 절차를 안내한다
+      const authHint = message.includes('code=1008')
+        ? [
+            'Remote relays require a PAT with the agent scope.',
+            'Create one in Dashboard → Settings → Tokens,',
+            'then pass it with --token (or TAPFLOW_AGENT_TOKEN).',
+          ]
+        : []
       if (agents.length > 0) {
-        console.log(`  ⚠  ${platform}: ${(e as Error).message}`)
+        console.log(`  ⚠  ${platform}: ${message}`)
       } else {
-        banner('error', `${platform.toUpperCase()} CONNECTION FAILED`, [(e as Error).message])
+        banner('error', `${platform.toUpperCase()} CONNECTION FAILED`, [message, ...authHint])
         process.exit(1)
       }
     }

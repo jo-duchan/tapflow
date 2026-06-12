@@ -70,6 +70,52 @@ describe('cmdAgentStart', () => {
     expect(androidConnectSpy).toHaveBeenCalled()
   })
 
+  // #271 — 원격 릴레이 인증 토큰 전달
+  describe('--token / TAPFLOW_AGENT_TOKEN', () => {
+    const ORIG_ENV = process.env.TAPFLOW_AGENT_TOKEN
+
+    afterEach(() => {
+      if (ORIG_ENV === undefined) delete process.env.TAPFLOW_AGENT_TOKEN
+      else process.env.TAPFLOW_AGENT_TOKEN = ORIG_ENV
+    })
+
+    it('--token이 connect opts로 전달된다', async () => {
+      delete process.env.TAPFLOW_AGENT_TOKEN
+      await cmdAgentStart({ platform: 'ios', token: 'tflw_pat_flag' })
+      expect(iosConnectSpy).toHaveBeenCalledWith(
+        'ws://localhost:4000',
+        expect.objectContaining({ token: 'tflw_pat_flag' }),
+      )
+    })
+
+    it('플래그가 없으면 TAPFLOW_AGENT_TOKEN 환경변수를 쓴다', async () => {
+      process.env.TAPFLOW_AGENT_TOKEN = 'tflw_pat_env'
+      await cmdAgentStart({ platform: 'ios' })
+      expect(iosConnectSpy).toHaveBeenCalledWith(
+        'ws://localhost:4000',
+        expect.objectContaining({ token: 'tflw_pat_env' }),
+      )
+    })
+
+    it('플래그가 환경변수보다 우선한다', async () => {
+      process.env.TAPFLOW_AGENT_TOKEN = 'tflw_pat_env'
+      await cmdAgentStart({ platform: 'ios', token: 'tflw_pat_flag' })
+      expect(iosConnectSpy).toHaveBeenCalledWith(
+        'ws://localhost:4000',
+        expect.objectContaining({ token: 'tflw_pat_flag' }),
+      )
+    })
+
+    it('둘 다 없으면 token이 undefined (localhost 무인증 경로)', async () => {
+      delete process.env.TAPFLOW_AGENT_TOKEN
+      await cmdAgentStart({ platform: 'ios' })
+      expect(iosConnectSpy).toHaveBeenCalledWith(
+        'ws://localhost:4000',
+        expect.objectContaining({ token: undefined }),
+      )
+    })
+  })
+
   it('--platform ios → iOS만 연결', async () => {
     await cmdAgentStart({ platform: 'ios' })
     expect(iosConnectSpy).toHaveBeenCalled()
@@ -100,6 +146,30 @@ describe('cmdAgentStart', () => {
     const exitSpy = vi.spyOn(process, 'exit').mockImplementation(() => { throw new Error('process.exit') })
     await expect(cmdAgentStart({ platform: 'ios' })).rejects.toThrow('process.exit')
     expect(exitSpy).toHaveBeenCalledWith(1)
+  })
+
+  // #271 — 릴레이의 1008 인증 거절은 토큰 발급 안내와 함께 표시한다
+  it('1008 인증 거절 → 배너에 --token 발급 안내 포함', async () => {
+    iosConnectSpy.mockRejectedValue(
+      new Error('relay closed the connection during handshake (code=1008: Unauthorized: agents need a PAT)'),
+    )
+    AgentRegistry.register('ios', DummyAgent as never, { canRun: () => true, connect: iosConnectSpy })
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {})
+    vi.spyOn(process, 'exit').mockImplementation(() => { throw new Error('process.exit') })
+    await expect(cmdAgentStart({ platform: 'ios' })).rejects.toThrow('process.exit')
+    const output = logSpy.mock.calls.map((c) => c.join(' ')).join('\n')
+    expect(output).toContain('--token')
+    expect(output).toContain('Tokens')
+  })
+
+  it('1008이 아닌 실패에는 토큰 안내를 붙이지 않는다', async () => {
+    iosConnectSpy.mockRejectedValue(new Error('connection refused'))
+    AgentRegistry.register('ios', DummyAgent as never, { canRun: () => true, connect: iosConnectSpy })
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {})
+    vi.spyOn(process, 'exit').mockImplementation(() => { throw new Error('process.exit') })
+    await expect(cmdAgentStart({ platform: 'ios' })).rejects.toThrow('process.exit')
+    const output = logSpy.mock.calls.map((c) => c.join(' ')).join('\n')
+    expect(output).not.toContain('--token')
   })
 
   it('--relay http:// 스킴 → exit(1)', async () => {

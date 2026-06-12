@@ -1113,4 +1113,103 @@ describe('connect — error paths', () => {
     expect(m['message']).toBe('No booted device')
     agent.disconnect()
   })
+
+  // #271 — 원격 릴레이 인증: token 옵션이 control/stream WS 업그레이드에 Bearer 헤더로 실린다.
+  // (iOS와 동일 동작 — IOSAgent.test.ts의 relay auth token 테스트와 짝)
+  describe('relay auth token (#271)', () => {
+    async function withRawServer<T>(
+      onConnection: (sock: WebSocket, authHeader: string | undefined) => void,
+      run: (url: string) => Promise<T>,
+    ): Promise<T> {
+      const wss = new WebSocketServer({ port: 0 })
+      const wssPort = (wss.address() as { port: number }).port
+      wss.on('connection', (sock, req) => onConnection(sock as unknown as WebSocket, req.headers.authorization))
+      try {
+        return await run(`ws://127.0.0.1:${wssPort}`)
+      } finally {
+        await new Promise<void>((r) => wss.close(() => r()))
+      }
+    }
+
+    it('token 옵션이 있으면 control WS에 Authorization: Bearer 헤더가 실린다', async () => {
+      let seen: string | undefined
+      await withRawServer(
+        (sock, auth) => {
+          seen = auth
+          sock.on('message', () => sock.send(JSON.stringify({ type: 'agent:registered', registeredSessions: [] })))
+        },
+        async (url) => {
+          const agent = new AndroidAgent({ token: 'tflw_pat_android' }, mockAdb())
+          await agent.connect(url)
+          agent.disconnect()
+        },
+      )
+      expect(seen).toBe('Bearer tflw_pat_android')
+    })
+
+    it('token이 없으면 Authorization 헤더를 보내지 않는다', async () => {
+      let seen: string | undefined = 'sentinel'
+      await withRawServer(
+        (sock, auth) => {
+          seen = auth
+          sock.on('message', () => sock.send(JSON.stringify({ type: 'agent:registered', registeredSessions: [] })))
+        },
+        async (url) => {
+          const agent = new AndroidAgent({}, mockAdb())
+          await agent.connect(url)
+          agent.disconnect()
+        },
+      )
+      expect(seen).toBeUndefined()
+    })
+
+    it('stream WS(openStreamWs)에도 같은 토큰 헤더가 실린다', async () => {
+      let seen: string | undefined
+      await withRawServer(
+        (sock, auth) => {
+          seen = auth
+          sock.on('message', () => sock.send(JSON.stringify({ type: 'stream:registered' })))
+        },
+        async (url) => {
+          const agent = new AndroidAgent({ token: 'tflw_pat_android' }, mockAdb())
+          const internals = agent as unknown as {
+            relayUrl: string | null
+            openStreamWs(state: { sessionId: string; streamWs: WebSocket | null }): Promise<WebSocket>
+          }
+          internals.relayUrl = url
+          const streamWs = await internals.openStreamWs({ sessionId: 's1', streamWs: null })
+          streamWs.close()
+        },
+      )
+      expect(seen).toBe('Bearer tflw_pat_android')
+    })
+  })
+
+  // #271 — 핸드셰이크 견고성 (IOSAgent.test.ts와 짝)
+  describe('handshake robustness (#271)', () => {
+    it('등록 전 1008 close → code/reason을 담아 reject한다 (무한 대기 없음)', async () => {
+      const wss = new WebSocketServer({ port: 0 })
+      const wssPort = (wss.address() as { port: number }).port
+      wss.on('connection', (sock) => sock.close(1008, 'Unauthorized: agents need a PAT'))
+      try {
+        const agent = new AndroidAgent({}, mockAdb())
+        await expect(agent.connect(`ws://127.0.0.1:${wssPort}`))
+          .rejects.toThrow(/code=1008.*Unauthorized: agents need a PAT/)
+      } finally {
+        await new Promise<void>((r) => wss.close(() => r()))
+      }
+    })
+
+    it('agent:registered 응답이 없으면 handshakeTimeoutMs 후 reject한다', async () => {
+      const wss = new WebSocketServer({ port: 0 }) // 업그레이드만 수락, 무응답
+      const wssPort = (wss.address() as { port: number }).port
+      try {
+        const agent = new AndroidAgent({ handshakeTimeoutMs: 150 }, mockAdb())
+        await expect(agent.connect(`ws://127.0.0.1:${wssPort}`))
+          .rejects.toThrow(/timed out after 150ms/)
+      } finally {
+        await new Promise<void>((r) => wss.close(() => r()))
+      }
+    })
+  })
 })

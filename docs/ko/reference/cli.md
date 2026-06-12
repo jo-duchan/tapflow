@@ -231,6 +231,7 @@ tapflow agent start --relay ws://192.168.x.x:4000
 | `--relay <url>` | config의 `relay.url`, 없으면 `ws://localhost:4000` | 릴레이 WebSocket URL. `tapflow.config.json`에 `relay.url`이 있으면 생략 가능. |
 | `--platform <ios\|android\|all>` | 자동 감지 | 시작할 플랫폼 |
 | `--device <name>` | 전체 시뮬레이터 | 릴레이에 노출할 iOS 시뮬레이터를 이름 또는 UDID로 한정 |
+| `--token <pat>` | `TAPFLOW_AGENT_TOKEN` 환경변수 | 원격 릴레이가 요구하는 `agent` 스코프 토큰. [에이전트 설정](/ko/guide/agent#원격-릴레이-인증)을 참고하세요. |
 
 
 ## `tapflow devices`

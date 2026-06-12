@@ -14,7 +14,7 @@ AgentRegistry.register('ios', IOSAgent, {
     // No pre-boot: connect registers devices only. Booting happens on demand via
     // device:boot (dashboard / MCP). deviceFilter narrows which devices are exposed
     // (Android parity — see AndroidAgent).
-    const agent = new IOSAgent({ deviceFilter: opts?.deviceFilter })
+    const agent = new IOSAgent({ deviceFilter: opts?.deviceFilter, token: opts?.token })
     await agent.connect(relayUrl)
     return agent
   },
