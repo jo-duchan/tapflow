@@ -223,7 +223,7 @@ See [Self-Hosting](/guide/self-hosting) for full setup instructions.
 Start the agent only and connect it to a relay. Does not start a local relay.
 
 ```sh
-tapflow agent start --relay ws://192.168.x.x:4000
+tapflow agent start --relay ws://192.168.x.x:4000 --token tflw_pat_xxxxxxxx
 ```
 
 | Option | Default | Description |
@@ -231,6 +231,7 @@ tapflow agent start --relay ws://192.168.x.x:4000
 | `--relay <url>` | `relay.url` in config, or `ws://localhost:4000` | Relay WebSocket URL. Omit if `relay.url` is set in `tapflow.config.json`. |
 | `--platform <ios\|android\|all>` | auto-detect | Platform to start |
 | `--device <name>` | all simulators | Limit which iOS simulators are exposed to the relay, by name or UDID |
+| `--token <pat>` | `TAPFLOW_AGENT_TOKEN` env | Token with the `agent` scope, required by remote relays. See [Agent Setup](/guide/agent#remote-relay-authentication). |
 
 
 ## `tapflow devices`

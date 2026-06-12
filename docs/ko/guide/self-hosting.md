@@ -4,7 +4,7 @@
 
 ::: info 릴레이 URL 두 가지 역할
 - **대시보드 접속** — 브라우저에서 `http://localhost:4000` (로컬) 또는 `http://192.168.x.x:4000` (팀 내 접속)
-- **에이전트 연결** — 릴레이가 다른 Mac에 있을 때: `tapflow agent start --relay ws://192.168.x.x:4000`. 에이전트→릴레이 구간은 항상 LAN 내부 `ws://`를 사용합니다.
+- **에이전트 연결** — 릴레이가 다른 Mac에 있을 때: `tapflow agent start --relay ws://192.168.x.x:4000`. 에이전트→릴레이 구간은 항상 LAN 내부 `ws://`를 사용하며, 원격 에이전트는 `agent` 스코프 토큰으로 인증합니다([원격 릴레이 인증](/ko/guide/agent#원격-릴레이-인증)).
 :::
 
 ## 배포 시나리오
@@ -34,8 +34,10 @@ tapflow relay start
 **각 에이전트 Mac에서:**
 
 ```sh
-tapflow agent start --relay ws://192.168.x.x:4000
+tapflow agent start --relay ws://192.168.x.x:4000 --token tflw_pat_xxxxxxxx
 ```
+
+릴레이가 에이전트와 다른 머신에 있으므로 `agent` 스코프 토큰이 필요합니다. 발급 방법은 [원격 릴레이 인증](/ko/guide/agent#원격-릴레이-인증)을 참고하세요.
 
 ## 배포 설정
 
@@ -77,6 +79,8 @@ JWT_SECRET=YOUR_JWT_SECRET tapflow start
 ## 외부 접속
 
 릴레이와 에이전트는 항상 같은 내부 네트워크에 유지합니다. 외부 접속은 릴레이 Mac에서 외부로 아웃바운드 터널을 열어 브라우저가 공개 URL로 접근하도록 합니다.
+
+릴레이는 localhost 밖에서 오는 모든 연결에 인증을 요구합니다. 브라우저는 로그인으로, 에이전트는 `agent` 스코프 토큰으로 인증합니다 — 에이전트 쪽 절차는 [원격 릴레이 인증](/ko/guide/agent#원격-릴레이-인증)에서 다룹니다.
 
 tapflow는 두 가지 터널 프로바이더를 지원합니다:
 

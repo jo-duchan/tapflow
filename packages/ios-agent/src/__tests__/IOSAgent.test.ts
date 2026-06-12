@@ -34,8 +34,9 @@ vi.mock('../ScreenCaptureStreamer', async (importOriginal) => {
   }
 })
 
-import { WebSocket } from 'ws'
-import { RelayServer, initDb, closeDb } from '@tapflowio/relay'
+import crypto from 'crypto'
+import { WebSocket, WebSocketServer } from 'ws'
+import { RelayServer, initDb, closeDb, getDb } from '@tapflowio/relay'
 import { IOSAgent } from '../IOSAgent'
 import { ScreenCaptureStreamer } from '../ScreenCaptureStreamer'
 import { SimctlWrapper } from '../SimctlWrapper'
@@ -115,6 +116,21 @@ describe('IOSAgent', () => {
 
   afterEach(async () => {
     await relay.stop()
+  })
+
+  // CodeRabbit #272 ⑥ — 직접 인스턴스화 시 비-macOS에서 일찍 명확히 실패한다 (AGENTS.md 규칙)
+  describe('platform guard', () => {
+    it('비-macOS + simctl 미주입(실제 런타임 경로)은 throw', () => {
+      const spy = vi.spyOn(process, 'platform', 'get').mockReturnValue('linux')
+      expect(() => new IOSAgent()).toThrow(/macOS/)
+      spy.mockRestore()
+    })
+
+    it('비-macOS여도 simctl 주입(테스트/모킹 경로)은 허용', () => {
+      const spy = vi.spyOn(process, 'platform', 'get').mockReturnValue('linux')
+      expect(() => new IOSAgent({}, mockSimctl())).not.toThrow()
+      spy.mockRestore()
+    })
   })
 
   describe('DeviceAgent delegation', () => {
@@ -758,6 +774,120 @@ describe('IOSAgent', () => {
     it('streams H.264 by default when env is unset and the browser accepts it', async () => {
       delete process.env.TAPFLOW_IOS_CODEC
       expect(await bootAndGetCodec({ acceptH264: true })).toBe('h264')
+    })
+  })
+
+  // #271 — 원격 릴레이 인증: token 옵션이 control/stream WS 업그레이드에 Bearer 헤더로 실린다.
+  describe('relay auth token (#271)', () => {
+    // 업그레이드 요청 헤더를 그대로 검증하기 위해 raw WebSocketServer 사용
+    async function captureAuthHeader(token?: string): Promise<string | undefined> {
+      const wss = new WebSocketServer({ port: 0 })
+      const wssPort = (wss.address() as { port: number }).port
+      const header = new Promise<string | undefined>((resolve) => {
+        wss.on('connection', (sock, req) => {
+          resolve(req.headers.authorization)
+          sock.on('message', () => sock.send(JSON.stringify({ type: 'agent:registered', registeredSessions: [] })))
+        })
+      })
+      const agent = new IOSAgent(token ? { token } : {}, mockSimctl())
+      await agent.connect(`ws://127.0.0.1:${wssPort}`)
+      const result = await header
+      agent.disconnect()
+      await new Promise<void>((r) => wss.close(() => r()))
+      return result
+    }
+
+    it('token 옵션이 있으면 control WS에 Authorization: Bearer 헤더가 실린다', async () => {
+      expect(await captureAuthHeader('tflw_pat_test123')).toBe('Bearer tflw_pat_test123')
+    })
+
+    it('token이 없으면 Authorization 헤더를 보내지 않는다 (localhost 무인증 유지)', async () => {
+      expect(await captureAuthHeader()).toBeUndefined()
+    })
+
+    it('원격 릴레이 + agent 스코프 PAT: control/stream WS 모두 인증되어 device:ready까지 도달한다', async () => {
+      // 모든 연결을 비-루프백 출발지로 가장 → 무인증이면 stream WS도 1008로 거절된다
+      const remoteSpy = vi
+        .spyOn(relay as unknown as { remoteAddressOf: () => string }, 'remoteAddressOf')
+        .mockReturnValue('192.168.0.77')
+      const db = getDb()
+      db.prepare(
+        "INSERT OR IGNORE INTO users (id, email, display_name, role, password_hash) VALUES (9101, 'agent-e2e@test.local', 'E2E', 'Admin', 'x')",
+      ).run()
+      const insertPat = (scope: string): string => {
+        const raw = `tflw_pat_${crypto.randomBytes(16).toString('hex')}`
+        db.prepare(
+          'INSERT INTO personal_access_tokens (user_id, name, token_hash, scope, expires_at) VALUES (9101, ?, ?, ?, NULL)',
+        ).run(`e2e-${raw.slice(-8)}`, crypto.createHash('sha256').update(raw).digest('hex'), scope)
+        return raw
+      }
+      // agent 소켓은 agent 스코프, browser 소켓은 view 스코프 — 실제 역할에 맞는 자격을 쓴다
+      const token = insertPat('agent')
+      const browserToken = insertPat('view')
+
+      const agent = new IOSAgent({ token }, mockSimctl(true))
+      await agent.connect(`ws://127.0.0.1:${port}`)
+
+      const browser = new WebSocket(`ws://127.0.0.1:${port}`, { headers: { authorization: `Bearer ${browserToken}` } })
+      await waitForOpen(browser)
+      browser.send(JSON.stringify({ type: 'session:start', sessionId: agent.sessionId }))
+      await waitForType(browser, 'session:joined')
+      browser.send(JSON.stringify({ type: 'device:boot', sessionId: agent.sessionId, payload: { deviceId: 'dev-1' } }))
+      await waitForType(browser, 'device:ready')
+
+      agent.disconnect()
+      browser.close()
+      remoteSpy.mockRestore()
+    })
+  })
+
+  // #271 — 핸드셰이크 견고성: 등록 전 close/무응답이 침묵 속에 영원히 멈추지 않는다.
+  describe('handshake robustness (#271)', () => {
+    async function withRawServer<T>(
+      onConnection: (sock: import('ws').WebSocket) => void,
+      run: (url: string) => Promise<T>,
+    ): Promise<T> {
+      const wss = new WebSocketServer({ port: 0 })
+      // 느린 러너에서 address()가 null일 수 있으므로 listening 이후 포트를 읽는다
+      await new Promise<void>((r) => wss.once('listening', r))
+      const wssPort = (wss.address() as { port: number }).port
+      wss.on('connection', onConnection)
+      try {
+        return await run(`ws://127.0.0.1:${wssPort}`)
+      } finally {
+        await new Promise<void>((r) => wss.close(() => r()))
+      }
+    }
+
+    it('등록 전 1008 close → code/reason을 담아 reject한다 (무한 대기 없음)', async () => {
+      await withRawServer(
+        (sock) => sock.close(1008, 'Unauthorized: agents need a PAT'),
+        async (url) => {
+          const agent = new IOSAgent({}, mockSimctl())
+          await expect(agent.connect(url)).rejects.toThrow(/code=1008.*Unauthorized: agents need a PAT/)
+        },
+      )
+    })
+
+    it('agent:registered 응답이 없으면 handshakeTimeoutMs 후 reject한다', async () => {
+      await withRawServer(
+        () => { /* 업그레이드만 수락하고 무응답 */ },
+        async (url) => {
+          const agent = new IOSAgent({ handshakeTimeoutMs: 150 }, mockSimctl())
+          await expect(agent.connect(url)).rejects.toThrow(/timed out after 150ms/)
+        },
+      )
+    })
+
+    // CodeRabbit #272 ② — malformed 첫 프레임이 핸들러에서 throw되어 connect()가 행되지 않는다
+    it('등록 전 malformed(비-JSON) 프레임 → 행 없이 reject한다', async () => {
+      await withRawServer(
+        (sock) => sock.on('message', () => sock.send('not-json{{{')),
+        async (url) => {
+          const agent = new IOSAgent({ handshakeTimeoutMs: 1000 }, mockSimctl())
+          await expect(agent.connect(url)).rejects.toThrow(/malformed|handshake/i)
+        },
+      )
     })
   })
 

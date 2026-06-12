@@ -41,6 +41,7 @@
 | `JWT_SECRET` | — | *(개발용 기본값)* | JWT 서명 키 (환경변수 전용) |
 | `TAPFLOW_DATA_DIR` | `local.dataDir` | `.tapflow-data` | DB·업로드 디렉토리 (상대 경로 지원) |
 | `TAPFLOW_RELAY_URL` | `relay.url` | *(비어있음)* | CLI 명령어의 기본 relay URL |
+| `TAPFLOW_AGENT_TOKEN` | — | *(비어있음)* | 원격 릴레이 인증용 `agent` 스코프 토큰. `--token` 플래그가 우선합니다. [에이전트 설정](/ko/guide/agent#원격-릴레이-인증)을 참고하세요. |
 | `TAPFLOW_BUILD_TTL_DAYS` | — | `7` | Done 빌드 파일·레코드 자동 삭제 기간(일). 로컬 테스트 시 `0.001` 등 작은 값으로 즉시 확인 가능. |
 | `TAPFLOW_WS_BACKPRESSURE_BYTES` | — | `1048576` (1 MB) | 브라우저 소켓당 바이너리 프레임 드롭 임계값. 버퍼가 이 값을 초과하면 프레임이 드롭됩니다. |
 | `SMTP_HOST` | `smtp.host` | `` | SMTP 호스트 |

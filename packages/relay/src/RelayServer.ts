@@ -1,12 +1,15 @@
 import http from 'http'
 import fs from 'fs'
+import os from 'os'
 import path from 'path'
 import { randomUUID } from 'crypto'
 import { WebSocketServer, WebSocket } from 'ws'
 import { SessionManager } from './SessionManager.js'
 import type { RelayMessage } from './types.js'
 import { Router, json } from './router.js'
-import { requireViewAuth, getAuth, verifyPat } from './middleware/auth.js'
+import { requireViewAuth, requireAuth, getAuth, verifyPat } from './middleware/auth.js'
+import { classifyConnection } from './lib/connectionAuth.js'
+import { pickLanAddress } from './lib/lanAddress.js'
 import { getDb } from './db.js'
 import { handleLogin, handleLogout, handleMe, handleChangePassword, handleInit, handleAuthStatus } from './api/auth.js'
 import { handleVerify, handleAccept } from './api/invitations.js'
@@ -76,6 +79,9 @@ const AGENT_MSG_TYPES = new Set([
   'session:chrome', 'session:deviceInfo',
   'app:install-done', 'app:install-error', 'app:launch-done', 'app:launch-error',
   'open-url:done', 'open-url:error', 'keyboard:toggled',
+  // stream:register binds a session's stream socket — agent-only, or a browser
+  // (view PAT / cookie) could hijack an existing session's video feed.
+  'stream:register',
 ])
 
 export class RelayServer {
@@ -192,6 +198,15 @@ export class RelayServer {
       res.end(JSON.stringify(this.logBuffer.slice(-lines)))
     })
 
+    // relay host — 대시보드가 agent 실행 커맨드에 박을 LAN 주소 (뷰어가 localhost로 접속한 경우의 치환용, #271)
+    this.router.get('/api/v1/relay/host', (req, res) => {
+      if (!requireAuth(req, res)) return
+      const addr = this.httpServer.address()
+      const port = typeof addr === 'object' && addr !== null ? addr.port : this.options.port
+      res.writeHead(200, { 'Content-Type': 'application/json' })
+      res.end(JSON.stringify({ lanHost: pickLanAddress(os.networkInterfaces()), port }))
+    })
+
     // agent resources
     this.router.get('/api/v1/agents', handleListAgents)
     this.router.get('/api/v1/agents/:name/resources', handleGetAgentResources)
@@ -272,23 +287,31 @@ export class RelayServer {
     }
   }
 
-  private handleConnection(ws: WebSocket, request: http.IncomingMessage): void {
-    const addr = request.socket.remoteAddress ?? ''
-    const isLocal = addr === '127.0.0.1' || addr === '::1' || addr === '::ffff:127.0.0.1'
-    this.wsExternal.set(ws, isExternalAddress(addr))
+  // Extracted so tests can simulate non-loopback origins (all test traffic is loopback).
+  private remoteAddressOf(request: http.IncomingMessage): string {
+    return request.socket.remoteAddress ?? ''
+  }
 
-    if (!isLocal) {
-      // Remote connections require a valid session cookie or PAT
-      if (!getAuth(request) && !verifyPat(request)) {
-        ws.close(1008, 'Unauthorized')
-        return
-      }
-      this.wsRoles.set(ws, 'browser')
-    } else if (getAuth(request)) {
-      // Local browser (dashboard running on the same machine) — has a session cookie
-      this.wsRoles.set(ws, 'browser')
+  private handleConnection(ws: WebSocket, request: http.IncomingMessage): void {
+    const addr = this.remoteAddressOf(request)
+    const isLocal = addr === '127.0.0.1' || addr === '::1' || addr === '::ffff:127.0.0.1'
+
+    const hasCookieAuth = getAuth(request) !== null
+    // DB lookup — only when the connection can't be classified without it (remote, no cookie).
+    const pat = !isLocal && !hasCookieAuth ? verifyPat(request) : null
+    const decision = classifyConnection({
+      isLocal,
+      hasCookieAuth,
+      patScopes: pat ? pat.scope.split(',').map((s) => s.trim()) : null,
+    })
+    if (decision.action === 'reject') {
+      this.pushLog(`WS connection rejected from ${addr} — no credentials (agents: PAT with 'agent' scope via --token)`)
+      ws.close(1008, decision.reason)
+      return
     }
-    // Local + no auth → role is determined by the first message (agent:register / stream:register)
+    this.wsExternal.set(ws, isExternalAddress(addr))
+    if (decision.role === 'browser') this.wsRoles.set(ws, 'browser')
+    // 'first-message' → role is determined by the first message (agent:register / stream:register)
 
     ws.on('message', (data, isBinary) => {
       if (isBinary) {

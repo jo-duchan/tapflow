@@ -23,7 +23,7 @@ function hasAdb(): boolean {
 AgentRegistry.register('android', AndroidAgent, {
   canRun: hasAdb,
   connect: async (relayUrl: string, opts?: AgentConnectOpts) => {
-    const agent = new AndroidAgent({ deviceFilter: opts?.deviceFilter })
+    const agent = new AndroidAgent({ deviceFilter: opts?.deviceFilter, token: opts?.token })
     await agent.connect(relayUrl)
     return agent
   },

@@ -78,7 +78,8 @@ cli
   .option('--relay <url>', 'Relay WebSocket URL (default: ws://localhost:4000)')
   .option('--platform <platform>', 'Platform to start: registered key or all (default: auto-detect)')
   .option('--device <name>', 'iOS Simulator name or UDID to use')
-  .action((subcommand: string, opts: { relay?: string; platform?: string; device?: string }) => {
+  .option('--token <pat>', "PAT with 'agent' scope for remote relays (or TAPFLOW_AGENT_TOKEN)")
+  .action((subcommand: string, opts: { relay?: string; platform?: string; device?: string; token?: string }) => {
     if (subcommand === 'start') return cmdAgentStart(opts)
     console.error(`Unknown subcommand: agent ${subcommand}`)
     process.exit(1)

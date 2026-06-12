@@ -40,6 +40,10 @@ export interface IOSAgentOptions {
   sleepBlocker?: SleepBlocker
   /** Restrict the devices registered with the relay to this name or id (exposure filter). */
   deviceFilter?: string
+  /** Credential for remote relays — sent as `Authorization: Bearer` on every relay WS (#271). */
+  token?: string
+  /** Handshake(연결~agent:registered) 타임아웃 ms. 기본 10초, 테스트용 주입 가능. */
+  handshakeTimeoutMs?: number
 }
 
 interface DeviceState {
@@ -73,6 +77,8 @@ export class IOSAgent implements DeviceAgent {
   private readonly reconnectDelays: number[]
   private readonly chromeLoader: DeviceChromeLoader
   private readonly deviceFilter?: string
+  private readonly token?: string
+  private readonly handshakeTimeoutMs: number
   private ws: WebSocket | null = null
   private deviceStates = new Map<string, DeviceState>()
   // Holds a macOS power assertion while connected so the host doesn't idle-throttle the
@@ -86,12 +92,20 @@ export class IOSAgent implements DeviceAgent {
   private _reconnectAttempt = 0
 
   constructor(options: IOSAgentOptions = {}, simctl?: SimctlWrapper) {
+    // IOSAgent는 직접 export되므로 AgentRegistry.canRun() 가드를 우회해 인스턴스화될 수 있다.
+    // 비-macOS에서는 simctl/캡처가 불명확한 에러로 늦게 실패하므로 여기서 일찍 막는다.
+    // simctl 주입은 테스트 경로이므로(모킹) 가드를 건너뛴다.
+    if (!simctl && process.platform !== 'darwin') {
+      throw new PlatformError('IOSAgent requires macOS (xcrun simctl is macOS-only)')
+    }
     this.simctl = simctl ?? new SimctlWrapper()
     this.fps = options.fps ?? 30
     this.intervalMs = options.intervalMs
     this.reconnectDelays = options.reconnectDelays ?? [1000, 2000, 4000, 8000, 16000, 30000]
     this.chromeLoader = new DeviceChromeLoader()
     this.deviceFilter = options.deviceFilter
+    this.token = options.token
+    this.handshakeTimeoutMs = options.handshakeTimeoutMs ?? 10_000
     // No-op under vitest so the suite never spawns real `caffeinate` processes.
     this.sleepBlocker = options.sleepBlocker ?? (process.env.VITEST ? { acquire() {}, release() {} } : createSleepBlocker())
   }
@@ -111,7 +125,14 @@ export class IOSAgent implements DeviceAgent {
       : allDevices
 
     return new Promise((resolve, reject) => {
-      const ws = new WebSocket(relayUrl)
+      const ws = new WebSocket(relayUrl, this.wsClientOptions())
+      let registered = false
+
+      // 등록 응답이 영영 오지 않는 행 방지 — 시간 내 미등록이면 끊고 reject (#271)
+      const timer = setTimeout(() => {
+        ws.terminate()
+        reject(new PlatformError(`relay handshake timed out after ${this.handshakeTimeoutMs}ms (${relayUrl})`))
+      }, this.handshakeTimeoutMs)
 
       ws.once('open', () => {
         disableNagle(ws)
@@ -130,8 +151,19 @@ export class IOSAgent implements DeviceAgent {
       })
 
       ws.once('message', (data) => {
-        const msg = JSON.parse(data.toString())
+        let msg: { type?: string; registeredSessions?: unknown }
+        try {
+          msg = JSON.parse(data.toString())
+        } catch {
+          // malformed 첫 프레임이 핸들러 밖으로 throw되면 connect()가 reject 없이 행된다 (#272)
+          clearTimeout(timer)
+          ws.terminate()
+          reject(new PlatformError('relay sent a malformed handshake response'))
+          return
+        }
         if (msg.type === 'agent:registered') {
+          registered = true
+          clearTimeout(timer)
           this.ws = ws
           this.sleepBlocker.acquire() // idempotent across reconnects
           this.initDeviceStates(
@@ -145,11 +177,30 @@ export class IOSAgent implements DeviceAgent {
           ws.on('close', () => this._scheduleReconnect())
           resolve()
         } else {
+          clearTimeout(timer)
+          ws.close()
           reject(new PlatformError(`Unexpected message during handshake: ${msg.type}`))
         }
       })
 
-      ws.once('error', reject)
+      // 등록 전의 정상 close(예: 릴레이의 1008 인증 거절)는 'error' 없이 도착한다.
+      // 사유를 살려 reject해야 무한 대기(스피너 행)가 아니라 진단 가능한 실패가 된다 (#271).
+      ws.once('close', (code, reason) => {
+        if (registered) return
+        clearTimeout(timer)
+        const reasonText = reason.toString()
+        reject(new PlatformError(
+          `relay closed the connection during handshake (code=${code}${reasonText ? `: ${reasonText}` : ''})`,
+        ))
+      })
+
+      ws.once('unexpected-response', (_req, res) => {
+        clearTimeout(timer)
+        ws.terminate()
+        reject(new PlatformError(`relay rejected the WebSocket upgrade (HTTP ${res.statusCode})`))
+      })
+
+      ws.once('error', (e) => { clearTimeout(timer); reject(e) })
     })
   }
 
@@ -210,7 +261,9 @@ export class IOSAgent implements DeviceAgent {
       this.connect(this.relayUrl).then(() => {
         this._reconnectAttempt = 0
         logger.info('reconnected to relay')
-      }).catch(() => {
+      }).catch((e) => {
+        // 실패 원인을 남겨야 인증 거절(1008)과 네트워크 장애를 구분할 수 있다 (#271)
+        logger.warn(`reconnect failed: ${e instanceof Error ? e.message : String(e)}`)
         this._scheduleReconnect()
       })
     }, delay)
@@ -341,8 +394,13 @@ export class IOSAgent implements DeviceAgent {
     void pump()
   }
 
+  // 원격 릴레이는 PAT 인증을 요구한다 (#271) — control/stream WS 모두 같은 토큰을 쓴다.
+  private wsClientOptions(): { headers?: Record<string, string> } {
+    return this.token ? { headers: { authorization: `Bearer ${this.token}` } } : {}
+  }
+
   private async openStreamWs(state: DeviceState): Promise<WebSocket> {
-    const streamWs = new WebSocket(this.relayUrl!)
+    const streamWs = new WebSocket(this.relayUrl!, this.wsClientOptions())
     state.streamWs = streamWs
     await registerStreamWs(streamWs, state.sessionId)
     return streamWs

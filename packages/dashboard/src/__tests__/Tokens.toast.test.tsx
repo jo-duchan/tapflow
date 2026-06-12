@@ -41,6 +41,23 @@ describe('Tokens — toast feedback', () => {
     await userEvent.click(await screen.findByRole('button', { name: /new token/i }))
     await userEvent.type(screen.getByLabelText(/name/i), 'my-token')
     await userEvent.click(screen.getByRole('button', { name: /create token/i }))
+    // 서버가 사유를 내려주면 그대로 보여준다 (#271 — agent 스코프 403 안내)
+    await waitFor(() =>
+      expect(toast.error).toHaveBeenCalledWith('Server error'),
+    )
+  })
+
+  it('TC2-1: 서버 에러 body가 없으면 기본 메시지로 toast.error 호출', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn()
+        .mockResolvedValueOnce({ ok: true, json: () => Promise.resolve([]) })
+        .mockResolvedValueOnce({ ok: false, json: () => Promise.reject(new Error('no body')) }),
+    )
+    renderTokens()
+    await userEvent.click(await screen.findByRole('button', { name: /new token/i }))
+    await userEvent.type(screen.getByLabelText(/name/i), 'my-token')
+    await userEvent.click(screen.getByRole('button', { name: /create token/i }))
     await waitFor(() =>
       expect(toast.error).toHaveBeenCalledWith('Failed to create token'),
     )
