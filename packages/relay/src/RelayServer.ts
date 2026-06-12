@@ -9,6 +9,7 @@ import type { RelayMessage } from './types.js'
 import { Router, json } from './router.js'
 import { requireViewAuth, requireAuth, getAuth, verifyPat } from './middleware/auth.js'
 import { classifyConnection } from './lib/connectionAuth.js'
+import { resolveClientAddress } from './lib/clientAddress.js'
 import { pickLanAddress } from './lib/lanAddress.js'
 import { getDb } from './db.js'
 import { handleLogin, handleLogout, handleMe, handleChangePassword, handleInit, handleAuthStatus } from './api/auth.js'
@@ -116,7 +117,7 @@ export class RelayServer {
     timer: ReturnType<typeof setTimeout>
   }>()
 
-  constructor(private readonly options: { port: number; publicDir?: string; uploadsDir?: string; idleTimeoutMs?: number; wsBackpressureBytes?: number; screenshotTimeoutMs?: number }) {
+  constructor(private readonly options: { port: number; publicDir?: string; uploadsDir?: string; idleTimeoutMs?: number; wsBackpressureBytes?: number; screenshotTimeoutMs?: number; trustedProxies?: string[] }) {
     this.backpressureBytes = options.wsBackpressureBytes ?? DEFAULT_BACKPRESSURE_BYTES
     this.screenshotTimeoutMs = options.screenshotTimeoutMs ?? 10_000
     this.sessions = new SessionManager({ idleTimeoutMs: options.idleTimeoutMs })
@@ -138,9 +139,9 @@ export class RelayServer {
 
     // auth
     this.router.get('/api/v1/auth/status', handleAuthStatus)
-    this.router.post('/api/v1/auth/init', handleInit)
+    this.router.post('/api/v1/auth/init', (req, res) => handleInit(req, res, this.options.trustedProxies ?? []))
     this.router.get('/api/v1/auth/me', handleMe)
-    this.router.post('/api/v1/auth/login', handleLogin)
+    this.router.post('/api/v1/auth/login', (req, res) => handleLogin(req, res, this.options.trustedProxies ?? []))
     this.router.post('/api/v1/auth/logout', handleLogout)
     this.router.post('/api/v1/auth/change-password', handleChangePassword)
     this.router.get('/api/v1/auth/reset-password/verify', handleVerifyReset)
@@ -293,8 +294,12 @@ export class RelayServer {
   }
 
   private handleConnection(ws: WebSocket, request: http.IncomingMessage): void {
-    const addr = this.remoteAddressOf(request)
-    const isLocal = addr === '127.0.0.1' || addr === '::1' || addr === '::ffff:127.0.0.1'
+    const xff = request.headers['x-forwarded-for']
+    const { addr, isLocal } = resolveClientAddress({
+      socketAddr: this.remoteAddressOf(request),
+      forwardedFor: Array.isArray(xff) ? xff[0] : xff,
+      trustedProxies: this.options.trustedProxies ?? [],
+    })
 
     const hasCookieAuth = getAuth(request) !== null
     // DB lookup — only when the connection can't be classified without it (remote, no cookie).

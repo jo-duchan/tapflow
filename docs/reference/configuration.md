@@ -38,10 +38,11 @@ Environment variables always take precedence over the config file — useful for
 | Variable | Config key | Default | Description |
 |----------|------------|---------|-------------|
 | `TAPFLOW_PORT` | `local.port` | `4000` | Server port |
-| `JWT_SECRET` | — | *(dev default)* | JWT signing key (env only) |
+| `JWT_SECRET` | — | *(auto-generated)* | JWT signing key (env only). If unset, a strong per-install secret is generated on first boot and persisted to the data directory. |
 | `TAPFLOW_DATA_DIR` | `local.dataDir` | `.tapflow-data` | DB and uploads directory (supports relative paths) |
 | `TAPFLOW_RELAY_URL` | `relay.url` | *(empty)* | Relay URL used as default by CLI commands |
 | `TAPFLOW_AGENT_TOKEN` | — | *(empty)* | Token with the `agent` scope for remote relay authentication. The `--token` flag takes precedence. See [Agent Setup](/guide/agent#remote-relay-authentication). |
+| `TAPFLOW_TRUSTED_PROXIES` | — | *(empty)* | Comma-separated IPs of trusted reverse proxies (e.g. `127.0.0.1,::1`). Set this when the relay runs behind a same-host reverse proxy so it reads the real client IP from `X-Forwarded-For` instead of the proxy's address. Empty disables forwarded-header parsing. |
 | `TAPFLOW_BUILD_TTL_DAYS` | — | `7` | Days before a Done build's files and record are automatically deleted. Set to a small value (e.g. `0.001`) to verify cleanup quickly in local testing. |
 | `TAPFLOW_WS_BACKPRESSURE_BYTES` | — | `1048576` (1 MB) | Binary frame drop threshold per browser socket. Frames are silently dropped when the socket buffer exceeds this value. |
 | `SMTP_HOST` | `smtp.host` | `` | SMTP host |
@@ -51,10 +52,8 @@ Environment variables always take precedence over the config file — useful for
 | `SMTP_PASS` | `smtp.pass` | `` | SMTP password |
 | `SMTP_FROM` | `smtp.from` | `tapflow <smtp.user>` | Sender address |
 
-::: warning Always replace JWT_SECRET
-If `JWT_SECRET` is not set, the dev default is used. Using the default in production lets anyone forge valid auth tokens.
-
-Generate a safe value:
+::: tip JWT_SECRET is optional
+If `JWT_SECRET` is not set, the relay generates a strong per-install secret on first boot and stores it in the data directory (`jwt-secret`, owner-only). Set `JWT_SECRET` explicitly only when you need a fixed key — for example, to share one secret across multiple relay instances:
 
 ```sh
 openssl rand -hex 32

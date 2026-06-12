@@ -45,8 +45,8 @@ tapflow.config.json
 *.db-shm
 *.db-wal
 
-# playground runtime data (recordings, uploads, db)
-playground/.tapflow-data/
+# runtime data (recordings, uploads, db, generated jwt-secret) — any package/cwd
+.tapflow-data/
 
 # playground test builds
 playground/test-builds/

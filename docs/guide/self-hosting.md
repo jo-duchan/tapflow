@@ -43,17 +43,15 @@ The relay runs on a different machine than the agents, so an `agent`-scope token
 
 ### JWT_SECRET
 
-::: warning Replace before deploying to a server
-The default value (`tapflow-dev-secret-change-in-production`) is public in the source code. Leaving it unchanged lets anyone forge valid tokens.
-:::
+If you don't set `JWT_SECRET`, the relay generates a strong per-install secret on first boot and persists it to the data directory (`jwt-secret`, owner-only). No action is required for a single relay.
 
-Generate a secure random secret:
+Set it explicitly only when you need a fixed key — for example, to share one secret across multiple relay instances. Generate a secure random value:
 
 ```sh
 openssl rand -hex 32
 ```
 
-Inject the generated value as an environment variable when starting:
+Inject it as an environment variable when starting:
 
 ```sh
 JWT_SECRET=YOUR_JWT_SECRET tapflow start

@@ -4,6 +4,9 @@ vi.mock('fs', () => ({
   default: {
     existsSync: vi.fn().mockReturnValue(false),
     readFileSync: vi.fn(),
+    mkdirSync: vi.fn(),
+    writeFileSync: vi.fn(),
+    chmodSync: vi.fn(),
   },
 }))
 
@@ -72,11 +75,11 @@ describe('relay config validation', () => {
     expect(exitSpy).not.toHaveBeenCalled()
   })
 
-  it('기본 JWT_SECRET 사용 시 경고 로그', async () => {
-    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+  it('JWT_SECRET 미설정 시 per-install 시크릿을 자동 생성한다 (공개 dev 기본값 미사용)', async () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => {})
     const { jwtSecret } = await import('../lib/config.js')
-    expect(jwtSecret).toContain('tapflow-dev-secret')
-    expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('dev default'))
+    expect(jwtSecret).not.toContain('tapflow-dev-secret')
+    expect(jwtSecret.length).toBeGreaterThanOrEqual(32)
   })
 
   it('config 파일에 jwtSecret 잔존 시 deprecation 경고', async () => {

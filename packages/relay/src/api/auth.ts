@@ -3,6 +3,21 @@ import crypto from 'crypto'
 import { getDb } from '../db.js'
 import { signJwt, requireAuth } from '../middleware/auth.js'
 import { json, readJson } from '../router.js'
+import { config } from '../lib/config.js'
+import { resolveClientAddress } from '../lib/clientAddress.js'
+import { createRateLimiter, type RateLimiter } from '../middleware/rateLimit.js'
+
+function resolveClient(req: http.IncomingMessage, trustedProxies: string[]) {
+  const xff = req.headers['x-forwarded-for']
+  return resolveClientAddress({
+    socketAddr: req.socket.remoteAddress ?? '',
+    forwardedFor: Array.isArray(xff) ? xff[0] : xff,
+    trustedProxies,
+  })
+}
+
+// 로그인 무차별 대입 방어: IP+계정 단위로 실패를 세고 지수 백오프로 잠근다.
+const loginLimiter = createRateLimiter()
 
 function hashPassword(password: string, salt: string): string {
   return crypto.pbkdf2Sync(password, salt, 100_000, 64, 'sha512').toString('hex')
@@ -16,15 +31,30 @@ export function makePasswordHash(password: string): string {
 
 export function verifyPassword(password: string, stored: string): boolean {
   const [salt, hash] = stored.split(':')
-  return crypto.timingSafeEqual(
-    Buffer.from(hashPassword(password, salt), 'hex'),
-    Buffer.from(hash, 'hex')
-  )
+  if (!salt || !hash) return false
+  const computed = Buffer.from(hashPassword(password, salt), 'hex')
+  const expected = Buffer.from(hash, 'hex')
+  // 저장 해시 포맷 손상 시 길이 불일치로 timingSafeEqual이 RangeError → 안전 실패로 처리.
+  if (computed.length !== expected.length) return false
+  return crypto.timingSafeEqual(computed, expected)
 }
 
-export async function handleLogin(req: http.IncomingMessage, res: http.ServerResponse): Promise<void> {
+export async function handleLogin(
+  req: http.IncomingMessage,
+  res: http.ServerResponse,
+  trustedProxies: string[] = config.local.trustedProxies,
+  limiter: RateLimiter = loginLimiter,
+): Promise<void> {
   const body = await readJson<{ email: string; password: string }>(req)
   if (!body.email || !body.password) return json(res, 400, { error: 'email and password required' })
+
+  const key = `${resolveClient(req, trustedProxies).addr}|${body.email.toLowerCase()}`
+  const gate = limiter.check(key)
+  if (!gate.allowed) {
+    res.writeHead(429, { 'Content-Type': 'application/json', 'Retry-After': String(Math.ceil(gate.retryAfterMs / 1000)) })
+    res.end(JSON.stringify({ error: 'Too many attempts. Try again later.' }))
+    return
+  }
 
   const db = getDb()
   const user = db.prepare(
@@ -32,8 +62,10 @@ export async function handleLogin(req: http.IncomingMessage, res: http.ServerRes
   ).get(body.email) as { id: number; email: string; role: string; password_hash: string | null } | undefined
 
   if (!user || !user.password_hash || !verifyPassword(body.password, user.password_hash)) {
+    limiter.recordFailure(key)
     return json(res, 401, { error: 'Invalid credentials' })
   }
+  limiter.reset(key)
 
   const token = signJwt({ userId: user.id, email: user.email, role: user.role })
   const cookie = `tapflow_token=${token}; HttpOnly; Path=/; SameSite=Lax; Max-Age=${7 * 24 * 3600}`
@@ -85,7 +117,13 @@ export function handleAuthStatus(_req: http.IncomingMessage, res: http.ServerRes
   json(res, 200, { initialized: n > 0 })
 }
 
-export async function handleInit(req: http.IncomingMessage, res: http.ServerResponse): Promise<void> {
+export async function handleInit(req: http.IncomingMessage, res: http.ServerResponse, trustedProxies: string[] = config.local.trustedProxies): Promise<void> {
+  // 무인증 부트스트랩(`auth/init`)은 노출 인스턴스에서 최초 부팅~소유자 설정 사이 선점당할 수 있다.
+  // localhost 출처만 허용 → 원격 선점 차단. 헤드리스 서버는 SSH로 들어가 그 서버에서 admin init 실행.
+  if (!resolveClient(req, trustedProxies).isLocal) {
+    return json(res, 403, { error: 'Initialization is only allowed from localhost. Run `tapflow admin init` on the relay host.' })
+  }
+
   const db = getDb()
   const { n } = db.prepare('SELECT COUNT(*) as n FROM users').get() as { n: number }
   if (n > 0) return json(res, 403, { error: 'Already initialized' })
