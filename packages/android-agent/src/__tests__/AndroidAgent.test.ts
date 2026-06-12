@@ -1122,6 +1122,8 @@ describe('connect — error paths', () => {
       run: (url: string) => Promise<T>,
     ): Promise<T> {
       const wss = new WebSocketServer({ port: 0 })
+      // 느린 러너에서 address()가 null일 수 있으므로 listening 이후 포트를 읽는다
+      await new Promise<void>((r) => wss.once('listening', r))
       const wssPort = (wss.address() as { port: number }).port
       wss.on('connection', (sock, req) => onConnection(sock as unknown as WebSocket, req.headers.authorization))
       try {
@@ -1187,29 +1189,51 @@ describe('connect — error paths', () => {
 
   // #271 — 핸드셰이크 견고성 (IOSAgent.test.ts와 짝)
   describe('handshake robustness (#271)', () => {
-    it('등록 전 1008 close → code/reason을 담아 reject한다 (무한 대기 없음)', async () => {
+    // listening 이후 포트를 읽어 느린 러너의 null address()를 피한다 (CodeRabbit #272 ③)
+    async function withServer(
+      onConnection: (sock: WebSocket) => void,
+      run: (url: string) => Promise<void>,
+    ): Promise<void> {
       const wss = new WebSocketServer({ port: 0 })
+      await new Promise<void>((r) => wss.once('listening', r))
       const wssPort = (wss.address() as { port: number }).port
-      wss.on('connection', (sock) => sock.close(1008, 'Unauthorized: agents need a PAT'))
+      wss.on('connection', (sock) => onConnection(sock as unknown as WebSocket))
       try {
-        const agent = new AndroidAgent({}, mockAdb())
-        await expect(agent.connect(`ws://127.0.0.1:${wssPort}`))
-          .rejects.toThrow(/code=1008.*Unauthorized: agents need a PAT/)
+        await run(`ws://127.0.0.1:${wssPort}`)
       } finally {
         await new Promise<void>((r) => wss.close(() => r()))
       }
+    }
+
+    it('등록 전 1008 close → code/reason을 담아 reject한다 (무한 대기 없음)', async () => {
+      await withServer(
+        (sock) => sock.close(1008, 'Unauthorized: agents need a PAT'),
+        async (url) => {
+          const agent = new AndroidAgent({}, mockAdb())
+          await expect(agent.connect(url)).rejects.toThrow(/code=1008.*Unauthorized: agents need a PAT/)
+        },
+      )
     })
 
     it('agent:registered 응답이 없으면 handshakeTimeoutMs 후 reject한다', async () => {
-      const wss = new WebSocketServer({ port: 0 }) // 업그레이드만 수락, 무응답
-      const wssPort = (wss.address() as { port: number }).port
-      try {
-        const agent = new AndroidAgent({ handshakeTimeoutMs: 150 }, mockAdb())
-        await expect(agent.connect(`ws://127.0.0.1:${wssPort}`))
-          .rejects.toThrow(/timed out after 150ms/)
-      } finally {
-        await new Promise<void>((r) => wss.close(() => r()))
-      }
+      await withServer(
+        () => { /* 업그레이드만 수락, 무응답 */ },
+        async (url) => {
+          const agent = new AndroidAgent({ handshakeTimeoutMs: 150 }, mockAdb())
+          await expect(agent.connect(url)).rejects.toThrow(/timed out after 150ms/)
+        },
+      )
+    })
+
+    // CodeRabbit #272 ② — malformed 첫 프레임이 핸들러에서 throw되어 connect()가 행되지 않는다
+    it('등록 전 malformed(비-JSON) 프레임 → 행 없이 reject한다', async () => {
+      await withServer(
+        (sock) => sock.on('message', () => sock.send('not-json{{{')),
+        async (url) => {
+          const agent = new AndroidAgent({ handshakeTimeoutMs: 1000 }, mockAdb())
+          await expect(agent.connect(url)).rejects.toThrow(/malformed|handshake/i)
+        },
+      )
     })
   })
 })

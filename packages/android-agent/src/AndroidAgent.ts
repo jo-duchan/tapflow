@@ -241,7 +241,16 @@ export class AndroidAgent implements DeviceAgent {
       })
 
       ws.once('message', (data) => {
-        const msg = JSON.parse(data.toString())
+        let msg: { type?: string; registeredSessions?: unknown }
+        try {
+          msg = JSON.parse(data.toString())
+        } catch {
+          // malformed 첫 프레임이 핸들러 밖으로 throw되면 connect()가 reject 없이 행된다 (#272)
+          clearTimeout(timer)
+          ws.terminate()
+          reject(new PlatformError('relay sent a malformed handshake response'))
+          return
+        }
         if (msg.type === 'agent:registered') {
           registered = true
           clearTimeout(timer)

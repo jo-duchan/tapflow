@@ -79,6 +79,9 @@ const AGENT_MSG_TYPES = new Set([
   'session:chrome', 'session:deviceInfo',
   'app:install-done', 'app:install-error', 'app:launch-done', 'app:launch-error',
   'open-url:done', 'open-url:error', 'keyboard:toggled',
+  // stream:register binds a session's stream socket — agent-only, or a browser
+  // (view PAT / cookie) could hijack an existing session's video feed.
+  'stream:register',
 ])
 
 export class RelayServer {

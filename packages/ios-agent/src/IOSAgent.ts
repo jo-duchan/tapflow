@@ -92,6 +92,12 @@ export class IOSAgent implements DeviceAgent {
   private _reconnectAttempt = 0
 
   constructor(options: IOSAgentOptions = {}, simctl?: SimctlWrapper) {
+    // IOSAgent는 직접 export되므로 AgentRegistry.canRun() 가드를 우회해 인스턴스화될 수 있다.
+    // 비-macOS에서는 simctl/캡처가 불명확한 에러로 늦게 실패하므로 여기서 일찍 막는다.
+    // simctl 주입은 테스트 경로이므로(모킹) 가드를 건너뛴다.
+    if (!simctl && process.platform !== 'darwin') {
+      throw new PlatformError('IOSAgent requires macOS (xcrun simctl is macOS-only)')
+    }
     this.simctl = simctl ?? new SimctlWrapper()
     this.fps = options.fps ?? 30
     this.intervalMs = options.intervalMs
@@ -145,7 +151,16 @@ export class IOSAgent implements DeviceAgent {
       })
 
       ws.once('message', (data) => {
-        const msg = JSON.parse(data.toString())
+        let msg: { type?: string; registeredSessions?: unknown }
+        try {
+          msg = JSON.parse(data.toString())
+        } catch {
+          // malformed 첫 프레임이 핸들러 밖으로 throw되면 connect()가 reject 없이 행된다 (#272)
+          clearTimeout(timer)
+          ws.terminate()
+          reject(new PlatformError('relay sent a malformed handshake response'))
+          return
+        }
         if (msg.type === 'agent:registered') {
           registered = true
           clearTimeout(timer)

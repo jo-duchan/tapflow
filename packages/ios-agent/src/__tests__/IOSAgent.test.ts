@@ -118,6 +118,21 @@ describe('IOSAgent', () => {
     await relay.stop()
   })
 
+  // CodeRabbit #272 ⑥ — 직접 인스턴스화 시 비-macOS에서 일찍 명확히 실패한다 (AGENTS.md 규칙)
+  describe('platform guard', () => {
+    it('비-macOS + simctl 미주입(실제 런타임 경로)은 throw', () => {
+      const spy = vi.spyOn(process, 'platform', 'get').mockReturnValue('linux')
+      expect(() => new IOSAgent()).toThrow(/macOS/)
+      spy.mockRestore()
+    })
+
+    it('비-macOS여도 simctl 주입(테스트/모킹 경로)은 허용', () => {
+      const spy = vi.spyOn(process, 'platform', 'get').mockReturnValue('linux')
+      expect(() => new IOSAgent({}, mockSimctl())).not.toThrow()
+      spy.mockRestore()
+    })
+  })
+
   describe('DeviceAgent delegation', () => {
     it('listDevices delegates to SimctlWrapper', async () => {
       const simctl = mockSimctl()
@@ -795,19 +810,25 @@ describe('IOSAgent', () => {
       const remoteSpy = vi
         .spyOn(relay as unknown as { remoteAddressOf: () => string }, 'remoteAddressOf')
         .mockReturnValue('192.168.0.77')
-      const token = `tflw_pat_${crypto.randomBytes(16).toString('hex')}`
       const db = getDb()
       db.prepare(
         "INSERT OR IGNORE INTO users (id, email, display_name, role, password_hash) VALUES (9101, 'agent-e2e@test.local', 'E2E', 'Admin', 'x')",
       ).run()
-      db.prepare(
-        'INSERT INTO personal_access_tokens (user_id, name, token_hash, scope, expires_at) VALUES (9101, ?, ?, ?, NULL)',
-      ).run(`e2e-${token.slice(-8)}`, crypto.createHash('sha256').update(token).digest('hex'), 'agent')
+      const insertPat = (scope: string): string => {
+        const raw = `tflw_pat_${crypto.randomBytes(16).toString('hex')}`
+        db.prepare(
+          'INSERT INTO personal_access_tokens (user_id, name, token_hash, scope, expires_at) VALUES (9101, ?, ?, ?, NULL)',
+        ).run(`e2e-${raw.slice(-8)}`, crypto.createHash('sha256').update(raw).digest('hex'), scope)
+        return raw
+      }
+      // agent 소켓은 agent 스코프, browser 소켓은 view 스코프 — 실제 역할에 맞는 자격을 쓴다
+      const token = insertPat('agent')
+      const browserToken = insertPat('view')
 
       const agent = new IOSAgent({ token }, mockSimctl(true))
       await agent.connect(`ws://127.0.0.1:${port}`)
 
-      const browser = new WebSocket(`ws://127.0.0.1:${port}`, { headers: { authorization: `Bearer ${token}` } })
+      const browser = new WebSocket(`ws://127.0.0.1:${port}`, { headers: { authorization: `Bearer ${browserToken}` } })
       await waitForOpen(browser)
       browser.send(JSON.stringify({ type: 'session:start', sessionId: agent.sessionId }))
       await waitForType(browser, 'session:joined')
@@ -827,6 +848,8 @@ describe('IOSAgent', () => {
       run: (url: string) => Promise<T>,
     ): Promise<T> {
       const wss = new WebSocketServer({ port: 0 })
+      // 느린 러너에서 address()가 null일 수 있으므로 listening 이후 포트를 읽는다
+      await new Promise<void>((r) => wss.once('listening', r))
       const wssPort = (wss.address() as { port: number }).port
       wss.on('connection', onConnection)
       try {
@@ -852,6 +875,17 @@ describe('IOSAgent', () => {
         async (url) => {
           const agent = new IOSAgent({ handshakeTimeoutMs: 150 }, mockSimctl())
           await expect(agent.connect(url)).rejects.toThrow(/timed out after 150ms/)
+        },
+      )
+    })
+
+    // CodeRabbit #272 ② — malformed 첫 프레임이 핸들러에서 throw되어 connect()가 행되지 않는다
+    it('등록 전 malformed(비-JSON) 프레임 → 행 없이 reject한다', async () => {
+      await withRawServer(
+        (sock) => sock.on('message', () => sock.send('not-json{{{')),
+        async (url) => {
+          const agent = new IOSAgent({ handshakeTimeoutMs: 1000 }, mockSimctl())
+          await expect(agent.connect(url)).rejects.toThrow(/malformed|handshake/i)
         },
       )
     })

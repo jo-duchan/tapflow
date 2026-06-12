@@ -1107,6 +1107,29 @@ describe('RelayServer', () => {
       const code = await closePromise
       expect(code).toBe(1008)
     })
+
+    // CodeRabbit #272 ① — browser 소켓이 stream:register로 세션의 streamSocket을 탈취하지 못한다
+    it('browser socket sending stream:register is disconnected (stream hijack guard)', async () => {
+      // 정당한 agent + 세션을 만들어 탈취 대상 sessionId를 확보
+      const agent = new WebSocket(`ws://localhost:${port}`)
+      await waitForOpen(agent)
+      agent.send(JSON.stringify({ type: 'agent:register', devices: [{ id: 'devA', name: 'iPhone A', platform: 'ios', status: 'shutdown' }] }))
+      const { registeredSessions } = await waitForMessage(agent)
+      const sessionId = registeredSessions![0].sessionId
+
+      // browser 역할을 확정시킨 뒤 stream:register 시도
+      const ws = new WebSocket(`ws://localhost:${port}`)
+      await waitForOpen(ws)
+      ws.send(JSON.stringify({ type: 'session:start', sessionId: 'nonexistent' }))
+      await waitForMessage(ws) // error → browser role assigned
+
+      const closePromise = new Promise<number>((resolve) =>
+        ws.once('close', (code) => resolve(code))
+      )
+      ws.send(JSON.stringify({ type: 'stream:register', sessionId }))
+      expect(await closePromise).toBe(1008)
+      agent.close()
+    })
   })
 
   // #271 — 원격(비-루프백) 에이전트는 agent 스코프 PAT로 인증한다.
