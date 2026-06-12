@@ -4,7 +4,7 @@ The relay is a lightweight Node.js server. It only routes WebSocket traffic and 
 
 ::: info The relay URL has two uses
 - **Dashboard** — open in a browser: `http://localhost:4000` (local) or `http://192.168.x.x:4000` (team on same LAN)
-- **Agent connection** — when the relay is on a separate Mac: `tapflow agent start --relay ws://192.168.x.x:4000`. The agent→relay path always uses LAN `ws://`.
+- **Agent connection** — when the relay is on a separate Mac: `tapflow agent start --relay ws://192.168.x.x:4000`. The agent→relay path always uses LAN `ws://`, and remote agents authenticate with an `agent`-scope token ([Remote relay authentication](/guide/agent#remote-relay-authentication)).
 :::
 
 ## Deployment scenarios
@@ -34,8 +34,10 @@ tapflow relay start
 **On each agent Mac:**
 
 ```sh
-tapflow agent start --relay ws://192.168.x.x:4000
+tapflow agent start --relay ws://192.168.x.x:4000 --token tflw_pat_xxxxxxxx
 ```
+
+The relay runs on a different machine than the agents, so an `agent`-scope token is required. See [Remote relay authentication](/guide/agent#remote-relay-authentication) for how to create one.
 
 ## Deployment configuration
 
@@ -77,6 +79,8 @@ Teammates connect to `http://MACHINE_LOCAL_IP:4000` in their browser. The port m
 ## External access
 
 Keep the relay and agents on the same internal network at all times. External access works by opening an outbound tunnel from the relay Mac to a public endpoint — browsers connect to the public URL, which forwards traffic back to the relay.
+
+The relay requires authentication on every connection that does not come from localhost. Browsers authenticate by signing in; agents authenticate with an `agent`-scope token — the agent side is covered in [Remote relay authentication](/guide/agent#remote-relay-authentication).
 
 tapflow supports two tunnel providers:
 

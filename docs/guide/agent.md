@@ -30,6 +30,8 @@ The agent streams video frames to the relay continuously, so it must sit on the 
 
 No authentication is needed when the agent connects to a relay on the same machine (`localhost`). When the relay runs on a different machine, it only accepts agents that present a token with the `agent` scope. This protects your sessions from an arbitrary device on the same network impersonating an agent and feeding screens into a test session.
 
+The relay requires authentication on every connection that does not come from localhost — this section covers the agent side. For how browsers reach the relay from outside the office (tunnels), see [External access in Self-Hosting the Relay](/guide/self-hosting#external-access).
+
 ### Create a token
 
 In the dashboard, go to **Settings → Tokens → New token** and set the Type to **Agent**. Only accounts with the Admin role can create `agent`-scope tokens. The success screen shows a ready-to-run agent command — copy it and run it on the agent machine.

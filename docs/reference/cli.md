@@ -223,7 +223,7 @@ See [Self-Hosting](/guide/self-hosting) for full setup instructions.
 Start the agent only and connect it to a relay. Does not start a local relay.
 
 ```sh
-tapflow agent start --relay ws://192.168.x.x:4000
+tapflow agent start --relay ws://192.168.x.x:4000 --token tflw_pat_xxxxxxxx
 ```
 
 | Option | Default | Description |

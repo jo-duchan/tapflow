@@ -16,11 +16,11 @@ See [Introduction — How it works](/guide/introduction#how-it-works) for a diag
 When running `tapflow agent start` on another Mac, `ws://localhost:4000` resolves to that Mac's own localhost — not the relay machine. Use the relay's local IP address (`ws://192.168.x.x:4000`). Agents must stay on the same internal network as the relay — see [Self-Hosting the Relay](/guide/self-hosting) for network requirements.
 :::
 
-On the new Mac, install tapflow and point it at your existing relay:
+On the new Mac, install tapflow and point it at your existing relay. The relay runs on a different machine, so an `agent`-scope token is required ([Remote relay authentication](/guide/agent#remote-relay-authentication)):
 
 ```sh
 npm install -g tapflow
-tapflow agent start --relay ws://192.168.x.x:4000
+tapflow agent start --relay ws://192.168.x.x:4000 --token tflw_pat_xxxxxxxx
 ```
 
 That's it. The new Mac registers itself and its devices become visible in the dashboard immediately.
