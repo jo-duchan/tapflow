@@ -41,10 +41,13 @@ describe('loadOrCreatePersistedSecret', () => {
     expect(fs.existsSync(path.join(nested, 'jwt-secret'))).toBe(true)
   })
 
-  it('시크릿 파일은 소유자 전용(0600) 권한으로 저장된다', () => {
+  it('시크릿 파일은 소유자 전용(0600) 권한으로 저장된다 (POSIX 한정)', () => {
     loadOrCreatePersistedSecret(dir)
-    const mode = fs.statSync(path.join(dir, 'jwt-secret')).mode & 0o777
-    expect(mode).toBe(0o600)
+    // Windows(NTFS)는 POSIX 권한이 없고 chmodSync도 best-effort라 단언을 POSIX로 게이트한다.
+    if (process.platform !== 'win32') {
+      const mode = fs.statSync(path.join(dir, 'jwt-secret')).mode & 0o777
+      expect(mode).toBe(0o600)
+    }
   })
 
   it('손상된(너무 짧은) 시크릿 파일은 무시하고 새로 생성한다', () => {
