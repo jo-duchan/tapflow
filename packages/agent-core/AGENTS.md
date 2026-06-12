@@ -12,7 +12,7 @@ The sole contract that platform implementations (ios-agent, android-agent) depen
 ## HOW
 
 - The interface contains only platform-neutral methods: `listDevices`, `boot`, `shutdown`, `installApp`, `launchApp`, `screenshot`, `stream`, `touchStart`, `touchMove`, `touchEnd`.
-- `AgentRegistry` exposes exactly two methods: `register(platform, AgentClass)` / `get(platform)`.
+- `AgentRegistry`: platforms self-register via `register(platform, AgentClass, opts?)` (with a `connect` hook and optional `canRun` gate); the CLI drives them through `available()` / `connect(platform, relayUrl, opts)`. `connect`'s `AgentConnectOpts` carries `deviceFilter` and an optional `token` (opaque credential the agent forwards to a remote relay as `Authorization: Bearer`).
 - Interface changes must pass all implementation package tests before merging.
 
 ## HOW NOT
