@@ -9,6 +9,7 @@ import type { RelayMessage } from './types.js'
 import { Router, json } from './router.js'
 import { requireViewAuth, requireAuth, getAuth, verifyPat } from './middleware/auth.js'
 import { classifyConnection } from './lib/connectionAuth.js'
+import { resolveClientAddress } from './lib/clientAddress.js'
 import { pickLanAddress } from './lib/lanAddress.js'
 import { getDb } from './db.js'
 import { handleLogin, handleLogout, handleMe, handleChangePassword, handleInit, handleAuthStatus } from './api/auth.js'
@@ -109,6 +110,8 @@ export class RelayServer {
   private wsExternal = new Map<WebSocket, boolean>()
   private readonly backpressureBytes: number
   private readonly screenshotTimeoutMs: number
+  // One-shot warning when XFF arrives on a loopback socket but TAPFLOW_TRUSTED_PROXIES is unset.
+  private warnedProxyMisconfig = false
   private pendingScreenshots = new Map<string, {
     sessionId: string
     resolve: (buf: Buffer, format: 'png' | 'jpeg') => void
@@ -116,7 +119,7 @@ export class RelayServer {
     timer: ReturnType<typeof setTimeout>
   }>()
 
-  constructor(private readonly options: { port: number; publicDir?: string; uploadsDir?: string; idleTimeoutMs?: number; wsBackpressureBytes?: number; screenshotTimeoutMs?: number }) {
+  constructor(private readonly options: { port: number; publicDir?: string; uploadsDir?: string; idleTimeoutMs?: number; wsBackpressureBytes?: number; screenshotTimeoutMs?: number; trustedProxies?: string[] }) {
     this.backpressureBytes = options.wsBackpressureBytes ?? DEFAULT_BACKPRESSURE_BYTES
     this.screenshotTimeoutMs = options.screenshotTimeoutMs ?? 10_000
     this.sessions = new SessionManager({ idleTimeoutMs: options.idleTimeoutMs })
@@ -138,9 +141,9 @@ export class RelayServer {
 
     // auth
     this.router.get('/api/v1/auth/status', handleAuthStatus)
-    this.router.post('/api/v1/auth/init', handleInit)
+    this.router.post('/api/v1/auth/init', (req, res) => handleInit(req, res, this.options.trustedProxies ?? []))
     this.router.get('/api/v1/auth/me', handleMe)
-    this.router.post('/api/v1/auth/login', handleLogin)
+    this.router.post('/api/v1/auth/login', (req, res) => handleLogin(req, res, this.options.trustedProxies ?? []))
     this.router.post('/api/v1/auth/logout', handleLogout)
     this.router.post('/api/v1/auth/change-password', handleChangePassword)
     this.router.get('/api/v1/auth/reset-password/verify', handleVerifyReset)
@@ -292,9 +295,30 @@ export class RelayServer {
     return request.socket.remoteAddress ?? ''
   }
 
+  private warnProxyMisconfigOnce(socketAddr: string, forwardedFor: string | undefined): void {
+    if (this.warnedProxyMisconfig) return
+    if ((this.options.trustedProxies?.length ?? 0) > 0 || !forwardedFor) return
+    const a = socketAddr.replace(/^::ffff:/, '')
+    if (a === '::1' || a.startsWith('127.')) {
+      logger.warn(
+        'Received X-Forwarded-For from a loopback connection but TAPFLOW_TRUSTED_PROXIES is unset. ' +
+        'If the relay runs behind a same-host reverse proxy, set TAPFLOW_TRUSTED_PROXIES so the real ' +
+        'client IP is used — otherwise every proxied client is treated as localhost (unauthenticated).'
+      )
+      this.warnedProxyMisconfig = true
+    }
+  }
+
   private handleConnection(ws: WebSocket, request: http.IncomingMessage): void {
-    const addr = this.remoteAddressOf(request)
-    const isLocal = addr === '127.0.0.1' || addr === '::1' || addr === '::ffff:127.0.0.1'
+    const socketAddr = this.remoteAddressOf(request)
+    const xff = request.headers['x-forwarded-for']
+    const forwardedFor = Array.isArray(xff) ? xff[0] : xff
+    this.warnProxyMisconfigOnce(socketAddr, forwardedFor)
+    const { addr, isLocal } = resolveClientAddress({
+      socketAddr,
+      forwardedFor,
+      trustedProxies: this.options.trustedProxies ?? [],
+    })
 
     const hasCookieAuth = getAuth(request) !== null
     // DB lookup — only when the connection can't be classified without it (remote, no cookie).

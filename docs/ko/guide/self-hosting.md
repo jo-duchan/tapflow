@@ -43,11 +43,9 @@ tapflow agent start --relay ws://192.168.x.x:4000 --token tflw_pat_xxxxxxxx
 
 ### JWT_SECRET
 
-::: warning 서버 배포 시 반드시 교체하세요
-기본값(`tapflow-dev-secret-change-in-production`)이 소스코드에 공개되어 있습니다. 이 값을 그대로 사용하면 누구나 유효한 토큰을 위조할 수 있습니다.
-:::
+단일 릴레이라면 `JWT_SECRET`을 따로 설정하지 않아도 됩니다. 설정하지 않으면 릴레이가 최초 부팅 시 강력한 per-install 시크릿을 생성해 데이터 디렉토리(`jwt-secret`, 소유자 전용)에 저장합니다.
 
-아래 명령으로 안전한 랜덤 시크릿을 생성합니다:
+고정 키가 필요한 경우, 예를 들어 여러 릴레이 인스턴스가 하나의 시크릿을 공유해야 한다면 명시적으로 설정하세요. 안전한 랜덤 값을 생성합니다:
 
 ```sh
 openssl rand -hex 32

@@ -1,11 +1,11 @@
 import fs from 'fs'
 import path from 'path'
+import crypto from 'crypto'
 import { z } from 'zod'
 import { createLogger } from '@tapflowio/agent-core'
+import { parseTrustedProxies } from './clientAddress.js'
 
 const logger = createLogger('relay:config')
-
-const DEV_DEFAULT_SECRET = 'tapflow-dev-secret-change-in-production'
 
 const tunnelSshSchema = z.object({
   host: z.string().min(1),
@@ -32,6 +32,7 @@ const configSchema = z.object({
     port: z.number().int().min(1).max(65535),
     dataDir: z.string().min(1),
     wsBackpressureBytes: z.number().int().min(1),
+    trustedProxies: z.array(z.string()),
   }),
   relay: z.object({
     url: z.string().nullable(),
@@ -56,6 +57,7 @@ const DEFAULTS = {
     port: 4000,
     dataDir: '.tapflow-data',
     wsBackpressureBytes: 1_048_576,
+    trustedProxies: [],
   },
   relay: {
     url: null,
@@ -96,6 +98,7 @@ function load(): TapflowConfig {
       port: file.local?.port ?? DEFAULTS.local.port,
       dataDir: resolveDataDir(file.local?.dataDir ?? DEFAULTS.local.dataDir),
       wsBackpressureBytes: DEFAULTS.local.wsBackpressureBytes,
+      trustedProxies: parseTrustedProxies(process.env.TAPFLOW_TRUSTED_PROXIES),
     },
     relay: {
       url: file.relay?.url || null,
@@ -153,6 +156,28 @@ function load(): TapflowConfig {
   return result.data
 }
 
+// JWT_SECRET 미설정 시: 공개된 공유 기본값 대신 per-install 시크릿을 생성·영속화한다.
+// dataDir에 0600으로 저장하고 재시작 시 재사용 → 설정 없이도 위조 불가, 온보딩 friction 없음.
+export function loadOrCreatePersistedSecret(dataDir: string): string {
+  const secretPath = path.join(dataDir, 'jwt-secret')
+  try {
+    const existing = fs.readFileSync(secretPath, 'utf-8').trim()
+    if (existing.length >= 32) return existing
+  } catch {
+    // not yet created
+  }
+  const secret = crypto.randomBytes(48).toString('base64url')
+  fs.mkdirSync(dataDir, { recursive: true })
+  fs.writeFileSync(secretPath, secret, { mode: 0o600 })
+  try {
+    fs.chmodSync(secretPath, 0o600)
+  } catch {
+    // best-effort on platforms without POSIX permissions
+  }
+  logger.info(`Generated a per-install JWT secret at ${secretPath} (set JWT_SECRET to override)`)
+  return secret
+}
+
 function loadJwtSecret(): string {
   if (process.env.JWT_SECRET !== undefined) {
     if (process.env.JWT_SECRET.length < 32) {
@@ -161,8 +186,7 @@ function loadJwtSecret(): string {
     }
     return process.env.JWT_SECRET
   }
-  logger.warn('JWT_SECRET is using the dev default — set a strong secret in production')
-  return DEV_DEFAULT_SECRET
+  return loadOrCreatePersistedSecret(config.local.dataDir)
 }
 
 export const config = load()
