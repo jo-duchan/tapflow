@@ -170,7 +170,8 @@ tapflow is self-hosted by design — build files, device streams, and session re
 | Third-party simulator cloud | Not required |
 
 - **LAN-first** — the agent ↔ relay leg is internal traffic; the device stream never transits a third party.
-- **PAT + roles** — Personal Access Tokens carry scopes (e.g. `builds:write` for CI uploads), and team roles (Admin / Developer / QA / Viewer) govern dashboard access.
+- **Authenticated by default off-host** — the relay accepts unauthenticated connections only from its own machine (`localhost`). Browsers reaching it from elsewhere sign in; agents on another machine present an `agent`-scope token.
+- **PAT + roles** — Personal Access Tokens carry scopes (`builds:write` for CI uploads, `agent` for remote agents), and team roles (Admin / Developer / QA / Viewer) govern dashboard access.
 
 Found a vulnerability? See [SECURITY.md](SECURITY.md). For the full model, read [Security & Privacy](https://www.tapflow.dev/guide/security).
 
@@ -200,9 +201,11 @@ pm2 save && pm2 startup
 **Each Mac agent:**
 
 ```sh
-tapflow agent start --relay wss://your-relay-url
+tapflow agent start --relay wss://your-relay-url --token <agent-token>
 ```
 
+> A relay on a different machine accepts an agent only with an `agent`-scope token — create one in **Settings → Tokens** (Admin only). Agents on the relay's own machine (`tapflow start`) need no token. See [Remote relay authentication](https://www.tapflow.dev/guide/agent#remote-relay-authentication).
+>
 > For nginx / Caddy reverse proxy setup and external access, see [Self-Hosting the Relay](https://www.tapflow.dev/guide/self-hosting).
 
 ## CLI Reference
@@ -211,7 +214,7 @@ tapflow agent start --relay wss://your-relay-url
 |---------|-------------|
 | `tapflow start` | Start relay + agent together (local mode) |
 | `tapflow relay start` | Start relay only |
-| `tapflow agent start --relay <url>` | Start agent and connect to a relay |
+| `tapflow agent start --relay <url> [--token <pat>]` | Start agent and connect to a relay (remote relays need an `agent`-scope token) |
 | `tapflow init` | Scaffold `tapflow.config.json` |
 | `tapflow admin init` | Create the first admin account (CLI fallback) |
 | `tapflow doctor [platform]` | Diagnose prerequisites (Node, iOS, Android) |

@@ -15,7 +15,7 @@ Commands are registered in `src/index.ts`:
 | `admin init [--relay]` | Create the first admin account on the relay (CLI fallback for headless servers; web `/setup` is the default path) |
 | `start [--device, --platform]` | Local-only shortcut — starts relay + agent together (same Mac) |
 | `relay start [--port, --tunnel]` | Start relay only (for Docker/Linux server) |
-| `agent start [--relay, --device, --platform]` | Start agent only — connects to an existing relay |
+| `agent start [--relay, --device, --platform, --token]` | Start agent only — connects to an existing relay. `--token` (or `TAPFLOW_AGENT_TOKEN`) carries an `agent`-scope PAT, required when the relay is on a different machine; flag wins over env. |
 | `doctor [platform]` | Check system prerequisites (`ios` \| `android`; omit for all): iOS Xcode/simctl/Simulator, Android SDK/adb/AVD |
 | `setup [platform]` | Guided environment setup (`ios` \| `android`; omit to auto-detect): installs/repairs JDK, Android SDK (self-contained at `~/Library/Android/sdk`), simulator runtime / AVDs |
 | `devices` | List available simulators and AVDs |

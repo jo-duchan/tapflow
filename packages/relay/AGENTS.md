@@ -26,6 +26,7 @@ iOS build format: `.app.zip` (simulator builds). `.ipa` uploads return 400.
 ## HOW
 
 - The agent connects to the relay via outbound WebSocket first (the key to NAT traversal).
+- **Auth boundary**: connections from `localhost` are unauthenticated; every other origin must authenticate — browsers by JWT cookie / PAT, agents by a PAT with the `agent` scope (`Authorization: Bearer`). The role (browser / agent / stream) is decided in `classifyConnection` (`lib/connectionAuth.ts`); a `browser`-role socket that sends an agent-only message (`AGENT_MSG_TYPES`, which includes `stream:register`) is closed with 1008.
 - JSON messages and binary frames share the same WebSocket connection, branched by the `isBinary` flag.
 - Control message protocol: `input:touch:*`, `input:pinch:*`, `input:button`, `input:key`, `input:type`, `input:rotate`, `input:keyboard:toggle`, `device:boot`, `device:shutdown`, `session:start`, `session:end`.
 - JWTs are issued based on team invite links.
