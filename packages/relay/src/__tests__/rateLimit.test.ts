@@ -72,4 +72,15 @@ describe('createRateLimiter', () => {
     expect(rl.check('a', 0).allowed).toBe(true)  // 폐기됨
     expect(rl.check('e', 0).allowed).toBe(false) // 최신, 잠김 유지
   })
+
+  it('활발히 갱신되는 키는 eviction에서 보존 (LRU — 정크로 잠금 우회 방지)', () => {
+    const rl = createRateLimiter({ maxAttempts: 1, maxEntries: 3, retentionMs: 9_999_999 })
+    rl.recordFailure('victim', 0) // 먼저 삽입되어 잠김
+    rl.recordFailure('junk1', 0)
+    rl.recordFailure('junk2', 0)
+    rl.recordFailure('victim', 0) // 재갱신 → LRU상 맨 뒤로 이동해야 함
+    rl.recordFailure('junk3', 0)  // 상한 초과 → 가장 오래된 junk1부터 밀려남
+    rl.recordFailure('junk4', 0)  // junk2 밀려남
+    expect(rl.check('victim', 0).allowed).toBe(false) // 정크에 밀리지 않고 잠금 유지
+  })
 })

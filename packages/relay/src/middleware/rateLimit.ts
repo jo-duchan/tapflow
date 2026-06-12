@@ -70,6 +70,9 @@ export function createRateLimiter(opts: RateLimiterOptions = {}): RateLimiter {
       a.lockedUntil = now + Math.min(baseDelayMs * 2 ** over, maxDelayMs)
     }
     a.expiresAt = now + retentionMs
+    // delete 후 set으로 갱신된 키를 삽입 순서 맨 뒤로 보낸다(LRU). overflow eviction은 삽입
+    // 순서상 가장 오래된 것부터 폐기하므로, 활발한 키가 정크에 밀려 리셋되는 우회를 막는다.
+    store.delete(key)
     store.set(key, a)
     evictIfNeeded(now)
   }
