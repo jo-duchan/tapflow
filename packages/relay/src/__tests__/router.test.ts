@@ -211,4 +211,32 @@ describe('핸들러 예외 관측성', () => {
     expect(errorSpy).toHaveBeenCalled()
     errorSpy.mockRestore()
   })
+
+  it('경로 파라미터에 섞인 PAT도 마스킹 (전체 로그 라인 redact)', async () => {
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const router = new Router()
+    router.get('/api/:x', () => { throw new Error('boom') })
+    const req = makeReq('GET', '/api/tflw_pat_inpath')
+    const res = makeRes()
+
+    await router.handle(req, res)
+    const logged = errorSpy.mock.calls.flat().map(String).join(' ')
+    expect(logged).not.toContain('tflw_pat_inpath')
+    expect(logged).toContain('tflw_pat_***')
+    errorSpy.mockRestore()
+  })
+
+  it('세션 JWT도 마스킹', async () => {
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const router = new Router()
+    router.get('/x', () => { throw new Error('verify failed: eyJhbGciOiJIUzI1.eyJzdWIiOiIxIn0.s1gnatur3') })
+    const req = makeReq('GET', '/x')
+    const res = makeRes()
+
+    await router.handle(req, res)
+    const logged = errorSpy.mock.calls.flat().map(String).join(' ')
+    expect(logged).not.toContain('eyJhbGciOiJIUzI1.eyJzdWIiOiIxIn0.s1gnatur3')
+    expect(logged).toContain('[jwt]')
+    errorSpy.mockRestore()
+  })
 })

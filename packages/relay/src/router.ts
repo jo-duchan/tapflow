@@ -3,9 +3,12 @@ import { createLogger } from '@tapflowio/agent-core'
 
 const logger = createLogger('relay:router')
 
-// 로그에 PAT가 새지 않도록 마스킹 (에러 메시지/스택에 토큰이 섞여 들어온 경우 대비).
+// 로그에 토큰이 새지 않도록 마스킹: PAT(tflw_pat_…)와 세션 JWT(eyJ….….…).
+// 메시지·스택뿐 아니라 method/url(경로 파라미터에 토큰이 섞인 경우)까지 포함해 로그 라인 전체에 적용한다.
 function redactSecrets(s: string): string {
-  return s.replace(/tflw_pat_[A-Za-z0-9_-]+/g, 'tflw_pat_***')
+  return s
+    .replace(/tflw_pat_[A-Za-z0-9_-]+/g, 'tflw_pat_***')
+    .replace(/eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+/g, '[jwt]')
 }
 
 type Handler = (req: http.IncomingMessage, res: http.ServerResponse, params: Record<string, string>) => void | Promise<void>
@@ -48,7 +51,7 @@ export class Router {
       } catch (err) {
         // 관측성: 스택을 삼키지 말고 기록한다. 단 응답 본문에는 상세를 노출하지 않는다.
         const detail = err instanceof Error ? (err.stack ?? err.message) : String(err)
-        logger.error(`${method} ${url} — handler error: ${redactSecrets(detail)}`)
+        logger.error(redactSecrets(`${method} ${url} — handler error: ${detail}`))
         json(res, 500, { error: 'Internal server error' })
       }
       return true
