@@ -1,7 +1,7 @@
 import fs from 'fs'
 import path from 'path'
 import { z } from 'zod'
-import { RelayServer, initDb, config } from '@tapflowio/relay'
+import { RelayServer, initDb, config, createCertProvider, startCertRenewal } from '@tapflowio/relay'
 import { banner, step, warn } from '../lib/print.js'
 import { startConfiguredTunnel } from '../lib/tunnel-runner.js'
 import type { TunnelPlugin } from '../lib/tunnel.js'
@@ -27,9 +27,23 @@ export async function cmdRelayStart(opts: RelayStartOptions): Promise<void> {
     warn('tapflow.config.json not found — using defaults. Run tapflow init to configure.')
   }
   initDb(path.join(config.local.dataDir, 'tapflow.db'))
-  const server = new RelayServer({ port, uploadsDir: path.join(config.local.dataDir, 'uploads'), wsBackpressureBytes: config.local.wsBackpressureBytes })
+
+  let tls: { cert: string; key: string } | undefined
+  let certProvider: ReturnType<typeof createCertProvider> | null = null
+  if (config.tls) {
+    certProvider = createCertProvider(config.tls, { dataDir: config.local.dataDir })
+    const material = await certProvider.ensureCert()
+    tls = { cert: material.cert, key: material.key }
+  }
+  const httpScheme = tls ? 'https' : 'http'
+  const wsScheme = tls ? 'wss' : 'ws'
+
+  const server = new RelayServer({ port, uploadsDir: path.join(config.local.dataDir, 'uploads'), wsBackpressureBytes: config.local.wsBackpressureBytes, tls })
   await server.start()
-  step(`Relay started on ws://localhost:${port}`)
+  step(`Relay started on ${wsScheme}://localhost:${port}`)
+  if (certProvider) {
+    startCertRenewal(certProvider, { onRenew: (m) => server.updateTlsContext({ cert: m.cert, key: m.key }) })
+  }
 
   const SUPPORTED_PROVIDERS = ['rathole', 'tailscale']
   if (opts.tunnel && !SUPPORTED_PROVIDERS.includes(opts.tunnel)) {
@@ -52,9 +66,9 @@ export async function cmdRelayStart(opts: RelayStartOptions): Promise<void> {
   }
 
   banner('success', 'TAPFLOW RELAY READY', [
-    `Relay  : http://localhost:${port}`,
+    `Relay  : ${httpScheme}://localhost:${port}`,
     ...(publicUrl ? [`Public : ${publicUrl}`] : []),
-    `Connect Mac agents:  tapflow agent start --relay ws://<host>:${port}`,
+    `Connect Mac agents:  tapflow agent start --relay ${wsScheme}://<host>:${port}`,
     'Press Ctrl+C to stop.',
   ])
 
