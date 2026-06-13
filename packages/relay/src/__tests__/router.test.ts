@@ -176,3 +176,39 @@ describe('readJson', () => {
     await expect(readJson(req)).rejects.toThrow(SyntaxError)
   })
 })
+
+// #11 — 라우터가 핸들러 예외 스택을 삼키지 않고 기록 (응답엔 상세 비노출, PAT 마스킹)
+describe('핸들러 예외 관측성', () => {
+  it('핸들러 throw → 500 + 본문엔 상세 없음 + logger.error 기록 + PAT 마스킹', async () => {
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const router = new Router()
+    router.get('/boom', () => { throw new Error('failure leaking tflw_pat_secret123') })
+    const req = makeReq('GET', '/boom')
+    const res = makeRes()
+
+    const handled = await router.handle(req, res)
+    expect(handled).toBe(true)
+    expect(res._written[0]?.status).toBe(500)
+    expect(JSON.parse(res._written[0]?.body)).toEqual({ error: 'Internal server error' })
+
+    expect(errorSpy).toHaveBeenCalled()
+    const logged = errorSpy.mock.calls.flat().map(String).join(' ')
+    expect(logged).toContain('GET /boom')
+    expect(logged).not.toContain('tflw_pat_secret123') // 마스킹됨
+    expect(logged).toContain('tflw_pat_***')
+    errorSpy.mockRestore()
+  })
+
+  it('async 핸들러 reject도 500 + 로깅', async () => {
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const router = new Router()
+    router.post('/boom', () => Promise.reject(new Error('async boom')))
+    const req = makeReq('POST', '/boom')
+    const res = makeRes()
+
+    await router.handle(req, res)
+    expect(res._written[0]?.status).toBe(500)
+    expect(errorSpy).toHaveBeenCalled()
+    errorSpy.mockRestore()
+  })
+})
