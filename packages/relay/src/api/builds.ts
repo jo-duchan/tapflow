@@ -276,6 +276,12 @@ export async function handleUpdateBuild(
   json(res, 200, { ok: true })
 }
 
+// 업로드 크기 상한(바이트). 기본 500 MB, TAPFLOW_MAX_BUILD_BYTES로 조정 가능.
+function maxBuildUploadBytes(): number {
+  const v = Number(process.env.TAPFLOW_MAX_BUILD_BYTES)
+  return Number.isFinite(v) && v > 0 ? v : 500 * 1024 * 1024
+}
+
 export function handleUploadBuild(
   req: http.IncomingMessage,
   res: http.ServerResponse,
@@ -284,7 +290,7 @@ export function handleUploadBuild(
   const auth = requireBuildAuth(req, res)
   if (!auth) return
 
-  const bb = busboy({ headers: req.headers, limits: { fileSize: 500 * 1024 * 1024 } })
+  const bb = busboy({ headers: req.headers, limits: { fileSize: maxBuildUploadBytes() } })
   const fields: Record<string, string> = {}
   let savedPath = ''
   let originalName = ''
@@ -316,14 +322,18 @@ export function handleUploadBuild(
       ws.on('finish', resolve)
       ws.on('error', reject)
     })
+    // 크기 상한 초과 시 busboy가 스트림을 잘라('limit') 보내므로, 잘린 파일을 유효 빌드로 저장하면 안 된다.
+    stream.on('limit', () => { fileError = 'File exceeds the upload size limit' })
     stream.pipe(ws)
   })
 
   bb.on('finish', async () => {
-    if (fileError) return json(res, 400, { error: fileError })
-    if (!savedPath) return json(res, 400, { error: 'File required' })
-
     await writePromise
+    if (fileError) {
+      if (savedPath) unlinkSafe(savedPath, 'rejected upload')
+      return json(res, 400, { error: fileError })
+    }
+    if (!savedPath) return json(res, 400, { error: 'File required' })
 
     const ext = path.extname(originalName).toLowerCase()
     const isIos = ext === '.zip'

@@ -4,6 +4,8 @@ import { getDb } from '../db.js'
 import { requireRole } from '../middleware/auth.js'
 import { json, readJson } from '../router.js'
 import { sendMail } from '../lib/mailer.js'
+import { config } from '../lib/config.js'
+import { buildInviteBaseUrl } from '../lib/publicUrl.js'
 
 export function handleListMembers(req: http.IncomingMessage, res: http.ServerResponse): void {
   const auth = requireRole(req, res, ['Admin'])
@@ -34,8 +36,8 @@ export async function handleInvite(req: http.IncomingMessage, res: http.ServerRe
 
   let emailSent = false
   if (body.email) {
-    const proto = (req.headers['x-forwarded-proto'] as string | undefined) ?? 'http'
-    const inviteUrl = `${proto}://${req.headers.host}/invite?token=${token}`
+    // Host 헤더는 조작 가능하므로 신뢰 base URL(설정값)에서 링크를 만든다 (#6 Host 인젝션 차단).
+    const inviteUrl = `${buildInviteBaseUrl(config)}/invite?token=${token}`
     const html = `<p>You've been invited to join tapflow as <strong>${role}</strong>.</p>
 <p><a href="${inviteUrl}">Accept invitation</a></p>
 <p>This link expires in 7 days.</p>`

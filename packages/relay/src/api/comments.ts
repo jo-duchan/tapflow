@@ -50,6 +50,12 @@ export function handleListComments(req: http.IncomingMessage, res: http.ServerRe
   json(res, 200, result)
 }
 
+// 첨부 크기 상한(바이트). 기본 5 MB, TAPFLOW_MAX_COMMENT_BYTES로 조정 가능.
+function maxCommentAttachmentBytes(): number {
+  const v = Number(process.env.TAPFLOW_MAX_COMMENT_BYTES)
+  return Number.isFinite(v) && v > 0 ? v : 5 * 1024 * 1024
+}
+
 export function handleCreateComment(
   req: http.IncomingMessage,
   res: http.ServerResponse,
@@ -58,11 +64,12 @@ export function handleCreateComment(
   const auth = requireAuth(req, res)
   if (!auth) return
 
-  const bb = busboy({ headers: req.headers, limits: { fileSize: 5 * 1024 * 1024 } })
+  const bb = busboy({ headers: req.headers, limits: { fileSize: maxCommentAttachmentBytes() } })
   const fields: Record<string, string> = {}
   let attachmentPath = ''
   let attachmentMime = ''
   let sizeError = false
+  let writePromise: Promise<void> = Promise.resolve()
 
   bb.on('field', (name, val) => { fields[name] = val })
 
@@ -75,16 +82,23 @@ export function handleCreateComment(
     attachmentMime = info.mimeType
     fs.mkdirSync(path.dirname(attachmentPath), { recursive: true })
 
-    let size = 0
-    stream.on('data', (chunk: Buffer) => {
-      size += chunk.length
-      if (size > 5 * 1024 * 1024) sizeError = true
+    const ws = fs.createWriteStream(attachmentPath)
+    writePromise = new Promise((resolve, reject) => {
+      ws.on('finish', resolve)
+      ws.on('error', reject)
     })
-    stream.pipe(fs.createWriteStream(attachmentPath))
+    // 크기 상한 초과 시 busboy가 스트림을 잘라 보내므로, 잘린 첨부를 저장하면 안 된다.
+    stream.on('limit', () => { sizeError = true })
+    stream.pipe(ws)
   })
 
-  bb.on('finish', () => {
-    if (sizeError) return json(res, 400, { error: 'Max 5MB per attachment' })
+  bb.on('finish', async () => {
+    // 쓰기 완료를 기다린 뒤 삭제해야 잘린 파일이 디스크에 남지 않는다.
+    await writePromise.catch(() => {})
+    if (sizeError) {
+      if (attachmentPath) { try { fs.unlinkSync(attachmentPath) } catch { /* already gone */ } }
+      return json(res, 400, { error: 'Max 5MB per attachment' })
+    }
     if (!fields.build_id || !fields.body?.trim()) {
       return json(res, 400, { error: 'build_id and body required' })
     }
