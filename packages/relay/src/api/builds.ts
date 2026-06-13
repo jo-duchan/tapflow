@@ -8,6 +8,7 @@ import busboy from 'busboy'
 import { getDb } from '../db.js'
 import { requireAuth, requireBuildAuth } from '../middleware/auth.js'
 import { json, readJson } from '../router.js'
+import { unlinkSafe } from '../lib/uploads.js'
 
 // ── zip / plist helpers ────────────────────────────────────────────────────
 
@@ -432,15 +433,6 @@ function chunkArray<T>(arr: T[], size: number): T[][] {
   return chunks
 }
 
-function unlinkSafe(filePath: string, label: string): void {
-  try {
-    fs.unlinkSync(filePath)
-  } catch (err) {
-    if ((err as NodeJS.ErrnoException).code !== 'ENOENT') {
-      console.warn(`[tapflow] purge: failed to delete ${label}`, (err as Error).message)
-    }
-  }
-}
 
 export function purgeExpiredBuilds(recordingsDir: string): void {
   const db = getDb()

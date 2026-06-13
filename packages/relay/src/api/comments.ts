@@ -5,6 +5,7 @@ import busboy from 'busboy'
 import { getDb } from '../db.js'
 import { requireAuth } from '../middleware/auth.js'
 import { json } from '../router.js'
+import { unlinkSafe } from '../lib/uploads.js'
 
 export function handleListComments(req: http.IncomingMessage, res: http.ServerResponse): void {
   const auth = requireAuth(req, res)
@@ -96,8 +97,8 @@ export function handleCreateComment(
     // 쓰기 완료를 기다린 뒤 삭제해야 잘린 파일이 디스크에 남지 않는다.
     await writePromise.catch(() => {})
     if (sizeError) {
-      if (attachmentPath) { try { fs.unlinkSync(attachmentPath) } catch { /* already gone */ } }
-      return json(res, 400, { error: 'Max 5MB per attachment' })
+      if (attachmentPath) unlinkSafe(attachmentPath, 'rejected attachment')
+      return json(res, 400, { error: 'Attachment exceeds the upload size limit' })
     }
     if (!fields.build_id || !fields.body?.trim()) {
       return json(res, 400, { error: 'build_id and body required' })

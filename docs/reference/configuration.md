@@ -62,6 +62,8 @@ openssl rand -hex 32
 
 ::: warning Behind a reverse proxy, set TAPFLOW_TRUSTED_PROXIES
 If the relay runs behind a same-host reverse proxy (nginx, Caddy) and `TAPFLOW_TRUSTED_PROXIES` is left unset, the proxy's loopback address makes **every remote client look like localhost** — and localhost is unauthenticated. Set `TAPFLOW_TRUSTED_PROXIES` to the proxy's address (e.g. `127.0.0.1,::1`) and configure the proxy to forward `X-Forwarded-For`.
+
+For proxied or tunneled deployments, also set a public URL (`tunnel.publicUrl` or `relay.url`). Otherwise the CORS/CSRF allowlist is loopback-only and the dashboard's cross-origin requests can be blocked.
 :::
 
 ## Data directory
