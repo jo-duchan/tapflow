@@ -1,5 +1,22 @@
 # tapflow
 
+## 0.8.2
+
+### Patch Changes
+
+- 859f9e3: Harden the relay for public and proxied exposure:
+
+  - A per-install JWT secret is generated and persisted automatically when `JWT_SECRET` is unset, replacing the shared development default.
+  - Authentication endpoints apply rate limiting with exponential backoff.
+  - Bootstrap (`auth/init`) is restricted to localhost — on headless servers, run `tapflow admin init` on the relay host.
+  - New `TAPFLOW_TRUSTED_PROXIES` resolves the real client IP from `X-Forwarded-For` when the relay runs behind a same-host reverse proxy.
+
+- Updated dependencies [859f9e3]
+  - @tapflowio/relay@0.8.2
+  - @tapflowio/android-agent@0.8.2
+  - @tapflowio/ios-agent@0.8.2
+  - @tapflowio/agent-core@0.8.2
+
 ## 0.8.1
 
 ### Patch Changes

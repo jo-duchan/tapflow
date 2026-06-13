@@ -1,6 +1,6 @@
 {
   "name": "@tapflowio/android-agent",
-  "version": "0.8.1",
+  "version": "0.8.2",
   "description": "Android emulator agent for tapflow — ADB control and scrcpy H.264 streaming",
   "keywords": [
     "tapflow",

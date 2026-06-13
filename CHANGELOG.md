@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.2] - 2026-06-13
+
+### Changed
+
+- relay: a per-install JWT secret is now generated and persisted automatically when `JWT_SECRET` is unset, replacing the shared development default. No action is needed for a single relay; set `JWT_SECRET` only to share one key across multiple instances.
+- relay: login attempts are rate-limited with exponential backoff (per IP + account).
+- relay: first-time bootstrap (`auth/init`) is restricted to localhost. On headless servers, run `tapflow admin init` on the relay host.
+
+### Added
+
+- relay: `TAPFLOW_TRUSTED_PROXIES` — when the relay runs behind a same-host reverse proxy, set this so it resolves the real client IP from `X-Forwarded-For` instead of treating every proxied client as localhost. Configure the proxy to forward `X-Forwarded-For`.
+
 ## [0.8.1] - 2026-06-12
 
 ### Changed
@@ -128,7 +140,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Automatic `tapflow.config.json` creation as a side effect of `tapflow start` / `tapflow relay start`.
 
-[Unreleased]: https://github.com/jo-duchan/tapflow/compare/v0.8.1...HEAD
+[Unreleased]: https://github.com/jo-duchan/tapflow/compare/v0.8.2...HEAD
+[0.8.2]: https://github.com/jo-duchan/tapflow/compare/v0.8.1...v0.8.2
 [0.8.1]: https://github.com/jo-duchan/tapflow/compare/v0.8.0...v0.8.1
 [0.8.0]: https://github.com/jo-duchan/tapflow/compare/v0.7.0...v0.8.0
 [0.7.0]: https://github.com/jo-duchan/tapflow/compare/v0.6.1...v0.7.0
