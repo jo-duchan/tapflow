@@ -10,6 +10,8 @@ import { Router, json } from './router.js'
 import { requireViewAuth, requireAuth, getAuth, verifyPat } from './middleware/auth.js'
 import { classifyConnection } from './lib/connectionAuth.js'
 import { resolveClientAddress } from './lib/clientAddress.js'
+import { resolveCorsHeaders } from './lib/cors.js'
+import { isCsrfBlocked } from './lib/csrf.js'
 import { pickLanAddress } from './lib/lanAddress.js'
 import { getDb } from './db.js'
 import { handleLogin, handleLogout, handleMe, handleChangePassword, handleInit, handleAuthStatus } from './api/auth.js'
@@ -110,6 +112,7 @@ export class RelayServer {
   private wsExternal = new Map<WebSocket, boolean>()
   private readonly backpressureBytes: number
   private readonly screenshotTimeoutMs: number
+  private readonly corsAllowed: Set<string>
   // One-shot warning when XFF arrives on a loopback socket but TAPFLOW_TRUSTED_PROXIES is unset.
   private warnedProxyMisconfig = false
   private pendingScreenshots = new Map<string, {
@@ -119,9 +122,10 @@ export class RelayServer {
     timer: ReturnType<typeof setTimeout>
   }>()
 
-  constructor(private readonly options: { port: number; publicDir?: string; uploadsDir?: string; idleTimeoutMs?: number; wsBackpressureBytes?: number; screenshotTimeoutMs?: number; trustedProxies?: string[] }) {
+  constructor(private readonly options: { port: number; publicDir?: string; uploadsDir?: string; idleTimeoutMs?: number; wsBackpressureBytes?: number; screenshotTimeoutMs?: number; trustedProxies?: string[]; corsOrigins?: string[] }) {
     this.backpressureBytes = options.wsBackpressureBytes ?? DEFAULT_BACKPRESSURE_BYTES
     this.screenshotTimeoutMs = options.screenshotTimeoutMs ?? 10_000
+    this.corsAllowed = new Set(options.corsOrigins ?? [])
     this.sessions = new SessionManager({ idleTimeoutMs: options.idleTimeoutMs })
     this.publicDir = options.publicDir ?? path.join(import.meta.dirname, '../public')
     this.uploadsDir = options.uploadsDir ?? path.join(import.meta.dirname, '../uploads')
@@ -787,8 +791,10 @@ export class RelayServer {
   }
 
   private async handleRequest(req: http.IncomingMessage, res: http.ServerResponse): Promise<void> {
-    res.setHeader('Access-Control-Allow-Origin', '*')
-    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization')
+    const corsHeaders = resolveCorsHeaders(req.headers.origin, this.corsAllowed)
+    if (corsHeaders) {
+      for (const [k, v] of Object.entries(corsHeaders)) res.setHeader(k, v)
+    }
 
     if (req.method === 'OPTIONS') {
       res.writeHead(204)
@@ -801,6 +807,10 @@ export class RelayServer {
 
     if (url.startsWith('/api/')) {
       res.setHeader('Cache-Control', 'no-store')
+      if (isCsrfBlocked(req.method, req.headers, this.corsAllowed)) {
+        json(res, 403, { error: 'Cross-origin state-changing request blocked (CSRF protection)' })
+        return
+      }
     }
     if (url.startsWith('/uploads/')) {
       if (!requireViewAuth(req, res)) return
