@@ -53,5 +53,5 @@ describe.skipIf(!RUN)('ACME STAGING issuance (integration)', () => {
     expect(parseCertNotAfter(issued.cert).getTime()).toBeGreaterThan(Date.now())
     // 스테이징 인증서는 "(STAGING)" 발급자 — 프로덕션으로 새는 일이 없는지 확인
     expect(x.issuer.toUpperCase()).toContain('STAGING')
-  }, 180_000)
+  }, 300_000)
 })
