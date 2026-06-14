@@ -126,6 +126,40 @@ describe('cmdInitConfig', () => {
     expect(cfg.tunnel.ssh).toBeNull()
   })
 
+  it('none + Standard 성능 → tls 없음 (HTTP/WASM)', async () => {
+    Object.defineProperty(process.stdin, 'isTTY', { value: true, configurable: true })
+    mockSelect.mockResolvedValueOnce('none').mockResolvedValueOnce('standard')
+
+    await cmdInitConfig({})
+
+    const cfg = JSON.parse(fs.readFileSync(path.join(tmpDir, 'tapflow.config.json'), 'utf-8'))
+    expect(cfg.tunnel).toBeUndefined()
+    expect(cfg.tls).toBeUndefined()
+  })
+
+  it('none + High + Cloudflare → byo-api-token tls 생성', async () => {
+    Object.defineProperty(process.stdin, 'isTTY', { value: true, configurable: true })
+    mockSelect.mockResolvedValueOnce('none').mockResolvedValueOnce('high').mockResolvedValueOnce('cloudflare')
+    mockText.mockResolvedValueOnce('tap.example.com')
+
+    await cmdInitConfig({})
+
+    const cfg = JSON.parse(fs.readFileSync(path.join(tmpDir, 'tapflow.config.json'), 'utf-8'))
+    expect(cfg.tls).toEqual({ mode: 'byo-api-token', domain: 'tap.example.com', dnsProvider: 'cloudflare' })
+    expect(output.join('\n')).toContain('CLOUDFLARE_API_TOKEN')
+  })
+
+  it('none + High + Import → import-cert tls 생성', async () => {
+    Object.defineProperty(process.stdin, 'isTTY', { value: true, configurable: true })
+    mockSelect.mockResolvedValueOnce('none').mockResolvedValueOnce('high').mockResolvedValueOnce('import')
+    mockText.mockResolvedValueOnce('/etc/tls/fullchain.pem').mockResolvedValueOnce('/etc/tls/privkey.pem')
+
+    await cmdInitConfig({})
+
+    const cfg = JSON.parse(fs.readFileSync(path.join(tmpDir, 'tapflow.config.json'), 'utf-8'))
+    expect(cfg.tls).toEqual({ mode: 'import-cert', certPath: '/etc/tls/fullchain.pem', keyPath: '/etc/tls/privkey.pem' })
+  })
+
   describe('.gitignore', () => {
     beforeEach(() => {
       fs.mkdirSync(path.join(tmpDir, '.git'))
