@@ -21,6 +21,20 @@ describe('createCertProvider', () => {
     expect(p.strategy).toBe('byo-api-token')
   })
 
+  it('byo-api-token + desec 설정이면 AcmeCertProvider (DESEC_TOKEN 필요)', () => {
+    vi.stubEnv('DESEC_TOKEN', 'desec-token')
+    const p = createCertProvider({ mode: 'byo-api-token', domain: 'myteam.dedyn.io', dnsProvider: 'desec' }, { dataDir: '/tmp/x' })
+    expect(p).toBeInstanceOf(AcmeCertProvider)
+    expect(p.strategy).toBe('byo-api-token')
+  })
+
+  it('desec인데 DESEC_TOKEN 미설정이면 throw', () => {
+    vi.stubEnv('DESEC_TOKEN', '')
+    expect(() =>
+      createCertProvider({ mode: 'byo-api-token', domain: 'myteam.dedyn.io', dnsProvider: 'desec' }, { dataDir: '/tmp/x' }),
+    ).toThrow(/DESEC_TOKEN/)
+  })
+
   it('byo-api-token인데 CLOUDFLARE_API_TOKEN 미설정이면 throw', () => {
     vi.stubEnv('CLOUDFLARE_API_TOKEN', '')
     expect(() =>
