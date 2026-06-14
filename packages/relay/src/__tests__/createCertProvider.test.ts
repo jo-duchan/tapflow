@@ -35,6 +35,20 @@ describe('createCertProvider', () => {
     ).toThrow(/DESEC_TOKEN/)
   })
 
+  it('byo-api-token + vercel 설정이면 AcmeCertProvider (VERCEL_TOKEN 필요)', () => {
+    vi.stubEnv('VERCEL_TOKEN', 'vc-token')
+    const p = createCertProvider({ mode: 'byo-api-token', domain: 'tap.example.com', dnsProvider: 'vercel' }, { dataDir: '/tmp/x' })
+    expect(p).toBeInstanceOf(AcmeCertProvider)
+    expect(p.strategy).toBe('byo-api-token')
+  })
+
+  it('vercel인데 VERCEL_TOKEN 미설정이면 throw', () => {
+    vi.stubEnv('VERCEL_TOKEN', '')
+    expect(() =>
+      createCertProvider({ mode: 'byo-api-token', domain: 'tap.example.com', dnsProvider: 'vercel' }, { dataDir: '/tmp/x' }),
+    ).toThrow(/VERCEL_TOKEN/)
+  })
+
   it('byo-api-token인데 CLOUDFLARE_API_TOKEN 미설정이면 throw', () => {
     vi.stubEnv('CLOUDFLARE_API_TOKEN', '')
     expect(() =>

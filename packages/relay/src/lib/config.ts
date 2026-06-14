@@ -38,7 +38,7 @@ const importCertTlsSchema = z.object({
 const byoApiTokenTlsSchema = z.object({
   mode: z.literal('byo-api-token'),
   domain: z.string().min(1),
-  dnsProvider: z.enum(['cloudflare', 'desec']),
+  dnsProvider: z.enum(['cloudflare', 'desec', 'vercel']),
 })
 
 const tlsSchema = z.discriminatedUnion('mode', [byoApiTokenTlsSchema, importCertTlsSchema])
@@ -147,7 +147,7 @@ function load(): TapflowConfig {
       return {
         mode: t.mode as 'byo-api-token',
         domain: t.domain ?? '',
-        dnsProvider: (t.dnsProvider ?? 'cloudflare') as 'cloudflare' | 'desec',
+        dnsProvider: (t.dnsProvider ?? 'cloudflare') as 'cloudflare' | 'desec' | 'vercel',
       }
     })(),
     smtp: {

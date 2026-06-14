@@ -149,6 +149,18 @@ describe('cmdInitConfig', () => {
     expect(output.join('\n')).toContain('CLOUDFLARE_API_TOKEN')
   })
 
+  it('none + High + Vercel → byo-api-token(vercel) tls 생성', async () => {
+    Object.defineProperty(process.stdin, 'isTTY', { value: true, configurable: true })
+    mockSelect.mockResolvedValueOnce('none').mockResolvedValueOnce('high').mockResolvedValueOnce('vercel')
+    mockText.mockResolvedValueOnce('tap.example.com')
+
+    await cmdInitConfig({})
+
+    const cfg = JSON.parse(fs.readFileSync(path.join(tmpDir, 'tapflow.config.json'), 'utf-8'))
+    expect(cfg.tls).toEqual({ mode: 'byo-api-token', domain: 'tap.example.com', dnsProvider: 'vercel' })
+    expect(output.join('\n')).toContain('VERCEL_TOKEN')
+  })
+
   it('none + High + Import → import-cert tls 생성', async () => {
     Object.defineProperty(process.stdin, 'isTTY', { value: true, configurable: true })
     mockSelect.mockResolvedValueOnce('none').mockResolvedValueOnce('high').mockResolvedValueOnce('import')

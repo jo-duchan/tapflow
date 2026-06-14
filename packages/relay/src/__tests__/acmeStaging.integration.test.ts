@@ -3,6 +3,7 @@ import { X509Certificate } from 'crypto'
 import { AcmeClientIssuer } from '../lib/cert/AcmeClientIssuer.js'
 import { CloudflareDnsProvider } from '../lib/cert/CloudflareDnsProvider.js'
 import { DesecDnsProvider } from '../lib/cert/DesecDnsProvider.js'
+import { VercelDnsProvider } from '../lib/cert/VercelDnsProvider.js'
 import type { DnsProvider } from '../lib/cert/DnsProvider.js'
 import { parseCertNotAfter } from '../lib/cert/parseCert.js'
 
@@ -23,15 +24,18 @@ const domain = process.env.TAPFLOW_ACME_DOMAIN ?? ''
 const email = process.env.ACME_EMAIL ?? ''
 const desecToken = process.env.DESEC_TOKEN ?? ''
 const cloudflareToken = process.env.CLOUDFLARE_API_TOKEN ?? ''
+const vercelToken = process.env.VERCEL_TOKEN ?? ''
 
 describe.skipIf(!RUN)('ACME STAGING issuance (integration)', () => {
   it('DNS-01로 실제 LE 스테이징 cert를 발급한다 (deSEC 또는 Cloudflare)', async () => {
     expect(domain, 'set TAPFLOW_ACME_DOMAIN').toBeTruthy()
-    expect(desecToken || cloudflareToken, 'set DESEC_TOKEN or CLOUDFLARE_API_TOKEN').toBeTruthy()
+    expect(desecToken || cloudflareToken || vercelToken, 'set DESEC_TOKEN, CLOUDFLARE_API_TOKEN, or VERCEL_TOKEN').toBeTruthy()
 
-    const dns: DnsProvider = desecToken
-      ? new DesecDnsProvider({ token: desecToken })
-      : new CloudflareDnsProvider({ token: cloudflareToken })
+    const dns: DnsProvider = vercelToken
+      ? new VercelDnsProvider({ token: vercelToken, teamId: process.env.VERCEL_TEAM_ID || undefined })
+      : desecToken
+        ? new DesecDnsProvider({ token: desecToken })
+        : new CloudflareDnsProvider({ token: cloudflareToken })
     const issuer = new AcmeClientIssuer({ email, staging: true })
 
     const issued = await issuer.issue({ domain, dns })

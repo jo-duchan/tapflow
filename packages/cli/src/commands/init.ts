@@ -19,8 +19,13 @@ type TunnelConfig =
   | { provider: 'rathole'; serverAddr: string; publicUrl: string; ssh: { host: string; user: string; keyPath: string } | null }
 
 type TlsConfig =
-  | { mode: 'byo-api-token'; domain: string; dnsProvider: 'cloudflare' }
+  | { mode: 'byo-api-token'; domain: string; dnsProvider: 'cloudflare' | 'vercel' }
   | { mode: 'import-cert'; certPath: string; keyPath: string }
+
+const TOKEN_ENV: Record<'cloudflare' | 'vercel', string> = {
+  cloudflare: 'CLOUDFLARE_API_TOKEN',
+  vercel: 'VERCEL_TOKEN',
+}
 
 function isInsideGitRepo(dir: string): boolean {
   let current = dir
@@ -118,6 +123,7 @@ async function promptTls(): Promise<TlsConfig | null> {
     message: 'Certificate method',
     options: [
       { value: 'cloudflare', label: 'Cloudflare DNS', hint: 'auto-issue & renew via API token (env CLOUDFLARE_API_TOKEN)' },
+      { value: 'vercel', label: 'Vercel DNS', hint: 'auto-issue & renew via API token (env VERCEL_TOKEN)' },
       { value: 'import', label: 'Existing certificate', hint: 'bring your own cert & key files' },
     ],
   })
@@ -145,7 +151,7 @@ async function promptTls(): Promise<TlsConfig | null> {
     validate: (v) => (!v?.trim() ? 'Required' : undefined),
   })
   if (isCancel(domain)) { cancel('Cancelled.'); process.exit(0) }
-  return { mode: 'byo-api-token', domain: domain.trim(), dnsProvider: 'cloudflare' }
+  return { mode: 'byo-api-token', domain: domain.trim(), dnsProvider: method as 'cloudflare' | 'vercel' }
 }
 
 export async function cmdInitConfig(opts: InitConfigOptions): Promise<void> {
@@ -215,7 +221,7 @@ export async function cmdInitConfig(opts: InitConfigOptions): Promise<void> {
   if (tunnel) lines.push(`Tunnel: ${tunnel.provider}`)
   if (tls?.mode === 'byo-api-token') {
     lines.push(`HTTPS: ${tls.dnsProvider} DNS-01 for ${tls.domain}.`)
-    lines.push('Set CLOUDFLARE_API_TOKEN and point the domain A record to this Mac\'s LAN IP.')
+    lines.push(`Set ${TOKEN_ENV[tls.dnsProvider]} and point the domain A record to this Mac's LAN IP.`)
   } else if (tls?.mode === 'import-cert') {
     lines.push('HTTPS: import-cert. Ensure the cert/key paths exist on this Mac.')
   }

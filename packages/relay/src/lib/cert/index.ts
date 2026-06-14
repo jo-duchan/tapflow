@@ -4,6 +4,8 @@ export { CloudflareDnsProvider, cloudflareDnsFromEnv } from './CloudflareDnsProv
 export type { CloudflareDnsProviderOptions, FetchLike } from './CloudflareDnsProvider.js'
 export { DesecDnsProvider, desecDnsFromEnv } from './DesecDnsProvider.js'
 export type { DesecDnsProviderOptions } from './DesecDnsProvider.js'
+export { VercelDnsProvider, vercelDnsFromEnv } from './VercelDnsProvider.js'
+export type { VercelDnsProviderOptions } from './VercelDnsProvider.js'
 export { AcmeCertProvider, InMemoryCertStore } from './AcmeCertProvider.js'
 export type { AcmeIssuer, IssuedCert, CertStore, AcmeCertProviderOptions } from './AcmeCertProvider.js'
 export { AcmeClientIssuer } from './AcmeClientIssuer.js'
