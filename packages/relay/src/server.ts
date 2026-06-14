@@ -52,12 +52,16 @@ async function main(): Promise<void> {
   await server.start()
   logger.info(`tapflow relay running on port ${port} (${tls ? 'https' : 'http'})`)
 
-  if (provider) {
-    startCertRenewal(provider, { onRenew: (m) => server.updateTlsContext({ cert: m.cert, key: m.key }) })
-  }
+  const stopRenewal = provider
+    ? startCertRenewal(provider, { onRenew: (m) => server.updateTlsContext({ cert: m.cert, key: m.key }) })
+    : null
 
-  process.on('SIGTERM', () => server.stop().then(() => process.exit(0)))
-  process.on('SIGINT', () => server.stop().then(() => process.exit(0)))
+  const shutdown = () => {
+    stopRenewal?.()
+    void server.stop().then(() => process.exit(0))
+  }
+  process.on('SIGTERM', shutdown)
+  process.on('SIGINT', shutdown)
 }
 
 void main().catch((err) => {

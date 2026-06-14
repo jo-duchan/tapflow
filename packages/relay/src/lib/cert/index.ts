@@ -2,8 +2,6 @@ export type { CertProvider, CertMaterial, CertStrategy } from './CertProvider.js
 export type { DnsProvider } from './DnsProvider.js'
 export { CloudflareDnsProvider, cloudflareDnsFromEnv } from './CloudflareDnsProvider.js'
 export type { CloudflareDnsProviderOptions, FetchLike } from './CloudflareDnsProvider.js'
-export { DesecDnsProvider, desecDnsFromEnv } from './DesecDnsProvider.js'
-export type { DesecDnsProviderOptions } from './DesecDnsProvider.js'
 export { VercelDnsProvider, vercelDnsFromEnv } from './VercelDnsProvider.js'
 export type { VercelDnsProviderOptions } from './VercelDnsProvider.js'
 export { AcmeCertProvider, InMemoryCertStore } from './AcmeCertProvider.js'

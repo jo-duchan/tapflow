@@ -41,9 +41,9 @@ export async function cmdRelayStart(opts: RelayStartOptions): Promise<void> {
   const server = new RelayServer({ port, uploadsDir: path.join(config.local.dataDir, 'uploads'), wsBackpressureBytes: config.local.wsBackpressureBytes, tls })
   await server.start()
   step(`Relay started on ${httpScheme}://localhost:${port}`)
-  if (certProvider) {
-    startCertRenewal(certProvider, { onRenew: (m) => server.updateTlsContext({ cert: m.cert, key: m.key }) })
-  }
+  const stopRenewal = certProvider
+    ? startCertRenewal(certProvider, { onRenew: (m) => server.updateTlsContext({ cert: m.cert, key: m.key }) })
+    : null
 
   const SUPPORTED_PROVIDERS = ['rathole', 'tailscale']
   if (opts.tunnel && !SUPPORTED_PROVIDERS.includes(opts.tunnel)) {
@@ -73,6 +73,7 @@ export async function cmdRelayStart(opts: RelayStartOptions): Promise<void> {
   ])
 
   process.on('SIGINT', () => {
+    stopRenewal?.()
     void tunnel?.stop()
     process.exit(0)
   })

@@ -3,6 +3,7 @@ import { createLogger } from '@tapflowio/agent-core'
 import type { DnsProvider } from './DnsProvider.js'
 import type { AcmeIssuer, IssuedCert } from './AcmeCertProvider.js'
 import { parseCertNotAfter } from './parseCert.js'
+import { loadOrCreateAccountKey } from './accountKey.js'
 
 const logger = createLogger('relay:acme')
 
@@ -14,8 +15,10 @@ export interface AcmeClientIssuerOptions {
   email: string
   /** true면 LE 스테이징(테스트), 기본은 프로덕션. */
   staging?: boolean
-  /** 영속화된 계정 키(PEM). 없으면 발급 시 새로 생성. */
+  /** 영속화된 계정 키(PEM) 직접 주입. */
   accountKey?: Buffer | string
+  /** 계정 키를 캐시할 파일 경로 — 없으면 읽고, 없으면 생성·저장(매 발급마다 새 LE 계정 방지). */
+  accountKeyPath?: string
   /** TXT 설정 후 LE 검증 전 고정 전파 대기(ms). 기본 60초. */
   dnsPropagationMs?: number
 }
@@ -31,7 +34,11 @@ export class AcmeClientIssuer implements AcmeIssuer {
   constructor(private readonly opts: AcmeClientIssuerOptions) {}
 
   async issue({ domain, dns }: { domain: string; dns: DnsProvider }): Promise<IssuedCert> {
-    const accountKey = this.opts.accountKey ?? (await acme.crypto.createPrivateKey())
+    const accountKey =
+      this.opts.accountKey ??
+      (this.opts.accountKeyPath
+        ? await loadOrCreateAccountKey(this.opts.accountKeyPath, async () => (await acme.crypto.createPrivateKey()).toString())
+        : await acme.crypto.createPrivateKey())
     const client = new acme.Client({
       directoryUrl: this.opts.staging
         ? acme.directory.letsencrypt.staging
