@@ -42,8 +42,10 @@ export class DesecDnsProvider implements DnsProvider {
   }
 
   async setTxtRecord(fqdn: string, value: string): Promise<void> {
-    const zone = await this.zoneFor(fqdn)
-    const subname = this.subnameOf(fqdn, zone)
+    // 계약: 챌린지 레코드는 _acme-challenge.<fqdn> (CloudflareDnsProvider와 동일).
+    const recordName = `_acme-challenge.${fqdn}`
+    const zone = await this.zoneFor(recordName)
+    const subname = this.subnameOf(recordName, zone)
     const quoted = `"${value}"`
     const existing = await this.getRrset(zone, subname, 'TXT')
     if (existing?.records.includes(quoted)) return
@@ -53,8 +55,9 @@ export class DesecDnsProvider implements DnsProvider {
   }
 
   async removeTxtRecord(fqdn: string, value: string): Promise<void> {
-    const zone = await this.zoneFor(fqdn)
-    const subname = this.subnameOf(fqdn, zone)
+    const recordName = `_acme-challenge.${fqdn}`
+    const zone = await this.zoneFor(recordName)
+    const subname = this.subnameOf(recordName, zone)
     const quoted = `"${value}"`
     const existing = await this.getRrset(zone, subname, 'TXT')
     if (!existing) return
