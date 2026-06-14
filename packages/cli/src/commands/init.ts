@@ -107,8 +107,8 @@ async function promptTls(): Promise<TlsConfig | null> {
   const perf = await select({
     message: 'Streaming performance',
     options: [
-      { value: 'standard', label: 'Standard', hint: 'HTTP — instant, software decode (works without a domain)' },
-      { value: 'high', label: 'High performance', hint: 'HTTPS — smooth WebCodecs; requires a domain' },
+      { value: 'standard', label: 'Standard', hint: 'HTTP, software decode — instant, no domain needed' },
+      { value: 'high', label: 'High performance', hint: 'HTTPS, hardware decode (WebCodecs) — smooth, needs a domain' },
     ],
   })
   if (isCancel(perf)) { cancel('Cancelled.'); process.exit(0) }
@@ -118,7 +118,7 @@ async function promptTls(): Promise<TlsConfig | null> {
     message: 'Certificate method',
     options: [
       { value: 'cloudflare', label: 'Cloudflare DNS', hint: 'auto-issue & renew via API token (env CLOUDFLARE_API_TOKEN)' },
-      { value: 'import', label: 'Existing certificate', hint: 'bring your own cert / key files' },
+      { value: 'import', label: 'Existing certificate', hint: 'bring your own cert & key files' },
     ],
   })
   if (isCancel(method)) { cancel('Cancelled.'); process.exit(0) }
