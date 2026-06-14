@@ -27,7 +27,7 @@ const cloudflareToken = process.env.CLOUDFLARE_API_TOKEN ?? ''
 const vercelToken = process.env.VERCEL_TOKEN ?? ''
 
 describe.skipIf(!RUN)('ACME STAGING issuance (integration)', () => {
-  it('DNS-01로 실제 LE 스테이징 cert를 발급한다 (deSEC 또는 Cloudflare)', async () => {
+  it('DNS-01로 실제 LE 스테이징 cert를 발급한다 (Vercel / deSEC / Cloudflare)', async () => {
     expect(domain, 'set TAPFLOW_ACME_DOMAIN').toBeTruthy()
     expect(desecToken || cloudflareToken || vercelToken, 'set DESEC_TOKEN, CLOUDFLARE_API_TOKEN, or VERCEL_TOKEN').toBeTruthy()
 
