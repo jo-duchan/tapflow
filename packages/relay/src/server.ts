@@ -3,6 +3,7 @@ import { initDb } from './db.js'
 import { RelayServer } from './RelayServer.js'
 import { config } from './lib/config.js'
 import { buildInviteBaseUrl } from './lib/publicUrl.js'
+import { createCertProvider, startCertRenewal } from './lib/cert/index.js'
 import { createLogger } from '@tapflowio/agent-core'
 
 const logger = createLogger('relay')
@@ -32,11 +33,38 @@ if (config.local.trustedProxies.length > 0 && !config.tunnel?.publicUrl && !conf
   )
 }
 
-const server = new RelayServer({ port, uploadsDir, wsBackpressureBytes: config.local.wsBackpressureBytes, trustedProxies: config.local.trustedProxies, corsOrigins })
+async function main(): Promise<void> {
+  let tls: { cert: string; key: string } | undefined
+  let provider: ReturnType<typeof createCertProvider> | null = null
 
-void server.start().then(() => {
-  logger.info(`tapflow relay running on port ${port}`)
+  if (config.tls) {
+    provider = createCertProvider(config.tls, { dataDir })
+    const material = await provider.ensureCert()
+    tls = { cert: material.cert, key: material.key }
+  } else {
+    logger.info(
+      'TLS disabled — serving HTTP. Secure-context features (e.g. WebCodecs hardware decode) require HTTPS; ' +
+      'configure tls in tapflow.config.json to enable.'
+    )
+  }
+
+  const server = new RelayServer({ port, uploadsDir, wsBackpressureBytes: config.local.wsBackpressureBytes, trustedProxies: config.local.trustedProxies, corsOrigins, tls })
+  await server.start()
+  logger.info(`tapflow relay running on port ${port} (${tls ? 'https' : 'http'})`)
+
+  const stopRenewal = provider
+    ? startCertRenewal(provider, { onRenew: (m) => server.updateTlsContext({ cert: m.cert, key: m.key }) })
+    : null
+
+  const shutdown = () => {
+    stopRenewal?.()
+    void server.stop().then(() => process.exit(0))
+  }
+  process.on('SIGTERM', shutdown)
+  process.on('SIGINT', shutdown)
+}
+
+void main().catch((err) => {
+  logger.error(`relay failed to start: ${String(err)}`)
+  process.exit(1)
 })
-
-process.on('SIGTERM', () => server.stop().then(() => process.exit(0)))
-process.on('SIGINT', () => server.stop().then(() => process.exit(0)))

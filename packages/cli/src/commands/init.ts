@@ -18,6 +18,15 @@ type TunnelConfig =
   | { provider: 'tailscale'; publicUrl?: string }
   | { provider: 'rathole'; serverAddr: string; publicUrl: string; ssh: { host: string; user: string; keyPath: string } | null }
 
+type TlsConfig =
+  | { mode: 'byo-api-token'; domain: string; dnsProvider: 'cloudflare' | 'vercel' }
+  | { mode: 'import-cert'; certPath: string; keyPath: string }
+
+const TOKEN_ENV: Record<'cloudflare' | 'vercel', string> = {
+  cloudflare: 'CLOUDFLARE_API_TOKEN',
+  vercel: 'VERCEL_TOKEN',
+}
+
 function isInsideGitRepo(dir: string): boolean {
   let current = dir
   while (true) {
@@ -97,6 +106,54 @@ async function promptTunnel(): Promise<TunnelConfig | null> {
   return { provider: 'rathole', serverAddr: serverAddr.trim(), publicUrl: publicUrl.trim(), ssh }
 }
 
+// LAN(=no tunnel) HTTPS 선택. WebCodecs(빠른 영상)는 secure context(HTTPS)에서만 동작.
+// 도메인 없으면 Standard(HTTP/WASM)로 충분히 동작하므로 강요하지 않는다.
+async function promptTls(): Promise<TlsConfig | null> {
+  const perf = await select({
+    message: 'Streaming performance',
+    options: [
+      { value: 'standard', label: 'Standard', hint: 'HTTP, software decode — instant, no domain needed' },
+      { value: 'high', label: 'High performance', hint: 'HTTPS, hardware decode (WebCodecs) — smooth, needs a domain' },
+    ],
+  })
+  if (isCancel(perf)) { cancel('Cancelled.'); process.exit(0) }
+  if (perf !== 'high') return null
+
+  const method = await select({
+    message: 'Certificate method',
+    options: [
+      { value: 'cloudflare', label: 'Cloudflare DNS', hint: 'auto-issue & renew via API token (env CLOUDFLARE_API_TOKEN)' },
+      { value: 'vercel', label: 'Vercel DNS', hint: 'auto-issue & renew via API token (env VERCEL_TOKEN)' },
+      { value: 'import', label: 'Existing certificate', hint: 'bring your own cert & key files' },
+    ],
+  })
+  if (isCancel(method)) { cancel('Cancelled.'); process.exit(0) }
+
+  if (method === 'import') {
+    const certPath = await text({
+      message: 'Certificate path (fullchain PEM)',
+      placeholder: '/path/to/fullchain.pem',
+      validate: (v) => (!v?.trim() ? 'Required' : undefined),
+    })
+    if (isCancel(certPath)) { cancel('Cancelled.'); process.exit(0) }
+    const keyPath = await text({
+      message: 'Private key path (PEM)',
+      placeholder: '/path/to/privkey.pem',
+      validate: (v) => (!v?.trim() ? 'Required' : undefined),
+    })
+    if (isCancel(keyPath)) { cancel('Cancelled.'); process.exit(0) }
+    return { mode: 'import-cert', certPath: certPath.trim(), keyPath: keyPath.trim() }
+  }
+
+  const domain = await text({
+    message: 'Domain for tapflow (its A record points to this Mac on the LAN)',
+    placeholder: 'tap.yourcompany.com',
+    validate: (v) => (!v?.trim() ? 'Required' : undefined),
+  })
+  if (isCancel(domain)) { cancel('Cancelled.'); process.exit(0) }
+  return { mode: 'byo-api-token', domain: domain.trim(), dnsProvider: method as 'cloudflare' | 'vercel' }
+}
+
 export async function cmdInitConfig(opts: InitConfigOptions): Promise<void> {
   const configPath = path.join(process.cwd(), 'tapflow.config.json')
 
@@ -126,7 +183,17 @@ export async function cmdInitConfig(opts: InitConfigOptions): Promise<void> {
     tunnel = await promptTunnel()
   }
 
-  const configOut = tunnel != null ? { ...BASE_CONFIG, tunnel } : BASE_CONFIG
+  // HTTPS(WebCodecs)는 LAN(=no tunnel) 경로에서만 위저드로 묻는다. tailscale/rathole의 HTTPS는 후속.
+  let tls: TlsConfig | null = null
+  if (tunnel == null && process.stdin.isTTY) {
+    tls = await promptTls()
+  }
+
+  const configOut = {
+    ...BASE_CONFIG,
+    ...(tunnel != null ? { tunnel } : {}),
+    ...(tls != null ? { tls } : {}),
+  }
   try {
     fs.writeFileSync(configPath, JSON.stringify(configOut, null, 2) + '\n', 'utf-8')
   } catch (err) {
@@ -152,6 +219,12 @@ export async function cmdInitConfig(opts: InitConfigOptions): Promise<void> {
     lines.push('Fill in tunnel.serverAddr and tunnel.publicUrl in tapflow.config.json.')
   }
   if (tunnel) lines.push(`Tunnel: ${tunnel.provider}`)
+  if (tls?.mode === 'byo-api-token') {
+    lines.push(`HTTPS: ${tls.dnsProvider} DNS-01 for ${tls.domain}.`)
+    lines.push(`Set ${TOKEN_ENV[tls.dnsProvider]} and point the domain A record to this Mac's LAN IP.`)
+  } else if (tls?.mode === 'import-cert') {
+    lines.push('HTTPS: import-cert. Ensure the cert/key paths exist on this Mac.')
+  }
   lines.push('Next: tapflow start')
 
   banner('success', 'CONFIG CREATED', lines)

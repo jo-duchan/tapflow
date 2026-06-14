@@ -1,4 +1,5 @@
 import http from 'http'
+import https from 'https'
 import fs from 'fs'
 import os from 'os'
 import path from 'path'
@@ -88,7 +89,7 @@ const AGENT_MSG_TYPES = new Set([
 ])
 
 export class RelayServer {
-  private httpServer: http.Server
+  private httpServer: http.Server | https.Server
   private wss: WebSocketServer
   private sessions: SessionManager
   private publicDir: string
@@ -122,7 +123,7 @@ export class RelayServer {
     timer: ReturnType<typeof setTimeout>
   }>()
 
-  constructor(private readonly options: { port: number; publicDir?: string; uploadsDir?: string; idleTimeoutMs?: number; wsBackpressureBytes?: number; screenshotTimeoutMs?: number; trustedProxies?: string[]; corsOrigins?: string[] }) {
+  constructor(private readonly options: { port: number; publicDir?: string; uploadsDir?: string; idleTimeoutMs?: number; wsBackpressureBytes?: number; screenshotTimeoutMs?: number; trustedProxies?: string[]; corsOrigins?: string[]; tls?: { cert: string; key: string } }) {
     this.backpressureBytes = options.wsBackpressureBytes ?? DEFAULT_BACKPRESSURE_BYTES
     this.screenshotTimeoutMs = options.screenshotTimeoutMs ?? 10_000
     this.corsAllowed = new Set(options.corsOrigins ?? [])
@@ -131,7 +132,11 @@ export class RelayServer {
     this.uploadsDir = options.uploadsDir ?? path.join(import.meta.dirname, '../uploads')
     this.router = new Router()
     this.registerRoutes()
-    this.httpServer = http.createServer((req, res) => this.handleRequest(req, res))
+    // WebCodecs는 secure context(HTTPS)에서만 동작 — tls가 주어지면 https로 종단하고 WSS가 자동 승계한다.
+    const handler = (req: http.IncomingMessage, res: http.ServerResponse) => this.handleRequest(req, res)
+    this.httpServer = options.tls
+      ? https.createServer({ cert: options.tls.cert, key: options.tls.key }, handler)
+      : http.createServer(handler)
     // Disable Nagle on every accepted socket (browsers + agents): small writes (touch, frame tails)
     // must not be held waiting for an ACK. Negligible on localhost, but ~40ms stalls on LAN.
     this.httpServer.on('connection', (socket) => socket.setNoDelay(true))
@@ -278,6 +283,13 @@ export class RelayServer {
 
   address() {
     return this.httpServer.address()
+  }
+
+  // 갱신된 cert를 재시작 없이 핫스왑한다(https 종단일 때만 의미 있음).
+  updateTlsContext(material: { cert: string; key: string }): void {
+    if (this.httpServer instanceof https.Server) {
+      this.httpServer.setSecureContext({ cert: material.cert, key: material.key })
+    }
   }
 
   // Throttled callback asking the session's agent for an on-demand IDR (fast drop recovery); ignored by agents that don't support it.

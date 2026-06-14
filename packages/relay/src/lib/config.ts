@@ -27,6 +27,22 @@ const tailscaleTunnelSchema = z.object({
 
 const tunnelSchema = z.discriminatedUnion('provider', [ratholeTunnelSchema, tailscaleTunnelSchema])
 
+// LAN HTTPS (issue #232) — secure context용 TLS 종단 설정. 골격: v1은 LAN 가지만 구현.
+// 비밀(DNS API 토큰)은 config 파일이 아니라 env에서 읽는다(예: CLOUDFLARE_API_TOKEN).
+const importCertTlsSchema = z.object({
+  mode: z.literal('import-cert'),
+  certPath: z.string().min(1),
+  keyPath: z.string().min(1),
+})
+
+const byoApiTokenTlsSchema = z.object({
+  mode: z.literal('byo-api-token'),
+  domain: z.string().min(1),
+  dnsProvider: z.enum(['cloudflare', 'vercel']),
+})
+
+const tlsSchema = z.discriminatedUnion('mode', [byoApiTokenTlsSchema, importCertTlsSchema])
+
 const configSchema = z.object({
   local: z.object({
     port: z.number().int().min(1).max(65535),
@@ -38,6 +54,7 @@ const configSchema = z.object({
     url: z.string().nullable(),
   }),
   tunnel: tunnelSchema.nullable(),
+  tls: tlsSchema.nullable(),
   smtp: z.object({
     host: z.string(),
     port: z.number().int().min(1).max(65535),
@@ -63,6 +80,7 @@ const DEFAULTS = {
     url: null,
   },
   tunnel: null,
+  tls: null,
   smtp: {
     host: '',
     port: 587,
@@ -117,6 +135,19 @@ function load(): TapflowConfig {
         ssh: t.ssh != null
           ? { host: t.ssh.host ?? '', user: t.ssh.user ?? '', keyPath: t.ssh.keyPath }
           : null,
+      }
+    })(),
+    tls: (() => {
+      if (file.tls == null) return null
+      const t = file.tls as { mode?: string; certPath?: string; keyPath?: string; domain?: string; dnsProvider?: string }
+      if (t.mode === 'import-cert') {
+        return { mode: 'import-cert' as const, certPath: t.certPath ?? '', keyPath: t.keyPath ?? '' }
+      }
+      // Pass mode/provider through (no silent default) so zod rejects a missing/misspelled provider.
+      return {
+        mode: t.mode as 'byo-api-token',
+        domain: t.domain ?? '',
+        dnsProvider: (t.dnsProvider ?? '') as 'cloudflare' | 'vercel',
       }
     })(),
     smtp: {
