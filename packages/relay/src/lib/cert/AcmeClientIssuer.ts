@@ -1,7 +1,10 @@
 import * as acme from 'acme-client'
+import { createLogger } from '@tapflowio/agent-core'
 import type { DnsProvider } from './DnsProvider.js'
 import type { AcmeIssuer, IssuedCert } from './AcmeCertProvider.js'
 import { parseCertNotAfter } from './parseCert.js'
+
+const logger = createLogger('relay:acme')
 
 // 실제 Let's Encrypt 발급 — acme-client `auto()`에 DNS-01 챌린지 콜백으로 DnsProvider를 연결한다.
 // 네트워크 왕복이라 단위 테스트 대상이 아니다(통합/수동 검증). 키는 여기 로컬에서 생성된다.
@@ -39,21 +42,27 @@ export class AcmeClientIssuer implements AcmeIssuer {
 
     const propagationMs = this.opts.dnsPropagationMs ?? DEFAULT_DNS_PROPAGATION_MS
 
+    logger.info(`requesting ${this.opts.staging ? 'STAGING' : 'production'} cert for ${domain} via ${dns.name} (dns-01)`)
+
     const cert = await client.auto({
       csr,
       email: this.opts.email || undefined,
       termsOfServiceAgreed: true,
       challengePriority: ['dns-01'],
       challengeCreateFn: async (_authz, _challenge, keyAuthorization) => {
+        logger.info(`setting _acme-challenge.${domain} TXT`)
         await dns.setTxtRecord(domain, keyAuthorization)
-        // LE가 검증하기 전에 TXT가 전파되도록 대기 — Cloudflare는 보통 수초.
+        // LE가 검증하기 전에 TXT가 전파되도록 대기.
+        logger.info(`TXT set; waiting ${propagationMs}ms for propagation before validation`)
         if (propagationMs > 0) await sleep(propagationMs)
+        logger.info('propagation wait done; handing challenge to ACME for validation')
       },
       challengeRemoveFn: async (_authz, _challenge, keyAuthorization) => {
         await dns.removeTxtRecord(domain, keyAuthorization)
       },
     })
 
+    logger.info(`cert issued for ${domain}`)
     return { cert, key: key.toString(), expiresAt: parseCertNotAfter(cert) }
   }
 }
