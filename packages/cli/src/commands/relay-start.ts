@@ -40,7 +40,7 @@ export async function cmdRelayStart(opts: RelayStartOptions): Promise<void> {
 
   const server = new RelayServer({ port, uploadsDir: path.join(config.local.dataDir, 'uploads'), wsBackpressureBytes: config.local.wsBackpressureBytes, tls })
   await server.start()
-  step(`Relay started on ${wsScheme}://localhost:${port}`)
+  step(`Relay started on ${httpScheme}://localhost:${port}`)
   if (certProvider) {
     startCertRenewal(certProvider, { onRenew: (m) => server.updateTlsContext({ cert: m.cert, key: m.key }) })
   }

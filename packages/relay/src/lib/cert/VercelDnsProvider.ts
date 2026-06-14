@@ -1,5 +1,5 @@
 import type { DnsProvider } from './DnsProvider.js'
-import type { FetchLike } from './CloudflareDnsProvider.js'
+import { DNS_API_TIMEOUT_MS, type FetchLike } from './CloudflareDnsProvider.js'
 
 // Vercel DNS-01 solver (issue #232). 사용자 자기 Vercel 계정 토큰으로 동작한다(BYO).
 // 토큰은 config가 아니라 env(VERCEL_TOKEN)에서 읽는다(vercelDnsFromEnv).
@@ -92,8 +92,7 @@ export class VercelDnsProvider implements DnsProvider {
     if (this.fixedZoneName) return this.fixedZoneName
     const cached = this.zoneCache.get(fqdn)
     if (cached) return cached
-    const body = await this.request<{ domains: { name: string }[] }>(this.url('/v5/domains', { limit: '100' }), 'GET')
-    const names = body.domains.map((d) => d.name)
+    const names = await this.listAllDomains()
     const zone = names.filter((n) => fqdn === n || fqdn.endsWith(`.${n}`)).sort((a, b) => b.length - a.length)[0]
     if (!zone) throw new Error(`No Vercel domain found for ${fqdn}`)
     this.zoneCache.set(fqdn, zone)
@@ -102,11 +101,46 @@ export class VercelDnsProvider implements DnsProvider {
 
   private async findRecords(zone: string, type: string, subname: string): Promise<VercelRecord[]> {
     const fullName = subname === '' ? zone : `${subname}.${zone}`
-    const body = await this.request<{ records?: VercelRecord[] }>(
-      this.url(`/v5/domains/${zone}/records`, { limit: '100' }),
-      'GET',
-    )
-    return (body.records ?? []).filter((r) => r.type === type && (r.name === subname || r.name === fullName))
+    const records = await this.listAllRecords(zone)
+    return records.filter((r) => r.type === type && (r.name === subname || r.name === fullName))
+  }
+
+  // Vercel 목록 API는 페이지네이션됨(기본/limit 초과 시). pagination.next(타임스탬프)를 until로 넘겨 끝까지 순회.
+  // >100 도메인/레코드 계정에서 "No Vercel domain found"나 누락으로 인한 idempotency 깨짐 방지.
+  private async listAllDomains(): Promise<string[]> {
+    const names: string[] = []
+    let until: string | undefined
+    for (let page = 0; page < 100; page++) {
+      const params: Record<string, string> = { limit: '100' }
+      if (until) params.until = until
+      const body = await this.request<{ domains: { name: string }[]; pagination?: { next: number | null } }>(
+        this.url('/v5/domains', params),
+        'GET',
+      )
+      for (const d of body.domains) names.push(d.name)
+      const next = body.pagination?.next
+      if (!next) break
+      until = String(next)
+    }
+    return names
+  }
+
+  private async listAllRecords(zone: string): Promise<VercelRecord[]> {
+    const all: VercelRecord[] = []
+    let until: string | undefined
+    for (let page = 0; page < 100; page++) {
+      const params: Record<string, string> = { limit: '100' }
+      if (until) params.until = until
+      const body = await this.request<{ records?: VercelRecord[]; pagination?: { next: number | null } }>(
+        this.url(`/v5/domains/${zone}/records`, params),
+        'GET',
+      )
+      all.push(...(body.records ?? []))
+      const next = body.pagination?.next
+      if (!next) break
+      until = String(next)
+    }
+    return all
   }
 
   private async createRecord(zone: string, record: { type: string; name: string; value: string; ttl: number }): Promise<void> {
@@ -122,6 +156,7 @@ export class VercelDnsProvider implements DnsProvider {
       method,
       headers: { Authorization: `Bearer ${this.token}`, 'content-type': 'application/json' },
       body: body === undefined ? undefined : JSON.stringify(body),
+      signal: AbortSignal.timeout(DNS_API_TIMEOUT_MS),
     })
     const data = (await res.json().catch(() => null)) as { error?: { message?: string } } | null
     if (!res.ok) {

@@ -56,6 +56,8 @@ export class AcmeCertProvider implements CertProvider {
   private readonly store: CertStore
   private readonly now: () => number
   private readonly thresholdMs: number
+  // 진행 중 발급을 공유해 동시 호출이 중복 ACME 주문(→ CA 한도)을 내지 않게 한다(single-flight).
+  private inflight: Promise<CertMaterial> | null = null
 
   constructor(opts: AcmeCertProviderOptions) {
     this.domain = opts.domain
@@ -78,10 +80,18 @@ export class AcmeCertProvider implements CertProvider {
     return this.issueAndStore()
   }
 
-  private async issueAndStore(): Promise<CertMaterial> {
-    const issued = await this.issuer.issue({ domain: this.domain, dns: this.dns })
-    const material: CertMaterial = { cert: issued.cert, key: issued.key, expiresAt: issued.expiresAt }
-    await this.store.save(material)
-    return material
+  private issueAndStore(): Promise<CertMaterial> {
+    if (this.inflight) return this.inflight
+    this.inflight = (async () => {
+      try {
+        const issued = await this.issuer.issue({ domain: this.domain, dns: this.dns })
+        const material: CertMaterial = { cert: issued.cert, key: issued.key, expiresAt: issued.expiresAt }
+        await this.store.save(material)
+        return material
+      } finally {
+        this.inflight = null
+      }
+    })()
+    return this.inflight
   }
 }

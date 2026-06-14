@@ -1,5 +1,5 @@
 import type { DnsProvider } from './DnsProvider.js'
-import type { FetchLike } from './CloudflareDnsProvider.js'
+import { DNS_API_TIMEOUT_MS, type FetchLike } from './CloudflareDnsProvider.js'
 
 // deSEC(무료 비영리 DNS) DNS-01 solver (issue #232). 도메인 없는 유저도 무료 dedyn.io 서브도메인으로 자동 발급.
 // 토큰은 config가 아니라 env(DESEC_TOKEN)에서 읽는다(desecDnsFromEnv).
@@ -134,6 +134,7 @@ export class DesecDnsProvider implements DnsProvider {
       method,
       headers: { Authorization: `Token ${this.token}`, 'content-type': 'application/json' },
       body: body === undefined ? undefined : JSON.stringify(body),
+      signal: AbortSignal.timeout(DNS_API_TIMEOUT_MS),
     })
     let parsed: unknown = null
     if (res.status !== 204) {

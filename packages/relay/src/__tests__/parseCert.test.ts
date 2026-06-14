@@ -11,7 +11,7 @@ describe('parseCertNotAfter', () => {
   it('PEM에서 만료일을 Date로 파싱한다', () => {
     const exp = parseCertNotAfter(certPem)
     expect(exp).toBeInstanceOf(Date)
-    expect(exp.getTime()).toBeGreaterThan(Date.now())
+    expect(exp.getTime()).not.toBeNaN()
   })
 
   it('잘못된 PEM이면 throw', () => {

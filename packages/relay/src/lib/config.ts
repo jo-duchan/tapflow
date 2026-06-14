@@ -143,11 +143,11 @@ function load(): TapflowConfig {
       if (t.mode === 'import-cert') {
         return { mode: 'import-cert' as const, certPath: t.certPath ?? '', keyPath: t.keyPath ?? '' }
       }
-      // Pass the actual mode/provider so zod's discriminated union/enum rejects unknown values
+      // Pass mode/provider through (no silent default) so zod rejects a missing/misspelled provider.
       return {
         mode: t.mode as 'byo-api-token',
         domain: t.domain ?? '',
-        dnsProvider: (t.dnsProvider ?? 'cloudflare') as 'cloudflare' | 'desec' | 'vercel',
+        dnsProvider: (t.dnsProvider ?? '') as 'cloudflare' | 'desec' | 'vercel',
       }
     })(),
     smtp: {

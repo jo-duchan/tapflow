@@ -42,6 +42,14 @@ describe('AcmeCertProvider', () => {
     expect(issuer.issues).toBe(1)
   })
 
+  it('동시 ensureCert 호출도 1회만 발급한다 (single-flight)', async () => {
+    const now = () => T0
+    const issuer = new FakeIssuer(now)
+    const p = new AcmeCertProvider({ domain: 'tap.example.com', dns: new RecordingDns(), issuer, now })
+    await Promise.all([p.ensureCert(), p.ensureCert(), p.ensureCert()])
+    expect(issuer.issues).toBe(1)
+  })
+
   it('발급은 주입된 DnsProvider로 DNS-01 챌린지를 set/remove 한다', async () => {
     const now = () => T0
     const dns = new RecordingDns()

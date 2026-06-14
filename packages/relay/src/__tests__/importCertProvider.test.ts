@@ -13,7 +13,7 @@ describe('ImportCertProvider', () => {
     const m = await p.ensureCert()
     expect(m.cert).toContain('BEGIN CERTIFICATE')
     expect(m.key).toContain('PRIVATE KEY')
-    expect(m.expiresAt.getTime()).toBeGreaterThan(Date.now())
+    expect(m.expiresAt.getTime()).not.toBeNaN()
   })
 
   it('strategy는 import-cert', () => {

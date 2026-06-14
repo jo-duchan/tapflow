@@ -115,4 +115,30 @@ describe('VercelDnsProvider', () => {
   it('토큰이 없으면 생성 시 throw', () => {
     expect(() => new VercelDnsProvider({ token: '' })).toThrow(/token/i)
   })
+
+  it('레코드가 여러 페이지면 pagination.next를 따라가 매칭을 찾는다', async () => {
+    const target = { id: 'rec_target', name: '_acme-challenge.tap', type: 'TXT', value: 'tok-2' }
+    const deleted: string[] = []
+    const fetchFn: FetchLike = async (rawUrl, init) => {
+      const url = new URL(rawUrl)
+      const method = (init?.method ?? 'GET').toUpperCase()
+      const parts = url.pathname.split('/').filter(Boolean)
+      if (parts.length === 2 && parts[1] === 'domains') {
+        return { ok: true, status: 200, json: async () => ({ domains: [{ name: 'example.com' }] }) }
+      }
+      if (parts.length === 4 && parts[3] === 'records' && method === 'GET') {
+        // page 1: 빈 + next 커서, page 2(until 있음): target + next null
+        if (!url.searchParams.get('until')) return { ok: true, status: 200, json: async () => ({ records: [], pagination: { next: 1000 } }) }
+        return { ok: true, status: 200, json: async () => ({ records: [target], pagination: { next: null } }) }
+      }
+      if (parts.length === 5 && parts[3] === 'records' && method === 'DELETE') {
+        deleted.push(parts[4])
+        return { ok: true, status: 200, json: async () => ({}) }
+      }
+      return { ok: false, status: 400, json: async () => ({ error: { message: 'unhandled' } }) }
+    }
+    const dns = new VercelDnsProvider({ token: TOKEN, fetchFn })
+    await dns.removeTxtRecord('tap.example.com', 'tok-2')
+    expect(deleted).toContain('rec_target')
+  })
 })

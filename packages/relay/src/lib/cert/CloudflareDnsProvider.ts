@@ -9,8 +9,11 @@ const TTL_SECONDS = 60
 /** 의존성 주입용 최소 fetch 계약 — global fetch 타입에 묶이지 않게 자체 정의. */
 export type FetchLike = (
   url: string,
-  init?: { method?: string; headers?: Record<string, string>; body?: string },
+  init?: { method?: string; headers?: Record<string, string>; body?: string; signal?: AbortSignal },
 ) => Promise<{ ok: boolean; status: number; json(): Promise<unknown> }>
+
+// DNS 공급자 API 호출이 무한 대기하지 않도록 하는 요청 타임아웃.
+export const DNS_API_TIMEOUT_MS = 30_000
 
 export interface CloudflareDnsProviderOptions {
   token: string
@@ -112,6 +115,7 @@ export class CloudflareDnsProvider implements DnsProvider {
       method,
       headers: { Authorization: `Bearer ${this.token}`, 'content-type': 'application/json' },
       body: body === undefined ? undefined : JSON.stringify(body),
+      signal: AbortSignal.timeout(DNS_API_TIMEOUT_MS),
     })
     const data = (await res.json()) as CfResponse<T>
     if (!res.ok || !data.success) {

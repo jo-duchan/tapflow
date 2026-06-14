@@ -4,6 +4,7 @@ import os from 'os'
 import path from 'path'
 import { fileURLToPath } from 'url'
 import { DiskCertStore } from '../lib/cert/DiskCertStore.js'
+import { parseCertNotAfter } from '../lib/cert/parseCert.js'
 import type { CertMaterial } from '../lib/cert/CertProvider.js'
 
 const here = path.dirname(fileURLToPath(import.meta.url))
@@ -31,8 +32,8 @@ describe('DiskCertStore', () => {
     const loaded = await store.load()
     expect(loaded!.cert).toBe(cert)
     expect(loaded!.key).toBe(key)
-    // 만료는 저장값이 아니라 cert에서 파싱 — 픽스처는 미래 만료
-    expect(loaded!.expiresAt.getTime()).toBeGreaterThan(Date.now())
+    // 만료는 저장값이 아니라 cert에서 파싱 — 결정적으로 파싱값과 비교(벽시계 비의존)
+    expect(loaded!.expiresAt).toEqual(parseCertNotAfter(cert))
   })
 
   it('key 파일은 0600 권한으로 저장한다', async () => {
