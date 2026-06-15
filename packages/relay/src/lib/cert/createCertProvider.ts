@@ -14,9 +14,9 @@ export type TlsConfig =
 
 export interface CreateCertProviderDeps {
   dataDir: string
-  /** ACME 계정 이메일. 기본 env ACME_EMAIL. */
+  /** ACME 계정 이메일. 기본 env TAPFLOW_ACME_EMAIL. */
   email?: string
-  /** LE 스테이징 사용(테스트). 기본 env ACME_STAGING === '1'. */
+  /** LE 스테이징 사용(테스트). 기본 env TAPFLOW_ACME_STAGING === '1'. */
   staging?: boolean
 }
 
@@ -30,8 +30,8 @@ export function createCertProvider(tls: TlsConfig, deps: CreateCertProviderDeps)
   if (!entry) throw new Error(`unknown dnsProvider "${tls.dnsProvider}" — available: ${dnsProviders.names().join(', ')}`)
   const dns: DnsProvider = entry.fromEnv()
   const issuer = new AcmeClientIssuer({
-    email: deps.email ?? process.env.ACME_EMAIL ?? '',
-    staging: deps.staging ?? process.env.ACME_STAGING === '1',
+    email: deps.email ?? process.env.TAPFLOW_ACME_EMAIL ?? '',
+    staging: deps.staging ?? process.env.TAPFLOW_ACME_STAGING === '1',
     accountKeyPath: path.join(deps.dataDir, 'tls', 'account.pem'),
   })
   const store = new DiskCertStore(path.join(deps.dataDir, 'tls'))

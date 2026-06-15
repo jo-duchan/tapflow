@@ -146,7 +146,7 @@ describe('cmdInitConfig', () => {
 
     const cfg = JSON.parse(fs.readFileSync(path.join(tmpDir, 'tapflow.config.json'), 'utf-8'))
     expect(cfg.tls).toEqual({ mode: 'byo-api-token', domain: 'tap.example.com', dnsProvider: 'cloudflare' })
-    expect(output.join('\n')).toContain('CLOUDFLARE_API_TOKEN')
+    expect(output.join('\n')).toContain('TAPFLOW_CLOUDFLARE_TOKEN')
   })
 
   it('none + High + Vercel → byo-api-token(vercel) tls 생성', async () => {
@@ -158,7 +158,7 @@ describe('cmdInitConfig', () => {
 
     const cfg = JSON.parse(fs.readFileSync(path.join(tmpDir, 'tapflow.config.json'), 'utf-8'))
     expect(cfg.tls).toEqual({ mode: 'byo-api-token', domain: 'tap.example.com', dnsProvider: 'vercel' })
-    expect(output.join('\n')).toContain('VERCEL_TOKEN')
+    expect(output.join('\n')).toContain('TAPFLOW_VERCEL_TOKEN')
   })
 
   it('none + High + Import → import-cert tls 생성', async () => {

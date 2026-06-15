@@ -1,7 +1,7 @@
 import type { DnsProvider } from './DnsProvider.js'
 
 // Cloudflare DNS-01 solver (issue #232). 사용자 자기 Cloudflare 계정 토큰으로 동작한다(BYO).
-// 토큰은 config가 아니라 env(CLOUDFLARE_API_TOKEN)에서 읽는다 — cloudflareDnsFromEnv 참고.
+// 토큰은 config가 아니라 env(TAPFLOW_CLOUDFLARE_TOKEN)에서 읽는다 — cloudflareDnsFromEnv 참고.
 
 const DEFAULT_API_BASE = 'https://api.cloudflare.com/client/v4'
 const TTL_SECONDS = 60
@@ -52,7 +52,7 @@ export class CloudflareDnsProvider implements DnsProvider {
   private readonly zoneIdCache = new Map<string, string>()
 
   constructor(opts: CloudflareDnsProviderOptions) {
-    if (!opts.token) throw new Error('Cloudflare API token is required (set CLOUDFLARE_API_TOKEN)')
+    if (!opts.token) throw new Error('Cloudflare API token is required (set TAPFLOW_CLOUDFLARE_TOKEN)')
     this.token = opts.token
     this.fetchFn = opts.fetchFn ?? (globalThis.fetch as unknown as FetchLike)
     this.apiBase = opts.apiBase ?? DEFAULT_API_BASE
@@ -126,9 +126,9 @@ export class CloudflareDnsProvider implements DnsProvider {
   }
 }
 
-/** env(CLOUDFLARE_API_TOKEN)에서 토큰을 읽어 provider를 만든다. 토큰 미설정 시 throw. */
+/** env(TAPFLOW_CLOUDFLARE_TOKEN)에서 토큰을 읽어 provider를 만든다. 토큰 미설정 시 throw. */
 export function cloudflareDnsFromEnv(zoneName?: string): CloudflareDnsProvider {
-  const token = process.env.CLOUDFLARE_API_TOKEN
-  if (!token) throw new Error('CLOUDFLARE_API_TOKEN is not set')
+  const token = process.env.TAPFLOW_CLOUDFLARE_TOKEN
+  if (!token) throw new Error('TAPFLOW_CLOUDFLARE_TOKEN is not set')
   return new CloudflareDnsProvider({ token, zoneName })
 }

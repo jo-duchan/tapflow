@@ -29,7 +29,7 @@ const tailscaleTunnelSchema = z.object({
 const tunnelSchema = z.discriminatedUnion('provider', [ratholeTunnelSchema, tailscaleTunnelSchema])
 
 // LAN HTTPS (issue #232) — secure context용 TLS 종단 설정. 골격: v1은 LAN 가지만 구현.
-// 비밀(DNS API 토큰)은 config 파일이 아니라 env에서 읽는다(예: CLOUDFLARE_API_TOKEN).
+// 비밀(DNS API 토큰)은 config 파일이 아니라 env에서 읽는다(예: TAPFLOW_CLOUDFLARE_TOKEN).
 const importCertTlsSchema = z.object({
   mode: z.literal('import-cert'),
   certPath: z.string().min(1),

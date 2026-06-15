@@ -14,7 +14,7 @@ describe('dnsProviders registry', () => {
   it('각 엔트리는 라벨·힌트·envVars를 들고 있다(wizard용)', () => {
     const cf = dnsProviders.get('cloudflare')
     expect(cf?.label).toBeTruthy()
-    expect(cf?.envVars).toContain('CLOUDFLARE_API_TOKEN')
+    expect(cf?.envVars).toContain('TAPFLOW_CLOUDFLARE_TOKEN')
   })
 
   it('알 수 없는 provider는 undefined / has=false', () => {
@@ -23,7 +23,7 @@ describe('dnsProviders registry', () => {
   })
 
   it('fromEnv가 env에서 DnsProvider를 만든다', () => {
-    vi.stubEnv('CLOUDFLARE_API_TOKEN', 'cf-token')
+    vi.stubEnv('TAPFLOW_CLOUDFLARE_TOKEN', 'cf-token')
     const dns = dnsProviders.get('cloudflare')!.fromEnv()
     expect(dns).toBeInstanceOf(CloudflareDnsProvider)
     expect(dns.name).toBe('cloudflare')
