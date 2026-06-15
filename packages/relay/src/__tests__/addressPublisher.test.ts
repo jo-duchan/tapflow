@@ -41,6 +41,19 @@ describe('startAddressPublisher', () => {
     stop()
   })
 
+  it('같은 IP라도 reassertEveryTicks마다 재발행해 외부 변경을 self-heal한다', async () => {
+    const upsert = vi.fn(async () => {})
+    const stop = startAddressPublisher(tls, {
+      provider: mockProvider(upsert),
+      getIp: async () => '192.168.1.50',
+      intervalMs: 5,
+      reassertEveryTicks: 2,
+    })
+    // 같은 IP인데도 재확정으로 2회 이상 발행된다(dedup만이면 1회에서 멈춤).
+    await vi.waitFor(() => expect(upsert.mock.calls.length).toBeGreaterThanOrEqual(2), { timeout: 1000 })
+    stop()
+  })
+
   it('IP를 못 구하면 발행하지 않는다', async () => {
     const upsert = vi.fn(async () => {})
     const stop = startAddressPublisher(tls, { provider: mockProvider(upsert), getIp: async () => null })
