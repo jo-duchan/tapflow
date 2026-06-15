@@ -3,7 +3,7 @@ import { initDb } from './db.js'
 import { RelayServer } from './RelayServer.js'
 import { config } from './lib/config.js'
 import { buildInviteBaseUrl } from './lib/publicUrl.js'
-import { createCertProvider, startCertRenewal } from './lib/cert/index.js'
+import { createCertProvider, startCertRenewal, startAddressPublisher } from './lib/cert/index.js'
 import { createLogger } from '@tapflowio/agent-core'
 
 const logger = createLogger('relay')
@@ -56,8 +56,15 @@ async function main(): Promise<void> {
     ? startCertRenewal(provider, { onRenew: (m) => server.updateTlsContext({ cert: m.cert, key: m.key }) })
     : null
 
+  // byo-api-token: publish the relay's LAN IP to the domain's A record so teammates just open the URL.
+  const stopPublish =
+    config.tls?.mode === 'byo-api-token' && config.tls.publishAddress !== false
+      ? startAddressPublisher(config.tls)
+      : null
+
   const shutdown = () => {
     stopRenewal?.()
+    stopPublish?.()
     void server.stop().then(() => process.exit(0))
   }
   process.on('SIGTERM', shutdown)
