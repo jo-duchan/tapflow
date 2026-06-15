@@ -1,6 +1,7 @@
 import fs from 'fs'
 import path from 'path'
 import { select, text, isCancel, cancel } from '@clack/prompts'
+import { dnsProviders } from '@tapflowio/relay'
 import { banner, warn } from '../lib/print.js'
 
 export interface InitConfigOptions {
@@ -19,13 +20,8 @@ type TunnelConfig =
   | { provider: 'rathole'; serverAddr: string; publicUrl: string; ssh: { host: string; user: string; keyPath: string } | null }
 
 type TlsConfig =
-  | { mode: 'byo-api-token'; domain: string; dnsProvider: 'cloudflare' | 'vercel' }
+  | { mode: 'byo-api-token'; domain: string; dnsProvider: string }
   | { mode: 'import-cert'; certPath: string; keyPath: string }
-
-const TOKEN_ENV: Record<'cloudflare' | 'vercel', string> = {
-  cloudflare: 'CLOUDFLARE_API_TOKEN',
-  vercel: 'VERCEL_TOKEN',
-}
 
 function isInsideGitRepo(dir: string): boolean {
   let current = dir
@@ -122,8 +118,7 @@ async function promptTls(): Promise<TlsConfig | null> {
   const method = await select({
     message: 'Certificate method',
     options: [
-      { value: 'cloudflare', label: 'Cloudflare DNS', hint: 'auto-issue & renew via API token (env CLOUDFLARE_API_TOKEN)' },
-      { value: 'vercel', label: 'Vercel DNS', hint: 'auto-issue & renew via API token (env VERCEL_TOKEN)' },
+      ...dnsProviders.list().map((p) => ({ value: p.name, label: p.label, hint: p.hint })),
       { value: 'import', label: 'Existing certificate', hint: 'bring your own cert & key files' },
     ],
   })
@@ -151,7 +146,7 @@ async function promptTls(): Promise<TlsConfig | null> {
     validate: (v) => (!v?.trim() ? 'Required' : undefined),
   })
   if (isCancel(domain)) { cancel('Cancelled.'); process.exit(0) }
-  return { mode: 'byo-api-token', domain: domain.trim(), dnsProvider: method as 'cloudflare' | 'vercel' }
+  return { mode: 'byo-api-token', domain: domain.trim(), dnsProvider: method }
 }
 
 export async function cmdInitConfig(opts: InitConfigOptions): Promise<void> {
@@ -221,7 +216,7 @@ export async function cmdInitConfig(opts: InitConfigOptions): Promise<void> {
   if (tunnel) lines.push(`Tunnel: ${tunnel.provider}`)
   if (tls?.mode === 'byo-api-token') {
     lines.push(`HTTPS: ${tls.dnsProvider} DNS-01 for ${tls.domain}.`)
-    lines.push(`Set ${TOKEN_ENV[tls.dnsProvider]} and point the domain A record to this Mac's LAN IP.`)
+    lines.push(`Set ${dnsProviders.get(tls.dnsProvider)?.envVars.join(', ') ?? 'the provider credentials'} (the relay auto-publishes the A record on start).`)
   } else if (tls?.mode === 'import-cert') {
     lines.push('HTTPS: import-cert. Ensure the cert/key paths exist on this Mac.')
   }

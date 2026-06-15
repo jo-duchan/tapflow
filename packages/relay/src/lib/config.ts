@@ -4,6 +4,7 @@ import crypto from 'crypto'
 import { z } from 'zod'
 import { createLogger } from '@tapflowio/agent-core'
 import { parseTrustedProxies } from './clientAddress.js'
+import { dnsProviders } from './cert/dnsRegistry.js'
 
 const logger = createLogger('relay:config')
 
@@ -38,7 +39,10 @@ const importCertTlsSchema = z.object({
 const byoApiTokenTlsSchema = z.object({
   mode: z.literal('byo-api-token'),
   domain: z.string().min(1),
-  dnsProvider: z.enum(['cloudflare', 'vercel']),
+  // 유효 provider는 레지스트리가 정한다(새 provider 추가 시 스키마 무변경).
+  dnsProvider: z.string().min(1).refine((n) => dnsProviders.has(n), {
+    message: `unknown dnsProvider (available: ${dnsProviders.names().join(', ')})`,
+  }),
   // 도메인 A 레코드를 LAN IP로 자동 발행(기본 ON). false면 사용자가 직접 관리.
   publishAddress: z.boolean().optional(),
   // 자동 감지 대신 쓸 고정 LAN IP(멀티NIC/VPN 환경 오버라이드).
@@ -154,7 +158,7 @@ function load(): TapflowConfig {
       return {
         mode: t.mode as 'byo-api-token',
         domain: t.domain ?? '',
-        dnsProvider: (t.dnsProvider ?? '') as 'cloudflare' | 'vercel',
+        dnsProvider: t.dnsProvider ?? '',
         ...(t.publishAddress !== undefined ? { publishAddress: t.publishAddress } : {}),
         ...(t.address !== undefined ? { address: t.address } : {}),
       }
