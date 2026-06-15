@@ -27,6 +27,7 @@
 |----|------|
 | `local` | 이 머신에서 실행하는 relay 서버 설정 |
 | `relay.url` | 연결할 relay URL. `tapflow agent start`, `tapflow admin init`, `tapflow status`, `tapflow logs`의 기본값으로 사용됩니다. 설정 시 `--relay` 플래그 없이 동작합니다. 비어있으면 로컬 모드(`ws://localhost:[local.port]`)를 사용합니다. |
+| `tls` | LAN HTTPS(보안 컨텍스트) 설정. WebCodecs 하드웨어 디코드에 필요합니다. 아래 HTTPS 섹션을 참고하세요. |
 | `smtp` | 초대·비밀번호 재설정 이메일 발송을 위한 SMTP 설정 |
 
 `smtp.from`은 `smtp.user`가 설정되어 있으면 `tapflow <smtp.user>` 형태로 자동 설정됩니다. 발신자 주소를 다르게 지정하려면 명시적으로 입력합니다.
@@ -45,6 +46,10 @@
 | `TAPFLOW_TRUSTED_PROXIES` | — | *(비어있음)* | 신뢰하는 리버스 프록시 IP 목록(콤마 구분, 예: `127.0.0.1,::1`). 릴레이를 같은 호스트의 리버스 프록시 뒤에서 실행할 때 이 값을 설정하면, 프록시 주소 대신 `X-Forwarded-For`에 담긴 실제 클라이언트 IP를 사용합니다. 비어 있으면 전달 헤더를 파싱하지 않습니다. |
 | `TAPFLOW_BUILD_TTL_DAYS` | — | `7` | Done 빌드 파일·레코드 자동 삭제 기간(일). 로컬 테스트 시 `0.001` 등 작은 값으로 즉시 확인 가능. |
 | `TAPFLOW_WS_BACKPRESSURE_BYTES` | — | `1048576` (1 MB) | 브라우저 소켓당 바이너리 프레임 드롭 임계값. 버퍼가 이 값을 초과하면 프레임이 드롭됩니다. |
+| `TAPFLOW_CLOUDFLARE_TOKEN` | — | *(비어있음)* | `tls.dnsProvider`가 `cloudflare`일 때 DNS-01 발급에 쓰는 Cloudflare API 토큰. |
+| `TAPFLOW_VERCEL_TOKEN` | — | *(비어있음)* | `tls.dnsProvider`가 `vercel`일 때 쓰는 Vercel API 토큰. |
+| `TAPFLOW_VERCEL_TEAM_ID` | — | *(비어있음)* | 도메인이 팀 스코프에 속할 때 필요한 Vercel 팀 ID. |
+| `TAPFLOW_ACME_EMAIL` | — | *(비어있음)* | Let's Encrypt 계정 연락 이메일(선택). |
 | `SMTP_HOST` | `smtp.host` | `` | SMTP 호스트 |
 | `SMTP_PORT` | `smtp.port` | `587` | SMTP 포트 |
 | `SMTP_SECURE` | `smtp.secure` | `false` | TLS 사용 여부 (`true` 문자열로 설정) |
@@ -66,6 +71,65 @@ openssl rand -hex 32
 릴레이를 같은 호스트의 리버스 프록시(nginx, Caddy) 뒤에서 운영하면서 `TAPFLOW_TRUSTED_PROXIES`를 비워 두면, 프록시의 loopback 주소 때문에 **모든 원격 클라이언트가 localhost로 취급**됩니다. localhost는 무인증이므로 외부에 그대로 노출됩니다. 프록시 주소(예: `127.0.0.1,::1`)를 `TAPFLOW_TRUSTED_PROXIES`에 설정하고, 프록시가 `X-Forwarded-For`를 전달하도록 구성하세요.
 
 프록시나 터널로 노출하는 경우 공개 URL(`tunnel.publicUrl` 또는 `relay.url`)도 함께 설정하세요. 설정하지 않으면 CORS/CSRF 허용 목록이 loopback만 남아, 대시보드의 cross-origin 요청이 차단될 수 있습니다.
+:::
+
+## HTTPS (보안 컨텍스트)
+
+브라우저의 하드웨어 가속 영상 디코드(WebCodecs)는 보안 컨텍스트(HTTPS)에서만 동작합니다. HTTP로 접속하면 소프트웨어 디코드로 자동 폴백합니다. 같은 LAN의 팀원에게 더 부드러운 화면을 주려면 relay를 HTTPS로 종단하세요. `tls`를 설정하면 relay가 같은 포트에서 HTTPS와 WSS를 함께 종단합니다.
+
+발급 방식은 두 가지입니다.
+
+### 자기 DNS 계정으로 자동 발급 (`byo-api-token`)
+
+자기 도메인과 DNS 업체 API 토큰만 있으면 relay가 Let's Encrypt에서 DNS-01 방식으로 인증서를 자동 발급하고 갱신합니다.
+
+```json
+{
+  "local": { "port": 4000 },
+  "tls": {
+    "mode": "byo-api-token",
+    "domain": "tap.yourcompany.com",
+    "dnsProvider": "cloudflare"
+  }
+}
+```
+
+| 키 | 설명 |
+|----|------|
+| `tls.mode` | `byo-api-token`(Let's Encrypt DNS-01 자동 발급) 또는 `import-cert`(직접 준비한 파일). |
+| `tls.domain` | 인증서를 발급할 도메인. 팀원은 `https://[도메인]:[포트]`로 접속합니다. |
+| `tls.dnsProvider` | `cloudflare` 또는 `vercel`. 해당 업체 API 토큰은 환경변수에서 읽습니다. |
+| `tls.publishAddress` | 도메인 A 레코드를 이 머신의 LAN IP로 자동 발행합니다. 기본 `true`이며, DNS를 직접 관리하려면 `false`로 둡니다. |
+| `tls.address` | 자동 감지한 LAN IP 대신 사용할 IP. 멀티 NIC나 VPN 환경에서 오버라이드용입니다. |
+
+API 토큰은 설정 파일이 아니라 환경변수로 전달합니다. Cloudflare는 `TAPFLOW_CLOUDFLARE_TOKEN`, Vercel은 `TAPFLOW_VERCEL_TOKEN`을 씁니다. 팀 도메인이면 `TAPFLOW_VERCEL_TEAM_ID`도 함께 설정합니다.
+
+`publishAddress`가 켜져 있으면 relay가 부팅할 때 자기 LAN IP를 도메인 A 레코드로 발행하고 주기적으로 갱신합니다. 팀원은 DNS를 건드리지 않고 도메인만 열면 됩니다.
+
+### 직접 준비한 인증서 (`import-cert`)
+
+사내 PKI나 이미 보유한 와일드카드 인증서를 쓰려면 파일 경로를 지정합니다. 갱신은 직접 관리합니다.
+
+```json
+{
+  "tls": {
+    "mode": "import-cert",
+    "certPath": "/path/to/fullchain.pem",
+    "keyPath": "/path/to/privkey.pem"
+  }
+}
+```
+
+| 키 | 설명 |
+|----|------|
+| `tls.certPath` | fullchain 인증서 PEM 경로. |
+| `tls.keyPath` | 개인 키 PEM 경로. |
+
+::: tip 접속과 알려진 제약
+- 인증서는 도메인에 묶입니다. 따라서 `https://[도메인]:[포트]`로 접속해야 합니다. `localhost`나 IP로 접속하면 이름 불일치 경고가 납니다.
+- 일부 공유기는 공개 도메인이 사설 IP를 가리키는 응답을 차단합니다(DNS rebinding). 이 경우 공유기에 예외를 등록하거나 로컬 DNS로 도메인을 LAN IP에 매핑하세요.
+- WiFi 기기 격리(client isolation)가 켜진 망에서는 기기 간 통신이 막혀 LAN 접속 자체가 불가능합니다. 일반 가정·사무실 LAN을 사용하세요.
+- 테스트로 스테이징 인증서(`TAPFLOW_ACME_STAGING=1`)를 발급하면 브라우저가 신뢰하지 않아 경고가 납니다. 같은 도메인을 스테이징에서 운영용으로 바꾼 직후에는 브라우저가 이전 인증서 오류를 캐시할 수 있습니다. 이때는 시크릿 창이나 기록 삭제로 다시 확인하세요.
 :::
 
 ## 데이터 디렉토리

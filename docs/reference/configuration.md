@@ -27,6 +27,7 @@ The relay reads `tapflow.config.json` from the directory where it is started. Ge
 |-----|-------------|
 | `local` | Settings for the relay server running on this machine. |
 | `relay.url` | URL of the relay to connect to. Used by `tapflow agent start`, `tapflow admin init`, `tapflow status`, and `tapflow logs` as the default — no `--relay` flag needed when this is set. Leave empty for local mode (`ws://localhost:[local.port]`). |
+| `tls` | LAN HTTPS (secure context) settings, required for WebCodecs hardware decode. See the HTTPS section below. |
 | `smtp` | SMTP settings for sending invitation and password reset emails. |
 
 `smtp.from` defaults to `tapflow <smtp.user>` when `smtp.user` is set. Override it explicitly if you need a different sender address.
@@ -45,6 +46,10 @@ Environment variables always take precedence over the config file — useful for
 | `TAPFLOW_TRUSTED_PROXIES` | — | *(empty)* | Comma-separated IPs of trusted reverse proxies (e.g. `127.0.0.1,::1`). Set this when the relay runs behind a same-host reverse proxy so it reads the real client IP from `X-Forwarded-For` instead of the proxy's address. Empty disables forwarded-header parsing. |
 | `TAPFLOW_BUILD_TTL_DAYS` | — | `7` | Days before a Done build's files and record are automatically deleted. Set to a small value (e.g. `0.001`) to verify cleanup quickly in local testing. |
 | `TAPFLOW_WS_BACKPRESSURE_BYTES` | — | `1048576` (1 MB) | Binary frame drop threshold per browser socket. Frames are silently dropped when the socket buffer exceeds this value. |
+| `TAPFLOW_CLOUDFLARE_TOKEN` | — | *(empty)* | Cloudflare API token for DNS-01 issuance when `tls.dnsProvider` is `cloudflare`. |
+| `TAPFLOW_VERCEL_TOKEN` | — | *(empty)* | Vercel API token for DNS-01 issuance when `tls.dnsProvider` is `vercel`. |
+| `TAPFLOW_VERCEL_TEAM_ID` | — | *(empty)* | Vercel team ID, required when the domain belongs to a team scope. |
+| `TAPFLOW_ACME_EMAIL` | — | *(empty)* | Optional contact email for the Let's Encrypt account. |
 | `SMTP_HOST` | `smtp.host` | `` | SMTP host |
 | `SMTP_PORT` | `smtp.port` | `587` | SMTP port |
 | `SMTP_SECURE` | `smtp.secure` | `false` | Enable TLS (set to string `"true"`) |
@@ -64,6 +69,65 @@ openssl rand -hex 32
 If the relay runs behind a same-host reverse proxy (nginx, Caddy) and `TAPFLOW_TRUSTED_PROXIES` is left unset, the proxy's loopback address makes **every remote client look like localhost** — and localhost is unauthenticated. Set `TAPFLOW_TRUSTED_PROXIES` to the proxy's address (e.g. `127.0.0.1,::1`) and configure the proxy to forward `X-Forwarded-For`.
 
 For proxied or tunneled deployments, also set a public URL (`tunnel.publicUrl` or `relay.url`). Otherwise the CORS/CSRF allowlist is loopback-only and the dashboard's cross-origin requests can be blocked.
+:::
+
+## HTTPS (secure context)
+
+Hardware-accelerated video decode (WebCodecs) only runs in a secure context (HTTPS). Over HTTP the dashboard falls back to software decode, so to give teammates on the LAN a smoother stream, terminate the relay over HTTPS. With `tls` set, the relay terminates HTTPS and WSS on the same port.
+
+There are two issuance modes.
+
+### Auto-issue with your own DNS account (`byo-api-token`)
+
+With your own domain and a DNS provider API token, the relay auto-issues and renews a Let's Encrypt certificate over DNS-01.
+
+```json
+{
+  "local": { "port": 4000 },
+  "tls": {
+    "mode": "byo-api-token",
+    "domain": "tap.yourcompany.com",
+    "dnsProvider": "cloudflare"
+  }
+}
+```
+
+| Key | Description |
+|-----|-------------|
+| `tls.mode` | `byo-api-token` (auto-issue via Let's Encrypt DNS-01) or `import-cert` (your own files). |
+| `tls.domain` | Domain the certificate is issued for. Teammates open `https://[domain]:[port]`. |
+| `tls.dnsProvider` | `cloudflare` or `vercel`. The matching API token is read from the environment. |
+| `tls.publishAddress` | Auto-publish the domain's A record to this machine's LAN IP. Default `true`; set `false` to manage DNS yourself. |
+| `tls.address` | IP to use instead of the auto-detected LAN IP, for multi-NIC or VPN overrides. |
+
+API tokens are passed via environment variables, not the config file. Cloudflare uses `TAPFLOW_CLOUDFLARE_TOKEN` and Vercel uses `TAPFLOW_VERCEL_TOKEN`, plus `TAPFLOW_VERCEL_TEAM_ID` for a team domain.
+
+When `publishAddress` is on, the relay publishes its LAN IP to the domain's A record on boot and refreshes it periodically, so teammates just open the domain without touching DNS.
+
+### Bring your own certificate (`import-cert`)
+
+To use an internal PKI or a wildcard certificate you already hold, point to the files. You manage renewal yourself.
+
+```json
+{
+  "tls": {
+    "mode": "import-cert",
+    "certPath": "/path/to/fullchain.pem",
+    "keyPath": "/path/to/privkey.pem"
+  }
+}
+```
+
+| Key | Description |
+|-----|-------------|
+| `tls.certPath` | Path to the fullchain certificate PEM. |
+| `tls.keyPath` | Path to the private key PEM. |
+
+::: tip Access and known limits
+- The certificate is bound to the domain, so open `https://[domain]:[port]`. Connecting via `localhost` or an IP raises a name-mismatch warning.
+- Some routers block responses where a public domain points to a private IP (DNS rebinding). Add a router exception, or map the domain to the LAN IP via local DNS.
+- On networks with WiFi client isolation, device-to-device traffic is blocked and LAN access is impossible. Use a normal home or office LAN.
+- A staging certificate (`TAPFLOW_ACME_STAGING=1`) is untrusted, so browsers warn. Right after switching the same domain from staging to production, the browser may cache the old certificate error — re-check in a private window or after clearing history.
 :::
 
 ## Data directory
