@@ -41,14 +41,14 @@ export const dnsProviders = new DnsProviderRegistry()
 dnsProviders.register({
   name: 'cloudflare',
   label: 'Cloudflare DNS',
-  hint: 'auto-issue & renew via API token (env CLOUDFLARE_API_TOKEN)',
-  envVars: ['CLOUDFLARE_API_TOKEN'],
+  hint: 'auto-issue & renew via API token (env TAPFLOW_CLOUDFLARE_TOKEN)',
+  envVars: ['TAPFLOW_CLOUDFLARE_TOKEN'],
   fromEnv: cloudflareDnsFromEnv,
 })
 dnsProviders.register({
   name: 'vercel',
   label: 'Vercel DNS',
-  hint: 'auto-issue & renew via API token (env VERCEL_TOKEN)',
-  envVars: ['VERCEL_TOKEN'],
+  hint: 'auto-issue & renew via API token (env TAPFLOW_VERCEL_TOKEN)',
+  envVars: ['TAPFLOW_VERCEL_TOKEN'],
   fromEnv: vercelDnsFromEnv,
 })

@@ -2,7 +2,7 @@ import type { DnsProvider } from './DnsProvider.js'
 import { DNS_API_TIMEOUT_MS, type FetchLike } from './CloudflareDnsProvider.js'
 
 // Vercel DNS-01 solver (issue #232). 사용자 자기 Vercel 계정 토큰으로 동작한다(BYO).
-// 토큰은 config가 아니라 env(VERCEL_TOKEN)에서 읽는다(vercelDnsFromEnv).
+// 토큰은 config가 아니라 env(TAPFLOW_VERCEL_TOKEN)에서 읽는다(vercelDnsFromEnv).
 // Vercel은 개별 레코드(id 보유) 모델: name은 도메인 기준 상대 subname(루트는 ''), TXT 값은 따옴표 없이.
 
 const DEFAULT_API_BASE = 'https://api.vercel.com'
@@ -37,7 +37,7 @@ export class VercelDnsProvider implements DnsProvider {
   private readonly zoneCache = new Map<string, string>()
 
   constructor(opts: VercelDnsProviderOptions) {
-    if (!opts.token) throw new Error('Vercel API token is required (set VERCEL_TOKEN)')
+    if (!opts.token) throw new Error('Vercel API token is required (set TAPFLOW_VERCEL_TOKEN)')
     this.token = opts.token
     this.fetchFn = opts.fetchFn ?? (globalThis.fetch as unknown as FetchLike)
     this.apiBase = opts.apiBase ?? DEFAULT_API_BASE
@@ -167,9 +167,9 @@ export class VercelDnsProvider implements DnsProvider {
   }
 }
 
-/** env(VERCEL_TOKEN)에서 토큰을 읽어 provider를 만든다. 미설정 시 throw. (팀이면 VERCEL_TEAM_ID) */
+/** env(TAPFLOW_VERCEL_TOKEN)에서 토큰을 읽어 provider를 만든다. 미설정 시 throw. (팀이면 TAPFLOW_VERCEL_TEAM_ID) */
 export function vercelDnsFromEnv(zoneName?: string): VercelDnsProvider {
-  const token = process.env.VERCEL_TOKEN
-  if (!token) throw new Error('VERCEL_TOKEN is not set')
-  return new VercelDnsProvider({ token, zoneName, teamId: process.env.VERCEL_TEAM_ID || undefined })
+  const token = process.env.TAPFLOW_VERCEL_TOKEN
+  if (!token) throw new Error('TAPFLOW_VERCEL_TOKEN is not set')
+  return new VercelDnsProvider({ token, zoneName, teamId: process.env.TAPFLOW_VERCEL_TEAM_ID || undefined })
 }

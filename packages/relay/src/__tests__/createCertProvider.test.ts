@@ -15,31 +15,31 @@ describe('createCertProvider', () => {
   })
 
   it('byo-api-token 설정이면 AcmeCertProvider (토큰 env 필요)', () => {
-    vi.stubEnv('CLOUDFLARE_API_TOKEN', 'cf-token')
+    vi.stubEnv('TAPFLOW_CLOUDFLARE_TOKEN', 'cf-token')
     const p = createCertProvider({ mode: 'byo-api-token', domain: 'tap.example.com', dnsProvider: 'cloudflare' }, { dataDir: '/tmp/x' })
     expect(p).toBeInstanceOf(AcmeCertProvider)
     expect(p.strategy).toBe('byo-api-token')
   })
 
-  it('byo-api-token + vercel 설정이면 AcmeCertProvider (VERCEL_TOKEN 필요)', () => {
-    vi.stubEnv('VERCEL_TOKEN', 'vc-token')
+  it('byo-api-token + vercel 설정이면 AcmeCertProvider (TAPFLOW_VERCEL_TOKEN 필요)', () => {
+    vi.stubEnv('TAPFLOW_VERCEL_TOKEN', 'vc-token')
     const p = createCertProvider({ mode: 'byo-api-token', domain: 'tap.example.com', dnsProvider: 'vercel' }, { dataDir: '/tmp/x' })
     expect(p).toBeInstanceOf(AcmeCertProvider)
     expect(p.strategy).toBe('byo-api-token')
   })
 
-  it('vercel인데 VERCEL_TOKEN 미설정이면 throw', () => {
-    vi.stubEnv('VERCEL_TOKEN', '')
+  it('vercel인데 TAPFLOW_VERCEL_TOKEN 미설정이면 throw', () => {
+    vi.stubEnv('TAPFLOW_VERCEL_TOKEN', '')
     expect(() =>
       createCertProvider({ mode: 'byo-api-token', domain: 'tap.example.com', dnsProvider: 'vercel' }, { dataDir: '/tmp/x' }),
-    ).toThrow(/VERCEL_TOKEN/)
+    ).toThrow(/TAPFLOW_VERCEL_TOKEN/)
   })
 
-  it('byo-api-token인데 CLOUDFLARE_API_TOKEN 미설정이면 throw', () => {
-    vi.stubEnv('CLOUDFLARE_API_TOKEN', '')
+  it('byo-api-token인데 TAPFLOW_CLOUDFLARE_TOKEN 미설정이면 throw', () => {
+    vi.stubEnv('TAPFLOW_CLOUDFLARE_TOKEN', '')
     expect(() =>
       createCertProvider({ mode: 'byo-api-token', domain: 'tap.example.com', dnsProvider: 'cloudflare' }, { dataDir: '/tmp/x' }),
-    ).toThrow(/CLOUDFLARE_API_TOKEN/)
+    ).toThrow(/TAPFLOW_CLOUDFLARE_TOKEN/)
   })
 
   it('레지스트리에 없는 dnsProvider면 throw (available 목록 안내)', () => {
