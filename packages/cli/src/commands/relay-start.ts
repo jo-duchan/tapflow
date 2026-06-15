@@ -1,7 +1,7 @@
 import fs from 'fs'
 import path from 'path'
 import { z } from 'zod'
-import { RelayServer, initDb, config, createCertProvider, startCertRenewal } from '@tapflowio/relay'
+import { RelayServer, initDb, config, createCertProvider, startCertRenewal, startAddressPublisher } from '@tapflowio/relay'
 import { banner, step, warn } from '../lib/print.js'
 import { startConfiguredTunnel } from '../lib/tunnel-runner.js'
 import type { TunnelPlugin } from '../lib/tunnel.js'
@@ -37,13 +37,20 @@ export async function cmdRelayStart(opts: RelayStartOptions): Promise<void> {
   }
   const httpScheme = tls ? 'https' : 'http'
   const wsScheme = tls ? 'wss' : 'ws'
+  // A domain-bound cert won't validate against localhost, so advertise the cert's domain instead.
+  const displayHost = config.tls?.mode === 'byo-api-token' ? config.tls.domain : 'localhost'
 
   const server = new RelayServer({ port, uploadsDir: path.join(config.local.dataDir, 'uploads'), wsBackpressureBytes: config.local.wsBackpressureBytes, tls })
   await server.start()
-  step(`Relay started on ${httpScheme}://localhost:${port}`)
+  step(`Relay started on ${httpScheme}://${displayHost}:${port}`)
   const stopRenewal = certProvider
     ? startCertRenewal(certProvider, { onRenew: (m) => server.updateTlsContext({ cert: m.cert, key: m.key }) })
     : null
+  // byo-api-token: publish the relay's LAN IP to the domain's A record so teammates just open the URL.
+  const stopPublish =
+    config.tls?.mode === 'byo-api-token' && config.tls.publishAddress !== false
+      ? startAddressPublisher(config.tls)
+      : null
 
   const SUPPORTED_PROVIDERS = ['rathole', 'tailscale']
   if (opts.tunnel && !SUPPORTED_PROVIDERS.includes(opts.tunnel)) {
@@ -66,7 +73,7 @@ export async function cmdRelayStart(opts: RelayStartOptions): Promise<void> {
   }
 
   banner('success', 'TAPFLOW RELAY READY', [
-    `Relay  : ${httpScheme}://localhost:${port}`,
+    `Relay  : ${httpScheme}://${displayHost}:${port}`,
     ...(publicUrl ? [`Public : ${publicUrl}`] : []),
     `Connect Mac agents:  tapflow agent start --relay ${wsScheme}://<host>:${port}`,
     'Press Ctrl+C to stop.',
@@ -74,6 +81,7 @@ export async function cmdRelayStart(opts: RelayStartOptions): Promise<void> {
 
   process.on('SIGINT', () => {
     stopRenewal?.()
+    stopPublish?.()
     void tunnel?.stop()
     process.exit(0)
   })

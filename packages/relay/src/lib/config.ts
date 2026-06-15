@@ -39,6 +39,10 @@ const byoApiTokenTlsSchema = z.object({
   mode: z.literal('byo-api-token'),
   domain: z.string().min(1),
   dnsProvider: z.enum(['cloudflare', 'vercel']),
+  // 도메인 A 레코드를 LAN IP로 자동 발행(기본 ON). false면 사용자가 직접 관리.
+  publishAddress: z.boolean().optional(),
+  // 자동 감지 대신 쓸 고정 LAN IP(멀티NIC/VPN 환경 오버라이드).
+  address: z.string().min(1).optional(),
 })
 
 const tlsSchema = z.discriminatedUnion('mode', [byoApiTokenTlsSchema, importCertTlsSchema])
@@ -139,7 +143,10 @@ function load(): TapflowConfig {
     })(),
     tls: (() => {
       if (file.tls == null) return null
-      const t = file.tls as { mode?: string; certPath?: string; keyPath?: string; domain?: string; dnsProvider?: string }
+      const t = file.tls as {
+        mode?: string; certPath?: string; keyPath?: string; domain?: string; dnsProvider?: string
+        publishAddress?: boolean; address?: string
+      }
       if (t.mode === 'import-cert') {
         return { mode: 'import-cert' as const, certPath: t.certPath ?? '', keyPath: t.keyPath ?? '' }
       }
@@ -148,6 +155,8 @@ function load(): TapflowConfig {
         mode: t.mode as 'byo-api-token',
         domain: t.domain ?? '',
         dnsProvider: (t.dnsProvider ?? '') as 'cloudflare' | 'vercel',
+        ...(t.publishAddress !== undefined ? { publishAddress: t.publishAddress } : {}),
+        ...(t.address !== undefined ? { address: t.address } : {}),
       }
     })(),
     smtp: {
