@@ -41,4 +41,10 @@ describe('createCertProvider', () => {
       createCertProvider({ mode: 'byo-api-token', domain: 'tap.example.com', dnsProvider: 'cloudflare' }, { dataDir: '/tmp/x' }),
     ).toThrow(/CLOUDFLARE_API_TOKEN/)
   })
+
+  it('레지스트리에 없는 dnsProvider면 throw (available 목록 안내)', () => {
+    expect(() =>
+      createCertProvider({ mode: 'byo-api-token', domain: 'tap.example.com', dnsProvider: 'route66' }, { dataDir: '/tmp/x' }),
+    ).toThrow(/unknown dnsProvider .*available/)
+  })
 })

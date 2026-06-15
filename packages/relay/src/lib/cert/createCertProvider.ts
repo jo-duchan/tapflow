@@ -3,14 +3,13 @@ import type { CertProvider } from './CertProvider.js'
 import type { DnsProvider } from './DnsProvider.js'
 import { AcmeCertProvider } from './AcmeCertProvider.js'
 import { AcmeClientIssuer } from './AcmeClientIssuer.js'
-import { cloudflareDnsFromEnv } from './CloudflareDnsProvider.js'
-import { vercelDnsFromEnv } from './VercelDnsProvider.js'
+import { dnsProviders } from './dnsRegistry.js'
 import { ImportCertProvider } from './ImportCertProvider.js'
 import { DiskCertStore } from './DiskCertStore.js'
 
 // config.tls(비-null)와 동일 형태. cert 라이브러리를 config에 결합하지 않으려 로컬 정의.
 export type TlsConfig =
-  | { mode: 'byo-api-token'; domain: string; dnsProvider: 'cloudflare' | 'vercel' }
+  | { mode: 'byo-api-token'; domain: string; dnsProvider: string }
   | { mode: 'import-cert'; certPath: string; keyPath: string }
 
 export interface CreateCertProviderDeps {
@@ -26,8 +25,10 @@ export function createCertProvider(tls: TlsConfig, deps: CreateCertProviderDeps)
   if (tls.mode === 'import-cert') {
     return new ImportCertProvider({ certPath: tls.certPath, keyPath: tls.keyPath })
   }
-  // byo-api-token: 사용자 자기 DNS 계정 토큰으로 DNS-01 (provider별 env에서 토큰)
-  const dns: DnsProvider = tls.dnsProvider === 'vercel' ? vercelDnsFromEnv() : cloudflareDnsFromEnv()
+  // byo-api-token: 레지스트리에서 provider를 찾아 자기 DNS 계정 토큰(env)으로 DNS-01.
+  const entry = dnsProviders.get(tls.dnsProvider)
+  if (!entry) throw new Error(`unknown dnsProvider "${tls.dnsProvider}" — available: ${dnsProviders.names().join(', ')}`)
+  const dns: DnsProvider = entry.fromEnv()
   const issuer = new AcmeClientIssuer({
     email: deps.email ?? process.env.ACME_EMAIL ?? '',
     staging: deps.staging ?? process.env.ACME_STAGING === '1',

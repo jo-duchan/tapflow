@@ -1,8 +1,7 @@
 import dgram from 'dgram'
 import { createLogger } from '@tapflowio/agent-core'
 import type { DnsProvider } from './DnsProvider.js'
-import { cloudflareDnsFromEnv } from './CloudflareDnsProvider.js'
-import { vercelDnsFromEnv } from './VercelDnsProvider.js'
+import { dnsProviders } from './dnsRegistry.js'
 
 const logger = createLogger('relay:dns')
 
@@ -15,7 +14,7 @@ const DETECT_TIMEOUT_MS = 2_000
 
 export interface AddressPublisherTls {
   domain: string
-  dnsProvider: 'cloudflare' | 'vercel'
+  dnsProvider: string
   /** 자동 감지 대신 쓸 고정 IP. */
   address?: string
 }
@@ -58,7 +57,11 @@ export function detectLanIPv4(): Promise<string | null> {
 
 // byo-api-token일 때 LAN IP를 자기 도메인 A 레코드로 발행 — 팀원은 DNS를 손대지 않고 도메인만 연다.
 export function startAddressPublisher(tls: AddressPublisherTls, opts: AddressPublisherOptions = {}): () => void {
-  const dns = opts.provider ?? (tls.dnsProvider === 'vercel' ? vercelDnsFromEnv() : cloudflareDnsFromEnv())
+  const dns = opts.provider ?? dnsProviders.get(tls.dnsProvider)?.fromEnv()
+  if (!dns) {
+    logger.warn(`unknown dnsProvider "${tls.dnsProvider}" — skipping address auto-publish`)
+    return () => {}
+  }
   const upsert = dns.upsertAddressRecord?.bind(dns)
   if (!upsert) {
     logger.warn(`${dns.name} cannot publish A records — skipping address auto-publish`)
