@@ -156,7 +156,7 @@ function load(): TapflowConfig {
         domain: t.domain ?? '',
         dnsProvider: (t.dnsProvider ?? '') as 'cloudflare' | 'vercel',
         ...(t.publishAddress !== undefined ? { publishAddress: t.publishAddress } : {}),
-        ...(t.address ? { address: t.address } : {}),
+        ...(t.address !== undefined ? { address: t.address } : {}),
       }
     })(),
     smtp: {

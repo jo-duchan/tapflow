@@ -25,8 +25,7 @@ export interface AddressPublisherOptions {
   onError?: (err: unknown) => void
 }
 
-// 기본 라우트로 나가는 인터페이스의 IPv4를 얻는다. UDP connect는 실제 패킷을 보내지 않고
-// 로컬 주소만 결정한다 — os.networkInterfaces()로 고르면 VPN(utun)/멀티NIC에서 오감지하기 쉽다.
+// UDP connect(패킷 미전송)로 기본 라우트 인터페이스 IPv4를 얻는다 — networkInterfaces()는 VPN/멀티NIC 오감지 위험.
 export function detectLanIPv4(): Promise<string | null> {
   return new Promise((resolve) => {
     const sock = dgram.createSocket('udp4')
@@ -45,8 +44,7 @@ export function detectLanIPv4(): Promise<string | null> {
   })
 }
 
-// byo-api-token일 때 relay의 LAN IP를 자기 도메인 A 레코드로 발행한다(부팅 + IP 변경 시).
-// 사용자 자기 DNS 계정 토큰을 이미 보유하므로, 팀원은 DNS를 손대지 않고 도메인만 연다.
+// byo-api-token일 때 LAN IP를 자기 도메인 A 레코드로 발행 — 팀원은 DNS를 손대지 않고 도메인만 연다.
 export function startAddressPublisher(tls: AddressPublisherTls, opts: AddressPublisherOptions = {}): () => void {
   const dns = opts.provider ?? (tls.dnsProvider === 'vercel' ? vercelDnsFromEnv() : cloudflareDnsFromEnv())
   const upsert = dns.upsertAddressRecord?.bind(dns)
@@ -74,8 +72,16 @@ export function startAddressPublisher(tls: AddressPublisherTls, opts: AddressPub
     }
   }
 
-  void publish()
-  const timer = setInterval(() => void publish(), opts.intervalMs ?? DEFAULT_INTERVAL_MS)
+  // setInterval이 이전 upsert 완료 전 다음 publish를 시작하면 쓰기가 역순으로 끝나 stale IP가 남을 수 있다.
+  let inFlight = false
+  const tick = async (): Promise<void> => {
+    if (inFlight) return
+    inFlight = true
+    try { await publish() } finally { inFlight = false }
+  }
+
+  void tick()
+  const timer = setInterval(() => void tick(), opts.intervalMs ?? DEFAULT_INTERVAL_MS)
   timer.unref?.()
   return () => clearInterval(timer)
 }
