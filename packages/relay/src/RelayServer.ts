@@ -875,8 +875,35 @@ export class RelayServer {
     }
 
     const contentType = MIME_TYPES[path.extname(filePath)] ?? 'text/html'
-    res.writeHead(200, { 'Content-Type': contentType })
-    fs.createReadStream(filePath)
+    const headers: Record<string, string> = { 'Content-Type': contentType }
+
+    // Content-hashed build assets never change → cache them forever.
+    if (urlPath.startsWith('/assets/')) {
+      headers['Cache-Control'] = 'public, max-age=31536000, immutable'
+    }
+
+    // Serve the build-time .br sibling when accepted (precompressed → no runtime CPU on the stream path).
+    const acceptHeader = req.headers['accept-encoding']
+    const accept = Array.isArray(acceptHeader) ? acceptHeader.join(',') : acceptHeader ?? ''
+    const brAccepted = accept.split(',').some((token) => {
+      const [name, ...params] = token.trim().split(';')
+      const coding = name.trim().toLowerCase()
+      if (coding !== 'br' && coding !== '*') return false
+      const qParam = params.map((p) => p.trim()).find((p) => p.startsWith('q='))
+      const q = qParam ? Number(qParam.slice(2)) : 1
+      return !Number.isNaN(q) && q > 0
+    })
+    let servePath = filePath
+    const hasBr = fs.existsSync(filePath + '.br')
+    // Vary whenever a compressed variant exists, even if raw is served, so caches don't cross-serve.
+    if (hasBr) headers['Vary'] = 'Accept-Encoding'
+    if (brAccepted && hasBr) {
+      servePath = filePath + '.br'
+      headers['Content-Encoding'] = 'br'
+    }
+
+    res.writeHead(200, headers)
+    fs.createReadStream(servePath)
       .on('error', () => { res.destroy() })
       .pipe(res)
   }

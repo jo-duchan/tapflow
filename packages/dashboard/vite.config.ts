@@ -1,9 +1,14 @@
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
+import { compression } from 'vite-plugin-compression2'
 import path from 'path'
 
 export default defineConfig({
-  plugins: [react()],
+  plugins: [
+    react(),
+    // Precompress text assets to .br at build time (brotli only) so the relay serves them with no runtime CPU.
+    compression({ include: /\.(js|css|html|svg|json)$/, algorithms: ['brotliCompress'], deleteOriginalAssets: false }),
+  ],
   resolve: {
     alias: { '@': path.resolve(__dirname, '.') },
   },
