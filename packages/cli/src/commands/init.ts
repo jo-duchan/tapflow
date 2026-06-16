@@ -46,6 +46,32 @@ function addToGitignore(dir: string, entry: string): 'created' | 'appended' | 'a
   return 'created'
 }
 
+// #287 — 자격 증명을 gitignore된 .tapflow-data/.env 에 빈 값 템플릿으로 적어둔다(사용자가 토큰을 붙여넣음).
+// 기존 파일의 실제 값은 보존하고 누락된 변수만 추가한다. 비밀은 프롬프트/로그로 흐르지 않는다.
+function scaffoldEnvFile(dataDir: string, envVars: string[]): 'created' | 'appended' | 'already-present' {
+  const envPath = path.join(dataDir, '.env')
+  fs.mkdirSync(dataDir, { recursive: true })
+  if (fs.existsSync(envPath)) {
+    const content = fs.readFileSync(envPath, 'utf-8')
+    const present = new Set(
+      content.split('\n').map((l) => l.split('=')[0]?.trim()).filter(Boolean),
+    )
+    const missing = envVars.filter((v) => !present.has(v))
+    if (missing.length === 0) return 'already-present'
+    const separator = content.endsWith('\n') || content === '' ? '' : '\n'
+    fs.appendFileSync(envPath, `${separator}${missing.map((v) => `${v}=`).join('\n')}\n`, 'utf-8')
+    return 'appended'
+  }
+  const header = '# tapflow DNS/ACME credentials — do not commit. Paste each token after the =.\n'
+  fs.writeFileSync(envPath, header + envVars.map((v) => `${v}=`).join('\n') + '\n', { mode: 0o600 })
+  try {
+    fs.chmodSync(envPath, 0o600)
+  } catch {
+    // best-effort on platforms without POSIX permissions
+  }
+  return 'created'
+}
+
 async function promptTunnel(): Promise<TunnelConfig | null> {
   const provider = await select({
     message: 'Tunnel provider',
@@ -198,6 +224,18 @@ export async function cmdInitConfig(opts: InitConfigOptions): Promise<void> {
     process.exit(1)
   }
 
+  // byo-api-token: scaffold the credential env file so the relay can be restarted from any shell
+  // without re-exporting tokens. We write only empty variable names; the user pastes the secret.
+  let envScaffold: 'created' | 'appended' | 'already-present' | 'skipped' = 'skipped'
+  if (tls?.mode === 'byo-api-token') {
+    const envVars = dnsProviders.get(tls.dnsProvider)?.envVars ?? []
+    try {
+      envScaffold = scaffoldEnvFile(path.join(process.cwd(), '.tapflow-data'), envVars)
+    } catch (err) {
+      warn(`Could not write .tapflow-data/.env: ${err instanceof Error ? err.message : String(err)}`)
+    }
+  }
+
   let gitignoreUpdated: 'created' | 'appended' | 'already-present' | 'skipped' = 'skipped'
   if (isInsideGitRepo(process.cwd())) {
     try {
@@ -215,8 +253,13 @@ export async function cmdInitConfig(opts: InitConfigOptions): Promise<void> {
   }
   if (tunnel) lines.push(`Tunnel: ${tunnel.provider}`)
   if (tls?.mode === 'byo-api-token') {
+    const envVars = dnsProviders.get(tls.dnsProvider)?.envVars.join(', ') ?? 'the provider credentials'
     lines.push(`HTTPS: ${tls.dnsProvider} DNS-01 for ${tls.domain}.`)
-    lines.push(`Set ${dnsProviders.get(tls.dnsProvider)?.envVars.join(', ') ?? 'the provider credentials'} (the relay auto-publishes the A record on start).`)
+    if (envScaffold === 'created' || envScaffold === 'appended') {
+      lines.push(`Paste ${envVars} into .tapflow-data/.env (the relay reads it on start).`)
+    } else {
+      lines.push(`Set ${envVars} (the relay auto-publishes the A record on start).`)
+    }
   } else if (tls?.mode === 'import-cert') {
     lines.push('HTTPS: import-cert. Ensure the cert/key paths exist on this Mac.')
   }

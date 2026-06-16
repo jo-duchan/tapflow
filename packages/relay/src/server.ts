@@ -4,11 +4,15 @@ import { RelayServer } from './RelayServer.js'
 import { config } from './lib/config.js'
 import { buildCorsOrigins, proxyWithoutPublicUrlWarning } from './lib/proxyConfig.js'
 import { createCertProvider, startCertRenewal, startAddressPublisher } from './lib/cert/index.js'
+import { loadDataDirEnv } from './lib/loadEnvFile.js'
 import { createLogger } from '@tapflowio/agent-core'
 
 const logger = createLogger('relay')
 
 const { port, dataDir } = config.local
+// Load gitignored credentials (DNS/ACME tokens) before any cert issuance reads process.env.
+const envPath = loadDataDirEnv(dataDir)
+if (envPath) logger.info(`Loaded credentials from ${envPath}`)
 const dbPath = path.join(dataDir, 'tapflow.db')
 const uploadsDir = path.join(dataDir, 'uploads')
 
