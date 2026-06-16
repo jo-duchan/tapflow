@@ -1,3 +1,4 @@
+import { Suspense } from 'react'
 import { Outlet, Navigate, useLocation } from 'react-router-dom'
 import { SidebarInset, SidebarProvider, SidebarTrigger } from '@/components/ui/sidebar'
 import { AppSidebar } from '@/components/AppSidebar'
@@ -57,7 +58,10 @@ export function DashboardLayout() {
         <SidebarInset>
           <DashboardHeader />
           <main className="flex-1 min-h-0 overflow-auto">
-            <Outlet />
+            {/* Outlet-level Suspense so lazy page chunks load without unmounting the sidebar/header. */}
+            <Suspense fallback={<div className="flex h-full w-full items-center justify-center text-sm text-muted-foreground">Loading…</div>}>
+              <Outlet />
+            </Suspense>
           </main>
         </SidebarInset>
       </SidebarProvider>
