@@ -5,7 +5,9 @@ vi.mock('@tapflowio/relay', () => ({
     start: vi.fn().mockResolvedValue(undefined),
   }) }),
   initDb: vi.fn(),
-  config: { local: { port: 4000, dataDir: '/tmp/tapflow-test', wsBackpressureBytes: 1048576 }, relay: { url: null }, tunnel: null },
+  buildCorsOrigins: vi.fn(() => []),
+  proxyWithoutPublicUrlWarning: vi.fn(() => null),
+  config: { local: { port: 4000, dataDir: '/tmp/tapflow-test', wsBackpressureBytes: 1048576, trustedProxies: [] }, relay: { url: null }, tunnel: null },
 }))
 
 const mockTunnel = { setupServer: vi.fn(), start: vi.fn(), stop: vi.fn() }

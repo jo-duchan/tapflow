@@ -1,7 +1,7 @@
 import fs from 'fs'
 import path from 'path'
 import { z } from 'zod'
-import { RelayServer, initDb, config, createCertProvider, startCertRenewal, startAddressPublisher } from '@tapflowio/relay'
+import { RelayServer, initDb, config, createCertProvider, startCertRenewal, startAddressPublisher, buildCorsOrigins, proxyWithoutPublicUrlWarning } from '@tapflowio/relay'
 import { banner, step, warn } from '../lib/print.js'
 import { startConfiguredTunnel } from '../lib/tunnel-runner.js'
 import type { TunnelPlugin } from '../lib/tunnel.js'
@@ -40,7 +40,9 @@ export async function cmdRelayStart(opts: RelayStartOptions): Promise<void> {
   // A domain-bound cert won't validate against localhost, so advertise the cert's domain instead.
   const displayHost = config.tls?.mode === 'byo-api-token' ? config.tls.domain : 'localhost'
 
-  const server = new RelayServer({ port, uploadsDir: path.join(config.local.dataDir, 'uploads'), wsBackpressureBytes: config.local.wsBackpressureBytes, tls })
+  const proxyWarning = proxyWithoutPublicUrlWarning(config)
+  if (proxyWarning) warn(proxyWarning)
+  const server = new RelayServer({ port, uploadsDir: path.join(config.local.dataDir, 'uploads'), wsBackpressureBytes: config.local.wsBackpressureBytes, trustedProxies: config.local.trustedProxies, corsOrigins: buildCorsOrigins(config, port), tls })
   await server.start()
   step(`Relay started on ${httpScheme}://${displayHost}:${port}`)
   const stopRenewal = certProvider
