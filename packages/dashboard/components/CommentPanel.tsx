@@ -3,6 +3,7 @@ import { Button } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/textarea'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Link2, ImagePlus, ArrowUp } from 'lucide-react'
+import { toast } from 'sonner'
 import type { Comment } from '@/lib/types'
 import { UserAvatar } from '@/components/UserAvatar'
 
@@ -78,7 +79,9 @@ export function CommentPanel({ buildId }: Props) {
 
   function copyLink(id: number) {
     const url = `${location.origin}${location.pathname}${location.search}#comment-${id}`
-    navigator.clipboard.writeText(url).catch(() => {})
+    navigator.clipboard.writeText(url)
+      .then(() => toast.success('Link copied'))
+      .catch(() => toast.error('Could not copy link'))
   }
 
   function handleFileChange(f: File) {
@@ -104,7 +107,7 @@ export function CommentPanel({ buildId }: Props) {
   const groups = groupByDate(comments)
 
   return (
-    <div className="flex h-full flex-col gap-3">
+    <div className="flex h-full flex-col gap-3 px-1">
       <ScrollArea className="flex-1 rounded-md border">
         <div className="p-3">
           {comments.length === 0 ? (
@@ -165,7 +168,7 @@ export function CommentPanel({ buildId }: Props) {
         </div>
       </ScrollArea>
 
-      <div className="px-1 pb-1">
+      <div className="pb-1">
       <form onSubmit={handleSubmit}>
         <div className="rounded-xl border border-input bg-background ring-offset-background transition-shadow focus-within:outline-none focus-within:ring-2 focus-within:ring-ring focus-within:ring-offset-2">
           <Textarea

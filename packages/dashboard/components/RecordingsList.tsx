@@ -36,20 +36,28 @@ function formatExpiry(iso: string): { label: string; urgent: boolean } {
 export function RecordingsList({ buildId, refreshKey }: Props) {
   const [recordings, setRecordings] = useState<Recording[]>([]);
   const [loading, setLoading] = useState(true);
+  // Only show the loading text if the fetch is slow — avoids a flash on fast (few-ms) loads.
+  const [showLoading, setShowLoading] = useState(false);
 
   useEffect(() => {
     setLoading(true);
+    setShowLoading(false);
+    const t = setTimeout(() => setShowLoading(true), 250);
     fetch(`/api/v1/recordings?buildId=${buildId}`, {
       credentials: 'include',
     })
       .then((r) => (r.ok ? r.json() : []))
       .then((data: Recording[]) => setRecordings(data))
       .catch(() => setRecordings([]))
-      .finally(() => setLoading(false));
+      .finally(() => {
+        clearTimeout(t);
+        setLoading(false);
+      });
+    return () => clearTimeout(t);
   }, [buildId, refreshKey]);
 
   if (loading) {
-    return <p className="text-xs text-muted-foreground">Loading recordings…</p>;
+    return showLoading ? <p className="text-xs text-muted-foreground">Loading recordings…</p> : null;
   }
 
   if (recordings.length === 0) {
