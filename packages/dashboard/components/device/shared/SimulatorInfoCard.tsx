@@ -78,7 +78,7 @@ export function SimulatorInfoCard(props: SimulatorInfoCardProps) {
           )}
           {modeLabel && (
             <>
-              <Separator orientation="vertical" className="h-3" />
+              <Separator orientation="vertical" className="h-3 mx-1.5" />
               {mode === 'standard' ? (
                 <button
                   type="button"
