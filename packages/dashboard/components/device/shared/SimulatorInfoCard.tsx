@@ -1,7 +1,16 @@
 'use client';
 
+import { useMemo } from 'react';
 import { ScanLine } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { performanceMode } from '@/lib/decoders/pickDecoder';
+
+// init wizard와 같은 프로파일 용어로 — 디코더 jargon(WebCodecs/WASM) 대신.
+const MODE_LABEL: Record<string, string | null> = {
+  high: 'High performance',
+  standard: 'Standard',
+  unsupported: null,
+};
 
 interface SimulatorInfoCardProps {
   joined: boolean;
@@ -34,6 +43,8 @@ export function SimulatorInfoCard(props: SimulatorInfoCardProps) {
   const isIdle = fps > 0 && fps <= 15;
   const dotColor = isActive ? '#10b981' : isIdle ? '#94a3b8' : 'transparent';
   const stateLabel = isActive ? 'Active' : isIdle ? 'Idle' : null;
+  // Decode path is a stable per-browser capability; compute once, not per device card.
+  const modeLabel = useMemo(() => MODE_LABEL[performanceMode()], []);
 
   return (
     <div className="w-[300px] shrink-0 mt-3 rounded-xl border bg-background px-4 py-4 flex flex-col gap-3">
@@ -42,15 +53,21 @@ export function SimulatorInfoCard(props: SimulatorInfoCardProps) {
         <span className="text-[12px] font-medium">Focus</span>
       </div>
 
-      {joined && fps > 0 && (
+      {joined && (
         <div className="flex items-center" style={{ gap: 6 }}>
-          <span className="h-2 w-2 rounded-full shrink-0" style={{ background: dotColor }} />
-          <span className="text-[12px] font-mono text-foreground/75">{fps}</span>
-          <span className="text-[12px] text-muted-foreground">fps</span>
-          {stateLabel && (
-            <span className={cn('text-[11px]', isActive ? 'text-emerald-500' : 'text-muted-foreground/60')}>
-              · {stateLabel}
-            </span>
+          {/* Fixed width so the mode label after it doesn't shift as fps / Active·Idle change. */}
+          <span className="flex items-center shrink-0 w-[104px]" style={{ gap: 6 }}>
+            <span className="h-2 w-2 rounded-full shrink-0" style={{ background: dotColor }} />
+            <span className="text-[12px] font-mono text-foreground/75">{fps}</span>
+            <span className="text-[12px] text-muted-foreground">fps</span>
+            {stateLabel && (
+              <span className={cn('text-[11px]', isActive ? 'text-emerald-500' : 'text-muted-foreground/60')}>
+                · {stateLabel}
+              </span>
+            )}
+          </span>
+          {modeLabel && (
+            <span className="text-[11px] text-muted-foreground">· {modeLabel}</span>
           )}
         </div>
       )}
