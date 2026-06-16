@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { ScanLine } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { Separator } from '@/components/ui/separator';
 import { performanceMode } from '@/lib/decoders/pickDecoder';
 import { PerformanceModeNotice, shouldAutoShowPerfNotice, PERF_NOTICE_KEY } from '@/components/perf/PerformanceModeNotice';
 
@@ -67,28 +68,30 @@ export function SimulatorInfoCard(props: SimulatorInfoCardProps) {
 
       {joined && (
         <div className="flex items-center" style={{ gap: 6 }}>
-          {/* Fixed width so the mode label after it doesn't shift as fps / Active·Idle change. */}
-          <span className="flex items-center shrink-0 w-[104px]" style={{ gap: 6 }}>
-            <span className="h-2 w-2 rounded-full shrink-0" style={{ background: dotColor }} />
-            <span className="text-[12px] font-mono text-foreground/75">{fps}</span>
-            <span className="text-[12px] text-muted-foreground">fps</span>
-            {stateLabel && (
-              <span className={cn('text-[11px]', isActive ? 'text-emerald-500' : 'text-muted-foreground/60')}>
-                · {stateLabel}
-              </span>
-            )}
-          </span>
-          {modeLabel && (mode === 'standard' ? (
-            <button
-              type="button"
-              onClick={() => setNoticeOpen(true)}
-              className="text-[11px] text-foreground/70 hover:text-foreground underline-offset-2 hover:underline"
-            >
-              · {modeLabel}
-            </button>
-          ) : (
-            <span className="text-[11px] text-muted-foreground">· {modeLabel}</span>
-          ))}
+          <span className="h-2 w-2 rounded-full shrink-0" style={{ background: dotColor }} />
+          <span className="text-[12px] font-mono text-foreground/75">{fps}</span>
+          <span className="text-[12px] text-muted-foreground">fps</span>
+          {stateLabel && (
+            <span className={cn('text-[11px]', isActive ? 'text-emerald-500' : 'text-muted-foreground/60')}>
+              · {stateLabel}
+            </span>
+          )}
+          {modeLabel && (
+            <>
+              <Separator orientation="vertical" className="h-3" />
+              {mode === 'standard' ? (
+                <button
+                  type="button"
+                  onClick={() => setNoticeOpen(true)}
+                  className="text-[11px] text-foreground/70 hover:text-foreground underline-offset-2 hover:underline"
+                >
+                  {modeLabel}
+                </button>
+              ) : (
+                <span className="text-[11px] text-muted-foreground">{modeLabel}</span>
+              )}
+            </>
+          )}
         </div>
       )}
 
