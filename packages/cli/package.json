@@ -57,7 +57,7 @@
     "@tapflowio/ios-agent": "workspace:*",
     "@tapflowio/relay": "workspace:*",
     "cac": "^6.7.14",
-    "ws": "^8.0.0",
+    "ws": "^8.21.0",
     "zod": "^4.4.3"
   },
   "devDependencies": {
