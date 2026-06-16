@@ -6,7 +6,7 @@
   "private": true,
   "packageManager": "pnpm@9.15.1",
   "engines": {
-    "node": ">=20"
+    "node": ">=20.12.0"
   },
   "scripts": {
     "build": "pnpm --filter @tapflowio/agent-core build && pnpm --filter @tapflowio/dashboard build && pnpm --filter @tapflowio/relay build && pnpm --filter @tapflowio/ios-agent build && pnpm --filter @tapflowio/android-agent build && pnpm --filter tapflow build && pnpm --filter @tapflowio/mcp-server build",

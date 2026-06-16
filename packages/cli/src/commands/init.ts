@@ -46,8 +46,7 @@ function addToGitignore(dir: string, entry: string): 'created' | 'appended' | 'a
   return 'created'
 }
 
-// #287 — 자격 증명을 gitignore된 .tapflow-data/.env 에 빈 값 템플릿으로 적어둔다(사용자가 토큰을 붙여넣음).
-// 기존 파일의 실제 값은 보존하고 누락된 변수만 추가한다. 비밀은 프롬프트/로그로 흐르지 않는다.
+// #287 — 자격 증명 env 파일을 빈 값 템플릿으로 스캠폴드(사용자가 토큰 붙여넣음). 기존 값은 보존, 누락 키만 추가.
 function scaffoldEnvFile(dataDir: string, envVars: string[]): 'created' | 'appended' | 'already-present' {
   const envPath = path.join(dataDir, '.env')
   fs.mkdirSync(dataDir, { recursive: true })
@@ -224,8 +223,7 @@ export async function cmdInitConfig(opts: InitConfigOptions): Promise<void> {
     process.exit(1)
   }
 
-  // byo-api-token: scaffold the credential env file so the relay can be restarted from any shell
-  // without re-exporting tokens. We write only empty variable names; the user pastes the secret.
+  // byo-api-token: 토큰 재export 없이 재시작 가능하도록 자격 증명 env 파일을 스캠폴드(빈 변수명만 작성).
   let envScaffold: 'created' | 'appended' | 'already-present' | 'skipped' = 'skipped'
   if (tls?.mode === 'byo-api-token') {
     const envVars = dnsProviders.get(tls.dnsProvider)?.envVars ?? []
