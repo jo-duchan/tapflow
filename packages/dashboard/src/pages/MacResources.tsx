@@ -195,7 +195,7 @@ function ChartCard({
   range: Range
   now: number
 }) {
-  const hex = color === 'cpu' ? '#60a5fa' : '#a78bfa'
+  const hex = chartConfig[color].color
 
   return (
     <div className="rounded-lg border p-4 flex flex-col gap-3">
@@ -240,15 +240,13 @@ function AreaChartInner({
   const innerW = width - MARGIN.left - MARGIN.right
   const innerH = height - MARGIN.top - MARGIN.bottom
 
-  // Fixed window anchored to the fetch time. Round the right edge up to a clean
-  // boundary so ticks land on round times (e.g. 23:50, 00:00) instead of 00:47.
+  // Anchor to "now" rounded up to a clean step, so tick times stay round (e.g. 23:50).
   const step = TICK_STEP_MS[range]
   const maxT = Math.ceil(now / step) * step
   const minT = maxT - RANGE_MS[range]
   const xScale = scaleTime({ domain: [minT, maxT], range: [INSET, Math.max(INSET, innerW - INSET)] })
   const yScale = scaleLinear({ domain: [0, 100], range: [innerH, INSET] })
-  // Even, clean-stepped ticks across the whole window so the axis always spans
-  // the full range regardless of where data exists.
+  // Ticks span the whole window regardless of where data exists.
   const ticks = Array.from({ length: RANGE_MS[range] / step + 1 }, (_, i) => new Date(minT + i * step))
 
   const gradId = `fill-${dataKey}`
@@ -326,6 +324,8 @@ function AreaChartInner({
             onMouseMove={handleMove}
             onMouseLeave={hideTooltip}
             onTouchMove={handleMove}
+            onTouchEnd={hideTooltip}
+            onTouchCancel={hideTooltip}
           />
         </Group>
       </svg>
