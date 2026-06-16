@@ -1,9 +1,10 @@
 'use client';
 
-import { useMemo } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { ScanLine } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { performanceMode } from '@/lib/decoders/pickDecoder';
+import { PerformanceModeNotice, shouldAutoShowPerfNotice, PERF_NOTICE_KEY } from '@/components/perf/PerformanceModeNotice';
 
 // init wizard와 같은 프로파일 용어로 — 디코더 jargon(WebCodecs/WASM) 대신.
 const MODE_LABEL: Record<string, string | null> = {
@@ -44,7 +45,18 @@ export function SimulatorInfoCard(props: SimulatorInfoCardProps) {
   const dotColor = isActive ? '#10b981' : isIdle ? '#94a3b8' : 'transparent';
   const stateLabel = isActive ? 'Active' : isIdle ? 'Idle' : null;
   // Decode path is a stable per-browser capability; compute once, not per device card.
-  const modeLabel = useMemo(() => MODE_LABEL[performanceMode()], []);
+  const mode = useMemo(() => performanceMode(), []);
+  const modeLabel = MODE_LABEL[mode];
+  const [noticeOpen, setNoticeOpen] = useState(false);
+  useEffect(() => {
+    let dismissed = false;
+    try { dismissed = localStorage.getItem(PERF_NOTICE_KEY) === '1'; } catch { /* no storage */ }
+    if (shouldAutoShowPerfNotice(mode, dismissed)) setNoticeOpen(true);
+  }, [mode]);
+  const handleNoticeOpenChange = (next: boolean) => {
+    setNoticeOpen(next);
+    if (!next) { try { localStorage.setItem(PERF_NOTICE_KEY, '1'); } catch { /* no storage */ } }
+  };
 
   return (
     <div className="w-[300px] shrink-0 mt-3 rounded-xl border bg-background px-4 py-4 flex flex-col gap-3">
@@ -66,15 +78,25 @@ export function SimulatorInfoCard(props: SimulatorInfoCardProps) {
               </span>
             )}
           </span>
-          {modeLabel && (
+          {modeLabel && (mode === 'standard' ? (
+            <button
+              type="button"
+              onClick={() => setNoticeOpen(true)}
+              className="text-[11px] text-foreground/70 hover:text-foreground underline-offset-2 hover:underline"
+            >
+              · {modeLabel}
+            </button>
+          ) : (
             <span className="text-[11px] text-muted-foreground">· {modeLabel}</span>
-          )}
+          ))}
         </div>
       )}
 
       {statusText && (
         <p className="text-[12px] text-muted-foreground leading-relaxed break-all">{statusText}</p>
       )}
+
+      <PerformanceModeNotice open={noticeOpen} onOpenChange={handleNoticeOpenChange} />
     </div>
   );
 }
