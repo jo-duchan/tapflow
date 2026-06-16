@@ -3,11 +3,11 @@ import { buildInviteBaseUrl } from './publicUrl.js'
 
 type ProxyCfg = Pick<TapflowConfig, 'tunnel' | 'relay' | 'local'>
 
-// CORS allowlist: the configured public URL + loopback (dev). LAN access is same-origin, so dynamic
-// LAN IPs need not be listed; cross-origin browser use of a PAT is what we're restricting. Entries
-// must be origins (scheme+host+port, no path) to match the browser's Origin header.
+// Allow cross-origin PAT use only from the configured public origin + loopback (LAN is same-origin).
 export function buildCorsOrigins(cfg: ProxyCfg, port: number): string[] {
+  // Skip buildInviteBaseUrl's localhost fallback — it would allowlist a stale loopback at config.local.port under a different --port.
   const configuredOrigin = (() => {
+    if (!cfg.tunnel?.publicUrl && !cfg.relay.url) return null
     try { return new URL(buildInviteBaseUrl(cfg)).origin } catch { return null }
   })()
   const origins = [configuredOrigin, `http://localhost:${port}`, `http://127.0.0.1:${port}`]
@@ -15,8 +15,7 @@ export function buildCorsOrigins(cfg: ProxyCfg, port: number): string[] {
   return [...new Set(origins)]
 }
 
-// Proxied/tunneled exposure needs a public URL so the dashboard's cross-origin requests survive the
-// CORS/CSRF guards. Without it the allowlist is loopback-only and proxied POSTs can be blocked silently.
+// A proxied/tunneled relay needs a public URL, or the CSRF/CORS allowlist stays loopback-only and blocks proxied POSTs.
 export function proxyWithoutPublicUrlWarning(cfg: ProxyCfg): string | null {
   if (cfg.local.trustedProxies.length > 0 && !cfg.tunnel?.publicUrl && !cfg.relay.url) {
     return (

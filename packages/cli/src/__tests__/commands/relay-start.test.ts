@@ -18,7 +18,7 @@ vi.mock('../../lib/tailscale-tunnel.js', () => ({
   TailscaleTunnel: vi.fn().mockImplementation(function () { return mockTunnel }),
 }))
 
-import { RelayServer, initDb, config } from '@tapflowio/relay'
+import { RelayServer, initDb, config, buildCorsOrigins, proxyWithoutPublicUrlWarning } from '@tapflowio/relay'
 import { RatholeTunnel } from '../../lib/rathole-tunnel.js'
 import { TailscaleTunnel } from '../../lib/tailscale-tunnel.js'
 import { cmdRelayStart } from '../../commands/relay-start.js'
@@ -49,6 +49,16 @@ describe('cmdRelayStart', () => {
     await cmdRelayStart({})
     expect(RelayServer).toHaveBeenCalledWith(expect.objectContaining({ port: 4000 }))
     expect(vi.mocked(RelayServer).mock.results[0]?.value.start).toHaveBeenCalled()
+  })
+
+  it('프록시 옵션(trustedProxies/corsOrigins)을 RelayServer에 전달', async () => {
+    vi.mocked(buildCorsOrigins).mockReturnValue(['http://localhost:4000'])
+    await cmdRelayStart({})
+    expect(buildCorsOrigins).toHaveBeenCalled()
+    expect(proxyWithoutPublicUrlWarning).toHaveBeenCalled()
+    expect(RelayServer).toHaveBeenCalledWith(
+      expect.objectContaining({ trustedProxies: [], corsOrigins: ['http://localhost:4000'] }),
+    )
   })
 
   it('initDb가 RelayServer 생성 전에 호출됨', async () => {

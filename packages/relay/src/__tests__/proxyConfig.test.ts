@@ -26,6 +26,19 @@ describe('buildCorsOrigins', () => {
   it('relay.url(ws)이 http(s) origin으로 변환돼 포함된다', () => {
     expect(buildCorsOrigins(cfg({ relayUrl: 'wss://relay.example.com:8443' }), 4000)).toContain('https://relay.example.com:8443')
   })
+
+  it('공개 URL 없이 --port 오버라이드면 runtime port loopback만(config port stale 미포함)', () => {
+    // cfg()는 local.port=4000인데 runtime port는 8080
+    expect(buildCorsOrigins(cfg(), 8080)).toEqual(['http://localhost:8080', 'http://127.0.0.1:8080'])
+  })
+
+  it('공개 URL 있으면 --port 오버라이드여도 공개 origin + runtime port loopback', () => {
+    expect(buildCorsOrigins(cfg({ publicUrl: 'https://tap.example.com' }), 8080)).toEqual([
+      'https://tap.example.com',
+      'http://localhost:8080',
+      'http://127.0.0.1:8080',
+    ])
+  })
 })
 
 describe('proxyWithoutPublicUrlWarning', () => {
