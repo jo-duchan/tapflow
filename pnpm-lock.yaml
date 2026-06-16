@@ -286,6 +286,9 @@ importers:
       vite:
         specifier: ^6.4.2
         version: 6.4.3(@types/node@20.19.41)(jiti@1.21.7)(tsx@4.22.0)
+      vite-plugin-compression2:
+        specifier: ^2.5.3
+        version: 2.5.3(rollup@4.60.4)
       vitest:
         specifier: ^4.1.6
         version: 4.1.6(@types/node@20.19.41)(@vitest/coverage-v8@4.1.6)(jsdom@29.1.1)(vite@6.4.3(@types/node@20.19.41)(jiti@1.21.7)(tsx@4.22.0))
@@ -1918,6 +1921,15 @@ packages:
 
   '@rolldown/pluginutils@1.0.0-beta.27':
     resolution: {integrity: sha512-+d0F4MKMCbeVUJwG96uQ4SgAznZNSq93I3V+9NHA4OpvqG8mRCpGdKmK8l/dl02h2CCDHwW2FqilnTyDcAnqjA==}
+
+  '@rollup/pluginutils@5.4.0':
+    resolution: {integrity: sha512-MfPp06CjRLfXQ3wY0R8vJDYBy/MvVcc9OulEfR0B8Iv9ko+GCNaRZ+EpJYFl27LhKsZK0o420sYCRHCjfCgeUg==}
+    engines: {node: '>=14.0.0'}
+    peerDependencies:
+      rollup: ^1.20.0||^2.0.0||^3.0.0||^4.0.0
+    peerDependenciesMeta:
+      rollup:
+        optional: true
 
   '@rollup/rollup-android-arm-eabi@4.60.4':
     resolution: {integrity: sha512-F5QXMSiFebS9hKZj02XhWLLnRpJ3B3AROP0tWbFBSj+6kCbg5m9j5JoHKd4mmSVy5mS/IMQloYgYxCuJC0fxEQ==}
@@ -4611,6 +4623,9 @@ packages:
   tar-fs@2.1.4:
     resolution: {integrity: sha512-mDAjwmZdh7LTT6pNleZ05Yt65HC3E+NiQzl672vQG38jIrehtJk/J3mNwIg+vShQPcLF/LV7CMnDW6vjj6sfYQ==}
 
+  tar-mini@0.2.0:
+    resolution: {integrity: sha512-+qfUHz700DWnRutdUsxRRVZ38G1Qr27OetwaMYTdg8hcPxf46U0S1Zf76dQMWRBmusOt2ZCK5kbIaiLkoGO7WQ==}
+
   tar-stream@2.2.0:
     resolution: {integrity: sha512-ujeqbceABgwMZxEJnk2HDY2DlnUZ+9oEcb1KzTVfYHio0UE6dG71n60d8D2I4qNvleWrrXpmjpt7vZeF1LnMZQ==}
     engines: {node: '>=6'}
@@ -4814,6 +4829,9 @@ packages:
 
   victory-vendor@36.9.2:
     resolution: {integrity: sha512-PnpQQMuxlwYdocC8fIJqVXvkeViHYzotI+NJrCuav0ZYFoq912ZHBk3mCeuj+5/VpodOjPe1z0Fk2ihgzlXqjQ==}
+
+  vite-plugin-compression2@2.5.3:
+    resolution: {integrity: sha512-ItPgqQWkcnBbVw7is9OKwiZ8v6+ju9rYROl5Lp6QfQDEx/d55AwJQb/KLpsQqsU9HoigYBsZ8tK6I02UwJNvEw==}
 
   vite@5.4.21:
     resolution: {integrity: sha512-o5a9xKjbtuhY6Bi5S3+HvbRERmouabWbyUcpXXUA1u+GNUKoROi9byOJ8M0nHbHYHkYICiMlqxkg1KkYmm25Sw==}
@@ -6559,6 +6577,14 @@ snapshots:
   '@radix-ui/rect@1.1.1': {}
 
   '@rolldown/pluginutils@1.0.0-beta.27': {}
+
+  '@rollup/pluginutils@5.4.0(rollup@4.60.4)':
+    dependencies:
+      '@types/estree': 1.0.9
+      estree-walker: 2.0.2
+      picomatch: 4.0.4
+    optionalDependencies:
+      rollup: 4.60.4
 
   '@rollup/rollup-android-arm-eabi@4.60.4':
     optional: true
@@ -9478,6 +9504,8 @@ snapshots:
       pump: 3.0.4
       tar-stream: 2.2.0
 
+  tar-mini@0.2.0: {}
+
   tar-stream@2.2.0:
     dependencies:
       bl: 4.1.0
@@ -9678,6 +9706,13 @@ snapshots:
       d3-shape: 3.2.0
       d3-time: 3.1.0
       d3-timer: 3.0.1
+
+  vite-plugin-compression2@2.5.3(rollup@4.60.4):
+    dependencies:
+      '@rollup/pluginutils': 5.4.0(rollup@4.60.4)
+      tar-mini: 0.2.0
+    transitivePeerDependencies:
+      - rollup
 
   vite@5.4.21(@types/node@20.19.41):
     dependencies:

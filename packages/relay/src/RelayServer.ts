@@ -875,8 +875,27 @@ export class RelayServer {
     }
 
     const contentType = MIME_TYPES[path.extname(filePath)] ?? 'text/html'
-    res.writeHead(200, { 'Content-Type': contentType })
-    fs.createReadStream(filePath)
+    const headers: Record<string, string> = { 'Content-Type': contentType }
+
+    // Content-hashed build assets never change → cache them forever.
+    if (urlPath.startsWith('/assets/')) {
+      headers['Cache-Control'] = 'public, max-age=31536000, immutable'
+    }
+
+    // Serve the build-time precompressed .br sibling when the client accepts it.
+    // It's compressed at build time, so there's no runtime compression cost —
+    // this stays off the WebSocket stream path entirely. Clients without brotli
+    // (vanishingly rare) get the uncompressed original.
+    const accept = (req.headers['accept-encoding'] as string | undefined) ?? ''
+    let servePath = filePath
+    if (/\bbr\b/.test(accept) && fs.existsSync(filePath + '.br')) {
+      servePath = filePath + '.br'
+      headers['Content-Encoding'] = 'br'
+      headers['Vary'] = 'Accept-Encoding'
+    }
+
+    res.writeHead(200, headers)
+    fs.createReadStream(servePath)
       .on('error', () => { res.destroy() })
       .pipe(res)
   }

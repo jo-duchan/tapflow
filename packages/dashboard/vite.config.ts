@@ -1,9 +1,18 @@
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
+import { compression } from 'vite-plugin-compression2'
 import path from 'path'
 
 export default defineConfig({
-  plugins: [react()],
+  plugins: [
+    react(),
+    // Precompress text assets at build time so the relay can serve .br
+    // straight from disk (no runtime compression — keeps CPU off the stream path).
+    // Brotli only: it's the static-asset standard (smaller, broadly supported);
+    // clients without br get the uncompressed original, so a .gz sibling would
+    // just bloat the package for a near-nonexistent audience.
+    compression({ include: /\.(js|css|html|svg|json)$/, algorithms: ['brotliCompress'], deleteOriginalAssets: false }),
+  ],
   resolve: {
     alias: { '@': path.resolve(__dirname, '.') },
   },
