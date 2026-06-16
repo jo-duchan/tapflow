@@ -58,3 +58,19 @@ export function pickDecoder(caps: DecoderCapabilities = detectCapabilities()): D
 export function canDecodeH264(caps: DecoderCapabilities = detectCapabilities()): boolean {
   return (caps.secureContext && caps.webCodecs && caps.webgl2) || (caps.wasm && caps.webgl2)
 }
+
+export type PerformanceMode = 'high' | 'standard' | 'unsupported'
+
+/**
+ * Maps the active decode path to the init wizard's performance profile labels, so the UI can show
+ * the same wording (Standard / High performance) instead of decoder jargon. Same branch as
+ * pickDecoder, evaluated without constructing a decoder:
+ * - 'high' — WebCodecs (secure context): hardware decode.
+ * - 'standard' — WASM (tinyh264): software decode on plain HTTP.
+ * - 'unsupported' — neither (WebGL2 missing).
+ */
+export function performanceMode(caps: DecoderCapabilities = detectCapabilities()): PerformanceMode {
+  if (caps.secureContext && caps.webCodecs && caps.webgl2) return 'high'
+  if (caps.wasm && caps.webgl2) return 'standard'
+  return 'unsupported'
+}

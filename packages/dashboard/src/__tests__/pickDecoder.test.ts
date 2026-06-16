@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest'
-import { pickDecoder, canDecodeH264, detectCapabilities, type DecoderCapabilities } from '@/lib/decoders/pickDecoder'
+import { pickDecoder, canDecodeH264, detectCapabilities, performanceMode, type DecoderCapabilities } from '@/lib/decoders/pickDecoder'
 import { WebCodecsDecoder } from '@/lib/decoders/WebCodecsDecoder'
 import { WASMDecoder } from '@/lib/decoders/WASMDecoder'
 
@@ -80,6 +80,33 @@ describe('canDecodeH264 — boot acceptH264 판정 (pickDecoder와 동일 조건
 
   it('아무 것도 불가 → false', () => {
     expect(canDecodeH264(caps())).toBe(false)
+  })
+})
+
+// ── performanceMode (pickDecoder와 동일 분기를 UI 라벨 키로) ─────────────────────────
+describe('performanceMode — 디코드 경로를 init 프로파일 키로 매핑', () => {
+  it('secure + WebCodecs + WebGL2 → high (WebCodecs)', () => {
+    expect(performanceMode(caps({ secureContext: true, webCodecs: true, webgl2: true }))).toBe('high')
+  })
+
+  it('WebCodecs·WASM 모두 가능하면 high 우선', () => {
+    expect(performanceMode(caps({ secureContext: true, webCodecs: true, webgl2: true, wasm: true }))).toBe('high')
+  })
+
+  it('비-secure + wasm + WebGL2 → standard (WASM)', () => {
+    expect(performanceMode(caps({ wasm: true, webgl2: true }))).toBe('standard')
+  })
+
+  it('secure지만 WebCodecs 미지원 → standard', () => {
+    expect(performanceMode(caps({ secureContext: true, webCodecs: false, wasm: true, webgl2: true }))).toBe('standard')
+  })
+
+  it('WebGL2 없으면 unsupported', () => {
+    expect(performanceMode(caps({ secureContext: true, webCodecs: true, wasm: true, webgl2: false }))).toBe('unsupported')
+  })
+
+  it('아무 것도 불가 → unsupported', () => {
+    expect(performanceMode(caps())).toBe('unsupported')
   })
 })
 
