@@ -172,6 +172,50 @@ describe('cmdInitConfig', () => {
     expect(cfg.tls).toEqual({ mode: 'import-cert', certPath: '/etc/tls/fullchain.pem', keyPath: '/etc/tls/privkey.pem' })
   })
 
+  describe('.env scaffold (#287)', () => {
+    const envPath = () => path.join(tmpDir, '.tapflow-data', '.env')
+
+    it('byo-api-token → .tapflow-data/.env 를 빈 값 템플릿으로 자동 생성', async () => {
+      Object.defineProperty(process.stdin, 'isTTY', { value: true, configurable: true })
+      mockSelect.mockResolvedValueOnce('none').mockResolvedValueOnce('high').mockResolvedValueOnce('cloudflare')
+      mockText.mockResolvedValueOnce('tap.example.com')
+
+      await cmdInitConfig({})
+
+      const content = fs.readFileSync(envPath(), 'utf-8')
+      expect(content).toContain('TAPFLOW_CLOUDFLARE_TOKEN=')
+      // 비밀은 비어 있어야 한다 (프롬프트/로그로 흐르지 않음)
+      expect(content).not.toMatch(/TAPFLOW_CLOUDFLARE_TOKEN=\S/)
+      if (process.platform !== 'win32') {
+        expect(fs.statSync(envPath()).mode & 0o777).toBe(0o600)
+      }
+    })
+
+    it('기존 .env 의 실제 값은 보존하고 누락 키만 추가', async () => {
+      Object.defineProperty(process.stdin, 'isTTY', { value: true, configurable: true })
+      fs.mkdirSync(path.join(tmpDir, '.tapflow-data'), { recursive: true })
+      fs.writeFileSync(envPath(), 'TAPFLOW_VERCEL_TOKEN=secret_existing\n', 'utf-8')
+      mockSelect.mockResolvedValueOnce('none').mockResolvedValueOnce('high').mockResolvedValueOnce('cloudflare')
+      mockText.mockResolvedValueOnce('tap.example.com')
+
+      await cmdInitConfig({})
+
+      const content = fs.readFileSync(envPath(), 'utf-8')
+      expect(content).toContain('TAPFLOW_VERCEL_TOKEN=secret_existing')
+      expect(content).toContain('TAPFLOW_CLOUDFLARE_TOKEN=')
+    })
+
+    it('import-cert → .env 생성 없음', async () => {
+      Object.defineProperty(process.stdin, 'isTTY', { value: true, configurable: true })
+      mockSelect.mockResolvedValueOnce('none').mockResolvedValueOnce('high').mockResolvedValueOnce('import')
+      mockText.mockResolvedValueOnce('/etc/tls/fullchain.pem').mockResolvedValueOnce('/etc/tls/privkey.pem')
+
+      await cmdInitConfig({})
+
+      expect(fs.existsSync(envPath())).toBe(false)
+    })
+  })
+
   describe('.gitignore', () => {
     beforeEach(() => {
       fs.mkdirSync(path.join(tmpDir, '.git'))
