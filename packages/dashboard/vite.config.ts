@@ -6,11 +6,7 @@ import path from 'path'
 export default defineConfig({
   plugins: [
     react(),
-    // Precompress text assets at build time so the relay can serve .br
-    // straight from disk (no runtime compression — keeps CPU off the stream path).
-    // Brotli only: it's the static-asset standard (smaller, broadly supported);
-    // clients without br get the uncompressed original, so a .gz sibling would
-    // just bloat the package for a near-nonexistent audience.
+    // Precompress text assets to .br at build time (brotli only) so the relay serves them with no runtime CPU.
     compression({ include: /\.(js|css|html|svg|json)$/, algorithms: ['brotliCompress'], deleteOriginalAssets: false }),
   ],
   resolve: {

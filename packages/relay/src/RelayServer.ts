@@ -882,16 +882,24 @@ export class RelayServer {
       headers['Cache-Control'] = 'public, max-age=31536000, immutable'
     }
 
-    // Serve the build-time precompressed .br sibling when the client accepts it.
-    // It's compressed at build time, so there's no runtime compression cost —
-    // this stays off the WebSocket stream path entirely. Clients without brotli
-    // (vanishingly rare) get the uncompressed original.
-    const accept = (req.headers['accept-encoding'] as string | undefined) ?? ''
+    // Serve the build-time .br sibling when accepted (precompressed → no runtime CPU on the stream path).
+    const acceptHeader = req.headers['accept-encoding']
+    const accept = Array.isArray(acceptHeader) ? acceptHeader.join(',') : acceptHeader ?? ''
+    const brAccepted = accept.split(',').some((token) => {
+      const [name, ...params] = token.trim().split(';')
+      const coding = name.trim().toLowerCase()
+      if (coding !== 'br' && coding !== '*') return false
+      const qParam = params.map((p) => p.trim()).find((p) => p.startsWith('q='))
+      const q = qParam ? Number(qParam.slice(2)) : 1
+      return !Number.isNaN(q) && q > 0
+    })
     let servePath = filePath
-    if (/\bbr\b/.test(accept) && fs.existsSync(filePath + '.br')) {
+    const hasBr = fs.existsSync(filePath + '.br')
+    // Vary whenever a compressed variant exists, even if raw is served, so caches don't cross-serve.
+    if (hasBr) headers['Vary'] = 'Accept-Encoding'
+    if (brAccepted && hasBr) {
       servePath = filePath + '.br'
       headers['Content-Encoding'] = 'br'
-      headers['Vary'] = 'Accept-Encoding'
     }
 
     res.writeHead(200, headers)

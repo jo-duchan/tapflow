@@ -78,6 +78,18 @@ describe('static asset compression', () => {
     expect(res.body).toBe('RAW_JS')
   })
 
+  it('does not serve brotli when br is explicitly disabled (br;q=0)', async () => {
+    const res = await httpGet(port, '/assets/app.js', { 'Accept-Encoding': 'br;q=0, identity' })
+    expect(res.headers['content-encoding']).toBeUndefined()
+    expect(res.body).toBe('RAW_JS')
+  })
+
+  it('sets Vary even when raw is served, since a .br sibling exists', async () => {
+    const res = await httpGet(port, '/assets/app.js', { 'Accept-Encoding': 'identity' })
+    expect(res.headers['content-encoding']).toBeUndefined()
+    expect(res.headers['vary']).toBe('Accept-Encoding')
+  })
+
   it('serves raw when no precompressed sibling exists', async () => {
     const res = await httpGet(port, '/assets/plain.js', { 'Accept-Encoding': 'br' })
     expect(res.headers['content-encoding']).toBeUndefined()
