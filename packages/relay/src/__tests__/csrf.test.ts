@@ -16,6 +16,16 @@ describe('isCsrfBlocked', () => {
     expect(isCsrfBlocked('POST', { cookie, origin: 'http://192.168.0.9:4000', host: '192.168.0.9:4000' }, allowed)).toBe(false)
   })
 
+  it('loopback origin은 Host가 달라도 통과 (Vite dev proxy :3001 → relay :4000)', () => {
+    expect(isCsrfBlocked('POST', { cookie, origin: 'http://localhost:3001', host: 'localhost:4000' }, allowed)).toBe(false)
+    expect(isCsrfBlocked('POST', { cookie, origin: 'http://127.0.0.1:5173', host: 'localhost:4000' }, allowed)).toBe(false)
+    expect(isCsrfBlocked('POST', { cookie, origin: 'http://[::1]:3001', host: 'localhost:4000' }, allowed)).toBe(false)
+  })
+
+  it('loopback 예외가 원격 공격 origin을 풀어주지 않는다 (Origin은 위조 불가)', () => {
+    expect(isCsrfBlocked('POST', { cookie, origin: 'https://evil.com', host: 'localhost:4000' }, allowed)).toBe(true)
+  })
+
   it('쿠키 + 상태변경 + cross-origin → 차단', () => {
     expect(isCsrfBlocked('POST', { cookie, origin: 'https://evil.com', host: '192.168.0.9:4000' }, allowed)).toBe(true)
     expect(isCsrfBlocked('PATCH', { cookie, origin: 'https://evil.com', host: 'x:4000' }, allowed)).toBe(true)

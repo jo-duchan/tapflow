@@ -9,6 +9,13 @@ import type http from 'http'
 //       쿠키 없는 요청(미인증/login/init), Origin 없는 요청(비-브라우저; 브라우저는 cross-site에 Origin을 생략하지 못한다).
 const SAFE_METHODS = new Set(['GET', 'HEAD', 'OPTIONS'])
 
+// Loopback origins are the local dev machine (e.g. Vite :3001 proxying to the relay :4000), never a
+// remote attacker — a cross-site page can't forge a localhost Origin, so exempting these is safe.
+function isLoopbackHost(hostname: string): boolean {
+  const h = hostname.replace(/^\[|\]$/g, '')
+  return h === 'localhost' || h === '127.0.0.1' || h === '::1'
+}
+
 export function isCsrfBlocked(
   method: string | undefined,
   headers: http.IncomingHttpHeaders,
@@ -26,7 +33,9 @@ export function isCsrfBlocked(
 
   const host = headers['host']
   try {
-    if (host && new URL(origin).host === host) return false
+    const url = new URL(origin)
+    if (host && url.host === host) return false
+    if (isLoopbackHost(url.hostname)) return false
   } catch {
     // malformed Origin → treat as cross-origin (blocked below)
   }
