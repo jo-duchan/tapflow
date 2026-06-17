@@ -1,5 +1,37 @@
 # tapflow
 
+## 0.9.0
+
+### Minor Changes
+
+- LAN HTTPS — terminate TLS in-process with automatic certificates.
+
+  - relay: in-process TLS termination with a disk-backed certificate store and automatic renewal. Two providers: `AcmeCertProvider` (Let's Encrypt via DNS-01) and `ImportCertProvider` (bring your own cert).
+  - relay: pluggable `DnsProviderRegistry` for DNS-01 challenges, with `CloudflareDnsProvider` and `VercelDnsProvider` adapters. New DNS providers register without touching relay code.
+  - relay: auto-publishes the detected LAN IP to the configured domain's A record and self-heals it on change, so the HTTPS hostname keeps resolving on the local network.
+  - relay: DNS/ACME credentials load from a gitignored `.env` file, namespaced under `TAPFLOW_`. Requires Node >= 20.12.0.
+  - cli: `tapflow init` gains a guided HTTPS setup step for the LAN path; `tapflow start` wires `--trusted-proxies` / `--cors-origins`.
+
+  This enables WebCodecs-based low-latency streaming, which requires a secure context on the LAN.
+
+### Patch Changes
+
+- da68b9e: Further harden the relay for public exposure:
+
+  - CORS is restricted to the configured origins (public URL + loopback) instead of `*`, so an `Authorization` token can't be used from an unlisted cross-origin script.
+  - Cookie-authenticated state-changing requests must come from a same-origin or allowlisted origin (lightweight CSRF guard); PAT-authenticated requests are exempt.
+  - Invite links are built from the configured base URL (tunnel public URL / relay URL) instead of the request `Host` header.
+  - Uploads that exceed the size limit are rejected and their partial files removed (builds and comment attachments). Limits are configurable via `TAPFLOW_MAX_BUILD_BYTES` / `TAPFLOW_MAX_COMMENT_BYTES`.
+
+- 37f1aae: The relay now logs handler exceptions (method, path, stack) instead of silently swallowing them, so 5xx failures are diagnosable. Response bodies still return only a generic message, and PATs are masked in the logs.
+- Updated dependencies
+- Updated dependencies [da68b9e]
+- Updated dependencies [37f1aae]
+  - @tapflowio/relay@0.9.0
+  - @tapflowio/android-agent@0.9.0
+  - @tapflowio/ios-agent@0.9.0
+  - @tapflowio/agent-core@0.9.0
+
 ## 0.8.2
 
 ### Patch Changes
