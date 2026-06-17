@@ -1,6 +1,6 @@
 # tapflow 설정
 
-`tapflow init`은 대화형으로 `tapflow.config.json`을 만들고, 자격 증명을 담는 `.env` 파일과 `.gitignore` 항목까지 함께 준비합니다. 기본값(포트 4000, 터널 없음, HTTP)으로 충분하다면 이 단계를 건너뛰고 바로 `tapflow start`로 넘어가도 됩니다.
+`tapflow init`은 대화형으로 `tapflow.config.json`을 만듭니다. 선택한 옵션과 현재 디렉토리가 git 저장소인지에 따라 자격 증명 `.env` 파일과 `.gitignore` 항목도 함께 준비합니다. 기본값(포트 4000, 터널 없음, HTTP)으로 충분하다면 이 단계를 건너뛰고 바로 `tapflow start`로 넘어가도 됩니다.
 
 ## tapflow init 실행
 
@@ -10,13 +10,13 @@
 tapflow init
 ```
 
-명령은 세 가지를 만듭니다.
+명령은 최대 세 가지를 만듭니다.
 
 | 생성물 | 내용 |
 |--------|------|
 | `tapflow.config.json` | 릴레이 설정 파일. 선택한 포트·터널·HTTPS 설정이 들어갑니다. |
-| `.tapflow-data/.env` | DNS·ACME 자격 증명을 담는 파일. HTTPS 자동 발급을 선택했을 때만 만들어집니다. |
-| `.gitignore` 항목 | `.tapflow-data/`를 추가해 런타임 데이터와 토큰이 커밋되지 않도록 합니다. |
+| `.tapflow-data/.env` | DNS·ACME 자격 증명을 담는 파일. DNS 자동 발급을 선택했을 때만 만들어집니다. |
+| `.gitignore` 항목 | git 저장소 안에서 실행했을 때 `.tapflow-data/`를 추가해 런타임 데이터와 토큰이 커밋되지 않도록 합니다. |
 
 이어서 대화형 프롬프트가 순서대로 나타납니다. 터널을 먼저 고르고, 터널 없이 LAN으로 쓸 때만 스트리밍 성능과 인증서 방식을 묻습니다.
 
@@ -36,7 +36,7 @@ tapflow init
 | **Tailscale** | 암호화된 오버레이 네트워크로 외부 접속. VPS가 필요 없습니다. |
 | **rathole** | 직접 보유한 VPS를 통해 완전한 공개 URL로 노출. |
 
-각 터널의 설정 방법과 사전 준비물은 [릴레이 배포](/ko/guide/self-hosting#external-access)에서 다룹니다.
+각 터널의 설정 방법과 사전 준비물은 [릴레이 배포](/ko/guide/self-hosting#외부-접속)에서 다룹니다.
 
 ::: tip 비대화형 환경(CI)
 프롬프트 없이 터널을 지정하려면 플래그를 씁니다. `tapflow init --tunnel tailscale` 또는 `tapflow init --tunnel rathole`. 이미 파일이 있으면 `--force`로 덮어씁니다.
@@ -54,7 +54,7 @@ tapflow init
 브라우저의 하드웨어 디코드는 보안 컨텍스트(HTTPS)에서만 동작하므로, 더 선명하고 부드러운 화면을 주려면 **High performance**를 선택해 HTTPS를 설정합니다. 두 선택이 실제 화질·디코더로 어떻게 이어지는지는 [스트림 품질](/ko/guide/streaming)에서 설명합니다.
 
 ::: info 터널을 고르면 이 단계는 나오지 않습니다
-터널은 HTTPS를 터널 계층에서 처리하므로 이 단계는 LAN 직결일 때만 나옵니다. rathole은 VPS의 Caddy가, Tailscale은 `tailscale serve`(무료·선택)가 TLS를 종단하며, 릴레이의 `tls` 설정은 어느 쪽도 필요 없습니다. 터널별 HTTPS 설정은 [릴레이 배포](/ko/guide/self-hosting#external-access)를 참고하세요.
+터널은 HTTPS를 터널 계층에서 처리하므로 이 단계는 LAN 직결일 때만 나옵니다. rathole은 VPS의 Caddy가, Tailscale은 `tailscale serve`(무료·선택)가 TLS를 종단하며, 릴레이의 `tls` 설정은 어느 쪽도 필요 없습니다. 터널별 HTTPS 설정은 [릴레이 배포](/ko/guide/self-hosting#외부-접속)를 참고하세요.
 :::
 
 ## 3. 인증서 방식 (High performance 선택 시)

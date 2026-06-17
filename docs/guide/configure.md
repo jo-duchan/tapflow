@@ -1,6 +1,6 @@
 # Configuring tapflow
 
-`tapflow init` interactively generates `tapflow.config.json`, and scaffolds the `.env` file that holds your credentials along with a `.gitignore` entry. If the defaults (port 4000, no tunnel, HTTP) are fine, skip this step and go straight to `tapflow start`.
+`tapflow init` interactively generates `tapflow.config.json`. Depending on the options you choose and whether you're in a git repo, it can also scaffold the credentials `.env` file and update `.gitignore`. If the defaults (port 4000, no tunnel, HTTP) are fine, skip this step and go straight to `tapflow start`.
 
 ## Run tapflow init
 
@@ -10,13 +10,13 @@ Run it from the directory where the relay will start.
 tapflow init
 ```
 
-The command creates three things.
+The command can create up to three things.
 
 | Output | Contents |
 |--------|----------|
 | `tapflow.config.json` | Relay configuration. Holds the port, tunnel, and HTTPS settings you choose. |
-| `.tapflow-data/.env` | Holds DNS / ACME credentials. Created only when you opt into automatic HTTPS issuance. |
-| `.gitignore` entry | Adds `.tapflow-data/` so runtime data and tokens are never committed. |
+| `.tapflow-data/.env` | Holds DNS / ACME credentials. Created only when you pick DNS auto-issue. |
+| `.gitignore` entry | Adds `.tapflow-data/` when run inside a git repo, so runtime data and tokens are never committed. |
 
 The interactive prompts then appear in order. You pick a tunnel first; the streaming and certificate prompts only show when you run on the LAN with no tunnel.
 
