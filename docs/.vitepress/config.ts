@@ -3,6 +3,19 @@ import { withMermaid } from 'vitepress-plugin-mermaid'
 import tapflowLight from './theme/tapflow-light.json'
 import tapflowDark from './theme/tapflow-dark.json'
 
+// VitePress(mdit-vue) 기본 slugify는 NFKD 정규화라 한글 음절을 자모 분리(NFD) 형태의 헤딩 id로 만든다.
+// 브라우저 URL hash는 NFC라 바이트가 어긋나 비ASCII 헤딩으로 스크롤이 안 된다.
+// mdit-vue와 동일한 특수문자·_숫자 prefix 처리에 정규화만 NFC로 바꿔 id를 완성형으로 만든다.
+function nfcSlugify(str: string): string {
+  return str
+    .normalize('NFC')
+    .replace(/[\s~`!@#$%^&*()\-_+=[\]{}|\\;:"'“”‘’<>,.?/]+/g, '-')
+    .replace(/-{2,}/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .replace(/^(\d)/, '_$1')
+    .toLowerCase()
+}
+
 const enSidebar = [
   {
     text: 'Getting Started',
@@ -224,6 +237,7 @@ export default withMermaid(defineConfig({
 
   markdown: {
     theme: { light: tapflowLight as any, dark: tapflowDark as any },
+    anchor: { slugify: nfcSlugify },
   },
 
   vite: {
