@@ -68,25 +68,29 @@ If you turn on HTTPS, choose how the certificate is provided.
 
 When you choose DNS auto-issue, you select a provider and enter a domain, and a `.tapflow-data/.env` for the token is scaffolded alongside. The full reference for issuance modes and config keys is in [Configuration — HTTPS](/reference/configuration#https-secure-context).
 
-## .tapflow-data/.env — holding credentials
+## .tapflow-data/.env — holding secrets
 
-When you choose DNS auto-issue, `init` scaffolds an `.env` file as an empty template for the token. Tokens are secrets, so they stay out of `tapflow.config.json` and live in this gitignored file instead.
+`.tapflow-data/.env` is the **default home for every relay secret**. Choosing DNS auto-issue makes `init` scaffold an empty template for the token, but this file holds more than DNS tokens — `JWT_SECRET`, the SMTP password, and any other secret go here too, one per line. Secrets stay out of `tapflow.config.json` and live in this gitignored file instead.
 
-The file is created with key names only and empty values. Paste the token you obtained after each `=`.
+Paste each value after the `=`.
 
 ```ini
-# tapflow DNS/ACME credentials — do not commit. Paste each token after the =.
+# tapflow secrets — do not commit. Paste each value after the =.
 TAPFLOW_CLOUDFLARE_TOKEN=
+JWT_SECRET=
+SMTP_PASS=
 ```
 
 | Aspect | Detail |
 |--------|--------|
-| What goes in | The API token for your chosen DNS provider. Cloudflare uses `TAPFLOW_CLOUDFLARE_TOKEN`, Vercel uses `TAPFLOW_VERCEL_TOKEN` (plus `TAPFLOW_VERCEL_TEAM_ID` for a team domain). |
-| When it's read | The relay reads it on start and uses it for certificate issuance. |
+| What goes in | Any relay secret — DNS provider tokens (`TAPFLOW_CLOUDFLARE_TOKEN` / `TAPFLOW_VERCEL_TOKEN`), `JWT_SECRET`, `SMTP_PASS`, and so on. |
+| When it's read | The relay reads it first thing on start, before applying any other setting. |
 | Permissions | Created with `0600` so only the owner can read it. |
-| Precedence | A shell environment variable set for the same key overrides the file value. |
+| Precedence | **Shell env > `.env` > `tapflow.config.json`.** A shell variable set for the same key overrides the file value. |
 
-This way you don't re-export the token every time you restart the relay. Put it in the file once, and the relay reads it on boot.
+`TAPFLOW_DATA_DIR` is the one exception: it decides where `.env` lives (`<dataDir>/.env`), so it can't be read from `.env`. Set the data directory in `tapflow.config.json` or the shell instead.
+
+This way you don't re-export secrets every time you restart the relay. Put them in the file once, and the relay reads them on boot — handy for long-running setups under PM2 or launchd.
 
 ## What gets created
 

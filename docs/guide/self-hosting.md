@@ -51,7 +51,13 @@ Set it explicitly only when you need a fixed key — for example, to share one s
 openssl rand -hex 32
 ```
 
-Inject it as an environment variable when starting:
+Put it in `.tapflow-data/.env` so it survives restarts without re-exporting — the relay reads the file on start:
+
+```ini
+JWT_SECRET=YOUR_JWT_SECRET
+```
+
+Or inject it as a shell environment variable, which takes precedence over the file:
 
 ```sh
 JWT_SECRET=YOUR_JWT_SECRET tapflow start

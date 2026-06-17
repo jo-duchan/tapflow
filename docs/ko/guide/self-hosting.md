@@ -51,7 +51,13 @@ tapflow agent start --relay ws://192.168.x.x:4000 --token tflw_pat_xxxxxxxx
 openssl rand -hex 32
 ```
 
-생성된 값을 환경변수로 주입해 시작합니다:
+생성된 값을 `.tapflow-data/.env`에 적으면 재시작할 때마다 다시 export하지 않아도 됩니다. 릴레이가 시작할 때 파일을 읽습니다:
+
+```ini
+JWT_SECRET=YOUR_JWT_SECRET
+```
+
+또는 셸 환경변수로 주입할 수 있으며, 이 값이 파일보다 우선합니다:
 
 ```sh
 JWT_SECRET=YOUR_JWT_SECRET tapflow start

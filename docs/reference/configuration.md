@@ -36,6 +36,8 @@ The relay reads `tapflow.config.json` from the directory where it is started. Ge
 
 Environment variables always take precedence over the config file — useful for server deployments and CI.
 
+Secrets can also live in the `.tapflow-data/.env` file. The relay loads it first thing on start, so any variable below can come from there instead of the shell. Precedence is **shell env > `.env` > config file**. See [Configuring tapflow](/guide/configure) for the file format and the one exception (`TAPFLOW_DATA_DIR`).
+
 | Variable | Config key | Default | Description |
 |----------|------------|---------|-------------|
 | `TAPFLOW_PORT` | `local.port` | `4000` | Server port |
@@ -63,6 +65,8 @@ If `JWT_SECRET` is not set, the relay generates a strong per-install secret on f
 ```sh
 openssl rand -hex 32
 ```
+
+Put the value in `.tapflow-data/.env` or inject it as a shell environment variable.
 :::
 
 ::: warning Behind a reverse proxy, set TAPFLOW_TRUSTED_PROXIES

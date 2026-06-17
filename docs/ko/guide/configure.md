@@ -68,25 +68,29 @@ HTTPS를 켜기로 했다면 인증서를 어떻게 마련할지 고릅니다.
 
 DNS 자동 발급을 고르면 업체를 선택하고 도메인을 입력합니다. 이때 토큰을 담을 `.tapflow-data/.env`가 함께 만들어집니다. 인증서 발급 모드와 설정 키의 전체 레퍼런스는 [설정 파일 — HTTPS](/ko/reference/configuration#https-보안-컨텍스트)에 있습니다.
 
-## .tapflow-data/.env — 자격 증명 보관
+## .tapflow-data/.env — 비밀 보관
 
-DNS 자동 발급을 선택하면 `init`이 토큰을 담을 `.env` 파일을 빈 템플릿으로 만듭니다. 토큰은 비밀이라 `tapflow.config.json`에 두지 않고, gitignore되는 이 파일에 분리합니다.
+`.tapflow-data/.env`는 릴레이의 **모든 비밀이 모이는 기본 경로**입니다. DNS 자동 발급을 선택하면 `init`이 토큰을 담을 빈 템플릿을 만들지만, 이 파일에는 DNS 토큰뿐 아니라 `JWT_SECRET`이나 SMTP 비밀번호 같은 다른 비밀도 한 줄씩 적을 수 있습니다. 비밀이라 `tapflow.config.json`에 두지 않고, gitignore되는 이 파일에 분리합니다.
 
-만들어지는 파일은 키 이름만 있고 값은 비어 있습니다. 각 키의 `=` 뒤에 발급받은 토큰을 붙여넣습니다.
+키 이름 뒤 `=` 다음에 값을 붙여넣습니다.
 
 ```ini
-# tapflow DNS/ACME credentials — do not commit. Paste each token after the =.
+# tapflow secrets — do not commit. Paste each value after the =.
 TAPFLOW_CLOUDFLARE_TOKEN=
+JWT_SECRET=
+SMTP_PASS=
 ```
 
 | 항목 | 내용 |
 |------|------|
-| 들어가는 값 | 선택한 DNS 업체의 API 토큰. Cloudflare는 `TAPFLOW_CLOUDFLARE_TOKEN`, Vercel은 `TAPFLOW_VERCEL_TOKEN`(팀 도메인은 `TAPFLOW_VERCEL_TEAM_ID`도) |
-| 읽는 시점 | 릴레이가 시작할 때 읽어 인증서 발급에 사용합니다. |
+| 들어가는 값 | 어떤 릴레이 비밀이든 — DNS 업체 토큰(`TAPFLOW_CLOUDFLARE_TOKEN`·`TAPFLOW_VERCEL_TOKEN`), `JWT_SECRET`, `SMTP_PASS` 등 |
+| 읽는 시점 | 릴레이가 시작할 때 가장 먼저 읽어 이후 모든 설정에 반영합니다. |
 | 권한 | 소유자만 읽도록 `0600`으로 생성됩니다. |
-| 우선순위 | 셸 환경변수로 같은 키를 직접 설정하면 파일 값보다 우선합니다. |
+| 우선순위 | **셸 환경변수 > `.env` > `tapflow.config.json`** 순입니다. 셸에 같은 키를 직접 설정하면 파일 값보다 우선합니다. |
 
-이 방식 덕분에 릴레이를 재시작할 때마다 토큰을 다시 export할 필요가 없습니다. 파일에 한 번 넣어 두면 릴레이가 부팅할 때 알아서 읽습니다.
+단 `TAPFLOW_DATA_DIR`만 예외입니다. 이 값이 `.env`의 위치(`<dataDir>/.env`)를 결정하므로 `.env` 안에 적어도 읽히지 않습니다. 데이터 디렉토리는 `tapflow.config.json`이나 셸 환경변수로만 바꿉니다.
+
+이 방식 덕분에 릴레이를 재시작할 때마다 비밀을 다시 export할 필요가 없습니다. 파일에 한 번 넣어 두면 릴레이가 부팅할 때 알아서 읽습니다. PM2나 launchd로 상시 운영할 때 특히 편합니다.
 
 ## 생성되는 파일
 
