@@ -54,7 +54,7 @@ This step appears only when you pick **None** for the tunnel. It sets the qualit
 Browser hardware decoding runs only in a secure context (HTTPS), so to give teammates a sharper, smoother stream, choose **High performance** and set up HTTPS. How each choice maps to the actual resolution and decoder is explained in [Streaming Quality](/guide/streaming).
 
 ::: info This step is skipped when you pick a tunnel
-Tailscale and rathole handle HTTPS at the tunnel layer — Tailscale with its own certificate, rathole with Caddy terminating TLS on the VPS. So the relay terminates HTTPS itself only on a direct LAN connection, which is why this step is asked only then.
+A tunnel handles HTTPS at its own layer, so this step only appears for a direct LAN connection. rathole terminates TLS with Caddy on the VPS; Tailscale terminates it with `tailscale serve` (free, optional). The relay needs no `tls` config either way. For the per-tunnel HTTPS setup, see [Self-Hosting the Relay](/guide/self-hosting#external-access).
 :::
 
 ## 3. Certificate method (when High performance is chosen)

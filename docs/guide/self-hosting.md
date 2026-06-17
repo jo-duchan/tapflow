@@ -159,6 +159,30 @@ Set `"publicUrl": "http://your-hostname.tailnet.ts.net:4000"` in the tunnel conf
 Tailscale only provides the browser→relay path. Agents (simulator Macs) still connect to the relay's internal IP over your LAN — no change needed there.
 :::
 
+#### Enable HTTPS for the sharper stream (optional)
+
+The default URL is `http://...ts.net:4000`, so the browser uses software decode (the Standard profile). To unlock hardware decode (WebCodecs), terminate the relay over Tailscale's free HTTPS. Tailscale issues and renews the `*.ts.net` certificate automatically, so no domain or DNS token is needed.
+
+1. In the Tailscale admin console under **DNS**, enable **MagicDNS** and **HTTPS Certificates**. You'll acknowledge that machine names appear in the public Certificate Transparency log.
+2. On the relay Mac, terminate the relay port over HTTPS. Tailscale manages the certificate for you, so there's no separate issue step:
+
+```sh
+tailscale serve 4000
+```
+
+3. Point `publicUrl` at the HTTPS address in `tapflow.config.json` so the banner and shared URL match:
+
+```json
+{
+  "tunnel": {
+    "provider": "tailscale",
+    "publicUrl": "https://your-hostname.tailnet.ts.net"
+  }
+}
+```
+
+Teammates opening that HTTPS address now get a secure context and a hardware-decode profile. The relay itself stays on HTTP (4000) and needs no `tls` config — Tailscale terminates TLS in front of it. See [Streaming Quality](/guide/streaming) for the profiles.
+
 ### VPS + rathole
 
 Use this when you need a fully public URL — for external collaborators, anonymous demos, or when Tailscale isn't an option. Traffic is routed through a VPS you own.

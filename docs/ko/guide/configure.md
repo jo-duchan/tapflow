@@ -54,7 +54,7 @@ tapflow init
 브라우저의 하드웨어 디코드는 보안 컨텍스트(HTTPS)에서만 동작하므로, 더 선명하고 부드러운 화면을 주려면 **High performance**를 선택해 HTTPS를 설정합니다. 두 선택이 실제 화질·디코더로 어떻게 이어지는지는 [스트림 품질](/ko/guide/streaming)에서 설명합니다.
 
 ::: info 터널을 고르면 이 단계는 나오지 않습니다
-Tailscale과 rathole은 HTTPS를 터널 계층에서 처리합니다. Tailscale은 자체 인증서를, rathole은 VPS의 Caddy가 TLS를 종단합니다. 따라서 LAN 직결일 때만 릴레이가 직접 HTTPS를 종단하도록 이 단계를 묻습니다.
+터널은 HTTPS를 터널 계층에서 처리하므로 이 단계는 LAN 직결일 때만 나옵니다. rathole은 VPS의 Caddy가, Tailscale은 `tailscale serve`(무료·선택)가 TLS를 종단하며, 릴레이의 `tls` 설정은 어느 쪽도 필요 없습니다. 터널별 HTTPS 설정은 [릴레이 배포](/ko/guide/self-hosting#external-access)를 참고하세요.
 :::
 
 ## 3. 인증서 방식 (High performance 선택 시)
