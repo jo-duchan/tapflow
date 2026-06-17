@@ -1,5 +1,16 @@
 # tapflow
 
+## 0.9.1
+
+### Patch Changes
+
+- The relay now loads `.tapflow-data/.env` before reading its config, so every secret can live in that file — not just DNS/ACME tokens. `JWT_SECRET`, the SMTP password, and the tunnel token are all picked up from `.env` now. Precedence is shell env > `.env` > config file (a shell variable still overrides the file). `TAPFLOW_DATA_DIR` is the one exception, since it decides where `.env` lives.
+- Updated dependencies
+  - @tapflowio/relay@0.9.1
+  - @tapflowio/android-agent@0.9.1
+  - @tapflowio/ios-agent@0.9.1
+  - @tapflowio/agent-core@0.9.1
+
 ## 0.9.0
 
 ### Minor Changes
