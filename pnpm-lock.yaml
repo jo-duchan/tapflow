@@ -269,6 +269,9 @@ importers:
       '@tweakpane/core':
         specifier: ^2.0.5
         version: 2.0.5
+      '@types/d3-array':
+        specifier: ^3.2.2
+        version: 3.2.2
       '@types/node':
         specifier: ^20.0.0
         version: 20.19.41
