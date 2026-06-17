@@ -54,7 +54,7 @@
   "dependencies": {
     "@tapflowio/agent-core": "workspace:*",
     "acme-client": "^5.4.0",
-    "better-sqlite3": "^12.9.0",
+    "better-sqlite3": "^12.11.1",
     "busboy": "^1.6.0",
     "jsonwebtoken": "^9.0.3",
     "nodemailer": "^8.0.11",
@@ -65,10 +65,10 @@
     "@types/better-sqlite3": "^7.6.13",
     "@types/busboy": "^1.5.4",
     "@types/jsonwebtoken": "^9.0.10",
-    "@types/node": "^20.0.0",
+    "@types/node": "^20.19.43",
     "@types/nodemailer": "^8.0.0",
     "@types/ws": "^8.0.0",
     "typescript": "^5.0.0",
-    "vitest": "^4.1.8"
+    "vitest": "^4.1.9"
   }
 }
