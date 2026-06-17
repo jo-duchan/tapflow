@@ -51,7 +51,7 @@
     "postinstall": "node bin/postinstall.js"
   },
   "dependencies": {
-    "@clack/prompts": "^1.5.0",
+    "@clack/prompts": "^1.5.1",
     "@tapflowio/agent-core": "workspace:*",
     "@tapflowio/android-agent": "workspace:*",
     "@tapflowio/ios-agent": "workspace:*",
@@ -61,10 +61,10 @@
     "zod": "^4.4.3"
   },
   "devDependencies": {
-    "@types/node": "^20.0.0",
+    "@types/node": "^20.19.43",
     "@types/ws": "^8.0.0",
-    "tsx": "^4.0.0",
+    "tsx": "^4.22.4",
     "typescript": "^5.0.0",
-    "vitest": "^4.1.8"
+    "vitest": "^4.1.9"
   }
 }
