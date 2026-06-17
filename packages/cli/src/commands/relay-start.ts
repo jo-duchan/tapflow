@@ -1,7 +1,7 @@
 import fs from 'fs'
 import path from 'path'
 import { z } from 'zod'
-import { RelayServer, initDb, config, createCertProvider, startCertRenewal, startAddressPublisher, buildCorsOrigins, proxyWithoutPublicUrlWarning, loadDataDirEnv } from '@tapflowio/relay'
+import { RelayServer, initDb, config, loadedEnvPath, createCertProvider, startCertRenewal, startAddressPublisher, buildCorsOrigins, proxyWithoutPublicUrlWarning } from '@tapflowio/relay'
 import { banner, step, warn } from '../lib/print.js'
 import { startConfiguredTunnel } from '../lib/tunnel-runner.js'
 import type { TunnelPlugin } from '../lib/tunnel.js'
@@ -26,9 +26,8 @@ export async function cmdRelayStart(opts: RelayStartOptions): Promise<void> {
   if (!fs.existsSync(path.join(process.cwd(), 'tapflow.config.json'))) {
     warn('tapflow.config.json not found — using defaults. Run tapflow init to configure.')
   }
-  // Load gitignored credentials (DNS/ACME tokens) before any cert issuance reads process.env.
-  const envPath = loadDataDirEnv(config.local.dataDir)
-  if (envPath) step(`Loaded credentials from ${envPath}`)
+  // config already loaded <dataDir>/.env before reading any secret (JWT/SMTP/DNS tokens); just report it.
+  if (loadedEnvPath) step(`Loaded credentials from ${loadedEnvPath}`)
   initDb(path.join(config.local.dataDir, 'tapflow.db'))
 
   let tls: { cert: string; key: string } | undefined
