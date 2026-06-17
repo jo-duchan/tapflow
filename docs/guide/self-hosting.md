@@ -82,6 +82,10 @@ The relay requires authentication on every connection that does not come from lo
 
 tapflow supports two tunnel providers:
 
+::: tip tapflow init writes the tunnel config for you
+The `tunnel` blocks shown below can be generated interactively — run `tapflow init` and pick a provider. See [Configuring tapflow](/guide/configure). The sections here cover the resulting config and the provider-side setup.
+:::
+
 | | Tailscale | VPS + rathole |
 |---|-----------|---------------|
 | **Setup** | Install app + sign in | VPS with SSH access required |

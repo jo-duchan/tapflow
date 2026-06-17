@@ -82,6 +82,10 @@ JWT_SECRET=YOUR_JWT_SECRET tapflow start
 
 tapflow는 두 가지 터널 프로바이더를 지원합니다:
 
+::: tip 터널 설정은 tapflow init이 만들어 줍니다
+아래에 보이는 `tunnel` 블록은 `tapflow init`을 실행하고 프로바이더를 고르면 대화형으로 생성됩니다. [tapflow 설정](/ko/guide/configure)을 참고하세요. 여기서는 생성된 설정과 프로바이더 쪽 준비 과정을 다룹니다.
+:::
+
 | | Tailscale | VPS + rathole |
 |---|-----------|---------------|
 | **설정** | 앱 설치 + 로그인 | SSH 접근 가능한 VPS 필요 |

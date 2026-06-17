@@ -100,7 +100,7 @@ With your own domain and a DNS provider API token, the relay auto-issues and ren
 | `tls.publishAddress` | Auto-publish the domain's A record to this machine's LAN IP. Default `true`; set `false` to manage DNS yourself. |
 | `tls.address` | IP to use instead of the auto-detected LAN IP, for multi-NIC or VPN overrides. |
 
-API tokens go in the `.tapflow-data/.env` file that `tapflow init` scaffolds, not in the config file. Cloudflare uses `TAPFLOW_CLOUDFLARE_TOKEN` and Vercel uses `TAPFLOW_VERCEL_TOKEN`, plus `TAPFLOW_VERCEL_TEAM_ID` for a team domain. The file stays out of git because `.tapflow-data/` is gitignored. A value set directly in the environment takes precedence over the file.
+API tokens go in the `.tapflow-data/.env` file that `tapflow init` scaffolds, not in the config file. Cloudflare uses `TAPFLOW_CLOUDFLARE_TOKEN` and Vercel uses `TAPFLOW_VERCEL_TOKEN`, plus `TAPFLOW_VERCEL_TEAM_ID` for a team domain. The file stays out of git because `.tapflow-data/` is gitignored. A value set directly in the environment takes precedence over the file. See [Configuring tapflow](/guide/configure) for how the file is scaffolded and read.
 
 When `publishAddress` is on, the relay publishes its LAN IP to the domain's A record on boot and refreshes it periodically, so teammates just open the domain without touching DNS.
 
