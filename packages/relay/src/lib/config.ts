@@ -5,6 +5,7 @@ import { z } from 'zod'
 import { createLogger } from '@tapflowio/agent-core'
 import { parseTrustedProxies } from './clientAddress.js'
 import { dnsProviders } from './cert/dnsRegistry.js'
+import { loadDataDirEnv } from './loadEnvFile.js'
 
 const logger = createLogger('relay:config')
 
@@ -103,6 +104,9 @@ function resolveDataDir(raw: string): string {
   return path.isAbsolute(raw) ? raw : path.join(process.cwd(), raw)
 }
 
+// Populated by load(): path of the dataDir/.env that was loaded, or null. CLI/server use it for a "loaded credentials" log.
+export let loadedEnvPath: string | null = null
+
 function load(): TapflowConfig {
   let file: DeepPartial<TapflowConfig> & { local?: { jwtSecret?: unknown } } = {}
 
@@ -119,10 +123,17 @@ function load(): TapflowConfig {
     logger.warn('local.jwtSecret in tapflow.config.json is deprecated — use JWT_SECRET env var instead')
   }
 
+  // Resolve dataDir first, then load <dataDir>/.env, so every secret read below (JWT_SECRET, SMTP,
+  // DNS/ACME tokens) defaults to the .env file. dataDir itself can't come from .env (chicken-and-egg):
+  // it's set only by config.json or TAPFLOW_DATA_DIR. ambient process.env still wins over the file.
+  let dataDir = resolveDataDir(file.local?.dataDir ?? DEFAULTS.local.dataDir)
+  if (process.env.TAPFLOW_DATA_DIR) dataDir = resolveDataDir(process.env.TAPFLOW_DATA_DIR)
+  loadedEnvPath = loadDataDirEnv(dataDir)
+
   const cfg: TapflowConfig = {
     local: {
       port: file.local?.port ?? DEFAULTS.local.port,
-      dataDir: resolveDataDir(file.local?.dataDir ?? DEFAULTS.local.dataDir),
+      dataDir,
       wsBackpressureBytes: DEFAULTS.local.wsBackpressureBytes,
       trustedProxies: parseTrustedProxies(process.env.TAPFLOW_TRUSTED_PROXIES),
     },
@@ -174,7 +185,7 @@ function load(): TapflowConfig {
   }
 
   if (process.env.TAPFLOW_PORT) cfg.local.port = Number(process.env.TAPFLOW_PORT)
-  if (process.env.TAPFLOW_DATA_DIR) cfg.local.dataDir = resolveDataDir(process.env.TAPFLOW_DATA_DIR)
+  // TAPFLOW_DATA_DIR is already applied above (before the .env load) — it can't be set from .env.
   if (process.env.TAPFLOW_WS_BACKPRESSURE_BYTES) cfg.local.wsBackpressureBytes = Number(process.env.TAPFLOW_WS_BACKPRESSURE_BYTES)
   if (process.env.TAPFLOW_RELAY_URL) cfg.relay.url = process.env.TAPFLOW_RELAY_URL || null
   if (process.env.SMTP_HOST) cfg.smtp.host = process.env.SMTP_HOST
