@@ -26,5 +26,6 @@ jobs:
       - run: pnpm --filter @tapflowio/agent-core build
       - run: pnpm --filter @tapflowio/dashboard build
       - run: pnpm --filter @tapflowio/relay --filter @tapflowio/ios-agent --filter @tapflowio/android-agent build
+      - run: pnpm --filter tapflow --filter @tapflowio/mcp-server build
 
       - run: pnpm test
