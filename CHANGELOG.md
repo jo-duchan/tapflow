@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.9.1] - 2026-06-18
+
+### Changed
+
+- relay: every secret can now live in `.tapflow-data/.env`, not just DNS/ACME tokens. The relay loads `.env` before reading its config, so `JWT_SECRET`, the SMTP password, and the tunnel token are picked up from there too. Precedence is shell env > `.env` > config file (a shell variable still overrides the file); `TAPFLOW_DATA_DIR` is the exception since it determines where `.env` lives.
+
 ## [0.9.0] - 2026-06-17
 
 ### Added
@@ -163,7 +169,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Automatic `tapflow.config.json` creation as a side effect of `tapflow start` / `tapflow relay start`.
 
-[Unreleased]: https://github.com/jo-duchan/tapflow/compare/v0.9.0...HEAD
+[Unreleased]: https://github.com/jo-duchan/tapflow/compare/v0.9.1...HEAD
+[0.9.1]: https://github.com/jo-duchan/tapflow/compare/v0.9.0...v0.9.1
 [0.9.0]: https://github.com/jo-duchan/tapflow/compare/v0.8.2...v0.9.0
 [0.8.2]: https://github.com/jo-duchan/tapflow/compare/v0.8.1...v0.8.2
 [0.8.1]: https://github.com/jo-duchan/tapflow/compare/v0.8.0...v0.8.1
