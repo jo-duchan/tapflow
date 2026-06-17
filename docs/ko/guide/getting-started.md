@@ -30,29 +30,15 @@ tapflow setup
 
 릴레이만 운영하는 서버(Linux)에서는 건너뜁니다. 자세한 내용은 [환경 준비](/ko/guide/environment-setup)를 참고하세요.
 
-## 3. 설정 파일 생성 (선택)
+## 3. tapflow 설정 (선택)
 
-`tapflow init`을 실행해 `tapflow.config.json`을 생성합니다. 기본값(포트 4000, 터널 없음)으로 충분하다면 이 단계를 건너뛸 수 있습니다.
-
-실행하면 터널 프로바이더를 선택하는 프롬프트가 표시됩니다:
+`tapflow init`을 실행해 `tapflow.config.json`을 생성합니다. 터널을 묻고, 터널 없이 LAN으로 쓸 때는 스트리밍 성능(HTTP 또는 HTTPS)까지 대화형으로 물어봅니다. 기본값(포트 4000, 터널 없음, HTTP)으로 충분하다면 이 단계를 건너뛸 수 있습니다.
 
 ```sh
 tapflow init
-# ◆ Tunnel provider
-# ● None  (local only)
-# ○ Tailscale  (recommended — E2E encrypted, no VPS required)
-# ○ rathole  (VPS required)
-#
-# ✓ tapflow.config.json created.
 ```
 
-::: tip 비대화형 환경(CI)에서는 플래그로 지정하세요
-`tapflow init --tunnel tailscale` 또는 `tapflow init --tunnel rathole`로 프롬프트 없이 바로 생성할 수 있습니다.
-:::
-
-::: tip 이미 설정 파일이 있다면?
-`tapflow.config.json`이 이미 존재하면 `tapflow init`은 오류로 종료합니다. 덮어쓰려면 `--force` 옵션을 사용하세요.
-:::
+각 프롬프트가 무엇을 설정하는지, `.env` 자격 증명 파일과 CI 플래그는 어떻게 쓰는지는 [tapflow 설정](/ko/guide/configure)에서 다룹니다.
 
 ## 4. 릴레이 + 에이전트 시작
 

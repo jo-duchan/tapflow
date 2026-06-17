@@ -3,25 +3,43 @@ import { withMermaid } from 'vitepress-plugin-mermaid'
 import tapflowLight from './theme/tapflow-light.json'
 import tapflowDark from './theme/tapflow-dark.json'
 
+// VitePress(mdit-vue) 기본 slugify는 NFKD 정규화라 한글 음절을 자모 분리(NFD) 형태의 헤딩 id로 만든다.
+// 브라우저 URL hash는 NFC라 바이트가 어긋나 비ASCII 헤딩으로 스크롤이 안 된다.
+// mdit-vue와 동일한 특수문자·_숫자 prefix 처리에 정규화만 NFC로 바꿔 id를 완성형으로 만든다.
+function nfcSlugify(str: string): string {
+  return str
+    .normalize('NFC')
+    .replace(/[\s~`!@#$%^&*()\-_+=[\]{}|\\;:"'“”‘’<>,.?/]+/g, '-')
+    .replace(/-{2,}/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .replace(/^(\d)/, '_$1')
+    .toLowerCase()
+}
+
 const enSidebar = [
   {
     text: 'Getting Started',
     items: [
       { text: 'Introduction', link: '/guide/introduction' },
-      { text: 'Quick Start', link: '/guide/getting-started' },
       { text: 'Requirements', link: '/guide/requirements' },
+      { text: 'Quick Start', link: '/guide/getting-started' },
     ],
   },
   {
     text: 'Setup',
     items: [
-      { text: 'Self-Hosting the Relay', link: '/guide/self-hosting' },
       { text: 'Environment Setup', link: '/guide/environment-setup' },
+      { text: 'Configuring tapflow', link: '/guide/configure' },
+      { text: 'Self-Hosting the Relay', link: '/guide/self-hosting' },
       { text: 'Agent Setup', link: '/guide/agent' },
-      { text: 'Streaming Quality', link: '/guide/streaming' },
+      { text: 'Scaling Mac Resources', link: '/guide/scaling' },
+    ],
+  },
+  {
+    text: 'Distribution',
+    items: [
       { text: 'Uploading Builds', link: '/guide/upload-builds' },
       { text: 'Build Distribution', link: '/guide/build-distribution' },
-      { text: 'Scaling Mac Resources', link: '/guide/scaling' },
     ],
   },
   {
@@ -43,6 +61,7 @@ const enSidebar = [
     items: [
       { text: 'CLI Reference', link: '/reference/cli' },
       { text: 'Configuration', link: '/reference/configuration' },
+      { text: 'Streaming Quality', link: '/guide/streaming' },
       { text: 'REST API', link: '/reference/api' },
       { text: 'Performance & Latency', link: '/reference/performance' },
       { text: 'Security & Privacy', link: '/reference/security' },
@@ -67,20 +86,25 @@ const koSidebar = [
     text: '시작하기',
     items: [
       { text: '소개', link: '/ko/guide/introduction' },
-      { text: '빠른 시작', link: '/ko/guide/getting-started' },
       { text: '시스템 요구사항', link: '/ko/guide/requirements' },
+      { text: '빠른 시작', link: '/ko/guide/getting-started' },
     ],
   },
   {
     text: '설정',
     items: [
-      { text: '릴레이 배포', link: '/ko/guide/self-hosting' },
       { text: '환경 준비', link: '/ko/guide/environment-setup' },
+      { text: 'tapflow 설정', link: '/ko/guide/configure' },
+      { text: '릴레이 배포', link: '/ko/guide/self-hosting' },
       { text: '에이전트 설정', link: '/ko/guide/agent' },
-      { text: '스트림 품질', link: '/ko/guide/streaming' },
+      { text: 'Mac 리소스 확장', link: '/ko/guide/scaling' },
+    ],
+  },
+  {
+    text: '빌드 배포',
+    items: [
       { text: '빌드 업로드', link: '/ko/guide/upload-builds' },
       { text: '빌드 배포', link: '/ko/guide/build-distribution' },
-      { text: 'Mac 리소스 확장', link: '/ko/guide/scaling' },
     ],
   },
   {
@@ -102,6 +126,7 @@ const koSidebar = [
     items: [
       { text: 'CLI 레퍼런스', link: '/ko/reference/cli' },
       { text: '설정 파일', link: '/ko/reference/configuration' },
+      { text: '스트림 품질', link: '/ko/guide/streaming' },
       { text: 'REST API', link: '/ko/reference/api' },
       { text: '성능과 지연', link: '/ko/reference/performance' },
       { text: '보안 및 개인정보', link: '/ko/reference/security' },
@@ -212,6 +237,7 @@ export default withMermaid(defineConfig({
 
   markdown: {
     theme: { light: tapflowLight as any, dark: tapflowDark as any },
+    anchor: { slugify: nfcSlugify },
   },
 
   vite: {

@@ -30,29 +30,15 @@ tapflow setup
 
 Skip this on a relay-only server (Linux). See [Environment Setup](/guide/environment-setup) for details.
 
-## 3. Scaffold config (optional)
+## 3. Configure tapflow (optional)
 
-Run `tapflow init` to generate `tapflow.config.json`. Skip this step if you are happy with the defaults (port 4000, no tunnel).
-
-The command prompts you to select a tunnel provider:
+Run `tapflow init` to generate `tapflow.config.json`. It interactively asks for a tunnel and, on a plain LAN, your streaming performance (HTTP or HTTPS). Skip this step if the defaults are fine — port 4000, no tunnel, HTTP.
 
 ```sh
 tapflow init
-# ◆ Tunnel provider
-# ● None  (local only)
-# ○ Tailscale  (recommended — E2E encrypted, no VPS required)
-# ○ rathole  (VPS required)
-#
-# ✓ tapflow.config.json created.
 ```
 
-::: tip Non-interactive environments (CI)
-Pass the provider as a flag to skip the prompt: `tapflow init --tunnel tailscale` or `tapflow init --tunnel rathole`.
-:::
-
-::: tip Already have a config file?
-`tapflow init` exits with an error if `tapflow.config.json` already exists. Use `--force` to overwrite.
-:::
+For what each prompt sets, the `.env` credentials file, and the CI flags, see [Configuring tapflow](/guide/configure).
 
 ## 4. Start the relay + agent
 

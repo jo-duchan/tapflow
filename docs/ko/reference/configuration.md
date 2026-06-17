@@ -36,6 +36,8 @@
 
 환경변수는 항상 설정 파일보다 우선합니다. 서버 환경이나 CI에서 유용합니다.
 
+비밀은 `.tapflow-data/.env` 파일에도 둘 수 있습니다. 릴레이가 시작할 때 이 파일을 먼저 읽으므로, 아래 변수를 셸 대신 파일에 적어도 됩니다. 우선순위는 **셸 환경변수 > `.env` > 설정 파일** 순입니다. 파일 형식과 예외(`TAPFLOW_DATA_DIR`)는 [tapflow 설정](/ko/guide/configure)에서 다룹니다.
+
 | 환경변수 | Config 키 | 기본값 | 설명 |
 |---------|-----------|--------|------|
 | `TAPFLOW_PORT` | `local.port` | `4000` | 서버 포트 |
@@ -65,6 +67,8 @@
 ```sh
 openssl rand -hex 32
 ```
+
+생성한 값은 `.tapflow-data/.env`에 적거나 셸 환경변수로 주입합니다.
 :::
 
 ::: warning 리버스 프록시 뒤에서는 TAPFLOW_TRUSTED_PROXIES를 설정하세요
@@ -102,7 +106,7 @@ openssl rand -hex 32
 | `tls.publishAddress` | 도메인 A 레코드를 이 머신의 LAN IP로 자동 발행합니다. 기본 `true`이며, DNS를 직접 관리하려면 `false`로 둡니다. |
 | `tls.address` | 자동 감지한 LAN IP 대신 사용할 IP. 멀티 NIC나 VPN 환경에서 오버라이드용입니다. |
 
-API 토큰은 설정 파일이 아니라 `tapflow init`이 만들어 두는 `.tapflow-data/.env` 파일에 적습니다. Cloudflare는 `TAPFLOW_CLOUDFLARE_TOKEN`, Vercel은 `TAPFLOW_VERCEL_TOKEN`을 씁니다. 팀 도메인이면 `TAPFLOW_VERCEL_TEAM_ID`도 함께 넣습니다. `.tapflow-data/`는 gitignore 대상이라 이 파일은 커밋되지 않습니다. 환경변수로 직접 설정한 값이 있으면 파일보다 우선합니다.
+API 토큰은 설정 파일이 아니라 `tapflow init`이 만들어 두는 `.tapflow-data/.env` 파일에 적습니다. Cloudflare는 `TAPFLOW_CLOUDFLARE_TOKEN`, Vercel은 `TAPFLOW_VERCEL_TOKEN`을 씁니다. 팀 도메인이면 `TAPFLOW_VERCEL_TEAM_ID`도 함께 넣습니다. `.tapflow-data/`는 gitignore 대상이라 이 파일은 커밋되지 않습니다. 환경변수로 직접 설정한 값이 있으면 파일보다 우선합니다. 이 파일이 어떻게 만들어지고 읽히는지는 [tapflow 설정](/ko/guide/configure)에서 다룹니다.
 
 `publishAddress`가 켜져 있으면 relay가 부팅할 때 자기 LAN IP를 도메인 A 레코드로 발행하고 주기적으로 갱신합니다. 팀원은 DNS를 건드리지 않고 도메인만 열면 됩니다.
 

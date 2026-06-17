@@ -51,7 +51,13 @@ Set it explicitly only when you need a fixed key — for example, to share one s
 openssl rand -hex 32
 ```
 
-Inject it as an environment variable when starting:
+Put it in `.tapflow-data/.env` so it survives restarts without re-exporting — the relay reads the file on start:
+
+```ini
+JWT_SECRET=YOUR_JWT_SECRET
+```
+
+Or inject it as a shell environment variable, which takes precedence over the file:
 
 ```sh
 JWT_SECRET=YOUR_JWT_SECRET tapflow start
@@ -69,8 +75,10 @@ The simplest way for teammates on the same office network to reach the dashboard
 
 ```sh
 npm install -g tapflow
-JWT_SECRET=YOUR_JWT_SECRET tapflow start
+tapflow start
 ```
+
+A single relay auto-generates its `JWT_SECRET`, so there's nothing to set here. To pin a fixed key, see [JWT_SECRET](#jwt-secret) above.
 
 Teammates connect to `http://MACHINE_LOCAL_IP:4000` in their browser. The port matches `local.port` in `tapflow.config.json` (default `4000`).
 
@@ -81,6 +89,10 @@ Keep the relay and agents on the same internal network at all times. External ac
 The relay requires authentication on every connection that does not come from localhost. Browsers authenticate by signing in; agents authenticate with an `agent`-scope token — the agent side is covered in [Remote relay authentication](/guide/agent#remote-relay-authentication).
 
 tapflow supports two tunnel providers:
+
+::: tip tapflow init writes the tunnel config for you
+The `tunnel` blocks shown below can be generated interactively — run `tapflow init` and pick a provider. See [Configuring tapflow](/guide/configure). The sections here cover the resulting config and the provider-side setup.
+:::
 
 | | Tailscale | VPS + rathole |
 |---|-----------|---------------|
@@ -147,6 +159,30 @@ Set `"publicUrl": "http://your-hostname.tailnet.ts.net:4000"` in the tunnel conf
 Tailscale only provides the browser→relay path. Agents (simulator Macs) still connect to the relay's internal IP over your LAN — no change needed there.
 :::
 
+#### Enable HTTPS for the sharper stream (optional)
+
+The default URL is `http://...ts.net:4000`, so the browser uses software decode (the Standard profile). To unlock hardware decode (WebCodecs), terminate the relay over Tailscale's free HTTPS. Tailscale issues and renews the `*.ts.net` certificate automatically, so no domain or DNS token is needed.
+
+1. In the Tailscale admin console under **DNS**, enable **MagicDNS** and **HTTPS Certificates**. You'll acknowledge that machine names appear in the public Certificate Transparency log.
+2. On the relay Mac, terminate the relay port over HTTPS. Tailscale manages the certificate for you, so there's no separate issue step:
+
+```sh
+tailscale serve 4000
+```
+
+3. Point `publicUrl` at the HTTPS address in `tapflow.config.json` so the banner and shared URL match:
+
+```json
+{
+  "tunnel": {
+    "provider": "tailscale",
+    "publicUrl": "https://your-hostname.tailnet.ts.net"
+  }
+}
+```
+
+Teammates opening that HTTPS address now get a secure context and a hardware-decode profile. The relay itself stays on HTTP (4000) and needs no `tls` config — Tailscale terminates TLS in front of it. See [Streaming Quality](/guide/streaming) for the profiles.
+
 ### VPS + rathole
 
 Use this when you need a fully public URL — for external collaborators, anonymous demos, or when Tailscale isn't an option. Traffic is routed through a VPS you own.
@@ -208,16 +244,22 @@ Add the `tunnel` section to `tapflow.config.json`:
 }
 ```
 
-Pass the token as an environment variable and start. If you run the relay and agent on the same Mac:
+Put the tunnel token in `.tapflow-data/.env`:
+
+```ini
+TAPFLOW_TUNNEL_TOKEN=your-secret-token
+```
+
+Then start. If you run the relay and agent on the same Mac:
 
 ```sh
-TAPFLOW_TUNNEL_TOKEN=your-secret-token tapflow start
+tapflow start
 ```
 
 If the relay runs on a dedicated Mac:
 
 ```sh
-TAPFLOW_TUNNEL_TOKEN=your-secret-token tapflow relay start
+tapflow relay start
 ```
 
 tapflow connects to the VPS over SSH, downloads and installs rathole automatically on first run, then starts both the VPS-side server and the local tunnel client. The public URL is printed in the banner when the tunnel is ready.
@@ -240,10 +282,10 @@ Handles automatic restart on crash, restart on server reboot, and log management
 npm install -g pm2 tapflow
 ```
 
-Inject the JWT_SECRET you generated above, then start:
+With `JWT_SECRET` in `.tapflow-data/.env` (or left unset to auto-generate), start:
 
 ```sh
-JWT_SECRET=YOUR_JWT_SECRET pm2 start tapflow --name relay -- relay start
+pm2 start tapflow --name relay -- relay start
 pm2 save
 pm2 startup
 ```

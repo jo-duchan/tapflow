@@ -190,8 +190,10 @@ tapflow reads the Tailscale MagicDNS hostname automatically. Set `"publicUrl"` t
 
 **VPS + rathole**
 
+Put `TAPFLOW_TUNNEL_TOKEN` in `.tapflow-data/.env`, then:
+
 ```sh
-TAPFLOW_TUNNEL_TOKEN=your-secret tapflow relay start
+tapflow relay start
 ```
 
 `tapflow.config.json`:
