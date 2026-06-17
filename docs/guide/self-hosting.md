@@ -75,8 +75,10 @@ The simplest way for teammates on the same office network to reach the dashboard
 
 ```sh
 npm install -g tapflow
-JWT_SECRET=YOUR_JWT_SECRET tapflow start
+tapflow start
 ```
+
+A single relay auto-generates its `JWT_SECRET`, so there's nothing to set here. To pin a fixed key, see [JWT_SECRET](#jwt-secret) above.
 
 Teammates connect to `http://MACHINE_LOCAL_IP:4000` in their browser. The port matches `local.port` in `tapflow.config.json` (default `4000`).
 
@@ -218,16 +220,22 @@ Add the `tunnel` section to `tapflow.config.json`:
 }
 ```
 
-Pass the token as an environment variable and start. If you run the relay and agent on the same Mac:
+Put the tunnel token in `.tapflow-data/.env`:
+
+```ini
+TAPFLOW_TUNNEL_TOKEN=your-secret-token
+```
+
+Then start. If you run the relay and agent on the same Mac:
 
 ```sh
-TAPFLOW_TUNNEL_TOKEN=your-secret-token tapflow start
+tapflow start
 ```
 
 If the relay runs on a dedicated Mac:
 
 ```sh
-TAPFLOW_TUNNEL_TOKEN=your-secret-token tapflow relay start
+tapflow relay start
 ```
 
 tapflow connects to the VPS over SSH, downloads and installs rathole automatically on first run, then starts both the VPS-side server and the local tunnel client. The public URL is printed in the banner when the tunnel is ready.
@@ -250,10 +258,10 @@ Handles automatic restart on crash, restart on server reboot, and log management
 npm install -g pm2 tapflow
 ```
 
-Inject the JWT_SECRET you generated above, then start:
+With `JWT_SECRET` in `.tapflow-data/.env` (or left unset to auto-generate), start:
 
 ```sh
-JWT_SECRET=YOUR_JWT_SECRET pm2 start tapflow --name relay -- relay start
+pm2 start tapflow --name relay -- relay start
 pm2 save
 pm2 startup
 ```
