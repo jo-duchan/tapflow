@@ -18,11 +18,18 @@ describe('createSleepBlocker', () => {
     expect(spawnFn).not.toHaveBeenCalled()
   })
 
-  it('spawns `caffeinate -i` on acquire (macOS)', () => {
+  it('spawns `caffeinate -di` on acquire by default (prevents display sleep too)', () => {
     const spawnFn = vi.fn(() => fakeProc())
-    const b = createSleepBlocker('darwin', spawnFn as never)
+    const b = createSleepBlocker('darwin', spawnFn as never, {})
     b.acquire()
     expect(spawnFn).toHaveBeenCalledOnce()
+    expect(spawnFn).toHaveBeenCalledWith('caffeinate', ['-di'], { stdio: 'ignore' })
+  })
+
+  it('falls back to `caffeinate -i` when TAPFLOW_ALLOW_DISPLAY_SLEEP is set', () => {
+    const spawnFn = vi.fn(() => fakeProc())
+    const b = createSleepBlocker('darwin', spawnFn as never, { TAPFLOW_ALLOW_DISPLAY_SLEEP: '1' })
+    b.acquire()
     expect(spawnFn).toHaveBeenCalledWith('caffeinate', ['-i'], { stdio: 'ignore' })
   })
 
