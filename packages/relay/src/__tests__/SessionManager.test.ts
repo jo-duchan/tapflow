@@ -103,6 +103,63 @@ describe('SessionManager', () => {
     })
   })
 
+  describe('getAgentSocketsByIdentity()', () => {
+    it('returns sockets sharing the same hostname + platform', () => {
+      const sm = new SessionManager()
+      const wsOld = mockSocket()
+      const wsNew = mockSocket()
+      sm.create(wsOld, [{ id: 'd1', name: 'A', platform: 'ios', status: 'shutdown' }], 'MyMac', 'ios')
+      sm.create(wsNew, [{ id: 'd2', name: 'B', platform: 'ios', status: 'shutdown' }], 'MyMac', 'ios')
+      const found = sm.getAgentSocketsByIdentity('MyMac', 'ios')
+      expect(found).toHaveLength(2)
+      expect(found).toContain(wsOld)
+      expect(found).toContain(wsNew)
+    })
+
+    it('does not mix platforms — iOS + Android on one Mac stay separate', () => {
+      const sm = new SessionManager()
+      const wsIos = mockSocket()
+      const wsAndroid = mockSocket()
+      sm.create(wsIos, [{ id: 'd1', name: 'A', platform: 'ios', status: 'shutdown' }], 'MyMac', 'ios')
+      sm.create(wsAndroid, [{ id: 'd2', name: 'B', platform: 'android', status: 'shutdown' }], 'MyMac', 'android')
+      expect(sm.getAgentSocketsByIdentity('MyMac', 'ios')).toEqual([wsIos])
+      expect(sm.getAgentSocketsByIdentity('MyMac', 'android')).toEqual([wsAndroid])
+    })
+
+    it('returns one socket once even with multiple device sessions', () => {
+      const sm = new SessionManager()
+      const ws = mockSocket()
+      sm.create(ws, [
+        { id: 'd1', name: 'A', platform: 'ios', status: 'shutdown' },
+        { id: 'd2', name: 'B', platform: 'ios', status: 'shutdown' },
+      ], 'MyMac', 'ios')
+      expect(sm.getAgentSocketsByIdentity('MyMac', 'ios')).toEqual([ws])
+    })
+
+    it('returns empty array when nothing matches', () => {
+      const sm = new SessionManager()
+      sm.create(mockSocket(), [{ id: 'd1', name: 'A', platform: 'ios', status: 'shutdown' }], 'MyMac', 'ios')
+      expect(sm.getAgentSocketsByIdentity('OtherMac', 'ios')).toEqual([])
+    })
+
+    it('keys on machine id — same hostname, different machine ids stay separate', () => {
+      const sm = new SessionManager()
+      const wsA = mockSocket()
+      const wsB = mockSocket()
+      sm.create(wsA, [{ id: 'd1', name: 'A', platform: 'ios', status: 'shutdown' }], 'DupName', 'ios', 'uuid-A')
+      sm.create(wsB, [{ id: 'd2', name: 'B', platform: 'ios', status: 'shutdown' }], 'DupName', 'ios', 'uuid-B')
+      expect(sm.getAgentSocketsByIdentity('uuid-A', 'ios')).toEqual([wsA])
+      expect(sm.getAgentSocketsByIdentity('uuid-B', 'ios')).toEqual([wsB])
+    })
+
+    it('falls back to hostname when machine id is absent (older agent)', () => {
+      const sm = new SessionManager()
+      const ws = mockSocket()
+      sm.create(ws, [{ id: 'd1', name: 'A', platform: 'ios', status: 'shutdown' }], 'OldMac', 'ios')
+      expect(sm.getAgentSocketsByIdentity('OldMac', 'ios')).toEqual([ws])
+    })
+  })
+
   describe('getByStreamSocket()', () => {
     it('returns undefined when no stream socket registered', () => {
       const sm = new SessionManager()

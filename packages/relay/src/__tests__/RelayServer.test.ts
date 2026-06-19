@@ -106,6 +106,80 @@ describe('RelayServer', () => {
     ws.close()
   })
 
+  it('re-register from the same agent (hostname+platform) evicts the stale socket — one card, not a duplicate', async () => {
+    const devices = [{ id: 'devA', name: 'iPhone A', platform: 'ios', status: 'shutdown' }]
+
+    const agent1 = new WebSocket(`ws://localhost:${port}`)
+    await waitForOpen(agent1)
+    agent1.send(JSON.stringify({ type: 'agent:register', agentId: 'uuid-1', agentName: 'MyMac', platform: 'ios', devices }))
+    await waitForType(agent1, 'agent:registered')
+    const agent1Closed = new Promise<void>((resolve) => agent1.on('close', () => resolve()))
+
+    // Unclean reconnect: a fresh socket from the same Mac before the old socket's close fires.
+    const agent2 = new WebSocket(`ws://localhost:${port}`)
+    await waitForOpen(agent2)
+    agent2.send(JSON.stringify({ type: 'agent:register', agentId: 'uuid-1', agentName: 'MyMac', platform: 'ios', devices }))
+    await waitForType(agent2, 'agent:registered')
+
+    // The relay terminates the stale socket.
+    await agent1Closed
+
+    const browser = new WebSocket(`ws://localhost:${port}`)
+    await waitForOpen(browser)
+    browser.send(JSON.stringify({ type: 'agents:list' }))
+    const listed = await waitForType(browser, 'agents:listed')
+    expect(listed.sessions!.filter((s) => s.agentName === 'MyMac')).toHaveLength(1)
+
+    agent2.close()
+    browser.close()
+  })
+
+  it('keeps iOS and Android agents on the same Mac as separate cards', async () => {
+    const iosAgent = new WebSocket(`ws://localhost:${port}`)
+    await waitForOpen(iosAgent)
+    iosAgent.send(JSON.stringify({ type: 'agent:register', agentId: 'uuid-mac', agentName: 'MyMac', platform: 'ios', devices: [{ id: 'i1', name: 'iPhone', platform: 'ios', status: 'shutdown' }] }))
+    await waitForType(iosAgent, 'agent:registered')
+
+    const androidAgent = new WebSocket(`ws://localhost:${port}`)
+    await waitForOpen(androidAgent)
+    androidAgent.send(JSON.stringify({ type: 'agent:register', agentId: 'uuid-mac', agentName: 'MyMac', platform: 'android', devices: [{ id: 'a1', name: 'Pixel', platform: 'android', status: 'shutdown' }] }))
+    await waitForType(androidAgent, 'agent:registered')
+
+    const browser = new WebSocket(`ws://localhost:${port}`)
+    await waitForOpen(browser)
+    browser.send(JSON.stringify({ type: 'agents:list' }))
+    const listed = await waitForType(browser, 'agents:listed')
+    expect(listed.sessions!.filter((s) => s.agentName === 'MyMac')).toHaveLength(2)
+
+    iosAgent.close()
+    androidAgent.close()
+    browser.close()
+  })
+
+  it('does not evict a different Mac that shares a hostname (distinct machine ids → two cards)', async () => {
+    const devices = [{ id: 'devA', name: 'iPhone A', platform: 'ios', status: 'shutdown' }]
+
+    const macA = new WebSocket(`ws://localhost:${port}`)
+    await waitForOpen(macA)
+    macA.send(JSON.stringify({ type: 'agent:register', agentId: 'uuid-A', agentName: 'DupName', platform: 'ios', devices }))
+    await waitForType(macA, 'agent:registered')
+
+    const macB = new WebSocket(`ws://localhost:${port}`)
+    await waitForOpen(macB)
+    macB.send(JSON.stringify({ type: 'agent:register', agentId: 'uuid-B', agentName: 'DupName', platform: 'ios', devices }))
+    await waitForType(macB, 'agent:registered')
+
+    const browser = new WebSocket(`ws://localhost:${port}`)
+    await waitForOpen(browser)
+    browser.send(JSON.stringify({ type: 'agents:list' }))
+    const listed = await waitForType(browser, 'agents:listed')
+    expect(listed.sessions!.filter((s) => s.agentName === 'DupName')).toHaveLength(2)
+
+    macA.close()
+    macB.close()
+    browser.close()
+  })
+
   it('allows a browser to join a device session', async () => {
     const devices = [{ id: 'devA', name: 'iPhone A', platform: 'ios', status: 'shutdown' }]
     const agent = new WebSocket(`ws://localhost:${port}`)

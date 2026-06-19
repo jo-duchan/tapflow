@@ -19,6 +19,7 @@ import {
   createThroughputSampler,
   createSleepBlocker,
   type SleepBlocker,
+  getMachineId,
   DEFAULT_BACKPRESSURE_BYTES,
   writeEnvelopeHeader,
   rewriteLowLatencySpsInFrame,
@@ -139,6 +140,7 @@ export class IOSAgent implements DeviceAgent {
         ws.send(JSON.stringify({
           type: 'agent:register',
           platform: 'ios',
+          agentId: getMachineId(),
           agentName: os.hostname(),
           devices: devices.map((d) => ({
             id: d.id,

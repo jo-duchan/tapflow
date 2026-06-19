@@ -71,6 +71,9 @@ export interface RelayMessage {
   payload?: unknown
   message?: string
   agentName?: string
+  // agent:register: stable per-machine id (macOS IOPlatformUUID). Unique per Mac, unlike agentName
+  // (os.hostname() can collide). Absent from older agents → relay falls back to agentName for dedup.
+  agentId?: string
   // agent:register: raw device list (without sessionId/busy — added by relay)
   devices?: Array<{ id: string; name: string; platform: string; status: string; osVersion?: string }>
   platform?: string  // agent:register: agent platform ('ios' | 'android')
