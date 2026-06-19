@@ -3,7 +3,8 @@ import { initDb } from './db.js'
 import { RelayServer } from './RelayServer.js'
 import { config, loadedEnvPath } from './lib/config.js'
 import { buildCorsOrigins, proxyWithoutPublicUrlWarning } from './lib/proxyConfig.js'
-import { createCertProvider, startCertRenewal, startAddressPublisher } from './lib/cert/index.js'
+import { createCertProvider } from './lib/cert/index.js'
+import { startTlsBackgroundTasks } from './lib/tlsTasks.js'
 import { createLogger } from '@tapflowio/agent-core'
 
 const logger = createLogger('relay')
@@ -39,19 +40,10 @@ async function main(): Promise<void> {
   await server.start()
   logger.info(`tapflow relay running on port ${port} (${tls ? 'https' : 'http'})`)
 
-  const stopRenewal = provider
-    ? startCertRenewal(provider, { onRenew: (m) => server.updateTlsContext({ cert: m.cert, key: m.key }) })
-    : null
-
-  // byo-api-token: publish the relay's LAN IP to the domain's A record so teammates just open the URL.
-  const stopPublish =
-    config.tls?.mode === 'byo-api-token' && config.tls.publishAddress !== false
-      ? startAddressPublisher(config.tls)
-      : null
+  const stopTls = provider ? startTlsBackgroundTasks(provider, server, config.tls) : null
 
   const shutdown = () => {
-    stopRenewal?.()
-    stopPublish?.()
+    stopTls?.()
     void server.stop().then(() => process.exit(0))
   }
   process.on('SIGTERM', shutdown)

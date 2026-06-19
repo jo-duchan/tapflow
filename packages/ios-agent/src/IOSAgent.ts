@@ -19,6 +19,7 @@ import {
   createThroughputSampler,
   createSleepBlocker,
   type SleepBlocker,
+  isLocalhostWss,
   DEFAULT_BACKPRESSURE_BYTES,
   writeEnvelopeHeader,
   rewriteLowLatencySpsInFrame,
@@ -395,8 +396,13 @@ export class IOSAgent implements DeviceAgent {
   }
 
   // 원격 릴레이는 PAT 인증을 요구한다 (#271) — control/stream WS 모두 같은 토큰을 쓴다.
-  private wsClientOptions(): { headers?: Record<string, string> } {
-    return this.token ? { headers: { authorization: `Bearer ${this.token}` } } : {}
+  private wsClientOptions(): { headers?: Record<string, string>; rejectUnauthorized?: boolean } {
+    const opts: { headers?: Record<string, string>; rejectUnauthorized?: boolean } = {}
+    if (this.token) opts.headers = { authorization: `Bearer ${this.token}` }
+    // All-in-one (tapflow start): the relay's domain cert won't match wss://localhost, but localhost
+    // never leaves the machine so MITM is impossible — accept it. External relays keep verification.
+    if (this.relayUrl && isLocalhostWss(this.relayUrl)) opts.rejectUnauthorized = false
+    return opts
   }
 
   private async openStreamWs(state: DeviceState): Promise<WebSocket> {

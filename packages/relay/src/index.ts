@@ -7,6 +7,7 @@ export { buildCorsOrigins, proxyWithoutPublicUrlWarning } from './lib/proxyConfi
 export type { CertProvider, CertMaterial, CertStrategy } from './lib/cert/index.js'
 export type { DnsProvider } from './lib/cert/index.js'
 export { createCertProvider, startCertRenewal, startAddressPublisher, dnsProviders } from './lib/cert/index.js'
+export { startTlsBackgroundTasks } from './lib/tlsTasks.js'
 export type { DnsProviderEntry } from './lib/cert/index.js'
 export type { TlsConfig } from './lib/cert/index.js'
 export type { Session } from './SessionManager.js'

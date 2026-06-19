@@ -1,4 +1,4 @@
-import { RelayServer, initDb, config } from '@tapflowio/relay'
+import { RelayServer, initDb, config, createCertProvider, startTlsBackgroundTasks, buildCorsOrigins, proxyWithoutPublicUrlWarning } from '@tapflowio/relay'
 import { AgentRegistry } from '@tapflowio/agent-core'
 import fs from 'fs'
 import path from 'path'
@@ -16,7 +16,6 @@ export interface StartOptions {
 const RELAY_PORT = config.local.port
 
 export async function cmdStart(opts: StartOptions): Promise<void> {
-  const relayUrl = `ws://localhost:${RELAY_PORT}`
   const explicit = opts.platform
 
   let platformsToRun: string[]
@@ -38,9 +37,28 @@ export async function cmdStart(opts: StartOptions): Promise<void> {
     warn('tapflow.config.json not found — using defaults. Run tapflow init to configure.')
   }
   initDb(path.join(config.local.dataDir, 'tapflow.db'))
-  const server = new RelayServer({ port: RELAY_PORT, uploadsDir: path.join(config.local.dataDir, 'uploads'), wsBackpressureBytes: config.local.wsBackpressureBytes })
+
+  // LAN HTTPS for the secure-context (Smooth/WebCodecs) path — same wiring as `tapflow relay start`.
+  let tls: { cert: string; key: string } | undefined
+  let certProvider: ReturnType<typeof createCertProvider> | null = null
+  if (config.tls) {
+    certProvider = createCertProvider(config.tls, { dataDir: config.local.dataDir })
+    const material = await certProvider.ensureCert()
+    tls = { cert: material.cert, key: material.key }
+  }
+  const httpScheme = tls ? 'https' : 'http'
+  const wsScheme = tls ? 'wss' : 'ws'
+  // A domain-bound cert won't validate against localhost, so advertise the cert's domain to teammates.
+  const displayHost = config.tls?.mode === 'byo-api-token' ? config.tls.domain : 'localhost'
+  // The co-located agent connects over localhost; the agent accepts the domain cert there (see isLocalhostWss).
+  const relayUrl = `${wsScheme}://localhost:${RELAY_PORT}`
+
+  const proxyWarning = proxyWithoutPublicUrlWarning(config)
+  if (proxyWarning) warn(proxyWarning)
+  const server = new RelayServer({ port: RELAY_PORT, uploadsDir: path.join(config.local.dataDir, 'uploads'), wsBackpressureBytes: config.local.wsBackpressureBytes, trustedProxies: config.local.trustedProxies, corsOrigins: buildCorsOrigins(config, RELAY_PORT), tls })
   await server.start()
-  step(`Relay started on ws://localhost:${RELAY_PORT}`)
+  const stopTls = certProvider ? startTlsBackgroundTasks(certProvider, server, config.tls) : null
+  step(`Relay started on ${httpScheme}://${displayHost}:${RELAY_PORT}`)
 
   // ── 2. Tunnel (optional — publishes a public URL for teammates) ────────────
   let tunnel: TunnelPlugin | null = null
@@ -54,14 +72,14 @@ export async function cmdStart(opts: StartOptions): Promise<void> {
   // ── 3. Agent availability check ───────────────────────────────────────────
   if (platformsToRun.length === 0) {
     banner('success', 'TAPFLOW RELAY READY', [
-      `Relay  : http://localhost:${RELAY_PORT}`,
+      `Relay  : ${httpScheme}://${displayHost}:${RELAY_PORT}`,
       ...(publicUrl ? [`Public : ${publicUrl}`] : []),
       'No agent environment detected — running relay only.',
-      `Connect a Mac agent:  tapflow agent start --relay ws://<this-ip>:${RELAY_PORT} --token <agent-PAT>`,
+      `Connect a Mac agent:  tapflow agent start --relay ${wsScheme}://<this-ip>:${RELAY_PORT} --token <agent-PAT>`,
       `  Issue an 'agent'-scope token in the dashboard (Settings → Tokens).`,
       'Press Ctrl+C to stop.',
     ])
-    process.on('SIGINT', () => { void tunnel?.stop(); process.exit(0) })
+    process.on('SIGINT', () => { stopTls?.(); void tunnel?.stop(); process.exit(0) })
     return
   }
 
@@ -87,13 +105,14 @@ export async function cmdStart(opts: StartOptions): Promise<void> {
   }
 
   banner('success', 'TAPFLOW READY', [
-    `Relay  : http://localhost:${RELAY_PORT}`,
+    `Relay  : ${httpScheme}://${displayHost}:${RELAY_PORT}`,
     ...(publicUrl ? [`Public : ${publicUrl}`] : []),
-    `Open ${publicUrl ?? `http://localhost:${RELAY_PORT}`} in your browser.`,
+    `Open ${publicUrl ?? `${httpScheme}://${displayHost}:${RELAY_PORT}`} in your browser.`,
     'Press Ctrl+C to stop.',
   ])
 
   process.on('SIGINT', () => {
+    stopTls?.()
     agents.forEach((a) => a.disconnect())
     void tunnel?.stop()
     process.exit(0)
