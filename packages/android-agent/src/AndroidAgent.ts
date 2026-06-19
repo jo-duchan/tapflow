@@ -12,6 +12,7 @@ import {
   createThroughputSampler,
   createSleepBlocker,
   type SleepBlocker,
+  getMachineId,
   isLocalhostWss,
   DEFAULT_BACKPRESSURE_BYTES,
   writeEnvelopeHeader,
@@ -230,6 +231,7 @@ export class AndroidAgent implements DeviceAgent {
         ws.send(JSON.stringify({
           type: 'agent:register',
           platform: 'android',
+          agentId: getMachineId(),
           agentName: os.hostname(),
           devices: devices.map((d) => ({
             id: d.id,

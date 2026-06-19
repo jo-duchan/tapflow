@@ -23,6 +23,7 @@ export { createThroughputSampler } from './throughput.js'
 export type { ThroughputSample } from './throughput.js'
 export { createSleepBlocker } from './power.js'
 export type { SleepBlocker } from './power.js'
+export { getMachineId } from './machineId.js'
 export { isLocalhostWss } from './relayUrl.js'
 export { pickMaxSize } from './resolution.js'
 export {

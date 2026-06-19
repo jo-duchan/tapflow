@@ -396,21 +396,8 @@ export class RelayServer {
     ws.on('close', () => {
       this.wsRoles.delete(ws)
       this.wsExternal.delete(ws)
-      // Agent main socket disconnected → remove all device sessions for this agent
-      const agentSessions = this.sessions.getAllByAgentSocket(ws)
-      if (agentSessions.length > 0) {
-        const agentSessionIds = new Set(agentSessions.map((s) => s.id))
-        for (const [reqId, pending] of this.pendingScreenshots.entries()) {
-          if (agentSessionIds.has(pending.sessionId)) {
-            clearTimeout(pending.timer)
-            this.pendingScreenshots.delete(reqId)
-            pending.reject(new Error('Agent disconnected'))
-          }
-        }
-        for (const s of agentSessions) this.sessions.remove(s.id)
-        this.sessions.removeResources(ws)
-        return
-      }
+      // Agent main socket disconnected → remove its sessions, reject in-flight screenshots, drop resources
+      if (this.evictAgentSocket(ws)) return
 
       // Stream socket disconnected → clear the streamSocket reference
       const streamSession = this.sessions.getByStreamSocket(ws)
@@ -621,8 +608,41 @@ export class RelayServer {
     }
   }
 
+  // Removes an agent socket's sessions + resources and rejects its in-flight screenshot requests.
+  // Shared by socket close and re-register eviction. Returns true if `ws` had agent sessions.
+  private evictAgentSocket(ws: WebSocket): boolean {
+    const agentSessions = this.sessions.getAllByAgentSocket(ws)
+    if (agentSessions.length === 0) return false
+    const agentSessionIds = new Set(agentSessions.map((s) => s.id))
+    for (const [reqId, pending] of this.pendingScreenshots.entries()) {
+      if (agentSessionIds.has(pending.sessionId)) {
+        clearTimeout(pending.timer)
+        this.pendingScreenshots.delete(reqId)
+        pending.reject(new Error('Agent disconnected'))
+      }
+    }
+    for (const s of agentSessions) this.sessions.remove(s.id)
+    this.sessions.removeResources(ws)
+    return true
+  }
+
   private handleAgentRegister(ws: WebSocket, msg: RelayMessage): void {
-    const sessionIds = this.sessions.create(ws, msg.devices ?? [], msg.agentName, msg.platform)
+    // Re-register from the same Mac (machine id + platform): the old socket's close may not have
+    // fired yet after an unclean drop (Wi-Fi loss, sleep) — its TCP teardown lags — which would
+    // leave a duplicate, eventually-"Stale" card. Evict the stale agent's sessions and terminate
+    // its socket before creating the new ones. Identity is agentId (unique per Mac) when present,
+    // else agentName. (Heartbeat backstop for never-reconnecting agents: #313.)
+    const identity = msg.agentId ?? msg.agentName
+    if (identity) {
+      for (const old of this.sessions.getAgentSocketsByIdentity(identity, msg.platform)) {
+        if (old === ws) continue
+        // Evict before terminate: the old socket's close fires async, by which point its sessions are
+        // gone and its in-flight screenshots would be undiscoverable — reject them here instead.
+        this.evictAgentSocket(old)
+        old.terminate()
+      }
+    }
+    const sessionIds = this.sessions.create(ws, msg.devices ?? [], msg.agentName, msg.platform, msg.agentId)
     const registeredSessions = (msg.devices ?? []).map((d, i) => ({
       deviceId: d.id,
       sessionId: sessionIds[i],
