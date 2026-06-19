@@ -57,7 +57,8 @@ export async function cmdStart(opts: StartOptions): Promise<void> {
       `Relay  : http://localhost:${RELAY_PORT}`,
       ...(publicUrl ? [`Public : ${publicUrl}`] : []),
       'No agent environment detected — running relay only.',
-      `Connect a Mac agent:  tapflow agent start --relay ws://<this-ip>:${RELAY_PORT}`,
+      `Connect a Mac agent:  tapflow agent start --relay ws://<this-ip>:${RELAY_PORT} --token <agent-PAT>`,
+      `  Issue an 'agent'-scope token in the dashboard (Settings → Tokens).`,
       'Press Ctrl+C to stop.',
     ])
     process.on('SIGINT', () => { void tunnel?.stop(); process.exit(0) })
