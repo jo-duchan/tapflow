@@ -124,4 +124,4 @@ Resolution and decoder are chosen automatically per viewer connection — tapflo
 
 While an agent is connected, it holds a macOS power assertion so the host doesn't sleep mid-session. By default it also keeps the display awake (`caffeinate -di`): when the display sleeps, macOS parks the GPU and throttles the simulator render and encoding, which shows up as a sluggish stream. Running an agent effectively dedicates the Mac to tapflow, so this is the default.
 
-On a Mac you also use for other things, set `TAPFLOW_ALLOW_DISPLAY_SLEEP=1` to let the display sleep normally (system sleep is still blocked).
+Set `TAPFLOW_ALLOW_DISPLAY_SLEEP=1` to let the display sleep normally (system sleep is still blocked).
