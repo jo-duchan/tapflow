@@ -13,7 +13,7 @@ import {
 
 // init wizard와 같은 프로파일 용어로 — 디코더 jargon(WebCodecs/WASM) 대신.
 const MODE_LABEL: Record<string, string | null> = {
-  high: 'High performance',
+  high: 'Smooth',
   standard: 'Standard',
   unsupported: null,
 };

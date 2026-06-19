@@ -22,8 +22,8 @@ The interactive prompts then appear in order. You pick a tunnel first; the strea
 
 ```text
 1. Tunnel              None · Tailscale · rathole
-2. Streaming           Only when tunnel is None — Standard (HTTP) · High (HTTPS)
-3. Certificate         Only when High is chosen — DNS auto-issue · Existing cert
+2. Streaming           Only when tunnel is None — Standard (HTTP) · Smooth (HTTPS)
+3. Certificate         Only when Smooth is chosen — DNS auto-issue · Existing cert
 ```
 
 ## 1. Pick a tunnel
@@ -49,15 +49,15 @@ This step appears only when you pick **None** for the tunnel. It sets the qualit
 | Choice | Meaning |
 |--------|---------|
 | **Standard** | Starts instantly over HTTP. Uses software decode and needs no domain. |
-| **High performance** | Turns on hardware decode (WebCodecs) over HTTPS. Smoother, but needs a domain. |
+| **Smooth** | Turns on hardware decode (WebCodecs) over HTTPS. Smoother, but needs a domain. |
 
-Browser hardware decoding runs only in a secure context (HTTPS), so to give teammates a sharper, smoother stream, choose **High performance** and set up HTTPS. How each choice maps to the actual resolution and decoder is explained in [Streaming Quality](/guide/streaming).
+Browser hardware decoding runs only in a secure context (HTTPS), so to give teammates a sharper, smoother stream, choose **Smooth** and set up HTTPS. How each choice maps to the actual resolution and decoder is explained in [Streaming Quality](/guide/streaming).
 
 ::: info This step is skipped when you pick a tunnel
 A tunnel handles HTTPS at its own layer, so this step only appears for a direct LAN connection. rathole terminates TLS with Caddy on the VPS; Tailscale terminates it with `tailscale serve` (free, optional). The relay needs no `tls` config either way. For the per-tunnel HTTPS setup, see [Self-Hosting the Relay](/guide/self-hosting#external-access).
 :::
 
-## 3. Certificate method (when High performance is chosen)
+## 3. Certificate method (when Smooth is chosen)
 
 If you turn on HTTPS, choose how the certificate is provided.
 

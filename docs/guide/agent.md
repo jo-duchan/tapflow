@@ -118,4 +118,4 @@ See [Troubleshooting](/guide/troubleshooting) for more detailed solutions.
 
 ## Stream quality
 
-Resolution and decoder are chosen automatically per viewer connection — tapflow streams in a **Standard**, **Sharp**, or **Remote** profile depending on how each viewer reaches the relay. See [Streaming Quality](/guide/streaming) for the profiles and how to tune them.
+Resolution and decoder are chosen automatically per viewer connection — tapflow streams in a **Standard**, **Smooth**, or **Remote** profile depending on how each viewer reaches the relay. See [Streaming Quality](/guide/streaming) for the profiles and how to tune them.

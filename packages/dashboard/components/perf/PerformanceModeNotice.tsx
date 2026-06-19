@@ -33,10 +33,10 @@ export function PerformanceModeNotice({
           <DialogTitle>Streaming in Standard mode</DialogTitle>
           <DialogDescription className="space-y-3 pt-1">
             <span className="block">
-              This screen is running in Standard mode. For a faster, smoother picture, switch to High performance.
+              This screen is running in Standard mode. For a faster, smoother picture, switch to Smooth.
             </span>
             <span className="block">
-              High performance needs the relay served over HTTPS. If you didn&apos;t set up tapflow, ask whoever did.
+              Smooth needs the relay served over HTTPS. If you didn&apos;t set up tapflow, ask whoever did.
             </span>
           </DialogDescription>
         </DialogHeader>
