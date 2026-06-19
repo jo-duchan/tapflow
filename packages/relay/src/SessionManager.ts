@@ -6,6 +6,7 @@ import type { AgentResources, SessionInfo } from './types.js'
 
 export interface Session {
   id: string
+  agentId?: string
   agentName?: string
   agentPlatform?: string
   agentSocket: WebSocket
@@ -37,12 +38,13 @@ export class SessionManager {
     this.idleTimeoutMs = options.idleTimeoutMs ?? DEFAULT_IDLE_TIMEOUT_MS
   }
 
-  create(agentSocket: WebSocket, devices: RawDevice[] = [], agentName?: string, agentPlatform?: string): string[] {
+  create(agentSocket: WebSocket, devices: RawDevice[] = [], agentName?: string, agentPlatform?: string, agentId?: string): string[] {
     const agentIds = this.agentSocketIndex.get(agentSocket) ?? new Set<string>()
     return devices.map((d) => {
       const id = randomUUID()
       this.sessions.set(id, {
         id,
+        agentId,
         agentName,
         agentPlatform,
         agentSocket,
@@ -69,6 +71,23 @@ export class SessionManager {
     const ids = this.agentSocketIndex.get(ws)
     if (!ids) return []
     return Array.from(ids).map((id) => this.sessions.get(id)).filter((s): s is Session => s !== undefined)
+  }
+
+  /**
+   * Agent sockets currently registered under the same identity (machine id + platform). Identity
+   * is `agentId ?? agentName`: agentId (macOS IOPlatformUUID) is unique per Mac, while agentName
+   * (os.hostname()) can collide across hosts — so older agents without an agentId fall back to the
+   * hostname. Platform disambiguates an iOS and Android agent on the same Mac (same agentId). Used
+   * on re-register to evict an agent's stale socket (the old connection whose close hasn't fired
+   * yet after an unclean drop) before it shows as a duplicate "Stale" card. Heartbeat backstop for
+   * never-reconnecting agents is tracked in #313.
+   */
+  getAgentSocketsByIdentity(identity: string, platform: string | undefined): WebSocket[] {
+    const sockets = new Set<WebSocket>()
+    for (const s of this.sessions.values()) {
+      if ((s.agentId ?? s.agentName) === identity && s.agentPlatform === platform) sockets.add(s.agentSocket)
+    }
+    return Array.from(sockets)
   }
 
   getByStreamSocket(ws: WebSocket): Session | undefined {

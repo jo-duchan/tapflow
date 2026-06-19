@@ -622,7 +622,21 @@ export class RelayServer {
   }
 
   private handleAgentRegister(ws: WebSocket, msg: RelayMessage): void {
-    const sessionIds = this.sessions.create(ws, msg.devices ?? [], msg.agentName, msg.platform)
+    // Re-register from the same Mac (machine id + platform): the old socket's close may not have
+    // fired yet after an unclean drop (Wi-Fi loss, sleep) — its TCP teardown lags — which would
+    // leave a duplicate, eventually-"Stale" card. Evict the stale agent's sessions and terminate
+    // its socket before creating the new ones. Identity is agentId (unique per Mac) when present,
+    // else agentName. (Heartbeat backstop for never-reconnecting agents: #313.)
+    const identity = msg.agentId ?? msg.agentName
+    if (identity) {
+      for (const old of this.sessions.getAgentSocketsByIdentity(identity, msg.platform)) {
+        if (old === ws) continue
+        for (const s of this.sessions.getAllByAgentSocket(old)) this.sessions.remove(s.id)
+        this.sessions.removeResources(old)
+        old.terminate()
+      }
+    }
+    const sessionIds = this.sessions.create(ws, msg.devices ?? [], msg.agentName, msg.platform, msg.agentId)
     const registeredSessions = (msg.devices ?? []).map((d, i) => ({
       deviceId: d.id,
       sessionId: sessionIds[i],
