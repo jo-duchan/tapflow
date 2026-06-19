@@ -159,9 +159,9 @@ config의 `tunnel` 섹션에 `"publicUrl": "http://your-hostname.tailnet.ts.net:
 Tailscale은 브라우저→릴레이 경로만 제공합니다. 에이전트(시뮬레이터 Mac)는 계속 LAN 내부 IP로 릴레이에 연결합니다 — 에이전트 설정 변경 없이 사용 가능합니다.
 :::
 
-#### HTTPS로 고성능 스트림 켜기 (선택)
+#### HTTPS로 더 부드러운 스트림 켜기 (선택)
 
-기본 접속은 `http://...ts.net:4000`이라 브라우저가 소프트웨어 디코드(Standard 프로파일)를 씁니다. 더 선명한 하드웨어 디코드(WebCodecs)를 원하면 Tailscale의 무료 HTTPS로 종단하면 됩니다. Tailscale이 `*.ts.net` 인증서를 자동 발급·갱신하므로 도메인이나 DNS 토큰이 필요 없습니다.
+기본 접속은 평문 HTTP라 팀원에게 Standard 프로파일이 적용됩니다. Tailscale의 무료 HTTPS로 종단하면 Smooth 프로파일로 전환됩니다([스트림 품질](/ko/guide/streaming) 참고). Tailscale이 `*.ts.net` 인증서를 자동 발급·갱신하므로 도메인이나 DNS 토큰이 필요 없습니다.
 
 1. Tailscale admin 콘솔의 **DNS** 설정에서 **MagicDNS**와 **HTTPS Certificates**를 켭니다. 머신 이름이 공개 Certificate Transparency 기록에 남는다는 점에 동의해야 합니다.
 2. 릴레이 Mac에서 relay 포트를 HTTPS로 종단합니다. Tailscale이 인증서를 자동 관리하므로 별도 발급 명령은 필요 없습니다:
@@ -181,7 +181,7 @@ tailscale serve 4000
 }
 ```
 
-팀원이 이 HTTPS 주소로 접속하면 보안 컨텍스트가 되어 하드웨어 디코드 프로파일로 스트리밍됩니다. 릴레이 자체는 HTTP(4000)로 두며 `tls` 설정은 필요 없습니다. TLS는 Tailscale이 앞단에서 종단합니다. 프로파일 상세는 [스트림 품질](/ko/guide/streaming)을 참고하세요.
+팀원이 이 HTTPS 주소로 접속하면 Smooth 프로파일로 스트리밍됩니다. 릴레이 자체는 HTTP(4000)로 두며 `tls` 설정은 필요 없습니다. TLS는 Tailscale이 앞단에서 종단합니다.
 
 ### VPS + rathole
 
