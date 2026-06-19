@@ -9,6 +9,10 @@ The relay is a lightweight Node.js server. It only routes WebSocket traffic and 
 
 ## Deployment scenarios
 
+::: tip Keep agents and the relay on the same wired LAN
+The agent streams video frames to the relay continuously, so the two must share a LAN. Different floors or VLANs in one building are fine — internal routing keeps latency low — but placing an agent across the internet raises RTT and drops frames. **Wired Ethernet is recommended**; Wi-Fi works but can stutter on a Mac (AWDL), so see [Stream lag or stuttering](/guide/troubleshooting#stream-lag) if playback hitches.
+:::
+
 ### Local (single Mac)
 
 Run the relay and agent on the same Mac at once.
@@ -20,10 +24,6 @@ tapflow start
 ### Team (separate relay server)
 
 Run the relay on a dedicated Mac; run the agent on each Mac with a simulator.
-
-::: tip Keep agents and the relay on the same internal network
-The agent streams video frames to the relay continuously. Agents and relay can be on different floors or VLANs within the same office building — internal routing keeps latency low enough. Placing agents across the internet on a different network increases RTT and causes frame drops.
-:::
 
 **On the relay Mac:**
 
@@ -72,8 +72,6 @@ The relay reads `tapflow.config.json` from the working directory. See [Configura
 ## Internal access (same network)
 
 The simplest way for teammates on the same office network to reach the dashboard.
-
-For the smoothest stream, run the agent and relay over a wired LAN. See [Stream lag or stuttering](/guide/troubleshooting#stream-lag) if playback hitches.
 
 ```sh
 npm install -g tapflow

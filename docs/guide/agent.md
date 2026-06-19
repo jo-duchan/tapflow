@@ -22,8 +22,8 @@ tapflow agent start --relay ws://192.168.x.x:4000 --token tflw_pat_xxxxxxxx
 | `--device` | all simulators | Limit which iOS simulators are exposed to the relay, by name or UDID |
 | `--token` | none | Token with the `agent` scope for remote relay authentication. Can also be passed via the `TAPFLOW_AGENT_TOKEN` environment variable. |
 
-::: tip Put the agent and relay on the same LAN — wired if you can
-The agent streams video frames to the relay continuously, so the two should sit on the same LAN. **Wired Ethernet is strongly recommended.** Wi-Fi works, but on a Mac it can stutter about twice a second from AWDL (AirDrop/AirPlay/Handoff channel hopping) regardless of signal strength — if you can't go wired, turn off Bluetooth, AirDrop, and Handoff to keep it quiet. Connecting across different networks, or over an unstable link, also raises latency and drops frames. See [Stream lag or stuttering](/guide/troubleshooting#stream-lag) if playback hitches.
+::: tip Wired LAN recommended
+Keep the agent and relay on the same wired LAN. Wi-Fi works but can stutter on a Mac (AWDL channel hopping), regardless of signal strength — see [Stream lag or stuttering](/guide/troubleshooting#stream-lag) for why and how to mitigate.
 :::
 
 ## Remote relay authentication
