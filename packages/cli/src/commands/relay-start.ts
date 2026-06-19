@@ -79,7 +79,8 @@ export async function cmdRelayStart(opts: RelayStartOptions): Promise<void> {
   banner('success', 'TAPFLOW RELAY READY', [
     `Relay  : ${httpScheme}://${displayHost}:${port}`,
     ...(publicUrl ? [`Public : ${publicUrl}`] : []),
-    `Connect Mac agents:  tapflow agent start --relay ${wsScheme}://<host>:${port}`,
+    `Connect Mac agents:  tapflow agent start --relay ${wsScheme}://<host>:${port} --token <agent-PAT>`,
+    `  Issue an 'agent'-scope token in the dashboard (Settings → Tokens).`,
     'Press Ctrl+C to stop.',
   ])
 

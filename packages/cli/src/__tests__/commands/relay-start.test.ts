@@ -100,6 +100,13 @@ describe('cmdRelayStart', () => {
     expect(output.join('\n')).toContain('localhost:4000')
   })
 
+  it('Connect Mac agents 안내에 --token PAT와 발급처가 포함됨', async () => {
+    await cmdRelayStart({})
+    const out = output.join('\n')
+    expect(out).toContain('--token <agent-PAT>')
+    expect(out).toContain('Settings → Tokens')
+  })
+
   it('포트 범위 초과(99999) → exit(1)', async () => {
     await expect(cmdRelayStart({ port: 99999 })).rejects.toThrow('process.exit')
     expect(exitSpy).toHaveBeenCalledWith(1)
