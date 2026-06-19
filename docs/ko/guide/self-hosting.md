@@ -73,6 +73,8 @@ JWT_SECRET=YOUR_JWT_SECRET tapflow start
 
 같은 사무실 건물 내 팀원이 대시보드에 접근하는 가장 간단한 방법입니다.
 
+가장 매끄러운 스트림을 위해 에이전트와 릴레이는 유선 LAN으로 연결하세요. 재생이 끊긴다면 [스트림 지연·끊김](/ko/guide/troubleshooting#stream-lag)을 참고하세요.
+
 ```sh
 npm install -g tapflow
 tapflow start

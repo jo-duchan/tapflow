@@ -73,6 +73,8 @@ The relay reads `tapflow.config.json` from the working directory. See [Configura
 
 The simplest way for teammates on the same office network to reach the dashboard.
 
+For the smoothest stream, run the agent and relay over a wired LAN. See [Stream lag or stuttering](/guide/troubleshooting#stream-lag) if playback hitches.
+
 ```sh
 npm install -g tapflow
 tapflow start
