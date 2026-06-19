@@ -63,15 +63,17 @@ let maxSize: Int = {
     return 0
 }()
 
-// Target encode dimensions: scale so the longest side ≤ maxSize, preserving aspect, rounded to even
-// (H.264 requires even dimensions). Returns the source dims unchanged when no downscale applies.
+// Target encode dimensions: scale so the longest side ≤ maxSize, preserving aspect, then round down to a
+// multiple of 16. Only the native tier (maxSize=0) returns the source dims unchanged; every downscale tier
+// 16-aligns even when no scaling is needed (longest ≤ maxSize). 16-alignment matches the H.264 macroblock
+// so coded == display: the WASM (tinyh264) decoder used on plain-HTTP LAN doesn't apply frame-cropping, so
+// a non-16 size would leave a green padding edge (mirrors android emulator-encoder).
 func targetDims(_ w: Int, _ h: Int) -> (Int, Int) {
-    guard maxSize > 0 else { return (w, h) }
+    guard maxSize > 0 else { return (w, h) }  // native (secure-context WebCodecs path) — no WASM, cropping is fine
     let longest = max(w, h)
-    guard longest > maxSize else { return (w, h) }
-    let scale = Double(maxSize) / Double(longest)
-    let tw = max(2, Int((Double(w) * scale).rounded()) & ~1)
-    let th = max(2, Int((Double(h) * scale).rounded()) & ~1)
+    let scale = longest > maxSize ? Double(maxSize) / Double(longest) : 1.0
+    let tw = max(16, Int((Double(w) * scale).rounded()) & ~15)
+    let th = max(16, Int((Double(h) * scale).rounded()) & ~15)
     return (tw, th)
 }
 
