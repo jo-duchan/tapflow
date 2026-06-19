@@ -63,7 +63,7 @@ export type PerformanceMode = 'high' | 'standard' | 'unsupported'
 
 /**
  * Maps the active decode path to the init wizard's performance profile labels, so the UI can show
- * the same wording (Standard / High performance) instead of decoder jargon. Same branch as
+ * the same wording (Standard / Smooth) instead of decoder jargon. Same branch as
  * pickDecoder, evaluated without constructing a decoder:
  * - 'high' — WebCodecs (secure context): hardware decode.
  * - 'standard' — WASM (tinyh264): software decode on plain HTTP.

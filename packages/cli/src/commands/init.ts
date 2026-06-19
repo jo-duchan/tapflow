@@ -134,7 +134,7 @@ async function promptTls(): Promise<TlsConfig | null> {
     message: 'Streaming performance',
     options: [
       { value: 'standard', label: 'Standard', hint: 'HTTP, software decode — instant, no domain needed' },
-      { value: 'high', label: 'High performance', hint: 'HTTPS, hardware decode (WebCodecs) — smooth, needs a domain' },
+      { value: 'high', label: 'Smooth', hint: 'HTTPS, hardware decode (WebCodecs) — needs a domain' },
     ],
   })
   if (isCancel(perf)) { cancel('Cancelled.'); process.exit(0) }
