@@ -347,4 +347,33 @@ describe('GET /api/v1/sessions/:sessionId/screenshot', () => {
     agent.close()
     browser.close()
   })
+
+  it('TC9: re-register eviction rejects an in-flight screenshot immediately (502, not a 504 timeout)', async () => {
+    const devices = [{ id: 'dev-1', name: 'iPhone', platform: 'ios', status: 'booted' }]
+    const agent1 = new WebSocket(`ws://localhost:${port}`)
+    await waitForOpen(agent1)
+    agent1.send(JSON.stringify({ type: 'agent:register', agentId: 'uuid-1', platform: 'ios', devices }))
+    const reply = await waitForType(agent1, 'agent:registered')
+    const sessionId = reply.registeredSessions![0].sessionId
+
+    // On the screenshot request, the same Mac reconnects on a fresh socket → evicts agent1.
+    let agent2: WebSocket | undefined
+    agent1.on('message', (data) => {
+      const msg = JSON.parse(data.toString()) as RelayMessage
+      if (msg.type === 'screenshot:request') {
+        agent2 = new WebSocket(`ws://localhost:${port}`)
+        agent2.on('open', () =>
+          agent2!.send(JSON.stringify({ type: 'agent:register', agentId: 'uuid-1', platform: 'ios', devices })),
+        )
+      }
+    })
+
+    const start = Date.now()
+    const res = await httpGet(port, `/api/v1/sessions/${sessionId}/screenshot`, { Cookie: makeAuthCookie() })
+    expect(res.status).toBe(502)                 // rejected as Agent disconnected, not the 504 timeout
+    expect(Date.now() - start).toBeLessThan(300) // resolved before screenshotTimeoutMs
+
+    agent1.close()
+    agent2?.close()
+  })
 })
