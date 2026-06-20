@@ -2,10 +2,8 @@
 
 tapflow scales horizontally — add more Mac hosts to the same relay to expand your device pool. Each Mac runs its own agent and connects outbound to the relay, so no firewall changes are required.
 
-::: warning Keep agents and the relay on the same internal network
-The agent streams video frames to the relay continuously. The latency (RTT) between the agent Mac and the relay must stay low to avoid frame drops.
-
-Within the same office building, agents and relay can be on different floors or VLANs — internal routing keeps RTT low enough. Placing agents on a different network across the internet significantly increases latency and causes frame drops.
+::: warning Every agent Mac must share the relay's LAN
+Each Mac you add streams to the relay continuously, so it must be on the same LAN as the relay. See [deployment networking](/guide/self-hosting#deployment-scenarios) for the requirements.
 :::
 
 See [Introduction — How it works](/guide/introduction#how-it-works) for a diagram.
@@ -13,7 +11,7 @@ See [Introduction — How it works](/guide/introduction#how-it-works) for a diag
 ## Adding a second Mac
 
 ::: tip The relay must be reachable from all Macs
-When running `tapflow agent start` on another Mac, `ws://localhost:4000` resolves to that Mac's own localhost — not the relay machine. Use the relay's local IP address (`ws://192.168.x.x:4000`). Agents must stay on the same internal network as the relay — see [Self-Hosting the Relay](/guide/self-hosting) for network requirements.
+When running `tapflow agent start` on another Mac, `ws://localhost:4000` resolves to that Mac's own localhost — not the relay machine. Use the relay's local IP address (`ws://192.168.x.x:4000`).
 :::
 
 On the new Mac, install tapflow and point it at your existing relay. The relay runs on a different machine, so an `agent`-scope token is required ([Remote relay authentication](/guide/agent#remote-relay-authentication)):
