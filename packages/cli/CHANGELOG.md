@@ -9,9 +9,6 @@
   Include `--token` in the agent connect hint for remote relays, and unify the stream-quality tier label to "Smooth".
 
 - Updated dependencies
-- Updated dependencies
-- Updated dependencies
-- Updated dependencies
   - @tapflowio/agent-core@0.9.2
   - @tapflowio/android-agent@0.9.2
   - @tapflowio/ios-agent@0.9.2
