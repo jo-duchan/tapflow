@@ -8,6 +8,7 @@ overrides:
   shell-quote@<1.8.4: ^1.8.4
   esbuild@>=0.27.3 <0.28.1: '>=0.28.1'
   hono@<4.12.25: ^4.12.25
+  dompurify@<=3.4.10: '>=3.4.11 <4'
 
 importers:
 
@@ -395,8 +396,8 @@ importers:
         specifier: ^9.0.3
         version: 9.0.3
       nodemailer:
-        specifier: ^8.0.11
-        version: 8.0.11
+        specifier: ^9.0.1
+        version: 9.0.1
       ws:
         specifier: ^8.21.0
         version: 8.21.0
@@ -3232,8 +3233,8 @@ packages:
   dom-accessibility-api@0.6.3:
     resolution: {integrity: sha512-7ZgogeTnjuHbo+ct10G9Ffp0mif17idi0IyWNVA/wcwcm7NPOD/WEHVP3n7n3MhXqxoIYm8d6MuZohYWIZ4T3w==}
 
-  dompurify@3.4.10:
-    resolution: {integrity: sha512-0xzNv0e7oYC6yyuOGZIABPM4qtg3QxLFniDNPP4ZP90wR8Yq3zgwpRbrNiT4N3IKqDbbYFEJLV+JWEs19aZ//w==}
+  dompurify@3.4.11:
+    resolution: {integrity: sha512-zhlUV12GsaRzMsf9q5M254YhA4+VuF0fG+QFqu6aYpoGlKtz+w8//jBcGVYBgQkR5GHjUomejY84AV+/uPbWdw==}
 
   dunder-proto@1.0.1:
     resolution: {integrity: sha512-KIN/nDJBQRcXw0MLVhZE9iQHmG68qAVIBg9CqmUYjmQIhgij9U5MFvrqkUL5FbtyyzZuOeOt0zdeRe4UY7ct+A==}
@@ -4102,8 +4103,8 @@ packages:
   node-releases@2.0.44:
     resolution: {integrity: sha512-5WUyunoPMsvvEhS8AxHtRzP+oA8UCkJ7YRxatWKjngndhDGLiqEVAQKWjFAiAiuL8zMRGzGSJxFnLetoa43qGQ==}
 
-  nodemailer@8.0.11:
-    resolution: {integrity: sha512-nrO/pDAUKl+wXX+lx16tDLbnm0fW6sK/x8mgohaCpg+CdCEl482bD4tCuAZk2DyliruiNTIZxRCoWkDqJEnAiA==}
+  nodemailer@9.0.1:
+    resolution: {integrity: sha512-Gwv8SQewT616ZM/URn0H54b8PWo/Wum7md3EW2aWy1lO27+WZCX+Xyak3J+NlmHUjDh5ME+uesJUDRbR3Ye8Bw==}
     engines: {node: '>=6.0.0'}
 
   non-layered-tidy-tree-layout@2.0.2:
@@ -8017,7 +8018,7 @@ snapshots:
 
   dom-accessibility-api@0.6.3: {}
 
-  dompurify@3.4.10:
+  dompurify@3.4.11:
     optionalDependencies:
       '@types/trusted-types': 2.0.7
 
@@ -8865,7 +8866,7 @@ snapshots:
       d3-sankey: 0.12.3
       dagre-d3-es: 7.0.14
       dayjs: 1.11.20
-      dompurify: 3.4.10
+      dompurify: 3.4.11
       es-toolkit: 1.46.1
       katex: 0.16.46
       khroma: 2.1.0
@@ -8956,7 +8957,7 @@ snapshots:
 
   node-releases@2.0.44: {}
 
-  nodemailer@8.0.11: {}
+  nodemailer@9.0.1: {}
 
   non-layered-tidy-tree-layout@2.0.2:
     optional: true
