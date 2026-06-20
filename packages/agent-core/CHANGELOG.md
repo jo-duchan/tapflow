@@ -1,5 +1,12 @@
 # @tapflowio/agent-core
 
+## 0.9.2
+
+### Patch Changes
+
+- - Prevent display sleep by default (`caffeinate -di`) so the host Mac keeps streaming during a session.
+  - Dedup agent re-register by machine id to remove duplicate "Stale" cards.
+
 ## 0.9.1
 
 ## 0.9.0

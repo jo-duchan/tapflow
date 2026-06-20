@@ -1,5 +1,13 @@
 # @tapflowio/ios-agent
 
+## 0.9.2
+
+### Patch Changes
+
+- 16-align downscaled encode dimensions to remove the WASM (tinyh264) green edge on the no-downscale tier.
+- Updated dependencies
+  - @tapflowio/agent-core@0.9.2
+
 ## 0.9.1
 
 ### Patch Changes
