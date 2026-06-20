@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.9.2] - 2026-06-20
+
+### Changed
+
+- cli: unify the stream-quality tier label to "Smooth".
+
+### Fixed
+
+- cli: `tapflow start` now wires TLS like `relay start`, so the all-in-one path can serve HTTPS/WSS for secure-context streaming (Smooth/WebCodecs) to LAN teammates — previously only `relay start` did. The co-located agent trusts the localhost `wss://` cert only (it never leaves the machine); external relays keep full verification.
+- cli: include `--token` in the agent connect hint for remote relays.
+- agent: prevent display sleep by default (`caffeinate -di`) so the host Mac keeps streaming during a session.
+- relay/agents: dedup agent re-register by machine id, removing duplicate "Stale" cards.
+- relay: reject in-flight screenshots when an agent is evicted on re-register.
+- ios: 16-align downscaled encode dimensions to remove the WASM (tinyh264) green edge on the no-downscale tier.
+
+### Security
+
+- Bump nodemailer to 9.0.1 — the message-level `raw` option bypassed `disableFileAccess`/`disableUrlAccess`, enabling arbitrary file read and full-response SSRF (GHSA-p6gq-j5cr-w38f). relay uses a plain SMTP send path, so real-world exposure was nil.
+- Bump undici to 7.28.0 (TLS certificate validation bypass via SOCKS5 ProxyAgent, GHSA-vmh5-mc38-953g) and override dompurify to 3.4.11 (`ALLOWED_ATTR` pollution via `setConfig()`, GHSA-cmwh-pvxp-8882) — both dev/build-only transitive dependencies. Remove an orphaned dashboard lockfile the security graph scanned as a duplicate manifest.
+
 ## [0.9.1] - 2026-06-18
 
 ### Changed
@@ -169,7 +189,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Automatic `tapflow.config.json` creation as a side effect of `tapflow start` / `tapflow relay start`.
 
-[Unreleased]: https://github.com/jo-duchan/tapflow/compare/v0.9.1...HEAD
+[Unreleased]: https://github.com/jo-duchan/tapflow/compare/v0.9.2...HEAD
+[0.9.2]: https://github.com/jo-duchan/tapflow/compare/v0.9.1...v0.9.2
 [0.9.1]: https://github.com/jo-duchan/tapflow/compare/v0.9.0...v0.9.1
 [0.9.0]: https://github.com/jo-duchan/tapflow/compare/v0.8.2...v0.9.0
 [0.8.2]: https://github.com/jo-duchan/tapflow/compare/v0.8.1...v0.8.2

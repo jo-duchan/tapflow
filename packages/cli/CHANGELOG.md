@@ -1,5 +1,22 @@
 # tapflow
 
+## 0.9.2
+
+### Patch Changes
+
+- Wire TLS into the all-in-one `tapflow start` so LAN teammates get secure-context streaming (Smooth/WebCodecs) — previously only `relay start` served HTTPS. The co-located agent accepts the localhost `wss://` cert only, while external relays keep full verification.
+
+  Include `--token` in the agent connect hint for remote relays, and unify the stream-quality tier label to "Smooth".
+
+- Updated dependencies
+- Updated dependencies
+- Updated dependencies
+- Updated dependencies
+  - @tapflowio/agent-core@0.9.2
+  - @tapflowio/android-agent@0.9.2
+  - @tapflowio/ios-agent@0.9.2
+  - @tapflowio/relay@0.9.2
+
 ## 0.9.1
 
 ### Patch Changes

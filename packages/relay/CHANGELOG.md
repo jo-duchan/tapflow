@@ -1,5 +1,16 @@
 # @tapflowio/relay
 
+## 0.9.2
+
+### Patch Changes
+
+- - Bump nodemailer to 9.0.1, resolving the `raw`-option file-access / SSRF advisory (GHSA-p6gq-j5cr-w38f).
+  - Reject in-flight screenshots when an agent is evicted on re-register.
+  - Dedup agent re-register by machine id to remove duplicate "Stale" cards.
+  - Extract `startTlsBackgroundTasks` (cert renewal + address publish) shared by all three entry points.
+- Updated dependencies
+  - @tapflowio/agent-core@0.9.2
+
 ## 0.9.1
 
 ### Patch Changes

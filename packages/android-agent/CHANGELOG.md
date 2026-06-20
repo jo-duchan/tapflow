@@ -1,5 +1,13 @@
 # @tapflowio/android-agent
 
+## 0.9.2
+
+### Patch Changes
+
+- Dedup agent re-register by machine id to remove duplicate "Stale" cards.
+- Updated dependencies
+  - @tapflowio/agent-core@0.9.2
+
 ## 0.9.1
 
 ### Patch Changes
