@@ -46,8 +46,7 @@ export function isExternalAddress(addr: string): boolean {
 // Min gap between IDR requests per session — one IDR resyncs the stream, so avoid
 // spamming the agent in the frames between request and the IDR arriving.
 const IDR_REQUEST_THROTTLE_MS = 500
-// WebSocket heartbeat: probe every connection each interval; a socket that misses one full
-// interval without a pong is terminated (≈2× this = worst-case dead-socket detection).
+// Ping every socket each interval; a missed pong window (~2× this) terminates the dead socket.
 const HEARTBEAT_MS = 30_000
 import { handleVerifyReset, handleDoReset, handleSendMemberReset } from './api/passwordReset.js'
 import { handleListBuilds, handleGetBuild, handleUpdateBuild, handleUploadBuild, purgeExpiredBuilds } from './api/builds.js'
@@ -295,9 +294,7 @@ export class RelayServer {
     return this.httpServer.address()
   }
 
-  // Heartbeat sweep: ping every live socket and mark it pending; a socket still pending from the
-  // previous sweep (no pong) is dead — terminate it, which fires the existing close cleanup. Covers
-  // agent/browser/stream uniformly (all share wss.clients). `clients` is injectable for tests.
+  // Terminate sockets that missed the previous pong; ping the rest. Covers all roles via wss.clients.
   private runHeartbeat(clients: Iterable<WebSocket> = this.wss.clients): void {
     for (const ws of clients) {
       if (this.wsAlive.get(ws) === false) { ws.terminate(); continue }
