@@ -46,6 +46,8 @@ export function isExternalAddress(addr: string): boolean {
 // Min gap between IDR requests per session — one IDR resyncs the stream, so avoid
 // spamming the agent in the frames between request and the IDR arriving.
 const IDR_REQUEST_THROTTLE_MS = 500
+// Ping every socket each interval; a missed pong window (~2× this) terminates the dead socket.
+const HEARTBEAT_MS = 30_000
 import { handleVerifyReset, handleDoReset, handleSendMemberReset } from './api/passwordReset.js'
 import { handleListBuilds, handleGetBuild, handleUpdateBuild, handleUploadBuild, purgeExpiredBuilds } from './api/builds.js'
 import { handleListApps, handleCreateApp, handleUpdateApp, handleDeleteApp } from './api/apps.js'
@@ -102,6 +104,9 @@ export class RelayServer {
   private purgeOldResourcesTimer: ReturnType<typeof setInterval> | null = null
   private purgeBuildsTimer: ReturnType<typeof setInterval> | null = null
   private flushResourcesTimer: ReturnType<typeof setInterval> | null = null
+  private heartbeatTimer: ReturnType<typeof setInterval> | null = null
+  // Liveness per socket for the heartbeat sweep. WeakMap → no manual cleanup on close (GC handles it).
+  private wsAlive = new WeakMap<WebSocket, boolean>()
   private dropHandlers = new Map<string, () => void>()
   // Per-session keyframe-aware sender: drops to the next keyframe under backpressure (no H.264 P-frame tearing).
   private droppers = new Map<string, KeyframeAwareSender>()
@@ -254,6 +259,9 @@ export class RelayServer {
     this.flushResourcesTimer = setInterval(() => this.flushResourceBuffers(), 60_000)
     this.flushResourcesTimer.unref()
 
+    this.heartbeatTimer = setInterval(() => this.runHeartbeat(), HEARTBEAT_MS)
+    this.heartbeatTimer.unref()
+
     return new Promise((resolve, reject) => {
       this.httpServer.once('error', (err: NodeJS.ErrnoException) => {
         if (err.code === 'EADDRINUSE') {
@@ -273,6 +281,7 @@ export class RelayServer {
     if (this.purgeOldResourcesTimer) { clearInterval(this.purgeOldResourcesTimer); this.purgeOldResourcesTimer = null }
     if (this.purgeBuildsTimer) { clearInterval(this.purgeBuildsTimer); this.purgeBuildsTimer = null }
     if (this.flushResourcesTimer) { clearInterval(this.flushResourcesTimer); this.flushResourcesTimer = null }
+    if (this.heartbeatTimer) { clearInterval(this.heartbeatTimer); this.heartbeatTimer = null }
     return new Promise((resolve, reject) => {
       this.wss.clients.forEach((ws) => ws.terminate())
       this.wss.close(() => {
@@ -283,6 +292,15 @@ export class RelayServer {
 
   address() {
     return this.httpServer.address()
+  }
+
+  // Terminate sockets that missed the previous pong; ping the rest. Covers all roles via wss.clients.
+  private runHeartbeat(clients: Iterable<WebSocket> = this.wss.clients): void {
+    for (const ws of clients) {
+      if (this.wsAlive.get(ws) === false) { ws.terminate(); continue }
+      this.wsAlive.set(ws, false)
+      if (ws.readyState === WebSocket.OPEN) ws.ping()
+    }
   }
 
   // 갱신된 cert를 재시작 없이 핫스왑한다(https 종단일 때만 의미 있음).
@@ -350,6 +368,9 @@ export class RelayServer {
       return
     }
     this.wsExternal.set(ws, isExternalAddress(addr))
+    // Heartbeat liveness: alive until proven otherwise; each pong revives it (see runHeartbeat).
+    this.wsAlive.set(ws, true)
+    ws.on('pong', () => this.wsAlive.set(ws, true))
     if (decision.role === 'browser') this.wsRoles.set(ws, 'browser')
     // 'first-message' → role is determined by the first message (agent:register / stream:register)
 
