@@ -33,6 +33,7 @@ iOS build format: `.app.zip` (simulator builds). `.ipa` uploads return 400.
 - Serves the `public/` directory as HTTP static files (dashboard build output).
 - The relay does not buffer stream data — it forwards immediately on arrival.
 - WebSocket upgrade requests and regular HTTP requests are split on the same port.
+- A heartbeat (`runHeartbeat`, every `HEARTBEAT_MS`=30s) pings every socket (agent/browser/stream); one missed pong window → `ws.terminate()`, which fires the existing `close` cleanup — detects dead sockets without waiting for TCP timeout.
 
 ### API Endpoints (builds / apps)
 
