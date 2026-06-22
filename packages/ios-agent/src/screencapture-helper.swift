@@ -518,6 +518,14 @@ let captureQueue = DispatchQueue(label: "com.tapflow.capture", qos: .userInterac
 var latestSurface: IOSurface?
 var callbackBlocks: [AnyObject] = []  // retain ObjC blocks
 
+// capture-wait (#195): time a changed surface sat before the timer encoded it. Both
+// updateLatestSurface and the timer run on the serial captureQueue, so these are lock-free.
+var lastObservedSeed: UInt32 = 0
+var latestSeedArrivalNs: UInt64 = 0
+var captureWaitSumMs = 0.0
+var captureWaitMax = 0.0
+var captureWaitN = 0
+
 func updateLatestSurface() {
     var best: IOSurface?
     var bestArea = 0
@@ -527,7 +535,25 @@ func updateLatestSurface() {
         let area = IOSurfaceGetWidth(surf) * IOSurfaceGetHeight(surf)
         if area > bestArea { best = surf; bestArea = area }
     }
-    if let best { latestSurface = best }
+    if let best {
+        latestSurface = best
+        let s = IOSurfaceGetSeed(best)
+        if s != lastObservedSeed { lastObservedSeed = s; latestSeedArrivalNs = DispatchTime.now().uptimeNanoseconds }
+    }
+}
+
+// Accumulate capture-wait for a freshly-changed frame; emit avg/max each 150-sample window.
+// Excludes keep-alive / forced-keyframe re-sends (changed == false) — those aren't new captures.
+func recordCaptureWait(_ changed: Bool, _ nowNs: UInt64) {
+    guard logTearStats, changed, latestSeedArrivalNs != 0 else { return }
+    captureWaitSumMs += Double(nowNs - latestSeedArrivalNs) / 1_000_000
+    captureWaitMax = max(captureWaitMax, Double(nowNs - latestSeedArrivalNs) / 1_000_000)
+    captureWaitN += 1
+    if captureWaitN >= 150 {
+        fputs(String(format: "info: capture-wait avg=%.1fms max=%.1fms n=%d\n",
+                     captureWaitSumMs / Double(captureWaitN), captureWaitMax, captureWaitN), stderr)
+        captureWaitSumMs = 0; captureWaitMax = 0; captureWaitN = 0
+    }
 }
 
 let regSel = NSSelectorFromString(
@@ -596,9 +622,11 @@ timer.setEventHandler {
         let seed = IOSurfaceGetSeed(surf)
         let elapsedMs = Double(nowNs - lastSentNs) / 1_000_000
         if seed == lastSeed && elapsedMs < h264KeepAliveMs && !pendingForceKeyFrame { return }
+        let changed = seed != lastSeed
         lastSeed = seed
         lastSentNs = nowNs
         encodeH264(surf)  // firstFrameSent is set in the compression output callback
+        recordCaptureWait(changed, nowNs)
         // tear-guard stats (TAPFLOW_STREAM_METRICS=1): retries climb during scroll, flat when static.
         if logTearStats && h264FrameIndex % 150 == 0 {
             fputs("info: tear-guard retries=\(tearRetries) exhausted=\(tearExhausted) frames=\(h264FrameIndex)\n", stderr)
@@ -609,11 +637,13 @@ timer.setEventHandler {
         let seed = IOSurfaceGetSeed(surf)
         let elapsedMs = Double(nowNs - lastSentNs) / 1_000_000
         if seed == lastSeed && elapsedMs < 100 { return }
+        let changed = seed != lastSeed
         guard let jpeg = encodeJPEG(surf) else { return }
         lastSeed = seed
         lastSentNs = nowNs
         firstFrameSent = true
         writeFrame(jpeg)
+        recordCaptureWait(changed, nowNs)
     }
 }
 timer.resume()
