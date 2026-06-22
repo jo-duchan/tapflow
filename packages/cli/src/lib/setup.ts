@@ -6,9 +6,11 @@ import { confirm, text, isCancel } from '@clack/prompts'
 import { type DoctorCheck } from './doctor.js'
 import { step } from './print.js'
 
-// setup 단계 결과는 진단 결과(DoctorCheck)와 같은 형태를 쓴다.
+// setup 단계 결과는 진단 결과(DoctorCheck)와 같은 형태를 쓰되, 변화 유형(state)을 덧붙인다.
 // ok=true: 이미 OK이거나 방금 자동 수정함, warn=true: 수동 조치 필요(안내).
-export type SetupStepResult = DoctorCheck
+// state로 "이미 있었음 / 새로 설치함 / 고침"을 구분한다(ok는 그대로라 doctor엔 영향 없음).
+export type SetupStepState = 'found' | 'created' | 'repaired'
+export type SetupStepResult = DoctorCheck & { state?: SetupStepState }
 
 const PATH_MARKER_START = '# >>> tapflow android sdk >>>'
 const PATH_MARKER_END = '# <<< tapflow android sdk <<<'
@@ -120,7 +122,7 @@ export async function runSetupIos(): Promise<SetupStepResult[]> {
 
 async function checkAndFixXcode(): Promise<SetupStepResult> {
   if (existsSync(XCODE_APP)) {
-    return { label: 'Xcode installed', ok: true }
+    return { label: 'Xcode installed', ok: true, state: 'found' }
   }
   // Xcode는 App Store에서만 설치 가능 — CLI가 직접 설치할 수 없다.
   if (!process.stdout.isTTY) {
@@ -152,7 +154,7 @@ async function checkAndFixXcode(): Promise<SetupStepResult> {
     }
   }
   if (existsSync(XCODE_APP)) {
-    return { label: 'Xcode installed', ok: true }
+    return { label: 'Xcode installed', ok: true, state: 'created' }
   }
   return {
     label: 'Xcode',
@@ -168,6 +170,8 @@ async function checkXcodeActivation(xcodeInstalled: boolean): Promise<SetupStepR
     return { label: 'Xcode activation', ok: false, warn: true, detail: 'Install Xcode first.' }
   }
   const selectHint = `Run: sudo xcode-select -s ${XCODE_DEVELOPER_DIR}`
+  // 이번 실행에서 sudo로 재구성한 적이 있으면 found가 아니라 repaired로 보고한다.
+  let repaired = false
 
   // 1. active developer dir이 Xcode를 가리키게
   let dir = ''
@@ -186,11 +190,12 @@ async function checkXcodeActivation(xcodeInstalled: boolean): Promise<SetupStepR
     if (!ok) {
       return { label: 'Xcode command-line tools', ok: false, warn: true, detail: selectHint }
     }
+    repaired = true
   }
 
   // 2. license / first-launch
   if (isXcodeReady()) {
-    return { label: 'Xcode ready', ok: true }
+    return { label: 'Xcode ready', ok: true, state: repaired ? 'repaired' : 'found' }
   }
   const finishHint = 'Finish Xcode setup: sudo xcodebuild -license accept && sudo xcodebuild -runFirstLaunch'
   if (!process.stdout.isTTY) {
@@ -201,7 +206,7 @@ async function checkXcodeActivation(xcodeInstalled: boolean): Promise<SetupStepR
     ['xcodebuild', '-runFirstLaunch'],
   ])
   if (ok && isXcodeReady()) {
-    return { label: 'Xcode ready', ok: true }
+    return { label: 'Xcode ready', ok: true, state: 'repaired' }
   }
   return { label: 'Xcode setup', ok: false, warn: true, detail: finishHint }
 }
@@ -209,7 +214,7 @@ async function checkXcodeActivation(xcodeInstalled: boolean): Promise<SetupStepR
 // 부팅하지 않는다 — 시뮬 런타임/디바이스가 준비됐는지만 보장(없으면 런타임 설치).
 async function checkAndFixSimulator(): Promise<SetupStepResult> {
   if (hasIosDevice()) {
-    return { label: 'Simulator ready', ok: true }
+    return { label: 'Simulator ready', ok: true, state: 'found' }
   }
   const hint = 'No simulator runtime. Run: xcodebuild -downloadPlatform iOS (or install one in Xcode).'
   if (!process.stdout.isTTY) {
@@ -222,7 +227,7 @@ async function checkAndFixSimulator(): Promise<SetupStepResult> {
   console.log()
   const r = spawnSync('xcodebuild', ['-downloadPlatform', 'iOS'], { stdio: 'inherit' })
   if (r.status === 0 && hasIosDevice()) {
-    return { label: 'Simulator runtime installed', ok: true }
+    return { label: 'Simulator runtime installed', ok: true, state: 'created' }
   }
   return { label: 'Simulator', ok: false, warn: true, detail: 'Could not prepare a simulator. Open Xcode to install a runtime.' }
 }
@@ -234,7 +239,7 @@ const HOMEBREW_INSTALL =
 async function checkAndFixHomebrew(): Promise<SetupStepResult> {
   try {
     execSync('which brew', { stdio: 'pipe' })
-    return { label: 'Homebrew installed', ok: true }
+    return { label: 'Homebrew installed', ok: true, state: 'found' }
   } catch {
     // 미설치 — 아래에서 확인 후 설치
   }
@@ -260,6 +265,7 @@ async function checkAndFixHomebrew(): Promise<SetupStepResult> {
     return {
       label: 'Homebrew installed',
       ok: true,
+      state: 'created',
       detail: "If later steps can't find brew, open a new terminal and re-run tapflow setup.",
     }
   }
@@ -274,7 +280,7 @@ async function checkAndFixHomebrew(): Promise<SetupStepResult> {
 // sdkmanager/avdmanager 실행에 JDK가 필요하다(없으면 'Unable to locate a Java Runtime').
 async function checkAndFixJdk(brewAvailable: boolean): Promise<SetupStepResult> {
   if (hasJava()) {
-    return { label: 'Java (JDK)', ok: true }
+    return { label: 'Java (JDK)', ok: true, state: 'found' }
   }
   if (!brewAvailable) {
     return { label: 'Java (JDK)', ok: false, detail: 'Install Homebrew first, then: brew install --cask temurin' }
@@ -291,7 +297,7 @@ async function checkAndFixJdk(brewAvailable: boolean): Promise<SetupStepResult> 
   console.log()
   const r = spawnSync('brew', ['install', '--cask', 'temurin'], { stdio: 'inherit' })
   if (r.status === 0 && hasJava()) {
-    return { label: 'Java (JDK) installed', ok: true }
+    return { label: 'Java (JDK) installed', ok: true, state: 'created' }
   }
   return { label: 'Java (JDK)', ok: false, detail: 'JDK install failed. Install manually: brew install --cask temurin' }
 }
@@ -303,6 +309,7 @@ async function checkAndFixAndroidSdk(brewAvailable: boolean, javaOk: boolean): P
     return {
       label: 'Android SDK ready',
       ok: true,
+      state: 'found',
       detail: reg?.added ? newShellHint(reg.file) : undefined,
     }
   }
@@ -350,6 +357,7 @@ async function checkAndFixAndroidSdk(brewAvailable: boolean, javaOk: boolean): P
   return {
     label: 'Android SDK installed',
     ok: true,
+    state: 'created',
     detail: `SDK at ${ANDROID_SDK_DIR}.${reg?.added ? ` ${newShellHint(reg.file)}` : ''}`,
   }
 }
@@ -367,7 +375,7 @@ async function checkAndFixAvd(sdkOk: boolean): Promise<SetupStepResult> {
   }
   const avds = listAvds()
   if (avds.length > 0) {
-    return { label: `AVD ready: ${avds.length} device(s)`, ok: true }
+    return { label: `AVD ready: ${avds.length} device(s)`, ok: true, state: 'found' }
   }
   const manualHint = 'Create an AVD with avdmanager (see Android docs).'
   if (!process.stdout.isTTY) {
@@ -379,7 +387,7 @@ async function checkAndFixAvd(sdkOk: boolean): Promise<SetupStepResult> {
   }
   const result = createAvds()
   if (result.ok) {
-    return { label: `AVDs created: ${result.created.join(', ')}`, ok: true }
+    return { label: `AVDs created: ${result.created.join(', ')}`, ok: true, state: 'created' }
   }
   return { label: 'AVD', ok: false, warn: true, detail: result.detail ?? manualHint }
 }

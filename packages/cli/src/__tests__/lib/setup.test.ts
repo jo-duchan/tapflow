@@ -246,6 +246,60 @@ describe('runSetupAndroid', () => {
       expect.anything(),
     )
   })
+
+  // issue #326: state로 "이미 있었음(found)"과 "이번에 설치함(created)"을 구분한다.
+  it("state: 완전 구성 머신은 모든 단계가 'found'", async () => {
+    const results = await runSetupAndroid()
+    expect(results.every((r) => r.ok)).toBe(true)
+    expect(findStep(results, 'homebrew')?.state).toBe('found')
+    expect(findStep(results, 'java')?.state).toBe('found')
+    expect(findStep(results, 'android sdk')?.state).toBe('found')
+    expect(findStep(results, 'avd')?.state).toBe('found')
+  })
+
+  it("state: 이번 실행에 SDK를 부트스트랩하면 'created'", async () => {
+    setTTY(true)
+    let installed = false
+    mockExistsSync.mockImplementation((p) => {
+      if (p === SDK_SDKMANAGER || p === SDK_ADB) return installed
+      if (p === SDK_AVDMANAGER || p === SDK_EMULATOR) return true
+      return false
+    })
+    mockSpawnSync.mockImplementation((cmd, args) => {
+      const a = Array.isArray(args) ? args : []
+      if (typeof cmd === 'string' && cmd.includes('sdkmanager') && a.includes('cmdline-tools;latest')) {
+        installed = true
+        return okSpawn as never
+      }
+      if (cmd === SDK_EMULATOR && a.includes('-list-avds')) {
+        return { ...okSpawn, stdout: 'tapflow-phone\n' } as never
+      }
+      return okSpawn as never
+    })
+
+    const results = await runSetupAndroid()
+    expect(findStep(results, 'android sdk')?.state).toBe('created')
+  })
+
+  it("state: 이번 실행에 AVD를 생성하면 'created'", async () => {
+    setTTY(true)
+    mockSpawnSync.mockImplementation((cmd, args) => {
+      const a = Array.isArray(args) ? args : []
+      if (cmd === SDK_EMULATOR && a.includes('-list-avds')) {
+        return { ...okSpawn, stdout: '' } as never
+      }
+      if (cmd === SDK_AVDMANAGER && a.includes('device')) {
+        return {
+          ...okSpawn,
+          stdout: 'id: 0 or "pixel_5"\nid: 1 or "pixel_7"\nid: 2 or "pixel_7_pro"\nid: 3 or "pixel_c"\n',
+        } as never
+      }
+      return okSpawn as never
+    })
+
+    const results = await runSetupAndroid()
+    expect(findStep(results, 'avd')?.state).toBe('created')
+  })
 })
 
 describe('runSetupIos', () => {
@@ -395,5 +449,56 @@ describe('runSetupIos', () => {
     const results = await runSetupIos()
     expect(results.every((r) => r.ok)).toBe(true)
     expect(mockSpawnSync).not.toHaveBeenCalled()
+  })
+
+  // issue #326: iOS 단계도 found / created / repaired를 구분한다.
+  it("state: 완전 구성 macOS는 'found' (xcode/simulator)", async () => {
+    const results = await runSetupIos()
+    expect(findStep(results, 'xcode installed')?.state).toBe('found')
+    expect(findStep(results, 'simulator')?.state).toBe('found')
+  })
+
+  it("state: 시뮬 런타임을 이번에 설치하면 'created'", async () => {
+    setTTY(true)
+    mockConfirm.mockResolvedValue(true as never)
+    let hasDevice = false
+    mockExecSync.mockImplementation((cmd) => {
+      const c = cmd as string
+      if (c === 'which brew') return '/opt/homebrew/bin/brew\n'
+      if (c === 'xcode-select -p') return '/Applications/Xcode.app/Contents/Developer\n'
+      if (c === 'xcodebuild -version') return 'Xcode 26.5\n'
+      if (c.includes('simctl list devices')) return hasDevice ? simctlBooted : simctlEmpty
+      return ''
+    })
+    mockSpawnSync.mockImplementation((cmd, args) => {
+      const a = Array.isArray(args) ? args : []
+      if (cmd === 'xcodebuild' && a.includes('-downloadPlatform')) {
+        hasDevice = true
+        return okSpawn as never
+      }
+      return okSpawn as never
+    })
+
+    const results = await runSetupIos()
+    expect(findStep(results, 'simulator')?.state).toBe('created')
+  })
+
+  it("state: 활성화를 sudo로 고치면 'repaired'", async () => {
+    setTTY(true)
+    mockConfirm.mockResolvedValue(true as never)
+    // active dir이 CommandLineTools라 xcode-select -s로 고쳐야 하는 상태
+    mockExecSync.mockImplementation((cmd) => {
+      const c = cmd as string
+      if (c === 'which brew') return '/opt/homebrew/bin/brew\n'
+      if (c === 'xcode-select -p') return '/Library/Developer/CommandLineTools\n'
+      if (c === 'xcodebuild -version') return 'Xcode 26.5\n'
+      if (c.includes('simctl list devices')) return simctlBooted
+      return ''
+    })
+
+    const results = await runSetupIos()
+    const ready = findStep(results, 'xcode ready')
+    expect(ready?.ok).toBe(true)
+    expect(ready?.state).toBe('repaired')
   })
 })
