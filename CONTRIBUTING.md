@@ -133,6 +133,7 @@ Run the tests for any changed packages before opening a PR. New behavior must be
 
 Platform-specific implementation notes for contributors:
 
+- [Measuring performance](./contributing/measurement.md) — the instrumentation reference: every metric emitter (`TAPFLOW_STREAM_METRICS`, relay drops, `?perf=1` panel, console tags), its exact output, and how to measure on localhost vs cross-machine
 - [Android video streaming diagnosis](./contributing/android-video-streaming-diagnosis.md) — scrcpy H.264 encoder investigation notes
 - [SimulatorKit internals](./contributing/simkit-internals.md) — iOS touch injection reverse-engineering notes
 - [Streaming latency engineering log](./contributing/streaming-latency-log.md) — glass-to-glass low-latency render-path log: pipeline/bottleneck analysis, measurements, and decisions (JPEG vs H.264, MSE vs WebCodecs vs WASM)
