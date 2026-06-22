@@ -77,6 +77,20 @@ openssl rand -hex 32
 프록시나 터널로 노출하는 경우 공개 URL(`tunnel.publicUrl` 또는 `relay.url`)도 함께 설정하세요. 설정하지 않으면 CORS/CSRF 허용 목록이 loopback만 남아, 대시보드의 cross-origin 요청이 차단될 수 있습니다.
 :::
 
+## 스트리밍 튜닝 (에이전트)
+
+아래 환경변수는 릴레이가 아니라 **에이전트** 프로세스(`tapflow agent start` / `tapflow start`)에 설정하며, 영상 스트림의 LAN 대역폭 ↔ 화질 트레이드오프를 조정합니다. 스트림을 *측정*하는 진단 플래그(`TAPFLOW_STREAM_METRICS`, `?perf=1` 패널)는 기여자용 도구로, [measurement.md](https://github.com/jo-duchan/tapflow/blob/main/contributing/measurement.md)를 참고하세요.
+
+| 변수 | 기본값 | 설명 |
+|------|--------|------|
+| `TAPFLOW_IOS_CODEC` | `h264` | iOS 스트림 코덱 — `h264`(기본) 또는 `jpeg`. H.264는 브라우저 지원도 필요하며, 미지원 브라우저는 자동으로 JPEG로 폴백합니다. |
+| `TAPFLOW_IOS_H264_BITRATE` | `8000000` | iOS H.264 목표 비트레이트(bits/s, soft cap). 낮을수록 LAN 드롭은 줄고 모션 블록은 늘어납니다. |
+| `TAPFLOW_JPEG_QUALITY` | `0.8` | iOS JPEG 품질(0–1), JPEG 경로 전용. 낮을수록 드롭은 줄고 아티팩트는 늘어납니다. |
+| `TAPFLOW_MAX_SIZE` | *(원본)* | 긴 변 기준 다운스케일 상한(px), 양 플랫폼 공통. 낮을수록 대역폭·뷰어 디코드 부하는 줄고 화질은 낮아집니다. |
+| `TAPFLOW_IOS_MAX_SIZE` / `TAPFLOW_ANDROID_MAX_SIZE` | *(원본)* | `TAPFLOW_MAX_SIZE`의 플랫폼별 오버라이드. |
+| `TAPFLOW_ANDROID_FPS` | `30` | Android 에뮬레이터 캡처 프레임율(gRPC 경로). |
+| `TAPFLOW_ANDROID_BACKEND` | *(자동)* | Android 백엔드 강제 — `grpc` 또는 `scrcpy`. 미설정 시 디바이스 종류로 자동 선택. |
+
 ## HTTPS (보안 컨텍스트)
 
 브라우저의 하드웨어 가속 영상 디코드(WebCodecs)는 보안 컨텍스트(HTTPS)에서만 동작합니다. HTTP로 접속하면 소프트웨어 디코드로 자동 폴백합니다. 같은 LAN의 팀원에게 더 부드러운 화면을 주려면 relay를 HTTPS로 종단하세요. `tls`를 설정하면 relay가 같은 포트에서 HTTPS와 WSS를 함께 종단합니다.

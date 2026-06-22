@@ -184,7 +184,9 @@ snapshot.
   tearing; they need separate fixes.
 - Reuse safety: downscale reads the snapshot synchronously (vImage) before the next tick; native
   hands it to VTEncode but full-res encode is far slower than the frame interval, so the in-flight
-  encode never overlaps the next copy. `TAPFLOW_STREAM_METRICS=1` logs the retry/exhausted counts.
+  encode never overlaps the next copy. `TAPFLOW_STREAM_METRICS=1` logs the retry/exhausted counts
+  (and the per-frame `capture-wait` poll gap) — formats and the full instrumentation surface are in
+  [`contributing/measurement.md`](../../contributing/measurement.md).
 
 ---
 

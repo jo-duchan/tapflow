@@ -75,6 +75,20 @@ If the relay runs behind a same-host reverse proxy (nginx, Caddy) and `TAPFLOW_T
 For proxied or tunneled deployments, also set a public URL (`tunnel.publicUrl` or `relay.url`). Otherwise the CORS/CSRF allowlist is loopback-only and the dashboard's cross-origin requests can be blocked.
 :::
 
+## Streaming tuning (agent)
+
+These variables are set on the **agent** process (`tapflow agent start` / `tapflow start`), not the relay, and tune the video stream's LAN bandwidth ↔ fidelity trade-off. Diagnostic flags for *measuring* the stream (`TAPFLOW_STREAM_METRICS`, the `?perf=1` panel) are a contributor tool — see [measurement.md](https://github.com/jo-duchan/tapflow/blob/main/contributing/measurement.md).
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `TAPFLOW_IOS_CODEC` | `h264` | iOS stream codec — `h264` (default) or `jpeg`. H.264 also needs browser support; unsupported browsers fall back to JPEG automatically. |
+| `TAPFLOW_IOS_H264_BITRATE` | `8000000` | iOS H.264 target bitrate (bits/s, soft cap). Lower = fewer LAN drops, more motion blockiness. |
+| `TAPFLOW_JPEG_QUALITY` | `0.8` | iOS JPEG quality (0–1), JPEG path only. Lower = fewer drops, more artifacts. |
+| `TAPFLOW_MAX_SIZE` | *(native)* | Downscale cap for the longest side (px), both platforms. Lower = less bandwidth and viewer decode load, lower fidelity. |
+| `TAPFLOW_IOS_MAX_SIZE` / `TAPFLOW_ANDROID_MAX_SIZE` | *(native)* | Per-platform override of `TAPFLOW_MAX_SIZE`. |
+| `TAPFLOW_ANDROID_FPS` | `30` | Android emulator capture frame rate (gRPC path). |
+| `TAPFLOW_ANDROID_BACKEND` | *(auto)* | Force the Android backend — `grpc` or `scrcpy`. Auto-selected by device type when unset. |
+
 ## HTTPS (secure context)
 
 Hardware-accelerated video decode (WebCodecs) only runs in a secure context (HTTPS). Over HTTP the dashboard falls back to software decode, so to give teammates on the LAN a smoother stream, terminate the relay over HTTPS. With `tls` set, the relay terminates HTTPS and WSS on the same port.
