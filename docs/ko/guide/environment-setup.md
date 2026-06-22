@@ -37,6 +37,8 @@ tapflow doctor --json
 
 `tapflow setup`은 doctor가 찾아낸 부족한 부분을 직접 설치·구성합니다. 인자 없이 실행하면 환경을 감지해 가능한 플랫폼을 모두 설정합니다.
 
+<VideoPlayer src="/tapflow-setup.mp4" />
+
 ```sh
 tapflow setup
 ```
