@@ -1,6 +1,6 @@
 # Wi-Fi Relay Latency Diagnosis (AWDL) — Insights
 
-> This document records how a periodic stream hitch on a Wi-Fi relay was traced to **AWDL** (Apple Wireless Direct Link), using ICMP ping alone — no guessing. The user-facing remedy lives in [`docs/guide/troubleshooting.md`](../docs/guide/troubleshooting.md) ("Stream lag or stuttering"); this is the engineering backing — the method, the evidence, and the dead ends — kept out of the user docs deliberately.
+> This document records how a periodic stream hitch on a Wi-Fi relay was traced to **AWDL** (Apple Wireless Direct Link), led by ICMP ping (with `wdutil` and `ifconfig` to corroborate and confirm) — no guessing. The user-facing remedy lives in [`docs/guide/troubleshooting.md`](../docs/guide/troubleshooting.md) ("Stream lag or stuttering"); this is the engineering backing — the method, the evidence, and the dead ends — kept out of the user docs deliberately.
 
 ---
 
@@ -27,9 +27,9 @@ The same content over the loopback / wired path was smooth, which is what made i
 
 ---
 
-## Diagnosis (ping-only, no guessing)
+## Diagnosis (ping-led, no guessing)
 
-The whole point of this log: the cause was isolated with **`ping` alone**, by ruling things out rather than speculating. Every hypothesis had a measurement attached.
+The whole point of this log: the fault was **localized with `ping`** by ruling things out rather than speculating, then corroborated with `wdutil` and confirmed with `ifconfig awdl0`. Every hypothesis had a measurement attached.
 
 ### Step 1 — the sawtooth persists under active load
 
@@ -116,7 +116,7 @@ Ordered by preference for an OSS, non-invasive product.
 - **Pinning the Wi-Fi channel (e.g. 149)** — router-dependent, doesn't generalize for self-hosters.
 - **A launchd daemon to hold `awdl0` down** — invasive, needs root, fights the OS.
 - **Third-party tools** (`ping-warden`, etc.) — cat-and-mouse with macOS, unsuitable as an OSS default.
-- **A macOS API to disable AWDL** — none exists (confirmed via Apple DTS). The newer Wi-Fi Aware real-time API is iOS 26+ only, not macOS.
+- **A macOS API to disable AWDL** — none exists (confirmed via Apple DTS). The newer Wi-Fi Aware real-time API is iOS/iPadOS 26+ only, not macOS ([Apple TN3111 — iOS Wi-Fi API overview](https://developer.apple.com/documentation/technotes/tn3111-ios-wifi-api-overview), [Wi-Fi Aware framework](https://developer.apple.com/documentation/WiFiAware)).
 
 This is why tapflow's product behavior is limited to **detect + guide**, never manipulating `awdl0`.
 
