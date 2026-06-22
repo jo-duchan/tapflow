@@ -23,6 +23,8 @@
     <a href="https://www.tapflow.dev/guide/getting-started">🚀 Quick Start</a>
     &nbsp;·&nbsp;
     <a href="https://www.tapflow.dev/guide/introduction">🎥 Demo</a>
+    &nbsp;·&nbsp;
+    <a href="https://www.tapflow.dev/guide/environment-setup#tapflow-setup">🎬 Setup</a>
   </p>
 </div>
 

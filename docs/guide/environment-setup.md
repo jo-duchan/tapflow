@@ -37,6 +37,8 @@ tapflow doctor --json
 
 `tapflow setup` installs and configures whatever `doctor` reported as missing. Run it without an argument to detect the environment and set up every supported platform.
 
+<VideoPlayer src="/tapflow-setup.mp4" />
+
 ```sh
 tapflow setup
 ```
