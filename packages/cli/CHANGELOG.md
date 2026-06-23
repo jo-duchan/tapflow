@@ -1,5 +1,26 @@
 # tapflow
 
+## 0.10.0
+
+### Minor Changes
+
+- Build review status is now decoupled from the storage deletion lifecycle (#258). Marking a build **Done** no longer schedules it for deletion — `status_label` is a pure review state, and purge keys off a new nullable `delete_after` timestamp instead of `completed_at`. Deletion is an explicit action via `POST /api/v1/builds/:id/schedule-deletion` (and `DELETE …/schedule-deletion` to cancel); the response and build payloads now include `delete_after`. Migration `012` adds the column and grandfathers builds already on the old `completed_at` clock (`delete_after = completed_at + TTL`) so upgrades keep reclaiming disk. The dashboard shows a deletion-countdown badge separate from the status column with explicit schedule/cancel actions.
+
+### Patch Changes
+
+- 9864d2d: Build-upload validation errors are now returned in English, matching the rest of the API (previously the `.app.zip` format, missing-`.app`-directory, and device-only-slice messages were Korean only). Internal code comments are unchanged.
+- `tapflow setup` now reports per-step state — `found` / `created` / `repaired` — instead of a binary result, so you can see which prerequisites were already in place versus newly provisioned. Android SDK environment registration that was already present is now reported as `repaired` rather than `found`.
+- c3ea54c: The iOS screen-capture helper now reports a `capture-wait` metric under `TAPFLOW_STREAM_METRICS=1` — the polling gap between an IOSurface change and when the frame is encoded, emitted as `info: capture-wait avg/max/n` per 150-sample window. Diagnostic only; capture behavior is unchanged.
+- d1b36a9: The relay now runs a WebSocket heartbeat (ping/pong, 30s) over every socket and terminates one that misses a pong window, so dead agent/browser/stream sockets (Wi-Fi loss, sleep, cable pull) are detected promptly instead of lingering until the TCP timeout. Termination reuses the existing close cleanup, evicting stale sessions and clearing the duplicate "Stale" card.
+- Updated dependencies
+- Updated dependencies [9864d2d]
+- Updated dependencies [c3ea54c]
+- Updated dependencies [d1b36a9]
+  - @tapflowio/relay@0.10.0
+  - @tapflowio/ios-agent@0.10.0
+  - @tapflowio/android-agent@0.10.0
+  - @tapflowio/agent-core@0.10.0
+
 ## 0.9.2
 
 ### Patch Changes
