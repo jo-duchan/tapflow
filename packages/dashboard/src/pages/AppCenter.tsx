@@ -75,15 +75,22 @@ export function AppCenter() {
   }
 
   async function handleScheduleDeletion(buildId: number) {
-    await scheduleBuildDeletion(buildId)
-    // 7d = default TAPFLOW_BUILD_TTL_DAYS; the server is authoritative, this is the optimistic countdown.
-    const deleteAfter = new Date(Date.now() + 7 * 24 * 3_600_000).toISOString()
-    setBuilds(prev => prev.map(b => b.id === buildId ? { ...b, delete_after: deleteAfter } : b))
+    try {
+      // Use the server's delete_after — don't re-derive the TTL on the client.
+      const deleteAfter = await scheduleBuildDeletion(buildId)
+      setBuilds(prev => prev.map(b => b.id === buildId ? { ...b, delete_after: deleteAfter } : b))
+    } catch (err) {
+      console.error('Failed to schedule deletion', err)
+    }
   }
 
   async function handleCancelDeletion(buildId: number) {
-    await cancelBuildDeletion(buildId)
-    setBuilds(prev => prev.map(b => b.id === buildId ? { ...b, delete_after: null } : b))
+    try {
+      await cancelBuildDeletion(buildId)
+      setBuilds(prev => prev.map(b => b.id === buildId ? { ...b, delete_after: null } : b))
+    } catch (err) {
+      console.error('Failed to cancel scheduled deletion', err)
+    }
   }
 
   const releaseGroups = groupByRelease(builds)

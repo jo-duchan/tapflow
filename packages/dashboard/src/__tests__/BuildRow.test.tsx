@@ -50,6 +50,14 @@ describe('BuildRow — deletion lifecycle', () => {
     expect(screen.getByText(/Deletes in 5h/)).toBeTruthy()
   })
 
+  it('parses naive SQLite UTC timestamps, not as local time', () => {
+    // server format: "YYYY-MM-DD HH:MM:SS" (UTC, no tz) — must read identically to the ISO path
+    const d = new Date(Date.now() + 5 * 3_600_000 + 1_800_000)
+    const sqlite = d.toISOString().slice(0, 19).replace('T', ' ')
+    renderRow(makeBuild({ delete_after: sqlite }))
+    expect(screen.getByText(/Deletes in 5h/)).toBeTruthy()
+  })
+
   it('scheduling deletion goes through a confirm dialog', async () => {
     const onScheduleDeletion = vi.fn()
     renderRow(makeBuild({ delete_after: null }), { onScheduleDeletion })

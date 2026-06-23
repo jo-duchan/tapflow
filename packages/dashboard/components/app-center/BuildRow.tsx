@@ -24,10 +24,12 @@ import { Play, Trash2, Clock } from 'lucide-react';
 import type { Build } from '@/lib/types';
 import { STATUS_TONE } from '@/lib/build-format';
 
-// delete_after is the absolute time the build is purged. Countdown is independent
-// of the review status (issue #258).
+// delete_after is the absolute purge time; the countdown is independent of review status (#258).
 function formatDeletionCountdown(deleteAfter: string): { label: string; urgent: boolean } {
-  const diff = new Date(deleteAfter).getTime() - Date.now();
+  // SQLite datetime() returns naive UTC ("YYYY-MM-DD HH:MM:SS") — append Z so it isn't read as local time.
+  const hasTz = /[zZ]|[+-]\d{2}:?\d{2}$/.test(deleteAfter);
+  const ms = new Date(hasTz ? deleteAfter : deleteAfter.replace(' ', 'T') + 'Z').getTime();
+  const diff = ms - Date.now();
   if (diff <= 0) return { label: 'Deleting…', urgent: true };
   const h = Math.floor(diff / 3_600_000);
   if (h < 1) return { label: 'Deletes in < 1h', urgent: true };

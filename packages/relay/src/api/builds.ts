@@ -285,11 +285,14 @@ export function handleScheduleBuildDeletion(
   params: Record<string, string>
 ): void {
   if (!requireAuth(req, res)) return
-  const result = getDb()
+  const db = getDb()
+  const result = db
     .prepare(`UPDATE builds SET delete_after = datetime('now', '+' || ? || ' days') WHERE id = ?`)
     .run(BUILD_TTL_DAYS, params.id)
   if (result.changes === 0) return json(res, 404, { error: 'Build not found' })
-  json(res, 200, { ok: true })
+  // Return the authoritative timestamp so the client doesn't re-derive the TTL.
+  const row = db.prepare('SELECT delete_after FROM builds WHERE id = ?').get(params.id) as { delete_after: string }
+  json(res, 200, { ok: true, delete_after: row.delete_after })
 }
 
 // Cancel a scheduled deletion: take the build back off the purge clock.
@@ -451,7 +454,10 @@ export function handleUploadBuild(
   req.pipe(bb)
 }
 
-const BUILD_TTL_DAYS = Number(process.env['TAPFLOW_BUILD_TTL_DAYS'] ?? 7)
+// Fall back to 7 when the env var is missing or malformed; a NaN here would make
+// SQLite store delete_after as NULL and silently skip scheduling.
+const ttlEnv = Number(process.env['TAPFLOW_BUILD_TTL_DAYS'])
+const BUILD_TTL_DAYS = Number.isFinite(ttlEnv) && ttlEnv > 0 ? ttlEnv : 7
 const SQLITE_MAX_PARAMS = 999
 
 function chunkArray<T>(arr: T[], size: number): T[][] {

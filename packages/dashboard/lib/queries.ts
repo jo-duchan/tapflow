@@ -58,14 +58,19 @@ export async function updateBuildStatus(
   })
 }
 
-// Put a build on the deletion clock (server sets delete_after = now + TTL).
-export async function scheduleBuildDeletion(id: number): Promise<void> {
-  await fetch(`/api/v1/builds/${id}/schedule-deletion`, { method: 'POST', credentials: 'include' })
+// Put a build on the deletion clock (server sets delete_after = now + TTL) and
+// return the server's authoritative delete_after.
+export async function scheduleBuildDeletion(id: number): Promise<string> {
+  const res = await fetch(`/api/v1/builds/${id}/schedule-deletion`, { method: 'POST', credentials: 'include' })
+  if (!res.ok) throw new Error(`Failed to schedule deletion (${res.status})`)
+  const data = await res.json()
+  return data.delete_after as string
 }
 
 // Take a build back off the deletion clock.
 export async function cancelBuildDeletion(id: number): Promise<void> {
-  await fetch(`/api/v1/builds/${id}/schedule-deletion`, { method: 'DELETE', credentials: 'include' })
+  const res = await fetch(`/api/v1/builds/${id}/schedule-deletion`, { method: 'DELETE', credentials: 'include' })
+  if (!res.ok) throw new Error(`Failed to cancel scheduled deletion (${res.status})`)
 }
 
 export async function getBuild(buildId: string | number): Promise<Build | null> {

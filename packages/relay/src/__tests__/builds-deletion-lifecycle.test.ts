@@ -181,6 +181,7 @@ describe('builds deletion lifecycle: HTTP endpoints', () => {
     expect(r.status).toBe(200)
     const da = deleteAfterOf(buildId)
     expect(da).not.toBeNull()
+    expect(r.body.delete_after).toBe(da) // server returns the authoritative timestamp
     expect(new Date(da! + 'Z').getTime()).toBeGreaterThan(Date.now())
     const status = (getDb().prepare('SELECT status_label FROM builds WHERE id = ?').get(buildId) as { status_label: string }).status_label
     expect(status).toBe('Done')
