@@ -249,12 +249,35 @@ describe('runSetupAndroid', () => {
 
   // issue #326: state로 "이미 있었음(found)"과 "이번에 설치함(created)"을 구분한다.
   it("state: 완전 구성 머신은 모든 단계가 'found'", async () => {
+    // 완전 구성 = env(rc 마커)까지 이미 등록된 상태. 그래야 registerAndroidEnv가
+    // append 없이 added:false를 반환하고 SDK 단계가 'found'로 보고된다.
+    mockReadFileSync.mockReturnValue(
+      '# >>> tapflow android sdk >>>\nexport ANDROID_HOME="x"\n# <<< tapflow android sdk <<<\n',
+    )
+    mockExistsSync.mockImplementation(
+      (p) =>
+        p === SDK_SDKMANAGER ||
+        p === SDK_ADB ||
+        p === SDK_AVDMANAGER ||
+        p === SDK_EMULATOR ||
+        p === zshrc,
+    )
+
     const results = await runSetupAndroid()
     expect(results.every((r) => r.ok)).toBe(true)
     expect(findStep(results, 'homebrew')?.state).toBe('found')
     expect(findStep(results, 'java')?.state).toBe('found')
     expect(findStep(results, 'android sdk')?.state).toBe('found')
     expect(findStep(results, 'avd')?.state).toBe('found')
+  })
+
+  // issue #326: SDK 바이너리는 있지만 이번 실행에 env(rc)를 새로 등록하면 'repaired'.
+  it("state: SDK는 있고 env를 이번에 등록하면 'repaired'", async () => {
+    // 기본 mock은 rc가 비어 있어(readFileSync→'') registerAndroidEnv가 append하고 added:true.
+    const results = await runSetupAndroid()
+    expect(findStep(results, 'android sdk')?.ok).toBe(true)
+    expect(findStep(results, 'android sdk')?.state).toBe('repaired')
+    expect(mockAppendFileSync).toHaveBeenCalledWith(zshrc, expect.stringContaining('ANDROID_HOME'))
   })
 
   it("state: 이번 실행에 SDK를 부트스트랩하면 'created'", async () => {

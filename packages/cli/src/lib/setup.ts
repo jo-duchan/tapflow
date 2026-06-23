@@ -6,9 +6,7 @@ import { confirm, text, isCancel } from '@clack/prompts'
 import { type DoctorCheck } from './doctor.js'
 import { step } from './print.js'
 
-// setup 단계 결과는 진단 결과(DoctorCheck)와 같은 형태를 쓰되, 변화 유형(state)을 덧붙인다.
-// ok=true: 이미 OK이거나 방금 자동 수정함, warn=true: 수동 조치 필요(안내).
-// state로 "이미 있었음 / 새로 설치함 / 고침"을 구분한다(ok는 그대로라 doctor엔 영향 없음).
+// SetupStepResult = DoctorCheck + optional state (found/created/repaired); ok is untouched so doctor is unaffected.
 export type SetupStepState = 'found' | 'created' | 'repaired'
 export type SetupStepResult = DoctorCheck & { state?: SetupStepState }
 
@@ -309,7 +307,7 @@ async function checkAndFixAndroidSdk(brewAvailable: boolean, javaOk: boolean): P
     return {
       label: 'Android SDK ready',
       ok: true,
-      state: 'found',
+      state: reg?.added ? 'repaired' : 'found',
       detail: reg?.added ? newShellHint(reg.file) : undefined,
     }
   }
