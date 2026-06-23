@@ -305,7 +305,7 @@ export function handleUploadBuild(
     const ext = path.extname(originalName).toLowerCase()
 
     if (ext === '.ipa') {
-      fileError = 'iOS 시뮬레이터용 빌드는 .app.zip 형식이어야 합니다. xcodebuild -sdk iphonesimulator 로 빌드한 .app 디렉토리를 zip 압축해 업로드하세요.'
+      fileError = 'iOS simulator builds must be in .app.zip format. Zip the .app directory built with xcodebuild -sdk iphonesimulator and upload it.'
       stream.resume()
       return
     }
@@ -351,7 +351,7 @@ export function handleUploadBuild(
       const info = extractAppZipInfo(savedPath)
       if (info === null) {
         fs.unlinkSync(savedPath)
-        return json(res, 400, { error: 'zip 안에서 .app 디렉토리를 찾을 수 없습니다. .app 디렉토리를 포함한 zip 파일을 업로드하세요.' })
+        return json(res, 400, { error: 'No .app directory found in the zip. Upload a zip that contains a .app directory.' })
       }
 
       // lipo 슬라이스 검증 (macOS only; Linux에서는 null → skip)
@@ -360,7 +360,7 @@ export function handleUploadBuild(
         const sliceOk = hasSimulatorSlice(savedPath, appDir)
         if (sliceOk === false) {
           fs.unlinkSync(savedPath)
-          return json(res, 400, { error: '디바이스용 슬라이스만 포함된 빌드입니다. xcodebuild -sdk iphonesimulator 로 빌드해 시뮬레이터 슬라이스를 포함하세요.' })
+          return json(res, 400, { error: 'This build contains device-only slices. Build with xcodebuild -sdk iphonesimulator to include a simulator slice.' })
         }
       }
 

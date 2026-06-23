@@ -3,6 +3,7 @@ import http from 'http'
 import fs from 'fs'
 import os from 'os'
 import path from 'path'
+import { spawnSync } from 'child_process'
 import { RelayServer } from '../RelayServer'
 import { initDb, getDb, closeDb } from '../db'
 import { makePasswordHash } from '../api/auth'
@@ -93,6 +94,27 @@ describe('upload size-limit handling', () => {
     const body = multipartBody(boundary, [{ name: 'file', filename: 'app.zip', contentType: 'application/zip', data: Buffer.alloc(200, 0x41) }])
     const r = await httpPostMultipart(port, '/api/v1/builds', body, boundary, cookie)
     expect(r.body.error).not.toBe('File exceeds the upload size limit')
+  })
+
+  // #263 — build-validation errors are returned in English, not Korean
+  it('빌드: .ipa 업로드는 400 + 영어 안내', async () => {
+    const boundary = 'X3'
+    const body = multipartBody(boundary, [{ name: 'file', filename: 'app.ipa', contentType: 'application/octet-stream', data: Buffer.alloc(50, 0x41) }])
+    const r = await httpPostMultipart(port, '/api/v1/builds', body, boundary, cookie)
+    expect(r.status).toBe(400)
+    expect(r.body.error).toBe('iOS simulator builds must be in .app.zip format. Zip the .app directory built with xcodebuild -sdk iphonesimulator and upload it.')
+  })
+
+  it('빌드: .app 디렉토리 없는 zip은 400 + 영어 안내', async () => {
+    const readme = path.join(uploadsDir, 'readme.txt')
+    fs.writeFileSync(readme, 'hello')
+    const noAppZip = path.join(uploadsDir, 'noapp.zip')
+    spawnSync('zip', ['-j', noAppZip, readme])
+    const boundary = 'X4'
+    const body = multipartBody(boundary, [{ name: 'file', filename: 'app.zip', contentType: 'application/zip', data: fs.readFileSync(noAppZip) }])
+    const r = await httpPostMultipart(port, '/api/v1/builds', body, boundary, cookie)
+    expect(r.status).toBe(400)
+    expect(r.body.error).toBe('No .app directory found in the zip. Upload a zip that contains a .app directory.')
   })
 
   it('댓글 첨부: 크기 상한 초과 → 400 + uploads/comments에 잔존 파일 없음', async () => {
