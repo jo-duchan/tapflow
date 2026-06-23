@@ -130,6 +130,28 @@ describe('cmdSetup', () => {
     expect(logLines.join('\n')).toMatch(/new terminal/i)
   })
 
+  // issue #326: ok 단계의 state를 체크 옆에 함께 출력한다.
+  it('state가 있으면 체크 옆에 (found/created/repaired) 표기', async () => {
+    mockRunSetupAndroid.mockResolvedValue([
+      { label: 'Homebrew installed', ok: true, state: 'found' },
+      { label: 'Android SDK installed', ok: true, state: 'created' },
+    ])
+
+    await cmdSetup('android')
+    const out = logLines.join('\n')
+    expect(out).toMatch(/Homebrew installed.*\(found\)/)
+    expect(out).toMatch(/Android SDK installed.*\(created\)/)
+  })
+
+  it('state가 없는 ok 단계는 기존처럼 표기 없이 출력 (회귀)', async () => {
+    mockRunSetupIos.mockResolvedValue([{ label: 'Xcode installed', ok: true }])
+
+    await cmdSetup('ios')
+    const out = logLines.join('\n')
+    expect(out).toContain('Xcode installed')
+    expect(out).not.toMatch(/Xcode installed.*\((found|created|repaired)\)/)
+  })
+
   it('인자 없음 + 감지 0개 → 안내, exit 없음', async () => {
     vi.spyOn(process, 'platform', 'get').mockReturnValue('linux')
     mockResolveAdb.mockReturnValue(null)

@@ -25,7 +25,8 @@ async function detectPlatforms(): Promise<string[]> {
 function printResults(results: SetupStepResult[]): void {
   for (const r of results) {
     if (r.ok) {
-      console.log(`  ${GREEN}✓${R}  ${r.label}`)
+      const tag = r.state ? ` ${DIM}(${r.state})${R}` : ''
+      console.log(`  ${GREEN}✓${R}  ${r.label}${tag}`)
       if (r.detail) console.log(`${DIM}       ${r.detail}${R}`)
     } else if (r.warn) {
       console.log(`  ${YELLOW}⚠${R}  ${r.label}`)
