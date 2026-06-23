@@ -121,6 +121,7 @@ export interface Build {
   bundle_id: string | null
   uploaded_at: string
   completed_at: string | null
+  delete_after: string | null
   uploader: string | null
 }
 

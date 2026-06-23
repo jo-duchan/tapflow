@@ -58,6 +58,16 @@ export async function updateBuildStatus(
   })
 }
 
+// Put a build on the deletion clock (server sets delete_after = now + TTL).
+export async function scheduleBuildDeletion(id: number): Promise<void> {
+  await fetch(`/api/v1/builds/${id}/schedule-deletion`, { method: 'POST', credentials: 'include' })
+}
+
+// Take a build back off the deletion clock.
+export async function cancelBuildDeletion(id: number): Promise<void> {
+  await fetch(`/api/v1/builds/${id}/schedule-deletion`, { method: 'DELETE', credentials: 'include' })
+}
+
 export async function getBuild(buildId: string | number): Promise<Build | null> {
   const res = await fetch(`/api/v1/builds/${buildId}`, { credentials: 'include' })
   return res.ok ? res.json() : null

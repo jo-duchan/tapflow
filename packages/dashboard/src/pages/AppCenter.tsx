@@ -8,7 +8,7 @@ import {
 import { UploadBuildDialog } from '@/components/UploadBuildDialog'
 import { AppSidebar } from '@/components/app-center/AppSidebar'
 import { ReleaseAccordion } from '@/components/app-center/ReleaseAccordion'
-import { getApps, getBuilds, updateBuildStatus, groupByRelease } from '@/lib/queries'
+import { getApps, getBuilds, updateBuildStatus, scheduleBuildDeletion, cancelBuildDeletion, groupByRelease } from '@/lib/queries'
 import type { App, Build } from '@/lib/types'
 
 export function AppCenter() {
@@ -72,6 +72,18 @@ export function AppCenter() {
     setBuilds(prev => prev.map(b =>
       b.id === buildId ? { ...b, status_label: status as Build['status_label'] } : b
     ))
+  }
+
+  async function handleScheduleDeletion(buildId: number) {
+    await scheduleBuildDeletion(buildId)
+    // 7d = default TAPFLOW_BUILD_TTL_DAYS; the server is authoritative, this is the optimistic countdown.
+    const deleteAfter = new Date(Date.now() + 7 * 24 * 3_600_000).toISOString()
+    setBuilds(prev => prev.map(b => b.id === buildId ? { ...b, delete_after: deleteAfter } : b))
+  }
+
+  async function handleCancelDeletion(buildId: number) {
+    await cancelBuildDeletion(buildId)
+    setBuilds(prev => prev.map(b => b.id === buildId ? { ...b, delete_after: null } : b))
   }
 
   const releaseGroups = groupByRelease(builds)
@@ -138,6 +150,8 @@ export function AppCenter() {
                 onToggle={() => handleToggleRelease(versionName)}
                 onNavigate={(id) => navigate(`/app-center/build?id=${id}`)}
                 onStatusChange={handleStatusChange}
+                onScheduleDeletion={handleScheduleDeletion}
+                onCancelDeletion={handleCancelDeletion}
               />
             ))}
           </div>

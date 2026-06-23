@@ -49,7 +49,7 @@ const IDR_REQUEST_THROTTLE_MS = 500
 // Ping every socket each interval; a missed pong window (~2× this) terminates the dead socket.
 const HEARTBEAT_MS = 30_000
 import { handleVerifyReset, handleDoReset, handleSendMemberReset } from './api/passwordReset.js'
-import { handleListBuilds, handleGetBuild, handleUpdateBuild, handleUploadBuild, purgeExpiredBuilds } from './api/builds.js'
+import { handleListBuilds, handleGetBuild, handleUpdateBuild, handleUploadBuild, handleScheduleBuildDeletion, handleCancelBuildDeletion, purgeExpiredBuilds } from './api/builds.js'
 import { handleListApps, handleCreateApp, handleUpdateApp, handleDeleteApp } from './api/apps.js'
 import { handleListComments, handleCreateComment, handleDeleteComment } from './api/comments.js'
 import { handleListMembers, handleInvite, handleUpdateMember, handleDeleteMember } from './api/team.js'
@@ -177,6 +177,8 @@ export class RelayServer {
     this.router.get('/api/v1/builds', handleListBuilds)
     this.router.get('/api/v1/builds/:id', handleGetBuild)
     this.router.patch('/api/v1/builds/:id', handleUpdateBuild)
+    this.router.post('/api/v1/builds/:id/schedule-deletion', handleScheduleBuildDeletion)
+    this.router.delete('/api/v1/builds/:id/schedule-deletion', handleCancelBuildDeletion)
     this.router.post('/api/v1/builds', (req, res) => handleUploadBuild(req, res, u))
 
     // comments
