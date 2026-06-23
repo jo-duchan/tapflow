@@ -46,7 +46,11 @@ iOS build format: `.app.zip` (simulator builds). `.ipa` uploads return 400.
 | `POST` | `/api/v1/builds` | Upload a build (`.app.zip` / `.apk`) |
 | `GET` | `/api/v1/builds` | Build list (filterable by `app_id`) |
 | `GET` | `/api/v1/builds/:id` | Single build |
-| `PATCH` | `/api/v1/builds/:id` | Update `status_label` |
+| `PATCH` | `/api/v1/builds/:id` | Update `status_label` / `version_label` |
+| `POST` | `/api/v1/builds/:id/schedule-deletion` | Put the build on the deletion clock (`delete_after = now + TTL`) |
+| `DELETE` | `/api/v1/builds/:id/schedule-deletion` | Cancel a scheduled deletion |
+
+> **Deletion lifecycle (issue #258)**: review status and deletion are orthogonal. `status_label` (incl. `Done`) is a pure review state and never schedules deletion; purge keys off `delete_after` only, which is set by the explicit schedule-deletion action. `completed_at` is informational.
 
 ## Environment Variables
 

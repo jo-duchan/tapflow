@@ -352,9 +352,12 @@ Query:
   "status_label": "In Progress",
   "platform": "ios",
   "bundle_id": "com.example.app",
-  "uploaded_at": "2025-05-15T12:00:00.000Z"
+  "uploaded_at": "2025-05-15T12:00:00.000Z",
+  "delete_after": null
 }
 ```
+
+`delete_after`는 빌드 파일이 삭제되는 시각입니다. 삭제가 예약되지 않았으면 `null`입니다. `status_label`과 독립적이라 빌드를 `Done`으로 표시해도 삭제가 예약되지 않습니다.
 
 
 ### `PATCH /api/v1/builds/:id`
@@ -366,6 +369,28 @@ Body (JSON):
   status_label  Backlog|In Progress|Done|Rejected|null  선택
   version_label string|null                              선택
 ```
+
+**응답 `200`**
+
+```json
+{ "ok": true }
+```
+
+
+### `POST /api/v1/builds/:id/schedule-deletion`
+
+빌드 삭제를 예약합니다. 서버가 `delete_after = now + TAPFLOW_BUILD_TTL_DAYS`로 설정하고 그 시각이 지나면 파일과 레코드를 삭제합니다.
+
+**응답 `200`**
+
+```json
+{ "ok": true }
+```
+
+
+### `DELETE /api/v1/builds/:id/schedule-deletion`
+
+예약한 삭제를 취소하고 `delete_after`를 비웁니다.
 
 **응답 `200`**
 

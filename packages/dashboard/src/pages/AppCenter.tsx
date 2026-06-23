@@ -1,5 +1,6 @@
 import { useEffect, useState, useCallback } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
+import { toast } from 'sonner'
 import { Layers, Package } from 'lucide-react'
 import { SearchInput } from '@/components/ui/search-input'
 import {
@@ -8,7 +9,7 @@ import {
 import { UploadBuildDialog } from '@/components/UploadBuildDialog'
 import { AppSidebar } from '@/components/app-center/AppSidebar'
 import { ReleaseAccordion } from '@/components/app-center/ReleaseAccordion'
-import { getApps, getBuilds, updateBuildStatus, groupByRelease } from '@/lib/queries'
+import { getApps, getBuilds, updateBuildStatus, scheduleBuildDeletion, cancelBuildDeletion, groupByRelease } from '@/lib/queries'
 import type { App, Build } from '@/lib/types'
 
 export function AppCenter() {
@@ -72,6 +73,25 @@ export function AppCenter() {
     setBuilds(prev => prev.map(b =>
       b.id === buildId ? { ...b, status_label: status as Build['status_label'] } : b
     ))
+  }
+
+  async function handleScheduleDeletion(buildId: number) {
+    try {
+      // Use the server's delete_after — don't re-derive the TTL on the client.
+      const deleteAfter = await scheduleBuildDeletion(buildId)
+      setBuilds(prev => prev.map(b => b.id === buildId ? { ...b, delete_after: deleteAfter } : b))
+    } catch {
+      toast.error('Failed to schedule deletion')
+    }
+  }
+
+  async function handleCancelDeletion(buildId: number) {
+    try {
+      await cancelBuildDeletion(buildId)
+      setBuilds(prev => prev.map(b => b.id === buildId ? { ...b, delete_after: null } : b))
+    } catch {
+      toast.error('Failed to cancel scheduled deletion')
+    }
   }
 
   const releaseGroups = groupByRelease(builds)
@@ -138,6 +158,8 @@ export function AppCenter() {
                 onToggle={() => handleToggleRelease(versionName)}
                 onNavigate={(id) => navigate(`/app-center/build?id=${id}`)}
                 onStatusChange={handleStatusChange}
+                onScheduleDeletion={handleScheduleDeletion}
+                onCancelDeletion={handleCancelDeletion}
               />
             ))}
           </div>

@@ -10,6 +10,8 @@ interface Props {
   onToggle: () => void
   onNavigate: (buildId: number) => void
   onStatusChange: (buildId: number, status: string | null) => void
+  onScheduleDeletion: (buildId: number) => void
+  onCancelDeletion: (buildId: number) => void
 }
 
 export function ReleaseAccordion({
@@ -19,6 +21,8 @@ export function ReleaseAccordion({
   onToggle,
   onNavigate,
   onStatusChange,
+  onScheduleDeletion,
+  onCancelDeletion,
 }: Props) {
   return (
     <div className="rounded-lg shadow-card-2 overflow-hidden">
@@ -44,6 +48,8 @@ export function ReleaseAccordion({
               isLast={idx === builds.length - 1}
               onNavigate={onNavigate}
               onStatusChange={onStatusChange}
+              onScheduleDeletion={onScheduleDeletion}
+              onCancelDeletion={onCancelDeletion}
             />
           ))}
         </div>

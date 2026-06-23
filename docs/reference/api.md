@@ -352,9 +352,12 @@ Return a single build.
   "status_label": "In Progress",
   "platform": "ios",
   "bundle_id": "com.example.app",
-  "uploaded_at": "2025-05-15T12:00:00.000Z"
+  "uploaded_at": "2025-05-15T12:00:00.000Z",
+  "delete_after": null
 }
 ```
+
+`delete_after` is the time the build's files are purged, or `null` when no deletion is scheduled. It is independent of `status_label` — marking a build `Done` does not schedule deletion.
 
 
 ### `PATCH /api/v1/builds/:id`
@@ -366,6 +369,28 @@ Body (JSON):
   status_label  Backlog|In Progress|Done|Rejected|null  optional
   version_label string|null                              optional
 ```
+
+**Response `200`**
+
+```json
+{ "ok": true }
+```
+
+
+### `POST /api/v1/builds/:id/schedule-deletion`
+
+Schedule the build for deletion. The server sets `delete_after = now + TAPFLOW_BUILD_TTL_DAYS`; the files and record are purged after that time.
+
+**Response `200`**
+
+```json
+{ "ok": true }
+```
+
+
+### `DELETE /api/v1/builds/:id/schedule-deletion`
+
+Cancel a scheduled deletion, clearing `delete_after`.
 
 **Response `200`**
 

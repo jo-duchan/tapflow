@@ -204,7 +204,7 @@ export function handleListBuilds(req: http.IncomingMessage, res: http.ServerResp
   const items = db.prepare(`
     SELECT b.id, b.app_id, ap.name, b.version_name, b.build_number,
            b.version_label, b.status_label, b.platform,
-           b.bundle_id, b.uploaded_at, b.completed_at,
+           b.bundle_id, b.uploaded_at, b.completed_at, b.delete_after,
            COALESCE(u.display_name, substr(u.email, 1, instr(u.email, '@') - 1)) as uploader
     ${baseFrom}
     ${where}
@@ -224,7 +224,7 @@ export function handleGetBuild(
 
   const build = getDb().prepare(`
     SELECT b.id, b.app_id, ap.name, b.version_name, b.build_number,
-           b.version_label, b.status_label, b.platform, b.bundle_id, b.uploaded_at, b.completed_at
+           b.version_label, b.status_label, b.platform, b.bundle_id, b.uploaded_at, b.completed_at, b.delete_after
     FROM builds b
     LEFT JOIN apps ap ON ap.id = b.app_id
     WHERE b.id = ?
@@ -273,6 +273,36 @@ export async function handleUpdateBuild(
   if (updates.length === 0) return json(res, 400, { error: 'Nothing to update' })
 
   const result = db.prepare(`UPDATE builds SET ${updates.join(', ')} WHERE id = ?`).run(...values, params.id)
+  if (result.changes === 0) return json(res, 404, { error: 'Build not found' })
+  json(res, 200, { ok: true })
+}
+
+// Schedule deletion: an explicit, manual action that puts the build on the purge
+// clock (delete_after = now + TTL). Orthogonal to status_label (issue #258).
+export function handleScheduleBuildDeletion(
+  req: http.IncomingMessage,
+  res: http.ServerResponse,
+  params: Record<string, string>
+): void {
+  if (!requireAuth(req, res)) return
+  const db = getDb()
+  const result = db
+    .prepare(`UPDATE builds SET delete_after = datetime('now', '+' || ? || ' days') WHERE id = ?`)
+    .run(BUILD_TTL_DAYS, params.id)
+  if (result.changes === 0) return json(res, 404, { error: 'Build not found' })
+  // Return the authoritative timestamp so the client doesn't re-derive the TTL.
+  const row = db.prepare('SELECT delete_after FROM builds WHERE id = ?').get(params.id) as { delete_after: string }
+  json(res, 200, { ok: true, delete_after: row.delete_after })
+}
+
+// Cancel a scheduled deletion: take the build back off the purge clock.
+export function handleCancelBuildDeletion(
+  req: http.IncomingMessage,
+  res: http.ServerResponse,
+  params: Record<string, string>
+): void {
+  if (!requireAuth(req, res)) return
+  const result = getDb().prepare('UPDATE builds SET delete_after = NULL WHERE id = ?').run(params.id)
   if (result.changes === 0) return json(res, 404, { error: 'Build not found' })
   json(res, 200, { ok: true })
 }
@@ -424,7 +454,10 @@ export function handleUploadBuild(
   req.pipe(bb)
 }
 
-const BUILD_TTL_DAYS = Number(process.env['TAPFLOW_BUILD_TTL_DAYS'] ?? 7)
+// Fall back to 7 when the env var is missing or malformed; a NaN here would make
+// SQLite store delete_after as NULL and silently skip scheduling.
+const ttlEnv = Number(process.env['TAPFLOW_BUILD_TTL_DAYS'])
+const BUILD_TTL_DAYS = Number.isFinite(ttlEnv) && ttlEnv > 0 ? ttlEnv : 7
 const SQLITE_MAX_PARAMS = 999
 
 function chunkArray<T>(arr: T[], size: number): T[][] {
@@ -437,8 +470,8 @@ function chunkArray<T>(arr: T[], size: number): T[][] {
 export function purgeExpiredBuilds(recordingsDir: string): void {
   const db = getDb()
   const expired = db.prepare(
-    `SELECT id, file_path FROM builds WHERE completed_at < datetime('now', '-' || ? || ' days')`
-  ).all(BUILD_TTL_DAYS) as { id: number; file_path: string }[]
+    `SELECT id, file_path FROM builds WHERE delete_after IS NOT NULL AND delete_after < datetime('now')`
+  ).all() as { id: number; file_path: string }[]
 
   if (expired.length === 0) return
 

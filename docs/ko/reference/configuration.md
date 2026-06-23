@@ -46,7 +46,7 @@
 | `TAPFLOW_RELAY_URL` | `relay.url` | *(비어있음)* | CLI 명령어의 기본 relay URL |
 | `TAPFLOW_AGENT_TOKEN` | — | *(비어있음)* | 원격 릴레이 인증용 `agent` 스코프 토큰. `--token` 플래그가 우선합니다. [에이전트 설정](/ko/guide/agent#원격-릴레이-인증)을 참고하세요. |
 | `TAPFLOW_TRUSTED_PROXIES` | — | *(비어있음)* | 신뢰하는 리버스 프록시 IP 목록(콤마 구분, 예: `127.0.0.1,::1`). 릴레이를 같은 호스트의 리버스 프록시 뒤에서 실행할 때 이 값을 설정하면, 프록시 주소 대신 `X-Forwarded-For`에 담긴 실제 클라이언트 IP를 사용합니다. 비어 있으면 전달 헤더를 파싱하지 않습니다. |
-| `TAPFLOW_BUILD_TTL_DAYS` | — | `7` | Done 빌드 파일·레코드 자동 삭제 기간(일). 로컬 테스트 시 `0.001` 등 작은 값으로 즉시 확인 가능. |
+| `TAPFLOW_BUILD_TTL_DAYS` | — | `7` | 삭제를 예약한 빌드의 파일·레코드를 실제로 지우기까지 보관하는 기간(일). 예약은 수동 동작이라 **Done** 표시만으로는 삭제되지 않는다. 로컬 테스트 시 `0.001` 등 작은 값으로 즉시 확인 가능. |
 | `TAPFLOW_WS_BACKPRESSURE_BYTES` | — | `1048576` (1 MB) | 브라우저 소켓당 바이너리 프레임 드롭 임계값. 버퍼가 이 값을 초과하면 프레임이 드롭됩니다. |
 | `TAPFLOW_CLOUDFLARE_TOKEN` | — | *(비어있음)* | `tls.dnsProvider`가 `cloudflare`일 때 DNS-01 발급에 쓰는 Cloudflare API 토큰. |
 | `TAPFLOW_VERCEL_TOKEN` | — | *(비어있음)* | `tls.dnsProvider`가 `vercel`일 때 쓰는 Vercel API 토큰. |
