@@ -247,6 +247,35 @@ describe('runSetupAndroid', () => {
     )
   })
 
+  it('shows a new-shell hint when the rc block exists but adb is not in the live PATH', async () => {
+    mockReadFileSync.mockReturnValue(
+      '# >>> tapflow android sdk >>>\nexport ANDROID_HOME="x"\n# <<< tapflow android sdk <<<\n',
+    )
+    mockExistsSync.mockImplementation(
+      (p) =>
+        p === SDK_SDKMANAGER ||
+        p === SDK_ADB ||
+        p === SDK_AVDMANAGER ||
+        p === SDK_EMULATOR ||
+        p === zshrc,
+    )
+    mockExecSync.mockImplementation((cmd) => {
+      const c = cmd as string
+      if (c === 'which brew') return '/opt/homebrew/bin/brew\n'
+      if (c === '/usr/libexec/java_home') return '/Library/Java/.../Home\n'
+      if (c === 'which sdkmanager') return '/opt/homebrew/bin/sdkmanager\n'
+      if (c === 'which adb') throw new Error('not found')
+      return ''
+    })
+
+    const results = await runSetupAndroid()
+    const sdk = findStep(results, 'android sdk')
+    expect(sdk?.ok).toBe(true)
+    expect(sdk?.state).toBe('found')
+    expect(sdk?.detail).toContain('open a new terminal')
+    expect(mockAppendFileSync).not.toHaveBeenCalled()
+  })
+
   // issue #326: state로 "이미 있었음(found)"과 "이번에 설치함(created)"을 구분한다.
   it("state: 완전 구성 머신은 모든 단계가 'found'", async () => {
     // 완전 구성 = env(rc 마커)까지 이미 등록된 상태. 그래야 registerAndroidEnv가

@@ -3,7 +3,7 @@ import { existsSync, readFileSync, appendFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { confirm, text, isCancel } from '@clack/prompts'
-import { type DoctorCheck } from './doctor.js'
+import { resolveAdb, type DoctorCheck } from './doctor.js'
 import { step } from './print.js'
 
 // SetupStepResult = DoctorCheck + optional state (found/created/repaired); ok is untouched so doctor is unaffected.
@@ -303,12 +303,15 @@ async function checkAndFixJdk(brewAvailable: boolean): Promise<SetupStepResult> 
 // Android SDK를 ~/Library/Android/sdk에 자기완결로 구성한다(Android Studio GUI 불필요).
 async function checkAndFixAndroidSdk(brewAvailable: boolean, javaOk: boolean): Promise<SetupStepResult> {
   if (sdkSelfContained()) {
+    const adb = resolveAdb()
     const reg = registerAndroidEnv()
+    const needsLiveShellRefresh = Boolean(reg && !reg.added && adb && !adb.inPath)
+    const detail = reg && (reg.added || needsLiveShellRefresh) ? newShellHint(reg.file) : undefined
     return {
       label: 'Android SDK ready',
       ok: true,
       state: reg?.added ? 'repaired' : 'found',
-      detail: reg?.added ? newShellHint(reg.file) : undefined,
+      detail,
     }
   }
   if (!javaOk) {
