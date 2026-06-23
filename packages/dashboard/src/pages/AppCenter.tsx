@@ -1,5 +1,6 @@
 import { useEffect, useState, useCallback } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
+import { toast } from 'sonner'
 import { Layers, Package } from 'lucide-react'
 import { SearchInput } from '@/components/ui/search-input'
 import {
@@ -79,8 +80,8 @@ export function AppCenter() {
       // Use the server's delete_after — don't re-derive the TTL on the client.
       const deleteAfter = await scheduleBuildDeletion(buildId)
       setBuilds(prev => prev.map(b => b.id === buildId ? { ...b, delete_after: deleteAfter } : b))
-    } catch (err) {
-      console.error('Failed to schedule deletion', err)
+    } catch {
+      toast.error('Failed to schedule deletion')
     }
   }
 
@@ -88,8 +89,8 @@ export function AppCenter() {
     try {
       await cancelBuildDeletion(buildId)
       setBuilds(prev => prev.map(b => b.id === buildId ? { ...b, delete_after: null } : b))
-    } catch (err) {
-      console.error('Failed to cancel scheduled deletion', err)
+    } catch {
+      toast.error('Failed to cancel scheduled deletion')
     }
   }
 
