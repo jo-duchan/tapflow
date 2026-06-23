@@ -78,7 +78,7 @@ Get user confirmation before any hard-to-reverse operation.
 ### Branches, Commits & Releases
 → [CONTRIBUTING.md](./CONTRIBUTING.md)
 
-Write GitHub PR and issue titles/bodies in **English**. (Conversation, code comments, and docs follow the existing KO/EN rules — only GitHub artifacts default to English.)
+Write GitHub PR and issue titles/bodies in **English**, and write new code comments in **English** too. (Conversation and docs follow the existing KO/EN rules.) Code comments default to English so contributors of any language can read and extend them — existing Korean comments stay until the line they sit on is changed.
 
 Before starting any task that requires code changes:
 1. `git checkout main && git pull origin main` — always start from the latest main.
@@ -102,7 +102,7 @@ Custom commands: `/work-plan {topic}` · `/deep-research {problem}` · `/qa {tar
 - **DIP**: Dependencies via constructor injection. Depend on interfaces, not implementations.
 
 ### Code Rules
-- Comments only when the WHY is non-obvious: one line max.
+- Comments only when the WHY is non-obvious: one line max. Write new comments in English; leave existing Korean comments unless you're already editing that line.
 - When changing an interface, update `agent-core` first, then align implementations.
 - New platforms are added via `AgentRegistry.register()` only — relay and dashboard code stay unchanged.
 
