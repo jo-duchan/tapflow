@@ -168,7 +168,7 @@ function isPortAvailable(port: number): Promise<boolean> {
     const server = createServer()
     server.once('error', () => resolve(false))
     server.once('listening', () => server.close(() => resolve(true)))
-    server.listen(port, '127.0.0.1')
+    server.listen({ port, host: '::', ipv6Only: false })
   })
 }
 
