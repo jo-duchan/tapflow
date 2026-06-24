@@ -85,7 +85,7 @@ function checkAdbStatus(adb: AdbResolution | null): DoctorCheck {
     label: 'adb (not in PATH)',
     ok: false,
     warn: true,
-    detail: `adb found at ${adb.path} but not in PATH. Run: tapflow setup android`,
+    detail: `adb found at ${adb.path} but not in PATH. Open a new terminal or run: exec $SHELL, then re-run tapflow doctor`,
   }
 }
 

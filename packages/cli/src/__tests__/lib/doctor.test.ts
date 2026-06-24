@@ -206,7 +206,8 @@ describe('runDoctorChecks', () => {
     expect(result.android).not.toBeNull()
     const adbCheck = result.android?.find((c) => c.label.includes('not in PATH'))
     expect(adbCheck?.warn).toBe(true)
-    expect(adbCheck?.detail).toContain('setup android')
+    expect(adbCheck?.detail).toContain('new terminal')
+    expect(adbCheck?.detail).toContain('tapflow doctor')
     expect(adbCheck?.detail).toContain(sdkAdb)
   })
 
