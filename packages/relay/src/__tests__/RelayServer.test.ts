@@ -480,10 +480,14 @@ describe('RelayServer', () => {
     const beforeSend = Date.now()
     streamWs.send(audioFrame)
     const received = await framePromise
+    const afterReceive = Date.now()
 
-    // On a near-empty socket the yielding audio sender forwards: payload intact + relayedAt patched.
+    // On a near-empty socket the yielding audio sender forwards: payload intact + relayedAt patched
+    // within the send→receive window (bounded both sides so a stray future timestamp can't pass).
     expect(received.subarray(HEADER_SIZE)).toEqual(pcm)
-    expect(Number(received.readBigUInt64BE(14))).toBeGreaterThanOrEqual(beforeSend)
+    const relayedAt = Number(received.readBigUInt64BE(14))
+    expect(relayedAt).toBeGreaterThanOrEqual(beforeSend)
+    expect(relayedAt).toBeLessThanOrEqual(afterReceive)
 
     agent.close()
     browser.close()
