@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
-import { ScanLine, Volume2, VolumeX } from 'lucide-react';
+import { ScanLine } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Separator } from '@/components/ui/separator';
 import { performanceMode } from '@/lib/decoders/pickDecoder';
@@ -27,10 +27,6 @@ interface SimulatorInfoCardProps {
   installing: boolean;
   installError: string | null;
   keyboardActive: boolean;
-  // Audio output is opt-in (Android emulator). `audioAvailable=false` → no indicator. Display only;
-  // muting is the emulator's job — `soundActive` just reflects whether audible sound is coming through.
-  audioAvailable?: boolean;
-  soundActive?: boolean;
 }
 
 function getStatusText(props: SimulatorInfoCardProps): string | null {
@@ -46,7 +42,7 @@ function getStatusText(props: SimulatorInfoCardProps): string | null {
 }
 
 export function SimulatorInfoCard(props: SimulatorInfoCardProps) {
-  const { joined, fps, keyboardActive, audioAvailable, soundActive } = props;
+  const { joined, fps, keyboardActive } = props;
   const statusText = getStatusText(props);
   // fps is intentionally low when screen is static (idle keep-alive ~10fps).
   // Use "active/idle" framing instead of red/green to avoid false alarm.
@@ -90,13 +86,6 @@ export function SimulatorInfoCard(props: SimulatorInfoCardProps) {
       >
         <ScanLine className="h-3.5 w-3.5 shrink-0" />
         <span className="text-[12px] font-medium">Focus</span>
-        {audioAvailable && (
-          <span className="ml-auto flex items-center" title={soundActive ? 'Sound on' : 'Sound off'}>
-            {soundActive
-              ? <Volume2 className="h-3.5 w-3.5 text-emerald-500" />
-              : <VolumeX className="h-3.5 w-3.5 text-muted-foreground/50" />}
-          </span>
-        )}
       </div>
 
       {joined && (

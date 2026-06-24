@@ -24,8 +24,7 @@ function getEmulatorPath(): string {
 }
 
 export interface EmulatorLaunchOpts {
-  // Opt-in audio output. Default false keeps `-no-audio` so the audio backend stays off and
-  // the video-only path is byte-for-byte unchanged.
+  // Opt-in audio output; default off keeps `-no-audio` so the video-only path is unchanged.
   audio?: boolean
 }
 

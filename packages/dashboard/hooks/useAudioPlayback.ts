@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef } from 'react'
 import { pcmS16ToFloat32Planar } from '@/lib/audio/pcm'
 
 // MVP fixed format: the Android emulator's gRPC audio is S16LE / 44100 / Stereo. iOS will
@@ -9,27 +9,20 @@ const CHANNELS = 2
 const JITTER_LEAD = 0.06 // 60ms
 // If the playhead falls behind or drifts too far ahead, resync (a brief glitch beats growing latency).
 const RESYNC_GAP = 0.3 // 300ms
-const SILENCE_THRESHOLD = 0.01 // |sample| above this counts as audible
-const SOUND_HOLD_MS = 1200     // keep the "on" indicator this long after the last audible frame
 
 type AnyAudioContext = typeof AudioContext
 
 export interface AudioPlayback {
   // Feed one raw-PCM payload (envelope already stripped). Stable identity — safe in deps.
   pushFrame: (pcm: ArrayBuffer) => void
-  hasAudio: boolean      // an audio stream exists for this session (first frame seen)
-  soundActive: boolean   // audible sound is currently coming through (non-silent recently)
 }
 
 // Always-on playback: we play whatever the emulator outputs and never mute on our side —
-// muting is the emulator's job (its own volume keys). We only surface an on/off indicator.
+// muting is the emulator's job (its own volume keys). The audio is audible, so there's no
+// on-screen indicator.
 export function useAudioPlayback(): AudioPlayback {
   const ctxRef = useRef<AudioContext | null>(null)
   const nextStartRef = useRef(0)
-  const lastSoundAtRef = useRef(0)
-
-  const [hasAudio, setHasAudio] = useState(false)
-  const [soundActive, setSoundActive] = useState(false)
 
   const ensureCtx = useCallback((): AudioContext | null => {
     if (ctxRef.current) return ctxRef.current
@@ -37,7 +30,6 @@ export function useAudioPlayback(): AudioPlayback {
       window.AudioContext ?? (window as unknown as { webkitAudioContext?: AnyAudioContext }).webkitAudioContext
     if (!Ctor) return null
     ctxRef.current = new Ctor()
-    setHasAudio(true)
     return ctxRef.current
   }, [])
 
@@ -50,12 +42,6 @@ export function useAudioPlayback(): AudioPlayback {
     const planar = pcmS16ToFloat32Planar(pcm, CHANNELS)
     const frameCount = planar[0]?.length ?? 0
     if (frameCount === 0) return
-
-    // Drive the on/off indicator: mark "sound now" if this frame is audible (stride-sampled for cheapness).
-    const ch0 = planar[0]
-    for (let i = 0; i < frameCount; i += 16) {
-      if (Math.abs(ch0[i]) > SILENCE_THRESHOLD) { lastSoundAtRef.current = performance.now(); break }
-    }
 
     const buffer = ctx.createBuffer(CHANNELS, frameCount, SAMPLE_RATE)
     for (let c = 0; c < CHANNELS; c++) buffer.getChannelData(c).set(planar[c])
@@ -72,16 +58,6 @@ export function useAudioPlayback(): AudioPlayback {
     nextStartRef.current = start + buffer.duration
   }, [ensureCtx])
 
-  // Poll the "audible recently" window → soundActive. Bounded re-renders (only on transitions).
-  useEffect(() => {
-    if (!hasAudio) return
-    const id = setInterval(() => {
-      const active = performance.now() - lastSoundAtRef.current < SOUND_HOLD_MS
-      setSoundActive((prev) => (prev === active ? prev : active))
-    }, 400)
-    return () => clearInterval(id)
-  }, [hasAudio])
-
   useEffect(() => {
     return () => {
       void ctxRef.current?.close()
@@ -89,5 +65,5 @@ export function useAudioPlayback(): AudioPlayback {
     }
   }, [])
 
-  return { pushFrame, hasAudio, soundActive }
+  return { pushFrame }
 }

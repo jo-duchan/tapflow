@@ -256,7 +256,7 @@ describe('sendAudioYieldingToVideo — audio yields to video on a shared socket'
   })
 
   it('무손상 보장: ceiling은 video 백프레셔 임계(1MB)보다 한참 낮다', () => {
-    // 오디오가 한 프레임 실려도 bufferedAmount는 ceiling+한프레임 수준 → video threshold를 못 건드림.
+    // Even with one audio frame on top, bufferedAmount stays ~ceiling+one frame — never the video threshold.
     expect(AUDIO_BUFFER_CEILING_BYTES).toBeLessThan(DEFAULT_BACKPRESSURE_BYTES / 4)
   })
 })

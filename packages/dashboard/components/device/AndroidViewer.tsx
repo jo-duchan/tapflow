@@ -45,8 +45,6 @@ interface AndroidViewerProps {
    *  the framebuffer as black; we clip them so they don't show inside the screen bezel. 0 = square. */
   cornerRadius?: number;
   perfHookRef?: MutableRefObject<PerfHook>;
-  /** Opt-in audio-output status (display only). `hasAudio=false` → no indicator shown. */
-  audio?: { hasAudio: boolean; soundActive: boolean };
 }
 
 export function AndroidViewer({
@@ -55,7 +53,7 @@ export function AndroidViewer({
   launching, setLaunching, androidButtons,
   binaryFrameHandlerRef, onRecordingUploaded,
   screenWidth, screenHeight, cornerRadius,
-  perfHookRef, audio,
+  perfHookRef,
 }: AndroidViewerProps) {
   const surfaceHostRef = useRef<HTMLDivElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -559,8 +557,6 @@ export function AndroidViewer({
           deviceReady={deviceReady} bootError={bootError}
           installing={installing} installError={installError}
           keyboardActive={keyboardActive}
-          audioAvailable={audio?.hasAudio ?? false}
-          soundActive={audio?.soundActive ?? false}
         />
       </div>
     </div>

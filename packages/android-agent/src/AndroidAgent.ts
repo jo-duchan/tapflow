@@ -455,7 +455,15 @@ export class AndroidAgent implements DeviceAgent {
     const base = Number(process.env.TAPFLOW_ANDROID_GRPC_PORT) || 8554
     for (let p = base; p < base + 200; p += 2) { // emulators conventionally use even ports
       if (this.pendingGrpcPorts.has(p)) continue
-      if (await isTcpPortFree(p)) { this.pendingGrpcPorts.add(p); return p }
+      // Reserve before the async probe so two concurrent boots can't both claim the same port.
+      this.pendingGrpcPorts.add(p)
+      let free = false
+      try {
+        free = await isTcpPortFree(p)
+        if (free) return p
+      } finally {
+        if (!free) this.pendingGrpcPorts.delete(p)
+      }
     }
     throw new PlatformError('No free gRPC port available for the emulator')
   }

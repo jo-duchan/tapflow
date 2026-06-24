@@ -64,8 +64,8 @@ export function DeviceViewer({ sessionId, deviceId, buildId, resetMode, onRecord
 
   // Opt-in audio output (Android emulator first). Audio frames are codec-tagged and routed
   // straight to Web Audio — they never enter the video FIFO/decoder path. Always-on playback;
-  // muting is delegated to the emulator's own volume keys. We only surface an on/off indicator.
-  const { pushFrame: pushAudioFrame, hasAudio, soundActive } = useAudioPlayback();
+  // muting is delegated to the emulator's own volume keys.
+  const { pushFrame: pushAudioFrame } = useAudioPlayback();
 
   const handleMessage = useCallback((msg: RelayMessage) => {
     if (msg.type === 'session:joined') {
@@ -188,7 +188,7 @@ export function DeviceViewer({ sessionId, deviceId, buildId, resetMode, onRecord
   return (
     <>
       {iosChrome && <IOSViewer {...commonProps} chrome={iosChrome} perfHookRef={devPerfHookRef} />}
-      {androidChrome && <AndroidViewer {...commonProps} androidButtons={androidChrome.buttons} screenWidth={androidChrome.screenWidth} screenHeight={androidChrome.screenHeight} cornerRadius={androidChrome.cornerRadius} perfHookRef={devPerfHookRef} audio={{ hasAudio, soundActive }} />}
+      {androidChrome && <AndroidViewer {...commonProps} androidButtons={androidChrome.buttons} screenWidth={androidChrome.screenWidth} screenHeight={androidChrome.screenHeight} cornerRadius={androidChrome.cornerRadius} perfHookRef={devPerfHookRef} />}
       {import.meta.env.DEV && perfMode && perfVisible && (
         <>
           <StatsOverlay perfHookRef={statsRef} />
