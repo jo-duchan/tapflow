@@ -8,7 +8,8 @@ import { AndroidViewer } from './device/AndroidViewer';
 import { SimulatorInfoCard } from './device/shared/SimulatorInfoCard';
 import type { AndroidButton, ChromeData, RelayMessage } from '@/lib/types';
 import type { FrameTiming, PerfHook } from './perf/types';
-import { parseEnvelopeHeader, HEADER_SIZE, CODEC_H264, type BinaryFrameHandler } from '@/lib/envelope';
+import { parseEnvelopeHeader, HEADER_SIZE, CODEC_H264, CODEC_AUDIO, type BinaryFrameHandler } from '@/lib/envelope';
+import { useAudioPlayback } from '@/hooks/useAudioPlayback';
 import { canDecodeH264 } from '@/lib/decoders/pickDecoder';
 import { StatsOverlay } from './perf/StatsOverlay';
 import { MetricsPanel } from './perf/MetricsPanel';
@@ -61,6 +62,11 @@ export function DeviceViewer({ sessionId, deviceId, buildId, resetMode, onRecord
   // SimulatorViewer routes incoming binary frames to whichever viewer is mounted.
   const binaryFrameHandlerRef = useRef<BinaryFrameHandler | undefined>(undefined);
 
+  // Opt-in audio output (Android emulator first). Audio frames are codec-tagged and routed
+  // straight to Web Audio — they never enter the video FIFO/decoder path. Always-on playback;
+  // muting is delegated to the emulator's own volume keys. We only surface an on/off indicator.
+  const { pushFrame: pushAudioFrame, hasAudio, soundActive } = useAudioPlayback();
+
   const handleMessage = useCallback((msg: RelayMessage) => {
     if (msg.type === 'session:joined') {
       setJoined(true);
@@ -106,6 +112,12 @@ export function DeviceViewer({ sessionId, deviceId, buildId, resetMode, onRecord
 
   const handleBinaryFrame = useCallback((data: ArrayBuffer) => {
     const envelope = parseEnvelopeHeader(data);
+    // Audio is a separate pipeline: hand the PCM to Web Audio and return before touching the
+    // video FIFO/decoder. (It must not enter envelopeQueueRef — that's video-frame correlation.)
+    if (envelope && envelope.codec === CODEC_AUDIO) {
+      pushAudioFrame(data.slice(HEADER_SIZE));
+      return;
+    }
     // iOS H.264 presents asynchronously through a decoder surface; its viewer's
     // FrameLatencyTracker owns capturedAt/relayedAt correlation (via meta), so it
     // must not also go through this FIFO — a dropped frame would desync it forever.
@@ -118,7 +130,7 @@ export function DeviceViewer({ sessionId, deviceId, buildId, resetMode, onRecord
       ? { codec: envelope.codec, keyframe: envelope.keyframe, capturedAt: envelope.capturedAt, relayedAt: envelope.relayedAt }
       : undefined;
     binaryFrameHandlerRef.current?.(payload, meta);
-  }, []);
+  }, [pushAudioFrame]);
 
   const { send, connected } = useRelay(handleMessage, handleBinaryFrame);
   useLayoutEffect(() => { sendRef.current = send; });
@@ -176,7 +188,7 @@ export function DeviceViewer({ sessionId, deviceId, buildId, resetMode, onRecord
   return (
     <>
       {iosChrome && <IOSViewer {...commonProps} chrome={iosChrome} perfHookRef={devPerfHookRef} />}
-      {androidChrome && <AndroidViewer {...commonProps} androidButtons={androidChrome.buttons} screenWidth={androidChrome.screenWidth} screenHeight={androidChrome.screenHeight} cornerRadius={androidChrome.cornerRadius} perfHookRef={devPerfHookRef} />}
+      {androidChrome && <AndroidViewer {...commonProps} androidButtons={androidChrome.buttons} screenWidth={androidChrome.screenWidth} screenHeight={androidChrome.screenHeight} cornerRadius={androidChrome.cornerRadius} perfHookRef={devPerfHookRef} audio={{ hasAudio, soundActive }} />}
       {import.meta.env.DEV && perfMode && perfVisible && (
         <>
           <StatsOverlay perfHookRef={statsRef} />

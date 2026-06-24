@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { parseEnvelopeHeader, HEADER_SIZE, CODEC_JPEG, CODEC_H264 } from '@/lib/envelope'
+import { parseEnvelopeHeader, HEADER_SIZE, CODEC_JPEG, CODEC_H264, CODEC_AUDIO } from '@/lib/envelope'
 
 // Builds a TFFE envelope frame for testing. flags = byte 5.
 function makeFrame(opts: {
@@ -52,6 +52,12 @@ describe('parseEnvelopeHeader', () => {
   it('normalizes a stray keyframe bit on a JPEG frame to false', () => {
     const env = parseEnvelopeHeader(makeFrame({ flags: 0x02 }))
     expect(env?.codec).toBe(CODEC_JPEG)
+    expect(env?.keyframe).toBe(false)
+  })
+
+  it('reports audio when bit2 is set, with keyframe false', () => {
+    const env = parseEnvelopeHeader(makeFrame({ flags: 0x04 }))
+    expect(env?.codec).toBe(CODEC_AUDIO)
     expect(env?.keyframe).toBe(false)
   })
 

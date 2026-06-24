@@ -9,7 +9,7 @@ import { RelayServer } from '../RelayServer'
 import { initDb, closeDb, getDb } from '../db'
 import { hashPat } from '../middleware/auth'
 import type { RelayMessage } from '../types'
-import { writeEnvelopeHeader, HEADER_SIZE } from '@tapflowio/agent-core/utils'
+import { writeEnvelopeHeader, HEADER_SIZE, CODEC_AUDIO } from '@tapflowio/agent-core/utils'
 
 // Sends a raw HTTP request, bypassing client-side URL normalization.
 const rawHttpGet = (targetPort: number, rawPath: string): Promise<number> =>
@@ -446,6 +446,44 @@ describe('RelayServer', () => {
     expect(relayedAt).toBeLessThanOrEqual(afterSend + 50)
     // payload bytes preserved
     expect(received.subarray(HEADER_SIZE)).toEqual(Buffer.from([0xFF, 0xD8]))
+
+    agent.close()
+    browser.close()
+    streamWs.close()
+  })
+
+  it('relay forwards CODEC_AUDIO frames to browser (audio routing, relayedAt patched)', async () => {
+    const devices = [{ id: 'devA', name: 'iPhone A', platform: 'ios', status: 'shutdown' }]
+    const agent = new WebSocket(`ws://localhost:${port}`)
+    await waitForOpen(agent)
+    agent.send(JSON.stringify({ type: 'agent:register', devices }))
+    const { registeredSessions } = await waitForMessage(agent)
+    const sessionId = registeredSessions![0].sessionId
+
+    const browser = new WebSocket(`ws://localhost:${port}`)
+    browser.binaryType = 'nodebuffer'
+    await waitForOpen(browser)
+    browser.send(JSON.stringify({ type: 'session:start', sessionId }))
+    await waitForMessage(browser) // session:joined
+
+    const streamWs = new WebSocket(`ws://localhost:${port}`)
+    await waitForOpen(streamWs)
+    streamWs.send(JSON.stringify({ type: 'stream:register', sessionId }))
+    await waitForMessage(streamWs) // stream:registered
+
+    const pcm = Buffer.from([0x11, 0x22, 0x33, 0x44])
+    const audioFrame = writeEnvelopeHeader(pcm, Date.now() - 5, { codec: CODEC_AUDIO })
+
+    const framePromise = new Promise<Buffer>((r) =>
+      browser.once('message', (d, isBinary) => { if (isBinary) r(d as Buffer) })
+    )
+    const beforeSend = Date.now()
+    streamWs.send(audioFrame)
+    const received = await framePromise
+
+    // On a near-empty socket the yielding audio sender forwards: payload intact + relayedAt patched.
+    expect(received.subarray(HEADER_SIZE)).toEqual(pcm)
+    expect(Number(received.readBigUInt64BE(14))).toBeGreaterThanOrEqual(beforeSend)
 
     agent.close()
     browser.close()

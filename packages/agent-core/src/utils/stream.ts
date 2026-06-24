@@ -26,6 +26,30 @@ export function sendBinaryWithBackpressure(
   return true
 }
 
+// Audio rides the SAME browser socket as video (codec-tagged), so audio bytes also count
+// toward ws.bufferedAmount — which the video keyframe-aware sender reads to decide backpressure.
+// To guarantee audio NEVER degrades video, audio yields: it only sends when the socket is
+// near-empty (below this ceiling), and drops otherwise. The ceiling sits far below the video
+// threshold (1 MB), so a sent audio frame can't push the socket near video's backpressure point.
+// A dropped audio frame is a brief glitch — always cheaper than stalling video.
+export const AUDIO_BUFFER_CEILING_BYTES = 65_536 // 64 KB
+
+// Returns true if the audio frame was sent, false if dropped (socket busy/closed).
+export function sendAudioYieldingToVideo(
+  ws: WebSocket,
+  data: Parameters<WebSocket['send']>[0],
+  onDrop: () => void,
+  ceiling: number = AUDIO_BUFFER_CEILING_BYTES,
+): boolean {
+  if (ws.readyState !== WebSocket.OPEN) return false
+  if (ws.bufferedAmount > ceiling) {
+    onDrop()
+    return false
+  }
+  ws.send(data, { binary: true })
+  return true
+}
+
 export interface KeyframeAwareSender {
   /**
    * Sends `frame`, or drops it to keep the H.264 reference chain intact.

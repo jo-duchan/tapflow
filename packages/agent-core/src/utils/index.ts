@@ -5,6 +5,8 @@ export {
   sendBinaryWithBackpressure,
   createKeyframeAwareSender,
   createRateLimitedDropWarn,
+  sendAudioYieldingToVideo,
+  AUDIO_BUFFER_CEILING_BYTES,
   DEFAULT_BACKPRESSURE_BYTES,
 } from './stream.js'
 export type { KeyframeAwareSender } from './stream.js'
@@ -13,6 +15,7 @@ export {
   HEADER_SIZE,
   CODEC_JPEG,
   CODEC_H264,
+  CODEC_AUDIO,
   hasEnvelope,
   writeEnvelopeHeader,
   readEnvelopeFlags,

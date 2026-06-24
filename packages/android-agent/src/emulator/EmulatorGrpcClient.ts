@@ -25,6 +25,17 @@ export interface ScreenshotStream {
   cancel(): void
 }
 
+/** One raw-PCM audio packet from the emulator's gRPC stream (S16LE / 44100 / Stereo). */
+export interface EmulatorAudioFrame {
+  audio: Buffer
+  timestamp: number   // epoch microseconds (AudioPacket.timestamp) — for loose A/V sync
+}
+
+export interface AudioStream {
+  frames: AsyncIterable<EmulatorAudioFrame>
+  cancel(): void
+}
+
 // --- proto message shapes (only the fields we touch; enums decoded as strings) ---
 interface ImageFormatMsg { format: string; width: number; height: number; display: number }
 interface ImageMsg {
@@ -32,6 +43,10 @@ interface ImageMsg {
   seq: number
   format: { rotation: { rotation: SkinRotation }; width: number; height: number }
 }
+// proto-loader is configured with enums:String and longs:String, so enum/uint64 fields
+// arrive (and are sent) as strings.
+interface AudioFormatMsg { samplingRate: number; channels: string; format: string; mode: string }
+interface AudioPacketMsg { format: AudioFormatMsg; timestamp: string; audio: Buffer }
 interface TouchMsg { x: number; y: number; identifier: number; pressure: number }
 interface TouchEventMsg { touches: TouchMsg[]; display: number }
 interface KeyboardEventMsg { codeType: string; eventType: string; keyCode?: number; key?: string; text?: string }
@@ -43,6 +58,7 @@ type UnaryCb = (err: Error | null) => void
 /** The subset of the generated EmulatorController stub we use. Injectable for tests. */
 export interface RawEmulatorController {
   streamScreenshot(format: ImageFormatMsg): ClientReadableStream<ImageMsg>
+  streamAudio(format: AudioFormatMsg): ClientReadableStream<AudioPacketMsg>
   sendTouch(event: TouchEventMsg, cb: UnaryCb): void
   sendKey(event: KeyboardEventMsg, cb: UnaryCb): void
   sendMouse(event: MouseEventMsg, cb: UnaryCb): void
@@ -104,6 +120,25 @@ export class EmulatorGrpcClient {
           rotation: msg.format.rotation.rotation,
           seq: msg.seq,
         }
+      }
+    }
+    return { frames: mapped(), cancel: () => call.cancel() }
+  }
+
+  /** Server-side streaming of raw PCM (S16LE / 44100 / Stereo). MODE_REAL_TIME so the
+   *  emulator overwrites stale audio if we fall behind — the freshest packet wins, never
+   *  blocking the emulator (matches the drop-old policy; audio must never backpressure video). */
+  streamAudio(opts: { samplingRate?: number } = {}): AudioStream {
+    const call = this.raw.streamAudio({
+      samplingRate: opts.samplingRate ?? 44100,
+      channels: 'Stereo',
+      format: 'AUD_FMT_S16',
+      mode: 'MODE_REAL_TIME',
+    })
+    async function* mapped(): AsyncGenerator<EmulatorAudioFrame> {
+      for await (const msg of call as AsyncIterable<AudioPacketMsg>) {
+        if (!msg.audio || msg.audio.length === 0) continue
+        yield { audio: msg.audio, timestamp: Number(msg.timestamp) }
       }
     }
     return { frames: mapped(), cancel: () => call.cancel() }
