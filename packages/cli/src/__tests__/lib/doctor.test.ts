@@ -2,9 +2,11 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 
 vi.mock('node:child_process')
 vi.mock('node:fs')
+vi.mock('node:net')
 
 import { execSync, spawnSync } from 'node:child_process'
 import { existsSync } from 'node:fs'
+import { createServer } from 'node:net'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { runDoctorChecks } from '../../lib/doctor.js'
@@ -13,6 +15,7 @@ const mockExistsSync = vi.mocked(existsSync)
 
 const mockExecSync = vi.mocked(execSync)
 const mockSpawnSync = vi.mocked(spawnSync)
+const mockCreateServer = vi.mocked(createServer)
 const sdkmanagerLinux = join(homedir(), 'Android', 'Sdk', 'cmdline-tools', 'latest', 'bin', 'sdkmanager')
 const emulatorLinux = join(homedir(), 'Android', 'Sdk', 'emulator', 'emulator')
 
@@ -31,10 +34,32 @@ const simctlNoneBooted = JSON.stringify({
   },
 })
 
+function mockPortAvailable(available: boolean): void {
+  mockCreateServer.mockImplementation(() => {
+    const handlers = new Map<string, () => void>()
+    const server = {
+      once: vi.fn((event: string, handler: () => void) => {
+        handlers.set(event, handler)
+        return server
+      }),
+      listen: vi.fn(() => {
+        handlers.get(available ? 'listening' : 'error')?.()
+        return server
+      }),
+      close: vi.fn((handler?: () => void) => {
+        handler?.()
+        return server
+      }),
+    }
+    return server as never
+  })
+}
+
 describe('runDoctorChecks', () => {
   beforeEach(() => {
     vi.resetAllMocks()
     mockExistsSync.mockReturnValue(false)
+    mockPortAvailable(true)
   })
   afterEach(() => {
     vi.restoreAllMocks()
@@ -115,12 +140,34 @@ describe('runDoctorChecks', () => {
   it('Node 버전 < 20이면 실패 + detail 포함', async () => {
     vi.spyOn(process, 'platform', 'get').mockReturnValue('linux')
     vi.spyOn(process, 'version', 'get').mockReturnValue('v18.0.0')
+    mockPortAvailable(true)
     mockExecSync.mockImplementation(() => { throw new Error('not found') })
 
     const result = await runDoctorChecks()
     const nodeCheck = result.common.find((c) => c.label.includes('Node'))
     expect(nodeCheck?.ok).toBe(false)
     expect(nodeCheck?.detail).toContain('Node ≥ 20')
+  })
+
+  it('Port 4000이 사용 가능하면 common 진단에서 ok로 표시', async () => {
+    vi.spyOn(process, 'platform', 'get').mockReturnValue('linux')
+    mockPortAvailable(true)
+    mockExecSync.mockImplementation(() => { throw new Error('not found') })
+
+    const result = await runDoctorChecks()
+    const portCheck = result.common.find((c) => c.label === 'Port 4000')
+    expect(portCheck).toEqual({ label: 'Port 4000', ok: true })
+  })
+
+  it('Port 4000이 점유되어 있으면 해결 명령을 포함해 실패로 표시', async () => {
+    vi.spyOn(process, 'platform', 'get').mockReturnValue('linux')
+    mockPortAvailable(false)
+    mockExecSync.mockImplementation(() => { throw new Error('not found') })
+
+    const result = await runDoctorChecks()
+    const portCheck = result.common.find((c) => c.label === 'Port 4000')
+    expect(portCheck?.ok).toBe(false)
+    expect(portCheck?.detail).toBe('Port 4000 is already in use. Run: lsof -ti:4000 | xargs kill')
   })
 
   it('booted 시뮬레이터가 있으면 이름 포함', async () => {

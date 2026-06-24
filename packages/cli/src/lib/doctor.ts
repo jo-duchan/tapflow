@@ -1,5 +1,6 @@
 import { execSync, spawnSync } from 'node:child_process'
 import { existsSync } from 'node:fs'
+import { createServer } from 'node:net'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 
@@ -23,7 +24,7 @@ export async function runDoctorChecks(platform?: string): Promise<DoctorResult> 
   const wantAndroid = platform === 'android' || !platform
 
   return {
-    common: [checkNodeVersion()],
+    common: [checkNodeVersion(), await checkPort(4000)],
     ios: wantIos ? buildIosChecks(isMac) : null,
     android: wantAndroid ? buildAndroidChecks(resolveAdb()) : null,
   }
@@ -151,6 +152,24 @@ function checkNodeVersion(): DoctorCheck {
     ok,
     detail: ok ? undefined : 'Node ≥ 20 required. Install from https://nodejs.org/',
   }
+}
+
+async function checkPort(port: number): Promise<DoctorCheck> {
+  const ok = await isPortAvailable(port)
+  return {
+    label: `Port ${port}`,
+    ok,
+    detail: ok ? undefined : `Port ${port} is already in use. Run: lsof -ti:${port} | xargs kill`,
+  }
+}
+
+function isPortAvailable(port: number): Promise<boolean> {
+  return new Promise((resolve) => {
+    const server = createServer()
+    server.once('error', () => resolve(false))
+    server.once('listening', () => server.close(() => resolve(true)))
+    server.listen(port, '127.0.0.1')
+  })
 }
 
 export interface AdbResolution {
