@@ -73,8 +73,8 @@ export async function cmdSetup(platform?: string): Promise<void> {
   }
   banner(allReady ? 'success' : 'error', allReady ? 'SETUP COMPLETE' : 'SETUP INCOMPLETE', summary)
 
-  // env를 방금 등록했으면 현재 쉘엔 반영 안 됨 → 새 터미널 안내(doctor가 PATH 경고를 내지 않도록).
+  // env가 rc에 있지만 현재 쉘엔 반영 안 됨 → 새 터미널 안내(doctor가 PATH 경고를 내지 않도록).
   if (needsNewShell) {
-    step('Open a new terminal (or run: exec $SHELL), then `tapflow doctor` to verify — ANDROID_HOME/PATH was just added to your shell config.')
+    step("Open a new terminal (or run: exec $SHELL), then `tapflow doctor` to verify — ANDROID_HOME/PATH is configured in your shell, but the current session hasn't loaded it yet.")
   }
 }

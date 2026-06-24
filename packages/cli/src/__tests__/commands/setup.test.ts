@@ -123,7 +123,7 @@ describe('cmdSetup', () => {
 
   it('env를 방금 등록(detail에 new terminal)하면 새 터미널 안내 출력', async () => {
     mockRunSetupAndroid.mockResolvedValue([
-      { label: 'Android SDK installed', ok: true, detail: 'SDK at /x. Added ANDROID_HOME/PATH to ~/.zshrc — open a new terminal (or run: exec zsh) to use them.' },
+      { label: 'Android SDK installed', ok: true, detail: 'SDK at /x. ANDROID_HOME/PATH is configured in ~/.zshrc — open a new terminal (or run: exec zsh) to use them.' },
     ])
 
     await cmdSetup('android')
