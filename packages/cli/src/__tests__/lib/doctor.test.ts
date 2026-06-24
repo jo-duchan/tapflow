@@ -156,7 +156,7 @@ describe('runDoctorChecks', () => {
 
     const result = await runDoctorChecks()
     const portCheck = result.common.find((c) => c.label === 'Port 4000')
-    expect(portCheck).toEqual({ label: 'Port 4000', ok: true })
+    expect(portCheck).toStrictEqual({ label: 'Port 4000', ok: true, detail: undefined })
   })
 
   it('Port 4000이 점유되어 있으면 해결 명령을 포함해 실패로 표시', async () => {
