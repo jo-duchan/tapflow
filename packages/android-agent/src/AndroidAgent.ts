@@ -27,6 +27,7 @@ import { AndroidTouchHelper } from './AndroidTouchHelper.js'
 import { ScrcpySession } from './scrcpy/ScrcpySession.js'
 import type { ScrcpyFrame } from './scrcpy/ScrcpyVideo.js'
 import { EmulatorGrpcClient, type AudioStream } from './emulator/EmulatorGrpcClient.js'
+import { discoverGrpcPort, isTcpPortFree } from './emulator/discovery.js'
 import { EmulatorVideo } from './emulator/EmulatorVideo.js'
 
 const logger = createLogger('android-agent')
@@ -126,6 +127,7 @@ interface DeviceState {
   scrcpySession: ScrcpySession | null
   emulatorVideo: EmulatorVideo | null
   emulatorAudio: AudioStream | null   // opt-in gRPC audio stream (TAPFLOW_ANDROID_AUDIO=1); null when off
+  grpcPort: number | null             // gRPC port this device's emulator was launched with; null if we didn't launch it
   grpcClient: EmulatorGrpcClient | null
   cornerRadius: number   // baked rounded-corner radius as a fraction of width (0 = square)
   secureContext: boolean // viewer context → downscale tier (native / 1280 / 1000)
@@ -312,6 +314,7 @@ export class AndroidAgent implements DeviceAgent {
         scrcpySession: null,
         emulatorVideo: null,
         emulatorAudio: null,
+        grpcPort: null,
         grpcClient: null,
         cornerRadius: 0,
         secureContext: false,
@@ -442,8 +445,19 @@ export class AndroidAgent implements DeviceAgent {
   // is unsecured; without it the emulator opens its DEFAULT gRPC port with token auth, which our
   // unauthenticated client can't use. Launches are always AVDs (emulators), so default to gRPC
   // unless explicitly forced to scrcpy. undefined = don't open gRPC.
-  private grpcPort(): number | undefined {
-    return this.forceScrcpy() ? undefined : (Number(process.env.TAPFLOW_ANDROID_GRPC_PORT) || 8554)
+  // Ports reserved between pick() and the emulator actually binding them — avoids two concurrent
+  // boots racing onto the same port before either emulator has claimed it.
+  private pendingGrpcPorts = new Set<number>()
+
+  // A FREE gRPC port for a new emulator. Each emulator must get its own port — a shared fixed 8554
+  // makes a second emulator collide and every session ends up streaming the first emulator (#stream-bleed).
+  private async pickFreeGrpcPort(): Promise<number> {
+    const base = Number(process.env.TAPFLOW_ANDROID_GRPC_PORT) || 8554
+    for (let p = base; p < base + 200; p += 2) { // emulators conventionally use even ports
+      if (this.pendingGrpcPorts.has(p)) continue
+      if (await isTcpPortFree(p)) { this.pendingGrpcPorts.add(p); return p }
+    }
+    throw new PlatformError('No free gRPC port available for the emulator')
   }
 
   // Opt-in audio output (default off). Gates both emulator launch (`-no-audio` removal) and the
@@ -566,7 +580,9 @@ export class AndroidAgent implements DeviceAgent {
   // the shared pump. Input is routed to the gRPC client in handleRelayMessage. No auto-restart —
   // the backend is torn down with the device state.
   private async startGrpcVideoStream(state: DeviceState, streamWs: WebSocket, serial: string): Promise<void> {
-    const port = this.grpcPort() ?? 8554
+    // Connect to THIS emulator's port: the one we launched it with, else the port it advertises in
+    // its discovery .ini (covers externally-booted emulators), else the legacy default.
+    const port = state.grpcPort ?? discoverGrpcPort(serial) ?? 8554
     // Downscale box (longest side), server-side resize. Per-session tier from the viewer context
     // (secure→native / LAN-HTTP→1280 / external→1000); TAPFLOW_ANDROID_MAX_SIZE | TAPFLOW_MAX_SIZE
     // is a hard override.
@@ -711,12 +727,20 @@ export class AndroidAgent implements DeviceAgent {
       if (!target) throw new PlatformError(`Device not found: ${avdId}`)
 
       if (target.status !== 'booted') {
-        this.launcher.launch(avdName, this.grpcPort(), { audio: this.audioEnabled() })
-        const serial = await this.launcher.findSerial(avdName)
-        if (seq !== state.bootSeq) return
-        await this.launcher.waitForBoot(serial)
-        if (seq !== state.bootSeq) return
-        this.adb.setSerial(avdId, serial)
+        // One unique gRPC port per emulator (undefined when forced to scrcpy → no `-grpc`).
+        const grpcPort = this.forceScrcpy() ? undefined : await this.pickFreeGrpcPort()
+        state.grpcPort = grpcPort ?? null
+        try {
+          this.launcher.launch(avdName, grpcPort, { audio: this.audioEnabled() })
+          const serial = await this.launcher.findSerial(avdName)
+          if (seq !== state.bootSeq) return
+          await this.launcher.waitForBoot(serial)
+          if (seq !== state.bootSeq) return
+          this.adb.setSerial(avdId, serial)
+        } finally {
+          // The emulator now holds the port (or boot failed) — drop the reservation either way.
+          if (grpcPort !== undefined) this.pendingGrpcPorts.delete(grpcPort)
+        }
       }
 
       const refreshed = await this.adb.listDevices()
