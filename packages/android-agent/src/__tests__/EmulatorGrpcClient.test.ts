@@ -16,9 +16,14 @@ function img(image: Buffer, width: number, height: number, rotation = 'PORTRAIT'
   return { image, seq, format: { rotation: { rotation }, width, height } }
 }
 
+function pkt(audio: Buffer, timestamp: string) {
+  return { format: { samplingRate: '44100', channels: 'Stereo', format: 'AUD_FMT_S16', mode: 'MODE_REAL_TIME' }, timestamp, audio }
+}
+
 function makeRaw(overrides: Partial<RawEmulatorController> = {}): RawEmulatorController {
   return {
     streamScreenshot: vi.fn(),
+    streamAudio: vi.fn(),
     sendTouch: vi.fn((_e, cb) => cb(null)),
     sendKey: vi.fn((_e, cb) => cb(null)),
     sendMouse: vi.fn((_e, cb) => cb(null)),
@@ -66,6 +71,37 @@ describe('EmulatorGrpcClient', () => {
     const call = fakeCall([])
     const client = new EmulatorGrpcClient('x', makeRaw({ streamScreenshot: (() => call) as never }))
     const stream = client.streamScreenshot()
+    stream.cancel()
+    expect(call.cancel).toHaveBeenCalledOnce()
+  })
+
+  it('requests S16/44100/Stereo real-time audio, maps packets, skips empty, converts us timestamp', async () => {
+    const a = Buffer.from([1, 2, 3, 4])
+    const b = Buffer.from([5, 6, 7, 8])
+    const call = fakeCall([
+      pkt(Buffer.alloc(0), '1000'),  // empty packet — must be skipped
+      pkt(a, '2000'),
+      pkt(b, '3000'),
+    ])
+    const streamAudio = vi.fn(() => call)
+    const client = new EmulatorGrpcClient('x', makeRaw({ streamAudio: streamAudio as never }))
+
+    const { frames } = client.streamAudio()
+    const out = []
+    for await (const f of frames) out.push(f)
+
+    expect(streamAudio).toHaveBeenCalledWith({
+      samplingRate: 44100, channels: 'Stereo', format: 'AUD_FMT_S16', mode: 'MODE_REAL_TIME',
+    })
+    expect(out).toHaveLength(2)
+    expect(out[0]).toEqual({ audio: a, timestamp: 2000 })
+    expect(out[1]).toEqual({ audio: b, timestamp: 3000 })
+  })
+
+  it('streamAudio cancel() cancels the underlying call', () => {
+    const call = fakeCall([])
+    const client = new EmulatorGrpcClient('x', makeRaw({ streamAudio: (() => call) as never }))
+    const stream = client.streamAudio()
     stream.cancel()
     expect(call.cancel).toHaveBeenCalledOnce()
   })

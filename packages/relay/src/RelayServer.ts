@@ -21,11 +21,13 @@ import { createLogger } from '@tapflowio/agent-core'
 import {
   createKeyframeAwareSender,
   createRateLimitedDropWarn,
+  sendAudioYieldingToVideo,
   DEFAULT_BACKPRESSURE_BYTES,
   hasEnvelope,
   patchRelayedAt,
   readEnvelopeFlags,
   CODEC_JPEG,
+  CODEC_AUDIO,
 } from '@tapflowio/agent-core/utils'
 import type { KeyframeAwareSender } from '@tapflowio/agent-core/utils'
 
@@ -108,6 +110,8 @@ export class RelayServer {
   // Liveness per socket for the heartbeat sweep. WeakMap → no manual cleanup on close (GC handles it).
   private wsAlive = new WeakMap<WebSocket, boolean>()
   private dropHandlers = new Map<string, () => void>()
+  // Per-session throttled drop-warn for audio (kept separate so audio drops don't mask video drops in logs).
+  private audioDropHandlers = new Map<string, () => void>()
   // Per-session keyframe-aware sender: drops to the next keyframe under backpressure (no H.264 P-frame tearing).
   private droppers = new Map<string, KeyframeAwareSender>()
   // Per-session throttled "request an IDR from the agent" callbacks (drop recovery).
@@ -381,6 +385,21 @@ export class RelayServer {
         // Binary frames arrive on the dedicated stream WS, route to the session's browser
         const session = this.sessions.getByStreamSocket(ws)
         if (session?.browserSocket) {
+          const frameBuf = data as Buffer
+          // Audio rides the same socket (codec-tagged). Route it through a sender that YIELDS to
+          // video — it drops audio unless the socket is near-empty, so audio never inflates
+          // bufferedAmount enough to trip the video backpressure path. Must branch before the
+          // video dropper, which would (wrongly) treat audio as a droppable P-frame.
+          if (hasEnvelope(frameBuf) && readEnvelopeFlags(frameBuf).codec === CODEC_AUDIO) {
+            patchRelayedAt(frameBuf, Date.now())
+            let onAudioDrop = this.audioDropHandlers.get(session.id)
+            if (!onAudioDrop) {
+              onAudioDrop = createRateLimitedDropWarn(logger, `${session.id} audio`)
+              this.audioDropHandlers.set(session.id, onAudioDrop)
+            }
+            sendAudioYieldingToVideo(session.browserSocket, frameBuf, onAudioDrop)
+            return
+          }
           let onDrop = this.dropHandlers.get(session.id)
           if (!onDrop) {
             onDrop = createRateLimitedDropWarn(logger, session.id)
@@ -396,15 +415,14 @@ export class RelayServer {
             requestIdr = this.makeIdrRequester(session.id)
             this.idrRequesters.set(session.id, requestIdr)
           }
-          const frame = data as Buffer
           // JPEG and H.264 IDRs are resync points; only P-frames must wait for a keyframe after a drop.
           let isKeyframe = true
-          if (hasEnvelope(frame)) {
-            patchRelayedAt(frame, Date.now())
-            const flags = readEnvelopeFlags(frame)
+          if (hasEnvelope(frameBuf)) {
+            patchRelayedAt(frameBuf, Date.now())
+            const flags = readEnvelopeFlags(frameBuf)
             isKeyframe = flags.codec === CODEC_JPEG || flags.keyframe
           }
-          dropper.send(session.browserSocket, frame, this.backpressureBytes, isKeyframe, onDrop, requestIdr)
+          dropper.send(session.browserSocket, frameBuf, this.backpressureBytes, isKeyframe, onDrop, requestIdr)
         }
         return
       }
@@ -483,6 +501,7 @@ export class RelayServer {
         if (msg.sessionId) {
           this.sessions.remove(msg.sessionId)
           this.dropHandlers.delete(msg.sessionId)
+          this.audioDropHandlers.delete(msg.sessionId)
           this.droppers.delete(msg.sessionId)
           this.idrRequesters.delete(msg.sessionId)
         }
@@ -492,6 +511,7 @@ export class RelayServer {
         if (msg.sessionId) {
           this.sessions.clearBrowser(msg.sessionId)
           this.dropHandlers.delete(msg.sessionId)
+          this.audioDropHandlers.delete(msg.sessionId)
           this.droppers.delete(msg.sessionId)
           this.idrRequesters.delete(msg.sessionId)
         }

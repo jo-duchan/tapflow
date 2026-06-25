@@ -47,9 +47,10 @@ export function SimulatorInfoCard(props: SimulatorInfoCardProps) {
   // fps is intentionally low when screen is static (idle keep-alive ~10fps).
   // Use "active/idle" framing instead of red/green to avoid false alarm.
   const isActive = fps > 15;
-  const isIdle = fps > 0 && fps <= 15;
-  const dotColor = isActive ? '#10b981' : isIdle ? '#94a3b8' : 'transparent';
-  const stateLabel = isActive ? 'Active' : isIdle ? 'Idle' : null;
+  // fps 0 (fully static screen / between frames) is still idle, not a blank state — keep the gray
+  // dot and "Idle" label instead of hiding them.
+  const dotColor = isActive ? '#10b981' : '#94a3b8';
+  const stateLabel = isActive ? 'Active' : 'Idle';
   // Decode path is a stable per-browser capability; compute once, not per device card.
   const mode = useMemo(() => performanceMode(), []);
   const modeLabel = MODE_LABEL[mode];

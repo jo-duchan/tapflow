@@ -18,13 +18,16 @@ import {
   writeEnvelopeHeader,
   rewriteLowLatencySpsInFrame,
   CODEC_H264,
+  CODEC_AUDIO,
+  sendAudioYieldingToVideo,
 } from '@tapflowio/agent-core/utils'
 import { AdbWrapper } from './AdbWrapper.js'
 import { EmulatorLauncher } from './EmulatorLauncher.js'
 import { AndroidTouchHelper } from './AndroidTouchHelper.js'
 import { ScrcpySession } from './scrcpy/ScrcpySession.js'
 import type { ScrcpyFrame } from './scrcpy/ScrcpyVideo.js'
-import { EmulatorGrpcClient } from './emulator/EmulatorGrpcClient.js'
+import { EmulatorGrpcClient, type AudioStream } from './emulator/EmulatorGrpcClient.js'
+import { discoverGrpcPort, isTcpPortFree } from './emulator/discovery.js'
 import { EmulatorVideo } from './emulator/EmulatorVideo.js'
 
 const logger = createLogger('android-agent')
@@ -123,6 +126,8 @@ interface DeviceState {
   streamWs: WebSocket | null
   scrcpySession: ScrcpySession | null
   emulatorVideo: EmulatorVideo | null
+  emulatorAudio: AudioStream | null   // opt-in gRPC audio stream (TAPFLOW_ANDROID_AUDIO=1); null when off
+  grpcPort: number | null             // gRPC port this device's emulator was launched with; null if we didn't launch it
   grpcClient: EmulatorGrpcClient | null
   cornerRadius: number   // baked rounded-corner radius as a fraction of width (0 = square)
   secureContext: boolean // viewer context → downscale tier (native / 1280 / 1000)
@@ -308,6 +313,8 @@ export class AndroidAgent implements DeviceAgent {
         streamWs: null,
         scrcpySession: null,
         emulatorVideo: null,
+        emulatorAudio: null,
+        grpcPort: null,
         grpcClient: null,
         cornerRadius: 0,
         secureContext: false,
@@ -390,6 +397,8 @@ export class AndroidAgent implements DeviceAgent {
     state.scrcpySession = null
     state.emulatorVideo?.stop()
     state.emulatorVideo = null
+    state.emulatorAudio?.cancel()
+    state.emulatorAudio = null
     state.grpcClient?.close()
     state.grpcClient = null
     state.cornerRadius = 0
@@ -436,8 +445,33 @@ export class AndroidAgent implements DeviceAgent {
   // is unsecured; without it the emulator opens its DEFAULT gRPC port with token auth, which our
   // unauthenticated client can't use. Launches are always AVDs (emulators), so default to gRPC
   // unless explicitly forced to scrcpy. undefined = don't open gRPC.
-  private grpcPort(): number | undefined {
-    return this.forceScrcpy() ? undefined : (Number(process.env.TAPFLOW_ANDROID_GRPC_PORT) || 8554)
+  // Ports reserved between pick() and the emulator actually binding them — avoids two concurrent
+  // boots racing onto the same port before either emulator has claimed it.
+  private pendingGrpcPorts = new Set<number>()
+
+  // A FREE gRPC port for a new emulator. Each emulator must get its own port — a shared fixed 8554
+  // makes a second emulator collide and every session ends up streaming the first emulator (#stream-bleed).
+  private async pickFreeGrpcPort(): Promise<number> {
+    const base = Number(process.env.TAPFLOW_ANDROID_GRPC_PORT) || 8554
+    for (let p = base; p < base + 200; p += 2) { // emulators conventionally use even ports
+      if (this.pendingGrpcPorts.has(p)) continue
+      // Reserve before the async probe so two concurrent boots can't both claim the same port.
+      this.pendingGrpcPorts.add(p)
+      let free = false
+      try {
+        free = await isTcpPortFree(p)
+        if (free) return p
+      } finally {
+        if (!free) this.pendingGrpcPorts.delete(p)
+      }
+    }
+    throw new PlatformError('No free gRPC port available for the emulator')
+  }
+
+  // Opt-in audio output (default off). Gates both emulator launch (`-no-audio` removal) and the
+  // gRPC streamAudio pump — both must read the same flag so the audio backend matches the stream.
+  private audioEnabled(): boolean {
+    return process.env.TAPFLOW_ANDROID_AUDIO === '1'
   }
 
   private async startVideoStream(state: DeviceState, streamWs: WebSocket): Promise<void> {
@@ -554,7 +588,9 @@ export class AndroidAgent implements DeviceAgent {
   // the shared pump. Input is routed to the gRPC client in handleRelayMessage. No auto-restart —
   // the backend is torn down with the device state.
   private async startGrpcVideoStream(state: DeviceState, streamWs: WebSocket, serial: string): Promise<void> {
-    const port = this.grpcPort() ?? 8554
+    // Connect to THIS emulator's port: the one we launched it with, else the port it advertises in
+    // its discovery .ini (covers externally-booted emulators), else the legacy default.
+    const port = state.grpcPort ?? discoverGrpcPort(serial) ?? 8554
     // Downscale box (longest side), server-side resize. Per-session tier from the viewer context
     // (secure→native / LAN-HTTP→1280 / external→1000); TAPFLOW_ANDROID_MAX_SIZE | TAPFLOW_MAX_SIZE
     // is a hard override.
@@ -596,6 +632,30 @@ export class AndroidAgent implements DeviceAgent {
         void this.restartVideoStream(state)
       }
     })
+
+    // Opt-in audio output, on the SAME gRPC client + stream socket as video. Best-effort: if it
+    // ends or errors it does NOT trigger a video restart — video owns the session lifecycle.
+    if (this.audioEnabled()) {
+      const audio = client.streamAudio()
+      state.emulatorAudio = audio
+      void this.pumpAudio(state, streamWs, audio)
+    }
+  }
+
+  // Forward raw-PCM audio frames to the relay on the shared stream socket. Uses the yielding sender,
+  // never the keyframe-aware video sender: audio must never inflate the socket buffer enough to make
+  // video's backpressure misfire. A dropped audio frame is a brief glitch; a stalled video isn't.
+  private async pumpAudio(state: DeviceState, streamWs: WebSocket, audio: AudioStream): Promise<void> {
+    const warnDrop = createRateLimitedDropWarn(logger, `${state.deviceId} audio`)
+    try {
+      for await (const f of audio.frames) {
+        if (streamWs.readyState !== WebSocket.OPEN) break
+        const frame = writeEnvelopeHeader(f.audio, Date.now(), { codec: CODEC_AUDIO })
+        sendAudioYieldingToVideo(streamWs, frame, warnDrop)
+      }
+    } catch {
+      // stream cancelled or ws closed — expected on teardown/restart
+    }
   }
 
   private async restartVideoStream(state: DeviceState): Promise<void> {
@@ -606,6 +666,8 @@ export class AndroidAgent implements DeviceAgent {
     state.scrcpySession = null
     state.emulatorVideo?.stop()
     state.emulatorVideo = null
+    state.emulatorAudio?.cancel()
+    state.emulatorAudio = null
     state.grpcClient?.close()
     state.grpcClient = null
     state.touchHelper?.stop()
@@ -673,12 +735,20 @@ export class AndroidAgent implements DeviceAgent {
       if (!target) throw new PlatformError(`Device not found: ${avdId}`)
 
       if (target.status !== 'booted') {
-        this.launcher.launch(avdName, this.grpcPort())
-        const serial = await this.launcher.findSerial(avdName)
-        if (seq !== state.bootSeq) return
-        await this.launcher.waitForBoot(serial)
-        if (seq !== state.bootSeq) return
-        this.adb.setSerial(avdId, serial)
+        // One unique gRPC port per emulator (undefined when forced to scrcpy → no `-grpc`).
+        const grpcPort = this.forceScrcpy() ? undefined : await this.pickFreeGrpcPort()
+        state.grpcPort = grpcPort ?? null
+        try {
+          this.launcher.launch(avdName, grpcPort, { audio: this.audioEnabled() })
+          const serial = await this.launcher.findSerial(avdName)
+          if (seq !== state.bootSeq) return
+          await this.launcher.waitForBoot(serial)
+          if (seq !== state.bootSeq) return
+          this.adb.setSerial(avdId, serial)
+        } finally {
+          // The emulator now holds the port (or boot failed) — drop the reservation either way.
+          if (grpcPort !== undefined) this.pendingGrpcPorts.delete(grpcPort)
+        }
       }
 
       const refreshed = await this.adb.listDevices()

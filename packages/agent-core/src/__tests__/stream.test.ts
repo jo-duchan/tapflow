@@ -6,6 +6,8 @@ import {
   sendBinaryWithBackpressure,
   createKeyframeAwareSender,
   createRateLimitedDropWarn,
+  sendAudioYieldingToVideo,
+  AUDIO_BUFFER_CEILING_BYTES,
   DEFAULT_BACKPRESSURE_BYTES,
 } from '../utils/stream'
 import type { Logger } from '../logger'
@@ -216,6 +218,83 @@ describe('createKeyframeAwareSender — drop-to-keyframe', () => {
     const onWant = vi.fn()
     s.send(ws, frame, THRESHOLD, DELTA, vi.fn(), onWant)
     expect(onWant).not.toHaveBeenCalled()
+  })
+})
+
+describe('sendAudioYieldingToVideo — audio yields to video on a shared socket', () => {
+  const frame = Buffer.from('pcm')
+
+  it('소켓이 비어 있으면(near-empty) 오디오를 전송', () => {
+    const ws = makeMockWs({ bufferedAmount: 0 })
+    const onDrop = vi.fn()
+    expect(sendAudioYieldingToVideo(ws, frame, onDrop)).toBe(true)
+    expect(ws.send).toHaveBeenCalledOnce()
+    expect(ws.send).toHaveBeenCalledWith(frame, { binary: true })
+    expect(onDrop).not.toHaveBeenCalled()
+  })
+
+  it('핵심: 소켓 버퍼가 ceiling을 넘으면(=video가 버퍼 점유) 오디오를 드롭', () => {
+    const ws = makeMockWs({ bufferedAmount: AUDIO_BUFFER_CEILING_BYTES + 1 })
+    const onDrop = vi.fn()
+    expect(sendAudioYieldingToVideo(ws, frame, onDrop)).toBe(false)
+    expect(ws.send).not.toHaveBeenCalled()
+    expect(onDrop).toHaveBeenCalledOnce()
+  })
+
+  it('ceiling 정확히까지는 전송(경계)', () => {
+    const ws = makeMockWs({ bufferedAmount: AUDIO_BUFFER_CEILING_BYTES })
+    expect(sendAudioYieldingToVideo(ws, frame, vi.fn())).toBe(true)
+    expect(ws.send).toHaveBeenCalledOnce()
+  })
+
+  it('닫힌 소켓이면 send/drop 둘 다 없음', () => {
+    const ws = makeMockWs({ readyState: 3, bufferedAmount: 0 })
+    const onDrop = vi.fn()
+    expect(sendAudioYieldingToVideo(ws, frame, onDrop)).toBe(false)
+    expect(ws.send).not.toHaveBeenCalled()
+    expect(onDrop).not.toHaveBeenCalled()
+  })
+
+  it('무손상 보장: ceiling은 video 백프레셔 임계(1MB)보다 한참 낮다', () => {
+    // Even with one audio frame on top, bufferedAmount stays ~ceiling+one frame — never the video threshold.
+    expect(AUDIO_BUFFER_CEILING_BYTES).toBeLessThan(DEFAULT_BACKPRESSURE_BYTES / 4)
+  })
+})
+
+// No-degradation gate (issue #259): audio and video share ONE socket (codec B). This pins the
+// invariant that audio yields to video — it can never be the cause of a video drop.
+describe('no-degradation invariant — audio never degrades video on a shared socket', () => {
+  const VIDEO_THRESHOLD = DEFAULT_BACKPRESSURE_BYTES // 1 MB
+  const frame = Buffer.from('x')
+  const KEY = true
+  const DELTA = false
+
+  it('partial backpressure (above audio ceiling, below video threshold): audio drops, video sends', () => {
+    // The socket has video bytes queued — not enough to backpressure video, but past the audio ceiling.
+    const ws = makeMockWs({ bufferedAmount: AUDIO_BUFFER_CEILING_BYTES + 1 })
+    const video = createKeyframeAwareSender()
+
+    const audioSent = sendAudioYieldingToVideo(ws, frame, vi.fn())
+    const videoSent = video.send(ws, frame, VIDEO_THRESHOLD, DELTA, vi.fn())
+
+    expect(audioSent).toBe(false) // audio yields
+    expect(videoSent).toBe(true)  // video unaffected
+  })
+
+  it('near-empty socket: both audio and video send (audio adds no harm when there is headroom)', () => {
+    const ws = makeMockWs({ bufferedAmount: 0 })
+    const video = createKeyframeAwareSender()
+    expect(sendAudioYieldingToVideo(ws, frame, vi.fn())).toBe(true)
+    expect(video.send(ws, frame, VIDEO_THRESHOLD, KEY, vi.fn())).toBe(true)
+  })
+
+  it('a sent audio frame cannot push the socket to the video backpressure point', () => {
+    // Worst case: audio sends at exactly the ceiling. Even a large PCM chunk on top stays far below
+    // the video threshold, so video never sees `full` because of audio.
+    const ws = makeMockWs({ bufferedAmount: AUDIO_BUFFER_CEILING_BYTES })
+    expect(sendAudioYieldingToVideo(ws, frame, vi.fn())).toBe(true)
+    const largestPlausibleAudioChunk = 16_384 // 16 KB ≫ a 20-30ms S16 stereo PCM frame
+    expect(AUDIO_BUFFER_CEILING_BYTES + largestPlausibleAudioChunk).toBeLessThan(VIDEO_THRESHOLD)
   })
 })
 

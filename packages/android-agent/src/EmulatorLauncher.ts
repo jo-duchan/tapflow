@@ -23,13 +23,26 @@ function getEmulatorPath(): string {
   return `${androidHome}/emulator/emulator`
 }
 
+export interface EmulatorLaunchOpts {
+  // Opt-in audio output; default off keeps `-no-audio` so the video-only path is unchanged.
+  audio?: boolean
+}
+
+/** Build the emulator CLI args. Pure + exported so the `-no-audio` gating is unit-testable. */
+export function buildEmulatorArgs(avdName: string, grpcPort?: number, opts?: EmulatorLaunchOpts): string[] {
+  const args = ['-avd', avdName]
+  if (!opts?.audio) args.push('-no-audio')
+  args.push('-no-snapshot', '-no-window', '-gpu', 'host')
+  if (grpcPort !== undefined) args.push('-grpc', String(grpcPort))
+  return args
+}
+
 export class EmulatorLauncher {
   /** `grpcPort`, when set, opens the emulator's unprotected localhost gRPC endpoint
    *  (`-grpc <port>`) for host-side screen capture + input — the same trust boundary as
    *  scrcpy's localhost ADB. Verified to work under `-no-window` headless. */
-  launch(avdName: string, grpcPort?: number): void {
-    const args = ['-avd', avdName, '-no-audio', '-no-snapshot', '-no-window', '-gpu', 'host']
-    if (grpcPort !== undefined) args.push('-grpc', String(grpcPort))
+  launch(avdName: string, grpcPort?: number, opts?: EmulatorLaunchOpts): void {
+    const args = buildEmulatorArgs(avdName, grpcPort, opts)
     const proc = spawn(getEmulatorPath(), args, {
       detached: true,
       stdio: 'ignore',

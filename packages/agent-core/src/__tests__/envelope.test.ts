@@ -4,6 +4,7 @@ import {
   TFFE_MAGIC,
   CODEC_JPEG,
   CODEC_H264,
+  CODEC_AUDIO,
   hasEnvelope,
   writeEnvelopeHeader,
   readEnvelopeFlags,
@@ -75,6 +76,16 @@ describe('writeEnvelopeHeader', () => {
     const result = writeEnvelopeHeader(Buffer.alloc(0), 0, { codec: CODEC_JPEG })
     expect(result[5] & 0x01).toBe(0)
   })
+
+  it('sets bit2 for the audio codec, leaving the H.264/keyframe bits clear', () => {
+    const result = writeEnvelopeHeader(Buffer.alloc(0), 0, { codec: CODEC_AUDIO })
+    expect(result[5]).toBe(0x04)
+  })
+
+  it('ignores keyframe for the audio codec (no keyframes in PCM audio)', () => {
+    const result = writeEnvelopeHeader(Buffer.alloc(0), 0, { codec: CODEC_AUDIO, keyframe: true })
+    expect(result[5]).toBe(0x04)
+  })
 })
 
 describe('readEnvelopeFlags', () => {
@@ -103,6 +114,17 @@ describe('readEnvelopeFlags', () => {
     const frame = writeEnvelopeHeader(Buffer.alloc(0), 0)
     frame[5] = 0x02 // keyframe bit set but codec bit clear (malformed)
     expect(readEnvelopeFlags(frame)).toEqual({ codec: CODEC_JPEG, keyframe: false })
+  })
+
+  it('reads the audio codec with keyframe normalized to false', () => {
+    const frame = writeEnvelopeHeader(Buffer.alloc(4), 1000, { codec: CODEC_AUDIO })
+    expect(readEnvelopeFlags(frame)).toEqual({ codec: CODEC_AUDIO, keyframe: false })
+  })
+
+  it('audio codec takes precedence and survives patchRelayedAt', () => {
+    const frame = writeEnvelopeHeader(Buffer.alloc(4), 1000, { codec: CODEC_AUDIO })
+    patchRelayedAt(frame, 2000)
+    expect(readEnvelopeFlags(frame)).toEqual({ codec: CODEC_AUDIO, keyframe: false })
   })
 })
 
