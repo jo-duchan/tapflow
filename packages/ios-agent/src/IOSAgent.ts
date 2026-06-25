@@ -363,6 +363,22 @@ export class IOSAgent implements DeviceAgent {
     }
   }
 
+  // Inject the audio-tap dylib at launch, but never let it break the app. A non-standard hardened-
+  // runtime build makes dyld reject the inserted dylib and the launch fails outright; on any failure
+  // of the injected launch, relaunch without injection so the app still runs (just without audio).
+  private async launchAppWithAudioFallback(
+    bundleId: string,
+    childEnv: Record<string, string> | undefined,
+  ): Promise<void> {
+    if (!childEnv) return this.simctl.launchApp(bundleId)
+    try {
+      await this.simctl.launchApp(bundleId, childEnv)
+    } catch (e) {
+      logger.warn(`audio injection launch failed for ${bundleId}, relaunching without audio capture: ${(e as Error).message}`)
+      await this.simctl.launchApp(bundleId)
+    }
+  }
+
   // Forward captured PCM to the relay on the shared stream socket via the yielding sender (audio must
   // never inflate the socket buffer enough to trip video's backpressure). Mirrors android-agent.pumpAudio.
   private async pumpAudio(state: DeviceState, streamWs: WebSocket, frames: ReadableStream<AudioFrame>): Promise<void> {
@@ -611,7 +627,7 @@ export class IOSAgent implements DeviceAgent {
         const { bundleId } = msg.payload as { bundleId: string }
         const sessionId = msg.sessionId
         const childEnv = this.audioLaunchEnv(sessionId ? this.deviceStates.get(sessionId) : undefined)
-        this.simctl.launchApp(bundleId, childEnv)
+        this.launchAppWithAudioFallback(bundleId, childEnv)
           .then(() => this.ws?.send(JSON.stringify({ type: 'app:launch-done', sessionId })))
           .catch((e: unknown) => {
             const message = e instanceof Error ? e.message : String(e)

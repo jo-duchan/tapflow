@@ -170,6 +170,41 @@ describe('IOSAgent', () => {
       expect(simctl.launchApp).toHaveBeenCalledWith('com.example.app')
     })
 
+    // The audio-tap dylib is injected at launch via SIMCTL_CHILD_DYLD_INSERT_LIBRARIES. A non-standard
+    // hardened-runtime build makes dyld reject it and the launch fails outright — audio must never break
+    // the app, so the injected launch falls back to a plain relaunch.
+    type WithFallback = { launchAppWithAudioFallback(b: string, e?: Record<string, string>): Promise<void> }
+    const audioEnv = { SIMCTL_CHILD_DYLD_INSERT_LIBRARIES: '/x/audio-tap.dylib', SIMCTL_CHILD_TAPFLOW_AUDIO_PORT: '5123' }
+
+    it('relaunches without injection when the injected launch fails (e.g. hardened build rejects the dylib)', async () => {
+      const simctl = mockSimctl()
+      ;(simctl.launchApp as ReturnType<typeof vi.fn>).mockImplementation(async (_b: string, childEnv?: unknown) => {
+        if (childEnv) throw new Error('dyld: cannot load (library validation)')
+        return undefined
+      })
+      const agent = new IOSAgent({}, simctl)
+      await (agent as unknown as WithFallback).launchAppWithAudioFallback('com.example.app', audioEnv)
+      expect(simctl.launchApp).toHaveBeenNthCalledWith(1, 'com.example.app', audioEnv)
+      expect(simctl.launchApp).toHaveBeenNthCalledWith(2, 'com.example.app')
+    })
+
+    it('does not retry when there is no injection env (audio off)', async () => {
+      const simctl = mockSimctl()
+      const agent = new IOSAgent({}, simctl)
+      await (agent as unknown as WithFallback).launchAppWithAudioFallback('com.example.app', undefined)
+      expect(simctl.launchApp).toHaveBeenCalledTimes(1)
+      expect(simctl.launchApp).toHaveBeenCalledWith('com.example.app')
+    })
+
+    it('surfaces the error when the no-injection relaunch also fails (real launch failure, not injection)', async () => {
+      const simctl = mockSimctl()
+      ;(simctl.launchApp as ReturnType<typeof vi.fn>).mockRejectedValue(new Error('No such app'))
+      const agent = new IOSAgent({}, simctl)
+      await expect(
+        (agent as unknown as WithFallback).launchAppWithAudioFallback('com.example.app', audioEnv),
+      ).rejects.toThrow('No such app')
+    })
+
     it('stream throws ValidationError before any device session is available', () => {
       const agent = new IOSAgent({}, mockSimctl())
       expect(() => agent.stream()).toThrow(ValidationError)
