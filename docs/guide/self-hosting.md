@@ -276,7 +276,9 @@ Deploying the relay to fly.io, Railway, or similar services puts the agent→rel
 
 ## Backup
 
-The relay keeps its durable state under `local.dataDir` in `tapflow.config.json` (default: `.tapflow-data/`). Back up this directory before OS upgrades, relay migration, or any long-running team pilot.
+The relay keeps its durable state under the resolved data directory (default: `.tapflow-data/`; `TAPFLOW_DATA_DIR` can override `local.dataDir`). Back up that directory before OS upgrades, relay migration, or any long-running team pilot.
+
+Important paths below use the default directory name. If you configured a different data directory, replace `.tapflow-data/` with that path.
 
 Important paths:
 
@@ -290,7 +292,7 @@ Important paths:
 
 ### Recommended: Litestream for SQLite
 
-[Litestream](https://litestream.io/) streams SQLite WAL changes to object storage such as AWS S3, Cloudflare R2, Backblaze B2, or any S3-compatible endpoint. It does not require tapflow schema changes or a separate database server.
+[Litestream](https://litestream.io/) is an external process; tapflow does not bundle, install, or supervise it. Litestream streams SQLite WAL changes to object storage such as AWS S3, Cloudflare R2, Backblaze B2, or any S3-compatible endpoint. It does not require tapflow schema changes or a separate database server.
 
 Install Litestream on the relay host:
 
