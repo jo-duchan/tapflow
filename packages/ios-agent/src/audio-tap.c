@@ -49,24 +49,48 @@ _interpose_aqeb __attribute__((section("__DATA,__interpose"))) =
 // MultiChannelMixer (mainMixerNode) whose render DOES go through AudioUnitRender — and the mixer's
 // output is the final mix. We lock onto the first mixer instance (avoids interleaving submixes) and
 // convert its Float32 planar output to the canonical S16 interleaved stereo.
+#define DST_SR 44100.0          // canonical rate the dashboard plays at (matches android-agent)
+#define CONV_CAP 8192           // g_conv capacity in int16 → 4096 stereo frames
+
 static AudioUnit g_mixerUnit = NULL;
-static int16_t g_conv[8192]; // up to 4096 frames stereo; mixer renders are ~512 frames
+static int16_t g_conv[CONV_CAP];
+static double g_srcSR = 0;      // the mixer's output sample rate, queried once (0 = not yet known)
 
 static inline int16_t f2s16(float f) {
     if (f > 1.0f) f = 1.0f; else if (f < -1.0f) f = -1.0f;
     return (int16_t)(f * 32767.0f);
 }
 
+// Convert one mixer render (Float32 planar, g_srcSR) to canonical S16 interleaved stereo @ 44100.
+// Resamples with linear interpolation when g_srcSR != 44100 (e.g. a 48 kHz app), so the dashboard's
+// fixed-44100 playback isn't pitch-shifted.
 static void send_mixer(const AudioBufferList *io, UInt32 frames) {
-    if (g_sock < 0 || io->mNumberBuffers == 0) return;
-    if (frames * 2 > (UInt32)(sizeof(g_conv) / sizeof(g_conv[0]))) return; // bound the static buffer
+    if (g_sock < 0 || io->mNumberBuffers == 0 || g_srcSR <= 0) return;
     const float *L = (const float *)io->mBuffers[0].mData;
     const float *R = (io->mNumberBuffers > 1) ? (const float *)io->mBuffers[1].mData : L; // mono → dup
-    for (UInt32 i = 0; i < frames; i++) {
-        g_conv[2 * i]     = f2s16(L[i]);
-        g_conv[2 * i + 1] = f2s16(R[i]);
+
+    if (g_srcSR == DST_SR) {
+        if (frames * 2 > CONV_CAP) return;
+        for (UInt32 i = 0; i < frames; i++) {
+            g_conv[2 * i]     = f2s16(L[i]);
+            g_conv[2 * i + 1] = f2s16(R[i]);
+        }
+        send_frame(g_conv, frames * 2 * sizeof(int16_t));
+        return;
     }
-    send_frame(g_conv, frames * 2 * sizeof(int16_t));
+
+    const double ratio = DST_SR / g_srcSR; // out frames per in frame
+    UInt32 outFrames = (UInt32)(frames * ratio);
+    if (outFrames * 2 > CONV_CAP) outFrames = CONV_CAP / 2;
+    for (UInt32 j = 0; j < outFrames; j++) {
+        const double srcPos = j / ratio;            // position in the source buffer
+        const UInt32 i0 = (UInt32)srcPos;
+        const UInt32 i1 = (i0 + 1 < frames) ? i0 + 1 : i0;
+        const float frac = (float)(srcPos - i0);
+        g_conv[2 * j]     = f2s16(L[i0] + (L[i1] - L[i0]) * frac);
+        g_conv[2 * j + 1] = f2s16(R[i0] + (R[i1] - R[i0]) * frac);
+    }
+    send_frame(g_conv, outFrames * 2 * sizeof(int16_t));
 }
 
 static OSStatus tap_AudioUnitRender(
@@ -78,7 +102,15 @@ static OSStatus tap_AudioUnitRender(
         AudioComponent c = AudioComponentInstanceGetComponent(inUnit);
         AudioComponentDescription d;
         if (c && AudioComponentGetDescription(c, &d) == noErr && d.componentType == kAudioUnitType_Mixer) {
-            if (g_mixerUnit == NULL) g_mixerUnit = inUnit;
+            if (g_mixerUnit == NULL) {
+                g_mixerUnit = inUnit;
+                AudioStreamBasicDescription asbd; UInt32 sz = sizeof(asbd);
+                if (AudioUnitGetProperty(inUnit, kAudioUnitProperty_StreamFormat,
+                                         kAudioUnitScope_Output, 0, &asbd, &sz) == noErr) {
+                    g_srcSR = asbd.mSampleRate;
+                    fprintf(stderr, "audio-tap: mixer output SR=%.0f ch=%u\n", g_srcSR, asbd.mChannelsPerFrame);
+                }
+            }
             if (inUnit == g_mixerUnit) send_mixer(ioData, inFrames);
         }
     }
