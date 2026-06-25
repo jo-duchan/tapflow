@@ -300,6 +300,8 @@ Install Litestream on the relay host:
 brew install litestream
 ```
 
+On Linux, install the Litestream release binary for your architecture from the official releases page.
+
 Create `litestream.yml` next to your tapflow config:
 
 ```yaml
