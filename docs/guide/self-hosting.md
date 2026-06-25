@@ -274,6 +274,68 @@ Open ports `2333/tcp` (rathole) and `443/tcp` (Caddy) on the VPS. Port `4000` do
 Deploying the relay to fly.io, Railway, or similar services puts the agent→relay path over the internet. RTT then exceeds the 30fps threshold (33ms/frame), causing persistent frame drops with no way to recover. tapflow does not support this configuration.
 :::
 
+## Backup
+
+The relay keeps its durable state under the resolved data directory (default: `.tapflow-data/`; `TAPFLOW_DATA_DIR` can override `local.dataDir`). Back up that directory before OS upgrades, relay migration, or any long-running team pilot.
+
+Important paths below use the default directory name. If you configured a different data directory, replace `.tapflow-data/` with that path.
+
+Important paths:
+
+| Path | Why it matters |
+|------|----------------|
+| `.tapflow-data/tapflow.db` | SQLite database for accounts, apps, builds, sessions, comments, tokens, and settings. |
+| `.tapflow-data/tapflow.db-wal` / `.tapflow-data/tapflow.db-shm` | SQLite WAL sidecar files. Include them in filesystem snapshots, or use Litestream so changes are captured safely. |
+| `.tapflow-data/uploads/` | Uploaded build artifacts served by the relay. |
+| `.tapflow-data/recordings/` | Session recordings uploaded through the relay. |
+| `.tapflow-data/.env` and `.tapflow-data/jwt-secret` | Relay secrets. Keep them private and restore them with the data directory so existing sessions and integrations keep working. |
+
+### Recommended: Litestream for SQLite
+
+[Litestream](https://litestream.io/) is an external process; tapflow does not bundle, install, or supervise it. Litestream streams SQLite WAL changes to object storage such as AWS S3, Cloudflare R2, Backblaze B2, or any S3-compatible endpoint. It does not require tapflow schema changes or a separate database server.
+
+Install Litestream on the relay host:
+
+```sh
+brew install litestream
+```
+
+On Linux, install the Litestream release binary for your architecture from the official releases page.
+
+Create `litestream.yml` next to your tapflow config:
+
+```yaml
+dbs:
+  - path: .tapflow-data/tapflow.db
+    replicas:
+      - type: s3
+        bucket: YOUR_BUCKET
+        path: tapflow/relay/tapflow.db
+        endpoint: YOUR_S3_ENDPOINT
+```
+
+Set the credentials required by your storage provider, then run Litestream alongside the relay:
+
+```sh
+litestream replicate -config litestream.yml
+```
+
+If you use PM2, keep the relay and Litestream as separate processes so each can restart independently:
+
+```sh
+pm2 start tapflow --name relay -- relay start
+pm2 start litestream --name relay-backup -- replicate -config litestream.yml
+pm2 save
+```
+
+Restore the database before starting tapflow on a new host:
+
+```sh
+litestream restore -config litestream.yml -if-replica-exists .tapflow-data/tapflow.db
+```
+
+Then restore `.tapflow-data/uploads/`, `.tapflow-data/recordings/`, `.tapflow-data/.env`, and `.tapflow-data/jwt-secret` from your file backup. Litestream protects the SQLite database only; build files, recordings, and secrets still need a normal filesystem or object-storage backup.
+
 ## PM2 (keeping the relay Mac always on)
 
 Handles automatic restart on crash, restart on server reboot, and log management — run this on the relay Mac.

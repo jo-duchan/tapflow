@@ -274,6 +274,68 @@ VPS에서 `2333/tcp`(rathole)와 `443/tcp`(Caddy)를 열어야 합니다. `4000`
 fly.io, Railway 등 클라우드 서비스에 릴레이를 올리면 에이전트→릴레이 구간이 인터넷을 타게 됩니다. 이 경우 RTT가 30fps 기준(33ms/frame)을 초과해 프레임 드롭이 발생하며 스트리밍 품질을 보장할 수 없습니다. tapflow는 이 구성을 지원하지 않습니다.
 :::
 
+## 백업
+
+릴레이의 영속 상태는 실제 사용되는 데이터 디렉토리 아래에 저장됩니다(기본값: `.tapflow-data/`; `TAPFLOW_DATA_DIR`가 `local.dataDir`를 덮어쓸 수 있습니다). OS 업그레이드, 릴레이 이전, 장기 팀 파일럿 전에는 이 디렉토리를 백업하세요.
+
+아래 주요 경로는 기본 디렉토리 이름을 기준으로 설명합니다. 다른 데이터 디렉토리를 설정했다면 `.tapflow-data/`를 해당 경로로 바꿔 읽으세요.
+
+주요 경로:
+
+| 경로 | 중요한 이유 |
+|------|-------------|
+| `.tapflow-data/tapflow.db` | 계정, 앱, 빌드, 세션, 댓글, 토큰, 설정을 담는 SQLite 데이터베이스입니다. |
+| `.tapflow-data/tapflow.db-wal` / `.tapflow-data/tapflow.db-shm` | SQLite WAL 보조 파일입니다. 파일시스템 스냅샷에 함께 포함하거나, Litestream을 사용해 변경분을 안전하게 캡처하세요. |
+| `.tapflow-data/uploads/` | 릴레이가 제공하는 업로드된 빌드 아티팩트입니다. |
+| `.tapflow-data/recordings/` | 릴레이를 통해 업로드된 세션 녹화 파일입니다. |
+| `.tapflow-data/.env`와 `.tapflow-data/jwt-secret` | 릴레이 시크릿입니다. 비공개로 보관하고 데이터 디렉토리와 함께 복원해야 기존 세션과 연동이 유지됩니다. |
+
+### 권장: SQLite에는 Litestream 사용
+
+[Litestream](https://litestream.io/)은 외부 프로세스입니다. tapflow가 Litestream을 번들링, 설치, 관리하지 않습니다. Litestream은 SQLite WAL 변경분을 AWS S3, Cloudflare R2, Backblaze B2, 또는 S3 호환 스토리지로 스트리밍합니다. tapflow 스키마 변경이나 별도 데이터베이스 서버가 필요 없습니다.
+
+릴레이 호스트에 Litestream을 설치합니다:
+
+```sh
+brew install litestream
+```
+
+Linux에서는 공식 릴리스 페이지에서 아키텍처에 맞는 Litestream 릴리스 바이너리를 설치하세요.
+
+tapflow 설정 파일 옆에 `litestream.yml`을 만듭니다:
+
+```yaml
+dbs:
+  - path: .tapflow-data/tapflow.db
+    replicas:
+      - type: s3
+        bucket: YOUR_BUCKET
+        path: tapflow/relay/tapflow.db
+        endpoint: YOUR_S3_ENDPOINT
+```
+
+스토리지 공급자가 요구하는 인증 정보를 설정한 뒤, 릴레이와 함께 Litestream을 실행합니다:
+
+```sh
+litestream replicate -config litestream.yml
+```
+
+PM2를 사용한다면 릴레이와 Litestream을 별도 프로세스로 두어 각각 독립적으로 재시작되게 합니다:
+
+```sh
+pm2 start tapflow --name relay -- relay start
+pm2 start litestream --name relay-backup -- replicate -config litestream.yml
+pm2 save
+```
+
+새 호스트에서 tapflow를 시작하기 전에 데이터베이스를 복원합니다:
+
+```sh
+litestream restore -config litestream.yml -if-replica-exists .tapflow-data/tapflow.db
+```
+
+그다음 `.tapflow-data/uploads/`, `.tapflow-data/recordings/`, `.tapflow-data/.env`, `.tapflow-data/jwt-secret`를 파일 백업에서 복원하세요. Litestream은 SQLite 데이터베이스만 보호합니다. 빌드 파일, 녹화 파일, 시크릿은 별도의 파일시스템 또는 오브젝트 스토리지 백업이 필요합니다.
+
 ## PM2 (릴레이 Mac 상시 운영)
 
 릴레이 Mac에서 크래시 시 자동 재시작, 재부팅 후 자동 시작, 로그 관리를 처리합니다.
