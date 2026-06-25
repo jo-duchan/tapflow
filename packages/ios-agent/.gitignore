@@ -1,0 +1,5 @@
+# audiotap-helper is built + ad-hoc-signed on demand by ensureHelperApp() (TCC needs a .app launched
+# via LaunchServices). The Swift source is committed; the bundle is local. Distribution packaging
+# (shipping a pre-signed .app) is a follow-up.
+bin/audiotap-helper.app/
+bin/.audiotap.entitlements

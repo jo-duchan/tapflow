@@ -26,9 +26,13 @@ import {
   rewriteLowLatencySpsInFrame,
   CODEC_JPEG,
   CODEC_H264,
+  CODEC_AUDIO,
+  sendAudioYieldingToVideo,
 } from '@tapflowio/agent-core/utils'
+import type { AudioFrame } from '@tapflowio/agent-core'
 import { SimctlWrapper, isDeviceMissingError } from './SimctlWrapper.js'
 import { ScreenCaptureStreamer, type StreamFrame } from './ScreenCaptureStreamer.js'
+import { AudioCaptureStreamer, ensureHelperApp, launchAudioHelper } from './AudioCaptureStreamer.js'
 import { MjpegStreamer } from './MjpegStreamer.js'
 import { TouchHelper } from './TouchHelper.js'
 import { DeviceChromeLoader, type ChromeData } from './DeviceChromeLoader.js'
@@ -70,6 +74,10 @@ interface DeviceState {
   // Viewer context from device:boot → downscale tier (native / 1280 / 1000).
   secureContext: boolean
   external: boolean
+  // Audio output (opt-in). The loopback server the audiotap-helper streams PCM to, and its port —
+  // the helper (launched per app:launch) connects here. null/0 when audio is off.
+  audioStreamer: AudioCaptureStreamer | null
+  audioPort: number
 }
 
 export class IOSAgent implements DeviceAgent {
@@ -225,6 +233,8 @@ export class IOSAgent implements DeviceAgent {
         acceptH264: false,
         secureContext: false,
         external: false,
+        audioStreamer: null,
+        audioPort: 0,
       })
     })
   }
@@ -294,6 +304,9 @@ export class IOSAgent implements DeviceAgent {
     void state.streamReader?.cancel()
     state.streamReader = null
     state.captureStreamer = null // reader.cancel() kills the helper proc; drop the ref so a stale requestKeyframe() no-ops
+    state.audioStreamer?.stop() // closes the loopback server → the helper sees EOF and exits
+    state.audioStreamer = null
+    state.audioPort = 0
     state.touchHelper?.stop()
     state.touchHelper = null
     state.streamWs?.close()
@@ -462,6 +475,9 @@ export class IOSAgent implements DeviceAgent {
       }
 
       this.startBinaryStream(state, streamWs)
+      // Opt-in audio output: stand up the loopback server now; the audiotap-helper (launched per
+      // app:launch) connects and streams. Best-effort — never blocks/affects the video path.
+      if (this.audioEnabled()) this.startAudioCapture(state, streamWs)
       this.ws?.send(JSON.stringify({ type: 'device:ready', sessionId, payload: { deviceId } }))
 
       // Sync AppleKeyboards after ready — fire-and-forget so streaming isn't delayed.
@@ -550,7 +566,14 @@ export class IOSAgent implements DeviceAgent {
         const { bundleId } = msg.payload as { bundleId: string }
         const sessionId = msg.sessionId
         this.simctl.launchApp(bundleId)
-          .then(() => this.ws?.send(JSON.stringify({ type: 'app:launch-done', sessionId })))
+          .then((pid) => {
+            // The launched app is a host process — tap its PID for audio (opt-in). Best-effort.
+            const state = sessionId ? this.deviceStates.get(sessionId) : undefined
+            if (pid && this.audioEnabled() && state?.audioStreamer && state.audioPort) {
+              this.launchAudioHelperForPid(state, pid)
+            }
+            this.ws?.send(JSON.stringify({ type: 'app:launch-done', sessionId }))
+          })
           .catch((e: unknown) => {
             const message = e instanceof Error ? e.message : String(e)
             this.ws?.send(JSON.stringify({ type: 'app:launch-error', sessionId, message }))
@@ -738,7 +761,63 @@ export class IOSAgent implements DeviceAgent {
   boot(deviceId: string): Promise<void> { return this.simctl.boot(deviceId) }
   shutdown(deviceId: string): Promise<void> { return this.simctl.shutdown(deviceId) }
   installApp(appPath: string): Promise<void> { return this.simctl.installApp(appPath) }
-  launchApp(bundleId: string): Promise<void> { return this.simctl.launchApp(bundleId) }
+  async launchApp(bundleId: string): Promise<void> { await this.simctl.launchApp(bundleId) }
+
+  // ── Audio output (opt-in, macOS 14.2+ Core Audio process taps) ───────────────────────────────
+  // Simulator apps are host processes, so a process tap on the launched app's PID captures its audio
+  // with no device routing, no injection, and no host-output hijack. The capture runs in a separate
+  // signed .app (audiotap-helper) launched via LaunchServices so it holds its own audio-recording TCC
+  // grant; it streams PCM back over loopback TCP. See AudioCaptureStreamer.
+
+  private audioEnabled(): boolean {
+    return process.env.TAPFLOW_IOS_AUDIO === '1' && this.isAudioSupported()
+  }
+
+  // Core Audio process taps need macOS 14.2+ (Darwin 23.2+). os.release() → "<darwinMajor>.<minor>.…".
+  private isAudioSupported(): boolean {
+    const [maj, min] = os.release().split('.').map(Number)
+    return maj > 23 || (maj === 23 && min >= 2)
+  }
+
+  // Stand up the per-session loopback server the audiotap-helper streams to, and pump its frames to
+  // the relay. The helper is launched per app:launch (audio flows once an app runs).
+  private startAudioCapture(state: DeviceState, streamWs: WebSocket): void {
+    const streamer = new AudioCaptureStreamer()
+    streamer.listen()
+      .then((port) => {
+        state.audioStreamer = streamer
+        state.audioPort = port
+        void this.pumpAudio(streamWs, streamer.frames())
+      })
+      .catch((e) => logger.warn(`audio capture server failed to start: ${e instanceof Error ? e.message : String(e)}`))
+  }
+
+  // Launch the tap helper for a just-launched app's PID. Swallows errors — audio must never break
+  // the launch/video path (e.g. helper build fails, or the user hasn't granted the audio permission).
+  private launchAudioHelperForPid(state: DeviceState, pid: number): void {
+    try {
+      launchAudioHelper(ensureHelperApp(), state.audioPort, [pid])
+    } catch (e) {
+      logger.warn(`audiotap-helper launch failed (audio disabled for this app): ${e instanceof Error ? e.message : String(e)}`)
+    }
+  }
+
+  // Forward captured PCM to the relay on the shared stream socket via the yielding sender (audio must
+  // never inflate the socket buffer enough to trip video's backpressure). Mirrors android-agent.
+  private async pumpAudio(streamWs: WebSocket, frames: ReadableStream<AudioFrame>): Promise<void> {
+    const warnDrop = createRateLimitedDropWarn(logger, 'ios audio')
+    const reader = frames.getReader()
+    try {
+      for (;;) {
+        const { value, done } = await reader.read()
+        if (done || streamWs.readyState !== WebSocket.OPEN) break
+        const frame = writeEnvelopeHeader(value.payload, Date.now(), { codec: CODEC_AUDIO })
+        sendAudioYieldingToVideo(streamWs, frame, warnDrop)
+      }
+    } catch {
+      // stream cancelled or ws closed — expected on teardown/restart
+    }
+  }
   screenshot(): Promise<Buffer> { return this.simctl.screenshot() }
   stream(): ReadableStream<Buffer> {
     const first = this.deviceStates.values().next().value
