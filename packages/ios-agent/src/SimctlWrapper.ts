@@ -127,8 +127,10 @@ export class SimctlWrapper {
     await this.runner.exec('install', 'booted', appPath)
   }
 
-  async launchApp(bundleId: string): Promise<void> {
-    await this.runner.exec('launch', 'booted', bundleId)
+  // `childEnv` (SIMCTL_CHILD_* keys) is injected into the launched app — used for the audio-tap dylib.
+  async launchApp(bundleId: string, childEnv?: Record<string, string>): Promise<void> {
+    if (childEnv) await this.runner.execEnv(childEnv, 'launch', 'booted', bundleId)
+    else await this.runner.exec('launch', 'booted', bundleId)
   }
 
   async openUrl(deviceId: string, url: string): Promise<void> {

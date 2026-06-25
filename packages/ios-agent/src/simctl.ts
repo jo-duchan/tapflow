@@ -21,6 +21,9 @@ async function restartCoreSimulatorService(): Promise<void> {
 
 export interface SimctlRunner {
   exec(...args: string[]): Promise<string>
+  // Like exec, but merges extra child env vars in — used to pass SIMCTL_CHILD_* (e.g. the audio-tap
+  // dylib injection) through `simctl launch` to the launched app.
+  execEnv(env: Record<string, string>, ...args: string[]): Promise<string>
   execBinary(...args: string[]): Promise<Buffer>
 }
 
@@ -35,22 +38,33 @@ function coreSimServiceError(): Error {
   )
 }
 
-export const defaultRunner: SimctlRunner = {
-  async exec(...args: string[]): Promise<string> {
+// Run `xcrun simctl <args>` with one retry across a CoreSimulatorService version mismatch. `childEnv`,
+// when given, is merged onto process.env for the child (carries SIMCTL_CHILD_* into `simctl launch`).
+async function runSimctl(args: string[], childEnv?: Record<string, string>): Promise<string> {
+  const opts: { encoding: 'utf8'; env?: NodeJS.ProcessEnv } = { encoding: 'utf8' }
+  if (childEnv) opts.env = { ...process.env, ...childEnv }
+  try {
+    const { stdout } = await execFileAsync('xcrun', ['simctl', ...args], opts)
+    return stdout
+  } catch (err) {
+    if (!isCoreSimulatorVersionMismatch(err)) throw err
+    logger.warn('CoreSimulatorService version mismatch — restarting service and retrying')
+    await restartCoreSimulatorService()
     try {
-      const { stdout } = await execFileAsync('xcrun', ['simctl', ...args])
+      const { stdout } = await execFileAsync('xcrun', ['simctl', ...args], opts)
       return stdout
-    } catch (err) {
-      if (!isCoreSimulatorVersionMismatch(err)) throw err
-      logger.warn('CoreSimulatorService version mismatch — restarting service and retrying')
-      await restartCoreSimulatorService()
-      try {
-        const { stdout } = await execFileAsync('xcrun', ['simctl', ...args])
-        return stdout
-      } catch {
-        throw coreSimServiceError()
-      }
+    } catch {
+      throw coreSimServiceError()
     }
+  }
+}
+
+export const defaultRunner: SimctlRunner = {
+  exec(...args: string[]): Promise<string> {
+    return runSimctl(args)
+  },
+  execEnv(env: Record<string, string>, ...args: string[]): Promise<string> {
+    return runSimctl(args, env)
   },
   async execBinary(...args: string[]): Promise<Buffer> {
     try {

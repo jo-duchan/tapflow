@@ -34,6 +34,7 @@ const SIMCTL_LIST_OUTPUT = JSON.stringify({
 function mockRunner(outputs: Record<string, string> = {}): SimctlRunner {
   return {
     exec: vi.fn(async (...args: string[]) => outputs[args[0]] ?? ''),
+    execEnv: vi.fn(async (_env: Record<string, string>, ...args: string[]) => outputs[args[0]] ?? ''),
     execBinary: vi.fn().mockResolvedValue(Buffer.alloc(0)),
   }
 }
@@ -114,6 +115,15 @@ describe('SimctlWrapper', () => {
       const wrapper = new SimctlWrapper(runner)
       await wrapper.launchApp('com.example.app')
       expect(runner.exec).toHaveBeenCalledWith('launch', 'booted', 'com.example.app')
+    })
+
+    it('injects childEnv via execEnv when given (audio-tap dylib)', async () => {
+      const runner = mockRunner()
+      const wrapper = new SimctlWrapper(runner)
+      const env = { SIMCTL_CHILD_DYLD_INSERT_LIBRARIES: '/x/audio-tap.dylib', SIMCTL_CHILD_TAPFLOW_AUDIO_PORT: '5123' }
+      await wrapper.launchApp('com.example.app', env)
+      expect(runner.execEnv).toHaveBeenCalledWith(env, 'launch', 'booted', 'com.example.app')
+      expect(runner.exec).not.toHaveBeenCalled()
     })
   })
 
