@@ -1,5 +1,6 @@
-# audiotap-helper is built + ad-hoc-signed on demand by ensureHelperApp() (TCC needs a .app launched
-# via LaunchServices). The Swift source is committed; the bundle is local. Distribution packaging
-# (shipping a pre-signed .app) is a follow-up.
-bin/audiotap-helper.app/
+# audiotap-helper bundle: committed as a prebuilt, ad-hoc-signed arm64 .app (like the other prebuilt
+# helper binaries in bin/) so npm-installed users get it without a build. TCC needs a .app launched
+# via LaunchServices, so this is a bundle rather than a bare binary. ensureHelperApp() rebuilds it from
+# the committed Swift source on mtime change (developers only; shipped packages omit src). The
+# entitlements file is a local build input and isn't needed at runtime.
 bin/.audiotap.entitlements
