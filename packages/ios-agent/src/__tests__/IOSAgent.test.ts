@@ -34,14 +34,38 @@ vi.mock('../ScreenCaptureStreamer', async (importOriginal) => {
   }
 })
 
+// Mock the audio path so the whole-sim tap can be asserted without building/launching the real helper
+// or enumerating live processes. listen() resolves a fake port; frames() never closes (live capture).
+vi.mock('../AudioCaptureStreamer', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../AudioCaptureStreamer')>()
+  return {
+    ...actual,
+    AudioCaptureStreamer: vi.fn(function () { return {
+      listen: vi.fn().mockResolvedValue(54321),
+      frames: () => new ReadableStream({ start() {} }),
+      updatePids: vi.fn(),
+      stop: vi.fn(),
+    } }),
+    ensureHelperApp: vi.fn(() => '/fake/audiotap-helper.app'),
+    launchAudioHelper: vi.fn(),
+    isAudioSupported: vi.fn(() => true),
+  }
+})
+vi.mock('../SimProcessTree', () => ({
+  enumerateSimPids: vi.fn(() => [101, 102, 103]),
+}))
+
 import crypto from 'crypto'
 import { WebSocket, WebSocketServer } from 'ws'
 import { RelayServer, initDb, closeDb, getDb } from '@tapflowio/relay'
 import { IOSAgent } from '../IOSAgent'
 import { ScreenCaptureStreamer } from '../ScreenCaptureStreamer'
+import { AudioCaptureStreamer, launchAudioHelper } from '../AudioCaptureStreamer'
 import { SimctlWrapper } from '../SimctlWrapper'
 import { TouchHelper } from '../TouchHelper'
 const MockTouchHelper = vi.mocked(TouchHelper)
+const MockAudioStreamer = vi.mocked(AudioCaptureStreamer)
+const mockLaunchAudioHelper = vi.mocked(launchAudioHelper)
 
 // Test-only view of IOSAgent internals (reconnect state lives behind private fields).
 interface IOSAgentInternals {
@@ -888,6 +912,56 @@ describe('IOSAgent', () => {
           await expect(agent.connect(url)).rejects.toThrow(/malformed|handshake/i)
         },
       )
+    })
+  })
+
+  describe('audio output (whole-sim tap, opt-in)', () => {
+    beforeEach(() => {
+      MockAudioStreamer.mockClear()
+      mockLaunchAudioHelper.mockClear()
+      delete process.env.TAPFLOW_IOS_AUDIO
+    })
+    afterEach(() => { delete process.env.TAPFLOW_IOS_AUDIO })
+
+    async function bootSession(): Promise<{ agent: IOSAgent; browser: WebSocket }> {
+      const browser = new WebSocket(`ws://localhost:${port}`)
+      await waitForOpen(browser)
+      const agent = new IOSAgent({ intervalMs: 50 }, mockSimctl(true))
+      await agent.connect(`ws://localhost:${port}`)
+      browser.send(JSON.stringify({ type: 'session:start', sessionId: agent.sessionId }))
+      await waitForType(browser, 'session:joined')
+      browser.send(JSON.stringify({ type: 'device:boot', sessionId: agent.sessionId, payload: { deviceId: 'dev-1' } }))
+      await waitForType(browser, 'device:ready')
+      return { agent, browser }
+    }
+
+    it('opt-out (TAPFLOW_IOS_AUDIO unset): no helper launched at boot', async () => {
+      const { agent, browser } = await bootSession()
+      await new Promise((r) => setTimeout(r, 30)) // give any async audio path a tick to (not) fire
+      expect(MockAudioStreamer).not.toHaveBeenCalled()
+      expect(mockLaunchAudioHelper).not.toHaveBeenCalled()
+      agent.disconnect(); browser.close()
+    })
+
+    it('opt-in: boot launches the whole-sim tap with the enumerated sim pids', async () => {
+      process.env.TAPFLOW_IOS_AUDIO = '1'
+      const { agent, browser } = await bootSession()
+      await vi.waitFor(() => expect(mockLaunchAudioHelper).toHaveBeenCalledTimes(1))
+      const [appPath, helperPort, pids] = mockLaunchAudioHelper.mock.calls[0]
+      expect(appPath).toBe('/fake/audiotap-helper.app')
+      expect(helperPort).toBe(54321) // AudioCaptureStreamer.listen() mock
+      expect(pids).toEqual([101, 102, 103]) // enumerateSimPids mock — whole-sim, not a single app
+      agent.disconnect(); browser.close()
+    })
+
+    it('cleanup on disconnect stops the audio streamer', async () => {
+      process.env.TAPFLOW_IOS_AUDIO = '1'
+      const { agent, browser } = await bootSession()
+      await vi.waitFor(() => expect(MockAudioStreamer).toHaveBeenCalledTimes(1))
+      const instance = MockAudioStreamer.mock.results[0].value as { stop: ReturnType<typeof vi.fn> }
+      agent.disconnect()
+      expect(instance.stop).toHaveBeenCalled()
+      browser.close()
     })
   })
 
