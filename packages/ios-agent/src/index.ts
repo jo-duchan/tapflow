@@ -7,6 +7,8 @@ export type { IOSAgentOptions } from './IOSAgent.js'
 export { SimctlWrapper } from './SimctlWrapper.js'
 export { MjpegStreamer } from './MjpegStreamer.js'
 export { KEY_CODE_MAP, MODIFIER_BITS } from './KeyCodeMap.js'
+// Audio-capture TCC priming for `tapflow setup ios` (grant up front, not at first boot).
+export { requestAudioPermission, isAudioSupported } from './AudioCaptureStreamer.js'
 
 AgentRegistry.register('ios', IOSAgent, {
   canRun: () => process.platform === 'darwin',

@@ -1,4 +1,5 @@
 import net from 'node:net'
+import os from 'node:os'
 import { execFileSync } from 'node:child_process'
 import { existsSync, statSync, mkdirSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
@@ -76,6 +77,27 @@ export function launchAudioHelper(appPath: string, port: number, pids: number[])
     { stdio: ['ignore', 'ignore', 'ignore'] })
 }
 
+// Core Audio process taps need macOS 14.2+ (Darwin 23.2+). os.release() → "<darwinMajor>.<minor>.…".
+export function isAudioSupported(): boolean {
+  const [maj, min] = os.release().split('.').map(Number)
+  return maj > 23 || (maj === 23 && min >= 2)
+}
+
+/**
+ * Prime the audio-capture TCC grant up front (from `tapflow setup ios`) so the operator approves it
+ * while present — not at first simulator boot, which a headless agent operator would likely miss.
+ *
+ * Runs the helper's --request-permission mode: a global tap whose *capture start* raises the same
+ * audio-capture prompt a per-pid tap needs (the grant keys on the app cdhash + service, not the tap
+ * shape), so no port/pid/booted simulator is required. `open -W` blocks until the helper exits, i.e.
+ * until the modal is answered. The grant itself isn't readable back, so the caller treats a clean
+ * return as "prompt shown / answered" and leaves approve-vs-deny to the operator.
+ */
+export function requestAudioPermission(): void {
+  const app = ensureHelperApp()
+  execFileSync('open', ['-W', '-n', '-a', app, '--args', '--request-permission'], { stdio: ['ignore', 'ignore', 'ignore'] })
+}
+
 // Wire format from the audiotap-helper: length-prefixed PCM frames — [u32 BE len][PCM bytes], where
 // PCM is normalized S16LE / 44100 / Stereo. Mirrors the video helper's length-prefix framing
 // (parseStreamFrames); the source is a localhost TCP socket the helper connects to.
@@ -103,6 +125,8 @@ export class AudioCaptureStreamer {
   private controller: ReadableStreamDefaultController<AudioFrame> | null = null
   private buf: Buffer = Buffer.alloc(0)
   private port = 0
+  private activeSock: net.Socket | null = null
+  private pendingPids: number[] | null = null
 
   /** Binds 127.0.0.1:<ephemeral> and resolves the assigned port (pass it to the dylib). */
   listen(): Promise<number> {
@@ -120,6 +144,8 @@ export class AudioCaptureStreamer {
 
   private onConnection(sock: net.Socket): void {
     this.buf = Buffer.alloc(0) // fresh per connection (the app relaunch reconnects)
+    this.activeSock = sock
+    if (this.pendingPids) { this.writePids(sock, this.pendingPids); this.pendingPids = null }
     sock.on('data', (chunk: Buffer) => {
       this.buf = this.buf.length ? Buffer.concat([this.buf, chunk]) : chunk
       const { frames, rest } = parseAudioFrames(this.buf)
@@ -127,7 +153,26 @@ export class AudioCaptureStreamer {
       // timestamp: stamp on arrival (epoch µs). Loose A/V sync is acceptable for manual QA.
       for (const payload of frames) this.controller?.enqueue({ payload, timestamp: Date.now() * 1000 })
     })
-    sock.on('error', () => { /* guest dylib disconnect — expected on app exit/relaunch */ })
+    sock.on('close', () => { if (this.activeSock === sock) this.activeSock = null })
+    sock.on('error', () => { /* helper disconnect — expected on app exit/relaunch */ })
+  }
+
+  /**
+   * Push a new tap set to the running helper over the same loopback socket (the agent→helper
+   * direction). Wire: [u32 BE count][pid:u32 BE × count] — mirrors the helper's read loop. The helper
+   * tears down the old tap and rebuilds it for these pids, keeping the socket and frame stream alive.
+   * If the helper hasn't connected yet, the latest set is buffered and flushed on connect.
+   */
+  updatePids(pids: number[]): void {
+    if (this.activeSock) this.writePids(this.activeSock, pids)
+    else this.pendingPids = pids
+  }
+
+  private writePids(sock: net.Socket, pids: number[]): void {
+    const buf = Buffer.allocUnsafe(4 + pids.length * 4)
+    buf.writeUInt32BE(pids.length, 0)
+    pids.forEach((p, i) => buf.writeUInt32BE(p >>> 0, 4 + i * 4))
+    sock.write(buf)
   }
 
   /** The frame stream. Call after listen() and before the app connects. */
@@ -140,6 +185,8 @@ export class AudioCaptureStreamer {
 
   stop(): void {
     this.controller = null
+    this.pendingPids = null
+    if (this.activeSock) { this.activeSock.destroy(); this.activeSock = null }
     if (this.server) { this.server.close(); this.server = null; logger.debug('audio capture server closed') }
   }
 }

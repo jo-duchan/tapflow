@@ -1,6 +1,7 @@
-import { describe, it, expect } from 'vitest'
-import { parseAudioFrames, AudioCaptureStreamer } from '../AudioCaptureStreamer'
+import { describe, it, expect, vi } from 'vitest'
+import { parseAudioFrames, AudioCaptureStreamer, isAudioSupported } from '../AudioCaptureStreamer'
 import net from 'node:net'
+import os from 'node:os'
 
 // Build a length-prefixed frame: [u32 BE len][payload].
 function frame(payload: Buffer): Buffer {
@@ -49,6 +50,24 @@ describe('parseAudioFrames', () => {
   })
 })
 
+describe('isAudioSupported (macOS 14.2+ / Darwin 23.2+ gate)', () => {
+  function withRelease<T>(release: string, fn: () => T): T {
+    const spy = vi.spyOn(os, 'release').mockReturnValue(release)
+    try { return fn() } finally { spy.mockRestore() }
+  }
+
+  it('true on Darwin 23.2 (macOS 14.2) and above', () => {
+    expect(withRelease('23.2.0', isAudioSupported)).toBe(true)
+    expect(withRelease('23.6.0', isAudioSupported)).toBe(true)
+    expect(withRelease('24.0.0', isAudioSupported)).toBe(true)
+  })
+
+  it('false below Darwin 23.2 (macOS < 14.2)', () => {
+    expect(withRelease('23.1.0', isAudioSupported)).toBe(false)
+    expect(withRelease('22.6.0', isAudioSupported)).toBe(false)
+  })
+})
+
 describe('AudioCaptureStreamer (loopback TCP → AudioFrame stream)', () => {
   it('listens on an ephemeral port and yields AudioFrames for PCM a client writes', async () => {
     const streamer = new AudioCaptureStreamer()
@@ -73,6 +92,45 @@ describe('AudioCaptureStreamer (loopback TCP → AudioFrame stream)', () => {
     expect(f2.value?.payload).toEqual(Buffer.from([5, 6]))
     expect(typeof f1.value?.timestamp).toBe('number')
 
+    client.destroy()
+    streamer.stop()
+  })
+
+  // Read one [u32 BE count][pid:u32 BE × count] tap-set update off a socket.
+  function readPidUpdate(sock: net.Socket): Promise<number[]> {
+    return new Promise((resolve) => {
+      sock.once('data', (buf: Buffer) => {
+        const count = buf.readUInt32BE(0)
+        const pids: number[] = []
+        for (let i = 0; i < count; i++) pids.push(buf.readUInt32BE(4 + i * 4))
+        resolve(pids)
+      })
+    })
+  }
+
+  it('updatePids() pushes the new tap set to a connected helper (agent→helper direction)', async () => {
+    const streamer = new AudioCaptureStreamer()
+    const port = await streamer.listen()
+    streamer.frames()
+    const client = await new Promise<net.Socket>((resolve) => {
+      const c = net.createConnection(port, '127.0.0.1', () => resolve(c))
+    })
+    const received = readPidUpdate(client)
+    streamer.updatePids([34356, 34379, 34386])
+    expect(await received).toEqual([34356, 34379, 34386])
+    client.destroy()
+    streamer.stop()
+  })
+
+  it('buffers updatePids() before the helper connects and flushes on connect', async () => {
+    const streamer = new AudioCaptureStreamer()
+    const port = await streamer.listen()
+    streamer.frames()
+    streamer.updatePids([111, 222]) // helper not connected yet
+    const client = await new Promise<net.Socket>((resolve) => {
+      const c = net.createConnection(port, '127.0.0.1', () => resolve(c))
+    })
+    expect(await readPidUpdate(client)).toEqual([111, 222])
     client.destroy()
     streamer.stop()
   })
