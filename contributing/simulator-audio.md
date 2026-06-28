@@ -65,6 +65,17 @@ The **CPU** side — does the audio pump steal video-encode time? — was measur
 
 Within measurement noise (per-150-frame capture-wait windows vary ±2 ms); fps and drop are identical. A 30 s run agreed (capture-wait +0.8 ms). Conclusion: audio output is non-degrading — transport by the unit-tested contract, CPU by this measurement. Reproduce with `TAPFLOW_STREAM_METRICS=1` + `:3001?perf=1` (see [`measurement.md`](./measurement.md)).
 
+### Per-sim isolation — measured (cross-bleed)
+
+Each sim taps only its own `launchd_sim` descendants, with a **separate helper instance and loopback port per session** — so concurrent sims must not bleed audio into each other. Measured with two booted sims, audio playing in sim A only, raw capture peak (before gain) logged per sim:
+
+| sim | state | capture peak |
+|---|---|---|
+| A (iPhone 16 Pro) | playing | avg 1729, max 5508 |
+| B (iPhone 16 Pro Max) | silent | **0** (148/148 samples) |
+
+Zero bleed — sim B's capture stayed at exactly 0 the whole time sim A played. This also surfaced a multi-sim bug: `launchAudioHelper` must pass `open -n`, otherwise `open -a` reuses the first sim's helper and the second sim gets no audio at all (silent on single-sim, only visible with two). Regression-tested in `AudioCaptureStreamer.test.ts`.
+
 ### Code map (iOS)
 
 | File | Role |

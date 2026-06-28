@@ -69,11 +69,13 @@ export function ensureHelperApp(): string {
 
 /**
  * Launch the helper bundle via LaunchServices, pointed at the agent's loopback port and the simulator
- * process PID(s) to tap. `-g` keeps it backgrounded (no focus steal). LaunchServices makes it its own
+ * process PID(s) to tap. `-g` keeps it backgrounded (no focus steal). `-n` forces a NEW instance per
+ * simulator — without it `open -a` reuses the first sim's running helper, so a second concurrent sim
+ * never gets its own tap and its audio silently breaks. LaunchServices makes each its own
  * TCC-responsible process; it connects back to `port` and streams PCM.
  */
 export function launchAudioHelper(appPath: string, port: number, pids: number[]): void {
-  execFileSync('open', ['-g', '-a', appPath, '--args', String(port), ...pids.map(String)],
+  execFileSync('open', ['-g', '-n', '-a', appPath, '--args', String(port), ...pids.map(String)],
     { stdio: ['ignore', 'ignore', 'ignore'] })
 }
 

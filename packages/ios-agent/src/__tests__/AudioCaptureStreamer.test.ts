@@ -1,7 +1,7 @@
 import { describe, it, expect, vi } from 'vitest'
 vi.mock('node:child_process', () => ({ execFileSync: vi.fn() }))
 import { execFileSync } from 'node:child_process'
-import { parseAudioFrames, AudioCaptureStreamer, isAudioSupported, applyGain, readSimVolume } from '../AudioCaptureStreamer'
+import { parseAudioFrames, AudioCaptureStreamer, isAudioSupported, applyGain, readSimVolume, launchAudioHelper } from '../AudioCaptureStreamer'
 import net from 'node:net'
 import os from 'node:os'
 const mockExecFileSync = vi.mocked(execFileSync)
@@ -102,6 +102,18 @@ describe('readSimVolume (sim_volume → 0-1 gain)', () => {
   it('defaults to full volume (1) when sim_volume is absent', () => {
     mockExecFileSync.mockReturnValue(JSON.stringify({ sim_ringer_state: 1 }) as never)
     expect(readSimVolume('udid')).toBe(1)
+  })
+})
+
+describe('launchAudioHelper (per-sim isolation)', () => {
+  it('forces a new instance with -n so each concurrent sim gets its own helper', () => {
+    mockExecFileSync.mockClear()
+    mockExecFileSync.mockReturnValue('' as never)
+    launchAudioHelper('/x/audiotap-helper.app', 12345, [101, 102])
+    const [cmd, args] = mockExecFileSync.mock.calls[0]
+    expect(cmd).toBe('open')
+    // -n is what prevents `open -a` from reusing the first sim's helper (multi-sim audio bug)
+    expect(args).toEqual(['-g', '-n', '-a', '/x/audiotap-helper.app', '--args', '12345', '101', '102'])
   })
 })
 
