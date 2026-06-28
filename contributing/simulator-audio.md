@@ -50,6 +50,21 @@ The process tap captures audio *before* the simulator applies its own media volu
 1. **TCC: the capture must be a `.app` launched via LaunchServices.** A process tap returns *silence* unless the **responsible process** holds the audio-recording TCC grant. A CLI helper the Node agent spawns inherits the agent/terminal's (ungranted) responsibility → silence (verified). So the capture runs in a small signed bundle — `audiotap-helper.app` — launched via `open -g`; it becomes its own responsible process with its own **one-time** grant (like Screen Recording). The helper streams PCM back over **loopback TCP** (`open` detaches it, so stdout isn't an option). Steady-state (unchanged helper binary) reuses the same ad-hoc cdhash, so the grant persists; only a helper change re-prompts. **Priming the grant**: the prompt otherwise appears at first `device:boot`, which an unattended agent operator would miss — so `tapflow setup ios` runs the helper's `--request-permission` mode (a global tap whose *capture start*, not tap creation, raises the prompt — needing no port/pid/booted sim) to grant it up front while the operator is present.
 2. **macOS 14.2+** (Core Audio process taps). Older macOS → iOS audio is unsupported (no fallback; the dylib path C was rejected, see below).
 
+### No-degradation — measured (iOS, localhost A/B)
+
+The shared `sendAudioYieldingToVideo` contract guarantees the **transport** side: audio's 64 KB ceiling ≪ video's 1 MB backpressure threshold, so a sent audio frame can't push the socket near video's drop point. That's unit-tested as the *no-degradation invariant* in `agent-core/src/__tests__/stream.test.ts` (`AUDIO_BUFFER_CEILING_BYTES + max chunk < VIDEO_THRESHOLD`), and is the **right** way to verify it — localhost loopback has effectively unbounded bandwidth, so it can't exercise transport contention at all.
+
+The **CPU** side — does the audio pump steal video-encode time? — was measured on localhost (single-clock A/B, audio OFF vs ON, H.264 30 fps, 60 s, equal sample counts):
+
+| metric | audio OFF | audio ON | Δ |
+|---|---|---|---|
+| capture-wait avg | ~7.5 ms | ~7.8 ms | +0.3 ms |
+| glass→glass p95 | 6.5 ms | 7.1 ms | +0.6 ms |
+| agent→relay p95 | 2 ms | 2 ms | 0 |
+| fps / drop | 30 / 0% | 30 / 0% | unchanged |
+
+Within measurement noise (per-150-frame capture-wait windows vary ±2 ms); fps and drop are identical. A 30 s run agreed (capture-wait +0.8 ms). Conclusion: audio output is non-degrading — transport by the unit-tested contract, CPU by this measurement. Reproduce with `TAPFLOW_STREAM_METRICS=1` + `:3001?perf=1` (see [`measurement.md`](./measurement.md)).
+
 ### Code map (iOS)
 
 | File | Role |
