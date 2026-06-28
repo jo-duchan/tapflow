@@ -30,6 +30,7 @@ Common rules are in the root [AGENTS.md](./AGENTS.md).
 | File | Contents |
 |------|----------|
 | [CONTRIBUTING.md](./CONTRIBUTING.md) | Branch, release, and commit conventions |
+| [contributing/simulator-audio.md](./contributing/simulator-audio.md) | Simulator audio capture (iOS/Android) — design, whole-sim dynamic tap, sim-volume, rejected approaches |
 | [packages/dashboard/DESIGN.md](./packages/dashboard/DESIGN.md) | Dashboard design system — color tokens, typography, elevation, component specs |
 | [.internal/PRD.md](./.internal/PRD.md) | Product requirements (local only) |
 | [docs/AGENTS.md](./docs/AGENTS.md) | VitePress work rules — shiki code blocks, CSS customization notes |

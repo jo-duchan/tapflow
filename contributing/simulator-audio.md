@@ -28,23 +28,37 @@ The key insight that unlocked iOS:
 
 > **Simulator apps are host macOS processes.** `xcrun simctl launch` returns a host PID; `ps` shows the app's host binary. The simulator's audio doesn't go through a single tappable device — each app (and its children) plays to the host's CoreAudio directly.
 
-So we capture per-process with a **Core Audio process tap**: translate the app PID → process object (`kAudioHardwarePropertyTranslatePIDToProcessObject`) → `CATapDescription(stereoMixdownOfProcesses:)` → `AudioHardwareCreateProcessTap` → a private aggregate device (`kAudioAggregateDeviceTapListKey`, with the host default output as the clock sub-device) → an IOProc reads the tapped PCM. `muteBehavior = .unmuted` so the app still plays normally; we capture a copy. No device routing, no dylib injection, no host-output hijack, and it works on **any signed build**.
+So we capture per-process with a **Core Audio process tap**: translate the sim's process PIDs → process objects (`kAudioHardwarePropertyTranslatePIDToProcessObject`) → `CATapDescription(stereoMixdownOfProcesses:)` → `AudioHardwareCreateProcessTap` → a private aggregate device (`kAudioAggregateDeviceTapListKey`, with the host default output as the clock sub-device) → an IOProc reads the tapped PCM. `muteBehavior = .unmuted` so the apps still play normally; we capture a copy. No device routing, no dylib injection, no host-output hijack, and it works on **any signed build**.
 
 This gives the Android-symmetric properties on one Mac: **per-sim isolation** (tap only that sim's PIDs), **whole-sim** (tap the sim's process tree incl. WebKit `WebContent` → WebView audio works), **headless**, **no build modification**.
 
+### Whole-sim dynamic tap
+
+The tap set is the sim's whole process tree, kept current as processes come and go and as they start/stop audio:
+
+- **Enumerate** (`SimProcessTree.enumerateSimPids`): every sim process is a descendant of one `launchd_sim` whose command line embeds the device UDID; walk that tree. `IOSAgent` taps this set at `device:boot` — **not** per-`app:launch`.
+- **Poll for new processes** (1.5s): a launched app or a freshly spawned `WebContent` is a *new* PID → push the updated set to the helper. `open`-launched helpers have no stdin, so pid updates ride the **same loopback socket** the helper streams PCM on (it's bidirectional). Dead PIDs need no rebuild — they resolve to no audio object, so the helper just stops mixing them; we only rebuild on additions (avoids daemon-churn glitches).
+- **React to audio start** (helper's `kAudioHardwarePropertyProcessObjectList` listener): `TranslatePIDToProcessObject` only resolves a process *currently producing audio*, so a PID already in the set (e.g. `WebContent` when a YouTube tab starts) becomes tappable only at that moment — which pid polling can't see (the PID never changes). The listener rebuilds the tap when the audio-object list changes.
+- **Queue separation (critical)**: the listener and the IOProc run on **separate** dispatch queues. Sharing one deadlocks `AudioDeviceStop` (in tap teardown) against the live IOProc on a video switch's stop/start audio churn — audio drops permanently and the helper can't even exit on SIGTERM. (Found via the "first video plays, the next is silent forever" bug.)
+
+### Simulator volume
+
+The process tap captures audio *before* the simulator applies its own media volume, so the captured signal ignores the sim volume (only the browser's `<audio>` volume would change it). The sim's current volume is exposed at `…/Devices/<udid>/data/var/run/simulatoraudio/audiosettings.plist` as `sim_volume` (0–100, updated live as the user changes it). `readSimVolume()` reads it (there is no `simctl` volume subcommand) and `applyGain()` multiplies it into the captured PCM, per session — so concurrent sims keep independent volume. The curve is currently linear (`v/100`); matching iOS's perceptual (log) curve is a follow-up.
+
 ### Two non-obvious constraints
 
-1. **TCC: the capture must be a `.app` launched via LaunchServices.** A process tap returns *silence* unless the **responsible process** holds the audio-recording TCC grant. A CLI helper the Node agent spawns inherits the agent/terminal's (ungranted) responsibility → silence (verified). So the capture runs in a small signed bundle — `audiotap-helper.app` — launched via `open -g`; it becomes its own responsible process with its own **one-time** grant (like Screen Recording). The helper streams PCM back over **loopback TCP** (`open` detaches it, so stdout isn't an option). Steady-state (unchanged helper binary) reuses the same ad-hoc cdhash, so the grant persists; only a helper change re-prompts.
+1. **TCC: the capture must be a `.app` launched via LaunchServices.** A process tap returns *silence* unless the **responsible process** holds the audio-recording TCC grant. A CLI helper the Node agent spawns inherits the agent/terminal's (ungranted) responsibility → silence (verified). So the capture runs in a small signed bundle — `audiotap-helper.app` — launched via `open -g`; it becomes its own responsible process with its own **one-time** grant (like Screen Recording). The helper streams PCM back over **loopback TCP** (`open` detaches it, so stdout isn't an option). Steady-state (unchanged helper binary) reuses the same ad-hoc cdhash, so the grant persists; only a helper change re-prompts. **Priming the grant**: the prompt otherwise appears at first `device:boot`, which an unattended agent operator would miss — so `tapflow setup ios` runs the helper's `--request-permission` mode (a global tap whose *capture start*, not tap creation, raises the prompt — needing no port/pid/booted sim) to grant it up front while the operator is present.
 2. **macOS 14.2+** (Core Audio process taps). Older macOS → iOS audio is unsupported (no fallback; the dylib path C was rejected, see below).
 
 ### Code map (iOS)
 
 | File | Role |
 |---|---|
-| `ios-agent/src/audiotap-helper.swift` | The tap helper: PID → process tap → aggregate → IOProc → Float32→S16/44100 resample → loopback TCP frames. |
-| `ios-agent/src/AudioCaptureStreamer.ts` | `ensureHelperApp()` (mtime build + ad-hoc sign of the `.app`), `launchAudioHelper()` (`open -g`), and the loopback TCP server → `ReadableStream<AudioFrame>`. |
-| `ios-agent/src/IOSAgent.ts` | Opt-in + macOS-14.2 gate; boot-time loopback listen; launch the helper for the app PID at `app:launch`; `pumpAudio` → `CODEC_AUDIO`. |
-| `ios-agent/src/SimctlWrapper.ts` | `launchApp` returns the launched host PID. |
+| `ios-agent/src/audiotap-helper.swift` | The tap helper: PIDs → process tap → aggregate → IOProc → Float32→S16/44100 → loopback TCP frames. Bidirectional socket (receives pid-set updates → rebuilds the tap), `kAudioHardwarePropertyProcessObjectList` listener (rebuild on audio start), separate control/IOProc queues, and a `--request-permission` priming mode. |
+| `ios-agent/src/AudioCaptureStreamer.ts` | `ensureHelperApp()` (mtime build + ad-hoc sign of the `.app`), `launchAudioHelper()` (`open -g`), `updatePids()` (push the tap set), the loopback TCP server → `ReadableStream<AudioFrame>`; plus `isAudioSupported()`, `readSimVolume()`, `applyGain()`, `requestAudioPermission()`. |
+| `ios-agent/src/SimProcessTree.ts` | `enumerateSimPids(udid)` — the sim's host PIDs via its `launchd_sim` descendant tree. |
+| `ios-agent/src/IOSAgent.ts` | Opt-in + macOS-14.2 gate; boot-time whole-sim tap + 1.5s process-tree poll; per-session sim-volume gain; `pumpAudio` → `CODEC_AUDIO`. |
+| `cli/src/lib/setup.ts` | `tapflow setup ios` primes the audio-capture TCC grant up front via `requestAudioPermission()`. |
 
 ## Why the platforms are asymmetric
 
@@ -52,7 +66,7 @@ Android = **one** emulator process with a built-in audio stream (tap it directly
 
 ## Rejected iOS approaches (do not re-explore without new facts)
 
-All four were tried against headless `simctl`-booted sims. Full evidence is in the `.work/` plans (`2026-06-25-ios-audio-output-impl-plan.md`).
+All four were tried against headless `simctl`-booted sims. Full evidence is in the `.work/` plans — the rejected-approach detail in `.work/archive/2026-06-25-ios-audio-output-impl-plan.md`, the approach-E design in `.work/2026-06-26-ios-audio-process-tap-plan.md` (local only).
 
 | # | Approach | Why rejected |
 |---|---|---|
