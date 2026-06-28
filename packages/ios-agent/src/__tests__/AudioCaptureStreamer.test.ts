@@ -115,15 +115,6 @@ describe('launchAudioHelper (per-sim isolation)', () => {
     // -n is what prevents `open -a` from reusing the first sim's helper (multi-sim audio bug)
     expect(args).toEqual(['-g', '-n', '-a', '/x/audiotap-helper.app', '--args', '12345', '101', '102'])
   })
-
-  it('appends --mute only when muted (default keeps host audible)', () => {
-    mockExecFileSync.mockClear()
-    mockExecFileSync.mockReturnValue('' as never)
-    launchAudioHelper('/x/h.app', 1, [101], false)
-    expect(mockExecFileSync.mock.calls[0][1]).not.toContain('--mute')
-    launchAudioHelper('/x/h.app', 1, [101], true)
-    expect(mockExecFileSync.mock.calls[1][1]).toEqual(['-g', '-n', '-a', '/x/h.app', '--args', '1', '101', '--mute'])
-  })
 })
 
 describe('isAudioSupported (macOS 14.2+ / Darwin 23.2+ gate)', () => {

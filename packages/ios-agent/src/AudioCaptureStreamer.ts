@@ -74,9 +74,8 @@ export function ensureHelperApp(): string {
  * never gets its own tap and its audio silently breaks. LaunchServices makes each its own
  * TCC-responsible process; it connects back to `port` and streams PCM.
  */
-export function launchAudioHelper(appPath: string, port: number, pids: number[], mute = false): void {
-  const muteArg = mute ? ['--mute'] : [] // mute the host (agent Mac) output; default keeps it audible
-  execFileSync('open', ['-g', '-n', '-a', appPath, '--args', String(port), ...pids.map(String), ...muteArg],
+export function launchAudioHelper(appPath: string, port: number, pids: number[]): void {
+  execFileSync('open', ['-g', '-n', '-a', appPath, '--args', String(port), ...pids.map(String)],
     { stdio: ['ignore', 'ignore', 'ignore'] })
 }
 
@@ -109,13 +108,17 @@ export function readSimVolume(udid: string): number {
  *
  * Runs the helper's --request-permission mode: a global tap whose *capture start* raises the same
  * audio-capture prompt a per-pid tap needs (the grant keys on the app cdhash + service, not the tap
- * shape), so no port/pid/booted simulator is required. `open -W` blocks until the helper exits, i.e.
- * until the modal is answered. The grant itself isn't readable back, so the caller treats a clean
- * return as "prompt shown / answered" and leaves approve-vs-deny to the operator.
+ * shape), so no port/pid/booted simulator is required. The grant isn't readable back, so the caller
+ * treats a clean return as "prompt shown / answered" and leaves approve-vs-deny to the operator.
+ *
+ * `wait` (default true, for `tapflow setup ios`): `open -W` blocks until the modal is answered.
+ * `wait=false` (for `tapflow agent start`): fire-and-forget so agent startup isn't blocked — if the
+ * grant exists the helper exits silently, otherwise the modal pops for the operator to allow.
  */
-export function requestAudioPermission(): void {
+export function requestAudioPermission(wait = true): void {
   const app = ensureHelperApp()
-  execFileSync('open', ['-W', '-n', '-a', app, '--args', '--request-permission'], { stdio: ['ignore', 'ignore', 'ignore'] })
+  const flags = wait ? ['-W', '-n'] : ['-g', '-n']
+  execFileSync('open', [...flags, '-a', app, '--args', '--request-permission'], { stdio: ['ignore', 'ignore', 'ignore'] })
 }
 
 // Wire format from the audiotap-helper: length-prefixed PCM frames — [u32 BE len][PCM bytes], where

@@ -784,14 +784,11 @@ export class IOSAgent implements DeviceAgent {
   // signed .app (audiotap-helper) launched via LaunchServices so it holds its own audio-recording TCC
   // grant; it streams PCM back over loopback TCP. See AudioCaptureStreamer.
 
+  // Audio output is ON by default (macOS 14.2+); opt out with TAPFLOW_AUDIO=off. The tap is .muted, so
+  // the sim's audio goes only to the browser and the host (agent Mac) stays silent. The grant is
+  // primed at `tapflow agent start`; see contributing/simulator-audio.md.
   private audioEnabled(): boolean {
-    return process.env.TAPFLOW_IOS_AUDIO === '1' && isAudioSupported()
-  }
-
-  // Opt-in: mute only the tapped sim processes on the host (not the whole Mac — other apps unaffected),
-  // for a dedicated/unattended agent Mac. Default off keeps the sim audible on the host too.
-  private audioMuted(): boolean {
-    return process.env.TAPFLOW_IOS_AUDIO_MUTE === '1'
+    return process.env.TAPFLOW_AUDIO !== 'off' && isAudioSupported()
   }
 
   // Stand up the per-session loopback server the audiotap-helper streams to, pump its frames to the
@@ -822,7 +819,7 @@ export class IOSAgent implements DeviceAgent {
     if (!pids.length) { logger.warn('no simulator processes to tap (audio idle until first poll)'); return }
     state.audioPids = new Set(pids)
     try {
-      launchAudioHelper(ensureHelperApp(), state.audioPort, pids, this.audioMuted())
+      launchAudioHelper(ensureHelperApp(), state.audioPort, pids)
     } catch (e) {
       logger.warn(`audiotap-helper launch failed (audio disabled): ${e instanceof Error ? e.message : String(e)}`)
     }

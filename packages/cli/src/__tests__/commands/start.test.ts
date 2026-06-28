@@ -14,7 +14,7 @@ vi.mock('@tapflowio/relay', () => ({
 
   config: { local: { port: 4000, dataDir: '/tmp/tapflow-test', wsBackpressureBytes: 1048576 }, relay: { url: null }, tunnel: null, tls: undefined },
 }))
-vi.mock('@tapflowio/ios-agent', () => ({}))
+vi.mock('@tapflowio/ios-agent', () => ({ requestAudioPermission: vi.fn(), isAudioSupported: vi.fn(() => true) }))
 vi.mock('@tapflowio/android-agent', () => ({}))
 
 const mockTunnel = { stop: vi.fn() }

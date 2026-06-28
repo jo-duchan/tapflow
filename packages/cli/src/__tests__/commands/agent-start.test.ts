@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 
 vi.mock('node:child_process')
-vi.mock('@tapflowio/ios-agent', () => ({}))
+vi.mock('@tapflowio/ios-agent', () => ({ requestAudioPermission: vi.fn(), isAudioSupported: vi.fn(() => true) }))
 vi.mock('@tapflowio/android-agent', () => ({}))
 
 import { execSync } from 'node:child_process'

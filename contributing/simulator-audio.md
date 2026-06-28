@@ -1,6 +1,6 @@
 # Simulator audio capture (device → browser) — design & rejected approaches
 
-> How tapflow captures an Android emulator's / iOS simulator's audio and streams it to the browser, why the two platforms use different mechanisms, and — importantly — the iOS approaches we tried and **rejected**, with reasons, so nobody re-walks the dead ends. Manual-testing feature, opt-in. Tracking: [#259](https://github.com/jo-duchan/tapflow/issues/259) (output), [#334](https://github.com/jo-duchan/tapflow/issues/334) (input, out of scope here).
+> How tapflow captures an Android emulator's / iOS simulator's audio and streams it to the browser, why the two platforms use different mechanisms, and — importantly — the iOS approaches we tried and **rejected**, with reasons, so nobody re-walks the dead ends. Manual-testing feature, on by default (opt out with `TAPFLOW_AUDIO=off`). Tracking: [#259](https://github.com/jo-duchan/tapflow/issues/259) (output), [#334](https://github.com/jo-duchan/tapflow/issues/334) (input, out of scope here).
 
 ---
 
@@ -16,7 +16,7 @@ Capture is platform-specific; everything downstream is shared and lives on `main
 - **Canonical format**: 44100 / Stereo / S16LE. Each platform normalizes to this; the dashboard plays a fixed format (no per-frame format negotiation).
 - **`CODEC_AUDIO`** (`agent-core/src/utils/envelope.ts`): an independent envelope bit, so audio rides the *same* stream socket as video without touching the JPEG/H.264 layout.
 - **`sendAudioYieldingToVideo`** (`agent-core/src/utils/stream.ts`): audio uses the yielding sender, never the keyframe-aware video sender — **audio must never inflate the socket buffer enough to trip video's backpressure**. A dropped audio frame is a brief glitch; a stalled video is not. This is the no-degradation contract (audio is additive, never harms the manual-testing video path).
-- **Opt-in**: `TAPFLOW_ANDROID_AUDIO=1` / `TAPFLOW_IOS_AUDIO=1`. Default off leaves the video path byte-for-byte unchanged.
+- **On by default**: opt out with `TAPFLOW_AUDIO=off` — a single env for both platforms (`agent start --ios/--android` already selects the platform). iOS additionally needs macOS 14.2+. The no-degradation contract (audio yields to video) keeps the video path safe whether audio is on or off.
 
 ## Android — emulator gRPC `streamAudio`
 
@@ -28,7 +28,7 @@ The key insight that unlocked iOS:
 
 > **Simulator apps are host macOS processes.** `xcrun simctl launch` returns a host PID; `ps` shows the app's host binary. The simulator's audio doesn't go through a single tappable device — each app (and its children) plays to the host's CoreAudio directly.
 
-So we capture per-process with a **Core Audio process tap**: translate the sim's process PIDs → process objects (`kAudioHardwarePropertyTranslatePIDToProcessObject`) → `CATapDescription(stereoMixdownOfProcesses:)` → `AudioHardwareCreateProcessTap` → a private aggregate device (`kAudioAggregateDeviceTapListKey`, with the host default output as the clock sub-device) → an IOProc reads the tapped PCM. `muteBehavior = .unmuted` so the apps still play normally; we capture a copy. No device routing, no dylib injection, no host-output hijack, and it works on **any signed build**.
+So we capture per-process with a **Core Audio process tap**: translate the sim's process PIDs → process objects (`kAudioHardwarePropertyTranslatePIDToProcessObject`) → `CATapDescription(stereoMixdownOfProcesses:)` → `AudioHardwareCreateProcessTap` → a private aggregate device (`kAudioAggregateDeviceTapListKey`, with the host default output as the clock sub-device) → an IOProc reads the tapped PCM. `muteBehavior = .muted` so the sim's audio goes only to the browser (the agent Mac stays silent); we capture the copy. No device routing, no dylib injection, no host-output hijack, and it works on **any signed build**.
 
 This gives the Android-symmetric properties on one Mac: **per-sim isolation** (tap only that sim's PIDs), **whole-sim** (tap the sim's process tree incl. WebKit `WebContent` → WebView audio works), **headless**, **no build modification**.
 
@@ -45,15 +45,17 @@ The tap set is the sim's whole process tree, kept current as processes come and 
 
 The process tap captures audio *before* the simulator applies its own media volume, so the captured signal ignores the sim volume (only the browser's `<audio>` volume would change it). The sim's current volume is exposed at `…/Devices/<udid>/data/var/run/simulatoraudio/audiosettings.plist` as `sim_volume` (0–100, updated live as the user changes it). `readSimVolume()` reads it (there is no `simctl` volume subcommand) and `applyGain()` multiplies it into the captured PCM, per session — so concurrent sims keep independent volume. The curve is currently linear (`v/100`); matching iOS's perceptual (log) curve is a follow-up.
 
-### Host output (muteBehavior)
+### Host output: iOS muted, Android not (asymmetric)
 
-By default the tap is `.unmuted` — the sim plays on the agent Mac's speakers too (like a real device) and we capture a copy. Set `TAPFLOW_IOS_AUDIO_MUTE=1` for `.muted`: only the **tapped sim processes** are silenced on the host (process-tap scope — *other Mac apps are unaffected*, unlike a system-output redirect), so the sim's audio goes only to the browser. Useful for a dedicated/unattended agent Mac. Per-session, so each sim is independent.
+iOS pins `muteBehavior = .muted`, so when audio is on the sim plays **only to the browser** and the agent Mac stays silent — no echo, no noise on a shared/unattended Mac. It's process-tap-scoped, so other Mac apps are unaffected (unlike a system-output redirect).
 
-It stays **opt-in** (not auto-by-permission) because the tap's audio-capture TCC grant can't be read at runtime: `AVCaptureDevice.authorizationStatus(for: .audio)` reflects the **mic** service (`kTCCServiceMicrophone`), not the tap's (`kTCCServiceAudioCapture`) — verified, the capture grant was given while that status stayed `notDetermined` — and capture denial is *silent* (no OSStatus). So `.muted`-by-default would turn a missed permission prompt into **total silence** (host muted *and* capture silent); `.unmuted` keeps the host's original audio audible when capture fails. (Auto-detect would need the private `TCCAccessPreflight(kTCCServiceAudioCapture)`, too fragile for an unattended agent.)
+**Android can't match this.** The emulator's `-audio <backend>` couples play+record, and `-audio none` disables both (gRPC capture included). A headless emulator (`-no-window`, audio on) **does** output to the host Mac (measured). So with audio on, the Android emulator is also audible on the agent Mac — silence it with the **Mac's own volume**. Restoring symmetry via a shared process-tap helper on the emulator PID (mute-only) is tracked in [#341](https://github.com/jo-duchan/tapflow/issues/341).
+
+Why iOS can't auto-decide mute by permission: the tap's audio-capture TCC grant isn't readable at runtime — `AVCaptureDevice.authorizationStatus(.audio)` reflects the **mic** service (`kTCCServiceMicrophone`), not the tap's (`kTCCServiceAudioCapture`) — verified, the capture grant was given while that status stayed `notDetermined` — and denial is *silent* (no OSStatus). So `.muted` is unconditional, and we rely on priming the grant at `agent start` (below) to avoid a missed-prompt → total-silence trap.
 
 ### Two non-obvious constraints
 
-1. **TCC: the capture must be a `.app` launched via LaunchServices.** A process tap returns *silence* unless the **responsible process** holds the audio-recording TCC grant. A CLI helper the Node agent spawns inherits the agent/terminal's (ungranted) responsibility → silence (verified). So the capture runs in a small signed bundle — `audiotap-helper.app` — launched via `open -g`; it becomes its own responsible process with its own **one-time** grant (like Screen Recording). The helper streams PCM back over **loopback TCP** (`open` detaches it, so stdout isn't an option). Steady-state (unchanged helper binary) reuses the same ad-hoc cdhash, so the grant persists; only a helper change re-prompts. **Priming the grant**: the prompt otherwise appears at first `device:boot`, which an unattended agent operator would miss — so `tapflow setup ios` runs the helper's `--request-permission` mode (a global tap whose *capture start*, not tap creation, raises the prompt — needing no port/pid/booted sim) to grant it up front while the operator is present.
+1. **TCC: the capture must be a `.app` launched via LaunchServices.** A process tap returns *silence* unless the **responsible process** holds the audio-recording TCC grant. A CLI helper the Node agent spawns inherits the agent/terminal's (ungranted) responsibility → silence (verified). So the capture runs in a small signed bundle — `audiotap-helper.app` — launched via `open -g`; it becomes its own responsible process with its own **one-time** grant (like Screen Recording). The helper streams PCM back over **loopback TCP** (`open` detaches it, so stdout isn't an option). Steady-state (unchanged helper binary) reuses the same ad-hoc cdhash, so the grant persists; only a helper change re-prompts. **Priming the grant**: the prompt otherwise appears at first `device:boot`, which an unattended operator would miss. So **`tapflow agent start`** (non-blocking) and `tapflow setup ios` run the helper's `--request-permission` mode (a global tap whose *capture start*, not tap creation, raises the prompt — needing no port/pid/booted sim). If the grant exists the helper exits silently; otherwise the operator gets the modal. The agent operator (not the dashboard user) owns this, so **if browser audio is silent, re-run `tapflow agent start`** to get the prompt again.
 2. **macOS 14.2+** (Core Audio process taps). Older macOS → iOS audio is unsupported (no fallback; the dylib path C was rejected, see below).
 
 ### No-degradation — measured (iOS, localhost A/B)
@@ -89,8 +91,8 @@ Zero bleed — sim B's capture stayed at exactly 0 the whole time sim A played. 
 | `ios-agent/src/audiotap-helper.swift` | The tap helper: PIDs → process tap → aggregate → IOProc → Float32→S16/44100 → loopback TCP frames. Bidirectional socket (receives pid-set updates → rebuilds the tap), `kAudioHardwarePropertyProcessObjectList` listener (rebuild on audio start), separate control/IOProc queues, and a `--request-permission` priming mode. |
 | `ios-agent/src/AudioCaptureStreamer.ts` | `ensureHelperApp()` (mtime build + ad-hoc sign of the `.app`), `launchAudioHelper()` (`open -g`), `updatePids()` (push the tap set), the loopback TCP server → `ReadableStream<AudioFrame>`; plus `isAudioSupported()`, `readSimVolume()`, `applyGain()`, `requestAudioPermission()`. |
 | `ios-agent/src/SimProcessTree.ts` | `enumerateSimPids(udid)` — the sim's host PIDs via its `launchd_sim` descendant tree. |
-| `ios-agent/src/IOSAgent.ts` | Opt-in + macOS-14.2 gate; boot-time whole-sim tap + 1.5s process-tree poll; per-session sim-volume gain; `pumpAudio` → `CODEC_AUDIO`. |
-| `cli/src/lib/setup.ts` | `tapflow setup ios` primes the audio-capture TCC grant up front via `requestAudioPermission()`. |
+| `ios-agent/src/IOSAgent.ts` | Default-on (`TAPFLOW_AUDIO`≠`off`) + macOS-14.2 gate; boot-time whole-sim tap + 1.5s process-tree poll; per-session sim-volume gain; `pumpAudio` → `CODEC_AUDIO`. |
+| `cli/src/commands/{agent-start,start}.ts`, `lib/setup.ts` | prime the audio-capture TCC grant via `requestAudioPermission()` — `agent start` non-blocking (every start), `setup ios` blocking. |
 
 ## Why the platforms are asymmetric
 
