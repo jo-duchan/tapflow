@@ -179,12 +179,13 @@ var curTapID = AudioObjectID(0)
 var curAggID = AudioObjectID(0)
 var curProcID: AudioDeviceIOProcID?
 var aggSeq = 0
+var curObjs: [AudioObjectID] = [] // audio objects in the live tap — skip a rebuild that resolves to the same set
 
 func destroyTap() {
   if curAggID != 0, let p = curProcID { AudioDeviceStop(curAggID, p); AudioDeviceDestroyIOProcID(curAggID, p) }
   if curAggID != 0 { AudioHardwareDestroyAggregateDevice(curAggID) }
   if curTapID != 0 { AudioHardwareDestroyProcessTap(curTapID) }
-  curProcID = nil; curAggID = 0; curTapID = 0
+  curProcID = nil; curAggID = 0; curTapID = 0; curObjs = []
 }
 
 // Build (or rebuild) the tap for `pids`. Returns false if no process objects resolve (e.g. all pids
@@ -192,9 +193,14 @@ func destroyTap() {
 // destroyTap() drains the IOProc before teardown, so the rebuild never races a live callback.
 @discardableResult
 func rebuildTap(_ pids: [pid_t]) -> Bool {
-  destroyTap()
-  let procObjs = pids.map(processObject).filter { $0 != 0 }
+  let procObjs = pids.map(processObject).filter { $0 != 0 }.sorted()
   guard !procObjs.isEmpty else { err("audiotap: no process objects for pids \(pids)"); return false }
+  // No-op skip: if the resolved audio objects are unchanged, keep the live tap instead of tearing it
+  // down and rebuilding — the destroy→create gap would briefly unmute the host (measured ~91% of
+  // rebuilds were no-ops from daemon pid churn). Real changes (a process starts/stops audio) change
+  // procObjs and still rebuild, so capture responsiveness is unaffected.
+  if curTapID != 0 && procObjs == curObjs { return true }
+  destroyTap()
 
   let tapDesc = CATapDescription(stereoMixdownOfProcesses: procObjs)
   tapDesc.isPrivate = true
@@ -240,6 +246,7 @@ func rebuildTap(_ pids: [pid_t]) -> Bool {
   }
   guard AudioDeviceCreateIOProcIDWithBlock(&curProcID, curAggID, ioQueue, block) == noErr else { err("IOProc create failed"); return false }
   AudioDeviceStart(curAggID, curProcID)
+  curObjs = procObjs
   return true
 }
 
