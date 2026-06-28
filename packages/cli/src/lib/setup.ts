@@ -33,6 +33,10 @@ function androidSystemImage(): string {
   return `system-images;${AVD_IMAGE_API};google_apis;${abi}`
 }
 
+function androidSystemImageDir(): string {
+  return join(ANDROID_SDK_DIR, ...androidSystemImage().split(';'))
+}
+
 // 디바이스 부팅은 하지 않는다 — QA Session 접속 시 relay가 on-demand로 부팅한다.
 // setup은 "부팅 가능한 디바이스/AVD가 준비된 상태"까지만 보장한다.
 
@@ -88,7 +92,12 @@ const SDK_CMDLINE_BIN = join(ANDROID_SDK_DIR, 'cmdline-tools', 'latest', 'bin')
 
 // cmdline-tools가 SDK 안에 있고 platform-tools(adb)까지 갖춘 자기완결 상태인지.
 function sdkSelfContained(): boolean {
-  return existsSync(join(SDK_CMDLINE_BIN, 'sdkmanager')) && existsSync(join(ANDROID_SDK_DIR, 'platform-tools', 'adb'))
+  return (
+    existsSync(join(SDK_CMDLINE_BIN, 'sdkmanager')) &&
+    existsSync(join(ANDROID_SDK_DIR, 'platform-tools', 'adb')) &&
+    existsSync(join(ANDROID_SDK_DIR, 'emulator', 'emulator')) &&
+    existsSync(androidSystemImageDir())
+  )
 }
 
 function hasJava(): boolean {
