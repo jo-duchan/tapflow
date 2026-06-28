@@ -8,7 +8,7 @@
 
 Capture is platform-specific; everything downstream is shared and lives on `main`:
 
-```
+```text
 <platform capture> → S16LE / 44100 / Stereo → CODEC_AUDIO envelope → sendAudioYieldingToVideo
                    → relay (CODEC_AUDIO routing) → browser (Web Audio playback)
 ```
@@ -82,7 +82,7 @@ Each sim taps only its own `launchd_sim` descendants, with a **separate helper i
 | A (iPhone 16 Pro) | playing | avg 1729, max 5508 |
 | B (iPhone 16 Pro Max) | silent | **0** (148/148 samples) |
 
-Zero bleed — sim B's capture stayed at exactly 0 the whole time sim A played. This also surfaced a multi-sim bug: `launchAudioHelper` must pass `open -n`, otherwise `open -a` reuses the first sim's helper and the second sim gets no audio at all (silent on single-sim, only visible with two). Regression-tested in `AudioCaptureStreamer.test.ts`.
+Zero bleed — sim B's capture stayed at exactly 0 the whole time sim A played. This also surfaced a multi-sim bug: `launchAudioHelper` must pass `open -n`, otherwise `open -a` reuses the first sim's helper and the second sim gets no audio at all (not visible in single-sim runs — only surfaces once a second sim joins). Regression-tested in `AudioCaptureStreamer.test.ts`.
 
 ### Code map (iOS)
 

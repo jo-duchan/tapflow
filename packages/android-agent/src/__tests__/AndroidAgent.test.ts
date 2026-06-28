@@ -70,7 +70,7 @@ vi.mock('../emulator/EmulatorGrpcClient', () => ({
     close: vi.fn(),
     touchDown: vi.fn(), touchMove: vi.fn(), touchUp: vi.fn(),
     pinchStart: vi.fn(), pinchMove: vi.fn(), pinchEnd: vi.fn(),
-    streamAudio: vi.fn(() => new ReadableStream({ start() {} })), // audio is on by default now
+    streamAudio: vi.fn(() => ({ frames: () => new ReadableStream({ start() {} }), cancel: vi.fn() })), // AudioStream shape: { frames, cancel }
   }) }),
 }))
 

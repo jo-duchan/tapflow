@@ -795,9 +795,13 @@ export class IOSAgent implements DeviceAgent {
   // relay, and start the whole-sim tap: launch the helper for the simulator's current process tree,
   // then poll for new processes (apps, WebKit WebContent) and push deltas over the same socket.
   private startAudioCapture(state: DeviceState, streamWs: WebSocket, udid: string): void {
+    const seq = state.bootSeq
     const streamer = new AudioCaptureStreamer()
     streamer.listen()
       .then((port) => {
+        // A reboot/shutdown/disconnect may have superseded this boot while listen() was binding —
+        // discard so we don't leave an orphan helper/poll/server behind the current lifecycle.
+        if (seq !== state.bootSeq || streamWs.readyState !== WebSocket.OPEN) { streamer.stop(); return }
         state.audioStreamer = streamer
         state.audioPort = port
         state.audioVolume = readSimVolume(udid)

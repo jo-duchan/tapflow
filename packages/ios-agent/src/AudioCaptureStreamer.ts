@@ -116,9 +116,14 @@ export function readSimVolume(udid: string): number {
  * grant exists the helper exits silently, otherwise the modal pops for the operator to allow.
  */
 export function requestAudioPermission(wait = true): void {
-  const app = ensureHelperApp()
-  const flags = wait ? ['-W', '-n'] : ['-g', '-n']
-  execFileSync('open', [...flags, '-a', app, '--args', '--request-permission'], { stdio: ['ignore', 'ignore', 'ignore'] })
+  try {
+    const app = ensureHelperApp()
+    const flags = wait ? ['-W', '-n'] : ['-g', '-n']
+    execFileSync('open', [...flags, '-a', app, '--args', '--request-permission'], { stdio: ['ignore', 'ignore', 'ignore'] })
+  } catch (e) {
+    if (wait) throw e // setup wants to surface it; agent-start priming is best-effort (never block startup)
+    logger.warn(`audio permission priming skipped: ${e instanceof Error ? e.message : String(e)}`)
+  }
 }
 
 // Wire format from the audiotap-helper: length-prefixed PCM frames — [u32 BE len][PCM bytes], where
@@ -175,6 +180,8 @@ export class AudioCaptureStreamer {
   }
 
   private onConnection(sock: net.Socket): void {
+    // Drop a stale helper's socket so two overlapping instances can't interleave frames into buf.
+    if (this.activeSock && this.activeSock !== sock) this.activeSock.destroy()
     this.buf = Buffer.alloc(0) // fresh per connection (the app relaunch reconnects)
     this.activeSock = sock
     if (this.pendingPids) { this.writePids(sock, this.pendingPids); this.pendingPids = null }
@@ -216,6 +223,7 @@ export class AudioCaptureStreamer {
   }
 
   stop(): void {
+    try { this.controller?.close() } catch { /* already closed/errored — fine */ } // end the frame stream so pumpAudio's reader unblocks
     this.controller = null
     this.pendingPids = null
     if (this.activeSock) { this.activeSock.destroy(); this.activeSock = null }
