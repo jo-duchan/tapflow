@@ -88,8 +88,12 @@ let args = CommandLine.arguments
 // creation alone doesn't), so this builds an aggregate + IOProc and runs it briefly. exit 0 = granted.
 if args.contains("--request-permission") { primePermissionAndExit() }
 
-guard args.count >= 3, let port = UInt16(args[1]) else { err("usage: audiotap-helper <port> <pid>..."); exit(64) }
-let initialPids = args[2...].compactMap { pid_t($0) }
+guard args.count >= 3, let port = UInt16(args[1]) else { err("usage: audiotap-helper <port> <pid>... [--mute]"); exit(64) }
+// --mute: mute only the TAPPED sim processes' output on the host (process-tap scope — other Mac apps
+// are unaffected), for an unattended/dedicated agent Mac. Default (.unmuted) keeps the sim audible on
+// the host too, like a real device.
+let muted = args.contains("--mute")
+let initialPids = args[2...].filter { $0 != "--mute" }.compactMap { pid_t($0) }
 guard !initialPids.isEmpty else { err("no valid pid"); exit(64) }
 
 // ---- loopback connect (helper reaches the agent's 127.0.0.1 server) ----
@@ -198,7 +202,7 @@ func rebuildTap(_ pids: [pid_t]) -> Bool {
 
   let tapDesc = CATapDescription(stereoMixdownOfProcesses: procObjs)
   tapDesc.isPrivate = true
-  tapDesc.muteBehavior = .unmuted // the apps still play normally; we capture a copy
+  tapDesc.muteBehavior = muted ? .muted : .unmuted // .unmuted: apps still play on the host; we capture a copy
   guard AudioHardwareCreateProcessTap(tapDesc, &curTapID) == noErr, curTapID != 0 else { err("create tap failed"); return false }
 
   // the tap object's actual UID (not necessarily the description's uuid) drives the aggregate's tap list

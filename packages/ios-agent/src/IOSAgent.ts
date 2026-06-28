@@ -788,6 +788,12 @@ export class IOSAgent implements DeviceAgent {
     return process.env.TAPFLOW_IOS_AUDIO === '1' && isAudioSupported()
   }
 
+  // Opt-in: mute only the tapped sim processes on the host (not the whole Mac — other apps unaffected),
+  // for a dedicated/unattended agent Mac. Default off keeps the sim audible on the host too.
+  private audioMuted(): boolean {
+    return process.env.TAPFLOW_IOS_AUDIO_MUTE === '1'
+  }
+
   // Stand up the per-session loopback server the audiotap-helper streams to, pump its frames to the
   // relay, and start the whole-sim tap: launch the helper for the simulator's current process tree,
   // then poll for new processes (apps, WebKit WebContent) and push deltas over the same socket.
@@ -816,7 +822,7 @@ export class IOSAgent implements DeviceAgent {
     if (!pids.length) { logger.warn('no simulator processes to tap (audio idle until first poll)'); return }
     state.audioPids = new Set(pids)
     try {
-      launchAudioHelper(ensureHelperApp(), state.audioPort, pids)
+      launchAudioHelper(ensureHelperApp(), state.audioPort, pids, this.audioMuted())
     } catch (e) {
       logger.warn(`audiotap-helper launch failed (audio disabled): ${e instanceof Error ? e.message : String(e)}`)
     }

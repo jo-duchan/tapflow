@@ -74,8 +74,9 @@ export function ensureHelperApp(): string {
  * never gets its own tap and its audio silently breaks. LaunchServices makes each its own
  * TCC-responsible process; it connects back to `port` and streams PCM.
  */
-export function launchAudioHelper(appPath: string, port: number, pids: number[]): void {
-  execFileSync('open', ['-g', '-n', '-a', appPath, '--args', String(port), ...pids.map(String)],
+export function launchAudioHelper(appPath: string, port: number, pids: number[], mute = false): void {
+  const muteArg = mute ? ['--mute'] : [] // mute the host (agent Mac) output; default keeps it audible
+  execFileSync('open', ['-g', '-n', '-a', appPath, '--args', String(port), ...pids.map(String), ...muteArg],
     { stdio: ['ignore', 'ignore', 'ignore'] })
 }
 
