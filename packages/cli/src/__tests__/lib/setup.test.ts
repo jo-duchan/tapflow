@@ -186,9 +186,19 @@ describe('runSetupAndroid', () => {
       if (p === SDK_EMULATOR || p === SDK_SYSTEM_IMAGE) return installed
       return false
     })
+    const expectedSystemImage =
+      process.arch === 'arm64'
+        ? 'system-images;android-35;google_apis;arm64-v8a'
+        : 'system-images;android-35;google_apis;x86_64'
+
     mockSpawnSync.mockImplementation((cmd, args) => {
       const a = Array.isArray(args) ? args : []
-      if (typeof cmd === 'string' && cmd.includes('sdkmanager') && a.includes('cmdline-tools;latest')) {
+      if (
+        typeof cmd === 'string' &&
+        cmd.includes('sdkmanager') &&
+        a.includes('cmdline-tools;latest') &&
+        a.includes(expectedSystemImage)
+      ) {
         installed = true
         return okSpawn as never
       }
@@ -202,7 +212,13 @@ describe('runSetupAndroid', () => {
 
     expect(mockSpawnSync).toHaveBeenCalledWith(
       SDK_SDKMANAGER,
-      expect.arrayContaining([`--sdk_root=${SDK_DIR}`, 'cmdline-tools;latest', 'platform-tools', 'emulator']),
+      expect.arrayContaining([
+        `--sdk_root=${SDK_DIR}`,
+        'cmdline-tools;latest',
+        'platform-tools',
+        'emulator',
+        expectedSystemImage,
+      ]),
       expect.anything(),
     )
     expect(findStep(results, 'android sdk')?.label).toBe('Android SDK installed')
