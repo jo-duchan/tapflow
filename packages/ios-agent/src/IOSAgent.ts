@@ -32,7 +32,7 @@ import {
 import type { AudioFrame } from '@tapflowio/agent-core'
 import { SimctlWrapper, isDeviceMissingError } from './SimctlWrapper.js'
 import { ScreenCaptureStreamer, type StreamFrame } from './ScreenCaptureStreamer.js'
-import { AudioCaptureStreamer, ensureHelperApp, launchAudioHelper, isAudioSupported } from './AudioCaptureStreamer.js'
+import { AudioCaptureStreamer, ensureHelperApp, launchAudioHelper, isAudioSupported, readSimVolume, applyGain } from './AudioCaptureStreamer.js'
 import { enumerateSimPids } from './SimProcessTree.js'
 import { MjpegStreamer } from './MjpegStreamer.js'
 import { TouchHelper } from './TouchHelper.js'
@@ -88,6 +88,9 @@ interface DeviceState {
   // pushed to the helper (so we only rebuild the tap when a NEW process appears).
   audioPoll: ReturnType<typeof setInterval> | null
   audioPids: Set<number> | null
+  // Per-device capture gain (0–1) from the sim's sim_volume. The tap captures pre-volume audio, so we
+  // multiply it back in. Per-session field → each simulator's volume is applied independently.
+  audioVolume: number
 }
 
 export class IOSAgent implements DeviceAgent {
@@ -247,6 +250,7 @@ export class IOSAgent implements DeviceAgent {
         audioPort: 0,
         audioPoll: null,
         audioPids: null,
+        audioVolume: 1,
       })
     })
   }
@@ -793,9 +797,13 @@ export class IOSAgent implements DeviceAgent {
       .then((port) => {
         state.audioStreamer = streamer
         state.audioPort = port
-        void this.pumpAudio(streamWs, streamer.frames())
+        state.audioVolume = readSimVolume(udid)
+        void this.pumpAudio(streamWs, streamer.frames(), state)
         this.launchWholeSimTap(state, udid)
-        state.audioPoll = setInterval(() => this.refreshAudioPids(state, udid), AUDIO_POLL_MS)
+        state.audioPoll = setInterval(() => {
+          this.refreshAudioPids(state, udid)
+          state.audioVolume = readSimVolume(udid) // track live sim-volume changes
+        }, AUDIO_POLL_MS)
       })
       .catch((e) => logger.warn(`audio capture server failed to start: ${e instanceof Error ? e.message : String(e)}`))
   }
@@ -831,13 +839,14 @@ export class IOSAgent implements DeviceAgent {
 
   // Forward captured PCM to the relay on the shared stream socket via the yielding sender (audio must
   // never inflate the socket buffer enough to trip video's backpressure). Mirrors android-agent.
-  private async pumpAudio(streamWs: WebSocket, frames: ReadableStream<AudioFrame>): Promise<void> {
+  private async pumpAudio(streamWs: WebSocket, frames: ReadableStream<AudioFrame>, state: DeviceState): Promise<void> {
     const warnDrop = createRateLimitedDropWarn(logger, 'ios audio')
     const reader = frames.getReader()
     try {
       for (;;) {
         const { value, done } = await reader.read()
         if (done || streamWs.readyState !== WebSocket.OPEN) break
+        if (state.audioVolume < 0.999) applyGain(value.payload, state.audioVolume) // reflect sim volume (tap is pre-volume)
         const frame = writeEnvelopeHeader(value.payload, Date.now(), { codec: CODEC_AUDIO })
         sendAudioYieldingToVideo(streamWs, frame, warnDrop)
       }

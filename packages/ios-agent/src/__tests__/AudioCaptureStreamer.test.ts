@@ -1,7 +1,10 @@
 import { describe, it, expect, vi } from 'vitest'
-import { parseAudioFrames, AudioCaptureStreamer, isAudioSupported } from '../AudioCaptureStreamer'
+vi.mock('node:child_process', () => ({ execFileSync: vi.fn() }))
+import { execFileSync } from 'node:child_process'
+import { parseAudioFrames, AudioCaptureStreamer, isAudioSupported, applyGain, readSimVolume } from '../AudioCaptureStreamer'
 import net from 'node:net'
 import os from 'node:os'
+const mockExecFileSync = vi.mocked(execFileSync)
 
 // Build a length-prefixed frame: [u32 BE len][payload].
 function frame(payload: Buffer): Buffer {
@@ -47,6 +50,58 @@ describe('parseAudioFrames', () => {
     const { frames, rest } = parseAudioFrames(Buffer.from([0, 0]))
     expect(frames).toHaveLength(0)
     expect(rest.length).toBe(2)
+  })
+})
+
+describe('applyGain (S16LE in-place, sim-volume reflection)', () => {
+  function s16(values: number[]): Buffer {
+    const b = Buffer.alloc(values.length * 2)
+    values.forEach((v, i) => b.writeInt16LE(v, i * 2))
+    return b
+  }
+
+  it('scales samples by the gain', () => {
+    const b = s16([1000, -2000, 4000])
+    applyGain(b, 0.5)
+    expect([b.readInt16LE(0), b.readInt16LE(2), b.readInt16LE(4)]).toEqual([500, -1000, 2000])
+  })
+
+  it('silences at gain 0', () => {
+    const b = s16([12345, -9999])
+    applyGain(b, 0)
+    expect([b.readInt16LE(0), b.readInt16LE(2)]).toEqual([0, 0])
+  })
+
+  it('clamps to the S16 range', () => {
+    const b = s16([20000, -20000])
+    applyGain(b, 2)
+    expect([b.readInt16LE(0), b.readInt16LE(2)]).toEqual([32767, -32768])
+  })
+})
+
+describe('readSimVolume (sim_volume → 0-1 gain)', () => {
+  it('maps sim_volume 0-100 to a 0-1 gain', () => {
+    mockExecFileSync.mockReturnValue(JSON.stringify({ sim_volume: 87 }) as never)
+    expect(readSimVolume('udid')).toBeCloseTo(0.87)
+    mockExecFileSync.mockReturnValue(JSON.stringify({ sim_volume: 100 }) as never)
+    expect(readSimVolume('udid')).toBe(1)
+    mockExecFileSync.mockReturnValue(JSON.stringify({ sim_volume: 0 }) as never)
+    expect(readSimVolume('udid')).toBe(0)
+  })
+
+  it('clamps above 100 to 1', () => {
+    mockExecFileSync.mockReturnValue(JSON.stringify({ sim_volume: 150 }) as never)
+    expect(readSimVolume('udid')).toBe(1)
+  })
+
+  it('defaults to full volume (1) when the plist is unreadable', () => {
+    mockExecFileSync.mockImplementation(() => { throw new Error('plist missing') })
+    expect(readSimVolume('udid')).toBe(1)
+  })
+
+  it('defaults to full volume (1) when sim_volume is absent', () => {
+    mockExecFileSync.mockReturnValue(JSON.stringify({ sim_ringer_state: 1 }) as never)
+    expect(readSimVolume('udid')).toBe(1)
   })
 })
 

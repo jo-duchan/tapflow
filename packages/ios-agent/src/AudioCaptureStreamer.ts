@@ -84,6 +84,23 @@ export function isAudioSupported(): boolean {
 }
 
 /**
+ * Read the simulator's current media volume (`sim_volume`, 0–100) from its audiosettings.plist and
+ * return it as a 0–1 gain. The Core Audio process tap captures audio *before* the simulator applies
+ * its volume, so the agent multiplies it back in. The plist updates live as the user changes the
+ * simulator volume. Returns 1 (full) when unreadable — a volume-read failure must never mute audio.
+ */
+export function readSimVolume(udid: string): number {
+  const plist = join(os.homedir(), 'Library', 'Developer', 'CoreSimulator', 'Devices', udid,
+    'data', 'var', 'run', 'simulatoraudio', 'audiosettings.plist')
+  try {
+    const json = execFileSync('plutil', ['-convert', 'json', '-o', '-', plist], { encoding: 'utf8' })
+    const v = (JSON.parse(json) as { sim_volume?: number }).sim_volume
+    if (typeof v === 'number' && v >= 0) return Math.min(1, v / 100)
+  } catch { /* plist missing / not yet created → full volume */ }
+  return 1
+}
+
+/**
  * Prime the audio-capture TCC grant up front (from `tapflow setup ios`) so the operator approves it
  * while present — not at first simulator boot, which a headless agent operator would likely miss.
  *
@@ -110,6 +127,15 @@ export function parseAudioFrames(buf: Buffer): { frames: Buffer[]; rest: Buffer 
     buf = buf.subarray(4 + len)
   }
   return { frames, rest: buf }
+}
+
+// Apply a 0–1 gain to interleaved S16LE PCM in place. The process tap captures audio before the
+// simulator's own volume is applied, so the agent multiplies sim_volume back in. Clamps to S16 range.
+export function applyGain(buf: Buffer, gain: number): void {
+  for (let i = 0; i + 1 < buf.length; i += 2) {
+    const s = Math.round(buf.readInt16LE(i) * gain)
+    buf.writeInt16LE(s > 32767 ? 32767 : s < -32768 ? -32768 : s, i)
+  }
 }
 
 /**
