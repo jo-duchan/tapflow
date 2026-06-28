@@ -9,7 +9,7 @@
 // capture/stream logic lives in ios-agent / android-agent.
 import os from 'node:os'
 import { execFileSync } from 'node:child_process'
-import { existsSync, statSync, mkdirSync, writeFileSync } from 'node:fs'
+import { existsSync, statSync, mkdirSync, writeFileSync, rmSync } from 'node:fs'
 import { join } from 'node:path'
 import { createLogger, PlatformError } from '@tapflowio/agent-core'
 
@@ -61,15 +61,23 @@ export function ensureHelperApp(): string {
     throw new PlatformError('audiotap-helper.app missing and source not found — reinstall @tapflowio/audiotap-helper')
   }
   logger.info('building audiotap-helper.app...')
-  mkdirSync(join(HELPER_APP, 'Contents', 'MacOS'), { recursive: true })
-  execFileSync('swiftc', [
-    HELPER_SRC, '-o', HELPER_BIN, '-framework', 'CoreAudio', '-framework', 'AudioToolbox',
-  ], { stdio: ['ignore', 'ignore', 'inherit'] })
-  writeFileSync(join(HELPER_APP, 'Contents', 'Info.plist'), INFO_PLIST)
-  const entPath = join(import.meta.dirname, '..', 'bin', '.audiotap.entitlements')
-  writeFileSync(entPath, ENTITLEMENTS)
-  execFileSync('codesign', ['--force', '--sign', '-', '--entitlements', entPath, HELPER_APP],
-    { stdio: ['ignore', 'ignore', 'inherit'] })
+  // Build + sign as a unit. If any step fails (e.g. swiftc OK but codesign fails), remove the bundle
+  // so a later call doesn't return a half-built/unsigned .app from the mtime gate above (an unsigned
+  // bundle silently fails the TCC grant). Next call rebuilds from scratch.
+  try {
+    mkdirSync(join(HELPER_APP, 'Contents', 'MacOS'), { recursive: true })
+    execFileSync('swiftc', [
+      HELPER_SRC, '-o', HELPER_BIN, '-framework', 'CoreAudio', '-framework', 'AudioToolbox',
+    ], { stdio: ['ignore', 'ignore', 'inherit'] })
+    writeFileSync(join(HELPER_APP, 'Contents', 'Info.plist'), INFO_PLIST)
+    const entPath = join(import.meta.dirname, '..', 'bin', '.audiotap.entitlements')
+    writeFileSync(entPath, ENTITLEMENTS)
+    execFileSync('codesign', ['--force', '--sign', '-', '--entitlements', entPath, HELPER_APP],
+      { stdio: ['ignore', 'ignore', 'inherit'] })
+  } catch (e) {
+    rmSync(HELPER_APP, { recursive: true, force: true })
+    throw e
+  }
   logger.info('built audiotap-helper.app')
   return HELPER_APP
 }
