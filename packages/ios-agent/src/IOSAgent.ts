@@ -26,13 +26,23 @@ import {
   rewriteLowLatencySpsInFrame,
   CODEC_JPEG,
   CODEC_H264,
+  CODEC_AUDIO,
+  sendAudioYieldingToVideo,
 } from '@tapflowio/agent-core/utils'
+import type { AudioFrame } from '@tapflowio/agent-core'
 import { SimctlWrapper, isDeviceMissingError } from './SimctlWrapper.js'
 import { ScreenCaptureStreamer, type StreamFrame } from './ScreenCaptureStreamer.js'
+import { AudioCaptureStreamer, ensureHelperApp, launchAudioHelper, isAudioSupported, readSimVolume, applyGain } from './AudioCaptureStreamer.js'
+import { enumerateSimPids } from './SimProcessTree.js'
 import { MjpegStreamer } from './MjpegStreamer.js'
 import { TouchHelper } from './TouchHelper.js'
 import { DeviceChromeLoader, type ChromeData } from './DeviceChromeLoader.js'
 import { KEY_CODE_MAP } from './KeyCodeMap.js'
+
+// whole-sim audio: how often to re-enumerate the simulator's process tree for new audio-producing
+// processes (launched apps, WebKit WebContent). Short enough that a tab's audio starts promptly,
+// long enough to keep `ps` overhead negligible.
+const AUDIO_POLL_MS = 1500
 
 export interface IOSAgentOptions {
   fps?: number
@@ -70,6 +80,17 @@ interface DeviceState {
   // Viewer context from device:boot → downscale tier (native / 1280 / 1000).
   secureContext: boolean
   external: boolean
+  // Audio output (opt-in). The loopback server the audiotap-helper streams PCM to, and its port —
+  // the helper (launched at boot for the whole simulator) connects here. null/0 when audio is off.
+  audioStreamer: AudioCaptureStreamer | null
+  audioPort: number
+  // whole-sim tap: the poll timer that re-enumerates the sim's process tree, and the last pid set we
+  // pushed to the helper (so we only rebuild the tap when a NEW process appears).
+  audioPoll: ReturnType<typeof setInterval> | null
+  audioPids: Set<number> | null
+  // Per-device capture gain (0–1) from the sim's sim_volume. The tap captures pre-volume audio, so we
+  // multiply it back in. Per-session field → each simulator's volume is applied independently.
+  audioVolume: number
 }
 
 export class IOSAgent implements DeviceAgent {
@@ -225,6 +246,11 @@ export class IOSAgent implements DeviceAgent {
         acceptH264: false,
         secureContext: false,
         external: false,
+        audioStreamer: null,
+        audioPort: 0,
+        audioPoll: null,
+        audioPids: null,
+        audioVolume: 1,
       })
     })
   }
@@ -294,6 +320,11 @@ export class IOSAgent implements DeviceAgent {
     void state.streamReader?.cancel()
     state.streamReader = null
     state.captureStreamer = null // reader.cancel() kills the helper proc; drop the ref so a stale requestKeyframe() no-ops
+    if (state.audioPoll) { clearInterval(state.audioPoll); state.audioPoll = null }
+    state.audioStreamer?.stop() // closes the loopback server → the helper sees EOF and exits
+    state.audioStreamer = null
+    state.audioPort = 0
+    state.audioPids = null
     state.touchHelper?.stop()
     state.touchHelper = null
     state.streamWs?.close()
@@ -462,6 +493,9 @@ export class IOSAgent implements DeviceAgent {
       }
 
       this.startBinaryStream(state, streamWs)
+      // Opt-in audio output: stand up the loopback server and start the whole-sim tap now. Best-effort
+      // — never blocks/affects the video path.
+      if (this.audioEnabled()) this.startAudioCapture(state, streamWs, deviceId)
       this.ws?.send(JSON.stringify({ type: 'device:ready', sessionId, payload: { deviceId } }))
 
       // Sync AppleKeyboards after ready — fire-and-forget so streaming isn't delayed.
@@ -550,7 +584,11 @@ export class IOSAgent implements DeviceAgent {
         const { bundleId } = msg.payload as { bundleId: string }
         const sessionId = msg.sessionId
         this.simctl.launchApp(bundleId)
-          .then(() => this.ws?.send(JSON.stringify({ type: 'app:launch-done', sessionId })))
+          .then(() => {
+            // Audio: the whole-sim tap's poll picks up the launched app process within one interval;
+            // no per-launch helper needed.
+            this.ws?.send(JSON.stringify({ type: 'app:launch-done', sessionId }))
+          })
           .catch((e: unknown) => {
             const message = e instanceof Error ? e.message : String(e)
             this.ws?.send(JSON.stringify({ type: 'app:launch-error', sessionId, message }))
@@ -738,7 +776,91 @@ export class IOSAgent implements DeviceAgent {
   boot(deviceId: string): Promise<void> { return this.simctl.boot(deviceId) }
   shutdown(deviceId: string): Promise<void> { return this.simctl.shutdown(deviceId) }
   installApp(appPath: string): Promise<void> { return this.simctl.installApp(appPath) }
-  launchApp(bundleId: string): Promise<void> { return this.simctl.launchApp(bundleId) }
+  async launchApp(bundleId: string): Promise<void> { await this.simctl.launchApp(bundleId) }
+
+  // ── Audio output (opt-in, macOS 14.2+ Core Audio process taps) ───────────────────────────────
+  // Simulator apps are host processes, so a process tap on the launched app's PID captures its audio
+  // with no device routing, no injection, and no host-output hijack. The capture runs in a separate
+  // signed .app (audiotap-helper) launched via LaunchServices so it holds its own audio-recording TCC
+  // grant; it streams PCM back over loopback TCP. See AudioCaptureStreamer.
+
+  // Audio output is ON by default (macOS 14.2+); opt out with TAPFLOW_AUDIO=off. The tap is .muted, so
+  // the sim's audio goes only to the browser and the host (agent Mac) stays silent. The grant is
+  // primed at `tapflow agent start`; see contributing/simulator-audio.md.
+  private audioEnabled(): boolean {
+    return process.env.TAPFLOW_AUDIO !== 'off' && isAudioSupported()
+  }
+
+  // Stand up the per-session loopback server the audiotap-helper streams to, pump its frames to the
+  // relay, and start the whole-sim tap: launch the helper for the simulator's current process tree,
+  // then poll for new processes (apps, WebKit WebContent) and push deltas over the same socket.
+  private startAudioCapture(state: DeviceState, streamWs: WebSocket, udid: string): void {
+    const seq = state.bootSeq
+    const streamer = new AudioCaptureStreamer()
+    streamer.listen()
+      .then((port) => {
+        // A reboot/shutdown/disconnect may have superseded this boot while listen() was binding —
+        // discard so we don't leave an orphan helper/poll/server behind the current lifecycle.
+        if (seq !== state.bootSeq || streamWs.readyState !== WebSocket.OPEN) { streamer.stop(); return }
+        state.audioStreamer = streamer
+        state.audioPort = port
+        state.audioVolume = readSimVolume(udid)
+        void this.pumpAudio(streamWs, streamer.frames(), state)
+        this.launchWholeSimTap(state, udid)
+        state.audioPoll = setInterval(() => {
+          this.refreshAudioPids(state, udid)
+          state.audioVolume = readSimVolume(udid) // track live sim-volume changes
+        }, AUDIO_POLL_MS)
+      })
+      .catch((e) => logger.warn(`audio capture server failed to start: ${e instanceof Error ? e.message : String(e)}`))
+  }
+
+  // Launch the tap helper for the simulator's whole process tree. Swallows errors — audio must never
+  // break the launch/video path (e.g. helper build fails, or the user hasn't granted the audio
+  // permission). The helper holds the socket open; refreshAudioPids() pushes later updates to it.
+  private launchWholeSimTap(state: DeviceState, udid: string): void {
+    const pids = enumerateSimPids(udid)
+    if (!pids.length) { logger.warn('no simulator processes to tap (audio idle until first poll)'); return }
+    state.audioPids = new Set(pids)
+    try {
+      launchAudioHelper(ensureHelperApp(), state.audioPort, pids)
+    } catch (e) {
+      logger.warn(`audiotap-helper launch failed (audio disabled): ${e instanceof Error ? e.message : String(e)}`)
+    }
+  }
+
+  // Re-enumerate the sim's process tree and, only when a NEW process appeared (a launched app or a
+  // freshly spawned WebKit WebContent), push the updated set so the helper rebuilds its tap. Dead pids
+  // need no rebuild — they resolve to no audio object, so the helper just stops mixing them; we still
+  // refresh the baseline so a later reappearance is detected. Rebuilding only on additions keeps
+  // short-lived daemon churn from causing constant tap teardown (audio glitches).
+  private refreshAudioPids(state: DeviceState, udid: string): void {
+    if (!state.audioStreamer) return
+    const pids = enumerateSimPids(udid)
+    if (!pids.length) return
+    const prev = state.audioPids
+    const hasNew = !prev || pids.some((p) => !prev.has(p))
+    state.audioPids = new Set(pids)
+    if (hasNew) state.audioStreamer.updatePids(pids)
+  }
+
+  // Forward captured PCM to the relay on the shared stream socket via the yielding sender (audio must
+  // never inflate the socket buffer enough to trip video's backpressure). Mirrors android-agent.
+  private async pumpAudio(streamWs: WebSocket, frames: ReadableStream<AudioFrame>, state: DeviceState): Promise<void> {
+    const warnDrop = createRateLimitedDropWarn(logger, 'ios audio')
+    const reader = frames.getReader()
+    try {
+      for (;;) {
+        const { value, done } = await reader.read()
+        if (done || streamWs.readyState !== WebSocket.OPEN) break
+        if (state.audioVolume < 0.999) applyGain(value.payload, state.audioVolume) // reflect sim volume (tap is pre-volume)
+        const frame = writeEnvelopeHeader(value.payload, Date.now(), { codec: CODEC_AUDIO })
+        sendAudioYieldingToVideo(streamWs, frame, warnDrop)
+      }
+    } catch {
+      // stream cancelled or ws closed — expected on teardown/restart
+    }
+  }
   screenshot(): Promise<Buffer> { return this.simctl.screenshot() }
   stream(): ReadableStream<Buffer> {
     const first = this.deviceStates.values().next().value

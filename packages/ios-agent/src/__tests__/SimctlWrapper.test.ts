@@ -115,6 +115,18 @@ describe('SimctlWrapper', () => {
       await wrapper.launchApp('com.example.app')
       expect(runner.exec).toHaveBeenCalledWith('launch', 'booted', 'com.example.app')
     })
+
+    it('parses the launched host PID from simctl output (for the audiotap-helper)', async () => {
+      const runner = mockRunner({ launch: 'com.example.app: 90210\n' })
+      const wrapper = new SimctlWrapper(runner)
+      await expect(wrapper.launchApp('com.example.app')).resolves.toBe(90210)
+    })
+
+    it('returns null when no PID can be parsed', async () => {
+      const runner = mockRunner({ launch: '' })
+      const wrapper = new SimctlWrapper(runner)
+      await expect(wrapper.launchApp('com.example.app')).resolves.toBeNull()
+    })
   })
 
   describe('openUrl', () => {

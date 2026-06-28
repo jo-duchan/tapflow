@@ -127,8 +127,12 @@ export class SimctlWrapper {
     await this.runner.exec('install', 'booted', appPath)
   }
 
-  async launchApp(bundleId: string): Promise<void> {
-    await this.runner.exec('launch', 'booted', bundleId)
+  // Returns the launched app's host PID (`simctl launch` prints "<bundleId>: <pid>"), or null if it
+  // can't be parsed. The audiotap-helper taps this PID; non-audio callers ignore it.
+  async launchApp(bundleId: string): Promise<number | null> {
+    const out = await this.runner.exec('launch', 'booted', bundleId)
+    const m = out.match(/:\s*(\d+)\s*$/)
+    return m ? Number(m[1]) : null
   }
 
   async openUrl(deviceId: string, url: string): Promise<void> {

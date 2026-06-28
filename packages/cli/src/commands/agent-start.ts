@@ -1,7 +1,7 @@
 import { z } from 'zod'
 import { AgentRegistry } from '@tapflowio/agent-core'
 import { config } from '@tapflowio/relay'
-import '@tapflowio/ios-agent'
+import { requestAudioPermission, isAudioSupported } from '@tapflowio/ios-agent'
 import '@tapflowio/android-agent'
 import { banner, createSpinner } from '../lib/print.js'
 
@@ -52,6 +52,13 @@ export async function cmdAgentStart(opts: AgentStartOptions): Promise<void> {
       'Run `tapflow doctor` to diagnose.',
     ])
     process.exit(1)
+  }
+
+  // Prime the iOS audio-capture permission (audio is on by default). Non-blocking: if the grant
+  // already exists the helper exits silently; otherwise the operator gets the one-time modal. Re-run
+  // `tapflow agent start` to retry if audio is silent. See contributing/simulator-audio.md.
+  if (platformsToRun.includes('ios') && process.env.TAPFLOW_AUDIO !== 'off' && isAudioSupported()) {
+    requestAudioPermission(false)
   }
 
   const agents: Array<{ disconnect(): void }> = []

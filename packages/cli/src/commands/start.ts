@@ -2,7 +2,7 @@ import { RelayServer, initDb, config, createCertProvider, startTlsBackgroundTask
 import { AgentRegistry } from '@tapflowio/agent-core'
 import fs from 'fs'
 import path from 'path'
-import '@tapflowio/ios-agent'
+import { requestAudioPermission, isAudioSupported } from '@tapflowio/ios-agent'
 import '@tapflowio/android-agent'
 import { banner, createSpinner, step, warn } from '../lib/print.js'
 import { startConfiguredTunnel } from '../lib/tunnel-runner.js'
@@ -30,6 +30,12 @@ export async function cmdStart(opts: StartOptions): Promise<void> {
       process.exit(1)
     }
     platformsToRun = [explicit]
+  }
+
+  // Prime the iOS audio-capture permission (audio is on by default). Non-blocking: if the grant
+  // already exists the helper exits silently; otherwise the operator gets the one-time modal.
+  if (platformsToRun.includes('ios') && process.env.TAPFLOW_AUDIO !== 'off' && isAudioSupported()) {
+    requestAudioPermission(false)
   }
 
   // ── 1. Relay (always local) ───────────────────────────────────────────────

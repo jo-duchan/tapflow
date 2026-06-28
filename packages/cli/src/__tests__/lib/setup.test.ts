@@ -7,6 +7,10 @@ vi.mock('@clack/prompts', () => ({
   text: vi.fn(),
   isCancel: vi.fn(() => false),
 }))
+vi.mock('@tapflowio/ios-agent', () => ({
+  isAudioSupported: vi.fn(() => true),
+  requestAudioPermission: vi.fn(),
+}))
 
 import { execSync, spawnSync } from 'node:child_process'
 import { existsSync, readFileSync, appendFileSync } from 'node:fs'
