@@ -46,11 +46,14 @@ vi.mock('../AudioCaptureStreamer', async (importOriginal) => {
       updatePids: vi.fn(),
       stop: vi.fn(),
     } }),
-    ensureHelperApp: vi.fn(() => '/fake/audiotap-helper.app'),
-    launchAudioHelper: vi.fn(),
-    isAudioSupported: vi.fn(() => true),
   }
 })
+// Build/launch/permission helper utils moved to the shared @tapflowio/audiotap-helper package.
+vi.mock('@tapflowio/audiotap-helper', () => ({
+  ensureHelperApp: vi.fn(() => '/fake/audiotap-helper.app'),
+  launchAudioHelper: vi.fn(),
+  isAudioSupported: vi.fn(() => true),
+}))
 vi.mock('../SimProcessTree', () => ({
   enumerateSimPids: vi.fn(() => [101, 102, 103]),
 }))
@@ -60,7 +63,8 @@ import { WebSocket, WebSocketServer } from 'ws'
 import { RelayServer, initDb, closeDb, getDb } from '@tapflowio/relay'
 import { IOSAgent } from '../IOSAgent'
 import { ScreenCaptureStreamer } from '../ScreenCaptureStreamer'
-import { AudioCaptureStreamer, launchAudioHelper } from '../AudioCaptureStreamer'
+import { AudioCaptureStreamer } from '../AudioCaptureStreamer'
+import { launchAudioHelper } from '@tapflowio/audiotap-helper'
 import { SimctlWrapper } from '../SimctlWrapper'
 import { TouchHelper } from '../TouchHelper'
 const MockTouchHelper = vi.mocked(TouchHelper)

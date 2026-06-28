@@ -1,14 +1,13 @@
 {
-  "name": "@tapflowio/ios-agent",
-  "version": "0.10.0",
-  "description": "iOS simulator agent for tapflow — xcrun simctl control and screen streaming",
+  "name": "@tapflowio/audiotap-helper",
+  "version": "0.1.0",
+  "description": "Shared macOS Core Audio process-tap helper for tapflow — iOS simulator audio capture and Android emulator host-mute",
   "keywords": [
     "tapflow",
-    "ios",
-    "simulator",
-    "xcrun",
-    "simctl",
-    "streaming",
+    "macos",
+    "core-audio",
+    "process-tap",
+    "audio",
     "qa"
   ],
   "homepage": "https://github.com/jo-duchan/tapflow",
@@ -16,13 +15,10 @@
   "repository": {
     "type": "git",
     "url": "https://github.com/jo-duchan/tapflow.git",
-    "directory": "packages/ios-agent"
+    "directory": "packages/audiotap-helper"
   },
   "license": "MIT",
   "author": "tapflow contributors",
-  "os": [
-    "darwin"
-  ],
   "type": "module",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
@@ -48,21 +44,17 @@
     "access": "public"
   },
   "scripts": {
-    "postinstall": "node -e \"if (process.platform === 'darwin') { require('fs').readdirSync('bin').forEach(f => require('fs').chmodSync('bin/' + f, 0o755)) }\"",
+    "postinstall": "node -e \"if (process.platform === 'darwin') { try { require('fs').chmodSync('bin/audiotap-helper.app/Contents/MacOS/audiotap-helper', 0o755) } catch {} }\"",
     "build": "tsc",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "lint": "eslint src"
   },
   "dependencies": {
-    "@tapflowio/agent-core": "workspace:*",
-    "@tapflowio/audiotap-helper": "workspace:*",
-    "ws": "^8.21.0"
+    "@tapflowio/agent-core": "workspace:*"
   },
   "devDependencies": {
-    "@tapflowio/relay": "workspace:*",
     "@types/node": "^20.19.43",
-    "@types/ws": "^8.0.0",
     "typescript": "^5.0.0",
     "vitest": "^4.1.9"
   }

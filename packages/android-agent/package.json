@@ -56,6 +56,7 @@
     "@grpc/grpc-js": "^1.14.4",
     "@grpc/proto-loader": "^0.8.1",
     "@tapflowio/agent-core": "workspace:*",
+    "@tapflowio/audiotap-helper": "workspace:*",
     "ws": "^8.21.0"
   },
   "devDependencies": {

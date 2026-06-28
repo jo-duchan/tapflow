@@ -58,6 +58,14 @@ vi.mock('../EmulatorLauncher', () => ({
     findSerial: vi.fn().mockResolvedValue('emulator-5554'),
     waitForBoot: vi.fn().mockResolvedValue(undefined),
   }) }),
+  findEmulatorPid: vi.fn(() => null),
+}))
+// Shared macOS host-mute helper (#341). Off by default in tests (isAudioSupported → false → no-op);
+// the host-mute test overrides these to assert the mute tap launches.
+vi.mock('@tapflowio/audiotap-helper', () => ({
+  isAudioSupported: vi.fn(() => false),
+  ensureHelperApp: vi.fn(() => '/fake/audiotap-helper.app'),
+  launchMuteOnlyTap: vi.fn(),
 }))
 
 // gRPC backend mocks (emulator host-encode path). Inert for the scrcpy-pinned tests; exercised by
@@ -97,6 +105,8 @@ import { AdbWrapper } from '../AdbWrapper'
 import { ScrcpySession } from '../scrcpy/ScrcpySession'
 import { EmulatorVideo } from '../emulator/EmulatorVideo'
 import { EmulatorGrpcClient } from '../emulator/EmulatorGrpcClient'
+import { findEmulatorPid } from '../EmulatorLauncher'
+import { isAudioSupported, launchMuteOnlyTap } from '@tapflowio/audiotap-helper'
 import type { ScrcpyControl } from '../scrcpy/ScrcpyControl'
 import type { ScrcpyFrame } from '../scrcpy/ScrcpyVideo'
 import type { AdbRunner } from '../adb'
@@ -948,6 +958,28 @@ describe('AndroidAgent', () => {
       expect(vi.mocked(ScrcpySession)).toHaveBeenCalled()
       expect(getState().emulatorVideo).toBeNull()
       expect(getState().grpcClient).toBeNull()
+    })
+
+    // #341: with audio on, mute the emulator's host output on the agent Mac via a mute-only tap.
+    it('host-mute: launches a mute-only tap on the emulator pid (audio on, macOS 14.2+)', async () => {
+      vi.mocked(isAudioSupported).mockReturnValue(true)
+      vi.mocked(findEmulatorPid).mockReturnValue(9999)
+      vi.mocked(launchMuteOnlyTap).mockClear()
+      await bootDevice()
+      await vi.waitFor(() => expect(vi.mocked(launchMuteOnlyTap)).toHaveBeenCalledTimes(1))
+      const [appPath, pids] = vi.mocked(launchMuteOnlyTap).mock.calls[0]
+      expect(appPath).toBe('/fake/audiotap-helper.app')
+      expect(pids).toEqual([9999])
+      vi.mocked(isAudioSupported).mockReturnValue(false) // restore for the other tests
+      vi.mocked(findEmulatorPid).mockReturnValue(null)
+    })
+
+    it('host-mute: skipped below macOS 14.2 (falls back to the Mac volume)', async () => {
+      vi.mocked(isAudioSupported).mockReturnValue(false)
+      vi.mocked(launchMuteOnlyTap).mockClear()
+      await bootDevice()
+      await new Promise((r) => setTimeout(r, 30))
+      expect(vi.mocked(launchMuteOnlyTap)).not.toHaveBeenCalled()
     })
   })
 })

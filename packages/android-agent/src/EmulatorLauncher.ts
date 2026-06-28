@@ -1,4 +1,4 @@
-import { execFile, spawn } from 'child_process'
+import { execFile, execFileSync, spawn } from 'child_process'
 import { promisify } from 'util'
 import { createLogger, PlatformError, ValidationError } from '@tapflowio/agent-core'
 
@@ -26,6 +26,20 @@ function getEmulatorPath(): string {
 export interface EmulatorLaunchOpts {
   // Opt-in audio output; default off keeps `-no-audio` so the video-only path is unchanged.
   audio?: boolean
+}
+
+/**
+ * Find the running emulator's qemu PID by AVD name — the qemu process embeds `-avd <name>` in its
+ * command line. Used to point the macOS mute-only audio tap at the emulator's host process so its
+ * audio doesn't leak to the agent Mac's speakers (#341). Returns null when not found (not running yet,
+ * or `pgrep` unavailable / exits 1 with no match). macOS only in practice; harmless elsewhere.
+ */
+export function findEmulatorPid(avdName: string): number | null {
+  try {
+    const out = execFileSync('pgrep', ['-f', `qemu-system.*-avd ${avdName}`], { encoding: 'utf8' })
+    const pid = parseInt(out.trim().split('\n')[0] ?? '', 10)
+    return Number.isFinite(pid) ? pid : null
+  } catch { return null }
 }
 
 /** Build the emulator CLI args. Pure + exported so the `-no-audio` gating is unit-testable. */

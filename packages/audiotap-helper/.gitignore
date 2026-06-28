@@ -1,0 +1,6 @@
+# audiotap-helper bundle: committed as a prebuilt, ad-hoc-signed arm64 .app (like the prebuilt helper
+# binaries in ios-agent/bin) so npm-installed users get it without a build. TCC needs a .app launched
+# via LaunchServices to be the responsible process for the audio-capture grant.
+#
+# entitlements file is a local build input and isn't needed at runtime.
+bin/.audiotap.entitlements

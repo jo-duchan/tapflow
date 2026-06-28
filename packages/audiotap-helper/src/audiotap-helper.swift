@@ -88,21 +88,35 @@ let args = CommandLine.arguments
 // creation alone doesn't), so this builds an aggregate + IOProc and runs it briefly. exit 0 = granted.
 if args.contains("--request-permission") { primePermissionAndExit() }
 
-guard args.count >= 3, let port = UInt16(args[1]) else { err("usage: audiotap-helper <port> <pid>..."); exit(64) }
-let initialPids = args[2...].compactMap { pid_t($0) }
+// Mute-only mode (Android host-mute symmetry, #341): hold a .muted process tap on the given pids
+// (the emulator/qemu process) so its host output is silenced, while gRPC handles the browser capture.
+// No port, no socket, no streaming — muteBehavior does all the work; the tap is just held alive.
+let muteOnlyIdx = args.firstIndex(of: "--mute-only")
+
+let initialPids: [pid_t]
+var port: UInt16 = 0
+if let mi = muteOnlyIdx {
+  initialPids = args[(mi + 1)...].compactMap { pid_t($0) }
+} else {
+  guard args.count >= 3, let p = UInt16(args[1]) else { err("usage: audiotap-helper <port> <pid>... | --mute-only <pid>..."); exit(64) }
+  port = p
+  initialPids = args[2...].compactMap { pid_t($0) }
+}
 guard !initialPids.isEmpty else { err("no valid pid"); exit(64) }
 
 // ---- loopback connect (helper reaches the agent's 127.0.0.1 server) ----
 let sock = socket(AF_INET, SOCK_STREAM, 0)
 guard sock >= 0 else { exit(65) }
-var addr = sockaddr_in()
-addr.sin_family = sa_family_t(AF_INET)
-addr.sin_port = port.bigEndian
-addr.sin_addr.s_addr = inet_addr("127.0.0.1")
-let connected = withUnsafePointer(to: &addr) {
-  $0.withMemoryRebound(to: sockaddr.self, capacity: 1) { connect(sock, $0, socklen_t(MemoryLayout<sockaddr_in>.size)) }
+if muteOnlyIdx == nil { // mute-only mode streams nothing, so it never connects the loopback socket
+  var addr = sockaddr_in()
+  addr.sin_family = sa_family_t(AF_INET)
+  addr.sin_port = port.bigEndian
+  addr.sin_addr.s_addr = inet_addr("127.0.0.1")
+  let connected = withUnsafePointer(to: &addr) {
+    $0.withMemoryRebound(to: sockaddr.self, capacity: 1) { connect(sock, $0, socklen_t(MemoryLayout<sockaddr_in>.size)) }
+  }
+  guard connected == 0 else { err("connect 127.0.0.1:\(port) failed"); exit(65) }
 }
-guard connected == 0 else { err("connect 127.0.0.1:\(port) failed"); exit(65) }
 
 // ---- translate PID(s) → process objects ----
 func processObject(_ pid: pid_t) -> AudioObjectID {
@@ -132,7 +146,7 @@ func deviceUID(_ id: AudioObjectID) -> String {
 // Source format is read per-rebuild from the live aggregate (rate/channels can differ per tap).
 var srcSR = 48000.0
 var srcCh = 2
-var connectedOK = true
+var connectedOK = (muteOnlyIdx == nil) // mute-only never streams → sendBuffer stays a no-op
 
 @inline(__always) func f2s16(_ f: Float) -> Int16 {
   let c = f > 1 ? 1 : (f < -1 ? -1 : f)
@@ -276,6 +290,22 @@ var cmd = [UInt8]()
   return UInt32(b[off]) << 24 | UInt32(b[off + 1]) << 16 | UInt32(b[off + 2]) << 8 | UInt32(b[off + 3])
 }
 var tmp = [UInt8](repeating: 0, count: 4096)
+if muteOnlyIdx != nil {
+  err("audiotap: mute-only — holding .muted tap for \(initialPids)")
+  // No socket to read; hold the muted tap alive (Android captures via gRPC). Self-exit once every
+  // target process is gone (emulator stopped) so the helper cleans up without an explicit kill.
+  let watch = DispatchSource.makeTimerSource(queue: controlQueue)
+  watch.schedule(deadline: .now() + 2, repeating: 2)
+  watch.setEventHandler {
+    if initialPids.allSatisfy({ kill($0, 0) != 0 }) {
+      err("audiotap: mute-only — target process gone, exiting")
+      destroyTap()
+      exit(0)
+    }
+  }
+  watch.resume()
+  dispatchMain()
+}
 while connectedOK {
   let n = read(sock, &tmp, tmp.count)
   if n <= 0 { break } // agent closed
