@@ -36,7 +36,9 @@ export interface EmulatorLaunchOpts {
  */
 export function findEmulatorPid(avdName: string): number | null {
   try {
-    const out = execFileSync('pgrep', ['-f', `qemu-system.*-avd ${avdName}`], { encoding: 'utf8' })
+    // Escape regex metacharacters so an AVD name like "Pixel.7" can't alter the pgrep -f pattern.
+    const esc = avdName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+    const out = execFileSync('pgrep', ['-f', `qemu-system.*-avd ${esc}`], { encoding: 'utf8' })
     const pid = parseInt(out.trim().split('\n')[0] ?? '', 10)
     return Number.isFinite(pid) ? pid : null
   } catch { return null }

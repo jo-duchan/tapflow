@@ -194,6 +194,7 @@ var curAggID = AudioObjectID(0)
 var curProcID: AudioDeviceIOProcID?
 var aggSeq = 0
 var curObjs: [AudioObjectID] = [] // audio objects in the live tap — skip a rebuild that resolves to the same set
+var muteWatch: DispatchSourceTimer? // mute-only mode's self-exit watchdog; retained for the process lifetime
 
 func destroyTap() {
   if curAggID != 0, let p = curProcID { AudioDeviceStop(curAggID, p); AudioDeviceDestroyIOProcID(curAggID, p) }
@@ -297,13 +298,16 @@ if muteOnlyIdx != nil {
   let watch = DispatchSource.makeTimerSource(queue: controlQueue)
   watch.schedule(deadline: .now() + 2, repeating: 2)
   watch.setEventHandler {
-    if initialPids.allSatisfy({ kill($0, 0) != 0 }) {
+    // ESRCH = no such process (gone). A nonzero kill with EPERM means the process is alive but not
+    // signalable — don't treat that as gone, or we'd tear down the mute too early.
+    if initialPids.allSatisfy({ kill($0, 0) != 0 && errno == ESRCH }) {
       err("audiotap: mute-only — target process gone, exiting")
       destroyTap()
       exit(0)
     }
   }
   watch.resume()
+  muteWatch = watch // retain for the process lifetime; a local would be released by ARC after resume()
   dispatchMain()
 }
 while connectedOK {
