@@ -28,7 +28,7 @@
   "types": "dist/index.d.ts",
   "exports": {
     ".": {
-      "types": "./src/index.ts",
+      "types": "./dist/index.d.ts",
       "source": "./src/index.ts",
       "tsx": "./src/index.ts",
       "import": "./dist/index.js",
@@ -49,8 +49,8 @@
   },
   "scripts": {
     "postinstall": "node -e \"if (process.platform === 'darwin') { require('fs').readdirSync('bin').forEach(f => require('fs').chmodSync('bin/' + f, 0o755)) }\"",
-    "build": "tsc",
-    "typecheck": "tsc --noEmit",
+    "build": "tsc -b",
+    "typecheck": "tsc -b",
     "test": "vitest run",
     "lint": "eslint src"
   },

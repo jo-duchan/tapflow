@@ -12,7 +12,7 @@
     "build": "pnpm --filter @tapflowio/agent-core build && pnpm --filter @tapflowio/dashboard build && pnpm --filter @tapflowio/relay build && pnpm --filter @tapflowio/ios-agent build && pnpm --filter @tapflowio/android-agent build && pnpm --filter tapflow build && pnpm --filter @tapflowio/mcp-server build",
     "test": "pnpm -r test --if-present",
     "lint": "pnpm -r --if-present lint",
-    "typecheck": "pnpm -r --if-present typecheck",
+    "typecheck": "tsc -b && pnpm --filter @tapflowio/dashboard --filter @tapflowio/mcp-server typecheck",
     "prepare": "lefthook install",
     "dev": "concurrently -k -n relay,dashboard,ios,android -c cyan,magenta,green,yellow \"pnpm dev:relay\" \"pnpm --filter @tapflowio/dashboard dev\" \"pnpm dev:ios\" \"pnpm dev:android\"",
     "dev:pool": "concurrently -k -n relay,ios,mocks -c cyan,green,yellow \"pnpm dev:relay\" \"pnpm dev:ios\" \"pnpm --filter @tapflowio/playground mock-agents\"",

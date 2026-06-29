@@ -24,7 +24,7 @@
   "types": "dist/index.d.ts",
   "exports": {
     ".": {
-      "types": "./src/index.ts",
+      "types": "./dist/index.d.ts",
       "source": "./src/index.ts",
       "tsx": "./src/index.ts",
       "import": "./dist/index.js",
@@ -45,8 +45,8 @@
   },
   "scripts": {
     "postinstall": "node -e \"if (process.platform === 'darwin') { try { require('fs').chmodSync('bin/audiotap-helper.app/Contents/MacOS/audiotap-helper', 0o755) } catch {} }\"",
-    "build": "tsc",
-    "typecheck": "tsc --noEmit",
+    "build": "tsc -b",
+    "typecheck": "tsc -b",
     "test": "vitest run",
     "lint": "eslint src"
   },

@@ -9,8 +9,29 @@
     "declarationMap": true,
     "sourceMap": true,
     "strict": true,
-    "esModuleInterop": true
+    "esModuleInterop": true,
+    "composite": true
   },
-  "include": ["src"],
-  "exclude": ["src/__tests__", "dist", "node_modules"]
+  "include": [
+    "src"
+  ],
+  "exclude": [
+    "src/__tests__",
+    "dist",
+    "node_modules"
+  ],
+  "references": [
+    {
+      "path": "../agent-core"
+    },
+    {
+      "path": "../ios-agent"
+    },
+    {
+      "path": "../android-agent"
+    },
+    {
+      "path": "../relay"
+    }
+  ]
 }

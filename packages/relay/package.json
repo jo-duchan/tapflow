@@ -25,7 +25,7 @@
   "types": "dist/index.d.ts",
   "exports": {
     ".": {
-      "types": "./src/index.ts",
+      "types": "./dist/index.d.ts",
       "source": "./src/index.ts",
       "tsx": "./src/index.ts",
       "import": "./dist/index.js",
@@ -45,8 +45,8 @@
     "access": "public"
   },
   "scripts": {
-    "build": "tsc && rm -rf dist/migrations && cp -r src/migrations dist/migrations",
-    "typecheck": "tsc --noEmit",
+    "build": "tsc -b && rm -rf dist/migrations && cp -r src/migrations dist/migrations",
+    "typecheck": "tsc -b",
     "start": "node dist/server.js",
     "test": "vitest run",
     "lint": "eslint src"

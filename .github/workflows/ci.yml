@@ -23,6 +23,8 @@ jobs:
 
       - run: pnpm lint
 
+      - run: pnpm typecheck
+
       - run: pnpm --filter @tapflowio/agent-core build
       - run: pnpm --filter @tapflowio/audiotap-helper build
       - run: pnpm --filter @tapflowio/dashboard build
