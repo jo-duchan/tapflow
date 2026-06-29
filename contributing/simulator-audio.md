@@ -45,11 +45,11 @@ The tap set is the sim's whole process tree, kept current as processes come and 
 
 The process tap captures audio *before* the simulator applies its own media volume, so the captured signal ignores the sim volume (only the browser's `<audio>` volume would change it). The sim's current volume is exposed at `…/Devices/<udid>/data/var/run/simulatoraudio/audiosettings.plist` as `sim_volume` (0–100, updated live as the user changes it). `readSimVolume()` reads it (there is no `simctl` volume subcommand) and `applyGain()` multiplies it into the captured PCM, per session — so concurrent sims keep independent volume. The curve is currently linear (`v/100`); matching iOS's perceptual (log) curve is a follow-up.
 
-### Host output: iOS muted, Android not (asymmetric)
+### Host output: both muted (iOS by capture, Android by a mute-only tap)
 
 iOS pins `muteBehavior = .muted`, so when audio is on the sim plays **only to the browser** and the agent Mac stays silent — no echo, no noise on a shared/unattended Mac. It's process-tap-scoped, so other Mac apps are unaffected (unlike a system-output redirect).
 
-**Android can't match this.** The emulator's `-audio <backend>` couples play+record, and `-audio none` disables both (gRPC capture included). A headless emulator (`-no-window`, audio on) **does** output to the host Mac (measured). So with audio on, the Android emulator is also audible on the agent Mac — silence it with the **Mac's own volume**. Restoring symmetry via a shared process-tap helper on the emulator PID (mute-only) is tracked in [#341](https://github.com/jo-duchan/tapflow/issues/341).
+**Android reaches the same result a different way (#341).** The emulator's `-audio <backend>` couples play+record (`-audio none` disables both, gRPC capture included), and a headless emulator (`-no-window`, audio on) **does** output to the host Mac (measured) — so it can't self-mute. But qemu is just a macOS process, so on **macOS 14.2+** the agent holds a **mute-only** process tap (the same `audiotap-helper`, `--mute-only`) on the emulator's qemu PID: `muteBehavior = .muted`, no capture, no socket. That silences the emulator's host output while gRPC keeps capturing for the browser — matching iOS. The helper self-exits when qemu dies; below 14.2 / non-macOS it's a no-op and you fall back to the Mac's volume. The shared helper lives in `@tapflowio/audiotap-helper` (used by both `ios-agent` and `android-agent`).
 
 Why iOS can't auto-decide mute by permission: the tap's audio-capture TCC grant isn't readable at runtime — `AVCaptureDevice.authorizationStatus(.audio)` reflects the **mic** service (`kTCCServiceMicrophone`), not the tap's (`kTCCServiceAudioCapture`) — verified, the capture grant was given while that status stayed `notDetermined` — and denial is *silent* (no OSStatus). So `.muted` is unconditional, and we rely on priming the grant at `agent start` (below) to avoid a missed-prompt → total-silence trap.
 
@@ -94,9 +94,9 @@ Zero bleed — sim B's capture stayed at exactly 0 the whole time sim A played. 
 | `ios-agent/src/IOSAgent.ts` | Default-on (`TAPFLOW_AUDIO`≠`off`) + macOS-14.2 gate; boot-time whole-sim tap + 1.5s process-tree poll; per-session sim-volume gain; `pumpAudio` → `CODEC_AUDIO`. |
 | `cli/src/commands/{agent-start,start}.ts`, `lib/setup.ts` | prime the audio-capture TCC grant via `requestAudioPermission()` — `agent start` non-blocking (every start), `setup ios` blocking. |
 
-## Why the platforms are asymmetric
+## Why the capture mechanisms differ
 
-Android = **one** emulator process with a built-in audio stream (tap it directly). iOS = **many** host processes per sim, each playing to host CoreAudio independently — there is no single per-sim audio stream at the simulator layer. iOS audio is therefore captured at the **macOS** layer (process taps), not the simulator layer. The simulator deliberately exposes audio only as *routing* (which host device the guest plays to), never as a tappable stream — unlike video, which has a per-device framebuffer port (`com.apple.framebuffer.display`, tapped via SimulatorKit IOSurface).
+(Host *output* is muted on both now — see above. The *capture* path still differs.) Android = **one** emulator process with a built-in audio stream (tap it directly). iOS = **many** host processes per sim, each playing to host CoreAudio independently — there is no single per-sim audio stream at the simulator layer. iOS audio is therefore captured at the **macOS** layer (process taps), not the simulator layer. The simulator deliberately exposes audio only as *routing* (which host device the guest plays to), never as a tappable stream — unlike video, which has a per-device framebuffer port (`com.apple.framebuffer.display`, tapped via SimulatorKit IOSurface).
 
 ## Rejected iOS approaches (do not re-explore without new facts)
 

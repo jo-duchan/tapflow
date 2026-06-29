@@ -21,8 +21,10 @@ import {
   CODEC_AUDIO,
   sendAudioYieldingToVideo,
 } from '@tapflowio/agent-core/utils'
+import { execFileSync } from 'child_process'
 import { AdbWrapper } from './AdbWrapper.js'
-import { EmulatorLauncher } from './EmulatorLauncher.js'
+import { EmulatorLauncher, findEmulatorPid } from './EmulatorLauncher.js'
+import { ensureHelperApp, launchMuteOnlyTap, isAudioSupported } from '@tapflowio/audiotap-helper'
 import { AndroidTouchHelper } from './AndroidTouchHelper.js'
 import { ScrcpySession } from './scrcpy/ScrcpySession.js'
 import type { ScrcpyFrame } from './scrcpy/ScrcpyVideo.js'
@@ -127,6 +129,7 @@ interface DeviceState {
   scrcpySession: ScrcpySession | null
   emulatorVideo: EmulatorVideo | null
   emulatorAudio: AudioStream | null   // gRPC audio stream (on by default; null when TAPFLOW_AUDIO=off)
+  audioMuteQemuPid: number | null     // qemu pid silenced by the macOS mute-only tap (#341); null if not muting
   grpcPort: number | null             // gRPC port this device's emulator was launched with; null if we didn't launch it
   grpcClient: EmulatorGrpcClient | null
   cornerRadius: number   // baked rounded-corner radius as a fraction of width (0 = square)
@@ -314,6 +317,7 @@ export class AndroidAgent implements DeviceAgent {
         scrcpySession: null,
         emulatorVideo: null,
         emulatorAudio: null,
+        audioMuteQemuPid: null,
         grpcPort: null,
         grpcClient: null,
         cornerRadius: 0,
@@ -399,6 +403,7 @@ export class AndroidAgent implements DeviceAgent {
     state.emulatorVideo = null
     state.emulatorAudio?.cancel()
     state.emulatorAudio = null
+    this.stopHostMute(state)
     state.grpcClient?.close()
     state.grpcClient = null
     state.cornerRadius = 0
@@ -641,7 +646,35 @@ export class AndroidAgent implements DeviceAgent {
       const audio = client.streamAudio()
       state.emulatorAudio = audio
       void this.pumpAudio(state, streamWs, audio)
+      this.startHostMute(state) // #341: silence the emulator's host (agent Mac) output — iOS parity
     }
+  }
+
+  // #341: the emulator also plays to the agent Mac's speakers (its `-audio` backend has no
+  // host-output-only mute). On macOS 14.2+ we hold a mute-only Core Audio process tap on the
+  // emulator's qemu pid so its host output is silenced while gRPC keeps capturing for the browser —
+  // matching iOS's muteBehavior=.muted. Below 14.2 / non-macOS: no-op (fall back to the Mac's volume).
+  private startHostMute(state: DeviceState): void {
+    if (!isAudioSupported()) return
+    if (state.audioMuteQemuPid != null) return // already muting this session (e.g. a stream restart)
+    const avdName = state.deviceId.replace(/^avd:/, '')
+    const qemuPid = findEmulatorPid(avdName)
+    if (!qemuPid) { logger.debug(`host-mute: no qemu pid for ${avdName}`); return }
+    try {
+      launchMuteOnlyTap(ensureHelperApp(), [qemuPid])
+      state.audioMuteQemuPid = qemuPid
+      logger.info(`host-mute: silencing emulator host output on the agent Mac (qemu ${qemuPid})`)
+    } catch (e) {
+      logger.warn(`host-mute: failed to launch mute tap: ${e instanceof Error ? e.message : String(e)}`)
+    }
+  }
+
+  // Stop muting on teardown so the emulator is audible again if the operator uses it directly. The
+  // mute helper also self-exits when qemu dies, so this only matters when the emulator outlives us.
+  private stopHostMute(state: DeviceState): void {
+    if (state.audioMuteQemuPid == null) return
+    try { execFileSync('pkill', ['-f', `audiotap-helper.*--mute-only ${state.audioMuteQemuPid}$`], { stdio: 'ignore' }) } catch { /* already gone */ }
+    state.audioMuteQemuPid = null
   }
 
   // Forward raw-PCM audio frames to the relay on the shared stream socket. Uses the yielding sender,

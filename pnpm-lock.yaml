@@ -79,6 +79,9 @@ importers:
       '@tapflowio/agent-core':
         specifier: workspace:*
         version: link:../agent-core
+      '@tapflowio/audiotap-helper':
+        specifier: workspace:*
+        version: link:../audiotap-helper
       ws:
         specifier: ^8.21.0
         version: 8.21.0
@@ -92,6 +95,22 @@ importers:
       '@types/ws':
         specifier: ^8.0.0
         version: 8.18.1
+      typescript:
+        specifier: ^5.0.0
+        version: 5.9.3
+      vitest:
+        specifier: ^4.1.9
+        version: 4.1.9(@types/node@20.19.43)(@vitest/coverage-v8@4.1.9)(jsdom@29.1.1)(vite@6.4.3(@types/node@20.19.43)(jiti@1.21.7)(tsx@4.22.4))
+
+  packages/audiotap-helper:
+    dependencies:
+      '@tapflowio/agent-core':
+        specifier: workspace:*
+        version: link:../agent-core
+    devDependencies:
+      '@types/node':
+        specifier: ^20.19.43
+        version: 20.19.43
       typescript:
         specifier: ^5.0.0
         version: 5.9.3
@@ -334,6 +353,9 @@ importers:
       '@tapflowio/agent-core':
         specifier: workspace:*
         version: link:../agent-core
+      '@tapflowio/audiotap-helper':
+        specifier: workspace:*
+        version: link:../audiotap-helper
       ws:
         specifier: ^8.21.0
         version: 8.21.0

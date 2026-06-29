@@ -54,10 +54,12 @@ export async function cmdAgentStart(opts: AgentStartOptions): Promise<void> {
     process.exit(1)
   }
 
-  // Prime the iOS audio-capture permission (audio is on by default). Non-blocking: if the grant
-  // already exists the helper exits silently; otherwise the operator gets the one-time modal. Re-run
+  // Prime the audio-capture permission (audio is on by default) — shared by iOS capture and Android
+  // host-mute (#341), both via the same signed helper / TCC grant. Non-blocking: if the grant already
+  // exists the helper exits silently; otherwise the operator gets the one-time modal. Re-run
   // `tapflow agent start` to retry if audio is silent. See contributing/simulator-audio.md.
-  if (platformsToRun.includes('ios') && process.env.TAPFLOW_AUDIO !== 'off' && isAudioSupported()) {
+  if ((platformsToRun.includes('ios') || platformsToRun.includes('android')) &&
+      process.env.TAPFLOW_AUDIO !== 'off' && isAudioSupported()) {
     requestAudioPermission(false)
   }
 

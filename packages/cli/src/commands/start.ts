@@ -32,9 +32,11 @@ export async function cmdStart(opts: StartOptions): Promise<void> {
     platformsToRun = [explicit]
   }
 
-  // Prime the iOS audio-capture permission (audio is on by default). Non-blocking: if the grant
-  // already exists the helper exits silently; otherwise the operator gets the one-time modal.
-  if (platformsToRun.includes('ios') && process.env.TAPFLOW_AUDIO !== 'off' && isAudioSupported()) {
+  // Prime the audio-capture permission (audio is on by default) — shared by iOS capture and Android
+  // host-mute (#341), both via the same signed helper / TCC grant. Non-blocking: if the grant already
+  // exists the helper exits silently; otherwise the operator gets the one-time modal.
+  if ((platformsToRun.includes('ios') || platformsToRun.includes('android')) &&
+      process.env.TAPFLOW_AUDIO !== 'off' && isAudioSupported()) {
     requestAudioPermission(false)
   }
 
