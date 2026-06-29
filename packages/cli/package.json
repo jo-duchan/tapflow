@@ -43,8 +43,8 @@
     }
   },
   "scripts": {
-    "build": "tsc",
-    "typecheck": "tsc --noEmit",
+    "build": "tsc -b",
+    "typecheck": "tsc -b",
     "dev": "tsx src/index.ts",
     "test": "vitest run",
     "lint": "eslint src",
