@@ -33,6 +33,13 @@ const SDK_SDKMANAGER = join(SDK_DIR, 'cmdline-tools', 'latest', 'bin', 'sdkmanag
 const SDK_AVDMANAGER = join(SDK_DIR, 'cmdline-tools', 'latest', 'bin', 'avdmanager')
 const SDK_ADB = join(SDK_DIR, 'platform-tools', 'adb')
 const SDK_EMULATOR = join(SDK_DIR, 'emulator', 'emulator')
+const SDK_SYSTEM_IMAGE = join(
+  SDK_DIR,
+  'system-images',
+  'android-35',
+  'google_apis',
+  process.arch === 'arm64' ? 'arm64-v8a' : 'x86_64',
+)
 const zshrc = join(homedir(), '.zshrc')
 
 const okSpawn = { status: 0, stdout: '', stderr: '', pid: 1, output: [], signal: null }
@@ -60,7 +67,7 @@ describe('runSetupAndroid', () => {
       return ''
     })
     mockExistsSync.mockImplementation(
-      (p) => p === SDK_SDKMANAGER || p === SDK_ADB || p === SDK_AVDMANAGER || p === SDK_EMULATOR,
+      (p) => p === SDK_SDKMANAGER || p === SDK_ADB || p === SDK_AVDMANAGER || p === SDK_EMULATOR || p === SDK_SYSTEM_IMAGE,
     )
     mockSpawnSync.mockImplementation((cmd, args) => {
       if (cmd === SDK_EMULATOR && Array.isArray(args) && args.includes('-list-avds')) {
@@ -135,7 +142,7 @@ describe('runSetupAndroid', () => {
     setTTY(true)
     let installed = false
     mockExistsSync.mockImplementation((p) => {
-      if (p === SDK_SDKMANAGER || p === SDK_ADB) return installed
+      if (p === SDK_SDKMANAGER || p === SDK_ADB || p === SDK_SYSTEM_IMAGE) return installed
       if (p === SDK_AVDMANAGER || p === SDK_EMULATOR) return true
       return false
     })
@@ -166,6 +173,56 @@ describe('runSetupAndroid', () => {
 
     const results = await runSetupAndroid()
     expect(findStep(results, 'android sdk')?.warn).toBe(true)
+  })
+
+  it('partial SDK without emulator/system image is repaired instead of reported as found', async () => {
+    setTTY(true)
+    mockReadFileSync.mockReturnValue(
+      '# >>> tapflow android sdk >>>\nexport ANDROID_HOME="x"\n# <<< tapflow android sdk <<<\n',
+    )
+    let installed = false
+    mockExistsSync.mockImplementation((p) => {
+      if (p === SDK_SDKMANAGER || p === SDK_ADB || p === SDK_AVDMANAGER || p === zshrc) return true
+      if (p === SDK_EMULATOR || p === SDK_SYSTEM_IMAGE) return installed
+      return false
+    })
+    const expectedSystemImage =
+      process.arch === 'arm64'
+        ? 'system-images;android-35;google_apis;arm64-v8a'
+        : 'system-images;android-35;google_apis;x86_64'
+
+    mockSpawnSync.mockImplementation((cmd, args) => {
+      const a = Array.isArray(args) ? args : []
+      if (
+        typeof cmd === 'string' &&
+        cmd.includes('sdkmanager') &&
+        a.includes('cmdline-tools;latest') &&
+        a.includes(expectedSystemImage)
+      ) {
+        installed = true
+        return okSpawn as never
+      }
+      if (cmd === SDK_EMULATOR && a.includes('-list-avds')) {
+        return { ...okSpawn, stdout: 'tapflow-phone\n' } as never
+      }
+      return okSpawn as never
+    })
+
+    const results = await runSetupAndroid()
+
+    expect(mockSpawnSync).toHaveBeenCalledWith(
+      SDK_SDKMANAGER,
+      expect.arrayContaining([
+        `--sdk_root=${SDK_DIR}`,
+        'cmdline-tools;latest',
+        'platform-tools',
+        'emulator',
+        expectedSystemImage,
+      ]),
+      expect.anything(),
+    )
+    expect(findStep(results, 'android sdk')?.label).toBe('Android SDK installed')
+    expect(findStep(results, 'android sdk')?.state).toBe('created')
   })
 
   it('AVD가 있으면 ok (생성 안 함)', async () => {
@@ -237,6 +294,7 @@ describe('runSetupAndroid', () => {
         p === SDK_ADB ||
         p === SDK_AVDMANAGER ||
         p === SDK_EMULATOR ||
+        p === SDK_SYSTEM_IMAGE ||
         p === zshrc,
     )
 
@@ -261,6 +319,7 @@ describe('runSetupAndroid', () => {
         p === SDK_ADB ||
         p === SDK_AVDMANAGER ||
         p === SDK_EMULATOR ||
+        p === SDK_SYSTEM_IMAGE ||
         p === zshrc,
     )
     mockExecSync.mockImplementation((cmd) => {
@@ -293,6 +352,7 @@ describe('runSetupAndroid', () => {
         p === SDK_ADB ||
         p === SDK_AVDMANAGER ||
         p === SDK_EMULATOR ||
+        p === SDK_SYSTEM_IMAGE ||
         p === zshrc,
     )
 
@@ -317,7 +377,7 @@ describe('runSetupAndroid', () => {
     setTTY(true)
     let installed = false
     mockExistsSync.mockImplementation((p) => {
-      if (p === SDK_SDKMANAGER || p === SDK_ADB) return installed
+      if (p === SDK_SDKMANAGER || p === SDK_ADB || p === SDK_SYSTEM_IMAGE) return installed
       if (p === SDK_AVDMANAGER || p === SDK_EMULATOR) return true
       return false
     })
