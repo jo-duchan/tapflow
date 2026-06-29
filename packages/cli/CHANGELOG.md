@@ -1,5 +1,35 @@
 # tapflow
 
+## 0.11.0
+
+### Minor Changes
+
+- 0c2b82c: Simulator audio output (device → browser) is now **on by default** for both iOS and Android. Opt out with `TAPFLOW_AUDIO=off` — one env for both platforms (`agent start --ios/--android` already selects the platform). The no-degradation contract (audio yields to video) keeps the video path safe whether audio is on or off.
+
+  **iOS**: simulator processes are host processes, so tapflow taps the whole simulator's process tree with a Core Audio process tap (macOS 14.2+) — app audio + WebKit `WebContent` (web audio, e.g. YouTube in Safari) + system sounds, with no device routing, no dylib injection, no host-output hijack, on any signed build. The tap stays current as processes spawn and start/stop audio (process-tree polling + a Core Audio process-object listener); each simulator is isolated (no cross-bleed); the sim's own volume is reflected; and the host (agent Mac) stays muted so audio goes only to the browser. The audio-capture permission is primed at `tapflow agent start` — re-run it if browser audio is silent.
+
+  **Android**: emulator audio is captured over gRPC `streamAudio`. Unlike iOS, the emulator also plays to the host Mac (it has no host-output-only mute) — use the Mac's own volume to silence it.
+
+  Capture normalizes to 44100/Stereo/S16 and rides the existing `CODEC_AUDIO` transport. The capture runs in a small signed helper (`audiotap-helper`, iOS) launched via LaunchServices so it holds its own one-time audio-recording grant.
+
+### Patch Changes
+
+- 3377bfe: Fix the package type entrypoint for npm consumers (#345). `exports.types` now points at the published `dist/*.d.ts` instead of `src/` — which isn't shipped in the tarball (`files` ships only `dist`/`bin`), so consumers couldn't resolve the package's types.
+
+  The monorepo moves to **TypeScript project references** (each lib package gets `composite: true` + `references`, plus a root solution `tsconfig.json`). `typecheck`/`build` run via `tsc -b`, so workspace typecheck stays build-light (incremental, no manual dist build) while the published packages expose correct types from `dist`. No runtime or public API changes.
+
+- d6da20c: Clarify the Android setup/doctor PATH refresh guidance when the SDK rc block already exists but the current shell has not loaded it.
+- a0d3eac: Add a `tapflow doctor` check that warns when the default relay port 4000 is already occupied.
+- Updated dependencies [2af1938]
+- Updated dependencies [2af1938]
+- Updated dependencies [6bd8ebe]
+- Updated dependencies [0c2b82c]
+- Updated dependencies [3377bfe]
+  - @tapflowio/android-agent@0.11.0
+  - @tapflowio/ios-agent@0.11.0
+  - @tapflowio/agent-core@0.11.0
+  - @tapflowio/relay@0.11.0
+
 ## 0.10.0
 
 ### Minor Changes
