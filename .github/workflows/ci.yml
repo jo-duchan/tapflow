@@ -23,10 +23,6 @@ jobs:
 
       - run: pnpm lint
 
-      - run: |
-          echo "audiotap @types:"; ls -la packages/audiotap-helper/node_modules/@types 2>&1 || echo NONE
-          echo "root @types:"; ls -la node_modules/@types 2>&1 || echo NONE
-          echo "resolve from audiotap:"; node -e "console.log(require.resolve('@types/node/package.json',{paths:['packages/audiotap-helper']}))" 2>&1 || echo FAIL
       - run: pnpm typecheck
 
       - run: pnpm --filter @tapflowio/agent-core build
