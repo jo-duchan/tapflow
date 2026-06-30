@@ -59,6 +59,7 @@ const enSidebar = [
   {
     text: 'Reference',
     items: [
+      { text: 'Changelog', link: '/changelog' },
       { text: 'CLI Reference', link: '/reference/cli' },
       { text: 'Configuration', link: '/reference/configuration' },
       { text: 'Streaming Quality', link: '/guide/streaming' },
@@ -125,6 +126,7 @@ const koSidebar = [
   {
     text: '레퍼런스',
     items: [
+      { text: '변경 기록', link: '/ko/changelog' },
       { text: 'CLI 레퍼런스', link: '/ko/reference/cli' },
       { text: '설정 파일', link: '/ko/reference/configuration' },
       { text: '스트림 품질', link: '/ko/guide/streaming' },
