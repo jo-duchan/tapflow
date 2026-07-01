@@ -9,7 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- docs: add a VitePress changelog page scaffold in English and Korean.
+- docs: add navigation links to the project changelog.
 
 ## [0.11.0] - 2026-06-29
 

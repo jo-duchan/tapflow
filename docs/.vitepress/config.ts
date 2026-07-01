@@ -59,7 +59,6 @@ const enSidebar = [
   {
     text: 'Reference',
     items: [
-      { text: 'Changelog', link: '/changelog' },
       { text: 'CLI Reference', link: '/reference/cli' },
       { text: 'Configuration', link: '/reference/configuration' },
       { text: 'Streaming Quality', link: '/guide/streaming' },
@@ -126,7 +125,6 @@ const koSidebar = [
   {
     text: '레퍼런스',
     items: [
-      { text: '변경 기록', link: '/ko/changelog' },
       { text: 'CLI 레퍼런스', link: '/ko/reference/cli' },
       { text: '설정 파일', link: '/ko/reference/configuration' },
       { text: '스트림 품질', link: '/ko/guide/streaming' },
@@ -167,6 +165,7 @@ export default withMermaid(defineConfig({
         nav: [
           { text: 'Guide', link: '/guide/introduction', activeMatch: '^/(guide|dashboard)' },
           { text: 'Reference', link: '/reference/cli', activeMatch: '^/reference' },
+          { text: 'Changelog', link: 'https://github.com/jo-duchan/tapflow/blob/main/CHANGELOG.md' },
         ],
         sidebar: enSidebar,
       },
@@ -178,6 +177,7 @@ export default withMermaid(defineConfig({
         nav: [
           { text: '가이드', link: '/ko/guide/introduction', activeMatch: '^/ko/(guide|dashboard)' },
           { text: '레퍼런스', link: '/ko/reference/cli', activeMatch: '^/ko/reference' },
+          { text: '변경 기록', link: 'https://github.com/jo-duchan/tapflow/blob/main/CHANGELOG.md' },
         ],
         sidebar: koSidebar,
       },
