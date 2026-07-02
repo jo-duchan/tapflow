@@ -73,6 +73,9 @@ cannot keep true.
 | [relay-resource-rejection.md](./relay-resource-rejection.md) | rationale | relay, resource-management, session |
 | [relay-backpressure-frame-drop.md](./relay-backpressure-frame-drop.md) | rationale | relay, streaming, backpressure |
 | [build-status-deletion-decoupling.md](./build-status-deletion-decoupling.md) | rationale | relay, builds, storage |
+| [relay-tunnel-access.md](./relay-tunnel-access.md) | rationale | relay, deployment, tunnel |
+| [relay-agent-auth.md](./relay-agent-auth.md) | rationale | relay, auth, security |
+| [relay-secret-loading.md](./relay-secret-loading.md) | rationale | relay, config, secrets |
 | [simkit-internals.md](./simkit-internals.md) | reference | ios, simulator, reverse-engineering |
 | [measurement.md](./measurement.md) | reference | performance, measurement, instrumentation |
 | [downscale-tuning.md](./downscale-tuning.md) | reference | streaming, performance, downscale |

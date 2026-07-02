@@ -60,6 +60,9 @@ Committed *why* behind non-obvious decisions. Read the relevant one **before** c
 | [relay-resource-rejection.md](./contributing/relay-resource-rejection.md) | rationale | Why the relay rejects new sessions above a CPU/RAM threshold, evaluated relay-side |
 | [relay-backpressure-frame-drop.md](./contributing/relay-backpressure-frame-drop.md) | rationale | Why the relay silently drops frames on `bufferedAmount` backpressure — bounds memory |
 | [build-status-deletion-decoupling.md](./contributing/build-status-deletion-decoupling.md) | rationale | Why a build's `Done` status is decoupled from its `delete_after` deletion lifetime |
+| [relay-tunnel-access.md](./contributing/relay-tunnel-access.md) | rationale | Why the relay stays inside the agent's network and tunneling is an opt-in plugin |
+| [relay-agent-auth.md](./contributing/relay-agent-auth.md) | rationale | Why remote agents authenticate with an `agent`-scope PAT instead of an IP check |
+| [relay-secret-loading.md](./contributing/relay-secret-loading.md) | rationale | Why the relay loads `.env` before evaluating its module-singleton config |
 | [simkit-internals.md](./contributing/simkit-internals.md) | reference | SimulatorKit reverse-engineering notes — binary layout, symbols, touch/button injection |
 | [measurement.md](./contributing/measurement.md) | reference | Every performance metric emitter — how to enable it, its output, what it means |
 | [downscale-tuning.md](./contributing/downscale-tuning.md) | reference | Encode-resolution downscale lever — QA fidelity vs decode/bandwidth, recommended default |
