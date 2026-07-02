@@ -1,5 +1,11 @@
 # @tapflowio/relay
 
+## 0.11.1
+
+### Patch Changes
+
+- @tapflowio/agent-core@0.11.1
+
 ## 0.11.0
 
 ### Patch Changes

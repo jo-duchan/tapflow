@@ -1,5 +1,16 @@
 # @tapflowio/ios-agent
 
+## 0.11.1
+
+### Patch Changes
+
+- Confine physical device-frame buttons to the bezel and add button press-and-hold.
+
+  A tap inside the screen area is no longer hijacked as a button press (previously a circular hit-test around each button center could overlap the screen on devices where a button sits near the bezel, e.g. iPhone SE). HID buttons now support real-time hold: `input:button` accepts an optional `phase: 'down' | 'up'` so a button can be held instead of only tapped. The field is optional, so existing single-press clients (e.g. MCP sending `{ name }`) are unaffected.
+
+  - @tapflowio/agent-core@0.11.1
+  - @tapflowio/audiotap-helper@0.2.1
+
 ## 0.11.0
 
 ### Minor Changes

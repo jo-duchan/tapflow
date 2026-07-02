@@ -7,9 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.11.1] - 2026-07-02
+
 ### Added
 
+- relay: Docker support and a container image publish workflow, so the relay can be self-hosted as an image instead of only from source (#352).
 - docs: add navigation links to the project changelog.
+
+### Changed
+
+- deps: bump the npm minor/patch dependency group (22 updates).
+
+### Fixed
+
+- ios: physical device-frame buttons are confined to the bezel — a tap inside the screen area is no longer hijacked as a button press on devices where a button sits near the edge (e.g. iPhone SE). HID buttons also support press-and-hold via an optional `phase: 'down' | 'up'` on `input:button`; existing single-press clients are unaffected.
+- dashboard: use the `TimerOff` icon for the cancel-deletion action.
+
+### Security
+
+- Patch js-yaml to 3.15.0 to address CVE-2026-53550.
 
 ## [0.11.0] - 2026-06-29
 
@@ -224,7 +240,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Automatic `tapflow.config.json` creation as a side effect of `tapflow start` / `tapflow relay start`.
 
-[Unreleased]: https://github.com/jo-duchan/tapflow/compare/v0.11.0...HEAD
+[Unreleased]: https://github.com/jo-duchan/tapflow/compare/v0.11.1...HEAD
+[0.11.1]: https://github.com/jo-duchan/tapflow/compare/v0.11.0...v0.11.1
 [0.11.0]: https://github.com/jo-duchan/tapflow/compare/v0.10.0...v0.11.0
 [0.10.0]: https://github.com/jo-duchan/tapflow/compare/v0.9.2...v0.10.0
 [0.9.2]: https://github.com/jo-duchan/tapflow/compare/v0.9.1...v0.9.2
