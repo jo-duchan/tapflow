@@ -367,6 +367,11 @@ export function IOSViewer({
       cx = (e.clientX - rect.left) * (chrome.compositeWidth / rect.width)
       cy = (e.clientY - rect.top) * (chrome.compositeHeight / rect.height)
     }
+    // Screen area takes priority: a tap inside the screen rect is never a physical-button
+    // press, even if it falls within a button's circular hit radius (buttons near the bezel
+    // edge — e.g. iPhone SE — otherwise hijack screen taps).
+    const sr = chrome.screenRect
+    if (cx >= sr.x && cx <= sr.x + sr.width && cy >= sr.y && cy <= sr.y + sr.height) return null
     for (const btn of chrome.buttons) {
       const dx = cx - btn.normalOffset.x; const dy = cy - btn.normalOffset.y
       if (dx * dx + dy * dy < BUTTON_HIT_RADIUS ** 2) return btn.name
@@ -390,7 +395,12 @@ export function IOSViewer({
       setPinchHint(fingers); send({ type: 'input:pinch:start', sessionId, payload: fingers }); return
     }
     const btn = toButton(e)
-    if (btn) { pressedButton.current = btn; setFlashedButton(btn); return }
+    if (btn) {
+      pressedButton.current = btn; setFlashedButton(btn)
+      ;(e.target as Element).setPointerCapture(e.pointerId)
+      send({ type: 'input:button', sessionId, payload: { name: btn, phase: 'down' } })
+      return
+    }
     const pos = toNormScreen(e); if (!pos) return
     touchStartPos.current = pos
     ;(e.target as Element).setPointerCapture(e.pointerId)
@@ -458,7 +468,7 @@ export function IOSViewer({
     }
     touchStartPos.current = null
     if (pressedButton.current) {
-      send({ type: 'input:button', sessionId, payload: { name: pressedButton.current } })
+      send({ type: 'input:button', sessionId, payload: { name: pressedButton.current, phase: 'up' } })
       pressedButton.current = null; setTimeout(() => setFlashedButton(null), 100); return
     }
     cursorStateRef.current = 'release'; releaseAnimRef.current = { startTime: performance.now() }
@@ -476,7 +486,11 @@ export function IOSViewer({
       isPinchMode.current = false; setPinchActive(false); setPinchHint(null); send({ type: 'input:pinch:end', sessionId }); return
     }
     touchStartPos.current = null
-    if (pressedButton.current) { pressedButton.current = null; setFlashedButton(null); return }
+    if (pressedButton.current) {
+      // Release the held button, else the HID button stays down on the device.
+      send({ type: 'input:button', sessionId, payload: { name: pressedButton.current, phase: 'up' } })
+      pressedButton.current = null; setFlashedButton(null); return
+    }
     cursorStateRef.current = 'release'; releaseAnimRef.current = { startTime: performance.now() }
     send({ type: 'input:touch:end', sessionId })
   }, [send, sessionId])

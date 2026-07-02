@@ -59,6 +59,26 @@ export class TouchHelper {
     this.proc.stdin.write(buf)
   }
 
+  // Real-time button hold: down + up sent as separate frames so the hold lasts as long as
+  // the user holds the button in the dashboard (e.g. Action button long-press). type 4 above
+  // remains the fixed short-press path.
+  private writeButtonOp(type: number, usagePage: number, usage: number): void {
+    if (!this.proc?.stdin?.writable) return
+    const buf = Buffer.allocUnsafe(9)
+    buf.writeUInt8(type, 0)
+    buf.writeUInt32BE(usagePage, 1)
+    buf.writeUInt32BE(usage, 5)
+    this.proc.stdin.write(buf)
+  }
+
+  pressButtonDown(usagePage: number, usage: number): void {
+    this.writeButtonOp(10, usagePage, usage)
+  }
+
+  pressButtonUp(usagePage: number, usage: number): void {
+    this.writeButtonOp(11, usagePage, usage)
+  }
+
   // Legacy path for home (code=0) and lock (code=1) buttons
   pressLegacyButton(code: number): void {
     if (!this.proc?.stdin?.writable) return

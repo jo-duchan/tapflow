@@ -149,7 +149,7 @@ export type RelayMessage =
   | { type: 'input:pinch:end'; sessionId: string }
   | { type: 'input:key'; sessionId: string; payload: { key: string } }
   | { type: 'input:type'; sessionId: string; payload: { text: string } }
-  | { type: 'input:button'; sessionId: string; payload: { name: string } }
+  | { type: 'input:button'; sessionId: string; payload: { name: string; phase?: 'down' | 'up' } }
   | { type: 'input:rotate'; sessionId: string }
   | { type: 'input:keyboard:toggle'; sessionId: string }
   | { type: 'keyboard:toggled'; sessionId: string; payload: { visible: boolean } }

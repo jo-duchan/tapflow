@@ -691,13 +691,17 @@ export class IOSAgent implements DeviceAgent {
       case 'input:button': {
         const state = this.deviceStates.get(msg.sessionId!)
         if (!state?.touchHelper) break
-        const { name } = msg.payload as { name: string }
+        const { name, phase } = msg.payload as { name: string; phase?: 'down' | 'up' }
         if (name === 'home') {
-          state.touchHelper.pressLegacyButton(0)
+          // Home has no HID down/up split — always a single legacy press. Send once on release
+          // (or on a phase-less legacy message) so a down+up pair doesn't fire it twice.
+          if (phase !== 'down') state.touchHelper.pressLegacyButton(0)
         } else {
           const btn = state.loadedChrome?.buttons.find((b) => b.name === name)
           if (btn && btn.usagePage > 0 && btn.usage > 0) {
-            state.touchHelper.pressButton(btn.usagePage, btn.usage)
+            if (phase === 'down') state.touchHelper.pressButtonDown(btn.usagePage, btn.usage)
+            else if (phase === 'up') state.touchHelper.pressButtonUp(btn.usagePage, btn.usage)
+            else state.touchHelper.pressButton(btn.usagePage, btn.usage)
           }
         }
         break
