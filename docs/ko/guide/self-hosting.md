@@ -362,3 +362,75 @@ pm2 restart relay
 ::: tip 다음 단계
 릴레이가 실행되면 브라우저에서 `http://localhost:4000`을 열면 설정 페이지로 자동 이동합니다. 브라우저를 사용할 수 없는 서버 환경이라면 `tapflow admin init`을 사용하세요. 팀원 초대와 첫 빌드 업로드는 [대시보드 최초 설정](/ko/dashboard/setup)을 참고하세요.
 :::
+
+## systemd (Linux 릴레이 서버)
+
+릴레이를 Linux 호스트에서 실행하고 부팅 시 자동 시작, 크래시 후 재시작, journald 로그 관리를 원한다면 systemd를 사용하세요. 먼저 tapflow를 전역으로 설치합니다:
+
+```sh
+npm install -g tapflow
+```
+
+전용 사용자와 데이터 디렉터리를 만듭니다:
+
+```sh
+sudo useradd --system --create-home --home-dir /var/lib/tapflow --shell /usr/sbin/nologin tapflow
+sudo mkdir -p /etc/tapflow /var/lib/tapflow/.tapflow-data
+sudo chown -R tapflow:tapflow /var/lib/tapflow
+```
+
+릴레이 시크릿은 `/etc/tapflow/relay.env`에 둡니다:
+
+```ini
+TAPFLOW_DATA_DIR=/var/lib/tapflow/.tapflow-data
+JWT_SECRET=YOUR_JWT_SECRET
+```
+
+`JWT_SECRET`은 `openssl rand -hex 32`로 생성하고, `/etc/tapflow/relay.env`는 root만 읽을 수 있게 제한합니다:
+
+```sh
+sudo chmod 600 /etc/tapflow/relay.env
+```
+
+`/etc/systemd/system/tapflow-relay.service`를 만듭니다:
+
+```ini
+[Unit]
+Description=tapflow relay
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=tapflow
+Group=tapflow
+WorkingDirectory=/var/lib/tapflow
+EnvironmentFile=/etc/tapflow/relay.env
+ExecStart=/usr/bin/env tapflow relay start
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
+```
+
+서비스를 활성화하고 시작합니다:
+
+```sh
+sudo systemctl daemon-reload
+sudo systemctl enable --now tapflow-relay
+sudo systemctl status tapflow-relay
+```
+
+로그는 다음으로 확인합니다:
+
+```sh
+journalctl -u tapflow-relay -f
+```
+
+전역 패키지를 업데이트한 뒤에는 서비스를 재시작합니다:
+
+```sh
+npm update -g tapflow
+sudo systemctl restart tapflow-relay
+```
