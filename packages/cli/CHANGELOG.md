@@ -1,5 +1,16 @@
 # tapflow
 
+## 0.11.1
+
+### Patch Changes
+
+- Patch js-yaml to 3.15.0 to address CVE-2026-53550, and bump the npm minor/patch dependency group.
+- Updated dependencies
+  - @tapflowio/ios-agent@0.11.1
+  - @tapflowio/agent-core@0.11.1
+  - @tapflowio/android-agent@0.11.1
+  - @tapflowio/relay@0.11.1
+
 ## 0.11.0
 
 ### Minor Changes
