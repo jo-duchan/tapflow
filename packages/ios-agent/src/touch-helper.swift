@@ -16,6 +16,8 @@
 //   type 7 = pinch move    (x1,y1, x2,y2)
 //   type 8 = pinch end     (coords unused — last saved coords used)
 //   type 9 = key press     ([0]=modifierBitmap u8, [1–3]=pad, [4–7]=hidUsage u32BE, page=0x07)
+//   type 10 = HID button down (a=usagePage u32BE, b=usage u32BE) — real-time hold, no auto-up
+//   type 11 = HID button up   (a=usagePage u32BE, b=usage u32BE)
 //
 // Single-touch: IndigoHIDMessageForMouseNSEvent(p, delta=0, target=0x32, NSEventType, size, edge)
 // Two-finger:   IndigoHIDMessageForMouseNSEvent(p1, p2, target, eventType, direction, 1.0,1.0,1.0,1.0)
@@ -400,6 +402,25 @@ func pressButton(usagePage: UInt32, usage: UInt32) {
     }
 }
 
+// Separate down/up so the dashboard can hold a button for its real duration (e.g. Action
+// button long-press). The hold time is the gap between the down and up frames on stdin.
+func pressButtonDown(usagePage: UInt32, usage: UInt32) {
+    guard let indigoArb = indigoArbitrary else {
+        fputs("warn: HID button unavailable (page=\(usagePage) usage=\(usage))\n", stderr)
+        return
+    }
+    if let msgDown = indigoArb(kIndigoHIDTargetDigitizer, usagePage, usage, kHIDOpDown) {
+        sendMsg(hidClient, sendSel, msgDown, true, nil, nil)
+    }
+}
+
+func pressButtonUp(usagePage: UInt32, usage: UInt32) {
+    guard let indigoArb = indigoArbitrary else { return }
+    if let msgUp = indigoArb(kIndigoHIDTargetDigitizer, usagePage, usage, kHIDOpUp) {
+        sendMsg(hidClient, sendSel, msgUp, true, nil, nil)
+    }
+}
+
 // Keyboard: HID usage page 0x07 (Keyboard/Keypad).
 // modifiers: USB HID modifier bitmap — bit0=LeftCtrl, bit1=LeftShift, bit2=LeftAlt, bit3=LeftGUI, …
 // Sends modifier-down → key-down → key-up → modifier-up sequence.
@@ -526,6 +547,14 @@ DispatchQueue.global(qos: .userInteractive).async {
             case 5:
                 let code = u32BE(rest, offset: 0)
                 pressLegacyButton(code: code)
+            case 10:
+                let usagePage = u32BE(rest, offset: 0)
+                let usage     = u32BE(rest, offset: 4)
+                pressButtonDown(usagePage: usagePage, usage: usage)
+            case 11:
+                let usagePage = u32BE(rest, offset: 0)
+                let usage     = u32BE(rest, offset: 4)
+                pressButtonUp(usagePage: usagePage, usage: usage)
             case 9:
                 let modifier = rest[0]
                 let usage    = u32BE(rest, offset: 4)

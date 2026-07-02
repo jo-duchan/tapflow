@@ -20,7 +20,7 @@ import {
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
 import { Separator } from '@/components/ui/separator';
-import { Play, Trash2, Clock } from 'lucide-react';
+import { Play, Trash2, TimerOff } from 'lucide-react';
 import type { Build } from '@/lib/types';
 import { STATUS_TONE } from '@/lib/build-format';
 
@@ -152,7 +152,7 @@ export function BuildRow({
             onClick={() => onCancelDeletion(build.id)}
             title="Cancel scheduled deletion"
           >
-            <Clock className="h-3.5 w-3.5" />
+            <TimerOff className="h-3.5 w-3.5" />
           </Button>
         ) : (
           <Button

@@ -12,6 +12,8 @@ vi.mock('../TouchHelper', () => ({
     touchMove: vi.fn(),
     touchEnd: vi.fn(),
     pressButton: vi.fn(),
+    pressButtonDown: vi.fn(),
+    pressButtonUp: vi.fn(),
     pressLegacyButton: vi.fn(),
     pinchStart: vi.fn(),
     pinchMove: vi.fn(),
@@ -267,6 +269,26 @@ describe('IOSAgent', () => {
       const { browser, agent, thInstance } = await setupPinchSession()
       browser.send(JSON.stringify({ type: 'input:pinch:end', sessionId: agent.sessionId }))
       await vi.waitFor(() => expect(thInstance.pinchEnd).toHaveBeenCalled(), { timeout: 500 })
+      agent.disconnect()
+      browser.close()
+    })
+
+    // home has no HID down/up split — a down+up pair from the dashboard must not fire it twice.
+    it('input:button home (no phase) presses the legacy button once', async () => {
+      const { browser, agent, thInstance } = await setupPinchSession()
+      browser.send(JSON.stringify({ type: 'input:button', sessionId: agent.sessionId, payload: { name: 'home' } }))
+      await vi.waitFor(() => expect(thInstance.pressLegacyButton).toHaveBeenCalledWith(0), { timeout: 500 })
+      expect(thInstance.pressLegacyButton).toHaveBeenCalledTimes(1)
+      agent.disconnect()
+      browser.close()
+    })
+
+    it('input:button home fires only on the up phase, not on down', async () => {
+      const { browser, agent, thInstance } = await setupPinchSession()
+      browser.send(JSON.stringify({ type: 'input:button', sessionId: agent.sessionId, payload: { name: 'home', phase: 'down' } }))
+      browser.send(JSON.stringify({ type: 'input:button', sessionId: agent.sessionId, payload: { name: 'home', phase: 'up' } }))
+      await vi.waitFor(() => expect(thInstance.pressLegacyButton).toHaveBeenCalledWith(0), { timeout: 500 })
+      expect(thInstance.pressLegacyButton).toHaveBeenCalledTimes(1)
       agent.disconnect()
       browser.close()
     })
