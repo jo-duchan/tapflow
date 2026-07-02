@@ -13,7 +13,7 @@
     "test": "pnpm -r test --if-present",
     "lint": "pnpm -r --if-present lint",
     "typecheck": "tsc -b && pnpm --filter @tapflowio/dashboard --filter @tapflowio/mcp-server typecheck",
-    "prepare": "lefthook install",
+    "prepare": "lefthook install || true",
     "dev": "concurrently -k -n relay,dashboard,ios,android -c cyan,magenta,green,yellow \"pnpm dev:relay\" \"pnpm --filter @tapflowio/dashboard dev\" \"pnpm dev:ios\" \"pnpm dev:android\"",
     "dev:pool": "concurrently -k -n relay,ios,mocks -c cyan,green,yellow \"pnpm dev:relay\" \"pnpm dev:ios\" \"pnpm --filter @tapflowio/playground mock-agents\"",
     "dev:relay": "pnpm --filter @tapflowio/playground relay",
