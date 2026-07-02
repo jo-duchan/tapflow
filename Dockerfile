@@ -4,13 +4,15 @@ FROM node:20-alpine AS builder
 WORKDIR /app
 
 # Install pnpm
-RUN npm install -g pnpm
+RUN npm install -g pnpm@9.15.1
 
 # Copy workspace configuration and lockfile
 COPY package.json pnpm-workspace.yaml pnpm-lock.yaml ./
 
 # Copy all packages for building and workspace resolution
 COPY packages ./packages
+COPY playground/package.json ./playground/
+COPY docs/package.json ./docs/
 
 # Install dependencies across the entire monorepo
 RUN pnpm install --frozen-lockfile
