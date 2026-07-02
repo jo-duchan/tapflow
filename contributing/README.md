@@ -64,9 +64,19 @@ cannot keep true.
 | [legacy-browser-fallback-ios-only.md](./legacy-browser-fallback-ios-only.md) | rationale | ios, streaming, browser-compat |
 | [monorepo-project-references.md](./monorepo-project-references.md) | rationale | monorepo, typescript, build |
 | [android-sdk-bootstrap.md](./android-sdk-bootstrap.md) | rationale | android, setup, sdk |
+| [runtime-platform-registration.md](./runtime-platform-registration.md) | rationale | agent-core, architecture, extensibility |
+| [codec-negotiation.md](./codec-negotiation.md) | rationale | streaming, codec, browser-compat |
+| [android-rotation.md](./android-rotation.md) | rationale | android, rotation, scrcpy |
+| [ios-device-recovery.md](./ios-device-recovery.md) | rationale | ios, lifecycle, recovery |
+| [agent-keep-awake.md](./agent-keep-awake.md) | rationale | macos, performance, power |
+| [relay-heartbeat.md](./relay-heartbeat.md) | rationale | relay, websocket, reliability |
+| [relay-resource-rejection.md](./relay-resource-rejection.md) | rationale | relay, resource-management, session |
+| [relay-backpressure-frame-drop.md](./relay-backpressure-frame-drop.md) | rationale | relay, streaming, backpressure |
+| [build-status-deletion-decoupling.md](./build-status-deletion-decoupling.md) | rationale | relay, builds, storage |
 | [simkit-internals.md](./simkit-internals.md) | reference | ios, simulator, reverse-engineering |
 | [measurement.md](./measurement.md) | reference | performance, measurement, instrumentation |
 | [downscale-tuning.md](./downscale-tuning.md) | reference | streaming, performance, downscale |
+| [frame-envelope.md](./frame-envelope.md) | reference | streaming, protocol, instrumentation |
 | [streaming-latency-log.md](./streaming-latency-log.md) | log | streaming, latency, performance |
 | [android-video-streaming-diagnosis.md](./android-video-streaming-diagnosis.md) | diagnosis | android, video, streaming |
 | [awdl-wifi-latency-diagnosis.md](./awdl-wifi-latency-diagnosis.md) | diagnosis | network, latency, relay, wifi |

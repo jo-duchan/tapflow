@@ -51,9 +51,19 @@ Committed *why* behind non-obvious decisions. Read the relevant one **before** c
 | [legacy-browser-fallback-ios-only.md](./contributing/legacy-browser-fallback-ios-only.md) | rationale | Why the JPEG legacy-browser (~5%) fallback exists only on iOS — historical, not a bug |
 | [monorepo-project-references.md](./contributing/monorepo-project-references.md) | rationale | Why library packages use TS project references — the `exports.types→src` bug (#345), rejected alternatives |
 | [android-sdk-bootstrap.md](./contributing/android-sdk-bootstrap.md) | rationale | Why `setup android` bootstraps a self-contained SDK — Android Studio ≠ SDK, the three fragility causes |
+| [runtime-platform-registration.md](./contributing/runtime-platform-registration.md) | rationale | Why platforms self-register at runtime (`AgentRegistry.register`) instead of a literal `Platform` union — the OCP payoff |
+| [codec-negotiation.md](./contributing/codec-negotiation.md) | rationale | Why the browser negotiates H.264 capability before the agent streams — the ~95%/5% floor, black-screen prevention |
+| [android-rotation.md](./contributing/android-rotation.md) | rationale | Why rotation uses `wm user-rotation` + pinned scrcpy 3.3 — legacy command ignored on API 35+ |
+| [ios-device-recovery.md](./contributing/ios-device-recovery.md) | rationale | Why `tapflow start` does not pre-boot iOS, and where zombie-simulator recovery lives |
+| [agent-keep-awake.md](./contributing/agent-keep-awake.md) | rationale | Why the agent holds a `caffeinate` assertion during a session — idle throttle drops the emulator to ~4-5 fps |
+| [relay-heartbeat.md](./contributing/relay-heartbeat.md) | rationale | Why the relay runs a ping/pong heartbeat — dead sockets otherwise linger to the TCP timeout |
+| [relay-resource-rejection.md](./contributing/relay-resource-rejection.md) | rationale | Why the relay rejects new sessions above a CPU/RAM threshold, evaluated relay-side |
+| [relay-backpressure-frame-drop.md](./contributing/relay-backpressure-frame-drop.md) | rationale | Why the relay silently drops frames on `bufferedAmount` backpressure — bounds memory |
+| [build-status-deletion-decoupling.md](./contributing/build-status-deletion-decoupling.md) | rationale | Why a build's `Done` status is decoupled from its `delete_after` deletion lifetime |
 | [simkit-internals.md](./contributing/simkit-internals.md) | reference | SimulatorKit reverse-engineering notes — binary layout, symbols, touch/button injection |
 | [measurement.md](./contributing/measurement.md) | reference | Every performance metric emitter — how to enable it, its output, what it means |
 | [downscale-tuning.md](./contributing/downscale-tuning.md) | reference | Encode-resolution downscale lever — QA fidelity vs decode/bandwidth, recommended default |
+| [frame-envelope.md](./contributing/frame-envelope.md) | reference | Frame envelope wire format (TFFE v1) — 22-byte per-frame timestamp header, magic-byte backward compat |
 | [streaming-latency-log.md](./contributing/streaming-latency-log.md) | log | Append-only glass-to-glass latency log — pipeline analysis, attempts, decisions |
 | [android-video-streaming-diagnosis.md](./contributing/android-video-streaming-diagnosis.md) | diagnosis | Android emulator streaming issues traced to root cause, one section per issue |
 | [awdl-wifi-latency-diagnosis.md](./contributing/awdl-wifi-latency-diagnosis.md) | diagnosis | Periodic Wi-Fi stream hitch traced to AWDL via ICMP ping — method and evidence |
