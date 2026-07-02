@@ -1,3 +1,9 @@
+---
+type: rules
+topics: [audio, macos, capture]
+status: living
+---
+
 # audiotap-helper — AGENTS.md
 
 > Common rules: [AGENTS.md](../../AGENTS.md) | Full index: [INDEX.md](../../INDEX.md)

@@ -1,3 +1,9 @@
+---
+type: rules
+topics: [agent-core, interface, design]
+status: living
+---
+
 # agent-core — AGENTS.md
 
 > Common rules: [AGENTS.md](../../AGENTS.md) | Full index: [INDEX.md](../../INDEX.md)

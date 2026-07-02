@@ -1,3 +1,9 @@
+---
+type: rules
+topics: [meta, contributing, conventions]
+status: living
+---
+
 # tapflow — AGENTS.md (Common Rules)
 
 > Package-specific rules are referenced via [INDEX.md](./INDEX.md).
@@ -93,7 +99,7 @@ Work logs go in `.work/`. Conventions: [.work/CLAUDE.md](./.work/CLAUDE.md).
 3. **Review** — edge cases + real data validation → PR (`type: review`).
 4. **Compound** — extract repeating patterns into test + code + prompt bundles (`type: compound`).
 
-Custom commands: `/work-plan {topic}` · `/deep-research {problem}` · `/qa {target}` · `/doc-sync` · `/compound` · `/release {major|minor|patch}`.
+Custom commands: `/work-plan {topic}` · `/deep-research {problem}` · `/qa {target}` · `/doc-sync` · `/compound` · `/promote-decision {topic}` · `/release {major|minor|patch}`.
 
 ### Design Principles (SOLID — priority subset)
 

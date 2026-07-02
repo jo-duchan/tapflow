@@ -1,3 +1,10 @@
+---
+type: reference
+topics: [performance, measurement, instrumentation]
+status: living
+related: [streaming-latency-log]
+---
+
 # Measuring tapflow performance — Reference
 
 > The single reference for tapflow's instrumentation surface — every metric emitter, how to turn it on, its exact output, and what it means. The chronological decisions behind the streaming pipeline live in [`streaming-latency-log.md`](./streaming-latency-log.md); the user-settable tuning knobs (codec, bitrate, resolution, fps) are documented for operators in [`docs/reference/configuration.md`](../docs/reference/configuration.md#streaming-tuning-agent). This file is the contributor-facing "where do I read the numbers" index.

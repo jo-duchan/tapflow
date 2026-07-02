@@ -1,3 +1,10 @@
+---
+type: reference
+topics: [streaming, performance, downscale, lan]
+status: stable
+related: [streaming-latency-log, measurement]
+---
+
 # Downscale tuning (tier1 LAN-HTTP)
 
 How to set the encode-resolution downscale, and the measurements behind the recommended default.

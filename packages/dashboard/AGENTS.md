@@ -1,3 +1,9 @@
+---
+type: rules
+topics: [dashboard, react, ui]
+status: living
+---
+
 # dashboard — AGENTS.md
 
 > Common rules: [AGENTS.md](../../AGENTS.md) | Full index: [INDEX.md](../../INDEX.md)

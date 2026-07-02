@@ -1,3 +1,10 @@
+---
+type: log
+topics: [streaming, latency, performance]
+status: living
+related: [measurement, downscale-tuning]
+---
+
 # Streaming latency engineering log — tier1 goal: feels-like-direct responsiveness
 
 A running, append-only engineering log for tapflow's glass-to-glass latency work on tier1

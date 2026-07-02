@@ -1,3 +1,9 @@
+---
+type: rules
+topics: [playground, integration-testing, local]
+status: living
+---
+
 # playground — AGENTS.md
 
 > 공통 규칙: [AGENTS.md](../AGENTS.md) | 전체 인덱스: [INDEX.md](../INDEX.md)

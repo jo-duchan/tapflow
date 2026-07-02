@@ -1,3 +1,9 @@
+---
+type: index
+topics: [meta, navigation]
+status: living
+---
+
 # INDEX.md — AGENTS.md Reference Index
 
 Each package's AGENTS.md is referenced hierarchically through this file.
@@ -31,10 +37,26 @@ Common rules are in the root [AGENTS.md](./AGENTS.md).
 | File | Contents |
 |------|----------|
 | [CONTRIBUTING.md](./CONTRIBUTING.md) | Branch, release, and commit conventions |
-| [contributing/simulator-audio.md](./contributing/simulator-audio.md) | Simulator audio capture (iOS/Android) — design, whole-sim dynamic tap, sim-volume, rejected approaches |
 | [packages/dashboard/DESIGN.md](./packages/dashboard/DESIGN.md) | Dashboard design system — color tokens, typography, elevation, component specs |
 | [.internal/PRD.md](./.internal/PRD.md) | Product requirements (local only) |
 | [docs/AGENTS.md](./docs/AGENTS.md) | VitePress work rules — shiki code blocks, CSS customization notes |
+
+### Engineering decision & rationale records — `contributing/`
+
+Committed *why* behind non-obvious decisions. Read the relevant one **before** changing the code it describes. Schema and conventions: [contributing/README.md](./contributing/README.md).
+
+| File | type | Contents |
+|------|------|----------|
+| [simulator-audio.md](./contributing/simulator-audio.md) | rationale | Simulator audio capture (iOS/Android) — design, whole-sim dynamic tap, sim-volume, rejected approaches |
+| [legacy-browser-fallback-ios-only.md](./contributing/legacy-browser-fallback-ios-only.md) | rationale | Why the JPEG legacy-browser (~5%) fallback exists only on iOS — historical, not a bug |
+| [monorepo-project-references.md](./contributing/monorepo-project-references.md) | rationale | Why library packages use TS project references — the `exports.types→src` bug (#345), rejected alternatives |
+| [android-sdk-bootstrap.md](./contributing/android-sdk-bootstrap.md) | rationale | Why `setup android` bootstraps a self-contained SDK — Android Studio ≠ SDK, the three fragility causes |
+| [simkit-internals.md](./contributing/simkit-internals.md) | reference | SimulatorKit reverse-engineering notes — binary layout, symbols, touch/button injection |
+| [measurement.md](./contributing/measurement.md) | reference | Every performance metric emitter — how to enable it, its output, what it means |
+| [downscale-tuning.md](./contributing/downscale-tuning.md) | reference | Encode-resolution downscale lever — QA fidelity vs decode/bandwidth, recommended default |
+| [streaming-latency-log.md](./contributing/streaming-latency-log.md) | log | Append-only glass-to-glass latency log — pipeline analysis, attempts, decisions |
+| [android-video-streaming-diagnosis.md](./contributing/android-video-streaming-diagnosis.md) | diagnosis | Android emulator streaming issues traced to root cause, one section per issue |
+| [awdl-wifi-latency-diagnosis.md](./contributing/awdl-wifi-latency-diagnosis.md) | diagnosis | Periodic Wi-Fi stream hitch traced to AWDL via ICMP ping — method and evidence |
 
 ---
 

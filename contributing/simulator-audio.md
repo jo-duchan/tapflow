@@ -1,3 +1,9 @@
+---
+type: rationale
+topics: [audio, ios, android, streaming]
+status: stable
+---
+
 # Simulator audio capture (device → browser) — design & rejected approaches
 
 > How tapflow captures an Android emulator's / iOS simulator's audio and streams it to the browser, why the two platforms use different mechanisms, and — importantly — the iOS approaches we tried and **rejected**, with reasons, so nobody re-walks the dead ends. Manual-testing feature, on by default (opt out with `TAPFLOW_AUDIO=off`). Tracking: [#259](https://github.com/jo-duchan/tapflow/issues/259) (output), [#334](https://github.com/jo-duchan/tapflow/issues/334) (input, out of scope here).
