@@ -379,7 +379,7 @@ sudo mkdir -p /etc/tapflow /var/lib/tapflow/.tapflow-data
 sudo chown -R tapflow:tapflow /var/lib/tapflow
 ```
 
-릴레이 시크릿은 `/etc/tapflow/relay.env`에 둡니다:
+릴레이 시크릿은 `/etc/tapflow/relay.env`에 둡니다. 기존 [JWT_SECRET](#jwt-secret) 섹션은 릴레이가 직접 읽는 `.tapflow-data/.env` 방식도 설명합니다:
 
 ```ini
 TAPFLOW_DATA_DIR=/var/lib/tapflow/.tapflow-data
@@ -413,6 +413,8 @@ RestartSec=5
 [Install]
 WantedBy=multi-user.target
 ```
+
+기본값이 아닌 포트나 다른 설정이 필요하다면 `tapflow.config.json`을 `WorkingDirectory`인 `/var/lib/tapflow`에 둡니다.
 
 서비스를 활성화하고 시작합니다:
 

@@ -379,7 +379,7 @@ sudo mkdir -p /etc/tapflow /var/lib/tapflow/.tapflow-data
 sudo chown -R tapflow:tapflow /var/lib/tapflow
 ```
 
-Put relay secrets in `/etc/tapflow/relay.env`:
+Put relay secrets in `/etc/tapflow/relay.env`. The existing [JWT_SECRET](#jwt-secret) section also describes the `.tapflow-data/.env` convention that the relay reads directly:
 
 ```ini
 TAPFLOW_DATA_DIR=/var/lib/tapflow/.tapflow-data
@@ -413,6 +413,8 @@ RestartSec=5
 [Install]
 WantedBy=multi-user.target
 ```
+
+Place `tapflow.config.json` in `/var/lib/tapflow` if you need to customize the port or other settings, because that is the service `WorkingDirectory`.
 
 Enable and start the service:
 
