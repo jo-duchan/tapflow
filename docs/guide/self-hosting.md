@@ -362,3 +362,77 @@ pm2 restart relay
 ::: tip Next step
 Once the relay is running, open `http://localhost:4000` in a browser — the dashboard redirects to the setup page automatically. For headless servers, use `tapflow admin init` instead. For team invitations and your first build upload, see [First-time Setup](/dashboard/setup).
 :::
+
+## systemd (Linux relay server)
+
+Use systemd when the relay runs on a Linux host and you want it to start at boot, restart after crashes, and write logs to journald. Install tapflow globally first:
+
+```sh
+npm install -g tapflow
+```
+
+Create a dedicated user and data directory:
+
+```sh
+sudo useradd --system --create-home --home-dir /var/lib/tapflow --shell /usr/sbin/nologin tapflow
+sudo mkdir -p /etc/tapflow /var/lib/tapflow/.tapflow-data
+sudo chown -R tapflow:tapflow /var/lib/tapflow
+```
+
+Put relay secrets in `/etc/tapflow/relay.env`. The existing [JWT_SECRET](#jwt-secret) section also describes the `.tapflow-data/.env` convention that the relay reads directly:
+
+```ini
+TAPFLOW_DATA_DIR=/var/lib/tapflow/.tapflow-data
+JWT_SECRET=YOUR_JWT_SECRET
+```
+
+Generate `JWT_SECRET` with `openssl rand -hex 32`, then keep `/etc/tapflow/relay.env` readable only by root:
+
+```sh
+sudo chmod 600 /etc/tapflow/relay.env
+```
+
+Create `/etc/systemd/system/tapflow-relay.service`:
+
+```ini
+[Unit]
+Description=tapflow relay
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=tapflow
+Group=tapflow
+WorkingDirectory=/var/lib/tapflow
+EnvironmentFile=/etc/tapflow/relay.env
+ExecStart=/usr/bin/env tapflow relay start
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
+```
+
+Place `tapflow.config.json` in `/var/lib/tapflow` if you need to customize the port or other settings, because that is the service `WorkingDirectory`.
+
+Enable and start the service:
+
+```sh
+sudo systemctl daemon-reload
+sudo systemctl enable --now tapflow-relay
+sudo systemctl status tapflow-relay
+```
+
+View logs with:
+
+```sh
+journalctl -u tapflow-relay -f
+```
+
+After updating the global package, restart the service:
+
+```sh
+npm update -g tapflow
+sudo systemctl restart tapflow-relay
+```
