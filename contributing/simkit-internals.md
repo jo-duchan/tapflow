@@ -1,3 +1,9 @@
+---
+type: reference
+topics: [ios, simulator, reverse-engineering]
+status: living
+---
+
 # SimulatorKit Internals — Reverse-Engineering Notes
 
 > This document records the SimulatorKit reverse-engineering done while implementing iOS touch/button injection for tapflow. It is a reference.

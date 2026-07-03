@@ -1,3 +1,9 @@
+---
+type: rules
+topics: [ios, simulator, macos]
+status: living
+---
+
 # ios-agent — AGENTS.md
 
 > Common rules: [AGENTS.md](../../AGENTS.md) | Full index: [INDEX.md](../../INDEX.md)

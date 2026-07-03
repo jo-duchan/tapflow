@@ -1,3 +1,9 @@
+---
+type: diagnosis
+topics: [network, latency, relay, wifi]
+status: stable
+---
+
 # Wi-Fi Relay Latency Diagnosis (AWDL) — Insights
 
 > This document records how a periodic stream hitch on a Wi-Fi relay was traced to **AWDL** (Apple Wireless Direct Link), led by ICMP ping (with `wdutil` and `ifconfig` to corroborate and confirm) — no guessing. The user-facing remedy lives in [`docs/guide/troubleshooting.md`](../docs/guide/troubleshooting.md) ("Stream lag or stuttering"); this is the engineering backing — the method, the evidence, and the dead ends — kept out of the user docs deliberately.

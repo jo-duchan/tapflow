@@ -1,3 +1,9 @@
+---
+type: rules
+topics: [relay, websocket, server]
+status: living
+---
+
 # relay — AGENTS.md
 
 > Common rules: [AGENTS.md](../../AGENTS.md) | Full index: [INDEX.md](../../INDEX.md)

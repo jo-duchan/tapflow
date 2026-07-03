@@ -67,6 +67,66 @@ patch release — please run a recent version.
 
 Once `1.0.0` is tagged, this table will be updated with a longer support window.
 
+## Threat model
+
+tapflow runs on your LAN by default and can be exposed beyond it through an opt-in tunnel
+(rathole, cloudflared) or a reverse proxy. The security model assumes that the moment the relay
+becomes reachable from an untrusted network, its authentication and device-control endpoints are
+effectively internet-facing.
+
+The **relay is the trust boundary**: it holds accounts, sessions, and uploaded builds, and it
+relays live device control. Agents connect from the same internal network; browsers connect from
+the LAN or the public tunnel URL. The assets worth protecting are account credentials and JWTs,
+personal access tokens, uploaded builds and recordings, and live device control (touch, keys,
+boot). The adversary we design against is an unauthenticated party who can reach an externally
+exposed relay.
+
+Single-Mac loopback use is the low-friction default and is treated as trusted. The hardening below
+is calibrated for the moment that local-only assumption breaks.
+
+## Security posture
+
+What the relay enforces, from a defender's point of view:
+
+- **Authentication is required** on the REST API and on WebSocket connections. WebSocket message
+  types are restricted by role, so a browser connection cannot issue agent-only control messages.
+- **Remote agents present an `agent`-scope token**, issued by an admin, rather than being trusted by
+  IP address. IP heuristics quietly become allow-all behind a Docker bridge or a reverse proxy, so
+  they are not used as an authentication boundary.
+- **Authentication endpoints are rate-limited** per IP and per account with backoff, which bounds
+  online guessing.
+- **No shipped default signing secret.** The JWT secret is generated per install and persisted with
+  restrictive file permissions. The relay refuses to start with a placeholder secret when it is
+  bound for external exposure, and only warns for localhost-only binding.
+- **First-admin setup is gated** so a remote party cannot claim the initial-setup window on a freshly
+  exposed instance.
+- **Reverse-proxy deployments use an explicit trusted-proxy boundary.** The real client address is
+  resolved only from proxies you list in `TAPFLOW_TRUSTED_PROXIES`; forwarded headers from anywhere
+  else are ignored, and an ambiguous case is treated as remote, so a token is required.
+- **Request hygiene**: CORS is limited to configured origins on authenticated paths rather than a
+  blanket wildcard, state-changing requests carry a same-origin guard, and invitation links are built
+  from a configured base URL rather than a request header.
+- **Uploads are contained and authenticated**, oversized uploads are rejected, and partial files are
+  cleaned up.
+- **Tokens carry least-privilege scopes** (`view`, `builds:write`, `agent`); the `agent` scope is
+  admin-only.
+- **Secrets have one home.** All relay secrets default to `.tapflow-data/.env`, with the shell
+  environment overriding the file and the file overriding config.
+- **tapflow does not phone home.** It moves builds, recordings, and streams only between your own
+  agents, relay, and browsers, never to a tapflow-run or analytics service. Where that traffic
+  travels is your choice: a LAN or your own VPS keeps it on hardware you control, while a hosted
+  tunnel such as `cloudflared` routes it through that provider, a trade-off you opt into.
+
+## Exposing tapflow beyond your LAN
+
+If you put tapflow behind a tunnel or a public reverse proxy, you own the perimeter. At minimum:
+
+- Set a strong `JWT_SECRET` (the relay refuses to start externally without one).
+- Terminate TLS in front of the relay.
+- Set `TAPFLOW_TRUSTED_PROXIES` to your proxy's address so client-IP checks cannot be spoofed.
+- Issue `agent`-scope tokens to remote agents, and keep every token least-privilege.
+- Stay on the latest release for security fixes.
+
 ## Scope
 
 Because tapflow is self-hosted, security responsibility is **shared**. Vulnerabilities in tapflow's

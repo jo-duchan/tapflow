@@ -1,3 +1,9 @@
+---
+type: diagnosis
+topics: [android, video, streaming, emulator]
+status: living
+---
+
 # Android Video Streaming Diagnosis — Insights
 
 > This document records the diagnosis and resolution of problems encountered while streaming the Android emulator. Add a section per issue.

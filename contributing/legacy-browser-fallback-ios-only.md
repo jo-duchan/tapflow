@@ -1,3 +1,10 @@
+---
+type: rationale
+topics: [ios, streaming, browser-compat]
+status: stable
+related: [streaming-latency-log]
+---
+
 # Why the legacy-browser (5%) fallback is iOS-only
 
 > This document records *why* the JPEG fallback for old/unsupported browsers (~5%, no WebGL2)

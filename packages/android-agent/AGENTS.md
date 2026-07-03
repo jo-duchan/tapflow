@@ -1,3 +1,9 @@
+---
+type: rules
+topics: [android, emulator, adb]
+status: living
+---
+
 # android-agent — AGENTS.md
 
 > Common rules: [AGENTS.md](../../AGENTS.md) | Full index: [INDEX.md](../../INDEX.md)

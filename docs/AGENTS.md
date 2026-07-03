@@ -1,3 +1,9 @@
+---
+type: rules
+topics: [docs, vitepress, contributing]
+status: living
+---
+
 # docs — AGENTS.md
 
 VitePress 1.x 기반 정적 문서 사이트. 작업하면서 겪은 삽질과 확인된 동작을 기록한다.

@@ -1,3 +1,9 @@
+---
+type: rules
+topics: [mcp, ai-agent, experimental]
+status: living
+---
+
 # mcp-server — AGENTS.md
 
 > Common rules: [AGENTS.md](../../AGENTS.md) | Full index: [INDEX.md](../../INDEX.md)
