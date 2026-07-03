@@ -22,7 +22,7 @@ export interface WebhookPayload {
 export type FetchLike = (
   url: string,
   init: { method: string; headers: Record<string, string>; body: string; signal: AbortSignal }
-) => Promise<{ ok: boolean; status: number }>
+) => Promise<{ ok: boolean; status: number; text: () => Promise<string> }>
 
 /**
  * Validate a webhook destination URL. Returns an error string, or null when allowed.
@@ -39,7 +39,16 @@ export function validateWebhookUrl(raw: string): string | null {
   if (u.protocol !== 'http:' && u.protocol !== 'https:') {
     return 'URL must use http or https'
   }
-  const host = u.hostname.toLowerCase().replace(/^\[|\]$/g, '') // strip IPv6 brackets
+  let host = u.hostname.toLowerCase().replace(/^\[|\]$/g, '') // strip IPv6 brackets
+  // Node normalizes an IPv4-mapped IPv6 host (e.g. ::ffff:127.0.0.1) to a hex form
+  // like ::ffff:7f00:1, which would slip past the IPv4 checks below yet still connect
+  // to the embedded IPv4 — an SSRF bypass. Unwrap it back to dotted IPv4 first.
+  const mapped = host.match(/^::ffff:([0-9a-f]{1,4}):([0-9a-f]{1,4})$/)
+  if (mapped) {
+    const hi = parseInt(mapped[1], 16)
+    const lo = parseInt(mapped[2], 16)
+    host = [hi >> 8, hi & 0xff, lo >> 8, lo & 0xff].join('.')
+  }
   if (
     host === 'localhost' ||
     host === '0.0.0.0' ||
@@ -90,6 +99,8 @@ export async function deliverWebhooks(
           body,
           signal: AbortSignal.timeout(WEBHOOK_TIMEOUT_MS),
         })
+        // Drain the body so undici releases the connection back to the pool.
+        await res.text()
         if (!res.ok) logger.warn(`webhook POST ${ep.url} returned ${res.status}`)
       } catch (err) {
         logger.warn(`webhook POST ${ep.url} failed: ${String(err)}`)

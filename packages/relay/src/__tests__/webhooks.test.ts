@@ -80,6 +80,9 @@ describe('validateWebhookUrl', () => {
     expect(validateWebhookUrl('http://localhost/hook')).toBeTruthy()
     expect(validateWebhookUrl('http://169.254.169.254/latest/meta-data')).toBeTruthy()
     expect(validateWebhookUrl('http://[::1]/hook')).toBeTruthy()
+    // IPv4-mapped IPv6 must not slip past — Node normalizes these to a hex form
+    expect(validateWebhookUrl('http://[::ffff:127.0.0.1]/hook')).toBeTruthy()
+    expect(validateWebhookUrl('http://[::ffff:169.254.169.254]/hook')).toBeTruthy()
   })
   it('#17 allows private LAN and public addresses', () => {
     expect(validateWebhookUrl('http://10.0.1.5/hook')).toBeNull()
@@ -123,7 +126,7 @@ describe('deliverWebhooks', () => {
     const calls: { url: string; headers: Record<string, string>; body: string }[] = []
     const fetchFn: FetchLike = async (url, init) => {
       calls.push({ url, headers: init.headers, body: init.body })
-      return { ok: true, status: 200 }
+      return { ok: true, status: 200, text: async () => '' }
     }
     return { fetchFn, calls }
   }
@@ -167,7 +170,7 @@ describe('deliverWebhooks', () => {
     const fetchFn: FetchLike = async (url) => {
       calls.push(url)
       if (url.endsWith('/bad')) throw new Error('connection refused')
-      return { ok: true, status: 200 }
+      return { ok: true, status: 200, text: async () => '' }
     }
     await expect(deliverWebhooks(payload, { fetchFn })).resolves.toBeUndefined()
     expect(calls.sort()).toEqual(['http://10.0.0.1/bad', 'http://10.0.0.2/good'])
