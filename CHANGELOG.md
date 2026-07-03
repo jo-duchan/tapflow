@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.12.0] - 2026-07-03
+
+### Added
+
+- relay: accept EAS `eas build` iOS simulator artifacts (`.tar.gz` / `.tgz`) as a first-class build upload, alongside `.app.zip` (iOS) and `.apk` (Android). The archive is stored as-is and extracted with `tar` at install time — no re-zip — so the `.app`'s executable bits and symlinks are preserved. Uploads are validated before storage: path traversal (`..`/absolute), symbolic/hard links, corrupt gzip, and gzip bombs (`TAPFLOW_MAX_UNPACKED_BYTES`, default upload cap ×4) are rejected. Expo/EAS teams can now run `eas build → CI → tapflow` and upload the native `.tar.gz` directly, with no CI re-packaging step (#362).
+
 ## [0.11.1] - 2026-07-02
 
 ### Added
@@ -240,7 +246,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Automatic `tapflow.config.json` creation as a side effect of `tapflow start` / `tapflow relay start`.
 
-[Unreleased]: https://github.com/jo-duchan/tapflow/compare/v0.11.1...HEAD
+[Unreleased]: https://github.com/jo-duchan/tapflow/compare/v0.12.0...HEAD
+[0.12.0]: https://github.com/jo-duchan/tapflow/compare/v0.11.1...v0.12.0
 [0.11.1]: https://github.com/jo-duchan/tapflow/compare/v0.11.0...v0.11.1
 [0.11.0]: https://github.com/jo-duchan/tapflow/compare/v0.10.0...v0.11.0
 [0.10.0]: https://github.com/jo-duchan/tapflow/compare/v0.9.2...v0.10.0
