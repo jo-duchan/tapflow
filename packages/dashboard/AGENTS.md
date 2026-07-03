@@ -27,7 +27,7 @@ The audience is the whole team (PO, PM, designers, backend, QA) — not just QA.
 - **App sidebar**: `GET /api/v1/apps` → selecting an app manages state via `?appId=N` URL parameter.
 - **Release Accordion**: `GET /api/v1/builds?app_id=N` → grouped by `version_name` (`groupByRelease()`). No dedicated `releases` table — UI grouping uses `version_name` metadata.
 - **Build card**: shows `build_number`, `platform`, `status_label`, uploader, `uploaded_at`. Inline status dropdown. **"Start QA" CTA** → `/app-center/build?id={build_id}`.
-- **Upload**: `UploadBuildDialog` — iOS `.app.zip` / Android `.apk`. `version_name` / `build_number` are auto-extracted from plist, so no manual input fields.
+- **Upload**: `UploadBuildDialog` — iOS `.app.zip` or `.tar.gz`/`.tgz` (EAS simulator build) / Android `.apk`. `version_name` / `build_number` are auto-extracted from plist, so no manual input fields.
 
 ## HOW
 

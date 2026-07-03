@@ -45,6 +45,9 @@ import { KEY_CODE_MAP } from './KeyCodeMap.js'
 // long enough to keep `ps` overhead negligible.
 const AUDIO_POLL_MS = 1500
 
+// 아카이브 추출(tar/unzip) 시 stdout 상한. 기본 1MB 로는 파일 많은 큰 .app 에서 넘칠 수 있어 넉넉히 잡는다.
+const EXTRACT_MAXBUFFER = 256 * 1024 * 1024 // 256 MB
+
 export interface IOSAgentOptions {
   fps?: number
   intervalMs?: number
@@ -744,30 +747,47 @@ export class IOSAgent implements DeviceAgent {
   }
 
   /**
-   * .app.zip 이면 임시 디렉토리에 풀어 .app 경로로 설치, .apk 이면 직접 설치.
-   * install 완료 후 임시 디렉토리를 정리한다.
+   * .app.zip / .tar.gz(.tgz) 이면 임시 디렉토리에 풀어 .app 경로로 설치, 그 외(.apk 등)는
+   * 직접 설치. tar 추출은 실행 비트·심볼릭 링크를 보존하고(재압축이 아니라 네이티브 보관),
+   * macOS tar(libarchive)가 path traversal·symlink 탈출을 기본 차단한다. 완료 후 임시 정리.
    */
   private async installBuild(filePath: string, bundleId?: string): Promise<void> {
     if (bundleId) {
       await this.simctl.uninstallApp(bundleId).catch(() => { /* 미설치 상태면 무시 */ })
     }
 
-    if (!filePath.endsWith('.zip')) {
+    const lower = filePath.toLowerCase()
+    const isTar = lower.endsWith('.tar.gz') || lower.endsWith('.tgz')
+    const isZip = lower.endsWith('.zip')
+    if (!isTar && !isZip) {
       return this.simctl.installApp(filePath)
     }
 
     const tmpDir = path.join(tmpdir(), `tapflow-install-${randomUUID()}`)
     fs.mkdirSync(tmpDir, { recursive: true })
     try {
-      const result = spawnSync('unzip', ['-o', filePath, '-d', tmpDir])
+      // tar 는 기본 무음, unzip 은 -q 로 무음화해 큰 .app 에서 verbose stdout 이 기본
+      // maxBuffer(1MB)를 넘겨 추출이 죽는 것을 막는다.
+      const result = isTar
+        ? spawnSync('tar', ['-xzf', filePath, '-C', tmpDir], { maxBuffer: EXTRACT_MAXBUFFER })
+        : spawnSync('unzip', ['-q', '-o', filePath, '-d', tmpDir], { maxBuffer: EXTRACT_MAXBUFFER })
+      // 실행 자체 실패(tar/unzip 부재=ENOENT 등)는 아카이브 무효와 구분한다.
+      if (result.error) {
+        const code = (result.error as NodeJS.ErrnoException).code ?? result.error.message
+        throw new Error(`아카이브 추출 실행 실패 (${isTar ? 'tar' : 'unzip'}: ${code})`)
+      }
       if (result.status !== 0) {
-        throw new ValidationError(`zip 압축 해제 실패 — 시뮬레이터용 .app.zip 파일인지 확인하세요.`)
+        throw new ValidationError(
+          isTar
+            ? 'tar.gz 압축 해제 실패 — 시뮬레이터용 .tar.gz(경로 탈출/심볼릭 링크 없는)인지 확인하세요.'
+            : 'zip 압축 해제 실패 — 시뮬레이터용 .app.zip 파일인지 확인하세요.',
+        )
       }
 
       const entries = fs.readdirSync(tmpDir)
       const appDir = entries.find(e => e.endsWith('.app') && fs.statSync(path.join(tmpDir, e)).isDirectory())
       if (!appDir) {
-        throw new ValidationError('.app 디렉토리를 찾을 수 없습니다. xcodebuild -sdk iphonesimulator 로 빌드한 .app 을 zip 압축해 업로드하세요.')
+        throw new ValidationError('.app 디렉토리를 찾을 수 없습니다. iphonesimulator 로 빌드한 .app 을 .app.zip 또는 .tar.gz 로 업로드하세요.')
       }
 
       await this.simctl.installApp(path.join(tmpDir, appDir))

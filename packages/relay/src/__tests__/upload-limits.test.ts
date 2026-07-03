@@ -102,7 +102,7 @@ describe('upload size-limit handling', () => {
     const body = multipartBody(boundary, [{ name: 'file', filename: 'app.ipa', contentType: 'application/octet-stream', data: Buffer.alloc(50, 0x41) }])
     const r = await httpPostMultipart(port, '/api/v1/builds', body, boundary, cookie)
     expect(r.status).toBe(400)
-    expect(r.body.error).toBe('iOS simulator builds must be in .app.zip format. Zip the .app directory built with xcodebuild -sdk iphonesimulator and upload it.')
+    expect(r.body.error).toBe('iOS simulator builds must be in .app.zip or .tar.gz format. Zip (or tar.gz, e.g. an EAS simulator build) the .app directory built for iphonesimulator and upload it.')
   })
 
   it('빌드: .app 디렉토리 없는 zip은 400 + 영어 안내', async () => {
@@ -114,7 +114,7 @@ describe('upload size-limit handling', () => {
     const body = multipartBody(boundary, [{ name: 'file', filename: 'app.zip', contentType: 'application/zip', data: fs.readFileSync(noAppZip) }])
     const r = await httpPostMultipart(port, '/api/v1/builds', body, boundary, cookie)
     expect(r.status).toBe(400)
-    expect(r.body.error).toBe('No .app directory found in the zip. Upload a zip that contains a .app directory.')
+    expect(r.body.error).toBe('No .app directory found in the archive. Upload a .app.zip or .tar.gz that contains a .app directory.')
   })
 
   it('댓글 첨부: 크기 상한 초과 → 400 + uploads/comments에 잔존 파일 없음', async () => {

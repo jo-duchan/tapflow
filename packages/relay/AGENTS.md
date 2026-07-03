@@ -25,9 +25,10 @@ A single process on a single configurable port (default: 4000) handles both WebS
 
 Build file storage path: `uploads/builds/`.
 
-iOS build format: `.app.zip` (simulator builds). `.ipa` uploads return 400.
-- Auto-extracts `CFBundleIdentifier`, `CFBundleShortVersionString`, `CFBundleVersion`, `CFBundleDisplayName`/`CFBundleName` from `*.app/Info.plist`.
+iOS build format: `.app.zip` **or** `.tar.gz`/`.tgz` (EAS `eas build` simulator artifacts). `.ipa` uploads return 400. `.tar.gz` is stored natively (no re-zip) so the `.app`'s exec bits / symlinks survive to install time; `tar` extraction happens on the macOS agent.
+- Auto-extracts `CFBundleIdentifier`, `CFBundleShortVersionString`, `CFBundleVersion`, `CFBundleDisplayName`/`CFBundleName` from the top-level `*.app/Info.plist` (zip: `unzip -p`; tar: `tar -xzOf`).
 - Validates simulator slices via `lipo -info`. **Skipped in Linux environments (lipo not available) — errors surface at install time instead**.
+- `.tar.gz` uploads are validated before storage (`validateTarGz`): rejects path traversal (`..`/absolute), symlink/hardlink entries, corrupt gzip, and gzip bombs (`TAPFLOW_MAX_UNPACKED_BYTES`, default upload cap ×4). `tar` resolves PAX/GNU long names so header parsing can't be bypassed.
 
 ## HOW
 
@@ -49,7 +50,7 @@ iOS build format: `.app.zip` (simulator builds). `.ipa` uploads return 400.
 | `POST` | `/api/v1/apps` | Create an app entry |
 | `PATCH` | `/api/v1/apps/:id` | Manually rename an app (Admin/Developer) |
 | `DELETE` | `/api/v1/apps/:id` | Delete an app (and its builds) |
-| `POST` | `/api/v1/builds` | Upload a build (`.app.zip` / `.apk`) |
+| `POST` | `/api/v1/builds` | Upload a build (`.app.zip` / `.tar.gz` / `.tgz` / `.apk`) |
 | `GET` | `/api/v1/builds` | Build list (filterable by `app_id`) |
 | `GET` | `/api/v1/builds/:id` | Single build |
 | `PATCH` | `/api/v1/builds/:id` | Update `status_label` / `version_label` |
