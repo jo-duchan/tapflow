@@ -72,6 +72,15 @@ const configSchema = z.object({
     pass: z.string(),
     from: z.string(),
   }),
+  // Declarative outbound webhook endpoints. secret is resolved from an env var
+  // (secretEnv in the file) — secrets never live in config.json.
+  webhooks: z.array(
+    z.object({
+      url: z.string().min(1),
+      secret: z.string(),
+      enabled: z.boolean(),
+    })
+  ),
 })
 
 export type TapflowConfig = z.infer<typeof configSchema>
@@ -98,10 +107,25 @@ const DEFAULTS = {
     pass: '',
     from: 'tapflow <noreply@tapflow.local>',
   },
+  webhooks: [],
 } satisfies TapflowConfig
 
 function resolveDataDir(raw: string): string {
   return path.isAbsolute(raw) ? raw : path.join(process.cwd(), raw)
+}
+
+// Map raw config.json webhook entries ({ url, secretEnv?, enabled? }) to resolved
+// endpoints. The signing secret is read from the named env var, never from the file;
+// entries without a url are dropped.
+export function resolveWebhooksConfig(raw: unknown, env: NodeJS.ProcessEnv): TapflowConfig['webhooks'] {
+  if (!Array.isArray(raw)) return []
+  return (raw as Array<{ url?: string; secretEnv?: string; enabled?: boolean }>)
+    .map((w) => ({
+      url: w.url ?? '',
+      secret: w.secretEnv ? (env[w.secretEnv] ?? '') : '',
+      enabled: w.enabled !== false,
+    }))
+    .filter((w) => w.url)
 }
 
 // Populated by load(): path of the dataDir/.env that was loaded, or null. CLI/server use it for a "loaded credentials" log.
@@ -182,6 +206,7 @@ function load(): TapflowConfig {
       pass: file.smtp?.pass ?? DEFAULTS.smtp.pass,
       from: file.smtp?.from ?? DEFAULTS.smtp.from,
     },
+    webhooks: resolveWebhooksConfig((file as { webhooks?: unknown }).webhooks, process.env),
   }
 
   if (process.env.TAPFLOW_PORT) cfg.local.port = Number(process.env.TAPFLOW_PORT)

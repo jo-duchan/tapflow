@@ -15,6 +15,7 @@ import {
   type FetchLike,
   type WebhookPayload,
 } from '../lib/webhooks'
+import { config, resolveWebhooksConfig } from '../lib/config'
 
 // ── helpers ──────────────────────────────────────────────────────────────────
 
@@ -105,6 +106,26 @@ describe('signPayload', () => {
   })
 })
 
+// ── unit: resolveWebhooksConfig ────────────────────────────────────────────────
+
+describe('resolveWebhooksConfig', () => {
+  it('resolves the signing secret from the named env var', () => {
+    const out = resolveWebhooksConfig([{ url: 'https://a/x', secretEnv: 'WH_SECRET' }], { WH_SECRET: 'sek' })
+    expect(out).toEqual([{ url: 'https://a/x', secret: 'sek', enabled: true }])
+  })
+  it('leaves secret empty when secretEnv is absent or unset', () => {
+    expect(resolveWebhooksConfig([{ url: 'https://a/x' }], {})[0].secret).toBe('')
+    expect(resolveWebhooksConfig([{ url: 'https://a/x', secretEnv: 'NOPE' }], {})[0].secret).toBe('')
+  })
+  it('keeps enabled:false and drops entries without a url', () => {
+    const out = resolveWebhooksConfig([{ url: 'https://a/x', enabled: false }, { secretEnv: 'X' }], {})
+    expect(out).toEqual([{ url: 'https://a/x', secret: '', enabled: false }])
+  })
+  it('returns [] for non-array input', () => {
+    expect(resolveWebhooksConfig(undefined, {})).toEqual([])
+  })
+})
+
 // ── unit: deliverWebhooks (injected fetch) ─────────────────────────────────────
 
 describe('deliverWebhooks', () => {
@@ -114,7 +135,7 @@ describe('deliverWebhooks', () => {
     initDb(path.join(tmpDir, 'test.db'))
   })
   afterAll(() => { closeDb(); fs.rmSync(tmpDir, { recursive: true, force: true }) })
-  afterEach(() => { getDb().exec('DELETE FROM webhook_endpoints') })
+  afterEach(() => { getDb().exec('DELETE FROM webhook_endpoints'); config.webhooks.length = 0 })
 
   const payload: WebhookPayload = {
     event: 'build.status_changed',
@@ -161,6 +182,23 @@ describe('deliverWebhooks', () => {
     const { fetchFn, calls } = record()
     await deliverWebhooks(payload, { fetchFn })
     expect(calls).toHaveLength(0)
+  })
+
+  it('delivers to config.json endpoints alongside DB ones', async () => {
+    getDb().prepare('INSERT INTO webhook_endpoints (url, secret, enabled) VALUES (?, ?, 1)').run('http://10.0.0.1/db', null)
+    config.webhooks.push({ url: 'http://10.0.0.2/cfg', secret: '', enabled: true })
+    const { fetchFn, calls } = record()
+    await deliverWebhooks(payload, { fetchFn })
+    expect(calls.map((c) => c.url).sort()).toEqual(['http://10.0.0.1/db', 'http://10.0.0.2/cfg'])
+  })
+
+  it('skips disabled config endpoints and signs with the config secret', async () => {
+    config.webhooks.push({ url: 'http://10.0.0.3/off', secret: 'x', enabled: false })
+    config.webhooks.push({ url: 'http://10.0.0.4/cfg', secret: 'cfgsecret', enabled: true })
+    const { fetchFn, calls } = record()
+    await deliverWebhooks(payload, { fetchFn })
+    expect(calls.map((c) => c.url)).toEqual(['http://10.0.0.4/cfg'])
+    expect(calls[0].headers['X-Tapflow-Signature']).toBe(signPayload('cfgsecret', calls[0].body))
   })
 
   it('#15 one endpoint failing does not stop the others', async () => {

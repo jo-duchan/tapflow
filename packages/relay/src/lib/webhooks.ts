@@ -1,6 +1,7 @@
 import crypto from 'crypto'
 import { createLogger } from '@tapflowio/agent-core'
 import { getDb } from '../db.js'
+import { config } from './config.js'
 
 const logger = createLogger('relay:webhooks')
 
@@ -80,9 +81,14 @@ export async function deliverWebhooks(
   payload: WebhookPayload,
   opts: { fetchFn?: FetchLike } = {}
 ): Promise<void> {
-  const rows = getDb()
+  const dbRows = getDb()
     .prepare('SELECT url, secret FROM webhook_endpoints WHERE enabled = 1')
     .all() as EndpointRow[]
+  // Declarative config.json endpoints are delivered alongside the DB-registered ones.
+  const configRows: EndpointRow[] = config.webhooks
+    .filter((w) => w.enabled)
+    .map((w) => ({ url: w.url, secret: w.secret || null }))
+  const rows = [...configRows, ...dbRows]
   if (rows.length === 0) return
 
   const body = JSON.stringify(payload)

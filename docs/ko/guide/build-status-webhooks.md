@@ -21,7 +21,37 @@ LLM 에이전트가 시뮬레이터를 자동으로 조작하는 방식은 [CI/C
 
 ## 엔드포인트 등록
 
-`POST /api/v1/webhooks`로 알림 받을 URL을 등록합니다. 인증은 빌드 업로드와 동일하게 `builds:write` 스코프의 Personal Access Token을 사용합니다. 토큰 발급은 [빌드 배포](/ko/guide/build-distribution)의 토큰 생성 절을 참고하세요.
+등록 방법은 두 가지입니다. 설정을 파일로 관리하면 `config.json`으로 선언하고, 런타임에 추가·삭제하려면 REST API를 씁니다. 두 방식으로 등록한 엔드포인트는 함께 발송됩니다.
+
+### config.json으로 선언 (권장)
+
+`tapflow.config.json`의 `webhooks` 배열에 등록합니다. self-hosted 운영자가 TLS·SMTP 같은 다른 설정과 한 파일에서 함께 관리하는 방식입니다.
+
+```json
+{
+  "webhooks": [
+    { "url": "https://ci.internal/hooks/tapflow", "secretEnv": "TAPFLOW_WEBHOOK_SECRET_CI" }
+  ]
+}
+```
+
+secret은 config.json에 직접 쓰지 않습니다. `secretEnv`에 환경 변수 이름을 지정하면 tapflow가 그 값을 서명 키로 읽어옵니다. 실제 secret은 `.env`에 둡니다.
+
+```
+TAPFLOW_WEBHOOK_SECRET_CI=a-long-random-string
+```
+
+| 필드 | 설명 |
+|------|------|
+| `url` | 알림을 받을 주소 (필수) |
+| `secretEnv` | 서명 secret이 담긴 환경 변수 이름 (선택, 강하게 권장) |
+| `enabled` | 활성 여부 (기본 `true`) |
+
+config.json 변경은 relay를 다시 시작해야 반영됩니다.
+
+### REST API로 등록
+
+런타임에 추가하려면 `POST /api/v1/webhooks`를 씁니다. 인증은 빌드 업로드와 동일하게 `builds:write` 스코프의 Personal Access Token을 사용합니다. 토큰 발급은 [빌드 배포](/ko/guide/build-distribution)의 토큰 생성 절을 참고하세요.
 
 ```sh
 curl -X POST https://your-relay/api/v1/webhooks \
@@ -36,9 +66,9 @@ curl -X POST https://your-relay/api/v1/webhooks \
 | `secret` | 서명에 쓸 비밀 키 (선택, 강하게 권장) |
 | `enabled` | 활성 여부 (기본 `true`) |
 
-여러 개를 등록하면 활성화된 모든 엔드포인트로 각각 전송되므로, Slack과 사내 CI에 동시에 연결할 수 있습니다.
+REST API는 `config.json`과 달리 secret을 요청 본문에 직접 담습니다. 여러 개를 등록하면 활성화된 모든 엔드포인트로 각각 전송되므로, Slack과 사내 CI에 동시에 연결할 수 있습니다.
 
-관리용 엔드포인트는 다음과 같습니다.
+REST 관리용 엔드포인트는 다음과 같습니다.
 
 | Method | Path | 설명 |
 |--------|------|------|
