@@ -57,7 +57,7 @@ curl -X POST "$TAPFLOW_RELAY_URL/api/v1/builds" \
   -F "label=$GIT_BRANCH"
 ```
 
-bundle ID, 버전, 빌드 번호는 `.app` 안의 Info.plist에서 자동으로 추출되므로 따로 입력하지 않아도 됩니다.
+bundle ID, 버전, 빌드 번호는 업로드한 빌드에서 자동으로 추출되므로 따로 입력하지 않아도 됩니다.
 
 EAS Build가 끝나는 시점에 자동으로 올리려면 작은 수신 엔드포인트를 하나 둡니다. EAS Webhook의 완료 알림을 받아 산출물 URL을 내려받은 뒤 위 요청을 그대로 호출하면 됩니다. tapflow는 이 표준 멀티파트 업로드를 받는 것까지 책임집니다.
 

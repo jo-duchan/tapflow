@@ -57,7 +57,7 @@ curl -X POST "$TAPFLOW_RELAY_URL/api/v1/builds" \
   -F "label=$GIT_BRANCH"
 ```
 
-The bundle ID, version, and build number are extracted automatically from the `.app`'s Info.plist, so there is nothing to type in.
+The bundle ID, version, and build number are extracted automatically from the uploaded build, so there is nothing to type in.
 
 To upload automatically when an EAS build finishes, add a small receiver that takes the EAS Webhook completion event, downloads the artifact URL, and makes the same request above. tapflow's job is to accept that standard multipart upload.
 
