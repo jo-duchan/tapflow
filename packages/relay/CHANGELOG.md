@@ -1,5 +1,15 @@
 # @tapflowio/relay
 
+## 0.12.0
+
+### Minor Changes
+
+- Accept EAS `eas build` iOS simulator artifacts (`.tar.gz` / `.tgz`) as a first-class build upload, alongside `.app.zip` and `.apk`. The archive is stored as-is (no re-zip) and extracted with `tar` at install time, so the `.app`'s executable bits and symlinks are preserved. Uploads are validated before storage — path traversal (`..`/absolute), symbolic/hard links, corrupt gzip, and gzip bombs (`TAPFLOW_MAX_UNPACKED_BYTES`, default upload cap ×4) are rejected. This removes the CI re-packaging step for Expo/EAS teams: `eas build → CI → tapflow` uploads the native `.tar.gz` directly.
+
+### Patch Changes
+
+- @tapflowio/agent-core@0.12.0
+
 ## 0.11.1
 
 ### Patch Changes
