@@ -21,7 +21,7 @@ is the slow-decay other half of the already-merged register-time dedup.
 
 Every tick, terminate any socket that did not answer the previous ping, then ping the rest:
 
-```
+```text
 on connection: setAlive(ws, true); ws.on('pong', () => setAlive(ws, true))
 heartbeat tick (every HEARTBEAT_MS):
   for ws of wss.clients:

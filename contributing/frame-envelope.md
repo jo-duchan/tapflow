@@ -17,7 +17,7 @@ instead of only the three browser-side hops.
 
 ## Layout
 
-```
+```text
 Offset  Size  Type       Field
 0       4     bytes      magic = [0x54, 0x46, 0x46, 0x45]  ('TFFE')
 4       1     uint8      version = 1

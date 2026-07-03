@@ -67,4 +67,5 @@ sdkmanager --sdk_root="$HOME/Library/Android/sdk" \
 "$HOME/Library/Android/sdk/emulator/emulator" -list-avds   # → AVD is listed
 ```
 
-The ABI follows the host arch (`arm64-v8a` / `x86_64`).
+The example shows the Apple Silicon ABI (`arm64-v8a`); the setup code derives it from the
+host arch and uses `x86_64` on an Intel Mac, so the image name is not actually hardcoded.

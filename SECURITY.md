@@ -112,8 +112,10 @@ What the relay enforces, from a defender's point of view:
   admin-only.
 - **Secrets have one home.** All relay secrets default to `.tapflow-data/.env`, with the shell
   environment overriding the file and the file overriding config.
-- **Your data stays yours.** Builds, recordings, and streams remain on infrastructure you control,
-  whether that is the LAN or your own VPS when tunneling. Nothing is sent to a third-party service.
+- **tapflow does not phone home.** It moves builds, recordings, and streams only between your own
+  agents, relay, and browsers, never to a tapflow-run or analytics service. Where that traffic
+  travels is your choice: a LAN or your own VPS keeps it on hardware you control, while a hosted
+  tunnel such as `cloudflared` routes it through that provider, a trade-off you opt into.
 
 ## Exposing tapflow beyond your LAN
 
