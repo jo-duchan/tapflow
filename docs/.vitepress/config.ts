@@ -41,6 +41,7 @@ const enSidebar = [
       { text: 'Uploading Builds', link: '/guide/upload-builds' },
       { text: 'Build Distribution', link: '/guide/build-distribution' },
       { text: 'Expo Build Integration', link: '/guide/build-expo-eas' },
+      { text: 'Webhooks', link: '/guide/build-status-webhooks' },
     ],
   },
   {
@@ -108,6 +109,7 @@ const koSidebar = [
       { text: '빌드 업로드', link: '/ko/guide/upload-builds' },
       { text: '빌드 배포', link: '/ko/guide/build-distribution' },
       { text: 'Expo 빌드 연동', link: '/ko/guide/build-expo-eas' },
+      { text: '웹훅', link: '/ko/guide/build-status-webhooks' },
     ],
   },
   {

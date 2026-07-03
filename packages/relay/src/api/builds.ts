@@ -10,6 +10,7 @@ import { getDb } from '../db.js'
 import { requireAuth, requireBuildAuth } from '../middleware/auth.js'
 import { json, readJson } from '../router.js'
 import { unlinkSafe } from '../lib/uploads.js'
+import { deliverWebhooks } from '../lib/webhooks.js'
 
 // ── archive kind ───────────────────────────────────────────────────────────
 
@@ -370,6 +371,25 @@ export async function handleUpdateBuild(
   const result = db.prepare(`UPDATE builds SET ${updates.join(', ')} WHERE id = ?`).run(...values, params.id)
   if (result.changes === 0) return json(res, 404, { error: 'Build not found' })
   json(res, 200, { ok: true })
+
+  // Fire webhooks on a review-status transition into Done/Rejected. Fire-and-forget and
+  // best-effort: delivery must never block or fail the PATCH response sent above.
+  const next = body.status_label
+  if ('status_label' in body && (next === 'Done' || next === 'Rejected') && existing.status_label !== next) {
+    const info = db
+      .prepare('SELECT b.version_name, a.platform FROM builds b JOIN apps a ON a.id = b.app_id WHERE b.id = ?')
+      .get(params.id) as { version_name: string | null; platform: string | null } | undefined
+    void deliverWebhooks({
+      event: 'build.status_changed',
+      build: {
+        id: String(params.id),
+        platform: info?.platform ?? null,
+        appVersion: info?.version_name ?? null,
+        status: next,
+      },
+      changedAt: new Date().toISOString(),
+    }).catch(() => {})
+  }
 }
 
 // Schedule deletion: an explicit, manual action that puts the build on the purge
