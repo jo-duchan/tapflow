@@ -19,7 +19,10 @@
     "secure": false,
     "user": "relay@example.com",
     "pass": "password"
-  }
+  },
+  "webhooks": [
+    { "url": "https://ci.internal/hooks/tapflow", "secretEnv": "TAPFLOW_WEBHOOK_SECRET_CI" }
+  ]
 }
 ```
 
@@ -29,6 +32,7 @@
 | `relay.url` | 연결할 relay URL. `tapflow agent start`, `tapflow admin init`, `tapflow status`, `tapflow logs`의 기본값으로 사용됩니다. 설정 시 `--relay` 플래그 없이 동작합니다. 비어있으면 로컬 모드(`ws://localhost:[local.port]`)를 사용합니다. |
 | `tls` | LAN HTTPS(보안 컨텍스트) 설정. WebCodecs 하드웨어 디코드에 필요합니다. 아래 HTTPS 섹션을 참고하세요. |
 | `smtp` | 초대·비밀번호 재설정 이메일 발송을 위한 SMTP 설정 |
+| `webhooks` | 빌드 리뷰 상태가 바뀔 때 알림을 보낼 아웃바운드 엔드포인트. 서명 secret은 `secretEnv`가 가리키는 환경 변수에서 읽습니다. 아래 웹훅 섹션을 참고하세요. |
 
 `smtp.from`은 `smtp.user`가 설정되어 있으면 `tapflow <smtp.user>` 형태로 자동 설정됩니다. 발신자 주소를 다르게 지정하려면 명시적으로 입력합니다.
 
@@ -172,3 +176,15 @@ your-directory/
 SMTP가 설정되지 않으면 초대 이메일과 비밀번호 재설정 이메일이 발송되지 않습니다. 이 경우 Admin이 초대 링크를 직접 복사해 공유할 수 있습니다.
 
 팀 초대에 이메일을 사용하려면 `smtp.host`와 `smtp.user`, `smtp.pass`를 설정합니다.
+
+## 웹훅
+
+빌드 리뷰 상태가 `Done` 또는 `Rejected`로 바뀌면 tapflow가 등록된 URL로 POST합니다. `webhooks` 배열로 엔드포인트를 선언하고, REST API로도 런타임에 더 등록할 수 있습니다. 페이로드·서명 검증·발화 조건은 [웹훅](/ko/guide/build-status-webhooks)에서 다룹니다.
+
+| 키 | 설명 |
+|----|------|
+| `webhooks[].url` | 알림을 받을 주소 (필수) |
+| `webhooks[].secretEnv` | HMAC 서명 secret이 담긴 환경 변수 이름. secret은 config.json에 직접 두지 않습니다. |
+| `webhooks[].enabled` | 활성 여부. 기본 `true` |
+
+`webhooks` 변경은 relay를 다시 시작해야 반영됩니다.
