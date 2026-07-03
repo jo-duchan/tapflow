@@ -23,12 +23,37 @@ This guide covers the **manual review path**: CI delivers the build; people do t
 For automated testing where an LLM agent controls the simulator, see [MCP in CI/CD](/guide/mcp-ci). That is a separate, experimental feature.
 :::
 
+## Recipes by build tool
+
+The steps below work with any build tool. If you use a specific one, start with its recipe.
+
+| Build tool | Recipe |
+|-----------|--------|
+| Expo (EAS) | [EAS build integration](/guide/build-expo-eas) |
+| bare React Native · Flutter · native | Follow the generic flow on this page (build → artifact → upload) |
+
+Once your build produces an artifact (`.app.zip`, `.tar.gz`, or `.apk`), the rest is the same regardless of the build tool.
+
 ## Prerequisites
 
 | Requirement | Notes |
 |-------------|-------|
 | tapflow relay | Running and reachable from your CI environment |
 | Personal Access Token | Create one in **Settings → Tokens** with `builds:write` scope |
+
+## How CI reaches the relay
+
+Your CI job has to reach the relay's `POST /api/v1/builds`. The relay is meant to stay on the same internal network as the agents ([Self-Hosting the Relay](/guide/self-hosting)), so the path depends on where CI runs.
+
+| Relay setup | How CI uploads |
+|-----------|----------------|
+| **LAN only (default)** | Cloud runners (GitHub-hosted and the like) cannot reach a LAN relay. Upload from a self-hosted runner on the internal network, using the relay's internal address (`http://192.168.x.x:4000`) |
+| **VPS + rathole tunnel** | Open the relay for [external access](/guide/self-hosting) and CI can upload from anywhere via the public URL (`https://your-vps.com`) — the smoothest fit for cloud CI |
+| **Tailscale tunnel** | Only tailnet members can connect, so the CI runner has to be on the tailnet |
+
+::: tip The relay does not go on a cloud host
+Deploying the relay to fly.io, Railway, or similar puts the agent→relay path over the internet and the stream breaks (unsupported). When you need public access, keep the relay on the internal network and expose it through a tunnel. The VPS is the tunnel host, not the relay host.
+:::
 
 ## 1. Generate a token
 
@@ -64,8 +89,7 @@ curl -X POST https://your-relay/api/v1/builds \
 Use `label` to attach context — branch name, ticket number, or a short description.
 
 ::: warning iOS builds
-`.ipa` files are not supported. Use `.app.zip` only.  
-Build with `xcodebuild -sdk iphonesimulator`, then zip the `.app` folder.
+`.ipa` files are not supported. For a simulator build, upload `.app.zip` or `.tar.gz`/`.tgz`. Build `.app.zip` with `xcodebuild -sdk iphonesimulator` and zip the `.app` folder; for `.tar.gz`, see [EAS build integration](/guide/build-expo-eas).
 :::
 
 ## 3. Post build metadata (optional)

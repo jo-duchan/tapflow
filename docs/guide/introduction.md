@@ -24,7 +24,7 @@ In short, tapflow is a self-hosted, open-source alternative to cloud testing ser
 ```mermaid
 flowchart TD
     B["Browser (Team)"]
-    R["Relay Server<br/>Linux or Mac, same LAN as agents"]
+    R["Relay Server<br/>Linux/Mac, same LAN"]
     A1["Mac Agent 1<br/>iOS · Android simulators"]
     A2["Mac Agent 2<br/>iOS · Android simulators"]
     More["Mac Agent N<br/>iOS · Android simulators"]
