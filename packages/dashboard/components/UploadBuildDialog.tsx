@@ -93,7 +93,7 @@ export function UploadBuildDialog({ onSuccess, appId }: Props) {
               onChange={(e) => setFile(e.target.files?.[0] ?? null)}
             />
             <p className="text-xs text-muted-foreground">
-              iOS: <code>.app.zip</code> or <code>.tar.gz</code> (e.g. an EAS simulator build)
+              iOS: <code>.app.zip</code> or <code>.tar.gz</code> / <code>.tgz</code> (e.g. an EAS simulator build)
               &nbsp;·&nbsp;Android: <code>.apk</code>
             </p>
           </div>

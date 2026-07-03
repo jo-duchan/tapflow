@@ -249,6 +249,16 @@ describe('IOSAgent', () => {
       expect(simctl.installApp).not.toHaveBeenCalled()
     })
 
+    it('installBuild throws a validation error on a corrupt .tar.gz (bad archive, not a spawn failure)', async () => {
+      const simctl = mockSimctl()
+      const agent = new IOSAgent({}, simctl) as unknown as WithInstallBuild
+      const src = fs.mkdtempSync(path.join(os.tmpdir(), 'tapflow-arch-bad-'))
+      const out = path.join(src, 'corrupt.tar.gz')
+      fs.writeFileSync(out, Buffer.from('not a real gzip stream'))
+      await expect(agent.installBuild(out)).rejects.toThrow(/압축 해제 실패/)
+      expect(simctl.installApp).not.toHaveBeenCalled()
+    })
+
     it('launchApp delegates to SimctlWrapper', async () => {
       const simctl = mockSimctl()
       const agent = new IOSAgent({}, simctl)

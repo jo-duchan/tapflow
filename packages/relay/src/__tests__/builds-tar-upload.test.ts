@@ -190,4 +190,21 @@ describe('POST /api/v1/builds — .tar.gz (EAS simulator) ingest', () => {
       fs.rmSync(shimDir, { recursive: true, force: true })
     }
   })
+
+  // CodeRabbit #362 (critical): a large .app whose `tar -tzf`/`-tzvf` listing exceeds Node's
+  // default 1 MB spawnSync maxBuffer must NOT be rejected (or silently skip the symlink check).
+  // Padding entries push the listing past 1 MB; the explicit maxBuffer keeps validation intact.
+  it('accepts a valid tar.gz whose listing exceeds the default spawnSync buffer', async () => {
+    const entries: { name: string; data?: Buffer }[] = [
+      { name: 'BigApp.app/Info.plist', data: Buffer.from(XML_PLIST) },
+    ]
+    // ~130-char safe paths × 12k ≈ 1.5 MB listing (> 1 MB default maxBuffer).
+    for (let i = 0; i < 12000; i++) {
+      entries.push({ name: `BigApp.app/pad/${String(i).padStart(6, '0')}_${'x'.repeat(100)}.bin` })
+    }
+    const big = writeRawTarGz(entries)
+    const r = await postTar(port, 'T14', 'BigApp.tar.gz', big, cookie)
+    expect(r.status).toBe(201)
+    expect(r.body.bundle_id).toBe('com.example.eas')
+  })
 })

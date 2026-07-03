@@ -45,6 +45,9 @@ import { KEY_CODE_MAP } from './KeyCodeMap.js'
 // long enough to keep `ps` overhead negligible.
 const AUDIO_POLL_MS = 1500
 
+// 아카이브 추출(tar/unzip) 시 stdout 상한. 기본 1MB 로는 파일 많은 큰 .app 에서 넘칠 수 있어 넉넉히 잡는다.
+const EXTRACT_MAXBUFFER = 256 * 1024 * 1024 // 256 MB
+
 export interface IOSAgentOptions {
   fps?: number
   intervalMs?: number
@@ -763,9 +766,16 @@ export class IOSAgent implements DeviceAgent {
     const tmpDir = path.join(tmpdir(), `tapflow-install-${randomUUID()}`)
     fs.mkdirSync(tmpDir, { recursive: true })
     try {
+      // tar 는 기본 무음, unzip 은 -q 로 무음화해 큰 .app 에서 verbose stdout 이 기본
+      // maxBuffer(1MB)를 넘겨 추출이 죽는 것을 막는다.
       const result = isTar
-        ? spawnSync('tar', ['-xzf', filePath, '-C', tmpDir])
-        : spawnSync('unzip', ['-o', filePath, '-d', tmpDir])
+        ? spawnSync('tar', ['-xzf', filePath, '-C', tmpDir], { maxBuffer: EXTRACT_MAXBUFFER })
+        : spawnSync('unzip', ['-q', '-o', filePath, '-d', tmpDir], { maxBuffer: EXTRACT_MAXBUFFER })
+      // 실행 자체 실패(tar/unzip 부재=ENOENT 등)는 아카이브 무효와 구분한다.
+      if (result.error) {
+        const code = (result.error as NodeJS.ErrnoException).code ?? result.error.message
+        throw new Error(`아카이브 추출 실행 실패 (${isTar ? 'tar' : 'unzip'}: ${code})`)
+      }
       if (result.status !== 0) {
         throw new ValidationError(
           isTar

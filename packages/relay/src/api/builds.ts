@@ -78,9 +78,14 @@ function parseInfoPlist(plistBuf: Buffer): AppInfo {
   }
 }
 
+// 아카이브 리스트/엔트리 읽기의 stdout 상한. 기본 maxBuffer(1MB)는 파일 많은 큰 .app
+// 리스트나 큰 실행 바이너리에서 넘쳐(ENOBUFS, status=null) 검증을 스킵/오탐시킬 수 있어
+// 넉넉히 잡는다. 초과 시엔 각 호출부가 fail-closed(거절)로 처리한다.
+const ARCHIVE_READ_MAXBUFFER = 256 * 1024 * 1024 // 256 MB
+
 /** zip 내 루트 수준 *.app 디렉토리 이름을 찾는다. 없으면 null. */
 function findAppDirInZip(zipPath: string): string | null {
-  const list = spawnSync('unzip', ['-l', zipPath], { encoding: 'utf8' })
+  const list = spawnSync('unzip', ['-l', zipPath], { encoding: 'utf8', maxBuffer: ARCHIVE_READ_MAXBUFFER })
   if (list.status !== 0) return null
   // "  12345  2024-01-01 00:00:00  MyApp.app/"  형태를 매칭 (앱 이름에 공백 포함 가능)
   // HH:MM 시간 컬럼을 기준점으로 삼아 filename 컬럼만 캡처
@@ -97,7 +102,7 @@ export function extractAppZipInfo(zipPath: string): AppInfo | null {
   const appDir = findAppDirInZip(zipPath)
   if (!appDir) return null
 
-  const extract = spawnSync('unzip', ['-p', zipPath, `${appDir}/Info.plist`])
+  const extract = spawnSync('unzip', ['-p', zipPath, `${appDir}/Info.plist`], { maxBuffer: ARCHIVE_READ_MAXBUFFER })
   if (extract.status !== 0 || !extract.stdout) return null
 
   return parseInfoPlist(extract.stdout as Buffer)
@@ -109,7 +114,7 @@ export function extractAppZipInfo(zipPath: string): AppInfo | null {
 
 /** tar.gz 내 루트 수준 *.app 디렉토리 이름을 찾는다. 없으면 null. */
 function findAppDirInTar(tarPath: string): string | null {
-  const list = spawnSync('tar', ['-tzf', tarPath], { encoding: 'utf8' })
+  const list = spawnSync('tar', ['-tzf', tarPath], { encoding: 'utf8', maxBuffer: ARCHIVE_READ_MAXBUFFER })
   if (list.status !== 0) return null
   // 최상위 "Foo.app/..." 만 — 프레임워크 내부 중첩 .app/Info.plist 오탐 방지.
   const re = /^(?:\.\/)?([^/]+\.app)\//m
@@ -121,7 +126,7 @@ function findAppDirInTar(tarPath: string): string | null {
 function readTarEntry(tarPath: string, entry: string): Buffer | null {
   // 아카이브가 "./Foo.app/..." 형태일 수 있어 두 후보를 시도한다.
   for (const name of [entry, `./${entry}`]) {
-    const r = spawnSync('tar', ['-xzOf', tarPath, name])
+    const r = spawnSync('tar', ['-xzOf', tarPath, name], { maxBuffer: ARCHIVE_READ_MAXBUFFER })
     if (r.status === 0 && r.stdout && (r.stdout as Buffer).length) return r.stdout as Buffer
   }
   return null
@@ -224,7 +229,7 @@ function hasSimulatorSlice(filePath: string, appDir: string): boolean | null {
   if (buildFileKind(filePath) === 'ios-tar') {
     binaryBuf = readTarEntry(filePath, `${appDir}/${binaryName}`)
   } else {
-    const extract = spawnSync('unzip', ['-p', filePath, `${appDir}/${binaryName}`])
+    const extract = spawnSync('unzip', ['-p', filePath, `${appDir}/${binaryName}`], { maxBuffer: ARCHIVE_READ_MAXBUFFER })
     if (extract.status === 0 && extract.stdout?.length) binaryBuf = extract.stdout as Buffer
   }
 
@@ -418,8 +423,10 @@ function maxUnpackedBytes(): number {
  * - gzip bomb: 해제 스트림 바이트가 상한 초과 (전체 버퍼링 없이 조기 중단)
  */
 export async function validateTarGz(tarPath: string): Promise<string | null> {
-  const list = spawnSync('tar', ['-tzf', tarPath], { encoding: 'utf8' })
-  if (list.status !== 0) return 'Corrupt or invalid .tar.gz archive.'
+  // fail-closed: 버퍼 초과(ENOBUFS, status=null)나 tar 부재(ENOENT)면 stdout이 잘려
+  // 검증이 우회될 수 있으므로 거절한다. maxBuffer 를 넉넉히 잡아 정상 아카이브는 통과.
+  const list = spawnSync('tar', ['-tzf', tarPath], { encoding: 'utf8', maxBuffer: ARCHIVE_READ_MAXBUFFER })
+  if (list.error || list.status !== 0) return 'Corrupt or invalid .tar.gz archive.'
 
   const names = (list.stdout as string).split('\n').filter(Boolean)
   for (const raw of names) {
@@ -430,13 +437,13 @@ export async function validateTarGz(tarPath: string): Promise<string | null> {
   }
 
   // 엔트리 타입 검사: ls -l 스타일 첫 문자 l(symlink)/h(hardlink) 거부.
-  const verbose = spawnSync('tar', ['-tzvf', tarPath], { encoding: 'utf8' })
-  if (verbose.status === 0) {
-    for (const line of (verbose.stdout as string).split('\n')) {
-      const c = line[0]
-      if (c === 'l' || c === 'h') {
-        return 'Archive contains a symbolic or hard link and was rejected.'
-      }
+  // 목록을 못 얻으면(에러/잘림) symlink 검사를 건너뛰지 말고 fail-closed 로 거절한다.
+  const verbose = spawnSync('tar', ['-tzvf', tarPath], { encoding: 'utf8', maxBuffer: ARCHIVE_READ_MAXBUFFER })
+  if (verbose.error || verbose.status !== 0) return 'Corrupt or invalid .tar.gz archive.'
+  for (const line of (verbose.stdout as string).split('\n')) {
+    const c = line[0]
+    if (c === 'l' || c === 'h') {
+      return 'Archive contains a symbolic or hard link and was rejected.'
     }
   }
 

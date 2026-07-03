@@ -50,7 +50,7 @@ iOS build format: `.app.zip` **or** `.tar.gz`/`.tgz` (EAS `eas build` simulator 
 | `POST` | `/api/v1/apps` | Create an app entry |
 | `PATCH` | `/api/v1/apps/:id` | Manually rename an app (Admin/Developer) |
 | `DELETE` | `/api/v1/apps/:id` | Delete an app (and its builds) |
-| `POST` | `/api/v1/builds` | Upload a build (`.app.zip` / `.tar.gz` / `.apk`) |
+| `POST` | `/api/v1/builds` | Upload a build (`.app.zip` / `.tar.gz` / `.tgz` / `.apk`) |
 | `GET` | `/api/v1/builds` | Build list (filterable by `app_id`) |
 | `GET` | `/api/v1/builds/:id` | Single build |
 | `PATCH` | `/api/v1/builds/:id` | Update `status_label` / `version_label` |
