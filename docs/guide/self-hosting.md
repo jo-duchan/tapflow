@@ -409,12 +409,39 @@ EnvironmentFile=/etc/tapflow/relay.env
 ExecStart=/usr/bin/env tapflow relay start
 Restart=on-failure
 RestartSec=5
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ReadWritePaths=/var/lib/tapflow
 
 [Install]
 WantedBy=multi-user.target
 ```
 
+The hardening directives keep the filesystem read-only except for
+`/var/lib/tapflow`, which includes the configured
+`/var/lib/tapflow/.tapflow-data` directory. If you move
+`TAPFLOW_DATA_DIR` outside `/var/lib/tapflow`, add that path to
+`ReadWritePaths` too.
+
 Place `tapflow.config.json` in `/var/lib/tapflow` if you need to customize the port or other settings, because that is the service `WorkingDirectory`.
+
+Run a foreground smoke test before enabling the service. This confirms the
+relay can bind and write to the data directory with the same dedicated user:
+
+```sh
+cd /var/lib/tapflow
+sudo -u tapflow env TAPFLOW_DATA_DIR=/var/lib/tapflow/.tapflow-data tapflow relay start
+```
+
+In another shell, confirm the relay responds:
+
+```sh
+tapflow status
+```
+
+Stop the foreground relay with Ctrl-C after the status check passes.
 
 Enable and start the service:
 
