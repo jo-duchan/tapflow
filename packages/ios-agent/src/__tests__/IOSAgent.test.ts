@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeAll, afterAll, beforeEach, afterEach } 
 import fs from 'fs'
 import os from 'os'
 import path from 'path'
+import { spawnSync } from 'child_process'
 import { ValidationError } from '@tapflowio/agent-core'
 
 vi.mock('../TouchHelper', () => ({
@@ -191,6 +192,61 @@ describe('IOSAgent', () => {
       const agent = new IOSAgent({}, simctl)
       await agent.installApp('/path/MyApp.app')
       expect(simctl.installApp).toHaveBeenCalledWith('/path/MyApp.app')
+    })
+
+    // installBuild: extract .app.zip / .tar.gz to a temp dir, then simctl install the .app.
+    // The real simulator install+launch (fidelity/exec-bit) is manual QA; here we verify the
+    // archive branch resolves the .app path via mocked simctl.
+    type WithInstallBuild = { installBuild(filePath: string, bundleId?: string): Promise<void> }
+    const makeSimAppArchive = (name: string, ext: string): string => {
+      const src = fs.mkdtempSync(path.join(os.tmpdir(), 'tapflow-arch-src-'))
+      const appDir = path.join(src, `${name}.app`)
+      fs.mkdirSync(appDir, { recursive: true })
+      fs.writeFileSync(path.join(appDir, 'Info.plist'), '<plist><dict/></plist>')
+      fs.writeFileSync(path.join(appDir, name), Buffer.from([0xcf, 0xfa, 0xed, 0xfe]))
+      const out = path.join(src, `${name}${ext}`)
+      if (ext.includes('tar') || ext.includes('tgz')) {
+        spawnSync('tar', ['-czf', out, '-C', src, `${name}.app`])
+      } else {
+        spawnSync('zip', ['-r', out, `${name}.app`], { cwd: src })
+      }
+      return out
+    }
+
+    it('installBuild extracts a .tar.gz and installs the .app (R4)', async () => {
+      const simctl = mockSimctl()
+      const agent = new IOSAgent({}, simctl) as unknown as WithInstallBuild
+      const tarPath = makeSimAppArchive('TarApp', '.tar.gz')
+      await agent.installBuild(tarPath)
+      expect(simctl.installApp).toHaveBeenCalledTimes(1)
+      expect((simctl.installApp as ReturnType<typeof vi.fn>).mock.calls[0][0]).toMatch(/\/TarApp\.app$/)
+    })
+
+    it('installBuild supports the .tgz extension', async () => {
+      const simctl = mockSimctl()
+      const agent = new IOSAgent({}, simctl) as unknown as WithInstallBuild
+      const tarPath = makeSimAppArchive('TgzApp', '.tgz')
+      await agent.installBuild(tarPath)
+      expect((simctl.installApp as ReturnType<typeof vi.fn>).mock.calls[0][0]).toMatch(/\/TgzApp\.app$/)
+    })
+
+    it('installBuild still handles legacy .app.zip (regression)', async () => {
+      const simctl = mockSimctl()
+      const agent = new IOSAgent({}, simctl) as unknown as WithInstallBuild
+      const zipPath = makeSimAppArchive('ZipApp', '.app.zip')
+      await agent.installBuild(zipPath)
+      expect((simctl.installApp as ReturnType<typeof vi.fn>).mock.calls[0][0]).toMatch(/\/ZipApp\.app$/)
+    })
+
+    it('installBuild rejects a tar.gz with no .app directory', async () => {
+      const simctl = mockSimctl()
+      const agent = new IOSAgent({}, simctl) as unknown as WithInstallBuild
+      const src = fs.mkdtempSync(path.join(os.tmpdir(), 'tapflow-arch-noapp-'))
+      fs.writeFileSync(path.join(src, 'readme.txt'), 'hi')
+      const out = path.join(src, 'noapp.tar.gz')
+      spawnSync('tar', ['-czf', out, '-C', src, 'readme.txt'])
+      await expect(agent.installBuild(out)).rejects.toThrow(/\.app/)
+      expect(simctl.installApp).not.toHaveBeenCalled()
     })
 
     it('launchApp delegates to SimctlWrapper', async () => {

@@ -223,3 +223,51 @@ describe('extractAppZipInfo', () => {
     expect(info).toBeNull()
   })
 })
+
+// ── extractAppTarInfo unit tests (EAS .tar.gz) ─────────────────────────────
+
+describe('extractAppTarInfo', () => {
+  let tmpDir: string
+  let mod: typeof import('../api/builds')
+  let makeAppTarGz: typeof import('./helpers/tarFixture').makeAppTarGz
+  let writeRawTarGz: typeof import('./helpers/tarFixture').writeRawTarGz
+
+  beforeAll(async () => {
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'tapflow-tar-test-'))
+    mod = await import('../api/builds')
+    const fx = await import('./helpers/tarFixture')
+    makeAppTarGz = fx.makeAppTarGz
+    writeRawTarGz = fx.writeRawTarGz
+  })
+
+  afterAll(() => { fs.rmSync(tmpDir, { recursive: true, force: true }) })
+
+  it('extracts metadata from the top-level *.app/Info.plist (not nested framework plist)', () => {
+    const tarPath = makeAppTarGz(tmpDir, 'CoffeeApp', XML_PLIST)
+    const info = mod.extractAppTarInfo(tarPath)
+    expect(info).not.toBeNull()
+    expect(info!.bundleId).toBe('com.example.coffee')
+    expect(info!.versionName).toBe('1.4.0')
+    expect(info!.buildNumber).toBe('89')
+    expect(info!.appName).toBe('Coffee App')
+  })
+
+  it('supports the .tgz extension', () => {
+    const tarPath = makeAppTarGz(tmpDir, 'TgzApp', XML_PLIST, '.tgz')
+    const info = mod.extractAppTarInfo(tarPath)
+    expect(info).not.toBeNull()
+    expect(info!.bundleId).toBe('com.example.coffee')
+  })
+
+  it('extractAppInfo dispatches to the tar path by extension', () => {
+    const tarPath = makeAppTarGz(tmpDir, 'DispatchApp', XML_PLIST)
+    const info = mod.extractAppInfo(tarPath)
+    expect(info?.bundleId).toBe('com.example.coffee')
+  })
+
+  it('returns null for a tar.gz with no .app directory', () => {
+    const noApp = path.join(tmpDir, 'noapp.tar.gz')
+    fs.writeFileSync(noApp, writeRawTarGz([{ name: 'readme.txt', data: Buffer.from('hi') }]))
+    expect(mod.extractAppTarInfo(noApp)).toBeNull()
+  })
+})

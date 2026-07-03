@@ -1,5 +1,6 @@
 import http from 'http'
 import fs from 'fs'
+import zlib from 'zlib'
 import path from 'path'
 import { tmpdir } from 'os'
 import { randomUUID } from 'crypto'
@@ -9,6 +10,32 @@ import { getDb } from '../db.js'
 import { requireAuth, requireBuildAuth } from '../middleware/auth.js'
 import { json, readJson } from '../router.js'
 import { unlinkSafe } from '../lib/uploads.js'
+
+// ── archive kind ───────────────────────────────────────────────────────────
+
+// path.extname('app.tar.gz') === '.gz', so compound extensions can't be detected
+// with extname alone. Match the full suffix, longest first.
+export type BuildFileKind = 'ios-zip' | 'ios-tar' | 'android' | 'ipa' | 'aab' | 'unknown'
+
+export function buildFileKind(filename: string): BuildFileKind {
+  const lower = filename.toLowerCase()
+  if (lower.endsWith('.tar.gz') || lower.endsWith('.tgz')) return 'ios-tar'
+  if (lower.endsWith('.zip')) return 'ios-zip'
+  if (lower.endsWith('.apk')) return 'android'
+  if (lower.endsWith('.ipa')) return 'ipa'
+  if (lower.endsWith('.aab')) return 'aab'
+  return 'unknown'
+}
+
+/** 알려진 아카이브 확장자를 벗긴 베이스 이름(메타 부재 시 앱 이름 폴백용). */
+function stripArchiveExt(filename: string): string {
+  const base = path.basename(filename)
+  const lower = base.toLowerCase()
+  for (const ext of ['.tar.gz', '.tgz', '.app.zip', '.zip', '.apk', '.ipa', '.aab']) {
+    if (lower.endsWith(ext)) return base.slice(0, base.length - ext.length)
+  }
+  return base.replace(/\.[^.]+$/, '')
+}
 
 // ── zip / plist helpers ────────────────────────────────────────────────────
 
@@ -20,34 +47,15 @@ function parseXmlPlist(xml: string): Record<string, string> {
   return result
 }
 
-/** zip 내 루트 수준 *.app 디렉토리 이름을 찾는다. 없으면 null. */
-function findAppDirInZip(zipPath: string): string | null {
-  const list = spawnSync('unzip', ['-l', zipPath], { encoding: 'utf8' })
-  if (list.status !== 0) return null
-  // "  12345  2024-01-01 00:00:00  MyApp.app/"  형태를 매칭 (앱 이름에 공백 포함 가능)
-  // HH:MM 시간 컬럼을 기준점으로 삼아 filename 컬럼만 캡처
-  const re = /\d{2}:\d{2}\s+(\S[^/\n]*\.app)\/\s*$/m
-  const m = re.exec(list.stdout as string)
-  if (!m) return null
-  // 루트 레벨만 (슬래시 미포함)
-  const candidate = m[1]
-  return candidate.includes('/') ? null : candidate
-}
-
-/** .app.zip에서 앱 메타데이터를 추출한다. 구조 오류 시 null. */
-export function extractAppZipInfo(zipPath: string): {
+type AppInfo = {
   bundleId: string | null
   versionName: string | null
   buildNumber: string | null
   appName: string | null
-} | null {
-  const appDir = findAppDirInZip(zipPath)
-  if (!appDir) return null
+}
 
-  const extract = spawnSync('unzip', ['-p', zipPath, `${appDir}/Info.plist`])
-  if (extract.status !== 0 || !extract.stdout) return null
-
-  const plistBuf = extract.stdout as Buffer
+/** Info.plist Buffer(xml 또는 bplist)에서 CFBundle* 를 파싱한다. 아카이브 종류와 무관. */
+function parseInfoPlist(plistBuf: Buffer): AppInfo {
   let parsed: Record<string, string>
 
   if (plistBuf.subarray(0, 6).toString() === 'bplist') {
@@ -68,6 +76,76 @@ export function extractAppZipInfo(zipPath: string): {
     buildNumber: parsed['CFBundleVersion'] ?? null,
     appName: parsed['CFBundleDisplayName'] ?? parsed['CFBundleName'] ?? null,
   }
+}
+
+/** zip 내 루트 수준 *.app 디렉토리 이름을 찾는다. 없으면 null. */
+function findAppDirInZip(zipPath: string): string | null {
+  const list = spawnSync('unzip', ['-l', zipPath], { encoding: 'utf8' })
+  if (list.status !== 0) return null
+  // "  12345  2024-01-01 00:00:00  MyApp.app/"  형태를 매칭 (앱 이름에 공백 포함 가능)
+  // HH:MM 시간 컬럼을 기준점으로 삼아 filename 컬럼만 캡처
+  const re = /\d{2}:\d{2}\s+(\S[^/\n]*\.app)\/\s*$/m
+  const m = re.exec(list.stdout as string)
+  if (!m) return null
+  // 루트 레벨만 (슬래시 미포함)
+  const candidate = m[1]
+  return candidate.includes('/') ? null : candidate
+}
+
+/** .app.zip에서 앱 메타데이터를 추출한다. 구조 오류 시 null. */
+export function extractAppZipInfo(zipPath: string): AppInfo | null {
+  const appDir = findAppDirInZip(zipPath)
+  if (!appDir) return null
+
+  const extract = spawnSync('unzip', ['-p', zipPath, `${appDir}/Info.plist`])
+  if (extract.status !== 0 || !extract.stdout) return null
+
+  return parseInfoPlist(extract.stdout as Buffer)
+}
+
+// ── tar.gz helpers (EAS 시뮬레이터 산출물) ──────────────────────────────────
+// tar 는 순차 스캔이라 zip 처럼 랜덤액세스가 어렵다. tar 바이너리가 이름을 해석하게
+// 두어(-tzf/-xzOf) PAX/GNU long-name 도 안전하게 처리한다 (손으로 파싱하지 않음).
+
+/** tar.gz 내 루트 수준 *.app 디렉토리 이름을 찾는다. 없으면 null. */
+function findAppDirInTar(tarPath: string): string | null {
+  const list = spawnSync('tar', ['-tzf', tarPath], { encoding: 'utf8' })
+  if (list.status !== 0) return null
+  // 최상위 "Foo.app/..." 만 — 프레임워크 내부 중첩 .app/Info.plist 오탐 방지.
+  const re = /^(?:\.\/)?([^/]+\.app)\//m
+  const m = re.exec(list.stdout as string)
+  return m ? m[1] : null
+}
+
+/** tar.gz 안 특정 엔트리를 stdout Buffer 로 읽는다. 실패 시 null. */
+function readTarEntry(tarPath: string, entry: string): Buffer | null {
+  // 아카이브가 "./Foo.app/..." 형태일 수 있어 두 후보를 시도한다.
+  for (const name of [entry, `./${entry}`]) {
+    const r = spawnSync('tar', ['-xzOf', tarPath, name])
+    if (r.status === 0 && r.stdout && (r.stdout as Buffer).length) return r.stdout as Buffer
+  }
+  return null
+}
+
+/** .tar.gz 안 *.app/Info.plist 에서 앱 메타데이터를 추출한다. 구조 오류 시 null. */
+export function extractAppTarInfo(tarPath: string): AppInfo | null {
+  const appDir = findAppDirInTar(tarPath)
+  if (!appDir) return null
+
+  const buf = readTarEntry(tarPath, `${appDir}/Info.plist`)
+  if (!buf) return null
+
+  return parseInfoPlist(buf)
+}
+
+// ── archive-agnostic dispatch ───────────────────────────────────────────────
+
+function findAppDir(filePath: string): string | null {
+  return buildFileKind(filePath) === 'ios-tar' ? findAppDirInTar(filePath) : findAppDirInZip(filePath)
+}
+
+export function extractAppInfo(filePath: string): AppInfo | null {
+  return buildFileKind(filePath) === 'ios-tar' ? extractAppTarInfo(filePath) : extractAppZipInfo(filePath)
 }
 
 /** ANDROID_HOME/build-tools 아래에서 최신 aapt 경로를 찾는다. macOS 기본 경로 + PATH fallback 포함. */
@@ -120,16 +198,12 @@ function extractApkInfo(apkPath: string): {
 }
 
 /**
- * lipo로 시뮬레이터 슬라이스 존재를 확인한다.
+ * Mach-O 바이너리 Buffer에 lipo -info 를 돌려 시뮬레이터 슬라이스 존재를 확인한다.
  * lipo 미설치(Linux relay) 시 null 반환 → 검증 skip.
  */
-function hasSimulatorSlice(zipPath: string, appDir: string): boolean | null {
-  const binaryName = path.basename(appDir, '.app')
-  const extract = spawnSync('unzip', ['-p', zipPath, `${appDir}/${binaryName}`])
-  if (extract.status !== 0 || !extract.stdout?.length) return null
-
+function lipoHasSimSlice(binaryBuf: Buffer): boolean | null {
   const tmpBin = path.join(tmpdir(), `tapflow-lipo-${randomUUID()}`)
-  fs.writeFileSync(tmpBin, extract.stdout as Buffer)
+  fs.writeFileSync(tmpBin, binaryBuf)
   try {
     const lipo = spawnSync('lipo', ['-info', tmpBin], { encoding: 'utf8' })
     if (lipo.status !== 0) return null // lipo 없음 → skip
@@ -140,6 +214,22 @@ function hasSimulatorSlice(zipPath: string, appDir: string): boolean | null {
   } finally {
     try { fs.unlinkSync(tmpBin) } catch { /* ignore */ }
   }
+}
+
+/** .app.zip / .tar.gz 의 .app 실행 바이너리에 시뮬레이터 슬라이스가 있는지 확인. */
+function hasSimulatorSlice(filePath: string, appDir: string): boolean | null {
+  const binaryName = path.basename(appDir, '.app')
+  let binaryBuf: Buffer | null = null
+
+  if (buildFileKind(filePath) === 'ios-tar') {
+    binaryBuf = readTarEntry(filePath, `${appDir}/${binaryName}`)
+  } else {
+    const extract = spawnSync('unzip', ['-p', filePath, `${appDir}/${binaryName}`])
+    if (extract.status === 0 && extract.stdout?.length) binaryBuf = extract.stdout as Buffer
+  }
+
+  if (!binaryBuf?.length) return null
+  return lipoHasSimSlice(binaryBuf)
 }
 
 // ── app 자동 생성 / 조회 ──────────────────────────────────────────────────
@@ -313,6 +403,68 @@ function maxBuildUploadBytes(): number {
   return Number.isFinite(v) && v > 0 ? v : 500 * 1024 * 1024
 }
 
+// 해제 후 크기 상한(gzip bomb 방어). 압축 전 상한과 별개. 기본 업로드 상한×4.
+function maxUnpackedBytes(): number {
+  const v = Number(process.env.TAPFLOW_MAX_UNPACKED_BYTES)
+  return Number.isFinite(v) && v > 0 ? v : maxBuildUploadBytes() * 4
+}
+
+/**
+ * 업로드된 .tar.gz 를 설치 전에 검증한다 (R7). tar 바이너리가 이름을 해석하므로
+ * PAX/GNU long-name 우회가 없다. 문제 시 에러 문구, 정상 시 null.
+ * - 손상/비-gzip: tar -tzf 실패
+ * - path traversal: 절대경로 또는 `..` 세그먼트
+ * - symlink/hardlink 탈출: -tzvf 의 타입 문자(l/h)
+ * - gzip bomb: 해제 스트림 바이트가 상한 초과 (전체 버퍼링 없이 조기 중단)
+ */
+export async function validateTarGz(tarPath: string): Promise<string | null> {
+  const list = spawnSync('tar', ['-tzf', tarPath], { encoding: 'utf8' })
+  if (list.status !== 0) return 'Corrupt or invalid .tar.gz archive.'
+
+  const names = (list.stdout as string).split('\n').filter(Boolean)
+  for (const raw of names) {
+    const name = raw.replace(/^\.\//, '')
+    if (name.startsWith('/') || name.split('/').some((seg) => seg === '..')) {
+      return 'Archive contains an unsafe path (absolute or ".." escape) and was rejected.'
+    }
+  }
+
+  // 엔트리 타입 검사: ls -l 스타일 첫 문자 l(symlink)/h(hardlink) 거부.
+  const verbose = spawnSync('tar', ['-tzvf', tarPath], { encoding: 'utf8' })
+  if (verbose.status === 0) {
+    for (const line of (verbose.stdout as string).split('\n')) {
+      const c = line[0]
+      if (c === 'l' || c === 'h') {
+        return 'Archive contains a symbolic or hard link and was rejected.'
+      }
+    }
+  }
+
+  // gzip bomb: 스트리밍 해제 바이트를 세며 상한 초과 시 즉시 중단 (t3.small 메모리 보호).
+  const cap = maxUnpackedBytes()
+  return await new Promise<string | null>((resolve) => {
+    let total = 0
+    let done = false
+    const input = fs.createReadStream(tarPath)
+    const gunzip = zlib.createGunzip()
+    const finish = (r: string | null) => {
+      if (done) return
+      done = true
+      input.destroy()
+      gunzip.destroy()
+      resolve(r)
+    }
+    gunzip.on('data', (chunk: Buffer) => {
+      total += chunk.length
+      if (total > cap) finish('Archive exceeds the maximum unpacked size limit.')
+    })
+    gunzip.on('end', () => finish(null))
+    gunzip.on('error', () => finish('Corrupt or invalid .tar.gz archive.'))
+    input.on('error', () => finish('Corrupt or invalid .tar.gz archive.'))
+    input.pipe(gunzip)
+  })
+}
+
 export function handleUploadBuild(
   req: http.IncomingMessage,
   res: http.ServerResponse,
@@ -332,20 +484,26 @@ export function handleUploadBuild(
 
   bb.on('file', (_field, stream, info) => {
     originalName = info.filename
-    const ext = path.extname(originalName).toLowerCase()
+    const kind = buildFileKind(originalName)
 
-    if (ext === '.ipa') {
-      fileError = 'iOS simulator builds must be in .app.zip format. Zip the .app directory built with xcodebuild -sdk iphonesimulator and upload it.'
+    if (kind === 'ipa') {
+      fileError = 'iOS simulator builds must be in .app.zip or .tar.gz format. Zip (or tar.gz, e.g. an EAS simulator build) the .app directory built for iphonesimulator and upload it.'
       stream.resume()
       return
     }
-    if (!['.zip', '.apk'].includes(ext)) {
-      fileError = 'Only .app.zip (iOS) or .apk (Android) files allowed'
+    if (kind === 'aab') {
+      fileError = 'Android emulator installs require an .apk. Build an .apk (not .aab) and upload it.'
+      stream.resume()
+      return
+    }
+    if (kind === 'unknown') {
+      fileError = 'Only .app.zip / .tar.gz (iOS) or .apk (Android) files allowed'
       stream.resume()
       return
     }
 
-    const fileName = `${Date.now()}_${path.basename(originalName)}`
+    // 충돌 방지: 같은 ms + 같은 파일명 동시 업로드(특히 CI 자동화) 시 file_path 공유를 막는다.
+    const fileName = `${Date.now()}-${randomUUID().slice(0, 8)}_${path.basename(originalName)}`
     savedPath = path.join(uploadsDir, 'builds', fileName)
     fs.mkdirSync(path.dirname(savedPath), { recursive: true })
     const ws = fs.createWriteStream(savedPath)
@@ -366,8 +524,8 @@ export function handleUploadBuild(
     }
     if (!savedPath) return json(res, 400, { error: 'File required' })
 
-    const ext = path.extname(originalName).toLowerCase()
-    const isIos = ext === '.zip'
+    const kind = buildFileKind(originalName)
+    const isIos = kind === 'ios-zip' || kind === 'ios-tar'
     const platform = fields.platform ?? (isIos ? 'ios' : 'android')
     const status = ['Backlog', 'In Progress', 'Done', 'Rejected'].includes(fields.status)
       ? fields.status : null
@@ -378,19 +536,28 @@ export function handleUploadBuild(
     let resolvedAppName: string | null = null
 
     if (isIos) {
-      const info = extractAppZipInfo(savedPath)
+      // .tar.gz 는 설치 전에 traversal/symlink/bomb/손상을 걸러낸다 (R7).
+      if (kind === 'ios-tar') {
+        const tarError = await validateTarGz(savedPath)
+        if (tarError) {
+          unlinkSafe(savedPath, 'rejected upload')
+          return json(res, 400, { error: tarError })
+        }
+      }
+
+      const info = extractAppInfo(savedPath)
       if (info === null) {
         fs.unlinkSync(savedPath)
-        return json(res, 400, { error: 'No .app directory found in the zip. Upload a zip that contains a .app directory.' })
+        return json(res, 400, { error: 'No .app directory found in the archive. Upload a .app.zip or .tar.gz that contains a .app directory.' })
       }
 
       // lipo 슬라이스 검증 (macOS only; Linux에서는 null → skip)
-      const appDir = findAppDirInZip(savedPath)
+      const appDir = findAppDir(savedPath)
       if (appDir) {
         const sliceOk = hasSimulatorSlice(savedPath, appDir)
         if (sliceOk === false) {
           fs.unlinkSync(savedPath)
-          return json(res, 400, { error: 'This build contains device-only slices. Build with xcodebuild -sdk iphonesimulator to include a simulator slice.' })
+          return json(res, 400, { error: 'This build contains device-only slices. Build for iphonesimulator to include a simulator slice.' })
         }
       }
 
@@ -407,7 +574,7 @@ export function handleUploadBuild(
     }
 
     const bundleIdKey = bundleId ?? '__unknown__'
-    const appName     = resolvedAppName ?? fields.label ?? path.basename(originalName, ext)
+    const appName     = resolvedAppName ?? fields.label ?? stripArchiveExt(originalName)
 
     const db = getDb()
     let appId: number
