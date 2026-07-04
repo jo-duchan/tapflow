@@ -3,6 +3,10 @@ import { createLogger } from '@tapflowio/agent-core'
 import { getDb } from '../db.js'
 import { config } from './config.js'
 
+// Re-exported so existing importers keep using webhooks.ts; the implementation lives
+// in webhookUrl.ts to avoid a circular import with config.ts (which also validates).
+export { validateWebhookUrl } from './webhookUrl.js'
+
 const logger = createLogger('relay:webhooks')
 
 // Each outbound request is bounded so a slow receiver can't tie up delivery.
@@ -24,43 +28,6 @@ export type FetchLike = (
   url: string,
   init: { method: string; headers: Record<string, string>; body: string; signal: AbortSignal }
 ) => Promise<{ ok: boolean; status: number; text: () => Promise<string> }>
-
-/**
- * Validate a webhook destination URL. Returns an error string, or null when allowed.
- * Blocks loopback and cloud-metadata addresses; private LAN ranges (10/172.16/192.168)
- * are intentionally allowed because self-hosted CI often lives there.
- */
-export function validateWebhookUrl(raw: string): string | null {
-  let u: URL
-  try {
-    u = new URL(raw)
-  } catch {
-    return 'Invalid URL'
-  }
-  if (u.protocol !== 'http:' && u.protocol !== 'https:') {
-    return 'URL must use http or https'
-  }
-  let host = u.hostname.toLowerCase().replace(/^\[|\]$/g, '') // strip IPv6 brackets
-  // Node normalizes an IPv4-mapped IPv6 host (e.g. ::ffff:127.0.0.1) to a hex form
-  // like ::ffff:7f00:1, which would slip past the IPv4 checks below yet still connect
-  // to the embedded IPv4 — an SSRF bypass. Unwrap it back to dotted IPv4 first.
-  const mapped = host.match(/^::ffff:([0-9a-f]{1,4}):([0-9a-f]{1,4})$/)
-  if (mapped) {
-    const hi = parseInt(mapped[1], 16)
-    const lo = parseInt(mapped[2], 16)
-    host = [hi >> 8, hi & 0xff, lo >> 8, lo & 0xff].join('.')
-  }
-  if (
-    host === 'localhost' ||
-    host === '0.0.0.0' ||
-    host === '::1' ||
-    host.startsWith('127.') ||
-    host.startsWith('169.254.')
-  ) {
-    return 'URL host is not allowed (loopback or metadata address)'
-  }
-  return null
-}
 
 /** HMAC-SHA256 signature of the raw request body, formatted like EAS's expo-signature. */
 export function signPayload(secret: string, body: string): string {

@@ -6,6 +6,7 @@ import { createLogger } from '@tapflowio/agent-core'
 import { parseTrustedProxies } from './clientAddress.js'
 import { dnsProviders } from './cert/dnsRegistry.js'
 import { loadDataDirEnv } from './loadEnvFile.js'
+import { validateWebhookUrl } from './webhookUrl.js'
 
 const logger = createLogger('relay:config')
 
@@ -114,18 +115,43 @@ function resolveDataDir(raw: string): string {
   return path.isAbsolute(raw) ? raw : path.join(process.cwd(), raw)
 }
 
+const rawWebhookEntrySchema = z.array(
+  z.object({
+    url: z.string().optional(),
+    secretEnv: z.string().optional(),
+    enabled: z.boolean().optional(),
+  })
+)
+
 // Map raw config.json webhook entries ({ url, secretEnv?, enabled? }) to resolved
-// endpoints. The signing secret is read from the named env var, never from the file;
-// entries without a url are dropped.
+// endpoints. The signing secret is read from the named env var, never from the file.
+// Entries are dropped (with a warning) when they have no url or fail the SSRF/format
+// gate, so config-file endpoints run under the same checks as REST-registered ones.
 export function resolveWebhooksConfig(raw: unknown, env: NodeJS.ProcessEnv): TapflowConfig['webhooks'] {
-  if (!Array.isArray(raw)) return []
-  return (raw as Array<{ url?: string; secretEnv?: string; enabled?: boolean }>)
-    .map((w) => ({
-      url: w.url ?? '',
+  if (raw === undefined) return []
+  const parsed = rawWebhookEntrySchema.safeParse(raw)
+  if (!parsed.success) {
+    logger.warn('webhooks in tapflow.config.json is malformed — ignoring')
+    return []
+  }
+  const out: TapflowConfig['webhooks'] = []
+  for (const w of parsed.data) {
+    if (!w.url) continue
+    const err = validateWebhookUrl(w.url)
+    if (err) {
+      logger.warn(`ignoring config webhook ${w.url}: ${err}`)
+      continue
+    }
+    if (w.secretEnv && !env[w.secretEnv]) {
+      logger.warn(`config webhook ${w.url}: secretEnv ${w.secretEnv} is not set — deliveries will be unsigned`)
+    }
+    out.push({
+      url: w.url,
       secret: w.secretEnv ? (env[w.secretEnv] ?? '') : '',
       enabled: w.enabled !== false,
-    }))
-    .filter((w) => w.url)
+    })
+  }
+  return out
 }
 
 // Populated by load(): path of the dataDir/.env that was loaded, or null. CLI/server use it for a "loaded credentials" log.

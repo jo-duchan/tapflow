@@ -121,8 +121,17 @@ describe('resolveWebhooksConfig', () => {
     const out = resolveWebhooksConfig([{ url: 'https://a/x', enabled: false }, { secretEnv: 'X' }], {})
     expect(out).toEqual([{ url: 'https://a/x', secret: '', enabled: false }])
   })
-  it('returns [] for non-array input', () => {
+  it('returns [] for non-array or malformed input', () => {
     expect(resolveWebhooksConfig(undefined, {})).toEqual([])
+    expect(resolveWebhooksConfig('nope', {})).toEqual([])
+    expect(resolveWebhooksConfig([{ url: 123 }], {})).toEqual([])
+  })
+  it('drops entries that fail the SSRF/format gate', () => {
+    const out = resolveWebhooksConfig(
+      [{ url: 'http://127.0.0.1/x' }, { url: 'http://[::ffff:127.0.0.1]/x' }, { url: 'not a url' }, { url: 'https://ok/x' }],
+      {}
+    )
+    expect(out.map((w) => w.url)).toEqual(['https://ok/x'])
   })
 })
 
