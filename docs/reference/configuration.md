@@ -19,7 +19,10 @@ The relay reads `tapflow.config.json` from the directory where it is started. Ge
     "secure": false,
     "user": "relay@example.com",
     "pass": "password"
-  }
+  },
+  "webhooks": [
+    { "url": "https://ci.internal/hooks/tapflow", "secretEnv": "TAPFLOW_WEBHOOK_SECRET_CI" }
+  ]
 }
 ```
 
@@ -29,6 +32,7 @@ The relay reads `tapflow.config.json` from the directory where it is started. Ge
 | `relay.url` | URL of the relay to connect to. Used by `tapflow agent start`, `tapflow admin init`, `tapflow status`, and `tapflow logs` as the default — no `--relay` flag needed when this is set. Leave empty for local mode (`ws://localhost:[local.port]`). |
 | `tls` | LAN HTTPS (secure context) settings, required for WebCodecs hardware decode. See the HTTPS section below. |
 | `smtp` | SMTP settings for sending invitation and password reset emails. |
+| `webhooks` | Outbound endpoints notified when a build's review status changes. Signing secrets are read from env vars named by `secretEnv`. See the Webhooks section below. |
 
 `smtp.from` defaults to `tapflow <smtp.user>` when `smtp.user` is set. Override it explicitly if you need a different sender address.
 
@@ -170,3 +174,15 @@ To change the data directory location, set `TAPFLOW_DATA_DIR` or `local.dataDir`
 Without SMTP, invitation emails and password reset emails will not be sent. In that case, Admins can copy and share the invite link directly.
 
 To send invitation emails, configure `smtp.host`, `smtp.user`, and `smtp.pass`.
+
+## Webhooks
+
+tapflow POSTs to registered URLs when a build's review status changes to `Done` or `Rejected`. Declare endpoints in the `webhooks` array; the REST API can register more at runtime. The full payload, signature verification, and firing rules are in [Webhooks](/guide/build-status-webhooks).
+
+| Key | Description |
+|-----|-------------|
+| `webhooks[].url` | Destination that receives the POST (required). |
+| `webhooks[].secretEnv` | Name of the env var holding the HMAC signing secret. Secrets never go in config.json. |
+| `webhooks[].enabled` | Whether the endpoint is active. Defaults to `true`. |
+
+Changes to `webhooks` take effect after a relay restart.

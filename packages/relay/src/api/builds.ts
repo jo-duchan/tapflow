@@ -10,6 +10,7 @@ import { getDb } from '../db.js'
 import { requireAuth, requireBuildAuth } from '../middleware/auth.js'
 import { json, readJson } from '../router.js'
 import { unlinkSafe } from '../lib/uploads.js'
+import { deliverWebhooks } from '../lib/webhooks.js'
 
 // ── archive kind ───────────────────────────────────────────────────────────
 
@@ -337,13 +338,17 @@ export async function handleUpdateBuild(
   const auth = requireAuth(req, res)
   if (!auth) return
 
+  // Parse the body before reading current state, so the SELECT and UPDATE below run
+  // with no await between them. Closes a TOCTOU window where two concurrent PATCHes
+  // could both observe the old status_label and both fire the webhook.
+  const body = await readJson<{ status_label?: string | null; version_label?: string | null }>(req)
+
   const db = getDb()
   const existing = db.prepare('SELECT status_label FROM builds WHERE id = ?').get(params.id) as
     | { status_label: string | null }
     | undefined
   if (!existing) return json(res, 404, { error: 'Build not found' })
 
-  const body = await readJson<{ status_label?: string | null; version_label?: string | null }>(req)
   const VALID_STATUS = ['Backlog', 'In Progress', 'Done', 'Rejected']
   const updates: string[] = []
   const values: unknown[] = []
@@ -370,6 +375,30 @@ export async function handleUpdateBuild(
   const result = db.prepare(`UPDATE builds SET ${updates.join(', ')} WHERE id = ?`).run(...values, params.id)
   if (result.changes === 0) return json(res, 404, { error: 'Build not found' })
   json(res, 200, { ok: true })
+
+  // Fire webhooks on a review-status transition into Done/Rejected. Fire-and-forget and
+  // best-effort: neither the synchronous lookup nor delivery may reject the handler
+  // after the response above has already been sent.
+  const next = body.status_label
+  if ('status_label' in body && (next === 'Done' || next === 'Rejected') && existing.status_label !== next) {
+    try {
+      const info = db
+        .prepare('SELECT b.version_name, a.platform FROM builds b JOIN apps a ON a.id = b.app_id WHERE b.id = ?')
+        .get(params.id) as { version_name: string | null; platform: string | null } | undefined
+      void deliverWebhooks({
+        event: 'build.status_changed',
+        build: {
+          id: String(params.id),
+          platform: info?.platform ?? null,
+          appVersion: info?.version_name ?? null,
+          status: next,
+        },
+        changedAt: new Date().toISOString(),
+      }).catch(() => {})
+    } catch {
+      // best-effort: never let webhook wiring reject the already-sent response
+    }
+  }
 }
 
 // Schedule deletion: an explicit, manual action that puts the build on the purge

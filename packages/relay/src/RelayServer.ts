@@ -53,6 +53,7 @@ const HEARTBEAT_MS = 30_000
 import { handleVerifyReset, handleDoReset, handleSendMemberReset } from './api/passwordReset.js'
 import { handleListBuilds, handleGetBuild, handleUpdateBuild, handleUploadBuild, handleScheduleBuildDeletion, handleCancelBuildDeletion, purgeExpiredBuilds } from './api/builds.js'
 import { handleListApps, handleCreateApp, handleUpdateApp, handleDeleteApp } from './api/apps.js'
+import { handleListWebhooks, handleCreateWebhook, handleUpdateWebhook, handleDeleteWebhook } from './api/webhooks.js'
 import { handleListComments, handleCreateComment, handleDeleteComment } from './api/comments.js'
 import { handleListMembers, handleInvite, handleUpdateMember, handleDeleteMember } from './api/team.js'
 import { handleListTokens, handleCreateToken, handleRevokeToken } from './api/tokens.js'
@@ -184,6 +185,12 @@ export class RelayServer {
     this.router.post('/api/v1/builds/:id/schedule-deletion', handleScheduleBuildDeletion)
     this.router.delete('/api/v1/builds/:id/schedule-deletion', handleCancelBuildDeletion)
     this.router.post('/api/v1/builds', (req, res) => handleUploadBuild(req, res, u))
+
+    // webhooks (outbound build-status notifications)
+    this.router.get('/api/v1/webhooks', handleListWebhooks)
+    this.router.post('/api/v1/webhooks', handleCreateWebhook)
+    this.router.patch('/api/v1/webhooks/:id', handleUpdateWebhook)
+    this.router.delete('/api/v1/webhooks/:id', handleDeleteWebhook)
 
     // comments
     this.router.get('/api/v1/comments', handleListComments)
