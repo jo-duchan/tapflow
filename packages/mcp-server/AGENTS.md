@@ -1,6 +1,6 @@
 ---
 type: rules
-topics: [mcp, ai-agent, experimental]
+topics: [mcp, ai-agent]
 status: living
 ---
 
@@ -14,7 +14,7 @@ status: living
 
 `@tapflowio/mcp-server`: bridges tapflow to LLM agents via the [Model Context Protocol](https://modelcontextprotocol.io).
 
-**Experimental** — published under the `experimental` dist-tag. APIs and tool schemas may change between releases. Excluded from changeset automatic version management until promoted to stable.
+Published on the standard npm channel and versioned by changesets in the repo-wide fixed group (graduated from the `experimental` dist-tag in 2026-07). Never publish with raw `npm publish` — it does not rewrite `workspace:*` dependencies (the package depends on `@tapflowio/flow-runner`); the changesets → pnpm publish path does.
 
 Connects to the relay over WebSocket + REST (`TapflowClient`), registers MCP tools, and exposes them to any MCP-compatible client (Claude Code, Codex, Cursor, etc.) via stdio transport.
 
@@ -37,5 +37,3 @@ Connects to the relay over WebSocket + REST (`TapflowClient`), registers MCP too
 
 - Do not add relay-side logic to this package — it is a client only.
 - Do not introduce stateful session management beyond what `TapflowClient` already tracks.
-- Do not promote to `latest` dist-tag until the experimental graduation checklist in `.work/2026-05-28-mcp-usability-todo.md` is complete.
-- Do not add this package to changeset automatic versioning until the `ignore` entry in `.changeset/config.json` is removed as part of graduation.

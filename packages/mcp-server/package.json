@@ -1,6 +1,6 @@
 {
   "name": "@tapflowio/mcp-server",
-  "version": "0.13.0-experimental.1",
+  "version": "0.13.0",
   "description": "MCP server for tapflow — lets LLM agents control iOS/Android simulators via Model Context Protocol",
   "keywords": [
     "tapflow",
@@ -30,7 +30,6 @@
     "dist"
   ],
   "publishConfig": {
-    "tag": "experimental",
     "access": "public"
   },
   "scripts": {

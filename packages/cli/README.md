@@ -157,7 +157,7 @@ What's included:
 - **Screenshot REST endpoint** — `GET /api/v1/sessions/:sessionId/screenshot` for CI and AI agents.
 - **Mac resource monitoring** — CPU & RAM per agent, to spot overloaded hosts before assigning sessions.
 - **Team management** — invite links, roles (Admin / Developer / QA / Viewer), and Personal Access Tokens.
-- **MCP Server** *(experimental)* — `@tapflowio/mcp-server` lets Claude Code and other LLM agents control simulators as native tools.
+- **MCP Server** — `@tapflowio/mcp-server` lets Claude Code and other LLM agents control simulators as native tools.
 
 <a name="latency-note"></a>
 > <sup>1</sup> On localhost, decode-to-present is in the single-to-low-double-digit milliseconds (WebCodecs ~2.5 ms, WASM ~9–14 ms); end-to-end "glass-to-glass" latency also depends on your network. See the [streaming latency log](https://github.com/jo-duchan/tapflow/blob/main/contributing/streaming-latency-log.md) for the full pipeline analysis and measurements.
@@ -253,7 +253,7 @@ Full reference → [CLI docs](https://www.tapflow.dev/reference/cli)
 - [Dashboard Overview](https://www.tapflow.dev/dashboard/overview)
 
 **AI Agent**
-- [MCP Server](https://www.tapflow.dev/guide/mcp-server) *(experimental)*
+- [MCP Server](https://www.tapflow.dev/guide/mcp-server)
 
 **Reference**
 - [CLI Reference](https://www.tapflow.dev/reference/cli)
