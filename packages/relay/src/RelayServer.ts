@@ -6,7 +6,7 @@ import path from 'path'
 import { randomUUID } from 'crypto'
 import { WebSocketServer, WebSocket } from 'ws'
 import { SessionManager } from './SessionManager.js'
-import type { RelayMessage } from './types.js'
+import type { RelayMessage, UIElement } from './types.js'
 import { Router, json } from './router.js'
 import { requireViewAuth, requireAuth, getAuth, verifyPat } from './middleware/auth.js'
 import { classifyConnection } from './lib/connectionAuth.js'
@@ -84,6 +84,7 @@ const RESOURCE_THRESHOLD = Number.isFinite(_parsedThreshold) ? _parsedThreshold 
 // that send any of these are disconnected immediately.
 const AGENT_MSG_TYPES = new Set([
   'agent:register', 'agent:resources', 'screenshot:done', 'screenshot:error',
+  'ui:tree:response', 'ui:tree:error',
   'device:booting', 'device:boot-error', 'device:shutdown-done', 'device:ready',
   'session:chrome', 'session:deviceInfo',
   'app:install-done', 'app:install-error', 'app:launch-done', 'app:launch-error',
@@ -132,10 +133,20 @@ export class RelayServer {
     reject: (err: Error) => void
     timer: ReturnType<typeof setTimeout>
   }>()
+  private readonly uiTreeTimeoutMs: number
+  private pendingUITrees = new Map<string, {
+    sessionId: string
+    resolve: (elements: UIElement[]) => void
+    reject: (err: Error) => void
+    timer: ReturnType<typeof setTimeout>
+  }>()
 
-  constructor(private readonly options: { port: number; publicDir?: string; uploadsDir?: string; idleTimeoutMs?: number; wsBackpressureBytes?: number; screenshotTimeoutMs?: number; trustedProxies?: string[]; corsOrigins?: string[]; tls?: { cert: string; key: string } }) {
+  constructor(private readonly options: { port: number; publicDir?: string; uploadsDir?: string; idleTimeoutMs?: number; wsBackpressureBytes?: number; screenshotTimeoutMs?: number; uiTreeTimeoutMs?: number; trustedProxies?: string[]; corsOrigins?: string[]; tls?: { cert: string; key: string } }) {
     this.backpressureBytes = options.wsBackpressureBytes ?? DEFAULT_BACKPRESSURE_BYTES
     this.screenshotTimeoutMs = options.screenshotTimeoutMs ?? 10_000
+    // Longer than the screenshot default: the Android agent's device-side dump
+    // itself may take up to 10s before it errors out.
+    this.uiTreeTimeoutMs = options.uiTreeTimeoutMs ?? 15_000
     this.corsAllowed = new Set(options.corsOrigins ?? [])
     this.sessions = new SessionManager({ idleTimeoutMs: options.idleTimeoutMs })
     this.publicDir = options.publicDir ?? path.join(import.meta.dirname, '../public')
@@ -244,6 +255,8 @@ export class RelayServer {
     // screenshot
     this.router.get('/api/v1/sessions/:sessionId/screenshot',
       (req, res, params) => this.handleGetScreenshot(req, res, params))
+    this.router.get('/api/v1/sessions/:sessionId/ui-tree',
+      (req, res, params) => this.handleGetUITree(req, res, params))
   }
 
   pushLog(msg: string): void {
@@ -497,6 +510,8 @@ export class RelayServer {
       case 'agent:register':     this.handleAgentRegister(ws, msg); break
       case 'screenshot:done':    this.handleScreenshotDone(msg); break
       case 'screenshot:error':   this.handleScreenshotError(msg); break
+      case 'ui:tree:response':   this.handleUITreeResponse(msg); break
+      case 'ui:tree:error':      this.handleUITreeError(msg); break
       case 'agents:list': {
         ws.send(JSON.stringify({ type: 'agents:listed', sessions: this.sessions.list() }))
         break
@@ -658,8 +673,9 @@ export class RelayServer {
     }
   }
 
-  // Removes an agent socket's sessions + resources and rejects its in-flight screenshot requests.
-  // Shared by socket close and re-register eviction. Returns true if `ws` had agent sessions.
+  // Removes an agent socket's sessions + resources and rejects its in-flight
+  // screenshot / ui-tree requests. Shared by socket close and re-register
+  // eviction. Returns true if `ws` had agent sessions.
   private evictAgentSocket(ws: WebSocket): boolean {
     const agentSessions = this.sessions.getAllByAgentSocket(ws)
     if (agentSessions.length === 0) return false
@@ -668,6 +684,13 @@ export class RelayServer {
       if (agentSessionIds.has(pending.sessionId)) {
         clearTimeout(pending.timer)
         this.pendingScreenshots.delete(reqId)
+        pending.reject(new Error('Agent disconnected'))
+      }
+    }
+    for (const [reqId, pending] of this.pendingUITrees.entries()) {
+      if (agentSessionIds.has(pending.sessionId)) {
+        clearTimeout(pending.timer)
+        this.pendingUITrees.delete(reqId)
         pending.reject(new Error('Agent disconnected'))
       }
     }
@@ -840,6 +863,72 @@ export class RelayServer {
 
       session.agentSocket.send(JSON.stringify({ type: 'screenshot:request', sessionId, requestId, format }))
     })
+  }
+
+  private async handleGetUITree(
+    req: http.IncomingMessage,
+    res: http.ServerResponse,
+    params: Record<string, string>,
+  ): Promise<void> {
+    if (!requireViewAuth(req, res)) return
+
+    const { sessionId } = params
+    const session = this.sessions.get(sessionId)
+    if (!session) {
+      json(res, 404, { error: 'Session not found' })
+      return
+    }
+    if (session.deviceStatus === 'shutdown') {
+      json(res, 409, { error: 'Device is not booted' })
+      return
+    }
+    if (session.agentSocket.readyState !== WebSocket.OPEN) {
+      json(res, 502, { error: 'Agent offline' })
+      return
+    }
+
+    const requestId = randomUUID()
+
+    return new Promise<void>((resolve) => {
+      const timer = setTimeout(() => {
+        this.pendingUITrees.delete(requestId)
+        json(res, 504, { error: 'UI tree query timed out — the agent may not support ui:tree:request (update the agent), or the screen never went idle' })
+        resolve()
+      }, this.uiTreeTimeoutMs)
+
+      this.pendingUITrees.set(requestId, {
+        sessionId,
+        resolve: (elements) => {
+          clearTimeout(timer)
+          this.pendingUITrees.delete(requestId)
+          json(res, 200, { elements })
+          resolve()
+        },
+        reject: (err) => {
+          clearTimeout(timer)
+          this.pendingUITrees.delete(requestId)
+          json(res, 502, { error: err.message })
+          resolve()
+        },
+        timer,
+      })
+
+      session.agentSocket.send(JSON.stringify({ type: 'ui:tree:request', sessionId, requestId }))
+    })
+  }
+
+  private handleUITreeResponse(msg: RelayMessage): void {
+    if (!msg.requestId) return
+    const pending = this.pendingUITrees.get(msg.requestId)
+    if (!pending) return
+    pending.resolve(msg.elements ?? [])
+  }
+
+  private handleUITreeError(msg: RelayMessage): void {
+    if (!msg.requestId) return
+    const pending = this.pendingUITrees.get(msg.requestId)
+    if (!pending) return
+    pending.reject(new Error(msg.message ?? 'UI tree query failed'))
   }
 
   private handleScreenshotDone(msg: RelayMessage): void {

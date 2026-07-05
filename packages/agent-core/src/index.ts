@@ -1,4 +1,14 @@
-export type { Platform, DeviceStatus, Device, Point, AndroidButton, AgentResources } from './types.js'
+export type {
+  Platform,
+  DeviceStatus,
+  Device,
+  Point,
+  AndroidButton,
+  AgentResources,
+  UIElement,
+  UIElementFrame,
+  UIElementRole,
+} from './types.js'
 export type { DeviceAgent, DeviceAgentConstructor } from './DeviceAgent.js'
 export { hasAudioCapability } from './AudioStreamCapability.js'
 export type {

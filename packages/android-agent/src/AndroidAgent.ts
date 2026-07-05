@@ -1,6 +1,6 @@
 import os from 'os'
 import { WebSocket } from 'ws'
-import type { AndroidButton, Device, DeviceAgent } from '@tapflowio/agent-core'
+import type { AndroidButton, Device, DeviceAgent, UIElement } from '@tapflowio/agent-core'
 import { createLogger, PlatformError, ValidationError } from '@tapflowio/agent-core'
 import {
   createResourceSampler,
@@ -26,6 +26,7 @@ import { AdbWrapper } from './AdbWrapper.js'
 import { EmulatorLauncher, findEmulatorPid } from './EmulatorLauncher.js'
 import { ensureHelperApp, launchMuteOnlyTap, isAudioSupported } from '@tapflowio/audiotap-helper'
 import { AndroidTouchHelper } from './AndroidTouchHelper.js'
+import { parseUiAutomatorDump } from './uiTree.js'
 import { ScrcpySession } from './scrcpy/ScrcpySession.js'
 import type { ScrcpyFrame } from './scrcpy/ScrcpyVideo.js'
 import { EmulatorGrpcClient, type AudioStream } from './emulator/EmulatorGrpcClient.js'
@@ -1064,6 +1065,29 @@ export class AndroidAgent implements DeviceAgent {
           })
         break
       }
+      case 'ui:tree:request': {
+        const raw = msg as unknown as { requestId: string; sessionId?: string }
+        const { requestId } = raw
+        const sessionId = msg.sessionId
+        const state = this.deviceStates.get(sessionId!)
+        const serial = state ? this.adb.getSerial(state.deviceId) : undefined
+        if (!serial) {
+          this.ws?.send(JSON.stringify({ type: 'ui:tree:error', sessionId, requestId, message: 'No booted device' }))
+          break
+        }
+        this.adb.dumpUiHierarchy(serial)
+          .then((xml) => this.ws?.send(JSON.stringify({
+            type: 'ui:tree:response',
+            sessionId,
+            requestId,
+            elements: parseUiAutomatorDump(xml),
+          })))
+          .catch((e: unknown) => {
+            const message = e instanceof Error ? e.message : String(e)
+            this.ws?.send(JSON.stringify({ type: 'ui:tree:error', sessionId, requestId, message }))
+          })
+        break
+      }
     }
   }
 
@@ -1141,6 +1165,13 @@ export class AndroidAgent implements DeviceAgent {
     const serial = first ? this.adb.getSerial(first.deviceId) : undefined
     if (!serial) throw new ValidationError('no booted device — call connect() first')
     return this.adb.screenshot(serial)
+  }
+
+  async queryUITree(): Promise<UIElement[]> {
+    const first = this.deviceStates.values().next().value
+    const serial = first ? this.adb.getSerial(first.deviceId) : undefined
+    if (!serial) throw new ValidationError('no booted device — call connect() first')
+    return parseUiAutomatorDump(await this.adb.dumpUiHierarchy(serial))
   }
 
   stream(): ReadableStream<Buffer> {

@@ -42,10 +42,13 @@ export type MessageType =
   | 'screenshot:request'
   | 'screenshot:done'
   | 'screenshot:error'
+  | 'ui:tree:request'
+  | 'ui:tree:response'
+  | 'ui:tree:error'
   | 'error'
 
-import type { AgentResources } from '@tapflowio/agent-core'
-export type { AgentResources }
+import type { AgentResources, UIElement } from '@tapflowio/agent-core'
+export type { AgentResources, UIElement }
 
 export interface DeviceInfo {
   id: string
@@ -86,4 +89,6 @@ export interface RelayMessage {
   requestId?: string
   data?: string
   format?: 'png' | 'jpeg'
+  // ui:tree:response: unified element schema (normalized 0-1 frames), mapped agent-side
+  elements?: UIElement[]
 }

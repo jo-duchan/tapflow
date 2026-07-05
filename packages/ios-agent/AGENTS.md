@@ -100,6 +100,30 @@ pnpm build
 
 ---
 
+### accessibility-helper interface
+
+```bash
+accessibility-helper <deviceName>
+```
+
+Reads the iOS UI tree by applying the **macOS AXUIElement API to the Simulator.app process** — no WebDriverAgent, nothing installed inside the device. The Simulator bridges iOS accessibility into the macOS AX tree; the device screen is the window's `AXGroup` with subrole `iOSContentGroup`, whose frame is the normalization basis (all output frames are 0-1 relative to it, matching the touch path's coordinate space). Simulator chrome (hardware buttons, toolbar) lives outside that group so traversal never sees it.
+
+- `<deviceName>` prefix-matches the window title (`"iPhone 16 Pro – iOS 18.5"`); with a single open window it falls back to that window.
+- Output: single JSON object `{ "elements": [{ role, subrole?, label, identifier?, value?, enabled, frame }] }` with **raw macOS AX roles** — the unified-role mapping lives in `UITreeReader.ts` (`mapAxNodes`) so it stays unit-testable. Notable bridgings: UISwitch → `AXCheckBox/AXSwitch`, tab bar items → `AXRadioButton/AXTabButton`, SwiftUI text → `AXGenericElement`.
+- Exit codes: `0` ok · `2` macOS Accessibility permission missing (TCC — the app hosting the agent process needs the grant) · `3` Simulator window not found · `4` `iOSContentGroup` missing. `UITreeReader` maps each to an actionable `PlatformError` — never a silent empty tree.
+- Requires Simulator.app running with the device window open (Xcode 14+ auto-opens it on `simctl boot`).
+
+When changing the Swift output shape, **always update both locations simultaneously**:
+1. `src/accessibility-helper.swift` — JSON output changes
+2. `src/UITreeReader.ts` — `AxNode` interface + `mapAxNodes`
+
+Compile (output to `bin/`):
+```bash
+cd packages/ios-agent && swiftc src/accessibility-helper.swift -o bin/accessibility-helper
+```
+
+---
+
 ### keyboard-helper interface
 
 ```bash

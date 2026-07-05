@@ -138,6 +138,27 @@ export class AdbWrapper {
     return this.runner.execBinary('-s', serial, 'exec-out', 'screencap', '-p')
   }
 
+  // uiautomator waits for an idle window, so screens with continuous animation
+  // can block forever — the device-side toybox `timeout` kills the dump and we
+  // surface an explicit error instead of hanging (never a silent empty tree).
+  async dumpUiHierarchy(serial: string, timeoutSec = 10): Promise<string> {
+    const output = await this.runner.exec(
+      '-s', serial, 'exec-out',
+      'timeout', String(timeoutSec), 'uiautomator', 'dump', '/dev/tty',
+    )
+    const start = output.indexOf('<?xml') >= 0 ? output.indexOf('<?xml') : output.indexOf('<hierarchy')
+    const end = output.lastIndexOf('</hierarchy>')
+    if (start < 0 || end < 0) {
+      const detail = output.trim().slice(0, 200)
+      throw new PlatformError(
+        `uiautomator dump produced no XML within ${timeoutSec}s` +
+        (detail ? ` (${detail})` : '') +
+        ' — screens with continuous animation block the dump; retry on a settled screen',
+      )
+    }
+    return output.slice(start, end + '</hierarchy>'.length)
+  }
+
   // rotation is an Android user_rotation value (0=portrait, 3=canonical landscape home-left/punch-right).
   // `wm user-rotation lock` over legacy `settings put system user_rotation`: the latter is silently
   // ignored on newer Android (API 35+) — the display never rotates, only a rotation-suggestion appears.

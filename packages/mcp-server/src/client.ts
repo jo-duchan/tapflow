@@ -33,6 +33,17 @@ export interface AppInfo {
   builds: BuildInfo[]
 }
 
+// Unified element schema produced agent-side (mirrors @tapflowio/agent-core UIElement).
+// Frames are normalized 0-1 in the same coordinate space the tap path consumes.
+export interface UIElement {
+  role: 'button' | 'text' | 'input' | 'image' | 'checkbox' | 'switch' | 'slider' | 'list' | 'cell' | 'tab' | 'other'
+  label: string
+  identifier?: string
+  frame: { x: number; y: number; width: number; height: number }
+  enabled: boolean
+  rawRole?: string
+}
+
 type RelayMsg = Record<string, unknown>
 
 interface Waiter {
@@ -237,6 +248,27 @@ export class TapflowClient {
       throw new Error(message)
     }
     return Buffer.from(await res.arrayBuffer())
+  }
+
+  async queryUITree(sessionId: string): Promise<UIElement[]> {
+    const httpBase = this.relayUrl.replace(/^wss?/, (p) => (p === 'wss' ? 'https' : 'http'))
+    const url = new URL(`/api/v1/sessions/${sessionId}/ui-tree`, httpBase)
+    const res = await fetch(url.toString(), {
+      headers: { Authorization: `Bearer ${this.token}` },
+    })
+    if (!res.ok) {
+      // Read text first — res.json() consumes the body, so a later res.text()
+      // fallback can never run after a failed JSON parse.
+      const text = await res.text().catch(() => '')
+      let message = text || `UI tree query failed: ${res.status}`
+      try {
+        const body = JSON.parse(text) as { error?: string }
+        if (body.error) message = body.error
+      } catch { /* keep the raw text */ }
+      throw new Error(message)
+    }
+    const body = (await res.json()) as { elements?: UIElement[] }
+    return body.elements ?? []
   }
 
   async listBuilds(): Promise<AppInfo[]> {
