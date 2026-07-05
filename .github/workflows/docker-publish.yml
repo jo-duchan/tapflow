@@ -9,13 +9,31 @@ on:
       - 'v*.*.*-*'
   pull_request:
 
+env:
+  IMAGE: tapflow/tapflow
+
 jobs:
-  build-and-push:
-    runs-on: ubuntu-latest
-    # Publish only when Docker Hub credentials are configured; otherwise build-validate only.
+  # Build each architecture on its own native runner. arm64 used to build under
+  # QEMU emulation on an amd64 runner, where the native module compile could hang
+  # for hours; native runners remove the emulation entirely.
+  build:
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: linux/amd64
+            runner: ubuntu-24.04
+          - platform: linux/arm64
+            runner: ubuntu-24.04-arm
     env:
       HAS_DOCKERHUB: ${{ secrets.DOCKERHUB_TOKEN != '' && secrets.DOCKERHUB_USERNAME != '' }}
     steps:
+      - name: Prepare platform name
+        run: echo "PLATFORM_PAIR=${platform//\//-}" >> "$GITHUB_ENV"
+        env:
+          platform: ${{ matrix.platform }}
+
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
@@ -24,9 +42,6 @@ jobs:
       - name: Warn when Docker Hub credentials are missing
         if: github.event_name != 'pull_request' && env.HAS_DOCKERHUB != 'true'
         run: echo "::warning::DOCKERHUB_USERNAME/DOCKERHUB_TOKEN are not set — building the image for validation but skipping push."
-
-      - name: Set up QEMU
-        uses: docker/setup-qemu-action@v3
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
@@ -38,25 +53,95 @@ jobs:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
-      - name: Extract metadata (tags, labels) for Docker
+      - name: Extract metadata (labels) for Docker
         id: meta
         uses: docker/metadata-action@v5
         with:
-          images: tapflow/tapflow
+          images: ${{ env.IMAGE }}
+
+      - name: Build image (push by digest when publishing)
+        id: build
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: ./Dockerfile
+          platforms: ${{ matrix.platform }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha,scope=${{ env.PLATFORM_PAIR }}
+          cache-to: type=gha,mode=max,scope=${{ env.PLATFORM_PAIR }}
+          # Publish: push a per-architecture image by digest (merged into a manifest
+          # list in the merge job). Otherwise (PR / no credentials): build for
+          # validation only, keeping just the cache.
+          outputs: ${{ (github.event_name != 'pull_request' && env.HAS_DOCKERHUB == 'true') && format('type=image,name={0},push-by-digest=true,name-canonical=true,push=true', env.IMAGE) || 'type=cacheonly' }}
+
+      - name: Export digest
+        if: github.event_name != 'pull_request' && env.HAS_DOCKERHUB == 'true'
+        run: |
+          mkdir -p "${{ runner.temp }}/digests"
+          digest="${{ steps.build.outputs.digest }}"
+          touch "${{ runner.temp }}/digests/${digest#sha256:}"
+
+      - name: Upload digest
+        if: github.event_name != 'pull_request' && env.HAS_DOCKERHUB == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: digests-${{ env.PLATFORM_PAIR }}
+          path: ${{ runner.temp }}/digests/*
+          if-no-files-found: error
+          retention-days: 1
+
+  # Combine the per-architecture digests into a single multi-arch manifest list.
+  # Only runs for real publishes; PRs and credential-less builds validate only.
+  merge:
+    needs: build
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    env:
+      HAS_DOCKERHUB: ${{ secrets.DOCKERHUB_TOKEN != '' && secrets.DOCKERHUB_USERNAME != '' }}
+    steps:
+      - name: Note validation-only build
+        if: env.HAS_DOCKERHUB != 'true'
+        run: echo "::warning::No Docker Hub credentials — per-architecture validation builds succeeded, nothing to publish."
+
+      - name: Download digests
+        if: env.HAS_DOCKERHUB == 'true'
+        uses: actions/download-artifact@v4
+        with:
+          path: ${{ runner.temp }}/digests
+          pattern: digests-*
+          merge-multiple: true
+
+      - name: Set up Docker Buildx
+        if: env.HAS_DOCKERHUB == 'true'
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to Docker Hub
+        if: env.HAS_DOCKERHUB == 'true'
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Extract metadata (tags) for Docker
+        id: meta
+        if: env.HAS_DOCKERHUB == 'true'
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.IMAGE }}
           tags: |
             type=edge,branch=main
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
             type=sha
 
-      - name: Build and push Docker image
-        uses: docker/build-push-action@v5
-        with:
-          context: .
-          file: ./Dockerfile
-          push: ${{ github.event_name != 'pull_request' && env.HAS_DOCKERHUB == 'true' }}
-          platforms: linux/amd64,linux/arm64
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+      - name: Create manifest list and push
+        if: env.HAS_DOCKERHUB == 'true'
+        working-directory: ${{ runner.temp }}/digests
+        run: |
+          # shellcheck disable=SC2046  # intentional split: expand -t flags and per-digest refs
+          docker buildx imagetools create $(jq -cr '.tags | map("-t " + .) | join(" ")' <<< "$DOCKER_METADATA_OUTPUT_JSON") \
+            $(printf '${{ env.IMAGE }}@sha256:%s ' *)
+
+      - name: Inspect image
+        if: env.HAS_DOCKERHUB == 'true'
+        run: docker buildx imagetools inspect ${{ env.IMAGE }}:${{ steps.meta.outputs.version }}
