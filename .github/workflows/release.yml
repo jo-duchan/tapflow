@@ -31,17 +31,15 @@ jobs:
 
       - run: pnpm build
 
-      - name: Publish stable packages
-        run: |
-          node -e "const fs=require('fs'),p=JSON.parse(fs.readFileSync('packages/mcp-server/package.json','utf8'));p.private=true;fs.writeFileSync('packages/mcp-server/package.json',JSON.stringify(p,null,2))"
-          pnpm changeset publish --no-git-tag
-          node -e "const fs=require('fs'),p=JSON.parse(fs.readFileSync('packages/mcp-server/package.json','utf8'));delete p.private;fs.writeFileSync('packages/mcp-server/package.json',JSON.stringify(p,null,2))"
+      # All public packages (mcp-server and flow-runner graduated from the
+      # experimental dist-tag in 2026-07) go through the single changesets
+      # path — it publishes via pnpm, which rewrites workspace:* dependencies
+      # to real versions. Never publish these packages with raw `npm publish`:
+      # it keeps the literal workspace:* and ships an uninstallable tarball.
+      - name: Publish packages
+        run: pnpm changeset publish --no-git-tag
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Publish mcp-server (experimental)
-        continue-on-error: true
-        run: pnpm --filter @tapflowio/mcp-server exec npm publish --tag experimental --access public
 
       - uses: softprops/action-gh-release@v2
         with:

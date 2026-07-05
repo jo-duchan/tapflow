@@ -1,12 +1,5 @@
 # MCP Server
 
-::: warning Experimental
-`@tapflowio/mcp-server` is experimental. APIs and tool schemas may change between releases. Install with the `experimental` tag:
-```sh
-npm install @tapflowio/mcp-server@experimental
-```
-:::
-
 `@tapflowio/mcp-server` exposes tapflow as a [Model Context Protocol (MCP)](https://modelcontextprotocol.io) server. Claude Code, Codex, and any other MCP-compatible LLM agent can control iOS simulators and Android emulators as native tools — no scripting, no hardcoded selectors.
 
 ## When to use this

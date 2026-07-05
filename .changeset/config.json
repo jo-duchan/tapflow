@@ -8,7 +8,9 @@
       "@tapflowio/agent-core",
       "@tapflowio/ios-agent",
       "@tapflowio/android-agent",
-      "@tapflowio/relay"
+      "@tapflowio/relay",
+      "@tapflowio/flow-runner",
+      "@tapflowio/mcp-server"
     ]
   ],
   "linked": [],
@@ -17,8 +19,6 @@
   "updateInternalDependencies": "patch",
   "ignore": [
     "@tapflowio/dashboard",
-    "@tapflowio/playground",
-    "@tapflowio/mcp-server",
-    "@tapflowio/flow-runner"
+    "@tapflowio/playground"
   ]
 }

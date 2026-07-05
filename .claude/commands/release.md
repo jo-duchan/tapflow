@@ -38,16 +38,22 @@ model: claude-opus-4-8
 ## 5. changeset 작성/보완
 
 - 이번 테마를 담은 changeset이 없으면 추가한다(기본 changelog 생성기는 changeset 본문만 CHANGELOG에 넣으므로, 핵심 변경이 changeset에 없으면 누락된다).
-- **fixed 그룹**(`tapflow`·`agent-core`·`ios-agent`·`android-agent`·`relay`)은 멤버 하나만 명시해도 5개가 동반 bump되지만, CHANGELOG 본문은 명시된 패키지에만 들어간다 → 본문이 필요한 핵심 패키지를 모두 명시한다.
+- **fixed 그룹**(`tapflow`·`agent-core`·`ios-agent`·`android-agent`·`relay`·`flow-runner`·`mcp-server`)은 멤버 하나만 명시해도 전체가 동반 bump되지만, CHANGELOG 본문은 명시된 패키지에만 들어간다 → 본문이 필요한 핵심 패키지를 모두 명시한다.
 
 ## 6. 버전 적용
 
 - `pnpm changeset version`
-- fixed 그룹 5개가 함께 `X.Y.Z`로 올랐는지, changeset 파일이 소비됐는지 확인.
+- fixed 그룹 7개가 함께 `X.Y.Z`로 올랐는지, changeset 파일이 소비됐는지 확인.
 
 ## 7. 이 레포 전용 수동 단계 (놓치기 가장 쉬움)
 
-- **mcp-server**: `.changeset` `ignore` 대상이라 자동 bump 안 됨 → `package.json` version을 **`X.Y.Z-experimental.1`** 로 수동 변경(experimental dist-tag, graduation 전까지 수동).
+- **mcp-server·flow-runner는 2026-07 graduation 이후 fixed 그룹의 정규 멤버다** — experimental 접미사 수동 변경 절차는 폐기됐다. 되살리지 말 것.
+- **flow-runner 첫 발행 전제(1회성, v0.14.0 이전에만 해당)**: `@tapflowio/flow-runner`는 npm에 존재하지 않아 OIDC trusted publishing으로 첫 publish가 불가하다(신규 패키지에는 trusted publisher를 등록할 수 없음). **태그 push 전에** 반드시:
+  1. 로컬에서 seed publish — **반드시 pnpm 경로로**: `pnpm --filter @tapflowio/flow-runner publish --access public --no-git-checks` (raw `npm publish`는 `workspace:*`를 치환하지 않아 설치 불가 tarball이 나간다)
+  2. npmjs.com 패키지 설정에서 trusted publisher 등록: repo `jo-duchan/tapflow`, workflow `release.yml`
+  3. 이걸 건너뛰고 태그를 밀면: 다른 패키지는 발행되고 flow-runner만 실패 → exact pin 의존 때문에 **`npm i tapflow`가 전 사용자에게 깨진다** (복구: 태그 커밋에서 flow-runner 수동 pnpm publish 후 잡 재실행)
+- **graduation 릴리즈(v0.14.0) 태그 전제**: MCP 안정화(Track A — press_key/press_button 수정 + 툴 전수 검증) 머지 완료. `.work/2026-07-05-mcp-followups-plan.md` 확인.
+- **릴리즈 후 1회성**: 구 `experimental` dist-tag가 0.13.0-experimental.1에 고정돼 있어 `@experimental`로 설치한 기존 사용자는 업데이트가 끊긴다 → `npm dist-tag add @tapflowio/mcp-server@X.Y.Z experimental` 로 당겨주거나 태그 제거를 안내한다.
 - **루트 `CHANGELOG.md`**: changeset 관리 밖(Keep a Changelog 수동) → `[Unreleased]`를 `[X.Y.Z] - YYYY-MM-DD`(오늘 날짜)로 승격하고 Added/Changed/Fixed를 채운다.
   - **하단 compare 링크도 함께 갱신**(놓치기 쉬움): `[Unreleased]`를 `vX.Y.Z...HEAD`로 바꾸고, `[X.Y.Z]: .../compare/v{직전}...vX.Y.Z` 링크를 새로 추가한다. 직전 릴리즈 링크가 빠져 있으면 이번에 함께 메운다.
 - **dashboard**: private + `ignore` → 건드리지 않는다.
@@ -76,6 +82,6 @@ model: claude-opus-4-8
   `git fetch origin main && git tag vX.Y.Z <머지 커밋 SHA>`
 - **STOP** — 태그 push는 즉시 npm 발행을 유발하는 되돌리기 어려운 작업이다. 사용자 확인 후 진행한다.
 - `git push origin vX.Y.Z`
-- 워크플로우가 처리하는 것: `pnpm build` → `changeset publish`(stable 5종) → `mcp-server`는 experimental dist-tag로 별도 publish → GitHub Release 생성.
+- 워크플로우가 처리하는 것: `pnpm build` → `changeset publish`(공개 패키지 전부, 단일 경로) → GitHub Release 생성. changesets publish는 위상 정렬 없이 동시 발행하므로, 신규 패키지가 있으면 위 7번의 seed publish 전제를 반드시 지킨다.
 - npm 인증은 **GitHub OIDC(trusted publishing)** 로 동작한다 — NPM_TOKEN 등 별도 토큰이 필요 없다.
 - 발행 확인: Actions의 Release 워크플로우 `success`, `npm view tapflow version`, GitHub Releases 페이지.
