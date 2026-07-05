@@ -103,12 +103,12 @@ Custom commands: `/work-plan {topic}` · `/deep-research {problem}` · `/qa {tar
 
 ### Adversarial Review (required before every code-change PR)
 
-The authoring session inherits its own assumptions, so before `gh pr create` the diff must be refuted by an **independent context** that has NOT seen the working conversation. Docs-only PRs may skip this.
+The authoring session inherits its own assumptions, so before creating a PR the diff must be refuted by an **independent context** that has NOT seen the working conversation. Docs-only PRs may skip the review itself, but still write the record (with the skip reason) — the gate always requires it.
 
 - **Default reviewer**: a fresh subagent given only the diff, repo access, and a refute-first prompt — "find bugs, contract violations, and missing cases; verify every claim with commands; report findings with severity and evidence, plus a checked-and-cleared list". Do not share the authoring session's reasoning with it.
 - **Escalation**: protocol / public-interface / release-infrastructure changes get a second independent channel (a second subagent with a different lens, or Codex for cross-model independence).
-- **Record**: write findings + dispositions (fixed, or skipped with a reason) to `.work/reviews/<branch>.md` (slashes → `__`), including the reviewed HEAD commit hash. Mention the review in the PR body.
-- **Enforcement**: the PreToolUse hook `.claude/hooks/adversarial-review-gate.sh` blocks `gh pr create` unless that record exists and references the current HEAD — any commit after the review invalidates the record until it is refreshed against the new diff.
+- **Record**: write findings + dispositions (fixed, or skipped with a reason) to `.work/reviews/<branch>.md` (slashes → `__`), including the **full 40-character HEAD hash** (`git rev-parse HEAD` — an abbreviated hash will not pass the gate). Mention the review in the PR body.
+- **Enforcement**: the PreToolUse hook `.claude/hooks/adversarial-review-gate.sh` blocks PR creation unless that record exists and references the current HEAD — any commit after the review invalidates the record until it is refreshed against the new diff.
 
 ### Design Principles (SOLID — priority subset)
 
