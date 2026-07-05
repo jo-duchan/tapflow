@@ -29,6 +29,7 @@ Commands are registered in `src/index.ts`:
 | `reset` | Shut down all simulators and emulators |
 | `status [--relay]` | Show connected agents, devices, and session count (WebSocket `agents:listed`) |
 | `logs [--relay] [--lines]` | Query the relay in-memory log buffer (`GET /api/v1/logs`) |
+| `flow run <files...> [--relay, --token, --session, --device, --build, --no-install, --junit, --artifacts, --timeout]` | Replay YAML flows deterministically via `@tapflowio/flow-runner` (no LLM). Exit codes: `0` passed · `1` flow failed · `2` env/config error. Always sends `device:boot` (idempotent — it initializes the agent's touch/stream state). `--token` needs a `view`-scope PAT; REST (`/ui-tree`, `/screenshot`) requires auth even on localhost. |
 
 ### Command Design Principles
 

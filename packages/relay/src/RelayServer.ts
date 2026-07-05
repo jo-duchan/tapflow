@@ -85,6 +85,7 @@ const RESOURCE_THRESHOLD = Number.isFinite(_parsedThreshold) ? _parsedThreshold 
 const AGENT_MSG_TYPES = new Set([
   'agent:register', 'agent:resources', 'screenshot:done', 'screenshot:error',
   'ui:tree:response', 'ui:tree:error',
+  'app:clear-state-done', 'app:clear-state-error',
   'device:booting', 'device:boot-error', 'device:shutdown-done', 'device:ready',
   'session:chrome', 'session:deviceInfo',
   'app:install-done', 'app:install-error', 'app:launch-done', 'app:launch-error',
@@ -608,6 +609,8 @@ export class RelayServer {
       case 'app:launch-error':
       case 'open-url:done':
       case 'open-url:error':
+      case 'app:clear-state-done':
+      case 'app:clear-state-error':
       case 'keyboard:toggled': {
         const session = this.sessions.get(msg.sessionId!)
         if (session?.browserSocket?.readyState === WebSocket.OPEN) {
@@ -638,6 +641,15 @@ export class RelayServer {
           session.agentSocket.send(JSON.stringify(msg))
         } else {
           ws.send(JSON.stringify({ type: 'open-url:error', sessionId: msg.sessionId, message: 'agent offline' }))
+        }
+        break
+      }
+      case 'app:clear-state': {
+        const session = this.sessions.get(msg.sessionId!)
+        if (session?.agentSocket.readyState === WebSocket.OPEN) {
+          session.agentSocket.send(JSON.stringify(msg))
+        } else {
+          ws.send(JSON.stringify({ type: 'app:clear-state-error', sessionId: msg.sessionId, message: 'agent offline' }))
         }
         break
       }

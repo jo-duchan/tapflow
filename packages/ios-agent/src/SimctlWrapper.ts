@@ -4,6 +4,7 @@ import { promisify } from 'util'
 import { promises as fs } from 'fs'
 import { tmpdir } from 'os'
 import { join } from 'path'
+import { PlatformError } from '@tapflowio/agent-core'
 
 const execFileAsync = promisify(execFile)
 const ROTATION_HELPER  = join(import.meta.dirname, '..', 'bin', 'rotation-helper')
@@ -121,6 +122,23 @@ export class SimctlWrapper {
 
   async uninstallApp(bundleId: string): Promise<void> {
     await this.runner.exec('uninstall', 'booted', bundleId)
+  }
+
+  // pm-clear analog for the simulator: wipe the app's data-container contents
+  // (Documents / Library / tmp) instead of uninstalling, so the installed
+  // binary survives and flow-runner clearState → launchApp keeps working.
+  async clearAppData(bundleId: string): Promise<void> {
+    await this.runner.exec('terminate', 'booted', bundleId).catch(() => { /* not running is fine */ })
+    const out = await this.runner.exec('get_app_container', 'booted', bundleId, 'data')
+    const container = out.trim()
+    if (!container.startsWith('/')) {
+      throw new PlatformError(`cannot resolve data container for ${bundleId}: ${container || 'empty simctl output'}`)
+    }
+    for (const sub of ['Documents', 'Library', 'tmp']) {
+      const dir = join(container, sub)
+      const entries = await fs.readdir(dir).catch(() => [] as string[])
+      await Promise.all(entries.map((e) => fs.rm(join(dir, e), { recursive: true, force: true })))
+    }
   }
 
   async installApp(appPath: string): Promise<void> {

@@ -278,4 +278,38 @@ describe('SimctlWrapper', () => {
       expect(isDeviceMissingError('cannot be located on disk')).toBe(false)
     })
   })
+
+  describe('clearAppData', () => {
+    it('wipes Documents/Library/tmp contents but keeps the container structure', async () => {
+      const os = await import('os')
+      const path = await import('path')
+      const realFs = (await vi.importActual<typeof import('fs')>('fs')).promises
+      const container = await realFs.mkdtemp(path.join(os.tmpdir(), 'tapflow-container-'))
+      await realFs.mkdir(path.join(container, 'Documents'))
+      await realFs.mkdir(path.join(container, 'Library', 'Caches'), { recursive: true })
+      await realFs.mkdir(path.join(container, 'tmp'))
+      await realFs.writeFile(path.join(container, 'Documents', 'user.db'), 'data')
+      await realFs.writeFile(path.join(container, 'Library', 'Caches', 'c.bin'), 'cache')
+      await realFs.writeFile(path.join(container, '.metadata.plist'), 'meta')
+
+      const runner = mockRunner({ get_app_container: `${container}\n` })
+      const wrapper = new SimctlWrapper(runner)
+      await wrapper.clearAppData('com.example.app')
+
+      expect(runner.exec).toHaveBeenCalledWith('terminate', 'booted', 'com.example.app')
+      expect(await realFs.readdir(path.join(container, 'Documents'))).toEqual([])
+      expect(await realFs.readdir(path.join(container, 'Library'))).toEqual([])
+      // container root structure and metadata survive (unlike uninstall)
+      expect(await realFs.readdir(container)).toContain('.metadata.plist')
+      expect(await realFs.readdir(container)).toContain('Documents')
+
+      await realFs.rm(container, { recursive: true, force: true })
+    })
+
+    it('throws PlatformError when the data container cannot be resolved', async () => {
+      const runner = mockRunner({ get_app_container: 'No such file or directory\n' })
+      const wrapper = new SimctlWrapper(runner)
+      await expect(wrapper.clearAppData('com.unknown')).rejects.toThrow(/data container/)
+    })
+  })
 })

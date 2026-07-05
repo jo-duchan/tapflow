@@ -17,6 +17,7 @@ import { cmdAgentStart } from './commands/agent-start.js'
 import { cmdReset } from './commands/reset.js'
 import { cmdStatus } from './commands/status.js'
 import { cmdLogs } from './commands/logs.js'
+import { cmdFlowRun, type FlowRunOptions } from './commands/flow-run.js'
 
 process.on('unhandledRejection', (err) => {
   console.error(err instanceof Error ? err.message : String(err))
@@ -99,6 +100,29 @@ cli
   .option('--relay <url>', 'Relay URL (default: http://localhost:4000)')
   .option('--lines <n>', 'Number of lines to show (default: 100)', { default: 100 })
   .action((opts: { relay?: string; lines?: number }) => cmdLogs(opts))
+
+cli
+  .command('flow <subcommand> [...files]', 'Deterministic flow commands (subcommand: run)')
+  .option('--relay <url>', 'Relay URL (default: ws://localhost:4000)')
+  .option('--token <token>', 'PAT for a remote relay (or TAPFLOW_TOKEN env)')
+  .option('--session <id>', 'Target session id (from tapflow status)')
+  .option('--device <name>', 'Target device by name (boots it when shut down)')
+  .option('--build <id>', 'Build under test — installed before the run, launched by the launchApp step')
+  .option('--no-install', 'Skip installing --build before the run')
+  .option('--junit <path>', 'Write a JUnit XML report')
+  .option('--artifacts <dir>', 'Failure screenshot directory (default: .tapflow/artifacts)')
+  .option('--timeout <seconds>', 'Default per-selector wait (default: 10)')
+  .action((subcommand: string, files: string[], opts: FlowRunOptions & { build?: string | number; timeout?: string | number }) => {
+    if (subcommand !== 'run') {
+      console.error(`unknown flow subcommand: ${subcommand} (expected: run)`)
+      process.exit(2)
+    }
+    return cmdFlowRun(files, {
+      ...opts,
+      build: opts.build !== undefined ? Number(opts.build) : undefined,
+      timeout: opts.timeout !== undefined ? Number(opts.timeout) : undefined,
+    })
+  })
 
 cli.help()
 cli.version(version)

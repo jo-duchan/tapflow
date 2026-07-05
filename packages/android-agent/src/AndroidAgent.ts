@@ -1065,6 +1065,23 @@ export class AndroidAgent implements DeviceAgent {
           })
         break
       }
+      case 'app:clear-state': {
+        const { bundleId } = (msg.payload ?? {}) as { bundleId?: string }
+        const sessionId = msg.sessionId
+        const state = this.deviceStates.get(sessionId!)
+        const serial = state ? this.adb.getSerial(state.deviceId) : undefined
+        if (!serial || !bundleId) {
+          this.ws?.send(JSON.stringify({ type: 'app:clear-state-error', sessionId, message: !serial ? 'No booted device' : 'bundleId missing' }))
+          break
+        }
+        this.adb.clearAppData(serial, bundleId)
+          .then(() => this.ws?.send(JSON.stringify({ type: 'app:clear-state-done', sessionId })))
+          .catch((e: unknown) => {
+            const message = e instanceof Error ? e.message : String(e)
+            this.ws?.send(JSON.stringify({ type: 'app:clear-state-error', sessionId, message }))
+          })
+        break
+      }
       case 'ui:tree:request': {
         const raw = msg as unknown as { requestId: string; sessionId?: string }
         const { requestId } = raw

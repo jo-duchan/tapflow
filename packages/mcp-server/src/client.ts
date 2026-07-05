@@ -179,12 +179,14 @@ export class TapflowClient {
     for (let i = 1; i < STEPS; i++) {
       await delay(interval)
       const t = i / STEPS
+      // coordinates here are normalized 0-1 — rounding would snap every
+      // intermediate move to a screen edge
       this.send({
         type: 'input:touch:move',
         sessionId,
         payload: {
-          x: Math.round(startX + (endX - startX) * t),
-          y: Math.round(startY + (endY - startY) * t),
+          x: startX + (endX - startX) * t,
+          y: startY + (endY - startY) * t,
         },
       })
     }
@@ -202,6 +204,37 @@ export class TapflowClient {
 
   pressButton(sessionId: string, button: string): void {
     this.send({ type: 'input:button', sessionId, payload: { button } })
+  }
+
+  // Agents consume KeyboardEvent.code names ({ code, modifiers }) on input:key.
+  pressKeyCode(sessionId: string, code: string): void {
+    this.send({ type: 'input:key', sessionId, payload: { code, modifiers: 0 } })
+  }
+
+  async openUrl(sessionId: string, url: string): Promise<void> {
+    this.send({ type: 'open-url', sessionId, payload: { url } })
+    const msg = await this.waitFor(
+      (m) =>
+        (m['type'] === 'open-url:done' || m['type'] === 'open-url:error') &&
+        m['sessionId'] === sessionId,
+      15_000,
+    )
+    if (msg['type'] === 'open-url:error') {
+      throw new Error((msg['message'] as string) ?? 'Open URL failed')
+    }
+  }
+
+  async clearState(sessionId: string, bundleId: string): Promise<void> {
+    this.send({ type: 'app:clear-state', sessionId, payload: { bundleId } })
+    const msg = await this.waitFor(
+      (m) =>
+        (m['type'] === 'app:clear-state-done' || m['type'] === 'app:clear-state-error') &&
+        m['sessionId'] === sessionId,
+      30_000,
+    )
+    if (msg['type'] === 'app:clear-state-error') {
+      throw new Error((msg['message'] as string) ?? 'Clear state failed')
+    }
   }
 
   async installApp(sessionId: string, buildId: number): Promise<void> {
