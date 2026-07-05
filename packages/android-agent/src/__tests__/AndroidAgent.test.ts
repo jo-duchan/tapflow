@@ -770,11 +770,19 @@ describe('AndroidAgent', () => {
     })
 
     describe('input — type', () => {
-      it('routes input:type to adb.inputText and acks input:type-done', async () => {
-        const spy = vi.spyOn(adb, 'inputText').mockResolvedValue()
+      it('routes input:type to adb.inputText and acks only after it completes', async () => {
+        // gate inputText so we can prove the ack is not sent until it resolves
+        let resolveInput!: () => void
+        const spy = vi.spyOn(adb, 'inputText').mockReturnValue(new Promise<void>((r) => { resolveInput = r }))
         const ack = waitForType(browser, 'input:type-done')
         inject({ type: 'input:type', payload: { text: 'hello' } })
         await vi.waitFor(() => expect(spy).toHaveBeenCalledWith('emulator-5554', 'hello'), { timeout: 500 })
+        // ack must NOT have fired while inputText is still pending
+        let acked = false
+        void ack.then(() => { acked = true })
+        await new Promise((r) => setTimeout(r, 50))
+        expect(acked).toBe(false)
+        resolveInput()
         expect((await ack).sessionId).toBe(agent.sessionId)
       })
 

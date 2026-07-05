@@ -322,14 +322,16 @@ describe('IOSAgent', () => {
       const thInstance = MockTouchHelper.mock.results[0].value
 
       // register the ack listener before sending — the done can arrive before
-      // the setPasteboard/sendKey assertions below finish awaiting
+      // the assertions below finish awaiting
       const done = waitForType(browser, 'input:type-done')
       browser.send(JSON.stringify({ type: 'input:type', sessionId: agent.sessionId, payload: { text: '안녕 hi' } }))
-      // pasteboard first (Unicode-safe), then Cmd+V: KeyV usage 0x19, MetaLeft bit 0x08
-      await vi.waitFor(() => expect(simctl.setPasteboard).toHaveBeenCalledWith('dev-1', '안녕 hi'), { timeout: 500 })
-      await vi.waitFor(() => expect(thInstance.sendKey).toHaveBeenCalledWith(0x19, 0x08), { timeout: 500 })
-      // acks completion so a following input step stays ordered
+      // the ack must arrive AFTER the work completed — so once done lands, the
+      // pasteboard write and Cmd+V (KeyV 0x19, MetaLeft 0x08) are already done.
+      // (a synchronous check here, not waitFor, so moving .then(done) ahead of
+      // the paste would fail this test — the ordering is what's under guard)
       expect((await done).sessionId).toBe(agent.sessionId)
+      expect(simctl.setPasteboard).toHaveBeenCalledWith('dev-1', '안녕 hi')
+      expect(thInstance.sendKey).toHaveBeenCalledWith(0x19, 0x08)
 
       agent.disconnect()
       browser.close()
