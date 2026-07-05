@@ -69,7 +69,8 @@ function parseSelector(v: unknown, ctx: string): Selector {
 }
 
 function parsePoint(v: unknown, ctx: string, key: string): [number, number] {
-  if (!Array.isArray(v) || v.length !== 2 || v.some((n) => typeof n !== 'number' || n < 0 || n > 1)) {
+  // Number.isFinite guards YAML's `.nan`/`.inf`, which pass plain range checks
+  if (!Array.isArray(v) || v.length !== 2 || v.some((n) => typeof n !== 'number' || !Number.isFinite(n) || n < 0 || n > 1)) {
     throw new ValidationError(`${ctx}: "${key}" must be [x, y] with normalized 0-1 coordinates`)
   }
   return [v[0] as number, v[1] as number]

@@ -23,6 +23,14 @@
   "type": "module",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "default": "./dist/index.js"
+    },
+    "./schema/tapflow-flow.schema.json": "./schema/tapflow-flow.schema.json"
+  },
   "files": [
     "dist",
     "schema"

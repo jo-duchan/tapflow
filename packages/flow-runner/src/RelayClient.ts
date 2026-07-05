@@ -49,7 +49,7 @@ export class RelayClient {
         this.ws = ws
         resolve()
       })
-      ws.once('error', reject)
+      ws.once('error', (e) => reject(new PlatformError(`relay connection failed: ${(e as Error).message}`)))
       ws.on('message', (data, isBinary) => {
         if (isBinary) return
         try {
@@ -60,7 +60,7 @@ export class RelayClient {
         this.ws = null
         for (const w of this.waiters.splice(0)) {
           clearTimeout(w.timer)
-          w.reject(new Error('WebSocket closed'))
+          w.reject(new PlatformError('relay connection closed'))
         }
       })
     })

@@ -49,4 +49,12 @@ describe('toJUnitXml', () => {
     const xml = toJUnitXml([passed])
     expect(xml).not.toContain('<failure')
   })
+
+  it('strips XML-invalid control characters from messages', () => {
+    const xml = toJUnitXml([{
+      ...failed,
+      failureMessage: 'boom\x07\x00 with bell',
+    }])
+    expect(xml).toContain('message="boom with bell"')
+  })
 })

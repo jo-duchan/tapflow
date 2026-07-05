@@ -87,6 +87,7 @@ AGENTS.md (common rules — WHAT/WHY/HOW/HOW NOT)
     ├── packages/dashboard/AGENTS.md
     ├── packages/cli/AGENTS.md
     ├── packages/mcp-server/AGENTS.md
+    ├── packages/flow-runner/AGENTS.md
     ├── playground/AGENTS.md
     ├── .work/CLAUDE.md
     ├── .internal/marketing/AGENTS.md

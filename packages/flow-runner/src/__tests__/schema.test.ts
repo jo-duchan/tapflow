@@ -87,6 +87,15 @@ steps:
     expect(flow.steps[0]).toEqual({ type: 'clearState', appId: 'com.other.app' })
   })
 
+  it('rejects non-finite swipe coordinates (.nan)', () => {
+    expect(() => parseFlow(`
+steps:
+  - swipe:
+      from: [.nan, 0.5]
+      to: [0.5, 0.2]
+`, 'x.yaml')).toThrow(/steps\[0\]/)
+  })
+
   it('rejects swipe coordinates outside 0-1', () => {
     expect(() => parseFlow(`
 steps:

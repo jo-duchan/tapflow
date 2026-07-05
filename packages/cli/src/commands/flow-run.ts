@@ -42,11 +42,14 @@ async function resolveSession(client: RelayClient, opts: FlowRunOptions): Promis
   if (opts.session) {
     candidates = devices.filter((d) => d.sessionId === opts.session)
     if (candidates.length === 0) envFail(`session ${opts.session} not found`)
+    if (candidates.length > 1) envFail(`session ${opts.session} matches multiple devices — narrow with --device <name>`)
   } else if (opts.device) {
     candidates = devices.filter((d) => d.name === opts.device)
     if (candidates.length === 0) {
       envFail(`device "${opts.device}" not found (available: ${devices.map((d) => d.name).join(', ')})`)
     }
+    // The same device name can exist on two agents (two Macs) — never pick one silently.
+    if (candidates.length > 1) envFail(`multiple devices named "${opts.device}" — narrow with --session <id> (tapflow status)`)
   } else {
     const booted = devices.filter((d) => d.status === 'booted')
     if (booted.length === 1) {
@@ -67,6 +70,10 @@ async function resolveSession(client: RelayClient, opts: FlowRunOptions): Promis
 
 export async function cmdFlowRun(files: string[], opts: FlowRunOptions): Promise<void> {
   if (files.length === 0) envFail('no flow files given — usage: tapflow flow run .tapflow/flows/*.yaml')
+  // NaN would disable every deadline check in the engine (Date.now() >= NaN is
+  // always false) and hang the run — reject bad numeric flags up front.
+  if (opts.build !== undefined && !Number.isInteger(opts.build)) envFail('--build must be an integer build id (see list_builds / the dashboard)')
+  if (opts.timeout !== undefined && !(Number.isFinite(opts.timeout) && opts.timeout > 0)) envFail('--timeout must be a positive number of seconds')
 
   // Parse everything up front: a schema error is a config problem (exit 2),
   // not a test failure, and it should surface before touching any device.
@@ -113,7 +120,7 @@ export async function cmdFlowRun(files: string[], opts: FlowRunOptions): Promise
     const engineOpts = opts.timeout !== undefined ? { defaultTimeoutMs: opts.timeout * 1000 } : {}
     const results: FlowResult[] = []
 
-    for (const flow of flows) {
+    for (const [flowIndex, flow] of flows.entries()) {
       process.stdout.write(`▶ ${flow.name} `)
       const result = await runFlow(flow, driver, engineOpts)
       results.push(result)
@@ -121,9 +128,12 @@ export async function cmdFlowRun(files: string[], opts: FlowRunOptions): Promise
       if (result.status === 'failed') {
         console.error(`  ${result.failureMessage}`)
         if (result.failureScreenshot) {
-          const dir = opts.artifacts ?? path.join('.tapflow', 'artifacts')
+          // Runtime data belongs in the gitignored .tapflow-data/, and the
+          // index prefix keeps same-named flows from different directories
+          // from overwriting each other's evidence.
+          const dir = opts.artifacts ?? path.join('.tapflow-data', 'artifacts')
           fs.mkdirSync(dir, { recursive: true })
-          const shot = path.join(dir, `${flow.name.replace(/[^\w.-]+/g, '_')}-failure.png`)
+          const shot = path.join(dir, `${String(flowIndex + 1).padStart(2, '0')}-${flow.name.replace(/[^\w.-]+/g, '_')}-failure.png`)
           fs.writeFileSync(shot, result.failureScreenshot)
           console.error(`  screenshot: ${shot}`)
         }

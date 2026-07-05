@@ -176,7 +176,18 @@ export function registerTools(server: McpServer, client: TapflowClient): void {
         if ((flow === undefined) === (flowPath === undefined)) {
           return err('run_flow needs exactly one of "flow" (inline YAML) or "path"')
         }
-        const yamlText = flow ?? fs.readFileSync(flowPath!, 'utf-8')
+        let yamlText: string
+        if (flow !== undefined) {
+          yamlText = flow
+        } else {
+          // Constrain file reads to the server cwd subtree — this tool loads
+          // flow YAML, not arbitrary files. Anything else goes through "flow".
+          const resolved = path.resolve(flowPath!)
+          if (!resolved.startsWith(process.cwd() + path.sep)) {
+            return err(`run_flow "path" must stay inside the MCP server working directory (${process.cwd()}) — pass the YAML inline via "flow" instead`)
+          }
+          yamlText = fs.readFileSync(resolved, 'utf-8')
+        }
         const parsed = parseFlow(yamlText, flowPath ?? 'inline-flow.yaml')
         const driver = makeFlowDriver(client, sessionId, buildId)
         const result = await runFlow(parsed, driver)

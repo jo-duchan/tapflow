@@ -290,6 +290,7 @@ describe('SimctlWrapper', () => {
       await realFs.mkdir(path.join(container, 'tmp'))
       await realFs.writeFile(path.join(container, 'Documents', 'user.db'), 'data')
       await realFs.writeFile(path.join(container, 'Library', 'Caches', 'c.bin'), 'cache')
+      await realFs.writeFile(path.join(container, 'tmp', 'scratch.dat'), 'tmp')
       await realFs.writeFile(path.join(container, '.metadata.plist'), 'meta')
 
       const runner = mockRunner({ get_app_container: `${container}\n` })
@@ -299,6 +300,7 @@ describe('SimctlWrapper', () => {
       expect(runner.exec).toHaveBeenCalledWith('terminate', 'booted', 'com.example.app')
       expect(await realFs.readdir(path.join(container, 'Documents'))).toEqual([])
       expect(await realFs.readdir(path.join(container, 'Library'))).toEqual([])
+      expect(await realFs.readdir(path.join(container, 'tmp'))).toEqual([])
       // container root structure and metadata survive (unlike uninstall)
       expect(await realFs.readdir(container)).toContain('.metadata.plist')
       expect(await realFs.readdir(container)).toContain('Documents')
