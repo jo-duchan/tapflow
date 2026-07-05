@@ -310,25 +310,34 @@ export class TapflowClient {
     const httpBase = this.relayUrl.replace(/^wss?/, (p) => (p === 'wss' ? 'https' : 'http'))
     const headers = { Authorization: `Bearer ${this.token}` }
 
-    const [appsRes, buildsRes] = await Promise.all([
-      fetch(new URL('/api/v1/apps', httpBase).toString(), { headers }),
-      fetch(new URL('/api/v1/builds', httpBase).toString(), { headers }),
-    ])
-
+    const appsRes = await fetch(new URL('/api/v1/apps', httpBase).toString(), { headers })
     if (!appsRes.ok) throw new Error(`Failed to fetch apps: ${appsRes.status}`)
-    if (!buildsRes.ok) throw new Error(`Failed to fetch builds: ${buildsRes.status}`)
-
-    // Both endpoints wrap their lists: GET /apps → { items }, GET /builds → { items, total }.
+    // GET /apps → { items } (unpaginated).
     const apps = ((await appsRes.json()) as { items?: Array<{ id: number; name: string; bundle_id: string; platform: string }> }).items ?? []
-    const builds = ((await buildsRes.json()) as { items?: Array<{
+
+    // GET /builds is paginated (limit ≤ 100, default 20) — page through `total`
+    // so list_builds returns every build, not just the newest page.
+    type RawBuild = {
       id: number
       app_id: number
       version_name: string
       build_number: string
       platform: string
       status_label: string | null
-      created_at: string
-    }> }).items ?? []
+      uploaded_at: string
+    }
+    const builds: RawBuild[] = []
+    for (let page = 0; ; page++) {
+      const url = new URL('/api/v1/builds', httpBase)
+      url.searchParams.set('limit', '100')
+      url.searchParams.set('page', String(page))
+      const res = await fetch(url.toString(), { headers })
+      if (!res.ok) throw new Error(`Failed to fetch builds: ${res.status}`)
+      const body = (await res.json()) as { items?: RawBuild[]; total?: number }
+      const items = body.items ?? []
+      builds.push(...items)
+      if (items.length === 0 || builds.length >= (body.total ?? builds.length)) break
+    }
 
     return apps.map((app) => ({
       id: app.id,
@@ -343,7 +352,7 @@ export class TapflowClient {
           buildNumber: b.build_number,
           platform: b.platform,
           statusLabel: b.status_label,
-          createdAt: b.created_at,
+          createdAt: b.uploaded_at,
         })),
     }))
   }

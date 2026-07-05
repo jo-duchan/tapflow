@@ -2,6 +2,12 @@ import type { Device } from '@tapflowio/agent-core'
 import { PlatformError, ValidationError } from '@tapflowio/agent-core'
 import { defaultRunner, type AdbRunner } from './adb.js'
 
+// Encode text for `adb shell input text`: space → %s, and backslash-escape the
+// characters the device shell would otherwise interpret. Exported for tests.
+export function encodeAdbInputText(text: string): string {
+  return text.replace(/[ ()<>|&;*\\"'`$#~]/g, (c) => (c === ' ' ? '%s' : `\\${c}`))
+}
+
 export class AdbWrapper {
   // avdId ("avd:<name>") → ADB serial ("emulator-5554")
   private readonly serialMap = new Map<string, string>()
@@ -174,6 +180,18 @@ export class AdbWrapper {
 
   async sendInput(serial: string, ...args: string[]): Promise<void> {
     await this.runner.exec('-s', serial, 'shell', 'input', ...args)
+  }
+
+  // `adb shell input text` runs in the device shell, which splits on spaces and
+  // interprets shell metacharacters — encode spaces as %s and backslash-escape
+  // the rest. ASCII only (the `input text` command can't emit arbitrary
+  // Unicode without a custom IME); non-ASCII is dropped with a thrown error so
+  // callers don't silently believe it typed.
+  async inputText(serial: string, text: string): Promise<void> {
+    if (/[^\x20-\x7e]/.test(text)) {
+      throw new PlatformError('Android input text supports ASCII only — non-ASCII characters require a custom IME (not supported)')
+    }
+    await this.runner.exec('-s', serial, 'shell', 'input', 'text', encodeAdbInputText(text))
   }
 
   async sendKeyEvent(serial: string, keyCode: string): Promise<void> {

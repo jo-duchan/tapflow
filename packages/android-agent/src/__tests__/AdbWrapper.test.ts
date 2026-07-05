@@ -208,6 +208,29 @@ describe('AdbWrapper', () => {
     })
   })
 
+  describe('inputText', () => {
+    it('sends `input text` with spaces encoded as %s', async () => {
+      const runner = mockRunner()
+      const wrapper = new AdbWrapper(runner)
+      await wrapper.inputText('emulator-5554', 'user@example.com pw')
+      expect(runner.exec).toHaveBeenCalledWith('-s', 'emulator-5554', 'shell', 'input', 'text', 'user@example.com%spw')
+    })
+
+    it('backslash-escapes shell metacharacters', async () => {
+      const runner = mockRunner()
+      const wrapper = new AdbWrapper(runner)
+      await wrapper.inputText('emulator-5554', 'a(b)&c;d')
+      expect(runner.exec).toHaveBeenCalledWith('-s', 'emulator-5554', 'shell', 'input', 'text', 'a\\(b\\)\\&c\\;d')
+    })
+
+    it('rejects non-ASCII text instead of silently typing nothing', async () => {
+      const runner = mockRunner()
+      const wrapper = new AdbWrapper(runner)
+      await expect(wrapper.inputText('emulator-5554', '안녕')).rejects.toThrow(PlatformError)
+      expect(runner.exec).not.toHaveBeenCalled()
+    })
+  })
+
   describe('clearAppData', () => {
     it('runs pm clear and succeeds on "Success" output', async () => {
       const runner = mockRunner()

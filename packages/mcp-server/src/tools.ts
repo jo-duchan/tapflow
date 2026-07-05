@@ -300,10 +300,12 @@ export function registerTools(server: McpServer, client: TapflowClient): void {
   server.registerTool(
     'type_text',
     {
-      description: 'Type text into the focused input field.',
+      description:
+        'Type text into the currently focused input field (tap the field first). ' +
+        'iOS supports arbitrary Unicode (pasted); Android supports ASCII only.',
       inputSchema: {
         sessionId: z.string().describe('Session ID from list_devices'),
-        text: z.string().describe('Text to type'),
+        text: z.string().describe('Text to type into the focused field'),
       },
     },
     async ({ sessionId, text }) => {
@@ -342,11 +344,11 @@ export function registerTools(server: McpServer, client: TapflowClient): void {
     'press_button',
     {
       description:
-        'Press a hardware button. iOS: "home", "lock", "volume_up", "volume_down" (device-dependent). ' +
-        'Android: "home", "back", "recent_apps", "power", "volume_up", "volume_down".',
+        'Press a hardware button by a cross-platform name: "home", "lock", "volume_up", "volume_down" work on both ' +
+        'platforms. Android also has "back" and "recent_apps" (no-ops on iOS). iOS also has "mute".',
       inputSchema: {
         sessionId: z.string().describe('Session ID from list_devices'),
-        button: z.string().describe('Button name (e.g. "home", "back")'),
+        button: z.string().describe('Button name (e.g. "home", "lock", "back")'),
       },
     },
     async ({ sessionId, button }) => {

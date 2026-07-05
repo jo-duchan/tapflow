@@ -337,19 +337,29 @@ describe('TapflowClient', () => {
   })
 
   describe('listBuilds', () => {
-    it('unwraps the { items } envelopes from /apps and /builds', async () => {
+    it('unwraps { items }, maps uploaded_at→createdAt, and pages through total', async () => {
       const origFetch = globalThis.fetch
+      // 3 builds across 2 pages (limit=100 requested; server splits for the test)
+      const allBuilds = [
+        { id: 7, app_id: 1, version_name: '1.0', build_number: '42', platform: 'ios', status_label: null, uploaded_at: '2026-07-01' },
+        { id: 8, app_id: 1, version_name: '1.1', build_number: '43', platform: 'ios', status_label: 'Done', uploaded_at: '2026-07-02' },
+        { id: 9, app_id: 1, version_name: '1.2', build_number: '44', platform: 'ios', status_label: null, uploaded_at: '2026-07-03' },
+      ]
       globalThis.fetch = async (url: RequestInfo | URL) => {
-        const u = String(url)
-        if (u.includes('/api/v1/apps')) {
+        const u = new URL(String(url))
+        if (u.pathname.endsWith('/apps')) {
           return new Response(JSON.stringify({ items: [{ id: 1, name: 'TheApp', bundle_id: 'com.example', platform: 'ios' }] }), { status: 200, headers: { 'Content-Type': 'application/json' } })
         }
-        return new Response(JSON.stringify({ items: [{ id: 7, app_id: 1, version_name: '1.0', build_number: '42', platform: 'ios', status_label: null, created_at: 'now' }], total: 1 }), { status: 200, headers: { 'Content-Type': 'application/json' } })
+        const page = Number(u.searchParams.get('page'))
+        const items = page === 0 ? allBuilds.slice(0, 2) : allBuilds.slice(2)
+        return new Response(JSON.stringify({ items, total: 3 }), { status: 200, headers: { 'Content-Type': 'application/json' } })
       }
       try {
         const apps = await client.listBuilds()
         expect(apps).toHaveLength(1)
-        expect(apps[0].builds[0].id).toBe(7)
+        // all three builds returned (not just the first page)
+        expect(apps[0].builds.map((b) => b.id)).toEqual([7, 8, 9])
+        expect(apps[0].builds[0].createdAt).toBe('2026-07-01')
       } finally {
         globalThis.fetch = origFetch
       }

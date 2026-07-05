@@ -1033,6 +1033,14 @@ export class AndroidAgent implements DeviceAgent {
         // client-side key forwarding toggle only — no ADB side effect needed
         break
       }
+      case 'input:type': {
+        const state = this.deviceStates.get(msg.sessionId!)
+        const serial = state ? this.adb.getSerial(state.deviceId) : undefined
+        if (!serial) break
+        const { text } = msg.payload as { text: string }
+        if (text) this.adb.inputText(serial, text).catch(() => {})
+        break
+      }
       case 'input:key': {
         const state = this.deviceStates.get(msg.sessionId!)
         const serial = state ? this.adb.getSerial(state.deviceId) : undefined

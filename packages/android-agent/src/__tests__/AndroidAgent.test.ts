@@ -769,6 +769,14 @@ describe('AndroidAgent', () => {
       })
     })
 
+    describe('input — type', () => {
+      it('routes input:type to adb.inputText', async () => {
+        const spy = vi.spyOn(adb, 'inputText').mockResolvedValue()
+        inject({ type: 'input:type', payload: { text: 'hello' } })
+        await vi.waitFor(() => expect(spy).toHaveBeenCalledWith('emulator-5554', 'hello'), { timeout: 500 })
+      })
+    })
+
     describe('input — button', () => {
       it('forwards a named button press to the touch helper', () => {
         const helper = getState().touchHelper!

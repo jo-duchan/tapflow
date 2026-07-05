@@ -123,6 +123,18 @@ describe('AndroidTouchHelper', () => {
       expect(adb.sendKeyEvent).toHaveBeenCalledWith('emulator-5554', 'KEYCODE_APP_SWITCH')
     })
 
+    it('lock 별칭 → KEYCODE_POWER (크로스플랫폼 어휘)', () => {
+      helper.pressButton('lock')
+      expect(adb.sendKeyEvent).toHaveBeenCalledWith('emulator-5554', 'KEYCODE_POWER')
+    })
+
+    it('volume_up / volume_down → KEYCODE_VOLUME_*', () => {
+      helper.pressButton('volume_up')
+      helper.pressButton('volume_down')
+      expect(adb.sendKeyEvent).toHaveBeenCalledWith('emulator-5554', 'KEYCODE_VOLUME_UP')
+      expect(adb.sendKeyEvent).toHaveBeenCalledWith('emulator-5554', 'KEYCODE_VOLUME_DOWN')
+    })
+
     it('알 수 없는 버튼은 sendKeyEvent 호출하지 않음', () => {
       helper.pressButton('unknown_button')
       expect(adb.sendKeyEvent).not.toHaveBeenCalled()
