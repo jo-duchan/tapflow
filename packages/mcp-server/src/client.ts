@@ -312,8 +312,8 @@ export class TapflowClient {
 
     const appsRes = await fetch(new URL('/api/v1/apps', httpBase).toString(), { headers })
     if (!appsRes.ok) throw new Error(`Failed to fetch apps: ${appsRes.status}`)
-    // GET /apps → { items } (unpaginated).
-    const apps = ((await appsRes.json()) as { items?: Array<{ id: number; name: string; bundle_id: string; platform: string }> }).items ?? []
+    // GET /apps → { items } (unpaginated); the bundle id column is bundle_id_key.
+    const apps = ((await appsRes.json()) as { items?: Array<{ id: number; name: string; bundle_id_key: string; platform: string }> }).items ?? []
 
     // GET /builds is paginated (limit ≤ 100, default 20) — page through `total`
     // so list_builds returns every build, not just the newest page.
@@ -342,7 +342,7 @@ export class TapflowClient {
     return apps.map((app) => ({
       id: app.id,
       name: app.name,
-      bundleId: app.bundle_id,
+      bundleId: app.bundle_id_key,
       platform: app.platform,
       builds: builds
         .filter((b) => b.app_id === app.id)

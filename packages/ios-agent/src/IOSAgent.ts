@@ -688,10 +688,20 @@ export class IOSAgent implements DeviceAgent {
         if (!text) break
         // simctl pbcopy → Cmd+V paste. Works for arbitrary Unicode (unlike a
         // per-character HID path, which is limited to keys on the layout) and
-        // needs a focused text field, same as real typing.
-        this.simctl.setPasteboard(state.deviceId, text)
-          .then(() => state.touchHelper?.sendKey(KEY_CODE_MAP['KeyV'], MODIFIER_BITS['MetaLeft']))
-          .catch((e: unknown) => logger.error('input:type (pbcopy+paste) failed:', e))
+        // needs a focused text field, same as real typing. Cmd+V goes through
+        // the same HID keyboard path as input:key, so hide the software
+        // keyboard first when it's up — otherwise iOS desyncs the hardware
+        // keyboard context and the chord is dropped (same guard as input:key).
+        const paste = (): void => { state.touchHelper?.sendKey(KEY_CODE_MAP['KeyV'], MODIFIER_BITS['MetaLeft']) }
+        const doType = async (): Promise<void> => {
+          await this.simctl.setPasteboard(state.deviceId, text)
+          if (state.softKeyboardVisible) {
+            state.softKeyboardVisible = false
+            await this.simctl.hideSoftwareKeyboard(state.deviceId).catch(() => {})
+          }
+          paste()
+        }
+        doType().catch((e: unknown) => logger.error('input:type (pbcopy+paste) failed:', e))
         break
       }
       case 'input:key': {

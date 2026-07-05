@@ -345,7 +345,8 @@ export function registerTools(server: McpServer, client: TapflowClient): void {
     {
       description:
         'Press a hardware button by a cross-platform name: "home", "lock", "volume_up", "volume_down" work on both ' +
-        'platforms. Android also has "back" and "recent_apps" (no-ops on iOS). iOS also has "mute".',
+        'platforms. Android also has "back" and "recent_apps" (no-ops on iOS). Other names map to a device button ' +
+        'only if that device exposes one.',
       inputSchema: {
         sessionId: z.string().describe('Session ID from list_devices'),
         button: z.string().describe('Button name (e.g. "home", "lock", "back")'),

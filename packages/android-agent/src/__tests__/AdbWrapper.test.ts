@@ -223,6 +223,14 @@ describe('AdbWrapper', () => {
       expect(runner.exec).toHaveBeenCalledWith('-s', 'emulator-5554', 'shell', 'input', 'text', 'a\\(b\\)\\&c\\;d')
     })
 
+    it('escapes a literal % so it is not re-expanded as %s (space)', async () => {
+      const runner = mockRunner()
+      const wrapper = new AdbWrapper(runner)
+      await wrapper.inputText('emulator-5554', '50% off')
+      // % → \% (literal), space → %s
+      expect(runner.exec).toHaveBeenCalledWith('-s', 'emulator-5554', 'shell', 'input', 'text', '50\\%%soff')
+    })
+
     it('rejects non-ASCII text instead of silently typing nothing', async () => {
       const runner = mockRunner()
       const wrapper = new AdbWrapper(runner)

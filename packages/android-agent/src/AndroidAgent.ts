@@ -1038,7 +1038,7 @@ export class AndroidAgent implements DeviceAgent {
         const serial = state ? this.adb.getSerial(state.deviceId) : undefined
         if (!serial) break
         const { text } = msg.payload as { text: string }
-        if (text) this.adb.inputText(serial, text).catch(() => {})
+        if (text) this.adb.inputText(serial, text).catch((e: unknown) => logger.error('input:type failed:', e))
         break
       }
       case 'input:key': {

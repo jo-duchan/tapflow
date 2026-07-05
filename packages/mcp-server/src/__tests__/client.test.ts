@@ -348,7 +348,8 @@ describe('TapflowClient', () => {
       globalThis.fetch = async (url: RequestInfo | URL) => {
         const u = new URL(String(url))
         if (u.pathname.endsWith('/apps')) {
-          return new Response(JSON.stringify({ items: [{ id: 1, name: 'TheApp', bundle_id: 'com.example', platform: 'ios' }] }), { status: 200, headers: { 'Content-Type': 'application/json' } })
+          // real server column is bundle_id_key, not bundle_id
+          return new Response(JSON.stringify({ items: [{ id: 1, name: 'TheApp', bundle_id_key: 'com.example', platform: 'ios' }] }), { status: 200, headers: { 'Content-Type': 'application/json' } })
         }
         const page = Number(u.searchParams.get('page'))
         const items = page === 0 ? allBuilds.slice(0, 2) : allBuilds.slice(2)
@@ -357,6 +358,7 @@ describe('TapflowClient', () => {
       try {
         const apps = await client.listBuilds()
         expect(apps).toHaveLength(1)
+        expect(apps[0].bundleId).toBe('com.example') // from bundle_id_key, not undefined
         // all three builds returned (not just the first page)
         expect(apps[0].builds.map((b) => b.id)).toEqual([7, 8, 9])
         expect(apps[0].builds[0].createdAt).toBe('2026-07-01')

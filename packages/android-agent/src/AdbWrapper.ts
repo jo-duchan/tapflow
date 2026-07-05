@@ -2,10 +2,11 @@ import type { Device } from '@tapflowio/agent-core'
 import { PlatformError, ValidationError } from '@tapflowio/agent-core'
 import { defaultRunner, type AdbRunner } from './adb.js'
 
-// Encode text for `adb shell input text`: space → %s, and backslash-escape the
-// characters the device shell would otherwise interpret. Exported for tests.
+// Encode text for `adb shell input text`: space → %s, literal % → \% (so a
+// user's "%s" isn't re-expanded to a space), and backslash-escape the other
+// characters the device shell would interpret. Exported for tests.
 export function encodeAdbInputText(text: string): string {
-  return text.replace(/[ ()<>|&;*\\"'`$#~]/g, (c) => (c === ' ' ? '%s' : `\\${c}`))
+  return text.replace(/[ %()<>|&;*\\"'`$#~]/g, (c) => (c === ' ' ? '%s' : `\\${c}`))
 }
 
 export class AdbWrapper {
