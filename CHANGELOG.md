@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.13.0] - 2026-07-05
+
+### Added
+
+- relay: outbound webhooks for build review-status changes. The relay POSTs to registered URLs when a build's review status transitions to `Done` or `Rejected`, so review outcomes can flow into Slack or the next CI step. Register at runtime via `POST /api/v1/webhooks` (`builds:write` scope) or declare endpoints in `tapflow.config.json` (`webhooks`, with signing secrets read from env vars). Deliveries carry metadata only — never app binaries — and are HMAC-SHA256 signed (`X-Tapflow-Signature`) when a secret is set. Registration blocks loopback and cloud-metadata addresses (#367).
+
 ## [0.12.0] - 2026-07-03
 
 ### Added
@@ -246,7 +252,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Automatic `tapflow.config.json` creation as a side effect of `tapflow start` / `tapflow relay start`.
 
-[Unreleased]: https://github.com/jo-duchan/tapflow/compare/v0.12.0...HEAD
+[Unreleased]: https://github.com/jo-duchan/tapflow/compare/v0.13.0...HEAD
+[0.13.0]: https://github.com/jo-duchan/tapflow/compare/v0.12.0...v0.13.0
 [0.12.0]: https://github.com/jo-duchan/tapflow/compare/v0.11.1...v0.12.0
 [0.11.1]: https://github.com/jo-duchan/tapflow/compare/v0.11.0...v0.11.1
 [0.11.0]: https://github.com/jo-duchan/tapflow/compare/v0.10.0...v0.11.0
