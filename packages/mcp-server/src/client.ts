@@ -198,17 +198,18 @@ export class TapflowClient {
     this.send({ type: 'input:type', sessionId, payload: { text } })
   }
 
-  pressKey(sessionId: string, key: string): void {
-    this.send({ type: 'input:key', sessionId, payload: { key } })
-  }
-
-  pressButton(sessionId: string, button: string): void {
-    this.send({ type: 'input:button', sessionId, payload: { button } })
-  }
-
   // Agents consume KeyboardEvent.code names ({ code, modifiers }) on input:key.
-  pressKeyCode(sessionId: string, code: string): void {
+  // 'Return' is accepted as an alias — neither platform maps it, 'Enter' is the code.
+  pressKey(sessionId: string, key: string): void {
+    const code = key === 'Return' ? 'Enter' : key
     this.send({ type: 'input:key', sessionId, payload: { code, modifiers: 0 } })
+  }
+
+  // Agents consume { name, phase? } on input:button; a phase-less message is a
+  // single press on both platforms (iOS 'home' is legacy-pressed once, chrome
+  // buttons and Android BUTTON_KEY_MAP names resolve by name).
+  pressButton(sessionId: string, button: string): void {
+    this.send({ type: 'input:button', sessionId, payload: { name: button } })
   }
 
   async openUrl(sessionId: string, url: string): Promise<void> {
@@ -271,13 +272,14 @@ export class TapflowClient {
       headers: { Authorization: `Bearer ${this.token}` },
     })
     if (!res.ok) {
-      let message: string
+      // Read text first — res.json() consumes the body, so a later res.text()
+      // fallback can never run after a failed JSON parse.
+      const text = await res.text().catch(() => '')
+      let message = text || `Screenshot failed: ${res.status}`
       try {
-        const body = (await res.json()) as { error?: string }
-        message = body.error ?? `Screenshot failed: ${res.status}`
-      } catch {
-        message = (await res.text().catch(() => '')) || `Screenshot failed: ${res.status}`
-      }
+        const body = JSON.parse(text) as { error?: string }
+        if (body.error) message = body.error
+      } catch { /* keep the raw text */ }
       throw new Error(message)
     }
     return Buffer.from(await res.arrayBuffer())
@@ -316,8 +318,9 @@ export class TapflowClient {
     if (!appsRes.ok) throw new Error(`Failed to fetch apps: ${appsRes.status}`)
     if (!buildsRes.ok) throw new Error(`Failed to fetch builds: ${buildsRes.status}`)
 
-    const apps = (await appsRes.json()) as Array<{ id: number; name: string; bundle_id: string; platform: string }>
-    const builds = (await buildsRes.json()) as Array<{
+    // Both endpoints wrap their lists: GET /apps → { items }, GET /builds → { items, total }.
+    const apps = ((await appsRes.json()) as { items?: Array<{ id: number; name: string; bundle_id: string; platform: string }> }).items ?? []
+    const builds = ((await buildsRes.json()) as { items?: Array<{
       id: number
       app_id: number
       version_name: string
@@ -325,7 +328,7 @@ export class TapflowClient {
       platform: string
       status_label: string | null
       created_at: string
-    }>
+    }> }).items ?? []
 
     return apps.map((app) => ({
       id: app.id,

@@ -169,18 +169,33 @@ describe('TapflowClient', () => {
   })
 
   describe('pressKey', () => {
-    it('sends input:key with key name', async () => {
+    it('sends the agent contract { code, modifiers } — not { key }', async () => {
+      client.pressKey('sess-1', 'Enter')
+      const msg = await waitForMessage(relay, 'input:key')
+      expect(msg).toMatchObject({ type: 'input:key', sessionId: 'sess-1', payload: { code: 'Enter', modifiers: 0 } })
+      expect((msg as { payload: Record<string, unknown> }).payload).not.toHaveProperty('key')
+    })
+
+    it('maps the Return alias to Enter (no platform maps "Return")', async () => {
       client.pressKey('sess-1', 'Return')
       const msg = await waitForMessage(relay, 'input:key')
-      expect(msg).toMatchObject({ type: 'input:key', sessionId: 'sess-1', payload: { key: 'Return' } })
+      expect(msg).toMatchObject({ payload: { code: 'Enter', modifiers: 0 } })
+    })
+
+    it('passes other KeyboardEvent.code names through unchanged', async () => {
+      client.pressKey('sess-1', 'Backspace')
+      const msg = await waitForMessage(relay, 'input:key')
+      expect(msg).toMatchObject({ payload: { code: 'Backspace', modifiers: 0 } })
     })
   })
 
   describe('pressButton', () => {
-    it('sends input:button with button name', async () => {
+    it('sends the agent contract { name } — not { button }', async () => {
       client.pressButton('sess-1', 'home')
       const msg = await waitForMessage(relay, 'input:button')
-      expect(msg).toMatchObject({ type: 'input:button', sessionId: 'sess-1', payload: { button: 'home' } })
+      expect(msg).toMatchObject({ type: 'input:button', sessionId: 'sess-1', payload: { name: 'home' } })
+      expect((msg as { payload: Record<string, unknown> }).payload).not.toHaveProperty('button')
+      expect((msg as { payload: Record<string, unknown> }).payload).not.toHaveProperty('phase')
     })
   })
 
@@ -252,6 +267,17 @@ describe('TapflowClient', () => {
         globalThis.fetch = origFetch
       }
     })
+
+    it('falls back to the response text when the error body is not JSON', async () => {
+      const origFetch = globalThis.fetch
+      globalThis.fetch = async () =>
+        new Response('Bad Gateway', { status: 502, headers: { 'Content-Type': 'text/plain' } })
+      try {
+        await expect(client.screenshot('sess-1')).rejects.toThrow('Bad Gateway')
+      } finally {
+        globalThis.fetch = origFetch
+      }
+    })
   })
 
   describe('queryUITree', () => {
@@ -304,6 +330,26 @@ describe('TapflowClient', () => {
         })
       try {
         await expect(client.queryUITree('sess-1')).rejects.toThrow('uiautomator dump produced no XML')
+      } finally {
+        globalThis.fetch = origFetch
+      }
+    })
+  })
+
+  describe('listBuilds', () => {
+    it('unwraps the { items } envelopes from /apps and /builds', async () => {
+      const origFetch = globalThis.fetch
+      globalThis.fetch = async (url: RequestInfo | URL) => {
+        const u = String(url)
+        if (u.includes('/api/v1/apps')) {
+          return new Response(JSON.stringify({ items: [{ id: 1, name: 'TheApp', bundle_id: 'com.example', platform: 'ios' }] }), { status: 200, headers: { 'Content-Type': 'application/json' } })
+        }
+        return new Response(JSON.stringify({ items: [{ id: 7, app_id: 1, version_name: '1.0', build_number: '42', platform: 'ios', status_label: null, created_at: 'now' }], total: 1 }), { status: 200, headers: { 'Content-Type': 'application/json' } })
+      }
+      try {
+        const apps = await client.listBuilds()
+        expect(apps).toHaveLength(1)
+        expect(apps[0].builds[0].id).toBe(7)
       } finally {
         globalThis.fetch = origFetch
       }
