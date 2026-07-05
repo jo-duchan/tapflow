@@ -21,7 +21,7 @@ head=$(git rev-parse HEAD 2>/dev/null) || exit 0
 record=".work/reviews/${branch//\//__}.md"
 
 if [ ! -f "$record" ]; then
-  echo "Blocked: no adversarial review record ($record). Before creating a PR, have an independent context (a fresh subagent — no extra accounts needed; Codex is optional) review the diff, then write findings and dispositions (fixed / skipped+reason) to that file, including the full 40-char HEAD hash (git rev-parse HEAD). Docs-only PR: skip the review but still write the record with the skip reason. If this command is not actually creating a PR (the text merely mentions the command), split that text into a separate command. See: AGENTS.md > Adversarial Review." >&2
+  echo "Blocked: no adversarial review record ($record). Before creating a PR, have an independent context (a fresh subagent — no extra accounts needed; Codex is optional) review the diff, then write findings and dispositions (fixed / skipped+reason) to that file, including the full 40-char HEAD hash (git rev-parse HEAD). Docs-only PR: skip the review but still write the record with the skip reason and the same full HEAD hash. If this command is not actually creating a PR (the text merely mentions the command), split that text into a separate command. See: AGENTS.md > Adversarial Review." >&2
   exit 2
 fi
 if ! grep -q "$head" "$record"; then
