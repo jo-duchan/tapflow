@@ -194,8 +194,19 @@ export class TapflowClient {
     this.send({ type: 'input:touch:end', sessionId, payload: { x: endX, y: endY } })
   }
 
-  typeText(sessionId: string, text: string): void {
+  // Awaits the agent's ack so a following input (e.g. pressKey Enter) is sent
+  // only after the text has landed — the paste/adb write runs async agent-side.
+  async typeText(sessionId: string, text: string): Promise<void> {
     this.send({ type: 'input:type', sessionId, payload: { text } })
+    const msg = await this.waitFor(
+      (m) =>
+        (m['type'] === 'input:type-done' || m['type'] === 'input:type-error') &&
+        m['sessionId'] === sessionId,
+      15_000,
+    )
+    if (msg['type'] === 'input:type-error') {
+      throw new Error((msg['message'] as string) ?? 'Type text failed')
+    }
   }
 
   // Agents consume KeyboardEvent.code names ({ code, modifiers }) on input:key.

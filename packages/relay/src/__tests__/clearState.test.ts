@@ -127,4 +127,32 @@ describe('app:clear-state relay routing', () => {
 
     agent.close()
   })
+
+  it('forwards input:type-done/error from the agent back to the browser', async () => {
+    const { agent, browser, sessionId } = await setup()
+
+    agent.on('message', (data) => {
+      const msg = JSON.parse(data.toString()) as RelayMessage
+      if (msg.type === 'input:type') {
+        agent.send(JSON.stringify({ type: 'input:type-done', sessionId: msg.sessionId }))
+      }
+    })
+
+    browser.send(JSON.stringify({ type: 'input:type', sessionId, payload: { text: 'hi' } }))
+    const done = await waitForType(browser, 'input:type-done')
+    expect(done.sessionId).toBe(sessionId)
+
+    agent.close()
+    browser.close()
+  })
+
+  it('a browser socket cannot spoof input:type-done (agent-only → 1008 close)', async () => {
+    const { agent, browser, sessionId } = await setup()
+
+    const closed = new Promise<number>((resolve) => browser.on('close', (code) => resolve(code)))
+    browser.send(JSON.stringify({ type: 'input:type-done', sessionId }))
+    expect(await closed).toBe(1008)
+
+    agent.close()
+  })
 })

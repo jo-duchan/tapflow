@@ -185,8 +185,14 @@ export class RelayClient {
     this.send({ type: 'input:touch:end', sessionId, payload: { x: to[0], y: to[1] } })
   }
 
-  typeText(sessionId: string, text: string): void {
+  async typeText(sessionId: string, text: string): Promise<void> {
     this.send({ type: 'input:type', sessionId, payload: { text } })
+    const msg = await this.waitFor(
+      (m) => (m['type'] === 'input:type-done' || m['type'] === 'input:type-error') && m['sessionId'] === sessionId,
+      15_000,
+      'type text',
+    )
+    if (msg['type'] === 'input:type-error') throw new PlatformError((msg['message'] as string) ?? 'type text failed')
   }
 
   pressKey(sessionId: string, code: string): void {

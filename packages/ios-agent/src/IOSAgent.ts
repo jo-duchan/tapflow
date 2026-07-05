@@ -682,26 +682,37 @@ export class IOSAgent implements DeviceAgent {
         break
       }
       case 'input:type': {
-        const state = this.deviceStates.get(msg.sessionId!)
-        if (!state?.touchHelper) break
-        const { text } = msg.payload as { text: string }
-        if (!text) break
+        const sessionId = msg.sessionId
+        const state = this.deviceStates.get(sessionId!)
+        const { text } = (msg.payload ?? {}) as { text?: string }
+        if (!state?.touchHelper) {
+          this.ws?.send(JSON.stringify({ type: 'input:type-error', sessionId, message: 'No booted device' }))
+          break
+        }
         // simctl pbcopy → Cmd+V paste. Works for arbitrary Unicode (unlike a
         // per-character HID path, which is limited to keys on the layout) and
         // needs a focused text field, same as real typing. Cmd+V goes through
         // the same HID keyboard path as input:key, so hide the software
         // keyboard first when it's up — otherwise iOS desyncs the hardware
         // keyboard context and the chord is dropped (same guard as input:key).
-        const paste = (): void => { state.touchHelper?.sendKey(KEY_CODE_MAP['KeyV'], MODIFIER_BITS['MetaLeft']) }
         const doType = async (): Promise<void> => {
+          if (!text) return
           await this.simctl.setPasteboard(state.deviceId, text)
           if (state.softKeyboardVisible) {
             state.softKeyboardVisible = false
             await this.simctl.hideSoftwareKeyboard(state.deviceId).catch(() => {})
           }
-          paste()
+          state.touchHelper?.sendKey(KEY_CODE_MAP['KeyV'], MODIFIER_BITS['MetaLeft'])
         }
-        doType().catch((e: unknown) => logger.error('input:type (pbcopy+paste) failed:', e))
+        // Ack on completion so a following input step (e.g. pressKey Enter) is
+        // only sent after the paste has actually landed.
+        doType()
+          .then(() => this.ws?.send(JSON.stringify({ type: 'input:type-done', sessionId })))
+          .catch((e: unknown) => {
+            const message = e instanceof Error ? e.message : String(e)
+            logger.error('input:type (pbcopy+paste) failed:', e)
+            this.ws?.send(JSON.stringify({ type: 'input:type-error', sessionId, message }))
+          })
         break
       }
       case 'input:key': {

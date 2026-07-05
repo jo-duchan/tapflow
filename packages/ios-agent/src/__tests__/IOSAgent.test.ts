@@ -321,10 +321,41 @@ describe('IOSAgent', () => {
       await vi.waitFor(() => expect(MockTouchHelper.mock.results).toHaveLength(1), { timeout: 500 })
       const thInstance = MockTouchHelper.mock.results[0].value
 
+      // register the ack listener before sending — the done can arrive before
+      // the setPasteboard/sendKey assertions below finish awaiting
+      const done = waitForType(browser, 'input:type-done')
       browser.send(JSON.stringify({ type: 'input:type', sessionId: agent.sessionId, payload: { text: '안녕 hi' } }))
       // pasteboard first (Unicode-safe), then Cmd+V: KeyV usage 0x19, MetaLeft bit 0x08
       await vi.waitFor(() => expect(simctl.setPasteboard).toHaveBeenCalledWith('dev-1', '안녕 hi'), { timeout: 500 })
       await vi.waitFor(() => expect(thInstance.sendKey).toHaveBeenCalledWith(0x19, 0x08), { timeout: 500 })
+      // acks completion so a following input step stays ordered
+      expect((await done).sessionId).toBe(agent.sessionId)
+
+      agent.disconnect()
+      browser.close()
+    })
+
+    it('input:type hides the software keyboard first when it is visible', async () => {
+      const simctl = mockSimctl(true)
+      const browser = new WebSocket(`ws://localhost:${port}`)
+      await waitForOpen(browser)
+      const agent = new IOSAgent({ intervalMs: 50 }, simctl)
+      await agent.connect(`ws://localhost:${port}`)
+      browser.send(JSON.stringify({ type: 'session:start', sessionId: agent.sessionId }))
+      await waitForType(browser, 'session:joined')
+      browser.send(JSON.stringify({ type: 'device:boot', sessionId: agent.sessionId, payload: { deviceId: 'dev-1' } }))
+      await waitForType(browser, 'device:ready')
+      await vi.waitFor(() => expect(MockTouchHelper.mock.results).toHaveLength(1), { timeout: 500 })
+
+      // bring the software keyboard up first
+      browser.send(JSON.stringify({ type: 'input:keyboard:toggle', sessionId: agent.sessionId }))
+      await waitForType(browser, 'keyboard:toggled')
+
+      const typed = waitForType(browser, 'input:type-done')
+      browser.send(JSON.stringify({ type: 'input:type', sessionId: agent.sessionId, payload: { text: 'hi' } }))
+      await typed
+      // hidden before the Cmd+V chord (mirrors the input:key guard)
+      expect(simctl.hideSoftwareKeyboard).toHaveBeenCalledWith('dev-1')
 
       agent.disconnect()
       browser.close()

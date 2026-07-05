@@ -21,8 +21,8 @@ export class RelayDriver implements FlowDriver {
     return this.client.swipe(this.sessionId, from, to, durationMs)
   }
 
-  async inputText(text: string): Promise<void> {
-    this.client.typeText(this.sessionId, text)
+  inputText(text: string): Promise<void> {
+    return this.client.typeText(this.sessionId, text)
   }
 
   async pressKey(code: string): Promise<void> {

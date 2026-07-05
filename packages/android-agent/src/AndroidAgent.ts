@@ -1034,11 +1034,23 @@ export class AndroidAgent implements DeviceAgent {
         break
       }
       case 'input:type': {
-        const state = this.deviceStates.get(msg.sessionId!)
+        const sessionId = msg.sessionId
+        const state = this.deviceStates.get(sessionId!)
         const serial = state ? this.adb.getSerial(state.deviceId) : undefined
-        if (!serial) break
-        const { text } = msg.payload as { text: string }
-        if (text) this.adb.inputText(serial, text).catch((e: unknown) => logger.error('input:type failed:', e))
+        const { text } = (msg.payload ?? {}) as { text?: string }
+        if (!serial) {
+          this.ws?.send(JSON.stringify({ type: 'input:type-error', sessionId, message: 'No booted device' }))
+          break
+        }
+        // Ack on completion so a following input step (e.g. pressKey Enter) is
+        // only sent after the text has actually landed.
+        Promise.resolve(text ? this.adb.inputText(serial, text) : undefined)
+          .then(() => this.ws?.send(JSON.stringify({ type: 'input:type-done', sessionId })))
+          .catch((e: unknown) => {
+            const message = e instanceof Error ? e.message : String(e)
+            logger.error('input:type failed:', e)
+            this.ws?.send(JSON.stringify({ type: 'input:type-error', sessionId, message }))
+          })
         break
       }
       case 'input:key': {

@@ -165,6 +165,9 @@ export class SimctlWrapper {
     await new Promise<void>((resolve, reject) => {
       const proc = spawn('xcrun', ['simctl', 'pbcopy', deviceId])
       proc.on('error', reject)
+      // stdin can emit its own 'error' if the spawn fails mid-write — an
+      // unhandled stream 'error' would crash the agent, so reject instead.
+      proc.stdin.on('error', reject)
       proc.on('close', (code) => (code === 0 ? resolve() : reject(new Error(`simctl pbcopy exited ${code}`))))
       proc.stdin.write(text)
       proc.stdin.end()

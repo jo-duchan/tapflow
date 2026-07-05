@@ -310,7 +310,7 @@ export function registerTools(server: McpServer, client: TapflowClient): void {
     },
     async ({ sessionId, text }) => {
       try {
-        client.typeText(sessionId, text)
+        await client.typeText(sessionId, text)
         return ok(JSON.stringify({ typed: true, text }))
       } catch (e) {
         return err(`type_text failed: ${(e as Error).message}`)

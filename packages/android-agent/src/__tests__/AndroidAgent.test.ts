@@ -770,10 +770,19 @@ describe('AndroidAgent', () => {
     })
 
     describe('input — type', () => {
-      it('routes input:type to adb.inputText', async () => {
+      it('routes input:type to adb.inputText and acks input:type-done', async () => {
         const spy = vi.spyOn(adb, 'inputText').mockResolvedValue()
+        const ack = waitForType(browser, 'input:type-done')
         inject({ type: 'input:type', payload: { text: 'hello' } })
         await vi.waitFor(() => expect(spy).toHaveBeenCalledWith('emulator-5554', 'hello'), { timeout: 500 })
+        expect((await ack).sessionId).toBe(agent.sessionId)
+      })
+
+      it('acks input:type-error when the text is rejected', async () => {
+        vi.spyOn(adb, 'inputText').mockRejectedValue(new Error('ASCII only'))
+        const ack = waitForType(browser, 'input:type-error')
+        inject({ type: 'input:type', payload: { text: '안녕' } })
+        expect((await ack).message).toBe('ASCII only')
       })
     })
 

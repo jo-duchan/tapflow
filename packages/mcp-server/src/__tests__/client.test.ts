@@ -161,10 +161,15 @@ describe('TapflowClient', () => {
   })
 
   describe('typeText', () => {
-    it('sends input:type with text', async () => {
-      client.typeText('sess-1', 'hello')
-      const msg = await waitForMessage(relay, 'input:type')
-      expect(msg).toMatchObject({ type: 'input:type', sessionId: 'sess-1', payload: { text: 'hello' } })
+    it('sends input:type and resolves on input:type-done', async () => {
+      setTimeout(() => relay.send({ type: 'input:type-done', sessionId: 'sess-1' }), 10)
+      await expect(client.typeText('sess-1', 'hello')).resolves.toBeUndefined()
+      expect(await waitForMessage(relay, 'input:type')).toMatchObject({ type: 'input:type', sessionId: 'sess-1', payload: { text: 'hello' } })
+    })
+
+    it('throws on input:type-error', async () => {
+      setTimeout(() => relay.send({ type: 'input:type-error', sessionId: 'sess-1', message: 'No booted device' }), 10)
+      await expect(client.typeText('sess-1', 'x')).rejects.toThrow('No booted device')
     })
   })
 

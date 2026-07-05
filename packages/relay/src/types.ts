@@ -38,6 +38,8 @@ export type MessageType =
   | 'input:pinch:end'
   | 'input:key'
   | 'input:type'
+  | 'input:type-done'
+  | 'input:type-error'
   | 'input:button'
   | 'input:rotate'
   | 'input:keyboard:toggle'
