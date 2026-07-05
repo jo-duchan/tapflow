@@ -13,7 +13,7 @@ cmd=$(printf '%s' "$input" | jq -r '.tool_input.command // ""')
 # Backticks are deliberately NOT a command position (markdown quoting).
 # Fail-open by design (jq/git missing, not a repo): this gate guards a
 # cooperative-but-forgetful agent, not an adversary.
-printf '%s' "$cmd" | grep -qE '(^[[:space:]]*|(;|&&|\||\$\(|then|do)[[:space:]]*)gh[[:space:]]+pr[[:space:]]+create' || exit 0
+printf '%s' "$cmd" | grep -qE '(^[[:space:]]*|(;|&&|\||\$\()[[:space:]]*|(^|[[:space:]])(then|do)[[:space:]]+)gh[[:space:]]+pr[[:space:]]+create' || exit 0
 
 cd "${CLAUDE_PROJECT_DIR:-.}" 2>/dev/null || exit 0
 branch=$(git rev-parse --abbrev-ref HEAD 2>/dev/null) || exit 0
