@@ -1,0 +1,28 @@
+#!/bin/bash
+# PreToolUse(Bash) gate: blocks `gh pr create` unless an adversarial review
+# record exists for the current branch AND references the current HEAD commit.
+# Review records live in .work/reviews/<branch>.md (local-only, gitignored with
+# the rest of .work/). The HEAD-hash check guarantees "reviewed code == PR code":
+# any commit after the review invalidates the record until it is refreshed.
+
+input=$(cat)
+cmd=$(printf '%s' "$input" | jq -r '.tool_input.command // ""')
+# Match `gh pr create` only in command position (line start or after ; && |) —
+# a plain substring match false-positives on commit messages / heredoc bodies
+# that merely mention the command.
+printf '%s' "$cmd" | grep -qE '(^[[:space:]]*|(;|&&|\|)[[:space:]]*)gh[[:space:]]+pr[[:space:]]+create' || exit 0
+
+cd "${CLAUDE_PROJECT_DIR:-.}" 2>/dev/null || exit 0
+branch=$(git rev-parse --abbrev-ref HEAD 2>/dev/null) || exit 0
+head=$(git rev-parse HEAD 2>/dev/null) || exit 0
+record=".work/reviews/${branch//\//__}.md"
+
+if [ ! -f "$record" ]; then
+  echo "Blocked: adversarial review 기록이 없습니다 ($record). PR 생성 전에 독립 컨텍스트(서브에이전트 또는 Codex) 리뷰를 수행하고, 발견사항과 처리 내역(수정 또는 스킵+사유)을 해당 파일에 기록하세요. 기록에는 리뷰한 HEAD 커밋 해시를 포함해야 합니다. 절차: AGENTS.md Workflow 3. Review 참고." >&2
+  exit 2
+fi
+if ! grep -q "$head" "$record"; then
+  echo "Blocked: $record 가 현재 HEAD($head)를 참조하지 않습니다. 리뷰 이후 커밋이 추가되었습니다 — 현재 diff 기준으로 리뷰를 갱신하고 기록에 새 HEAD 해시를 반영한 뒤 다시 시도하세요." >&2
+  exit 2
+fi
+exit 0
