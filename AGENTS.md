@@ -96,10 +96,19 @@ Work logs go in `.work/`. Conventions: [.work/CLAUDE.md](./.work/CLAUDE.md).
 
 1. **Plan** — define requirements + test cases first (`type: plan`).
 2. **Work** — write tests first, implement until they pass.
-3. **Review** — edge cases + real data validation → PR (`type: review`).
+3. **Review** — edge cases + real data validation → **adversarial review** (below) → PR (`type: review`).
 4. **Compound** — extract repeating patterns into test + code + prompt bundles (`type: compound`).
 
 Custom commands: `/work-plan {topic}` · `/deep-research {problem}` · `/qa {target}` · `/doc-sync` · `/compound` · `/promote-decision {topic}` · `/release {major|minor|patch}`.
+
+### Adversarial Review (required before every code-change PR)
+
+The authoring session inherits its own assumptions, so before creating a PR the diff must be refuted by an **independent context** that has NOT seen the working conversation. Docs-only PRs may skip the review itself, but still write the record (with the skip reason) — the gate always requires it.
+
+- **Default reviewer**: a fresh subagent given only the diff, repo access, and a refute-first prompt — "find bugs, contract violations, and missing cases; verify every claim with commands; report findings with severity and evidence, plus a checked-and-cleared list". Do not share the authoring session's reasoning with it.
+- **Escalation**: protocol / public-interface / release-infrastructure changes get a second independent channel (a second subagent with a different lens, or Codex for cross-model independence).
+- **Record**: write findings + dispositions (fixed, or skipped with a reason) to `.work/reviews/<branch>.md` (slashes → `__`), including the **full 40-character HEAD hash** (`git rev-parse HEAD` — an abbreviated hash will not pass the gate). Mention the review in the PR body.
+- **Enforcement**: the PreToolUse hook `.claude/hooks/adversarial-review-gate.sh` blocks PR creation unless that record exists and references the current HEAD — any commit after the review invalidates the record until it is refreshed against the new diff.
 
 ### Design Principles (SOLID — priority subset)
 

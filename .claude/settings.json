@@ -11,6 +11,10 @@
           {
             "type": "command",
             "command": "cmd=$(jq -r '.tool_input.command // \"\"'); printf '%s' \"$cmd\" | perl -CSD -e 'local $/; my $c=<>; if ($c =~ /gh\\s+(pr|issue)\\s+(create|edit)/ && $c =~ /\\p{Hangul}/) { print STDERR \"Blocked: the gh pr/issue command contains Korean. Rewrite the PR/Issue title and body in English, then re-run.\\n\"; exit 2 }'"
+          },
+          {
+            "type": "command",
+            "command": "bash \"$CLAUDE_PROJECT_DIR/.claude/hooks/adversarial-review-gate.sh\""
           }
         ]
       }

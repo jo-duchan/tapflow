@@ -72,6 +72,7 @@ model: claude-opus-4-8
 
 - `git push -u origin release/vX.Y.Z`
 - `gh pr create --base main` — 본문에 버전 표 + 릴리즈노트 + 호환성 근거.
+- adversarial review gate가 릴리즈 PR에도 적용된다 — 버전 범프 PR은 docs-only 취급으로 리뷰 생략 가능하되 `.work/reviews/<브랜치>.md`에 스킵 사유 + full HEAD 해시(git rev-parse HEAD) 기록은 필수.
 - **PR을 머지하지 않는다.** 머지는 사용자 몫.
 
 ## 11. 머지 후 — 태그 push로 발행 트리거 (놓치면 발행이 안 됨)
