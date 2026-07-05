@@ -106,13 +106,25 @@ The people who install, operate, and contribute. Make setup, diagnosis, and oper
 
 ## Phase 5 — Agent Experience (AX) `v0.5.0` and beyond
 
-Treat the LLM agent as a first-class user. The **additive** MCP path — opt-in, never affecting the
-manual testing path — gets optimized here. The foundation already exists (`@tapflowio/mcp-server`
-with MCP tools, plus the screenshot REST endpoint); Phase 5 builds on top.
+tapflow has two QA axes. The browser dashboard is the **manual QA axis**: the whole team tests by
+hand, no setup required. The MCP path is the **automated QA axis**: its main stage is CI/CD. Both
+axes share the same session infrastructure (relay, agents, dashboard observation); the automated
+axis is opt-in and never affects the manual path.
+
+The guiding principle for the automated axis: **an LLM is involved only at authoring time — replay
+is deterministic.** Agents explore the app through MCP tools and generate flow files; CI replays
+those flows with zero LLM calls, which keeps runs idempotent and API cost at zero. Flow files are
+a generated artifact, not a language users must learn.
+
+The foundation already exists (`@tapflowio/mcp-server` with MCP tools, plus the screenshot REST
+endpoint); Phase 5 builds on top.
 
 - [x] Screenshot REST endpoint — `GET /api/v1/sessions/:sessionId/screenshot` for programmatic capture
 - [x] `@tapflowio/mcp-server` — LLM-driven simulator control via MCP tools
-- [#133](https://github.com/jo-duchan/tapflow/issues/133) — UI accessibility tree query for semantic commands (tap by element, not coordinates)
+- [#133](https://github.com/jo-duchan/tapflow/issues/133) — UI accessibility tree query (`query_ui_tree`) — unified element schema with normalized frames, so agents tap by element instead of guessing coordinates
+- [ ] Deterministic YAML flow format + headless CLI runner — state reset and condition-based waits built in, JUnit report + failure screenshots, no LLM at replay time
+- [ ] `run_flow` MCP tool — agents replay verified flows through the same deterministic engine
+- [ ] Dashboard demo recording → YAML flow draft — capture channel for non-developers (after the runner ships)
 
 ---
 
@@ -131,7 +143,7 @@ Larger tracks that fit tapflow's mission but are not yet committed to a version.
 
 The following are out of scope for tapflow's core mission ("browser-based simulator control, data on-premises"):
 
-- **WebDriverAgent / Appium integration** — tapflow is a human QA tool, not an automation framework
+- **External automation framework integration (WebDriverAgent, Appium, Selenium)** — the automated QA axis is served by tapflow's own minimal, deterministic flow runner (Phase 5); wiring in external drivers is not planned
 - **Cloud hosting / SaaS mode** — tapflow is self-hosted by design
 - **Video streaming via WebRTC** — DataChannel instability and lack of P2P benefit in a relay-intermediary architecture make this a net negative
 
