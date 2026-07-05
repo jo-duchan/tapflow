@@ -1,49 +1,54 @@
 {
-  "name": "@tapflowio/mcp-server",
+  "name": "@tapflowio/flow-runner",
   "version": "0.13.0-experimental.1",
-  "description": "MCP server for tapflow — lets LLM agents control iOS/Android simulators via Model Context Protocol",
+  "description": "Deterministic YAML flow runner for tapflow — replay UI test flows against simulators/emulators with zero LLM calls",
   "keywords": [
     "tapflow",
-    "mcp",
-    "model-context-protocol",
+    "flow",
+    "ui-testing",
     "ios",
     "android",
     "simulator",
-    "ai-agent"
+    "ci"
   ],
   "homepage": "https://github.com/jo-duchan/tapflow",
   "bugs": "https://github.com/jo-duchan/tapflow/issues",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/jo-duchan/tapflow.git",
-    "directory": "packages/mcp-server"
+    "directory": "packages/flow-runner"
   },
   "license": "MIT",
   "author": "tapflow contributors",
   "type": "module",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
-  "bin": {
-    "tapflow-mcp": "dist/index.js"
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "default": "./dist/index.js"
+    },
+    "./schema/tapflow-flow.schema.json": "./schema/tapflow-flow.schema.json"
   },
   "files": [
-    "dist"
+    "dist",
+    "schema"
   ],
   "publishConfig": {
     "tag": "experimental",
     "access": "public"
   },
   "scripts": {
-    "build": "tsc && chmod +x dist/index.js",
+    "build": "tsc -b",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "lint": "eslint src"
   },
   "dependencies": {
-    "@modelcontextprotocol/sdk": "^1.29.0",
-    "@tapflowio/flow-runner": "workspace:*",
+    "@tapflowio/agent-core": "workspace:*",
     "ws": "^8.21.0",
-    "zod": "^4.4.3"
+    "yaml": "^2.6.0"
   },
   "devDependencies": {
     "@types/node": "^20.19.43",

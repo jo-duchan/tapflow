@@ -62,8 +62,22 @@ guard let app = NSRunningApplication.runningApplications(withBundleIdentifier: "
     fail(3, "Simulator.app is not running")
 }
 
+// The ios-agent hides Simulator.app after boot to reduce desktop clutter, and
+// hidden apps expose an empty AXWindows list — unhide and wait briefly so tree
+// queries work on agent-booted simulators too.
+if app.isHidden { app.unhide() }
+
 let axApp = AXUIElementCreateApplication(app.processIdentifier)
-guard let windows = attr(axApp, kAXWindowsAttribute) as? [AXUIElement], !windows.isEmpty else {
+var windowList: [AXUIElement] = []
+for attempt in 0..<10 {
+    if let ws = attr(axApp, kAXWindowsAttribute) as? [AXUIElement], !ws.isEmpty {
+        windowList = ws
+        break
+    }
+    if attempt < 9 { usleep(200_000) }
+}
+let windows = windowList
+guard !windows.isEmpty else {
     fail(3, "Simulator.app has no windows (is the device window visible?)")
 }
 

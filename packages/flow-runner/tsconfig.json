@@ -27,18 +27,6 @@
   "references": [
     {
       "path": "../agent-core"
-    },
-    {
-      "path": "../ios-agent"
-    },
-    {
-      "path": "../android-agent"
-    },
-    {
-      "path": "../relay"
-    },
-    {
-      "path": "../flow-runner"
     }
   ]
 }

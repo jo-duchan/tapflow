@@ -99,8 +99,13 @@ export class AdbWrapper {
     return { width: parseInt(m[1], 10), height: parseInt(m[2], 10) }
   }
 
+  // pm clear prints "Failed" with exit code 0 (e.g. unknown package), so the
+  // output must be checked — a silent no-op would break flow-runner clearState.
   async clearAppData(serial: string, packageName: string): Promise<void> {
-    await this.runner.exec('-s', serial, 'shell', 'pm', 'clear', packageName)
+    const out = await this.runner.exec('-s', serial, 'shell', 'pm', 'clear', packageName)
+    if (!out.includes('Success')) {
+      throw new PlatformError(`pm clear failed for ${packageName}: ${out.trim() || 'unknown error'}`)
+    }
   }
 
   async installApp(serial: string, apkPath: string): Promise<void> {

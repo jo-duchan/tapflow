@@ -208,6 +208,25 @@ describe('AdbWrapper', () => {
     })
   })
 
+  describe('clearAppData', () => {
+    it('runs pm clear and succeeds on "Success" output', async () => {
+      const runner = mockRunner()
+      ;(runner.exec as ReturnType<typeof vi.fn>).mockImplementation(async (...args: string[]) =>
+        args.includes('clear') ? 'Success\n' : '')
+      const wrapper = new AdbWrapper(runner)
+      await wrapper.clearAppData('emulator-5554', 'com.example.app')
+      expect(runner.exec).toHaveBeenCalledWith('-s', 'emulator-5554', 'shell', 'pm', 'clear', 'com.example.app')
+    })
+
+    it('throws PlatformError when pm clear reports Failed (exit code 0)', async () => {
+      const runner = mockRunner()
+      ;(runner.exec as ReturnType<typeof vi.fn>).mockImplementation(async (...args: string[]) =>
+        args.includes('clear') ? 'Failed\n' : '')
+      const wrapper = new AdbWrapper(runner)
+      await expect(wrapper.clearAppData('emulator-5554', 'unknown.pkg')).rejects.toThrow(PlatformError)
+    })
+  })
+
   describe('dumpUiHierarchy', () => {
     const XML = `<?xml version='1.0' encoding='UTF-8' standalone='yes' ?>\n<hierarchy rotation="0"><node bounds="[0,0][1080,2400]" /></hierarchy>`
 

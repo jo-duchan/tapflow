@@ -3,7 +3,28 @@ import fs from 'fs'
 import os from 'os'
 import path from 'path'
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
+import { parseFlow, runFlow, type FlowDriver } from '@tapflowio/flow-runner'
 import type { TapflowClient } from './client.js'
+
+// Adapts TapflowClient (this process's single relay connection) to the
+// flow-runner engine surface, so run_flow shares the session the agent
+// already joined via connect_device instead of opening a second one.
+function makeFlowDriver(client: TapflowClient, sessionId: string, buildId?: number): FlowDriver {
+  return {
+    queryUITree: () => client.queryUITree(sessionId),
+    tap: async (x, y) => client.tap(sessionId, x, y),
+    swipe: (from, to, durationMs) => client.swipe(sessionId, from[0], from[1], to[0], to[1], durationMs),
+    inputText: async (text) => client.typeText(sessionId, text),
+    pressKey: async (code) => client.pressKeyCode(sessionId, code),
+    openUrl: (url) => client.openUrl(sessionId, url),
+    launchApp: async () => {
+      if (buildId === undefined) throw new Error('this flow uses launchApp — pass buildId (see list_builds)')
+      await client.launchApp(sessionId, buildId)
+    },
+    clearState: (appId) => client.clearState(sessionId, appId),
+    screenshot: () => client.screenshot(sessionId),
+  }
+}
 
 function getImageDimensions(buf: Buffer, format: string): { width: number; height: number } | null {
   if (format === 'png' && buf.length >= 24) {
@@ -130,6 +151,62 @@ export function registerTools(server: McpServer, client: TapflowClient): void {
         return ok(JSON.stringify({ count: elements.length, elements }, null, 2))
       } catch (e) {
         return err(`query_ui_tree failed: ${(e as Error).message}`)
+      }
+    },
+  )
+
+  server.registerTool(
+    'run_flow',
+    {
+      description:
+        'Replay a tapflow flow (YAML) deterministically — no LLM in the loop. Use this for verified scenarios instead of ' +
+        'tapping step by step: author the flow once, then replay it idempotently. Pass the YAML inline via "flow", or a ' +
+        'file path via "path" (resolved from the MCP server process cwd). Steps: clearState / launchApp / tapOn / ' +
+        'inputText / pressKey / swipe / scroll / openUrl / assertVisible / assertNotVisible. launchApp launches the ' +
+        'buildId argument. Returns per-step results; on failure a screenshot is saved to a temp file.',
+      inputSchema: {
+        sessionId: z.string().describe('Session ID from list_devices (connect_device first)'),
+        flow: z.string().optional().describe('Flow YAML content (inline)'),
+        path: z.string().optional().describe('Path to a flow YAML file (alternative to "flow")'),
+        buildId: z.number().optional().describe('Build under test for the launchApp step (from list_builds)'),
+      },
+    },
+    async ({ sessionId, flow, path: flowPath, buildId }) => {
+      try {
+        if ((flow === undefined) === (flowPath === undefined)) {
+          return err('run_flow needs exactly one of "flow" (inline YAML) or "path"')
+        }
+        let yamlText: string
+        if (flow !== undefined) {
+          yamlText = flow
+        } else {
+          // Constrain file reads to the server cwd subtree — this tool loads
+          // flow YAML, not arbitrary files. Anything else goes through "flow".
+          const resolved = path.resolve(flowPath!)
+          if (!resolved.startsWith(process.cwd() + path.sep)) {
+            return err(`run_flow "path" must stay inside the MCP server working directory (${process.cwd()}) — pass the YAML inline via "flow" instead`)
+          }
+          yamlText = fs.readFileSync(resolved, 'utf-8')
+        }
+        const parsed = parseFlow(yamlText, flowPath ?? 'inline-flow.yaml')
+        const driver = makeFlowDriver(client, sessionId, buildId)
+        const result = await runFlow(parsed, driver)
+
+        let screenshotPath: string | undefined
+        if (result.failureScreenshot) {
+          screenshotPath = path.join(os.tmpdir(), `tapflow-flow-failure-${Date.now()}.png`)
+          fs.writeFileSync(screenshotPath, result.failureScreenshot)
+        }
+        return ok(JSON.stringify({
+          name: result.name,
+          status: result.status,
+          durationMs: result.durationMs,
+          steps: result.steps,
+          ...(result.failureMessage ? { failureMessage: result.failureMessage } : {}),
+          ...(screenshotPath ? { failureScreenshotPath: screenshotPath } : {}),
+        }, null, 2))
+      } catch (e) {
+        return err(`run_flow failed: ${(e as Error).message}`)
       }
     },
   )

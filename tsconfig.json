@@ -8,6 +8,9 @@
       "path": "packages/audiotap-helper"
     },
     {
+      "path": "packages/flow-runner"
+    },
+    {
       "path": "packages/relay"
     },
     {

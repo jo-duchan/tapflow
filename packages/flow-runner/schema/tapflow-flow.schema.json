@@ -1,0 +1,85 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://raw.githubusercontent.com/jo-duchan/tapflow/main/packages/flow-runner/schema/tapflow-flow.schema.json",
+  "title": "tapflow flow",
+  "description": "Deterministic UI test flow replayed by @tapflowio/flow-runner (tapflow flow run). Frames and coordinates are normalized 0-1.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["steps"],
+  "properties": {
+    "name": {
+      "type": "string",
+      "description": "Flow name shown in reports. Defaults to the file name."
+    },
+    "appId": {
+      "type": "string",
+      "description": "Bundle id / application id of the app under test. Required for the bare clearState step."
+    },
+    "steps": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "#/definitions/step" }
+    }
+  },
+  "definitions": {
+    "selector": {
+      "oneOf": [
+        {
+          "type": "string",
+          "minLength": 1,
+          "description": "Bare selector: matched as exact identifier, then exact label, then partial label."
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "anyOf": [{ "required": ["id"] }, { "required": ["label"] }],
+          "properties": {
+            "id": { "type": "string", "minLength": 1, "description": "Exact accessibility identifier / resource-id." },
+            "label": { "type": "string", "minLength": 1, "description": "Label text (exact match first, then substring)." },
+            "timeout": { "type": "number", "exclusiveMinimum": 0, "description": "Seconds to wait for the element (default 10)." }
+          }
+        }
+      ]
+    },
+    "point": {
+      "type": "array",
+      "minItems": 2,
+      "maxItems": 2,
+      "items": { "type": "number", "minimum": 0, "maximum": 1 },
+      "description": "[x, y] normalized 0-1"
+    },
+    "step": {
+      "oneOf": [
+        { "const": "clearState", "description": "Reset the app data of the flow-level appId." },
+        { "const": "launchApp", "description": "Launch the build under test (tapflow flow run --build)." },
+        { "const": "scroll", "description": "Scroll down one screen." },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "minProperties": 1,
+          "maxProperties": 1,
+          "properties": {
+            "clearState": { "type": "string", "minLength": 1, "description": "Reset the app data of this bundle id." },
+            "tapOn": { "$ref": "#/definitions/selector" },
+            "inputText": { "type": "string", "description": "Type into the focused input." },
+            "pressKey": { "type": "string", "minLength": 1, "description": "KeyboardEvent.code name: Enter, Backspace, Escape, Tab, ArrowDown, …" },
+            "openUrl": { "type": "string", "minLength": 1, "description": "Open a deep link / URL." },
+            "scroll": { "enum": ["up", "down", "left", "right"], "description": "Direction to reveal more content." },
+            "swipe": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["from", "to"],
+              "properties": {
+                "from": { "$ref": "#/definitions/point" },
+                "to": { "$ref": "#/definitions/point" },
+                "durationMs": { "type": "number", "exclusiveMinimum": 0, "default": 300 }
+              }
+            },
+            "assertVisible": { "$ref": "#/definitions/selector" },
+            "assertNotVisible": { "$ref": "#/definitions/selector" }
+          }
+        }
+      ]
+    }
+  }
+}
