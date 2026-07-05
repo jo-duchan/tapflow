@@ -9,6 +9,7 @@ function mockRunner(responses: {
   avdName?: string
   osVersion?: string
   screenSize?: string
+  uiDump?: string
 } = {}): AdbRunner {
   return {
     exec: vi.fn(async (...args: string[]) => {
@@ -23,6 +24,9 @@ function mockRunner(responses: {
       }
       if (args.includes('wm') && args.includes('size')) {
         return `Physical size: ${responses.screenSize ?? '1080x2400'}\n`
+      }
+      if (args.includes('uiautomator')) {
+        return responses.uiDump ?? ''
       }
       return ''
     }),
@@ -201,6 +205,39 @@ describe('AdbWrapper', () => {
       await wrapper.setRotation('emulator-5554', 3)
       const calls = (runner.exec as ReturnType<typeof vi.fn>).mock.calls
       expect(calls.every((c) => !c.includes('user_rotation') && !c.includes('accelerometer_rotation'))).toBe(true)
+    })
+  })
+
+  describe('dumpUiHierarchy', () => {
+    const XML = `<?xml version='1.0' encoding='UTF-8' standalone='yes' ?>\n<hierarchy rotation="0"><node bounds="[0,0][1080,2400]" /></hierarchy>`
+
+    it('runs uiautomator dump under the device-side timeout command', async () => {
+      const runner = mockRunner({ uiDump: XML })
+      const wrapper = new AdbWrapper(runner)
+      await wrapper.dumpUiHierarchy('emulator-5554')
+      expect(runner.exec).toHaveBeenCalledWith(
+        '-s', 'emulator-5554', 'exec-out',
+        'timeout', '10', 'uiautomator', 'dump', '/dev/tty',
+      )
+    })
+
+    it('strips the trailing status line and returns clean XML', async () => {
+      const runner = mockRunner({ uiDump: `${XML}UI hierarchy dumped to: /dev/tty\n` })
+      const wrapper = new AdbWrapper(runner)
+      const xml = await wrapper.dumpUiHierarchy('emulator-5554')
+      expect(xml).toBe(XML)
+    })
+
+    it('throws PlatformError when the timed-out dump produced no XML', async () => {
+      const runner = mockRunner({ uiDump: '' })
+      const wrapper = new AdbWrapper(runner)
+      await expect(wrapper.dumpUiHierarchy('emulator-5554')).rejects.toThrow(PlatformError)
+    })
+
+    it('throws PlatformError on truncated XML (dump killed mid-write)', async () => {
+      const runner = mockRunner({ uiDump: `<?xml version='1.0'?>\n<hierarchy rotation="0"><node ` })
+      const wrapper = new AdbWrapper(runner)
+      await expect(wrapper.dumpUiHierarchy('emulator-5554')).rejects.toThrow(PlatformError)
     })
   })
 })

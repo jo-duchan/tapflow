@@ -5,7 +5,7 @@ import { tmpdir } from 'os'
 import { randomUUID } from 'crypto'
 import { spawnSync } from 'child_process'
 import { WebSocket } from 'ws'
-import type { Device, DeviceAgent } from '@tapflowio/agent-core'
+import type { Device, DeviceAgent, UIElement } from '@tapflowio/agent-core'
 import { createLogger, PlatformError, ValidationError } from '@tapflowio/agent-core'
 
 const logger = createLogger('ios-agent')
@@ -37,6 +37,7 @@ import { ensureHelperApp, launchAudioHelper, isAudioSupported } from '@tapflowio
 import { enumerateSimPids } from './SimProcessTree.js'
 import { MjpegStreamer } from './MjpegStreamer.js'
 import { TouchHelper } from './TouchHelper.js'
+import { UITreeReader } from './UITreeReader.js'
 import { DeviceChromeLoader, type ChromeData } from './DeviceChromeLoader.js'
 import { KEY_CODE_MAP } from './KeyCodeMap.js'
 
@@ -108,6 +109,7 @@ export class IOSAgent implements DeviceAgent {
   private readonly handshakeTimeoutMs: number
   private ws: WebSocket | null = null
   private deviceStates = new Map<string, DeviceState>()
+  private readonly uiTreeReader = new UITreeReader()
   // Holds a macOS power assertion while connected so the host doesn't idle-throttle the
   // simulator capture/encode when the Mac is unattended. No-op off macOS.
   private readonly sleepBlocker: SleepBlocker
@@ -743,7 +745,33 @@ export class IOSAgent implements DeviceAgent {
           })
         break
       }
+      case 'ui:tree:request': {
+        const raw = msg as unknown as { requestId: string; sessionId?: string }
+        const { requestId } = raw
+        const sessionId = msg.sessionId
+        const state = this.deviceStates.get(sessionId!)
+        if (!state) {
+          this.ws?.send(JSON.stringify({ type: 'ui:tree:error', sessionId, requestId, message: 'No booted device' }))
+          break
+        }
+        this.readUITree(state.deviceId)
+          .then((elements) => this.ws?.send(JSON.stringify({ type: 'ui:tree:response', sessionId, requestId, elements })))
+          .catch((e: unknown) => {
+            const message = e instanceof Error ? e.message : String(e)
+            this.ws?.send(JSON.stringify({ type: 'ui:tree:error', sessionId, requestId, message }))
+          })
+        break
+      }
     }
+  }
+
+  // The AX helper matches the Simulator window by device *name* (the window
+  // title), so resolve the udid through the device list first.
+  private async readUITree(deviceId: string): Promise<UIElement[]> {
+    const devices = await this.simctl.listDevices()
+    const name = devices.find((d) => d.id === deviceId)?.name
+    if (!name) throw new PlatformError(`device ${deviceId} not found in simctl list`)
+    return this.uiTreeReader.read(name)
   }
 
   /**
@@ -802,6 +830,12 @@ export class IOSAgent implements DeviceAgent {
   shutdown(deviceId: string): Promise<void> { return this.simctl.shutdown(deviceId) }
   installApp(appPath: string): Promise<void> { return this.simctl.installApp(appPath) }
   async launchApp(bundleId: string): Promise<void> { await this.simctl.launchApp(bundleId) }
+
+  async queryUITree(): Promise<UIElement[]> {
+    const state = this.deviceStates.values().next().value
+    if (!state) throw new ValidationError('no booted device — call connect() first')
+    return this.readUITree(state.deviceId)
+  }
 
   // ── Audio output (opt-in, macOS 14.2+ Core Audio process taps) ───────────────────────────────
   // Simulator apps are host processes, so a process tap on the launched app's PID captures its audio

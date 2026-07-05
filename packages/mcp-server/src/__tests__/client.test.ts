@@ -254,6 +254,51 @@ describe('TapflowClient', () => {
     })
   })
 
+  describe('queryUITree', () => {
+    const ELEMENTS = [
+      {
+        role: 'button',
+        label: 'Login',
+        identifier: 'com.example.app:id/login',
+        frame: { x: 0.25, y: 0.5, width: 0.5, height: 0.0625 },
+        enabled: true,
+        rawRole: 'android.widget.Button',
+      },
+    ]
+
+    it('calls the ui-tree REST endpoint with PAT and returns elements', async () => {
+      const origFetch = globalThis.fetch
+      globalThis.fetch = async (url: RequestInfo | URL, init?: RequestInit) => {
+        expect(String(url)).toContain('/api/v1/sessions/sess-1/ui-tree')
+        expect((init?.headers as Record<string, string>)['Authorization']).toBe('Bearer tflw_pat_test')
+        return new Response(JSON.stringify({ elements: ELEMENTS }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        })
+      }
+      try {
+        const elements = await client.queryUITree('sess-1')
+        expect(elements).toEqual(ELEMENTS)
+      } finally {
+        globalThis.fetch = origFetch
+      }
+    })
+
+    it('surfaces the relay error body (e.g. 502 dump failure) as an exception', async () => {
+      const origFetch = globalThis.fetch
+      globalThis.fetch = async () =>
+        new Response(JSON.stringify({ error: 'uiautomator dump produced no XML within 10s' }), {
+          status: 502,
+          headers: { 'Content-Type': 'application/json' },
+        })
+      try {
+        await expect(client.queryUITree('sess-1')).rejects.toThrow('uiautomator dump produced no XML')
+      } finally {
+        globalThis.fetch = origFetch
+      }
+    })
+  })
+
   describe('WebSocket lifecycle', () => {
     it('rejects pending waiters when WS closes', async () => {
       const promise = client.listDevices()

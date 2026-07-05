@@ -17,7 +17,8 @@ The sole contract that platform implementations (ios-agent, android-agent) depen
 
 ## HOW
 
-- The interface contains only platform-neutral methods: `listDevices`, `boot`, `shutdown`, `installApp`, `launchApp`, `screenshot`, `stream`, `touchStart`, `touchMove`, `touchEnd`.
+- The interface contains only platform-neutral methods: `listDevices`, `boot`, `shutdown`, `installApp`, `launchApp`, `screenshot`, `stream`, `touchStart`, `touchMove`, `touchEnd`, `openUrl`, `queryUITree`.
+- `queryUITree` returns the unified `UIElement[]` schema (`role`/`label`/`identifier`/`frame`/`enabled`/`rawRole`); frames are normalized 0-1 in the same coordinate space the touch path consumes. Platform backends (uiautomator, AXUIElement, …) map into this schema on the agent side — relay and mcp-server are pass-through.
 - `AgentRegistry`: platforms self-register via `register(platform, AgentClass, opts?)` (with a `connect` hook and optional `canRun` gate); the CLI drives them through `available()` / `connect(platform, relayUrl, opts)`. `connect`'s `AgentConnectOpts` carries `deviceFilter` and an optional `token` (opaque credential the agent forwards to a remote relay as `Authorization: Bearer`).
 - Interface changes must pass all implementation package tests before merging.
 

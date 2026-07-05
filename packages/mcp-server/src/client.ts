@@ -33,6 +33,17 @@ export interface AppInfo {
   builds: BuildInfo[]
 }
 
+// Unified element schema produced agent-side (mirrors @tapflowio/agent-core UIElement).
+// Frames are normalized 0-1 in the same coordinate space the tap path consumes.
+export interface UIElement {
+  role: 'button' | 'text' | 'input' | 'image' | 'checkbox' | 'switch' | 'slider' | 'list' | 'cell' | 'tab' | 'other'
+  label: string
+  identifier?: string
+  frame: { x: number; y: number; width: number; height: number }
+  enabled: boolean
+  rawRole?: string
+}
+
 type RelayMsg = Record<string, unknown>
 
 interface Waiter {
@@ -237,6 +248,26 @@ export class TapflowClient {
       throw new Error(message)
     }
     return Buffer.from(await res.arrayBuffer())
+  }
+
+  async queryUITree(sessionId: string): Promise<UIElement[]> {
+    const httpBase = this.relayUrl.replace(/^wss?/, (p) => (p === 'wss' ? 'https' : 'http'))
+    const url = new URL(`/api/v1/sessions/${sessionId}/ui-tree`, httpBase)
+    const res = await fetch(url.toString(), {
+      headers: { Authorization: `Bearer ${this.token}` },
+    })
+    if (!res.ok) {
+      let message: string
+      try {
+        const body = (await res.json()) as { error?: string }
+        message = body.error ?? `UI tree query failed: ${res.status}`
+      } catch {
+        message = (await res.text().catch(() => '')) || `UI tree query failed: ${res.status}`
+      }
+      throw new Error(message)
+    }
+    const body = (await res.json()) as { elements?: UIElement[] }
+    return body.elements ?? []
   }
 
   async listBuilds(): Promise<AppInfo[]> {

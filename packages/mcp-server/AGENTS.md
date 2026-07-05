@@ -27,7 +27,9 @@ Connects to the relay over WebSocket + REST (`TapflowClient`), registers MCP too
 
 ### Available tools
 
-`list_devices`, `connect_device`, `disconnect_device`, `boot_device`, `screenshot`, `tap`, `swipe`, `type_text`, `press_key`, `press_button`, `install_app`, `launch_app`, `list_builds`
+`list_devices`, `connect_device`, `disconnect_device`, `boot_device`, `screenshot`, `query_ui_tree`, `tap`, `swipe`, `type_text`, `press_key`, `press_button`, `install_app`, `launch_app`, `list_builds`
+
+`query_ui_tree` returns the unified element schema (`role`/`label`/`identifier`/`frame`/`enabled`/`rawRole`) via `GET /api/v1/sessions/:sessionId/ui-tree`. Frames are normalized 0-1, so a frame center multiplied by the screenshot pixel size feeds straight into `tap`.
 
 ## HOW NOT
 

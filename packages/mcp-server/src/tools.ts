@@ -112,6 +112,29 @@ export function registerTools(server: McpServer, client: TapflowClient): void {
   )
 
   server.registerTool(
+    'query_ui_tree',
+    {
+      description:
+        'Query the accessibility tree of the current screen: interactive and text-bearing elements as ' +
+        '{ role, label, identifier, frame, enabled, rawRole }. Frames are normalized 0-1 relative to the screen. ' +
+        'Prefer this over guessing coordinates from a screenshot: to tap an element, multiply the frame center by the ' +
+        'screenshot pixel size — x = (frame.x + frame.width / 2) * screenshotWidth, y = (frame.y + frame.height / 2) * screenshotHeight — ' +
+        'and pass those pixel coordinates to the tap tool.',
+      inputSchema: {
+        sessionId: z.string().describe('Session ID from list_devices'),
+      },
+    },
+    async ({ sessionId }) => {
+      try {
+        const elements = await client.queryUITree(sessionId)
+        return ok(JSON.stringify({ count: elements.length, elements }, null, 2))
+      } catch (e) {
+        return err(`query_ui_tree failed: ${(e as Error).message}`)
+      }
+    },
+  )
+
+  server.registerTool(
     'screenshot',
     {
       description: 'Capture the current screen of a device. Returns the image so you can analyze it.',

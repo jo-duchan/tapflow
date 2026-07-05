@@ -31,3 +31,36 @@ export interface AndroidButton {
   accessibilityTitle: string
   keyCode: number
 }
+
+// Closed role vocabulary shared by all platforms. Unmappable native roles
+// become 'other'; the platform-native string is preserved in rawRole.
+export type UIElementRole =
+  | 'button'
+  | 'text'
+  | 'input'
+  | 'image'
+  | 'checkbox'
+  | 'switch'
+  | 'slider'
+  | 'list'
+  | 'cell'
+  | 'tab'
+  | 'other'
+
+// Normalized to 0-1 in the same coordinate space the touch input path
+// consumes, so a frame center can be fed straight into tap without conversion.
+export interface UIElementFrame {
+  x: number
+  y: number
+  width: number
+  height: number
+}
+
+export interface UIElement {
+  role: UIElementRole
+  label: string
+  identifier?: string
+  frame: UIElementFrame
+  enabled: boolean
+  rawRole?: string
+}
