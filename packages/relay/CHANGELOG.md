@@ -1,5 +1,17 @@
 # @tapflowio/relay
 
+## 0.13.0
+
+### Minor Changes
+
+- Outbound webhooks for build review-status changes
+
+  The relay now POSTs to registered URLs when a build's review status transitions to `Done` or `Rejected`, so review outcomes can flow into Slack or the next CI step. Endpoints are registered at runtime via the REST API (`/api/v1/webhooks`, `builds:write` scope) or declared in `tapflow.config.json` (`webhooks`, with signing secrets read from env vars). Deliveries carry metadata only — never app binaries — and are HMAC-SHA256 signed (`X-Tapflow-Signature`) when a secret is set. Registration blocks loopback and cloud-metadata addresses.
+
+### Patch Changes
+
+- @tapflowio/agent-core@0.13.0
+
 ## 0.12.0
 
 ### Minor Changes
