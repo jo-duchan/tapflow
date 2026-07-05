@@ -14,7 +14,7 @@ status: living
 
 `@tapflowio/mcp-server`: bridges tapflow to LLM agents via the [Model Context Protocol](https://modelcontextprotocol.io).
 
-Published on the standard npm channel and versioned by changesets in the repo-wide fixed group (graduated from the `experimental` dist-tag in v0.14.0). Never publish with raw `npm publish` — it does not rewrite `workspace:*` dependencies (the package depends on `@tapflowio/flow-runner`); the changesets → pnpm publish path does.
+Published on the standard npm channel and versioned by changesets in the repo-wide fixed group (graduated from the `experimental` dist-tag in 2026-07). Never publish with raw `npm publish` — it does not rewrite `workspace:*` dependencies (the package depends on `@tapflowio/flow-runner`); the changesets → pnpm publish path does.
 
 Connects to the relay over WebSocket + REST (`TapflowClient`), registers MCP tools, and exposes them to any MCP-compatible client (Claude Code, Codex, Cursor, etc.) via stdio transport.
 
