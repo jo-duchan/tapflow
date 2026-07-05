@@ -80,7 +80,15 @@ export function parseUiAutomatorDump(xml: string): UIElement[] {
 
   const elements: UIElement[] = []
   for (const { attrs, bounds } of nodes) {
-    if (!bounds || bounds.x2 <= bounds.x1 || bounds.y2 <= bounds.y1) continue
+    if (!bounds) continue
+    // Clip to the display so partially scrolled-out nodes (negative or
+    // beyond-screen bounds) never break the 0-1 normalized contract;
+    // fully off-screen nodes are dropped.
+    const x1 = Math.max(0, bounds.x1)
+    const y1 = Math.max(0, bounds.y1)
+    const x2 = Math.min(width, bounds.x2)
+    const y2 = Math.min(height, bounds.y2)
+    if (x2 <= x1 || y2 <= y1) continue
 
     const label = attrs['text'] || attrs['content-desc'] || ''
     const interactive =
@@ -95,10 +103,10 @@ export function parseUiAutomatorDump(xml: string): UIElement[] {
       role: toRole(className),
       label,
       frame: {
-        x: round4(bounds.x1 / width),
-        y: round4(bounds.y1 / height),
-        width: round4((bounds.x2 - bounds.x1) / width),
-        height: round4((bounds.y2 - bounds.y1) / height),
+        x: round4(x1 / width),
+        y: round4(y1 / height),
+        width: round4((x2 - x1) / width),
+        height: round4((y2 - y1) / height),
       },
       enabled: attrs['enabled'] !== 'false',
     }

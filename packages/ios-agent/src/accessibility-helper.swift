@@ -36,7 +36,8 @@ func stringAttr(_ el: AXUIElement, _ name: String) -> String? {
 }
 
 func frameOf(_ el: AXUIElement) -> CGRect? {
-    guard let posV = attr(el, kAXPositionAttribute), let sizeV = attr(el, kAXSizeAttribute) else { return nil }
+    guard let posV = attr(el, kAXPositionAttribute), CFGetTypeID(posV) == AXValueGetTypeID(),
+          let sizeV = attr(el, kAXSizeAttribute), CFGetTypeID(sizeV) == AXValueGetTypeID() else { return nil }
     var pos = CGPoint.zero
     var size = CGSize.zero
     guard AXValueGetValue(posV as! AXValue, .cgPoint, &pos),
@@ -66,11 +67,18 @@ guard let windows = attr(axApp, kAXWindowsAttribute) as? [AXUIElement], !windows
     fail(3, "Simulator.app has no windows (is the device window visible?)")
 }
 
-// Window titles look like "iPhone 16 Pro – iOS 18.5". Prefix-match the device
-// name; fall back to the only window when just one device is open.
+// Window titles look like "iPhone 16 Pro – iOS 18.5". Compare the device-name
+// part (before the " – " separator) for exact equality — a raw prefix match
+// would let "iPhone 16 Pro" silently resolve to an open "iPhone 16 Pro Max"
+// window. Fall back to the only window when just one device is open.
+func deviceNamePart(_ title: String) -> String {
+    if let range = title.range(of: " – ") { return String(title[..<range.lowerBound]) }
+    return title
+}
+
 let titled = windows.map { (win: $0, title: stringAttr($0, kAXTitleAttribute) ?? "") }
 let window: AXUIElement
-if let match = titled.first(where: { $0.title == deviceName || $0.title.hasPrefix(deviceName + " ") }) {
+if let match = titled.first(where: { deviceNamePart($0.title) == deviceName }) {
     window = match.win
 } else if windows.count == 1 {
     window = windows[0]

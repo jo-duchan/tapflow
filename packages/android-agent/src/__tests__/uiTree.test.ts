@@ -15,6 +15,8 @@ const attrs = (over: Record<string, string> = {}): string => {
     .join(' ')
 }
 
+const round = (n: number): number => Math.round(n * 10000) / 10000
+
 // 1080x2400 root, matching a typical portrait emulator
 const wrap = (inner: string): string =>
   `<?xml version='1.0' encoding='UTF-8' standalone='yes' ?>\n` +
@@ -96,6 +98,23 @@ describe('parseUiAutomatorDump', () => {
     const els = parseUiAutomatorDump(xml)
     expect(els.map((e) => e.role)).toEqual(cases.map(([, role]) => role))
     expect(els.map((e) => e.rawRole)).toEqual(cases.map(([cls]) => cls))
+  })
+
+  it('clips partially off-screen bounds into 0-1 and drops fully off-screen nodes', () => {
+    const xml = wrap(
+      [
+        // scrolled half above the top edge → y clipped to 0
+        `<node ${attrs({ class: 'android.widget.Button', text: 'Top', clickable: 'true', bounds: '[0,-100][1080,100]' })} />`,
+        // extends past the bottom edge → height clipped to the screen
+        `<node ${attrs({ class: 'android.widget.Button', text: 'Bottom', clickable: 'true', bounds: '[0,2300][1080,2600]' })} />`,
+        // entirely off-screen → dropped
+        `<node ${attrs({ class: 'android.widget.Button', text: 'Gone', clickable: 'true', bounds: '[0,2400][1080,2600]' })} />`,
+      ].join('\n'),
+    )
+    const els = parseUiAutomatorDump(xml)
+    expect(els.map((e) => e.label)).toEqual(['Top', 'Bottom'])
+    expect(els[0].frame).toEqual({ x: 0, y: 0, width: 1, height: round(100 / 2400) })
+    expect(els[1].frame).toEqual({ x: 0, y: round(2300 / 2400), width: 1, height: round(100 / 2400) })
   })
 
   it('falls back to content-desc when text is empty and omits empty identifiers', () => {

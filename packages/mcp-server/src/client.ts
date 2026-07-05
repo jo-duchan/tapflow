@@ -257,13 +257,14 @@ export class TapflowClient {
       headers: { Authorization: `Bearer ${this.token}` },
     })
     if (!res.ok) {
-      let message: string
+      // Read text first — res.json() consumes the body, so a later res.text()
+      // fallback can never run after a failed JSON parse.
+      const text = await res.text().catch(() => '')
+      let message = text || `UI tree query failed: ${res.status}`
       try {
-        const body = (await res.json()) as { error?: string }
-        message = body.error ?? `UI tree query failed: ${res.status}`
-      } catch {
-        message = (await res.text().catch(() => '')) || `UI tree query failed: ${res.status}`
-      }
+        const body = JSON.parse(text) as { error?: string }
+        if (body.error) message = body.error
+      } catch { /* keep the raw text */ }
       throw new Error(message)
     }
     const body = (await res.json()) as { elements?: UIElement[] }

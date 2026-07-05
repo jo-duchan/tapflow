@@ -1,4 +1,4 @@
-import { execFile, execFileSync } from 'child_process'
+import { execFile } from 'child_process'
 import { promisify } from 'util'
 import { existsSync, statSync, unlinkSync } from 'fs'
 import { join } from 'path'
@@ -11,7 +11,10 @@ const execFileAsync = promisify(execFile)
 const SWIFT_SRC = join(import.meta.dirname, '..', 'src', 'accessibility-helper.swift')
 const BINARY = join(import.meta.dirname, '..', 'bin', 'accessibility-helper')
 
-function ensureCompiled(): void {
+// Compiles asynchronously: read() sits on the live request path of an agent
+// that is also pumping video frames, so a synchronous swiftc run would stall
+// every connected session's streaming for the duration of the compile.
+async function ensureCompiled(): Promise<void> {
   if (existsSync(BINARY)) {
     // Swift source is not included in the published package — skip recompilation check
     if (!existsSync(SWIFT_SRC)) return
@@ -25,7 +28,7 @@ function ensureCompiled(): void {
     throw new PlatformError('accessibility-helper binary missing and Swift source not found — reinstall @tapflowio/ios-agent')
   }
   logger.info('compiling accessibility-helper...')
-  execFileSync('swiftc', [SWIFT_SRC, '-o', BINARY], { stdio: ['ignore', 'ignore', 'inherit'] })
+  await execFileAsync('swiftc', [SWIFT_SRC, '-o', BINARY])
   logger.info('compiled OK')
 }
 
@@ -100,7 +103,7 @@ export function mapAxNodes(nodes: AxNode[]): UIElement[] {
 export type HelperRunner = (deviceName: string) => Promise<string>
 
 const defaultRunner: HelperRunner = async (deviceName) => {
-  ensureCompiled()
+  await ensureCompiled()
   const { stdout } = await execFileAsync(BINARY, [deviceName], {
     timeout: 15_000,
     maxBuffer: 32 * 1024 * 1024,

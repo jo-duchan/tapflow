@@ -98,6 +98,13 @@ describe('UITreeReader', () => {
     await expect(reader.read('iPhone 16 Pro')).rejects.toThrow(/Simulator.app must be running/)
   })
 
+  it('maps a killed helper process (timeout) to an explicit timeout error', async () => {
+    const reader = new UITreeReader(async () => {
+      throw Object.assign(new Error('killed'), { killed: true })
+    })
+    await expect(reader.read('iPhone 16 Pro')).rejects.toThrow(/timed out/)
+  })
+
   it('throws PlatformError on malformed helper output (never a silent empty tree)', async () => {
     const reader = new UITreeReader(async () => 'not json')
     await expect(reader.read('iPhone 16 Pro')).rejects.toThrow(PlatformError)

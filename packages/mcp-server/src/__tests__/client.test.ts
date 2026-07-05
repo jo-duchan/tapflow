@@ -284,6 +284,17 @@ describe('TapflowClient', () => {
       }
     })
 
+    it('falls back to the response text when the error body is not JSON', async () => {
+      const origFetch = globalThis.fetch
+      globalThis.fetch = async () =>
+        new Response('Bad Gateway', { status: 502, headers: { 'Content-Type': 'text/plain' } })
+      try {
+        await expect(client.queryUITree('sess-1')).rejects.toThrow('Bad Gateway')
+      } finally {
+        globalThis.fetch = origFetch
+      }
+    })
+
     it('surfaces the relay error body (e.g. 502 dump failure) as an exception', async () => {
       const origFetch = globalThis.fetch
       globalThis.fetch = async () =>
