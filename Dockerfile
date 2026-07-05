@@ -3,6 +3,9 @@ FROM node:22-alpine AS builder
 
 WORKDIR /app
 
+# git is required by lefthook/prepare postinstall scripts that run during pnpm install.
+RUN apk add --no-cache git
+
 # Install pnpm
 RUN npm install -g pnpm@9.15.1
 
