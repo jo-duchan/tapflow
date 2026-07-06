@@ -194,21 +194,33 @@ export class TapflowClient {
     this.send({ type: 'input:touch:end', sessionId, payload: { x: endX, y: endY } })
   }
 
-  typeText(sessionId: string, text: string): void {
+  // Awaits the agent's ack so a following input (e.g. pressKey Enter) is sent
+  // only after the text has landed — the paste/adb write runs async agent-side.
+  async typeText(sessionId: string, text: string): Promise<void> {
     this.send({ type: 'input:type', sessionId, payload: { text } })
-  }
-
-  pressKey(sessionId: string, key: string): void {
-    this.send({ type: 'input:key', sessionId, payload: { key } })
-  }
-
-  pressButton(sessionId: string, button: string): void {
-    this.send({ type: 'input:button', sessionId, payload: { button } })
+    const msg = await this.waitFor(
+      (m) =>
+        (m['type'] === 'input:type-done' || m['type'] === 'input:type-error') &&
+        m['sessionId'] === sessionId,
+      15_000,
+    )
+    if (msg['type'] === 'input:type-error') {
+      throw new Error((msg['message'] as string) ?? 'Type text failed')
+    }
   }
 
   // Agents consume KeyboardEvent.code names ({ code, modifiers }) on input:key.
-  pressKeyCode(sessionId: string, code: string): void {
+  // 'Return' is accepted as an alias — neither platform maps it, 'Enter' is the code.
+  pressKey(sessionId: string, key: string): void {
+    const code = key === 'Return' ? 'Enter' : key
     this.send({ type: 'input:key', sessionId, payload: { code, modifiers: 0 } })
+  }
+
+  // Agents consume { name, phase? } on input:button; a phase-less message is a
+  // single press on both platforms (iOS 'home' is legacy-pressed once, chrome
+  // buttons and Android BUTTON_KEY_MAP names resolve by name).
+  pressButton(sessionId: string, button: string): void {
+    this.send({ type: 'input:button', sessionId, payload: { name: button } })
   }
 
   async openUrl(sessionId: string, url: string): Promise<void> {
@@ -271,13 +283,14 @@ export class TapflowClient {
       headers: { Authorization: `Bearer ${this.token}` },
     })
     if (!res.ok) {
-      let message: string
+      // Read text first — res.json() consumes the body, so a later res.text()
+      // fallback can never run after a failed JSON parse.
+      const text = await res.text().catch(() => '')
+      let message = text || `Screenshot failed: ${res.status}`
       try {
-        const body = (await res.json()) as { error?: string }
-        message = body.error ?? `Screenshot failed: ${res.status}`
-      } catch {
-        message = (await res.text().catch(() => '')) || `Screenshot failed: ${res.status}`
-      }
+        const body = JSON.parse(text) as { error?: string }
+        if (body.error) message = body.error
+      } catch { /* keep the raw text */ }
       throw new Error(message)
     }
     return Buffer.from(await res.arrayBuffer())
@@ -308,29 +321,39 @@ export class TapflowClient {
     const httpBase = this.relayUrl.replace(/^wss?/, (p) => (p === 'wss' ? 'https' : 'http'))
     const headers = { Authorization: `Bearer ${this.token}` }
 
-    const [appsRes, buildsRes] = await Promise.all([
-      fetch(new URL('/api/v1/apps', httpBase).toString(), { headers }),
-      fetch(new URL('/api/v1/builds', httpBase).toString(), { headers }),
-    ])
-
+    const appsRes = await fetch(new URL('/api/v1/apps', httpBase).toString(), { headers })
     if (!appsRes.ok) throw new Error(`Failed to fetch apps: ${appsRes.status}`)
-    if (!buildsRes.ok) throw new Error(`Failed to fetch builds: ${buildsRes.status}`)
+    // GET /apps → { items } (unpaginated); the bundle id column is bundle_id_key.
+    const apps = ((await appsRes.json()) as { items?: Array<{ id: number; name: string; bundle_id_key: string; platform: string }> }).items ?? []
 
-    const apps = (await appsRes.json()) as Array<{ id: number; name: string; bundle_id: string; platform: string }>
-    const builds = (await buildsRes.json()) as Array<{
+    // GET /builds is paginated (limit ≤ 100, default 20) — page through `total`
+    // so list_builds returns every build, not just the newest page.
+    type RawBuild = {
       id: number
       app_id: number
       version_name: string
       build_number: string
       platform: string
       status_label: string | null
-      created_at: string
-    }>
+      uploaded_at: string
+    }
+    const builds: RawBuild[] = []
+    for (let page = 0; ; page++) {
+      const url = new URL('/api/v1/builds', httpBase)
+      url.searchParams.set('limit', '100')
+      url.searchParams.set('page', String(page))
+      const res = await fetch(url.toString(), { headers })
+      if (!res.ok) throw new Error(`Failed to fetch builds: ${res.status}`)
+      const body = (await res.json()) as { items?: RawBuild[]; total?: number }
+      const items = body.items ?? []
+      builds.push(...items)
+      if (items.length === 0 || builds.length >= (body.total ?? builds.length)) break
+    }
 
     return apps.map((app) => ({
       id: app.id,
       name: app.name,
-      bundleId: app.bundle_id,
+      bundleId: app.bundle_id_key,
       platform: app.platform,
       builds: builds
         .filter((b) => b.app_id === app.id)
@@ -340,7 +363,7 @@ export class TapflowClient {
           buildNumber: b.build_number,
           platform: b.platform,
           statusLabel: b.status_label,
-          createdAt: b.created_at,
+          createdAt: b.uploaded_at,
         })),
     }))
   }

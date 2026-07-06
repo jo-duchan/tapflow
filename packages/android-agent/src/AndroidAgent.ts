@@ -1033,6 +1033,26 @@ export class AndroidAgent implements DeviceAgent {
         // client-side key forwarding toggle only — no ADB side effect needed
         break
       }
+      case 'input:type': {
+        const sessionId = msg.sessionId
+        const state = this.deviceStates.get(sessionId!)
+        const serial = state ? this.adb.getSerial(state.deviceId) : undefined
+        const { text } = (msg.payload ?? {}) as { text?: string }
+        if (!serial) {
+          this.ws?.send(JSON.stringify({ type: 'input:type-error', sessionId, message: 'No booted device' }))
+          break
+        }
+        // Ack on completion so a following input step (e.g. pressKey Enter) is
+        // only sent after the text has actually landed.
+        Promise.resolve(text ? this.adb.inputText(serial, text) : undefined)
+          .then(() => this.ws?.send(JSON.stringify({ type: 'input:type-done', sessionId })))
+          .catch((e: unknown) => {
+            const message = e instanceof Error ? e.message : String(e)
+            logger.error('input:type failed:', e)
+            this.ws?.send(JSON.stringify({ type: 'input:type-error', sessionId, message }))
+          })
+        break
+      }
       case 'input:key': {
         const state = this.deviceStates.get(msg.sessionId!)
         const serial = state ? this.adb.getSerial(state.deviceId) : undefined

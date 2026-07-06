@@ -1,5 +1,5 @@
 import { randomUUID } from 'crypto'
-import { execFile } from 'child_process'
+import { execFile, spawn } from 'child_process'
 import { promisify } from 'util'
 import { promises as fs } from 'fs'
 import { tmpdir } from 'os'
@@ -155,6 +155,23 @@ export class SimctlWrapper {
 
   async openUrl(deviceId: string, url: string): Promise<void> {
     await this.runner.exec('openurl', deviceId, url)
+  }
+
+  // Set the device pasteboard from stdin. Not routed through SimctlRunner
+  // because pbcopy reads text from stdin, which the exec(...args) contract
+  // doesn't carry — same exception as the osascript call in boot(). Used by
+  // IOSAgent for input:type (pbcopy → Cmd+V paste).
+  async setPasteboard(deviceId: string, text: string): Promise<void> {
+    await new Promise<void>((resolve, reject) => {
+      const proc = spawn('xcrun', ['simctl', 'pbcopy', deviceId])
+      proc.on('error', reject)
+      // stdin can emit its own 'error' if the spawn fails mid-write — an
+      // unhandled stream 'error' would crash the agent, so reject instead.
+      proc.stdin.on('error', reject)
+      proc.on('close', (code) => (code === 0 ? resolve() : reject(new Error(`simctl pbcopy exited ${code}`))))
+      proc.stdin.write(text)
+      proc.stdin.end()
+    })
   }
 
   async screenshot(format: 'png' | 'jpeg' = 'png'): Promise<Buffer> {

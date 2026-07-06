@@ -120,6 +120,7 @@ function mockSimctl(booted = false): SimctlWrapper {
     syncKeyboardsFromLanguages: vi.fn().mockResolvedValue(undefined),
     showSoftwareKeyboard: vi.fn().mockResolvedValue(undefined),
     hideSoftwareKeyboard: vi.fn().mockResolvedValue(undefined),
+    setPasteboard: vi.fn().mockResolvedValue(undefined),
     stopKeyboardDaemon: vi.fn(),
   } as unknown as SimctlWrapper
 }
@@ -306,6 +307,61 @@ describe('IOSAgent', () => {
       const thInstance = MockTouchHelper.mock.results[0].value
       return { browser, agent, thInstance }
     }
+
+    it('input:type sets the pasteboard then pastes with Cmd+V', async () => {
+      const simctl = mockSimctl(true)
+      const browser = new WebSocket(`ws://localhost:${port}`)
+      await waitForOpen(browser)
+      const agent = new IOSAgent({ intervalMs: 50 }, simctl)
+      await agent.connect(`ws://localhost:${port}`)
+      browser.send(JSON.stringify({ type: 'session:start', sessionId: agent.sessionId }))
+      await waitForType(browser, 'session:joined')
+      browser.send(JSON.stringify({ type: 'device:boot', sessionId: agent.sessionId, payload: { deviceId: 'dev-1' } }))
+      await waitForType(browser, 'device:ready')
+      await vi.waitFor(() => expect(MockTouchHelper.mock.results).toHaveLength(1), { timeout: 500 })
+      const thInstance = MockTouchHelper.mock.results[0].value
+
+      // register the ack listener before sending — the done can arrive before
+      // the assertions below finish awaiting
+      const done = waitForType(browser, 'input:type-done')
+      browser.send(JSON.stringify({ type: 'input:type', sessionId: agent.sessionId, payload: { text: '안녕 hi' } }))
+      // the ack must arrive AFTER the work completed — so once done lands, the
+      // pasteboard write and Cmd+V (KeyV 0x19, MetaLeft 0x08) are already done.
+      // (a synchronous check here, not waitFor, so moving .then(done) ahead of
+      // the paste would fail this test — the ordering is what's under guard)
+      expect((await done).sessionId).toBe(agent.sessionId)
+      expect(simctl.setPasteboard).toHaveBeenCalledWith('dev-1', '안녕 hi')
+      expect(thInstance.sendKey).toHaveBeenCalledWith(0x19, 0x08)
+
+      agent.disconnect()
+      browser.close()
+    })
+
+    it('input:type hides the software keyboard first when it is visible', async () => {
+      const simctl = mockSimctl(true)
+      const browser = new WebSocket(`ws://localhost:${port}`)
+      await waitForOpen(browser)
+      const agent = new IOSAgent({ intervalMs: 50 }, simctl)
+      await agent.connect(`ws://localhost:${port}`)
+      browser.send(JSON.stringify({ type: 'session:start', sessionId: agent.sessionId }))
+      await waitForType(browser, 'session:joined')
+      browser.send(JSON.stringify({ type: 'device:boot', sessionId: agent.sessionId, payload: { deviceId: 'dev-1' } }))
+      await waitForType(browser, 'device:ready')
+      await vi.waitFor(() => expect(MockTouchHelper.mock.results).toHaveLength(1), { timeout: 500 })
+
+      // bring the software keyboard up first
+      browser.send(JSON.stringify({ type: 'input:keyboard:toggle', sessionId: agent.sessionId }))
+      await waitForType(browser, 'keyboard:toggled')
+
+      const typed = waitForType(browser, 'input:type-done')
+      browser.send(JSON.stringify({ type: 'input:type', sessionId: agent.sessionId, payload: { text: 'hi' } }))
+      await typed
+      // hidden before the Cmd+V chord (mirrors the input:key guard)
+      expect(simctl.hideSoftwareKeyboard).toHaveBeenCalledWith('dev-1')
+
+      agent.disconnect()
+      browser.close()
+    })
 
     it('input:pinch:start calls touchHelper.pinchStart', async () => {
       const { browser, agent, thInstance } = await setupPinchSession()

@@ -8,6 +8,7 @@ const BUTTON_KEY_MAP: Record<string, string> = {
   back: 'KEYCODE_BACK',
   recent_apps: 'KEYCODE_APP_SWITCH',
   power: 'KEYCODE_POWER',
+  lock: 'KEYCODE_POWER', // cross-platform alias — Android's lock is the power key
   volume_up: 'KEYCODE_VOLUME_UP',
   volume_down: 'KEYCODE_VOLUME_DOWN',
 }

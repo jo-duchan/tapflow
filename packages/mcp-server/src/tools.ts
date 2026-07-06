@@ -15,7 +15,7 @@ function makeFlowDriver(client: TapflowClient, sessionId: string, buildId?: numb
     tap: async (x, y) => client.tap(sessionId, x, y),
     swipe: (from, to, durationMs) => client.swipe(sessionId, from[0], from[1], to[0], to[1], durationMs),
     inputText: async (text) => client.typeText(sessionId, text),
-    pressKey: async (code) => client.pressKeyCode(sessionId, code),
+    pressKey: async (code) => client.pressKey(sessionId, code),
     openUrl: (url) => client.openUrl(sessionId, url),
     launchApp: async () => {
       if (buildId === undefined) throw new Error('this flow uses launchApp — pass buildId (see list_builds)')
@@ -300,15 +300,17 @@ export function registerTools(server: McpServer, client: TapflowClient): void {
   server.registerTool(
     'type_text',
     {
-      description: 'Type text into the focused input field.',
+      description:
+        'Type text into the currently focused input field (tap the field first). ' +
+        'iOS supports arbitrary Unicode (pasted); Android supports ASCII only.',
       inputSchema: {
         sessionId: z.string().describe('Session ID from list_devices'),
-        text: z.string().describe('Text to type'),
+        text: z.string().describe('Text to type into the focused field'),
       },
     },
     async ({ sessionId, text }) => {
       try {
-        client.typeText(sessionId, text)
+        await client.typeText(sessionId, text)
         return ok(JSON.stringify({ typed: true, text }))
       } catch (e) {
         return err(`type_text failed: ${(e as Error).message}`)
@@ -319,10 +321,13 @@ export function registerTools(server: McpServer, client: TapflowClient): void {
   server.registerTool(
     'press_key',
     {
-      description: 'Press a keyboard key (e.g. "Return", "Delete", "Escape").',
+      description:
+        'Press a keyboard key by its KeyboardEvent.code name: "Enter", "Backspace", "Escape", "Tab", ' +
+        '"ArrowUp"/"ArrowDown"/"ArrowLeft"/"ArrowRight", letters as "KeyA".."KeyZ", digits as "Digit0".."Digit9". ' +
+        '"Return" is accepted as an alias for "Enter". Use type_text for entering text.',
       inputSchema: {
         sessionId: z.string().describe('Session ID from list_devices'),
-        key: z.string().describe('Key name (e.g. "Return", "Delete", "Escape")'),
+        key: z.string().describe('KeyboardEvent.code name (e.g. "Enter", "Backspace", "Escape")'),
       },
     },
     async ({ sessionId, key }) => {
@@ -338,10 +343,13 @@ export function registerTools(server: McpServer, client: TapflowClient): void {
   server.registerTool(
     'press_button',
     {
-      description: 'Press a hardware button (e.g. "home", "lock").',
+      description:
+        'Press a hardware button by a cross-platform name: "home", "lock", "volume_up", "volume_down" work on both ' +
+        'platforms. Android also has "back" and "recent_apps" (no-ops on iOS). Other names map to a device button ' +
+        'only if that device exposes one.',
       inputSchema: {
         sessionId: z.string().describe('Session ID from list_devices'),
-        button: z.string().describe('Button name (e.g. "home", "lock")'),
+        button: z.string().describe('Button name (e.g. "home", "lock", "back")'),
       },
     },
     async ({ sessionId, button }) => {

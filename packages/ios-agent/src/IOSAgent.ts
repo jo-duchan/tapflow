@@ -9,6 +9,15 @@ import type { Device, DeviceAgent, UIElement } from '@tapflowio/agent-core'
 import { createLogger, PlatformError, ValidationError } from '@tapflowio/agent-core'
 
 const logger = createLogger('ios-agent')
+
+// Cross-platform button name → iOS device-chrome button name. Chrome uses
+// hyphens and "power" (not "lock"); MCP's vocabulary uses underscores. Names
+// not listed here (incl. the raw chrome names the dashboard sends) pass through.
+export const IOS_BUTTON_ALIASES: Record<string, string> = {
+  lock: 'power',
+  volume_up: 'volume-up',
+  volume_down: 'volume-down',
+}
 import {
   createResourceSampler,
   registerStreamWs,
@@ -39,7 +48,7 @@ import { MjpegStreamer } from './MjpegStreamer.js'
 import { TouchHelper } from './TouchHelper.js'
 import { UITreeReader } from './UITreeReader.js'
 import { DeviceChromeLoader, type ChromeData } from './DeviceChromeLoader.js'
-import { KEY_CODE_MAP } from './KeyCodeMap.js'
+import { KEY_CODE_MAP, MODIFIER_BITS } from './KeyCodeMap.js'
 
 // whole-sim audio: how often to re-enumerate the simulator's process tree for new audio-producing
 // processes (launched apps, WebKit WebContent). Short enough that a tab's audio starts promptly,
@@ -672,6 +681,40 @@ export class IOSAgent implements DeviceAgent {
         })
         break
       }
+      case 'input:type': {
+        const sessionId = msg.sessionId
+        const state = this.deviceStates.get(sessionId!)
+        const { text } = (msg.payload ?? {}) as { text?: string }
+        if (!state?.touchHelper) {
+          this.ws?.send(JSON.stringify({ type: 'input:type-error', sessionId, message: 'No booted device' }))
+          break
+        }
+        // simctl pbcopy → Cmd+V paste. Works for arbitrary Unicode (unlike a
+        // per-character HID path, which is limited to keys on the layout) and
+        // needs a focused text field, same as real typing. Cmd+V goes through
+        // the same HID keyboard path as input:key, so hide the software
+        // keyboard first when it's up — otherwise iOS desyncs the hardware
+        // keyboard context and the chord is dropped (same guard as input:key).
+        const doType = async (): Promise<void> => {
+          if (!text) return
+          await this.simctl.setPasteboard(state.deviceId, text)
+          if (state.softKeyboardVisible) {
+            state.softKeyboardVisible = false
+            await this.simctl.hideSoftwareKeyboard(state.deviceId).catch(() => {})
+          }
+          state.touchHelper?.sendKey(KEY_CODE_MAP['KeyV'], MODIFIER_BITS['MetaLeft'])
+        }
+        // Ack on completion so a following input step (e.g. pressKey Enter) is
+        // only sent after the paste has actually landed.
+        doType()
+          .then(() => this.ws?.send(JSON.stringify({ type: 'input:type-done', sessionId })))
+          .catch((e: unknown) => {
+            const message = e instanceof Error ? e.message : String(e)
+            logger.error('input:type (pbcopy+paste) failed:', e)
+            this.ws?.send(JSON.stringify({ type: 'input:type-error', sessionId, message }))
+          })
+        break
+      }
       case 'input:key': {
         const state = this.deviceStates.get(msg.sessionId!)
         if (!state?.touchHelper) break
@@ -697,12 +740,16 @@ export class IOSAgent implements DeviceAgent {
         const state = this.deviceStates.get(msg.sessionId!)
         if (!state?.touchHelper) break
         const { name, phase } = msg.payload as { name: string; phase?: 'down' | 'up' }
-        if (name === 'home') {
+        // Map the cross-platform button vocabulary (used by MCP) onto this
+        // device's actual chrome button names. Dashboard already sends the raw
+        // chrome names (e.g. "volume-up"), which pass through unchanged.
+        const chromeName = IOS_BUTTON_ALIASES[name] ?? name
+        if (chromeName === 'home') {
           // Home has no HID down/up split — always a single legacy press. Send once on release
           // (or on a phase-less legacy message) so a down+up pair doesn't fire it twice.
           if (phase !== 'down') state.touchHelper.pressLegacyButton(0)
         } else {
-          const btn = state.loadedChrome?.buttons.find((b) => b.name === name)
+          const btn = state.loadedChrome?.buttons.find((b) => b.name === chromeName)
           if (btn && btn.usagePage > 0 && btn.usage > 0) {
             if (phase === 'down') state.touchHelper.pressButtonDown(btn.usagePage, btn.usage)
             else if (phase === 'up') state.touchHelper.pressButtonUp(btn.usagePage, btn.usage)
