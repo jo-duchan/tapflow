@@ -1,32 +1,17 @@
 # MCP in CI/CD
 
-Run automated smoke tests against a real simulator on every build — no Selenium, no WebDriverAgent, no hardcoded selectors. The LLM agent reads the screen from screenshots and adapts.
+The automated QA axis splits into two stages: an LLM agent explores the app and **authors** a scenario, and a deterministic runner **replays** it. The guiding principle is simple — an LLM is involved only at authoring time, and replay is deterministic.
 
-## How this works
+That distinction changes CI. If an LLM judges the screen on every run, the result varies run to run and you pay for API calls each time. Save a verified scenario as a [flow](/guide/writing-flows) instead, and CI replays that flow with no LLM calls — idempotent, and free.
 
-A CI job installs `@tapflowio/mcp-server`, configures it to point at your always-on relay, then invokes `claude` (Claude Code CLI) with a natural-language test prompt. The agent controls the simulator via MCP tools and exits with a non-zero code if it detects a failure.
+## Deterministic replay — the main CI path
 
-```text
-CI runner
-  → installs @tapflowio/mcp-server
-  → runs: claude --mcp-config .mcp.json -p "<test prompt>"
-      → agent calls list_devices, connect_device, install_app, launch_app, screenshot, tap, ...
-      → agent reports result / exits non-zero on failure
-```
+A CI job replays saved flows with `tapflow flow run`. There is no LLM on the replay path, so the same input always produces the same result, and there is no API cost.
 
-## Prerequisites
-
-| Requirement | Notes |
-|-------------|-------|
-| tapflow relay (always-on) | A Mac with the agent connected. Can be a dedicated Mac mini on your LAN. |
-| `TAPFLOW_TOKEN` | PAT with at least Developer role. Store as a CI secret. |
-| `ANTHROPIC_API_KEY` | Required to run `claude` non-interactively. Store as a CI secret. |
-| Claude Code CLI | `npm install -g @anthropic-ai/claude-code` |
-
-## GitHub Actions example
+With a relay and agent always on a self-hosted Mac runner, the job runs the flows and uses the exit code to tell whether they passed.
 
 ```yaml
-name: Smoke test
+name: Flow smoke test
 
 on:
   workflow_dispatch:
@@ -35,37 +20,30 @@ on:
 
 jobs:
   smoke:
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, macos]
 
     steps:
       - uses: actions/checkout@v4
 
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 20
-
-      - name: Install tools
-        run: |
-          npm install -g @tapflowio/mcp-server @anthropic-ai/claude-code
-
-      - name: Run smoke test
+      - name: Run flows
         env:
           TAPFLOW_RELAY_URL: ${{ secrets.TAPFLOW_RELAY_URL }}
           TAPFLOW_TOKEN: ${{ secrets.TAPFLOW_TOKEN }}
-          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
-          WORKSPACE: ${{ github.workspace }}
         run: |
-          claude --mcp-config .mcp.json -p "
-            List available devices and pick the first booted iOS simulator.
-            Connect to it and install the build at $WORKSPACE/MyApp.app.zip.
-            Launch the app and take a screenshot.
-            Verify the main screen loaded correctly — no error messages, no blank screens.
-            If anything looks wrong, describe the issue and exit with a failure.
-          "
+          tapflow flow run .tapflow/flows/*.yaml \
+            --relay "$TAPFLOW_RELAY_URL" \
+            --device "iPhone 16 Pro" \
+            --build "$BUILD_ID" \
+            --junit report.xml
 ```
 
-::: tip .mcp.json in the repo
-Commit a `.mcp.json` at the repo root that points to your relay. CI uses it directly.
+The flow YAML syntax, selector rules, and exit-code contract are covered in [Writing Flows](/guide/writing-flows).
+
+## Authoring flows with an agent
+
+Flows are an artifact an agent produces while exploring the app, not something you hand-write from scratch. Ask an MCP-capable agent like Claude Code for a scenario in plain language, and it drives the app through tapflow's MCP tools to confirm the behavior, then extracts the verified sequence as flow YAML and commits it to the repository.
+
+To connect the agent to the relay, keep a `.mcp.json` at the repo root pointing at the relay.
 
 ```json
 {
@@ -73,7 +51,7 @@ Commit a `.mcp.json` at the repo root that points to your relay. CI uses it dire
     "tapflow": {
       "command": "tapflow-mcp",
       "env": {
-        "TAPFLOW_RELAY_URL": "INJECTED_AT_RUNTIME",
+        "TAPFLOW_RELAY_URL": "ws://localhost:4000",
         "TAPFLOW_TOKEN": "INJECTED_AT_RUNTIME"
       }
     }
@@ -81,68 +59,52 @@ Commit a `.mcp.json` at the repo root that points to your relay. CI uses it dire
 }
 ```
 
-The `env` values here are overridden at runtime by the shell environment, so secrets never land in the repo.
-:::
+Give the agent a request that describes the outcome rather than the steps.
 
-## Multi-device matrix
+```
+Build a flow that signs in with an email and password and confirms the orders list.
+Drive the app to verify it works, then save the verified sequence to .tapflow/flows/login-smoke.yaml.
+```
 
-Run the same test across multiple simulators by parameterizing the job:
+The agent reads screen elements with `query_ui_tree`, drives them with `tap` and `type_text` to confirm the scenario, then saves it as a selector-based flow. That flow then replays deterministically in CI.
+
+## Replaying verified scenarios with run_flow
+
+You can use deterministic replay from within an agent session too. The `run_flow` tool replays a saved flow through the same deterministic engine, so an agent goes through the individual MCP tools while exploring and replays a verified scenario through `run_flow` — a hybrid of the two.
+
+## Exploratory runs — optional
+
+When you are exploring a new screen or debugging a flow, you can let an LLM judge the screen directly in CI. This path reads the screen with an LLM on every run, so it is not deterministic and it costs API calls, but it is useful for quickly checking a scenario you have not yet pinned into a flow.
+
+This path needs a few more prerequisites.
+
+| Requirement | Notes |
+|-------------|-------|
+| tapflow relay (always-on) | A Mac with the agent connected. Can be a dedicated Mac mini on your LAN. |
+| `TAPFLOW_TOKEN` | PAT with at least Developer role. Store as a CI secret. |
+| `ANTHROPIC_API_KEY` | Required to run `claude` non-interactively. Store as a CI secret. |
+| Claude Code CLI | `npm install -g @anthropic-ai/claude-code` |
 
 ```yaml
-jobs:
-  smoke:
-    runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        device: ["iPhone SE (3rd generation)", "iPhone 16 Pro", "iPad Air 13-inch (M2)"]
-
-    steps:
-      # ... install steps ...
-
-      - name: Run smoke test on ${{ matrix.device }}
+      - name: Exploratory check
         env:
           TAPFLOW_RELAY_URL: ${{ secrets.TAPFLOW_RELAY_URL }}
           TAPFLOW_TOKEN: ${{ secrets.TAPFLOW_TOKEN }}
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
-          TARGET_DEVICE: ${{ matrix.device }}
+          WORKSPACE: ${{ github.workspace }}
         run: |
           claude --mcp-config .mcp.json -p "
-            Find the simulator named '$TARGET_DEVICE' from list_devices.
-            Connect to it, install MyApp.app.zip, launch the app,
-            and verify the main screen loaded without errors.
+            List available devices and connect to a booted iOS simulator.
+            Install the build at $WORKSPACE/MyApp.app.zip and launch the app.
+            Take a screenshot and verify the main screen loaded correctly.
+            If there are error messages or blank screens, describe the issue and exit with a failure.
           "
 ```
 
-## Example test prompts
-
-Write prompts that describe outcomes, not steps. The agent figures out the navigation.
-
-**Login flow:**
-```text
-Connect to the first available simulator.
-Install and launch the sandbox build.
-Navigate to the login screen, enter email test@example.com and password test1234,
-tap the login button, and confirm the home screen appears within 10 seconds.
-Screenshot the result. If login fails or an error appears, report the error text and fail.
-```
-
-**Onboarding:**
-```text
-Fresh-install the app and walk through the onboarding flow.
-Screenshot each step. Verify all buttons are tappable and no screens are blank.
-Report any step where the UI appears broken.
-```
-
-**Post-deploy sanity check:**
-```text
-Launch the latest installed build.
-Visit the three main tabs: Home, Search, and Profile.
-Screenshot each tab and confirm they load without errors or empty states.
-```
+Exploratory prompts work best when they describe outcomes. "Verify the home screen loaded" holds up better than "tap the third item in the list" when the UI changes. For a regression test you run repeatedly, though, pinning the confirmed scenario into a flow is deterministic and free.
 
 ## Tips
 
-- **Keep prompts outcome-focused.** "Verify the home screen loaded" is better than "tap the third item in the list" — the latter breaks when the UI changes.
-- **Disconnect at the end.** Always include "disconnect the device when done" in your prompt, or the session stays open.
-- **Set a timeout.** `claude` has a default timeout; set `--timeout` explicitly for long flows so CI doesn't hang indefinitely.
-- **One session at a time.** The relay routes by session; running multiple jobs against the same relay concurrently is fine as long as they connect to different devices.
+- **Flows for regression, agents for exploration.** A test that runs every time in CI fits deterministic replay; checking a new scenario is faster with an agent.
+- **The `env` values in `.mcp.json` are overridden at runtime by the shell environment**, so secrets never land in the repo.
+- **One session per device.** The relay routes by session, so running multiple jobs against the same relay concurrently is fine as long as they connect to different devices.

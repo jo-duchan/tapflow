@@ -69,7 +69,7 @@ The agent connects outbound to the relay. Teammates open the dashboard, pick an 
 
 ## What tapflow is not
 
-tapflow doesn't replace native mobile development tools. Mobile developers still use Xcode, Android Studio, and their build tooling. tapflow makes the *running* simulators and emulators accessible to the rest of the team through a browser — it isn't an automation framework or a device farm.
+tapflow doesn't replace native mobile development tools. Mobile developers still use Xcode, Android Studio, and their build tooling. tapflow makes the *running* simulators and emulators accessible to the rest of the team through a browser, and it is not a device farm. It does have an automated QA axis — a deterministic flow runner and an MCP server for LLM agents — but wiring in external automation frameworks like WebDriverAgent or Appium is out of scope; tapflow ships its own minimal runner instead.
 
 ## How it works
 
