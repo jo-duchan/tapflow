@@ -84,6 +84,8 @@ Browser (your team)  ←─ WebSocket ─→  Relay Server  ←─ WebSocket (ou
 
 tapflow doesn't replace native mobile development tools. Mobile developers still use Xcode, Android Studio, and their build tooling. tapflow makes the *running* simulators and emulators accessible to the rest of the team through a browser, and it is not a device farm. It does have an automated QA axis — a deterministic flow runner and an MCP server for LLM agents — but wiring in external automation frameworks like WebDriverAgent or Appium is out of scope; tapflow ships its own minimal runner instead.
 
+Where this is heading is laid out in [VISION.md](VISION.md): growing manual QA into automation, only when you need it.
+
 ## Quick Start
 
 ### 1. Install
