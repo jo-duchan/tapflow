@@ -19,7 +19,12 @@ final class TreeServer {
         guard let nwPort = NWEndpoint.Port(rawValue: port) else {
             throw NSError(domain: "TreeServer", code: 1, userInfo: [NSLocalizedDescriptionKey: "invalid port \(port)"])
         }
-        listener = try NWListener(using: params, on: nwPort)
+        // Bind loopback ONLY. The simulator shares the host's network stack, so a
+        // default all-interfaces bind would expose the app's UI tree to the LAN with
+        // no auth — tapflow keeps app data inside the machine. requiredLocalEndpoint
+        // forces the listen socket onto 127.0.0.1 (requiredInterfaceType alone does not).
+        params.requiredLocalEndpoint = NWEndpoint.hostPort(host: NWEndpoint.Host("127.0.0.1"), port: nwPort)
+        listener = try NWListener(using: params)
     }
 
     func start() {

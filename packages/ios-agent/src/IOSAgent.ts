@@ -249,6 +249,13 @@ export class IOSAgent implements DeviceAgent {
   private initDeviceStates(
     registeredSessions: Array<{ deviceId: string; sessionId: string }>,
   ): void {
+    // Preserve the foreground app across a relay reconnect — the app is still
+    // running in the simulator, so a tree query after reconnect shouldn't fail
+    // (with "no app launched") until a new app:launch. Keyed by deviceId.
+    const priorBundleIds = new Map<string, string>()
+    for (const s of this.deviceStates.values()) {
+      if (s.currentBundleId) priorBundleIds.set(s.deviceId, s.currentBundleId)
+    }
     registeredSessions.forEach(({ deviceId, sessionId }) => {
       this.deviceStates.set(sessionId, {
         sessionId,
@@ -269,6 +276,7 @@ export class IOSAgent implements DeviceAgent {
         audioPoll: null,
         audioPids: null,
         audioVolume: 1,
+        currentBundleId: priorBundleIds.get(deviceId),
       })
     })
   }
@@ -559,9 +567,9 @@ export class IOSAgent implements DeviceAgent {
     state.streamWs?.close()
     state.streamWs = null
     state.currentBundleId = undefined
-    // The resident tree runner is bound to this simulator; drop it so a later
-    // boot rebuilds/relaunches it against the fresh runtime.
-    this.uiTreeReader.stop()
+    // Stop the tree runner only if it serves THIS device — shutting down one
+    // booted device must not kill another device's resident runner.
+    this.uiTreeReader.stopIfDevice(deviceId)
 
     try {
       await this.simctl.shutdown(deviceId)

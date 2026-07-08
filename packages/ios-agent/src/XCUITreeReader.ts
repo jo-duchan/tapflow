@@ -1,6 +1,6 @@
 import { spawn, execFile, type ChildProcess } from 'child_process'
 import { promisify } from 'util'
-import { existsSync } from 'fs'
+import { readdirSync } from 'fs'
 import { join } from 'path'
 import type { UIElement } from '@tapflowio/agent-core'
 import { createLogger, PlatformError } from '@tapflowio/agent-core'
@@ -12,11 +12,16 @@ const execFileAsync = promisify(execFile)
 const RUNNER_DIR = join(import.meta.dirname, '..', 'xctest-runner')
 const PROJECT = join(RUNNER_DIR, 'TapflowTreeRunner.xcodeproj')
 const BUILD_DIR = join(RUNNER_DIR, 'build')
-// build-for-testing writes this; its presence marks the runner as built (cached
-// across sessions — the first UI-tree query pays the build, later ones reuse it).
-const BUILT_APP = join(BUILD_DIR, 'Build', 'Products', 'Debug-iphonesimulator', 'TreeRunner-Runner.app')
+const PRODUCTS_DIR = join(BUILD_DIR, 'Build', 'Products')
 const SCHEME = 'TreeRunner'
-const DEFAULT_PORT = 22087
+// The in-simulator host app the UI-test runner attaches to. Terminating it ends
+// the test session so the HTTP port is released (killing the xcodebuild wrapper
+// alone does not tear the in-simulator process down).
+const RUNNER_HOST_BUNDLE = 'dev.tapflow.treerunner.host'
+// Fixed port: xcodebuild does not propagate host env to the in-simulator test
+// runner, so a per-udid port can't be passed this way. A single resident runner
+// (guarded below) means no collision; concurrent multi-device is deferred (Q8).
+const PORT = 22087
 
 interface RunnerHandle {
   proc: ChildProcess
@@ -25,18 +30,29 @@ interface RunnerHandle {
 }
 
 // Drives the resident XCUITest tree runner: builds it once, launches it (staying
-// resident), and queries GET /tree over the simulator-shared localhost. Replaces
+// resident), and queries GET /tree over the simulator-shared loopback. Replaces
 // the AXUIElement path (UITreeReader), which required a Simulator.app window.
 export class XCUITreeReader {
   private runner?: RunnerHandle
   private building?: Promise<void>
+  private starting?: Promise<RunnerHandle>
 
   private destination(udid: string): string {
-    return `platform=iOS Simulator,id=${udid},arch=arm64`
+    // No arch — xcodebuild resolves it (arm64 on Apple Silicon, x86_64 on Intel).
+    return `platform=iOS Simulator,id=${udid}`
+  }
+
+  private xctestrunReady(): boolean {
+    // test-without-building needs the .xctestrun, not just the .app — gate on it.
+    try {
+      return readdirSync(PRODUCTS_DIR).some((f) => f.endsWith('.xctestrun'))
+    } catch {
+      return false
+    }
   }
 
   private async ensureBuilt(udid: string): Promise<void> {
-    if (existsSync(BUILT_APP)) return
+    if (this.xctestrunReady()) return
     if (this.building) return this.building
     this.building = (async () => {
       logger.info('building tree runner (first run — cached afterwards)...')
@@ -49,38 +65,58 @@ export class XCUITreeReader {
     })()
     try {
       await this.building
+    } catch (e) {
+      throw new PlatformError(
+        `failed to build the UI-tree runner — ensure Xcode and an iOS simulator runtime are installed (xcode-select -p): ${(e as Error).message.slice(0, 300)}`,
+      )
     } finally {
       this.building = undefined
     }
   }
 
+  private runnerAlive(h: RunnerHandle | undefined): h is RunnerHandle {
+    return !!h && h.proc.exitCode === null && !h.proc.killed
+  }
+
   private async ensureRunner(udid: string): Promise<RunnerHandle> {
-    if (this.runner && this.runner.udid === udid && this.runner.proc.exitCode === null && !this.runner.proc.killed) {
-      return this.runner
+    if (this.runnerAlive(this.runner) && this.runner.udid === udid) return this.runner
+    // Serialize concurrent callers so we never double-spawn or hand back an
+    // un-ready runner (a second caller must await waitReady, not just the object).
+    if (this.starting) {
+      const h = await this.starting.catch(() => undefined)
+      if (h && this.runnerAlive(h) && h.udid === udid) return h
     }
-    this.stop()
+    this.starting = this.launchRunner(udid)
+    try {
+      return await this.starting
+    } finally {
+      this.starting = undefined
+    }
+  }
+
+  private async launchRunner(udid: string): Promise<RunnerHandle> {
+    this.stop() // tear down any stale/other-udid runner first
     await this.ensureBuilt(udid)
-    const port = DEFAULT_PORT
     const proc = spawn(
       'xcodebuild',
       ['test-without-building', '-project', PROJECT, '-scheme', SCHEME, '-destination', this.destination(udid), '-derivedDataPath', BUILD_DIR, '-quiet'],
-      { env: { ...process.env, TAPFLOW_TREE_PORT: String(port) }, stdio: 'ignore' },
+      { env: { ...process.env, TAPFLOW_TREE_PORT: String(PORT) }, stdio: 'ignore', detached: true },
     )
     proc.on('error', (e) => logger.error('tree runner process error:', e.message))
-    const handle: RunnerHandle = { proc, udid, port }
+    const handle: RunnerHandle = { proc, udid, port: PORT }
     this.runner = handle
-    await this.waitReady(port, proc)
+    await this.waitReady(handle)
     return handle
   }
 
-  private async waitReady(port: number, proc: ChildProcess): Promise<void> {
+  private async waitReady(handle: RunnerHandle): Promise<void> {
     for (let i = 0; i < 90; i++) {
-      if (proc.exitCode !== null || proc.killed) {
-        this.runner = undefined
+      if (!this.runnerAlive(handle)) {
+        if (this.runner === handle) this.runner = undefined
         throw new PlatformError('tree runner exited before becoming ready — check Xcode/simulator state')
       }
       try {
-        const r = await fetch(`http://localhost:${port}/health`, { signal: AbortSignal.timeout(1000) })
+        const r = await fetch(`http://localhost:${handle.port}/health`, { signal: AbortSignal.timeout(1000) })
         if (r.ok) return
       } catch {
         /* not listening yet */
@@ -88,7 +124,7 @@ export class XCUITreeReader {
       await new Promise((r) => setTimeout(r, 1000))
     }
     this.stop()
-    throw new PlatformError('tree runner did not become ready within 90s')
+    throw new PlatformError('tree runner did not become ready in time')
   }
 
   async read(udid: string, bundleId: string): Promise<UIElement[]> {
@@ -103,13 +139,49 @@ export class XCUITreeReader {
       if (e instanceof PlatformError) throw e
       throw new PlatformError(`UI tree query failed: ${(e as Error).message}`)
     }
+    // Guard against a garbage / wrong-bundleId body silently parsing to an empty
+    // tree — consumers must see an error, never a false "screen has no elements".
+    if (!text.includes('Element subtree:') && !text.includes('Application,')) {
+      throw new PlatformError(`tree runner returned an unexpected response for ${bundleId} — is the app running in the foreground?`)
+    }
     return parseTreeText(text)
   }
 
+  // Stop the resident runner regardless of which device it serves.
   stop(): void {
-    if (this.runner) {
-      this.runner.proc.kill()
-      this.runner = undefined
+    const handle = this.runner
+    if (!handle) return
+    this.runner = undefined
+    this.killHandle(handle)
+  }
+
+  // Stop only if the runner currently serves this device — so shutting down one
+  // booted device does not kill another device's runner.
+  stopIfDevice(udid: string): void {
+    if (this.runner?.udid === udid) this.stop()
+  }
+
+  private killHandle(handle: RunnerHandle): void {
+    const { proc, udid } = handle
+    const pid = proc.pid
+    // detached spawn → the child leads its own group; kill the whole group.
+    try {
+      if (pid) process.kill(-pid, 'SIGTERM')
+      else proc.kill('SIGTERM')
+    } catch {
+      /* already gone */
     }
+    // The in-simulator test host is not in that group — terminate it so the HTTP
+    // port is released instead of lingering.
+    execFile('xcrun', ['simctl', 'terminate', udid, RUNNER_HOST_BUNDLE], () => { /* best-effort */ })
+    // SIGKILL fallback if SIGTERM did not take.
+    const timer = setTimeout(() => {
+      try {
+        if (pid) process.kill(-pid, 'SIGKILL')
+      } catch {
+        /* gone */
+      }
+    }, 3000)
+    timer.unref?.()
   }
 }

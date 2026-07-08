@@ -58,15 +58,15 @@ interface RawNode {
   frame?: { x: number; y: number; width: number; height: number }
   identifier?: string
   label?: string
-  value?: string
 }
 
 const FRAME_RE = /\{\{(-?[\d.]+), (-?[\d.]+)\}, \{(-?[\d.]+), (-?[\d.]+)\}\}/
 // Terminate quoted fields on the next field boundary, so a quote inside the
-// value (e.g. label: 'Don't') does not truncate the match.
+// value (e.g. label: 'Don't') does not truncate the match. The `, value: `
+// lookahead stays even though value isn't captured — a trailing value field is
+// still a valid label boundary.
 const IDENTIFIER_RE = /, identifier: '(.*?)'(?=, label: |, value: |$)/
 const LABEL_RE = /, label: '(.*?)'(?=, value: |$)/
-const VALUE_RE = /, value: (.*)$/
 
 function parseLine(line: string): RawNode | null {
   // Strip indentation + the root arrow, then take the type up to ", 0x<addr>".
@@ -82,8 +82,6 @@ function parseLine(line: string): RawNode | null {
   if (im) node.identifier = im[1]
   const lm = LABEL_RE.exec(line)
   if (lm) node.label = lm[1]
-  const vm = VALUE_RE.exec(line)
-  if (vm) node.value = vm[1]
   return node
 }
 
@@ -123,8 +121,8 @@ export function parseTreeText(text: string): UIElement[] {
       role,
       label,
       frame: {
-        x: round4(node.frame.x / basis.width),
-        y: round4(node.frame.y / basis.height),
+        x: round4((node.frame.x - basis.x) / basis.width),
+        y: round4((node.frame.y - basis.y) / basis.height),
         width: round4(node.frame.width / basis.width),
         height: round4(node.frame.height / basis.height),
       },
