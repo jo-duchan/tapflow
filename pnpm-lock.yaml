@@ -16,12 +16,12 @@ importers:
 
   .:
     devDependencies:
+      '@a11y-lens/cli':
+        specifier: ^0.4.0
+        version: 0.4.0
       '@changesets/cli':
         specifier: ^2.31.0
         version: 2.31.0(@types/node@20.19.43)
-      '@joduchan/a11y-lens':
-        specifier: ^0.2.0
-        version: 0.2.0
       '@vitest/coverage-v8':
         specifier: ^4.1.9
         version: 4.1.9(vitest@4.1.9)
@@ -517,6 +517,11 @@ importers:
         version: 5.9.3
 
 packages:
+
+  '@a11y-lens/cli@0.4.0':
+    resolution: {integrity: sha512-ZXWTlg8VkF3zBKX3Mvl+lDp6dxJUcmjgiK6PJZ06ypJr4dIysdFBp+KWyNQ6pCZ0fhWbYyP9W6iY4Gu78f0hKw==}
+    engines: {node: '>=18'}
+    hasBin: true
 
   '@adobe/css-tools@4.4.4':
     resolution: {integrity: sha512-Elp+iwUx5rN5+Y8xLt5/GRoG20WGoDCQ/1Fb+1LiGtvwbDavuSk0jhD/eZdckHAuzcDzccnkv+rEjyWfRx18gg==}
@@ -1433,11 +1438,6 @@ packages:
     peerDependenciesMeta:
       '@types/node':
         optional: true
-
-  '@joduchan/a11y-lens@0.2.0':
-    resolution: {integrity: sha512-ViSBcCkPXEKlD4P7SIyIgn6wcrAjNp6ZC3z5OP2x3CUDwHmODqaj5pSgzxpc4syNwZWE0F6CE9j3h01DL2FYPA==}
-    engines: {node: '>=18'}
-    hasBin: true
 
   '@jridgewell/gen-mapping@0.3.13':
     resolution: {integrity: sha512-2kkt/7niJ6MgEPxF0bYdQ6etZaA+fQvDcLKckhy1yIQOzaoKjBBjSj63/aLVjYE3qhRt5dvM+uUyfCg6UKCBbA==}
@@ -4818,10 +4818,6 @@ packages:
     resolution: {integrity: sha512-SHf/r48b7vOrjve9PxJo3MN5v5yuyjHvdUcrQffT3WXMUfnGmHDVbC4k3sHJaJTgZCwpUplIaAo5ANtMyp3YHg==}
     engines: {node: '>=18'}
 
-  tinyglobby@0.2.16:
-    resolution: {integrity: sha512-pn99VhoACYR8nFHhxqix+uvsbXineAasWm5ojXoN8xEwK5Kd3/TrhNn1wByuD52UxWRLy8pu+kRMniEi6Eq9Zg==}
-    engines: {node: '>=12.0.0'}
-
   tinyglobby@0.2.17:
     resolution: {integrity: sha512-wXR/dYpcqKmfWpEdZjiKJOwCNFndD0DMnrW/cYjVGttEkBfVgcLFHoNrlj47mjOVic9yyNu65alsgF4NQyTa2g==}
     engines: {node: '>=12.0.0'}
@@ -5232,6 +5228,8 @@ packages:
     resolution: {integrity: sha512-bXE4cR/kVZhKZX/RjPEflHaKVhUVl85noU3v6b8apfQEc1x4A+zBxjZ4lN8LqGd6WZ3dl98pY4o717VFmoPp+A==}
 
 snapshots:
+
+  '@a11y-lens/cli@0.4.0': {}
 
   '@adobe/css-tools@4.4.4': {}
 
@@ -6052,8 +6050,6 @@ snapshots:
       iconv-lite: 0.7.2
     optionalDependencies:
       '@types/node': 20.19.43
-
-  '@joduchan/a11y-lens@0.2.0': {}
 
   '@jridgewell/gen-mapping@0.3.13':
     dependencies:
@@ -9701,11 +9697,6 @@ snapshots:
 
   tinyexec@1.2.4: {}
 
-  tinyglobby@0.2.16:
-    dependencies:
-      fdir: 6.5.0(picomatch@4.0.4)
-      picomatch: 4.0.4
-
   tinyglobby@0.2.17:
     dependencies:
       fdir: 6.5.0(picomatch@4.0.4)
@@ -9885,7 +9876,7 @@ snapshots:
       picomatch: 4.0.4
       postcss: 8.5.16
       rollup: 4.60.4
-      tinyglobby: 0.2.16
+      tinyglobby: 0.2.17
     optionalDependencies:
       '@types/node': 20.19.43
       fsevents: 2.3.3
