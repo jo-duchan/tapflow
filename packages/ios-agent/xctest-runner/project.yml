@@ -1,0 +1,37 @@
+name: TapflowTreeRunner
+options:
+  bundleIdPrefix: dev.tapflow
+  deploymentTarget:
+    iOS: "16.0"
+targets:
+  # Minimal host app the UI-test target attaches to. It never drives itself —
+  # the runner queries a SEPARATE target app via XCUIApplication(bundleIdentifier:).
+  TreeHost:
+    type: application
+    platform: iOS
+    sources: [TreeHost]
+    settings:
+      base:
+        GENERATE_INFOPLIST_FILE: true
+        PRODUCT_BUNDLE_IDENTIFIER: dev.tapflow.treerunner.host
+  # Resident UI-test target: launches, opens an HTTP server, and serves the
+  # accessibility tree of any bundleId on demand. Window-agnostic (runs inside
+  # the simulator) so it works with no Simulator.app window (tapflow headless path).
+  TreeRunner:
+    type: bundle.ui-testing
+    platform: iOS
+    sources: [TreeRunner]
+    dependencies:
+      - target: TreeHost
+    settings:
+      base:
+        GENERATE_INFOPLIST_FILE: true
+        PRODUCT_BUNDLE_IDENTIFIER: dev.tapflow.treerunner.uitests
+schemes:
+  TreeRunner:
+    build:
+      targets:
+        TreeHost: all
+        TreeRunner: [test]
+    test:
+      targets: [TreeRunner]

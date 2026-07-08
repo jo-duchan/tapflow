@@ -1,0 +1,41 @@
+Attributes: Application, 0x10580c2f0, pid: 73331, label: 'TheApp'
+Element subtree:
+ →Application, 0x10580c2f0, pid: 73331, label: 'TheApp'
+    Window (Main), 0x1058049a0, {{0.0, -0.0}, {402.0, 874.0}}
+      Other, 0x105809d90, {{0.0, -0.0}, {402.0, 874.0}}
+        NavigationBar, 0x105808b10, {{0.0, 47.4}, {402.0, 47.4}}, identifier: 'The App'
+          StaticText, 0x105809af0, {{165.1, 59.9}, {71.8, 21.9}}, label: 'The App'
+        Other, 0x105809c10, {{0.0, -0.0}, {402.0, 874.0}}
+          Other, 0x105808c30, {{0.0, -0.0}, {402.0, 874.0}}
+            Other, 0x105808d50, {{0.0, 94.7}, {402.0, 779.3}}
+              Other, 0x1058105c0, {{0.0, 94.7}, {402.0, 779.3}}, label: 'Choose An Awesome View Echo Box Login Screen Clipboard Demo Webview Demo List Demo Photo Demo Geolocation Demo Picker Demo Vertical scroll bar, 1 page Horizontal scroll bar, 1 page'
+                Other, 0x1058106e0, {{0.0, 94.7}, {402.0, 779.3}}, label: 'Choose An Awesome View Echo Box Login Screen Clipboard Demo Webview Demo List Demo Photo Demo Geolocation Demo Picker Demo Vertical scroll bar, 1 page Horizontal scroll bar, 1 page'
+                  Other, 0x105810800, {{0.0, 94.7}, {402.0, 779.3}}, label: 'Choose An Awesome View Echo Box Login Screen Clipboard Demo Webview Demo List Demo Photo Demo Geolocation Demo Picker Demo Vertical scroll bar, 1 page Horizontal scroll bar, 1 page'
+                    Other, 0x105810920, {{0.0, 94.7}, {402.0, 779.3}}, label: 'Choose An Awesome View Echo Box Login Screen Clipboard Demo Webview Demo List Demo Photo Demo Geolocation Demo Picker Demo Vertical scroll bar, 1 page Horizontal scroll bar, 1 page'
+                      ScrollView, 0x105810a40, {{0.0, 94.7}, {402.0, 779.3}}
+                        Other, 0x105810bc0, {{0.0, 94.7}, {402.0, 567.6}}, label: 'Choose An Awesome View Echo Box Login Screen Clipboard Demo Webview Demo List Demo Photo Demo Geolocation Demo Picker Demo'
+                          StaticText, 0x105810ce0, {{0.0, 94.7}, {402.0, 35.5}}, label: 'Choose An Awesome View'
+                          Other, 0x105810e00, {{0.0, 130.2}, {402.0, 532.1}}, label: 'Echo Box Login Screen Clipboard Demo Webview Demo List Demo Photo Demo Geolocation Demo Picker Demo'
+                            Other, 0x105810f20, {{0.0, 131.3}, {402.0, 66.4}}, identifier: 'Echo Box', label: 'Echo Box'
+                            Other, 0x105811040, {{0.0, 197.7}, {402.0, 66.4}}, identifier: 'Login Screen', label: 'Login Screen'
+                            Other, 0x105811160, {{0.0, 264.1}, {402.0, 66.4}}, identifier: 'Clipboard Demo', label: 'Clipboard Demo'
+                            Other, 0x105811280, {{0.0, 330.4}, {402.0, 66.4}}, identifier: 'Webview Demo', label: 'Webview Demo'
+                            Other, 0x1058113a0, {{0.0, 396.8}, {402.0, 66.4}}, identifier: 'List Demo', label: 'List Demo'
+                            Other, 0x1058114c0, {{0.0, 463.2}, {402.0, 66.4}}, identifier: 'Photo Demo', label: 'Photo Demo'
+                            Other, 0x1058115e0, {{0.0, 529.6}, {402.0, 66.4}}, identifier: 'Geolocation Demo', label: 'Geolocation Demo'
+                            Other, 0x105811700, {{0.0, 595.9}, {402.0, 66.4}}, identifier: 'Picker Demo', label: 'Picker Demo'
+                        Other, 0x105811820, {{366.6, 94.7}, {32.2, 779.3}}, label: 'Vertical scroll bar, 1 page', value: 0%
+                          Other, 0x105811940, {{395.6, 52.7}, {3.2, 38.7}}
+                        Other, 0x105811a60, {{0.0, 838.5}, {402.0, 32.3}}, label: 'Horizontal scroll bar, 1 page', value: 0%
+                          Other, 0x105811b80, {{-39.0, 806.0}, {36.0, 3.0}}
+                        Other, 0x105811ca0, {{366.6, 94.7}, {32.2, 779.3}}, label: 'Vertical scroll bar, 1 page', value: 0%
+                          Other, 0x105811dc0, {{395.6, 52.7}, {3.2, 38.7}}
+                        Other, 0x105811ee0, {{0.0, 838.5}, {402.0, 32.3}}, label: 'Horizontal scroll bar, 1 page', value: 0%
+                          Other, 0x105812000, {{-39.0, 806.0}, {36.0, 3.0}}
+Path to element:
+ →Application, 0x10580c2f0, pid: 73331, label: 'TheApp'
+Query chain:
+ →Find: Application 'io.cloudgrey.the-app'
+  Output: {
+    Application, 0x105812d10, pid: 73331, label: 'TheApp'
+  }
