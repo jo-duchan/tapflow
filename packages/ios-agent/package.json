@@ -38,6 +38,10 @@
   "files": [
     "dist",
     "bin",
+    "xctest-runner/project.yml",
+    "xctest-runner/TreeHost",
+    "xctest-runner/TreeRunner",
+    "xctest-runner/TapflowTreeRunner.xcodeproj",
     "README.md",
     "LICENSE"
   ],

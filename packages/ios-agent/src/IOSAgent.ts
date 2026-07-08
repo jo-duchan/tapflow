@@ -46,7 +46,7 @@ import { ensureHelperApp, launchAudioHelper, isAudioSupported } from '@tapflowio
 import { enumerateSimPids } from './SimProcessTree.js'
 import { MjpegStreamer } from './MjpegStreamer.js'
 import { TouchHelper } from './TouchHelper.js'
-import { UITreeReader } from './UITreeReader.js'
+import { XCUITreeReader } from './XCUITreeReader.js'
 import { DeviceChromeLoader, type ChromeData } from './DeviceChromeLoader.js'
 import { KEY_CODE_MAP, MODIFIER_BITS } from './KeyCodeMap.js'
 
@@ -118,7 +118,11 @@ export class IOSAgent implements DeviceAgent {
   private readonly handshakeTimeoutMs: number
   private ws: WebSocket | null = null
   private deviceStates = new Map<string, DeviceState>()
-  private readonly uiTreeReader = new UITreeReader()
+  // Last app launched per device (deviceId → bundleId). The XCUITest tree backend
+  // queries by bundleId; kept outside DeviceState so it survives a relay reconnect
+  // (which clears deviceStates) while the app keeps running in the simulator.
+  private lastBundleIds = new Map<string, string>()
+  private readonly uiTreeReader = new XCUITreeReader()
   // Holds a macOS power assertion while connected so the host doesn't idle-throttle the
   // simulator capture/encode when the Mac is unattended. No-op off macOS.
   private readonly sleepBlocker: SleepBlocker
@@ -278,6 +282,7 @@ export class IOSAgent implements DeviceAgent {
       this.cleanupDeviceState(state)
     }
     this.deviceStates.clear()
+    this.uiTreeReader.stop()
     this.sleepBlocker.release()
     this.ws?.close()
     this.ws = null
@@ -554,6 +559,10 @@ export class IOSAgent implements DeviceAgent {
     state.touchHelper = null
     state.streamWs?.close()
     state.streamWs = null
+    this.lastBundleIds.delete(deviceId)
+    // Stop the tree runner only if it serves THIS device — shutting down one
+    // booted device must not kill another device's resident runner.
+    this.uiTreeReader.stopIfDevice(deviceId)
 
     try {
       await this.simctl.shutdown(deviceId)
@@ -598,8 +607,11 @@ export class IOSAgent implements DeviceAgent {
       case 'app:launch': {
         const { bundleId } = msg.payload as { bundleId: string }
         const sessionId = msg.sessionId
+        const launchState = this.deviceStates.get(sessionId!)
         this.simctl.launchApp(bundleId)
           .then(() => {
+            // Track the foreground app so ui:tree:request can query it via XCUITest.
+            if (launchState) this.lastBundleIds.set(launchState.deviceId, bundleId)
             // Audio: the whole-sim tap's poll picks up the launched app process within one interval;
             // no per-launch helper needed.
             this.ws?.send(JSON.stringify({ type: 'app:launch-done', sessionId }))
@@ -817,7 +829,7 @@ export class IOSAgent implements DeviceAgent {
           this.ws?.send(JSON.stringify({ type: 'ui:tree:error', sessionId, requestId, message: 'No booted device' }))
           break
         }
-        this.readUITree(state.deviceId)
+        this.readUITree(state)
           .then((elements) => this.ws?.send(JSON.stringify({ type: 'ui:tree:response', sessionId, requestId, elements })))
           .catch((e: unknown) => {
             const message = e instanceof Error ? e.message : String(e)
@@ -828,13 +840,15 @@ export class IOSAgent implements DeviceAgent {
     }
   }
 
-  // The AX helper matches the Simulator window by device *name* (the window
-  // title), so resolve the udid through the device list first.
-  private async readUITree(deviceId: string): Promise<UIElement[]> {
-    const devices = await this.simctl.listDevices()
-    const name = devices.find((d) => d.id === deviceId)?.name
-    if (!name) throw new PlatformError(`device ${deviceId} not found in simctl list`)
-    return this.uiTreeReader.read(name)
+  // The XCUITest backend queries a specific app by bundleId (the last one launched
+  // via app:launch), reading its tree from inside the simulator — no Simulator.app
+  // window required.
+  private async readUITree(state: DeviceState): Promise<UIElement[]> {
+    const bundleId = this.lastBundleIds.get(state.deviceId)
+    if (!bundleId) {
+      throw new PlatformError('no app launched — launch an app before querying the UI tree')
+    }
+    return this.uiTreeReader.read(state.deviceId, bundleId)
   }
 
   /**
@@ -897,7 +911,7 @@ export class IOSAgent implements DeviceAgent {
   async queryUITree(): Promise<UIElement[]> {
     const state = this.deviceStates.values().next().value
     if (!state) throw new ValidationError('no booted device — call connect() first')
-    return this.readUITree(state.deviceId)
+    return this.readUITree(state)
   }
 
   // ── Audio output (opt-in, macOS 14.2+ Core Audio process taps) ───────────────────────────────

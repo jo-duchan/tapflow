@@ -100,26 +100,27 @@ pnpm build
 
 ---
 
-### accessibility-helper interface
+### XCUITest tree runner (UI tree backend)
 
+The iOS UI tree comes from a resident **XCUITest runner** that runs *inside* the simulator and serves the accessibility tree over HTTP. It is window-agnostic — no Simulator.app window is required — which matches tapflow's headless simulator operation (`simctl boot` does not auto-open a window in current Xcode, and streaming reads the IOSurface directly). This replaced the macOS AXUIElement helper, which needed a Simulator.app window and so failed on the headless path (the AX bridge only exists while the window is on screen). Still no WebDriverAgent — this is a self-hosted XCTest target.
+
+- Source: `xctest-runner/` — xcodegen `project.yml` → **committed `.xcodeproj`** (no xcodegen at runtime).
+  - `TreeHost` — minimal host app the UI-test target attaches to.
+  - `TreeRunner` — the UI-test target: `TreeServer.swift` opens an `NWListener` HTTP server; `TreeServerTest.swift` starts it and blocks so the process stays resident.
+- Protocol: `GET /health` → `ok` (readiness); `GET /tree?bundleId=<id>` → the app's `XCUIApplication.debugDescription` (text). Port via `TAPFLOW_TREE_PORT` env (default `22087`). The simulator shares `localhost` with the host (WDA pattern), so the host reaches the in-simulator server directly.
+- `XCUITreeReader.ts` builds the runner once (`build-for-testing`, cached under `xctest-runner/build/`, gitignored), launches it (`test-without-building`, resident), polls `/health`, then fetches `/tree`. `xcuiTree.ts` parses the debugDescription text into the unified schema — kept a **pure function** so it stays unit-testable against the `xcuiTree.test.ts` fixture (Open Q9: a future Xcode format change fails there).
+- Queries by bundleId: the reader needs the foreground app's bundleId, tracked as `DeviceState.currentBundleId` on `app:launch`. `readUITree` throws an actionable `PlatformError` if no app has been launched — never a silent empty tree.
+- Frames: debugDescription frames are points; the parser normalizes them 0-1 against the `Window` frame (same coordinate space as the touch path).
+- Lifecycle: **lazy** — the runner starts on the first UI-tree query (so the manual QA / streaming path never pays the build/launch cost) and is killed on device shutdown / disconnect.
+- `enabled`: debugDescription does not expose it, so elements default to `enabled: true`. If fidelity needs it, switch to the private snapshot API (plan Open Q9).
+
+When changing the tree output shape, **update both locations simultaneously**:
+1. `xctest-runner/TreeRunner/TreeServer.swift` — server / debugDescription source
+2. `src/xcuiTree.ts` — the parser + refresh the `xcuiTree.test.ts` fixture
+
+After editing runner sources, regenerate the committed project (the runner binary itself is built on first use by `XCUITreeReader`):
 ```bash
-accessibility-helper <deviceName>
-```
-
-Reads the iOS UI tree by applying the **macOS AXUIElement API to the Simulator.app process** — no WebDriverAgent, nothing installed inside the device. The Simulator bridges iOS accessibility into the macOS AX tree; the device screen is the window's `AXGroup` with subrole `iOSContentGroup`, whose frame is the normalization basis (all output frames are 0-1 relative to it, matching the touch path's coordinate space). Simulator chrome (hardware buttons, toolbar) lives outside that group so traversal never sees it.
-
-- `<deviceName>` prefix-matches the window title (`"iPhone 16 Pro – iOS 18.5"`); with a single open window it falls back to that window.
-- Output: single JSON object `{ "elements": [{ role, subrole?, label, identifier?, value?, enabled, frame }] }` with **raw macOS AX roles** — the unified-role mapping lives in `UITreeReader.ts` (`mapAxNodes`) so it stays unit-testable. Notable bridgings: UISwitch → `AXCheckBox/AXSwitch`, tab bar items → `AXRadioButton/AXTabButton`, SwiftUI text → `AXGenericElement`.
-- Exit codes: `0` ok · `2` macOS Accessibility permission missing (TCC — the app hosting the agent process needs the grant) · `3` Simulator window not found · `4` `iOSContentGroup` missing. `UITreeReader` maps each to an actionable `PlatformError` — never a silent empty tree.
-- Requires Simulator.app running with the device window open (Xcode 14+ auto-opens it on `simctl boot`).
-
-When changing the Swift output shape, **always update both locations simultaneously**:
-1. `src/accessibility-helper.swift` — JSON output changes
-2. `src/UITreeReader.ts` — `AxNode` interface + `mapAxNodes`
-
-Compile (output to `bin/`):
-```bash
-cd packages/ios-agent && swiftc src/accessibility-helper.swift -o bin/accessibility-helper
+cd packages/ios-agent/xctest-runner && xcodegen generate
 ```
 
 ---
