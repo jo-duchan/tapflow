@@ -1,4 +1,4 @@
-# Writing Flows
+# Flow Reference
 
 A flow is a UI test scenario written in YAML, replayed deterministically by `tapflow flow run` with no LLM calls. The same flow always runs in the same order from the same input, so it is idempotent — and it costs nothing in API calls in CI.
 

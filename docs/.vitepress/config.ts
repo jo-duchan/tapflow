@@ -55,7 +55,7 @@ const enSidebar = [
     text: 'AI Agent',
     items: [
       { text: 'MCP Server', link: '/guide/mcp-server' },
-      { text: 'Writing Flows', link: '/guide/writing-flows' },
+      { text: 'Flow Reference', link: '/guide/writing-flows' },
       { text: 'MCP in CI/CD', link: '/guide/mcp-ci' },
     ],
   },
@@ -124,7 +124,7 @@ const koSidebar = [
     text: 'AI 에이전트',
     items: [
       { text: 'MCP 서버', link: '/ko/guide/mcp-server' },
-      { text: '플로우 작성', link: '/ko/guide/writing-flows' },
+      { text: '플로우 레퍼런스', link: '/ko/guide/writing-flows' },
       { text: 'CI/CD에서 MCP 활용', link: '/ko/guide/mcp-ci' },
     ],
   },

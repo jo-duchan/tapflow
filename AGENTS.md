@@ -32,6 +32,8 @@ When designing features or writing docs, default to the manual testing perspecti
 - Reuses infrastructure (Mac) the team already owns.
 - Fully open-source and customizable.
 
+For the product direction and philosophy behind these — Manual First, Flow Capture as the moat, AI as an additive harness — see [VISION.md](./VISION.md).
+
 ---
 
 ## Core Principles

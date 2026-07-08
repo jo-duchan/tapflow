@@ -2,6 +2,8 @@
 
 `@tapflowio/mcp-server` exposes tapflow as a [Model Context Protocol (MCP)](https://modelcontextprotocol.io) server. Claude Code, Codex, and any other MCP-compatible LLM agent can control iOS simulators and Android emulators as native tools — no scripting, no hardcoded selectors.
 
+These three guides fit together: connect an agent here, learn the flow YAML format in the [Flow Reference](/guide/writing-flows), then combine them in [MCP in CI/CD](/guide/mcp-ci), where an agent authors a flow once and CI replays it deterministically.
+
 ## When to use this
 
 **Repeatable automated testing** is where this shines. One-off manual checks are still faster done by hand.
@@ -94,6 +96,7 @@ Any MCP-compatible client can use tapflow. Add the following to your MCP config 
 | `disconnect_device` | End a session |
 | `boot_device` | Boot a simulator or emulator |
 | `screenshot` | Capture the current screen (PNG or JPEG) |
+| `query_ui_tree` | Read the on-screen UI as a structured accessibility tree (role, label, identifier, frame) |
 | `tap` | Tap at a coordinate |
 | `swipe` | Swipe between two coordinates |
 | `type_text` | Type text into the focused field |
@@ -101,6 +104,7 @@ Any MCP-compatible client can use tapflow. Add the following to your MCP config 
 | `press_button` | Press a hardware button (home, lock, etc.) |
 | `install_app` | Install an app |
 | `launch_app` | Launch an installed app |
+| `run_flow` | Replay a YAML flow deterministically (no further LLM calls) |
 
 ## Typical workflow
 
