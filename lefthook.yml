@@ -7,6 +7,9 @@ pre-commit:
     - name: typecheck
       run: pnpm typecheck
 
+    - name: a11y-lens
+      run: pnpm exec a11y-lens check --staged
+
 pre-push:
   jobs:
     - name: no-direct-main-push

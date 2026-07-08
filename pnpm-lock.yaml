@@ -19,6 +19,9 @@ importers:
       '@changesets/cli':
         specifier: ^2.31.0
         version: 2.31.0(@types/node@20.19.43)
+      '@joduchan/a11y-lens':
+        specifier: ^0.2.0
+        version: 0.2.0
       '@vitest/coverage-v8':
         specifier: ^4.1.9
         version: 4.1.9(vitest@4.1.9)
@@ -1430,6 +1433,11 @@ packages:
     peerDependenciesMeta:
       '@types/node':
         optional: true
+
+  '@joduchan/a11y-lens@0.2.0':
+    resolution: {integrity: sha512-ViSBcCkPXEKlD4P7SIyIgn6wcrAjNp6ZC3z5OP2x3CUDwHmODqaj5pSgzxpc4syNwZWE0F6CE9j3h01DL2FYPA==}
+    engines: {node: '>=18'}
+    hasBin: true
 
   '@jridgewell/gen-mapping@0.3.13':
     resolution: {integrity: sha512-2kkt/7niJ6MgEPxF0bYdQ6etZaA+fQvDcLKckhy1yIQOzaoKjBBjSj63/aLVjYE3qhRt5dvM+uUyfCg6UKCBbA==}
@@ -6044,6 +6052,8 @@ snapshots:
       iconv-lite: 0.7.2
     optionalDependencies:
       '@types/node': 20.19.43
+
+  '@joduchan/a11y-lens@0.2.0': {}
 
   '@jridgewell/gen-mapping@0.3.13':
     dependencies:
