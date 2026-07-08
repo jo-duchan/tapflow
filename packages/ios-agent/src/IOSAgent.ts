@@ -105,9 +105,6 @@ interface DeviceState {
   // Per-device capture gain (0–1) from the sim's sim_volume. The tap captures pre-volume audio, so we
   // multiply it back in. Per-session field → each simulator's volume is applied independently.
   audioVolume: number
-  // Last app launched via app:launch — the XCUITest tree backend queries by bundleId
-  // (unlike the old AXUIElement path, which read whatever window was on screen).
-  currentBundleId?: string
 }
 
 export class IOSAgent implements DeviceAgent {
@@ -121,6 +118,10 @@ export class IOSAgent implements DeviceAgent {
   private readonly handshakeTimeoutMs: number
   private ws: WebSocket | null = null
   private deviceStates = new Map<string, DeviceState>()
+  // Last app launched per device (deviceId → bundleId). The XCUITest tree backend
+  // queries by bundleId; kept outside DeviceState so it survives a relay reconnect
+  // (which clears deviceStates) while the app keeps running in the simulator.
+  private lastBundleIds = new Map<string, string>()
   private readonly uiTreeReader = new XCUITreeReader()
   // Holds a macOS power assertion while connected so the host doesn't idle-throttle the
   // simulator capture/encode when the Mac is unattended. No-op off macOS.
@@ -249,13 +250,6 @@ export class IOSAgent implements DeviceAgent {
   private initDeviceStates(
     registeredSessions: Array<{ deviceId: string; sessionId: string }>,
   ): void {
-    // Preserve the foreground app across a relay reconnect — the app is still
-    // running in the simulator, so a tree query after reconnect shouldn't fail
-    // (with "no app launched") until a new app:launch. Keyed by deviceId.
-    const priorBundleIds = new Map<string, string>()
-    for (const s of this.deviceStates.values()) {
-      if (s.currentBundleId) priorBundleIds.set(s.deviceId, s.currentBundleId)
-    }
     registeredSessions.forEach(({ deviceId, sessionId }) => {
       this.deviceStates.set(sessionId, {
         sessionId,
@@ -276,7 +270,6 @@ export class IOSAgent implements DeviceAgent {
         audioPoll: null,
         audioPids: null,
         audioVolume: 1,
-        currentBundleId: priorBundleIds.get(deviceId),
       })
     })
   }
@@ -566,7 +559,7 @@ export class IOSAgent implements DeviceAgent {
     state.touchHelper = null
     state.streamWs?.close()
     state.streamWs = null
-    state.currentBundleId = undefined
+    this.lastBundleIds.delete(deviceId)
     // Stop the tree runner only if it serves THIS device — shutting down one
     // booted device must not kill another device's resident runner.
     this.uiTreeReader.stopIfDevice(deviceId)
@@ -618,7 +611,7 @@ export class IOSAgent implements DeviceAgent {
         this.simctl.launchApp(bundleId)
           .then(() => {
             // Track the foreground app so ui:tree:request can query it via XCUITest.
-            if (launchState) launchState.currentBundleId = bundleId
+            if (launchState) this.lastBundleIds.set(launchState.deviceId, bundleId)
             // Audio: the whole-sim tap's poll picks up the launched app process within one interval;
             // no per-launch helper needed.
             this.ws?.send(JSON.stringify({ type: 'app:launch-done', sessionId }))
@@ -851,10 +844,11 @@ export class IOSAgent implements DeviceAgent {
   // via app:launch), reading its tree from inside the simulator — no Simulator.app
   // window required.
   private async readUITree(state: DeviceState): Promise<UIElement[]> {
-    if (!state.currentBundleId) {
+    const bundleId = this.lastBundleIds.get(state.deviceId)
+    if (!bundleId) {
       throw new PlatformError('no app launched — launch an app before querying the UI tree')
     }
-    return this.uiTreeReader.read(state.deviceId, state.currentBundleId)
+    return this.uiTreeReader.read(state.deviceId, bundleId)
   }
 
   /**

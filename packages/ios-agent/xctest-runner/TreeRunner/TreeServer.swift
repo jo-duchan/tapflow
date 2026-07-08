@@ -33,6 +33,15 @@ final class TreeServer {
             conn.start(queue: self.queue)
             self.receive(conn, buffer: Data())
         }
+        // Surface a bind failure (e.g. port held by a stale runner) immediately by
+        // exiting — otherwise the process stays alive looking "ready" and the host
+        // only fails after the full 90s /health poll.
+        listener.stateUpdateHandler = { state in
+            if case .failed(let error) = state {
+                FileHandle.standardError.write(Data("tree server failed to bind: \(error)\n".utf8))
+                exit(1)
+            }
+        }
         listener.start(queue: queue)
     }
 

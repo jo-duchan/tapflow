@@ -29,6 +29,43 @@ interface RunnerHandle {
   port: number
 }
 
+// Native-tooling boundary (xcodebuild/xcrun). Injectable so tests can mock the
+// native calls without exercising the runner lifecycle / signal handling.
+export interface RunnerNative {
+  xctestrunReady(): boolean
+  build(destination: string): Promise<void>
+  spawn(destination: string, port: number): ChildProcess
+  terminateHost(udid: string): void
+}
+
+const defaultNative: RunnerNative = {
+  xctestrunReady() {
+    // test-without-building needs the .xctestrun, not just the .app — gate on it.
+    try {
+      return readdirSync(PRODUCTS_DIR).some((f) => f.endsWith('.xctestrun'))
+    } catch {
+      return false
+    }
+  },
+  async build(destination) {
+    await execFileAsync(
+      'xcodebuild',
+      ['build-for-testing', '-project', PROJECT, '-scheme', SCHEME, '-destination', destination, '-derivedDataPath', BUILD_DIR, '-quiet'],
+      { timeout: 300_000, maxBuffer: 64 * 1024 * 1024 },
+    )
+  },
+  spawn(destination, port) {
+    return spawn(
+      'xcodebuild',
+      ['test-without-building', '-project', PROJECT, '-scheme', SCHEME, '-destination', destination, '-derivedDataPath', BUILD_DIR, '-quiet'],
+      { env: { ...process.env, TAPFLOW_TREE_PORT: String(port) }, stdio: 'ignore', detached: true },
+    )
+  },
+  terminateHost(udid) {
+    execFile('xcrun', ['simctl', 'terminate', udid, RUNNER_HOST_BUNDLE], () => { /* best-effort */ })
+  },
+}
+
 // Drives the resident XCUITest tree runner: builds it once, launches it (staying
 // resident), and queries GET /tree over the simulator-shared loopback. Replaces
 // the AXUIElement path (UITreeReader), which required a Simulator.app window.
@@ -37,30 +74,19 @@ export class XCUITreeReader {
   private building?: Promise<void>
   private starting?: Promise<RunnerHandle>
 
+  constructor(private readonly native: RunnerNative = defaultNative) {}
+
   private destination(udid: string): string {
     // No arch — xcodebuild resolves it (arm64 on Apple Silicon, x86_64 on Intel).
     return `platform=iOS Simulator,id=${udid}`
   }
 
-  private xctestrunReady(): boolean {
-    // test-without-building needs the .xctestrun, not just the .app — gate on it.
-    try {
-      return readdirSync(PRODUCTS_DIR).some((f) => f.endsWith('.xctestrun'))
-    } catch {
-      return false
-    }
-  }
-
   private async ensureBuilt(udid: string): Promise<void> {
-    if (this.xctestrunReady()) return
+    if (this.native.xctestrunReady()) return
     if (this.building) return this.building
     this.building = (async () => {
       logger.info('building tree runner (first run — cached afterwards)...')
-      await execFileAsync(
-        'xcodebuild',
-        ['build-for-testing', '-project', PROJECT, '-scheme', SCHEME, '-destination', this.destination(udid), '-derivedDataPath', BUILD_DIR, '-quiet'],
-        { timeout: 300_000, maxBuffer: 64 * 1024 * 1024 },
-      )
+      await this.native.build(this.destination(udid))
       logger.info('tree runner built')
     })()
     try {
@@ -97,11 +123,7 @@ export class XCUITreeReader {
   private async launchRunner(udid: string): Promise<RunnerHandle> {
     this.stop() // tear down any stale/other-udid runner first
     await this.ensureBuilt(udid)
-    const proc = spawn(
-      'xcodebuild',
-      ['test-without-building', '-project', PROJECT, '-scheme', SCHEME, '-destination', this.destination(udid), '-derivedDataPath', BUILD_DIR, '-quiet'],
-      { env: { ...process.env, TAPFLOW_TREE_PORT: String(PORT) }, stdio: 'ignore', detached: true },
-    )
+    const proc = this.native.spawn(this.destination(udid), PORT)
     proc.on('error', (e) => logger.error('tree runner process error:', e.message))
     const handle: RunnerHandle = { proc, udid, port: PORT }
     this.runner = handle
@@ -173,7 +195,7 @@ export class XCUITreeReader {
     }
     // The in-simulator test host is not in that group — terminate it so the HTTP
     // port is released instead of lingering.
-    execFile('xcrun', ['simctl', 'terminate', udid, RUNNER_HOST_BUNDLE], () => { /* best-effort */ })
+    this.native.terminateHost(udid)
     // SIGKILL fallback if SIGTERM did not take.
     const timer = setTimeout(() => {
       try {
