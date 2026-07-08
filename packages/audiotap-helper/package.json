@@ -1,6 +1,6 @@
 {
   "name": "@tapflowio/audiotap-helper",
-  "version": "0.2.3",
+  "version": "0.2.4",
   "description": "Shared macOS Core Audio process-tap helper for tapflow — iOS simulator audio capture and Android emulator host-mute",
   "keywords": [
     "tapflow",
