@@ -129,7 +129,7 @@ A failed flow leaves a screenshot from the point of failure in the artifacts dir
 
 Keep flow files in your app repository under `.tapflow/flows/`. The runner accepts any path, so this is not enforced, but the CI examples and docs default to it.
 
-```
+```text
 your-app/
 ├── .tapflow/
 │   └── flows/

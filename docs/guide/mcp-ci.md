@@ -61,7 +61,7 @@ To connect the agent to the relay, keep a `.mcp.json` at the repo root pointing 
 
 Give the agent a request that describes the outcome rather than the steps.
 
-```
+```text
 Build a flow that signs in with an email and password and confirms the orders list.
 Drive the app to verify it works, then save the verified sequence to .tapflow/flows/login-smoke.yaml.
 ```
