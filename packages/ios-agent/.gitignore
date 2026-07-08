@@ -4,3 +4,4 @@
 # the committed Swift source on mtime change (developers only; shipped packages omit src). The
 # entitlements file is a local build input and isn't needed at runtime.
 bin/.audiotap.entitlements
+xctest-runner/build/
