@@ -9,6 +9,14 @@
   </p>
 
   <p>
+    <strong>No WebDriverAgent</strong>
+    &nbsp;·&nbsp;
+    <strong>2-line setup</strong>
+    &nbsp;·&nbsp;
+    <strong>Self-hosted · Free · MIT</strong>
+  </p>
+
+  <p>
     <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-blue.svg" alt="MIT License" /></a>
     <a href="https://nodejs.org"><img src="https://img.shields.io/badge/node-%3E%3D20-brightgreen" alt="Node.js ≥ 20" /></a>
     <img src="https://img.shields.io/badge/platform-macOS%20agent-lightgrey" alt="macOS Agent" />
@@ -30,7 +38,9 @@
 
 <video src="https://github.com/user-attachments/assets/75652346-93cb-4261-9210-6a24b883d44a" controls width="100%"></video>
 
-> **v0.x**: tapflow is under active development. Breaking changes may appear in minor versions until v1.0.0. See [ROADMAP](./ROADMAP.md) for the full plan.
+<p align="center"><em>Streams over H.264 with a zero-buffer decoder (no MSE) — <a href="contributing/streaming-latency-log.md">latency measurements ↗</a></em></p>
+
+> **v0.x, actively developed** — backward-compatible by default; breaking changes are rare and always noted in the [changelog](CHANGELOG.md). [Roadmap →](./ROADMAP.md)
 
 ---
 
@@ -57,31 +67,22 @@ We hit this exact problem, so we built tapflow.
 | Xcode / Android Studio | Each teammate needs a Mac and a full mobile toolchain |
 | **tapflow** | Reuse your own Macs — data stays on infrastructure you control, and the whole team does QA from a browser |
 
-## What tapflow does
+## How it works
 
 tapflow connects three parts:
 
-1. A **self-hosted relay** server (Linux or Mac)
-2. A **macOS agent** that drives iOS simulators and Android emulators
-3. A **browser dashboard** for the rest of the team
+1. A **self-hosted relay** (Linux or Mac) — also serves the dashboard on the same port, so there's no separate web server.
+2. A **macOS agent** that drives the iOS Simulator and Android emulator — it connects *outbound* to the relay (no inbound firewall rules) and injects iOS touch directly, without WebDriverAgent.
+3. A **browser dashboard** for the rest of the team — pick an available device and interact with it in real time while the simulators keep running on your Macs.
 
-The agent connects outbound to the relay. Teammates open the dashboard, pick an available device, and interact with it remotely — while the simulators and emulators keep running on your own Macs.
-
-## What tapflow is not
-
-tapflow doesn't replace native mobile development tools. Mobile developers still use Xcode, Android Studio, and their build tooling. tapflow makes the *running* simulators and emulators accessible to the rest of the team through a browser — it isn't an automation framework or a device farm.
-
-## How it works
-
-```
+```text
 Browser (your team)  ←─ WebSocket ─→  Relay Server  ←─ WebSocket (outbound) ─→  Mac Agent
                                     (Linux / Mac)                           (iOS · Android)
 ```
 
-1. The **Mac Agent** connects *outbound* to the relay — no inbound firewall rules needed.
-2. Anyone on the team opens the **dashboard** in any browser and sees all available devices.
-3. Touch events are forwarded in real time; the screen streams back to the browser.
-4. The **relay** also serves the dashboard SPA on the same port — no separate web server needed.
+## What tapflow is not
+
+tapflow doesn't replace native mobile development tools. Mobile developers still use Xcode, Android Studio, and their build tooling. tapflow makes the *running* simulators and emulators accessible to the rest of the team through a browser — it isn't an automation framework or a device farm.
 
 ## Quick Start
 
@@ -138,7 +139,7 @@ Navigate to `http://localhost:4000` and sign in with the account you just create
 ## Features
 
 - **No mobile toolchain for QA users** — teammates test from a browser without installing Xcode, Android Studio, or local simulator tooling.
-- **Self-hosted by default** — app builds, device streams, recordings, and account data stay on infrastructure you control.
+- **Self-hosted by default** — no third-party cloud and no external accounts; everything runs on hardware you already own.
 - **Use your existing Mac setup** — run agents on Macs that already have the iOS Simulator or Android emulator available.
 - **API-first** — REST endpoints and Personal Access Tokens support CI/CD and AI-agent workflows.
 
@@ -157,7 +158,7 @@ What's included:
 - **MCP Server** — `@tapflowio/mcp-server` lets Claude Code and other LLM agents control simulators as native tools.
 
 <a name="latency-note"></a>
-> <sup>1</sup> On a real LAN, decode-to-present measures in the low tens of milliseconds (p50 ~11–17 ms with the WASM software decoder; faster with WebCodecs on HTTPS); end-to-end "glass-to-glass" latency adds your network's round trip on top. See the [performance & latency reference](https://www.tapflow.dev/reference/performance) for the full measurements, conditions, and known limitations.
+> <sup>1</sup> On a real LAN, decode-to-present measures in the low tens of milliseconds (p50 ~11–17 ms with the WASM software decoder; faster with WebCodecs on HTTPS); end-to-end "glass-to-glass" latency adds your network's round trip on top. See the [streaming latency log](contributing/streaming-latency-log.md) for the full measurements, conditions, and known limitations.
 
 ## Security & Privacy
 
@@ -179,17 +180,7 @@ Found a vulnerability? See [SECURITY.md](SECURITY.md). For the full model, read 
 
 ## Self-Hosting
 
-### Local (single Mac)
-
-Relay and agent on the same machine — ideal for a single developer or small team.
-
-```sh
-tapflow start
-```
-
-### Team (separate relay server)
-
-Run the relay on a Linux server or dedicated Mac. Each Mac with simulators runs the agent.
+A single Mac needs nothing beyond `tapflow start` (see [Quick Start](#quick-start)). For a team, run the relay on a separate Linux server or dedicated Mac, and point each Mac agent at it.
 
 **Relay server:**
 
@@ -231,33 +222,11 @@ Full reference → [CLI docs](https://www.tapflow.dev/reference/cli)
 
 ## Documentation
 
-**[www.tapflow.dev](https://www.tapflow.dev)**
+Full docs: **[www.tapflow.dev](https://www.tapflow.dev)**
 
-**Getting Started**
-- [Introduction](https://www.tapflow.dev/guide/introduction)
-- [Quick Start](https://www.tapflow.dev/guide/getting-started)
-- [Requirements](https://www.tapflow.dev/guide/requirements)
-
-**Setup**
-- [Self-Hosting the Relay](https://www.tapflow.dev/guide/self-hosting)
-- [Security & Privacy](https://www.tapflow.dev/guide/security)
-- [Agent Setup](https://www.tapflow.dev/guide/agent)
-- [Uploading Builds (CI/CD)](https://www.tapflow.dev/guide/upload-builds)
-- [Scaling Mac Resources](https://www.tapflow.dev/guide/scaling)
-
-**Dashboard**
-- [First-time Setup](https://www.tapflow.dev/dashboard/setup)
-- [Dashboard Overview](https://www.tapflow.dev/dashboard/overview)
-
-**AI Agent**
-- [MCP Server](https://www.tapflow.dev/guide/mcp-server)
-
-**Reference**
-- [CLI Reference](https://www.tapflow.dev/reference/cli)
-- [Configuration](https://www.tapflow.dev/reference/configuration)
-- [REST API](https://www.tapflow.dev/reference/api)
-
-**[Troubleshooting](https://www.tapflow.dev/guide/troubleshooting)**
+- **Guides** — [Quick Start](https://www.tapflow.dev/guide/getting-started) · [Environment Setup](https://www.tapflow.dev/guide/environment-setup) · [Self-Hosting](https://www.tapflow.dev/guide/self-hosting) · [Security & Privacy](https://www.tapflow.dev/guide/security) · [Uploading Builds (CI/CD)](https://www.tapflow.dev/guide/upload-builds) · [Troubleshooting](https://www.tapflow.dev/guide/troubleshooting)
+- **Reference** — [CLI](https://www.tapflow.dev/reference/cli) · [Configuration](https://www.tapflow.dev/reference/configuration) · [REST API](https://www.tapflow.dev/reference/api)
+- **AI Agent** — [MCP Server](https://www.tapflow.dev/guide/mcp-server)
 
 ## Contributing
 
