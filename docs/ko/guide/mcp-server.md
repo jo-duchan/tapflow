@@ -2,6 +2,8 @@
 
 `@tapflowio/mcp-server`는 tapflow를 [Model Context Protocol(MCP)](https://modelcontextprotocol.io) 서버로 노출합니다. Claude Code, Codex 등 MCP를 지원하는 LLM 에이전트가 iOS 시뮬레이터와 Android 에뮬레이터를 네이티브 도구로 직접 제어할 수 있습니다. 스크립팅도, 좌표 하드코딩도 필요 없습니다.
 
+세 문서는 이렇게 이어집니다. 여기서 에이전트를 연결하고, [플로우 레퍼런스](/ko/guide/writing-flows)에서 플로우 YAML 형식을 익힌 뒤, [CI/CD에서 MCP 활용](/ko/guide/mcp-ci)에서 둘을 합칩니다. 에이전트가 플로우를 한 번 작성하면 이후 CI가 그 플로우를 결정적으로 재생합니다.
+
 ## 이럴 때 쓰세요
 
 **반복적인 자동화 테스트**에서 진가를 발휘합니다. 단발성 수동 확인은 여전히 직접 하는 게 빠릅니다.
@@ -94,6 +96,7 @@ MCP를 지원하는 클라이언트라면 모두 tapflow를 사용할 수 있습
 | `disconnect_device` | 세션 종료 |
 | `boot_device` | 시뮬레이터·에뮬레이터 부팅 |
 | `screenshot` | 현재 화면 캡처 (PNG 또는 JPEG) |
+| `query_ui_tree` | 화면 UI를 구조화된 접근성 트리로 조회 (role·label·identifier·frame) |
 | `tap` | 좌표 터치 |
 | `swipe` | 스와이프 |
 | `type_text` | 텍스트 입력 |
@@ -101,6 +104,7 @@ MCP를 지원하는 클라이언트라면 모두 tapflow를 사용할 수 있습
 | `press_button` | 하드웨어 버튼 입력 (홈, 잠금 등) |
 | `install_app` | 앱 설치 |
 | `launch_app` | 앱 실행 |
+| `run_flow` | YAML 플로우를 결정적으로 재생 (추가 LLM 호출 없음) |
 
 ## 일반적인 워크플로우
 

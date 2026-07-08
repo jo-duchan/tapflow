@@ -37,7 +37,7 @@ jobs:
             --junit report.xml
 ```
 
-플로우 YAML 문법, 셀렉터 규칙, 종료 코드 계약은 [플로우 작성](/ko/guide/writing-flows)에서 자세히 다룹니다.
+플로우 YAML 문법, 셀렉터 규칙, 종료 코드 계약은 [플로우 레퍼런스](/ko/guide/writing-flows)에서 자세히 다룹니다.
 
 ## 에이전트로 플로우 작성
 

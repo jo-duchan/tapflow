@@ -14,6 +14,16 @@ stays the single source of truth.
 
 ---
 
+## The three QA axes
+
+tapflow is one QA workflow used from three starting points, all sharing the same session, app, and runtime (see [VISION.md](./VISION.md) for the why).
+
+- **Manual QA** — the browser dashboard: the team tests by hand on a real simulator or emulator. Shipping today (Phases 1–4).
+- **AI Automation** — the deterministic flow runner (`tapflow flow run`) and the MCP server for LLM agents. Shipping today (Phase 5 foundation).
+- **Manual ↔ AI bridge** — turning a manual session into a replayable flow. Today an agent can author a flow by demonstrating it through the MCP tools. The larger goal is **Flow Capture**: a person operates the app in the dashboard and tapflow records the actions as tree-based selectors, no agent required (Phase 5+, not built yet).
+
+The bridge (especially Flow Capture) is the differentiator — it drops the cost of turning manual QA into automation to nearly zero.
+
 ## Current status
 
 | Area | Status |
@@ -125,7 +135,7 @@ endpoint); Phase 5 builds on top.
 - [#133](https://github.com/jo-duchan/tapflow/issues/133) — UI accessibility tree query (`query_ui_tree`) — unified element schema with normalized frames, so agents tap by element instead of guessing coordinates
 - [ ] Deterministic YAML flow format + headless CLI runner — state reset and condition-based waits built in, JUnit report + failure screenshots, no LLM at replay time
 - [ ] `run_flow` MCP tool — agents replay verified flows through the same deterministic engine
-- [ ] Dashboard demo recording → YAML flow draft — capture channel for non-developers (after the runner ships)
+- [ ] **Flow Capture** (the manual↔AI bridge) — a person operates the app in the dashboard; tapflow records the actions as tree-based selectors and drafts a YAML flow, no agent required. Selector-based (via the UI tree), not coordinate recording, so captures stay robust. After the runner ships.
 
 ---
 

@@ -37,7 +37,7 @@ jobs:
             --junit report.xml
 ```
 
-The flow YAML syntax, selector rules, and exit-code contract are covered in [Writing Flows](/guide/writing-flows).
+The flow YAML syntax, selector rules, and exit-code contract are covered in the [Flow Reference](/guide/writing-flows).
 
 ## Authoring flows with an agent
 
