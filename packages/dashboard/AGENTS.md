@@ -67,3 +67,24 @@ The audience is the whole team (PO, PM, designers, backend, QA) — not just QA.
 **Why** (not obvious from the code):
 - Both H.264 tiers paint **straight to a canvas with no `<video>` media element** — WebCodecs decodes to a `VideoFrame`, WASM (tinyh264) decodes to I420 rendered by `YUVWebGLRenderer` — so there is no media-element buffer adding latency. H.264 is hardware-decoded (WebCodecs) on secure contexts; only the JPEG fallback is CPU-decoded (`createImageBitmap`).
 - Release the GPU texture/frame every frame (`bitmap.close()` / `VideoFrame.close()`) — otherwise GPU memory leaks per frame.
+
+---
+
+<!-- a11y-lens:begin -->
+## Accessibility rules (a11y-lens)
+
+This package is the only one with DOM/client code, so the a11y-lens rules apply here. Staged UI changes are checked at commit time by the root lefthook `a11y-lens` job; findings with `error` severity block the commit.
+
+When writing or modifying UI code (JSX/TSX/HTML), apply the rule set in `node_modules/@joduchan/a11y-lens/skills/a11y-lens/references/` — read the relevant category before implementing:
+
+- `01-landmarks-headings.md` — document outline, one h1, no level skips, labelled landmarks
+- `02-images-alt.md` — alt text that describes function in context; icon-only controls need accessible names
+- `03-forms-labels.md` — placeholder is not a label; errors tied via `aria-describedby`; name matches visible label
+- `04-aria-widgets.md` — prefer native elements; custom widgets implement the complete WAI-ARIA APG pattern
+- `05-keyboard-interaction.md` — full APG key sets, no hover-only affordances, no keyboard traps
+- `06-focus-management.md` — overlays move and return focus; async results are announced via live regions
+
+Tip: agents with skills support get richer guidance via `npx skills add jo-duchan/a11y-lens`.
+
+Self-check against these categories before finishing any UI task — it is cheaper than failing the pre-commit gate.
+<!-- a11y-lens:end -->
