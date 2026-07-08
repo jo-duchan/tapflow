@@ -1,4 +1,4 @@
-# @tapflowio/mcp-server
+# @tapflowio/flow-runner
 
 ## 0.14.0
 
@@ -15,6 +15,4 @@
 ### Patch Changes
 
 - Updated dependencies [ba0a3d8]
-  - @tapflowio/flow-runner@0.14.0
-
-## 0.7.0
+  - @tapflowio/agent-core@0.14.0

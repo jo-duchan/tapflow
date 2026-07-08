@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.14.0] - 2026-07-09
+
+### Added
+
+- Automated QA axis. `query_ui_tree` (MCP) and `GET /api/v1/sessions/:sessionId/ui-tree` return a unified element schema (`role`/`label`/`identifier`/`frame`/`enabled`) with frames normalized 0–1, so a frame center feeds straight into `tap`. iOS reads the tree via a resident XCUITest runner inside the simulator — window-agnostic (no Simulator.app window, no WebDriverAgent); Android via `uiautomator dump` with a device-side timeout (#133).
+- `@tapflowio/flow-runner` (new package) and `tapflow flow run` replay YAML flows with zero LLM calls: a 10-step vocabulary, identifier/label selector resolution, condition-based waits, JUnit reports, failure screenshots, and a CI exit-code contract (0 pass / 1 flow failed / 2 env error).
+- `run_flow` (MCP) — an agent authors a flow once, then replays it deterministically over the existing session.
+- relay `app:clear-state` — reset app data (Android `pm clear`, iOS data-container wipe).
+- `@tapflowio/mcp-server` and `@tapflowio/flow-runner` graduate from the `experimental` dist-tag to the standard npm channel, versioned with the repo-wide fixed group.
+
+### Changed
+
+- Text entry waits for an `input:type-done` ack so a following key press stays correctly ordered. **A self-hosted agent older than v0.14.0 does not send this ack — update the agent and relay together, or text steps will time out.**
+
+### Fixed
+
+- mcp: `type_text`, cross-platform hardware buttons, and input payloads aligned with the agent protocol (#376, #377).
+
 ## [0.13.0] - 2026-07-05
 
 ### Added
@@ -252,7 +270,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Automatic `tapflow.config.json` creation as a side effect of `tapflow start` / `tapflow relay start`.
 
-[Unreleased]: https://github.com/jo-duchan/tapflow/compare/v0.13.0...HEAD
+[Unreleased]: https://github.com/jo-duchan/tapflow/compare/v0.14.0...HEAD
+[0.14.0]: https://github.com/jo-duchan/tapflow/compare/v0.13.0...v0.14.0
 [0.13.0]: https://github.com/jo-duchan/tapflow/compare/v0.12.0...v0.13.0
 [0.12.0]: https://github.com/jo-duchan/tapflow/compare/v0.11.1...v0.12.0
 [0.11.1]: https://github.com/jo-duchan/tapflow/compare/v0.11.0...v0.11.1
