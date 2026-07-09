@@ -25,7 +25,10 @@ jobs:
           cache: pnpm
           registry-url: https://registry.npmjs.org
 
-      - run: npm install -g npm@latest
+      # Pin npm: npm@12.0.0 broke provenance signing under trusted publishing
+      # ("Cannot find module 'sigstore'"). 11.18.0 is the last known-good line
+      # above the trusted-publishing floor. Revisit once npm ships a 12.x fix.
+      - run: npm install -g npm@11.18.0
 
       - run: pnpm install --frozen-lockfile
 
