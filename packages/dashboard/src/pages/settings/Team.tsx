@@ -150,13 +150,13 @@ export function TeamSettings() {
                   {errors.email && <p className="text-sm text-destructive">{errors.email.message}</p>}
                 </div>
                 <div className="grid gap-2">
-                  <Label>Role</Label>
+                  <Label htmlFor="invite-role">Role</Label>
                   <Controller
                     name="role"
                     control={control}
                     render={({ field }) => (
                       <Select value={field.value} onValueChange={field.onChange}>
-                        <SelectTrigger><SelectValue /></SelectTrigger>
+                        <SelectTrigger id="invite-role"><SelectValue /></SelectTrigger>
                         <SelectContent>
                           <SelectItem value="Admin">Admin</SelectItem>
                           <SelectItem value="Developer">Developer</SelectItem>
