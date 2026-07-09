@@ -166,9 +166,9 @@ export function TokenSettings() {
                   {errors.expiresDays && <p className="text-sm text-destructive">{errors.expiresDays.message}</p>}
                 </div>
                 <div className="grid gap-2">
-                  <Label>Type</Label>
+                  <Label htmlFor="token-type">Type</Label>
                   <Select value={tokenType} onValueChange={(v) => setTokenType(v as TokenType)}>
-                    <SelectTrigger><SelectValue /></SelectTrigger>
+                    <SelectTrigger id="token-type"><SelectValue /></SelectTrigger>
                     <SelectContent>
                       <SelectItem value="api">API — CI uploads &amp; API access</SelectItem>
                       <SelectItem value="agent">Agent — connect remote device agents (Admin only)</SelectItem>

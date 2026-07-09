@@ -221,13 +221,14 @@ export function DefaultSettings() {
                   control={workspaceForm.control}
                   render={({ field }) => (
                     <div className="relative w-16 h-16">
-                      <img src={logoUrl ?? defaultLogo} alt="logo" className="w-16 h-16 rounded-lg object-contain" />
+                      <img src={logoUrl ?? defaultLogo} alt="Workspace logo" className="w-16 h-16 rounded-lg object-contain" />
                       <button
                         type="button"
+                        aria-label="Change logo"
                         onClick={() => logoRef.current?.click()}
                         className="absolute bottom-0 right-0 w-6 h-6 rounded-full bg-background border border-border shadow-sm flex items-center justify-center hover:bg-accent transition-colors"
                       >
-                        <Pencil className="w-3 h-3" />
+                        <Pencil className="w-3 h-3" aria-hidden="true" />
                       </button>
                       <input ref={logoRef} type="file" accept=".png,.jpg,.jpeg" className="hidden"
                         onChange={(e) => {
@@ -271,7 +272,7 @@ export function DefaultSettings() {
                 render={({ field }) => (
                   <div className="relative w-14 h-14">
                     {avatarUrl ? (
-                      <img src={avatarUrl} alt="avatar" className="w-14 h-14 rounded-full object-cover border" />
+                      <img src={avatarUrl} alt="Profile avatar" className="w-14 h-14 rounded-full object-cover border" />
                     ) : (
                       <div
                         className="w-14 h-14 rounded-full flex items-center justify-center text-lg font-medium"
@@ -282,10 +283,11 @@ export function DefaultSettings() {
                     )}
                     <button
                       type="button"
+                      aria-label="Change avatar"
                       onClick={() => avatarRef.current?.click()}
                       className="absolute bottom-0 right-0 w-6 h-6 rounded-full bg-background border border-border shadow-sm flex items-center justify-center hover:bg-accent transition-colors"
                     >
-                      <Pencil className="w-3 h-3" />
+                      <Pencil className="w-3 h-3" aria-hidden="true" />
                     </button>
                     <input ref={avatarRef} type="file" accept=".png,.jpg,.jpeg" className="hidden"
                       onChange={(e) => {

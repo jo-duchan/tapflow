@@ -99,7 +99,7 @@ export function Invite() {
                 render={({ field }) => (
                   <div className="relative w-14 h-14">
                     {avatarPreview ? (
-                      <img src={avatarPreview} alt="avatar" className="w-14 h-14 rounded-full object-cover border" />
+                      <img src={avatarPreview} alt="Avatar preview" className="w-14 h-14 rounded-full object-cover border" />
                     ) : (
                       <div
                         className="w-14 h-14 rounded-full flex items-center justify-center text-lg font-medium"
@@ -110,10 +110,11 @@ export function Invite() {
                     )}
                     <button
                       type="button"
+                      aria-label="Change avatar"
                       onClick={() => avatarRef.current?.click()}
                       className="absolute bottom-0 right-0 w-6 h-6 rounded-full bg-background border border-border shadow-sm flex items-center justify-center hover:bg-accent transition-colors"
                     >
-                      <Pencil className="w-3 h-3" />
+                      <Pencil className="w-3 h-3" aria-hidden="true" />
                     </button>
                     <input
                       ref={avatarRef}

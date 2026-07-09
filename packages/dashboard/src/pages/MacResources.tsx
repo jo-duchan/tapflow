@@ -143,7 +143,7 @@ export function MacResources() {
         ) : (
           <div className="flex flex-col gap-6 p-6">
             <div className="flex items-center justify-between">
-              <h2 className="text-base font-semibold">{selectedAgent}</h2>
+              <h1 className="text-base font-semibold">{selectedAgent}</h1>
               <Tabs value={range} onValueChange={(v) => setRange(v as Range)}>
                 <TabsList>
                   {(Object.keys(RANGE_LABELS) as Range[]).map((r) => (

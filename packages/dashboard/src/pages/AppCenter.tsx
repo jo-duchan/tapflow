@@ -105,7 +105,7 @@ export function AppCenter() {
         onAdd={fetchApps}
       />
 
-      <main className="flex-1 flex flex-col gap-4 p-4 overflow-y-auto min-w-0">
+      <div className="flex-1 flex flex-col gap-4 p-4 overflow-y-auto min-w-0">
         <div className="flex items-center justify-between flex-wrap gap-2">
           <h1 className="text-xl font-semibold tracking-display-sm">
             {selectedApp ? selectedApp.name : 'App Center'}
@@ -166,7 +166,7 @@ export function AppCenter() {
         )}
         </>
         )}
-      </main>
+      </div>
     </div>
   )
 }
