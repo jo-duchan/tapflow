@@ -33,7 +33,7 @@
     "release": "pnpm build && changeset publish"
   },
   "devDependencies": {
-    "@a11y-lens/cli": "^0.4.0",
+    "@a11y-lens/cli": "^0.4.1",
     "@changesets/cli": "^2.31.0",
     "@vitest/coverage-v8": "^4.1.10",
     "concurrently": "^9.2.3",
