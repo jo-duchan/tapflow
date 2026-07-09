@@ -62,3 +62,7 @@ docs/.vitepress/dist
 
 # curl test artifacts
 cookies.txt
+
+# skills install artifacts (a11y-lens etc.)
+.agents/
+skills-lock.json
