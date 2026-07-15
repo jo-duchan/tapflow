@@ -2,6 +2,10 @@
 
 A flow is a UI test scenario written in YAML, replayed deterministically by `tapflow flow run` with no LLM calls. The same flow always runs in the same order from the same input, so it is idempotent — and it costs nothing in API calls in CI.
 
+::: warning Experimental
+tapflow's **AI Automation axis** — the MCP server and the flow runner — is experimental. The manual QA dashboard is the mature, production path; this axis is additive and still maturing. Expect rough edges, especially in selector matching and in timing right after an app launches.
+:::
+
 ::: info Two QA axes
 tapflow has two QA axes. The browser dashboard is the **manual QA axis**, where your team tests by hand; the flow runner covered here is the **automated QA axis**, whose main stage is CI/CD.
 

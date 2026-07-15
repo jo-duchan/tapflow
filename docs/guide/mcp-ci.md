@@ -4,6 +4,10 @@ The automated QA axis splits into two stages: an LLM agent explores the app and 
 
 That distinction changes CI. If an LLM judges the screen on every run, the result varies run to run and you pay for API calls each time. Save a verified scenario as a [flow](/guide/writing-flows) instead, and CI replays that flow with no LLM calls — idempotent, and free.
 
+::: warning Experimental
+tapflow's **AI Automation axis** — the MCP server and the flow runner — is experimental. The manual QA dashboard is the mature, production path; this axis is additive and still maturing. Expect rough edges, especially in selector matching and in timing right after an app launches.
+:::
+
 ## Deterministic replay — the main CI path
 
 A CI job replays saved flows with `tapflow flow run`. There is no LLM on the replay path, so the same input always produces the same result, and there is no API cost.
