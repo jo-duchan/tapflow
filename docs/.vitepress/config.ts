@@ -51,7 +51,7 @@ const enSidebar = [
     ],
   },
   {
-    text: 'AI Agent',
+    text: 'AI Automation',
     items: [
       { text: 'MCP Server', link: '/guide/mcp-server' },
       { text: 'Flow Reference', link: '/guide/writing-flows' },
@@ -119,7 +119,7 @@ const koSidebar = [
     ],
   },
   {
-    text: 'AI 에이전트',
+    text: 'AI 자동화',
     items: [
       { text: 'MCP 서버', link: '/ko/guide/mcp-server' },
       { text: '플로우 레퍼런스', link: '/ko/guide/writing-flows' },
