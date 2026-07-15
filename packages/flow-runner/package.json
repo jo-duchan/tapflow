@@ -46,7 +46,7 @@
   },
   "dependencies": {
     "@tapflowio/agent-core": "workspace:*",
-    "ws": "^8.21.0",
+    "ws": "^8.21.1",
     "yaml": "^2.6.0"
   },
   "devDependencies": {

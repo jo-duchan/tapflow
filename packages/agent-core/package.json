@@ -56,7 +56,7 @@
     "lint": "eslint src"
   },
   "dependencies": {
-    "ws": "^8.21.0"
+    "ws": "^8.21.1"
   },
   "devDependencies": {
     "@types/node": "^20.19.43",
