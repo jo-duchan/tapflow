@@ -59,7 +59,60 @@ curl -X POST "$TAPFLOW_RELAY_URL/api/v1/builds" \
 
 bundle ID, 버전, 빌드 번호는 업로드한 빌드에서 자동으로 추출되므로 따로 입력하지 않아도 됩니다.
 
-EAS Build가 끝나는 시점에 자동으로 올리려면 작은 수신 엔드포인트를 하나 둡니다. EAS Webhook의 완료 알림을 받아 산출물 URL을 내려받은 뒤 위 요청을 그대로 호출하면 됩니다. tapflow는 이 표준 멀티파트 업로드를 받는 것까지 책임집니다.
+### EAS 웹훅으로 업로드 자동화
+
+위 curl은 수동 업로드입니다. EAS Build가 끝나는 시점에 자동으로 올리려면, 직접 호스팅하는 작은 수신 엔드포인트로 [EAS 웹훅](https://docs.expo.dev/eas/webhooks/)을 보내면 됩니다. tapflow는 EAS 웹훅을 직접 받지 않고 표준 멀티파트 업로드만 받으므로, 이 수신 엔드포인트가 둘을 잇습니다. 이벤트를 검증하고, 산출물을 내려받고, relay로 POST합니다.
+
+```
+EAS Build 완료
+  → EAS 웹훅          → 수신 엔드포인트: 서명 검증 → 산출물 다운로드
+                      → POST /api/v1/builds (tapflow relay)
+  → App Center에 빌드 등장 → 팀 리뷰
+  → 상태 → Done / Rejected → tapflow 웹훅 → Slack · 다음 배포 단계
+```
+
+간단한 수신 엔드포인트 예시입니다(Node).
+
+```js
+import express from 'express'
+import crypto from 'crypto'
+
+const app = express()
+app.use(express.raw({ type: 'application/json' })) // EAS는 원본 본문에 서명한다
+
+app.post('/eas', async (req, res) => {
+  // 1. expo-signature 헤더 검증 (원본 본문의 HMAC-SHA1)
+  const expected = 'sha1=' + crypto.createHmac('sha1', process.env.EAS_WEBHOOK_SECRET).update(req.body).digest('hex')
+  const got = Buffer.from(req.get('expo-signature') ?? '')
+  if (got.length !== expected.length || !crypto.timingSafeEqual(got, Buffer.from(expected))) {
+    return res.status(401).end()
+  }
+
+  const build = JSON.parse(req.body.toString())
+  if (build.status !== 'finished') return res.status(200).end() // errored / canceled 무시
+
+  // 2. 산출물 다운로드 (iOS .tar.gz / Android .apk)
+  const artifact = await fetch(build.artifacts.applicationArchiveUrl).then((r) => r.arrayBuffer())
+  const name = build.platform === 'ios' ? 'build.tar.gz' : 'build.apk'
+
+  // 3. tapflow로 넘기기 — 위 curl과 동일한 멀티파트 업로드
+  const form = new FormData()
+  form.append('file', new Blob([artifact]), name)
+  form.append('status', 'In Progress')
+  const up = await fetch(`${process.env.TAPFLOW_RELAY_URL}/api/v1/builds`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${process.env.TAPFLOW_PAT}` },
+    body: form,
+  })
+  res.status(up.ok ? 200 : 502).end()
+})
+
+app.listen(3000)
+```
+
+양쪽에 같은 시크릿을 설정합니다. `eas webhook:create --event BUILD`에 넘긴 값을 수신 쪽에서 `EAS_WEBHOOK_SECRET`으로 읽습니다. 서명 방식의 방향에 주의하세요. EAS는 **HMAC-SHA1**(`expo-signature`)로 서명하는 반면, tapflow의 발신 웹훅은 HMAC-SHA256을 씁니다([웹훅](/ko/guide/build-status-webhooks) 참고).
+
+서비스를 상시 띄우기 부담스럽다면, EAS 웹훅이 `repository_dispatch`로 GitHub Actions 실행을 트리거하고 워크플로가 다운로드와 POST를 대신하게 할 수도 있습니다. 같은 세 단계이고 상시 수신 서버가 필요 없습니다.
 
 ## 4. 팀이 브라우저에서 테스트
 
