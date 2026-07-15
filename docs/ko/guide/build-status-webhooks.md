@@ -2,7 +2,7 @@
 
 팀이 리뷰를 마치고 빌드를 `Done` 또는 `Rejected`로 바꾸면, tapflow가 미리 등록해둔 URL로 그 사실을 알립니다. 이 신호를 Slack 알림이나 다음 배포 단계로 이어 붙이면 리뷰 결과가 자동으로 흐르게 됩니다.
 
-EAS 웹훅이 빌드 완료를 알리는 것과는 방향이 다릅니다. tapflow는 빌드를 직접 만들지 않으므로, 여기서 알리는 것은 빌드 완료가 아니라 **사람이 내린 리뷰 판정**입니다.
+tapflow는 빌드를 직접 만들지 않으므로, 여기서 알리는 것은 빌드 완료가 아니라 **사람이 내린 리뷰 판정**입니다.
 
 ## 동작 방식
 
@@ -141,6 +141,6 @@ function isFromTapflow(rawBody, signature, secret) {
 - 등록 URL은 loopback(`127.0.0.1`)과 클라우드 메타데이터 주소(`169.254.169.254`)를 거부합니다. 사내 사설망 주소(`10.x`, `192.168.x` 등)는 self-hosted CI를 위해 허용됩니다.
 - `secret`은 선택이지만, 등록 URL이 노출되면 위조 요청이 들어올 수 있으므로 지정하기를 강하게 권장합니다.
 
-## EAS 연동과의 관계
+## 빌드를 tapflow에 올리는 방향
 
-이 기능은 tapflow가 외부로 보내는(outbound) 알림입니다. 반대 방향인, EAS 빌드가 끝났을 때 그 결과를 받아 tapflow로 업로드하는(inbound) 방법은 [Expo 빌드 연동](/ko/guide/build-expo-eas)에서 다룹니다.
+이 기능은 tapflow가 외부로 보내는(outbound) 알림입니다. 반대 방향인, 빌드를 tapflow에 올리는 것은 일반 빌드 업로드이며 [빌드 배포](/ko/guide/build-distribution)에서 다룹니다.

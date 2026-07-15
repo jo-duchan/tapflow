@@ -23,16 +23,9 @@ This guide covers the **manual review path**: CI delivers the build; people do t
 For automated testing where an LLM agent controls the simulator, see [MCP in CI/CD](/guide/mcp-ci). That is a separate, experimental feature.
 :::
 
-## Recipes by build tool
+## Any build tool
 
-The steps below work with any build tool. If you use a specific one, start with its recipe.
-
-| Build tool | Recipe |
-|-----------|--------|
-| Expo (EAS) | [EAS build integration](/guide/build-expo-eas) |
-| bare React Native · Flutter · native | Follow the generic flow on this page (build → artifact → upload) |
-
-Once your build produces an artifact (`.app.zip`, `.tar.gz`, or `.apk`), the rest is the same regardless of the build tool.
+tapflow works on the built artifact, not the build tool. A native Xcode or Gradle build, React Native, Flutter, or a cloud build service all produce a build you upload the same way. Once you have an artifact (`.app.zip`, `.tar.gz`/`.tgz`, or `.apk`), the rest of this page is the same.
 
 ## Prerequisites
 
@@ -89,7 +82,7 @@ curl -X POST https://your-relay/api/v1/builds \
 Use `label` to attach context — branch name, ticket number, or a short description.
 
 ::: warning iOS builds
-`.ipa` files are not supported. For a simulator build, upload `.app.zip` or `.tar.gz`/`.tgz`. Build `.app.zip` with `xcodebuild -sdk iphonesimulator` and zip the `.app` folder; for `.tar.gz`, see [EAS build integration](/guide/build-expo-eas).
+`.ipa` files are not supported. For a simulator build, upload `.app.zip` or `.tar.gz`/`.tgz`. Build `.app.zip` with `xcodebuild -sdk iphonesimulator` and zip the `.app` folder; a `.tar.gz`/`.tgz` is what a cloud simulator build produces.
 :::
 
 ## 3. Post build metadata (optional)

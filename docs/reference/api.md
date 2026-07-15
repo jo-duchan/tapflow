@@ -280,17 +280,20 @@ Upload a build.
 ```
 Content-Type: multipart/form-data
 Authorization: Bearer tflw_pat_<token>  (or session cookie)
-
-Fields:
-  file    .app.zip (iOS) or .apk (Android) — max 500 MB  required
-  status  Backlog | In Progress | Done | Rejected          optional
-  label   custom label (e.g. "rc-1", "hotfix")             optional
-  app_id  link to an existing App explicitly               optional
 ```
 
+Only `file` is required; every other field is optional.
+
+| Field | Required | Description |
+|-------|----------|-------------|
+| `file` | Yes | The build artifact. iOS: `.app.zip` or `.tar.gz` / `.tgz` (a simulator build); Android: `.apk`. Max 500 MB. `.ipa` and `.aab` are rejected. |
+| `status` | No | Initial review status — one of `Backlog`, `In Progress`, `Done`, `Rejected`. Omit to leave it unset. |
+| `label` | No | Free-text label to identify the build in App Center (e.g. a branch name or `rc-1`). |
+| `platform` | No | `ios` or `android`. Derived from the file type when omitted. |
+| `app_id` | No | Attach to an existing app explicitly. Normally the app is resolved automatically from the bundle ID. |
+
 ::: warning iOS builds
-`.ipa` files are not supported. Use `.app.zip` only.
-Build with `xcodebuild -sdk iphonesimulator`, then zip the `.app` folder.
+`.ipa` files are not supported. Upload `.app.zip`, or the `.tar.gz` / `.tgz` a cloud simulator build produces. Build `.app.zip` with `xcodebuild -sdk iphonesimulator` and zip the `.app` folder.
 :::
 
 **Response `201`**

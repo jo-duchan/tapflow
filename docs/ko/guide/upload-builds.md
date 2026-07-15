@@ -6,7 +6,7 @@
 
 App Center에서 **Upload Build**를 클릭하고 파일을 선택합니다.
 
-- iOS: `.app.zip` 또는 `.tar.gz`/`.tgz` — 시뮬레이터용 빌드. `.app.zip`은 [커맨드라인으로 빌드](https://developer.apple.com/library/archive/technotes/tn2339/_index.html)하고, `.tar.gz`는 `eas build`가 만든 EAS 산출물을 그대로 올립니다.
+- iOS: `.app.zip` 또는 `.tar.gz`/`.tgz` — 시뮬레이터용 빌드. `.app.zip`은 [커맨드라인으로 빌드](https://developer.apple.com/library/archive/technotes/tn2339/_index.html)하고, `.tar.gz` 시뮬레이터 빌드는 그대로 올립니다.
 - Android: `.apk`
 
 ::: warning iOS — `.ipa` 파일은 지원하지 않습니다
