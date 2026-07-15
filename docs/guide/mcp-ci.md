@@ -1,12 +1,12 @@
 # MCP in CI/CD
 
-The automated QA axis splits into two stages: an LLM agent explores the app and **authors** a scenario, and a deterministic runner **replays** it. The guiding principle is simple — an LLM is involved only at authoring time, and replay is deterministic.
-
-That distinction changes CI. If an LLM judges the screen on every run, the result varies run to run and you pay for API calls each time. Save a verified scenario as a [flow](/guide/writing-flows) instead, and CI replays that flow with no LLM calls — idempotent, and free.
-
 ::: warning Experimental
 tapflow's **AI Automation axis** — the MCP server and the flow runner — is experimental. The manual QA dashboard is the mature, production path; this axis is additive and still maturing. Expect rough edges, especially in selector matching and in timing right after an app launches.
 :::
+
+The automated QA axis splits into two stages: an LLM agent explores the app and **authors** a scenario, and a deterministic runner **replays** it. The guiding principle is simple — an LLM is involved only at authoring time, and replay is deterministic.
+
+That distinction changes CI. If an LLM judges the screen on every run, the result varies run to run and you pay for API calls each time. Save a verified scenario as a [flow](/guide/writing-flows) instead, and CI replays that flow with no LLM calls — idempotent, and free.
 
 ## Deterministic replay — the main CI path
 

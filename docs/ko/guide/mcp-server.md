@@ -1,12 +1,12 @@
 # MCP 서버
 
-`@tapflowio/mcp-server`는 tapflow를 [Model Context Protocol(MCP)](https://modelcontextprotocol.io) 서버로 노출합니다. Claude Code, Codex 등 MCP를 지원하는 LLM 에이전트가 iOS 시뮬레이터와 Android 에뮬레이터를 네이티브 도구로 직접 제어할 수 있습니다. 스크립팅도, 좌표 하드코딩도 필요 없습니다.
-
-세 문서는 이렇게 이어집니다. 여기서 에이전트를 연결하고, [플로우 레퍼런스](/ko/guide/writing-flows)에서 플로우 YAML 형식을 익힌 뒤, [CI/CD에서 MCP 활용](/ko/guide/mcp-ci)에서 둘을 합칩니다. 에이전트가 플로우를 한 번 작성하면 이후 CI가 그 플로우를 결정적으로 재생합니다.
-
 ::: warning 실험적 기능
 tapflow의 **AI 자동화 축**인 MCP 서버와 플로우 러너는 실험적 기능입니다. 성숙한 정식 경로는 수동 QA 대시보드이며, 이 축은 부가 기능으로서 아직 다듬어지는 중입니다. 특히 셀렉터 매칭과 앱 실행 직후 타이밍에서 거친 부분이 있을 수 있습니다.
 :::
+
+`@tapflowio/mcp-server`는 tapflow를 [Model Context Protocol(MCP)](https://modelcontextprotocol.io) 서버로 노출합니다. Claude Code, Codex 등 MCP를 지원하는 LLM 에이전트가 iOS 시뮬레이터와 Android 에뮬레이터를 네이티브 도구로 직접 제어할 수 있습니다. 스크립팅도, 좌표 하드코딩도 필요 없습니다.
+
+세 문서는 이렇게 이어집니다. 여기서 에이전트를 연결하고, [플로우 레퍼런스](/ko/guide/writing-flows)에서 플로우 YAML 형식을 익힌 뒤, [CI/CD에서 MCP 활용](/ko/guide/mcp-ci)에서 둘을 합칩니다. 에이전트가 플로우를 한 번 작성하면 이후 CI가 그 플로우를 결정적으로 재생합니다.
 
 ## 이럴 때 쓰세요
 
