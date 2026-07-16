@@ -36,11 +36,11 @@
     "@a11y-lens/cli": "^0.4.1",
     "@changesets/cli": "^2.31.0",
     "@vitest/coverage-v8": "^4.1.10",
-    "concurrently": "^9.2.3",
-    "eslint": "^10.6.0",
+    "concurrently": "^9.2.4",
+    "eslint": "^10.7.0",
     "globals": "^17.7.0",
     "lefthook": "^2.1.10",
-    "typescript-eslint": "^8.63.0"
+    "typescript-eslint": "^8.64.0"
   },
   "pnpm": {
     "overrides": {

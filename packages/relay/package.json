@@ -58,7 +58,7 @@
     "busboy": "^1.6.0",
     "jsonwebtoken": "^9.0.3",
     "nodemailer": "^9.0.3",
-    "ws": "^8.21.0",
+    "ws": "^8.21.1",
     "zod": "^4.4.3"
   },
   "devDependencies": {
