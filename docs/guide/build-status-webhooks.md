@@ -2,7 +2,7 @@
 
 When your team finishes a review and moves a build to `Done` or `Rejected`, tapflow notifies a URL you registered. Wire that signal into a Slack alert or the next deploy step, and review outcomes flow through automatically.
 
-This runs the opposite direction from an EAS webhook. tapflow doesn't build your app, so what it reports here isn't a build completion — it's the **review verdict a person made**.
+tapflow doesn't build your app, so what it reports here isn't a build completion — it's the **review verdict a person made**.
 
 ## How it works
 
@@ -141,6 +141,6 @@ A webhook is sent **only when** `status_label` changes to `Done` or `Rejected`.
 - Registration rejects loopback (`127.0.0.1`) and cloud-metadata (`169.254.169.254`) addresses. Private LAN addresses (`10.x`, `192.168.x`, …) are allowed for self-hosted CI.
 - `secret` is optional, but set one — an exposed URL can otherwise receive forged requests.
 
-## Relation to EAS integration
+## Getting a build in
 
-This is an outbound notification tapflow sends. The opposite direction — receiving an EAS build-completion event and uploading the result into tapflow — is covered in [Expo build integration](/guide/build-expo-eas).
+This is an outbound notification tapflow sends. The opposite direction — getting a build *into* tapflow in the first place — is a normal build upload, covered in [Build Distribution](/guide/build-distribution).

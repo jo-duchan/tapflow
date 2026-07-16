@@ -40,7 +40,6 @@ const enSidebar = [
     items: [
       { text: 'Uploading Builds', link: '/guide/upload-builds' },
       { text: 'Build Distribution', link: '/guide/build-distribution' },
-      { text: 'Expo Build Integration', link: '/guide/build-expo-eas' },
       { text: 'Webhooks', link: '/guide/build-status-webhooks' },
     ],
   },
@@ -52,7 +51,7 @@ const enSidebar = [
     ],
   },
   {
-    text: 'AI Agent',
+    text: 'AI Automation',
     items: [
       { text: 'MCP Server', link: '/guide/mcp-server' },
       { text: 'Flow Reference', link: '/guide/writing-flows' },
@@ -109,7 +108,6 @@ const koSidebar = [
     items: [
       { text: '빌드 업로드', link: '/ko/guide/upload-builds' },
       { text: '빌드 배포', link: '/ko/guide/build-distribution' },
-      { text: 'Expo 빌드 연동', link: '/ko/guide/build-expo-eas' },
       { text: '웹훅', link: '/ko/guide/build-status-webhooks' },
     ],
   },
@@ -121,7 +119,7 @@ const koSidebar = [
     ],
   },
   {
-    text: 'AI 에이전트',
+    text: 'AI 자동화',
     items: [
       { text: 'MCP 서버', link: '/ko/guide/mcp-server' },
       { text: '플로우 레퍼런스', link: '/ko/guide/writing-flows' },

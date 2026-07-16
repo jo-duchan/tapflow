@@ -280,17 +280,20 @@ Body (JSON):
 ```
 Content-Type: multipart/form-data
 Authorization: Bearer tflw_pat_<token>  (또는 세션 쿠키)
-
-Fields:
-  file    .app.zip (iOS) 또는 .apk (Android) — 최대 500MB  필수
-  status  Backlog | In Progress | Done | Rejected            선택
-  label   커스텀 레이블 (예: "rc-1", "hotfix")               선택
-  app_id  기존 App에 명시적으로 연결                          선택
 ```
 
+`file`만 필수이고 나머지는 모두 선택입니다.
+
+| 필드 | 필수 | 설명 |
+|------|------|------|
+| `file` | 필수 | 빌드 산출물. iOS는 `.app.zip` 또는 `.tar.gz`/`.tgz`(시뮬레이터 빌드), Android는 `.apk`입니다. 최대 500MB이고 `.ipa`·`.aab`는 거부됩니다. |
+| `status` | 선택 | 초기 리뷰 상태로 `Backlog`, `In Progress`, `Done`, `Rejected` 중 하나입니다. 생략하면 미설정으로 둡니다. |
+| `label` | 선택 | App Center에서 빌드를 식별하는 자유 텍스트 레이블입니다(예: 브랜치명이나 `rc-1`). |
+| `platform` | 선택 | `ios` 또는 `android`입니다. 생략하면 파일 형식에서 자동으로 정해집니다. |
+| `app_id` | 선택 | 기존 앱에 명시적으로 연결합니다. 보통은 bundle ID로 앱이 자동 결정됩니다. |
+
 ::: warning iOS 빌드 주의사항
-`.ipa` 파일은 지원하지 않습니다. `.app.zip`만 허용됩니다.
-`xcodebuild -sdk iphonesimulator`로 빌드한 `.app` 폴더를 zip으로 압축하세요.
+`.ipa` 파일은 지원하지 않습니다. `.app.zip`을 올리거나, 클라우드 시뮬레이터 빌드가 만드는 `.tar.gz`/`.tgz`를 올리세요. `.app.zip`은 `xcodebuild -sdk iphonesimulator`로 빌드한 `.app` 폴더를 zip으로 압축하면 됩니다.
 :::
 
 **응답 `201`**
