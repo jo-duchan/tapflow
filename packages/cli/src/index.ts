@@ -18,6 +18,7 @@ import { cmdReset } from './commands/reset.js'
 import { cmdStatus } from './commands/status.js'
 import { cmdLogs } from './commands/logs.js'
 import { cmdFlowRun, type FlowRunOptions } from './commands/flow-run.js'
+import { cmdMigrateDataDir } from './commands/migrate.js'
 
 process.on('unhandledRejection', (err) => {
   console.error(err instanceof Error ? err.message : String(err))
@@ -122,6 +123,14 @@ cli
       build: opts.build !== undefined ? Number(opts.build) : undefined,
       timeout: opts.timeout !== undefined ? Number(opts.timeout) : undefined,
     })
+  })
+
+cli
+  .command('migrate <subcommand>', 'Migration commands (subcommand: data-dir)')
+  .action((subcommand: string) => {
+    if (subcommand === 'data-dir') return cmdMigrateDataDir()
+    console.error(`Unknown subcommand: migrate ${subcommand}`)
+    process.exit(1)
   })
 
 cli.help()

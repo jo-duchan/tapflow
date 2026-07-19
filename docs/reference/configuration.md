@@ -8,7 +8,7 @@ The relay reads `tapflow.config.json` from the directory where it is started. Ge
 {
   "local": {
     "port": 4000,
-    "dataDir": ".tapflow-data"
+    "dataDir": ".tapflow/data"
   },
   "relay": {
     "url": "https://your-relay-url"
@@ -40,13 +40,13 @@ The relay reads `tapflow.config.json` from the directory where it is started. Ge
 
 Environment variables always take precedence over the config file — useful for server deployments and CI.
 
-Secrets can also live in the `.tapflow-data/.env` file. The relay loads it first thing on start, so any variable below can come from there instead of the shell. Precedence is **shell env > `.env` > config file**. See [Configuring tapflow](/guide/configure) for the file format and the one exception (`TAPFLOW_DATA_DIR`).
+Secrets can also live in the `.tapflow/data/.env` file. The relay loads it first thing on start, so any variable below can come from there instead of the shell. Precedence is **shell env > `.env` > config file**. See [Configuring tapflow](/guide/configure) for the file format and the one exception (`TAPFLOW_DATA_DIR`).
 
 | Variable | Config key | Default | Description |
 |----------|------------|---------|-------------|
 | `TAPFLOW_PORT` | `local.port` | `4000` | Server port |
 | `JWT_SECRET` | — | *(auto-generated)* | JWT signing key (env only). If unset, a strong per-install secret is generated on first boot and persisted to the data directory. |
-| `TAPFLOW_DATA_DIR` | `local.dataDir` | `.tapflow-data` | DB and uploads directory (supports relative paths) |
+| `TAPFLOW_DATA_DIR` | `local.dataDir` | `.tapflow/data` | DB and uploads directory (supports relative paths) |
 | `TAPFLOW_RELAY_URL` | `relay.url` | *(empty)* | Relay URL used as default by CLI commands |
 | `TAPFLOW_AGENT_TOKEN` | — | *(empty)* | Token with the `agent` scope for remote relay authentication. The `--token` flag takes precedence. See [Agent Setup](/guide/agent#remote-relay-authentication). |
 | `TAPFLOW_TRUSTED_PROXIES` | — | *(empty)* | Comma-separated IPs of trusted reverse proxies (e.g. `127.0.0.1,::1`). Set this when the relay runs behind a same-host reverse proxy so it reads the real client IP from `X-Forwarded-For` instead of the proxy's address. Empty disables forwarded-header parsing. |
@@ -70,7 +70,7 @@ If `JWT_SECRET` is not set, the relay generates a strong per-install secret on f
 openssl rand -hex 32
 ```
 
-Put the value in `.tapflow-data/.env` or inject it as a shell environment variable.
+Put the value in `.tapflow/data/.env` or inject it as a shell environment variable.
 :::
 
 ::: warning Behind a reverse proxy, set TAPFLOW_TRUSTED_PROXIES
@@ -122,7 +122,7 @@ With your own domain and a DNS provider API token, the relay auto-issues and ren
 | `tls.publishAddress` | Auto-publish the domain's A record to this machine's LAN IP. Default `true`; set `false` to manage DNS yourself. |
 | `tls.address` | IP to use instead of the auto-detected LAN IP, for multi-NIC or VPN overrides. |
 
-API tokens go in the `.tapflow-data/.env` file that `tapflow init` scaffolds, not in the config file. Cloudflare uses `TAPFLOW_CLOUDFLARE_TOKEN` and Vercel uses `TAPFLOW_VERCEL_TOKEN`, plus `TAPFLOW_VERCEL_TEAM_ID` for a team domain. The file stays out of git because `.tapflow-data/` is gitignored. A value set directly in the environment takes precedence over the file. See [Configuring tapflow](/guide/configure) for how the file is scaffolded and read.
+API tokens go in the `.tapflow/data/.env` file that `tapflow init` scaffolds, not in the config file. Cloudflare uses `TAPFLOW_CLOUDFLARE_TOKEN` and Vercel uses `TAPFLOW_VERCEL_TOKEN`, plus `TAPFLOW_VERCEL_TEAM_ID` for a team domain. The file stays out of git because `.tapflow/data/` is gitignored. A value set directly in the environment takes precedence over the file. See [Configuring tapflow](/guide/configure) for how the file is scaffolded and read.
 
 When `publishAddress` is on, the relay publishes its LAN IP to the domain's A record on boot and refreshes it periodically, so teammates just open the domain without touching DNS.
 
@@ -159,15 +159,20 @@ The relay creates these files in the working directory on first run:
 ```text
 your-directory/
   tapflow.config.json   ← relay configuration (run tapflow init to generate)
-  .tapflow-data/
-    tapflow.db          ← SQLite database
-    uploads/
-      builds/           ← .app.zip and .apk files
-      avatars/
-      comments/
+  .tapflow/
+    data/               ← relay runtime state (gitignored)
+      tapflow.db        ← SQLite database
+      uploads/
+        builds/         ← .app.zip and .apk files
+        avatars/
+        comments/
+    flows/              ← committed YAML flows
+    artifacts/          ← flow failure screenshots (gitignored)
 ```
 
-To change the data directory location, set `TAPFLOW_DATA_DIR` or `local.dataDir`. Back up `.tapflow-data/` to preserve all data.
+To change the data directory location, set `TAPFLOW_DATA_DIR` or `local.dataDir`. Back up `.tapflow/data/` to preserve all data.
+
+Upgrading from a version that used `.tapflow-data/`? Nothing breaks: if your `tapflow.config.json` pins `local.dataDir` (older `tapflow init` wrote `.tapflow-data`), the relay honors it; a config-less default install keeps reading a pre-existing `.tapflow-data/`. To adopt the unified layout, run `tapflow migrate data-dir` once — it atomically renames `.tapflow-data/` → `.tapflow/data/` (no copy, no data loss), repoints `local.dataDir` when it pinned the old default, and updates `.gitignore`.
 
 ## SMTP
 

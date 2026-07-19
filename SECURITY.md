@@ -110,8 +110,10 @@ What the relay enforces, from a defender's point of view:
   cleaned up.
 - **Tokens carry least-privilege scopes** (`view`, `builds:write`, `agent`); the `agent` scope is
   admin-only.
-- **Secrets have one home.** All relay secrets default to `.tapflow-data/.env`, with the shell
-  environment overriding the file and the file overriding config.
+- **Secrets have one home.** All relay secrets default to `.tapflow/data/.env`, with the shell
+  environment overriding the file and the file overriding config. Installs upgrading from the older
+  `.tapflow-data/` layout keep reading `.tapflow-data/.env` until you run `tapflow migrate data-dir`,
+  which relocates the secrets into `.tapflow/data/` and keeps them gitignored.
 - **tapflow does not phone home.** It moves builds, recordings, and streams only between your own
   agents, relay, and browsers, never to a tapflow-run or analytics service. Where that traffic
   travels is your choice: a LAN or your own VPS keeps it on hardware you control, while a hosted

@@ -6,6 +6,7 @@ import { createLogger } from '@tapflowio/agent-core'
 import { parseTrustedProxies } from './clientAddress.js'
 import { dnsProviders } from './cert/dnsRegistry.js'
 import { loadDataDirEnv } from './loadEnvFile.js'
+import { resolveDefaultDataDir, LEGACY_DATA_DIR, UNIFIED_DATA_DIR } from './dataDir.js'
 import { validateWebhookUrl } from './webhookUrl.js'
 
 const logger = createLogger('relay:config')
@@ -91,7 +92,7 @@ type DeepPartial<T> = { [K in keyof T]?: T[K] extends object ? DeepPartial<T[K]>
 const DEFAULTS = {
   local: {
     port: 4000,
-    dataDir: '.tapflow-data',
+    dataDir: '.tapflow/data',
     wsBackpressureBytes: 1_048_576,
     trustedProxies: [],
   },
@@ -175,9 +176,21 @@ function load(): TapflowConfig {
 
   // Resolve dataDir first, then load <dataDir>/.env, so every secret read below (JWT_SECRET, SMTP,
   // DNS/ACME tokens) defaults to the .env file. dataDir itself can't come from .env (chicken-and-egg):
-  // it's set only by config.json or TAPFLOW_DATA_DIR. ambient process.env still wins over the file.
-  let dataDir = resolveDataDir(file.local?.dataDir ?? DEFAULTS.local.dataDir)
-  if (process.env.TAPFLOW_DATA_DIR) dataDir = resolveDataDir(process.env.TAPFLOW_DATA_DIR)
+  // it's set only by config.json or TAPFLOW_DATA_DIR. Precedence: TAPFLOW_DATA_DIR > config.json > default.
+  // The relay never moves data; when the default is in effect it resolves read-only, falling back to a
+  // pre-existing legacy .tapflow-data/ so an un-migrated install keeps reading its data.
+  let dataDir: string
+  if (process.env.TAPFLOW_DATA_DIR) {
+    dataDir = resolveDataDir(process.env.TAPFLOW_DATA_DIR)
+  } else if (file.local?.dataDir != null) {
+    dataDir = resolveDataDir(file.local.dataDir)
+  } else {
+    const resolved = resolveDefaultDataDir(process.cwd())
+    dataDir = resolved.dataDir
+    if (resolved.usingLegacy) {
+      logger.warn(`Reading data from the legacy ${LEGACY_DATA_DIR}/ — run \`tapflow migrate data-dir\` to move it into ${UNIFIED_DATA_DIR}/.`)
+    }
+  }
   loadedEnvPath = loadDataDirEnv(dataDir)
 
   const cfg: TapflowConfig = {

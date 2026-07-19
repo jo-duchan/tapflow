@@ -15,8 +15,8 @@ The command can create up to three things.
 | Output | Contents |
 |--------|----------|
 | `tapflow.config.json` | Relay configuration. Holds the port, tunnel, and HTTPS settings you choose. |
-| `.tapflow-data/.env` | Holds DNS / ACME credentials. Created only when you pick DNS auto-issue. |
-| `.gitignore` entry | Adds `.tapflow-data/` when run inside a git repo, so runtime data and tokens are never committed. |
+| `.tapflow/data/.env` | Holds DNS / ACME credentials. Created only when you pick DNS auto-issue. |
+| `.gitignore` entry | Adds `.tapflow/data/` and `.tapflow/artifacts/` when run inside a git repo, so runtime data and tokens are never committed (`.tapflow/flows/` stays tracked). |
 
 The interactive prompts then appear in order. You pick a tunnel first; the streaming and certificate prompts only show when you run on the LAN with no tunnel.
 
@@ -66,11 +66,11 @@ If you turn on HTTPS, choose how the certificate is provided.
 | **DNS auto-issue** | Auto-issues and renews a Let's Encrypt certificate with a Cloudflare or Vercel API token. Just enter your domain. |
 | **Existing certificate (import)** | Point to an internal PKI or a certificate file you already hold. You manage renewal yourself. |
 
-When you choose DNS auto-issue, you select a provider and enter a domain, and a `.tapflow-data/.env` for the token is scaffolded alongside. The full reference for issuance modes and config keys is in [Configuration — HTTPS](/reference/configuration#https-secure-context).
+When you choose DNS auto-issue, you select a provider and enter a domain, and a `.tapflow/data/.env` for the token is scaffolded alongside. The full reference for issuance modes and config keys is in [Configuration — HTTPS](/reference/configuration#https-secure-context).
 
-## .tapflow-data/.env — holding secrets
+## .tapflow/data/.env — holding secrets
 
-`.tapflow-data/.env` is the **default home for every relay secret**. Choosing DNS auto-issue makes `init` scaffold an empty template for the token, but this file holds more than DNS tokens — `JWT_SECRET`, the SMTP password, and any other secret go here too, one per line. Secrets stay out of `tapflow.config.json` and live in this gitignored file instead.
+`.tapflow/data/.env` is the **default home for every relay secret**. Choosing DNS auto-issue makes `init` scaffold an empty template for the token, but this file holds more than DNS tokens — `JWT_SECRET`, the SMTP password, and any other secret go here too, one per line. Secrets stay out of `tapflow.config.json` and live in this gitignored file instead.
 
 Paste each value after the `=`.
 
@@ -99,10 +99,13 @@ After `tapflow init` finishes, your working directory looks like this.
 ```text
 your-directory/
   tapflow.config.json    ← relay configuration
-  .gitignore             ← .tapflow-data/ entry added
-  .tapflow-data/
-    .env                 ← only when DNS auto-issue is chosen
+  .gitignore             ← .tapflow/ runtime dirs added (data/, artifacts/)
+  .tapflow/
+    data/                ← relay runtime state: db, uploads, secrets
+      .env               ← only when DNS auto-issue is chosen
 ```
+
+Everything tapflow writes lives under one `.tapflow/` root: the relay fills in `data/` on first start, `flows/` holds the YAML flows you commit, and `artifacts/` collects failure screenshots. Only `data/` and `artifacts/` are gitignored — `flows/` stays in your repo.
 
 Every key in `tapflow.config.json` and its environment-variable overrides are detailed in [Configuration](/reference/configuration).
 

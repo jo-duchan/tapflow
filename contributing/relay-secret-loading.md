@@ -31,8 +31,8 @@ load():
   4. read the remaining process.env values + jwtSecret
 ```
 
-`.tapflow-data/.env` becomes the single default home for every relay secret, so the mental model
-is one line: "secrets live in `.tapflow-data/.env`."
+`.tapflow/data/.env` becomes the single default home for every relay secret, so the mental model
+is one line: "secrets live in `.tapflow/data/.env`."
 
 ## Decisions worth keeping
 

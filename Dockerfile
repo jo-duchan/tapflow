@@ -44,8 +44,8 @@ USER node
 COPY --from=builder --chown=node:node /app/out ./
 
 # Create data directory as the node user for volume mount
-RUN mkdir -p /app/.tapflow-data
-VOLUME ["/app/.tapflow-data"]
+RUN mkdir -p /app/.tapflow/data
+VOLUME ["/app/.tapflow/data"]
 
 # Set environment to production
 ENV NODE_ENV=production

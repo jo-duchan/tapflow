@@ -30,6 +30,7 @@ describe('relay config validation', () => {
     const { config } = await import('../lib/config.js')
     expect(config.local.port).toBe(4000)
     expect(config.local.wsBackpressureBytes).toBe(1_048_576)
+    expect(config.local.dataDir).toMatch(/\.tapflow[/\\]data$/)
     expect(exitSpy).not.toHaveBeenCalled()
   })
 

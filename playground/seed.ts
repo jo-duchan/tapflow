@@ -2,7 +2,7 @@ import path from 'path'
 import crypto from 'crypto'
 import { initDb, getDb } from '@tapflowio/relay'
 
-const dataDir = path.join(import.meta.dirname, '.tapflow-data')
+const dataDir = path.join(import.meta.dirname, '.tapflow', 'data')
 initDb(path.join(dataDir, 'tapflow.db'))
 
 function makePasswordHash(password: string): string {

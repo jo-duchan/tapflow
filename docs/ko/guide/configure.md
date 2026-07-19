@@ -15,8 +15,8 @@ tapflow init
 | 생성물 | 내용 |
 |--------|------|
 | `tapflow.config.json` | 릴레이 설정 파일. 선택한 포트·터널·HTTPS 설정이 들어갑니다. |
-| `.tapflow-data/.env` | DNS·ACME 자격 증명을 담는 파일. DNS 자동 발급을 선택했을 때만 만들어집니다. |
-| `.gitignore` 항목 | git 저장소 안에서 실행했을 때 `.tapflow-data/`를 추가해 런타임 데이터와 토큰이 커밋되지 않도록 합니다. |
+| `.tapflow/data/.env` | DNS·ACME 자격 증명을 담는 파일. DNS 자동 발급을 선택했을 때만 만들어집니다. |
+| `.gitignore` 항목 | git 저장소 안에서 실행했을 때 `.tapflow/data/`와 `.tapflow/artifacts/`를 추가해 런타임 데이터와 토큰이 커밋되지 않도록 합니다(`.tapflow/flows/`는 추적 유지). |
 
 이어서 대화형 프롬프트가 순서대로 나타납니다. 터널을 먼저 고르고, 터널 없이 LAN으로 쓸 때만 스트리밍 성능과 인증서 방식을 묻습니다.
 
@@ -66,11 +66,11 @@ HTTPS를 켜기로 했다면 인증서를 어떻게 마련할지 고릅니다.
 | **DNS 자동 발급** | Cloudflare나 Vercel API 토큰으로 Let's Encrypt 인증서를 자동 발급·갱신합니다. 도메인을 입력하면 됩니다. |
 | **직접 인증서(import)** | 사내 PKI나 이미 보유한 인증서 파일 경로를 지정합니다. 갱신은 직접 관리합니다. |
 
-DNS 자동 발급을 고르면 업체를 선택하고 도메인을 입력합니다. 이때 토큰을 담을 `.tapflow-data/.env`가 함께 만들어집니다. 인증서 발급 모드와 설정 키의 전체 레퍼런스는 [설정 파일 — HTTPS](/ko/reference/configuration#https-보안-컨텍스트)에 있습니다.
+DNS 자동 발급을 고르면 업체를 선택하고 도메인을 입력합니다. 이때 토큰을 담을 `.tapflow/data/.env`가 함께 만들어집니다. 인증서 발급 모드와 설정 키의 전체 레퍼런스는 [설정 파일 — HTTPS](/ko/reference/configuration#https-보안-컨텍스트)에 있습니다.
 
-## .tapflow-data/.env — 비밀 보관
+## .tapflow/data/.env — 비밀 보관
 
-`.tapflow-data/.env`는 릴레이의 **모든 비밀이 모이는 기본 경로**입니다. DNS 자동 발급을 선택하면 `init`이 토큰을 담을 빈 템플릿을 만들지만, 이 파일에는 DNS 토큰뿐 아니라 `JWT_SECRET`이나 SMTP 비밀번호 같은 다른 비밀도 한 줄씩 적을 수 있습니다. 비밀이라 `tapflow.config.json`에 두지 않고, gitignore되는 이 파일에 분리합니다.
+`.tapflow/data/.env`는 릴레이의 **모든 비밀이 모이는 기본 경로**입니다. DNS 자동 발급을 선택하면 `init`이 토큰을 담을 빈 템플릿을 만들지만, 이 파일에는 DNS 토큰뿐 아니라 `JWT_SECRET`이나 SMTP 비밀번호 같은 다른 비밀도 한 줄씩 적을 수 있습니다. 비밀이라 `tapflow.config.json`에 두지 않고, gitignore되는 이 파일에 분리합니다.
 
 키 이름 뒤 `=` 다음에 값을 붙여넣습니다.
 
@@ -99,10 +99,13 @@ SMTP_PASS=
 ```text
 your-directory/
   tapflow.config.json    ← 릴레이 설정
-  .gitignore             ← .tapflow-data/ 항목 추가됨
-  .tapflow-data/
-    .env                 ← DNS 자동 발급을 선택했을 때만
+  .gitignore             ← .tapflow/ 런타임 디렉토리 추가됨 (data/, artifacts/)
+  .tapflow/
+    data/                ← 릴레이 런타임 상태: db, 업로드, 비밀
+      .env               ← DNS 자동 발급을 선택했을 때만
 ```
+
+tapflow가 쓰는 모든 파일은 `.tapflow/` 루트 하나에 모입니다. 릴레이가 첫 시작 때 `data/`를 채우고, `flows/`에는 커밋하는 YAML 플로우가 들어가며, `artifacts/`는 실패 스크린샷을 담습니다. gitignore 대상은 `data/`와 `artifacts/`뿐이고 `flows/`는 저장소에 남습니다.
 
 `tapflow.config.json`의 모든 키와 환경변수 오버라이드는 [설정 파일](/ko/reference/configuration)에서 자세히 다룹니다.
 

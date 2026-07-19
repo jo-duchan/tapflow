@@ -110,7 +110,7 @@ tapflow flow run .tapflow/flows/login.yaml .tapflow/flows/checkout.yaml
 | `--session <id>` | 대상 세션 ID (`tapflow status`로 확인) |
 | `--build <id>` | 테스트 대상 빌드. 실행 전 설치되고 `launchApp` 스텝이 이 빌드를 실행합니다. |
 | `--junit <path>` | JUnit XML 리포트를 지정한 경로에 씁니다. |
-| `--artifacts <dir>` | 실패 스크린샷 저장 디렉터리 (기본값 `.tapflow-data/artifacts`) |
+| `--artifacts <dir>` | 실패 스크린샷 저장 디렉터리 (기본값 `.tapflow/artifacts`) |
 | `--timeout <seconds>` | 셀렉터 기본 대기 시간 (기본값 10) |
 
 `launchApp` 스텝은 인자를 받지 않고 `--build`로 지정한 빌드를 실행합니다. 덕분에 플로우 파일에 빌드 ID를 하드코딩하지 않아도 되고 CI 실행마다 새 빌드에 그대로 재사용할 수 있습니다.
@@ -181,7 +181,7 @@ jobs:
           name: flow-results
           path: |
             report.xml
-            .tapflow-data/artifacts/
+            .tapflow/artifacts/
 ```
 
 종료 코드 계약 덕분에 스텝이 실패하면(`1` 또는 `2`) 잡도 실패합니다. `if: always()`로 실패 스크린샷과 JUnit 리포트를 실패한 실행에서도 수집합니다.
