@@ -51,7 +51,7 @@ Set it explicitly only when you need a fixed key — for example, to share one s
 openssl rand -hex 32
 ```
 
-Put it in `.tapflow-data/.env` so it survives restarts without re-exporting — the relay reads the file on start:
+Put it in `.tapflow/data/.env` so it survives restarts without re-exporting — the relay reads the file on start:
 
 ```ini
 JWT_SECRET=YOUR_JWT_SECRET
@@ -244,7 +244,7 @@ Add the `tunnel` section to `tapflow.config.json`:
 }
 ```
 
-Put the tunnel token in `.tapflow-data/.env`:
+Put the tunnel token in `.tapflow/data/.env`:
 
 ```ini
 TAPFLOW_TUNNEL_TOKEN=your-secret-token
@@ -276,19 +276,21 @@ Deploying the relay to fly.io, Railway, or similar services puts the agent→rel
 
 ## Backup
 
-The relay keeps its durable state under the resolved data directory (default: `.tapflow-data/`; `TAPFLOW_DATA_DIR` can override `local.dataDir`). Back up that directory before OS upgrades, relay migration, or any long-running team pilot.
+The relay keeps its durable state under the resolved data directory (default: `.tapflow/data/`; `TAPFLOW_DATA_DIR` can override `local.dataDir`). Back up that directory before OS upgrades, relay migration, or any long-running team pilot.
 
-Important paths below use the default directory name. If you configured a different data directory, replace `.tapflow-data/` with that path.
+If you are upgrading from a version that stored state in `.tapflow-data/`, nothing breaks — a pinned `local.dataDir` is honored and a config-less default install keeps reading the existing `.tapflow-data/`. Run `tapflow migrate data-dir` once to adopt the unified layout: it atomically renames `.tapflow-data/` → `.tapflow/data/` (no copy, no data loss), repoints `local.dataDir` when it pinned the old default, and updates `.gitignore`.
+
+Important paths below use the default directory name. If you configured a different data directory, replace `.tapflow/data/` with that path.
 
 Important paths:
 
 | Path | Why it matters |
 |------|----------------|
-| `.tapflow-data/tapflow.db` | SQLite database for accounts, apps, builds, sessions, comments, tokens, and settings. |
-| `.tapflow-data/tapflow.db-wal` / `.tapflow-data/tapflow.db-shm` | SQLite WAL sidecar files. Include them in filesystem snapshots, or use Litestream so changes are captured safely. |
-| `.tapflow-data/uploads/` | Uploaded build artifacts served by the relay. |
-| `.tapflow-data/recordings/` | Session recordings uploaded through the relay. |
-| `.tapflow-data/.env` and `.tapflow-data/jwt-secret` | Relay secrets. Keep them private and restore them with the data directory so existing sessions and integrations keep working. |
+| `.tapflow/data/tapflow.db` | SQLite database for accounts, apps, builds, sessions, comments, tokens, and settings. |
+| `.tapflow/data/tapflow.db-wal` / `.tapflow/data/tapflow.db-shm` | SQLite WAL sidecar files. Include them in filesystem snapshots, or use Litestream so changes are captured safely. |
+| `.tapflow/data/uploads/` | Uploaded build artifacts served by the relay. |
+| `.tapflow/data/recordings/` | Session recordings uploaded through the relay. |
+| `.tapflow/data/.env` and `.tapflow/data/jwt-secret` | Relay secrets. Keep them private and restore them with the data directory so existing sessions and integrations keep working. |
 
 ### Recommended: Litestream for SQLite
 
@@ -306,7 +308,7 @@ Create `litestream.yml` next to your tapflow config:
 
 ```yaml
 dbs:
-  - path: .tapflow-data/tapflow.db
+  - path: .tapflow/data/tapflow.db
     replicas:
       - type: s3
         bucket: YOUR_BUCKET
@@ -331,10 +333,10 @@ pm2 save
 Restore the database before starting tapflow on a new host:
 
 ```sh
-litestream restore -config litestream.yml -if-replica-exists .tapflow-data/tapflow.db
+litestream restore -config litestream.yml -if-replica-exists .tapflow/data/tapflow.db
 ```
 
-Then restore `.tapflow-data/uploads/`, `.tapflow-data/recordings/`, `.tapflow-data/.env`, and `.tapflow-data/jwt-secret` from your file backup. Litestream protects the SQLite database only; build files, recordings, and secrets still need a normal filesystem or object-storage backup.
+Then restore `.tapflow/data/uploads/`, `.tapflow/data/recordings/`, `.tapflow/data/.env`, and `.tapflow/data/jwt-secret` from your file backup. Litestream protects the SQLite database only; build files, recordings, and secrets still need a normal filesystem or object-storage backup.
 
 ## PM2 (keeping the relay Mac always on)
 
@@ -344,7 +346,7 @@ Handles automatic restart on crash, restart on server reboot, and log management
 npm install -g pm2 tapflow
 ```
 
-With `JWT_SECRET` in `.tapflow-data/.env` (or left unset to auto-generate), start:
+With `JWT_SECRET` in `.tapflow/data/.env` (or left unset to auto-generate), start:
 
 ```sh
 pm2 start tapflow --name relay -- relay start
@@ -375,14 +377,14 @@ Create a dedicated user and data directory:
 
 ```sh
 sudo useradd --system --create-home --home-dir /var/lib/tapflow --shell /usr/sbin/nologin tapflow
-sudo mkdir -p /etc/tapflow /var/lib/tapflow/.tapflow-data
+sudo mkdir -p /etc/tapflow /var/lib/tapflow/.tapflow/data
 sudo chown -R tapflow:tapflow /var/lib/tapflow
 ```
 
-Put relay secrets in `/etc/tapflow/relay.env`. The existing [JWT_SECRET](#jwt-secret) section also describes the `.tapflow-data/.env` convention that the relay reads directly:
+Put relay secrets in `/etc/tapflow/relay.env`. The existing [JWT_SECRET](#jwt-secret) section also describes the `.tapflow/data/.env` convention that the relay reads directly:
 
 ```ini
-TAPFLOW_DATA_DIR=/var/lib/tapflow/.tapflow-data
+TAPFLOW_DATA_DIR=/var/lib/tapflow/.tapflow/data
 JWT_SECRET=YOUR_JWT_SECRET
 ```
 

@@ -128,10 +128,10 @@ export async function cmdFlowRun(files: string[], opts: FlowRunOptions): Promise
       if (result.status === 'failed') {
         console.error(`  ${result.failureMessage}`)
         if (result.failureScreenshot) {
-          // Runtime data belongs in the gitignored .tapflow-data/, and the
+          // Runtime data belongs in the gitignored .tapflow/artifacts/, and the
           // index prefix keeps same-named flows from different directories
           // from overwriting each other's evidence.
-          const dir = opts.artifacts ?? path.join('.tapflow-data', 'artifacts')
+          const dir = opts.artifacts ?? path.join('.tapflow', 'artifacts')
           fs.mkdirSync(dir, { recursive: true })
           const shot = path.join(dir, `${String(flowIndex + 1).padStart(2, '0')}-${flow.name.replace(/[^\w.-]+/g, '_')}-failure.png`)
           fs.writeFileSync(shot, result.failureScreenshot)

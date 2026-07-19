@@ -9,8 +9,9 @@ export interface InitConfigOptions {
   force?: boolean
 }
 
+// dataDir omitted so it defaults to .tapflow/data; not pinning it lets an upgrade use the relay's read-only legacy fallback, keeping `tapflow migrate data-dir` conflict-free.
 const BASE_CONFIG = {
-  local: { port: 4000, dataDir: '.tapflow-data' },
+  local: { port: 4000 },
   relay: { url: '' },
   smtp: { host: '', port: 587, secure: false, user: '', pass: '' },
 }
@@ -33,16 +34,20 @@ function isInsideGitRepo(dir: string): boolean {
   }
 }
 
-function addToGitignore(dir: string, entry: string): 'created' | 'appended' | 'already-present' {
+// Ignore only the runtime subdirs of .tapflow/ — .tapflow/flows/ stays committed.
+function addToGitignore(dir: string, entries: string[]): 'created' | 'appended' | 'already-present' {
   const gitignorePath = path.join(dir, '.gitignore')
   if (fs.existsSync(gitignorePath)) {
     const content = fs.readFileSync(gitignorePath, 'utf-8')
-    if (content.split('\n').some((line) => line.trim() === entry)) return 'already-present'
+    const present = new Set(content.split('\n').map((line) => line.trim()))
+    // A `**/`-prefixed glob (how the monorepo root ignores these) already covers the exact entry.
+    const missing = entries.filter((e) => !present.has(e) && !present.has(`**/${e}`))
+    if (missing.length === 0) return 'already-present'
     const separator = content.endsWith('\n') ? '' : '\n'
-    fs.appendFileSync(gitignorePath, `${separator}\n# tapflow runtime data\n${entry}\n`, 'utf-8')
+    fs.appendFileSync(gitignorePath, `${separator}\n# tapflow runtime data\n${missing.join('\n')}\n`, 'utf-8')
     return 'appended'
   }
-  fs.writeFileSync(gitignorePath, `# tapflow runtime data\n${entry}\n`, 'utf-8')
+  fs.writeFileSync(gitignorePath, `# tapflow runtime data\n${entries.join('\n')}\n`, 'utf-8')
   return 'created'
 }
 
@@ -223,29 +228,35 @@ export async function cmdInitConfig(opts: InitConfigOptions): Promise<void> {
     process.exit(1)
   }
 
+  // Legacy .tapflow-data/ moves only via `tapflow migrate data-dir`; until then don't scaffold a fresh .tapflow/data/ (it would trap that command with a both-dirs conflict).
+  const hasLegacyDataDir = fs.existsSync(path.join(process.cwd(), '.tapflow-data'))
+
   // byo-api-token: 토큰 재export 없이 재시작 가능하도록 자격 증명 env 파일을 스캠폴드(빈 변수명만 작성).
   let envScaffold: 'created' | 'appended' | 'already-present' | 'skipped' = 'skipped'
-  if (tls?.mode === 'byo-api-token') {
+  if (tls?.mode === 'byo-api-token' && !hasLegacyDataDir) {
     const envVars = dnsProviders.get(tls.dnsProvider)?.envVars ?? []
     try {
-      envScaffold = scaffoldEnvFile(path.join(process.cwd(), '.tapflow-data'), envVars)
+      envScaffold = scaffoldEnvFile(path.join(process.cwd(), '.tapflow', 'data'), envVars)
     } catch (err) {
-      warn(`Could not write .tapflow-data/.env: ${err instanceof Error ? err.message : String(err)}`)
+      warn(`Could not write .tapflow/data/.env: ${err instanceof Error ? err.message : String(err)}`)
     }
   }
 
   let gitignoreUpdated: 'created' | 'appended' | 'already-present' | 'skipped' = 'skipped'
   if (isInsideGitRepo(process.cwd())) {
+    // Ignore the legacy dir too while it awaits migration, so its secrets aren't committed meanwhile.
+    const ignoreEntries = ['.tapflow/data/', '.tapflow/artifacts/']
+    if (hasLegacyDataDir) ignoreEntries.push('.tapflow-data/')
     try {
-      gitignoreUpdated = addToGitignore(process.cwd(), '.tapflow-data/')
+      gitignoreUpdated = addToGitignore(process.cwd(), ignoreEntries)
     } catch (err) {
       warn(`Could not update .gitignore: ${err instanceof Error ? err.message : String(err)}`)
     }
   }
 
   const lines: string[] = ['tapflow.config.json created.']
-  if (gitignoreUpdated === 'created') lines.push('.gitignore created (.tapflow-data/ added).')
-  else if (gitignoreUpdated === 'appended') lines.push('.tapflow-data/ added to .gitignore.')
+  if (gitignoreUpdated === 'created') lines.push('.gitignore created (.tapflow/ runtime dirs added).')
+  else if (gitignoreUpdated === 'appended') lines.push('.tapflow/ runtime dirs added to .gitignore.')
   if (tunnel?.provider === 'rathole' && (!tunnel.serverAddr || !tunnel.publicUrl)) {
     lines.push('Fill in tunnel.serverAddr and tunnel.publicUrl in tapflow.config.json.')
   }
@@ -253,13 +264,18 @@ export async function cmdInitConfig(opts: InitConfigOptions): Promise<void> {
   if (tls?.mode === 'byo-api-token') {
     const envVars = dnsProviders.get(tls.dnsProvider)?.envVars.join(', ') ?? 'the provider credentials'
     lines.push(`HTTPS: ${tls.dnsProvider} DNS-01 for ${tls.domain}.`)
-    if (envScaffold === 'created' || envScaffold === 'appended') {
-      lines.push(`Paste ${envVars} into .tapflow-data/.env (the relay reads it on start).`)
-    } else {
-      lines.push(`Set ${envVars} (the relay auto-publishes the A record on start).`)
+    if (!hasLegacyDataDir) {
+      if (envScaffold === 'created' || envScaffold === 'appended') {
+        lines.push(`Paste ${envVars} into .tapflow/data/.env (the relay reads it on start).`)
+      } else {
+        lines.push(`Set ${envVars} (the relay auto-publishes the A record on start).`)
+      }
     }
   } else if (tls?.mode === 'import-cert') {
     lines.push('HTTPS: import-cert. Ensure the cert/key paths exist on this Mac.')
+  }
+  if (hasLegacyDataDir) {
+    lines.push('Legacy .tapflow-data/ found — run `tapflow migrate data-dir` first, then add any DNS tokens to .tapflow/data/.env.')
   }
   lines.push('Next: tapflow start')
 

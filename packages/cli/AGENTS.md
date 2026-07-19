@@ -17,7 +17,7 @@ Commands are registered in `src/index.ts`:
 
 | Command | Behavior |
 |---------|----------|
-| `init [--tunnel, --force]` | Scaffold `tapflow.config.json` interactively; auto-adds `.tapflow-data/` to `.gitignore` |
+| `init [--tunnel, --force]` | Scaffold `tapflow.config.json` interactively; auto-adds the `.tapflow/` runtime dirs (`data/`, `artifacts/`) to `.gitignore` |
 | `admin init [--relay]` | Create the first admin account on the relay (CLI fallback for headless servers; web `/setup` is the default path) |
 | `start [--device, --platform]` | Local-only shortcut — starts relay + agent together (same Mac) |
 | `relay start [--port, --tunnel]` | Start relay only (for Docker/Linux server) |
@@ -30,6 +30,7 @@ Commands are registered in `src/index.ts`:
 | `status [--relay]` | Show connected agents, devices, and session count (WebSocket `agents:listed`) |
 | `logs [--relay] [--lines]` | Query the relay in-memory log buffer (`GET /api/v1/logs`) |
 | `flow run <files...> [--relay, --token, --session, --device, --build, --no-install, --junit, --artifacts, --timeout]` | Replay YAML flows deterministically via `@tapflowio/flow-runner` (no LLM). Exit codes: `0` passed · `1` flow failed · `2` env/config error. Always sends `device:boot` (idempotent — it initializes the agent's touch/stream state). `--token` needs a `view`-scope PAT; REST (`/ui-tree`, `/screenshot`) requires auth even on localhost. |
+| `migrate <subcommand>` | Migration commands (subcommand: `data-dir`). `migrate data-dir` moves a legacy `.tapflow-data/` into the unified `.tapflow/data/` (atomic rename), repoints `local.dataDir` in `tapflow.config.json` when it pinned the old default, and updates `.gitignore`. Idempotent; the relay itself never moves data (read-only fallback only). |
 
 ### Command Design Principles
 
@@ -41,7 +42,7 @@ Each command has exactly one responsibility. `tapflow start` is for local develo
 ## HOW
 
 - UX standard: one-line input → progress feedback → result message. Use spinners and banners for visual feedback (`print.ts`: `banner`, `step`, `warn`, `createSpinner`). Interactive prompts use `@clack/prompts`.
-- `tapflow.config.json` lives in the working directory (created by `tapflow init`); runtime data goes in `.tapflow-data/`. Downloaded tunnel binaries are cached in `~/.tapflow/bin`.
+- `tapflow.config.json` lives in the working directory (created by `tapflow init`); runtime data goes in `.tapflow/data/`. Downloaded tunnel binaries are cached in `~/.tapflow/bin`.
 - Package dependencies: `@tapflowio/agent-core`, `@tapflowio/ios-agent`, `@tapflowio/android-agent`, `@tapflowio/relay`. Import as libraries — do not reimplement.
 
 ## HOW NOT

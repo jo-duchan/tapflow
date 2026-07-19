@@ -14,6 +14,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Breaking Changes
 
 - `POST /api/v1/builds`: an `.apk` upload that specifies `app_id` is now rejected with `400` whenever the relay can't read the APK's package name (Android build-tools / `aapt` missing, or the APK itself unreadable/corrupt), instead of storing an unversioned build under that app. Migrate: install build-tools on the relay host with `tapflow setup android` (or re-export a valid APK), or omit `app_id` to file the build separately.
+- The default relay data directory moved from `.tapflow-data/` to `.tapflow/data/`, unifying all project state under a single `.tapflow/` root (`data/` runtime, `flows/` committed, `artifacts/` screenshots). **Existing installs keep working without action:** a `tapflow.config.json` that pins `local.dataDir` (which older `tapflow init` wrote) is honored as-is, and a config-less default install keeps reading a pre-existing `.tapflow-data/` (with a one-line hint). To unify the layout, run **`tapflow migrate data-dir`** once — it atomically renames `.tapflow-data/` → `.tapflow/data/` (no copy, no data loss), repoints `local.dataDir` when it pinned the old default, and adds the runtime paths to `.gitignore`. Cross-filesystem or conflicting states are reported with manual steps instead of guessing. **Docker:** the image volume moved from `/app/.tapflow-data` to `/app/.tapflow/data` — remount your data volume at the new path.
+
+### Changed
+
+- `tapflow flow run` now writes failure screenshots to `.tapflow/artifacts/` by default (was `.tapflow-data/artifacts/`), matching the `--artifacts` help text.
 
 ### Fixed
 

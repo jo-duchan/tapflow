@@ -190,7 +190,7 @@ tapflow reads the Tailscale MagicDNS hostname automatically. Set `"publicUrl"` t
 
 **VPS + rathole**
 
-Put `TAPFLOW_TUNNEL_TOKEN` in `.tapflow-data/.env`, then:
+Put `TAPFLOW_TUNNEL_TOKEN` in `.tapflow/data/.env`, then:
 
 ```sh
 tapflow relay start
@@ -311,3 +311,19 @@ tapflow logs
 |--------|---------|-------------|
 | `--relay <url>` | `relay.url` in config, or `http://localhost:4000` | Relay URL. Omit if `relay.url` is set in `tapflow.config.json`. |
 | `--lines <n>` | `100` | Number of log lines to show (max 500) |
+
+## `tapflow migrate data-dir`
+
+Move a legacy `.tapflow-data/` into the unified `.tapflow/data/` layout. Run this once after upgrading; it is idempotent and safe to re-run.
+
+```sh
+tapflow migrate data-dir
+```
+
+What it does:
+
+- Atomically renames `.tapflow-data/` → `.tapflow/data/` — a single filesystem rename, no copy and no half-moved state.
+- Repoints `local.dataDir` in `tapflow.config.json` when it still pins the old default `.tapflow-data`. A custom path is left untouched.
+- Adds `.tapflow/data/` and `.tapflow/artifacts/` to `.gitignore` so the moved secrets stay out of git.
+
+Existing installs keep working without running this — a pinned `local.dataDir` is honored, and a config-less default install keeps reading `.tapflow-data/`. If the two paths are on different filesystems, or both already exist, the command stops and prints the manual step instead of guessing.

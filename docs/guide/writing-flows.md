@@ -110,7 +110,7 @@ tapflow flow run .tapflow/flows/login.yaml .tapflow/flows/checkout.yaml
 | `--session <id>` | Target session id (from `tapflow status`) |
 | `--build <id>` | Build under test. Installed before the run; the `launchApp` step launches it. |
 | `--junit <path>` | Write a JUnit XML report to this path. |
-| `--artifacts <dir>` | Failure-screenshot directory (default `.tapflow-data/artifacts`) |
+| `--artifacts <dir>` | Failure-screenshot directory (default `.tapflow/artifacts`) |
 | `--timeout <seconds>` | Default per-selector wait (default 10) |
 
 The `launchApp` step takes no argument and launches the build passed via `--build`. That keeps the build id out of the flow file, so the same flow runs against a fresh build on every CI run.
@@ -181,7 +181,7 @@ jobs:
           name: flow-results
           path: |
             report.xml
-            .tapflow-data/artifacts/
+            .tapflow/artifacts/
 ```
 
 The exit-code contract makes the job fail when a step fails (`1` or `2`). `if: always()` collects the failure screenshots and the JUnit report even on a failing run.

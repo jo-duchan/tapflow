@@ -45,7 +45,11 @@ tapflow.config.json
 *.db-shm
 *.db-wal
 
-# runtime data (recordings, uploads, db, generated jwt-secret) — any package/cwd
+# runtime data (recordings, uploads, db, generated jwt-secret) — any package/cwd.
+# **/ prefix so it matches in subpackages too (a mid-pattern slash would anchor to repo root).
+# .tapflow/flows/ stays tracked — only the runtime subdirs are ignored.
+**/.tapflow/data/
+**/.tapflow/artifacts/
 .tapflow-data/
 
 # playground test builds

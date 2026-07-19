@@ -8,7 +8,7 @@
 {
   "local": {
     "port": 4000,
-    "dataDir": ".tapflow-data"
+    "dataDir": ".tapflow/data"
   },
   "relay": {
     "url": "https://your-relay-url"
@@ -40,13 +40,13 @@
 
 환경변수는 항상 설정 파일보다 우선합니다. 서버 환경이나 CI에서 유용합니다.
 
-비밀은 `.tapflow-data/.env` 파일에도 둘 수 있습니다. 릴레이가 시작할 때 이 파일을 먼저 읽으므로, 아래 변수를 셸 대신 파일에 적어도 됩니다. 우선순위는 **셸 환경변수 > `.env` > 설정 파일** 순입니다. 파일 형식과 예외(`TAPFLOW_DATA_DIR`)는 [tapflow 설정](/ko/guide/configure)에서 다룹니다.
+비밀은 `.tapflow/data/.env` 파일에도 둘 수 있습니다. 릴레이가 시작할 때 이 파일을 먼저 읽으므로, 아래 변수를 셸 대신 파일에 적어도 됩니다. 우선순위는 **셸 환경변수 > `.env` > 설정 파일** 순입니다. 파일 형식과 예외(`TAPFLOW_DATA_DIR`)는 [tapflow 설정](/ko/guide/configure)에서 다룹니다.
 
 | 환경변수 | Config 키 | 기본값 | 설명 |
 |---------|-----------|--------|------|
 | `TAPFLOW_PORT` | `local.port` | `4000` | 서버 포트 |
 | `JWT_SECRET` | — | *(자동 생성)* | JWT 서명 키 (환경변수 전용). 설정하지 않으면 최초 부팅 시 강력한 per-install 시크릿을 자동으로 생성해 데이터 디렉토리에 저장합니다. |
-| `TAPFLOW_DATA_DIR` | `local.dataDir` | `.tapflow-data` | DB·업로드 디렉토리 (상대 경로 지원) |
+| `TAPFLOW_DATA_DIR` | `local.dataDir` | `.tapflow/data` | DB·업로드 디렉토리 (상대 경로 지원) |
 | `TAPFLOW_RELAY_URL` | `relay.url` | *(비어있음)* | CLI 명령어의 기본 relay URL |
 | `TAPFLOW_AGENT_TOKEN` | — | *(비어있음)* | 원격 릴레이 인증용 `agent` 스코프 토큰. `--token` 플래그가 우선합니다. [에이전트 설정](/ko/guide/agent#원격-릴레이-인증)을 참고하세요. |
 | `TAPFLOW_TRUSTED_PROXIES` | — | *(비어있음)* | 신뢰하는 리버스 프록시 IP 목록(콤마 구분, 예: `127.0.0.1,::1`). 릴레이를 같은 호스트의 리버스 프록시 뒤에서 실행할 때 이 값을 설정하면, 프록시 주소 대신 `X-Forwarded-For`에 담긴 실제 클라이언트 IP를 사용합니다. 비어 있으면 전달 헤더를 파싱하지 않습니다. |
@@ -72,7 +72,7 @@
 openssl rand -hex 32
 ```
 
-생성한 값은 `.tapflow-data/.env`에 적거나 셸 환경변수로 주입합니다.
+생성한 값은 `.tapflow/data/.env`에 적거나 셸 환경변수로 주입합니다.
 :::
 
 ::: warning 리버스 프록시 뒤에서는 TAPFLOW_TRUSTED_PROXIES를 설정하세요
@@ -124,7 +124,7 @@ openssl rand -hex 32
 | `tls.publishAddress` | 도메인 A 레코드를 이 머신의 LAN IP로 자동 발행합니다. 기본 `true`이며, DNS를 직접 관리하려면 `false`로 둡니다. |
 | `tls.address` | 자동 감지한 LAN IP 대신 사용할 IP. 멀티 NIC나 VPN 환경에서 오버라이드용입니다. |
 
-API 토큰은 설정 파일이 아니라 `tapflow init`이 만들어 두는 `.tapflow-data/.env` 파일에 적습니다. Cloudflare는 `TAPFLOW_CLOUDFLARE_TOKEN`, Vercel은 `TAPFLOW_VERCEL_TOKEN`을 씁니다. 팀 도메인이면 `TAPFLOW_VERCEL_TEAM_ID`도 함께 넣습니다. `.tapflow-data/`는 gitignore 대상이라 이 파일은 커밋되지 않습니다. 환경변수로 직접 설정한 값이 있으면 파일보다 우선합니다. 이 파일이 어떻게 만들어지고 읽히는지는 [tapflow 설정](/ko/guide/configure)에서 다룹니다.
+API 토큰은 설정 파일이 아니라 `tapflow init`이 만들어 두는 `.tapflow/data/.env` 파일에 적습니다. Cloudflare는 `TAPFLOW_CLOUDFLARE_TOKEN`, Vercel은 `TAPFLOW_VERCEL_TOKEN`을 씁니다. 팀 도메인이면 `TAPFLOW_VERCEL_TEAM_ID`도 함께 넣습니다. `.tapflow/data/`는 gitignore 대상이라 이 파일은 커밋되지 않습니다. 환경변수로 직접 설정한 값이 있으면 파일보다 우선합니다. 이 파일이 어떻게 만들어지고 읽히는지는 [tapflow 설정](/ko/guide/configure)에서 다룹니다.
 
 `publishAddress`가 켜져 있으면 relay가 부팅할 때 자기 LAN IP를 도메인 A 레코드로 발행하고 주기적으로 갱신합니다. 팀원은 DNS를 건드리지 않고 도메인만 열면 됩니다.
 
@@ -161,15 +161,20 @@ API 토큰은 설정 파일이 아니라 `tapflow init`이 만들어 두는 `.ta
 ```text
 your-directory/
   tapflow.config.json   ← 릴레이 설정 파일 (tapflow init으로 생성)
-  .tapflow-data/
-    tapflow.db          ← SQLite 데이터베이스
-    uploads/
-      builds/           ← .app.zip 및 .apk 파일
-      avatars/
-      comments/
+  .tapflow/
+    data/               ← 릴레이 런타임 상태 (gitignore)
+      tapflow.db        ← SQLite 데이터베이스
+      uploads/
+        builds/         ← .app.zip 및 .apk 파일
+        avatars/
+        comments/
+    flows/              ← 커밋하는 YAML 플로우
+    artifacts/          ← 플로우 실패 스크린샷 (gitignore)
 ```
 
-데이터 디렉토리 위치를 변경하려면 `TAPFLOW_DATA_DIR` 환경변수 또는 `local.dataDir`을 사용합니다. `.tapflow-data/`를 백업하면 모든 데이터가 보존됩니다.
+데이터 디렉토리 위치를 변경하려면 `TAPFLOW_DATA_DIR` 환경변수 또는 `local.dataDir`을 사용합니다. `.tapflow/data/`를 백업하면 모든 데이터가 보존됩니다.
+
+`.tapflow-data/`를 쓰던 버전에서 올라와도 깨지지 않습니다. `tapflow.config.json`이 `local.dataDir`을 지정하고 있으면(구 `tapflow init`이 `.tapflow-data`를 써둠) 릴레이가 그 값을 존중하고, config가 없는 기본 설치는 기존 `.tapflow-data/`를 계속 읽습니다. 통합 레이아웃으로 바꾸려면 `tapflow migrate data-dir`을 한 번 실행하세요. `.tapflow-data/`를 `.tapflow/data/`로 원자적 rename 하고(복사 없음, 유실 없음), `local.dataDir`이 구 기본값을 가리키면 다시 써주며, `.gitignore`도 갱신합니다.
 
 ## SMTP 설정
 
