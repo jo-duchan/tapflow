@@ -154,11 +154,13 @@ export function extractAppInfo(filePath: string): AppInfo | null {
   return buildFileKind(filePath) === 'ios-tar' ? extractAppTarInfo(filePath) : extractAppZipInfo(filePath)
 }
 
-/** ANDROID_HOME/build-tools 아래에서 최신 aapt 경로를 찾는다. macOS 기본 경로 + PATH fallback 포함. */
-function findAapt(): string | null {
+/** Resolve aapt from the SDK build-tools (any version). Candidate list mirrors `tapflow doctor` so the two agree; falls back to PATH. */
+export function findAapt(): string | null {
   const candidates = [
     process.env['ANDROID_HOME'],
-    `${process.env['HOME']}/Library/Android/sdk`,
+    process.env['ANDROID_SDK_ROOT'],
+    `${process.env['HOME']}/Library/Android/sdk`, // macOS
+    `${process.env['HOME']}/Android/Sdk`,          // Linux
   ].filter(Boolean) as string[]
 
   for (const androidHome of candidates) {
@@ -184,13 +186,14 @@ function findAapt(): string | null {
   return null
 }
 
-/** aapt dump badging으로 APK 메타데이터를 추출한다. aapt 미설치 시 null 필드. */
-function extractApkInfo(apkPath: string): {
+/** Extract APK metadata via `aapt dump badging`. aaptFound=false means build-tools (aapt) is missing — extraction is impossible. */
+export function extractApkInfo(apkPath: string): {
   bundleId: string | null; versionName: string | null
   buildNumber: string | null; appName: string | null
+  aaptFound: boolean
 } {
-  const empty = { bundleId: null, versionName: null, buildNumber: null, appName: null }
   const aapt = findAapt()
+  const empty = { bundleId: null, versionName: null, buildNumber: null, appName: null, aaptFound: aapt !== null }
   if (!aapt) return empty
   const r = spawnSync(aapt, ['dump', 'badging', apkPath], { encoding: 'utf8' })
   if (r.status !== 0) return empty
@@ -200,7 +203,57 @@ function extractApkInfo(apkPath: string): {
     versionName: out.match(/versionName='([^']+)'/)?.[1] ?? null,
     buildNumber: out.match(/versionCode='([^']+)'/)?.[1] ?? null,
     appName:     out.match(/application-label(?:-\w+)?:'([^']+)'/)?.[1] ?? null,
+    aaptFound: true,
   }
+}
+
+export type UploadRoute =
+  | { kind: 'ok'; appId: number }
+  | { kind: 'app-not-found' }
+  | { kind: 'reject-null-bundle' }
+
+/**
+ * Decide which app row a build belongs to.
+ * An unidentifiable build (no bundleId — e.g. aapt missing / corrupt archive) is never used
+ * as evidence of app identity: it must not be absorbed into a caller-named app nor promote it
+ * to platform 'both'. With app_id → reject; without → isolate under `__unknown__`.
+ * The reject keys off `isAndroidArtifact` (derived from the uploaded file, not the caller-supplied
+ * `platform` field) so an APK sent with `platform=ios` can't bypass the guard. iOS degrades
+ * gracefully instead, mirroring the lipo/findAapt Linux-relay precedent.
+ */
+export function routeUploadToApp(
+  db: ReturnType<typeof getDb>,
+  opts: { appId: number | null; bundleId: string | null; appName: string; platform: string; isAndroidArtifact: boolean },
+): UploadRoute {
+  const { appId, bundleId, appName, platform, isAndroidArtifact } = opts
+
+  if (appId != null) {
+    const app = db.prepare('SELECT id, bundle_id_key, platform FROM apps WHERE id = ?')
+      .get(appId) as { id: number; bundle_id_key: string | null; platform: string } | undefined
+    if (!app) return { kind: 'app-not-found' }
+    if (bundleId === null && isAndroidArtifact) return { kind: 'reject-null-bundle' }
+    // A bundle_id that differs from the named app routes to (or creates) the app for that bundle_id.
+    if (bundleId !== null && app.bundle_id_key && app.bundle_id_key !== bundleId) {
+      return { kind: 'ok', appId: upsertApp(appName, bundleId, platform) }
+    }
+    if (app.platform !== 'both' && app.platform !== platform) {
+      db.prepare('UPDATE apps SET platform = ? WHERE id = ?').run('both', appId)
+    }
+    if (!app.bundle_id_key && bundleId !== null) {
+      db.prepare('UPDATE apps SET bundle_id_key = ? WHERE id = ?').run(bundleId, appId)
+    }
+    return { kind: 'ok', appId }
+  }
+
+  return { kind: 'ok', appId: upsertApp(appName, bundleId ?? '__unknown__', platform) }
+}
+
+/** Rejection message for an app_id-targeted APK upload whose metadata (bundleId) couldn't be read. Calls out a missing build-tools install specifically. */
+function nullBundleMessage(aaptFound: boolean): string {
+  if (!aaptFound) {
+    return 'Android build-tools (aapt) not found on the relay host, so the APK package name could not be read. Install build-tools (run `tapflow setup android`) and retry, or upload without app_id to file it under a separate app.'
+  }
+  return 'Could not read the package name from the APK — it may be corrupt or not a valid APK.'
 }
 
 /**
@@ -570,6 +623,7 @@ export function handleUploadBuild(
     let versionName: string | null = null
     let buildNumber: string | null = null
     let resolvedAppName: string | null = null
+    let aaptFound = true // only updated in the android branch — ios doesn't use aapt
 
     if (isIos) {
       // .tar.gz 는 설치 전에 traversal/symlink/bomb/손상을 걸러낸다 (R7).
@@ -607,36 +661,26 @@ export function handleUploadBuild(
       versionName     = info.versionName
       buildNumber     = info.buildNumber
       resolvedAppName = info.appName
+      aaptFound       = info.aaptFound
     }
 
-    const bundleIdKey = bundleId ?? '__unknown__'
-    const appName     = resolvedAppName ?? fields.label ?? stripArchiveExt(originalName)
+    const appName = resolvedAppName ?? fields.label ?? stripArchiveExt(originalName)
 
     const db = getDb()
-    let appId: number
-
-    if (fields.app_id) {
-      appId = Number(fields.app_id)
-      const app = db.prepare('SELECT id, bundle_id_key, platform FROM apps WHERE id = ?')
-        .get(appId) as { id: number; bundle_id_key: string | null; platform: string } | undefined
-      if (!app) {
-        fs.unlinkSync(savedPath)
-        return json(res, 404, { error: 'App not found' })
-      }
-      // 추출된 bundle_id가 지정한 앱과 다르면 bundle_id 기준으로 앱을 찾거나 생성
-      if (bundleId && app.bundle_id_key && app.bundle_id_key !== bundleId) {
-        appId = upsertApp(appName, bundleIdKey, platform)
-      } else {
-        if (app.platform !== 'both' && app.platform !== platform) {
-          db.prepare('UPDATE apps SET platform = ? WHERE id = ?').run('both', appId)
-        }
-        if (!app.bundle_id_key && bundleId) {
-          db.prepare('UPDATE apps SET bundle_id_key = ? WHERE id = ?').run(bundleId, appId)
-        }
-      }
-    } else {
-      appId = upsertApp(appName, bundleIdKey, platform)
+    const route = routeUploadToApp(db, {
+      appId: fields.app_id ? Number(fields.app_id) : null,
+      bundleId, appName, platform,
+      isAndroidArtifact: !isIos, // from the uploaded file kind, not the caller-supplied platform field
+    })
+    if (route.kind === 'app-not-found') {
+      unlinkSafe(savedPath, 'app not found')
+      return json(res, 404, { error: 'App not found' })
     }
+    if (route.kind === 'reject-null-bundle') {
+      unlinkSafe(savedPath, 'rejected upload')
+      return json(res, 400, { error: nullBundleMessage(aaptFound) })
+    }
+    const appId = route.appId
 
     const result = db.prepare(`
       INSERT INTO builds (app_id, version_name, build_number, bundle_id, status_label, file_path, label, version_label, uploader_id, platform)

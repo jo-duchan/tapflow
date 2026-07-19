@@ -115,6 +115,23 @@ If `arm64-v8a` is missing, the app was built targeting 32-bit ARM or Intel emula
 
 :::
 
+### An APK upload shows as 'Unversioned' or merges into the wrong app
+
+The relay reads an APK's app name, version, and package name with `aapt` from the Android build-tools. Without build-tools it can't read them, so the build is stored with no version or package name.
+
+- An upload that specifies an `app_id` is rejected with `400` in this case, so an unidentifiable build can't be filed under the app you named.
+- `tapflow doctor` flags this as a warning on the Android `aapt (build-tools)` check.
+
+Install build-tools on the machine that runs the relay to fix it.
+
+```sh
+tapflow setup android
+```
+
+If you've already run `tapflow setup`, run it again to add build-tools. To install by hand, use `sdkmanager --sdk_root="$ANDROID_HOME" "build-tools;35.0.0"`.
+
+If build-tools is already installed and a targeted upload still returns `400`, the APK itself is likely corrupt or not a valid package — rebuild or re-export it. `aapt dump badging your-app.apk` should print a `package: name=...` line for a valid APK.
+
 ### Colors look different from the emulator (less saturated)
 
 Colors in tapflow may look slightly less saturated than the Android emulator window. **This is expected — and tapflow is actually the more faithful reference.**

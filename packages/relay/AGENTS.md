@@ -19,7 +19,7 @@ A single process on a single configurable port (default: 4000) handles both WebS
 
 `apps` and `builds` are separate entities.
 
-- **apps**: unique app identifier. `UNIQUE(bundle_id_key, platform)`. Same bundle ID on iOS and Android = separate rows.
+- **apps**: product-level app identity, keyed by `bundle_id_key` alone (migration 007 dropped the old `UNIQUE(bundle_id_key, platform)`; uniqueness is enforced in `upsertApp`). `platform` is `ios` | `android` | `both` — the same bundle ID uploaded on both platforms is **one** row promoted to `both`, not separate rows.
 - **builds**: build artifacts. `app_id FK → apps.id`. Contains `version_name`, `build_number`, `file_path`.
 - `bundle_id_key` is used to auto-lookup/create the `apps` row → re-uploading the same app adds only a new `builds` row.
 

@@ -5,13 +5,14 @@ vi.mock('node:fs')
 vi.mock('node:net')
 
 import { execSync, spawnSync } from 'node:child_process'
-import { existsSync } from 'node:fs'
+import { existsSync, readdirSync } from 'node:fs'
 import { createServer } from 'node:net'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { runDoctorChecks } from '../../lib/doctor.js'
 
 const mockExistsSync = vi.mocked(existsSync)
+const mockReaddirSync = vi.mocked(readdirSync)
 
 const mockExecSync = vi.mocked(execSync)
 const mockSpawnSync = vi.mocked(spawnSync)
@@ -332,6 +333,65 @@ describe('runDoctorChecks', () => {
     const result = await runDoctorChecks('android')
     const sdk = result.android?.find((c) => c.label.includes('Android SDK'))
     expect(sdk?.ok).toBe(true)
+  })
+
+  it('build-tools(aapt)가 있으면 aapt 체크 ok', async () => {
+    vi.spyOn(process, 'platform', 'get').mockReturnValue('linux')
+    const sdk = '/opt/android-sdk'
+    vi.stubEnv('ANDROID_HOME', sdk)
+    vi.stubEnv('ANDROID_SDK_ROOT', '')
+    const sdkmanager = join(sdk, 'cmdline-tools', 'latest', 'bin', 'sdkmanager')
+    const buildTools = join(sdk, 'build-tools')
+    const aapt = join(buildTools, '35.0.0', 'aapt')
+    mockExistsSync.mockImplementation((p) => p === sdkmanager || p === buildTools || p === aapt)
+    mockReaddirSync.mockImplementation((p) => (p === buildTools ? ['35.0.0'] : []) as never)
+    mockExecSync.mockImplementation((cmd) => {
+      if ((cmd as string) === 'which adb') throw new Error('not found')
+      return ''
+    })
+
+    const result = await runDoctorChecks('android')
+    const aaptCheck = result.android?.find((c) => c.label.includes('aapt'))
+    expect(aaptCheck?.ok).toBe(true)
+  })
+
+  it('build-tools가 없으면 aapt 체크 warn + setup 안내 (SDK는 있어도)', async () => {
+    vi.spyOn(process, 'platform', 'get').mockReturnValue('linux')
+    const sdk = '/opt/android-sdk'
+    vi.stubEnv('ANDROID_HOME', sdk)
+    vi.stubEnv('ANDROID_SDK_ROOT', '')
+    const sdkmanager = join(sdk, 'cmdline-tools', 'latest', 'bin', 'sdkmanager')
+    mockExistsSync.mockImplementation((p) => p === sdkmanager) // no build-tools
+    mockExecSync.mockImplementation((cmd) => {
+      if ((cmd as string) === 'which adb') throw new Error('not found')
+      return ''
+    })
+
+    const result = await runDoctorChecks('android')
+    const aaptCheck = result.android?.find((c) => c.label.includes('aapt'))
+    expect(aaptCheck?.ok).toBe(false)
+    expect(aaptCheck?.warn).toBe(true)
+    expect(aaptCheck?.detail).toContain('setup android')
+  })
+
+  it('build-tools가 있으면 cmdline-tools(sdkmanager) 없이도 aapt 체크 ok (sdkmanager 비의존 스캔)', async () => {
+    vi.spyOn(process, 'platform', 'get').mockReturnValue('linux')
+    const sdk = '/opt/android-sdk'
+    vi.stubEnv('ANDROID_HOME', sdk)
+    vi.stubEnv('ANDROID_SDK_ROOT', '')
+    const buildTools = join(sdk, 'build-tools')
+    const aapt = join(buildTools, '35.0.0', 'aapt')
+    // sdkmanager(cmdline-tools) 없음, build-tools/aapt만 존재
+    mockExistsSync.mockImplementation((p) => p === buildTools || p === aapt)
+    mockReaddirSync.mockImplementation((p) => (p === buildTools ? ['35.0.0'] : []) as never)
+    mockExecSync.mockImplementation((cmd) => {
+      if ((cmd as string) === 'which adb') throw new Error('not found')
+      return ''
+    })
+
+    const result = await runDoctorChecks('android')
+    const aaptCheck = result.android?.find((c) => c.label.includes('aapt'))
+    expect(aaptCheck?.ok).toBe(true)
   })
 
   it('Android SDK가 없으면 fail(✗)', async () => {

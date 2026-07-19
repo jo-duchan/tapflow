@@ -1,5 +1,5 @@
 import { execSync, spawnSync } from 'node:child_process'
-import { existsSync, readFileSync, appendFileSync } from 'node:fs'
+import { existsSync, readFileSync, appendFileSync, readdirSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { confirm, text, isCancel } from '@clack/prompts'
@@ -20,6 +20,8 @@ const XCODE_APPSTORE = 'https://apps.apple.com/app/xcode/id497799835'
 const XCODE_DEVELOPER_DIR = '/Applications/Xcode.app/Contents/Developer'
 // Play Store 이미지는 crash 이슈가 있어 google_apis(non-playstore)를 쓴다.
 const AVD_IMAGE_API = 'android-35'
+// Needed for apk metadata extraction (aapt). Pinned to match the system image API (android-35).
+const ANDROID_BUILD_TOOLS = '35.0.0'
 // 폼팩터별로 해상도가 골고루 분포하도록 4종. device id는 SDK마다 다르므로 후보 중 가용한 첫 id 선택.
 const AVD_SPECS: { name: string; deviceCandidates: string[] }[] = [
   { name: 'tapflow-compact', deviceCandidates: ['pixel_5', 'pixel_4a', 'pixel_4'] },
@@ -90,14 +92,28 @@ function androidEnv(): NodeJS.ProcessEnv {
 
 const SDK_CMDLINE_BIN = join(ANDROID_SDK_DIR, 'cmdline-tools', 'latest', 'bin')
 
-// cmdline-tools가 SDK 안에 있고 platform-tools(adb)까지 갖춘 자기완결 상태인지.
+// Whether the SDK is self-contained: cmdline-tools inside the SDK, plus platform-tools (adb) and build-tools (aapt).
+// Without build-tools (aapt), apk metadata extraction fails and builds are stored with no bundleId → not self-contained.
 function sdkSelfContained(): boolean {
   return (
     existsSync(join(SDK_CMDLINE_BIN, 'sdkmanager')) &&
     existsSync(join(ANDROID_SDK_DIR, 'platform-tools', 'adb')) &&
     existsSync(join(ANDROID_SDK_DIR, 'emulator', 'emulator')) &&
+    hasBuildToolsAapt() &&
     existsSync(androidSystemImageDir())
   )
+}
+
+// Any build-tools version with aapt is enough — same bar as the relay's findAapt and `tapflow doctor`.
+// (setup still installs the pinned ANDROID_BUILD_TOOLS on a fresh SDK; an existing 34.x is not churned.)
+function hasBuildToolsAapt(): boolean {
+  const dir = join(ANDROID_SDK_DIR, 'build-tools')
+  if (!existsSync(dir)) return false
+  try {
+    return readdirSync(dir).some((v) => existsSync(join(dir, v, 'aapt')))
+  } catch {
+    return false
+  }
 }
 
 function hasJava(): boolean {
@@ -382,7 +398,7 @@ async function checkAndFixAndroidSdk(brewAvailable: boolean, javaOk: boolean): P
   spawnSync(bootSdkmanager, [root, '--licenses'], { stdio: ['pipe', 'inherit', 'inherit'], input: licenseInput })
   const inst = spawnSync(
     bootSdkmanager,
-    [root, 'cmdline-tools;latest', 'platform-tools', 'emulator', androidSystemImage()],
+    [root, 'cmdline-tools;latest', 'platform-tools', 'emulator', `build-tools;${ANDROID_BUILD_TOOLS}`, androidSystemImage()],
     { stdio: ['pipe', 'inherit', 'inherit'], input: licenseInput },
   )
   if (inst.status !== 0 || !sdkSelfContained()) {

@@ -1,5 +1,5 @@
 import { execSync, spawnSync } from 'node:child_process'
-import { existsSync } from 'node:fs'
+import { existsSync, readdirSync } from 'node:fs'
 import { createServer } from 'node:net'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
@@ -50,18 +50,21 @@ function buildIosChecks(isMac: boolean): DoctorCheck[] {
 // adb가 없어도 섹션을 숨기지 않고 진단을 노출한다(Android를 세팅하려는 사용자가 볼 수 있도록).
 // iOS(Xcode / simctl / Simulator)와 대칭: Android SDK / adb / AVD.
 function buildAndroidChecks(adb: AdbResolution | null): DoctorCheck[] {
-  return [checkAndroidSdk(), checkAdbStatus(adb), checkAvdAvailable()]
+  return [checkAndroidSdk(), checkAdbStatus(adb), checkAaptAvailable(), checkAvdAvailable()]
 }
 
-function androidSdkDir(): string | null {
-  const candidates = [
+function androidSdkCandidates(): string[] {
+  return [
     process.env.ANDROID_HOME,
     process.env.ANDROID_SDK_ROOT,
     join(homedir(), 'Library', 'Android', 'sdk'), // macOS
     join(homedir(), 'Android', 'Sdk'), // Linux
-  ]
-  for (const c of candidates) {
-    if (c && existsSync(join(c, 'cmdline-tools', 'latest', 'bin', 'sdkmanager'))) return c
+  ].filter(Boolean) as string[]
+}
+
+function androidSdkDir(): string | null {
+  for (const c of androidSdkCandidates()) {
+    if (existsSync(join(c, 'cmdline-tools', 'latest', 'bin', 'sdkmanager'))) return c
   }
   return null
 }
@@ -72,6 +75,37 @@ function checkAndroidSdk(): DoctorCheck {
     return { label: `Android SDK: ${dir}`, ok: true }
   }
   return { label: 'Android SDK', ok: false, detail: 'Android SDK not found. Run: tapflow setup android' }
+}
+
+// apk metadata extraction (aapt dump badging) needs build-tools. Without it, .apk uploads are stored
+// with no bundleId and app matching breaks (ghost builds / wrong-app merges). Diagnosed separately from SDK/adb/AVD.
+function checkAaptAvailable(): DoctorCheck {
+  // Scan the SDK candidates directly (not via androidSdkDir), so build-tools is found even when
+  // cmdline-tools/sdkmanager is absent — matching the relay's findAapt.
+  for (const c of androidSdkCandidates()) {
+    const aapt = findAaptInSdk(c)
+    if (aapt) return { label: `aapt (build-tools): ${aapt}`, ok: true }
+  }
+  return {
+    label: 'aapt (build-tools)',
+    ok: false,
+    warn: true,
+    detail: 'Android build-tools not found — targeted .apk uploads (with app_id) will be rejected; untargeted uploads are filed under __unknown__. Run: tapflow setup android',
+  }
+}
+
+function findAaptInSdk(sdkDir: string): string | null {
+  const buildToolsDir = join(sdkDir, 'build-tools')
+  if (!existsSync(buildToolsDir)) return null
+  try {
+    for (const v of readdirSync(buildToolsDir)) {
+      const aapt = join(buildToolsDir, v, 'aapt')
+      if (existsSync(aapt)) return aapt
+    }
+  } catch {
+    return null
+  }
+  return null
 }
 
 function checkAdbStatus(adb: AdbResolution | null): DoctorCheck {

@@ -13,7 +13,7 @@ vi.mock('@tapflowio/ios-agent', () => ({
 }))
 
 import { execSync, spawnSync } from 'node:child_process'
-import { existsSync, readFileSync, appendFileSync } from 'node:fs'
+import { existsSync, readFileSync, appendFileSync, readdirSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { confirm, text } from '@clack/prompts'
@@ -23,6 +23,7 @@ const mockExecSync = vi.mocked(execSync)
 const mockSpawnSync = vi.mocked(spawnSync)
 const mockExistsSync = vi.mocked(existsSync)
 const mockReadFileSync = vi.mocked(readFileSync)
+const mockReaddirSync = vi.mocked(readdirSync)
 const mockAppendFileSync = vi.mocked(appendFileSync)
 const mockConfirm = vi.mocked(confirm)
 const mockText = vi.mocked(text)
@@ -33,6 +34,8 @@ const SDK_SDKMANAGER = join(SDK_DIR, 'cmdline-tools', 'latest', 'bin', 'sdkmanag
 const SDK_AVDMANAGER = join(SDK_DIR, 'cmdline-tools', 'latest', 'bin', 'avdmanager')
 const SDK_ADB = join(SDK_DIR, 'platform-tools', 'adb')
 const SDK_EMULATOR = join(SDK_DIR, 'emulator', 'emulator')
+const SDK_BUILD_TOOLS_DIR = join(SDK_DIR, 'build-tools')
+const SDK_AAPT = join(SDK_BUILD_TOOLS_DIR, '35.0.0', 'aapt')
 const SDK_SYSTEM_IMAGE = join(
   SDK_DIR,
   'system-images',
@@ -67,8 +70,9 @@ describe('runSetupAndroid', () => {
       return ''
     })
     mockExistsSync.mockImplementation(
-      (p) => p === SDK_SDKMANAGER || p === SDK_ADB || p === SDK_AVDMANAGER || p === SDK_EMULATOR || p === SDK_SYSTEM_IMAGE,
+      (p) => p === SDK_SDKMANAGER || p === SDK_ADB || p === SDK_AVDMANAGER || p === SDK_EMULATOR || p === SDK_SYSTEM_IMAGE || p === SDK_BUILD_TOOLS_DIR || p === SDK_AAPT,
     )
+    mockReaddirSync.mockReturnValue(['35.0.0'] as never)
     mockSpawnSync.mockImplementation((cmd, args) => {
       if (cmd === SDK_EMULATOR && Array.isArray(args) && args.includes('-list-avds')) {
         return { ...okSpawn, stdout: 'tapflow-phone\n' } as never
@@ -142,7 +146,7 @@ describe('runSetupAndroid', () => {
     setTTY(true)
     let installed = false
     mockExistsSync.mockImplementation((p) => {
-      if (p === SDK_SDKMANAGER || p === SDK_ADB || p === SDK_SYSTEM_IMAGE) return installed
+      if (p === SDK_SDKMANAGER || p === SDK_ADB || p === SDK_SYSTEM_IMAGE || p === SDK_BUILD_TOOLS_DIR || p === SDK_AAPT) return installed
       if (p === SDK_AVDMANAGER || p === SDK_EMULATOR) return true
       return false
     })
@@ -161,7 +165,7 @@ describe('runSetupAndroid', () => {
     const results = await runSetupAndroid()
     expect(mockSpawnSync).toHaveBeenCalledWith(
       '/opt/homebrew/bin/sdkmanager',
-      expect.arrayContaining([`--sdk_root=${SDK_DIR}`, 'cmdline-tools;latest', 'platform-tools', 'emulator']),
+      expect.arrayContaining([`--sdk_root=${SDK_DIR}`, 'cmdline-tools;latest', 'platform-tools', 'emulator', 'build-tools;35.0.0']),
       expect.anything(),
     )
     expect(findStep(results, 'android sdk')?.ok).toBe(true)
@@ -183,7 +187,7 @@ describe('runSetupAndroid', () => {
     let installed = false
     mockExistsSync.mockImplementation((p) => {
       if (p === SDK_SDKMANAGER || p === SDK_ADB || p === SDK_AVDMANAGER || p === zshrc) return true
-      if (p === SDK_EMULATOR || p === SDK_SYSTEM_IMAGE) return installed
+      if (p === SDK_EMULATOR || p === SDK_SYSTEM_IMAGE || p === SDK_BUILD_TOOLS_DIR || p === SDK_AAPT) return installed
       return false
     })
     const expectedSystemImage =
@@ -217,12 +221,60 @@ describe('runSetupAndroid', () => {
         'cmdline-tools;latest',
         'platform-tools',
         'emulator',
+        'build-tools;35.0.0',
         expectedSystemImage,
       ]),
       expect.anything(),
     )
     expect(findStep(results, 'android sdk')?.label).toBe('Android SDK installed')
     expect(findStep(results, 'android sdk')?.state).toBe('created')
+  })
+
+  it('build-tools(aapt)만 없는 SDK는 자기완결로 보지 않고 복구한다', async () => {
+    setTTY(true)
+    let installed = false
+    mockExistsSync.mockImplementation((p) => {
+      if (p === SDK_SDKMANAGER || p === SDK_ADB || p === SDK_AVDMANAGER || p === SDK_EMULATOR || p === SDK_SYSTEM_IMAGE) return true
+      if (p === SDK_BUILD_TOOLS_DIR || p === SDK_AAPT) return installed
+      return false
+    })
+    mockSpawnSync.mockImplementation((cmd, args) => {
+      const a = Array.isArray(args) ? args : []
+      if (typeof cmd === 'string' && cmd.includes('sdkmanager') && a.includes('build-tools;35.0.0')) {
+        installed = true
+        return okSpawn as never
+      }
+      if (cmd === SDK_EMULATOR && a.includes('-list-avds')) {
+        return { ...okSpawn, stdout: 'tapflow-phone\n' } as never
+      }
+      return okSpawn as never
+    })
+
+    const results = await runSetupAndroid()
+    expect(mockSpawnSync).toHaveBeenCalledWith(
+      expect.stringContaining('sdkmanager'),
+      expect.arrayContaining(['build-tools;35.0.0']),
+      expect.anything(),
+    )
+    expect(findStep(results, 'android sdk')?.ok).toBe(true)
+    expect(findStep(results, 'android sdk')?.state).toBe('created')
+  })
+
+  it('build-tools가 35.0.0이 아닌 34.0.0만 있어도 자기완결로 인정한다 (버전 고정 판정 아님 → 재설치 없음)', async () => {
+    mockExistsSync.mockImplementation((p) => {
+      if (p === SDK_SDKMANAGER || p === SDK_ADB || p === SDK_AVDMANAGER || p === SDK_EMULATOR || p === SDK_SYSTEM_IMAGE || p === SDK_BUILD_TOOLS_DIR) return true
+      if (p === join(SDK_DIR, 'build-tools', '34.0.0', 'aapt')) return true
+      return false // no 35.0.0/aapt
+    })
+    mockReaddirSync.mockReturnValue(['34.0.0'] as never)
+
+    const results = await runSetupAndroid()
+    expect(findStep(results, 'android sdk')?.ok).toBe(true)
+    expect(mockSpawnSync).not.toHaveBeenCalledWith(
+      expect.stringContaining('sdkmanager'),
+      expect.arrayContaining(['build-tools;35.0.0']),
+      expect.anything(),
+    )
   })
 
   it('AVD가 있으면 ok (생성 안 함)', async () => {
@@ -295,6 +347,8 @@ describe('runSetupAndroid', () => {
         p === SDK_AVDMANAGER ||
         p === SDK_EMULATOR ||
         p === SDK_SYSTEM_IMAGE ||
+        p === SDK_BUILD_TOOLS_DIR ||
+        p === SDK_AAPT ||
         p === zshrc,
     )
 
@@ -320,6 +374,8 @@ describe('runSetupAndroid', () => {
         p === SDK_AVDMANAGER ||
         p === SDK_EMULATOR ||
         p === SDK_SYSTEM_IMAGE ||
+        p === SDK_BUILD_TOOLS_DIR ||
+        p === SDK_AAPT ||
         p === zshrc,
     )
     mockExecSync.mockImplementation((cmd) => {
@@ -353,6 +409,8 @@ describe('runSetupAndroid', () => {
         p === SDK_AVDMANAGER ||
         p === SDK_EMULATOR ||
         p === SDK_SYSTEM_IMAGE ||
+        p === SDK_BUILD_TOOLS_DIR ||
+        p === SDK_AAPT ||
         p === zshrc,
     )
 
@@ -377,7 +435,7 @@ describe('runSetupAndroid', () => {
     setTTY(true)
     let installed = false
     mockExistsSync.mockImplementation((p) => {
-      if (p === SDK_SDKMANAGER || p === SDK_ADB || p === SDK_SYSTEM_IMAGE) return installed
+      if (p === SDK_SDKMANAGER || p === SDK_ADB || p === SDK_SYSTEM_IMAGE || p === SDK_BUILD_TOOLS_DIR || p === SDK_AAPT) return installed
       if (p === SDK_AVDMANAGER || p === SDK_EMULATOR) return true
       return false
     })

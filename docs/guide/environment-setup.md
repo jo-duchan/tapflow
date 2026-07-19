@@ -23,7 +23,7 @@ It checks the following:
 |------|--------|
 | Common | Node version |
 | iOS | Xcode, `xcrun simctl`, an available simulator |
-| Android | Android SDK, adb, AVD |
+| Android | Android SDK, adb, build-tools (aapt), AVD |
 
 Each item shows as **✓ ready**, **⚠ attention**, or **✗ needs install**. It does not check whether a device is running — booting happens automatically when someone opens a session in the dashboard, so a single bootable device is enough to pass.
 
@@ -61,7 +61,7 @@ setup is designed to finish in one run. For steps that require installation, it 
 ### Android
 
 - **JDK**: installs a JDK if the one required to run the SDK tools is missing.
-- **Android SDK**: builds a self-contained SDK at `~/Library/Android/sdk` with the command-line tools, platform-tools, emulator, and a system image. The Android Studio GUI is not required.
+- **Android SDK**: builds a self-contained SDK at `~/Library/Android/sdk` with the command-line tools, platform-tools, emulator, build-tools (aapt), and a system image. The `aapt` from build-tools reads an APK's app name, version, and package name at upload time. The Android Studio GUI is not required.
 - **AVDs**: creates four devices across form factors (compact phone, standard phone, large phone, tablet) so you can test across resolutions.
 
 When setup adds `ANDROID_HOME` and PATH to your shell config, the current terminal doesn't pick them up. Open a new terminal (or run `exec $SHELL`), then verify with `tapflow doctor`.

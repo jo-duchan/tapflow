@@ -115,6 +115,23 @@ aapt dump badging your-app.apk | grep native-code
 
 :::
 
+### APK 업로드가 'Unversioned'로 표시되거나 다른 앱에 병합됨
+
+APK의 앱 이름·버전·패키지 이름은 릴레이가 Android build-tools의 `aapt`로 읽습니다. build-tools가 없으면 이 정보를 읽지 못해 빌드가 버전·패키지 없이 저장됩니다.
+
+- `app_id`를 지정한 업로드는 이 경우 `400`으로 거절됩니다. 정체를 알 수 없는 빌드가 지정한 앱에 섞여 들어가지 않도록 막는 것입니다.
+- `tapflow doctor`의 Android 항목에서 `aapt (build-tools)`가 경고로 표시되면 이 상태입니다.
+
+릴레이를 실행하는 머신에 build-tools를 설치하면 해결됩니다.
+
+```sh
+tapflow setup android
+```
+
+`tapflow setup`을 이미 돌린 적이 있다면 다시 실행해 build-tools를 채웁니다. 수동으로 설치할 때는 `sdkmanager --sdk_root="$ANDROID_HOME" "build-tools;35.0.0"`을 씁니다.
+
+build-tools가 이미 있는데도 지정 업로드가 계속 `400`이면, APK 자체가 손상됐거나 올바른 패키지가 아닐 가능성이 큽니다. 다시 빌드하거나 재추출하세요. 정상 APK라면 `aapt dump badging your-app.apk`가 `package: name=...` 줄을 출력합니다.
+
 ### 색이 에뮬레이터와 다르게 보임 (채도가 낮음)
 
 tapflow 화면의 색이 Android 에뮬레이터 창보다 채도가 약간 낮아 보일 수 있습니다. **이는 정상이며, 오히려 tapflow가 원본에 더 가까운 색을 보여줍니다.**
