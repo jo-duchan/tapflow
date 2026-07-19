@@ -1,5 +1,11 @@
 # @tapflowio/mcp-server
 
+## 0.15.0
+
+### Patch Changes
+
+- @tapflowio/flow-runner@0.15.0
+
 ## 0.14.0
 
 ### Minor Changes

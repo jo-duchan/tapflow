@@ -7,8 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.15.0] - 2026-07-20
+
 ### Added
 
+- `tapflow migrate data-dir` — a one-shot command that moves a legacy `.tapflow-data/` into the unified `.tapflow/data/` layout: atomic rename (no copy, no data loss), repoints `local.dataDir` in `tapflow.config.json` when it pinned the old default, and updates `.gitignore`. Idempotent; conflicting or cross-filesystem states stop with manual guidance.
 - `tapflow setup android` installs Android `build-tools` (pinned `35.0.0`), and `tapflow doctor` gains an `aapt (build-tools)` check — apk metadata extraction needs it.
 
 ### Breaking Changes
@@ -287,7 +290,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Automatic `tapflow.config.json` creation as a side effect of `tapflow start` / `tapflow relay start`.
 
-[Unreleased]: https://github.com/jo-duchan/tapflow/compare/v0.14.0...HEAD
+[Unreleased]: https://github.com/jo-duchan/tapflow/compare/v0.15.0...HEAD
+[0.15.0]: https://github.com/jo-duchan/tapflow/compare/v0.14.0...v0.15.0
 [0.14.0]: https://github.com/jo-duchan/tapflow/compare/v0.13.0...v0.14.0
 [0.13.0]: https://github.com/jo-duchan/tapflow/compare/v0.12.0...v0.13.0
 [0.12.0]: https://github.com/jo-duchan/tapflow/compare/v0.11.1...v0.12.0

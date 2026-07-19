@@ -1,5 +1,21 @@
 # @tapflowio/relay
 
+## 0.15.0
+
+### Minor Changes
+
+- Unify project state under a single `.tapflow/` root and harden Android build ingestion.
+
+  - **Breaking — default data directory moved** from `.tapflow-data/` to `.tapflow/data/`, unifying all project state under one `.tapflow/` root (`data/` runtime, `flows/` committed, `artifacts/` screenshots). Existing installs keep working without action — a pinned `local.dataDir` is honored and a config-less default install keeps reading a pre-existing `.tapflow-data/`. Run `tapflow migrate data-dir` once to unify the layout (atomic rename, no data loss; repoints `local.dataDir` and updates `.gitignore`). Docker: remount your data volume at `/app/.tapflow/data`.
+  - **Breaking — stricter APK ingestion.** `POST /api/v1/builds` now returns `400` for an `.apk` uploaded with `app_id` when the relay can't read the APK's package name (Android build-tools / `aapt` missing, or the archive is unreadable), instead of storing an unversioned build under that app. Install build-tools with `tapflow setup android`, or omit `app_id` to file the build separately.
+  - Added `tapflow migrate data-dir`, an Android `build-tools` install in `tapflow setup android`, and an `aapt (build-tools)` check in `tapflow doctor`.
+  - `tapflow flow run` writes failure screenshots to `.tapflow/artifacts/` by default, matching the `--artifacts` help text.
+  - Fixed: an `.apk` with unreadable metadata is no longer merged into an unrelated app or false-promoted to platform `both`; `tapflow doctor` and the relay now share the same `aapt` search paths.
+
+### Patch Changes
+
+- @tapflowio/agent-core@0.15.0
+
 ## 0.14.0
 
 ### Minor Changes
