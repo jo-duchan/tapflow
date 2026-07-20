@@ -2,6 +2,7 @@ import { describe, it, expect, vi } from 'vitest'
 import type { UIElement } from '@tapflowio/agent-core'
 import { runFlow, type FlowDriver } from '../engine.js'
 import { parseFlow } from '../schema.js'
+import { TransientQueryError } from '../errors.js'
 
 const el = (over: Partial<UIElement>): UIElement => ({
   role: 'button',
@@ -84,6 +85,46 @@ describe('runFlow', () => {
     expect(driver.queryUITree).toHaveBeenCalledTimes(3)
   })
 
+  it('retries a transient query error (foreground race), then resolves', async () => {
+    const driver = fakeDriver([[]])
+    let n = 0
+    driver.queryUITree = vi.fn(async () => {
+      if (n++ === 0) throw new TransientQueryError('is the app running in the foreground?')
+      return [el({ label: 'OK' })]
+    })
+    const result = await runFlow(flowOf('steps:\n  - tapOn: "OK"\n'), driver, { ...OPTS, defaultTimeoutMs: 500 })
+    expect(result.status).toBe('passed')
+    expect(driver.queryUITree).toHaveBeenCalledTimes(2)
+  })
+
+  it('fails at the deadline surfacing the last transient query error', async () => {
+    const driver = fakeDriver([[]])
+    driver.queryUITree = vi.fn(async () => { throw new TransientQueryError('is the app running in the foreground?') })
+    const result = await runFlow(flowOf('steps:\n  - tapOn: "OK"\n'), driver, OPTS)
+    expect(result.status).toBe('failed')
+    expect(result.failureMessage).toContain('last query error: is the app running in the foreground?')
+  })
+
+  it('fails immediately on a non-transient query error (no retry)', async () => {
+    const driver = fakeDriver([[]])
+    driver.queryUITree = vi.fn(async () => { throw new Error('Session not found') })
+    const result = await runFlow(flowOf('steps:\n  - tapOn: "OK"\n'), driver, OPTS)
+    expect(result.status).toBe('failed')
+    expect(result.failureMessage).toContain('Session not found')
+    expect(driver.queryUITree).toHaveBeenCalledTimes(1)
+  })
+
+  it('does not hang when a query stalls — the deadline aborts it and the step fails', async () => {
+    const driver = fakeDriver([[]])
+    // The query never resolves on its own; only the engine's deadline AbortSignal ends it.
+    driver.queryUITree = vi.fn((signal?: AbortSignal) => new Promise<UIElement[]>((_resolve, reject) => {
+      signal?.addEventListener('abort', () => reject(new TransientQueryError('query aborted at deadline')))
+    }))
+    const result = await runFlow(flowOf('steps:\n  - tapOn: "OK"\n'), driver, OPTS)
+    expect(result.status).toBe('failed')
+    expect(driver.queryUITree.mock.calls[0][0]).toBeInstanceOf(AbortSignal) // engine passed a bounding signal
+  })
+
   it('fails with a timeout, captures a screenshot, and skips remaining steps', async () => {
     const driver = fakeDriver([[]])
     const result = await runFlow(flowOf('steps:\n  - tapOn: "없는버튼"\n  - pressKey: Enter\n'), driver, OPTS)
@@ -110,6 +151,29 @@ describe('runFlow', () => {
     const driver = fakeDriver([[el({ label: '항목' }), el({ label: '항목' })]])
     const result = await runFlow(flowOf('steps:\n  - assertVisible: "항목"\n'), driver, OPTS)
     expect(result.status).toBe('passed')
+  })
+
+  it('assertVisible retries a transient query error, then passes', async () => {
+    const driver = fakeDriver([[]])
+    let n = 0
+    driver.queryUITree = vi.fn(async () => {
+      if (n++ === 0) throw new TransientQueryError('foreground?')
+      return [el({ label: '항목' })]
+    })
+    const result = await runFlow(flowOf('steps:\n  - assertVisible: "항목"\n'), driver, { ...OPTS, defaultTimeoutMs: 500 })
+    expect(result.status).toBe('passed')
+    expect(driver.queryUITree).toHaveBeenCalledTimes(2)
+  })
+
+  it('assertNotVisible does not treat a transient error as "gone" (element still present)', async () => {
+    const driver = fakeDriver([[]])
+    let n = 0
+    driver.queryUITree = vi.fn(async () => {
+      if (n++ === 0) throw new TransientQueryError('foreground?')
+      return [el({ label: '오류' })] // still present after the transient blip
+    })
+    const result = await runFlow(flowOf('steps:\n  - assertNotVisible: "오류"\n'), driver, OPTS)
+    expect(result.status).toBe('failed') // must not pass on the transient poll
   })
 
   it('maps scroll directions to swipes (direction = where to reveal content)', async () => {

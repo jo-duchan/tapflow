@@ -1,6 +1,20 @@
 import { WebSocket } from 'ws'
 import type { UIElement } from '@tapflowio/agent-core'
 import { PlatformError } from '@tapflowio/agent-core'
+import { TransientQueryError } from './errors.js'
+
+// Carries the HTTP status so ui-tree queries can tell a transient failure (retry) from a permanent one.
+// status 0 marks a network-level failure (fetch rejected before a response).
+class RelayHttpError extends PlatformError {
+  constructor(message: string, readonly status: number, options?: ErrorOptions) {
+    super(message, options)
+  }
+}
+
+// Statuses that won't self-heal by polling: bad request, auth, missing session, device-not-booted
+// (a flow always boots first, so mid-flow 409 is a dead device, not a race). Everything else
+// (agent/foreground-race 502, idle-timeout 504, 5xx, network 0) is retryable.
+const PERMANENT_QUERY_STATUSES = new Set([400, 401, 403, 404, 409])
 
 export interface DeviceInfo {
   id: string
@@ -213,10 +227,16 @@ export class RelayClient {
     return this.relayUrl.replace(/^wss?/, (p) => (p === 'wss' ? 'https' : 'http'))
   }
 
-  private async getJson<T>(path: string, what: string): Promise<T> {
-    const res = await fetch(new URL(path, this.httpBase()).toString(), {
-      headers: this.token ? { Authorization: `Bearer ${this.token}` } : undefined,
-    })
+  private async getJson<T>(path: string, what: string, signal?: AbortSignal): Promise<T> {
+    let res: Response
+    try {
+      res = await fetch(new URL(path, this.httpBase()).toString(), {
+        headers: this.token ? { Authorization: `Bearer ${this.token}` } : undefined,
+        signal,
+      })
+    } catch (e) {
+      throw new RelayHttpError(`${what} failed: ${(e as Error).message}`, 0, { cause: e })
+    }
     if (!res.ok) {
       const text = await res.text().catch(() => '')
       let message = text || `${what} failed: ${res.status}`
@@ -224,14 +244,23 @@ export class RelayClient {
         const body = JSON.parse(text) as { error?: string }
         if (body.error) message = body.error
       } catch { /* keep raw text */ }
-      throw new PlatformError(message)
+      throw new RelayHttpError(message, res.status)
     }
     return (await res.json()) as T
   }
 
-  async queryUITree(sessionId: string): Promise<UIElement[]> {
-    const body = await this.getJson<{ elements?: UIElement[] }>(`/api/v1/sessions/${sessionId}/ui-tree`, 'ui-tree query')
-    return body.elements ?? []
+  async queryUITree(sessionId: string, signal?: AbortSignal): Promise<UIElement[]> {
+    try {
+      const body = await this.getJson<{ elements?: UIElement[] }>(`/api/v1/sessions/${sessionId}/ui-tree`, 'ui-tree query', signal)
+      return body.elements ?? []
+    } catch (e) {
+      // A retryable condition (foreground race, idle timeout, agent blip, network) → let the runner
+      // poll again until the step deadline. Permanent failures keep their type and fail the step now.
+      if (e instanceof RelayHttpError && !PERMANENT_QUERY_STATUSES.has(e.status)) {
+        throw new TransientQueryError(e.message, { cause: e })
+      }
+      throw e
+    }
   }
 
   async screenshot(sessionId: string): Promise<Buffer> {
