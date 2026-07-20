@@ -11,7 +11,7 @@ export class RelayDriver implements FlowDriver {
     private readonly buildId?: number,
   ) {}
 
-  queryUITree() { return this.client.queryUITree(this.sessionId) }
+  queryUITree(signal?: AbortSignal) { return this.client.queryUITree(this.sessionId, signal) }
 
   async tap(x: number, y: number): Promise<void> {
     this.client.tap(this.sessionId, x, y)

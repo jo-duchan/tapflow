@@ -1,11 +1,13 @@
 import type { UIElement } from '@tapflowio/agent-core'
 import type { Flow, Selector, Step, ScrollDirection } from './schema.js'
+import { TransientQueryError } from './errors.js'
 
 // Transport-agnostic device surface the engine drives (DIP): the relay-backed
 // implementation lives in RelayDriver, tests use fakes, and mcp-server adapts
 // its own client. All coordinates are normalized 0-1.
 export interface FlowDriver {
-  queryUITree(): Promise<UIElement[]>
+  // Optional AbortSignal so a stalled query can't block the poll loop past the step deadline.
+  queryUITree(signal?: AbortSignal): Promise<UIElement[]>
   tap(x: number, y: number): Promise<void>
   swipe(from: [number, number], to: [number, number], durationMs: number): Promise<void>
   inputText(text: string): Promise<void>
@@ -99,6 +101,23 @@ export function matchSelector(tree: UIElement[], sel: Selector): UIElement[] {
 
 class StepFailure extends Error {}
 
+// Query the tree, surfacing a transient failure (foreground race, idle timeout, agent/network blip)
+// so the polling caller keeps waiting until its deadline. Permanent failures propagate and fail now.
+// The query is bounded by an AbortSignal set to the remaining deadline so a stalled response can't
+// block the loop past the step's timeout.
+async function queryOrRetry(driver: FlowDriver, deadline: number): Promise<{ tree: UIElement[] } | { transient: string }> {
+  try {
+    return { tree: await driver.queryUITree(AbortSignal.timeout(Math.max(1, deadline - Date.now()))) }
+  } catch (e) {
+    if (e instanceof TransientQueryError) return { transient: e.message }
+    throw e
+  }
+}
+
+function withLastError(base: string, lastError: string | undefined): string {
+  return lastError ? `${base} (last query error: ${lastError})` : base
+}
+
 async function resolveOne(
   driver: FlowDriver,
   sel: Selector,
@@ -106,15 +125,22 @@ async function resolveOne(
   pollIntervalMs: number,
 ): Promise<UIElement> {
   const deadline = Date.now() + (sel.timeoutMs ?? timeoutMs)
+  let lastError: string | undefined
   for (;;) {
-    const matches = matchSelector(await driver.queryUITree(), sel)
-    if (matches.length === 1) return matches[0]
-    if (matches.length > 1) {
-      const described = matches.slice(0, 5).map((m) => `${m.role} "${m.label}"${m.identifier ? ` id=${m.identifier}` : ''}`).join(' | ')
-      throw new StepFailure(`${matches.length} elements match ${describeSelector(sel)} — make the selector unique (candidates: ${described})`)
+    const q = await queryOrRetry(driver, deadline)
+    if ('tree' in q) {
+      lastError = undefined // a successful query clears any earlier transient error
+      const matches = matchSelector(q.tree, sel)
+      if (matches.length === 1) return matches[0]
+      if (matches.length > 1) {
+        const described = matches.slice(0, 5).map((m) => `${m.role} "${m.label}"${m.identifier ? ` id=${m.identifier}` : ''}`).join(' | ')
+        throw new StepFailure(`${matches.length} elements match ${describeSelector(sel)} — make the selector unique (candidates: ${described})`)
+      }
+    } else {
+      lastError = q.transient
     }
     if (Date.now() >= deadline) {
-      throw new StepFailure(`no element matched ${describeSelector(sel)} within ${(sel.timeoutMs ?? timeoutMs) / 1000}s`)
+      throw new StepFailure(withLastError(`no element matched ${describeSelector(sel)} within ${(sel.timeoutMs ?? timeoutMs) / 1000}s`, lastError))
     }
     await delay(pollIntervalMs)
   }
@@ -122,10 +148,17 @@ async function resolveOne(
 
 async function waitVisible(driver: FlowDriver, sel: Selector, timeoutMs: number, pollIntervalMs: number): Promise<void> {
   const deadline = Date.now() + (sel.timeoutMs ?? timeoutMs)
+  let lastError: string | undefined
   for (;;) {
-    if (matchSelector(await driver.queryUITree(), sel).length > 0) return
+    const q = await queryOrRetry(driver, deadline)
+    if ('tree' in q) {
+      lastError = undefined // a successful query clears any earlier transient error
+      if (matchSelector(q.tree, sel).length > 0) return
+    } else {
+      lastError = q.transient
+    }
     if (Date.now() >= deadline) {
-      throw new StepFailure(`no element matched ${describeSelector(sel)} within ${(sel.timeoutMs ?? timeoutMs) / 1000}s`)
+      throw new StepFailure(withLastError(`no element matched ${describeSelector(sel)} within ${(sel.timeoutMs ?? timeoutMs) / 1000}s`, lastError))
     }
     await delay(pollIntervalMs)
   }
@@ -133,10 +166,18 @@ async function waitVisible(driver: FlowDriver, sel: Selector, timeoutMs: number,
 
 async function waitNotVisible(driver: FlowDriver, sel: Selector, timeoutMs: number, pollIntervalMs: number): Promise<void> {
   const deadline = Date.now() + (sel.timeoutMs ?? timeoutMs)
+  let lastError: string | undefined
   for (;;) {
-    if (matchSelector(await driver.queryUITree(), sel).length === 0) return
+    const q = await queryOrRetry(driver, deadline)
+    if ('tree' in q) {
+      lastError = undefined // a successful query clears any earlier transient error
+      if (matchSelector(q.tree, sel).length === 0) return
+    } else {
+      // A transient failure means we can't confirm the element is gone — keep polling, don't return.
+      lastError = q.transient
+    }
     if (Date.now() >= deadline) {
-      throw new StepFailure(`element ${describeSelector(sel)} is still visible after ${(sel.timeoutMs ?? timeoutMs) / 1000}s`)
+      throw new StepFailure(withLastError(`element ${describeSelector(sel)} is still visible after ${(sel.timeoutMs ?? timeoutMs) / 1000}s`, lastError))
     }
     await delay(pollIntervalMs)
   }
