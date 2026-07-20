@@ -36,7 +36,7 @@
   </p>
 </div>
 
-<video src="https://github.com/user-attachments/assets/75652346-93cb-4261-9210-6a24b883d44a" controls width="100%"></video>
+<video src="https://github.com/user-attachments/assets/dbba8bde-74b6-4fb9-bdb6-3919bc4295c4" controls width="100%"></video>
 
 <p align="center"><em>Streams over H.264 with a zero-buffer decoder (no MSE) — <a href="contributing/streaming-latency-log.md">latency measurements ↗</a></em></p>
 
