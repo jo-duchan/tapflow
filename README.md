@@ -159,7 +159,7 @@ What's included:
 - **Team management** — invite links, roles (Admin / Developer / QA / Viewer), and Personal Access Tokens.
 - **MCP Server** — `@tapflowio/mcp-server` lets Claude Code and other LLM agents control simulators as native tools.
 
-<a name="latency-note"></a>
+<span id="latency-note"></span>
 > <sup>1</sup> On a real LAN, decode-to-present measures in the low tens of milliseconds (p50 ~11–17 ms with the WASM software decoder; faster with WebCodecs on HTTPS); end-to-end "glass-to-glass" latency adds your network's round trip on top. See the [streaming latency log](contributing/streaming-latency-log.md) for the full measurements, conditions, and known limitations.
 
 ## Security & Privacy
