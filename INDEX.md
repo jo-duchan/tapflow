@@ -71,6 +71,7 @@ Committed *why* behind non-obvious decisions. Read the relevant one **before** c
 | [streaming-latency-log.md](./contributing/streaming-latency-log.md) | log | Append-only glass-to-glass latency log — pipeline analysis, attempts, decisions |
 | [android-video-streaming-diagnosis.md](./contributing/android-video-streaming-diagnosis.md) | diagnosis | Android emulator streaming issues traced to root cause, one section per issue |
 | [awdl-wifi-latency-diagnosis.md](./contributing/awdl-wifi-latency-diagnosis.md) | diagnosis | Periodic Wi-Fi stream hitch traced to AWDL via ICMP ping — method and evidence |
+| [workshop-lab-fork-observations.md](./contributing/workshop-lab-fork-observations.md) | reference | Third-party workshop-lab fork: independent iOS-sim capacity data (~4 seats/32GB) + where our extension seams stop |
 
 ---
 
