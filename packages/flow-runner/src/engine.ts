@@ -61,6 +61,8 @@ function describeSelector(sel: Selector): string {
   const parts: string[] = []
   if (sel.id !== undefined) parts.push(`id="${sel.id}"`)
   if (sel.label !== undefined) parts.push(`label="${sel.label}"`)
+  if (sel.role !== undefined) parts.push(`role=${sel.role}`)
+  if (sel.index !== undefined) parts.push(`index=${sel.index}`)
   return parts.join(', ')
 }
 
@@ -79,22 +81,33 @@ function describeStep(step: Step): string {
   }
 }
 
-// Selector resolution: explicit id → identifier only; explicit label → exact
-// then partial; bare text → exact identifier, then exact label, then partial label.
+// Selector resolution: explicit id → identifier only; explicit label → exact then partial; bare text →
+// exact identifier, then exact label, then partial label. role then narrows by element kind, and index
+// (0-based) picks one of the remaining matches — so a label shared by e.g. a button and its inner text
+// can be disambiguated with { label, role: button }, and a label-less row with { role: cell, index }.
 export function matchSelector(tree: UIElement[], sel: Selector): UIElement[] {
+  let pool: UIElement[]
   if (sel.text !== undefined) {
     const byId = tree.filter((e) => e.identifier === sel.text)
-    if (byId.length > 0) return byId
     const exact = tree.filter((e) => e.label === sel.text)
-    if (exact.length > 0) return exact
-    return tree.filter((e) => sel.text !== undefined && sel.text.length > 0 && e.label.includes(sel.text))
+    pool = byId.length > 0
+      ? byId
+      : exact.length > 0
+        ? exact
+        : tree.filter((e) => sel.text !== undefined && sel.text.length > 0 && e.label.includes(sel.text))
+  } else {
+    pool = tree
+    if (sel.id !== undefined) pool = pool.filter((e) => e.identifier === sel.id)
+    if (sel.label !== undefined) {
+      const label = sel.label
+      const exact = pool.filter((e) => e.label === label)
+      pool = exact.length > 0 ? exact : pool.filter((e) => e.label.includes(label))
+    }
   }
-  let pool = tree
-  if (sel.id !== undefined) pool = pool.filter((e) => e.identifier === sel.id)
-  if (sel.label !== undefined) {
-    const label = sel.label
-    const exact = pool.filter((e) => e.label === label)
-    pool = exact.length > 0 ? exact : pool.filter((e) => e.label.includes(label))
+  if (sel.role !== undefined) pool = pool.filter((e) => e.role === sel.role)
+  if (sel.index !== undefined) {
+    const el = pool[sel.index]
+    return el ? [el] : []
   }
   return pool
 }
@@ -134,7 +147,7 @@ async function resolveOne(
       if (matches.length === 1) return matches[0]
       if (matches.length > 1) {
         const described = matches.slice(0, 5).map((m) => `${m.role} "${m.label}"${m.identifier ? ` id=${m.identifier}` : ''}`).join(' | ')
-        throw new StepFailure(`${matches.length} elements match ${describeSelector(sel)} — make the selector unique (candidates: ${described})`)
+        throw new StepFailure(`${matches.length} elements match ${describeSelector(sel)} — add an index or a more specific role/label (candidates: ${described})`)
       }
     } else {
       lastError = q.transient

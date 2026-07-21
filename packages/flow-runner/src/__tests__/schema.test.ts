@@ -64,12 +64,35 @@ steps:
 `, 'x.yaml')).toThrow(/steps\[1\]/)
   })
 
-  it('rejects a selector with neither id nor label', () => {
+  it('rejects a selector with neither id, label, nor role', () => {
     expect(() => parseFlow(`
 steps:
   - tapOn:
       timeout: 5
-`, 'x.yaml')).toThrow(/id.*label|label.*id/)
+`, 'x.yaml')).toThrow(/id.*label.*role/)
+  })
+
+  it('parses role and index disambiguators', () => {
+    const flow = parseFlow(`
+steps:
+  - tapOn:
+      label: "New Orders"
+      role: button
+  - tapOn:
+      role: cell
+      index: 2
+`, 'x.yaml')
+    expect(flow.steps[0]).toEqual({ type: 'tapOn', selector: { label: 'New Orders', role: 'button' } })
+    expect(flow.steps[1]).toEqual({ type: 'tapOn', selector: { role: 'cell', index: 2 } })
+  })
+
+  it('rejects a negative or non-integer index', () => {
+    expect(() => parseFlow('steps:\n  - tapOn:\n      role: cell\n      index: -1\n', 'x.yaml')).toThrow(/index/)
+    expect(() => parseFlow('steps:\n  - tapOn:\n      role: cell\n      index: 1.5\n', 'x.yaml')).toThrow(/index/)
+  })
+
+  it('rejects index alone with no id/label/role', () => {
+    expect(() => parseFlow('steps:\n  - tapOn:\n      index: 0\n', 'x.yaml')).toThrow(/id.*label.*role/)
   })
 
   it('rejects clearState when no appId is available', () => {

@@ -7,6 +7,10 @@ export interface Selector {
   text?: string
   id?: string
   label?: string
+  // Disambiguators for the object form: role narrows by element kind (button/cell/…),
+  // index (0-based) picks the Nth match when role/label still resolve to several.
+  role?: string
+  index?: number
   timeoutMs?: number
 }
 
@@ -44,11 +48,13 @@ function parseSelector(v: unknown, ctx: string): Selector {
     return { text: v }
   }
   if (isRecord(v)) {
-    const { id, label, timeout, ...rest } = v as { id?: unknown; label?: unknown; timeout?: unknown }
+    const { id, label, role, index, timeout, ...rest } = v as {
+      id?: unknown; label?: unknown; role?: unknown; index?: unknown; timeout?: unknown
+    }
     const unknownKeys = Object.keys(rest)
     if (unknownKeys.length > 0) throw new ValidationError(`${ctx}: unknown selector keys: ${unknownKeys.join(', ')}`)
-    if (id === undefined && label === undefined) {
-      throw new ValidationError(`${ctx}: selector needs "id" or "label"`)
+    if (id === undefined && label === undefined && role === undefined) {
+      throw new ValidationError(`${ctx}: selector needs "id", "label", or "role"`)
     }
     const selector: Selector = {}
     if (id !== undefined) {
@@ -59,13 +65,21 @@ function parseSelector(v: unknown, ctx: string): Selector {
       if (typeof label !== 'string' || label.length === 0) throw new ValidationError(`${ctx}: "label" must be a non-empty string`)
       selector.label = label
     }
+    if (role !== undefined) {
+      if (typeof role !== 'string' || role.length === 0) throw new ValidationError(`${ctx}: "role" must be a non-empty string`)
+      selector.role = role
+    }
+    if (index !== undefined) {
+      if (typeof index !== 'number' || !Number.isInteger(index) || index < 0) throw new ValidationError(`${ctx}: "index" must be a non-negative integer`)
+      selector.index = index
+    }
     if (timeout !== undefined) {
       if (typeof timeout !== 'number' || !(timeout > 0)) throw new ValidationError(`${ctx}: "timeout" must be a positive number of seconds`)
       selector.timeoutMs = Math.round(timeout * 1000)
     }
     return selector
   }
-  throw new ValidationError(`${ctx}: selector must be a string or { id, label, timeout }`)
+  throw new ValidationError(`${ctx}: selector must be a string or { id, label, role, index, timeout }`)
 }
 
 function parsePoint(v: unknown, ctx: string, key: string): [number, number] {
