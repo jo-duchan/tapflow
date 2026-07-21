@@ -138,6 +138,29 @@ describe('TapflowClient', () => {
     })
   })
 
+  describe('shutdownDevice', () => {
+    it('sends device:shutdown (with payload.deviceId) and resolves on device:shutdown-done', async () => {
+      setTimeout(() => relay.send({ type: 'device:shutdown-done', sessionId: 'sess-1' }), 10)
+      await expect(client.shutdownDevice('sess-1', 'dev-1')).resolves.toBeUndefined()
+      const msg = await waitForMessage(relay, 'device:shutdown')
+      // deviceId must be in the payload — the agent handler destructures msg.payload.deviceId.
+      expect(msg).toMatchObject({ type: 'device:shutdown', sessionId: 'sess-1', payload: { deviceId: 'dev-1' } })
+    })
+
+    it('does not resolve on a different session\'s shutdown-done, only the matching one', async () => {
+      const p = client.shutdownDevice('sess-1', 'dev-1')
+      relay.send({ type: 'device:shutdown-done', sessionId: 'OTHER' })
+      // A different session's completion must leave the promise pending.
+      const outcome = await Promise.race([
+        p.then(() => 'resolved'),
+        new Promise<string>((r) => setTimeout(() => r('pending'), 40)),
+      ])
+      expect(outcome).toBe('pending')
+      relay.send({ type: 'device:shutdown-done', sessionId: 'sess-1' })
+      await expect(p).resolves.toBeUndefined()
+    })
+  })
+
   describe('tap', () => {
     it('sends touch:start then touch:end with coordinates', async () => {
       client.tap('sess-1', 100, 200)

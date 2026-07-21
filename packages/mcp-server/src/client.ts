@@ -158,6 +158,17 @@ export class TapflowClient {
     }
   }
 
+  // Powers the session's booted device down (agent runs simctl/adb shutdown, replies device:shutdown-done).
+  // payload carries deviceId, matching the agent handler and the relay's own shutdown path. There is no
+  // shutdown-error message: Android replies done regardless, iOS surfaces a failed shutdown as a wait timeout.
+  async shutdownDevice(sessionId: string, deviceId: string): Promise<void> {
+    this.send({ type: 'device:shutdown', sessionId, payload: { deviceId } })
+    await this.waitFor(
+      (m) => m['type'] === 'device:shutdown-done' && m['sessionId'] === sessionId,
+      30_000,
+    )
+  }
+
   tap(sessionId: string, x: number, y: number): void {
     const payload = { x, y }
     this.send({ type: 'input:touch:start', sessionId, payload })

@@ -27,7 +27,9 @@ Connects to the relay over WebSocket + REST (`TapflowClient`), registers MCP too
 
 ### Available tools
 
-`list_devices`, `connect_device`, `disconnect_device`, `boot_device`, `screenshot`, `query_ui_tree`, `run_flow`, `tap`, `swipe`, `type_text`, `press_key`, `press_button`, `install_app`, `launch_app`, `list_builds`
+`list_devices`, `connect_device`, `disconnect_device`, `boot_device`, `shutdown_device`, `screenshot`, `query_ui_tree`, `run_flow`, `tap`, `swipe`, `type_text`, `press_key`, `press_button`, `install_app`, `launch_app`, `list_builds`
+
+`disconnect_device` only leaves the session (`session:leave`) — the device stays booted. `shutdown_device` powers the device down (`device:shutdown` → agent runs simctl/adb shutdown → `device:shutdown-done`); use it to free resources or force a cold boot.
 
 `run_flow` replays a `@tapflowio/flow-runner` YAML flow deterministically (no LLM at replay time) over this process's existing relay connection — it shares the session joined via `connect_device`, so it never opens a second WebSocket or hits "Session busy".
 
