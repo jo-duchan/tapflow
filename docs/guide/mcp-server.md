@@ -99,6 +99,7 @@ Any MCP-compatible client can use tapflow. Add the following to your MCP config 
 | `connect_device` | Join a session (required before controlling a device) |
 | `disconnect_device` | End a session |
 | `boot_device` | Boot a simulator or emulator |
+| `shutdown_device` | Power the device down (frees resources; forces a cold boot next time) |
 | `screenshot` | Capture the current screen (PNG or JPEG) |
 | `query_ui_tree` | Read the on-screen UI as a structured accessibility tree (role, label, identifier, frame) |
 | `tap` | Tap at a coordinate |

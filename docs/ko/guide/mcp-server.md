@@ -99,6 +99,7 @@ MCP를 지원하는 클라이언트라면 모두 tapflow를 사용할 수 있습
 | `connect_device` | 세션 참여 (제어 전 필수) |
 | `disconnect_device` | 세션 종료 |
 | `boot_device` | 시뮬레이터·에뮬레이터 부팅 |
+| `shutdown_device` | 기기 전원 종료 (리소스 반납·다음 콜드 부팅 강제) |
 | `screenshot` | 현재 화면 캡처 (PNG 또는 JPEG) |
 | `query_ui_tree` | 화면 UI를 구조화된 접근성 트리로 조회 (role·label·identifier·frame) |
 | `tap` | 좌표 터치 |

@@ -133,6 +133,28 @@ export function registerTools(server: McpServer, client: TapflowClient): void {
   )
 
   server.registerTool(
+    'shutdown_device',
+    {
+      description:
+        'Shut the session\'s booted simulator/emulator down — powers the device off to free resources or force a ' +
+        'cold boot next time. Unlike disconnect_device (which only leaves the session, leaving the device running), ' +
+        'this actually stops the device. Requires connect_device first. Waits up to 30 seconds.',
+      inputSchema: {
+        sessionId: z.string().describe('Session ID from list_devices'),
+        deviceId: z.string().describe('Device ID from list_devices'),
+      },
+    },
+    async ({ sessionId, deviceId }) => {
+      try {
+        await client.shutdownDevice(sessionId, deviceId)
+        return ok(JSON.stringify({ shutdown: true, sessionId, deviceId }))
+      } catch (e) {
+        return err(`shutdown_device failed: ${(e as Error).message}`)
+      }
+    },
+  )
+
+  server.registerTool(
     'query_ui_tree',
     {
       description:
