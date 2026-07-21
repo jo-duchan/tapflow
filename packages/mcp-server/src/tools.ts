@@ -163,15 +163,18 @@ export function registerTools(server: McpServer, client: TapflowClient): void {
         'tapping step by step: author the flow once, then replay it idempotently. Pass the YAML inline via "flow", or a ' +
         'file path via "path" (resolved from the MCP server process cwd). Steps: clearState / launchApp / tapOn / ' +
         'inputText / pressKey / swipe / scroll / openUrl / assertVisible / assertNotVisible. launchApp launches the ' +
-        'buildId argument. Returns per-step results; on failure a screenshot is saved to a temp file.',
+        'buildId argument. When buildId is set, the build is installed before replaying (like `tapflow flow run --build`) ' +
+        'so clearState/launchApp have the app present — pass install:false to skip. Returns per-step results; on failure ' +
+        'a screenshot is saved to a temp file.',
       inputSchema: {
         sessionId: z.string().describe('Session ID from list_devices (connect_device first)'),
         flow: z.string().optional().describe('Flow YAML content (inline)'),
         path: z.string().optional().describe('Path to a flow YAML file (alternative to "flow")'),
-        buildId: z.number().optional().describe('Build under test for the launchApp step (from list_builds)'),
+        buildId: z.number().int().optional().describe('Build under test — installed before replay and launched by the launchApp step (from list_builds)'),
+        install: z.boolean().optional().describe('Install buildId before replaying (default: true when buildId is set)'),
       },
     },
-    async ({ sessionId, flow, path: flowPath, buildId }) => {
+    async ({ sessionId, flow, path: flowPath, buildId, install }) => {
       try {
         if ((flow === undefined) === (flowPath === undefined)) {
           return err('run_flow needs exactly one of "flow" (inline YAML) or "path"')
@@ -189,6 +192,10 @@ export function registerTools(server: McpServer, client: TapflowClient): void {
           yamlText = fs.readFileSync(resolved, 'utf-8')
         }
         const parsed = parseFlow(yamlText, flowPath ?? 'inline-flow.yaml')
+        // Install the build before replaying (mirrors `flow run --build`) so clearState/launchApp find the app present; skip with install:false.
+        if (buildId !== undefined && install !== false) {
+          await client.installApp(sessionId, buildId)
+        }
         const driver = makeFlowDriver(client, sessionId, buildId)
         const result = await runFlow(parsed, driver)
 
