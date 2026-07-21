@@ -32,10 +32,12 @@
         {
           "type": "object",
           "additionalProperties": false,
-          "anyOf": [{ "required": ["id"] }, { "required": ["label"] }],
+          "anyOf": [{ "required": ["id"] }, { "required": ["label"] }, { "required": ["role"] }],
           "properties": {
             "id": { "type": "string", "minLength": 1, "description": "Exact accessibility identifier / resource-id." },
             "label": { "type": "string", "minLength": 1, "description": "Label text (exact match first, then substring)." },
+            "role": { "type": "string", "minLength": 1, "description": "Narrow the match by element kind (button, text, cell, input, …)." },
+            "index": { "type": "integer", "minimum": 0, "description": "0-based: pick the Nth remaining match when role/label still resolve to several." },
             "timeout": { "type": "number", "exclusiveMinimum": 0, "description": "Seconds to wait for the element (default 10)." }
           }
         }

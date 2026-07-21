@@ -75,7 +75,45 @@ describe('runFlow', () => {
     const result = await runFlow(flowOf('steps:\n  - tapOn: "삭제"\n'), driver, OPTS)
     expect(result.status).toBe('failed')
     expect(result.failureMessage).toMatch(/2 elements match/)
+    expect(result.failureMessage).toMatch(/add an index or a more specific role\/label/)
     expect(driver.tap).not.toHaveBeenCalled()
+  })
+
+  it('disambiguates a shared label by role', async () => {
+    const driver = fakeDriver([[
+      el({ role: 'button', label: 'New Orders', frame: { x: 0.1, y: 0.2, width: 0.2, height: 0.1 } }),
+      el({ role: 'text', label: 'New Orders', frame: { x: 0.5, y: 0.5, width: 0.2, height: 0.1 } }),
+    ]])
+    const result = await runFlow(flowOf('steps:\n  - tapOn:\n      label: "New Orders"\n      role: button\n'), driver, OPTS)
+    expect(result.status).toBe('passed')
+    expect(driver.calls).toEqual([['tap', 0.2, 0.25]]) // the button, not its inner text
+  })
+
+  it('picks the Nth match by index (label-less rows)', async () => {
+    const driver = fakeDriver([[
+      el({ role: 'cell', label: '', frame: { x: 0, y: 0, width: 0.2, height: 0.1 } }),
+      el({ role: 'cell', label: '', frame: { x: 0, y: 0.3, width: 0.2, height: 0.1 } }),
+      el({ role: 'cell', label: '', frame: { x: 0, y: 0.6, width: 0.2, height: 0.1 } }),
+    ]])
+    const result = await runFlow(flowOf('steps:\n  - tapOn:\n      role: cell\n      index: 2\n'), driver, OPTS)
+    expect(result.status).toBe('passed')
+    expect(driver.calls).toEqual([['tap', 0.1, 0.65]]) // cell at index 2
+  })
+
+  it('index: 0 picks the first match', async () => {
+    const driver = fakeDriver([[
+      el({ role: 'cell', label: '', frame: { x: 0, y: 0.1, width: 0.2, height: 0.1 } }),
+      el({ role: 'cell', label: '', frame: { x: 0, y: 0.5, width: 0.2, height: 0.1 } }),
+    ]])
+    const result = await runFlow(flowOf('steps:\n  - tapOn:\n      role: cell\n      index: 0\n'), driver, OPTS)
+    expect(result.status).toBe('passed')
+    expect(driver.calls).toEqual([['tap', 0.1, 0.15]]) // first cell
+  })
+
+  it('index out of range → no match, fails at the deadline', async () => {
+    const driver = fakeDriver([[el({ role: 'cell', label: '' })]])
+    const result = await runFlow(flowOf('steps:\n  - tapOn:\n      role: cell\n      index: 5\n'), driver, OPTS)
+    expect(result.status).toBe('failed')
   })
 
   it('polls the tree until the element appears', async () => {

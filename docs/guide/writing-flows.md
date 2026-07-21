@@ -70,11 +70,24 @@ There is no fixed `sleep` step. Waiting is always condition-based. To wait for a
 
 # explicit label + wait time (seconds)
 - tapOn: { label: "Sign in", timeout: 20 }
+
+# narrow a shared label by element kind
+- tapOn: { label: "New Orders", role: button }
+
+# a label-less row: pick the Nth of its kind (0-based)
+- tapOn: { role: cell, index: 2 }
 ```
 
 A bare-string selector resolves in the order **exact identifier → exact label → partial label**. Once a stage matches, later stages are not tried.
 
 If a `tapOn` selector matches more than one element, it fails immediately and lists the candidates. It never picks the first one implicitly, so an ambiguous selector fails visibly instead of quietly tapping the wrong place. `assertVisible` checks presence only, so it passes when at least one element matches.
+
+To resolve an ambiguous match, add a disambiguator to the object form:
+
+- `role` — narrow by element kind (`button`, `text`, `cell`, `input`, …), e.g. when a button and its inner text share a label.
+- `index` — 0-based; pick the Nth remaining match. Useful for label-less, id-less rows where `role` alone still matches several.
+
+The object form needs at least one of `id`, `label`, or `role`; `role`/`index` refine that set.
 
 `timeout` is in seconds and defaults to 10. You can set it per selector.
 
