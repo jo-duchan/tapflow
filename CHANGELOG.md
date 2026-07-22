@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.16.0] - 2026-07-22
+
+### Added
+
+- Flow selectors gain two optional disambiguators for the object form: `role` narrows by element kind (e.g. `{ label: "New Orders", role: button }` when a button and its inner text share a label), and `index` (0-based) picks the Nth remaining match (e.g. `{ role: cell, index: 2 }` for a label-less, id-less row). Additive — bare-string and `{ id }` / `{ label }` selectors are unchanged; the object form now needs at least one of `id` / `label` / `role`.
+- MCP `run_flow` installs the build before replaying when `buildId` is set (parity with `tapflow flow run --build`), so a flow's `clearState` / `launchApp` finds the app present even after a session ended or the app was never installed. Pass `install: false` to skip.
+- MCP `shutdown_device` — powers a session's booted simulator/emulator down to free resources or force a cold boot next time. Distinct from `disconnect_device`, which only leaves the session and keeps the device running.
+
+### Fixed
+
+- `tapflow flow run`: wait steps (`tapOn` / `assertVisible` / `assertNotVisible`) no longer fail the instant a ui-tree query throws — e.g. the app not being in the foreground yet right after `launchApp`. The poll loop retries transient query failures (foreground race, idle timeout, network) until the step deadline while failing fast on permanent ones (bad request, auth, missing session), and bounds each query with an abort signal so a stalled response can't block past the deadline. This removes the long-press-as-sleep workaround.
+
+### Security
+
+- Pinned transitive dependencies past their advisories via `pnpm.overrides`: `axios` ≥ 1.18.0 (GHSA-xj6q-8x83-jv6g), `protobufjs` ≥ 7.6.5 (GHSA-j3f2-48v5-ccww), `body-parser` ≥ 2.3.0 (GHSA-v422-hmwv-36x6), and `js-yaml` 4.x ≥ 4.3.0 (GHSA-52cp-r559-cp3m).
+
 ## [0.15.0] - 2026-07-20
 
 ### Added
@@ -290,7 +306,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Automatic `tapflow.config.json` creation as a side effect of `tapflow start` / `tapflow relay start`.
 
-[Unreleased]: https://github.com/jo-duchan/tapflow/compare/v0.15.0...HEAD
+[Unreleased]: https://github.com/jo-duchan/tapflow/compare/v0.16.0...HEAD
+[0.16.0]: https://github.com/jo-duchan/tapflow/compare/v0.15.0...v0.16.0
 [0.15.0]: https://github.com/jo-duchan/tapflow/compare/v0.14.0...v0.15.0
 [0.14.0]: https://github.com/jo-duchan/tapflow/compare/v0.13.0...v0.14.0
 [0.13.0]: https://github.com/jo-duchan/tapflow/compare/v0.12.0...v0.13.0
