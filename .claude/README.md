@@ -35,7 +35,7 @@ Invoke with `/` in Claude Code.
 |---------|-------------|
 | `/ai-tells {ko\|en} {detect\|rewrite} [target]` | Detect/fix AI writing tells. `detect` is the default lint/gate (not a laundering tool). External posts (HN/Reddit) = `detect` only — see marketing OVERVIEW.md policy. |
 | `/work-plan {topic}` | Create a `.work/` plan document with requirements and test cases. |
-| `/deep-research {problem}` | Deep analysis of implementation, bug, or design problems using Opus. |
+| `/deep-research {problem}` | Deep analysis of implementation, bug, or design problems using Fable 5. |
 | `/qa {target}` | Plan and write tests for the target code. Potemkin and flaky tests prohibited. |
 | `/doc-sync` | Audit and fix consistency between AGENTS.md / INDEX.md / `.work/` and the codebase. |
 | `/compound` | Extract reusable patterns from the current session and update AGENTS.md. |
