@@ -1,5 +1,12 @@
 # @tapflowio/ios-agent
 
+## 0.16.0
+
+### Patch Changes
+
+- @tapflowio/agent-core@0.16.0
+- @tapflowio/audiotap-helper@0.2.6
+
 ## 0.15.0
 
 ### Patch Changes
