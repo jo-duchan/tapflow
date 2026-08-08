@@ -8,6 +8,29 @@
 2. Check that the URL in the `--relay` option uses `ws://` — agents always connect over the local network.
 3. Run `tapflow doctor` to inspect your environment.
 
+## Opening a build fails with `spawn unknown error` {#spawn-unknown-error}
+
+Check the Mac's architecture:
+
+```bash
+uname -m        # arm64 = Apple Silicon, x86_64 = Intel
+```
+
+If it reports `x86_64`, this is an **Intel Mac and the agent does not support it**. The native helper
+binaries are built for arm64 only, so macOS refuses to exec them (`EBADARCH`), which Node surfaces as
+`Unknown system error -86` and the dashboard shows as `spawn unknown error`.
+
+There is no workaround on the agent side today. Run the agent on an Apple Silicon Mac — the relay and
+the dashboard have no such constraint, so only the machine driving the simulators has to change.
+
+Intel support is possible and tracked in
+[#464](https://github.com/jo-duchan/tapflow/issues/464); it needs a universal build and verification on
+hardware the maintainers do not have, so it is not scheduled. See
+[Requirements](/guide/requirements#agent).
+
+If `uname -m` says `arm64`, this is a different problem — a helper that is missing or not executable
+produces the same message. Check that the agent package installed completely.
+
 ## iOS Simulator service version mismatch {#ios-simulator-service-version-mismatch}
 
 After updating Xcode, you may see a macOS alert:

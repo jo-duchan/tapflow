@@ -8,6 +8,28 @@
 2. `--relay` 옵션의 URL이 `ws://`인지 확인합니다. 에이전트는 항상 내부 네트워크로 연결합니다.
 3. `tapflow doctor`를 실행해 환경을 점검합니다.
 
+## 빌드를 열면 `spawn unknown error`가 납니다 {#spawn-unknown-error}
+
+먼저 Mac의 아키텍처를 확인하세요.
+
+```bash
+uname -m        # arm64면 Apple Silicon, x86_64면 Intel
+```
+
+`x86_64`가 나오면 **Intel Mac이고 에이전트가 지원하지 않는 환경**입니다. 네이티브 헬퍼 바이너리가
+arm64 전용이라 macOS가 실행을 거부하고(`EBADARCH`), Node가 그것을 `Unknown system error -86`으로
+올려보내면 대시보드에 `spawn unknown error`로 표시됩니다.
+
+현재 에이전트 쪽 우회 방법은 없습니다. 에이전트를 Apple Silicon Mac에서 실행하세요. 릴레이와
+대시보드에는 이 제약이 없으므로 시뮬레이터를 구동하는 머신만 바꾸면 됩니다.
+
+Intel 지원은 가능하고 [#464](https://github.com/jo-duchan/tapflow/issues/464)에서 다루고 있습니다.
+유니버설 빌드가 필요하고 메인테이너가 갖고 있지 않은 하드웨어에서 검증해야 해서 예정에는 없습니다.
+[시스템 요구사항](/ko/guide/requirements#에이전트)도 참고하세요.
+
+`uname -m`이 `arm64`를 출력하면 다른 문제입니다. 헬퍼 파일이 없거나 실행 권한이 없을 때도 같은
+메시지가 나오므로, 에이전트 패키지가 온전히 설치됐는지 확인하세요.
+
 ## iOS 시뮬레이터 서비스 버전 불일치 {#ios-simulator-service-version-mismatch}
 
 Xcode를 업데이트한 후 다음과 같은 macOS 알림이 표시될 수 있습니다:

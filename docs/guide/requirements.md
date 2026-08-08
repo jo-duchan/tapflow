@@ -10,8 +10,19 @@
 
 The agent runs on macOS. iOS and Android can run together on the same Mac.
 
-- macOS
+- macOS on **Apple Silicon** (M-series)
 - Node.js ≥ 22
+
+::: warning Intel Macs are not supported
+The agent ships native helper binaries built for arm64 only, so an Intel (x86_64) Mac cannot run them.
+Opening a build fails with a generic `spawn unknown error`.
+
+Apple Silicon is what tapflow has been developed and verified against. Intel support is possible and
+tracked in [#464](https://github.com/jo-duchan/tapflow/issues/464), but it is not scheduled — it needs
+a universal build plus verification on hardware the maintainers do not have.
+
+The relay has no such constraint. Only the machine running the **agent** needs Apple Silicon.
+:::
 
 ### iOS
 
