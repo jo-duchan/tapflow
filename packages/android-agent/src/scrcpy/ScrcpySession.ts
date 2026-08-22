@@ -48,6 +48,9 @@ export class ScrcpySession {
   private _video: ScrcpyVideo | null = null
   private _control: ScrcpyControl | null = null
   private port = 0
+  /** The process we killed on purpose — compared by identity so a late exit from an old
+   *  process is never blamed on the one running now. */
+  private stoppedProc: ChildProcess | null = null
 
   constructor() {
     const buf = randomBytes(4)
@@ -113,6 +116,16 @@ export class ScrcpySession {
     // Without a handler, an unhandled 'error' event (e.g. spawn() failing with ENOENT/EACCES,
     // or EPERM from kill()) throws and crashes the whole agent — taking down every device it manages.
     serverProc.on('error', (e) => logger.error(`server process: ${e.message}`))
+    // Log why the server exited so restart loops have a recorded cause. Expected exits (our own
+    // stop() sets this.stopping) are debug-level noise; unexpected ones are warnings.
+    serverProc.on('exit', (code, signal) => {
+      const detail = `code=${code ?? '-'} signal=${signal ?? '-'}`
+      if (this.stoppedProc === serverProc) {
+        logger.debug(`server process exited (${detail})`)
+      } else {
+        logger.warn(`server process exited unexpectedly (${detail})`)
+      }
+    })
     serverProc.unref()
 
     try {
@@ -133,6 +146,7 @@ export class ScrcpySession {
       logger.info(`ready — ${info.deviceName} ${info.width}×${info.height}`)
       return info
     } catch (e) {
+      this.stoppedProc = serverProc
       serverProc.kill()
       this.serverProc = null
       throw e
@@ -140,6 +154,7 @@ export class ScrcpySession {
   }
 
   stop(serial: string): void {
+    this.stoppedProc = this.serverProc
     this.serverProc?.kill()
     this.serverProc = null
     this.videoSocket?.destroy()
