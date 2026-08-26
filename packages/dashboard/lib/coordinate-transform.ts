@@ -85,10 +85,13 @@ export function widthFitScale(boxWidth: number, maxWidth: number): number {
 //  - toolbar column (SimulatorToolbar.tsx): `h-8 w-8` buttons (32) + `px-1.5` padding (2×6) + border (~2)
 //  - `gap-16` / `gap-8` (Tailwind spacing scale: 4rem / 2rem at the default 16px root)
 //  - info card (SimulatorInfoCard.tsx): its own fixed width when not stacked
+//  - bezel padding (AndroidViewer.tsx's device bezel, and DeviceViewer.tsx's pre-chrome
+//    skeleton phone — both use `padding: '12px'` on all four sides around the device box)
 export const TOOLBAR_COLUMN_W = 48
 export const ROW_GAP_16_PX = 64
 export const ROW_GAP_8_PX = 32
 export const INFO_CARD_W = 300
+export const BEZEL_PADDING_W = 24
 
 /**
  * Whether the toolbar, device box and info card fit beside each other (in one row, as the

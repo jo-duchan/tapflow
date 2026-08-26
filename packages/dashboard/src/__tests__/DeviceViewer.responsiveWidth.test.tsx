@@ -132,3 +132,22 @@ describe('DeviceViewer width budget — the toolbar/card row itself (#680)', () 
     expect(row.className).toMatch(/\bflex-col\b/)
   })
 })
+
+describe('DeviceViewer pre-chrome skeleton — bezel padding (CodeRabbit on #680)', () => {
+  beforeEach(() => { deliver = null })
+
+  // CodeRabbit: the skeleton phone has the same 24px bezel padding as AndroidViewer's real
+  // device. A 780px budget clears the toolbar+device(324)+card threshold (768px) but not once
+  // the bezel is reserved too (792px) — so it must still stack, not go side by side.
+  it('stacks at a budget that only fits without the bezel reserved', () => {
+    render(<DeviceViewer sessionId="mine" deviceId="dev-1" widthBudget={780} />)
+    const row = screen.getByTestId('device-skeleton-row')
+    expect(row.className).toMatch(/\bflex-col\b/)
+  })
+
+  it('goes side by side once the budget also covers the bezel', () => {
+    render(<DeviceViewer sessionId="mine" deviceId="dev-1" widthBudget={800} />)
+    const row = screen.getByTestId('device-skeleton-row')
+    expect(row.className).not.toMatch(/\bflex-col\b/)
+  })
+})

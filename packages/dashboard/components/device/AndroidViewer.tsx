@@ -17,7 +17,7 @@ import { Button } from '@/components/ui/button';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import type { AndroidButton } from '@/lib/types'
 import type { BinaryFrameHandler } from '@/lib/envelope'
-import { androidToNorm as toNormPure, toPinchFingers as makePinchFingers, widthFitScale, fitsSideBySide } from '@/lib/coordinate-transform';
+import { androidToNorm as toNormPure, toPinchFingers as makePinchFingers, widthFitScale, fitsSideBySide, BEZEL_PADDING_W } from '@/lib/coordinate-transform';
 import type { MutableRefObject } from 'react';
 import type { PerfHook } from '@/components/perf/types';
 import { useClipboardBridge, isBridgedChord, type ClipboardMessageHandler } from '@/hooks/useClipboardBridge';
@@ -28,9 +28,6 @@ const CURSOR_DOT_R = 8;
 const MOVE_THROTTLE_MS = 16;
 const DRAG_THRESHOLD = 0.02;
 const MAX_ANDROID_LONG = 720;
-// The bezel wrapper below always adds this around the device box (`padding: '12px'` on all four
-// sides = 24px of extra width) — present whether or not the toolbar/card are beside it.
-const ANDROID_BEZEL_PADDING_W = 24;
 
 interface AndroidViewerProps {
   sessionId: string;
@@ -453,9 +450,9 @@ export function AndroidViewer({
   // Toolbar and info card only compete with the device box for widthBudget when they're actually
   // beside it (#680) — stacked, the device (plus its always-present bezel) alone gets (almost)
   // the whole budget, so only shrink it further when the full row doesn't fit.
-  const sideBySide = fitsSideBySide(widthBudget, naiveContainerW, ANDROID_BEZEL_PADDING_W);
+  const sideBySide = fitsSideBySide(widthBudget, naiveContainerW, BEZEL_PADDING_W);
   const widthScale = !sideBySide && widthBudget
-    ? widthFitScale(naiveContainerW, Math.max(1, widthBudget - ANDROID_BEZEL_PADDING_W))
+    ? widthFitScale(naiveContainerW, Math.max(1, widthBudget - BEZEL_PADDING_W))
     : 1;
   const androidDisplayW = Math.round(naiveW * widthScale);
   const androidDisplayH = Math.round(naiveH * widthScale);
