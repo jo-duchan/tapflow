@@ -5,6 +5,11 @@ import {
   toPinchFingers,
   iosDisplayScale,
   widthFitScale,
+  fitsSideBySide,
+  TOOLBAR_COLUMN_W,
+  ROW_GAP_16_PX,
+  ROW_GAP_8_PX,
+  INFO_CARD_W,
 } from '@/lib/coordinate-transform'
 
 // ── helpers ──────────────────────────────────────────────────────────────────
@@ -153,5 +158,37 @@ describe('widthFitScale', () => {
 
   it('maxWidth <= 0 (unmeasured container) → 1, no constraint', () => {
     expect(widthFitScale(400, 0)).toBe(1)
+  })
+})
+
+// ── fitsSideBySide ────────────────────────────────────────────────────────────
+// CodeRabbit found this on #680: the toolbar and info card no longer compete with the device box
+// below `lg`, but at/above it they all unstack into one row again — and nothing checked whether
+// that whole row, in the space actually left after the session panel, still fits.
+
+describe('fitsSideBySide', () => {
+  const naiveBoxW = 347 // e.g. an iPhone-14-scale composite at the height-only cap
+
+  it('no budget measured yet → true (unconstrained fallback)', () => {
+    expect(fitsSideBySide(undefined, naiveBoxW)).toBe(true)
+    expect(fitsSideBySide(0, naiveBoxW)).toBe(true)
+  })
+
+  it('budget exactly enough for toolbar + gaps + device + card → true', () => {
+    const exact = TOOLBAR_COLUMN_W + ROW_GAP_16_PX + naiveBoxW + ROW_GAP_8_PX + INFO_CARD_W
+    expect(fitsSideBySide(exact, naiveBoxW)).toBe(true)
+  })
+
+  it('one pixel short → false — this is the #680 regression: a 1024px viewport with a 320px ' +
+    'session panel beside it leaves ~607px, well under what a full side-by-side row needs', () => {
+    const exact = TOOLBAR_COLUMN_W + ROW_GAP_16_PX + naiveBoxW + ROW_GAP_8_PX + INFO_CARD_W
+    expect(fitsSideBySide(exact - 1, naiveBoxW)).toBe(false)
+    expect(fitsSideBySide(607, naiveBoxW)).toBe(false)
+  })
+
+  it('extraReservedW (e.g. Android bezel padding) is added to what must fit', () => {
+    const exact = TOOLBAR_COLUMN_W + ROW_GAP_16_PX + naiveBoxW + ROW_GAP_8_PX + INFO_CARD_W
+    expect(fitsSideBySide(exact, naiveBoxW, 24)).toBe(false)
+    expect(fitsSideBySide(exact + 24, naiveBoxW, 24)).toBe(true)
   })
 })

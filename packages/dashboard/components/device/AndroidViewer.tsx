@@ -17,7 +17,7 @@ import { Button } from '@/components/ui/button';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import type { AndroidButton } from '@/lib/types'
 import type { BinaryFrameHandler } from '@/lib/envelope'
-import { androidToNorm as toNormPure, toPinchFingers as makePinchFingers, widthFitScale } from '@/lib/coordinate-transform';
+import { androidToNorm as toNormPure, toPinchFingers as makePinchFingers, widthFitScale, fitsSideBySide } from '@/lib/coordinate-transform';
 import type { MutableRefObject } from 'react';
 import type { PerfHook } from '@/components/perf/types';
 import { useClipboardBridge, isBridgedChord, type ClipboardMessageHandler } from '@/hooks/useClipboardBridge';
@@ -28,6 +28,9 @@ const CURSOR_DOT_R = 8;
 const MOVE_THROTTLE_MS = 16;
 const DRAG_THRESHOLD = 0.02;
 const MAX_ANDROID_LONG = 720;
+// The bezel wrapper below always adds this around the device box (`padding: '12px'` on all four
+// sides = 24px of extra width) — present whether or not the toolbar/card are beside it.
+const ANDROID_BEZEL_PADDING_W = 24;
 
 interface AndroidViewerProps {
   sessionId: string;
@@ -447,7 +450,13 @@ export function AndroidViewer({
   const needsCSSRotation = userWantsLandscape && !isLandscapeContent;
   // Budget applies to the box as it actually sits on screen — after the rotation swap above.
   const naiveContainerW = needsCSSRotation ? naiveH : naiveW;
-  const widthScale = widthBudget ? widthFitScale(naiveContainerW, widthBudget) : 1;
+  // Toolbar and info card only compete with the device box for widthBudget when they're actually
+  // beside it (#680) — stacked, the device (plus its always-present bezel) alone gets (almost)
+  // the whole budget, so only shrink it further when the full row doesn't fit.
+  const sideBySide = fitsSideBySide(widthBudget, naiveContainerW, ANDROID_BEZEL_PADDING_W);
+  const widthScale = !sideBySide && widthBudget
+    ? widthFitScale(naiveContainerW, Math.max(1, widthBudget - ANDROID_BEZEL_PADDING_W))
+    : 1;
   const androidDisplayW = Math.round(naiveW * widthScale);
   const androidDisplayH = Math.round(naiveH * widthScale);
   // react-hooks/immutability false positive: needsCSSRotationRef is only *read*, inside callbacks
@@ -520,7 +529,7 @@ export function AndroidViewer({
   ) : null;
 
   return (
-    <div className="flex flex-col items-center gap-4 lg:flex-row lg:items-start lg:justify-center lg:gap-16">
+    <div className={sideBySide ? 'flex items-start justify-center gap-16' : 'flex flex-col items-center gap-4'}>
       <canvas ref={recordCanvasRef} style={{ display: 'none' }} />
       <DeepLinkDialog open={deepLinkOpen} onOpenChange={setDeepLinkOpen} openUrl={openUrl} />
 
@@ -536,7 +545,7 @@ export function AndroidViewer({
         network={networkSupported ? { position: network.position, steerable: network.steerable, reason: network.reason, pending: network.pending, onToggle: network.toggle } : undefined}
       />
 
-      <div className="flex flex-col items-center gap-4 lg:flex-row lg:items-start lg:gap-8">
+      <div className={sideBySide ? 'flex items-start gap-8' : 'flex flex-col items-center gap-4'}>
         {/* phone body bezel — outer radius stays concentric with the screen (screenRadius + 12px padding) */}
         <div style={{ background: '#1c1c1e', borderRadius: `${screenRadius + 12}px`, padding: '12px', flexShrink: 0, boxShadow: '0 8px 32px rgba(0,0,0,0.45), inset 0 1px 0 rgba(255,255,255,0.06)' }}>
         <div
@@ -600,6 +609,7 @@ export function AndroidViewer({
         </div>{/* /phone body bezel */}
 
         <SimulatorInfoCard
+          sideBySide={sideBySide}
           joined={joined} fps={fps} connected={connected}
           deviceReady={deviceReady} bootError={bootError}
           installing={installing} installError={installError}

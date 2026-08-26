@@ -15,7 +15,7 @@ import { Button } from '@/components/ui/button';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { Kbd, KbdGroup } from '@/components/ui/kbd';
 import type { ChromeData } from '@/lib/types'
-import { iosToNormScreen, toPinchFingers as makePinchFingers, iosDisplayScale, widthFitScale } from '@/lib/coordinate-transform';
+import { iosToNormScreen, toPinchFingers as makePinchFingers, iosDisplayScale, widthFitScale, fitsSideBySide } from '@/lib/coordinate-transform';
 import { useDecoderStream } from '@/hooks/useDecoderStream';
 import type { BinaryFrameHandler } from '@/lib/envelope';
 import type { MutableRefObject } from 'react';
@@ -542,7 +542,11 @@ export function IOSViewer({
   const naiveBoxW = isLandscape
     ? Math.round(compositeLogicalH * heightScale)
     : Math.round(compositeLogicalW * heightScale);
-  const widthScale = widthBudget ? widthFitScale(naiveBoxW, widthBudget) : 1;
+  // Toolbar and info card only compete with the device box for widthBudget when they're actually
+  // beside it (#680) — stacked, the device box alone gets (almost) the whole budget, so only
+  // shrink it further when the full row doesn't fit.
+  const sideBySide = fitsSideBySide(widthBudget, naiveBoxW);
+  const widthScale = !sideBySide && widthBudget ? widthFitScale(naiveBoxW, widthBudget) : 1;
   const displayScale = heightScale * widthScale;
   const displayW = Math.round(compositeLogicalW * displayScale);
   const displayH = Math.round(compositeLogicalH * displayScale);
@@ -602,7 +606,7 @@ export function IOSViewer({
   ) : null;
 
   return (
-    <div className="flex flex-col items-center gap-4 lg:flex-row lg:items-start lg:justify-center lg:gap-16">
+    <div className={sideBySide ? 'flex items-start justify-center gap-16' : 'flex flex-col items-center gap-4'}>
       <canvas ref={recordCanvasRef} style={{ display: 'none' }} />
 
       <DeepLinkDialog open={deepLinkOpen} onOpenChange={setDeepLinkOpen} openUrl={openUrl} />
@@ -619,7 +623,7 @@ export function IOSViewer({
         network={networkSupported ? { position: network.position, steerable: network.steerable, reason: network.reason, pending: network.pending, onToggle: network.toggle } : undefined}
       />
 
-      <div className="flex flex-col items-center gap-4 lg:flex-row lg:items-start lg:gap-8">
+      <div className={sideBySide ? 'flex items-start gap-8' : 'flex flex-col items-center gap-4'}>
         <div ref={screenAreaRef} data-testid="ios-screen-area" style={{ width: isLandscape ? displayH : displayW, height: isLandscape ? displayW : displayH, position: 'relative', flexShrink: 0 }}>
           <div
             ref={containerRef}
@@ -754,6 +758,7 @@ export function IOSViewer({
         </div>
 
         <SimulatorInfoCard
+          sideBySide={sideBySide}
           joined={joined} fps={fps} connected={connected}
           deviceReady={deviceReady} bootError={bootError}
           installing={installing} installError={installError}

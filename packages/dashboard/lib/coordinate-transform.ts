@@ -79,3 +79,26 @@ export function iosDisplayScale(compositeLogicalH: number, maxDisplayH: number):
 export function widthFitScale(boxWidth: number, maxWidth: number): number {
   return maxWidth > 0 ? Math.min(1, maxWidth / boxWidth) : 1
 }
+
+// Real layout widths (CSS px) the width-budget math below has to account for — read off the
+// exact classes/styles the components render, not estimated:
+//  - toolbar column (SimulatorToolbar.tsx): `h-8 w-8` buttons (32) + `px-1.5` padding (2×6) + border (~2)
+//  - `gap-16` / `gap-8` (Tailwind spacing scale: 4rem / 2rem at the default 16px root)
+//  - info card (SimulatorInfoCard.tsx): its own fixed width when not stacked
+export const TOOLBAR_COLUMN_W = 48
+export const ROW_GAP_16_PX = 64
+export const ROW_GAP_8_PX = 32
+export const INFO_CARD_W = 300
+
+/**
+ * Whether the toolbar, device box and info card fit beside each other (in one row, as the
+ * desktop layout does) within `widthBudget`. `extraReservedW` covers a platform-specific extra
+ * that always sits around the device box (e.g. Android's bezel padding).
+ *
+ * `widthBudget` falsy (unmeasured) defaults to true — same "unconstrained" fallback as
+ * `widthFitScale`.
+ */
+export function fitsSideBySide(widthBudget: number | undefined, naiveBoxW: number, extraReservedW = 0): boolean {
+  if (!widthBudget) return true
+  return widthBudget >= TOOLBAR_COLUMN_W + ROW_GAP_16_PX + naiveBoxW + ROW_GAP_8_PX + INFO_CARD_W + extraReservedW
+}

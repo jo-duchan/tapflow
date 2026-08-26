@@ -14,6 +14,7 @@ import { useAudioPlayback } from '@/hooks/useAudioPlayback';
 import type { ClipboardMessageHandler } from '@/hooks/useClipboardBridge';
 import type { NetworkMessageHandler } from '@/hooks/useNetworkControl';
 import { canDecodeH264 } from '@/lib/decoders/pickDecoder';
+import { fitsSideBySide } from '@/lib/coordinate-transform';
 import { resolveInputError } from '@/lib/inputErrorNotice';
 import { newRequestId } from '@/lib/requestId';
 import { StatsOverlay } from './perf/StatsOverlay';
@@ -521,21 +522,25 @@ export function DeviceViewer({ sessionId, deviceId, buildId, resetMode, widthBud
 
   // Before chrome arrives, show a phone skeleton + status card so the layout isn't empty
   if (!iosChrome && !androidChrome) {
+    // Same row-fits check the real viewers use (#680) — the toolbar placeholder and info card
+    // stack below the skeleton phone instead of beside it when there isn't room for a full row.
+    const skeletonSideBySide = fitsSideBySide(widthBudget, 324);
     return (
-      <div className="flex flex-col items-center gap-4 lg:flex-row lg:items-start lg:justify-center lg:gap-16">
+      <div className={skeletonSideBySide ? 'flex items-start justify-center gap-16' : 'flex flex-col items-center gap-4'}>
         {/* toolbar placeholder */}
         <div className="flex flex-col items-center gap-0.5 rounded-2xl border bg-background/90 px-1.5 py-2.5 shrink-0 mt-3 opacity-40">
           {Array.from({ length: 5 }).map((_, i) => (
             <div key={i} className="h-8 w-8 rounded-md bg-muted animate-pulse" />
           ))}
         </div>
-        <div className="flex flex-col items-center gap-4 lg:flex-row lg:items-start lg:gap-8">
+        <div className={skeletonSideBySide ? 'flex items-start gap-8' : 'flex flex-col items-center gap-4'}>
           {/* phone body skeleton — width capped via max-width, not widthBudget math: it's a
               placeholder rect, not a real device render, so plain CSS shrink is enough. */}
           <div style={{ background: '#1c1c1e', borderRadius: '34px', padding: '12px', flexShrink: 0, maxWidth: '100%' }}>
             <div className="animate-pulse bg-zinc-700" style={{ width: 324, maxWidth: '100%', aspectRatio: '324 / 720', borderRadius: '22px' }} />
           </div>
           <SimulatorInfoCard
+            sideBySide={skeletonSideBySide}
             joined={joined} fps={0} connected={connected}
             deviceReady={deviceReady} bootError={bootError}
             installing={installing} installError={installError}

@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { ScanLine } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { INFO_CARD_W } from '@/lib/coordinate-transform';
 import { Separator } from '@/components/ui/separator';
 import { performanceMode } from '@/lib/decoders/pickDecoder';
 import { PerformanceModeNotice } from '@/components/perf/PerformanceModeNotice';
@@ -27,6 +28,10 @@ interface SimulatorInfoCardProps {
   /** The relay is holding this session open while its agent is gone (#426). Outranks every other
    *  status: the rest describe a device this viewer cannot currently reach. */
   agentAway?: boolean;
+  /** Whether the caller is rendering this beside the device box (desktop-style row) rather than
+   *  stacked below it (#680) — decides fixed width vs full width. Defaults to true so a caller
+   *  that hasn't measured a width budget yet keeps the desktop layout. */
+  sideBySide?: boolean;
 }
 
 function getStatusText(props: SimulatorInfoCardProps): string | null {
@@ -43,7 +48,7 @@ function getStatusText(props: SimulatorInfoCardProps): string | null {
 }
 
 export function SimulatorInfoCard(props: SimulatorInfoCardProps) {
-  const { joined, fps, keyboardActive } = props;
+  const { joined, fps, keyboardActive, sideBySide = true } = props;
   const statusText = getStatusText(props);
   // fps is intentionally low when screen is static (idle keep-alive ~10fps).
   // Use "active/idle" framing instead of red/green to avoid false alarm.
@@ -77,7 +82,10 @@ export function SimulatorInfoCard(props: SimulatorInfoCardProps) {
   };
 
   return (
-    <div className="w-full lg:w-[300px] lg:shrink-0 mt-3 rounded-xl border bg-background px-4 py-4 flex flex-col gap-3">
+    <div
+      className={cn('mt-3 rounded-xl border bg-background px-4 py-4 flex flex-col gap-3', sideBySide ? 'shrink-0' : 'w-full')}
+      style={sideBySide ? { width: INFO_CARD_W } : undefined}
+    >
       <div
         className={cn(
           'flex items-center',

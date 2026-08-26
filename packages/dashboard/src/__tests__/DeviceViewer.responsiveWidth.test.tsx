@@ -64,9 +64,8 @@ describe('DeviceViewer width budget — iOS', () => {
     const spaciousWidth = Number(screen.getByTestId('ios-screen-area').style.width.replace('px', ''))
     spacious.unmount()
 
-    // 200 < the height-only-capped natural width (~347), so this budget must be the binding
-    // constraint. The toolbar no longer competes with the device for this budget — it stacks
-    // above the device below `lg` — so no reserve needs to be subtracted here.
+    // 200 is well under fitsSideBySide's threshold, so the toolbar/card stack instead of
+    // competing with the device for this budget — the device gets (almost) the whole 200.
     renderWithChrome(IOS_CHROME, 200)
     const narrowWidth = Number(screen.getByTestId('ios-screen-area').style.width.replace('px', ''))
 
@@ -89,13 +88,47 @@ describe('DeviceViewer width budget — Android', () => {
     const spaciousWidth = Number(screen.getByTestId('android-screen-area').style.width.replace('px', ''))
     spacious.unmount()
 
-    // 200 < the long-side-capped natural width (324), so this budget must be the binding
-    // constraint — the toolbar/info-card no longer compete with the device for this budget
-    // (they stack above/beside it only at `lg`), so no reserve needs to be subtracted here.
+    // 200 is well under fitsSideBySide's threshold, so the toolbar/card stack instead of
+    // competing with the device for this budget.
     renderWithChrome(ANDROID_CHROME, 200)
     const narrowWidth = Number(screen.getByTestId('android-screen-area').style.width.replace('px', ''))
 
     expect(narrowWidth).toBeLessThan(spaciousWidth)
     expect(narrowWidth).toBeLessThanOrEqual(200)
+  })
+
+  it("reserves its always-present bezel padding, not just the screen area (CodeRabbit on #680)", () => {
+    // Naive screen-only width at this budget would round up to exactly 200 with no bezel
+    // reserved; reserving the real 24px bezel must bring it below that.
+    renderWithChrome(ANDROID_CHROME, 200)
+    const width = Number(screen.getByTestId('android-screen-area').style.width.replace('px', ''))
+    expect(width).toBeLessThan(200)
+  })
+})
+
+describe('DeviceViewer width budget — the toolbar/card row itself (#680)', () => {
+  beforeEach(() => { deliver = null })
+
+  // CodeRabbit on #680: at a 1024px viewport with a 320px session panel beside the viewer, the
+  // measured budget is ~607px — comfortably more than the device box alone needs, but not enough
+  // for the full toolbar+device+card row once everything unstacks at the same `lg` breakpoint.
+  const BORDERLINE_BUDGET = 607
+
+  it('iOS: stacks the toolbar/card row instead of overflowing at a borderline budget', () => {
+    renderWithChrome(IOS_CHROME, BORDERLINE_BUDGET)
+    const row = screen.getByTestId('ios-screen-area').parentElement!
+    expect(row.className).toMatch(/\bflex-col\b/)
+  })
+
+  it('iOS: a spacious budget keeps the row side by side', () => {
+    renderWithChrome(IOS_CHROME, 1200)
+    const row = screen.getByTestId('ios-screen-area').parentElement!
+    expect(row.className).not.toMatch(/\bflex-col\b/)
+  })
+
+  it('Android: stacks the toolbar/card row instead of overflowing at a borderline budget', () => {
+    renderWithChrome(ANDROID_CHROME, BORDERLINE_BUDGET)
+    const row = screen.getByTestId('android-screen-area').parentElement!.parentElement!
+    expect(row.className).toMatch(/\bflex-col\b/)
   })
 })
