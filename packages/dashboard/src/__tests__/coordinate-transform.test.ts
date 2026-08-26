@@ -4,6 +4,7 @@ import {
   androidToNorm,
   toPinchFingers,
   iosDisplayScale,
+  widthFitScale,
 } from '@/lib/coordinate-transform'
 
 // ── helpers ──────────────────────────────────────────────────────────────────
@@ -136,5 +137,21 @@ describe('iosDisplayScale', () => {
 
   it('compositeH = 0 → 1 (division-by-zero guard)', () => {
     expect(iosDisplayScale(0, 800)).toBe(1)
+  })
+})
+
+// ── widthFitScale ─────────────────────────────────────────────────────────────
+
+describe('widthFitScale', () => {
+  it('boxWidth <= maxWidth → scale 1 (no shrink needed)', () => {
+    expect(widthFitScale(300, 400)).toBe(1)
+  })
+
+  it('boxWidth > maxWidth → maxWidth / boxWidth', () => {
+    expect(widthFitScale(400, 200)).toBe(0.5)
+  })
+
+  it('maxWidth <= 0 (unmeasured container) → 1, no constraint', () => {
+    expect(widthFitScale(400, 0)).toBe(1)
   })
 })

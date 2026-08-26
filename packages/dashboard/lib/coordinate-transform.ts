@@ -70,3 +70,12 @@ export function toPinchFingers(f1: Point): { f0: Point; f1: Point } {
 export function iosDisplayScale(compositeLogicalH: number, maxDisplayH: number): number {
   return compositeLogicalH > 0 ? Math.min(1, maxDisplayH / compositeLogicalH) : 1
 }
+
+/**
+ * Additional shrink factor (<=1) needed so a `boxWidth`-wide element fits within `maxWidth`.
+ * `maxWidth <= 0` means the container hasn't been measured yet (or there is no width limit,
+ * e.g. a test rendering the viewer standalone) — no constraint is applied.
+ */
+export function widthFitScale(boxWidth: number, maxWidth: number): number {
+  return maxWidth > 0 ? Math.min(1, maxWidth / boxWidth) : 1
+}
