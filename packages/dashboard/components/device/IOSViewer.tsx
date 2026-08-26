@@ -15,7 +15,7 @@ import { Button } from '@/components/ui/button';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { Kbd, KbdGroup } from '@/components/ui/kbd';
 import type { ChromeData } from '@/lib/types'
-import { iosToNormScreen, toPinchFingers as makePinchFingers, iosDisplayScale } from '@/lib/coordinate-transform';
+import { iosToNormScreen, toPinchFingers as makePinchFingers, iosDisplayScale, widthFitScale } from '@/lib/coordinate-transform';
 import { useDecoderStream } from '@/hooks/useDecoderStream';
 import type { BinaryFrameHandler } from '@/lib/envelope';
 import type { MutableRefObject } from 'react';
@@ -56,6 +56,8 @@ interface IOSViewerProps {
   swKeyboardPending: boolean;
   onKbdToggle: () => void;
   perfHookRef?: MutableRefObject<PerfHook>;
+  /** Available width (CSS px) for the whole viewer (toolbar + device). `0`/absent = unconstrained. */
+  widthBudget?: number;
 }
 
 export function IOSViewer({
@@ -64,7 +66,7 @@ export function IOSViewer({
   launching, chrome,
   binaryFrameHandlerRef, clipboardHandlerRef, clipboardSupported, networkHandlerRef, networkSupported, onRecordingUploaded,
   swKeyboardVisible, swKeyboardPending, onKbdToggle,
-  perfHookRef,
+  perfHookRef, widthBudget,
 }: IOSViewerProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -534,7 +536,14 @@ export function IOSViewer({
   const compositeLogicalW = chrome.compositeWidth / 2;
   const compositeLogicalH = chrome.compositeHeight / 2;
   const MAX_DISPLAY_H = 750;
-  const displayScale = iosDisplayScale(compositeLogicalH, MAX_DISPLAY_H);
+  const heightScale = iosDisplayScale(compositeLogicalH, MAX_DISPLAY_H);
+  // Landscape swaps which axis is "width" on screen (screenAreaRef below sizes itself
+  // `isLandscape ? displayH : displayW`) — measure the box against the budget on that same axis.
+  const naiveBoxW = isLandscape
+    ? Math.round(compositeLogicalH * heightScale)
+    : Math.round(compositeLogicalW * heightScale);
+  const widthScale = widthBudget ? widthFitScale(naiveBoxW, widthBudget) : 1;
+  const displayScale = heightScale * widthScale;
   const displayW = Math.round(compositeLogicalW * displayScale);
   const displayH = Math.round(compositeLogicalH * displayScale);
   const screenPctLeft = (chrome.screenRect.x / chrome.compositeWidth) * 100;
@@ -593,7 +602,7 @@ export function IOSViewer({
   ) : null;
 
   return (
-    <div className="flex items-start justify-center gap-16">
+    <div className="flex flex-col items-center gap-4 lg:flex-row lg:items-start lg:justify-center lg:gap-16">
       <canvas ref={recordCanvasRef} style={{ display: 'none' }} />
 
       <DeepLinkDialog open={deepLinkOpen} onOpenChange={setDeepLinkOpen} openUrl={openUrl} />
@@ -610,8 +619,8 @@ export function IOSViewer({
         network={networkSupported ? { position: network.position, steerable: network.steerable, reason: network.reason, pending: network.pending, onToggle: network.toggle } : undefined}
       />
 
-      <div className="flex items-start gap-8">
-        <div ref={screenAreaRef} style={{ width: isLandscape ? displayH : displayW, height: isLandscape ? displayW : displayH, position: 'relative', flexShrink: 0 }}>
+      <div className="flex flex-col items-center gap-4 lg:flex-row lg:items-start lg:gap-8">
+        <div ref={screenAreaRef} data-testid="ios-screen-area" style={{ width: isLandscape ? displayH : displayW, height: isLandscape ? displayW : displayH, position: 'relative', flexShrink: 0 }}>
           <div
             ref={containerRef}
             className={`relative ${hoveredButton ? 'cursor-pointer' : 'cursor-default'}`}

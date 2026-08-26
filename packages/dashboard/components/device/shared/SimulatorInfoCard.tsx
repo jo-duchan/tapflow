@@ -77,7 +77,7 @@ export function SimulatorInfoCard(props: SimulatorInfoCardProps) {
   };
 
   return (
-    <div className="w-[300px] shrink-0 mt-3 rounded-xl border bg-background px-4 py-4 flex flex-col gap-3">
+    <div className="w-full lg:w-[300px] lg:shrink-0 mt-3 rounded-xl border bg-background px-4 py-4 flex flex-col gap-3">
       <div
         className={cn(
           'flex items-center',

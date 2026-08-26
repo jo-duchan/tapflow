@@ -17,7 +17,7 @@ import { Button } from '@/components/ui/button';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import type { AndroidButton } from '@/lib/types'
 import type { BinaryFrameHandler } from '@/lib/envelope'
-import { androidToNorm as toNormPure, toPinchFingers as makePinchFingers } from '@/lib/coordinate-transform';
+import { androidToNorm as toNormPure, toPinchFingers as makePinchFingers, widthFitScale } from '@/lib/coordinate-transform';
 import type { MutableRefObject } from 'react';
 import type { PerfHook } from '@/components/perf/types';
 import { useClipboardBridge, isBridgedChord, type ClipboardMessageHandler } from '@/hooks/useClipboardBridge';
@@ -58,6 +58,8 @@ interface AndroidViewerProps {
    *  the framebuffer as black; we clip them so they don't show inside the screen bezel. 0 = square. */
   cornerRadius?: number;
   perfHookRef?: MutableRefObject<PerfHook>;
+  /** Available width (CSS px) for the whole viewer (toolbar + device). `0`/absent = unconstrained. */
+  widthBudget?: number;
 }
 
 export function AndroidViewer({
@@ -66,7 +68,7 @@ export function AndroidViewer({
   launching, androidButtons,
   binaryFrameHandlerRef, clipboardHandlerRef, clipboardSupported, networkHandlerRef, networkSupported, onRecordingUploaded,
   screenWidth, screenHeight, cornerRadius,
-  perfHookRef,
+  perfHookRef, widthBudget,
 }: AndroidViewerProps) {
   const surfaceHostRef = useRef<HTMLDivElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -431,11 +433,11 @@ export function AndroidViewer({
   // ── Layout ────────────────────────────────────────────────────────────────
   // Scale by longest side so portrait and landscape stay the same physical size on screen
   const effectiveSize = videoSize ?? (screenWidth && screenHeight ? { width: screenWidth, height: screenHeight } : null);
-  const androidScale = effectiveSize
+  const longSideScale = effectiveSize
     ? Math.min(1, MAX_ANDROID_LONG / Math.max(effectiveSize.width, effectiveSize.height))
     : 0.3;
-  const androidDisplayW = effectiveSize ? Math.round(effectiveSize.width * androidScale) : 324;
-  const androidDisplayH = effectiveSize ? Math.round(effectiveSize.height * androidScale) : 720;
+  const naiveW = effectiveSize ? Math.round(effectiveSize.width * longSideScale) : 324;
+  const naiveH = effectiveSize ? Math.round(effectiveSize.height * longSideScale) : 720;
 
   // CSS rotation: applied when the user requested landscape but the video content is still
   // portrait (portrait-locked app). Matches native Android emulator — the shell rotates even
@@ -443,6 +445,11 @@ export function AndroidViewer({
   // display naturally (any landscape direction stays upright — scrcpy mirrors the real display).
   const isLandscapeContent = effectiveSize ? effectiveSize.width > effectiveSize.height : false;
   const needsCSSRotation = userWantsLandscape && !isLandscapeContent;
+  // Budget applies to the box as it actually sits on screen — after the rotation swap above.
+  const naiveContainerW = needsCSSRotation ? naiveH : naiveW;
+  const widthScale = widthBudget ? widthFitScale(naiveContainerW, widthBudget) : 1;
+  const androidDisplayW = Math.round(naiveW * widthScale);
+  const androidDisplayH = Math.round(naiveH * widthScale);
   // react-hooks/immutability false positive: needsCSSRotationRef is only *read*, inside callbacks
   // (lines 204 and 293), is never passed to a hook or listed in a deps array, and is not exposed via
   // forwardRef — so writing it from an effect is the standard pattern the rule exists to allow. The
@@ -513,7 +520,7 @@ export function AndroidViewer({
   ) : null;
 
   return (
-    <div className="flex items-start justify-center gap-16">
+    <div className="flex flex-col items-center gap-4 lg:flex-row lg:items-start lg:justify-center lg:gap-16">
       <canvas ref={recordCanvasRef} style={{ display: 'none' }} />
       <DeepLinkDialog open={deepLinkOpen} onOpenChange={setDeepLinkOpen} openUrl={openUrl} />
 
@@ -529,11 +536,12 @@ export function AndroidViewer({
         network={networkSupported ? { position: network.position, steerable: network.steerable, reason: network.reason, pending: network.pending, onToggle: network.toggle } : undefined}
       />
 
-      <div className="flex items-start gap-8">
+      <div className="flex flex-col items-center gap-4 lg:flex-row lg:items-start lg:gap-8">
         {/* phone body bezel — outer radius stays concentric with the screen (screenRadius + 12px padding) */}
         <div style={{ background: '#1c1c1e', borderRadius: `${screenRadius + 12}px`, padding: '12px', flexShrink: 0, boxShadow: '0 8px 32px rgba(0,0,0,0.45), inset 0 1px 0 rgba(255,255,255,0.06)' }}>
         <div
           ref={containerRef}
+          data-testid="android-screen-area"
           className="relative"
           style={{ width: containerW, height: containerH, backgroundColor: '#010101', borderRadius: `${screenRadius}px`, overflow: 'hidden' }}
         >

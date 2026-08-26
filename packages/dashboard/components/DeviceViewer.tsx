@@ -25,6 +25,9 @@ interface Props {
   deviceId: string;
   buildId?: number;
   resetMode?: 'app-only' | 'full-erase';
+  /** Available width (CSS px) for the whole viewer, measured by the page around it. `0`/absent
+   *  means unmeasured — the viewer falls back to its unconstrained desktop sizing. */
+  widthBudget?: number;
   onRecordingUploaded?: () => void;
   /** Why this viewer stopped. The viewer cannot recover from any of these on its own — it holds a
    *  socket it can make no further progress on — so it reports upward and the parent decides where to go.
@@ -35,7 +38,7 @@ interface Props {
   onSessionEnded?: (reason: SessionTerminatedReason | 'busy-elsewhere' | 'mac-overloaded') => void;
 }
 
-export function DeviceViewer({ sessionId, deviceId, buildId, resetMode, onRecordingUploaded, onSessionEnded }: Props) {
+export function DeviceViewer({ sessionId, deviceId, buildId, resetMode, widthBudget, onRecordingUploaded, onSessionEnded }: Props) {
   const sendRef = useRef<(msg: BrowserToRelay) => void>(() => {});
   // One reset per mount; see the boot handler below.
   const resetSentRef = useRef(false);
@@ -506,7 +509,7 @@ export function DeviceViewer({ sessionId, deviceId, buildId, resetMode, onRecord
   const commonProps = {
     sessionId, buildId, send, openUrl, launchApp, connected, joined,
     deviceReady, installing, installed, installError, bootError,
-    launching,
+    launching, widthBudget,
     binaryFrameHandlerRef,
     clipboardHandlerRef,
     clipboardSupported: agentCapabilities.includes('clipboard'),
@@ -519,17 +522,18 @@ export function DeviceViewer({ sessionId, deviceId, buildId, resetMode, onRecord
   // Before chrome arrives, show a phone skeleton + status card so the layout isn't empty
   if (!iosChrome && !androidChrome) {
     return (
-      <div className="flex items-start justify-center gap-16">
+      <div className="flex flex-col items-center gap-4 lg:flex-row lg:items-start lg:justify-center lg:gap-16">
         {/* toolbar placeholder */}
         <div className="flex flex-col items-center gap-0.5 rounded-2xl border bg-background/90 px-1.5 py-2.5 shrink-0 mt-3 opacity-40">
           {Array.from({ length: 5 }).map((_, i) => (
             <div key={i} className="h-8 w-8 rounded-md bg-muted animate-pulse" />
           ))}
         </div>
-        <div className="flex items-start gap-8">
-          {/* phone body skeleton */}
-          <div style={{ background: '#1c1c1e', borderRadius: '34px', padding: '12px', flexShrink: 0 }}>
-            <div className="animate-pulse bg-zinc-700" style={{ width: 324, height: 720, borderRadius: '22px' }} />
+        <div className="flex flex-col items-center gap-4 lg:flex-row lg:items-start lg:gap-8">
+          {/* phone body skeleton — width capped via max-width, not widthBudget math: it's a
+              placeholder rect, not a real device render, so plain CSS shrink is enough. */}
+          <div style={{ background: '#1c1c1e', borderRadius: '34px', padding: '12px', flexShrink: 0, maxWidth: '100%' }}>
+            <div className="animate-pulse bg-zinc-700" style={{ width: 324, maxWidth: '100%', aspectRatio: '324 / 720', borderRadius: '22px' }} />
           </div>
           <SimulatorInfoCard
             joined={joined} fps={0} connected={connected}
