@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { toast } from 'sonner';
 import type { SessionTerminatedReason } from '@tapflowio/protocol';
 import { useSearchParams, useNavigate } from 'react-router-dom';
@@ -79,6 +79,20 @@ export function QASession() {
     connected, agentGroups,
     startDevice, resetDevice, handleBack, handleBackToMacs, handleSessionEnded,
   } = useAgentSession(os);
+
+  // #679 — how much width the viewer actually has on screen (panel/sidebar included), so
+  // IOSViewer/AndroidViewer can shrink below their height-only cap on narrow viewports. `0` until
+  // measured, which both sides treat as "no constraint yet" (see `widthFitScale`). Depends on
+  // `activeSessionId` because the wrapper div only mounts once a session is active.
+  const viewerWrapperRef = useRef<HTMLDivElement>(null);
+  const [viewerWidthBudget, setViewerWidthBudget] = useState(0);
+  useLayoutEffect(() => {
+    const el = viewerWrapperRef.current;
+    if (!el) return;
+    const observer = new ResizeObserver(([entry]) => setViewerWidthBudget(entry.contentRect.width));
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [activeSessionId]);
 
   const selectedSession = agentGroups.find((s) => s.agentName === selectedAgent);
   const {
@@ -175,17 +189,18 @@ export function QASession() {
   }, [build, selectedAgent, activeSessionId, deviceLabel, navigate, handleBack, handleBackToMacs, setBreadcrumb]);
 
   return (
-    <div className="flex h-full min-h-0 gap-6 p-6">
+    <div data-testid="qa-session-root" className="flex flex-col lg:flex-row h-full min-h-0 gap-6 p-6">
       <div className="flex flex-col gap-3 flex-1 min-w-0 min-h-0">
         {/* -ml-1 pl-1: 좌측 ring 클리핑 방지 / -mr-4 pr-4: 스크롤바 마진 영역으로 분리 */}
         <div className="flex-1 min-h-0 overflow-auto -ml-1 pl-1 -mr-4 pr-4">
           {activeSessionId ? (
-            <div className="min-h-full flex items-center justify-center py-6 px-8 min-w-max">
+            <div ref={viewerWrapperRef} className="min-h-full flex items-center justify-center py-6 px-8">
               <DeviceViewer
                 sessionId={activeSessionId}
                 deviceId={deviceId}
                 buildId={build?.id}
                 resetMode={appliedResetMode}
+                widthBudget={viewerWidthBudget}
                 onRecordingUploaded={handleRecordingUploaded}
                 onSessionEnded={onSessionEnded}
               />
@@ -387,8 +402,8 @@ export function QASession() {
 
       {buildId && (
         <>
-          <Separator orientation="vertical" className="h-auto" />
-          <div className="w-80 shrink-0 h-full">
+          <Separator orientation="vertical" className="w-full h-px lg:h-auto lg:w-px" />
+          <div className="w-full h-80 lg:w-80 lg:h-full shrink-0">
             <SessionPanel
               buildId={Number(buildId)}
               recordingsRefreshKey={recordingsKey}
