@@ -2263,28 +2263,49 @@ export class RelayServer {
     const headers: Record<string, string> = { 'Content-Type': contentType }
 
     // Content-hashed build assets never change → cache them forever.
+    // HTML entry points must revalidate on every load so updates are picked up immediately.
     if (urlPath.startsWith('/assets/')) {
       headers['Cache-Control'] = 'public, max-age=31536000, immutable'
+    } else if (filePath.endsWith('index.html')) {
+      headers['Cache-Control'] = 'no-cache'
     }
 
-    // Serve the build-time .br sibling when accepted (precompressed → no runtime CPU on the stream path).
+    // Serve precompressed siblings (.br or .gz) when accepted (precompressed → no runtime CPU on the stream path).
     const acceptHeader = req.headers['accept-encoding']
     const accept = Array.isArray(acceptHeader) ? acceptHeader.join(',') : acceptHeader ?? ''
-    const brAccepted = accept.split(',').some((token) => {
-      const [name, ...params] = token.trim().split(';')
-      const coding = name.trim().toLowerCase()
-      if (coding !== 'br' && coding !== '*') return false
-      const qParam = params.map((p) => p.trim()).find((p) => p.startsWith('q='))
-      const q = qParam ? Number(qParam.slice(2)) : 1
-      return !Number.isNaN(q) && q > 0
-    })
-    let servePath = filePath
+
+    const parseQuality = (codingName: string): number => {
+      let quality = -1
+      for (const token of accept.split(',')) {
+        const [name, ...params] = token.trim().split(';')
+        const coding = name.trim().toLowerCase()
+        if (coding === codingName || coding === '*') {
+          const qParam = params.map((p) => p.trim()).find((p) => p.startsWith('q='))
+          const q = qParam ? Number(qParam.slice(2)) : 1
+          if (!Number.isNaN(q) && q > quality) {
+            quality = q
+          }
+        }
+      }
+      return quality
+    }
+
+    const brQ = parseQuality('br')
+    const gzQ = Math.max(parseQuality('gzip'), parseQuality('x-gzip'))
+
     const hasBr = fs.existsSync(filePath + '.br')
+    const hasGz = fs.existsSync(filePath + '.gz')
+
     // Vary whenever a compressed variant exists, even if raw is served, so caches don't cross-serve.
-    if (hasBr) headers['Vary'] = 'Accept-Encoding'
-    if (brAccepted && hasBr) {
+    if (hasBr || hasGz) headers['Vary'] = 'Accept-Encoding'
+
+    let servePath = filePath
+    if (brQ > 0 && hasBr && (gzQ <= 0 || !hasGz || brQ >= gzQ)) {
       servePath = filePath + '.br'
       headers['Content-Encoding'] = 'br'
+    } else if (gzQ > 0 && hasGz) {
+      servePath = filePath + '.gz'
+      headers['Content-Encoding'] = 'gzip'
     }
 
     res.writeHead(200, headers)
