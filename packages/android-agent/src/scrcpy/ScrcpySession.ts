@@ -113,6 +113,15 @@ export class ScrcpySession {
     // Without a handler, an unhandled 'error' event (e.g. spawn() failing with ENOENT/EACCES,
     // or EPERM from kill()) throws and crashes the whole agent — taking down every device it manages.
     serverProc.on('error', (e) => logger.error(`server process: ${e.message}`))
+    // Diagnosis only: the video socket closing already drives the restart, and a second trigger
+    // here would race it into a double restart. `stop()` and the failure path below drop the
+    // reference before the exit arrives, which is how a kill we asked for is told apart from
+    // a server that died on its own.
+    serverProc.on('exit', (code, signal) => {
+      const cause = signal ? `signal ${signal}` : `code ${code}`
+      if (this.serverProc === serverProc) logger.warn(`server process exited (${cause})`)
+      else logger.debug(`server process exited after stop (${cause})`)
+    })
     serverProc.unref()
 
     try {

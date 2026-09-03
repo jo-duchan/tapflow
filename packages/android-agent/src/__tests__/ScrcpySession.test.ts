@@ -103,4 +103,58 @@ describe('ScrcpySession', () => {
     await vi.advanceTimersByTimeAsync(1500)
     await startPromise
   })
+
+  describe('server process exit', () => {
+    // A server that dies on its own is a restart with no stated cause in the log (#481). The
+    // exit handler records it; `stop()` is the one exit that must not be reported as a problem.
+    async function started() {
+      vi.useFakeTimers()
+      const proc = makeFakeProc()
+      vi.mocked(spawn).mockReturnValue(proc as never)
+      vi.mocked(execFile)
+        .mockImplementationOnce(cbSuccess as never)                            // push: success
+        .mockImplementationOnce(cbFail(new Error('forward failed')) as never) // forward: fail
+      const { ScrcpySession } = await import('../scrcpy/ScrcpySession.js')
+      const session = new ScrcpySession()
+      const startPromise = session.start('emulator-5554').catch(() => {})
+      await vi.advanceTimersByTimeAsync(0)
+      return { proc, session, startPromise }
+    }
+
+    it('records the exit code of a server that died on its own', async () => {
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+      const { proc, startPromise } = await started()
+
+      proc.emit('exit', 1, null)
+      expect(warn).toHaveBeenCalledWith(expect.stringContaining('server process exited (code 1)'))
+
+      await vi.advanceTimersByTimeAsync(1500)
+      await startPromise
+    })
+
+    it('records the signal when there is no exit code', async () => {
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+      const { proc, startPromise } = await started()
+
+      proc.emit('exit', null, 'SIGKILL')
+      expect(warn).toHaveBeenCalledWith(expect.stringContaining('server process exited (signal SIGKILL)'))
+
+      await vi.advanceTimersByTimeAsync(1500)
+      await startPromise
+    })
+
+    it('does not report an exit the session asked for', async () => {
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+      const { proc, startPromise } = await started()
+      await vi.advanceTimersByTimeAsync(1500)
+      await startPromise
+      warn.mockClear()
+
+      // The failed start() killed the server and dropped the reference, the same way `stop()`
+      // does, so the exit that follows is the one we asked for.
+      expect(proc.kill).toHaveBeenCalled()
+      proc.emit('exit', null, 'SIGTERM')
+      expect(warn).not.toHaveBeenCalled()
+    })
+  })
 })
