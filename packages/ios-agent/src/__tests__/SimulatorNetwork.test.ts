@@ -1,4 +1,4 @@
-import { appendFileSync, chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'fs'
+import { appendFileSync, chmodSync, chownSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'fs'
 import { tmpdir } from 'os'
 import { join } from 'path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -892,12 +892,14 @@ describe('SimulatorNetwork', () => {
       expect(statSync(open).mode & 0o002, 'the directory is not world-writable').not.toBe(0)
       const path = join(open, 'state.json')
       writeFileSync(path, JSON.stringify({ at: Math.floor(Date.now() / 1000), pid: 1, pulseSeconds: 1, rule }))
+      // Under root the file this test wrote would be root-owned, which is the one thing the class
+      // trusts here — so it is handed to `nobody`, the way an attacker's file would be.
+      if (process.getuid?.() === 0) chownSync(path, 65534, 65534)
+      expect(statSync(path).uid, 'the forged file is owned by root').not.toBe(0)
       return path
     }
-    /** A file this user wrote is root-owned when the tests run as root, so the case cannot be told. */
-    const unlessRoot = process.getuid?.() === 0 ? it.skip : it
 
-    unlessRoot('refuses a state file that anyone could have written', async () => {
+    it('refuses a state file that anyone could have written', async () => {
       // The protected file is absent and the XPC listener is gone: the exact state in which a forged
       // `/tmp` file used to confirm a rule write and let layers 2 and 3 go on (#734).
       const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
@@ -931,7 +933,7 @@ describe('SimulatorNetwork', () => {
       expect(existsSync(conditionPath(UDID)), 'layer 2 was withheld over a file the provider wrote').toBe(true)
     })
 
-    unlessRoot('does not let a forged file stand in for a provider that stopped', async () => {
+    it('does not let a forged file stand in for a provider that stopped', async () => {
       // The liveness watcher reads the same files, so the same forgery would keep a device looking
       // enforced after the provider removed its file — the other half of #734's acceptance.
       armed()
