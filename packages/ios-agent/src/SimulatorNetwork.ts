@@ -987,25 +987,31 @@ export class SimulatorNetwork {
    * is flowing, the sign-off failure the feature exists to prevent (#734). Reachable only while the
    * protected file is absent, which is the state of a Mac whose filter is stopped or never installed.
    *
-   * **The rule is about the directory, not about which path this is.** A file in a directory anyone
-   * can write to is believed only when root owns it and nobody else can change it. The protected
-   * path is untouched, because its directory is 0755 — and so is a test's private temp directory,
-   * which is what lets a test keep injecting a file it wrote itself. Judged through the descriptor
-   * that is then read, so the file that was checked is the file that is believed, and without
-   * following a symlink, which the provider never leaves. Liveness reads through here as well, so a
-   * forged file cannot delay an `enforcement-lost` report either.
+   * **The rule is about the directory, not about which path this is.** A file in a directory that
+   * anyone but its owner can write to is believed only when root owns it and nobody else can change
+   * it. The protected path is untouched, because its directory is 0755 — and so is a test's private
+   * temp directory, 0700 from `mkdtemp`, which is what lets a test keep injecting a file it wrote
+   * itself. Judged through the descriptor that is then read, so the file that was checked is the
+   * file that is believed, and without following a symlink, which the provider never leaves.
+   * Liveness reads through here as well, so a forged file cannot delay an `enforcement-lost` report
+   * either.
+   *
+   * `O_NONBLOCK` is load-bearing: opening a FIFO read-only blocks until a writer arrives, and the
+   * `isFile()` check that would refuse it runs after the open — so a `mkfifo` at the fallback path
+   * held the agent's whole thread, streaming and relay connection included. A regular file is
+   * unaffected by the flag; the FIFO open returns at once and is refused where it was meant to be.
    */
   private readIfProviderWrote(path: string): string | undefined {
     let fd: number
     try {
-      fd = openSync(path, constants.O_RDONLY | constants.O_NOFOLLOW)
+      fd = openSync(path, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK)
     } catch {
       return undefined
     }
     try {
       const file = fstatSync(fd)
       if (!file.isFile()) return undefined
-      if ((statSync(dirname(path)).mode & 0o002) !== 0 && (file.uid !== 0 || (file.mode & 0o022) !== 0)) {
+      if ((statSync(dirname(path)).mode & 0o022) !== 0 && (file.uid !== 0 || (file.mode & 0o022) !== 0)) {
         // Once per path: this is polled ten times a second while a confirmation waits.
         if (!this.refused.has(path)) {
           this.refused.add(path)

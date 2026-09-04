@@ -1,3 +1,4 @@
+import { execFileSync } from 'child_process'
 import { appendFileSync, chmodSync, chownSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'fs'
 import { tmpdir } from 'os'
 import { join } from 'path'
@@ -895,7 +896,7 @@ describe('SimulatorNetwork', () => {
       // Under root the file this test wrote would be root-owned, which is the one thing the class
       // trusts here — so it is handed to `nobody`, the way an attacker's file would be.
       if (process.getuid?.() === 0) chownSync(path, 65534, 65534)
-      expect(statSync(path).uid, 'the forged file is owned by root').not.toBe(0)
+      expect(statSync(path).uid, 'the forged file is root-owned, so it would be trusted').not.toBe(0)
       return path
     }
 
@@ -917,6 +918,28 @@ describe('SimulatorNetwork', () => {
       const said = warn.mock.calls.filter((c) => String(c[0]).includes(forged))
       expect(said, 'the refused file was not named, or was named on every poll').toHaveLength(1)
       warn.mockRestore()
+    })
+
+    it('returns from a FIFO at the fallback path rather than blocking on it', async () => {
+      // Opening a FIFO read-only waits for a writer, and the check that refuses a non-regular file
+      // runs after the open. Without `O_NONBLOCK` this held the agent's whole thread — no timer can
+      // fire, so the race below never resolved and the run had to be killed by hand.
+      armed()
+      writeFileSync(join(dir, 'NO_CONFIRM'), '')
+      writeFileSync(join(dir, 'NO_STATE'), '')
+      const open = join(dir, 'openfifo')
+      mkdirSync(open)
+      chmodSync(open, 0o1777)
+      const fifo = join(open, 'state.json')
+      execFileSync('mkfifo', [fifo])
+      const net = make(undefined, 300, [join(dir, 'state.json'), fifo])
+
+      const raced = await Promise.race([
+        net.setOffline(UDID, true).then(() => 'returned'),
+        new Promise((r) => setTimeout(() => r('hung'), 4000)),
+      ])
+      expect(raced, 'openSync on the FIFO blocked the event loop').toBe('returned')
+      nothingApplied()
     })
 
     it('believes the same file from a directory only its owner can write', async () => {
