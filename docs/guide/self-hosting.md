@@ -13,6 +13,43 @@ The relay is a lightweight Node.js server. It only routes WebSocket traffic and 
 The agent streams video frames to the relay continuously, so the two must share a LAN. Different floors or VLANs in one building are fine — internal routing keeps latency low — but placing an agent across the internet raises RTT and drops frames. **Wired Ethernet is recommended**; Wi-Fi works but can stutter on a Mac (AWDL), so see [Stream lag or stuttering](/guide/troubleshooting#stream-lag) if playback hitches.
 :::
 
+### Docker Compose (LAN server)
+
+You can run the relay via Docker on an always-on LAN box. This provides a clean deployment using the official image, freeing you from installing Node.js globally.
+
+```sh
+docker pull tapflow/tapflow
+```
+
+Create a `docker-compose.yml`:
+
+```yaml
+services:
+  relay:
+    image: tapflow/tapflow:edge
+    ports:
+      - "4000:4000"
+    volumes:
+      - ./data:/app/.tapflow/data
+    restart: unless-stopped
+```
+
+Start the container:
+
+```sh
+docker-compose up -d
+```
+
+::: danger A volume is mandatory
+Notice the `./data:/app/.tapflow/data` volume above. It is strictly required. If omitted, the relay generates a new `JWT_SECRET` inside the container every time it restarts, which will instantly log out every user and break all agent connections.
+:::
+
+**Topology:** The container runs the relay *only*. Agents (which drive real simulators) must still run on Macs on your LAN, connecting outbound to this Docker server using an `agent`-scope token (`tapflow agent start --relay ws://<docker-box-ip>:4000 --token ...`).
+
+::: danger Do not deploy the relay directly to a cloud service
+Deploying the Docker container to fly.io or similar services puts the agent→relay path over the internet. RTT then exceeds the 30fps threshold (33ms/frame), causing persistent frame drops with no way to recover. tapflow does not support this configuration.
+:::
+
 ### Local (single Mac)
 
 Run the relay and agent on the same Mac at once.

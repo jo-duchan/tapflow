@@ -13,6 +13,43 @@
 에이전트는 릴레이로 영상 프레임을 지속적으로 전송하므로 둘은 같은 LAN에 있어야 합니다. 같은 사무실 건물이라면 층이 다르거나 VLAN이 분리돼 있어도 내부 라우팅으로 지연이 충분히 낮습니다. 다만 에이전트를 인터넷 너머 다른 네트워크에 두면 RTT가 높아져 프레임이 드롭됩니다. **유선 이더넷을 권장합니다.** Wi-Fi도 동작하지만 Mac에서는 AWDL 때문에 끊길 수 있습니다. 끊김이 보이면 [스트림 지연·끊김](/ko/guide/troubleshooting#stream-lag)을 참고하세요.
 :::
 
+### Docker Compose (LAN 서버)
+
+상시 켜져 있는 LAN 서버에서 Docker로 릴레이를 실행할 수 있습니다. 공식 이미지를 사용하여 깔끔하게 배포할 수 있으며, Node.js를 전역으로 설치할 필요가 없습니다.
+
+```sh
+docker pull tapflow/tapflow
+```
+
+`docker-compose.yml`을 만듭니다:
+
+```yaml
+services:
+  relay:
+    image: tapflow/tapflow:edge
+    ports:
+      - "4000:4000"
+    volumes:
+      - ./data:/app/.tapflow/data
+    restart: unless-stopped
+```
+
+컨테이너를 시작합니다:
+
+```sh
+docker-compose up -d
+```
+
+::: danger 볼륨(volume)은 필수입니다
+위의 `./data:/app/.tapflow/data` 볼륨 마운트는 반드시 필요합니다. 이를 누락하면 컨테이너가 재시작될 때마다 새로운 `JWT_SECRET`이 컨테이너 내부에서 생성되어 모든 사용자가 즉시 로그아웃되고 에이전트 연결이 끊어집니다.
+:::
+
+**토폴로지:** 이 컨테이너는 릴레이만 실행합니다. 실제 시뮬레이터를 구동하는 에이전트는 같은 LAN의 Mac에서 실행되어야 하며, `agent` 스코프 토큰을 사용하여 이 Docker 서버로 아웃바운드 연결을 해야 합니다(`tapflow agent start --relay ws://<docker-box-ip>:4000 --token ...`).
+
+::: danger 릴레이를 클라우드에 직접 배포하지 마세요
+fly.io 등 클라우드 서비스에 Docker 컨테이너를 올리면 에이전트→릴레이 구간이 인터넷을 타게 됩니다. 이 경우 RTT가 30fps 기준(33ms/frame)을 초과해 프레임 드롭이 발생하며 스트리밍 품질을 보장할 수 없습니다. tapflow는 이 구성을 지원하지 않습니다.
+:::
+
 ### 로컬 운영 (Mac 한 대)
 
 릴레이와 에이전트를 같은 Mac에서 한 번에 실행합니다.

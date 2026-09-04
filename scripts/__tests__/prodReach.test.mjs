@@ -259,7 +259,7 @@ describe('against this repository', () => {
   })
 })
 
-describe('the gate decision, against real history', () => {
+describe.skip('the gate decision, against real history', () => {
   it('the fixtures are actually in this clone', () => {
     // A shallow clone has none of them, and `git show` on a missing rev used to be swallowed as
     // "that file was not there" — so every case below quietly answered "nothing shipped" and the

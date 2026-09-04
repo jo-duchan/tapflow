@@ -69,6 +69,15 @@ Check the labels before you start: `requires: macOS` means the change runs again
 - Releases are driven by [changesets](https://github.com/changesets/changesets). A tag push triggers GitHub Actions → npm publish + GitHub Release. Merging to main does not auto-publish.
 - Never publish with raw `npm publish` — it does not rewrite `workspace:*` dependencies between packages; the changesets → pnpm publish path does.
 
+### Publishing the Docker image from a fork
+
+If you are publishing a fork of tapflow to a custom Docker registry namespace, you need two repository secrets set up in GitHub:
+
+- `DOCKERHUB_USERNAME` — your Docker Hub username.
+- `DOCKERHUB_TOKEN` — your Docker Hub personal access token (Read & Write permissions).
+
+The `.github/workflows/docker-publish.yml` workflow will automatically detect these secrets and publish multi-platform images (`linux/amd64`, `linux/arm64`) to `your-username/tapflow` on every push to `main` and on version tags. Without these secrets, the CI will only build and smoke-test the image for validation, without attempting to publish it.
+
 ### Versioning (Semver)
 
 Versions follow `MAJOR.MINOR.PATCH`. Determine the bump from the commits since the last release:
