@@ -143,12 +143,20 @@ jobs:
       # `xcodegen generate` without `--spec` resets both `Info.plist` `CFBundleVersion`s to `1`,
       # which would be a version regression in a working tree. Harmless here because the checkout is
       # ephemeral and nothing is committed from it — but that is the reason this step is last.
+      #
+      # **`Release`, because that is what `build.sh` ships.** The generated project defaults to
+      # `Debug`, and a step whose whole point is "compile what goes out" must not compile something
+      # else. It changes nothing measurable today — there is no `#if DEBUG` anywhere under
+      # `Extension/`, `Host/` or `Shared/` — which is exactly why it is worth pinning now rather than
+      # after the first one arrives. Release is also whole-module, so it is the configuration that
+      # can raise a diagnostic `Debug` does not. Measured at 6s.
       - name: Compile the shipping targets
         working-directory: packages/ios-agent/ios-netfilter
         run: |
           set -euo pipefail
           xcodegen generate >/dev/null
           xcodebuild build -project TapflowNetFilter.xcodeproj -scheme TapflowNetFilter \
+            -configuration Release \
             -destination 'platform=macOS,arch=arm64' CODE_SIGNING_ALLOWED=NO | tail -5
 
   # `protect-main` requires the status check named `ci`. A matrix reports per-leg contexts
