@@ -89,6 +89,29 @@ final class ProcessIdentityTests: XCTestCase {
         XCTAssertNil(cache.lookup(other))
     }
 
+    /// **The lock, which every other test here is blind to.** `UDIDCache` is the only shared mutable
+    /// state in the pure half, and `attribute()` reaches it from `handleNewFlow` — which
+    /// `Provider.swift` says outright can be "mid-flight on another thread". Deleting
+    /// `lock.lock(); defer { lock.unlock() }` from both methods leaves every other assertion in this
+    /// file passing, because nothing else here starts a second thread.
+    ///
+    /// **The failure is a crash, not a wrong answer**, so this asserts the entries survive rather
+    /// than trying to catch a torn read: a bare Swift `Dictionary` mutated from two threads corrupts
+    /// its own storage. Measured on a copy with the lock removed — `exit=139` (SIGSEGV) on 5 runs of
+    /// 5, against `exit=0` on 5 of 5 with it. `run-tests.sh` plants that mutation.
+    func testConcurrentStoresAndLookupsKeepEveryEntry() {
+        let cache = UDIDCache()
+        let count = 2_000
+        let ids = (0..<count).map { ProcIdentity(pid: pid_t($0), startSec: 1_788_540_210, startUsec: 0) }
+        DispatchQueue.concurrentPerform(iterations: count) { i in
+            cache.store(ids[i], "UDID-\(i)")
+            _ = cache.lookup(ids[(i + 1) % count])
+        }
+        for (i, id) in ids.enumerated() {
+            XCTAssertEqual(cache.lookup(id), "UDID-\(i)", "entry \(i) was lost")
+        }
+    }
+
     /// Two simulators running at once, which is the case the cache exists for. Recorded because a
     /// cache that held one entry would pass every test above.
     func testTwoBootsAreHeldAtOnce() {

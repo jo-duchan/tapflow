@@ -139,6 +139,11 @@ mutate "prune: keeps everything" 's/counts.filter { rule.contains($0.key) }/coun
 mutate "prune: empty rule keeps" 's/counts.filter { rule.contains($0.key) }/rule.isEmpty ? counts : counts.filter { rule.contains($0.key) }/' || fails=1
 mutate "pulse: rates swapped"    's/enforcing ? 1 : 5/enforcing ? 5 : 1/'                      || fails=1
 mutate "pulse: always fast"      's/enforcing ? 1 : 5/1/'                                      || fails=1
+# **The one mutation here that kills by crashing rather than by asserting.** A bare Swift `Dictionary`
+# mutated from two threads corrupts its storage, so the test process takes SIGSEGV — which `run` reads
+# as a non-zero exit with `Test Case` present, exactly as a failed assertion does. That is the honest
+# outcome: the lock's absence is not observable any other way.
+mutate "cache: no lock"          's/lock.lock(); defer { lock.unlock() }//'                     || fails=1
 
 # --- the host binary's arguments and rule arithmetic ---
 #
@@ -163,5 +168,11 @@ mutate "args: keeps empty entries"     's/split(separator: ",")/split(separator:
 mutate "reject: bare word allowed"     's/^            throw ArgError.unknown(arg)$/            _ = arg/' "$HOST_SRC" || fails=1
 mutate "reject: any flag is known"     's/if !knownFlags.contains(arg)/if false/'            "$HOST_SRC" || fails=1
 mutate "reject: the value is judged"   's/if arg == "--add" || arg == "--remove" { i += 1 }//' "$HOST_SRC" || fails=1
+mutate "reject: mode flags unknown"    's/"--confirm", "--off", //'                        "$HOST_SRC" || fails=1
+mutate "args: last flag wins"          's/args.firstIndex(of: flag)/args.lastIndex(of: flag)/' "$HOST_SRC" || fails=1
+mutate "mode: --off unwired"           's/if args.contains("--off") { return .disable }//' "$HOST_SRC" || fails=1
+mutate "mode: install beats off"       '/if args.contains("--confirm")/{n;s/.*/    if args.contains("--install") { return .install }/;n;s/.*/    if args.contains("--off") { return .disable }/;}' "$HOST_SRC" || fails=1
+mutate "clear: inverted"               's/!args.contains("--add") \&\& !args.contains("--remove")/args.contains("--add") || args.contains("--remove")/' "$HOST_SRC" || fails=1
+mutate "clear: never clears"           's/!args.contains("--add") \&\& !args.contains("--remove")/false/' "$HOST_SRC" || fails=1
 restore
 [[ $fails -eq 0 ]] && echo "=== all mutations killed ===" || { echo "=== a mutation survived ==="; exit 1; }

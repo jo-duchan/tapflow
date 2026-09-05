@@ -787,32 +787,46 @@ already done, so the dashboard interrupts rather than re-colours.
   rather than failing. `IOSAgent` points its `SimulatorNetwork` at a nonexistent host binary under
   vitest, and `options.network` injects one.
 
-#### The filter's Swift has tests now, and CI cannot run them
+#### The filter's Swift has tests, and CI runs them
 
 ```bash
 pnpm --filter @tapflowio/ios-agent test:netfilter            # run them
 packages/ios-agent/ios-netfilter/run-tests.sh --mutate       # run them, then prove they hold
 ```
 
-**Not part of `pnpm test`, on purpose.** That is vitest and CI runs it on `ubuntu-latest`; there is no
-macOS runner in `ci.yml`. So this is a check a Mac contributor runs by hand, and wiring it into the
-suite would only break the suite everywhere else. The constraint is #690's own shape rather than this
-script's: the filter's Swift is testable only where Xcode is.
+**Not part of `pnpm test`, on purpose.** That is vitest on `ubuntu-latest`, and wiring Swift into it
+would break the suite everywhere else. It has its own job instead: `test-swift` on `macos-15` runs
+`--mutate` and is part of the `ci` rollup, so the mutations are a required check rather than a
+courtesy a Mac contributor performs. **This paragraph used to say CI could not run these at all**,
+which was true until #759 and then stayed on the page — the same sentence survived in `run-tests.sh`'s
+header and in `ci.yml` until a review went looking for copies of it.
 
-**What is testable is what does not read the kernel.** Attribution walks the process tree with
-`sysctl`, reads `KERN_PROCARGS2`, calls `proc_pidpath` — none of which stands up in a unit test. Peel
-those away and what is left is `Extension/FlowIdentity.swift`: a string arrived and a device
-identifier has to come out of it. That file exists to be the seam, which is why its function is
-`internal` rather than `private` — `tests.yml` compiles it **into** the test bundle, because a system
-extension cannot be linked by one.
+**What is testable is what does not read the kernel or the filesystem.** Attribution walks the
+process tree with `sysctl`, reads `KERN_PROCARGS2`, calls `proc_pidpath`; the heartbeat writes a file
+as root; `NEFilterSocketFlow` cannot be constructed. None of that stands up in a unit test. Peel it
+away and two files are left — `Extension/FlowIdentity.swift` for the flow half (the udid parse, the
+DNS classifier, the audit-token readers, the attribution cache, the drop-count prune, the pulse rate)
+and `Host/RuleArguments.swift` for the host binary's half (its flag vocabulary, the mode it selects,
+the rule delta, and the branch that erases the rule). Both exist to be seams, which is why their
+declarations are `internal` rather than `private` — `tests.yml` compiles them **into** the test
+bundle, because neither target can be linked by one.
 
-**`--mutate` is the half that matters.** Four of the seven tests assert that something is *not*
-found, and a test asserting absence passes when nothing happens — that is its definition, so a green
-run is not evidence it holds anything
+**`--mutate` is the half that matters.** Many of the tests assert that something is *not* found or
+*not* allowed, and a test asserting absence passes when nothing happens — that is its definition, so
+a green run is not evidence it holds anything
 ([contributing/test-and-guard-coverage.md](../../contributing/test-and-guard-coverage.md) rule 2).
-The flag breaks the parse five ways and requires each one to fail a test. Its first draft could not
-have done that: `run()` piped `xcodebuild` into `grep` and returned *grep's* status, so a mutation
+The flag breaks the sources forty-one ways and requires each one to fail a test. Its first draft could
+not have done that: `run()` piped `xcodebuild` into `grep` and returned *grep's* status, so a mutation
 that did not even compile would have been reported as killed.
+
+**Every mutation is a cost paid on every push**, now that CI runs the flag — one `xcodebuild` each.
+Count them with `grep -cE '^mutate "'`, not `grep -c '^mutate '`, which counts the function
+definition; a comment in `ci.yml` said thirty-six for exactly that reason.
+
+**And it has found something.** A mutation deleting `.filter { !$0.isEmpty }` from `parseUDIDs`
+survived — not because the test was decoration but because the filter was: `split(separator:)`
+defaults to `omittingEmptySubsequences: true`, so the line could never remove anything. A green suite
+would not have said so.
 
 **The spec is `tests.yml`, deliberately separate from `project.yml`.** `project.yml` is one of the
 four enumerated inputs to the extension's version stamp, so a test target declared there would make

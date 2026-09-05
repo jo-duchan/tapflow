@@ -69,11 +69,11 @@ jobs:
   # import nothing but `Foundation`, but `run-tests.sh` drives `xcodegen` and `xcodebuild`, so it needs
   # Xcode. **Free for a public repository**, which is why it was worth looking at twice.
   #
-  # **`--mutate`, not a plain run.** Four of the tests assert that something is *not* allowed, and a
+  # **`--mutate`, not a plain run.** Many of the tests assert that something is *not* allowed, and a
   # test asserting absence passes when nothing happens — that is its definition. The flag breaks the
-  # sources fifteen ways and requires each one to fail a test, which is the only thing that makes a
-  # green run evidence (`contributing/test-and-guard-coverage.md` rule 2). It runs the suite sixteen
-  # times; the suite is one Swift file and its tests, so that is seconds.
+  # sources forty-one ways and requires each one to fail a test, which is the only thing that makes
+  # a green run evidence (`contributing/test-and-guard-coverage.md` rule 2). It runs the suite once
+  # per mutation plus a baseline.
   #
   # **What is pinned, and what a pinned label does not cover.** `macos-15` fixes the OS; it does not
   # fix Xcode, which GitHub rolls forward inside a label. So the toolchain here will move without this
@@ -90,11 +90,15 @@ jobs:
   test-swift:
     runs-on: macos-15
     # The suite is two Swift files and their tests, but the job is `brew`-free installs plus
-    # thirty-six `xcodebuild` launches — one baseline and one per mutation, and `--mutate` is what
-    # this job runs. **That number is the thing to watch when adding a mutation**: it was sixteen
-    # when the job was written, and every entry in `run-tests.sh` is now a cost paid on every push.
-    # Bounded because the default is 360 minutes and this is the repository's only macOS job — a
-    # hung run would hold the required check for six hours.
+    # forty-two `xcodebuild test` launches — one baseline and one per mutation — and then one
+    # `xcodebuild build` that compiles the shipping targets. **That number is the thing to watch when adding a mutation**: it
+    # was sixteen when the job was written, and every entry in `run-tests.sh` is now a cost paid on
+    # every push. Count them with `grep -cE '^mutate "'`, not `grep -c '^mutate '`, which counts the
+    # function definition and is how the first version of this comment said thirty-six.
+    #
+    # Bounded because the default is 360 minutes and this is the repository's only macOS job — a hung
+    # run would hold the required check for six hours. Measured at 2m35s–3m08s across four runs when
+    # it was sixteen launches, so the ceiling keeps roughly threefold headroom at forty-two — about seven minutes.
     timeout-minutes: 20
     permissions:
       contents: read
@@ -123,6 +127,29 @@ jobs:
           xcodegen --version
 
       - run: packages/ios-agent/ios-netfilter/run-tests.sh --mutate
+
+      # **The step above never compiles the shipping targets.** `tests.yml` builds a bundle out of
+      # the two pure sources and `Tests/`; `Provider.swift`, `IPCListener.swift`, both `main.swift`
+      # and `Shared/` are in neither test bundle. So a name that collides between a pure file and one
+      # of those breaks `build.sh` on the maintainer's Mac at release time with the whole suite and
+      # every mutation green — and the pure files now export eleven declarations across two targets,
+      # where they exported three from one.
+      #
+      # **Measured, because a guard that has not been seen to fire is not a guard.** Appending
+      # `func pulseSeconds(enforcing: Bool) -> TimeInterval { 0 }` to `Shared/NetFilterXPC.swift` in a
+      # copy of the directory left the test bundle at `43 tests, 0 failures` and made this step exit
+      # 65 with `invalid redeclaration of 'pulseSeconds(enforcing:)'`.
+      #
+      # `xcodegen generate` without `--spec` resets both `Info.plist` `CFBundleVersion`s to `1`,
+      # which would be a version regression in a working tree. Harmless here because the checkout is
+      # ephemeral and nothing is committed from it — but that is the reason this step is last.
+      - name: Compile the shipping targets
+        working-directory: packages/ios-agent/ios-netfilter
+        run: |
+          set -euo pipefail
+          xcodegen generate >/dev/null
+          xcodebuild build -project TapflowNetFilter.xcodeproj -scheme TapflowNetFilter \
+            -destination 'platform=macOS,arch=arm64' CODE_SIGNING_ALLOWED=NO | tail -5
 
   # `protect-main` requires the status check named `ci`. A matrix reports per-leg contexts
   # (`test (22)`, `test (24)`) and never one called `ci`, so the matrix lives in `test` and this

@@ -77,3 +77,36 @@ func mergeRule(existing: [String], add: [String], remove: [String]) -> [String] 
     out.subtract(remove)
     return out.sorted()
 }
+
+/// Which of the four things this invocation is.
+///
+/// Kept next to `knownFlags` on purpose: **the two have to agree, and nothing but a test can say so.**
+/// A flag added to `knownFlags` without a case here is accepted by `rejectUnknownArguments`, falls
+/// through to `.configure`, and — carrying no `--add` or `--remove` — makes `clearsTheRule` true. The
+/// run then erases the offline rule. That is the same failure `rejectUnknownArguments` exists to
+/// close, reached through the one door it does not watch, and `testEveryKnownFlagThatIsNotAValueFlagSelectsAMode`
+/// is what watches it.
+enum Mode { case install, configure, disable, confirm }
+
+/// **The order is a decision, not an accident.** `--confirm` reads and must never configure on the
+/// way, so it wins outright; `--off` beats `--install` so that turning the filter off cannot
+/// re-install it first. Pinned because nothing else records it.
+func parseMode(_ args: [String]) -> Mode {
+    if args.contains("--confirm") { return .confirm }
+    if args.contains("--off") { return .disable }
+    if args.contains("--install") { return .install }
+    return .configure
+}
+
+/// **Naming no delta means "replace the rule with nothing".**
+///
+/// This is the destructive branch, and it is reached by *absence* — which is why it is worth a name
+/// and a test rather than an inline conjunction. `configureFilter` takes this as `clearAll` and, when
+/// true, writes an empty offline set no matter what was there. `tapflow setup` and a bare run are the
+/// callers that mean it.
+///
+/// Inverting it would make every `--add` wipe the host's rule instead of extending it; leaving it
+/// always false would make the filter impossible to clear.
+func clearsTheRule(_ args: [String]) -> Bool {
+    !args.contains("--add") && !args.contains("--remove")
+}

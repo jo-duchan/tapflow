@@ -261,14 +261,7 @@ private func cleanupOldProxy(_ done: @escaping () -> Void) {
  * person or `tapflow setup` runs. Everything else touches only `NEFilterManager`, which is what the
  * agent needs and is the fast, boring path.
  */
-private enum Mode { case install, configure, disable, confirm }
-
-private func parseMode() -> Mode {
-    if CommandLine.arguments.contains("--confirm") { return .confirm }
-    if CommandLine.arguments.contains("--off") { return .disable }
-    if CommandLine.arguments.contains("--install") { return .install }
-    return .configure
-}
+// `Mode`, `parseMode` and `clearsTheRule` are in `RuleArguments.swift` — see the note there.
 
 /// `--off` disables the filter without uninstalling the extension.
 ///
@@ -411,7 +404,7 @@ do {
     try rejectUnknownArguments(CommandLine.arguments)
     add = try parseUDIDs(CommandLine.arguments, flag: "--add")
     remove = try parseUDIDs(CommandLine.arguments, flag: "--remove")
-    clearAll = !CommandLine.arguments.contains("--add") && !CommandLine.arguments.contains("--remove")
+    clearAll = clearsTheRule(CommandLine.arguments)
 } catch ArgError.unknown(let flag) {
     die(.badArguments, "unknown argument \(flag) — this build does not understand it")
 } catch ArgError.missingValue(let flag) {
@@ -420,7 +413,7 @@ do {
     die(.badArguments, "\(error)")
 }
 
-switch parseMode() {
+switch parseMode(CommandLine.arguments) {
 case .confirm:
     // Reads only. It must not configure anything on the way — a confirmation that writes is not one.
     confirmEnforcement()

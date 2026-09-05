@@ -217,6 +217,13 @@ func pulseSeconds(enforcing: Bool) -> TimeInterval { enforcing ? 1 : 5 }
  * So the caller assigns the result back. A count has to be per *episode*, not per provider lifetime,
  * or "has it dropped anything since I took it offline" has no answer here.
  *
+ * **That assignment is the load-bearing half and nothing here covers it.** It lives at
+ * `Provider.swift`'s `droppedByUDID = prunedDrops(droppedByUDID, rule: rule)`, which no test bundle
+ * compiles and no mutation reaches. Before this function was extracted the prune and the assignment
+ * were one statement, so breaking either broke both; they are separable now, and changing that line
+ * to a `let` restores the `{"A": 12}`-before-a-single-drop bug with every test green. Covering it
+ * needs a seam through `Heartbeat`, which is a larger change than this note.
+ *
  * **Pruning too eagerly is the safe direction.** A transient unreadable `vendorConfiguration` would
  * read as an empty rule and wipe the counts; they then restart from zero, and zero proves nothing by
  * design. The other way round produces a false proof.

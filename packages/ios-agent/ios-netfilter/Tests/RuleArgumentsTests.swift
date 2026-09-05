@@ -105,6 +105,69 @@ final class RuleArgumentsTests: XCTestCase {
         XCTAssertNoThrow(try rejectUnknownArguments(["tapflow", "--install", "--add", "A", "--remove", "B"]))
     }
 
+    /// **`--confirm` and `--off` were in `knownFlags` and nothing ever judged them against it.**
+    /// Every other case reaches that set through `--install`, `--add` or `--remove`; the two mode
+    /// flags appear in these tests only in `--add`'s *value* position, where the loop skips them
+    /// with `i += 1` without consulting the set at all. Dropping both from `knownFlags` left the
+    /// whole file green — and `TapflowNetFilter --confirm`, which is how the agent confirms the
+    /// kernel is enforcing, would exit 8 as a bad argument.
+    func testEveryModeFlagIsAnAcceptedArgument() {
+        XCTAssertNoThrow(try rejectUnknownArguments(["tapflow", "--confirm"]))
+        XCTAssertNoThrow(try rejectUnknownArguments(["tapflow", "--off"]))
+        XCTAssertNoThrow(try rejectUnknownArguments(["tapflow", "--install"]))
+    }
+
+    /// **A floor, not a fence: a repeated flag reads only its first occurrence.**
+    /// `--add A --add B` is accepted, parses to `["A"]`, and B stays online with nothing said. The
+    /// agent does not reach it — `SimulatorNetwork.ts` joins its udids into one `--add` — so this
+    /// pins today's behaviour rather than blessing it. Throwing instead would be a CLI flag change,
+    /// which is its own decision; this test is what makes taking it a visible one.
+    func testARepeatedFlagIsReadOnlyOnce() throws {
+        XCTAssertNoThrow(try rejectUnknownArguments(["tapflow", "--add", "A", "--add", "B"]))
+        XCTAssertEqual(try parseUDIDs(["tapflow", "--add", "A", "--add", "B"], flag: "--add"), ["A"])
+    }
+
+    // MARK: - mode, and the branch that erases the rule
+
+    /// **The structural half of `knownFlags`.** `rejectUnknownArguments` proves a flag is *accepted*;
+    /// this proves it is *wired*. A flag in the set with no case in `parseMode` is accepted, falls
+    /// through to `.configure`, carries no delta, and so erases the offline rule — the same failure
+    /// `TapflowNetFilter typo` used to cause, reached through the one door that check does not watch.
+    ///
+    /// Written as a loop over the set rather than as four assertions, so adding a flag to
+    /// `knownFlags` is what makes this fail rather than remembering to extend a list here.
+    func testEveryKnownFlagThatIsNotAValueFlagSelectsAMode() {
+        let valueFlags: Set<String> = ["--add", "--remove"]
+        for flag in knownFlags where !valueFlags.contains(flag) {
+            XCTAssertNotEqual(
+                parseMode(["tapflow", flag]), .configure,
+                "\(flag) is accepted but selects no mode, so it reaches configure with nothing to add "
+                + "or remove — which erases the offline rule")
+        }
+    }
+
+    /// The precedence, which nothing else records. `--confirm` reads and must not configure on the
+    /// way, so it wins outright; `--off` beats `--install` so turning the filter off cannot
+    /// re-install it first.
+    func testTheModeOrderIsConfirmThenOffThenInstall() {
+        XCTAssertEqual(parseMode(["tapflow", "--confirm", "--off", "--install"]), .confirm)
+        XCTAssertEqual(parseMode(["tapflow", "--off", "--install"]), .disable)
+        XCTAssertEqual(parseMode(["tapflow", "--install"]), .install)
+        XCTAssertEqual(parseMode(["tapflow", "--add", "A"]), .configure)
+        XCTAssertEqual(parseMode(["tapflow"]), .configure)
+    }
+
+    /// **The destructive branch, reached by absence.** True means `configureFilter` writes an empty
+    /// offline set whatever was there. Inverted, every `--add` would wipe the host's rule instead of
+    /// extending it; always false and the filter could never be cleared.
+    func testTheRuleIsClearedOnlyWhenNoDeltaIsNamed() {
+        XCTAssertTrue(clearsTheRule(["tapflow"]))
+        XCTAssertTrue(clearsTheRule(["tapflow", "--install"]))
+        XCTAssertFalse(clearsTheRule(["tapflow", "--add", "A"]))
+        XCTAssertFalse(clearsTheRule(["tapflow", "--remove", "A"]))
+        XCTAssertFalse(clearsTheRule(["tapflow", "--add", "A", "--remove", "B"]))
+    }
+
     /// **Where the two functions divide, recorded because neither can see it alone.** A flag sitting
     /// in `--add`'s value position is skipped here — this function accepts it — and it is
     /// `parseUDIDs` that refuses. Each is right on its own and the pair is what closes the hole, so

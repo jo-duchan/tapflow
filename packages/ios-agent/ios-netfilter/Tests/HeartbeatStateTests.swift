@@ -52,11 +52,10 @@ final class HeartbeatStateTests: XCTestCase {
         XCTAssertEqual(pulseSeconds(enforcing: false), 5)
     }
 
-    /// The value is written into the file as an integer, and a reader sizes its staleness threshold
-    /// from what it reads. A rate that does not survive that round trip would have the reader
-    /// waiting on a threshold nobody set.
-    func testBothRatesSurviveBeingWrittenAsIntegers() {
-        XCTAssertEqual(Int(pulseSeconds(enforcing: true)), 1)
-        XCTAssertEqual(Int(pulseSeconds(enforcing: false)), 5)
-    }
+    // **A test asserting `Int(pulseSeconds(…))` used to sit here, and it could not fail on its own.**
+    // `XCTAssertEqual` on `Double` is exact, so `d == 1.0` already implies `Int(d) == 1`; the case it
+    // claimed to guard — a fractional rate losing its remainder at `Provider.swift`'s `Int(...)` — is
+    // the one case it passed. Set the rate to 1.5 and the test above fails while that one did not.
+    // Covering the round trip for real needs the rendered JSON, and `renderLocked` is private to
+    // `Provider.swift`, which no test bundle compiles.
 }
