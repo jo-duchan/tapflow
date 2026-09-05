@@ -43,11 +43,20 @@ final class RuleArgumentsTests: XCTestCase {
     /// confirmation reads the published rule back and checks it against what it asked for, so an
     /// order that varies between runs is an equality that fails for no reason.
     ///
-    /// Six elements rather than two: an unsorted implementation has to be caught by more than a coin
-    /// flip, and `Set` iteration order is not defined.
+    /// **Twelve elements, and the count is the whole design of this case.** `Set` iteration order is
+    /// undefined and Swift seeds its hasher per process, so the mutation that drops `.sorted()`
+    /// returns an arbitrary permutation — which can land in ascending order by luck and be reported
+    /// as a surviving mutation, sending someone after a hole that is not there. Measured by building
+    /// the same set in 300 fresh processes: at six elements `Array(out) == out.sorted()` **once**, at
+    /// twelve **zero times** (12! is 479 million orderings).
+    ///
+    /// The alternative was to mutate to `out.sorted().reversed()`, which cannot coincide at all. It
+    /// is not used because `Array(out)` is the line somebody would actually write when they think
+    /// the sort is redundant, and a mutation is worth more when it models a plausible edit.
     func testOutputIsSorted() {
-        XCTAssertEqual(mergeRule(existing: ["F", "E", "D", "C", "B", "A"], add: [], remove: []),
-                       ["A", "B", "C", "D", "E", "F"])
+        let descending = ["L", "K", "J", "I", "H", "G", "F", "E", "D", "C", "B", "A"]
+        XCTAssertEqual(mergeRule(existing: descending, add: [], remove: []),
+                       ["A", "B", "C", "D", "E", "F", "G", "H", "I", "J", "K", "L"])
     }
 
     // MARK: - parseUDIDs

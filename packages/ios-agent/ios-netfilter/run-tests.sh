@@ -153,9 +153,11 @@ mutate "merge: remove wipes"           's/out.subtract(remove)/out.removeAll()/'
 # Swaps the two lines rather than deleting one, so it is the ORDER under test and not the presence of
 # a subtract — `remove` winning over `add` for the same udid is the property, and only a flip moves it.
 mutate "merge: union after subtract"   '/out.formUnion(add)/{s/.*/    out.subtract(remove)/;n;s/.*/    out.formUnion(add)/;}' "$HOST_SRC" || fails=1
-# **The one mutation here that can survive by luck.** Swift seeds its hasher per process, so an
-# unsorted six-element result lands in sorted order about once in 720 runs. Six and not two for that
-# reason; a two-element case would have been a coin flip.
+# **This one could survive by luck, and the fixture is what stops it.** Swift seeds its hasher per
+# process, so `Array(out)` is an arbitrary permutation each run. Measured over 300 fresh processes:
+# a six-element set matched `sorted()` **once**, a twelve-element set **zero** times — so
+# `testOutputIsSorted` uses twelve. Raised from six after CodeRabbit pointed out that a flaky
+# `SURVIVED` sends someone after a hole that is not there.
 mutate "merge: unsorted output"        's/return out.sorted()/return Array(out)/'            "$HOST_SRC" || fails=1
 mutate "args: absent flag throws"      's/else { return \[\] }/else { throw ArgError.missingValue(flag) }/' "$HOST_SRC" || fails=1
 mutate "args: value may be a flag"     's/, !args\[i + 1\].hasPrefix("--")//'                "$HOST_SRC" || fails=1
