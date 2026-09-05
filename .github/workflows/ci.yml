@@ -71,7 +71,7 @@ jobs:
   #
   # **`--mutate`, not a plain run.** Many of the tests assert that something is *not* allowed, and a
   # test asserting absence passes when nothing happens — that is its definition. The flag breaks the
-  # sources forty-one ways and requires each one to fail a test, which is the only thing that makes
+  # sources seventy ways and requires each one to fail a test, which is the only thing that makes
   # a green run evidence (`contributing/test-and-guard-coverage.md` rule 2). It runs the suite once
   # per mutation plus a baseline.
   #
@@ -90,16 +90,26 @@ jobs:
   test-swift:
     runs-on: macos-15
     # The suite is two Swift files and their tests, but the job is `brew`-free installs plus
-    # forty-two `xcodebuild test` launches — one baseline and one per mutation — and then one
-    # `xcodebuild build` that compiles the shipping targets. **That number is the thing to watch when adding a mutation**: it
-    # was sixteen when the job was written, and every entry in `run-tests.sh` is now a cost paid on
-    # every push. Count them with `grep -cE '^mutate "'`, not `grep -c '^mutate '`, which counts the
-    # function definition and is how the first version of this comment said thirty-six.
+    # seventy-one `xcodebuild test` launches — one baseline and one per mutation — and then one
+    # `xcodebuild build` that compiles the shipping targets. **That number is the thing to watch when
+    # adding a mutation**: it was sixteen when the job was written, and every entry in `run-tests.sh`
+    # is a cost paid on every run of this job. Count them with `grep -cE '^mutate "'`, not
+    # `grep -c '^mutate '`, which counts the function definition and is how one version of this
+    # comment said thirty-six when it was thirty-four.
     #
-    # Bounded because the default is 360 minutes and this is the repository's only macOS job — a hung
-    # run would hold the required check for six hours. Measured at 2m35s–3m08s across four runs when
-    # it was sixteen launches, so the ceiling keeps roughly threefold headroom at forty-two — about seven minutes.
-    timeout-minutes: 20
+    # **The ceiling comes from measurement, and it has already been outgrown once.** Real runs here:
+    # sixteen launches took 2m35s–3m08s and forty-two took 9m27s, so a launch costs about 13.5s on
+    # this runner against 10.8s locally. Seventy-one is therefore ~16 minutes, plus about a minute
+    # for the Release build. At `timeout-minutes: 20` that left 1.3x, which is not headroom — it is a
+    # coin flip on a slow runner, and the failure it produces is a required check going red for no
+    # reason.
+    #
+    # Thirty-five keeps roughly 2x. **When that is not enough either, raising it again is the wrong
+    # move**: around a hundred launches the honest options are dropping mutations that no longer aim
+    # at a decision, or running `--mutate` on a narrower trigger than every PR update and leaving the
+    # plain suite here. Bounded at all because the default is 360 minutes and this is the repository's
+    # only macOS job — a hung run would otherwise hold the required check for six hours.
+    timeout-minutes: 35
     permissions:
       contents: read
     steps:

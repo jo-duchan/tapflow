@@ -120,37 +120,9 @@ private final class Heartbeat {
     /// dropped write means the filter is stopping, and `remove()` is what follows it.
     private var lastPublishedRule: Set<String>?
 
-    private var flowsSimulator = 0
-    private var flowsHost = 0
-    private var flowsUnresolved = 0
-    private var flowsDropped = 0
-    private var flowsIdle = 0
-    /// Flows an offline simulator was allowed anyway because they are name resolution.
-    ///
-    /// **A subset of `simulator`, like `dropped` is** — the first draft made it a sibling instead, so
-    /// `simulator − dropped` silently stopped meaning "allowed simulator flows" for anyone reading the
-    /// file. It stays out of `dropped` because that is the number the agent reads as evidence the
-    /// filter is enforcing, and a DNS allow is not that.
-    private var flowsDns = 0
-    /**
-     * Drops, per device (#654).
-     *
-     * **The file used to prove rule *delivery* and was read as enforcement.** A fresh file naming a
-     * device says the provider received the rule; it does not say the device's traffic stopped. The
-     * gap is deliberate — `handleNewFlow`'s `.unresolved` branch allows on purpose, because failing
-     * closed on a transient `sysctl` failure would cut the user's own browser — so a simulator whose
-     * flows consistently fail attribution keeps talking while the file stays fresh and correct.
-     *
-     * A drop is the one thing that can close it, because a dropped flow was attributed by
-     * construction and therefore has a udid.
-     *
-     * **`unresolved` is not here and never can be.** Unresolved *means* the walk could not name an
-     * owner; bucketing it per device would invent the attribution whose absence defines it. It stays
-     * a host-wide total, and anyone reaching for a per-device version should read this instead.
-     */
-    private var droppedByUDID: [String: Int] = [:]
-    private var walks = 0
-    private var walkNanos: UInt64 = 0
+    /// Every number the file carries. `FlowCounts` in `FlowIdentity.swift` holds the arithmetic;
+    /// this class holds the lock, the queue and the write.
+    private var counts = FlowCounts()
 
     /// **`idle` is its own member and does not fold into `host`.**
     ///
@@ -158,36 +130,12 @@ private final class Heartbeat {
     /// them as host flows would put a number in the file meaning "we decided this belonged to the
     /// Mac", when nothing decided anything. The file is read to diagnose, and a diagnosis built on an
     /// invented decision is worse than a missing one.
-    enum Outcome { case simulator(dropped: Bool, udid: String), host, unresolved, idle, dns }
 
-    /**
-     * Candidates, in order — **and every one of them has to be readable by the agent**, which runs
-     * as the user while this runs as root.
-     *
-     * That rules out the obvious-looking ones. `NSHomeDirectory()` for root is `/var/root`, which is
-     * `drwxr-x---`, and root's `NSTemporaryDirectory()` is a `drwx------` folder under
-     * `/var/folders`. A file written there succeeds, logs a cheerful path, and is invisible to the
-     * only reader — worse than failing, because the loud "no writable path" line never fires.
-     *
-     * Measured: the first candidate works. `/tmp` has **not** been exercised — an earlier version of
-     * this comment claimed the old "root cannot write /tmp" note was false, which the evidence did
-     * not support, because the loop returns on the first success and never reached it.
-     *
-     * **Only success is remembered.** A `probed` flag used to be set before either candidate was
-     * tried, so one transient refusal — a full disk, a permission that had not settled yet — silenced
-     * the file for the rest of the provider's life, and the agent read that permanent silence as "not
-     * enforcing" while the filter went on dropping traffic. Re-probing costs four syscalls on the
-     * `io` queue at most once a pulse, and only while there is no path; the logs are what needed the
-     * guard, not the work.
-     */
-    private static let candidates = [
-        "/Library/Application Support/tapflow",
-        "/tmp",
-    ]
-
+    // The candidate list is `stateFileCandidates` in `FlowIdentity.swift`, with the reasoning
+    // for the order and for what is NOT on it.
     private func resolvePath() -> String? {
         if let path { return path }
-        for dir in Heartbeat.candidates {
+        for dir in stateFileCandidates {
             try? FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true,
                                                      attributes: [.posixPermissions: 0o755])
             let candidate = (dir as NSString).appendingPathComponent("tapflow-netfilter-state.json")
@@ -213,26 +161,7 @@ private final class Heartbeat {
     /// counters cannot be read half-updated and the rule cannot be published out of order.
     func note(_ outcome: Outcome, walkNanos: UInt64?, rule: Set<String>, ruleChanged: Bool) {
         lock.lock()
-        switch outcome {
-        case .simulator(let dropped, let udid):
-            flowsSimulator += 1
-            if dropped {
-                flowsDropped += 1
-                droppedByUDID[udid, default: 0] += 1
-            }
-        case .host: flowsHost += 1
-        case .unresolved: flowsUnresolved += 1
-        case .idle: flowsIdle += 1
-        case .dns:
-            flowsSimulator += 1
-            flowsDns += 1
-        }
-        // Only a walk that ran is a walk. Counting the `pid <= 0` short circuit diluted the average
-        // with samples that measured nothing.
-        if let nanos = walkNanos {
-            walks += 1
-            self.walkNanos += nanos
-        }
+        counts.record(outcome, walkNanos: walkNanos)
         // Enqueued while the lock is still held. See `publish`.
         if dueLocked(force: ruleChanged) { publish(renderLocked(rule: rule)) }
         lock.unlock()
@@ -259,7 +188,7 @@ private final class Heartbeat {
         // consume-once and lives on the flow path, so reading it here would race `handleNewFlow` for
         // the same edge and one of the two would publish nothing.
         let unpublished = lastPublishedRule != rule
-        if unpublished || now - lastWrite >= pulseSeconds(enforcing: !rule.isEmpty) - 0.25 {
+        if pulseIsDue(unpublished: unpublished, now: now, lastWrite: lastWrite, enforcing: !rule.isEmpty) {
             lastWrite = now
             publish(renderLocked(rule: rule))
         }
@@ -303,40 +232,19 @@ private final class Heartbeat {
 
     private func dueLocked(force: Bool) -> Bool {
         let now = CFAbsoluteTimeGetCurrent()
-        if !force && now - lastWrite < 1.0 { return false }
+        guard writeIsDue(force: force, now: now, lastWrite: lastWrite) else { return false }
         lastWrite = now
         return true
     }
 
+    /// The clock and the pid are the only part that is not decidable, so they are the only part left
+    /// here. `renderState` prunes `counts.droppedByUDID` as it renders — see the note there for why
+    /// those two cannot be separated.
     private func renderLocked(rule: Set<String>) -> String {
         lastPublishedRule = rule
-        let avg = walks > 0 ? Double(walkNanos) / Double(walks) / 1000.0 : 0
-        // The rule arrives through `vendorConfiguration`, which this provider does not write and
-        // cannot constrain. Hand-quoting it made the whole file invalid JSON for any value carrying a
-        // quote or a backslash, and an unparseable file reads as "not enforcing" — the wrong answer,
-        // stated confidently, with nothing in the log to say why.
-        let rules = (try? JSONSerialization.data(withJSONObject: rule.sorted()))
-            .flatMap { String(data: $0, encoding: .utf8) } ?? "[]"
-        var json = "{\"at\":\(Int(Date().timeIntervalSince1970))"
-        // **Which provider wrote this.** A replacement leaves two of them briefly alive, both
-        // publishing to this one path, and only one is the session the kernel consults — so a reader
-        // that finds the rule disagreeing cannot otherwise say whose rule it read. `--confirm` has
-        // carried this since #639; the file did not, and the file is what a reader falls back to once
-        // the replacement has taken the XPC listener away.
-        json += ",\"pid\":\(ProcessInfo.processInfo.processIdentifier)"
-        json += ",\"pulseSeconds\":\(Int(pulseSeconds(enforcing: !rule.isEmpty)))"
-        json += ",\"rule\":\(rules)"
-        json += ",\"flows\":{\"simulator\":\(flowsSimulator),\"host\":\(flowsHost)"
-        json += ",\"unresolved\":\(flowsUnresolved),\"dropped\":\(flowsDropped)"
-        json += ",\"idle\":\(flowsIdle),\"dnsAllowed\":\(flowsDns)}"
-        // Assigned back on purpose — see `prunedDrops`, where the reason is written down.
-        droppedByUDID = prunedDrops(droppedByUDID, rule: rule)
-        let perDevice = droppedByUDID
-        let dropped = (try? JSONSerialization.data(withJSONObject: perDevice))
-            .flatMap { String(data: $0, encoding: .utf8) } ?? "{}"
-        json += ",\"droppedByDevice\":\(dropped)"
-        json += ",\"attribution\":{\"walks\":\(walks),\"avgMicros\":\(String(format: "%.1f", avg))}}\n"
-        return json
+        return renderState(&counts, rule: rule,
+                           pid: ProcessInfo.processInfo.processIdentifier,
+                           at: Int(Date().timeIntervalSince1970))
     }
 
     /// **Called with `lock` held**, on purpose: rendering under the lock and enqueuing outside it let
@@ -502,56 +410,77 @@ class Provider: NEFilterDataProvider {
             attribution = .unresolved("no audit token")
         }
 
-        switch attribution {
-        // A flow this Mac owns — the user's browser, mail, everything else. Allowed outright, which
-        // also ENDS filtering for it, so nothing downstream is paid for by host traffic.
+        // **One decision, and it is `decideFlow`.** What is left here is the logging, which names the
+        // pid and the audit session — neither is part of the verdict, and neither is checkable by a
+        // test, so keeping them out of the pure function is what let it be tested at all.
+        //
+        // The reasoning each branch used to carry moved with it. Two are worth repeating where the
+        // log line is, because the log is what someone reads when they doubt them:
+        //
+        //  - `.host` is allowed outright, which also ENDS filtering for that flow, so nothing
+        //    downstream is paid for by the user's own traffic.
+        //  - `.unresolved` is allowed too, and that is a decision rather than an oversight (#642).
+        //    Failing closed on a transient `sysctl` error would cut the user's own browser, which is
+        //    worse than the hole. What was wrong before was that the hole was invisible — logged
+        //    identically to a host flow and absent from every counter.
+        // **Read at most once, and only where a branch needs it.** `decideFlow` takes an
+        // `@autoclosure` so an allowed flow never pays for the endpoint — but the log lines below
+        // need the same values the verdict was made from, and calling `flowShape` again would read a
+        // live `NEFilterSocketFlow` a second time. Two reads are not provably equal, and the DROP
+        // line is the measurement this build exists to take.
+        var cachedShape: FlowShape?
+        func shape() -> FlowShape {
+            if let cachedShape { return cachedShape }
+            let read = flowShape(flow)
+            cachedShape = read
+            return read
+        }
+        let verdict = decideFlow(rule: rule, attribution: attribution, shape: shape())
+        let outcome: Outcome
+        let allow: Bool
+        switch verdict {
+        case .allow(let o): outcome = o; allow = true
+        case .drop(let o): outcome = o; allow = false
+        }
+
+        switch outcome {
         case .host:
             os_log("handleNewFlow pid=%{public}d udid=- asid=%{public}u verdict=allow(host)",
                    log: log, type: .default, pid, asid)
-            heartbeat.note(.host, walkNanos: walkNanos, rule: rule, ruleChanged: ruleChanged)
-            return .allow()
-
-        // **Not the same thing as a host flow, and it used to be logged as one** (#642). The walk
-        // failed — no audit token, an unreadable `KERN_PROCARGS2`, a process that exited underneath
-        // it — so this flow *might* belong to a simulator that is supposed to be offline.
-        //
-        // It is still allowed, and that is a decision rather than an oversight. Failing closed on a
-        // failed `sysctl` would cut the user's own browser on a transient error, which is worse than
-        // the hole: this filter is host-wide, and the whole promise of the feature is that only the
-        // simulator you toggled is affected. What was actually wrong was that the hole was invisible
-        // — indistinguishable in the log from an ordinary host flow, and absent from any counter.
-        case .unresolved(let why):
+        case .unresolved:
+            var why = "no audit token"
+            if case .unresolved(let w) = attribution { why = w }
             os_log("handleNewFlow pid=%{public}d udid=? asid=%{public}u verdict=allow(UNRESOLVED: %{public}@)",
                    log: log, type: .error, pid, asid, why)
-            heartbeat.note(.unresolved, walkNanos: walkNanos, rule: rule, ruleChanged: ruleChanged)
-            return .allow()
-
-        case .simulator(let udid):
-            let drop = rule.contains(udid)
-            // **Asked only where it can change the answer.** A flow that was going to be allowed does
-            // not need to know its port, and reading the endpoint costs an allocation per flow.
-            if drop {
-                let (port, how, isUDP, isOutbound) = flowShape(flow)
-                if passesRegardlessOfRule(remotePort: port, isUDP: isUDP, isOutbound: isOutbound) {
-                    os_log("handleNewFlow pid=%{public}d udid=%{public}@ asid=%{public}u verdict=allow(dns port=%{public}d via %{public}@)",
-                           log: log, type: .default, pid, udid, asid, port ?? -1, how)
-                    heartbeat.note(.dns, walkNanos: walkNanos, rule: rule, ruleChanged: ruleChanged)
-                    return .allow()
-                }
-                // **The measurement this build exists to take** (#607 A2-0): whether the endpoint is
-                // readable at all on this OS, and through which property. Logged for every dropped
-                // flow rather than sampled, because a port that reads as `-1` here is the difference
-                // between this feature working and not, and it must not depend on catching a sample.
-                os_log("handleNewFlow pid=%{public}d udid=%{public}@ asid=%{public}u verdict=DROP port=%{public}d via %{public}@ udp=%{public}d out=%{public}d",
-                       log: log, type: .default, pid, udid, asid, port ?? -1, how, isUDP ? 1 : 0, isOutbound ? 1 : 0)
-                heartbeat.note(.simulator(dropped: true, udid: udid), walkNanos: walkNanos, rule: rule, ruleChanged: ruleChanged)
-                return .drop()
-            }
+        case .dns:
+            // **The udid is recovered from the attribution, because `Outcome.dns` does not carry
+            // one.** This line records the one hole deliberately left in the offline guarantee, and a
+            // refactor briefly dropped the field — leaving a log that says a device was let through
+            // to resolve a name without saying which device. `pid` does not answer it: that is the
+            // process inside the simulator, not the simulator.
+            var udid = "?"
+            if case .simulator(let attributed) = attribution { udid = attributed }
+            let read = shape()
+            os_log("handleNewFlow pid=%{public}d udid=%{public}@ asid=%{public}u verdict=allow(dns port=%{public}d via %{public}@)",
+                   log: log, type: .default, pid, udid, asid, read.port ?? -1, read.how)
+        case .simulator(let dropped, let udid) where dropped:
+            // **The measurement this build exists to take** (#607 A2-0): whether the endpoint is
+            // readable at all on this OS, and through which property. Logged for every dropped flow
+            // rather than sampled, because a port that reads as `-1` here is the difference between
+            // this feature working and not, and it must not depend on catching a sample.
+            let read = shape()
+            os_log("handleNewFlow pid=%{public}d udid=%{public}@ asid=%{public}u verdict=DROP port=%{public}d via %{public}@ udp=%{public}d out=%{public}d",
+                   log: log, type: .default, pid, udid, asid, read.port ?? -1, read.how,
+                   read.isUDP ? 1 : 0, read.isOutbound ? 1 : 0)
+        case .simulator(_, let udid):
             os_log("handleNewFlow pid=%{public}d udid=%{public}@ asid=%{public}u verdict=allow",
                    log: log, type: .default, pid, udid, asid)
-            heartbeat.note(.simulator(dropped: false, udid: udid), walkNanos: walkNanos, rule: rule, ruleChanged: ruleChanged)
-            return .allow()
+        case .idle:
+            break   // the empty-rule path returned above; nothing was attributed
         }
+
+        heartbeat.note(outcome, walkNanos: walkNanos, rule: rule, ruleChanged: ruleChanged)
+        return allow ? .allow() : .drop()
     }
 }
 
@@ -564,9 +493,11 @@ class Provider: NEFilterDataProvider {
  * only what the answer was — if a future OS empties one, that shows up as the channel changing rather
  * than as a port that mysteriously stops being readable.
  */
-private func flowShape(_ flow: NEFilterFlow) -> (port: Int?, how: String, isUDP: Bool, isOutbound: Bool) {
+private func flowShape(_ flow: NEFilterFlow) -> FlowShape {
     let outbound = flow.direction == .outbound
-    guard let socketFlow = flow as? NEFilterSocketFlow else { return (nil, "not-a-socket-flow", false, outbound) }
+    guard let socketFlow = flow as? NEFilterSocketFlow else {
+        return FlowShape(port: nil, how: "not-a-socket-flow", isUDP: false, isOutbound: outbound)
+    }
     let udp = socketFlow.socketProtocol == IPPROTO_UDP
     // Read here, decided in `portFromChannels` — the two property reads are the only part a unit test
     // cannot reach, so they are the only part left in this file.
@@ -574,7 +505,7 @@ private func flowShape(_ flow: NEFilterFlow) -> (port: Int?, how: String, isUDP:
     if let e = socketFlow.remoteFlowEndpoint, case let .hostPort(host: _, port: p) = e { flowPort = p.rawValue }
     let (port, how) = portFromChannels(hostEndpointPort: (socketFlow.remoteEndpoint as? NWHostEndpoint)?.port,
                                        flowEndpointPort: flowPort)
-    return (port, how, udp, outbound)
+    return FlowShape(port: port, how: how, isUDP: udp, isOutbound: outbound)
 }
 
 // MARK: - pid → UDID
@@ -621,20 +552,6 @@ private func procArgs(_ pid: pid_t) -> String? {
 }
 
 private let udidCache = UDIDCache()
-
-/**
- * What a flow's process turned out to be — **three outcomes, where the code used to have two**.
- *
- * `udidForPID` returned `String?`, and `nil` meant both "this is the Mac's own traffic" and "the
- * walk failed". They were logged identically and counted not at all, so a simulator that should have
- * been offline could reach the network because a `sysctl` returned an error, with the log calling it
- * a host flow (#642).
- */
-private enum Attribution {
-    case simulator(String)
-    case host
-    case unresolved(String)
-}
 
 /// The parent walk, with its failures kept apart from its negative answer.
 private func attribute(_ pid: pid_t) -> Attribution {
