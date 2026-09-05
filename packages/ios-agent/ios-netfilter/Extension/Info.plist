@@ -17,7 +17,7 @@
 	<key>CFBundleShortVersionString</key>
 	<string>1.0</string>
 	<key>CFBundleVersion</key>
-	<string>1788540210</string>
+	<string>1788615767</string>
 	<key>NSSystemExtensionUsageDescription</key>
 	<string>tapflow uses a network filter to turn a simulator's network on and off.</string>
 	<key>NetworkExtension</key>
