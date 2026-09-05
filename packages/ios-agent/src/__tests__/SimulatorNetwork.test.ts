@@ -886,11 +886,11 @@ describe('SimulatorNetwork', () => {
      * to `mkdir` — and the assertion on the directory is what keeps this from silently becoming a
      * test of a private directory, which the class trusts.
      */
-    const forgedState = (rule: string[]) => {
+    const forgedState = (rule: string[], mode = 0o1777) => {
       const open = join(dir, 'open')
       mkdirSync(open)
-      chmodSync(open, 0o1777)
-      expect(statSync(open).mode & 0o002, 'the directory is not world-writable').not.toBe(0)
+      chmodSync(open, mode)
+      expect(statSync(open).mode & 0o022, 'the directory is writable by its owner only').not.toBe(0)
       const path = join(open, 'state.json')
       writeFileSync(path, JSON.stringify({ at: Math.floor(Date.now() / 1000), pid: 1, pulseSeconds: 1, rule }))
       // Under root the file this test wrote would be root-owned, which is the one thing the class
@@ -918,6 +918,22 @@ describe('SimulatorNetwork', () => {
       const said = warn.mock.calls.filter((c) => String(c[0]).includes(forged))
       expect(said, 'the refused file was not named, or was named on every poll').toHaveLength(1)
       warn.mockRestore()
+    })
+
+    it('refuses a state file from a directory the group can write to', async () => {
+      // Neither shipped path can tell this mask from the world-writable one: the protected directory
+      // is 0755 and `/private/tmp` is 1777. A 0775 directory is not an odd shape on macOS, where every
+      // local account is in `staff`, and it is the only case that fails if the mask narrows to 0o002.
+      armed()
+      writeFileSync(join(dir, 'NO_CONFIRM'), '')
+      writeFileSync(join(dir, 'NO_STATE'), '')
+      const forged = forgedState([UDID], 0o775)
+      const net = make(undefined, 300, [join(dir, 'state.json'), forged])
+
+      await expect(net.setOffline(UDID, true)).resolves.toEqual({
+        offline: false, available: false, reason: 'filter-unavailable',
+      })
+      nothingApplied()
     })
 
     it('returns from a FIFO at the fallback path rather than blocking on it', async () => {

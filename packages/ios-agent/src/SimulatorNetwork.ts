@@ -989,12 +989,11 @@ export class SimulatorNetwork {
    *
    * **The rule is about the directory, not about which path this is.** A file in a directory that
    * anyone but its owner can write to is believed only when root owns it and nobody else can change
-   * it. The protected path is untouched, because its directory is 0755 — and so is a test's private
-   * temp directory, 0700 from `mkdtemp`, which is what lets a test keep injecting a file it wrote
-   * itself. Judged through the descriptor that is then read, so the file that was checked is the
-   * file that is believed, and without following a symlink, which the provider never leaves.
-   * Liveness reads through here as well, so a forged file cannot delay an `enforcement-lost` report
-   * either.
+   * it. The protected path is untouched, and so is a test's temp directory: nobody but the owner can
+   * write to either, which is what lets a test keep injecting a file it wrote itself. Judged through
+   * the descriptor that is then read, so the file that was checked is the file that is believed, and
+   * without following a symlink, which the provider never leaves. Liveness reads through here as
+   * well, so a forged file cannot delay an `enforcement-lost` report either.
    *
    * `O_NONBLOCK` is load-bearing: opening a FIFO read-only blocks until a writer arrives, and the
    * `isFile()` check that would refuse it runs after the open — so a `mkfifo` at the fallback path
