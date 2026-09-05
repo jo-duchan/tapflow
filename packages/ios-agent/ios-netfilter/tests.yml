@@ -30,7 +30,11 @@ targets:
     type: bundle.unit-test
     platform: macOS
     sources:
+      # Both halves of the binary pair, because both have a pure part and neither can be linked: a
+      # system extension is not loadable by a test bundle, and `Host/main.swift` is top-level code
+      # whose statements would become a second `main`.
       - Extension/FlowIdentity.swift
+      - Host/RuleArguments.swift
       - Tests
 schemes:
   FilterLogicTests:

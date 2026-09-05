@@ -110,3 +110,117 @@ func portFromChannels(hostEndpointPort: String?, flowEndpointPort: UInt16?) -> (
 func passesRegardlessOfRule(remotePort: Int?, isUDP: Bool, isOutbound: Bool) -> Bool {
     isOutbound && isUDP && remotePort == dnsPort
 }
+
+// MARK: - the audit token
+
+// `audit_token_t` is 8 x uint32 (auid, euid, egid, ruid, rgid, pid, asid, pidversion). The framework
+// hands it over as `Data`, so reading a field is an index into that run of words — and an index is
+// exactly the kind of thing that is right until someone counts wrong. Both functions are here rather
+// than in `Provider.swift` because a `Data` is something a test can build.
+
+/// The flow's process, or `nil` when the blob is not an audit token.
+///
+/// **The size guard is not defensive dressing.** Without it the read runs off whatever the framework
+/// handed over, and the pid that comes back attributes the flow to a process that has nothing to do
+/// with it — which is a device cut that nobody asked for, or a simulator that stays online.
+func pidFromAuditToken(_ data: Data) -> pid_t? {
+    guard data.count == MemoryLayout<audit_token_t>.size else { return nil }
+    return data.withUnsafeBytes { pid_t(bitPattern: $0.bindMemory(to: UInt32.self)[5]) }
+}
+
+/// The audit session, or `0` when the blob is not an audit token.
+///
+/// `0` rather than `nil` because the caller logs it and no session identifier is not an error worth
+/// a branch there.
+func asidFromToken(_ data: Data) -> UInt32 {
+    guard data.count == MemoryLayout<audit_token_t>.size else { return 0 }
+    return data.withUnsafeBytes { $0.bindMemory(to: UInt32.self)[6] }
+}
+
+// MARK: - process identity, and caching by it
+
+/**
+ * A process's pid and its **start time**.
+ *
+ * The start time is what makes a pid an identity. macOS reuses pids, and `launchd_sim`'s is reused
+ * readily — every simulator boot starts one, and a Mac that has booted a few dozen wraps the range.
+ * A cache keyed on the number alone therefore answers for a simulator that no longer exists, and the
+ * consequence is not a stale label: it is `handleNewFlow` cutting a device nobody asked to cut, with
+ * every log line agreeing that the udid was right. `(pid, start)` is unique for the life of the Mac.
+ *
+ * Not `pidversion` from the audit token, which is there at word 7 and would be the obvious source:
+ * it identifies the *flow's* process, and what has to be identified is its `launchd_sim` ancestor,
+ * which has no token here.
+ *
+ * `procSysctl` fills this in from `KERN_PROC` and stays in `Provider.swift` — the kernel read is the
+ * half a test cannot stand up. What a test can hold is that two different starts are two different
+ * devices, which is the whole point of the field.
+ */
+struct ProcIdentity: Hashable {
+    let pid: pid_t
+    let startSec: Int64
+    let startUsec: Int32
+}
+
+// launchd_sim outlives every flow of the simulator it hosts, so caching by its identity holds for the
+// whole boot and the per-flow cost stays at the parent walk. Only positive results are cached: a host
+// flow is rejected by the launchd_sim path check before any argument read, so it never pays for the
+// miss.
+//
+// **Keyed on the identity and not the pid**, for the reason on `ProcIdentity`. Entries are never
+// evicted, which is affordable because the key is a boot rather than a process — one per simulator
+// started while the provider has been running — and because it is *wrong* to evict on the same signal
+// that inserts: a pid whose entry is dropped is looked up again and re-cached from `KERN_PROCARGS2`,
+// which reads the CURRENT process's arguments. The stale answer would simply be re-derived. Keying it
+// away is the only fix that does not depend on noticing the exit.
+final class UDIDCache {
+    private var byRoot: [ProcIdentity: String] = [:]
+    private let lock = NSLock()
+
+    func lookup(_ root: ProcIdentity) -> String? {
+        lock.lock(); defer { lock.unlock() }
+        return byRoot[root]
+    }
+
+    func store(_ root: ProcIdentity, _ udid: String) {
+        lock.lock(); defer { lock.unlock() }
+        byRoot[root] = udid
+    }
+}
+
+// MARK: - what the heartbeat publishes
+
+/// How often the state file is refreshed with nothing happening — **1s while a device is offline, 5s
+/// otherwise.** The rate in force is written into the file, so a reader sizes its threshold from what
+/// it reads rather than from a constant it has to keep in sync with this one.
+///
+/// **A reader should allow at least three of these before calling the provider gone.** The numbers
+/// are measured rather than chosen: `SIGKILL` on the provider freezes the file immediately, launchd
+/// brings it back in about **5.8 seconds** (4 of 5 runs; one took 21.3), and the kernel passes that
+/// simulator's traffic for the whole of it — 23 to 27 requests per occurrence. At 5s pulses the
+/// threshold is 15s, so the commonest outage would be arithmetically invisible.
+///
+/// The fast rate is spent only where it buys something. An empty rule enforces nothing, so there is
+/// nothing to lose track of, and a file write every second for the life of the Mac would buy exactly
+/// that.
+func pulseSeconds(enforcing: Bool) -> TimeInterval { enforcing ? 1 : 5 }
+
+/**
+ * The per-device drop counts that belong in the next state file — **a prune, not a copy.**
+ *
+ * The difference is the whole value of the field. `filter` returns a new dictionary, so an earlier
+ * version left the counts in memory while publishing a pruned view: take a device offline, drop
+ * twelve flows, bring it back online, take it offline again, and the very next file said
+ * `{"A": 12}` before a single flow had been dropped in that episode. The agent reads that as
+ * "enforcement observed" — the exact lie the field exists to close, told with a number attached.
+ *
+ * So the caller assigns the result back. A count has to be per *episode*, not per provider lifetime,
+ * or "has it dropped anything since I took it offline" has no answer here.
+ *
+ * **Pruning too eagerly is the safe direction.** A transient unreadable `vendorConfiguration` would
+ * read as an empty rule and wipe the counts; they then restart from zero, and zero proves nothing by
+ * design. The other way round produces a false proof.
+ */
+func prunedDrops(_ counts: [String: Int], rule: Set<String>) -> [String: Int] {
+    counts.filter { rule.contains($0.key) }
+}

@@ -9,6 +9,7 @@
 /* Begin PBXBuildFile section */
 		1EB5A4DC002983B05480C21D /* Provider.swift in Sources */ = {isa = PBXBuildFile; fileRef = C111B5C2387C9F74B90F719C /* Provider.swift */; };
 		59B2F5CC9B41626052345E26 /* NetFilterXPC.swift in Sources */ = {isa = PBXBuildFile; fileRef = C25D42D3D2B228816EA7E762 /* NetFilterXPC.swift */; };
+		6B305D9051451E0F1ED5823B /* RuleArguments.swift in Sources */ = {isa = PBXBuildFile; fileRef = D47C2445B92EBE27C4AED101 /* RuleArguments.swift */; };
 		9B983E07C8002FA5E682C120 /* TapflowNetFilterExt.systemextension in Embed System Extensions */ = {isa = PBXBuildFile; fileRef = 22203C023C48EF4D646161DC /* TapflowNetFilterExt.systemextension */; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
 		A487BFF363CBC58C4C27665F /* IPCListener.swift in Sources */ = {isa = PBXBuildFile; fileRef = D2FD6F612A509F232BE16F3E /* IPCListener.swift */; };
 		B9EB98A005AB4F6624AB6336 /* NetFilterXPC.swift in Sources */ = {isa = PBXBuildFile; fileRef = C25D42D3D2B228816EA7E762 /* NetFilterXPC.swift */; };
@@ -51,6 +52,7 @@
 		C111B5C2387C9F74B90F719C /* Provider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Provider.swift; sourceTree = "<group>"; };
 		C25D42D3D2B228816EA7E762 /* NetFilterXPC.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NetFilterXPC.swift; sourceTree = "<group>"; };
 		D2FD6F612A509F232BE16F3E /* IPCListener.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IPCListener.swift; sourceTree = "<group>"; };
+		D47C2445B92EBE27C4AED101 /* RuleArguments.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RuleArguments.swift; sourceTree = "<group>"; };
 		DB3E4F72359FE28D6623F356 /* FlowIdentity.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FlowIdentity.swift; sourceTree = "<group>"; };
 		FEA8687E0D5DB021E56B18B1 /* TapflowNetFilter.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = TapflowNetFilter.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		FF867352E788B5D199B6533A /* main.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = main.swift; sourceTree = "<group>"; };
@@ -63,6 +65,7 @@
 				01A0098D2D8600D6F92C13BD /* Host.entitlements */,
 				808EF47BAC51B82D543F132F /* Info.plist */,
 				0CDE906FDC73B161BA5D1C10 /* main.swift */,
+				D47C2445B92EBE27C4AED101 /* RuleArguments.swift */,
 			);
 			path = Host;
 			sourceTree = "<group>";
@@ -191,6 +194,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				B9EB98A005AB4F6624AB6336 /* NetFilterXPC.swift in Sources */,
+				6B305D9051451E0F1ED5823B /* RuleArguments.swift in Sources */,
 				F5137EB914E55831493692EB /* main.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;

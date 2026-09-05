@@ -91,24 +91,7 @@ private let ruleWatch = RuleWatch()
  * (#641), and how often attribution *failed* rather than finding a host process (#642).
  */
 private final class Heartbeat {
-    /// How often the file is refreshed with nothing happening — **1s while a device is offline, 5s
-    /// otherwise.** The rate in force is written into the file, so a reader sizes its threshold from
-    /// what it reads rather than from a constant it has to keep in sync with this one.
-    ///
-    /// **A reader should allow at least three of these before calling the provider gone**, which is
-    /// unchanged. What changed is that three of the old ones could not see the thing they were for.
-    /// `SIGKILL` on the provider was timed again: the file freezes immediately, launchd brings it
-    /// back in about **5.8 seconds** (4 of 5 runs; one took 21.3), and — measured at the same time —
-    /// **the kernel passes that simulator's traffic for the whole of it**, 23 to 27 requests per
-    /// occurrence. The NE framework waits out a 5.1s "filter extension exit timer" before the session
-    /// even leaves `Running`. At 5s pulses the threshold is 15s, so the commonest outage is
-    /// arithmetically invisible: the tester goes on looking at an offline control while their
-    /// requests succeed, which is the sign-off this whole feature exists to prevent.
-    ///
-    /// The fast rate is spent only where it buys something. An empty rule enforces nothing, so there
-    /// is nothing to lose track of, and a file write every second for the life of the Mac would buy
-    /// exactly that.
-    static func pulseSeconds(enforcing: Bool) -> TimeInterval { enforcing ? 1 : 5 }
+    // `pulseSeconds(enforcing:)` is in `FlowIdentity.swift` with the measurements behind 1 and 5.
 
     private let lock = NSLock()
     /// The disk write happens here, never on the flow's thread. `handleNewFlow` decides whether a
@@ -276,7 +259,7 @@ private final class Heartbeat {
         // consume-once and lives on the flow path, so reading it here would race `handleNewFlow` for
         // the same edge and one of the two would publish nothing.
         let unpublished = lastPublishedRule != rule
-        if unpublished || now - lastWrite >= Heartbeat.pulseSeconds(enforcing: !rule.isEmpty) - 0.25 {
+        if unpublished || now - lastWrite >= pulseSeconds(enforcing: !rule.isEmpty) - 0.25 {
             lastWrite = now
             publish(renderLocked(rule: rule))
         }
@@ -341,25 +324,13 @@ private final class Heartbeat {
         // carried this since #639; the file did not, and the file is what a reader falls back to once
         // the replacement has taken the XPC listener away.
         json += ",\"pid\":\(ProcessInfo.processInfo.processIdentifier)"
-        json += ",\"pulseSeconds\":\(Int(Heartbeat.pulseSeconds(enforcing: !rule.isEmpty)))"
+        json += ",\"pulseSeconds\":\(Int(pulseSeconds(enforcing: !rule.isEmpty)))"
         json += ",\"rule\":\(rules)"
         json += ",\"flows\":{\"simulator\":\(flowsSimulator),\"host\":\(flowsHost)"
         json += ",\"unresolved\":\(flowsUnresolved),\"dropped\":\(flowsDropped)"
         json += ",\"idle\":\(flowsIdle),\"dnsAllowed\":\(flowsDns)}"
-        // **The store is pruned, not a copy of it** — and the difference is the whole value of the
-        // field. `filter` returns a new dictionary, so an earlier version left the counts in memory
-        // while publishing a pruned view: take a device offline, drop twelve flows, bring it back
-        // online, take it offline again, and the very next file said `{"A": 12}` before a single flow
-        // had been dropped in that episode. The agent reads that as "enforcement observed" — the
-        // exact lie this field exists to close, told with a number attached.
-        //
-        // A count also has to be per *episode*, not per provider lifetime, or "has it dropped
-        // anything since I took it offline" has no answer here.
-        //
-        // **Pruning too eagerly is the safe direction.** A transient unreadable `vendorConfiguration`
-        // would read as an empty rule and wipe the counts; they then restart from zero, and zero
-        // proves nothing by design. The other way round produces a false proof.
-        droppedByUDID = droppedByUDID.filter { rule.contains($0.key) }
+        // Assigned back on purpose — see `prunedDrops`, where the reason is written down.
+        droppedByUDID = prunedDrops(droppedByUDID, rule: rule)
         let perDevice = droppedByUDID
         let dropped = (try? JSONSerialization.data(withJSONObject: perDevice))
             .flatMap { String(data: $0, encoding: .utf8) } ?? "{}"
@@ -608,39 +579,14 @@ private func flowShape(_ flow: NEFilterFlow) -> (port: Int?, how: String, isUDP:
 
 // MARK: - pid → UDID
 
-// audit_token_t is 8 x uint32 (auid, euid, egid, ruid, rgid, pid, asid, pidversion).
-private func pidFromAuditToken(_ data: Data) -> pid_t? {
-    guard data.count == MemoryLayout<audit_token_t>.size else { return nil }
-    return data.withUnsafeBytes { pid_t(bitPattern: $0.bindMemory(to: UInt32.self)[5]) }
-}
-
-private func asidFromToken(_ data: Data) -> UInt32 {
-    guard data.count == MemoryLayout<audit_token_t>.size else { return 0 }
-    return data.withUnsafeBytes { $0.bindMemory(to: UInt32.self)[6] }
-}
+// **The decidable half of this section lives in `FlowIdentity.swift`** — the two audit-token
+// readers, `ProcIdentity`, `UDIDCache` and `extractUDID`. The line the split follows is the kernel:
+// a `Data` and a dictionary behind a lock are things a test can build, and `sysctl(KERN_PROC)` is
+// not. What is left in this file is the reads themselves.
 
 // Parent lookup goes through sysctl(KERN_PROC), which the sysext sandbox permits — measured against both
 // a host process (a Chrome helper resolved to the Chrome browser process) and simulator flows (all 231
 // resolved to launchd_sim).
-/**
- * A process's parent and its **start time**, read together from one `sysctl`.
- *
- * The start time is what makes a pid an identity. macOS reuses pids, and `launchd_sim`'s is reused
- * readily — every simulator boot starts one, and a Mac that has booted a few dozen wraps the range.
- * A cache keyed on the number alone therefore answers for a simulator that no longer exists, and the
- * consequence is not a stale label: it is `handleNewFlow` cutting a device nobody asked to cut, with
- * every log line agreeing that the udid was right. `(pid, start)` is unique for the life of the Mac.
- *
- * Not `pidversion` from the audit token, which is there at word 7 and would be the obvious source:
- * it identifies the *flow's* process, and what has to be identified is its `launchd_sim` ancestor,
- * which has no token here.
- */
-private struct ProcIdentity: Hashable {
-    let pid: pid_t
-    let startSec: Int64
-    let startUsec: Int32
-}
-
 private func procSysctl(_ pid: pid_t) -> (ppid: pid_t, identity: ProcIdentity)? {
     var mib: [Int32] = [CTL_KERN, KERN_PROC, KERN_PROC_PID, pid]
     var kp = kinfo_proc()
@@ -672,34 +618,6 @@ private func procArgs(_ pid: pid_t) -> String? {
 
     let text = buf.prefix(len).map { $0 == 0 ? UInt8(0x20) : $0 }
     return String(decoding: text, as: UTF8.self)
-}
-
-// `extractUDID(from:)` lives in `FlowIdentity.swift` — see the note there for why.
-
-// launchd_sim outlives every flow of the simulator it hosts, so caching by its identity holds for the
-// whole boot and the per-flow cost stays at the parent walk. Only positive results are cached: a host
-// flow is rejected by the launchd_sim path check before any argument read, so it never pays for the
-// miss.
-//
-// **Keyed on the identity and not the pid**, for the reason on `ProcIdentity`. Entries are never
-// evicted, which is affordable because the key is a boot rather than a process — one per simulator
-// started while the provider has been running — and because it is *wrong* to evict on the same signal
-// that inserts: a pid whose entry is dropped is looked up again and re-cached from `KERN_PROCARGS2`,
-// which reads the CURRENT process's arguments. The stale answer would simply be re-derived. Keying it
-// away is the only fix that does not depend on noticing the exit.
-private final class UDIDCache {
-    private var byRoot: [ProcIdentity: String] = [:]
-    private let lock = NSLock()
-
-    func lookup(_ root: ProcIdentity) -> String? {
-        lock.lock(); defer { lock.unlock() }
-        return byRoot[root]
-    }
-
-    func store(_ root: ProcIdentity, _ udid: String) {
-        lock.lock(); defer { lock.unlock() }
-        byRoot[root] = udid
-    }
 }
 
 private let udidCache = UDIDCache()

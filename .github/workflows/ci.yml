@@ -89,9 +89,12 @@ jobs:
   # Either way the filter buys nothing, and the cost it would save is real but modest.
   test-swift:
     runs-on: macos-15
-    # The suite is one Swift file and its tests, but the job is `brew`-free installs plus sixteen
-    # `xcodebuild` launches. Bounded because the default is 360 minutes and this is the repository's
-    # only macOS job — a hung run would hold the required check for six hours.
+    # The suite is two Swift files and their tests, but the job is `brew`-free installs plus
+    # thirty-six `xcodebuild` launches — one baseline and one per mutation, and `--mutate` is what
+    # this job runs. **That number is the thing to watch when adding a mutation**: it was sixteen
+    # when the job was written, and every entry in `run-tests.sh` is now a cost paid on every push.
+    # Bounded because the default is 360 minutes and this is the repository's only macOS job — a
+    # hung run would hold the required check for six hours.
     timeout-minutes: 20
     permissions:
       contents: read

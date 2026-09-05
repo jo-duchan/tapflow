@@ -297,62 +297,6 @@ private func disableFilter() {
     }
 }
 
-/// A comma-separated udid list behind `flag`. Absent is `[]`; **present with no value is an error**,
-/// because `--add` followed by another flag used to consume that flag as a udid.
-private func parseUDIDs(_ flag: String) throws -> [String] {
-    let args = CommandLine.arguments
-    guard let i = args.firstIndex(of: flag) else { return [] }
-    guard i + 1 < args.count, !args[i + 1].hasPrefix("--") else { throw ArgError.missingValue(flag) }
-    return args[i + 1].split(separator: ",").map(String.init).filter { !$0.isEmpty }
-}
-
-private enum ArgError: Error { case missingValue(String), unknown(String) }
-
-/// Every flag this build accepts. Anything else is `badArguments`.
-private let knownFlags: Set<String> = ["--install", "--confirm", "--off", "--add", "--remove"]
-
-/**
- * Every argument has to be one this build consumes — **including the ones that are not flags.**
- *
- * Checking only `--`-prefixed words left the same hole one door over: `TapflowNetFilter typo` matched
- * no flag, so `clearAll` came out true and the run wiped the rule. A word this binary does not
- * understand must never be the reason a rule is emptied.
- */
-private func rejectUnknownArguments() throws {
-    var i = 1
-    let args = CommandLine.arguments
-    while i < args.count {
-        let arg = args[i]
-        if arg.hasPrefix("--") {
-            if !knownFlags.contains(arg) { throw ArgError.unknown(arg) }
-            // `--add` and `--remove` take a value; the mode flags do not.
-            if arg == "--add" || arg == "--remove" { i += 1 }
-        } else {
-            throw ArgError.unknown(arg)
-        }
-        i += 1
-    }
-}
-
-/**
- * **The rule is a delta the caller names, not a set it replaces.**
- *
- * Replacing was the defect. The agent wrote its *whole* offline set on every run, and `arm()` runs on
- * every device boot knowing nothing — so a second agent starting put every device the first had taken
- * offline back online, silently, while its tester watched an offline control over working traffic.
- *
- * A delta cannot do that: an agent names only the devices it is handling, so it removes nothing it
- * does not know about. The cleanup the unconditional write used to provide survives in a more precise
- * form — `arm(udid)` names that udid in `--remove`, and arm runs whenever a device boots, so a rule
- * left by a dead process is cleared the next time that device comes up rather than by wiping the host.
- */
-private func mergeRule(existing: [String], add: [String], remove: [String]) -> [String] {
-    var out = Set(existing)
-    out.formUnion(add)
-    out.subtract(remove)
-    return out.sorted()
-}
-
 // Rule injection goes through NEFilterProviderConfiguration.vendorConfiguration — the channel the
 // framework provides for exactly this, and the one that survives a provider restart, since the
 // provider re-reads it at `startFilter`.
@@ -464,9 +408,9 @@ let add: [String]
 let remove: [String]
 let clearAll: Bool
 do {
-    try rejectUnknownArguments()
-    add = try parseUDIDs("--add")
-    remove = try parseUDIDs("--remove")
+    try rejectUnknownArguments(CommandLine.arguments)
+    add = try parseUDIDs(CommandLine.arguments, flag: "--add")
+    remove = try parseUDIDs(CommandLine.arguments, flag: "--remove")
     clearAll = !CommandLine.arguments.contains("--add") && !CommandLine.arguments.contains("--remove")
 } catch ArgError.unknown(let flag) {
     die(.badArguments, "unknown argument \(flag) — this build does not understand it")
