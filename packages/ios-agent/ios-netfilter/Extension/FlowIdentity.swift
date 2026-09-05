@@ -284,9 +284,16 @@ enum FlowVerdict: Equatable { case allow(Outcome), drop(Outcome) }
  * close: a fresh state file proves the rule arrived, not that anything stopped, so a device whose
  * flows consistently fail attribution keeps talking while the file stays correct.
  *
- * `attribution` is `nil` exactly when no walk ran. In production that is the empty-rule path, which
- * returns above it; a `nil` arriving with a rule in force is not reachable today and is allowed
- * rather than trapped, because a verdict function is the wrong place to decide a flow cannot happen.
+ * **Two branches here are unreachable from the only call site, deliberately.** `handleNewFlow`
+ * returns before calling this when the rule is empty, and the `Attribution` it passes is not
+ * optional — so `rule.isEmpty` and `attribution == nil` are fallbacks that make this function total,
+ * not paths production takes.
+ *
+ * The duplication is the price of a real thing: `Provider.swift`'s early return exists for the
+ * *walk*, not for the verdict. #685 measured 125,989 parent walks avoided by skipping attribution
+ * when nothing is offline, and moving that check in here would restore every one of them. So both
+ * sides keep it, the tests that grade these branches say what they are, and nothing here is allowed
+ * to read as if the shipping binary depended on it.
  */
 /// `shape` is an `@autoclosure` so reading the endpoint stays on the branch that needs it — the
 /// original code computed it inside `if drop`, and folding the decision into one function must not
@@ -374,10 +381,16 @@ struct FlowCounts: Equatable {
  * pinned somewhere: the agent picks fields out of this by name, and a rename here is a silent
  * failure there.
  *
- * **`counts` is `inout` so the prune cannot be separated from the render.** An earlier shape returned
- * the pruned map for the caller to assign back, and a caller that dropped the assignment re-created
- * the bug the prune exists to close — `{"A": 12}` published before a single flow had been dropped in
- * that episode — with every test still green. Now the only way to render is to prune.
+ * **`counts` is `inout` so the CALLER cannot forget the prune** — and that is all it buys. An earlier
+ * shape returned the pruned map for the caller to assign back, and a caller that dropped the
+ * assignment re-created the bug the prune exists to close: `{"A": 12}` published before a single flow
+ * had been dropped in that episode.
+ *
+ * **It does not stop this function serialising the wrong copy.** A review measured that: keep the
+ * assignment, serialise the pre-prune map, and all 68 tests pass while the file carries a count for a
+ * device that left the rule. The assignment and the serialisation are still two statements. What
+ * closes it is a test on the rendered JSON rather than on the retained map, which is why
+ * `testRenderingPrunesTheCountsItRenders` parses what comes back.
  *
  * The clock and the pid are parameters rather than reads, which is what makes this decidable at all.
  */
@@ -441,8 +454,13 @@ func pulseIsDue(unpublished: Bool, now: Double, lastWrite: Double, enforcing: Bo
  * failing, because the loud "no writable path" line never fires.
  *
  * Measured: the first candidate works. `/tmp` has **not** been exercised, because the loop returns on
- * the first success and never reaches it. The order is what the agent's own fallback list mirrors
- * (`SimulatorNetwork.ts`), so the two must not drift.
+ * the first success and never reaches it.
+ *
+ * **This list exists three times and nothing compiles all three** — here, `FILTER_STATE_FILES` in
+ * `packages/ios-agent/src/SimulatorNetwork.ts`, and again in `packages/cli/src/lib/net-filter.ts`.
+ * A Swift test can pin this copy and no more, so the cross-language half is a node check in
+ * `scripts/__tests__/` that reads all three and compares them. Without it the agent can be sent
+ * looking in a directory the provider never writes, with every suite green.
  */
 let stateFileCandidates = [
     "/Library/Application Support/tapflow",

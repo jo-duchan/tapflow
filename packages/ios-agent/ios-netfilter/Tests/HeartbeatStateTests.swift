@@ -89,6 +89,16 @@ final class HeartbeatStateTests: XCTestCase {
         XCTAssertEqual(c.simulator, 2)
         XCTAssertEqual(c.dropped, 1, "an allowed simulator flow is not a drop")
         XCTAssertEqual(c.droppedByUDID, [udid: 1])
+
+        // **Counted twice on purpose: these are accumulators, and one sample cannot tell an
+        // accumulator from an assignment.** A review measured it — turning `dropped += 1`,
+        // `walks += 1`, `host += 1`, `walkNanos +=` or `droppedByUDID[udid] +=` into `=` left every
+        // assertion in this file passing. A per-device count pinned at 1 makes the agent's
+        // "enforcement observed" line say one flow forever.
+        c.record(.simulator(dropped: true, udid: udid), walkNanos: nil)
+        XCTAssertEqual(c.dropped, 2)
+        XCTAssertEqual(c.droppedByUDID, [udid: 2])
+        XCTAssertEqual(c.simulator, 3)
     }
 
     /// **`idle` does not fold into `host`.** Those flows were never attributed — the walk was skipped
@@ -97,9 +107,10 @@ final class HeartbeatStateTests: XCTestCase {
     func testTheOtherThreeOutcomesEachHaveTheirOwnCounter() {
         var c = FlowCounts()
         c.record(.host, walkNanos: nil)
+        c.record(.host, walkNanos: nil)
         c.record(.unresolved, walkNanos: nil)
         c.record(.idle, walkNanos: nil)
-        XCTAssertEqual(c.host, 1)
+        XCTAssertEqual(c.host, 2, "counted twice: one sample cannot tell `+=` from `=`")
         XCTAssertEqual(c.unresolved, 1)
         XCTAssertEqual(c.idle, 1)
         XCTAssertEqual(c.simulator, 0)
@@ -113,6 +124,14 @@ final class HeartbeatStateTests: XCTestCase {
         c.record(.host, walkNanos: nil)
         XCTAssertEqual(c.walks, 1)
         XCTAssertEqual(c.averageWalkMicros, 2.0, accuracy: 0.001)
+
+        // **A second walk, because `walkNanos = nanos` reports the LAST walk over the walk count and
+        // one sample cannot see that.** This average is the number that justified skipping
+        // attribution on an empty rule (#641), so it has to be an average.
+        c.record(.host, walkNanos: 4_000)
+        XCTAssertEqual(c.walks, 2)
+        XCTAssertEqual(c.averageWalkMicros, 3.0, accuracy: 0.001)
+
         XCTAssertEqual(FlowCounts().averageWalkMicros, 0, "no walks is zero, not a division by zero")
     }
 
@@ -155,12 +174,20 @@ final class HeartbeatStateTests: XCTestCase {
     /// **The prune happens inside the render, and this is what says so.** An earlier shape returned
     /// the pruned map for the caller to assign back; a caller that dropped the assignment re-created
     /// the `{"A": 12}`-before-a-single-drop bug with every test green.
-    func testRenderingPrunesTheCountsItRenders() {
+    /// **Both halves, and the published one is the half that matters.** Asserting only the retained
+    /// map leaves the render free to serialise the pre-prune copy: a review measured that mutation
+    /// passing all 68 tests while the file carried a count for a device that had left the rule —
+    /// which `SimulatorNetwork.ts` reads as "enforcement observed" before a single flow was dropped.
+    func testRenderingPrunesTheCountsItRenders() throws {
         var counts = FlowCounts()
         counts.record(.simulator(dropped: true, udid: "A"), walkNanos: nil)
         counts.record(.simulator(dropped: true, udid: "B"), walkNanos: nil)
-        _ = renderState(&counts, rule: ["B"], pid: 1, at: 0)
+        let json = renderState(&counts, rule: ["B"], pid: 1, at: 0)
+
         XCTAssertEqual(counts.droppedByUDID, ["B": 1], "A left the rule, so its count cannot survive")
+        let obj = try XCTUnwrap(try JSONSerialization.jsonObject(with: Data(json.utf8)) as? [String: Any])
+        XCTAssertEqual(obj["droppedByDevice"] as? [String: Int], ["B": 1],
+                       "the published map is what the agent reads, and it must be the pruned one")
     }
 
     /// A rule carrying a quote or a backslash used to make the whole file invalid JSON, and an
@@ -188,8 +215,11 @@ final class HeartbeatStateTests: XCTestCase {
     func testARuleChangeIsDueImmediatelyAndAnUnchangedRuleIsRateLimited() {
         XCTAssertTrue(writeIsDue(force: true, now: 100.0, lastWrite: 99.9))
         XCTAssertFalse(writeIsDue(force: false, now: 100.0, lastWrite: 99.9))
+        // **Bounded from both sides.** With only a lower bound the threshold could be loosened to
+        // 0.5 and every assertion here would still pass, silently doubling the write rate the
+        // agent's staleness math is sized against. `99.5` is what refuses that.
+        XCTAssertFalse(writeIsDue(force: false, now: 100.0, lastWrite: 99.5))
         XCTAssertTrue(writeIsDue(force: false, now: 100.0, lastWrite: 99.0))
-        XCTAssertTrue(writeIsDue(force: false, now: 100.0, lastWrite: 98.0))
     }
 
     /// **The 0.25 is the timer's leeway, not a rounding.** Without it a 1s tick against a 1s
@@ -218,8 +248,10 @@ final class HeartbeatStateTests: XCTestCase {
     /// provider runs as root. That rules out `/var/root` and root's `NSTemporaryDirectory()`, where a
     /// write succeeds, logs a cheerful path, and is invisible to the only reader.
     ///
-    /// The order mirrors the agent's own fallback list in `SimulatorNetwork.ts`. The two must not
-    /// drift, and nothing but this compares them.
+    /// **This pins the Swift copy and nothing more.** The same list exists twice more in TypeScript —
+    /// `FILTER_STATE_FILES` in `packages/ios-agent/src/SimulatorNetwork.ts` and again in
+    /// `packages/cli/src/lib/net-filter.ts` — and a Swift test cannot read either. The cross-language
+    /// half is `scripts/__tests__/netfilterStatePaths.test.mjs`, which reads all three.
     func testTheCandidatesAreTheTwoTheAgentAlsoLooksIn() {
         XCTAssertEqual(stateFileCandidates,
                        ["/Library/Application Support/tapflow", "/tmp"])

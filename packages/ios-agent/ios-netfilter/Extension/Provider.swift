@@ -423,7 +423,19 @@ class Provider: NEFilterDataProvider {
         //    Failing closed on a transient `sysctl` error would cut the user's own browser, which is
         //    worse than the hole. What was wrong before was that the hole was invisible — logged
         //    identically to a host flow and absent from every counter.
-        let verdict = decideFlow(rule: rule, attribution: attribution, shape: flowShape(flow))
+        // **Read at most once, and only where a branch needs it.** `decideFlow` takes an
+        // `@autoclosure` so an allowed flow never pays for the endpoint — but the log lines below
+        // need the same values the verdict was made from, and calling `flowShape` again would read a
+        // live `NEFilterSocketFlow` a second time. Two reads are not provably equal, and the DROP
+        // line is the measurement this build exists to take.
+        var cachedShape: FlowShape?
+        func shape() -> FlowShape {
+            if let cachedShape { return cachedShape }
+            let read = flowShape(flow)
+            cachedShape = read
+            return read
+        }
+        let verdict = decideFlow(rule: rule, attribution: attribution, shape: shape())
         let outcome: Outcome
         let allow: Bool
         switch verdict {
@@ -441,18 +453,25 @@ class Provider: NEFilterDataProvider {
             os_log("handleNewFlow pid=%{public}d udid=? asid=%{public}u verdict=allow(UNRESOLVED: %{public}@)",
                    log: log, type: .error, pid, asid, why)
         case .dns:
-            let shape = flowShape(flow)
-            os_log("handleNewFlow pid=%{public}d asid=%{public}u verdict=allow(dns port=%{public}d via %{public}@)",
-                   log: log, type: .default, pid, asid, shape.port ?? -1, shape.how)
+            // **The udid is recovered from the attribution, because `Outcome.dns` does not carry
+            // one.** This line records the one hole deliberately left in the offline guarantee, and a
+            // refactor briefly dropped the field — leaving a log that says a device was let through
+            // to resolve a name without saying which device. `pid` does not answer it: that is the
+            // process inside the simulator, not the simulator.
+            var udid = "?"
+            if case .simulator(let attributed) = attribution { udid = attributed }
+            let read = shape()
+            os_log("handleNewFlow pid=%{public}d udid=%{public}@ asid=%{public}u verdict=allow(dns port=%{public}d via %{public}@)",
+                   log: log, type: .default, pid, udid, asid, read.port ?? -1, read.how)
         case .simulator(let dropped, let udid) where dropped:
             // **The measurement this build exists to take** (#607 A2-0): whether the endpoint is
             // readable at all on this OS, and through which property. Logged for every dropped flow
             // rather than sampled, because a port that reads as `-1` here is the difference between
             // this feature working and not, and it must not depend on catching a sample.
-            let shape = flowShape(flow)
+            let read = shape()
             os_log("handleNewFlow pid=%{public}d udid=%{public}@ asid=%{public}u verdict=DROP port=%{public}d via %{public}@ udp=%{public}d out=%{public}d",
-                   log: log, type: .default, pid, udid, asid, shape.port ?? -1, shape.how,
-                   shape.isUDP ? 1 : 0, shape.isOutbound ? 1 : 0)
+                   log: log, type: .default, pid, udid, asid, read.port ?? -1, read.how,
+                   read.isUDP ? 1 : 0, read.isOutbound ? 1 : 0)
         case .simulator(_, let udid):
             os_log("handleNewFlow pid=%{public}d udid=%{public}@ asid=%{public}u verdict=allow",
                    log: log, type: .default, pid, udid, asid)

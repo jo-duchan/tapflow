@@ -15,6 +15,12 @@ final class FlowVerdictTests: XCTestCase {
 
     /// The empty rule enforces nothing, so no flow is judged and none is attributed. `idle` rather
     /// than `host` because nothing decided the flow belonged to the Mac.
+    ///
+    /// **Production does not reach this branch, and saying so is part of the test.** `handleNewFlow`
+    /// returns before calling `decideFlow` when the rule is empty — the early return is there for the
+    /// *walk*, which #685 measured at 125,989 avoided parent walks, not for the verdict. So this
+    /// grades a fallback that keeps the function total, and the duplication between the two sides is
+    /// deliberate rather than an oversight nobody noticed.
     func testAnEmptyRuleAllowsWithoutJudgingAnything() {
         XCTAssertEqual(decideFlow(rule: [], attribution: .simulator(udid), shape: https), .allow(.idle))
         XCTAssertEqual(decideFlow(rule: [], attribution: nil, shape: https), .allow(.idle))
@@ -55,7 +61,13 @@ final class FlowVerdictTests: XCTestCase {
     /// **The endpoint is read only where it can change the answer.** It costs a property read per
     /// flow, and the original code paid it inside `if drop` for that reason; folding the decision
     /// into one function must not quietly move that onto every flow. `shape` is an `@autoclosure`,
-    /// and this is what proves the laziness survived.
+    /// and this counts its calls.
+    ///
+    /// **What it proves stops at this function's edge.** The first version of the fold read
+    /// `flowShape` again in `handleNewFlow`'s logging, so the drop and DNS paths read a live
+    /// `NEFilterSocketFlow` twice and the log named values the verdict was not made from — with this
+    /// test green throughout. The call site memoises now, and no test here can see that: nothing
+    /// compiles `Provider.swift`.
     func testTheEndpointIsNotReadOnAPathThatCannotUseIt() {
         var reads = 0
         func shape() -> FlowShape { reads += 1; return https }

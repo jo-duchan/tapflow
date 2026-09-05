@@ -193,17 +193,30 @@ mutate "counts: drop not per-device" 's/droppedByUDID\[udid, default: 0\] += 1//
 mutate "counts: allowed is a drop" 's/if dropped {/if true {/'                                    || fails=1
 mutate "counts: a skipped walk counts" 's/if let nanos = walkNanos {/let nanos = walkNanos ?? 0; if true {/' || fails=1
 mutate "counts: average by zero"   's/walks > 0 ? Double(walkNanos)/walks >= 0 ? Double(walkNanos)/' || fails=1
+# **Every accumulator, turned into an assignment.** A review found all five of these surviving: one
+# sample cannot tell `+=` from `=`, and the tests recorded each outcome once. A per-device count
+# pinned at 1 makes the agent's "enforcement observed" line say one flow forever.
+mutate "counts: dropped assigned"  's/self.dropped += 1/self.dropped = 1/'                        || fails=1
+mutate "counts: per-device assigned" 's/droppedByUDID\[udid, default: 0\] += 1/droppedByUDID[udid] = 1/' || fails=1
+mutate "counts: host assigned"     's/case .host: host += 1/case .host: host = 1/'                 || fails=1
+mutate "counts: walks assigned"    's/walks += 1/walks = 1/'                                       || fails=1
+mutate "counts: nanos assigned"    's/self.walkNanos += nanos/self.walkNanos = nanos/'             || fails=1
 
 # --- the state file ---
 mutate "render: clock is read"     's/json = "{\\"at\\":\\(epochSeconds)"/json = "{\\"at\\":\\(Int(Date().timeIntervalSince1970))"/' || fails=1
 mutate "render: pid dropped"       's/,\\"pid\\":\\(pid)//'                                       || fails=1
 mutate "render: rule truncated"    's/withJSONObject: rule.sorted()/withJSONObject: rule.sorted().map { String($0.prefix(1)) }/' || fails=1
 mutate "render: prune not applied" 's/counts.droppedByUDID = prunedDrops(/_ = prunedDrops(/'      || fails=1
+# **The prune applied, and the pre-prune copy published anyway.** `inout` stops the CALLER forgetting;
+# it does not stop this function serialising the wrong map, and asserting only the retained map left
+# that invisible. This is the mutation that says the test looks at what the agent actually reads.
+mutate "render: stale map published" 's/counts.droppedByUDID = prunedDrops(counts.droppedByUDID, rule: rule)/let stale = counts.droppedByUDID; counts.droppedByUDID = prunedDrops(counts.droppedByUDID, rule: rule)/; s/withJSONObject: counts.droppedByUDID))/withJSONObject: stale))/' || fails=1
 mutate "render: always idle rate"  's/pulseSeconds(enforcing: !rule.isEmpty)/pulseSeconds(enforcing: false)/' || fails=1
 
 # --- when a write is due ---
 mutate "due: force ignored"        's/force || now - lastWrite >= 1.0/now - lastWrite >= 1.0/'    || fails=1
 mutate "due: no rate limit"        's/force || now - lastWrite >= 1.0/true/'                      || fails=1
+mutate "due: threshold halved"     's/now - lastWrite >= 1.0/now - lastWrite >= 0.5/'             || fails=1
 mutate "pulse: no leeway"          's/pulseSeconds(enforcing: enforcing) - 0.25/pulseSeconds(enforcing: enforcing)/' || fails=1
 mutate "pulse: unpublished ignored" 's/unpublished || now - lastWrite/now - lastWrite/'           || fails=1
 
