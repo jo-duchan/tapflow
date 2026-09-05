@@ -231,3 +231,220 @@ func pulseSeconds(enforcing: Bool) -> TimeInterval { enforcing ? 1 : 5 }
 func prunedDrops(_ counts: [String: Int], rule: Set<String>) -> [String: Int] {
     counts.filter { rule.contains($0.key) }
 }
+
+// MARK: - what a flow turned out to be, and what that means
+
+/**
+ * What a flow's process turned out to be — **three outcomes, where the code used to have two**.
+ *
+ * `udidForPID` returned `String?`, and `nil` meant both "this is the Mac's own traffic" and "the
+ * walk failed". They were logged identically and counted not at all, so a simulator that should have
+ * been offline could reach the network because a `sysctl` returned an error, with the log calling it
+ * a host flow (#642).
+ *
+ * The walk that produces this reads the live kernel and stays in `Provider.swift`. What is decidable
+ * is what the answer *means*, which is `decideFlow` below.
+ */
+enum Attribution: Equatable {
+    case simulator(String)
+    case host
+    case unresolved(String)
+}
+
+/// What `flowShape` reads off an `NEFilterFlow`. A value, so the verdict can be decided without one —
+/// `NEFilterSocketFlow` cannot be constructed in a test, which is the whole reason this type exists.
+struct FlowShape: Equatable {
+    let port: Int?
+    let how: String
+    let isUDP: Bool
+    let isOutbound: Bool
+}
+
+/// Which bucket a flow lands in for the heartbeat's counters.
+///
+/// **`idle` is its own case and does not fold into `host`.** Those flows were never attributed — the
+/// walk was skipped because the rule was empty. Counting them as host flows would put a number in the
+/// file meaning "we decided this belonged to the Mac", when nothing decided anything. The file is read
+/// to diagnose, and a diagnosis built on an invented decision is worse than a missing one.
+enum Outcome: Equatable { case simulator(dropped: Bool, udid: String), host, unresolved, idle, dns }
+
+/// The verdict and the bucket together, because they are one decision and were one `switch`.
+enum FlowVerdict: Equatable { case allow(Outcome), drop(Outcome) }
+
+/**
+ * **Whether this flow is allowed, and what it is counted as.**
+ *
+ * The half of `handleNewFlow` that does not touch the kernel. Everything it needs has already been
+ * read by the time it is called: the rule from `vendorConfiguration`, the attribution from the parent
+ * walk, and the endpoint from the flow.
+ *
+ * **It fails open on purpose, in two places.** An unresolved walk allows, because failing closed on a
+ * transient `sysctl` error would cut the user's own browser; and a `nil` attribution — which means the
+ * caller had no audit token — allows for the same reason. That is the gap `droppedByUDID` exists to
+ * close: a fresh state file proves the rule arrived, not that anything stopped, so a device whose
+ * flows consistently fail attribution keeps talking while the file stays correct.
+ *
+ * `attribution` is `nil` exactly when no walk ran. In production that is the empty-rule path, which
+ * returns above it; a `nil` arriving with a rule in force is not reachable today and is allowed
+ * rather than trapped, because a verdict function is the wrong place to decide a flow cannot happen.
+ */
+/// `shape` is an `@autoclosure` so reading the endpoint stays on the branch that needs it — the
+/// original code computed it inside `if drop`, and folding the decision into one function must not
+/// quietly move that work onto every flow. Call sites read the same either way.
+func decideFlow(rule: Set<String>, attribution: Attribution?, shape: @autoclosure () -> FlowShape) -> FlowVerdict {
+    // The rule is read before the audit token, so the idle path touches neither.
+    if rule.isEmpty { return .allow(.idle) }
+    guard let attribution else { return .allow(.unresolved) }
+    switch attribution {
+    case .host: return .allow(.host)
+    case .unresolved: return .allow(.unresolved)
+    case .simulator(let udid):
+        guard rule.contains(udid) else { return .allow(.simulator(dropped: false, udid: udid)) }
+        let shape = shape()
+        if passesRegardlessOfRule(remotePort: shape.port, isUDP: shape.isUDP, isOutbound: shape.isOutbound) {
+            return .allow(.dns)
+        }
+        return .drop(.simulator(dropped: true, udid: udid))
+    }
+}
+
+// MARK: - the numbers the state file carries
+
+/**
+ * Everything the heartbeat counts, as a value.
+ *
+ * It was nine `private var`s on `Heartbeat`, which meant the arithmetic below could only be exercised
+ * by standing up the whole object — and that object writes a file as root. Pulled out so the counting
+ * is decidable on its own; the lock, the queue and the write stay where they were.
+ */
+struct FlowCounts: Equatable {
+    var simulator = 0
+    var host = 0
+    var unresolved = 0
+    var dropped = 0
+    var idle = 0
+    /// Flows an offline simulator was allowed anyway because they are name resolution.
+    ///
+    /// **A subset of `simulator`, like `dropped` is** — the first draft made it a sibling instead, so
+    /// `simulator − dropped` silently stopped meaning "allowed simulator flows" for anyone reading the
+    /// file. It stays out of `dropped` because that is the number the agent reads as evidence the
+    /// filter is enforcing, and a DNS allow is not that.
+    var dns = 0
+    /**
+     * Drops, per device (#654).
+     *
+     * **`unresolved` is not here and never can be.** Unresolved *means* the walk could not name an
+     * owner; bucketing it per device would invent the attribution whose absence defines it.
+     */
+    var droppedByUDID: [String: Int] = [:]
+    var walks = 0
+    var walkNanos: UInt64 = 0
+
+    /// Count one flow. **Only a walk that ran is a walk** — counting the `pid <= 0` short circuit
+    /// diluted the average with samples that measured nothing, so `walkNanos` is `nil` there.
+    mutating func record(_ outcome: Outcome, walkNanos: UInt64?) {
+        switch outcome {
+        case .simulator(let dropped, let udid):
+            simulator += 1
+            if dropped {
+                self.dropped += 1
+                droppedByUDID[udid, default: 0] += 1
+            }
+        case .host: host += 1
+        case .unresolved: unresolved += 1
+        case .idle: idle += 1
+        case .dns:
+            simulator += 1
+            dns += 1
+        }
+        if let nanos = walkNanos {
+            walks += 1
+            self.walkNanos += nanos
+        }
+    }
+
+    var averageWalkMicros: Double { walks > 0 ? Double(walkNanos) / Double(walks) / 1000.0 : 0 }
+}
+
+/**
+ * **The state file's body — the contract `SimulatorNetwork.ts` parses.**
+ *
+ * Hand-built rather than `Codable` because the field order is what a person reads first when
+ * diagnosing, and because two of the values are already JSON. What matters is that the shape is
+ * pinned somewhere: the agent picks fields out of this by name, and a rename here is a silent
+ * failure there.
+ *
+ * **`counts` is `inout` so the prune cannot be separated from the render.** An earlier shape returned
+ * the pruned map for the caller to assign back, and a caller that dropped the assignment re-created
+ * the bug the prune exists to close — `{"A": 12}` published before a single flow had been dropped in
+ * that episode — with every test still green. Now the only way to render is to prune.
+ *
+ * The clock and the pid are parameters rather than reads, which is what makes this decidable at all.
+ */
+func renderState(_ counts: inout FlowCounts, rule: Set<String>, pid: Int32, at epochSeconds: Int) -> String {
+    // The rule arrives through `vendorConfiguration`, which this provider does not write and cannot
+    // constrain. Hand-quoting it made the whole file invalid JSON for any value carrying a quote or a
+    // backslash, and an unparseable file reads as "not enforcing" — the wrong answer, stated
+    // confidently, with nothing in the log to say why.
+    let rules = (try? JSONSerialization.data(withJSONObject: rule.sorted()))
+        .flatMap { String(data: $0, encoding: .utf8) } ?? "[]"
+    var json = "{\"at\":\(epochSeconds)"
+    // **Which provider wrote this.** A replacement leaves two of them briefly alive, both publishing
+    // to this one path, and only one is the session the kernel consults.
+    json += ",\"pid\":\(pid)"
+    json += ",\"pulseSeconds\":\(Int(pulseSeconds(enforcing: !rule.isEmpty)))"
+    json += ",\"rule\":\(rules)"
+    json += ",\"flows\":{\"simulator\":\(counts.simulator),\"host\":\(counts.host)"
+    json += ",\"unresolved\":\(counts.unresolved),\"dropped\":\(counts.dropped)"
+    json += ",\"idle\":\(counts.idle),\"dnsAllowed\":\(counts.dns)}"
+    counts.droppedByUDID = prunedDrops(counts.droppedByUDID, rule: rule)
+    let dropped = (try? JSONSerialization.data(withJSONObject: counts.droppedByUDID))
+        .flatMap { String(data: $0, encoding: .utf8) } ?? "{}"
+    json += ",\"droppedByDevice\":\(dropped)"
+    json += ",\"attribution\":{\"walks\":\(counts.walks)"
+    json += ",\"avgMicros\":\(String(format: "%.1f", counts.averageWalkMicros))}}\n"
+    return json
+}
+
+// MARK: - when a write is due
+
+/// The per-flow rate limit. `force` is a rule change, which publishes whatever the clock says because
+/// a reader waiting on a confirmation should not wait out a rate limit for it.
+func writeIsDue(force: Bool, now: Double, lastWrite: Double) -> Bool {
+    force || now - lastWrite >= 1.0
+}
+
+/**
+ * The timer's rate limit. **One timer serves both rates** — it ticks at the fast one and this decides
+ * whether a write is due, so a rule change takes effect on the next tick with nothing to reschedule.
+ *
+ * The 0.25 is the timer's leeway: without it a 1s tick against a 1s threshold misses by a few
+ * milliseconds and writes every *other* tick, which would halve the rate this exists to set.
+ *
+ * **A rule this file has not published yet is due whatever the clock says.** `note` forces one on the
+ * same edge, which covers a Mac with traffic — but a Mac with no connections at all has only this
+ * timer, and the threshold it checks is the *idle* rate whenever the new rule is empty. Bringing the
+ * last device back online there published nothing for 4.75 seconds, and the agent's confirmation
+ * reads that silence as the rule not having landed.
+ */
+func pulseIsDue(unpublished: Bool, now: Double, lastWrite: Double, enforcing: Bool) -> Bool {
+    unpublished || now - lastWrite >= pulseSeconds(enforcing: enforcing) - 0.25
+}
+
+/**
+ * Where the state file is tried, in order — **and every one of them has to be readable by the agent**,
+ * which runs as the user while the provider runs as root.
+ *
+ * That rules out the obvious-looking ones. `NSHomeDirectory()` for root is `/var/root`, which is
+ * `drwxr-x---`, and root's `NSTemporaryDirectory()` is a `drwx------` folder under `/var/folders`. A
+ * file written there succeeds, logs a cheerful path, and is invisible to the only reader — worse than
+ * failing, because the loud "no writable path" line never fires.
+ *
+ * Measured: the first candidate works. `/tmp` has **not** been exercised, because the loop returns on
+ * the first success and never reaches it. The order is what the agent's own fallback list mirrors
+ * (`SimulatorNetwork.ts`), so the two must not drift.
+ */
+let stateFileCandidates = [
+    "/Library/Application Support/tapflow",
+    "/tmp",
+]
