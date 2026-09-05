@@ -1,6 +1,6 @@
 import { execFile } from 'child_process'
-import { existsSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'fs'
-import { join } from 'path'
+import { closeSync, constants, existsSync, fstatSync, mkdirSync, openSync, readFileSync, rmSync, statSync, writeFileSync } from 'fs'
+import { dirname, join } from 'path'
 import { promisify } from 'util'
 import type { NetworkStatePayload } from '@tapflowio/agent-core'
 
@@ -284,6 +284,8 @@ export class SimulatorNetwork {
   private readonly confirmDeadlineMs: number
   private enforcementLost: (udid: string) => void
   private readonly livenessIntervalMs: number
+  /** State files already reported as untrusted, so the warning is not repeated on every read. */
+  private readonly refused = new Set<string>()
 
   constructor(
     private readonly simctl: SimctlForNetwork,
@@ -949,9 +951,10 @@ export class SimulatorNetwork {
    *  anything, so it is treated as absent rather than as a reason to stop looking. */
   private readFilterState(): FilterStateFile | undefined {
     for (const path of this.stateFiles) {
-      if (!existsSync(path)) continue
+      const text = this.readIfProviderWrote(path)
+      if (text === undefined) continue
       try {
-        const raw = JSON.parse(readFileSync(path, 'utf8')) as Partial<FilterStateFile>
+        const raw = JSON.parse(text) as Partial<FilterStateFile>
         if (typeof raw.at !== 'number' || !Array.isArray(raw.rule)) continue
         return {
           at: raw.at,
@@ -971,6 +974,56 @@ export class SimulatorNetwork {
       }
     }
     return undefined
+  }
+
+  /**
+   * The file's contents, or nothing when anyone on this Mac could have written it.
+   *
+   * The provider runs as root and writes with `.atomic`, so what it leaves is a root-owned regular
+   * file. Its fallback is `/tmp`, and `/tmp` is world-writable: any local process can put a file
+   * there with a current timestamp and a rule naming a device, and this class read it as the
+   * provider's own publication. Since #733 that publication confirms a rule write — which is what
+   * lets layers 2 and 3 go on — so a forged file could draw "offline" over a simulator whose traffic
+   * is flowing, the sign-off failure the feature exists to prevent (#734). Reachable only while the
+   * protected file is absent, which is the state of a Mac whose filter is stopped or never installed.
+   *
+   * **The rule is about the directory, not about which path this is.** A file in a directory that
+   * anyone but its owner can write to is believed only when root owns it and nobody else can change
+   * it. The protected path is untouched, and so is a test's temp directory: nobody but the owner can
+   * write to either, which is what lets a test keep injecting a file it wrote itself. Judged through
+   * the descriptor that is then read, so the file that was checked is the file that is believed, and
+   * without following a symlink, which the provider never leaves. Liveness reads through here as
+   * well, so a forged file cannot delay an `enforcement-lost` report either.
+   *
+   * `O_NONBLOCK` is load-bearing: opening a FIFO read-only blocks until a writer arrives, and the
+   * `isFile()` check that would refuse it runs after the open — so a `mkfifo` at the fallback path
+   * held the agent's whole thread, streaming and relay connection included. A regular file is
+   * unaffected by the flag; the FIFO open returns at once and is refused where it was meant to be.
+   */
+  private readIfProviderWrote(path: string): string | undefined {
+    let fd: number
+    try {
+      fd = openSync(path, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK)
+    } catch {
+      return undefined
+    }
+    try {
+      const file = fstatSync(fd)
+      if (!file.isFile()) return undefined
+      if ((statSync(dirname(path)).mode & 0o022) !== 0 && (file.uid !== 0 || (file.mode & 0o022) !== 0)) {
+        // Once per path: this is polled ten times a second while a confirmation waits.
+        if (!this.refused.has(path)) {
+          this.refused.add(path)
+          console.warn(`[network] ignoring ${path}: in a world-writable directory and not written by root`)
+        }
+        return undefined
+      }
+      return readFileSync(fd, 'utf8')
+    } catch {
+      return undefined
+    } finally {
+      closeSync(fd)
+    }
   }
 
   // ── layer 1 ────────────────────────────────────────────────────────────────

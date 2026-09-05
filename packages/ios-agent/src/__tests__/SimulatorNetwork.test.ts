@@ -1,4 +1,5 @@
-import { appendFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'fs'
+import { execFileSync } from 'child_process'
+import { appendFileSync, chmodSync, chownSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'fs'
 import { tmpdir } from 'os'
 import { join } from 'path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -156,7 +157,7 @@ describe('SimulatorNetwork', () => {
   /** Every device this test reported as no longer enforced. */
   let lost: string[]
 
-  const make = (hostBinary?: string, confirmDeadlineMs?: number) => {
+  const make = (hostBinary?: string, confirmDeadlineMs?: number, stateFiles?: string[]) => {
     const n = new SimulatorNetwork(simctl, {
       filterHostBinary: hostBinary ?? fakeHostBinary(dir, log),
       conditionDir: dir,
@@ -165,7 +166,7 @@ describe('SimulatorNetwork', () => {
       // **Pointed at this test's own directory, and that is not only hygiene.** The default is the
       // path the real provider writes on this Mac, so a suite left on the default would read whatever
       // the developer's own filter happens to be enforcing — green or red depending on the machine.
-      filterStateFiles: [join(dir, 'state.json')],
+      filterStateFiles: stateFiles ?? [join(dir, 'state.json')],
       onEnforcementLost: (udid) => { lost.push(udid) },
       livenessIntervalMs: 20,
       // Only set where a test is about the fallback running out of time; the default is 3s.
@@ -876,6 +877,111 @@ describe('SimulatorNetwork', () => {
 
       await expect(net.setOffline(UDID, true)).resolves.toEqual({ offline: true, available: true })
       expect(existsSync(conditionPath(UDID)), 'layer 2 was withheld over a layer 1 that did land').toBe(true)
+    })
+
+    /**
+     * A state file in a directory anyone on the Mac can write to, which is what `/tmp` is.
+     *
+     * `chmod` after the `mkdir`, because the umask takes the world-writable bit off the mode passed
+     * to `mkdir` — and the assertion on the directory is what keeps this from silently becoming a
+     * test of a private directory, which the class trusts.
+     */
+    const forgedState = (rule: string[], mode = 0o1777) => {
+      const open = join(dir, 'open')
+      mkdirSync(open)
+      chmodSync(open, mode)
+      expect(statSync(open).mode & 0o022, 'the directory is writable by its owner only').not.toBe(0)
+      const path = join(open, 'state.json')
+      writeFileSync(path, JSON.stringify({ at: Math.floor(Date.now() / 1000), pid: 1, pulseSeconds: 1, rule }))
+      // Under root the file this test wrote would be root-owned, which is the one thing the class
+      // trusts here — so it is handed to `nobody`, the way an attacker's file would be.
+      if (process.getuid?.() === 0) chownSync(path, 65534, 65534)
+      expect(statSync(path).uid, 'the forged file is root-owned, so it would be trusted').not.toBe(0)
+      return path
+    }
+
+    it('refuses a state file that anyone could have written', async () => {
+      // The protected file is absent and the XPC listener is gone: the exact state in which a forged
+      // `/tmp` file used to confirm a rule write and let layers 2 and 3 go on (#734).
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+      armed()
+      writeFileSync(join(dir, 'NO_CONFIRM'), '')
+      writeFileSync(join(dir, 'NO_STATE'), '')
+      const forged = forgedState([UDID])
+      const net = make(undefined, 300, [join(dir, 'state.json'), forged])
+
+      await expect(net.setOffline(UDID, true)).resolves.toEqual({
+        offline: false, available: false, reason: 'filter-unavailable',
+      })
+      nothingApplied()
+      // Said once, not on each of the polls the deadline is made of.
+      const said = warn.mock.calls.filter((c) => String(c[0]).includes(forged))
+      expect(said, 'the refused file was not named, or was named on every poll').toHaveLength(1)
+      warn.mockRestore()
+    })
+
+    it('refuses a state file from a directory the group can write to', async () => {
+      // Neither shipped path can tell this mask from the world-writable one: the protected directory
+      // is 0755 and `/private/tmp` is 1777. A 0775 directory is not an odd shape on macOS, where every
+      // local account is in `staff`, and it is the only case that fails if the mask narrows to 0o002.
+      armed()
+      writeFileSync(join(dir, 'NO_CONFIRM'), '')
+      writeFileSync(join(dir, 'NO_STATE'), '')
+      const forged = forgedState([UDID], 0o775)
+      const net = make(undefined, 300, [join(dir, 'state.json'), forged])
+
+      await expect(net.setOffline(UDID, true)).resolves.toEqual({
+        offline: false, available: false, reason: 'filter-unavailable',
+      })
+      nothingApplied()
+    })
+
+    it('returns from a FIFO at the fallback path rather than blocking on it', async () => {
+      // Opening a FIFO read-only waits for a writer, and the check that refuses a non-regular file
+      // runs after the open. Without `O_NONBLOCK` this held the agent's whole thread — no timer can
+      // fire, so the race below never resolved and the run had to be killed by hand.
+      armed()
+      writeFileSync(join(dir, 'NO_CONFIRM'), '')
+      writeFileSync(join(dir, 'NO_STATE'), '')
+      const open = join(dir, 'openfifo')
+      mkdirSync(open)
+      chmodSync(open, 0o1777)
+      const fifo = join(open, 'state.json')
+      execFileSync('mkfifo', [fifo])
+      const net = make(undefined, 300, [join(dir, 'state.json'), fifo])
+
+      const raced = await Promise.race([
+        net.setOffline(UDID, true).then(() => 'returned'),
+        new Promise((r) => setTimeout(() => r('hung'), 4000)),
+      ])
+      expect(raced, 'openSync on the FIFO blocked the event loop').toBe('returned')
+      nothingApplied()
+    })
+
+    it('believes the same file from a directory only its owner can write', async () => {
+      // The positive control for the refusal above: the one thing that differs is the directory.
+      armed()
+      writeFileSync(join(dir, 'NO_CONFIRM'), '')
+      writeFileSync(join(dir, 'NO_STATE'), '')
+      writeFileSync(join(dir, 'state.json'), JSON.stringify({
+        at: Math.floor(Date.now() / 1000), pid: 1, pulseSeconds: 1, rule: [UDID],
+      }))
+      const net = make(undefined, 300)
+
+      await expect(net.setOffline(UDID, true)).resolves.toEqual({ offline: true, available: true })
+      expect(existsSync(conditionPath(UDID)), 'layer 2 was withheld over a file the provider wrote').toBe(true)
+    })
+
+    it('does not let a forged file stand in for a provider that stopped', async () => {
+      // The liveness watcher reads the same files, so the same forgery would keep a device looking
+      // enforced after the provider removed its file — the other half of #734's acceptance.
+      armed()
+      const forged = forgedState([UDID])
+      const net = make(undefined, undefined, [join(dir, 'state.json'), forged])
+      await expect(net.setOffline(UDID, true)).resolves.toEqual({ offline: true, available: true })
+
+      rmSync(join(dir, 'state.json'))
+      await vi.waitFor(() => expect(lost).toEqual([UDID]))
     })
 
     it('waits out a file written before the request rather than calling it a disagreement', async () => {
