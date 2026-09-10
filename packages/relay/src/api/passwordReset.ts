@@ -5,8 +5,14 @@ import { requireRole } from '../middleware/auth.js'
 import { makePasswordHash } from './auth.js'
 import { sendMail } from '../lib/mailer.js'
 import { json, readJson } from '../router.js'
+import { config, type TapflowConfig } from '../lib/config.js'
+import { buildInviteBaseUrl } from '../lib/publicUrl.js'
 
-export async function sendPasswordResetEmail(userId: number, origin: string): Promise<boolean> {
+export function buildPasswordResetUrl(token: string, cfg: Pick<TapflowConfig, 'tunnel' | 'relay' | 'local'>): string {
+  return `${buildInviteBaseUrl(cfg)}/reset-password?token=${token}`
+}
+
+export async function sendPasswordResetEmail(userId: number): Promise<boolean> {
   const db = getDb()
   const user = db.prepare('SELECT id, email FROM users WHERE id = ?').get(userId) as { id: number; email: string } | undefined
   if (!user) return false
@@ -16,7 +22,7 @@ export async function sendPasswordResetEmail(userId: number, origin: string): Pr
 
   db.prepare('INSERT INTO password_reset_tokens (user_id, token, expires_at) VALUES (?, ?, ?)').run(userId, token, expiresAt)
 
-  const link = `${origin}/reset-password?token=${token}`
+  const link = buildPasswordResetUrl(token, config)
   const html = `<p>A password reset was requested for your tapflow account.</p>
 <p><a href="${link}">Reset your password</a></p>
 <p>This link expires in 2 hours. If you did not request this, ignore this email.</p>`
@@ -69,9 +75,7 @@ export async function handleSendMemberReset(
   const member = db.prepare('SELECT id FROM users WHERE id = ?').get(params.id) as { id: number } | undefined
   if (!member) return json(res, 404, { error: 'Member not found' })
 
-  const proto = (req.headers['x-forwarded-proto'] as string | undefined) ?? 'http'
-  const origin = `${proto}://${req.headers.host}`
-  const emailSent = await sendPasswordResetEmail(member.id, origin)
+  const emailSent = await sendPasswordResetEmail(member.id)
 
   json(res, 200, { ok: true, emailSent })
 }

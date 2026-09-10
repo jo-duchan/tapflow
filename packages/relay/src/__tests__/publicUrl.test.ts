@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import { buildInviteBaseUrl } from '../lib/publicUrl'
+import { buildPasswordResetUrl } from '../api/passwordReset'
 
 // #6 — Host 인젝션 차단: 초대 링크 base를 Host 헤더가 아닌 설정값에서만 도출
 describe('buildInviteBaseUrl', () => {
@@ -33,5 +34,17 @@ describe('buildInviteBaseUrl', () => {
   it('tailscale 터널이지만 publicUrl 미설정이면 relay.url로 폴백', () => {
     expect(buildInviteBaseUrl({ tunnel: { provider: 'tailscale', publicUrl: undefined }, relay: { url: 'wss://relay.example.com' }, local }))
       .toBe('https://relay.example.com')
+  })
+})
+
+describe('buildPasswordResetUrl', () => {
+  const local = { port: 4000, dataDir: '.tapflow-data', wsBackpressureBytes: 1, trustedProxies: [] }
+
+  it('uses the configured public URL rather than request-derived data', () => {
+    expect(buildPasswordResetUrl('reset-token', {
+      tunnel: { provider: 'tailscale', publicUrl: 'https://mac.ts.net:4000/' },
+      relay: { url: 'ws://localhost:4000' },
+      local,
+    })).toBe('https://mac.ts.net:4000/reset-password?token=reset-token')
   })
 })

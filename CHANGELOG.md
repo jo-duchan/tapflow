@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Member password-reset emails now use the configured public URL.** The reset endpoint previously constructed its link from the request's `Host` and `X-Forwarded-Proto` headers, which a proxy can pass through from an untrusted request. It now uses the same configured URL selection as invitations: public tunnel URL first, then the configured relay URL, then the local fallback.
+
 - **The dashboard is finally compressed on the deployment almost everyone runs** ([#260](https://github.com/jo-duchan/tapflow/issues/260), [#737](https://github.com/jo-duchan/tapflow/issues/737)). tapflow has been building Brotli copies of its dashboard assets for a while, and on a default install they were never sent. Browsers only offer Brotli on a secure origin, and the relay is plain HTTP unless you configure TLS — so over `http://<lan-box>:4000` the browser asks for gzip, the relay had only `.br` on disk, and every asset went out uncompressed. The build now writes `.gz` alongside `.br`, and the relay serves whichever the browser will take, preferring Brotli when both are offered. Nothing is compressed at request time: both files are built once, so this costs no CPU while you are streaming. Content-hashed files under `/assets/` are also marked `immutable` for a year, so a returning tab stops re-fetching them, while `index.html` is marked `no-cache` so an update is picked up on the next load rather than after a hard refresh.
 
 - **android-agent**: Log unexpected scrcpy server process exits with their exit code and signal as warnings, while expected exits from `stop()` log at debug level (#481).
