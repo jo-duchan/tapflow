@@ -1,5 +1,6 @@
 import http from 'http'
 import crypto from 'crypto'
+import { createLogger } from '@tapflowio/agent-core'
 import { getDb } from '../db.js'
 import { requireRole } from '../middleware/auth.js'
 import { makePasswordHash } from './auth.js'
@@ -8,8 +9,17 @@ import { json, readJson } from '../router.js'
 import { config, type TapflowConfig } from '../lib/config.js'
 import { buildInviteBaseUrl } from '../lib/publicUrl.js'
 
+const logger = createLogger('relay:password-reset')
+const INSECURE_RESET_LINK_WARNING =
+  'Password-reset email uses insecure HTTP. Reset tokens may be exposed in transit; configure HTTPS with tunnel.publicUrl or relay.url.'
+let warnedInsecureResetLink = false
+
 export function buildPasswordResetUrl(token: string, cfg: Pick<TapflowConfig, 'tunnel' | 'relay' | 'local'>): string {
   return `${buildInviteBaseUrl(cfg)}/reset-password?token=${token}`
+}
+
+export function passwordResetLinkWarning(url: string): string | null {
+  return /^https:\/\//i.test(url) ? null : INSECURE_RESET_LINK_WARNING
 }
 
 export async function sendPasswordResetEmail(userId: number): Promise<boolean> {
@@ -23,6 +33,11 @@ export async function sendPasswordResetEmail(userId: number): Promise<boolean> {
   db.prepare('INSERT INTO password_reset_tokens (user_id, token, expires_at) VALUES (?, ?, ?)').run(userId, token, expiresAt)
 
   const link = buildPasswordResetUrl(token, config)
+  const warning = passwordResetLinkWarning(link)
+  if (warning !== null && !warnedInsecureResetLink) {
+    logger.warn(warning)
+    warnedInsecureResetLink = true
+  }
   const html = `<p>A password reset was requested for your tapflow account.</p>
 <p><a href="${link}">Reset your password</a></p>
 <p>This link expires in 2 hours. If you did not request this, ignore this email.</p>`
