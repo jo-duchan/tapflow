@@ -12,10 +12,14 @@ iOS 시뮬레이터가 열리지 않거나 부팅되지 않을 때, 한글 입�
 먼저 Mac의 아키텍처를 확인하세요.
 
 ```bash
-uname -m        # arm64면 Apple Silicon, x86_64면 Intel
+uname -m                       # arm64면 Apple Silicon, x86_64면 Intel 또는 Rosetta
+sysctl -n sysctl.proc_translated   # 1이면 이 셸이 Rosetta로 실행 중
 ```
 
-`x86_64`가 나오면 **Intel Mac이고 에이전트가 지원하지 않는 환경**입니다. 네이티브 헬퍼 바이너리가
+`sysctl`이 `1`을 출력하면 Apple Silicon Mac이고 셸이 Rosetta로 실행 중입니다. "Rosetta를 사용하여 열기"가
+꺼진 터미널을 열고 `node -p process.arch`가 `arm64`를 출력하는지 확인한 뒤 그 터미널에서 에이전트를 시작하세요.
+
+`uname -m`이 `x86_64`를 출력하고 `sysctl`이 `0`을 출력하거나 아무것도 출력하지 않으면 **Intel Mac이고 에이전트가 지원하지 않는 환경**입니다. 네이티브 헬퍼 바이너리가
 arm64 전용이라 macOS가 실행을 거부하고(`EBADARCH`), Node가 그것을 `Unknown system error -86`으로
 올려보내면 대시보드에 `spawn unknown error`로 표시됩니다.
 

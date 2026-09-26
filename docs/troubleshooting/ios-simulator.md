@@ -12,10 +12,15 @@ Fixes for an iOS simulator that will not open or boot, and for broken Korean inp
 Check the Mac's architecture:
 
 ```bash
-uname -m        # arm64 = Apple Silicon, x86_64 = Intel
+uname -m                       # arm64 = Apple Silicon, x86_64 = Intel or Rosetta
+sysctl -n sysctl.proc_translated   # 1 = this shell runs under Rosetta
 ```
 
-If it reports `x86_64`, this is an **Intel Mac and the agent does not support it**. The native helper
+If `sysctl` prints `1`, the Mac is Apple Silicon and the shell is running under Rosetta: open a Terminal that
+is not set to "Open using Rosetta", check that `node -p process.arch` prints `arm64`, and start the agent from
+there.
+
+If `uname -m` reports `x86_64` and `sysctl` prints `0` or nothing, this is an **Intel Mac and the agent does not support it**. The native helper
 binaries are built for arm64 only, so macOS refuses to exec them (`EBADARCH`), which Node surfaces as
 `Unknown system error -86` and the dashboard shows as `spawn unknown error`.
 
