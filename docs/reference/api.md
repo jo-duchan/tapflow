@@ -433,7 +433,7 @@ Cancel a scheduled deletion, clearing `delete_after`.
 
 ## Webhooks
 
-Manage the endpoints notified when a build's review status changes. Every call takes the session cookie or a PAT with the `builds:write` scope. Payloads and signature verification are covered in [Webhooks](/guide/build-status-webhooks).
+Manage the endpoints notified when a build's review status changes. Every call takes the session cookie or a PAT with the `builds:write` scope. Payloads and signature verification are covered in [Webhooks](/operate/webhooks).
 
 ### `GET /api/v1/webhooks`
 

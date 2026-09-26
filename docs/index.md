@@ -8,7 +8,7 @@ hero:
   actions:
     - theme: brand
       text: Get Started
-      link: /guide/getting-started
+      link: /get-started/quick-start
     - theme: alt
       text: View on GitHub
       link: https://github.com/jo-duchan/tapflow

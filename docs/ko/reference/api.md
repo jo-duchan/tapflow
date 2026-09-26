@@ -433,7 +433,7 @@ Body (JSON):
 
 ## 웹훅 (Webhooks)
 
-빌드 리뷰 상태가 바뀔 때 알림을 받을 엔드포인트를 관리합니다. 모두 세션 쿠키나 `builds:write` scope의 PAT로 호출합니다. 페이로드와 서명 검증은 [웹훅](/ko/guide/build-status-webhooks)에서 다룹니다.
+빌드 리뷰 상태가 바뀔 때 알림을 받을 엔드포인트를 관리합니다. 모두 세션 쿠키나 `builds:write` scope의 PAT로 호출합니다. 페이로드와 서명 검증은 [웹훅](/ko/operate/webhooks)에서 다룹니다.
 
 ### `GET /api/v1/webhooks`
 

@@ -18,7 +18,10 @@
 //    the hook never sees.
 //  - **`llms.txt`** is inspected. It stays hand-written — the one-line description per link is the
 //    value of an index, and generating it would replace 27 sentences with 27 slugs. What is checked
-//    is the set, because the set is what drifted.
+//    is the set, because the set is what drifted — and, since the 2026-09 restructure, the grouping:
+//    each `## ` section is a top-level sidebar group listing the same pages in the same order, and
+//    the Korean sidebar mirrors the English one. That replaced a page-count pin, which every docs PR
+//    adding a page had to edit and which made those PRs conflict with each other.
 //
 // **Absence assertions are paired**, per `contributing/test-and-guard-coverage.md` rule 2, and the
 // pairing differs by case — an earlier version of this header claimed one shape for all three,
@@ -52,6 +55,9 @@
 //  - `txt` dropped from `TEXT_EXT`: red, because the origin check anchors on the two files it is
 //    about. Under a bare count floor this **survived** — 1,037 files still cleared it while
 //    `robots.txt` and `llms.txt` had left the scan.
+//  - (2026-09-27) the Network Control and Audio rows swapped in `llms.txt`: the grouping case red,
+//    though the set comparison stayed green — order is what it adds. One KO sidebar link pointed at
+//    the old `/ko/guide/audio`, and `collapsed` dropped from one KO group: the mirror case red on each.
 import { describe, it, expect } from 'vitest'
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, readdirSync, rmSync, existsSync } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -63,6 +69,7 @@ import {
   pageUrl,
 } from '../../docs/.vitepress/agent-artifacts.mjs'
 import { SKIP_PATHS, SKIP_PATHS_SOURCE } from './sourceFiles.mjs'
+import config from '../../docs/.vitepress/config.ts'
 
 const ROOT = join(import.meta.dirname, '..', '..')
 const SITE = 'https://www.tapflow.dev'
@@ -259,14 +266,104 @@ const llmsTxt = () => readFileSync(join(DOCS, 'public', 'llms.txt'), 'utf8')
 const indexedUrls = () =>
   [...llmsTxt().matchAll(/^- \[[^\]]+\]\((https?:\/\/[^)]+)\)/gm)].map((m) => m[1]).sort()
 
+/** The sidebar's leaf links, depth first, in the order a reader sees them. */
+const leaves = (items) => items.flatMap((i) => (i.items ? leaves(i.items) : [i.link]))
+
+/** `llms.txt` cut at its `## ` headings: `[{ title, urls }]`, in file order. `###` stays inside. */
+function llmsSections(text = llmsTxt()) {
+  return text.split(/^## /m).slice(1).map((chunk) => ({
+    title: chunk.slice(0, chunk.indexOf('\n')).trim(),
+    urls: [...chunk.matchAll(/^- \[[^\]]+\]\((https?:\/\/[^)]+)\)/gm)].map((m) => m[1]),
+  }))
+}
+
+/**
+ * Where `llms.txt` and the sidebar disagree: each top-level sidebar group is one `## ` section of the
+ * same name, in the same order, listing the same pages in the same order.
+ */
+function sectionProblems(sidebar, sections) {
+  const problems = []
+  const groups = sidebar.map((g) => g.text)
+  const titles = sections.map((s) => s.title)
+  if (groups.join('|') !== titles.join('|')) problems.push(`sections [${titles.join(', ')}] ≠ sidebar groups [${groups.join(', ')}]`)
+  for (const g of sidebar) {
+    const section = sections.find((s) => s.title === g.text)
+    if (!section) continue
+    const want = leaves(g.items).map((l) => `${SITE}${l}`)
+    if (want.join('|') !== section.urls.join('|')) {
+      problems.push(`${g.text}: llms.txt [${section.urls.map((u) => u.slice(SITE.length)).join(', ')}] ≠ sidebar [${want.map((u) => u.slice(SITE.length)).join(', ')}]`)
+    }
+  }
+  return problems
+}
+
+/** Where the Korean sidebar stops mirroring the English one (same tree, links under `/ko`). */
+function mirrorProblems(en, ko, path = '') {
+  const problems = []
+  if (en.length !== ko.length) problems.push(`${path || 'sidebar'}: ${en.length} entries in EN, ${ko.length} in KO`)
+  en.forEach((e, i) => {
+    const k = ko[i]
+    if (!k) return
+    const here = `${path}/${e.text}`
+    if (Boolean(e.items) !== Boolean(k.items)) problems.push(`${here}: a group on one side only`)
+    else if (e.items) problems.push(...mirrorProblems(e.items, k.items, here))
+    else if (`/ko${e.link}` !== k.link) problems.push(`${here}: EN ${e.link}, KO ${k.link}`)
+    if (Boolean(e.collapsed) !== Boolean(k.collapsed)) problems.push(`${here}: collapsed differs`)
+  })
+  return problems
+}
+
+const enSidebar = () => config.locales.root.themeConfig.sidebar
+const koSidebar = () => config.locales.ko.themeConfig.sidebar
+
 describe('llms.txt indexes the whole site', () => {
   it('lists every English page, and lists nothing that is not one', () => {
     const expected = indexablePages().map((p) => pageUrl(p, SITE)).sort()
-    // Measured 2026-09-18: 27 pages — 28 English `.md` less the landing. Stated so a failure says
-    // whether to add a row or move the number in the same diff, and so the comparison cannot pass
-    // on an empty walk.
-    expect(expected.length).toBe(27)
+    // A floor, not a pin: 27 pages on 2026-09-18 (28 English `.md` less the landing). A pin made
+    // every docs PR that adds a page edit this line, and docs PRs that land one after another
+    // conflicted on it. The floor keeps the comparison from passing on an empty walk.
+    expect(expected.length).toBeGreaterThanOrEqual(27)
     expect(indexedUrls()).toEqual(expected)
+  })
+
+  it('is grouped like the sidebar: one section per top-level group, same pages, same order', () => {
+    const sidebar = enSidebar()
+    // Named, so a sidebar that failed to load cannot agree with an llms.txt that has no sections.
+    expect(sidebar.map((g) => g.text)).toEqual(expect.arrayContaining(['Get started', 'Operate', 'Reference']))
+    expect(leaves(sidebar)).toContain('/operate/agents')
+    expect(sectionProblems(sidebar, llmsSections())).toEqual([])
+  })
+
+  it('reports a missing section, a page out of order, and a page in the wrong section', () => {
+    const sidebar = [
+      { text: 'A', items: [{ text: 'one', link: '/a/one' }, { text: 'g', items: [{ text: 'two', link: '/a/two' }] }] },
+      { text: 'B', items: [{ text: 'three', link: '/b/three' }] },
+      { text: 'C', items: [{ text: 'four', link: '/c/four' }] },
+    ]
+    const text = [
+      '# t', '', '## A', '', `- [two](${SITE}/a/two): x`, '', '### sub', '', `- [one](${SITE}/a/one): x`, '',
+      '## B', '', `- [three](${SITE}/b/three): x`, `- [four](${SITE}/c/four): x`, '',
+    ].join('\n')
+    expect(sectionProblems(sidebar, llmsSections(text))).toEqual([
+      'sections [A, B] ≠ sidebar groups [A, B, C]',
+      'A: llms.txt [/a/two, /a/one] ≠ sidebar [/a/one, /a/two]',
+      'B: llms.txt [/b/three, /c/four] ≠ sidebar [/b/three]',
+    ])
+  })
+
+  it('the Korean sidebar mirrors the English one', () => {
+    expect(leaves(koSidebar())).toContain('/ko/operate/agents')
+    expect(mirrorProblems(enSidebar(), koSidebar())).toEqual([])
+  })
+
+  it('reports a Korean sidebar that drifted', () => {
+    const en = [{ text: 'A', items: [{ text: 'one', link: '/a' }, { text: 'g', collapsed: true, items: [{ text: 'two', link: '/b' }] }] }]
+    const ko = [{ text: '가', items: [{ text: '하나', link: '/ko/a-renamed' }, { text: '그룹', items: [{ text: '둘', link: '/ko/b' }, { text: '셋', link: '/ko/c' }] }] }]
+    expect(mirrorProblems(en, ko)).toEqual([
+      '/A/one: EN /a, KO /ko/a-renamed',
+      '/A/g: 1 entries in EN, 2 in KO',
+      '/A/g: collapsed differs',
+    ])
   })
 
   it('points at the canonical origin, so no link opens on a redirect', () => {

@@ -63,7 +63,7 @@ export function handleCreateComment(
   uploadsDir: string
 ): void {
   // Build auth, not cookie-only: CI posts build metadata here with the same PAT it uploaded with
-  // (docs/guide/build-distribution.md), so a `builds:write` PAT has to be accepted.
+  // (docs/operate/ci-distribution.md), so a `builds:write` PAT has to be accepted.
   const auth = requireBuildAuth(req, res)
   if (!auth) return
 

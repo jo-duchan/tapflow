@@ -164,7 +164,7 @@ const FAILED = 'text-destructive hover:text-destructive';
  * `filter-unavailable` names the guide instead of linking to it. A link needs a surface, and the two
  * this control has are a tooltip that never opens on touch and an `sr-only` string; putting an anchor
  * in either is worse than a sentence that can be searched for. The destination exists —
- * `docs/guide/network-control.md`, and the setup steps it points at.
+ * `docs/testing/network-control.md`, and the setup steps it points at.
  */
 function reasonCaveat(reason: NetworkUnavailableReason | undefined): string {
   switch (reason) {

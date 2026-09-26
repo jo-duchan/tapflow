@@ -11,7 +11,7 @@ VitePress 1.x 기반 정적 문서 사이트. 작업하면서 겪은 삽질과 �
 
 ## 파일 구조
 
-VitePress 표준 구조를 따른다. 사이드바·shiki 테마 주입은 `.vitepress/config.ts`, CSS 커스터마이징과 shiki 커스텀 테마는 `.vitepress/theme/`에 있다. 문서 본문은 영어가 `docs/`, 한국어가 `docs/ko/`.
+VitePress 표준 구조를 따른다. 사이드바·shiki 테마 주입은 `.vitepress/config.ts`, CSS 커스터마이징과 shiki 커스텀 테마는 `.vitepress/theme/`에 있다. 문서 본문은 영어가 `docs/`, 한국어가 `docs/ko/`. 페이지 이동 기록(리다이렉트의 원본)은 `.vitepress/moves.json`에, 영상은 `public/media/`에 둔다.
 
 
 ## 문서 작성 규칙
@@ -21,7 +21,8 @@ VitePress 표준 구조를 따른다. 사이드바·shiki 테마 주입은 `.vit
 모든 문서는 한국어(`docs/ko/`)와 영어(`docs/`) 두 버전을 함께 작성한다.
 
 - 한국어가 소스 언어다. 내용 변경 시 한국어를 먼저 수정하고 영어에 반영한다.
-- 새 페이지를 추가할 때는 `docs/ko/`와 `docs/` 양쪽에 파일을 만들고, `config.ts`의 `koSidebar`와 `enSidebar` 모두에 등록한다. `docs/public/llms.txt`에도 행을 추가한다(`scripts/__tests__/agentReadableDocs.test.mjs`가 영어 페이지 집합과 일치하는지 검사한다). 작성 절차 전체는 `/write-docs` 커맨드에 있다.
+- 새 페이지를 추가할 때는 `docs/ko/`와 `docs/` 양쪽에 파일을 만들고, `config.ts`의 `koSidebar`와 `enSidebar` 모두에 등록한다. `docs/public/llms.txt`에도 사이드바와 같은 섹션·같은 순서로 행을 추가한다(`scripts/__tests__/agentReadableDocs.test.mjs`가 영어 페이지 집합, 섹션 구성, KO 사이드바 대칭을 검사한다). 작성 절차 전체는 `/write-docs` 커맨드에 있다.
+- 페이지 URL은 섹션 접두사를 따른다(`/get-started/`, `/testing/`, `/operate/`, `/automation/`, `/reference/`). 페이지를 옮기면 옛 URL을 `.vitepress/moves.json`에 추가하고 `node scripts/docs-redirects.mjs --write`로 `vercel.json`을 다시 만든다. 한 번 렌더된 헤딩 id는 `.vitepress/frozen-ids.json`에 고정되어 있어 없앨 수 없다(`docsMoves` 테스트). 자세한 규칙은 `/write-docs` §4·§5에 있다.
 - 내용·구조가 두 버전 간에 일치해야 한다. 한쪽에만 있는 섹션을 만들지 않는다.
 
 
@@ -186,7 +187,7 @@ VitePress는 `h2`에 기본으로 `border-top: 1px solid var(--vp-c-divider)`를
 - ❌ 섹션 사이에 `---` 추가
 - ✅ `---` 없이 `## Section` 바로 작성 — h2 border-top이 구분선 역할을 함
 
-기존 파일을 편집할 때 `---`가 있으면 제거한다. 다른 docs 페이지(`ios-agent.md`, `getting-started.md` 등)는 모두 `---`를 쓰지 않는다.
+기존 파일을 편집할 때 `---`가 있으면 제거한다. 다른 docs 페이지(`ios-agent.md`, `quick-start.md` 등)는 모두 `---`를 쓰지 않는다.
 
 ---
 

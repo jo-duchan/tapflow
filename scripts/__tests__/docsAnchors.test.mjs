@@ -38,6 +38,16 @@
 //  - before `<a name>` counted as a target, the real tree reported ten false misses on the
 //    performance footnotes — the check was wrong, not the page, and the fixture now carries one.
 //
+// **Shipped URLs follow the redirects; in-repo links do not.** A URL in a released agent or an npm
+// README cannot be edited, so it is judged after `docs/.vitepress/moves.json` has moved its path,
+// the way a browser reaches it. `LEGACY_URLS` keeps the ones that have shipped in their original
+// form after the source moves on. In-repo links are rewritten when a page moves, so they resolve
+// as written. Mutations on 2026-09-27: `## HTTPS (secure context) {#https-secure-context}` reworded
+// without its id — the docs, shipped, legacy and planted cases all failed, and with the id kept all
+// passed; `/guide/agent` pointed at a missing page in `moves.json` — the legacy case named
+// `#remote-relay-authentication`; `resolveMoved` made to return its input — the legacy case named
+// both README URLs and the planted redirect case went red.
+//
 // **Not seen**: fragments in frontmatter hero `link:`s and in `config.ts` nav/sidebar links (they are
 // not rendered markdown; none carry a `#` today), and URLs in `.js`/`.mjs`/`.swift` files under
 // packages/ (none today). Shipped URLs are read from `.ts`/`.tsx` sources and the READMEs.
@@ -47,6 +57,7 @@ import { join, posix } from 'node:path'
 import config from '../../docs/.vitepress/config.ts'
 import { createMarkdownRenderer } from '../../docs/node_modules/vitepress/dist/node/index.js'
 import { sources } from './sourceFiles.mjs'
+import { loadMoves, resolveMoved } from '../docs-redirects.mjs'
 
 const ROOT = join(import.meta.dirname, '..', '..')
 const DOCS = join(ROOT, 'docs')
@@ -152,13 +163,35 @@ function shippedUrls(files) {
   return out
 }
 
-/** Each shipped URL judged against the rendered docs, the same way a page's link is. */
-function brokenShipped(urls, rendered) {
+/**
+ * Each shipped URL judged against the rendered docs, the same way a page's link is — except that its
+ * path is first followed through `docs/.vitepress/moves.json`, because a shipped URL cannot be edited
+ * and reaches the page through the redirect. In-repo links do not get this: they are rewritten when
+ * a page moves.
+ */
+function brokenShipped(urls, rendered, moves = { pages: {} }) {
+  const redirected = (url) => {
+    const m = url.match(/^(https?:\/\/(?:www\.)?tapflow\.dev)(\/[^#?]*)(.*)$/)
+    return m ? `${m[1]}${resolveMoved(m[2], moves)}${m[3]}` : url
+  }
   return urls
-    .map(({ file, url }) => ({ file, url, t: target(url, 'index.md', rendered) }))
+    .map(({ file, url }) => ({ file, url, t: target(redirected(url), 'index.md', rendered) }))
     .filter(({ t }) => !t || !t.page || !rendered.get(t.page).ids.has(t.fragment))
     .map(({ file, url }) => `${file} → ${url}`)
 }
+
+/**
+ * URLs with a fragment that shipped somewhere no docs PR can edit: compiled into the dashboard or an
+ * agent, or printed in a README published to npm. Kept in their original form forever; see the case
+ * that reads them. Add one when a release ships a new one — do not remove one when the source moves on.
+ */
+const LEGACY_URLS = [
+  'https://www.tapflow.dev/reference/configuration#https-secure-context',          // dashboard PerformanceModeNotice.tsx
+  'https://www.tapflow.dev/guide/troubleshooting#ios-simulator-service-version-mismatch', // ios-agent simctl.ts
+  'https://www.tapflow.dev/guide/self-hosting#docker-compose-lan-server',          // READMEs
+  'https://www.tapflow.dev/guide/agent#remote-relay-authentication',               // READMEs, before 2026-09-27
+  'https://www.tapflow.dev/guide/environment-setup#tapflow-setup',                 // READMEs, before 2026-09-27
+]
 
 let site
 function renderSite() {
@@ -169,13 +202,14 @@ function renderSite() {
 describe('docs fragment links land on an id', () => {
   it('every internal link with a #fragment, EN and KO', () => {
     const rendered = renderSite()
-    // 56 pages on 2026-09-26: 28 English, 28 Korean, contributor files excluded.
-    expect(rendered.size).toBe(56)
+    // A floor, not a pin: 56 pages on 2026-09-26 (28 English, 28 Korean, contributor files
+    // excluded). Pages are added in most docs PRs, and `docsLocaleParity` already pairs them.
+    expect(rendered.size).toBeGreaterThanOrEqual(56)
     const { broken, checked } = brokenAnchors(rendered)
     // Anchored by name — a Hangul auto-slug, an explicit id, a same-page link — so a walk that
     // silently stopped decoding, rewriting or resolving one kind cannot pass on the others. The
     // count is the backstop under them (104 on 2026-09-26).
-    expect(checked).toContain('ko/reference/cli.md → /ko/guide/agent#원격-릴레이-인증')
+    expect(checked).toContain('ko/reference/cli.md → /ko/operate/agents#원격-릴레이-인증')
     expect(checked).toContain('dashboard/setup.md → /reference/configuration#create-the-first-admin-account-in-a-docker-container-tapflow-admin-email')
     expect(checked).toContain('reference/cli.md → #tapflow-migrate-net-filter')
     expect(checked.length).toBeGreaterThanOrEqual(100)
@@ -224,19 +258,33 @@ describe('the docs URLs shipped code opens land on an id', () => {
       'https://www.tapflow.dev/guide/troubleshooting#ios-simulator-service-version-mismatch',
       'https://www.tapflow.dev/guide/self-hosting#docker-compose-lan-server',
     ]))
-    expect(brokenShipped(urls, renderSite())).toEqual([])
+    expect(brokenShipped(urls, renderSite(), loadMoves())).toEqual([])
   })
 
-  it('reports a shipped URL whose heading is gone', () => {
+  it('every URL that has ever shipped with a #fragment, in its original form', () => {
+    // A URL compiled into a released agent or printed in a README published to npm is out of reach
+    // for good — editing the source today does not edit the copies already installed. So these stay
+    // listed after the code that held them moves on, and resolve through the redirects.
+    expect(brokenShipped(LEGACY_URLS.map((url) => ({ file: 'LEGACY_URLS', url })), renderSite(), loadMoves())).toEqual([])
+  })
+
+  it('reports a shipped URL whose heading is gone, and follows a redirect only when one exists', () => {
     const rendered = renderSite()
     const planted = [
       { file: 'x.ts', url: 'https://www.tapflow.dev/reference/configuration#https-secure-context' },
       { file: 'y.ts', url: 'https://www.tapflow.dev/reference/configuration#renamed-heading' },
       { file: 'z.ts', url: 'https://www.tapflow.dev/guide/moved-page#anything' },
+      { file: 'r.ts', url: 'https://www.tapflow.dev/guide/agent#remote-relay-authentication' },
+      { file: 's.ts', url: 'https://www.tapflow.dev/guide/agent#renamed-heading' },
     ]
-    expect(brokenShipped(planted, rendered)).toEqual([
+    expect(brokenShipped(planted, rendered, loadMoves())).toEqual([
       'y.ts → https://www.tapflow.dev/reference/configuration#renamed-heading',
       'z.ts → https://www.tapflow.dev/guide/moved-page#anything',
+      's.ts → https://www.tapflow.dev/guide/agent#renamed-heading',
+    ])
+    // Without the move table the old page is simply gone, so the redirect is what made `r.ts` land.
+    expect(brokenShipped(planted.filter((u) => u.file === 'r.ts'), rendered)).toEqual([
+      'r.ts → https://www.tapflow.dev/guide/agent#remote-relay-authentication',
     ])
   })
 })

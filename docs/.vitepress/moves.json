@@ -1,0 +1,30 @@
+{
+  "$comment": "Every docs page that moved, old URL -> new URL, English paths only. The single source for the redirects in docs/vercel.json: run `node scripts/docs-redirects.mjs --write` after editing, and scripts/__tests__/docsMoves.test.mjs fails until you do. Each `pages` entry also redirects /ko/<old> and <old>.md. Entries are permanent: a later move rewrites the destination here instead of adding a second hop. `aliases` are URLs that were never pages (no .md copy) and are mirrored under /ko only.",
+  "pages": {
+    "/guide/introduction": "/get-started/introduction",
+    "/guide/getting-started": "/get-started/quick-start",
+    "/guide/requirements": "/operate/requirements",
+    "/guide/environment-setup": "/operate/environment-setup",
+    "/guide/configure": "/operate/configure",
+    "/guide/agent": "/operate/agents",
+    "/guide/scaling": "/operate/scaling",
+    "/guide/streaming": "/operate/streaming-quality",
+    "/guide/build-distribution": "/operate/ci-distribution",
+    "/guide/build-status-webhooks": "/operate/webhooks",
+    "/guide/upload-builds": "/testing/app-center",
+    "/guide/audio": "/testing/audio",
+    "/guide/network-control": "/testing/network-control",
+    "/guide/mcp-server": "/automation/mcp-server",
+    "/guide/writing-flows": "/automation/flows",
+    "/guide/mcp-ci": "/automation/mcp-ci",
+    "/guide/contributing": "/contributing"
+  },
+  "aliases": {
+    "/guide": "/get-started/introduction",
+    "/guide/": "/get-started/introduction"
+  },
+  "files": {
+    "/tapflow-demo.mp4": "/media/tapflow-demo.mp4",
+    "/tapflow-setup.mp4": "/media/tapflow-setup.mp4"
+  }
+}

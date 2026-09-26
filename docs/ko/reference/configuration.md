@@ -1,6 +1,6 @@
 # 설정 파일
 
-릴레이는 이 머신의 설치 디렉터리에서 `tapflow.config.json`을 읽습니다. 기본값은 `~/.tapflow`이고, `TAPFLOW_HOME`이나 현재 디렉터리의 기존 설치가 있으면 그쪽입니다([명령이 쓰는 설치 디렉터리](/ko/guide/configure#명령이-쓰는-설치-디렉토리)). `tapflow init`을 실행해 파일을 생성하고, 설정을 변경한 뒤에는 릴레이를 재시작해야 적용됩니다.
+릴레이는 이 머신의 설치 디렉터리에서 `tapflow.config.json`을 읽습니다. 기본값은 `~/.tapflow`이고, `TAPFLOW_HOME`이나 현재 디렉터리의 기존 설치가 있으면 그쪽입니다([명령이 쓰는 설치 디렉터리](/ko/operate/configure#명령이-쓰는-설치-디렉토리)). `tapflow init`을 실행해 파일을 생성하고, 설정을 변경한 뒤에는 릴레이를 재시작해야 적용됩니다.
 
 파일 안의 상대 경로는 그 파일을 기준으로 풉니다. `tsconfig.json`이나 `litestream.yml`과 같은 방식입니다. `~/.tapflow/tapflow.config.json`의 `"dataDir": "data"`는 어느 디렉터리에서 명령을 실행하든 `~/.tapflow/data`를 뜻합니다.
 
@@ -44,7 +44,7 @@
 
 환경변수는 항상 설정 파일보다 우선합니다. 서버 환경이나 CI에서 유용합니다.
 
-비밀은 데이터 디렉터리의 `.env` 파일에도 둘 수 있습니다. 릴레이가 시작할 때 이 파일을 먼저 읽으므로, 아래 변수를 셸 대신 파일에 적어도 됩니다. 우선순위는 **셸 환경변수 > `.env` > 설정 파일** 순입니다. 파일 형식과 예외(`TAPFLOW_DATA_DIR`)는 [tapflow 설정](/ko/guide/configure)에서 다룹니다.
+비밀은 데이터 디렉터리의 `.env` 파일에도 둘 수 있습니다. 릴레이가 시작할 때 이 파일을 먼저 읽으므로, 아래 변수를 셸 대신 파일에 적어도 됩니다. 우선순위는 **셸 환경변수 > `.env` > 설정 파일** 순입니다. 파일 형식과 예외(`TAPFLOW_DATA_DIR`)는 [tapflow 설정](/ko/operate/configure)에서 다룹니다.
 
 | 환경변수 | Config 키 | 기본값 | 설명 |
 |---------|-----------|--------|------|
@@ -54,7 +54,7 @@
 | `TAPFLOW_HOME` | — | `~/.tapflow` | 설치 디렉터리. `tapflow.config.json`과 기본 데이터 디렉터리가 있는 곳이고 모든 명령이 이 값을 읽습니다. 상대 경로는 현재 디렉터리 기준이고 빈 값은 미설정으로 봅니다. 없는 디렉터리를 가리키면 릴레이를 실행하거나 릴레이에 접속하는 명령이 멈춥니다. `tapflow init`은 대신 그 디렉터리를 만듭니다. |
 | `TAPFLOW_DATA_DIR` | `local.dataDir` | `<설치>/data` | DB·업로드 디렉터리. 환경변수는 현재 디렉터리 기준, `local.dataDir`은 설정 파일 기준으로 상대 경로를 풉니다. 이미 `.tapflow/data`나 `.tapflow-data`가 있는 설치는 그대로 씁니다. |
 | `TAPFLOW_RELAY_URL` | `relay.url` | *(비어있음)* | CLI 명령어의 기본 릴레이 URL |
-| `TAPFLOW_AGENT_TOKEN` | — | *(비어있음)* | 원격 릴레이 인증용 `agent` 스코프 토큰. `--token` 플래그가 우선합니다. [에이전트 설정](/ko/guide/agent#원격-릴레이-인증)을 참고하세요. |
+| `TAPFLOW_AGENT_TOKEN` | — | *(비어있음)* | 원격 릴레이 인증용 `agent` 스코프 토큰. `--token` 플래그가 우선합니다. [에이전트 설정](/ko/operate/agents#원격-릴레이-인증)을 참고하세요. |
 | `TAPFLOW_TOKEN` | — | *(비어있음)* | `tapflow flow run`과 MCP 서버가 원격 릴레이에 접속할 때 쓰는 개인 액세스 토큰(PAT). `flow run`에서는 `--token` 플래그가 우선합니다. |
 | `TAPFLOW_TUNNEL_TOKEN` | — | *(비어있음)* | rathole 터널 인증에 쓰는 비밀 문자열. `tunnel.provider`가 `rathole`일 때 필요합니다. |
 | `TAPFLOW_LEAN` | `agent.lean` | `off` | `on` 또는 `off`. 다른 값은 경고와 함께 무시하고 설정 파일의 값을 씁니다. |
@@ -174,8 +174,8 @@ chmod 600 .tapflow/data/.env
 | `TAPFLOW_ANDROID_FPS` | `30` | Android 에뮬레이터 캡처 프레임율(gRPC 경로). |
 | `TAPFLOW_ANDROID_BACKEND` | *(자동)* | Android 백엔드 강제 — `grpc` 또는 `scrcpy`. 미설정 시 기기 종류로 자동 선택. |
 | `TAPFLOW_ANDROID_GRPC_PORT` | `8554` | tapflow가 부팅하는 에뮬레이터에 gRPC 포트를 고를 때 시작하는 포트. 이 값부터 2씩 올려 가며 비어 있는 첫 포트를 씁니다. |
-| `TAPFLOW_AUDIO` | *(켜짐)* | `off`이면 기기 오디오 스트리밍을 끕니다. [오디오](/ko/guide/audio)를 참고하세요. |
-| `TAPFLOW_ALLOW_DISPLAY_SLEEP` | *(비어있음)* | 값을 설정하면 세션 중에도 호스트 디스플레이가 꺼질 수 있습니다. 시스템 절전은 계속 막습니다. [에이전트 설정](/ko/guide/agent#호스트-디스플레이와-절전)을 참고하세요. |
+| `TAPFLOW_AUDIO` | *(켜짐)* | `off`이면 기기 오디오 스트리밍을 끕니다. [오디오](/ko/testing/audio)를 참고하세요. |
+| `TAPFLOW_ALLOW_DISPLAY_SLEEP` | *(비어있음)* | 값을 설정하면 세션 중에도 호스트 디스플레이가 꺼질 수 있습니다. 시스템 절전은 계속 막습니다. [에이전트 설정](/ko/operate/agents#호스트-디스플레이와-절전)을 참고하세요. |
 
 ## Lean mode (에이전트)
 
@@ -227,7 +227,9 @@ Mac 여러 대로 구성했다면, 각 Mac의 `tapflow.config.json`이 그 Mac�
 
 rathole을 쓰려면 `TAPFLOW_TUNNEL_TOKEN` 환경변수도 설정해야 합니다.
 
-## HTTPS (보안 컨텍스트)
+## HTTPS (보안 컨텍스트) {#https-secure-context}
+
+<a id="https-보안-컨텍스트"></a>
 
 브라우저의 하드웨어 가속 영상 디코드(WebCodecs)는 보안 컨텍스트(HTTPS)에서만 동작합니다. HTTP로 접속하면 소프트웨어 디코드로 자동 폴백합니다. 같은 LAN의 팀원에게 더 부드러운 화면을 주려면 릴레이를 HTTPS로 종단하세요. `tls`를 설정하면 릴레이가 같은 포트에서 HTTPS와 WSS를 함께 종단합니다.
 
@@ -256,7 +258,7 @@ rathole을 쓰려면 `TAPFLOW_TUNNEL_TOKEN` 환경변수도 설정해야 합니�
 | `tls.publishAddress` | 도메인 A 레코드를 이 머신의 LAN IP로 자동 발행합니다. 기본 `true`이며, DNS를 직접 관리하려면 `false`로 둡니다. |
 | `tls.address` | 자동 감지한 LAN IP 대신 사용할 IP. 멀티 NIC나 VPN 환경에서 오버라이드용입니다. |
 
-API 토큰은 설정 파일이 아니라 `tapflow init`이 데이터 디렉터리에 만들어 두는 `.env` 파일(기본값 `~/.tapflow/data/.env`)에 적습니다. Cloudflare는 `TAPFLOW_CLOUDFLARE_TOKEN`, Vercel은 `TAPFLOW_VERCEL_TOKEN`을 씁니다. 팀 도메인이면 `TAPFLOW_VERCEL_TEAM_ID`도 함께 넣습니다. 설치 디렉터리가 git 저장소 안에 있으면 `tapflow init`이 데이터 디렉터리를 `.gitignore`에 추가하므로 이 파일은 커밋되지 않습니다. 데이터 디렉터리를 다른 곳으로 지정했다면 그 경로도 무시 목록에 들어 있는지 확인하세요. 환경변수로 직접 설정한 값이 있으면 파일보다 우선합니다. 이 파일이 어떻게 만들어지고 읽히는지는 [tapflow 설정](/ko/guide/configure)에서 다룹니다.
+API 토큰은 설정 파일이 아니라 `tapflow init`이 데이터 디렉터리에 만들어 두는 `.env` 파일(기본값 `~/.tapflow/data/.env`)에 적습니다. Cloudflare는 `TAPFLOW_CLOUDFLARE_TOKEN`, Vercel은 `TAPFLOW_VERCEL_TOKEN`을 씁니다. 팀 도메인이면 `TAPFLOW_VERCEL_TEAM_ID`도 함께 넣습니다. 설치 디렉터리가 git 저장소 안에 있으면 `tapflow init`이 데이터 디렉터리를 `.gitignore`에 추가하므로 이 파일은 커밋되지 않습니다. 데이터 디렉터리를 다른 곳으로 지정했다면 그 경로도 무시 목록에 들어 있는지 확인하세요. 환경변수로 직접 설정한 값이 있으면 파일보다 우선합니다. 이 파일이 어떻게 만들어지고 읽히는지는 [tapflow 설정](/ko/operate/configure)에서 다룹니다.
 
 `publishAddress`가 켜져 있으면 릴레이가 부팅할 때 자기 LAN IP를 도메인 A 레코드로 발행하고 주기적으로 갱신합니다. 팀원은 DNS를 건드리지 않고 도메인만 열면 됩니다.
 
@@ -323,7 +325,7 @@ SMTP가 설정되지 않으면 초대 이메일과 비밀번호 재설정 이메
 
 ## 웹훅
 
-빌드 리뷰 상태가 `Done` 또는 `Rejected`로 바뀌면 tapflow가 등록된 URL로 POST합니다. `webhooks` 배열로 엔드포인트를 선언하고, REST API로도 런타임에 더 등록할 수 있습니다. 페이로드·서명 검증·발화 조건은 [웹훅](/ko/guide/build-status-webhooks)에서 다룹니다.
+빌드 리뷰 상태가 `Done` 또는 `Rejected`로 바뀌면 tapflow가 등록된 URL로 POST합니다. `webhooks` 배열로 엔드포인트를 선언하고, REST API로도 런타임에 더 등록할 수 있습니다. 페이로드·서명 검증·발화 조건은 [웹훅](/ko/operate/webhooks)에서 다룹니다.
 
 | 키 | 설명 |
 |----|------|

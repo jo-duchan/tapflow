@@ -124,18 +124,19 @@ KO 헤딩은 `사용 방법 / 플랫폼 지원 / 제한 사항 / 설정(운영�
 
 - 다른 페이지가 링크할 만한 새 헤딩에는 EN/KO 양쪽에 같은 `{#english-id}`를 붙인다. KO 자동 슬러그는 한글(`#외부-접속`)이라 헤딩 문구만 고쳐도 링크가 끊긴다. VitePress 빌드는 `#앵커`를 검사하지 않으므로 `docsAnchors` 테스트가 대신 잡는다.
 - 기존 헤딩 문구를 바꿀 때는 원래 슬러그를 `{#기존-id}`로 명시해 id를 유지한다.
-- 배포된 코드에 박힌 앵커는 절대 옮기거나 바꾸지 않는다.
-  - `/reference/configuration#https-secure-context`: `packages/dashboard/components/perf/PerformanceModeNotice.tsx:13`. EN 헤딩 `## HTTPS (secure context)`의 **자동 슬러그**라서 헤딩 문구만 바꿔도 끊긴다.
+- 배포된 코드에 박힌 앵커는 절대 옮기거나 바꾸지 않는다. `docsAnchors`의 `LEGACY_URLS`가 원래 형태 그대로 검사한다.
+  - `/reference/configuration#https-secure-context`: `packages/dashboard/components/perf/PerformanceModeNotice.tsx:13`. EN/KO 헤딩 양쪽에 명시적 id `{#https-secure-context}`가 있다. KO의 옛 슬러그는 헤딩 아래 `<a id="https-보안-컨텍스트"></a>`로 남아 있다.
   - `/guide/troubleshooting#ios-simulator-service-version-mismatch`: `packages/ios-agent/src/simctl.ts:49`, 명시적 id.
+- **한 번 렌더된 id는 없어지지 않는다.** `docs/.vitepress/frozen-ids.json`은 개편 직전(main `74bc7dc8`)에 렌더된 모든 id(EN + KO)이고, `docsMoves` 테스트가 페이지 이동을 따라가 지금도 그 id가 있는지 검사한다. 헤딩 문구를 바꾸면 `{#기존-id}`를 붙이거나, `<a id="기존-id"></a>`를 남기거나, 섹션이 다른 페이지로 갔다면 Moved sections 항목(`<a id="…" data-moved-to="/새/경로#id">`)을 둔다. 이 파일은 다시 생성하지 않는다.
 
 ## 5. 등록
 
 새 페이지는 세 곳에 등록한다.
 
-1. **`docs/.vitepress/config.ts`의 `enSidebar`와 `koSidebar` 양쪽.** 섹션은 현재 구조를 따른다. EN은 Getting Started / Setup / Distribution / Dashboard / AI Automation / Reference / Troubleshooting / Contributing, KO는 시작하기 / 설정 / 빌드 배포 / 대시보드 / AI 자동화 / 레퍼런스 / 트러블슈팅 / 기여. 사이드바 섹션과 파일 경로는 다를 수 있다. 예를 들어 `guide/audio.md`는 Reference 섹션에 있다.
+1. **`docs/.vitepress/config.ts`의 `enSidebar`와 `koSidebar` 양쪽.** 섹션은 독자가 하는 일로 나뉜다. EN은 Get started / Test apps / Operate(하위 그룹 Set up a Mac / Deploy the relay / Run the team / Deliver builds / AI automation (experimental)) / Reference / Troubleshooting / Contributing, KO는 시작하기 / 앱 테스트 / 운영(Mac 준비 / 릴레이 배포 / 팀 운영 / 빌드 전달 / AI 자동화 (실험적)) / 레퍼런스 / 문제 해결 / 기여. KO 사이드바는 EN과 같은 트리여야 하고 링크에는 `/ko`만 붙는다(테스트가 검사한다).
 2. **`docs/public/llms.txt`**: 해당 섹션에 `- [제목](https://www.tapflow.dev/{경로}): {한 줄 설명}` 행을 추가한다. `scripts/__tests__/agentReadableDocs.test.mjs`가 강제하는 것은 다음과 같다.
    - 링크 행의 URL 집합이 `docs/` 아래 영어 `.md` 페이지 전체(`ko/`, `AGENTS.md`/`CLAUDE.md`, `layout: home` 랜딩 제외)와 **정확히 같아야** 한다. 빠져도, 남아도 실패한다.
-   - 페이지 수가 테스트에 숫자로 박혀 있다(`expect(expected.length).toBe(27)`). 페이지를 추가하거나 지우면 이 숫자를 같은 변경에서 고친다.
+   - `## ` 섹션 하나가 사이드바 최상위 그룹 하나다. 섹션 이름이 그룹 이름(EN)과 같고, 섹션 안의 링크가 그 그룹의 페이지와 **같은 순서**여야 한다. Operate의 하위 그룹은 `### `로 나눠 쓴다.
    - 모든 URL은 `https://www.tapflow.dev/`로 시작한다(apex `tapflow.dev`는 307 리다이렉트).
    - 설명 문구 자체는 검사하지 않으므로 사람이 맞춘다. frontmatter `description`과 같은 내용으로 쓴다.
    - 확인: `pnpm test:scripts`
@@ -143,18 +144,23 @@ KO 헤딩은 `사용 방법 / 플랫폼 지원 / 제한 사항 / 설정(운영�
 
 | 위치 | EN | KO |
 |---|---|---|
-| 가이드·기능 페이지 | `docs/guide/{slug}.md` | `docs/ko/guide/{slug}.md` |
-| 대시보드 | `docs/dashboard/{slug}.md` | `docs/ko/dashboard/{slug}.md` |
+| Get started (튜토리얼·소개) | `docs/get-started/{slug}.md` | `docs/ko/get-started/{slug}.md` |
+| Test apps (기능 페이지) | `docs/testing/{slug}.md` | `docs/ko/testing/{slug}.md` |
+| Operate (운영자 how-to) | `docs/operate/{slug}.md` | `docs/ko/operate/{slug}.md` |
+| AI automation (실험적) | `docs/automation/{slug}.md` | `docs/ko/automation/{slug}.md` |
 | 레퍼런스 | `docs/reference/{slug}.md` | `docs/ko/reference/{slug}.md` |
 
-기능 페이지 전용 경로(`/features/` 등)는 아직 결정되지 않았다. 새 최상위 디렉터리를 만들지 말고 `docs/guide/`에 둔다. 기존 페이지의 URL은 이 커맨드로 옮기지 않는다.
+URL 접두사가 곧 섹션이다. slug는 UI 위치가 아니라 대상 이름으로 짓는다. `docs/guide/`와 `docs/dashboard/`에 남은 페이지는 분할·병합을 기다리는 중이므로 거기에 새 페이지를 두지 않는다.
+
+**페이지를 옮기거나 없앨 때**: 옛 URL을 `docs/.vitepress/moves.json`의 `pages`에 `"옛 경로": "새 경로"`로 추가하고 `node scripts/docs-redirects.mjs --write`로 `docs/vercel.json`을 다시 만든다. 항목 하나가 EN·KO·`.md` 네 개의 308 리다이렉트가 된다. 이미 옮긴 페이지를 또 옮기면 항목을 이어 붙이지 말고 기존 항목의 목적지를 고친다(연쇄 금지). 레포 안의 링크는 새 경로로 고치고, README처럼 이미 배포된 URL은 `docsAnchors`의 `LEGACY_URLS`가 옛 형태 그대로 계속 검사한다. 이 규칙은 `docsMoves` 테스트가 강제한다.
 
 ## 6. 미디어
 
 - 정적인 상태(설정 패널, 토글 위치)는 스크린샷으로, 움직임이나 순서가 핵심인 것은 영상으로 보여 준다. 터미널 출력은 이미지 대신 텍스트로 쓴다.
-- GIF보다 **짧은 무음 루프 영상 + poster 이미지**를 쓴다. 대략 5~15초, 한 클립에 동작 하나, 깜빡임 없이 만든다. 현재 `docs/.vitepress/theme/VideoPlayer.vue`는 `src`/`poster`와 `controls`만 지원한다(muted/loop/autoplay 없음).
+- **위치(필수): 영상(mp4/webm/mov)은 `docs/public/media/`에 두고** 본문에서는 `/media/{파일}`로 가리킨다. `scripts/__tests__/docsMedia.test.mjs`가 강제한다. 이미지는 대상이 아니다. 특히 `docs/public/demo-thumbnail.png`는 옮기지 않는다. npm에 배포된 `packages/cli/README.md`가 raw.githubusercontent.com 주소로 불러오고 `config.ts`의 `og:image`로도 쓰여서, 리다이렉트로 살릴 수 없기 때문이다.
+- 권고(검사하지 않음): GIF보다 **짧은 무음 루프 영상 + poster 이미지**를 쓴다. 대략 5~15초, 한 클립에 동작 하나, 깜빡임 없이 만든다. 크기는 클립당 약 2MB 이하를 목표로 한다. 소개·설정 영상(`tapflow-demo.mp4`, `tapflow-setup.mp4`)처럼 성격상 긴 영상은 예외다. 현재 `docs/.vitepress/theme/VideoPlayer.vue`는 `src`/`poster`와 `controls`만 지원한다(muted/loop/autoplay 없음).
 - **본문만 읽어도 이해되어야 한다.** 영상이 보여 주는 내용을 옆 문장이 말하고, 단계는 영상 없이도 따라갈 수 있어야 한다.
-- 크기: 클립당 약 2MB 이하를 목표로 한다(권고). `docs/public`에는 이미 mp4 두 개로 약 14MB가 들어 있다. 영상 저장 방식(git / LFS / GitHub 첨부)은 **아직 결정되지 않았으므로**, 큰 영상을 추가하기 전에 사람에게 확인한다.
+- 영상을 옮기면 옛 경로를 `docs/.vitepress/moves.json`의 `files`에 추가한다.
 
 ## 7. 작성 규칙
 
@@ -179,7 +185,7 @@ KO 헤딩은 `사용 방법 / 플랫폼 지원 / 제한 사항 / 설정(운영�
 ::: info Two testing paths
 This guide covers the **manual review path**: CI delivers the build; people do the testing.
 
-For automated testing where an LLM agent controls the simulator, see [MCP in CI/CD](/guide/mcp-ci). That is a separate, experimental feature.
+For automated testing where an LLM agent controls the simulator, see [MCP in CI/CD](/automation/mcp-ci). That is a separate, experimental feature.
 :::
 ```
 
@@ -187,7 +193,7 @@ For automated testing where an LLM agent controls the simulator, see [MCP in CI/
 ::: info 두 가지 테스트 경로
 이 가이드는 **수동 리뷰 경로**를 다룹니다. CI가 빌드를 전달하고, 팀원이 직접 테스트하는 방식입니다.
 
-LLM 에이전트가 시뮬레이터를 자동으로 조작하는 방식은 [CI/CD에서 MCP 활용](/ko/guide/mcp-ci)을 참고하세요. 이는 별도의 실험적 기능입니다.
+LLM 에이전트가 시뮬레이터를 자동으로 조작하는 방식은 [CI/CD에서 MCP 활용](/ko/automation/mcp-ci)을 참고하세요. 이는 별도의 실험적 기능입니다.
 :::
 ```
 
@@ -226,7 +232,7 @@ run: |
 2. 소스 대조(작성 전): 사실 목록과 `file:line`
 3. KO 작성 → EN 번역(KO 기반)
 4. 사실이 바뀌었다면 `docs/` 전체 grep 후 다른 출현도 EN/KO 모두 수정
-5. 새 페이지라면 사이드바 EN/KO와 `llms.txt`에 등록(필요하면 테스트의 페이지 수도 수정)
+5. 새 페이지라면 사이드바 EN/KO와 `llms.txt`의 같은 섹션·같은 순서에 등록
 6. 소스 대조(작성 후), 그리고 `docs/AGENTS.md` 용어집 대조(산문의 표기가 표와 같은지)
 7. `pnpm docs:build`, 새 페이지였다면 `pnpm test:scripts`. 오류가 나면 고치고 다시 돌린다. `#앵커` 링크, EN/KO 헤딩 구조, CLI 플래그와 `cli.md`의 일치는 `pnpm test:scripts`와 cli 테스트가 검사한다(`docsAnchors`, `docsLocaleParity`, `cliDocsParity`).
 8. **AI tells detect 게이트**: KO 산문은 `.claude/ai-tells/rules-ko.md`로, EN 산문은 `.claude/ai-tells/rules-en.md`로 `detect`한다. 두 파일의 **docs carve-out**(격식체 종결 균일, glossary 볼드, `~할 수 있습니다` 기능 서술, em dash 단문 closing)을 적용하고, 코드·수치·테이블·frontmatter는 건드리지 않는다.
@@ -255,7 +261,7 @@ run: |
 
 ## 등록 (새 페이지)
 - config.ts {EN 섹션} > "{EN 레이블}" / {KO 섹션} > "{KO 레이블}"
-- llms.txt {섹션} 행 추가, 테스트 페이지 수 {N → N+1}
+- llms.txt {섹션} 행 추가
 
 ## 빌드·테스트
 - pnpm docs:build 통과 / pnpm test:scripts 통과

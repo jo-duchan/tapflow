@@ -81,4 +81,4 @@ Personal access tokens (PATs) for CI/CD scripts and API access. The sidebar show
 - **New token** — enter a name, an expiry (1–365 days in this dialog, default 30), and a Type. **API** is for CI uploads and API access (scope `view, builds:write`); **Agent** connects remote Mac agents. The token is shown once — copy it immediately.
 - **Revoke** — instantly invalidates the token.
 
-Use PATs with the `Authorization: Bearer tflw_pat_<token>` header to upload builds from CI. See [Uploading Builds](/guide/upload-builds).
+Use PATs with the `Authorization: Bearer tflw_pat_<token>` header to upload builds from CI. See [Uploading Builds](/testing/app-center).

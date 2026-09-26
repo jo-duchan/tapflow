@@ -81,4 +81,4 @@ CI/CD 스크립트와 API 접근을 위한 개인 액세스 토큰(PAT)을 관�
 - **New token** — 이름, 만료 기간(이 화면에서는 1~365일, 기본 30일), 종류(Type)를 입력합니다. **API**는 CI 업로드와 API 접근용이고(`view, builds:write` 권한), **Agent**는 원격 Mac 에이전트 연결용입니다. 토큰은 생성 직후 한 번만 표시됩니다. 즉시 복사하세요.
 - **Revoke** — 즉시 토큰을 무효화합니다.
 
-CI에서 빌드를 업로드할 때 `Authorization: Bearer tflw_pat_<token>` 헤더로 사용합니다. [빌드 업로드](/ko/guide/upload-builds)를 참고하세요.
+CI에서 빌드를 업로드할 때 `Authorization: Bearer tflw_pat_<token>` 헤더로 사용합니다. [빌드 업로드](/ko/testing/app-center)를 참고하세요.
