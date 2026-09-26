@@ -57,7 +57,8 @@ export function DefaultSettings() {
   const defaultLogo = resolvedTheme === 'dark' ? '/logo-dark.svg' : '/logo.svg'
   const { user } = useAuth()
   const isAdmin = user?.role === 'Admin'
-  const canEditApps = user?.role === 'Admin' || user?.role === 'Developer'
+  // Everyone but Viewer manages apps — the same rule the relay enforces on /api/v1/apps.
+  const canEditApps = user?.role === 'Admin' || user?.role === 'Developer' || user?.role === 'QA'
 
   // ── Workspace (Admin only) ────────────────────────────────────────────────
   const queryClient = useQueryClient()

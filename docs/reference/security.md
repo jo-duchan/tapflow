@@ -40,6 +40,7 @@ Programmatic access to tapflow is controlled by **personal access tokens (PATs)*
   - `view` — read the app list, uploaded files, session screenshots and UI trees
   - `agent` — connect an agent on a remote Mac to the relay (only an Admin can issue one)
 - Dashboard access for team members is governed separately by **roles** (Admin / Developer / QA / Viewer), not by PATs.
+- A call made with a PAT is held to its owner's current role. Viewer is read-only, so a `builds:write` token owned by a Viewer cannot upload builds. The server checks the role on every request, so a role change applies to cookies and tokens right away.
 
 ## Access control boundaries
 

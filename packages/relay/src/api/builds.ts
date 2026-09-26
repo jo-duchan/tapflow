@@ -7,7 +7,7 @@ import { randomUUID } from 'crypto'
 import { spawnSync } from 'child_process'
 import busboy from 'busboy'
 import { getDb } from '../db.js'
-import { requireAuth, requireBuildAuth } from '../middleware/auth.js'
+import { assertCanWrite, requireAuth, requireBuildAuth } from '../middleware/auth.js'
 import { json, readJson } from '../router.js'
 import { unlinkSafe } from '../lib/uploads.js'
 import { deliverWebhooks } from '../lib/webhooks.js'
@@ -390,7 +390,7 @@ export async function handleUpdateBuild(
   params: Record<string, string>
 ): Promise<void> {
   const auth = requireAuth(req, res)
-  if (!auth) return
+  if (!auth || !assertCanWrite(res, auth.userId)) return
 
   // Parse the body before reading current state, so the SELECT and UPDATE below run
   // with no await between them. Closes a TOCTOU window where two concurrent PATCHes
@@ -462,7 +462,8 @@ export function handleScheduleBuildDeletion(
   res: http.ServerResponse,
   params: Record<string, string>
 ): void {
-  if (!requireAuth(req, res)) return
+  const auth = requireAuth(req, res)
+  if (!auth || !assertCanWrite(res, auth.userId)) return
   const db = getDb()
   const result = db
     .prepare(`UPDATE builds SET delete_after = datetime('now', '+' || ? || ' days') WHERE id = ?`)
@@ -479,7 +480,8 @@ export function handleCancelBuildDeletion(
   res: http.ServerResponse,
   params: Record<string, string>
 ): void {
-  if (!requireAuth(req, res)) return
+  const auth = requireAuth(req, res)
+  if (!auth || !assertCanWrite(res, auth.userId)) return
   const result = getDb().prepare('UPDATE builds SET delete_after = NULL WHERE id = ?').run(params.id)
   if (result.changes === 0) return json(res, 404, { error: 'Build not found' })
   json(res, 200, { ok: true })
@@ -561,7 +563,7 @@ export function handleUploadBuild(
   uploadsDir: string
 ): void {
   const auth = requireBuildAuth(req, res)
-  if (!auth) return
+  if (!auth || !assertCanWrite(res, auth.userId)) return
 
   const bb = busboy({ headers: req.headers, limits: { fileSize: maxBuildUploadBytes() } })
   const fields: Record<string, string> = {}

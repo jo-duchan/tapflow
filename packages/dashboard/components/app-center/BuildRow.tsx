@@ -32,6 +32,10 @@ interface Props {
   onStatusChange: (buildId: number, status: string | null) => void;
   onScheduleDeletion: (buildId: number) => void;
   onCancelDeletion: (buildId: number) => void;
+  /** False for Viewer. The status Select and the deletion button are then not rendered at all: the
+   *  status and deletion badges already say the state, and a control that can only be refused is
+   *  one more stop in the tab order with nothing behind it. */
+  canWrite: boolean;
   /** Describes the status trigger — App Center passes a note here when this row is where focus
    *  lands after the row above or below it left the filtered list (#833). */
   statusDescribedBy?: string;
@@ -44,6 +48,7 @@ export function BuildRow({
   onStatusChange,
   onScheduleDeletion,
   onCancelDeletion,
+  canWrite,
   statusDescribedBy,
 }: Props) {
   const [pendingSchedule, setPendingSchedule] = useState(false);
@@ -134,6 +139,7 @@ export function BuildRow({
           </div>
         </div>
 
+        {canWrite && (<>
         <Select value={build.status_label ?? 'none'} onValueChange={handleValueChange}>
           {/* Every control on the row is named from `buildRowName` — see it for why the number
               alone is not enough. `data-status-trigger` is how App Center finds this trigger to
@@ -190,6 +196,7 @@ export function BuildRow({
             <TooltipContent>{deletion ? 'Cancel scheduled deletion' : 'Schedule deletion'}</TooltipContent>
           </Tooltip>
         </TooltipProvider>
+        </>)}
 
         {/* The visible words first, so the name still contains what a voice-control user reads. */}
         <Button size="sm" onClick={() => onNavigate(build.id)} disabled={isDone} aria-label={`Start QA on ${rowName}`}>

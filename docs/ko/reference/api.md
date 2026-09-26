@@ -13,6 +13,8 @@
 | `builds:write` | `POST /builds`, `GET /builds`, `GET /builds/:id`, `POST /comments`, 웹훅 엔드포인트 전체 |
 | `view` | `GET /apps`, `GET /sessions/:sessionId/screenshot`, `GET /sessions/:sessionId/ui-tree`, `/uploads/` 아래 파일(`/api/v1/`이 아닌 릴레이 루트 경로) |
 
+**역할.** PAT로 호출해도 토큰 주인의 현재 역할이 적용됩니다. Viewer는 읽기 전용이라 빌드 업로드·수정·삭제 예약, 앱 생성·수정·삭제, 웹훅 엔드포인트 전체에서 `403`을 받습니다. 빌드 조회와 댓글 작성은 Viewer도 할 수 있습니다. 역할은 요청마다 서버가 다시 읽으므로 역할을 바꾸면 다시 로그인하거나 토큰을 새로 만들지 않아도 바로 적용됩니다.
+
 
 ## 에러 응답
 
@@ -22,7 +24,7 @@
 |---------|------|------|
 | `400` | 잘못된 요청 (필드 누락, 형식 오류 등) | `{ "error": "file required" }` |
 | `401` | 인증 없음 또는 만료 | `{ "error": "Unauthorized" }` |
-| `403` | 권한 없음 | `{ "error": "Forbidden" }` 또는 `{ "error": "Insufficient scope" }` |
+| `403` | 권한 없음 | `{ "error": "Forbidden" }`, `{ "error": "Insufficient scope" }` 또는 `{ "error": "Viewers have read-only access" }` |
 | `404` | 리소스를 찾을 수 없음 | `{ "error": "Build not found" }` |
 | `409` | 현재 상태에서 처리할 수 없음 | `{ "error": "Device is not booted" }` |
 | `410` | 토큰 만료 | `{ "error": "Invitation expired or not found" }` |
@@ -255,7 +257,7 @@ SMTP가 설정되지 않은 경우 `emailSent: false`가 반환되며, 재설정
 
 ### `POST /api/v1/apps`
 
-앱을 수동으로 생성합니다. **Admin 또는 Developer** 권한이 필요합니다.
+앱을 수동으로 생성합니다. **Admin, Developer, QA** 권한이 필요합니다. Viewer는 `403`을 받습니다.
 
 ```
 Body (JSON):
@@ -273,7 +275,7 @@ Body (JSON):
 
 ### `PATCH /api/v1/apps/:id`
 
-앱 이름을 수정합니다. **Admin 또는 Developer** 권한이 필요합니다.
+앱 이름을 수정합니다. **Admin, Developer, QA** 권한이 필요합니다. Viewer는 `403`을 받습니다.
 
 ```
 Body (JSON):
@@ -289,7 +291,7 @@ Body (JSON):
 
 ### `DELETE /api/v1/apps/:id`
 
-앱과 하위의 모든 빌드·댓글을 삭제합니다. **Admin 또는 Developer** 권한이 필요합니다.
+앱과 하위의 모든 빌드·댓글을 삭제합니다. **Admin, Developer, QA** 권한이 필요합니다. Viewer는 `403`을 받습니다.
 
 **응답 `200`**
 
@@ -302,7 +304,7 @@ Body (JSON):
 
 ### `POST /api/v1/builds`
 
-빌드를 업로드합니다.
+빌드를 업로드합니다. Viewer는 쿠키로 호출하든 자기 PAT로 호출하든 `403`을 받습니다.
 
 ```
 Content-Type: multipart/form-data
@@ -394,7 +396,7 @@ Query:
 
 ### `PATCH /api/v1/builds/:id`
 
-빌드의 상태 또는 레이블을 수정합니다.
+빌드의 상태 또는 레이블을 수정합니다. Viewer는 `403`을 받습니다.
 
 ```
 Body (JSON):
@@ -411,7 +413,7 @@ Body (JSON):
 
 ### `POST /api/v1/builds/:id/schedule-deletion`
 
-빌드 삭제를 예약합니다. 서버가 `delete_after = now + TAPFLOW_BUILD_TTL_DAYS`로 설정하고 그 시각이 지나면 파일과 레코드를 삭제합니다.
+빌드 삭제를 예약합니다. 서버가 `delete_after = now + TAPFLOW_BUILD_TTL_DAYS`로 설정하고 그 시각이 지나면 파일과 레코드를 삭제합니다. Viewer는 `403`을 받습니다.
 
 **응답 `200`**
 
@@ -422,7 +424,7 @@ Body (JSON):
 
 ### `DELETE /api/v1/builds/:id/schedule-deletion`
 
-예약한 삭제를 취소하고 `delete_after`를 비웁니다.
+예약한 삭제를 취소하고 `delete_after`를 비웁니다. Viewer는 `403`을 받습니다.
 
 **응답 `200`**
 
@@ -433,7 +435,7 @@ Body (JSON):
 
 ## 웹훅 (Webhooks)
 
-빌드 리뷰 상태가 바뀔 때 알림을 받을 엔드포인트를 관리합니다. 모두 세션 쿠키나 `builds:write` scope의 PAT로 호출합니다. 페이로드와 서명 검증은 [웹훅](/ko/guide/build-status-webhooks)에서 다룹니다.
+빌드 리뷰 상태가 바뀔 때 알림을 받을 엔드포인트를 관리합니다. 모두 세션 쿠키나 `builds:write` scope의 PAT로 호출합니다. 웹훅 URL 자체가 비밀인 경우가 많아서 Viewer는 목록 조회를 포함한 모든 웹훅 엔드포인트에서 `403`을 받습니다. 페이로드와 서명 검증은 [웹훅](/ko/guide/build-status-webhooks)에서 다룹니다.
 
 ### `GET /api/v1/webhooks`
 
@@ -515,7 +517,7 @@ Query:
 
 ### `POST /api/v1/comments`
 
-댓글을 작성합니다. 이미지를 첨부할 수 있습니다. 세션 쿠키나 `builds:write` scope의 PAT로 호출합니다.
+댓글을 작성합니다. 이미지를 첨부할 수 있습니다. 세션 쿠키나 `builds:write` scope의 PAT로 호출합니다. Viewer를 포함한 모든 역할이 작성할 수 있습니다.
 
 ```
 Content-Type: multipart/form-data

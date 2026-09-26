@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Breaking Changes
+
+- **Viewer is read-only.** A Viewer can view builds, test them in a QA Session and comment, and nothing else it does changes builds, apps or webhooks: uploading a build, changing its status, scheduling or cancelling its deletion and every `/api/v1/webhooks` route (listing included) now answer `403 { "error": "Viewers have read-only access" }`, with the dashboard cookie or with a personal access token, since a token is held to its owner's role. In the App Center a Viewer's **Add App** and **Upload build** show a notice instead of a dialog, and build rows drop the status menu and the deletion button. Migrate: give the members who upload builds or change their status the QA or Developer role. A CI token owned by a Viewer starts getting 403 on upload and works again as soon as its owner is promoted, with no new token needed.
+
+### Changed
+
+- **QA manages apps like Developer.** `POST`, `PATCH` and `DELETE /api/v1/apps` accept the QA role, and QA sees the apps section in **Settings**.
+
+- **A role change takes effect immediately.** Roles used to be read from the login cookie, which lasts 7 days, so a demoted member — an Admin included — kept their old rights and a promoted one was refused until they signed in again. The relay now reads the role from the database on every request, for cookies and tokens alike.
+
 ### Fixed
 
 - **`tapflow flow run --session` points at where a session id can be found.** Its help and the error for a `--device` name matching more than one device said to look in `tapflow status`, which prints no session ids. Both now name the MCP server's `list_devices`.

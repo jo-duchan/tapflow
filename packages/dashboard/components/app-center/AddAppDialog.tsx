@@ -21,9 +21,9 @@ import {
 import { toast } from 'sonner'
 import { createApp } from '@/lib/queries'
 
-type Props = { onSuccess: () => void }
+type Props = { onSuccess: () => void; canWrite: boolean }
 
-export function AddAppDialog({ onSuccess }: Props) {
+export function AddAppDialog({ onSuccess, canWrite }: Props) {
   const [open, setOpen] = useState(false)
   const [name, setName] = useState('')
   const [bundleId, setBundleId] = useState('')
@@ -56,13 +56,28 @@ export function AddAppDialog({ onSuccess }: Props) {
     }
   }
 
+  const trigger = (onClick?: () => void) => (
+    <button
+      type="button"
+      onClick={onClick}
+      className="flex w-full items-center gap-1.5 rounded-md px-2 py-1.5 text-left text-sm text-muted-foreground hover:bg-accent hover:text-foreground transition-colors"
+    >
+      <Plus className="size-3.5 shrink-0" />
+      <span>Add App</span>
+    </button>
+  )
+
+  // **Still a button for Viewer, and not `disabled`.** A disabled control is skipped by the keyboard
+  // and says nothing about why; this one keeps its name and its place in the tab order, and pressing
+  // it says what access would be needed. No dialog, so no request can follow.
+  if (!canWrite) {
+    return trigger(() => toast.error("Viewers can't add apps. Ask an Admin for QA or Developer access."))
+  }
+
   return (
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogTrigger asChild>
-        <button className="flex w-full items-center gap-1.5 rounded-md px-2 py-1.5 text-left text-sm text-muted-foreground hover:bg-accent hover:text-foreground transition-colors">
-          <Plus className="size-3.5 shrink-0" />
-          <span>Add App</span>
-        </button>
+        {trigger()}
       </DialogTrigger>
       <DialogContent className="sm:max-w-sm">
         <DialogHeader>

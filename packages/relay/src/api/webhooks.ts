@@ -1,6 +1,6 @@
 import type http from 'http'
 import { getDb } from '../db.js'
-import { requireBuildAuth } from '../middleware/auth.js'
+import { assertCanWrite, requireBuildAuth } from '../middleware/auth.js'
 import { json, readJson } from '../router.js'
 import { validateWebhookUrl } from '../lib/webhooks.js'
 
@@ -17,14 +17,18 @@ function publicView(r: WebhookRow) {
   return { id: r.id, url: r.url, enabled: !!r.enabled, has_secret: !!r.secret, created_at: r.created_at }
 }
 
+// All four routes, GET included, are closed to Viewer: webhook URLs are often secrets in themselves
+// (a Slack incoming webhook is its own credential), so reading the list is not a read-only act.
 export function handleListWebhooks(req: http.IncomingMessage, res: http.ServerResponse): void {
-  if (!requireBuildAuth(req, res)) return
+  const auth = requireBuildAuth(req, res)
+  if (!auth || !assertCanWrite(res, auth.userId)) return
   const rows = getDb().prepare('SELECT * FROM webhook_endpoints ORDER BY id').all() as WebhookRow[]
   json(res, 200, { webhooks: rows.map(publicView) })
 }
 
 export async function handleCreateWebhook(req: http.IncomingMessage, res: http.ServerResponse): Promise<void> {
-  if (!requireBuildAuth(req, res)) return
+  const auth = requireBuildAuth(req, res)
+  if (!auth || !assertCanWrite(res, auth.userId)) return
   const body = await readJson<{ url?: string; secret?: string | null; enabled?: boolean }>(req)
   if (!body.url || typeof body.url !== 'string') return json(res, 400, { error: 'url is required' })
   const err = validateWebhookUrl(body.url)
@@ -42,7 +46,8 @@ export async function handleUpdateWebhook(
   res: http.ServerResponse,
   params: Record<string, string>
 ): Promise<void> {
-  if (!requireBuildAuth(req, res)) return
+  const auth = requireBuildAuth(req, res)
+  if (!auth || !assertCanWrite(res, auth.userId)) return
   const db = getDb()
   const existing = db.prepare('SELECT id FROM webhook_endpoints WHERE id = ?').get(params.id)
   if (!existing) return json(res, 404, { error: 'Webhook not found' })
@@ -77,7 +82,8 @@ export function handleDeleteWebhook(
   res: http.ServerResponse,
   params: Record<string, string>
 ): void {
-  if (!requireBuildAuth(req, res)) return
+  const auth = requireBuildAuth(req, res)
+  if (!auth || !assertCanWrite(res, auth.userId)) return
   const r = getDb().prepare('DELETE FROM webhook_endpoints WHERE id = ?').run(params.id)
   if (r.changes === 0) return json(res, 404, { error: 'Webhook not found' })
   json(res, 200, { ok: true })

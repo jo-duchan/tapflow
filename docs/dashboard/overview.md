@@ -10,10 +10,12 @@ The main workspace for the team. Shows all uploaded builds organised by app.
 
 | UI element | What it does |
 |---|---|
-| App list | Groups builds by app (bundle ID + platform). Select an app to see its builds, grouped by version. |
+| App list | Groups builds by app (bundle ID + platform). Select an app to see its builds, grouped by version. Use **Add App** to add an app by hand. |
 | Build row | Shows build number, platform, status badge, uploader, and upload date. Click it to open the QA Session page for that build. |
-| Status | **Backlog** · **In Progress** · **Done** · **Rejected** — change it from the status menu on the build row. Any signed-in member can change it. |
+| Status | **Backlog** · **In Progress** · **Done** · **Rejected** — change it from the status menu on the build row. A Viewer sees the status badge only, with no status menu and no schedule-deletion button. |
 | Upload build | Opens the build upload dialog. Accepts `.app.zip` or `.tar.gz`/`.tgz` (iOS simulator builds) and `.apk` (Android). |
+
+Viewer is read-only. When a Viewer presses **Add App** or **Upload build**, a notice says QA or Developer access is needed instead of opening the dialog. For what each role can do, see [Invite your team](/dashboard/setup#_3-invite-your-team).
 
 ## QA Session
 

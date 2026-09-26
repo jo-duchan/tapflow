@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest'
-import { render, screen } from '@testing-library/react'
+import { cleanup, render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { BuildRow } from '@/components/app-center/BuildRow'
 import type { Build } from '@/lib/types'
@@ -25,7 +25,7 @@ function makeBuild(overrides: Partial<Build> = {}): Build {
   }
 }
 
-function renderRow(build: Build, handlers: Partial<Record<'onScheduleDeletion' | 'onCancelDeletion', (id: number) => void>> = {}) {
+function renderRow(build: Build, handlers: Partial<Record<'onScheduleDeletion' | 'onCancelDeletion', (id: number) => void>> = {}, canWrite = true) {
   render(
     <BuildRow
       build={build}
@@ -34,6 +34,7 @@ function renderRow(build: Build, handlers: Partial<Record<'onScheduleDeletion' |
       onStatusChange={() => {}}
       onScheduleDeletion={handlers.onScheduleDeletion ?? (() => {})}
       onCancelDeletion={handlers.onCancelDeletion ?? (() => {})}
+      canWrite={canWrite}
     />,
   )
 }
@@ -81,9 +82,9 @@ describe('BuildRow — every control names its row', () => {
     render(
       <>
         <BuildRow build={makeBuild({ id: 1, platform: 'ios', build_number: '42', version_name: '1.2.0' })} isLast={false}
-          onNavigate={() => {}} onStatusChange={() => {}} onScheduleDeletion={() => {}} onCancelDeletion={() => {}} />
+          onNavigate={() => {}} onStatusChange={() => {}} onScheduleDeletion={() => {}} onCancelDeletion={() => {}} canWrite />
         <BuildRow build={makeBuild({ id: 2, platform: 'android', build_number: '42', version_name: '1.2.0', delete_after: new Date(Date.now() + 86_400_000 * 3).toISOString() })} isLast
-          onNavigate={() => {}} onStatusChange={() => {}} onScheduleDeletion={() => {}} onCancelDeletion={() => {}} />
+          onNavigate={() => {}} onStatusChange={() => {}} onScheduleDeletion={() => {}} onCancelDeletion={() => {}} canWrite />
       </>,
     )
     expect(screen.getByRole('button', { name: 'Schedule deletion of ios build 42, 1.2.0' })).toBeTruthy()
@@ -101,5 +102,36 @@ describe('BuildRow — every control names its row', () => {
     await userEvent.tab()
     expect(document.activeElement).toBe(button)
     expect((await screen.findByRole('tooltip')).textContent).toContain('Schedule deletion')
+  })
+})
+
+// Viewer is read-only: the row still says its status and its deletion countdown, and still offers
+// Start QA, but draws no control that changes either.
+// Mutation: render the Select and deletion button regardless of `canWrite` → the absence assertions
+// below fail, while the presence twin keeps them honest about what the row does draw.
+describe('BuildRow — Viewer (canWrite false)', () => {
+  const scheduled = () => makeBuild({ status_label: 'Backlog', delete_after: new Date(Date.now() + 3 * 3_600_000).toISOString() })
+
+  it('draws no status Select and no deletion button, scheduled or not', () => {
+    renderRow(scheduled(), {}, false)
+    expect(screen.queryByRole('combobox')).toBeNull()
+    expect(screen.queryByRole('button', { name: /deletion/i })).toBeNull()
+    cleanup()
+    renderRow(makeBuild({ delete_after: null }), {}, false)
+    expect(screen.queryByRole('combobox')).toBeNull()
+    expect(screen.queryByRole('button', { name: /deletion/i })).toBeNull()
+  })
+
+  it('still shows the status, the countdown and Start QA', () => {
+    renderRow(scheduled(), {}, false)
+    expect(screen.getByText('Backlog')).toBeTruthy()
+    expect(screen.getByText(/Deletes in/)).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Start QA on ios build 1, 1.0.0' })).toBeTruthy()
+  })
+
+  it('the same build with canWrite draws both controls', () => {
+    renderRow(scheduled(), {}, true)
+    expect(screen.getByRole('combobox', { name: 'Status for ios build 1, 1.0.0' })).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Cancel scheduled deletion of ios build 1, 1.0.0' })).toBeTruthy()
   })
 })

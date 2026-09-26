@@ -15,6 +15,7 @@ import { getApps, getBuilds, updateBuildStatus, scheduleBuildDeletion, cancelBui
 import type { Build } from '@/lib/types'
 import { useFocusAfterSwap } from '@/hooks/useFocusAfterSwap'
 import { useReleaseDisclosure } from '@/hooks/useReleaseDisclosure'
+import { useAuth } from '@/hooks/useAuth'
 import { buildRowName, describeDeletionCountdown } from '@/lib/build-format'
 
 /**
@@ -50,6 +51,12 @@ export function AppCenter() {
   const [searchParams, setSearchParams] = useSearchParams()
 
   const queryClient = useQueryClient()
+  // **Read once here and handed down**, so the rows and dialogs below do not each ask for `/auth/me`.
+  // Viewer is the one read-only role; the relay refuses its writes whatever this says, so this only
+  // decides what is offered. Unknown counts as writable: `DashboardLayout` renders no page until the
+  // user is known, so the only render without one is a test that did not supply it.
+  const { user } = useAuth()
+  const canWrite = user?.role !== 'Viewer'
   const [search, setSearch] = useState('')
   // **What the box holds and what the query asks for are not the same value.** Every keystroke was
   // its own query key, so a four-letter search made four requests and four announcements — the last
@@ -461,6 +468,7 @@ export function AppCenter() {
         selectedAppId={selectedAppId}
         onSelect={handleAppSelect}
         onAdd={() => queryClient.invalidateQueries({ queryKey: ['apps'] })}
+        canWrite={canWrite}
       />
 
       <div className="flex-1 flex flex-col gap-4 p-4 overflow-y-auto min-w-0">
@@ -474,6 +482,7 @@ export function AppCenter() {
               queryClient.invalidateQueries({ queryKey: ['builds'] })
             }}
             appId={selectedAppId}
+            canWrite={canWrite}
           />
         </div>
 
@@ -601,6 +610,7 @@ export function AppCenter() {
                 onStatusChange={handleStatusChange}
                 onScheduleDeletion={handleScheduleDeletion}
                 onCancelDeletion={handleCancelDeletion}
+                canWrite={canWrite}
               />
             ))}
           </div>
