@@ -33,7 +33,7 @@ export const INBOUND_DISPOSITION = {
   'session:joined': { settles: 'joinSession' },
   'error': { does: 'settles `joinSession` as a refusal with the closed `reason`; an unaddressed one from an older relay settles nothing and is logged once as skew' },
   'session:agent-away': { does: 'records that the agent went away — suspends the optimistic input path' },
-  'session:rebound': { does: 'records that the device binding is gone; a ui-tree query then fails now (#573)' },
+  'session:rebound': { does: 'records that the device binding is gone; settles an in-flight boot waiter (#583); a ui-tree query then fails now (#573)' },
   'session:terminated': { does: 'records the end, and rejects that session\'s waiters with the reason' },
   'device:ready': { settles: 'bootDevice' },
   'device:boot-error': { settles: 'bootDevice' },

@@ -46,7 +46,7 @@ export const INBOUND_DISPOSITION = {
   // `session:start`, and it carries the closed `reason` that says what the caller should do next.
   'error': { does: 'settles `connectDevice` as a refusal with `reason` as well as the prose; an unaddressed one from an older relay settles nothing and is logged once as skew' },
   'session:agent-away': { does: 'records that the agent went away — suspends the optimistic input path' },
-  'session:rebound': { does: 'records that the device binding is gone until something boots again' },
+  'session:rebound': { does: 'records that the device binding is gone until something boots again; settles an in-flight boot waiter (#583)' },
   'session:terminated': { does: 'records the end, and rejects that session\'s waiters with the reason' },
   'device:ready': { settles: 'bootDevice' },
   'device:boot-error': { settles: 'bootDevice' },

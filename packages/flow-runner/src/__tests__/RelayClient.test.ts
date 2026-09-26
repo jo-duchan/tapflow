@@ -10,7 +10,8 @@ import {
   SessionLeftError,
   SessionUnavailableError,
 } from '../RelayClient.js'
-import { TransientQueryError } from '../errors.js'
+import { RelayDriver } from '../RelayDriver.js'
+import { TransientQueryError, isEnvironmentStepFailure } from '../errors.js'
 
 // Minimal Response stub for the ui-tree GET.
 function jsonResponse(status: number, body: unknown): Response {
@@ -675,6 +676,15 @@ describe('RelayClient — session lifecycle (#512, finding 4)', () => {
   const terminated = (sessionId: string) =>
     ({ type: 'session:terminated', sessionId, reason: 'agent-disconnected' })
 
+  // Settles to 'resolved'/'rejected' when the promise does, or 'still-waiting' after a short
+  // window — long enough for a socket round trip, orders shorter than any deadline under test, so
+  // a waiter that survives is observably still pending rather than merely slow.
+  const raceSettled = (p: Promise<unknown>, ms = 150): Promise<'resolved' | 'rejected' | 'still-waiting'> =>
+    Promise.race([
+      p.then(() => 'resolved' as const, () => 'rejected' as const),
+      new Promise<'still-waiting'>((r) => setTimeout(() => r('still-waiting'), ms)),
+    ])
+
   it('settles an in-flight install the moment the session is terminated, instead of at the 120s deadline', async () => {
     const { client, push } = await harness()
     const install = client.installApp('s1', 7)
@@ -721,10 +731,11 @@ describe('RelayClient — session lifecycle (#512, finding 4)', () => {
     await expect(listing).resolves.toEqual([])
   })
 
-  // **The mutation guard for the whole design.** Rejecting here is the obvious-looking change and it is a
-  // regression: the agent reconnects without restarting, its reply closure reads the socket at completion
-  // time, and a request that finishes after the reconnect lands on the new socket and matches on
-  // `requestId`. The relay's 15s grace exists to keep exactly this alive.
+  // **The mutation guard for the non-boot half of the design.** Rejecting a non-boot request here is the
+  // obvious-looking change and it is a regression: the agent reconnects without restarting, its reply
+  // closure reads the socket at completion time, and a request that finishes after the reconnect lands
+  // on the new socket and matches on `requestId`. The relay's 15s grace exists to keep exactly this
+  // alive. Boots are the exception, not the rule — see the #583 block below.
   it('does NOT settle an in-flight request on rebound — the reply can still arrive', async () => {
     const { client, push, reply } = await harness()
     const install = client.installApp('s1', 7)
@@ -771,8 +782,12 @@ describe('RelayClient — session lifecycle (#512, finding 4)', () => {
   // A boot is the one thing that answers what a rebound cost the session, so it is the one thing that
   // clears the note. If anything else cleared it, the advice would go quiet while still being true.
   it('stops asking for a reboot once one has happened', async () => {
-    const { client, push, reply } = await harness()
+    const { client, push, settle, reply } = await harness()
     push({ type: 'session:rebound', sessionId: 's1', capabilities: [] })
+    // Without this the boot below is already in flight when the rebound is dispatched, and #583
+    // settles it — which is a different test. The settle puts the rebound first, so this boot is
+    // the recovery one.
+    await settle()
     const boot = client.bootDevice('s1', 'dev-1')
     await reply('device:boot', { type: 'device:ready' })
     await boot
@@ -924,6 +939,75 @@ describe('RelayClient — session lifecycle (#512, finding 4)', () => {
     expect(err.message).toMatch(/session join timed out/)
     expect(err.message).toMatch(/went away/i)
   }, 15_000)
+
+  // #583. A boot in flight when the rebound arrives can never be answered: the binding a boot
+  // creates is exactly what the rebind loses, and the parked boot resumes against an unowned state.
+  // Every other request type keeps waiting for its reply on the new socket — boots are the one
+  // exception, settled here by waiter metadata (`isBoot`), never by prose matching.
+  it('settles a pending boot the moment the session rebounds', async () => {
+    const { client, push } = await harness()
+    const boot = client.bootDevice('s1', 'dev-1')
+    push({ type: 'session:rebound', sessionId: 's1', capabilities: [] })
+    const err = await boot.catch((e: unknown) => e) as SessionUnavailableError
+    expect(err).toBeInstanceOf(SessionUnavailableError)
+    // Not `SessionEndedError`: the session is alive, only its device binding is gone.
+    expect(err).not.toBeInstanceOf(SessionEndedError)
+    expect(err.message).toMatch(/device boot failed/)
+    expect(err.message).toContain('s1')
+    expect(err.message).toMatch(/rebounded/)
+    expect(err.message).toContain('the agent reconnected and cleared its device binding')
+  })
+
+  // The rejection above would be worthless if the driver read it as product: the run would blame
+  // the test and exit 1 for a relay event. This feeds the exact rejection through `RelayDriver`'s
+  // guard — the path every engine step failure travels — and holds the exit-2 marking there instead
+  // of trusting the class name.
+  it('classifies an invalidated boot as environmental, not product', async () => {
+    const { client, push } = await harness()
+    const boot = client.bootDevice('s1', 'dev-1')
+    push({ type: 'session:rebound', sessionId: 's1', capabilities: [] })
+    const bootErr = await boot.catch((e: unknown) => e)
+    const stub = { queryUITree: async (): Promise<never> => { throw bootErr } } as unknown as RelayClient
+    const err = await new RelayDriver(stub, 's1').queryUITree().catch((e: unknown) => e)
+    expect(err).toBe(bootErr) // the guard marks without replacing the object
+    expect(isEnvironmentStepFailure(err)).toBe(true)
+  })
+
+  // A boot issued *after* the rebound is the recovery boot that restores the binding. Settling is
+  // synchronous at dispatch, so only waiters already registered are touched — this one must survive
+  // the rebound and still be answerable.
+  it('leaves a boot issued after the rebound pending — it is the recovery boot', async () => {
+    const { client, push, reply } = await harness()
+    const stale = client.bootDevice('s1', 'dev-1')
+    push({ type: 'session:rebound', sessionId: 's1', capabilities: [] })
+    await expect(stale).rejects.toBeInstanceOf(SessionUnavailableError)
+    const recovery = client.bootDevice('s1', 'dev-1')
+    await expect(raceSettled(recovery)).resolves.toBe('still-waiting')
+    await reply('device:boot', { type: 'device:ready' })
+    await expect(recovery).resolves.toBeUndefined()
+  })
+
+  // `agent-away` is the relay's hold window, not an answer: the agent may come back on the same
+  // binding, so even a boot keeps waiting through it.
+  it('does not cancel a pending boot on agent-away — the grace may still answer it', async () => {
+    const { client, push, reply } = await harness()
+    const boot = client.bootDevice('s1', 'dev-1')
+    push({ type: 'session:agent-away', sessionId: 's1' })
+    await expect(raceSettled(boot)).resolves.toBe('still-waiting')
+    await reply('device:boot', { type: 'device:ready' })
+    await expect(boot).resolves.toBeUndefined()
+  })
+
+  it("leaves another session's boot waiter alone on rebound", async () => {
+    const { client, push, reply } = await harness()
+    const mine = client.bootDevice('s1', 'dev-1')
+    const other = client.bootDevice('s2', 'dev-2')
+    push({ type: 'session:rebound', sessionId: 's1', capabilities: [] })
+    await expect(mine).rejects.toBeInstanceOf(SessionUnavailableError)
+    // The last `device:boot` request is the other session's, so this answers it, not the settled one.
+    await reply('device:boot', { type: 'device:ready' })
+    await expect(other).resolves.toBeUndefined()
+  })
 })
 
 describe('RelayClient — the socket identifies its client to the relay (#527, #579)', () => {

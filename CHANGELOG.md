@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **An in-flight `device:boot` fails fast when its session rebounds instead of burning its full deadline.** The rebinding agent never saw the parked boot, so it can never be answered. The failure carries the rebound cause and reads as environmental; every other in-flight request keeps waiting for its reply on the new socket, and a boot issued after the rebound restores the binding as before.
+
 - **`tapflow flow run --session` points at where a session id can be found.** Its help and the error for a `--device` name matching more than one device said to look in `tapflow status`, which prints no session ids. Both now name the MCP server's `list_devices`.
 
 - **`POST /api/v1/comments` accepts a PAT with the `builds:write` scope.** The CI step in the Build Distribution guide that posts branch and commit info as a comment got a 401, because the route accepted only the dashboard cookie, and failed the job under `curl -sf`. It now works with the same token that uploaded the build; a token without `builds:write` gets a 403.

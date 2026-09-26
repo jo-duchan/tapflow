@@ -1,7 +1,8 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { WebSocketServer, WebSocket } from 'ws'
 import { TapflowClient, REASON_ADVICE, SessionEndedError, SessionLeftError, reasonAdvice } from '../client.js'
-import { TransientQueryError } from '@tapflowio/flow-runner'
+import { makeFlowDriver } from '../tools.js'
+import { EnvironmentStepError, TransientQueryError } from '@tapflowio/flow-runner'
 
 // inputAck models the agent's terminal-input ack: 'done' = new agent (booted), 'error' = rejects with prose only, 'error-with-reason' = rejects with the machine-readable reason too, 'none' = older agent that never acks (degradation).
 function createMockRelay(): {
@@ -1069,8 +1070,9 @@ describe('TapflowClient', () => {
       await expect(listing).resolves.toEqual([])
     })
 
-    // **The mutation guard for the whole design.** Rejecting here is the obvious-looking change and it is
-    // a regression.
+    // **The mutation guard for the non-boot half of the design.** Rejecting a non-boot request here is
+    // the obvious-looking change and it is a regression. Boots are the exception, not the rule — see
+    // the #583 block below.
     it('does NOT settle an in-flight request on rebound — the reply can still arrive', async () => {
       echoReply(relay, 'app:install', { type: 'app:install-done', sessionId: 'sess-1' })
       const install = client.installApp('sess-1', 42)
@@ -1264,6 +1266,82 @@ describe('TapflowClient', () => {
       expect(err.message).toMatch(/Request timed out/)
       expect(err.message).toMatch(/went away/i)
     }, 15_000)
+
+    // #583. A boot in flight when the rebound arrives can never be answered: the binding a boot
+    // creates is exactly what the rebind loses. Every other request type keeps waiting for its reply
+    // on the new socket — boots are the one exception, settled here by waiter metadata (`isBoot`),
+    // never by prose matching.
+    it('settles a pending boot the moment the session rebounds', async () => {
+      const boot = client.bootDevice('sess-1', 'dev-1')
+      await waitForMessage(relay, 'device:boot')
+      relay.send({ type: 'session:rebound', sessionId: 'sess-1', capabilities: [] })
+      const err = await boot.catch((e: unknown) => e) as Error
+      expect(err).toBeInstanceOf(Error)
+      // The session is alive, only its device binding is gone — never the terminated shape.
+      expect(err).not.toBeInstanceOf(SessionEndedError)
+      expect(err.message).toMatch(/Boot failed/)
+      expect(err.message).toContain('sess-1')
+      expect(err.message).toMatch(/rebounded/)
+      expect(err.message).toContain('the agent reconnected and cleared its device binding')
+    })
+
+    // The rejection above would be worthless if the tools layer read it as product. This feeds the
+    // exact rejection through `makeFlowDriver`'s guard — the classifier every `run_flow` step failure
+    // travels through — and holds the environmental retype there instead of trusting the prose.
+    it('classifies the invalidated boot as environmental through the tools guard', async () => {
+      const boot = client.bootDevice('sess-1', 'dev-1')
+      await waitForMessage(relay, 'device:boot')
+      relay.send({ type: 'session:rebound', sessionId: 'sess-1', capabilities: [] })
+      const bootErr = await boot.catch((e: unknown) => e)
+      const fake = { tap: async (): Promise<never> => { throw bootErr } } as unknown as TapflowClient
+      const err = await makeFlowDriver(fake, 'sess-1').tap(0.5, 0.5).catch((e: unknown) => e)
+      expect(err).toBeInstanceOf(EnvironmentStepError)
+      expect(err).not.toBe(bootErr) // retyped, with the original kept as cause
+      expect((err as Error).cause).toBe(bootErr)
+    })
+
+    // A boot issued *after* the rebound is the recovery boot that restores the binding. Settling is
+    // synchronous at dispatch, so only waiters already registered are touched — this one must survive
+    // the rebound and still be answerable.
+    it('leaves a boot issued after the rebound pending — it is the recovery boot', async () => {
+      const stale = client.bootDevice('sess-1', 'dev-1')
+      await waitForMessage(relay, 'device:boot')
+      relay.send({ type: 'session:rebound', sessionId: 'sess-1', capabilities: [] })
+      await expect(stale).rejects.toBeInstanceOf(Error)
+      echoReply(relay, 'device:boot', { type: 'device:ready', sessionId: 'sess-1' })
+      const recovery = client.bootDevice('sess-1', 'dev-1')
+      await expect(recovery).resolves.toBeUndefined()
+    })
+
+    // `agent-away` is the relay's hold window, not an answer: the agent may come back on the same
+    // binding, so even a boot keeps waiting through it.
+    it('does not cancel a pending boot on agent-away — the grace may still answer it', async () => {
+      echoReply(relay, 'device:boot', { type: 'device:ready', sessionId: 'sess-1' })
+      const boot = client.bootDevice('sess-1', 'dev-1')
+      relay.send({ type: 'session:agent-away', sessionId: 'sess-1' })
+      await expect(boot).resolves.toBeUndefined()
+    })
+
+    it("leaves another session's boot waiter alone on rebound", async () => {
+      const mine = client.bootDevice('sess-1', 'dev-1')
+      await waitForMessage(relay, 'device:boot')
+      const other = client.bootDevice('sess-2', 'dev-2')
+      // `waitForMessage` returns the first match, which is the other session's request — wait for
+      // this session's own request instead, or the ready below would carry the wrong correlator.
+      const otherReq = await new Promise<Record<string, unknown>>((resolve, reject) => {
+        const check = setInterval(() => {
+          const found = relay.sentMessages().find((m) => m['type'] === 'device:boot' && m['sessionId'] === 'sess-2')
+          if (found) { clearInterval(check); clearTimeout(timer); resolve(found) }
+        }, 10)
+        const timer = setTimeout(() => { clearInterval(check); reject(new Error('no sess-2 boot arrived')) }, 2000)
+      })
+      relay.send({ type: 'session:rebound', sessionId: 'sess-1', capabilities: [] })
+      await expect(mine).rejects.toBeInstanceOf(Error)
+      // Only the other session's boot is still waiting: answering it resolves, proving the rebound
+      // settled nothing outside its session.
+      relay.send({ type: 'device:ready', sessionId: 'sess-2', requestId: otherReq['requestId'] })
+      await expect(other).resolves.toBeUndefined()
+    })
   })
 
   describe('WebSocket lifecycle', () => {
