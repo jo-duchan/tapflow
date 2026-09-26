@@ -1,6 +1,6 @@
 # Configuration
 
-The relay reads `tapflow.config.json` from this machine's install directory — `~/.tapflow` unless `TAPFLOW_HOME` or an install in the current directory says otherwise ([which install a command uses](/guide/configure#which-install-a-command-uses)). Generate it by running `tapflow init`, then restart the relay after any changes.
+The relay reads `tapflow.config.json` from this machine's install directory — `~/.tapflow` unless `TAPFLOW_HOME` or an install in the current directory says otherwise ([which install a command uses](/operate/configure#which-install-a-command-uses)). Generate it by running `tapflow init`, then restart the relay after any changes.
 
 Paths inside the file are relative to the file itself, the way a `tsconfig.json` or a `litestream.yml` reads its own: `"dataDir": "data"` in `~/.tapflow/tapflow.config.json` means `~/.tapflow/data`, wherever you run the command from.
 
@@ -44,7 +44,7 @@ Paths inside the file are relative to the file itself, the way a `tsconfig.json`
 
 Environment variables always take precedence over the config file — useful for server deployments and CI.
 
-Secrets can also live in the data directory's `.env` file. The relay loads it first thing on start, so any variable below can come from there instead of the shell. Precedence is **shell env > `.env` > config file**. See [Configuring tapflow](/guide/configure) for the file format and the one exception (`TAPFLOW_DATA_DIR`).
+Secrets can also live in the data directory's `.env` file. The relay loads it first thing on start, so any variable below can come from there instead of the shell. Precedence is **shell env > `.env` > config file**. See [Configuring tapflow](/operate/configure) for the file format and the one exception (`TAPFLOW_DATA_DIR`).
 
 | Variable | Config key | Default | Description |
 |----------|------------|---------|-------------|
@@ -54,7 +54,7 @@ Secrets can also live in the data directory's `.env` file. The relay loads it fi
 | `TAPFLOW_HOME` | — | `~/.tapflow` | The install directory: where `tapflow.config.json` and, by default, the data directory live. Every command reads it. A relative value is taken from the current directory; an empty one counts as unset. A command that runs or reaches the relay stops when it names a directory that does not exist — `tapflow init` creates it instead. |
 | `TAPFLOW_DATA_DIR` | `local.dataDir` | `<install>/data` | DB and uploads directory. Relative to the current directory here, and to the config file in `local.dataDir`. An install that already holds `.tapflow/data` or `.tapflow-data` keeps using it. |
 | `TAPFLOW_RELAY_URL` | `relay.url` | *(empty)* | Relay URL used as default by CLI commands |
-| `TAPFLOW_AGENT_TOKEN` | — | *(empty)* | Token with the `agent` scope for remote relay authentication. The `--token` flag takes precedence. See [Agent Setup](/guide/agent#remote-relay-authentication). |
+| `TAPFLOW_AGENT_TOKEN` | — | *(empty)* | Token with the `agent` scope for remote relay authentication. The `--token` flag takes precedence. See [Agent Setup](/operate/agents#remote-relay-authentication). |
 | `TAPFLOW_TOKEN` | — | *(empty)* | Personal access token (PAT) that `tapflow flow run` and the MCP server use to reach a remote relay. For `flow run`, the `--token` flag takes precedence. |
 | `TAPFLOW_TUNNEL_TOKEN` | — | *(empty)* | Shared secret that authenticates the rathole tunnel. Required when `tunnel.provider` is `rathole`. |
 | `TAPFLOW_LEAN` | `agent.lean` | `off` | `on` or `off`. Any other value is ignored with a warning, and the config file's value is used. |
@@ -170,8 +170,8 @@ These variables are set on the **agent** process (`tapflow agent start` / `tapfl
 | `TAPFLOW_ANDROID_FPS` | `30` | Android emulator capture frame rate (gRPC path). |
 | `TAPFLOW_ANDROID_BACKEND` | *(auto)* | Force the Android backend — `grpc` or `scrcpy`. Auto-selected by device type when unset. |
 | `TAPFLOW_ANDROID_GRPC_PORT` | `8554` | First port tried when picking a gRPC port for an emulator tapflow boots. The first free port from here, stepping by 2, is used. |
-| `TAPFLOW_AUDIO` | *(on)* | `off` turns off device audio streaming. See [Audio](/guide/audio). |
-| `TAPFLOW_ALLOW_DISPLAY_SLEEP` | *(empty)* | Any value lets the host display sleep during a session. System sleep is still prevented. See [Agent Setup](/guide/agent#host-display-and-sleep). |
+| `TAPFLOW_AUDIO` | *(on)* | `off` turns off device audio streaming. See [Audio](/testing/audio). |
+| `TAPFLOW_ALLOW_DISPLAY_SLEEP` | *(empty)* | Any value lets the host display sleep during a session. System sleep is still prevented. See [Agent Setup](/operate/agents#host-display-and-sleep). |
 
 ## Lean mode (agent)
 
@@ -223,7 +223,7 @@ With `tunnel` set, `tapflow start` and `tapflow relay start` bring up a tunnel a
 
 rathole also needs the `TAPFLOW_TUNNEL_TOKEN` environment variable.
 
-## HTTPS (secure context)
+## HTTPS (secure context) {#https-secure-context}
 
 Hardware-accelerated video decode (WebCodecs) only runs in a secure context (HTTPS). Over HTTP the dashboard falls back to software decode, so to give teammates on the LAN a smoother stream, terminate the relay over HTTPS. With `tls` set, the relay terminates HTTPS and WSS on the same port.
 
@@ -252,7 +252,7 @@ With your own domain and a DNS provider API token, the relay auto-issues and ren
 | `tls.publishAddress` | Auto-publish the domain's A record to this machine's LAN IP. Default `true`; set `false` to manage DNS yourself. |
 | `tls.address` | IP to use instead of the auto-detected LAN IP, for multi-NIC or VPN overrides. |
 
-API tokens go in the `.env` file that `tapflow init` scaffolds in the data directory (`~/.tapflow/data/.env` by default), not in the config file. Cloudflare uses `TAPFLOW_CLOUDFLARE_TOKEN` and Vercel uses `TAPFLOW_VERCEL_TOKEN`, plus `TAPFLOW_VERCEL_TEAM_ID` for a team domain. When the install directory is inside a git repository, `tapflow init` adds the data directory to `.gitignore` so the file is not committed. If you point the data directory somewhere else, make sure that path is ignored too. A value set directly in the environment takes precedence over the file. See [Configuring tapflow](/guide/configure) for how the file is scaffolded and read.
+API tokens go in the `.env` file that `tapflow init` scaffolds in the data directory (`~/.tapflow/data/.env` by default), not in the config file. Cloudflare uses `TAPFLOW_CLOUDFLARE_TOKEN` and Vercel uses `TAPFLOW_VERCEL_TOKEN`, plus `TAPFLOW_VERCEL_TEAM_ID` for a team domain. When the install directory is inside a git repository, `tapflow init` adds the data directory to `.gitignore` so the file is not committed. If you point the data directory somewhere else, make sure that path is ignored too. A value set directly in the environment takes precedence over the file. See [Configuring tapflow](/operate/configure) for how the file is scaffolded and read.
 
 When `publishAddress` is on, the relay publishes its LAN IP to the domain's A record on boot and refreshes it periodically, so teammates just open the domain without touching DNS.
 
@@ -319,7 +319,7 @@ To send invitation emails, configure `smtp.host`, `smtp.user`, and `smtp.pass`.
 
 ## Webhooks
 
-tapflow POSTs to registered URLs when a build's review status changes to `Done` or `Rejected`. Declare endpoints in the `webhooks` array; the REST API can register more at runtime. The full payload, signature verification, and firing rules are in [Webhooks](/guide/build-status-webhooks).
+tapflow POSTs to registered URLs when a build's review status changes to `Done` or `Rejected`. Declare endpoints in the `webhooks` array; the REST API can register more at runtime. The full payload, signature verification, and firing rules are in [Webhooks](/operate/webhooks).
 
 | Key | Description |
 |-----|-------------|

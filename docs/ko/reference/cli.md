@@ -42,7 +42,7 @@ tapflow doctor android
 
 네트워크 필터는 두 항목으로 나뉩니다. 실패하는 이유가 다르기 때문입니다 — **설치·승인·켜져 있는가**, 그리고 이 맥의 버전들이 이 tapflow가 싣고 온 것과 같은가. 켜져 있는지는 자기 버전이 없는 세 번째 조건입니다. 필터를 꺼도 확장은 활성 상태로 남으므로, 버전은 전부 맞는데 아무것도 필터링하지 않는 상태가 생깁니다.
 
-**버전은 두 개이고, 검사는 뒤처진 쪽을 지목합니다.** `/Applications`의 앱과 그 안의 시스템 확장은 따로 버전을 갖습니다. 앱만 바뀐 릴리즈가 돌아가는 필터를 교체할 이유는 없기 때문입니다. 앱은 에이전트가 직접 실행하는 바이너리라서 그 자체로 중요합니다. 낡은 앱은 이해하지 못하는 요청을 받게 됩니다. 뒤의 것은 앞의 것으로 알 수 없습니다. 확장 교체는 맥을 재시작해야 끝나므로, 디스크의 앱은 최신인데 필터링은 옛 것이 하고 있는 상태가 생깁니다. 둘 다 실패가 아니라 경고입니다. 확장이 없어도 세션은 정상 동작하고 iOS 네트워크 제어만 안 됩니다. [네트워크 제어](/ko/guide/network-control)를 참고하세요.
+**버전은 두 개이고, 검사는 뒤처진 쪽을 지목합니다.** `/Applications`의 앱과 그 안의 시스템 확장은 따로 버전을 갖습니다. 앱만 바뀐 릴리즈가 돌아가는 필터를 교체할 이유는 없기 때문입니다. 앱은 에이전트가 직접 실행하는 바이너리라서 그 자체로 중요합니다. 낡은 앱은 이해하지 못하는 요청을 받게 됩니다. 뒤의 것은 앞의 것으로 알 수 없습니다. 확장 교체는 맥을 재시작해야 끝나므로, 디스크의 앱은 최신인데 필터링은 옛 것이 하고 있는 상태가 생깁니다. 둘 다 실패가 아니라 경고입니다. 확장이 없어도 세션은 정상 동작하고 iOS 네트워크 제어만 안 됩니다. [네트워크 제어](/ko/testing/network-control)를 참고하세요.
 
 네트워크 훅은 앱에 오프라인이라고 알리는 주입 라이브러리입니다. tapflow와 함께 오므로 없다면 설치가 손상된 것이고, 재설치가 복구입니다. 따로 표시하는 이유는 없을 때 조용하기 때문입니다. macOS는 존재하지 않는 주입 경로를 아무 말 없이 무시하므로, 앱은 훅 없이 뜨고 네트워크 제어는 계속 앱을 실행하라고 안내합니다. 실행한 앱이 눈앞에서 돌고 있는데도 세션 내내 그렇습니다.
 
@@ -53,7 +53,7 @@ tapflow doctor android
 | `[platform]` | `ios` 또는 `android`. 생략하면 전체 검사 |
 | `--json` | `{ ok, common, ios, android }`를 JSON으로 출력 (ANSI 없음) |
 
-전체 흐름은 [환경 준비](/ko/guide/environment-setup)를 참고하세요.
+전체 흐름은 [환경 준비](/ko/operate/environment-setup)를 참고하세요.
 
 
 ## `tapflow setup`
@@ -83,12 +83,12 @@ setup은 부팅 가능한 기기/AVD를 준비하는 데까지만 하며 실제 
 |------|------|
 | `[platform]` | `ios` 또는 `android`. 생략하면 자동 감지 |
 
-전체 흐름은 [환경 준비](/ko/guide/environment-setup)를 참고하세요.
+전체 흐름은 [환경 준비](/ko/operate/environment-setup)를 참고하세요.
 
 
 ## `tapflow init`
 
-이 머신의 tapflow를 설정합니다. `tapflow.config.json`, 코딩 에이전트가 읽는 `AGENTS.md`와 `CLAUDE.md`, 그리고 DNS 자동 발급을 선택하면 자격 증명 `.env`까지 만듭니다. 어느 디렉터리에서 실행해도 됩니다. 설치 디렉터리에 쓰고, 기본값은 `~/.tapflow`이며 `TAPFLOW_HOME`이나 현재 디렉터리의 기존 설치가 있으면 그쪽입니다([명령이 쓰는 설치 디렉터리](/ko/guide/configure#명령이-쓰는-설치-디렉토리)). 디렉터리가 없으면 만듭니다.
+이 머신의 tapflow를 설정합니다. `tapflow.config.json`, 코딩 에이전트가 읽는 `AGENTS.md`와 `CLAUDE.md`, 그리고 DNS 자동 발급을 선택하면 자격 증명 `.env`까지 만듭니다. 어느 디렉터리에서 실행해도 됩니다. 설치 디렉터리에 쓰고, 기본값은 `~/.tapflow`이며 `TAPFLOW_HOME`이나 현재 디렉터리의 기존 설치가 있으면 그쪽입니다([명령이 쓰는 설치 디렉터리](/ko/operate/configure#명령이-쓰는-설치-디렉토리)). 디렉터리가 없으면 만듭니다.
 
 다시 실행하면 설정은 그대로 두고 `AGENTS.md`의 tapflow 섹션만 갱신하므로, 기존 설치도 이 문서를 받을 수 있습니다. 설정을 새로 만들려면 `--force`를 씁니다. 이미 설정이 있는데 `--tunnel`을 주면 오류로 멈춥니다. 설정을 유지하면 그 플래그를 무시하게 되기 때문입니다.
 
@@ -254,7 +254,7 @@ tapflow agent start --relay ws://192.168.x.x:4000 --token tflw_pat_xxxxxxxx
 | `--relay <url>` | config의 `relay.url`, 없으면 `ws://localhost:4000` | 릴레이 WebSocket URL. `tapflow.config.json`에 `relay.url`이 있으면 생략 가능. |
 | `--platform <ios\|android\|all>` | 자동 감지 | 시작할 플랫폼 |
 | `--device <name>` | 전체 기기 | 릴레이에 노출할 기기를 한정. iOS 시뮬레이터는 이름 또는 UDID, Android 에뮬레이터는 AVD 이름 또는 기기 ID |
-| `--token <pat>` | `TAPFLOW_AGENT_TOKEN` 환경변수 | 원격 릴레이가 요구하는 `agent` 스코프 토큰. [에이전트 설정](/ko/guide/agent#원격-릴레이-인증)을 참고하세요. |
+| `--token <pat>` | `TAPFLOW_AGENT_TOKEN` 환경변수 | 원격 릴레이가 요구하는 `agent` 스코프 토큰. [에이전트 설정](/ko/operate/agents#원격-릴레이-인증)을 참고하세요. |
 
 `--relay`는 `ws://` 또는 `wss://`로 시작해야 합니다. Mac 한 대에서는 플랫폼마다 에이전트를 하나만 실행할 수 있습니다. 같은 플랫폼의 에이전트가 이미 실행 중이면 `AGENT ALREADY RUNNING`을 출력하고 종료합니다. 실행할 수 있는 플랫폼이 없으면 종료 코드 `1`로 끝납니다.
 
@@ -337,7 +337,7 @@ tapflow logs
 
 ## `tapflow flow run`
 
-저장된 플로우 파일을 LLM 없이 재생합니다. 플로우 작성법은 [플로우 레퍼런스](/ko/guide/writing-flows)를 참고하세요.
+저장된 플로우 파일을 LLM 없이 재생합니다. 플로우 작성법은 [플로우 레퍼런스](/ko/automation/flows)를 참고하세요.
 
 ```sh
 tapflow flow run .tapflow/flows/login-smoke.yaml

@@ -75,7 +75,7 @@ App Center에서 빌드 행을 클릭하면 QA 세션 화면이 열립니다. **
 | Tailscale 터널 | 시작 배너에 출력된 tailnet URL (팀원도 Tailscale 설치 필요) |
 | VPS + rathole 터널 | 시작 배너에 출력된 공개 URL, 예: `https://your-vps.com` |
 
-배포 방식별 자세한 내용은 [릴레이 배포](/ko/guide/self-hosting)를 참고하세요. 팀원이 어느 경로로 접속하느냐에 따라 받는 스트림 품질도 달라집니다. 같은 LAN이라도 평문 HTTP면 **Standard**, HTTPS면 더 부드러운 **Smooth** 프로파일이 적용됩니다. 접속 환경별 프로파일은 [스트림 품질](/ko/guide/streaming)을 참고하세요.
+배포 방식별 자세한 내용은 [릴레이 배포](/ko/guide/self-hosting)를 참고하세요. 팀원이 어느 경로로 접속하느냐에 따라 받는 스트림 품질도 달라집니다. 같은 LAN이라도 평문 HTTP면 **Standard**, HTTPS면 더 부드러운 **Smooth** 프로파일이 적용됩니다. 접속 환경별 프로파일은 [스트림 품질](/ko/operate/streaming-quality)을 참고하세요.
 
 **초대 수락.** [3단계](#_3-팀원-초대)에서 보낸 초대를 팀원이 수락하면 비밀번호를 설정하고 바로 로그인합니다. SMTP가 설정되지 않았다면 초대 링크를 직접 전달하세요.
 

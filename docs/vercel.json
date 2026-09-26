@@ -1,4 +1,376 @@
 {
   "outputDirectory": ".vitepress/dist",
-  "cleanUrls": true
+  "cleanUrls": true,
+  "redirects": [
+    {
+      "source": "/guide/introduction",
+      "destination": "/get-started/introduction",
+      "permanent": true
+    },
+    {
+      "source": "/ko/guide/introduction",
+      "destination": "/ko/get-started/introduction",
+      "permanent": true
+    },
+    {
+      "source": "/guide/introduction.md",
+      "destination": "/get-started/introduction.md",
+      "permanent": true
+    },
+    {
+      "source": "/ko/guide/introduction.md",
+      "destination": "/ko/get-started/introduction.md",
+      "permanent": true
+    },
+    {
+      "source": "/guide/getting-started",
+      "destination": "/get-started/quick-start",
+      "permanent": true
+    },
+    {
+      "source": "/ko/guide/getting-started",
+      "destination": "/ko/get-started/quick-start",
+      "permanent": true
+    },
+    {
+      "source": "/guide/getting-started.md",
+      "destination": "/get-started/quick-start.md",
+      "permanent": true
+    },
+    {
+      "source": "/ko/guide/getting-started.md",
+      "destination": "/ko/get-started/quick-start.md",
+      "permanent": true
+    },
+    {
+      "source": "/guide/requirements",
+      "destination": "/operate/requirements",
+      "permanent": true
+    },
+    {
+      "source": "/ko/guide/requirements",
+      "destination": "/ko/operate/requirements",
+      "permanent": true
+    },
+    {
+      "source": "/guide/requirements.md",
+      "destination": "/operate/requirements.md",
+      "permanent": true
+    },
+    {
+      "source": "/ko/guide/requirements.md",
+      "destination": "/ko/operate/requirements.md",
+      "permanent": true
+    },
+    {
+      "source": "/guide/environment-setup",
+      "destination": "/operate/environment-setup",
+      "permanent": true
+    },
+    {
+      "source": "/ko/guide/environment-setup",
+      "destination": "/ko/operate/environment-setup",
+      "permanent": true
+    },
+    {
+      "source": "/guide/environment-setup.md",
+      "destination": "/operate/environment-setup.md",
+      "permanent": true
+    },
+    {
+      "source": "/ko/guide/environment-setup.md",
+      "destination": "/ko/operate/environment-setup.md",
+      "permanent": true
+    },
+    {
+      "source": "/guide/configure",
+      "destination": "/operate/configure",
+      "permanent": true
+    },
+    {
+      "source": "/ko/guide/configure",
+      "destination": "/ko/operate/configure",
+      "permanent": true
+    },
+    {
+      "source": "/guide/configure.md",
+      "destination": "/operate/configure.md",
+      "permanent": true
+    },
+    {
+      "source": "/ko/guide/configure.md",
+      "destination": "/ko/operate/configure.md",
+      "permanent": true
+    },
+    {
+      "source": "/guide/agent",
+      "destination": "/operate/agents",
+      "permanent": true
+    },
+    {
+      "source": "/ko/guide/agent",
+      "destination": "/ko/operate/agents",
+      "permanent": true
+    },
+    {
+      "source": "/guide/agent.md",
+      "destination": "/operate/agents.md",
+      "permanent": true
+    },
+    {
+      "source": "/ko/guide/agent.md",
+      "destination": "/ko/operate/agents.md",
+      "permanent": true
+    },
+    {
+      "source": "/guide/scaling",
+      "destination": "/operate/scaling",
+      "permanent": true
+    },
+    {
+      "source": "/ko/guide/scaling",
+      "destination": "/ko/operate/scaling",
+      "permanent": true
+    },
+    {
+      "source": "/guide/scaling.md",
+      "destination": "/operate/scaling.md",
+      "permanent": true
+    },
+    {
+      "source": "/ko/guide/scaling.md",
+      "destination": "/ko/operate/scaling.md",
+      "permanent": true
+    },
+    {
+      "source": "/guide/streaming",
+      "destination": "/operate/streaming-quality",
+      "permanent": true
+    },
+    {
+      "source": "/ko/guide/streaming",
+      "destination": "/ko/operate/streaming-quality",
+      "permanent": true
+    },
+    {
+      "source": "/guide/streaming.md",
+      "destination": "/operate/streaming-quality.md",
+      "permanent": true
+    },
+    {
+      "source": "/ko/guide/streaming.md",
+      "destination": "/ko/operate/streaming-quality.md",
+      "permanent": true
+    },
+    {
+      "source": "/guide/build-distribution",
+      "destination": "/operate/ci-distribution",
+      "permanent": true
+    },
+    {
+      "source": "/ko/guide/build-distribution",
+      "destination": "/ko/operate/ci-distribution",
+      "permanent": true
+    },
+    {
+      "source": "/guide/build-distribution.md",
+      "destination": "/operate/ci-distribution.md",
+      "permanent": true
+    },
+    {
+      "source": "/ko/guide/build-distribution.md",
+      "destination": "/ko/operate/ci-distribution.md",
+      "permanent": true
+    },
+    {
+      "source": "/guide/build-status-webhooks",
+      "destination": "/operate/webhooks",
+      "permanent": true
+    },
+    {
+      "source": "/ko/guide/build-status-webhooks",
+      "destination": "/ko/operate/webhooks",
+      "permanent": true
+    },
+    {
+      "source": "/guide/build-status-webhooks.md",
+      "destination": "/operate/webhooks.md",
+      "permanent": true
+    },
+    {
+      "source": "/ko/guide/build-status-webhooks.md",
+      "destination": "/ko/operate/webhooks.md",
+      "permanent": true
+    },
+    {
+      "source": "/guide/upload-builds",
+      "destination": "/testing/app-center",
+      "permanent": true
+    },
+    {
+      "source": "/ko/guide/upload-builds",
+      "destination": "/ko/testing/app-center",
+      "permanent": true
+    },
+    {
+      "source": "/guide/upload-builds.md",
+      "destination": "/testing/app-center.md",
+      "permanent": true
+    },
+    {
+      "source": "/ko/guide/upload-builds.md",
+      "destination": "/ko/testing/app-center.md",
+      "permanent": true
+    },
+    {
+      "source": "/guide/audio",
+      "destination": "/testing/audio",
+      "permanent": true
+    },
+    {
+      "source": "/ko/guide/audio",
+      "destination": "/ko/testing/audio",
+      "permanent": true
+    },
+    {
+      "source": "/guide/audio.md",
+      "destination": "/testing/audio.md",
+      "permanent": true
+    },
+    {
+      "source": "/ko/guide/audio.md",
+      "destination": "/ko/testing/audio.md",
+      "permanent": true
+    },
+    {
+      "source": "/guide/network-control",
+      "destination": "/testing/network-control",
+      "permanent": true
+    },
+    {
+      "source": "/ko/guide/network-control",
+      "destination": "/ko/testing/network-control",
+      "permanent": true
+    },
+    {
+      "source": "/guide/network-control.md",
+      "destination": "/testing/network-control.md",
+      "permanent": true
+    },
+    {
+      "source": "/ko/guide/network-control.md",
+      "destination": "/ko/testing/network-control.md",
+      "permanent": true
+    },
+    {
+      "source": "/guide/mcp-server",
+      "destination": "/automation/mcp-server",
+      "permanent": true
+    },
+    {
+      "source": "/ko/guide/mcp-server",
+      "destination": "/ko/automation/mcp-server",
+      "permanent": true
+    },
+    {
+      "source": "/guide/mcp-server.md",
+      "destination": "/automation/mcp-server.md",
+      "permanent": true
+    },
+    {
+      "source": "/ko/guide/mcp-server.md",
+      "destination": "/ko/automation/mcp-server.md",
+      "permanent": true
+    },
+    {
+      "source": "/guide/writing-flows",
+      "destination": "/automation/flows",
+      "permanent": true
+    },
+    {
+      "source": "/ko/guide/writing-flows",
+      "destination": "/ko/automation/flows",
+      "permanent": true
+    },
+    {
+      "source": "/guide/writing-flows.md",
+      "destination": "/automation/flows.md",
+      "permanent": true
+    },
+    {
+      "source": "/ko/guide/writing-flows.md",
+      "destination": "/ko/automation/flows.md",
+      "permanent": true
+    },
+    {
+      "source": "/guide/mcp-ci",
+      "destination": "/automation/mcp-ci",
+      "permanent": true
+    },
+    {
+      "source": "/ko/guide/mcp-ci",
+      "destination": "/ko/automation/mcp-ci",
+      "permanent": true
+    },
+    {
+      "source": "/guide/mcp-ci.md",
+      "destination": "/automation/mcp-ci.md",
+      "permanent": true
+    },
+    {
+      "source": "/ko/guide/mcp-ci.md",
+      "destination": "/ko/automation/mcp-ci.md",
+      "permanent": true
+    },
+    {
+      "source": "/guide/contributing",
+      "destination": "/contributing",
+      "permanent": true
+    },
+    {
+      "source": "/ko/guide/contributing",
+      "destination": "/ko/contributing",
+      "permanent": true
+    },
+    {
+      "source": "/guide/contributing.md",
+      "destination": "/contributing.md",
+      "permanent": true
+    },
+    {
+      "source": "/ko/guide/contributing.md",
+      "destination": "/ko/contributing.md",
+      "permanent": true
+    },
+    {
+      "source": "/guide",
+      "destination": "/get-started/introduction",
+      "permanent": true
+    },
+    {
+      "source": "/ko/guide",
+      "destination": "/ko/get-started/introduction",
+      "permanent": true
+    },
+    {
+      "source": "/guide/",
+      "destination": "/get-started/introduction",
+      "permanent": true
+    },
+    {
+      "source": "/ko/guide/",
+      "destination": "/ko/get-started/introduction",
+      "permanent": true
+    },
+    {
+      "source": "/tapflow-demo.mp4",
+      "destination": "/media/tapflow-demo.mp4",
+      "permanent": true
+    },
+    {
+      "source": "/tapflow-setup.mp4",
+      "destination": "/media/tapflow-setup.mp4",
+      "permanent": true
+    }
+  ]
 }

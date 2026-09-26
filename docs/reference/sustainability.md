@@ -16,7 +16,7 @@ Simulators alone, though, do not carry that benefit across a team — only peopl
 
 ## Extending hardware lifetime
 
-When new machines are issued, the ones they replace are left over. Running one as an agent host keeps it in service instead of sending it for disposal. A simulator host often depends more on having enough memory than on CPU speed, so a Mac a generation or two behind can still handle the role reliably. The agent does need an [Apple Silicon Mac](/guide/requirements), though.
+When new machines are issued, the ones they replace are left over. Running one as an agent host keeps it in service instead of sending it for disposal. A simulator host often depends more on having enough memory than on CPU speed, so a Mac a generation or two behind can still handle the role reliably. The agent does need an [Apple Silicon Mac](/operate/requirements), though.
 
 Test devices and agent hosts also age on different clocks. Test devices are replaced on a schedule set by OS support windows and the need to validate new OS releases. An agent host faces little of that pressure and can stay in service until macOS stops supporting it. Over eight years, repeatedly replacing devices costs more than twice the manufacturing carbon of keeping one Mac.
 
@@ -43,5 +43,5 @@ The formulas, input sources, measurement conditions, and the comparisons we cons
 - **It draws power.** A Mac left on running simulators consumes electricity. In the comparison above, the electricity line favours physical devices.
 - **A Mac bought to be an agent host has an upfront cost.** Manufacturing carbon is zero only when you reuse a Mac you already have. If you do buy one, a Mac mini breaks even in roughly six months and a MacBook Pro in about three and a half years. Laptops carry a display and a battery, so their manufacturing carbon is far higher than a desktop's.
 - **It does not replace every physical device.** tapflow cannot test features that depend on device hardware, such as camera, NFC, or biometrics.
-- **Old Macs have a floor.** The iOS simulator requires a recent Xcode, which requires a recent macOS. A Mac past that line cannot run as an agent. See [Requirements](/guide/requirements).
+- **Old Macs have a floor.** The iOS simulator requires a recent Xcode, which requires a recent macOS. A Mac past that line cannot run as an agent. See [Requirements](/operate/requirements).
 - **Grid factors vary by region.** The figures above are for Korea. On a cleaner grid both electricity lines shrink, while the manufacturing comparison stays the same.

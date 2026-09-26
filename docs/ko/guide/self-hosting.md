@@ -4,7 +4,7 @@
 
 ::: info 릴레이 URL 두 가지 역할
 - **대시보드 접속** — 브라우저에서 `http://localhost:4000` (로컬) 또는 `http://192.168.x.x:4000` (팀 내 접속)
-- **에이전트 연결** — 릴레이가 다른 Mac에 있을 때: `tapflow agent start --relay ws://192.168.x.x:4000`. 에이전트→릴레이 구간은 LAN 내부로 연결합니다. 스킴은 `ws://`이고 릴레이에 `tls`를 설정해 HTTPS로 운영하면 `wss://`입니다. 원격 에이전트는 `agent` 스코프 토큰으로 인증합니다([원격 릴레이 인증](/ko/guide/agent#원격-릴레이-인증)).
+- **에이전트 연결** — 릴레이가 다른 Mac에 있을 때: `tapflow agent start --relay ws://192.168.x.x:4000`. 에이전트→릴레이 구간은 LAN 내부로 연결합니다. 스킴은 `ws://`이고 릴레이에 `tls`를 설정해 HTTPS로 운영하면 `wss://`입니다. 원격 에이전트는 `agent` 스코프 토큰으로 인증합니다([원격 릴레이 인증](/ko/operate/agents#원격-릴레이-인증)).
 :::
 
 ## 배포 시나리오
@@ -117,7 +117,7 @@ tapflow relay start
 tapflow agent start --relay ws://192.168.x.x:4000 --token tflw_pat_xxxxxxxx
 ```
 
-릴레이가 에이전트와 다른 머신에 있으므로 `agent` 스코프 토큰이 필요합니다. 발급 방법은 [원격 릴레이 인증](/ko/guide/agent#원격-릴레이-인증)을 참고하세요.
+릴레이가 에이전트와 다른 머신에 있으므로 `agent` 스코프 토큰이 필요합니다. 발급 방법은 [원격 릴레이 인증](/ko/operate/agents#원격-릴레이-인증)을 참고하세요.
 
 ## 배포 설정
 
@@ -166,12 +166,12 @@ tapflow start
 
 릴레이와 에이전트는 항상 같은 내부 네트워크에 유지합니다. 외부 접속은 릴레이 Mac에서 외부로 아웃바운드 터널을 열어 브라우저가 공개 URL로 접근하도록 합니다.
 
-릴레이는 localhost 밖에서 오는 모든 연결에 인증을 요구합니다. 브라우저는 로그인으로, 에이전트는 `agent` 스코프 토큰으로 인증합니다 — 에이전트 쪽 절차는 [원격 릴레이 인증](/ko/guide/agent#원격-릴레이-인증)에서 다룹니다.
+릴레이는 localhost 밖에서 오는 모든 연결에 인증을 요구합니다. 브라우저는 로그인으로, 에이전트는 `agent` 스코프 토큰으로 인증합니다 — 에이전트 쪽 절차는 [원격 릴레이 인증](/ko/operate/agents#원격-릴레이-인증)에서 다룹니다.
 
 tapflow는 두 가지 터널 프로바이더를 지원합니다:
 
 ::: tip 터널 설정은 tapflow init이 만들어 줍니다
-아래에 보이는 `tunnel` 블록은 `tapflow init`을 실행하고 프로바이더를 고르면 대화형으로 생성됩니다. [tapflow 설정](/ko/guide/configure)을 참고하세요. 여기서는 생성된 설정과 프로바이더 쪽 준비 과정을 다룹니다.
+아래에 보이는 `tunnel` 블록은 `tapflow init`을 실행하고 프로바이더를 고르면 대화형으로 생성됩니다. [tapflow 설정](/ko/operate/configure)을 참고하세요. 여기서는 생성된 설정과 프로바이더 쪽 준비 과정을 다룹니다.
 :::
 
 | | Tailscale | VPS + rathole |
@@ -245,7 +245,7 @@ Tailscale은 브라우저→릴레이 경로만 제공합니다. 에이전트(�
 
 #### HTTPS로 더 부드러운 스트림 켜기 (선택)
 
-기본 접속은 평문 HTTP이고 tailnet 주소는 외부 주소로 분류되므로 팀원은 1000px로 줄인 스트림을 WASM 디코더로 받습니다. Tailscale의 무료 HTTPS로 종단하면 터널 포트를 거쳐 들어오므로 Smooth 프로파일(원본 해상도, 하드웨어 디코딩)로 전환됩니다([스트림 품질](/ko/guide/streaming) 참고). Tailscale이 `*.ts.net` 인증서를 자동 발급·갱신하므로 도메인이나 DNS 토큰이 필요 없습니다.
+기본 접속은 평문 HTTP이고 tailnet 주소는 외부 주소로 분류되므로 팀원은 1000px로 줄인 스트림을 WASM 디코더로 받습니다. Tailscale의 무료 HTTPS로 종단하면 터널 포트를 거쳐 들어오므로 Smooth 프로파일(원본 해상도, 하드웨어 디코딩)로 전환됩니다([스트림 품질](/ko/operate/streaming-quality) 참고). Tailscale이 `*.ts.net` 인증서를 자동 발급·갱신하므로 도메인이나 DNS 토큰이 필요 없습니다.
 
 1. Tailscale admin 콘솔의 **DNS** 설정에서 **MagicDNS**와 **HTTPS Certificates**를 켭니다. 머신 이름이 공개 Certificate Transparency 기록에 남는다는 점에 동의해야 합니다.
 2. 릴레이 Mac에서 릴레이의 **터널 포트** 앞에 HTTPS를 둡니다. 기본값은 `4001`이고, `TAPFLOW_TUNNEL_PORT`를 정했거나 릴레이 자신이 4001을 쓰면 4002로 비켜섭니다. 시작 배너에 실제로 잡은 포트가 나오니 아래 명령에는 그 번호를 쓰세요. Tailscale이 인증서를 자동 관리하므로 별도 발급 명령은 필요 없습니다:

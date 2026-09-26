@@ -71,7 +71,7 @@ passes; #660 shipped one. `gh pr comment` is deliberately out of scope, because 
 conversation and the rule is about titles and bodies.
 
 **Docs prose is checked before the session ends.** Editing any Markdown under `docs/` — nested too,
-so `docs/ko/guide/agent.md` counts — and finishing without running
+so `docs/ko/operate/agents.md` counts — and finishing without running
 `/ai-tells detect` is blocked by `.claude/hooks/docs-aitells-gate.sh`, with
 `docs-aitells-reminder.sh` nudging at the moment of the edit. The check is a **lint, not a
 laundry**: it flags AI-writing tells in prose a human wrote, and `rewrite` stays manual and

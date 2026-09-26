@@ -142,9 +142,10 @@ describe('EN and KO docs have the same structure', () => {
   it('pairs every page, with the same heading sequence and explicit ids', () => {
     const pages = site()
     expect(parityProblems(pages)).toEqual([])
-    // 28 pairs on 2026-09-26 (27 prose pages and the landing), so a walk that found nothing cannot
-    // pass as "no problems". After the verdict, so a missing twin is reported by name first.
-    expect(pages.size).toBe(56)
+    // A floor, not a pin: 28 pairs on 2026-09-26 (27 prose pages and the landing). The pairing
+    // above is what holds EN == KO; this only keeps a walk that found nothing from passing as "no
+    // problems". After the verdict, so a missing twin is reported by name first.
+    expect(pages.size).toBeGreaterThanOrEqual(56)
     expect([...pages.values()].reduce((n, s) => n + headings(s).length, 0)).toBeGreaterThan(500)
   })
 
