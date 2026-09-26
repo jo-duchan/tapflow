@@ -1308,9 +1308,13 @@ describe('RelayClient — a relay close carries its code and reason', () => {
     const client = new RelayClient(`ws://localhost:${port}`, 'tflw_pat_x')
     await client.connect()
     await serverSideClosed
-    // The server's close event can land before the client's; wait for the client to have seen it too,
-    // so this case is the "not connected" path and not the CLOSING one below.
-    await new Promise((r) => setTimeout(r, 50))
+    // The server's close event can land before the client's; wait until the client has handled its own
+    // close (its handler lets go of the socket), so this case is the "not connected" path and not the
+    // CLOSING one below. A condition, not a fixed delay: a slow runner would otherwise take the CLOSING
+    // path and pass for the wrong reason.
+    await vi.waitFor(() => {
+      expect((client as unknown as { ws: WebSocket | null }).ws).toBeNull()
+    })
     const err = await client.joinSession('s1').catch((e: unknown) => e) as Error
     expect(err.message).toMatch(/not connected/)
     expect(err.message).toContain('1008')
