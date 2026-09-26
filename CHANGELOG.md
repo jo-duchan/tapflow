@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.25.0] - 2026-09-27
+
 ### Breaking Changes
 
 - **Viewer is read-only.** A Viewer can view builds, test them in a QA Session and comment, and nothing else it does changes builds, apps or webhooks: uploading a build, changing its status, scheduling or cancelling its deletion and every `/api/v1/webhooks` route (listing included) now answer `403 { "error": "Viewers have read-only access" }`, with the dashboard cookie or with a personal access token, since a token is held to its owner's role. In the App Center a Viewer's **Add App** and **Upload build** show a notice instead of a dialog, and build rows drop the status menu and the deletion button. Migrate: give the members who upload builds or change their status the QA or Developer role. A CI token owned by a Viewer starts getting 403 on upload and works again as soon as its owner is promoted, with no new token needed.
@@ -27,7 +29,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **A role change takes effect immediately on the endpoints that check the role**: team management, workspace settings, password-reset emails, issuing an `agent` scope token, deleting a comment, and uploading or changing builds, apps and webhooks. Roles used to be read from the login cookie, which lasts 7 days, so a demoted member — an Admin included — kept their old rights there and a promoted one was refused until they signed in again. The relay now reads the role from the database on every request to those endpoints, for cookies and tokens alike. A member removed from the team, an Admin included, gets 401 from them on their next request, and from every other endpoint too (see **Security**).
 
-- **`POST /api/v1/tokens` rejects an invalid `expires_in_days` with a 400.** A negative count used to create a token that had already expired, a value too large for a date failed without a proper response, and an empty or blank string (an unset CI variable) silently created a token that never expires. Omitting it, `null` or `0` still means no expiry, a numeric string like `"30"` still works, and the API keeps no upper limit.
+- **`POST /api/v1/tokens` rejects an invalid `expires_in_days` with a 400.** A negative count used to create a token that had already expired, a value too large for a date failed without a proper response, and an empty or blank string (an unset CI variable) silently created a token that never expires. Omitting it, `null` or `0` still means no expiry, a numeric string like `"30"` still works, and the API has no 365-day cap like the dialog's: only a count too large to be a date is refused.
 
 ### Fixed
 
@@ -816,7 +818,8 @@ found out by waiting.
 
 - Automatic `tapflow.config.json` creation as a side effect of `tapflow start` / `tapflow relay start`.
 
-[Unreleased]: https://github.com/jo-duchan/tapflow/compare/v0.24.0...HEAD
+[Unreleased]: https://github.com/jo-duchan/tapflow/compare/v0.25.0...HEAD
+[0.25.0]: https://github.com/jo-duchan/tapflow/compare/v0.24.0...v0.25.0
 [0.24.0]: https://github.com/jo-duchan/tapflow/compare/v0.23.0...v0.24.0
 [0.23.0]: https://github.com/jo-duchan/tapflow/compare/v0.22.0...v0.23.0
 [0.22.0]: https://github.com/jo-duchan/tapflow/compare/v0.21.0...v0.22.0

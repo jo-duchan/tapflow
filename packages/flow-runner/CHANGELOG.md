@@ -1,5 +1,16 @@
 # @tapflowio/flow-runner
 
+## 0.25.0
+
+### Minor Changes
+
+- 761db41: A relay that closes the connection is reported with its close code and reason. A token the relay refuses, such as one without the `view` scope, used to surface as "not connected to relay" or "relay connection closed" with nothing to act on; both errors now end with, for example, `(relay closed 1008: Forbidden: this token lacks the 'view' scope needed for device sessions; create an API-type token)`.
+
+### Patch Changes
+
+- @tapflowio/protocol@0.25.0
+- @tapflowio/agent-core@0.25.0
+
 ## 0.24.0
 
 ### Patch Changes
