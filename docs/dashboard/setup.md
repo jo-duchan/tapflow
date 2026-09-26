@@ -36,10 +36,10 @@ Once signed in as Admin, go to **Settings → Team** and create invite links:
 1. Click **Invite member**.
 2. Enter the team member's email and select a role:
    - **Admin** — can do everything except remove their own account. Inviting members, changing roles, removing members, resetting passwords, workspace settings and the **Settings → Tokens** page are Admin-only.
-   - **Developer** — can add, edit and delete apps.
-   - **QA**, **Viewer** — can do the shared actions below. The server does not currently tell these two roles apart.
+   - **Developer**, **QA** — can add, edit and delete apps, upload builds, change a build's status, schedule build deletion and manage webhooks. The two roles have the same permissions.
+   - **Viewer** — read-only. Can view builds, test them on a simulator or emulator in a QA Session, and comment. Cannot change builds or apps, and can neither see nor change webhooks.
 
-   Uploading builds, changing a build's status, commenting and starting sessions are open to every signed-in member, whatever their role. Viewer is not read-only.
+   Commenting and starting sessions are open to every signed-in member, whatever their role. A role change applies right away to the API endpoints that check roles, without the member signing in again.
 3. Click **Generate invite link**. The link appears in the dialog, and is also copied to your clipboard when the browser allows it. If SMTP is configured, the member also receives an invite email with a link to set their password.
 
 ::: tip No email server yet?

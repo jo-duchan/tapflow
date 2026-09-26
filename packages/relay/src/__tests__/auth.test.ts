@@ -135,16 +135,28 @@ describe('requireAuth', () => {
 // --- requireRole ---
 
 describe('requireRole', () => {
+  beforeEach(() => vi.resetAllMocks())
+
+  // The role comes from the users table, not the JWT (a cookie lives 7 days).
+  function dbRole(role: string | undefined) {
+    const get = vi.fn().mockReturnValue(role === undefined ? undefined : { role })
+    mockGet.mockReturnValue({ prepare: vi.fn().mockReturnValue({ get }) })
+    return get
+  }
+
   it('역할이 허용 목록에 있으면 AuthContext 반환', () => {
+    const get = dbRole('Admin')
     const token = signJwt(SAMPLE)
     const req = makeReq({ cookie: `tapflow_token=${token}` })
     const res = makeRes()
     const ctx = requireRole(req, res, ['Admin', 'Developer'])
     expect(ctx).toMatchObject(SAMPLE)
+    expect(get).toHaveBeenCalledWith(SAMPLE.userId)
     expect(res.writeHead).not.toHaveBeenCalled()
   })
 
   it('역할이 허용 목록에 없으면 403 반환 후 null', () => {
+    dbRole('Admin')
     const token = signJwt(SAMPLE) // role: 'Admin'
     const req = makeReq({ cookie: `tapflow_token=${token}` })
     const res = makeRes()
@@ -153,6 +165,30 @@ describe('requireRole', () => {
     expect(res._calls[0]?.status).toBe(403)
     const body = JSON.parse(res._calls[0]?.body ?? '{}')
     expect(body.error).toBe('Forbidden')
+  })
+
+  it('a demoted Admin is refused although the JWT still says Admin', () => {
+    dbRole('Developer')
+    const req = makeReq({ cookie: `tapflow_token=${signJwt(SAMPLE)}` })
+    const res = makeRes()
+    expect(requireRole(req, res, ['Admin'])).toBeNull()
+    expect(res._calls[0]?.status).toBe(403)
+  })
+
+  it('a promoted member is allowed and gets the DB role back', () => {
+    dbRole('Admin')
+    const req = makeReq({ cookie: `tapflow_token=${signJwt({ ...SAMPLE, role: 'Viewer' })}` })
+    const res = makeRes()
+    expect(requireRole(req, res, ['Admin'])).toMatchObject({ userId: SAMPLE.userId, role: 'Admin' })
+    expect(res.writeHead).not.toHaveBeenCalled()
+  })
+
+  it('a removed member (no users row) gets 401', () => {
+    dbRole(undefined)
+    const req = makeReq({ cookie: `tapflow_token=${signJwt(SAMPLE)}` })
+    const res = makeRes()
+    expect(requireRole(req, res, ['Admin'])).toBeNull()
+    expect(res._calls[0]?.status).toBe(401)
   })
 
   it('인증 자체가 없으면 requireRole도 null (401)', () => {

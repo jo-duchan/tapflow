@@ -1,7 +1,7 @@
 import http from 'http'
 import crypto from 'crypto'
 import { getDb } from '../db.js'
-import { requireAuth, hashPat } from '../middleware/auth.js'
+import { currentRole, requireAuth, hashPat } from '../middleware/auth.js'
 import { json, readJson } from '../router.js'
 import { AGENT_SCOPE } from '../lib/connectionAuth.js'
 
@@ -31,8 +31,13 @@ export async function handleCreateToken(req: http.IncomingMessage, res: http.Ser
     return json(res, 400, { error: `Invalid scope. Allowed: ${[...ALLOWED_SCOPES].join(', ')}` })
   }
   // agent 스코프 토큰은 화면을 공급하는 에이전트의 자격이므로 발급을 Admin으로 제한한다 (#271).
-  if (scopes.includes(AGENT_SCOPE) && auth.role !== 'Admin') {
-    return json(res, 403, { error: `'${AGENT_SCOPE}' scope requires the Admin role` })
+  // The DB role, not the JWT's: a demoted Admin keeps a valid cookie for up to 7 days.
+  if (scopes.includes(AGENT_SCOPE)) {
+    const role = currentRole(res, auth.userId)
+    if (role === null) return
+    if (role !== 'Admin') {
+      return json(res, 403, { error: `'${AGENT_SCOPE}' scope requires the Admin role` })
+    }
   }
 
   // Omitted or 0 means no expiry. A negative count used to mint a token that was already expired, and one too

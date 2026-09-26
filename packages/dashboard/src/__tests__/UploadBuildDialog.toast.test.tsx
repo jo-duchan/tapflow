@@ -28,7 +28,7 @@ describe('UploadBuildDialog — toast.promise feedback', () => {
 
   it('TC19: 업로드 시작 시 toast.promise 호출', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true }))
-    render(<UploadBuildDialog onSuccess={vi.fn()} />)
+    render(<UploadBuildDialog onSuccess={vi.fn()} canWrite />)
     await openAndAttachFile(makeFile())
     await userEvent.click(screen.getByRole('button', { name: /^upload$/i }))
     await waitFor(() => expect(toast.promise).toHaveBeenCalled())
@@ -36,7 +36,7 @@ describe('UploadBuildDialog — toast.promise feedback', () => {
 
   it('TC19: 업로드 시작과 동시에 다이얼로그가 닫힘', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true }))
-    render(<UploadBuildDialog onSuccess={vi.fn()} />)
+    render(<UploadBuildDialog onSuccess={vi.fn()} canWrite />)
     await openAndAttachFile(makeFile())
     await userEvent.click(screen.getByRole('button', { name: /^upload$/i }))
     await waitFor(() => expect(toast.promise).toHaveBeenCalled())
@@ -51,12 +51,31 @@ describe('UploadBuildDialog — toast.promise feedback', () => {
         json: () => Promise.resolve({ error: 'Unsupported file format' }),
       }),
     )
-    render(<UploadBuildDialog onSuccess={vi.fn()} />)
+    render(<UploadBuildDialog onSuccess={vi.fn()} canWrite />)
     await openAndAttachFile(makeFile())
     await userEvent.click(screen.getByRole('button', { name: /^upload$/i }))
     await waitFor(() => expect(toast.promise).toHaveBeenCalled())
     const promiseArg = (toast.promise as ReturnType<typeof vi.fn>).mock.calls[0][0] as Promise<unknown>
     const errMsg = await promiseArg.catch((e: Error) => e.message)
     expect(errMsg).toBe('Unsupported file format')
+  })
+})
+
+// Mutation: drop the `!canWrite` branch → the dialog opens and the toast is never raised.
+describe('UploadBuildDialog — Viewer', () => {
+  beforeEach(() => vi.clearAllMocks())
+  afterEach(() => vi.unstubAllGlobals())
+
+  it('shows a toast on click, opens no dialog and sends nothing', async () => {
+    const fetchMock = vi.fn()
+    vi.stubGlobal('fetch', fetchMock)
+    render(<UploadBuildDialog onSuccess={vi.fn()} canWrite={false} />)
+    const button = screen.getByRole('button', { name: /upload build/i })
+    expect(button).not.toBeDisabled()
+    await userEvent.click(button)
+    expect(toast.error).toHaveBeenCalledWith("Viewers can't upload builds. Ask an Admin for QA or Developer access.")
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+    expect(document.querySelector('input[type="file"]')).toBeNull()
+    expect(fetchMock).not.toHaveBeenCalled()
   })
 })

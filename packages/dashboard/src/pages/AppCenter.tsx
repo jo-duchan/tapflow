@@ -11,10 +11,11 @@ import {
 import { UploadBuildDialog } from '@/components/UploadBuildDialog'
 import { AppSidebar } from '@/components/app-center/AppSidebar'
 import { ReleaseAccordion } from '@/components/app-center/ReleaseAccordion'
-import { getApps, getBuilds, updateBuildStatus, scheduleBuildDeletion, cancelBuildDeletion, groupByRelease } from '@/lib/queries'
+import { getApps, getBuilds, updateBuildStatus, scheduleBuildDeletion, cancelBuildDeletion, groupByRelease, queryKeys, ForbiddenError } from '@/lib/queries'
 import type { Build } from '@/lib/types'
 import { useFocusAfterSwap } from '@/hooks/useFocusAfterSwap'
 import { useReleaseDisclosure } from '@/hooks/useReleaseDisclosure'
+import { useAuth } from '@/hooks/useAuth'
 import { buildRowName, describeDeletionCountdown } from '@/lib/build-format'
 
 /**
@@ -50,6 +51,12 @@ export function AppCenter() {
   const [searchParams, setSearchParams] = useSearchParams()
 
   const queryClient = useQueryClient()
+  // **Read once here and handed down**, so the rows and dialogs below do not each ask for `/auth/me`.
+  // Viewer is the one read-only role; the relay refuses its writes whatever this says, so this only
+  // decides what is offered. Unknown counts as writable: `DashboardLayout` renders no page until the
+  // user is known, so the only render without one is a test that did not supply it.
+  const { user } = useAuth()
+  const canWrite = user?.role !== 'Viewer'
   const [search, setSearch] = useState('')
   // **What the box holds and what the query asks for are not the same value.** Every keystroke was
   // its own query key, so a four-letter search made four requests and four announcements — the last
@@ -159,8 +166,16 @@ export function AppCenter() {
         queryClient.setQueryData<Build[]>(key, (old) => (old ? apply(old, vars) : old))
         return { previous, key }
       },
-      onError: (_error: unknown, _vars: V, context: MutationContext | undefined) => {
+      onError: (error: unknown, _vars: V, context: MutationContext | undefined) => {
         if (context?.previous) queryClient.setQueryData(context.key, context.previous)
+        // 403 = the relay refused. Show its message rather than a generic failure, and re-read the
+        // role: if it changed since this page loaded (a demotion to Viewer), the controls the relay
+        // will keep refusing are hidden. A refusal for another reason (CSRF) just refetches `/me`.
+        if (error instanceof ForbiddenError) {
+          void queryClient.invalidateQueries({ queryKey: queryKeys.me })
+          toast.error(error.message)
+          return
+        }
         toast.error(failureMessage)
       },
       // The same row lives under every other search and filter of this app, and those entries still
@@ -461,6 +476,7 @@ export function AppCenter() {
         selectedAppId={selectedAppId}
         onSelect={handleAppSelect}
         onAdd={() => queryClient.invalidateQueries({ queryKey: ['apps'] })}
+        canWrite={canWrite}
       />
 
       <div className="flex-1 flex flex-col gap-4 p-4 overflow-y-auto min-w-0">
@@ -474,6 +490,7 @@ export function AppCenter() {
               queryClient.invalidateQueries({ queryKey: ['builds'] })
             }}
             appId={selectedAppId}
+            canWrite={canWrite}
           />
         </div>
 
@@ -567,7 +584,8 @@ export function AppCenter() {
             <Package className="w-8 h-8 text-muted-foreground/40" />
             <p id={emptyTitleId} className="text-sm font-medium">{filtered ? 'No matching builds' : 'No builds yet'}</p>
             <p className="text-sm text-muted-foreground">
-              {filtered ? 'No build matches the search and status filters.' : 'Upload the first build to get started.'}
+              {filtered ? 'No build matches the search and status filters.'
+                : canWrite ? 'Upload the first build to get started.' : 'Builds appear here once a teammate uploads one.'}
             </p>
           </div>
         ) : (
@@ -601,6 +619,7 @@ export function AppCenter() {
                 onStatusChange={handleStatusChange}
                 onScheduleDeletion={handleScheduleDeletion}
                 onCancelDeletion={handleCancelDeletion}
+                canWrite={canWrite}
               />
             ))}
           </div>

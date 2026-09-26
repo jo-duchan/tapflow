@@ -1,7 +1,10 @@
 import http from 'http'
 import { getDb } from '../db.js'
-import { requireAuth, requireViewAuth } from '../middleware/auth.js'
+import { requireRole, requireViewAuth } from '../middleware/auth.js'
 import { json, readJson } from '../router.js'
+
+// Viewer is the one read-only role; QA manages apps like Developer does.
+const APP_MANAGERS = ['Admin', 'Developer', 'QA']
 
 export function handleListApps(req: http.IncomingMessage, res: http.ServerResponse): void {
   const auth = requireViewAuth(req, res)
@@ -29,12 +32,7 @@ export async function handleCreateApp(
   req: http.IncomingMessage,
   res: http.ServerResponse,
 ): Promise<void> {
-  const auth = requireAuth(req, res)
-  if (!auth) return
-
-  if (!['Admin', 'Developer'].includes(auth.role)) {
-    return json(res, 403, { error: 'Forbidden' })
-  }
+  if (!requireRole(req, res, APP_MANAGERS)) return
 
   const body = await readJson<{ name?: string; bundle_id_key?: string; platform?: string }>(req)
   if (!body.name?.trim()) return json(res, 400, { error: 'name is required' })
@@ -55,12 +53,7 @@ export function handleDeleteApp(
   res: http.ServerResponse,
   params: Record<string, string>
 ): void {
-  const auth = requireAuth(req, res)
-  if (!auth) return
-
-  if (!['Admin', 'Developer'].includes(auth.role)) {
-    return json(res, 403, { error: 'Forbidden' })
-  }
+  if (!requireRole(req, res, APP_MANAGERS)) return
 
   const db = getDb()
   // builds → comments는 ON DELETE CASCADE로 처리됨
@@ -76,12 +69,7 @@ export async function handleUpdateApp(
   res: http.ServerResponse,
   params: Record<string, string>
 ): Promise<void> {
-  const auth = requireAuth(req, res)
-  if (!auth) return
-
-  if (!['Admin', 'Developer'].includes(auth.role)) {
-    return json(res, 403, { error: 'Forbidden' })
-  }
+  if (!requireRole(req, res, APP_MANAGERS)) return
 
   const body = await readJson<{ name?: string }>(req)
   if (!body.name?.trim()) return json(res, 400, { error: 'name is required' })

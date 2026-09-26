@@ -18,9 +18,9 @@ import {
 import { toast } from 'sonner'
 import { Upload } from 'lucide-react'
 
-type Props = { onSuccess: () => void; appId?: number | null }
+type Props = { onSuccess: () => void; appId?: number | null; canWrite: boolean }
 
-export function UploadBuildDialog({ onSuccess, appId }: Props) {
+export function UploadBuildDialog({ onSuccess, appId, canWrite }: Props) {
   const [open, setOpen] = useState(false)
   const [file, setFile] = useState<File | null>(null)
   const [statusLabel, setStatusLabel] = useState('none')
@@ -62,6 +62,15 @@ export function UploadBuildDialog({ onSuccess, appId }: Props) {
   function handleOpenChange(next: boolean) {
     setOpen(next)
     if (!next) { setFile(null); setStatusLabel('none') }
+  }
+
+  // Viewer keeps a focusable, named button whose press explains the refusal — see AddAppDialog.
+  if (!canWrite) {
+    return (
+      <Button size="sm" onClick={() => toast.error("Viewers can't upload builds. Ask an Admin for QA or Developer access.")}>
+        <Upload className="mr-2 h-4 w-4" />Upload build
+      </Button>
+    )
   }
 
   return (

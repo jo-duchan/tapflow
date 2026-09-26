@@ -7,9 +7,10 @@ interface Props {
   selectedAppId: number | null
   onSelect: (id: number) => void
   onAdd: () => void
+  canWrite: boolean
 }
 
-export function AppSidebar({ apps, selectedAppId, onSelect, onAdd }: Props) {
+export function AppSidebar({ apps, selectedAppId, onSelect, onAdd, canWrite }: Props) {
   return (
     <aside className="w-64 shrink-0 border-r flex flex-col gap-1 p-3 overflow-y-auto">
       <span className="px-2 pb-1 font-mono text-xs font-medium text-muted-foreground uppercase tracking-wider">
@@ -32,7 +33,7 @@ export function AppSidebar({ apps, selectedAppId, onSelect, onAdd }: Props) {
         </button>
       ))}
       <div className="mt-1 border-t pt-1">
-        <AddAppDialog onSuccess={onAdd} />
+        <AddAppDialog onSuccess={onAdd} canWrite={canWrite} />
       </div>
     </aside>
   )
