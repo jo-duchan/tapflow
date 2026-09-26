@@ -465,7 +465,7 @@ Password reset links expire after **2 hours**. An Admin can send a new link with
 
 ## Viewing logs
 
-On the Mac the relay runs on, inspect its activity with the commands below. The relay does not show its logs to other machines.
+On the relay host, inspect its activity with the commands below. The relay does not show its logs to other machines.
 
 ```sh
 tapflow logs

@@ -11,7 +11,7 @@ import { RelayServer } from '../RelayServer'
 import { initDb, closeDb, getDb } from '../db'
 import { hashPat, signJwt } from '../middleware/auth'
 import { getJwtSecret } from '../lib/config'
-import { WS_AGENT_OWNER_REASON, WS_REJECT_REASON, WS_TOKEN_GONE_REASON } from '../lib/connectionAuth'
+import { WS_AGENT_OWNER_REASON, WS_REJECT_REASON, WS_SCOPE_REASON, WS_TOKEN_GONE_REASON } from '../lib/connectionAuth'
 import { barrier, waitForMessage, waitForOpen, waitForType } from '@tapflowio/test-utils'
 import type { AgentRegistered } from '@tapflowio/protocol'
 
@@ -33,6 +33,9 @@ import type { AgentRegistered } from '@tapflowio/protocol'
 // - the try/catch around `handleConnection`'s auth block removed → the database-fault case (the throw
 //   is uncaught and fails the run); the one around `/uploads` → the upload fault case.
 // - the sweep closing unconditionally → the two negative controls.
+// - token expiry compared as text again (`pat.expires_at > datetime('now')`) → the token-expiry sweep case
+//   and the start warning (their fixtures are `toISOString()`, as the relay writes them).
+// - the other mutations for the cases added later are named beside each case.
 
 interface Res { status: number; body: string }
 
@@ -132,8 +135,8 @@ describe('open sockets are re-validated', () => {
   const runHeartbeat = () => (server as unknown as { runHeartbeat: () => void }).runHeartbeat()
 
   /** A remote agent on `ownerId`'s agent token, and a local viewer holding its session. */
-  async function remoteAgentWithViewer(ownerId: number) {
-    const token = seedToken(ownerId, 'agent')
+  async function remoteAgentWithViewer(ownerId: number, scope = 'agent') {
+    const token = seedToken(ownerId, scope)
     const agent = await remote({ authorization: `Bearer ${token.raw}` })
     agent.send(JSON.stringify({ type: 'agent:register', platform: 'ios', agentName: `revalidate-${ownerId}`, devices: [{ id: 'devA', name: 'iPhone A', platform: 'ios', status: 'shutdown' }] }))
     const registered = await waitForMessage<AgentRegistered>(agent)
@@ -191,7 +194,8 @@ describe('open sockets are re-validated', () => {
   it('the heartbeat closes a socket whose token expired since it connected', async () => {
     const token = seedToken(4, 'view')
     const browser = await remote({ authorization: `Bearer ${token.raw}` })
-    getDb().prepare("UPDATE personal_access_tokens SET expires_at = datetime('now', '-1 minute') WHERE id = ?").run(token.id)
+    // Written the way the relay writes it (toISOString), so the text-vs-time comparison is exercised.
+    getDb().prepare('UPDATE personal_access_tokens SET expires_at = ? WHERE id = ?').run(new Date(Date.now() - 60_000).toISOString(), token.id)
     expect(await stillOpen(browser)).toBe(true)
     const closed = closedWithin(browser)
     runHeartbeat()
@@ -210,7 +214,9 @@ describe('open sockets are re-validated', () => {
   })
 
   it('demoting a different Admin leaves the agent open', async () => {
-    const { agent } = await remoteAgentWithViewer(2)
+    // `view,agent`: the round trip `stillOpen` makes is a browser-direction frame, which an `agent`-only
+    // socket may not send.
+    const { agent } = await remoteAgentWithViewer(2, 'view,agent')
     expect((await request(relayPort, 'PATCH', '/api/v1/team/members/3', adminCookie, { role: 'Developer' })).status).toBe(200)
     expect(await stillOpen(agent)).toBe(true)
   })
@@ -263,6 +269,9 @@ describe('open sockets are re-validated', () => {
   it('warns at start about agent tokens whose owner is no longer an Admin', async () => {
     seedToken(4, 'agent')
     seedToken(1, 'agent')
+    // Expired a minute ago, written as the relay writes it: not counted.
+    const expired = seedToken(4, 'agent')
+    getDb().prepare('UPDATE personal_access_tokens SET expires_at = ? WHERE id = ?').run(new Date(Date.now() - 60_000).toISOString(), expired.id)
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
     const second = new RelayServer({ port: 0 })
     try {
@@ -272,6 +281,124 @@ describe('open sockets are re-validated', () => {
       warn.mockRestore()
       await second.stop()
     }
+  })
+
+  // ── An agent or stream socket without `view` cannot act as a browser after its handshake ─────────
+  //
+  // Mutation: the role/direction gate for agent and stream sockets removed from `settleRole` → the two
+  // "closes" cases (the agent's `session:start` joins; the stream's is dispatched).
+
+  const register = (ws: WebSocket, name: string) =>
+    ws.send(JSON.stringify({ type: 'agent:register', platform: 'ios', agentName: name, devices: [{ id: 'devA', name: 'iPhone A', platform: 'ios', status: 'shutdown' }] }))
+
+  it('an agent registered on an agent-only token is closed when it sends a browser frame', async () => {
+    const token = seedToken(2, 'agent')
+    const agent = await remote({ authorization: `Bearer ${token.raw}` })
+    register(agent, 'agent-only-then-browse')
+    const { registeredSessions } = await waitForMessage<AgentRegistered>(agent)
+    const closed = closedWithin(agent)
+    agent.send(JSON.stringify({ type: 'session:start', sessionId: registeredSessions[0]!.sessionId }))
+    expect(await closed).toEqual({ code: 1008, reason: WS_SCOPE_REASON })
+  })
+
+  it('a stream socket on an agent-only token is closed when it sends a browser frame', async () => {
+    const local = new WebSocket(`ws://127.0.0.1:${relayPort}`)
+    sockets.push(local)
+    await waitForOpen(local)
+    register(local, 'stream-host')
+    const { registeredSessions } = await waitForMessage<AgentRegistered>(local)
+    const sessionId = registeredSessions[0]!.sessionId
+    const token = seedToken(2, 'agent')
+    const stream = await remote({ authorization: `Bearer ${token.raw}` })
+    stream.send(JSON.stringify({ type: 'stream:register', sessionId }))
+    await waitForType(stream, 'stream:registered')
+    const closed = closedWithin(stream)
+    stream.send(JSON.stringify({ type: 'session:start', sessionId }))
+    expect(await closed).toEqual({ code: 1008, reason: WS_SCOPE_REASON })
+  })
+
+  it('an agent on a view,agent token of an Admin may still browse (control)', async () => {
+    const token = seedToken(2, 'view,agent')
+    const agent = await remote({ authorization: `Bearer ${token.raw}` })
+    register(agent, 'view-agent-browse')
+    const { registeredSessions } = await waitForMessage<AgentRegistered>(agent)
+    agent.send(JSON.stringify({ type: 'session:start', sessionId: registeredSessions[0]!.sessionId }))
+    await waitForType(agent, 'session:joined')
+  })
+
+  // A socket that has not sent its first frame is re-judged as a fresh handshake: demoted while
+  // waiting, its `view,agent` token may now browse only. Mutation: the grants refresh in
+  // `revalidateSockets` removed → the register goes through.
+  it('a view,agent socket whose owner is demoted before its first frame cannot register', async () => {
+    const token = seedToken(2, 'view,agent')
+    const pending = await remote({ authorization: `Bearer ${token.raw}` })
+    expect((await request(relayPort, 'PATCH', '/api/v1/team/members/2', adminCookie, { role: 'Developer' })).status).toBe(200)
+    const closed = closedWithin(pending)
+    register(pending, 'demoted-before-first-frame')
+    expect(await closed).toEqual({ code: 1008, reason: WS_AGENT_OWNER_REASON })
+  })
+
+  // A database fault is not a revocation. Mutation: the sweep's catch closing the socket (or the
+  // fault read as "credential gone") → both sockets close.
+  it('a database fault during the sweep closes nothing and the relay keeps running', async () => {
+    const token = seedToken(4, 'view')
+    const viaPat = await remote({ authorization: `Bearer ${token.raw}` })
+    const viaCookie = await remote({ cookie: cookieFor(4) })
+    getDb().close()
+    try {
+      runHeartbeat()
+      expect(await stillOpen(viaPat)).toBe(true)
+      expect(await stillOpen(viaCookie)).toBe(true)
+    } finally {
+      openDb()
+    }
+    expect((await request(relayPort, 'GET', '/api/v1/logs')).status).toBe(200)
+  })
+
+  interface Internals {
+    wss: { clients: Set<WebSocket> }
+    principals: WeakMap<WebSocket, { via: string; patId?: number }>
+    closeForAuth: (ws: WebSocket, reason: string) => void
+    sessions: { get: (id: string) => { browserSocket: WebSocket | null } | undefined; getResources: (ws: WebSocket) => unknown }
+  }
+  const internals = () => server as unknown as Internals
+  const serverSideOf = (patId: number) =>
+    [...internals().wss.clients].find((ws) => internals().principals.get(ws)?.patId === patId)!
+
+  // Once the relay has closed a socket for its credential, nothing that socket sends counts — even
+  // frames that arrive before the peer's close reply. Driven on the server-side socket directly, so the
+  // frame lands after the close for certain. Mutation: the `revokedSockets` check at the top of the
+  // message handler removed → the session is bound to the closed socket.
+  it('frames from a socket closed for its credential are dropped', async () => {
+    const local = new WebSocket(`ws://127.0.0.1:${relayPort}`)
+    sockets.push(local)
+    await waitForOpen(local)
+    register(local, 'drop-after-close')
+    const { registeredSessions } = await waitForMessage<AgentRegistered>(local)
+    const sessionId = registeredSessions[0]!.sessionId
+    const token = seedToken(4, 'view')
+    await remote({ authorization: `Bearer ${token.raw}` })
+    const serverWs = serverSideOf(token.id)
+    internals().closeForAuth(serverWs, 'test')
+    serverWs.emit('message', Buffer.from(JSON.stringify({ type: 'session:start', sessionId })), false)
+    expect(internals().sessions.get(sessionId)?.browserSocket ?? null).toBeNull()
+  })
+
+  // Mutation: the `removeResources` fallback for a revoked agent socket with no sessions removed →
+  // its resource entry outlives it.
+  it('a revoked agent with no sessions has its resource entry removed', async () => {
+    const token = seedToken(2, 'agent')
+    const agent = await remote({ authorization: `Bearer ${token.raw}` })
+    agent.send(JSON.stringify({ type: 'agent:register', platform: 'ios', agentName: 'no-sessions', devices: [] }))
+    await waitForMessage<AgentRegistered>(agent)
+    const serverWs = serverSideOf(token.id)
+    agent.send(JSON.stringify({ type: 'agent:resources', resources: { cpuPercent: 1, memUsedMB: 1, memTotalMB: 2, slotsAvailable: 1, slotsTotal: 1, reportedAt: Date.now() } }))
+    for (let i = 0; i < 50 && internals().sessions.getResources(serverWs) === undefined; i++) await new Promise((r) => setTimeout(r, 10))
+    expect(internals().sessions.getResources(serverWs)).toBeDefined()
+    const serverClosed = new Promise<void>((resolve) => serverWs.once('close', () => resolve()))
+    expect((await request(relayPort, 'DELETE', `/api/v1/tokens/${token.id}`, { Cookie: cookieFor(2) })).status).toBe(204)
+    await serverClosed
+    expect(internals().sessions.getResources(serverWs)).toBeUndefined()
   })
 
   it('a local socket is never re-validated', async () => {

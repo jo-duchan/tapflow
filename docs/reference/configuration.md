@@ -31,7 +31,7 @@ Paths inside the file are relative to the file itself, the way a `tsconfig.json`
 | Key | Description |
 |-----|-------------|
 | `local` | Settings for the relay server running on this machine. |
-| `relay.url` | URL of the relay to connect to. Used by `tapflow agent start`, `tapflow admin init`, and `tapflow status` as the default — no `--relay` flag needed when this is set. `tapflow logs` does not read it and asks the relay on the same Mac (`http://localhost:[local.port]`). Leave empty for local mode (`ws://localhost:[local.port]`). Write it as `ws://` or `wss://`: `tapflow agent start` rejects any other scheme, and the other commands switch it to HTTP where they need to. |
+| `relay.url` | URL of the relay to connect to. Used by `tapflow agent start`, `tapflow admin init`, and `tapflow status` as the default — no `--relay` flag needed when this is set. `tapflow logs` does not read it: it asks the relay on the machine it runs on (`http://localhost:[local.port]`), so run it on the relay host. Leave empty for local mode (`ws://localhost:[local.port]`). Write it as `ws://` or `wss://`: `tapflow agent start` rejects any other scheme, and the other commands switch it to HTTP where they need to. |
 | `tunnel` | The tunnel that `tapflow start` and `tapflow relay start` bring up alongside the relay. See the Tunnel section below. |
 | `tls` | LAN HTTPS (secure context) settings, required for WebCodecs hardware decode. See the HTTPS section below. |
 | `smtp` | SMTP settings for sending invitation and password reset emails. |

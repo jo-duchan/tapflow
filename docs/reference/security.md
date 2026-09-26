@@ -50,7 +50,7 @@ Here is what tapflow handles and what you manage as the infrastructure operator.
 **tapflow provides:**
 - API authentication: build upload and listing, comments and webhooks accept a signed-in session or a `builds:write` PAT; the app list, uploaded files, screenshots and UI trees accept a signed-in session or a `view` PAT. The [REST API reference](/reference/api) lists which endpoints accept a PAT.
 - Device stream (WebSocket) authentication: a remote connection needs a signed-in session or a PAT with the `view` scope, and a remote agent needs an `agent`-scope PAT issued by a current Admin.
-- Relay logs (`GET /api/v1/logs`) are served only to the Mac the relay runs on.
+- Relay logs (`GET /api/v1/logs`) are served only to the relay host.
 - Sign-in for every connection that does not reach the relay port over loopback, including tunnel traffic, which arrives on a separate loopback port of its own
 - No outbound data transmission to external services
 

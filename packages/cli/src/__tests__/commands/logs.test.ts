@@ -74,6 +74,46 @@ describe('cmdLogs', () => {
     expect(joined).not.toContain('Could not reach')
   })
 
+  // A 403 from localhost means the relay saw this machine as remote — a Docker relay behind a
+  // published port. Mutation: the loopback branch removed → the message leads with `--relay localhost`.
+  it('403 from localhost → leads with docker compose logs', async () => {
+    mockFetch(403, { error: 'Logs are only available on the relay host.' })
+    await expect(cmdLogs({})).rejects.toThrow('process.exit')
+    const joined = output.join('\n')
+    expect(joined).toContain('treated this machine as remote')
+    expect(joined).toContain('docker compose logs')
+    expect(joined).not.toContain('--relay http://localhost:')
+  })
+
+  // An install that names a remote relay and runs none here. Mutation: the `relay.url` line removed →
+  // red.
+  it('unreachable default with relay.url set → says relay.url is not read and to run it on the relay host', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('ECONNREFUSED')))
+    const saved = config.relay.url
+    config.relay.url = 'wss://relay.example.com'
+    try {
+      await expect(cmdLogs({})).rejects.toThrow('process.exit')
+    } finally {
+      config.relay.url = saved
+    }
+    const joined = output.join('\n')
+    expect(joined).toContain('Could not reach relay')
+    expect(joined).toContain('not relay.url (wss://relay.example.com)')
+    expect(joined).toContain('run it on the relay host')
+  })
+
+  it('unreachable with an explicit --relay → no relay.url line', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('ECONNREFUSED')))
+    const saved = config.relay.url
+    config.relay.url = 'wss://relay.example.com'
+    try {
+      await expect(cmdLogs({ relay: 'http://localhost:4100' })).rejects.toThrow('process.exit')
+    } finally {
+      config.relay.url = saved
+    }
+    expect(output.join('\n')).not.toContain('relay.url')
+  })
+
   // Mutation: defaulting to `relay.url` again turns this red.
   it('defaults to this machine even when relay.url names a remote relay', async () => {
     const fetchMock = vi.fn().mockResolvedValue({ ok: true, status: 200, json: vi.fn().mockResolvedValue([]) })

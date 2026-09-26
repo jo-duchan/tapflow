@@ -39,15 +39,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **`tapflow flow run` reports why the relay closed the connection.** A refused token used to surface as "not connected to relay" or "relay connection closed"; the error now ends with the relay's close code and reason.
 
-- **`tapflow agent start` shows the relay's reason when it refuses an agent token**, instead of always suggesting to create a PAT with the `agent` scope. The suggestion stays for the refusal that means no agent token was given.
+- **`tapflow agent start` no longer tells you to create an `agent`-scope PAT when the relay refuses the token because its owner is no longer an Admin.** The relay's reason, printed as before, says to have a current Admin issue a new one; every other refusal keeps the suggestion.
 
 - **A token's "last used" time no longer moves when the relay refuses it** (wrong scope, or an agent token whose owner is no longer an Admin).
 
 ### Security
 
+- **A personal access token stops working at its expiry time, not at the end of that day (UTC).** The same holds for invitation links and password-reset links. Their expiry was compared as text against the database's clock, which writes the two in different formats, so each kept working until midnight UTC of the day it expired.
+
 - **`GET /api/v1/logs` no longer answers remote clients.** It needed no sign-in and listed the addresses of refused connections. It is served to the relay host only, through the same locality rule as first-admin setup, so the tunnel port and clients behind a trusted proxy are refused too.
 
-- **A personal access token without `view` can no longer open a device session over WebSocket, and an agent token can no longer act as a browser.** An `agent` token is also refused once its owner is no longer an Admin.
+- **A personal access token without `view` can no longer open a device session over WebSocket, and an `agent`-only token can no longer act as a browser, before or after it registers as an agent.** An `agent` token is also refused once its owner is no longer an Admin.
 
 - **Removing a member signs them out everywhere at once**: every HTTP endpoint, uploaded files, recordings and open device sessions. Their session cookie used to keep working on endpoints that do not check the role for up to 7 days. Revoking a token, a token or session cookie expiring, and an invitation accepted for an existing account with a different role now also close the WebSocket connections that relied on it, immediately or within 30 seconds.
 

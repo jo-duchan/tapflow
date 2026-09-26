@@ -874,7 +874,7 @@ A value that cannot be determined is `null`. `lanHost` is always `null` when the
 
 ### `GET /api/v1/logs`
 
-Return the relay's in-memory log buffer (last 500 lines). Only requests from the Mac the relay runs on are answered. Another machine, a tunnel, or a remote client behind a trusted proxy gets `403`, signed in or not. To read the logs from elsewhere, look at the relay Mac's own output (terminal, `journalctl`, `docker compose logs`).
+Return the relay's in-memory log buffer (last 500 lines). Only requests from the relay host are answered. Another machine, a tunnel, or a remote client behind a trusted proxy gets `403`, signed in or not. To read the logs from elsewhere, look at the relay host's own output (terminal, `journalctl`, `docker compose logs`).
 
 ```
 Query:

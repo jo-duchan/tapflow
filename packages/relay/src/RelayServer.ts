@@ -634,7 +634,7 @@ export class RelayServer {
       SELECT COUNT(*) AS n FROM personal_access_tokens pat JOIN users u ON u.id = pat.user_id
       WHERE u.role <> 'Admin'
         AND (',' || REPLACE(pat.scope, ' ', '') || ',') LIKE '%,${AGENT_SCOPE},%'
-        AND (pat.expires_at IS NULL OR pat.expires_at > datetime('now'))
+        AND (pat.expires_at IS NULL OR datetime(pat.expires_at) > datetime('now'))
     `).get() as { n: number }
     if (row.n > 0) {
       logger.warn(`${row.n} agent token(s) belong to a member who is no longer an Admin and will be refused. An Admin must issue a new agent token (Dashboard → Settings → Tokens) for each agent that uses one.`)
@@ -1140,6 +1140,17 @@ export class RelayServer {
     // against the array it replaces, no literal added and none lost.
     if (this.wsRoles.get(ws) === 'browser' && directionOf(type) !== 'browser') {
       ws.close(1008, 'Forbidden')
+      return false
+    }
+    // The other direction of the same rule. An agent or stream socket on a token without `view` may
+    // not act as a browser after its handshake either — `session:start`, `input:*`, `device:*` — or an
+    // `agent`-only token would drive devices just by registering first. No agent needs this: their
+    // text frames go through `sendMsg`/`sendOn`, typed `AgentToRelay | AgentToBrowser`, and the stream
+    // socket sends only `stream:register`; none of those types is browser-direction (checked against
+    // `BrowserToRelay` when this was added). Local agents carry no grants and are not gated.
+    const role = this.wsRoles.get(ws)
+    if ((role === 'agent' || role === 'stream') && grants && !grants.mayBrowse && directionOf(type) === 'browser') {
+      ws.close(1008, WS_SCOPE_REASON)
       return false
     }
     return true

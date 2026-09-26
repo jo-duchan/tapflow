@@ -56,7 +56,7 @@ export function handleVerifyReset(req: http.IncomingMessage, res: http.ServerRes
   const db = getDb()
   const row = db.prepare(`
     SELECT id FROM password_reset_tokens
-    WHERE token = ? AND used_at IS NULL AND expires_at > datetime('now')
+    WHERE token = ? AND used_at IS NULL AND datetime(expires_at) > datetime('now')
   `).get(token) as { id: number } | undefined
 
   if (!row) return json(res, 410, { error: 'Token expired or not found' })
@@ -71,7 +71,7 @@ export async function handleDoReset(req: http.IncomingMessage, res: http.ServerR
   const db = getDb()
   const row = db.prepare(`
     SELECT id, user_id FROM password_reset_tokens
-    WHERE token = ? AND used_at IS NULL AND expires_at > datetime('now')
+    WHERE token = ? AND used_at IS NULL AND datetime(expires_at) > datetime('now')
   `).get(body.token) as { id: number; user_id: number } | undefined
 
   if (!row) return json(res, 410, { error: 'Token expired or not found' })

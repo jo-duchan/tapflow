@@ -15,7 +15,7 @@ export function handleVerify(req: http.IncomingMessage, res: http.ServerResponse
   const db = getDb()
   const inv = db.prepare(`
     SELECT role FROM invitations
-    WHERE token = ? AND used_at IS NULL AND expires_at > datetime('now')
+    WHERE token = ? AND used_at IS NULL AND datetime(expires_at) > datetime('now')
   `).get(token) as { role: string } | undefined
 
   if (!inv) return json(res, 410, { error: 'Invitation expired or not found' })
@@ -60,7 +60,7 @@ export function handleAccept(
     const db = getDb()
     const inv = db.prepare(`
       SELECT id, email, role FROM invitations
-      WHERE token = ? AND used_at IS NULL AND expires_at > datetime('now')
+      WHERE token = ? AND used_at IS NULL AND datetime(expires_at) > datetime('now')
     `).get(token) as { id: number; email: string | null; role: string } | undefined
 
     if (!inv) return json(res, 410, { error: 'Invitation expired or not found' })

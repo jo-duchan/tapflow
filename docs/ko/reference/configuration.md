@@ -31,7 +31,7 @@
 | 키 | 설명 |
 |----|------|
 | `local` | 이 머신에서 실행하는 릴레이 서버 설정 |
-| `relay.url` | 연결할 릴레이 URL. `tapflow agent start`, `tapflow admin init`, `tapflow status`의 기본값으로 사용됩니다. 설정 시 `--relay` 플래그 없이 동작합니다. `tapflow logs`는 이 값을 읽지 않고 같은 Mac의 릴레이(`http://localhost:[local.port]`)를 조회합니다. 비어있으면 로컬 모드(`ws://localhost:[local.port]`)를 사용합니다. `ws://` 또는 `wss://`로 적어야 합니다. `tapflow agent start`는 다른 스킴을 거부하고 나머지 명령은 필요하면 HTTP 스킴으로 바꿔 씁니다. |
+| `relay.url` | 연결할 릴레이 URL. `tapflow agent start`, `tapflow admin init`, `tapflow status`의 기본값으로 사용됩니다. 설정 시 `--relay` 플래그 없이 동작합니다. `tapflow logs`는 이 값을 읽지 않고 명령을 실행한 머신의 릴레이(`http://localhost:[local.port]`)를 조회하므로 릴레이 호스트에서 실행합니다. 비어있으면 로컬 모드(`ws://localhost:[local.port]`)를 사용합니다. `ws://` 또는 `wss://`로 적어야 합니다. `tapflow agent start`는 다른 스킴을 거부하고 나머지 명령은 필요하면 HTTP 스킴으로 바꿔 씁니다. |
 | `tunnel` | `tapflow start`와 `tapflow relay start`가 함께 띄우는 터널 설정. 아래 터널 섹션을 참고하세요. |
 | `tls` | LAN HTTPS(보안 컨텍스트) 설정. WebCodecs 하드웨어 디코드에 필요합니다. 아래 HTTPS 섹션을 참고하세요. |
 | `smtp` | 초대·비밀번호 재설정 이메일 발송을 위한 SMTP 설정 |

@@ -144,6 +144,13 @@ describe('revalidatePrincipal', () => {
     expect(revalidatePrincipal(pat, role, live([AGENT_SCOPE], 'Admin'), now)).toBeNull()
   })
 
+  // `view,agent` is the case that tells the stream branch apart: re-classified as a fresh handshake,
+  // a non-Admin's `view,agent` token is an accepted browser, so a stream socket that fell through to
+  // that path would stay open on a token that can no longer feed a screen.
+  it.each(['agent', 'stream'] as const)('a %s-role socket on a view,agent token closes when its owner is demoted', (role) => {
+    expect(revalidatePrincipal(pat, role, live(['view', AGENT_SCOPE], 'QA'), now)).toBe(WS_AGENT_OWNER_REASON)
+  })
+
   it('a browser socket on a PAT that lacks view closes', () => {
     expect(revalidatePrincipal(pat, 'browser', live(['builds:write']), now)).toBe(WS_SCOPE_REASON)
   })

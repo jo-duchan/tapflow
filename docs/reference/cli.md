@@ -347,7 +347,7 @@ Example output:
 
 Show the recent log entries the relay keeps in memory (last 100 lines by default). Few events are recorded in this buffer. The relay's full log goes to the terminal it runs in.
 
-The relay shows these logs only to the Mac it runs on, so run this command on the relay Mac. Pointed at a remote relay from another Mac, it gets `403` and the CLI tells you what to run on the relay Mac instead. Under Docker, a CLI outside the container counts as remote too; use `docker compose logs`.
+The relay shows these logs only to the relay host, so run this command there. Pointed at a remote relay from another machine, it gets `403` and the CLI tells you what to run on the relay host instead. Under Docker, a CLI outside the container counts as remote too; use `docker compose logs`.
 
 ```sh
 tapflow logs
@@ -355,7 +355,7 @@ tapflow logs
 
 | Option | Default | Description |
 |--------|---------|-------------|
-| `--relay <url>` | `http://localhost:<local.port>` (4000 by default) | URL of the relay on this Mac. Set it when the relay runs on another port. `relay.url` is not read. |
+| `--relay <url>` | `http://localhost:<local.port>` (4000 by default) | URL of the relay on this machine. Set it when the relay runs on another port. `relay.url` is not read. |
 | `--lines <n>` | `100` | Number of log lines to show (max 500) |
 
 ## `tapflow flow run`

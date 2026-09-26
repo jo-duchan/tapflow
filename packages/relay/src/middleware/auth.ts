@@ -152,18 +152,23 @@ function toPatAuth(row: PatRow): PatAuth {
 
 // Joined with users so the owner's current role comes with the token: an `agent` token is only as good
 // as its owner's Admin role, and a Viewer's `builds:write` token is refused on write routes.
+// `datetime(expires_at)`, not the bare column: it is written by `toISOString()` ('2026-09-27T10:00:00.000Z')
+// and `datetime('now')` is '2026-09-27 10:00:00'. Compared as text, 'T' sorts after ' ', so a token that
+// expired this morning kept passing until the end of its UTC day.
 const PAT_SELECT = `
   SELECT pat.id, pat.user_id, pat.scope, u.email, u.role
   FROM personal_access_tokens pat
   JOIN users u ON u.id = pat.user_id
-  WHERE (pat.expires_at IS NULL OR pat.expires_at > datetime('now'))`
+  WHERE (pat.expires_at IS NULL OR datetime(pat.expires_at) > datetime('now'))`
 
 /**
  * The PAT on this request, or null when there is none, it is unknown, or it has expired.
  *
- * **Reads only.** `last_used_at` is written by `touchPat` once a caller has accepted the token: a
- * request the relay refuses (wrong scope, demoted owner) is not a use of it, and a "last used" that
- * moves on refusals tells an Admin a leaked token is in use when nothing got through.
+ * **Reads only.** `last_used_at` is written by `touchPat` once the credential check has accepted the
+ * token: a token refused there (a scope it lacks, a WebSocket refused for its scope or its owner's
+ * role) is not used, and a "last used" that moved on those told an Admin a leaked token was in use
+ * when nothing got through. A route that accepts the token and then refuses the request on the
+ * owner's role (`assertCanWrite` for a Viewer) still counts as a use — the token did reach the route.
  */
 export function verifyPat(req: http.IncomingMessage): PatAuth | null {
   const header = req.headers.authorization ?? ''

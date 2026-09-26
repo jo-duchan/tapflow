@@ -247,13 +247,19 @@ describe('cmdAgentStart', () => {
     expect(output).not.toContain('Remote relays require a PAT with the agent scope')
   })
 
-  it('1008 with no reason still gets the token hint', async () => {
-    iosConnectSpy.mockRejectedValue(new Error('relay closed the connection during handshake (code=1008)'))
+  // Every other 1008 keeps the hint. Mutation: narrowing the hint back to one reason (the regex this
+  // replaced) turns the `Forbidden` and scope rows red.
+  it.each([
+    'relay closed the connection during handshake (code=1008)',
+    'relay closed the connection during handshake (code=1008: Forbidden)',
+    "relay closed the connection during handshake (code=1008: Forbidden: this token lacks the 'view' scope needed for device sessions; create an API-type token)",
+  ])('%s → token hint', async (text) => {
+    iosConnectSpy.mockRejectedValue(new Error(text))
     AgentRegistry.register('ios', DummyAgent as never, { canRun: () => true, connect: iosConnectSpy })
     const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {})
     vi.spyOn(process, 'exit').mockImplementation(() => { throw new Error('process.exit') })
     await expect(cmdAgentStart({ platform: 'ios' })).rejects.toThrow('process.exit')
-    expect(logSpy.mock.calls.map((c) => c.join(' ')).join('\n')).toContain('--token')
+    expect(logSpy.mock.calls.map((c) => c.join(' ')).join('\n')).toContain('Remote relays require a PAT with the agent scope')
   })
 
   it('1008이 아닌 실패에는 토큰 안내를 붙이지 않는다', async () => {
