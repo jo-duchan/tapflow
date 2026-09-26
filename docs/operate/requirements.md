@@ -44,5 +44,5 @@ When a new major version (e.g. Xcode 28) is released, supporting it is our top p
 - No extensions or plugins required
 
 ::: tip When using Tailscale tunnel
-Every device that needs dashboard access must have Tailscale installed. → [Tailscale setup](/guide/self-hosting#tailscale-recommended)
+Every device that needs dashboard access must have Tailscale installed. → [Tailscale setup](/operate/external-access#tailscale-recommended)
 :::

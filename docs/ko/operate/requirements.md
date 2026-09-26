@@ -44,5 +44,5 @@ tapflow가 개발과 검증에 사용해온 환경이 Apple Silicon입니다. In
 - 별도 확장 프로그램 불필요
 
 ::: tip Tailscale 터널 사용 시
-대시보드에 접근하는 모든 기기에 Tailscale을 설치해야 합니다. → [Tailscale 설정](/ko/guide/self-hosting#tailscale-권장)
+대시보드에 접근하는 모든 기기에 Tailscale을 설치해야 합니다. → [Tailscale 설정](/ko/operate/external-access#tailscale-권장)
 :::

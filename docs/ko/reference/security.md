@@ -28,7 +28,7 @@ tapflow의 권장 배포 구조는 에이전트와 릴레이가 **같은 LAN 안
 
 에이전트 ↔ 릴레이 구간은 LAN 내부 트래픽입니다. 기기 스트림이 외부 서비스를 경유하지 않으므로, 앱의 UI와 동작이 네트워크 밖으로 노출될 위험이 없습니다.
 
-브라우저 ↔ 릴레이 구간(WAN)에 TLS를 적용하려면 reverse proxy나 터널을 사용하세요. [릴레이 배포 가이드](/ko/guide/self-hosting)를 참고하세요. 릴레이의 [`tls` 설정](/ko/reference/configuration#https-보안-컨텍스트)으로 릴레이가 직접 TLS를 종단할 수도 있습니다.
+브라우저 ↔ 릴레이 구간(WAN)에 TLS를 적용하려면 reverse proxy나 터널을 사용하세요. [외부 접속](/ko/operate/external-access)을 참고하세요. 릴레이의 [`tls` 설정](/ko/reference/configuration#https-보안-컨텍스트)으로 릴레이가 직접 TLS를 종단할 수도 있습니다.
 
 ## PAT 기반 인증
 

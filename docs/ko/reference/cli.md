@@ -238,7 +238,7 @@ tapflow relay start
 
 터널이 연결되면 배너에 공개 URL이 출력됩니다. 터널 연결에 실패해도 릴레이는 계속 동작합니다 — 터널만 사용 불가 상태가 됩니다.
 
-`tunnel` 키 전체는 [설정 파일](/ko/reference/configuration#터널)에 있습니다. 전체 세팅 방법은 [릴레이 배포](/ko/guide/self-hosting)를 참고하세요.
+`tunnel` 키 전체는 [설정 파일](/ko/reference/configuration#터널)에 있습니다. 전체 세팅 방법은 [외부 접속](/ko/operate/external-access)을 참고하세요.
 
 
 ## `tapflow agent start`
@@ -442,6 +442,6 @@ tapflow migrate net-filter --ignore-running-devices
 
 **필터가 실제로 돌기 시작했는지 확인한 뒤에 성공을 말합니다.** 확장을 설치할 때 macOS가 답하는 것은 "거절하지 않았다"이지 "동작한다"가 아닙니다. 설정은 그 뒤에 필터에게 전달되고 아무것도 돌아오지 않습니다. 그래서 최대 30초까지 지켜보다가 필터가 나타나면 바로 끝냅니다. `tapflow setup ios`가 필터를 설치할 때도 같습니다.
 
-나타나지 않으면 그렇게 말하고 **0이 아닌 코드로 종료합니다.** 설정은 켜져 있는데 아무도 답하지 않는 상태이기 때문입니다. 대개는 아직 기동 중이고 잠시 뒤 `tapflow doctor ios`가 정상이라고 답합니다. 맥의 새 연결이 멈췄다면 [문제 해결](/ko/guide/troubleshooting#network-lost-on-replace)을 보세요. 해법은 `--off`로 필터를 경로에서 빼는 것입니다.
+나타나지 않으면 그렇게 말하고 **0이 아닌 코드로 종료합니다.** 설정은 켜져 있는데 아무도 답하지 않는 상태이기 때문입니다. 대개는 아직 기동 중이고 잠시 뒤 `tapflow doctor ios`가 정상이라고 답합니다. 맥의 새 연결이 멈췄다면 [문제 해결](/ko/operate/network-extension#network-lost-on-replace)을 보세요. 해법은 `--off`로 필터를 경로에서 빼는 것입니다.
 
 끝나고 `tapflow doctor ios`로 맥이 어떤 상태가 됐는지 확인하세요.

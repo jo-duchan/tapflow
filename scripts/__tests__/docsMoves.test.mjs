@@ -27,9 +27,9 @@
 //
 // **Absence assertions are paired** (`contributing/test-and-guard-coverage.md` rule 2). "No missing
 // ids", "no chains", "no dead entries" is also what an empty walk reports, so each has a planted
-// fixture judged by the same function, and the real-tree cases carry floors. The real tree has **no**
-// Moved-sections entries yet (the split pages arrive later), so those two cases are held by their
-// fixtures alone until then.
+// fixture judged by the same function, and the real-tree cases carry floors — the Moved-sections one
+// too, since the three pages split in 2026-09 (`guide/self-hosting`, `guide/troubleshooting`,
+// `dashboard/overview`) left 126 entries across their successors, EN and KO.
 //
 // Mutations run by hand on 2026-09-27, per rule 1:
 //  - `## 1. Install tapflow {#_1-install-tapflow}` reworded to `## 1. Install the CLI` in
@@ -47,6 +47,18 @@
 //    that follow a move failed.
 //  - in the functions: the chain check, the dead-entry check and the target-id check each disabled
 //    in turn — the fixture for each went red, the real-tree cases stayed green (nothing to find yet).
+//  - after the three pages were split, the same day: the `ios-simulator-service-version-mismatch`
+//    entry deleted from `docs/troubleshooting.md` — the frozen case, the real Moved-sections case
+//    (its named entry) and both docsAnchors shipped-URL cases red; `<a id="dashboard-overview">`
+//    deleted from `docs/testing.md` — the frozen case named it; a `## Backup` heading added to
+//    `docs/operate/deployment.md` — the dead-entry case named `/operate/deployment#backup`;
+//    `data-moved-to` renamed away on `docs/troubleshooting.md`, leaving plain `<a id>`s — the frozen
+//    case stayed green, correctly, and the floor went red at 83; `/guide/self-hosting` dropped from
+//    `moves.json` — the agreement, frozen and legacy-URL cases red.
+//  - the two consistency checks added after review, planted on `docs/troubleshooting.md`: the
+//    `_400-error-on-upload` entry's `data-moved-to` pointed at `#ios-build-upload-errors` — reported as
+//    a different id and as a link that no longer matches; the Display sleep link's href pointed at
+//    `#host-cpu-ram-pressure` — reported as a drifted link. The fixture pins one line for each.
 import { describe, it, expect, beforeAll } from 'vitest'
 import { readFileSync, readdirSync, existsSync } from 'node:fs'
 import { join } from 'node:path'
@@ -95,13 +107,18 @@ function render(relPath, source) {
     ...[...html.matchAll(/<a\b[^>]*\sname="([^"]*)"/g)].map((m) => m[1]),
   ].map(decodeEntities))
   const headingIds = new Set([...html.matchAll(/<h[1-6]\b[^>]*\sid="([^"]*)"/g)].map((m) => decodeEntities(m[1])))
-  const moved = [...html.matchAll(/<a\b([^>]*)>/g)]
-    .map((m) => m[1])
-    .filter((attrs) => /\sdata-moved-to="/.test(attrs))
-    .map((attrs) => ({
-      id: decodeEntities(attrs.match(/\sid="([^"]*)"/)?.[1] ?? ''),
-      to: decodeEntities(attrs.match(/\sdata-moved-to="([^"]*)"/)[1]),
-    }))
+  // Each entry is the empty `<a id data-moved-to>` followed by the visible link a reader clicks;
+  // `href` is that link's target (percent-decoded, since a Hangul fragment arrives encoded).
+  const moved = [...html.matchAll(/<a\b([^>]*)>(?:<\/a>\s*<a\b([^>]*)>)?/g)]
+    .filter((m) => /\sdata-moved-to="/.test(m[1]))
+    .map(([, attrs, next]) => {
+      const href = next?.match(/\shref="([^"]*)"/)?.[1]
+      return {
+        id: decodeEntities(attrs.match(/\sid="([^"]*)"/)?.[1] ?? ''),
+        to: decodeEntities(attrs.match(/\sdata-moved-to="([^"]*)"/)[1]),
+        href: href === undefined ? undefined : decodeURIComponent(decodeEntities(href)),
+      }
+    })
   return { ids, headingIds, moved }
 }
 
@@ -153,18 +170,23 @@ function moveTableProblems(moves, pageUrls, publicFiles) {
 }
 
 /**
- * Moved-sections problems across `rendered`: a target that does not resolve, and an entry whose id
- * is also a heading on its own page (dead — the heading answers first).
+ * Moved-sections problems across `rendered`: a target that does not resolve, an entry whose id
+ * is also a heading on its own page (dead — the heading answers first), a target fragment that is
+ * not the entry's own id (a section keeps its id when it moves, so a different one means the entry
+ * points at the wrong section), and a visible link that goes somewhere other than `data-moved-to`
+ * (the attribute is what a forwarder would follow, the link is what a reader clicks).
  */
 function movedSectionProblems(rendered, moves) {
   const problems = []
   for (const [url, { headingIds, moved }] of rendered) {
-    for (const { id, to } of moved) {
+    for (const { id, to, href } of moved) {
       if (!id) problems.push(`${url}: a data-moved-to entry has no id`)
       else if (headingIds.has(id)) problems.push(`${url}#${id}: dead entry — still a heading on this page`)
       const hash = to.indexOf('#')
       const path = hash === -1 ? to : to.slice(0, hash)
       const fragment = hash === -1 ? '' : decodeURIComponent(to.slice(hash + 1))
+      if (fragment && id && fragment !== id) problems.push(`${url}#${id} → ${to}: points at a different id`)
+      if (href !== to) problems.push(`${url}#${id}: the link goes to ${href ?? '(no link)'}, not ${to}`)
       const page = rendered.get(resolveMoved(path, moves))
       if (!page) problems.push(`${url}#${id} → ${to}: no such page`)
       else if (fragment && !page.ids.has(fragment)) problems.push(`${url}#${id} → ${to}: no #${fragment} there`)
@@ -190,8 +212,8 @@ describe('docs/vercel.json is generated from moves.json', () => {
     expect(vercel.cleanUrls).toBe(true)
     expect(vercel.outputDirectory).toBe('.vitepress/dist')
     // Floor, and one rule by name per kind, so an empty table cannot agree with an empty file.
-    // 17 page moves × 4 + 2 aliases × 2 + 2 files on 2026-09-27.
-    expect(vercel.redirects.length).toBeGreaterThanOrEqual(74)
+    // 20 page moves × 4 + 4 aliases × 2 + 2 files on 2026-09-27.
+    expect(vercel.redirects.length).toBeGreaterThanOrEqual(90)
     expect(vercel.redirects).toEqual(expect.arrayContaining([
       { source: '/guide/agent', destination: '/operate/agents', permanent: true },
       { source: '/ko/guide/agent', destination: '/ko/operate/agents', permanent: true },
@@ -280,11 +302,21 @@ describe('every id the site rendered before the restructure still lands', () => 
 
 describe('Moved-sections entries resolve and are not dead', () => {
   it('on the real site', () => {
-    // No page carries one yet; the split pages add them. The fixture below holds the function.
-    expect(movedSectionProblems(renderSite(), loadMoves())).toEqual([])
+    const rendered = renderSite()
+    // Floor and names, so a render that stopped seeing `data-moved-to` cannot pass as "no problems":
+    // 126 entries on 2026-09-27 (14 + 43 + 6 per locale on `operate/deployment`, `troubleshooting`,
+    // `testing`). The named ones are the shipped fragment and the README one.
+    const entries = [...rendered].flatMap(([url, { moved }]) => moved.map((m) => `${url}#${m.id} → ${m.to}`))
+    expect(entries.length).toBeGreaterThanOrEqual(126)
+    expect(entries).toEqual(expect.arrayContaining([
+      '/troubleshooting#ios-simulator-service-version-mismatch → /troubleshooting/ios-simulator#ios-simulator-service-version-mismatch',
+      '/operate/deployment#docker-compose-lan-server → /operate/docker#docker-compose-lan-server',
+      '/ko/operate/deployment#docker-compose-lan-서버 → /ko/operate/docker#docker-compose-lan-서버',
+    ]))
+    expect(movedSectionProblems(rendered, loadMoves())).toEqual([])
   })
 
-  it('reports a dead entry, a missing target id, a missing target page — and accepts a good one', () => {
+  it('reports a dead entry, a missing target id, a missing target page, a wrong section and a drifted link — and accepts good ones', () => {
     const successor = [
       '# Deployment',
       '',
@@ -293,22 +325,28 @@ describe('Moved-sections entries resolve and are not dead', () => {
       '## Moved sections {#moved-sections}',
       '',
       '- <a id="docker-compose-lan-server" data-moved-to="/operate/docker#docker-compose-lan-server"></a>[Docker](/operate/docker#docker-compose-lan-server)',
-      '- <a id="scenarios" data-moved-to="/operate/docker#scenarios"></a>[dead](/operate/docker)',
-      '- <a id="external-access" data-moved-to="/operate/docker#nope"></a>[x](/operate/docker)',
-      '- <a id="외부-접속" data-moved-to="/old/place#x"></a>[x](/operate/docker)',
-      '- <a id="moved-by-redirect" data-moved-to="/old/docker#docker-compose-lan-server"></a>[x](/operate/docker)',
+      '- <a id="scenarios" data-moved-to="/operate/docker#scenarios"></a>[dead](/operate/docker#scenarios)',
+      '- <a id="nope" data-moved-to="/operate/docker#nope"></a>[x](/operate/docker#nope)',
+      '- <a id="외부-접속" data-moved-to="/old/place#외부-접속"></a>[x](/old/place#외부-접속)',
+      '- <a id="moved-by-redirect" data-moved-to="/old/docker#moved-by-redirect"></a>[x](/old/docker#moved-by-redirect)',
+      '- <a id="whole-page" data-moved-to="/operate/docker"></a>[x](/operate/docker)',
+      '- <a id="wrong-section" data-moved-to="/operate/docker#docker-compose-lan-server"></a>[x](/operate/docker#docker-compose-lan-server)',
+      '- <a id="link-drift" data-moved-to="/operate/docker#link-drift"></a>[x](/operate/docker#scenarios)',
       '',
     ].join('\n')
     const rendered = new Map([
       ['/operate/deployment', render('operate/deployment.md', successor)],
-      ['/operate/docker', render('operate/docker.md', '# Docker\n\n## Docker Compose (LAN server) {#docker-compose-lan-server}\n\n## Scenarios\n')],
+      ['/operate/docker', render('operate/docker.md', '# Docker\n\n## Docker Compose (LAN server) {#docker-compose-lan-server}\n\n## Scenarios\n\n## M {#moved-by-redirect}\n\n## L {#link-drift}\n')],
     ])
     const moves = { pages: { '/old/docker': '/operate/docker' } }
-    expect(rendered.get('/operate/deployment').moved).toHaveLength(5)
+    expect(rendered.get('/operate/deployment').moved).toHaveLength(8)
+    expect(rendered.get('/operate/deployment').moved[3].href).toBe('/old/place#외부-접속')
     expect(movedSectionProblems(rendered, moves)).toEqual([
       '/operate/deployment#scenarios: dead entry — still a heading on this page',
-      '/operate/deployment#external-access → /operate/docker#nope: no #nope there',
-      '/operate/deployment#외부-접속 → /old/place#x: no such page',
+      '/operate/deployment#nope → /operate/docker#nope: no #nope there',
+      '/operate/deployment#외부-접속 → /old/place#외부-접속: no such page',
+      '/operate/deployment#wrong-section → /operate/docker#docker-compose-lan-server: points at a different id',
+      '/operate/deployment#link-drift: the link goes to /operate/docker#scenarios, not /operate/docker#link-drift',
     ])
   })
 })

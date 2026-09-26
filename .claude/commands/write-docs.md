@@ -96,7 +96,7 @@ description: {한 문장. llms.txt 설명과 맞춘다}
 ## Platform support    ← iOS/Android 표: 지원 여부, 전제조건, 차이
 ## Limits
 ## Setup (operator)    ← 운영자 작업이 필요한 기능만. 팀원이 건너뛸 수 있게 분리
-## Troubleshooting     ← 이 기능에 한정된 증상. 공통 증상은 /guide/troubleshooting 링크
+## Troubleshooting     ← 이 기능에 한정된 증상. 공통 증상은 /troubleshooting 아래 영역 페이지 링크
 ## Related
 ```
 KO 헤딩은 `사용 방법 / 플랫폼 지원 / 제한 사항 / 설정(운영자) / 문제 해결 / 관련 문서`처럼 옮기고 `{#id}`는 EN과 같게 둔다.
@@ -126,17 +126,18 @@ KO 헤딩은 `사용 방법 / 플랫폼 지원 / 제한 사항 / 설정(운영�
 - 기존 헤딩 문구를 바꿀 때는 원래 슬러그를 `{#기존-id}`로 명시해 id를 유지한다.
 - 배포된 코드에 박힌 앵커는 절대 옮기거나 바꾸지 않는다. `docsAnchors`의 `LEGACY_URLS`가 원래 형태 그대로 검사한다.
   - `/reference/configuration#https-secure-context`: `packages/dashboard/components/perf/PerformanceModeNotice.tsx:13`. EN/KO 헤딩 양쪽에 명시적 id `{#https-secure-context}`가 있다. KO의 옛 슬러그는 헤딩 아래 `<a id="https-보안-컨텍스트"></a>`로 남아 있다.
-  - `/guide/troubleshooting#ios-simulator-service-version-mismatch`: `packages/ios-agent/src/simctl.ts:49`, 명시적 id.
+  - `/guide/troubleshooting#ios-simulator-service-version-mismatch`: `packages/ios-agent/src/simctl.ts:49`. 페이지가 나뉘어 옛 URL은 `/troubleshooting`으로 308 리다이렉트되고, 그 페이지의 Moved sections 항목(`<a id>`)이 섹션이 옮겨 간 `/troubleshooting/ios-simulator#…`(명시적 id)로 안내한다.
+  - `/guide/self-hosting#docker-compose-lan-server`: 예전 README(npm에 배포됨). 같은 방식으로 `/operate/deployment`의 Moved sections를 거쳐 `/operate/docker`로 간다.
 - **한 번 렌더된 id는 없어지지 않는다.** `docs/.vitepress/frozen-ids.json`은 개편 직전(main `74bc7dc8`)에 렌더된 모든 id(EN + KO)이고, `docsMoves` 테스트가 페이지 이동을 따라가 지금도 그 id가 있는지 검사한다. 헤딩 문구를 바꾸면 `{#기존-id}`를 붙이거나, `<a id="기존-id"></a>`를 남기거나, 섹션이 다른 페이지로 갔다면 Moved sections 항목(`<a id="…" data-moved-to="/새/경로#id">`)을 둔다. 이 파일은 다시 생성하지 않는다.
 
 ## 5. 등록
 
 새 페이지는 세 곳에 등록한다.
 
-1. **`docs/.vitepress/config.ts`의 `enSidebar`와 `koSidebar` 양쪽.** 섹션은 독자가 하는 일로 나뉜다. EN은 Get started / Test apps / Operate(하위 그룹 Set up a Mac / Deploy the relay / Run the team / Deliver builds / AI automation (experimental)) / Reference / Troubleshooting / Contributing, KO는 시작하기 / 앱 테스트 / 운영(Mac 준비 / 릴레이 배포 / 팀 운영 / 빌드 전달 / AI 자동화 (실험적)) / 레퍼런스 / 문제 해결 / 기여. KO 사이드바는 EN과 같은 트리여야 하고 링크에는 `/ko`만 붙는다(테스트가 검사한다).
+1. **`docs/.vitepress/config.ts`의 `enSidebar`와 `koSidebar` 양쪽.** 섹션은 독자가 하는 일로 나뉜다. EN은 Get started / Test apps(하위 그룹 QA Session) / Operate(하위 그룹 Set up a Mac / Deploy the relay / Run the team / Deliver builds / AI automation (experimental)) / Reference / Troubleshooting / Contributing, KO는 시작하기 / 앱 테스트(QA 세션) / 운영(Mac 준비 / 릴레이 배포 / 팀 운영 / 빌드 전달 / AI 자동화 (실험적)) / 레퍼런스 / 문제 해결 / 기여. KO 사이드바는 EN과 같은 트리여야 하고 링크에는 `/ko`만 붙는다(테스트가 검사한다).
 2. **`docs/public/llms.txt`**: 해당 섹션에 `- [제목](https://www.tapflow.dev/{경로}): {한 줄 설명}` 행을 추가한다. `scripts/__tests__/agentReadableDocs.test.mjs`가 강제하는 것은 다음과 같다.
    - 링크 행의 URL 집합이 `docs/` 아래 영어 `.md` 페이지 전체(`ko/`, `AGENTS.md`/`CLAUDE.md`, `layout: home` 랜딩 제외)와 **정확히 같아야** 한다. 빠져도, 남아도 실패한다.
-   - `## ` 섹션 하나가 사이드바 최상위 그룹 하나다. 섹션 이름이 그룹 이름(EN)과 같고, 섹션 안의 링크가 그 그룹의 페이지와 **같은 순서**여야 한다. Operate의 하위 그룹은 `### `로 나눠 쓴다.
+   - `## ` 섹션 하나가 사이드바 최상위 그룹 하나다. 섹션 이름이 그룹 이름(EN)과 같고, 섹션 안의 링크가 그 그룹의 페이지와 **같은 순서**여야 한다. Operate와 Test apps의 하위 그룹은 `### `로 나눠 쓴다.
    - 모든 URL은 `https://www.tapflow.dev/`로 시작한다(apex `tapflow.dev`는 307 리다이렉트).
    - 설명 문구 자체는 검사하지 않으므로 사람이 맞춘다. frontmatter `description`과 같은 내용으로 쓴다.
    - 확인: `pnpm test:scripts`
@@ -149,8 +150,9 @@ KO 헤딩은 `사용 방법 / 플랫폼 지원 / 제한 사항 / 설정(운영�
 | Operate (운영자 how-to) | `docs/operate/{slug}.md` | `docs/ko/operate/{slug}.md` |
 | AI automation (실험적) | `docs/automation/{slug}.md` | `docs/ko/automation/{slug}.md` |
 | 레퍼런스 | `docs/reference/{slug}.md` | `docs/ko/reference/{slug}.md` |
+| 문제 해결 | `docs/troubleshooting/{slug}.md` | `docs/ko/troubleshooting/{slug}.md` |
 
-URL 접두사가 곧 섹션이다. slug는 UI 위치가 아니라 대상 이름으로 짓는다. `docs/guide/`와 `docs/dashboard/`에 남은 페이지는 분할·병합을 기다리는 중이므로 거기에 새 페이지를 두지 않는다.
+URL 접두사가 곧 섹션이다. slug는 UI 위치가 아니라 대상 이름으로 짓는다. 섹션 개요는 `index.md`가 아니라 형제 파일로 둔다(`docs/testing.md` → `/testing`, `docs/troubleshooting.md` → `/troubleshooting`). `docs/dashboard/`에 남은 `setup.md`는 병합을 기다리는 중이므로 거기에 새 페이지를 두지 않는다.
 
 **페이지를 옮기거나 없앨 때**: 옛 URL을 `docs/.vitepress/moves.json`의 `pages`에 `"옛 경로": "새 경로"`로 추가하고 `node scripts/docs-redirects.mjs --write`로 `docs/vercel.json`을 다시 만든다. 항목 하나가 EN·KO·`.md` 네 개의 308 리다이렉트가 된다. 이미 옮긴 페이지를 또 옮기면 항목을 이어 붙이지 말고 기존 항목의 목적지를 고친다(연쇄 금지). 레포 안의 링크는 새 경로로 고치고, README처럼 이미 배포된 URL은 `docsAnchors`의 `LEGACY_URLS`가 옛 형태 그대로 계속 검사한다. 이 규칙은 `docsMoves` 테스트가 강제한다.
 

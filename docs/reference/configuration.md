@@ -211,7 +211,7 @@ In a setup with several Macs, each Mac's `tapflow.config.json` decides for the a
 
 ## Tunnel
 
-With `tunnel` set, `tapflow start` and `tapflow relay start` bring up a tunnel alongside the relay. The supported `provider` values are `tailscale` and `rathole`. Example configs are under [`tapflow relay start`](/reference/cli#tapflow-relay-start), and the full setup is in [Self-Hosting](/guide/self-hosting).
+With `tunnel` set, `tapflow start` and `tapflow relay start` bring up a tunnel alongside the relay. The supported `provider` values are `tailscale` and `rathole`. Example configs are under [`tapflow relay start`](/reference/cli#tapflow-relay-start), and the full setup is in [External access](/operate/external-access).
 
 | Key | Description |
 |-----|-------------|

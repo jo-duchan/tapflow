@@ -20,7 +20,7 @@ tapflow는 각 기기 화면을 H.264로 스트리밍하고 브라우저에서 �
 
 ## 배포 방식에 따른 프로파일
 
-프로파일은 브라우저가 릴레이에 어떻게 도달하는지에 따라 결정되며, 이는 [릴레이 배포](/ko/guide/self-hosting) 시 선택하는 것과 정확히 같습니다.
+프로파일은 브라우저가 릴레이에 어떻게 도달하는지에 따라 결정되며, 이는 [릴레이 배포](/ko/operate/deployment) 시 선택하는 것과 정확히 같습니다.
 
 | 배포 환경 | 프로파일 |
 |-----------|---------|
@@ -31,7 +31,7 @@ tapflow는 각 기기 화면을 H.264로 스트리밍하고 브라우저에서 �
 
 터널 클라이언트는 릴레이 Mac 안에서 loopback으로 연결하므로 릴레이는 터널로 들어온 시청자를 외부 주소로 구분하지 못합니다. 그래서 HTTPS 터널을 거친 시청자는 원본 해상도를 받습니다. 반대로 Tailscale의 tailnet 주소는 사설 대역 목록에 없어 외부 주소로 분류됩니다. 기본 Tailscale URL(평문 HTTP)로 접속하면 1000px 스트림을 WASM 디코더로 받습니다. 터널 사용자의 대역폭이 부족하면 아래 `TAPFLOW_MAX_SIZE`로 제한값을 직접 지정하세요.
 
-공유 LAN을 **Standard**에서 **Smooth**로 올리려면 릴레이를 HTTPS로 제공하세요 — 릴레이 배포의 [외부 접속](/ko/guide/self-hosting#외부-접속)을 참고하세요.
+공유 LAN을 **Standard**에서 **Smooth**로 올리려면 릴레이를 HTTPS로 제공하세요 — [tapflow 설정의 인증서 방식](/ko/operate/configure#_3-인증서-방식-smooth-선택-시)을 참고하세요.
 
 ::: tip HTTPS가 하드웨어 디코딩을 여는 이유
 WebCodecs는 [secure 컨텍스트](https://developer.mozilla.org/ko/docs/Web/Security/Secure_Contexts)에서만 사용할 수 있습니다. LAN의 평문 HTTP는 secure가 아니므로 브라우저가 WASM 디코더로 폴백합니다. 그래서 **Standard**는 해상도를 제한하고, **Smooth**(HTTPS)는 제한하지 않습니다.

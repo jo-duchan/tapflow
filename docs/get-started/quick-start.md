@@ -68,7 +68,7 @@ It prints the install, config and data paths first, then a banner like the one b
 Leave this terminal open. `Ctrl+C` stops the relay and the agent together.
 
 ::: tip Running the relay on a separate server?
-Use `tapflow relay start` and `tapflow agent start`. See [Self-Hosting the Relay](/guide/self-hosting).
+Use `tapflow relay start` and `tapflow agent start`. See [Deployment options](/operate/deployment).
 :::
 
 ## 5. Create the admin account {#_5-create-the-admin-account}

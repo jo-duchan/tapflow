@@ -254,13 +254,18 @@ describe('the docs URLs shipped code opens land on an id', () => {
       .filter((f) => existsSync(join(ROOT, f)))
     const files = [...sources('packages'), ...readmes]
     const urls = shippedUrls(files)
-    // Named, because these two are why the check exists — the first two a docs reorganisation would
-    // break (DOCS-AUDIT-PLAN). A walk that stopped reaching `packages/dashboard/components` or the
-    // agent's `src` would drop one of them without changing any verdict.
+    // Named, because the first two are why the check exists — the two a docs reorganisation would
+    // break (DOCS-AUDIT-PLAN) — and the third is how the READMEs are reached. A walk that stopped
+    // reaching `packages/dashboard/components`, the agent's `src` or the READMEs would drop one of
+    // them without changing any verdict. The READMEs' Docker link lost its fragment when
+    // `guide/self-hosting` was split (it now names the page `/operate/docker`, whose H1 "Deploy with
+    // Docker" keeps the old section id explicitly, `{#docker-compose-lan-server}`, and the KO page keeps
+    // `docker-compose-lan-서버` as an `<a id>`), so the README anchor here is the agent one; the old
+    // Docker URL stays in `LEGACY_URLS`.
     expect(urls.map((u) => u.url)).toEqual(expect.arrayContaining([
       'https://www.tapflow.dev/reference/configuration#https-secure-context',
       'https://www.tapflow.dev/guide/troubleshooting#ios-simulator-service-version-mismatch',
-      'https://www.tapflow.dev/guide/self-hosting#docker-compose-lan-server',
+      'https://www.tapflow.dev/operate/agents#remote-relay-authentication',
     ]))
     expect(brokenShipped(urls, renderSite(), loadMoves())).toEqual([])
   })

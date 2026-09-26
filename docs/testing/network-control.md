@@ -24,7 +24,7 @@ A dev server such as Metro reaches the device over the agent Mac's loopback, so 
 
 Network control on an iOS simulator requires the tapflow network extension to be installed once **on the agent Mac**. It installs on the Mac, not in the simulator: a simulator has no radio to switch off and shares the Mac's network.
 
-The extension comes with tapflow. The install and approval steps are in [Troubleshooting](/guide/troubleshooting#network-not-set-up); both happen on the agent Mac, and approving it needs an administrator password.
+The extension comes with tapflow. The install and approval steps are in [iOS network extension](/operate/network-extension#network-not-set-up); both happen on the agent Mac, and approving it needs an administrator password.
 
 ## When the button says why
 
@@ -41,7 +41,7 @@ A device that cannot be taken off the network draws the button in the failure co
 
 **Pressing again is only worth it where it says to try again.** The rest answer the same way however many times they are pressed.
 
-If a notice tells you the device went back on the network on its own while you were checking, the offline behaviour you have checked so far needs checking again. [Troubleshooting](/guide/troubleshooting#network-stopped) covers the cause and what to do.
+If a notice tells you the device went back on the network on its own while you were checking, the offline behaviour you have checked so far needs checking again. [Troubleshooting](/operate/network-extension#network-stopped) covers the cause and what to do.
 
 ## What you are trusting
 

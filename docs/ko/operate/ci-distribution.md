@@ -36,12 +36,12 @@ tapflow는 빌드 도구가 아니라 완성된 아티팩트를 다룹니다. �
 
 ## CI가 릴레이에 도달하려면 {#how-ci-reaches-the-relay}
 
-CI 잡이 릴레이의 `POST /api/v1/builds`에 접근할 수 있어야 합니다. 릴레이는 에이전트와 같은 내부 네트워크에 두는 것이 원칙입니다([릴레이 배포](/ko/guide/self-hosting)). 그래서 CI가 어디서 실행되는지에 따라 경로가 갈립니다.
+CI 잡이 릴레이의 `POST /api/v1/builds`에 접근할 수 있어야 합니다. 릴레이는 에이전트와 같은 내부 네트워크에 두는 것이 원칙입니다([배포 방식 선택](/ko/operate/deployment)). 그래서 CI가 어디서 실행되는지에 따라 경로가 갈립니다.
 
 | 릴레이 배치 | CI가 업로드하는 방법 |
 |-----------|----------------------|
 | **LAN 전용 (기본)** | 클라우드 러너(GitHub 호스티드 등)는 LAN 릴레이에 닿지 못합니다. 내부 네트워크에 둔 self-hosted 러너에서 릴레이 내부 주소(`http://192.168.x.x:4000`)로 업로드하세요 |
-| **VPS + rathole 터널** | 릴레이를 [외부 접근](/ko/guide/self-hosting)용으로 열어 두면 공개 URL(`https://your-vps.com`)로 어디서든 업로드할 수 있어 클라우드 CI에 가장 잘 맞습니다 |
+| **VPS + rathole 터널** | 릴레이를 [외부 접근](/ko/operate/external-access)용으로 열어 두면 공개 URL(`https://your-vps.com`)로 어디서든 업로드할 수 있어 클라우드 CI에 가장 잘 맞습니다 |
 | **Tailscale 터널** | tailnet 멤버만 접근할 수 있으므로 CI 러너도 tailnet에 연결돼 있어야 합니다 |
 
 ::: tip 릴레이는 클라우드에 직접 올리지 않습니다

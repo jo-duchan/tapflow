@@ -6,7 +6,7 @@ status: stable
 
 # Wi-Fi Relay Latency Diagnosis (AWDL) — Insights
 
-> This document records how a periodic stream hitch on a Wi-Fi relay was traced to **AWDL** (Apple Wireless Direct Link), led by ICMP ping (with `wdutil` and `ifconfig` to corroborate and confirm) — no guessing. The user-facing remedy lives in [`docs/guide/troubleshooting.md`](../docs/guide/troubleshooting.md) ("Stream lag or stuttering"); this is the engineering backing — the method, the evidence, and the dead ends — kept out of the user docs deliberately.
+> This document records how a periodic stream hitch on a Wi-Fi relay was traced to **AWDL** (Apple Wireless Direct Link), led by ICMP ping (with `wdutil` and `ifconfig` to corroborate and confirm) — no guessing. The user-facing remedy lives in [`docs/troubleshooting/streaming.md`](../docs/troubleshooting/streaming.md) ("Stream lag or stuttering"); this is the engineering backing — the method, the evidence, and the dead ends — kept out of the user docs deliberately.
 
 ---
 
@@ -155,5 +155,5 @@ The Smooth (HTTPS/WebCodecs) path itself showed **no code regression**: decode (
 
 ## References
 
-- User-facing remedy: [`docs/guide/troubleshooting.md`](../docs/guide/troubleshooting.md) → "Stream lag or stuttering"
+- User-facing remedy: [`docs/troubleshooting/streaming.md`](../docs/troubleshooting/streaming.md) → "Stream lag or stuttering"
 - Resource-aware adaptive encoding (deferred): [#310](https://github.com/jo-duchan/tapflow/issues/310)

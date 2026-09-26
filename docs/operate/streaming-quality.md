@@ -20,7 +20,7 @@ You don't select a profile. It follows from your relay deployment and the viewer
 
 ## How your deployment maps to a profile
 
-The profile is decided by how the browser reaches the relay — which is exactly what you choose when you [self-host the relay](/guide/self-hosting).
+The profile is decided by how the browser reaches the relay — which is exactly what you choose when you [self-host the relay](/operate/deployment).
 
 | Your setup | Profile |
 |------------|---------|
@@ -31,7 +31,7 @@ The profile is decided by how the browser reaches the relay — which is exactly
 
 A tunnel client connects over loopback from inside the relay Mac, so the relay cannot tell a viewer arriving through the tunnel from a local one. Viewers on an HTTPS tunnel therefore get native resolution. Tailscale's tailnet addresses, on the other hand, are not in the private-range list and count as external: opening the default plain-HTTP Tailscale URL gives a 1000 px stream decoded by the WASM decoder. If tunnel viewers are short on bandwidth, set a cap yourself with `TAPFLOW_MAX_SIZE` below.
 
-To move a shared LAN from **Standard** to **Smooth**, serve the relay over HTTPS — see [External access](/guide/self-hosting#external-access) in Self-Hosting the Relay.
+To move a shared LAN from **Standard** to **Smooth**, serve the relay over HTTPS — see the [certificate method in Configuring tapflow](/operate/configure#_3-certificate-method-when-smooth-is-chosen).
 
 ::: tip Why HTTPS unlocks hardware decoding
 WebCodecs is only available in a [secure context](https://developer.mozilla.org/en-US/docs/Web/Security/Secure_Contexts). Plain HTTP on the LAN is not secure, so the browser falls back to the WASM decoder — which is why **Standard** caps resolution and **Smooth** (HTTPS) doesn't.

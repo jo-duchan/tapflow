@@ -22,8 +22,12 @@
 
 ## Test apps
 
-- [Dashboard Overview](https://www.tapflow.dev/dashboard/overview): Reference for every dashboard section — App Center, testing sessions, recordings (72h retention), Mac Resources monitoring, and Settings (profile, team, tokens).
+- [Test apps](https://www.tapflow.dev/testing): Where teammates test builds in the dashboard: App Center lists the uploaded builds, and a QA Session streams a device to your browser.
 - [Uploading Builds](https://www.tapflow.dev/testing/app-center): Upload iOS (.app.zip) or Android (.apk) builds from the dashboard. Builds are linked to apps by bundle ID automatically.
+
+### QA Session
+
+- [QA Session](https://www.tapflow.dev/testing/qa-session): The full-screen device view: pick a Mac and a device to start a session, then touch, swipe, open deep links, record, and comment on the build.
 - [Network Control](https://www.tapflow.dev/testing/network-control): Take a simulator or emulator offline from the toolbar and bring it back. Exactly which connections are cut and which are not, why localhost is exempt, and why iOS needs the bundled network extension.
 - [Audio](https://www.tapflow.dev/testing/audio): Device audio in the browser — on by default on both platforms, the one-time permission, per-agent opt-out with TAPFLOW_AUDIO=off, volume, and why the agent Mac itself stays silent.
 
@@ -35,14 +39,19 @@
 - [Environment Setup](https://www.tapflow.dev/operate/environment-setup): `tapflow doctor` to diagnose what a Mac is missing, and `tapflow setup` to install and configure it — per platform, including the Xcode license and first-launch steps that need sudo.
 - [Configuring tapflow](https://www.tapflow.dev/operate/configure): `tapflow init` and the `tapflow.config.json` it writes — tunnel choice, streaming profile on a LAN, certificate method, and the `.env` that holds secrets. Skippable if port 4000 over HTTP with no tunnel is fine.
 - [Agent Setup](https://www.tapflow.dev/operate/agents): Start the Mac agent and connect it to the relay. iOS prerequisites (Xcode, Simulator Runtime), Android prerequisites (AVD with google_apis/arm64-v8a image), and authenticating a remote agent with a PAT.
+- [iOS Network Extension](https://www.tapflow.dev/operate/network-extension): Install and approve the network extension that iOS network control needs on the agent Mac, and recover when replacing it cuts the Mac off or a device comes back online by itself.
 
 ### Deploy the relay
 
-- [Self-Hosting the Relay](https://www.tapflow.dev/guide/self-hosting): Deploy the relay locally, on a Linux server, in Docker, or behind nginx/Caddy. Includes JWT_SECRET setup, ngrok for quick demos, and PM2 for production.
+- [Deployment Options](https://www.tapflow.dev/operate/deployment): Choose where the relay runs — on the same Mac as the agent, or on a separate relay server — and how teammates on the same network reach it.
+- [Deploy with Docker](https://www.tapflow.dev/operate/docker): Run the relay from the official Docker image on an always-on LAN box: the Compose file, the required volume, the relay URL for invite links, and creating the first account.
+- [External Access](https://www.tapflow.dev/operate/external-access): Reach the relay from outside the office through an outbound tunnel — Tailscale for tailnet members, or rathole through a VPS you own for a public URL — with optional HTTPS for the Smooth profile.
 - [Streaming Quality](https://www.tapflow.dev/operate/streaming-quality): The three streaming profiles (Standard / Smooth / Remote), which one a viewer gets from how it connects, the decoder and resolution behind each, and how to tune the resolution.
+- [Backups & Uptime](https://www.tapflow.dev/operate/relay-operations): Back up the relay's data directory (Litestream for SQLite), and keep the relay running with PM2 on a Mac or systemd on Linux.
 
 ### Run the team
 
+- [Team, Roles & Tokens](https://www.tapflow.dev/operate/team-and-roles): The dashboard's Settings pages: your profile, the member list with roles and invitations (Admin only), and personal access tokens (PATs) for CI and remote agents.
 - [Scaling Mac Resources](https://www.tapflow.dev/operate/scaling): Add more Mac hosts to the same relay for a larger device pool. Agent naming, per-Mac device limits, and monitoring via Mac Resources tab.
 
 ### Deliver builds
@@ -67,7 +76,13 @@
 
 ## Troubleshooting
 
-- [Troubleshooting](https://www.tapflow.dev/guide/troubleshooting): Agent connection issues, iOS CoreSimulator version mismatch, Korean IME bug on iOS 17, iOS build upload errors (.ipa vs .app.zip), Android AVD image issues, INSTALL_FAILED_NO_MATCHING_ABIS on Apple Silicon, session timeouts, auth issues.
+- [Troubleshooting](https://www.tapflow.dev/troubleshooting): Fixes for tapflow problems, grouped by area — install and agents, iOS simulator, Android emulator, builds, streaming, and sign-in — and how to read the relay's logs.
+- [Install & Agents](https://www.tapflow.dev/troubleshooting/install-and-agents): An agent that will not start or connect, `tapflow doctor` failures, and a relay that uses a configuration you did not expect.
+- [iOS Simulator](https://www.tapflow.dev/troubleshooting/ios-simulator): `spawn unknown error`, the CoreSimulator service version mismatch, a simulator that cannot be located on disk, and Korean input on iOS 17 and earlier.
+- [Android Emulator](https://www.tapflow.dev/troubleshooting/android-emulator): An emulator stream that does not start, colors that look less saturated than the emulator window, and an emulator that slows down when the Mac is unattended.
+- [Builds & Uploads](https://www.tapflow.dev/troubleshooting/builds): iOS upload errors (.ipa vs .app.zip), INSTALL_FAILED_NO_MATCHING_ABIS on Apple Silicon, and an APK that shows as Unversioned or merges into the wrong app.
+- [Stream & Sessions](https://www.tapflow.dev/troubleshooting/streaming): A stream that lags or stutters — Wi-Fi (AWDL), host load, display sleep, low resolution on a LAN — and a session that ends by itself.
+- [Sign-in & Accounts](https://www.tapflow.dev/troubleshooting/accounts): `tapflow admin init` reporting Already initialized, and an invitation or password reset link that has expired.
 
 ## Contributing
 

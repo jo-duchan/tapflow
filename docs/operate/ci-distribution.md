@@ -36,12 +36,12 @@ tapflow works on the built artifact, not the build tool. A native Xcode or Gradl
 
 ## How CI reaches the relay {#how-ci-reaches-the-relay}
 
-Your CI job has to reach the relay's `POST /api/v1/builds`. The relay is meant to stay on the same internal network as the agents ([Self-Hosting the Relay](/guide/self-hosting)), so the path depends on where CI runs.
+Your CI job has to reach the relay's `POST /api/v1/builds`. The relay is meant to stay on the same internal network as the agents ([Deployment options](/operate/deployment)), so the path depends on where CI runs.
 
 | Relay setup | How CI uploads |
 |-----------|----------------|
 | **LAN only (default)** | Cloud runners (GitHub-hosted and the like) cannot reach a LAN relay. Upload from a self-hosted runner on the internal network, using the relay's internal address (`http://192.168.x.x:4000`) |
-| **VPS + rathole tunnel** | Open the relay for [external access](/guide/self-hosting) and CI can upload from anywhere via the public URL (`https://your-vps.com`) — the smoothest fit for cloud CI |
+| **VPS + rathole tunnel** | Open the relay for [external access](/operate/external-access) and CI can upload from anywhere via the public URL (`https://your-vps.com`) — the smoothest fit for cloud CI |
 | **Tailscale tunnel** | Only tailnet members can connect, so the CI runner has to be on the tailnet |
 
 ::: tip The relay does not go on a cloud host

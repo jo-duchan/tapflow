@@ -9,8 +9,7 @@
 // after editing `moves.json`.
 //
 // Explicit rules, one per URL, not `:path*` patterns: a pattern on `/guide/:path*` would also
-// swallow `/guide/self-hosting` and `/guide/troubleshooting`, which are still pages, and any page
-// added under `/guide/` later. Vercel applies `redirects` before the filesystem, so a rule whose
+// swallow any page added under `/guide/` later. Vercel applies `redirects` before the filesystem, so a rule whose
 // source is still a page would hide that page.
 //
 // `permanent: true` answers 308. A browser keeps the request's `#fragment` across a redirect whose

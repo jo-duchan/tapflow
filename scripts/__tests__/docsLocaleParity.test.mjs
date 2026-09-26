@@ -19,8 +19,9 @@
 //
 // **No H4.** VitePress's outline stops at H3 by default, so an H4 is a heading no reader can navigate
 // to from the page's own table of contents, and one is usually a sign the page wants splitting.
-// The only page that has them is allowed exactly the count it has, and the allowance must be removed
-// when the page is split — an entry that no longer matches fails too, so it cannot outlive its reason.
+// A page may be granted an exact count in `H4_ALLOWED`, and an entry that no longer matches fails too,
+// so it cannot outlive its reason. The map is empty: the only page that had H4s (`guide/self-hosting`)
+// was split in 2026-09 and its tunnel and VPS walkthroughs became H3s on `operate/external-access`.
 //
 // Setext headings and HTML `<h2>` are not counted as headings (the docs use neither).
 //
@@ -35,7 +36,9 @@
 // case; deleting `docs/ko/guide/scaling.md` failed the pairing case by name. In `headings()`,
 // dropping the frontmatter skip failed the parity fixture, and dropping the fence skip failed both
 // fixtures — **and left the real-tree cases green**, since no page has a `#` line inside a fence at the
-// same depth on one side only. That is what the fixtures are for.
+// same depth on one side only. That is what the fixtures are for. On 2026-09-27, with the allowance
+// emptied: `### 1. Set up Caddy…` turned back into an H4 in `docs/operate/external-access.md` failed
+// the H4 case, and the sequence case beside it.
 import { describe, it, expect } from 'vitest'
 import { readFileSync, readdirSync } from 'node:fs'
 import { join } from 'node:path'
@@ -43,15 +46,8 @@ import { join } from 'node:path'
 const DOCS = join(import.meta.dirname, '..', '..', 'docs')
 const NOT_PAGES = new Set(['AGENTS.md', 'CLAUDE.md'])
 
-/**
- * Pages allowed H4s, with the exact count. `guide/self-hosting.md` has three under its tunnel and VPS
- * walkthroughs; splitting that page is an open decision in the docs audit (step 5), and flattening
- * the H4s before it is made would mean restructuring the page twice. Remove both entries with the split.
- */
-const H4_ALLOWED = new Map([
-  ['guide/self-hosting.md', 3],
-  ['ko/guide/self-hosting.md', 3],
-])
+/** Pages allowed H4s, with the exact count. Empty — see the header. Prefer splitting the page. */
+const H4_ALLOWED = new Map()
 
 function docPages(dir = DOCS, out = []) {
   for (const e of readdirSync(dir, { withFileTypes: true })) {

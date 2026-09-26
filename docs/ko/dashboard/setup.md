@@ -3,7 +3,7 @@
 새로운 릴레이에서 tapflow 대시보드를 처음 설정하는 과정을 안내합니다.
 
 ::: tip 릴레이가 먼저 실행 중이어야 합니다
-릴레이 설정이 아직 안 되어 있다면 [릴레이 배포](/ko/guide/self-hosting)를 먼저 확인하세요.
+릴레이 설정이 아직 안 되어 있다면 [배포 방식 선택](/ko/operate/deployment)을 먼저 확인하세요.
 :::
 
 ## 1. 관리자 계정 생성
@@ -75,7 +75,7 @@ App Center에서 빌드 행을 클릭하면 QA 세션 화면이 열립니다. **
 | Tailscale 터널 | 시작 배너에 출력된 tailnet URL (팀원도 Tailscale 설치 필요) |
 | VPS + rathole 터널 | 시작 배너에 출력된 공개 URL, 예: `https://your-vps.com` |
 
-배포 방식별 자세한 내용은 [릴레이 배포](/ko/guide/self-hosting)를 참고하세요. 팀원이 어느 경로로 접속하느냐에 따라 받는 스트림 품질도 달라집니다. 같은 LAN이라도 평문 HTTP면 **Standard**, HTTPS면 더 부드러운 **Smooth** 프로파일이 적용됩니다. 접속 환경별 프로파일은 [스트림 품질](/ko/operate/streaming-quality)을 참고하세요.
+배포 방식별 자세한 내용은 [배포 방식 선택](/ko/operate/deployment)을 참고하세요. 팀원이 어느 경로로 접속하느냐에 따라 받는 스트림 품질도 달라집니다. 같은 LAN이라도 평문 HTTP면 **Standard**, HTTPS면 더 부드러운 **Smooth** 프로파일이 적용됩니다. 접속 환경별 프로파일은 [스트림 품질](/ko/operate/streaming-quality)을 참고하세요.
 
 **초대 수락.** [3단계](#_3-팀원-초대)에서 보낸 초대를 팀원이 수락하면 비밀번호를 설정하고 바로 로그인합니다. SMTP가 설정되지 않았다면 초대 링크를 직접 전달하세요.
 
@@ -87,4 +87,4 @@ App Center에서 빌드 행을 클릭하면 QA 세션 화면이 열립니다. **
 
 팀원이 할 수 있는 작업은 초대 시 부여한 역할(Admin / Developer / QA / Viewer)에 따라 다릅니다. 역할별 권한은 위 [3. 팀원 초대](#_3-팀원-초대)를 참고하세요.
 
-**다음 단계:** 대시보드 각 섹션의 자세한 설명 → [대시보드 개요](/ko/dashboard/overview)
+**다음 단계:** 팀원이 App Center에서 빌드를 찾아 QA 세션에서 테스트하는 방법 → [앱 테스트](/ko/testing)

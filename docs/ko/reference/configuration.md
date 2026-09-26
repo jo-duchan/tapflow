@@ -215,7 +215,7 @@ Mac 여러 대로 구성했다면, 각 Mac의 `tapflow.config.json`이 그 Mac�
 
 ## 터널
 
-`tunnel`을 설정하면 `tapflow start`와 `tapflow relay start`가 릴레이와 함께 터널을 띄웁니다. 지원하는 `provider`는 `tailscale`과 `rathole`입니다. 설정 예시는 [`tapflow relay start`](/ko/reference/cli#tapflow-relay-start)에 있고 전체 절차는 [릴레이 배포](/ko/guide/self-hosting)에서 다룹니다.
+`tunnel`을 설정하면 `tapflow start`와 `tapflow relay start`가 릴레이와 함께 터널을 띄웁니다. 지원하는 `provider`는 `tailscale`과 `rathole`입니다. 설정 예시는 [`tapflow relay start`](/ko/reference/cli#tapflow-relay-start)에 있고 전체 절차는 [외부 접속](/ko/operate/external-access)에서 다룹니다.
 
 | 키 | 설명 |
 |----|------|

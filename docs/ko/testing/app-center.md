@@ -10,7 +10,7 @@ App Center에서 **Upload Build**를 클릭하고 파일을 선택합니다.
 - Android: `.apk`
 
 ::: warning iOS — `.ipa` 파일은 지원하지 않습니다
-`.ipa`는 실제 기기용 포맷입니다. tapflow는 시뮬레이터용 `.app.zip`과 `.tar.gz`/`.tgz`를 허용합니다. 업로드 오류가 발생하면 [문제 해결](/ko/guide/troubleshooting#ios-빌드-업로드-오류)을 참고하세요.
+`.ipa`는 실제 기기용 포맷입니다. tapflow는 시뮬레이터용 `.app.zip`과 `.tar.gz`/`.tgz`를 허용합니다. 업로드 오류가 발생하면 [문제 해결](/ko/troubleshooting/builds#ios-빌드-업로드-오류)을 참고하세요.
 :::
 
 업로드하면 bundle ID를 기준으로 App에 연결됩니다. 일치하는 App이 없으면 자동으로 생성됩니다. App을 먼저 만들어두고 빌드를 나중에 연결할 수도 있습니다.

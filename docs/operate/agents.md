@@ -24,14 +24,14 @@ tapflow agent start --relay ws://192.168.x.x:4000 --token tflw_pat_xxxxxxxx
 | `--token` | none | Token with the `agent` scope for remote relay authentication. Can also be passed via the `TAPFLOW_AGENT_TOKEN` environment variable. |
 
 ::: tip Wired LAN recommended
-Keep the agent and relay on the same wired LAN. Wi-Fi works but can stutter on a Mac (AWDL channel hopping), regardless of signal strength — see [Stream lag or stuttering](/guide/troubleshooting#stream-lag) for why and how to mitigate.
+Keep the agent and relay on the same wired LAN. Wi-Fi works but can stutter on a Mac (AWDL channel hopping), regardless of signal strength — see [Stream lag or stuttering](/troubleshooting/streaming#stream-lag) for why and how to mitigate.
 :::
 
 ## Remote relay authentication
 
 No authentication is needed when the agent connects to a relay on the same machine (`localhost`). When the relay runs on a different machine, it only accepts agents that present a token with the `agent` scope. This protects your sessions from an arbitrary device on the same network impersonating an agent and feeding screens into a test session.
 
-The relay requires authentication on every connection except one that reaches the relay port over loopback — this section covers the agent side. Reaching the same Mac by its LAN address counts as remote, and so does a tunnel client, which connects from loopback on someone else's behalf and therefore gets a separate tunnel port where every connection has to authenticate. For how browsers reach the relay from outside the office (tunnels), see [External access in Self-Hosting the Relay](/guide/self-hosting#external-access).
+The relay requires authentication on every connection except one that reaches the relay port over loopback — this section covers the agent side. Reaching the same Mac by its LAN address counts as remote, and so does a tunnel client, which connects from loopback on someone else's behalf and therefore gets a separate tunnel port where every connection has to authenticate. For how browsers reach the relay from outside the office (tunnels), see [External access](/operate/external-access).
 
 ### Create a token
 
@@ -119,7 +119,7 @@ tapflow doctor
 #   ✓  Lean mode (Android): off
 ```
 
-See [Troubleshooting](/guide/troubleshooting) for more detailed solutions.
+See [Troubleshooting](/troubleshooting) for more detailed solutions.
 
 ## Stream quality
 

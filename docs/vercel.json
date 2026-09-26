@@ -343,6 +343,66 @@
       "permanent": true
     },
     {
+      "source": "/guide/self-hosting",
+      "destination": "/operate/deployment",
+      "permanent": true
+    },
+    {
+      "source": "/ko/guide/self-hosting",
+      "destination": "/ko/operate/deployment",
+      "permanent": true
+    },
+    {
+      "source": "/guide/self-hosting.md",
+      "destination": "/operate/deployment.md",
+      "permanent": true
+    },
+    {
+      "source": "/ko/guide/self-hosting.md",
+      "destination": "/ko/operate/deployment.md",
+      "permanent": true
+    },
+    {
+      "source": "/guide/troubleshooting",
+      "destination": "/troubleshooting",
+      "permanent": true
+    },
+    {
+      "source": "/ko/guide/troubleshooting",
+      "destination": "/ko/troubleshooting",
+      "permanent": true
+    },
+    {
+      "source": "/guide/troubleshooting.md",
+      "destination": "/troubleshooting.md",
+      "permanent": true
+    },
+    {
+      "source": "/ko/guide/troubleshooting.md",
+      "destination": "/ko/troubleshooting.md",
+      "permanent": true
+    },
+    {
+      "source": "/dashboard/overview",
+      "destination": "/testing",
+      "permanent": true
+    },
+    {
+      "source": "/ko/dashboard/overview",
+      "destination": "/ko/testing",
+      "permanent": true
+    },
+    {
+      "source": "/dashboard/overview.md",
+      "destination": "/testing.md",
+      "permanent": true
+    },
+    {
+      "source": "/ko/dashboard/overview.md",
+      "destination": "/ko/testing.md",
+      "permanent": true
+    },
+    {
       "source": "/guide",
       "destination": "/get-started/introduction",
       "permanent": true
@@ -360,6 +420,26 @@
     {
       "source": "/ko/guide/",
       "destination": "/ko/get-started/introduction",
+      "permanent": true
+    },
+    {
+      "source": "/testing/",
+      "destination": "/testing",
+      "permanent": true
+    },
+    {
+      "source": "/ko/testing/",
+      "destination": "/ko/testing",
+      "permanent": true
+    },
+    {
+      "source": "/troubleshooting/",
+      "destination": "/troubleshooting",
+      "permanent": true
+    },
+    {
+      "source": "/ko/troubleshooting/",
+      "destination": "/ko/troubleshooting",
       "permanent": true
     },
     {

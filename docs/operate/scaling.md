@@ -3,7 +3,7 @@
 tapflow scales horizontally — add more Mac hosts to the same relay to expand your device pool. Each Mac runs its own agent and connects outbound to the relay, so no firewall changes are required.
 
 ::: warning Every agent Mac must share the relay's LAN
-Each Mac you add streams to the relay continuously, so it must be on the same LAN as the relay. See [deployment networking](/guide/self-hosting#deployment-scenarios) for the requirements.
+Each Mac you add streams to the relay continuously, so it must be on the same LAN as the relay. See [deployment networking](/operate/deployment#deployment-scenarios) for the requirements.
 :::
 
 See [Introduction — How it works](/get-started/introduction#how-it-works) for a diagram.
@@ -65,3 +65,17 @@ For a quick CLI check:
 ```sh
 tapflow status
 ```
+
+## Mac Resources
+
+**Route**: `/mac-resources`
+
+CPU and RAM usage for each Mac agent. Useful for spotting overloaded hosts before assigning more sessions.
+
+| Element | Description |
+|---|---|
+| Mac list | Macs that are connected now or have reported usage in the last 30 days, by hostname. A green dot marks a Mac whose agent is connected; select a Mac to show its charts. |
+| Time-series chart | Historical CPU % (blue) and RAM % (purple). |
+| Range selector | **1h** / **6h** / **24h** / **7d** — switches the visible window. |
+
+Data is sampled once per minute and retained for 30 days.

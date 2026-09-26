@@ -41,7 +41,7 @@ This decides how teammates reach the relay.
 | **Tailscale** | External access over an encrypted overlay network. No VPS required. |
 | **rathole** | A fully public URL through a VPS you own. |
 
-Each tunnel's setup steps and prerequisites are covered in [Self-Hosting the Relay](/guide/self-hosting#external-access).
+Each tunnel's setup steps and prerequisites are covered in [External access](/operate/external-access).
 
 ::: tip Non-interactive environments (CI)
 To set the tunnel without prompts, pass a flag: `tapflow init --tunnel tailscale` or `tapflow init --tunnel rathole`. Use `--force` to overwrite an existing file; without it, `--tunnel` on a configured install stops rather than ignoring the flag. `--tunnel rathole` writes `tunnel.serverAddr` and `tunnel.publicUrl` as empty values, and every `tapflow` command fails config validation until both are filled in, so fill them in `tapflow.config.json` right away.
@@ -59,7 +59,7 @@ This step appears only when you pick **None** for the tunnel. It sets the qualit
 Browser hardware decoding runs only in a secure context (HTTPS), so to give teammates a smoother, more responsive stream, choose **Smooth** and set up HTTPS. How each choice maps to the actual resolution and decoder is explained in [Streaming Quality](/operate/streaming-quality).
 
 ::: info This step is skipped when you pick a tunnel
-A tunnel handles HTTPS at its own layer, so this step only appears for a direct LAN connection. rathole terminates TLS with Caddy on the VPS; Tailscale terminates it with `tailscale serve` (free, optional). The relay needs no `tls` config either way. For the per-tunnel HTTPS setup, see [Self-Hosting the Relay](/guide/self-hosting#external-access).
+A tunnel handles HTTPS at its own layer, so this step only appears for a direct LAN connection. rathole terminates TLS with Caddy on the VPS; Tailscale terminates it with `tailscale serve` (free, optional). The relay needs no `tls` config either way. For the per-tunnel HTTPS setup, see [External access](/operate/external-access).
 :::
 
 ## 3. Certificate method (when Smooth is chosen)
@@ -140,7 +140,7 @@ your-app/                ← your repository: reviewed, committed, run in CI
 
 The line between them is how each side comes back. The repository half is restored by `git clone`; the machine half from a backup, because a database, uploaded builds and a signing key cannot be committed. Flow files also have to be in the repository for CI to run them at all — a runner checks out your app, not your home directory.
 
-Uploaded builds are the part that grows, and on a Mac they sit inside your home directory, so Time Machine backs them up with everything else. Set `TAPFLOW_HOME` to put the install somewhere else — `/var/lib/tapflow` on a server, as the [systemd example](/guide/self-hosting#systemd-linux-relay-server) does.
+Uploaded builds are the part that grows, and on a Mac they sit inside your home directory, so Time Machine backs them up with everything else. Set `TAPFLOW_HOME` to put the install somewhere else — `/var/lib/tapflow` on a server, as the [systemd example](/operate/relay-operations#systemd-linux-relay-server) does.
 
 ## Which install a command uses
 
@@ -168,6 +168,36 @@ Write your own notes outside the markers — `init` replaces only what is betwee
 
 Claude Code reads `AGENTS.md` directly. A session that cannot (an older version, a third-party provider such as Amazon Bedrock, or telemetry turned off) reads `CLAUDE.md` instead, which is why `init` writes one containing `@AGENTS.md`. If your install directory already has a `CLAUDE.md`, add that line to it yourself; `init` says so rather than editing a file you wrote.
 
+## Deployment configuration
+
+### JWT_SECRET
+
+If you don't set `JWT_SECRET`, the relay generates a strong per-install secret on first boot and persists it to the data directory (`jwt-secret`, owner-only). No action is required for a single relay.
+
+Set it explicitly only when you need a fixed key — for example, to share one secret across multiple relay instances. Generate a secure random value:
+
+```sh
+openssl rand -hex 32
+```
+
+Put it in the `.env` in the data directory (`~/.tapflow/data/.env` on a default install) so it survives restarts without re-exporting — the relay reads the file on start:
+
+```ini
+JWT_SECRET=YOUR_JWT_SECRET
+```
+
+Or inject it as a shell environment variable, which takes precedence over the file:
+
+```sh
+JWT_SECRET=YOUR_JWT_SECRET tapflow start
+```
+
+Once set, keep this value stable — changing it invalidates all active sessions immediately. Only rotate if the secret is compromised or you want to force everyone to log out.
+
+### tapflow.config.json
+
+The relay reads `tapflow.config.json` from this machine's install directory — `~/.tapflow` by default, or wherever `TAPFLOW_HOME` points. On a server, set `TAPFLOW_HOME` in the service environment so the unit, your shell and any `tapflow` command you run by hand all mean the same install. See [Configuration](/reference/configuration).
+
 ## Next step
 
 Once configured, start the relay and agent.
@@ -176,4 +206,4 @@ Once configured, start the relay and agent.
 tapflow start
 ```
 
-For how to start in each deployment scenario (single Mac, separate server, tunnel), see [Self-Hosting the Relay](/guide/self-hosting).
+For how to start in each deployment scenario (single Mac, separate server, tunnel), see [Deployment options](/operate/deployment).

@@ -58,8 +58,8 @@ const FORBIDDEN = [
  * does not exist.
  */
 const ALLOW = [
-  { text: '**Agent**', files: ['operate/agents.md', 'guide/troubleshooting.md', 'dashboard/overview.md'], reason: 'token Type label in Settings → Tokens, shown as-is in the dashboard' },
-  { text: '**AGENT ALREADY RUNNING**', files: ['guide/troubleshooting.md'], reason: 'literal CLI output the reader will see' },
+  { text: '**Agent**', files: ['operate/agents.md', 'troubleshooting/install-and-agents.md', 'operate/team-and-roles.md'], reason: 'token Type label in Settings → Tokens, shown as-is in the dashboard' },
+  { text: '**AGENT ALREADY RUNNING**', files: ['troubleshooting/install-and-agents.md'], reason: 'literal CLI output the reader will see' },
   { text: '에이전트 (Agents)', files: ['reference/api.md'], reason: 'API reference heading glossing the English resource group' },
   { text: '릴레이 (Relay)', files: ['reference/api.md'], reason: 'API reference heading glossing the English resource group' },
   { text: '디바이스 팜', files: ['reference/sustainability.md'], reason: 'industry term (device farm); "기기 팜" is not a phrase anyone searches for' },

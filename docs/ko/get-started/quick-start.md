@@ -76,7 +76,7 @@ tapflow start
 이 터미널은 닫지 말고 그대로 두세요. `Ctrl+C`를 누르면 릴레이와 에이전트가 함께 종료됩니다.
 
 ::: tip 릴레이를 서버에 따로 띄우려면
-`tapflow relay start`와 `tapflow agent start`를 사용하세요. 자세한 내용은 [릴레이 배포](/ko/guide/self-hosting)를 참고하세요.
+`tapflow relay start`와 `tapflow agent start`를 사용하세요. 자세한 내용은 [배포 방식 선택](/ko/operate/deployment)을 참고하세요.
 :::
 
 <a id="_5-관리자-계정-생성"></a>
