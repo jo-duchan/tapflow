@@ -24,7 +24,8 @@ export async function cmdLogs(opts: { relay?: string; lines?: number }): Promise
   if (!res) {
     // An install that names a remote relay and runs none here: before this release the command read
     // `relay.url`, so say why it looked here instead.
-    const why = !opts.relay && config.relay.url
+    // A loopback relay.url is this machine anyway, so pointing at "the relay host" would send the user away.
+    const why = !opts.relay && config.relay.url && !isLoopbackUrl(config.relay.url.replace(/^ws/, 'http'))
       ? `\n  \`tapflow logs\` reads the relay on this machine, not relay.url (${config.relay.url}) — run it on the relay host.`
       : ''
     console.error(`\n  ${RED}✗${R}  Could not reach relay at ${base}\n  Make sure tapflow is running.${why}\n`)

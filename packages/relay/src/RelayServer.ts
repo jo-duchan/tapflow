@@ -1019,9 +1019,9 @@ export class RelayServer {
       if (!this.settleRole(ws, inbound)) return
       if (!inbound.ok) {
         // **After the role gate, never before it**, so a browser spoofing an agent-only type gets 1008
-        // and no reply. That is the whole of the claim: an agent- or stream-role socket sending a
-        // malformed browser request passes the gate and *is* answered, because the gate only refuses a
-        // `browser` role sending a non-browser type. Harmless, and worth stating rather than implying
+        // and no reply. That is the whole of the claim: an agent- or stream-role socket whose token also
+        // carries `view` (or a local one) sending a malformed browser request passes the gate and *is*
+        // answered — without `view` it was already closed above. Harmless, and worth stating rather than implying
         // otherwise — such a socket already gets an answer on the well-formed path (`refuseInput` tells
         // it `not-session-owner`), and this reply says strictly less than that one.
         if (inbound.reason === 'bad-payload') this.refuseMalformed(ws, inbound)
