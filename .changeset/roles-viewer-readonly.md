@@ -6,4 +6,4 @@ Viewer is now read-only. A Viewer can look at builds, test them in a QA Session 
 
 QA can now create, rename and delete apps, as Developer can, and sees the apps section in Settings.
 
-Roles are read from the database on every request instead of from the 7-day login cookie, so promoting or demoting a member — including an Admin — takes effect on their next request, without signing in again or issuing a new token.
+The endpoints that check the role — team management, workspace settings, password-reset emails, issuing an `agent` scope token, deleting a comment, and uploading or changing builds, apps and webhooks — read it from the database on every request instead of from the 7-day login cookie, so promoting or demoting a member, including an Admin, takes effect there on their next request, without signing in again or issuing a new token. A member removed from the team, an Admin included, gets 401 from those endpoints on their next request; endpoints that do not check the role still accept a removed member's cookie until it expires.

@@ -15,7 +15,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **QA manages apps like Developer.** `POST`, `PATCH` and `DELETE /api/v1/apps` accept the QA role, and QA sees the apps section in **Settings**.
 
-- **A role change takes effect immediately.** Roles used to be read from the login cookie, which lasts 7 days, so a demoted member — an Admin included — kept their old rights and a promoted one was refused until they signed in again. The relay now reads the role from the database on every request, for cookies and tokens alike.
+- **A role change takes effect immediately on the endpoints that check the role**: team management, workspace settings, password-reset emails, issuing an `agent` scope token, deleting a comment, and uploading or changing builds, apps and webhooks. Roles used to be read from the login cookie, which lasts 7 days, so a demoted member — an Admin included — kept their old rights there and a promoted one was refused until they signed in again. The relay now reads the role from the database on every request to those endpoints, for cookies and tokens alike. A member removed from the team, an Admin included, gets 401 from them on their next request; endpoints that do not check the role still accept a removed member's cookie until it expires.
 
 ### Fixed
 

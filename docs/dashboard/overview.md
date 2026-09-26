@@ -62,6 +62,7 @@ Settings has three sub-pages accessible from the left nav.
 Personal profile settings for the currently signed-in user.
 
 - **Workspace** — the team name and logo. Visible to Admins only.
+- **Apps** — rename or delete apps. Visible to Admins, Developers and QA, hidden from Viewers.
 - **Nickname** — shown in comments and session history.
 - **Avatar** — click the pencil icon on the avatar to upload a new image (PNG or JPEG, max 2 MB).
 - **Change password** — requires current password.

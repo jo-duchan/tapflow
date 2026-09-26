@@ -13,7 +13,7 @@ Only the endpoints below accept a personal access token (PAT), and they accept t
 | `builds:write` | `POST /builds`, `GET /builds`, `GET /builds/:id`, `POST /comments`, every webhook endpoint |
 | `view` | `GET /apps`, `GET /sessions/:sessionId/screenshot`, `GET /sessions/:sessionId/ui-tree`, files under `/uploads/` (at the relay root, not under `/api/v1/`) |
 
-**Roles.** A call made with a PAT is held to its owner's current role. Viewer is read-only: uploading, updating or scheduling deletion of a build, creating, renaming or deleting an app, and every webhook endpoint return `403` for a Viewer. Reading builds and posting comments work for a Viewer too. The server reads the role on every request, so a role change applies without signing in again or issuing a new token.
+**Roles.** A call made with a PAT is held to its owner's current role. Viewer is read-only: uploading, updating or scheduling deletion of a build, creating, renaming or deleting an app, and every webhook endpoint return `403` for a Viewer. Reading builds and posting comments work for a Viewer too. The endpoints that check roles read the role on every request, so a role change applies there without signing in again or issuing a new token.
 
 
 ## Error responses

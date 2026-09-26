@@ -12,14 +12,19 @@ import { signJwt, hashPat } from '../middleware/auth'
 // QA can change builds, apps and webhooks. Every route below is exercised per role and per credential
 // the route accepts, and roles are read from the users table rather than from the 7-day JWT.
 //
-// Mutations run against this file (with auth.test.ts), each turning it red:
-// - `assertCanWrite` without its Viewer branch → all 17 Viewer 403 / nothing-changes rows, the
-//   demotion row and the Viewer-owned PAT row fail.
-// - `requireRole` comparing `auth.role` (the JWT) again → the demotion, promotion and demoted-Admin
-//   rows fail.
-// - PATCH /builds/:id judging the JWT role instead of calling `assertCanWrite` → its Viewer row, the
-//   demotion, promotion and removed-member rows fail.
-// - 'QA' dropped from `APP_MANAGERS` in apps.ts → the three QA app rows and the promotion row fail.
+// Mutations run against this file, each turning it red:
+// - `assertCanWrite` without its Viewer branch → every Viewer 403 / nothing-changes row, the demotion
+//   row and the Viewer-owned PAT row fail.
+// - `assertCanWrite` dropped from one route (upload, cancel deletion, the webhook routes) → that
+//   route's Viewer 403 rows and its nothing-changes rows fail.
+// - `requireRole` comparing `auth.role` (the JWT) again → all 15 cookie rows of the apps routes fail,
+//   because each signs the opposite role into its JWT, plus the demotion / promotion / demoted-Admin rows.
+// - PATCH /builds/:id judging the JWT role instead of calling `assertCanWrite` → its 5 matrix rows and
+//   the demotion, promotion and removed-member rows fail.
+// - 'QA' dropped from `APP_MANAGERS` → the three QA app rows and the promotion row fail; 'Viewer' added
+//   to it → the six Viewer app rows fail.
+// - tokens.ts judging agent-scope issuance on `auth.role` → the demoted-Admin token row fails.
+// - comments.ts reading the role row without `currentRole` → the removed-member delete row fails (500).
 
 type Role = 'Admin' | 'Developer' | 'QA' | 'Viewer'
 const ROLES: Role[] = ['Admin', 'Developer', 'QA', 'Viewer']
@@ -30,9 +35,12 @@ const cookieFor = (userId: number, role: string) =>
   `tapflow_token=${signJwt({ userId, email: `u${userId}@example.com`, role })}`
 
 type Cred = 'cookie' | 'pat'
+// **The cookie carries the opposite role to the DB**: a Viewer row signs 'Admin' into its JWT and a
+// writer row signs 'Viewer'. So every cookie-path row passes only if the relay reads the users table —
+// a regression back to the JWT role flips every one of them, not just the dedicated role-change rows.
 function headersFor(role: Role, cred: Cred): Record<string, string> {
   return cred === 'cookie'
-    ? { Cookie: cookieFor(USER_ID[role], role) }
+    ? { Cookie: cookieFor(USER_ID[role], role === 'Viewer' ? 'Admin' : 'Viewer') }
     : { Authorization: `Bearer ${pat(role)}` }
 }
 
@@ -97,6 +105,12 @@ function newApp(): number {
 function newWebhook(): number {
   return Number(getDb().prepare(`INSERT INTO webhook_endpoints (url, enabled) VALUES ('http://10.0.0.5/hook', 1)`).run().lastInsertRowid)
 }
+const count = (table: 'builds' | 'apps' | 'webhook_endpoints') =>
+  (getDb().prepare(`SELECT COUNT(*) AS n FROM ${table}`).get() as { n: number }).n
+const webhookRow = (id: number) =>
+  getDb().prepare('SELECT url, enabled FROM webhook_endpoints WHERE id = ?').get(id) as { url: string; enabled: number } | undefined
+const appRow = (id: number) =>
+  getDb().prepare('SELECT name FROM apps WHERE id = ?').get(id) as { name: string } | undefined
 const buildRow = (id: number) =>
   getDb().prepare('SELECT status_label, delete_after FROM builds WHERE id = ?').get(id) as { status_label: string; delete_after: string | null }
 
@@ -110,7 +124,15 @@ interface RouteCase {
 }
 
 const WRITE_ROUTES: RouteCase[] = [
-  { name: 'POST /builds', creds: ['cookie', 'pat'], ok: 201, run: (p, h) => upload(p, h) },
+  {
+    name: 'POST /builds', creds: ['cookie', 'pat'], ok: 201, run: (p, h) => upload(p, h),
+    // An upload auto-creates the app row as well as the build, so both counts are the evidence.
+    unchanged: async (p, h) => {
+      const builds = count('builds'), apps = count('apps')
+      await upload(p, h)
+      return () => { expect(count('builds')).toBe(builds); expect(count('apps')).toBe(apps) }
+    },
+  },
   {
     name: 'PATCH /builds/:id', creds: ['cookie'], ok: 200,
     run: (p, h) => request(p, 'PATCH', `/api/v1/builds/${newBuild()}`, h, { status_label: 'In Progress' }),
@@ -132,36 +154,67 @@ const WRITE_ROUTES: RouteCase[] = [
   {
     name: 'DELETE /builds/:id/schedule-deletion', creds: ['cookie'], ok: 200,
     run: (p, h) => request(p, 'DELETE', `/api/v1/builds/${newBuild()}/schedule-deletion`, h),
+    unchanged: async (p, h) => {
+      const id = newBuild()
+      getDb().prepare(`UPDATE builds SET delete_after = '2099-01-01 00:00:00' WHERE id = ?`).run(id)
+      await request(p, 'DELETE', `/api/v1/builds/${id}/schedule-deletion`, h)
+      return () => expect(buildRow(id).delete_after).toBe('2099-01-01 00:00:00')
+    },
   },
   { name: 'GET /webhooks', creds: ['cookie', 'pat'], ok: 200, run: (p, h) => request(p, 'GET', '/api/v1/webhooks', h) },
   {
     name: 'POST /webhooks', creds: ['cookie', 'pat'], ok: 201,
     run: (p, h) => request(p, 'POST', '/api/v1/webhooks', h, { url: 'http://10.0.0.9/hook' }),
     unchanged: async (p, h) => {
-      const before = (getDb().prepare('SELECT COUNT(*) AS n FROM webhook_endpoints').get() as { n: number }).n
+      const before = count('webhook_endpoints')
       await request(p, 'POST', '/api/v1/webhooks', h, { url: 'http://10.0.0.9/hook' })
-      return () => expect((getDb().prepare('SELECT COUNT(*) AS n FROM webhook_endpoints').get() as { n: number }).n).toBe(before)
+      return () => expect(count('webhook_endpoints')).toBe(before)
     },
   },
   {
     name: 'PATCH /webhooks/:id', creds: ['cookie', 'pat'], ok: 200,
     run: (p, h) => request(p, 'PATCH', `/api/v1/webhooks/${newWebhook()}`, h, { enabled: false }),
+    unchanged: async (p, h) => {
+      const id = newWebhook()
+      await request(p, 'PATCH', `/api/v1/webhooks/${id}`, h, { enabled: false, url: 'http://10.0.0.7/other' })
+      return () => expect(webhookRow(id)).toEqual({ url: 'http://10.0.0.5/hook', enabled: 1 })
+    },
   },
   {
     name: 'DELETE /webhooks/:id', creds: ['cookie', 'pat'], ok: 200,
     run: (p, h) => request(p, 'DELETE', `/api/v1/webhooks/${newWebhook()}`, h),
+    unchanged: async (p, h) => {
+      const id = newWebhook()
+      await request(p, 'DELETE', `/api/v1/webhooks/${id}`, h)
+      return () => expect(webhookRow(id)).toBeDefined()
+    },
   },
   {
     name: 'POST /apps', creds: ['cookie'], ok: 201,
     run: (p, h) => request(p, 'POST', '/api/v1/apps', h, { name: 'New', bundle_id_key: `com.example.n${Math.random().toString(36).slice(2)}`, platform: 'ios' }),
+    unchanged: async (p, h) => {
+      const before = count('apps')
+      await request(p, 'POST', '/api/v1/apps', h, { name: 'New', bundle_id_key: 'com.example.viewer', platform: 'ios' })
+      return () => expect(count('apps')).toBe(before)
+    },
   },
   {
     name: 'PATCH /apps/:id', creds: ['cookie'], ok: 200,
     run: (p, h) => request(p, 'PATCH', `/api/v1/apps/${newApp()}`, h, { name: 'Renamed' }),
+    unchanged: async (p, h) => {
+      const id = newApp()
+      await request(p, 'PATCH', `/api/v1/apps/${id}`, h, { name: 'Renamed' })
+      return () => expect(appRow(id)?.name).toBe('A')
+    },
   },
   {
     name: 'DELETE /apps/:id', creds: ['cookie'], ok: 200,
     run: (p, h) => request(p, 'DELETE', `/api/v1/apps/${newApp()}`, h),
+    unchanged: async (p, h) => {
+      const id = newApp()
+      await request(p, 'DELETE', `/api/v1/apps/${id}`, h)
+      return () => expect(appRow(id)).toBeDefined()
+    },
   },
 ]
 
@@ -294,6 +347,27 @@ describe('role matrix — Viewer is read-only, Admin/Developer/QA can write', ()
       setRole('Admin')
       const back = await request(port, 'GET', '/api/v1/team/members', { Cookie: cookieFor(MOVER, 'Viewer') })
       expect(back.status).toBe(200)
+    })
+
+    // Agent-scope issuance is Admin-only, judged on the DB role like everything above.
+    it('a demoted Admin cannot mint an agent-scope token with the old Admin JWT', async () => {
+      setRole('Developer')
+      const r = await request(port, 'POST', '/api/v1/tokens', { Cookie: cookieFor(MOVER, 'Admin') }, { name: 'mac', scope: 'agent' })
+      expect(r.status).toBe(403)
+      setRole('Admin')
+      const ok = await request(port, 'POST', '/api/v1/tokens', { Cookie: cookieFor(MOVER, 'Developer') }, { name: 'mac', scope: 'agent' })
+      expect(ok.status).toBe(201)
+    })
+
+    // Deleting a comment reads the role to allow an Admin to remove anyone's. A removed member's row
+    // is gone while their cookie is still valid, and that used to throw a TypeError (500).
+    it('a removed member deleting a comment gets 401, not a 500', async () => {
+      const buildId = newBuild()
+      const commentId = Number(getDb().prepare('INSERT INTO comments (build_id, author_id, body) VALUES (?, ?, ?)')
+        .run(buildId, USER_ID.Admin, 'keep me').lastInsertRowid)
+      const r = await request(port, 'DELETE', `/api/v1/comments/${commentId}`, { Cookie: cookieFor(4242, 'Admin') })
+      expect(r.status).toBe(401)
+      expect(getDb().prepare('SELECT id FROM comments WHERE id = ?').get(commentId)).toBeDefined()
     })
 
     it('a removed member gets 401 on a write route with a still-valid JWT', async () => {

@@ -11,7 +11,7 @@ import {
 import { UploadBuildDialog } from '@/components/UploadBuildDialog'
 import { AppSidebar } from '@/components/app-center/AppSidebar'
 import { ReleaseAccordion } from '@/components/app-center/ReleaseAccordion'
-import { getApps, getBuilds, updateBuildStatus, scheduleBuildDeletion, cancelBuildDeletion, groupByRelease } from '@/lib/queries'
+import { getApps, getBuilds, updateBuildStatus, scheduleBuildDeletion, cancelBuildDeletion, groupByRelease, queryKeys, RoleRefusedError } from '@/lib/queries'
 import type { Build } from '@/lib/types'
 import { useFocusAfterSwap } from '@/hooks/useFocusAfterSwap'
 import { useReleaseDisclosure } from '@/hooks/useReleaseDisclosure'
@@ -166,8 +166,16 @@ export function AppCenter() {
         queryClient.setQueryData<Build[]>(key, (old) => (old ? apply(old, vars) : old))
         return { previous, key }
       },
-      onError: (_error: unknown, _vars: V, context: MutationContext | undefined) => {
+      onError: (error: unknown, _vars: V, context: MutationContext | undefined) => {
         if (context?.previous) queryClient.setQueryData(context.key, context.previous)
+        // A 403 here means the role changed since this page loaded — a demotion to Viewer, say. The
+        // relay reads the role per request, so asking for `/me` again hides the controls it will keep
+        // refusing, and the server's own sentence says why instead of a generic failure.
+        if (error instanceof RoleRefusedError) {
+          void queryClient.invalidateQueries({ queryKey: queryKeys.me })
+          toast.error(error.message)
+          return
+        }
         toast.error(failureMessage)
       },
       // The same row lives under every other search and filter of this app, and those entries still
@@ -576,7 +584,8 @@ export function AppCenter() {
             <Package className="w-8 h-8 text-muted-foreground/40" />
             <p id={emptyTitleId} className="text-sm font-medium">{filtered ? 'No matching builds' : 'No builds yet'}</p>
             <p className="text-sm text-muted-foreground">
-              {filtered ? 'No build matches the search and status filters.' : 'Upload the first build to get started.'}
+              {filtered ? 'No build matches the search and status filters.'
+                : canWrite ? 'Upload the first build to get started.' : 'Builds appear here once a teammate uploads one.'}
             </p>
           </div>
         ) : (

@@ -1,7 +1,8 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { render, screen } from '@testing-library/react'
+import { render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { MemoryRouter, Route, Routes } from 'react-router-dom'
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import type { App, Build } from '@/lib/types'
 import type { AuthUser } from '@/hooks/useAuth'
 import { withQuery } from './withQuery'
@@ -12,6 +13,9 @@ import { withQuery } from './withQuery'
 //
 // Mutation: `canWrite = true` in AppCenter (the role never read) → every Viewer case fails.
 // Mutation: `canWrite = user?.role === 'Admin' || user?.role === 'Developer'` → the QA case fails.
+// Mutation: the empty-state line ignores `canWrite` → the Viewer empty-state case fails.
+// Mutation: the `RoleRefusedError` branch in `optimisticRows.onError` removed → the demoted-mid-session
+// case fails (generic toast, `/me` never re-read).
 
 const { toastError } = vi.hoisted(() => ({ toastError: vi.fn() }))
 vi.mock('sonner', () => ({ toast: { success: vi.fn(), error: toastError, warning: vi.fn(), promise: vi.fn() } }))
@@ -19,15 +23,19 @@ vi.mock('sonner', () => ({ toast: { success: vi.fn(), error: toastError, warning
 const auth = vi.hoisted(() => ({ user: null as AuthUser | null }))
 vi.mock('@/hooks/useAuth', () => ({ useAuth: () => ({ user: auth.user, loading: false }) }))
 
-const { getApps, getBuilds, createApp } = vi.hoisted(() => ({ getApps: vi.fn(), getBuilds: vi.fn(), createApp: vi.fn() }))
+const { getApps, getBuilds, createApp, updateBuildStatus } = vi.hoisted(() => ({
+  getApps: vi.fn(), getBuilds: vi.fn(), createApp: vi.fn(), updateBuildStatus: vi.fn(),
+}))
 vi.mock('@/lib/queries', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@/lib/queries')>()),
   getApps,
   getBuilds,
   createApp,
+  updateBuildStatus,
 }))
 
 import { AppCenter } from '@/src/pages/AppCenter'
+import { RoleRefusedError, queryKeys } from '@/lib/queries'
 
 const user = (role: string): AuthUser => ({ id: 1, email: 'a@b.c', displayName: 'A', avatarUrl: null, role })
 
@@ -70,6 +78,13 @@ describe('App Center — Viewer is read-only', () => {
     expect(createApp).not.toHaveBeenCalled()
   })
 
+  it('an app with no builds does not tell a Viewer to upload one', async () => {
+    getBuilds.mockResolvedValue([])
+    renderAppCenter()
+    expect(await screen.findByText('Builds appear here once a teammate uploads one.')).toBeInTheDocument()
+    expect(screen.queryByText('Upload the first build to get started.')).toBeNull()
+  })
+
   it('Upload build raises the toast and opens nothing', async () => {
     renderAppCenter()
     await userEvent.click(await screen.findByRole('button', { name: /upload build/i }))
@@ -93,5 +108,34 @@ describe('App Center — QA can write', () => {
     await userEvent.click(screen.getByRole('button', { name: /add app/i }))
     expect(await screen.findByRole('dialog', { name: 'Add App' })).toBeInTheDocument()
     expect(toastError).not.toHaveBeenCalled()
+  })
+})
+
+describe('App Center — a role change mid-session', () => {
+  beforeEach(() => { auth.user = user('QA') })
+
+  it('an empty app still invites QA to upload the first build', async () => {
+    getBuilds.mockResolvedValue([])
+    renderAppCenter()
+    expect(await screen.findByText('Upload the first build to get started.')).toBeInTheDocument()
+  })
+
+  // Demoted to Viewer after the page loaded: the controls are still drawn, and the relay refuses.
+  it('a 403 on a status change re-reads the role and says the server\'s reason', async () => {
+    updateBuildStatus.mockRejectedValue(new RoleRefusedError('Viewers have read-only access'))
+    const client = new QueryClient({ defaultOptions: { queries: { retry: 0, gcTime: 0 }, mutations: { retry: 0 } } })
+    const invalidate = vi.spyOn(client, 'invalidateQueries')
+    render(
+      <QueryClientProvider client={client}>
+        <MemoryRouter initialEntries={['/app-center?appId=1']}>
+          <Routes><Route path="/app-center" element={<AppCenter />} /></Routes>
+        </MemoryRouter>
+      </QueryClientProvider>,
+    )
+    await userEvent.click(await screen.findByRole('combobox', { name: 'Status for ios build 7, 1.0.0' }))
+    await userEvent.click(screen.getByRole('option', { name: 'Done' }))
+    await waitFor(() => expect(toastError).toHaveBeenCalledWith('Viewers have read-only access'))
+    expect(toastError).not.toHaveBeenCalledWith('Failed to update status')
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: queryKeys.me })
   })
 })

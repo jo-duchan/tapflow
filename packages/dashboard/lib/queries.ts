@@ -134,6 +134,18 @@ export async function createApp(data: {
   return res.json()
 }
 
+/**
+ * The relay refused a build action for the caller's role (403). Carries the server's sentence, e.g.
+ * "Viewers have read-only access", so App Center can say it and re-read the role.
+ */
+export class RoleRefusedError extends Error {}
+
+async function throwIfRefused(res: Response): Promise<void> {
+  if (res.status !== 403) return
+  const body = await res.json().catch(() => ({})) as { error?: string }
+  throw new RoleRefusedError(body.error ?? 'You do not have permission to do this')
+}
+
 export async function updateBuildStatus(
   id: number,
   status: string | null,
@@ -146,6 +158,7 @@ export async function updateBuildStatus(
   })
   // Its two siblings below throw; this one did not, so the optimistic label stayed on screen after
   // a refused change and the rollback beside it was unreachable code.
+  await throwIfRefused(res)
   if (!res.ok) throw new Error(`PATCH /api/v1/builds/${id} failed with ${res.status}`)
 }
 
@@ -153,6 +166,7 @@ export async function updateBuildStatus(
 // return the server's authoritative delete_after.
 export async function scheduleBuildDeletion(id: number): Promise<string> {
   const res = await fetch(`/api/v1/builds/${id}/schedule-deletion`, { method: 'POST', credentials: 'include' })
+  await throwIfRefused(res)
   if (!res.ok) throw new Error(`Failed to schedule deletion (${res.status})`)
   const data = await res.json()
   return data.delete_after as string
@@ -161,6 +175,7 @@ export async function scheduleBuildDeletion(id: number): Promise<string> {
 // Take a build back off the deletion clock.
 export async function cancelBuildDeletion(id: number): Promise<void> {
   const res = await fetch(`/api/v1/builds/${id}/schedule-deletion`, { method: 'DELETE', credentials: 'include' })
+  await throwIfRefused(res)
   if (!res.ok) throw new Error(`Failed to cancel scheduled deletion (${res.status})`)
 }
 
