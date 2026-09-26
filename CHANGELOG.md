@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.25.0] - 2026-09-27
+
 ### Breaking Changes
 
 - **Viewer is read-only.** A Viewer can view builds, test them in a QA Session and comment, and nothing else it does changes builds, apps or webhooks: uploading a build, changing its status, scheduling or cancelling its deletion and every `/api/v1/webhooks` route (listing included) now answer `403 { "error": "Viewers have read-only access" }`, with the dashboard cookie or with a personal access token, since a token is held to its owner's role. In the App Center a Viewer's **Add App** and **Upload build** show a notice instead of a dialog, and build rows drop the status menu and the deletion button. Migrate: give the members who upload builds or change their status the QA or Developer role. A CI token owned by a Viewer starts getting 403 on upload and works again as soon as its owner is promoted, with no new token needed.
@@ -816,7 +818,8 @@ found out by waiting.
 
 - Automatic `tapflow.config.json` creation as a side effect of `tapflow start` / `tapflow relay start`.
 
-[Unreleased]: https://github.com/jo-duchan/tapflow/compare/v0.24.0...HEAD
+[Unreleased]: https://github.com/jo-duchan/tapflow/compare/v0.25.0...HEAD
+[0.25.0]: https://github.com/jo-duchan/tapflow/compare/v0.24.0...v0.25.0
 [0.24.0]: https://github.com/jo-duchan/tapflow/compare/v0.23.0...v0.24.0
 [0.23.0]: https://github.com/jo-duchan/tapflow/compare/v0.22.0...v0.23.0
 [0.22.0]: https://github.com/jo-duchan/tapflow/compare/v0.21.0...v0.22.0

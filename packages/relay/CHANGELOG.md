@@ -1,5 +1,39 @@
 # @tapflowio/relay
 
+## 0.25.0
+
+### Minor Changes
+
+- 761db41: Relay authentication is tightened in four places.
+
+  - `GET /api/v1/logs` answers only the relay's own host. Another machine, the tunnel listener, and a remote client behind a trusted proxy get `403` telling them to run `tapflow logs` on the relay host, signed in or not. `?lines=` is now an integer from 1 to 500 (100 when absent or not a number).
+  - A remote WebSocket that authenticates with a personal access token needs the `view` scope to open device sessions; a token without it is closed with 1008 and a reason naming the scope. An `agent`-only token can no longer act as a browser, before or after it registers as an agent.
+  - An `agent`-scope token works only while its owner is an Admin. The handshake refuses it otherwise (1008, with a reason telling an Admin to issue a new one), a `view,agent` token of a non-Admin owner may still browse but not register an agent, and the relay logs at start how many agent tokens are affected.
+  - The session cookie is checked against the users table on every use, so a removed member is refused everywhere at once — every HTTP route, `/uploads`, recordings, and the WebSocket handshake — instead of until the 7-day cookie expired. Open WebSockets are re-checked on the 30-second heartbeat and right after a member is removed or has their role changed, a token is revoked, or an invitation is accepted for an existing account: a socket whose member, token or cookie is no longer valid, or has expired, is closed with 1008, and an agent closed this way ends its sessions at once instead of holding them for the reconnect grace.
+
+  A token's "last used" time now moves only when the relay accepts it, and a refused WebSocket is logged with its reason, once per token per minute. A database error while authenticating a WebSocket or an `/uploads` request closes that one connection (1011) or answers 500 instead of stopping the relay.
+
+  A personal access token, an invitation link and a password-reset link now stop working at their expiry time. Each was compared as text against SQLite's clock in a different format, so it kept working until the end of its expiry day (UTC).
+
+- 9751c9c: Viewer is now read-only. A Viewer can look at builds, test them in a QA Session and comment, but uploading a build (`POST /api/v1/builds`), changing its status (`PATCH /api/v1/builds/:id`), scheduling or cancelling its deletion, and every `/api/v1/webhooks` route — listing included — answer `403 { "error": "Viewers have read-only access" }`. This holds for a personal access token too: the owner's role decides, so a `builds:write` token owned by a Viewer can no longer upload. In the App Center a Viewer's **Add App** and **Upload build** buttons explain the refusal in a toast instead of opening a dialog, and build rows show the status without the status menu or the deletion button.
+
+  QA can now create, rename and delete apps, as Developer can, and sees the apps section in Settings.
+
+  The endpoints that check the role — team management, workspace settings, password-reset emails, issuing an `agent` scope token, deleting a comment, and uploading or changing builds, apps and webhooks — read it from the database on every request instead of from the 7-day login cookie, so promoting or demoting a member, including an Admin, takes effect there on their next request, without signing in again or issuing a new token. A member removed from the team, an Admin included, gets 401 from those endpoints on their next request.
+
+- 853a2aa: The dashboard's **New token** dialog offers **No expiration**, matching the API, which has always read an omitted `expires_in_days` as a token that never expires. The expiry is now a choice of 7, 30, 60 or 90 days, a custom number of days (still 1–365), or **No expiration**; the default stays 30 days. Choosing **No expiration** shows a recommendation beside the field: such a token stays valid until it is revoked, so CI tokens should expire in 90 days or less. The token list marks tokens with no expiry **No expiration** instead of "Never", so an Admin can find them and clean them up.
+
+  `POST /api/v1/tokens` now answers `400` for an `expires_in_days` that is negative, not a number or numeric string (an empty or blank string, a boolean or an array included), or too large to be a date. A negative count used to create a token that was already expired, and a value too large for a date failed with an error instead of a response. An empty string used to mean no expiry, so a CI template whose variable came out empty got a token that never expires; it is now rejected. Omitting it, `null` or `0` still means no expiry, a numeric string such as `"30"` still works, and there is still no upper limit through the API.
+
+### Patch Changes
+
+- e466590: `POST /api/v1/comments` accepts a personal access token with the `builds:write` scope, as `POST /api/v1/builds` does. The CI recipe in the Build Distribution guide uploads a build with a PAT and then posts the branch and commit as a comment with the same PAT, but the comment route accepted only the dashboard cookie, so that step got a 401 and, under `curl -sf`, failed the job. A PAT without `builds:write` gets a 403; the dashboard cookie works as before.
+
+  A comment on a build that does not exist now gets a 404, and a comment the database refuses for any other reason — such as one posted from a browser whose user an Admin has since removed — gets a 500. Both used to fail inside an asynchronous callback where nothing caught the error, and a relay started with the `tapflow` CLI exited on it. The comment's `author` in the response also falls back to the email's local part when the user has no display name, as the comment list already did.
+
+  - @tapflowio/protocol@0.25.0
+  - @tapflowio/agent-core@0.25.0
+
 ## 0.24.0
 
 ### Minor Changes
