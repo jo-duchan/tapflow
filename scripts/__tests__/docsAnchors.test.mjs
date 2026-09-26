@@ -90,6 +90,10 @@ beforeAll(async () => {
 /** One page, rendered: the ids it defines and the hrefs it links, in source order. */
 function render(relPath, source) {
   const html = md.render(source, { path: join(DOCS, relPath), relativePath: relPath, cleanUrls: true })
+    // An id inside an HTML comment or a code block renders as text, not as a target: without this a
+    // commented-out section, or a `text` fence showing the syntax, would count as the id still existing.
+    .replace(/<!--[\s\S]*?-->/g, '')
+    .replace(/<pre[\s\S]*?<\/pre>/g, '')
   // A fragment also scrolls to `<a name="…">` (HTML's legacy anchor), which is how
   // `reference/performance.md` numbers its footnotes — so both count as a target.
   const ids = new Set([

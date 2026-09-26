@@ -2,9 +2,9 @@
 
 tapflow를 설치하고 대시보드를 여는 과정을 안내합니다. Xcode나 Android SDK를 새로 받아야 한다면 `tapflow setup` 단계에서 다운로드 시간이 추가로 걸립니다.
 
-## 1. tapflow 설치 {#_1-install-tapflow}
-
 <a id="_1-tapflow-설치"></a>
+
+## 1. tapflow 설치 {#_1-install-tapflow}
 
 ::: code-group
 
@@ -22,9 +22,9 @@ pnpm add -g tapflow
 
 :::
 
-## 2. 환경 준비 {#_2-set-up-the-environment}
-
 <a id="_2-환경-준비"></a>
+
+## 2. 환경 준비 {#_2-set-up-the-environment}
 
 에이전트를 실행할 Mac에서는 시뮬레이터/에뮬레이터 사전 요건을 한 번에 설치합니다.
 
@@ -34,9 +34,9 @@ tapflow setup
 
 릴레이만 운영하는 서버(Linux)에서는 건너뜁니다. 자세한 내용은 [환경 준비](/ko/operate/environment-setup)를 참고하세요.
 
-## 3. tapflow 설정 (선택) {#_3-configure-tapflow-optional}
-
 <a id="_3-tapflow-설정-선택"></a>
+
+## 3. tapflow 설정 (선택) {#_3-configure-tapflow-optional}
 
 `tapflow init`을 실행해 이 머신을 설정합니다. `~/.tapflow`에 `tapflow.config.json`을 쓰고, 터널을 묻고, 터널 없이 LAN으로 쓸 때는 스트리밍 성능(HTTP 또는 HTTPS)까지 대화형으로 물어봅니다. 시뮬레이터나 에뮬레이터를 돌릴 수 있는 머신이면 Lean 모드를 켤지도 묻습니다. 기본값(포트 4000, 터널 없음, HTTP)으로 충분하다면 이 단계를 건너뛸 수 있습니다.
 
@@ -48,9 +48,9 @@ tapflow init
 
 `init`은 그 폴더에 `AGENTS.md`와 `CLAUDE.md`도 씁니다. 그 폴더에서 연 코딩 에이전트가 tapflow 질문에 공식 문서를 근거로 답합니다. 각 프롬프트가 무엇을 설정하는지, `.env` 자격 증명 파일과 CI 플래그는 어떻게 쓰는지는 [tapflow 설정](/ko/operate/configure)에서 다룹니다.
 
-## 4. 릴레이 + 에이전트 시작 {#_4-start-the-relay-agent}
-
 <a id="_4-릴레이-에이전트-시작"></a>
+
+## 4. 릴레이 + 에이전트 시작 {#_4-start-the-relay-agent}
 
 Mac에서 실행하세요:
 
@@ -79,9 +79,9 @@ tapflow start
 `tapflow relay start`와 `tapflow agent start`를 사용하세요. 자세한 내용은 [릴레이 배포](/ko/guide/self-hosting)를 참고하세요.
 :::
 
-## 5. 관리자 계정 생성 {#_5-create-the-admin-account}
-
 <a id="_5-관리자-계정-생성"></a>
+
+## 5. 관리자 계정 생성 {#_5-create-the-admin-account}
 
 tapflow는 기본 인증 정보가 없습니다. 최초 실행 시 대시보드가 설정 페이지로 자동 이동합니다:
 
@@ -97,9 +97,9 @@ tapflow는 기본 인증 정보가 없습니다. 최초 실행 시 대시보드�
 `tapflow admin init`을 실행해 CLI에서 최초 관리자 계정을 생성할 수 있습니다.
 :::
 
-## 6. 대시보드 열기 {#_6-open-the-dashboard}
-
 <a id="_6-대시보드-열기"></a>
+
+## 6. 대시보드 열기 {#_6-open-the-dashboard}
 
 브라우저에서 `http://localhost:4000`에 접속한 뒤, 방금 생성한 계정으로 로그인합니다.
 

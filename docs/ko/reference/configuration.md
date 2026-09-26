@@ -102,9 +102,9 @@ openssl rand -hex 32
 프록시나 터널로 노출하는 경우 공개 URL(`tunnel.publicUrl` 또는 `relay.url`)도 함께 설정하세요. 설정하지 않으면 CORS/CSRF 허용 목록이 loopback만 남아, 대시보드의 cross-origin 요청이 차단될 수 있습니다.
 :::
 
-## Docker 컨테이너에서 첫 관리자 계정 만들기 (`TAPFLOW_ADMIN_EMAIL`) {#create-the-first-admin-account-in-a-docker-container-tapflow-admin-email}
-
 <a name="docker-컨테이너에서-첫-관리자-계정-만들기-tapflow-admin-email"></a>
+
+## Docker 컨테이너에서 첫 관리자 계정 만들기 (`TAPFLOW_ADMIN_EMAIL`) {#create-the-first-admin-account-in-a-docker-container-tapflow-admin-email}
 
 두 변수를 설정하면 릴레이가 시작하면서 첫 Admin 계정을 만듭니다. 브라우저 온보딩과 `tapflow admin init`이 모두 닿지 않는 Docker 설치를 위한 경로입니다.
 
@@ -227,9 +227,9 @@ Mac 여러 대로 구성했다면, 각 Mac의 `tapflow.config.json`이 그 Mac�
 
 rathole을 쓰려면 `TAPFLOW_TUNNEL_TOKEN` 환경변수도 설정해야 합니다.
 
-## HTTPS (보안 컨텍스트) {#https-secure-context}
-
 <a id="https-보안-컨텍스트"></a>
+
+## HTTPS (보안 컨텍스트) {#https-secure-context}
 
 브라우저의 하드웨어 가속 영상 디코드(WebCodecs)는 보안 컨텍스트(HTTPS)에서만 동작합니다. HTTP로 접속하면 소프트웨어 디코드로 자동 폴백합니다. 같은 LAN의 팀원에게 더 부드러운 화면을 주려면 릴레이를 HTTPS로 종단하세요. `tls`를 설정하면 릴레이가 같은 포트에서 HTTPS와 WSS를 함께 종단합니다.
 

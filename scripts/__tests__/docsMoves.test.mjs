@@ -4,6 +4,7 @@
 // `/operate/`, `/automation/`). Old URLs are in READMEs published to npm, in shipped agent code, in
 // bookmarks and in other people's pages, none of which a docs PR can edit. Three things hold them:
 //
+//  - comment/`<pre>` stripping removed from render(): the fixture's commented-out and fenced ids count as present.
 //  - **`docs/.vitepress/moves.json` is the single source for the redirects.** `docs/vercel.json` is
 //    generated from it by `scripts/docs-redirects.mjs --write`, and this suite fails when the two
 //    disagree. A move also may not chain (a destination that is itself a source means two hops, and
@@ -85,6 +86,10 @@ beforeAll(async () => {
  */
 function render(relPath, source) {
   const html = md.render(source, { path: join(DOCS, relPath), relativePath: relPath, cleanUrls: true })
+    // An id inside an HTML comment or a code block renders as text, not as a target: without this a
+    // commented-out section, or a `text` fence showing the syntax, would count as the id still existing.
+    .replace(/<!--[\s\S]*?-->/g, '')
+    .replace(/<pre[\s\S]*?<\/pre>/g, '')
   const ids = new Set([
     ...[...html.matchAll(/\sid="([^"]*)"/g)].map((m) => m[1]),
     ...[...html.matchAll(/<a\b[^>]*\sname="([^"]*)"/g)].map((m) => m[1]),
@@ -254,17 +259,19 @@ describe('every id the site rendered before the restructure still lands', () => 
 
   it('reports an id that is gone, a page that is gone, and follows a move', () => {
     const rendered = new Map([
-      ['/new/a', render('new/a.md', '# A\n\n## Kept\n\n## Renamed {#old-slug}\n\n<a id="옛-제목"></a>\n')],
+      ['/new/a', render('new/a.md', '# A\n\n## Kept\n\n## Renamed {#old-slug}\n\n<a id="옛-제목"></a>\n\n<!-- <a id="in-comment"></a> -->\n\n```text\n<a id="in-fence"></a>\n```\n')],
       ['/b', render('b.md', '# B\n\n## Other\n')],
     ])
     const moves = { pages: { '/old/a': '/new/a' } }
     const frozen = {
-      '/old/a': ['kept', 'old-slug', '옛-제목', 'dropped'],
+      '/old/a': ['kept', 'old-slug', '옛-제목', 'dropped', 'in-comment', 'in-fence'],
       '/b': ['other', 'gone'],
       '/c': ['x'],
     }
     expect(missingFrozen(frozen, rendered, moves)).toEqual([
       '/old/a#dropped → /new/a (no such id)',
+      '/old/a#in-comment → /new/a (no such id)',
+      '/old/a#in-fence → /new/a (no such id)',
       '/b#gone → /b (no such id)',
       '/c#x → /c (no such page)',
     ])
