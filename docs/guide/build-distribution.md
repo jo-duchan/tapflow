@@ -53,7 +53,7 @@ Deploying the relay to fly.io, Railway, or similar puts the agent→relay path o
 In the dashboard, go to **Settings → Tokens → New token**. Only Admins see the Tokens page, so use an Admin account.
 
 - **Name**: something descriptive, e.g. `GitHub Actions`
-- **Expires in (days)**: 1–365 (default 30)
+- **Expiration**: 30 days by default. Pick 7, 30, 60 or 90 days, a custom number (1–365), or **No expiration**. For CI, 90 days or less is recommended.
 - **Type**: **API**, which grants `view, builds:write`
 
 Copy the token — it is shown only once. Store it as a CI secret (e.g. `TAPFLOW_PAT`).

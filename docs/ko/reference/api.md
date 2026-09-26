@@ -6,7 +6,7 @@
 - 대시보드 사용자: 세션 쿠키 (`tapflow_token`, 로그인 시 자동 설정)
 - CI/CD 스크립트: `Authorization: Bearer tflw_pat_<token>` 헤더
 
-아래 엔드포인트만 개인 액세스 토큰(PAT)을 받으며, 세션 쿠키로도 호출할 수 있습니다.
+아래 엔드포인트만 개인 액세스 토큰(PAT)을 받으며 세션 쿠키로도 호출할 수 있습니다.
 
 | PAT scope | 엔드포인트 |
 |-----------|-----------|
@@ -640,9 +640,11 @@ PAT를 생성합니다. 토큰 값은 **생성 직후 한 번만** 반환됩니�
 ```
 Body (JSON):
   name            string  필수
-  expires_in_days number  선택 (없으면 만료 없음)
+  expires_in_days number  선택 (없거나 0이면 만료 없음)
   scope           string  선택 (콤마로 구분. 기본값: view,builds:write)
 ```
+
+`expires_in_days`에는 0 이상의 일수를 보냅니다(`"30"` 같은 숫자 문자열도 됩니다). 음수, 빈 문자열을 포함해 숫자가 아닌 값, 날짜로 표현할 수 없을 만큼 큰 값을 보내면 `400`을 반환합니다. 대시보드에서는 1~365일만 입력할 수 있지만 API에는 상한이 없습니다.
 
 `scope`에는 `view`, `builds:write`, `agent`를 쓸 수 있습니다. `agent` scope는 원격 Mac의 에이전트가 릴레이에 연결할 때 쓰며 Admin만 발급할 수 있습니다. 다른 역할이 요청하면 `403`을 반환합니다.
 
