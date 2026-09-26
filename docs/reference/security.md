@@ -28,7 +28,7 @@ browser (anywhere) ──WAN──▶ relay ◀──LAN──▶ agent
 
 The agent ↔ relay leg is LAN-internal traffic. Because the device stream never passes through an external service, your app's UI and behavior are not exposed outside your network.
 
-To apply TLS to the browser ↔ relay leg (WAN), use a reverse proxy or tunnel in front of the relay. See the [Self-Hosting guide](/guide/self-hosting) for details. The relay can also terminate TLS itself through its [`tls` setting](/reference/configuration#https-secure-context).
+To apply TLS to the browser ↔ relay leg (WAN), use a reverse proxy or tunnel in front of the relay. See [External access](/operate/external-access) for details. The relay can also terminate TLS itself through its [`tls` setting](/reference/configuration#https-secure-context).
 
 ## PAT-based authentication
 

@@ -237,7 +237,7 @@ Unattended host Mac idles
 | **Battery CPU scaling** | macOS lowers peak CPU on battery regardless of the assertion — caffeinate prevents sleep, not down-clocking. |
 | **Clamshell sleep** | Closing a laptop lid sleeps the Mac; `caffeinate -i` cannot prevent it. |
 
-User-facing guidance lives in `docs/guide/troubleshooting.md` (#emulator-is-slow-when-the-mac-is-unattended).
+User-facing guidance lives in `docs/troubleshooting/android-emulator.md` (#emulator-is-slow-when-the-mac-is-unattended).
 
 ### Approaches considered
 

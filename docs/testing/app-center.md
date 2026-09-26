@@ -10,7 +10,7 @@ In App Center, click **Upload Build** and select your file.
 - Android: `.apk`
 
 ::: warning iOS — `.ipa` files are not supported
-`.ipa` is the format for real devices. tapflow accepts `.app.zip` and `.tar.gz`/`.tgz` for simulators. If you get an upload error, see [Troubleshooting](/guide/troubleshooting#ios-build-upload-errors).
+`.ipa` is the format for real devices. tapflow accepts `.app.zip` and `.tar.gz`/`.tgz` for simulators. If you get an upload error, see [Troubleshooting](/troubleshooting/builds#ios-build-upload-errors).
 :::
 
 On upload, the build is linked to an App by bundle ID. If no matching App exists, one is created automatically. You can also create the App first and link builds to it later.

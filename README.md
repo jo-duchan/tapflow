@@ -205,7 +205,7 @@ pm2 save && pm2 startup
 docker run -d -p 4000:4000 -v "$PWD/data:/app/.tapflow/data" tapflow/tapflow:latest
 ```
 
-> The image is the relay only — agents stay on your Macs. The volume is required (it holds the sign-in secret), and invite links need `TAPFLOW_RELAY_URL`. See [Docker Compose](https://www.tapflow.dev/guide/self-hosting#docker-compose-lan-server) for the full setup.
+> The image is the relay only — agents stay on your Macs. The volume is required (it holds the sign-in secret), and invite links need `TAPFLOW_RELAY_URL`. See [Docker Compose](https://www.tapflow.dev/operate/docker) for the full setup.
 
 **Each Mac agent:**
 
@@ -215,7 +215,7 @@ tapflow agent start --relay wss://your-relay-url --token <agent-token>
 
 > A relay on a different machine accepts an agent only with an `agent`-scope token — create one in **Settings → Tokens** (Admin only). Agents on the relay's own machine (`tapflow start`) need no token. See [Remote relay authentication](https://www.tapflow.dev/operate/agents#remote-relay-authentication).
 >
-> For nginx / Caddy reverse proxy setup and external access, see [Self-Hosting the Relay](https://www.tapflow.dev/guide/self-hosting).
+> For nginx / Caddy reverse proxy setup and external access, see [External access](https://www.tapflow.dev/operate/external-access).
 
 ## CLI Reference
 
@@ -240,7 +240,7 @@ Full reference → [CLI docs](https://www.tapflow.dev/reference/cli)
 
 Full docs: **[www.tapflow.dev](https://www.tapflow.dev)**
 
-- **Guides** — [Quick Start](https://www.tapflow.dev/get-started/quick-start) · [Environment Setup](https://www.tapflow.dev/operate/environment-setup) · [Self-Hosting](https://www.tapflow.dev/guide/self-hosting) · [Uploading Builds (CI/CD)](https://www.tapflow.dev/testing/app-center) · [Troubleshooting](https://www.tapflow.dev/guide/troubleshooting)
+- **Guides** — [Quick Start](https://www.tapflow.dev/get-started/quick-start) · [Environment Setup](https://www.tapflow.dev/operate/environment-setup) · [Self-Hosting](https://www.tapflow.dev/operate/deployment) · [Uploading Builds (CI/CD)](https://www.tapflow.dev/testing/app-center) · [Troubleshooting](https://www.tapflow.dev/troubleshooting)
 - **Reference** — [CLI](https://www.tapflow.dev/reference/cli) · [Configuration](https://www.tapflow.dev/reference/configuration) · [REST API](https://www.tapflow.dev/reference/api) · [Security & Privacy](https://www.tapflow.dev/reference/security)
 - **AI Agent** — [MCP Server](https://www.tapflow.dev/automation/mcp-server)
 

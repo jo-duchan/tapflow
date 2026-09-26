@@ -49,5 +49,5 @@ it puts the agent → relay leg across the internet, which is the one leg that m
   cloud-hosted relay (fails the RTT constraint above). Tailscale shipped later as a provider
   anyway: the client install is a real cost for an external collaborator and no cost for a team
   that already runs a tailnet, so it is offered beside rathole rather than instead of it. The
-  cloud-hosted relay stays rejected, and `docs/guide/self-hosting.md` says so in its own
-  warning.
+  cloud-hosted relay stays rejected, and `docs/operate/docker.md` and
+  `docs/operate/external-access.md` say so in their own warnings.

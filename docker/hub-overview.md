@@ -80,6 +80,6 @@ Agents run on your Macs and connect outbound to this relay:
 tapflow agent start --relay ws://<this-box-ip>:4000 --token <agent-scope token>
 ```
 
-Full setup, TLS, tunnels and the agent side: **https://www.tapflow.dev/guide/self-hosting**
+Full setup, TLS, tunnels and the agent side: **https://www.tapflow.dev/operate/deployment**
 
 Source and issues: **https://github.com/jo-duchan/tapflow** · MIT

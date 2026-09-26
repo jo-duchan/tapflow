@@ -3,7 +3,7 @@
 Walks through the steps to configure tapflow on a fresh relay for the first time.
 
 ::: tip The relay must be running first
-If you haven't set up the relay yet, see [Self-Hosting the Relay](/guide/self-hosting) first.
+If you haven't set up the relay yet, see [Deployment options](/operate/deployment) first.
 :::
 
 ## 1. Create the admin account
@@ -75,7 +75,7 @@ Now hand off access so the team can test on their own. Teammates don't install t
 | Tailscale tunnel | The tailnet URL printed in the startup banner (teammates need Tailscale installed too) |
 | VPS + rathole tunnel | The public URL printed in the startup banner, e.g. `https://your-vps.com` |
 
-See [Self-Hosting the Relay](/guide/self-hosting) for the details of each deployment. Which path a teammate connects over also decides the stream quality they get — on the same LAN, plain HTTP gives the **Standard** profile, while HTTPS gives the **Smooth** profile. See [Streaming Quality](/operate/streaming-quality) for the profile each setup maps to.
+See [Deployment options](/operate/deployment) for the details of each deployment. Which path a teammate connects over also decides the stream quality they get — on the same LAN, plain HTTP gives the **Standard** profile, while HTTPS gives the **Smooth** profile. See [Streaming Quality](/operate/streaming-quality) for the profile each setup maps to.
 
 **Have them accept the invite.** When a teammate accepts the invitation you sent in [step 3](#_3-invite-your-team), they set a password and sign in. If SMTP isn't configured, share the invite link directly.
 
@@ -87,4 +87,4 @@ See [Self-Hosting the Relay](/guide/self-hosting) for the details of each deploy
 
 What each person can do depends on the role you assigned when inviting them (Admin / Developer / QA / Viewer). See [3. Invite your team](#_3-invite-your-team) above for the role descriptions.
 
-**Next:** Learn what each dashboard section does → [Dashboard Overview](/dashboard/overview)
+**Next:** Learn what each dashboard section does → [Test apps](/testing)

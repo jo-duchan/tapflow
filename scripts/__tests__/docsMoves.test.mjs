@@ -27,9 +27,9 @@
 //
 // **Absence assertions are paired** (`contributing/test-and-guard-coverage.md` rule 2). "No missing
 // ids", "no chains", "no dead entries" is also what an empty walk reports, so each has a planted
-// fixture judged by the same function, and the real-tree cases carry floors. The real tree has **no**
-// Moved-sections entries yet (the split pages arrive later), so those two cases are held by their
-// fixtures alone until then.
+// fixture judged by the same function, and the real-tree cases carry floors — the Moved-sections one
+// too, since the three pages split in 2026-09 (`guide/self-hosting`, `guide/troubleshooting`,
+// `dashboard/overview`) left 126 entries across their successors, EN and KO.
 //
 // Mutations run by hand on 2026-09-27, per rule 1:
 //  - `## 1. Install tapflow {#_1-install-tapflow}` reworded to `## 1. Install the CLI` in
@@ -47,6 +47,14 @@
 //    that follow a move failed.
 //  - in the functions: the chain check, the dead-entry check and the target-id check each disabled
 //    in turn — the fixture for each went red, the real-tree cases stayed green (nothing to find yet).
+//  - after the three pages were split, the same day: the `ios-simulator-service-version-mismatch`
+//    entry deleted from `docs/troubleshooting.md` — the frozen case, the real Moved-sections case
+//    (its named entry) and both docsAnchors shipped-URL cases red; `<a id="dashboard-overview">`
+//    deleted from `docs/testing.md` — the frozen case named it; a `## Backup` heading added to
+//    `docs/operate/deployment.md` — the dead-entry case named `/operate/deployment#backup`;
+//    `data-moved-to` renamed away on `docs/troubleshooting.md`, leaving plain `<a id>`s — the frozen
+//    case stayed green, correctly, and the floor went red at 83; `/guide/self-hosting` dropped from
+//    `moves.json` — the agreement, frozen and legacy-URL cases red.
 import { describe, it, expect, beforeAll } from 'vitest'
 import { readFileSync, readdirSync, existsSync } from 'node:fs'
 import { join } from 'node:path'
@@ -280,8 +288,18 @@ describe('every id the site rendered before the restructure still lands', () => 
 
 describe('Moved-sections entries resolve and are not dead', () => {
   it('on the real site', () => {
-    // No page carries one yet; the split pages add them. The fixture below holds the function.
-    expect(movedSectionProblems(renderSite(), loadMoves())).toEqual([])
+    const rendered = renderSite()
+    // Floor and names, so a render that stopped seeing `data-moved-to` cannot pass as "no problems":
+    // 126 entries on 2026-09-27 (14 + 43 + 6 per locale on `operate/deployment`, `troubleshooting`,
+    // `testing`). The named ones are the shipped fragment and the README one.
+    const entries = [...rendered].flatMap(([url, { moved }]) => moved.map((m) => `${url}#${m.id} → ${m.to}`))
+    expect(entries.length).toBeGreaterThanOrEqual(126)
+    expect(entries).toEqual(expect.arrayContaining([
+      '/troubleshooting#ios-simulator-service-version-mismatch → /troubleshooting/ios-simulator#ios-simulator-service-version-mismatch',
+      '/operate/deployment#docker-compose-lan-server → /operate/docker#docker-compose-lan-server',
+      '/ko/operate/deployment#docker-compose-lan-서버 → /ko/operate/docker#docker-compose-lan-서버',
+    ]))
+    expect(movedSectionProblems(rendered, loadMoves())).toEqual([])
   })
 
   it('reports a dead entry, a missing target id, a missing target page — and accepts a good one', () => {

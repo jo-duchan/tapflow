@@ -259,7 +259,7 @@ The `ssh` section lets tapflow connect to the VPS and manage the rathole server 
 
 When the tunnel is ready, the public URL is printed in the banner. If the tunnel fails to connect, the relay continues to run — only the tunnel is unavailable.
 
-Every `tunnel` key is listed under [Configuration](/reference/configuration#tunnel). See [Self-Hosting](/guide/self-hosting) for full setup instructions.
+Every `tunnel` key is listed under [Configuration](/reference/configuration#tunnel). See [External access](/operate/external-access) for full setup instructions.
 
 
 ## `tapflow agent start`
@@ -508,7 +508,7 @@ soon as a filter appears. `tapflow setup ios` does the same when it installs the
 When none appears the command says so and **exits non-zero**, because that state is the one where the
 configuration is switched on and nothing is answering for it. Usually the filter is simply still
 starting, and `tapflow doctor ios` will say so a moment later. If new connections on the Mac have
-stopped working, see [Troubleshooting](/guide/troubleshooting#network-lost-on-replace) — the remedy is
+stopped working, see [Troubleshooting](/operate/network-extension#network-lost-on-replace) — the remedy is
 to take the filter out of the path with `--off`.
 
 Run `tapflow doctor ios` afterwards to confirm what the Mac ended up with.

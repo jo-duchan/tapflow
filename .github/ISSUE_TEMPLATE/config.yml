@@ -1,7 +1,7 @@
 blank_issues_enabled: false
 contact_links:
   - name: Troubleshooting guide
-    url: https://www.tapflow.dev/guide/troubleshooting
+    url: https://www.tapflow.dev/troubleshooting
     about: Common setup and runtime failures with their fixes — worth a look before filing.
   - name: Documentation
     url: https://www.tapflow.dev

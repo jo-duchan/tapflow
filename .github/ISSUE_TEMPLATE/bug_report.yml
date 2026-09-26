@@ -5,7 +5,7 @@ body:
   - type: markdown
     attributes:
       value: |
-        Before filing, please check [Troubleshooting](https://www.tapflow.dev/guide/troubleshooting) and search existing issues.
+        Before filing, please check [Troubleshooting](https://www.tapflow.dev/troubleshooting) and search existing issues.
 
   - type: textarea
     id: description

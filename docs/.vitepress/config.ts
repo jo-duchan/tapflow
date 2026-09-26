@@ -27,12 +27,11 @@ function nfcSlugify(str: string): string {
 }
 
 // Sections follow what the reader is doing, and a page's URL prefix names its section
-// (`/get-started/`, `/testing/`, `/operate/`, `/automation/`, `/reference/`). One sidebar for
+// (`/get-started/`, `/testing/`, `/operate/`, `/automation/`, `/reference/`, `/troubleshooting/`).
+// One sidebar for
 // every page rather than one per section, so each reader can see the other's pages.
 //
-// Interim entries until the pages are split or merged: `/dashboard/setup` (Get started),
-// `/dashboard/overview` (Test apps), `/guide/self-hosting` (Deploy the relay) and
-// `/guide/troubleshooting` keep their old URLs for now.
+// Interim entry until the page is merged: `/dashboard/setup` (Get started) keeps its old URL for now.
 //
 // `koSidebar` must mirror this one — same groups, same order, every link prefixed with `/ko` —
 // and `docs/public/llms.txt` lists the same links under the same top-level group names.
@@ -49,10 +48,16 @@ const enSidebar = [
   {
     text: 'Test apps',
     items: [
-      { text: 'Overview', link: '/dashboard/overview' },
+      { text: 'Overview', link: '/testing' },
       { text: 'App Center', link: '/testing/app-center' },
-      { text: 'Network control', link: '/testing/network-control' },
-      { text: 'Audio', link: '/testing/audio' },
+      {
+        text: 'QA Session',
+        items: [
+          { text: 'QA Session', link: '/testing/qa-session' },
+          { text: 'Network control', link: '/testing/network-control' },
+          { text: 'Audio', link: '/testing/audio' },
+        ],
+      },
     ],
   },
   {
@@ -66,20 +71,25 @@ const enSidebar = [
           { text: 'Environment setup', link: '/operate/environment-setup' },
           { text: 'Configure tapflow', link: '/operate/configure' },
           { text: 'Agents', link: '/operate/agents' },
+          { text: 'iOS network extension', link: '/operate/network-extension' },
         ],
       },
       {
         text: 'Deploy the relay',
         collapsed: true,
         items: [
-          { text: 'Self-Hosting the Relay', link: '/guide/self-hosting' },
+          { text: 'Deployment options', link: '/operate/deployment' },
+          { text: 'Docker', link: '/operate/docker' },
+          { text: 'External access', link: '/operate/external-access' },
           { text: 'Stream quality', link: '/operate/streaming-quality' },
+          { text: 'Backups & uptime', link: '/operate/relay-operations' },
         ],
       },
       {
         text: 'Run the team',
         collapsed: true,
         items: [
+          { text: 'Team, roles & tokens', link: '/operate/team-and-roles' },
           { text: 'Scaling Mac resources', link: '/operate/scaling' },
         ],
       },
@@ -116,7 +126,13 @@ const enSidebar = [
   {
     text: 'Troubleshooting',
     items: [
-      { text: 'Troubleshooting', link: '/guide/troubleshooting' },
+      { text: 'Overview', link: '/troubleshooting' },
+      { text: 'Install & agents', link: '/troubleshooting/install-and-agents' },
+      { text: 'iOS simulator', link: '/troubleshooting/ios-simulator' },
+      { text: 'Android emulator', link: '/troubleshooting/android-emulator' },
+      { text: 'Builds & uploads', link: '/troubleshooting/builds' },
+      { text: 'Stream & sessions', link: '/troubleshooting/streaming' },
+      { text: 'Sign-in & accounts', link: '/troubleshooting/accounts' },
     ],
   },
   {
@@ -139,10 +155,16 @@ const koSidebar = [
   {
     text: '앱 테스트',
     items: [
-      { text: '개요', link: '/ko/dashboard/overview' },
+      { text: '개요', link: '/ko/testing' },
       { text: 'App Center', link: '/ko/testing/app-center' },
-      { text: '네트워크 제어', link: '/ko/testing/network-control' },
-      { text: '오디오', link: '/ko/testing/audio' },
+      {
+        text: 'QA 세션',
+        items: [
+          { text: 'QA 세션', link: '/ko/testing/qa-session' },
+          { text: '네트워크 제어', link: '/ko/testing/network-control' },
+          { text: '오디오', link: '/ko/testing/audio' },
+        ],
+      },
     ],
   },
   {
@@ -156,20 +178,25 @@ const koSidebar = [
           { text: '환경 준비', link: '/ko/operate/environment-setup' },
           { text: 'tapflow 설정', link: '/ko/operate/configure' },
           { text: '에이전트 설정', link: '/ko/operate/agents' },
+          { text: 'iOS 네트워크 확장', link: '/ko/operate/network-extension' },
         ],
       },
       {
         text: '릴레이 배포',
         collapsed: true,
         items: [
-          { text: '릴레이 셀프 호스팅', link: '/ko/guide/self-hosting' },
+          { text: '배포 방식 선택', link: '/ko/operate/deployment' },
+          { text: 'Docker로 배포', link: '/ko/operate/docker' },
+          { text: '외부 접속', link: '/ko/operate/external-access' },
           { text: '스트림 품질', link: '/ko/operate/streaming-quality' },
+          { text: '백업과 상시 운영', link: '/ko/operate/relay-operations' },
         ],
       },
       {
         text: '팀 운영',
         collapsed: true,
         items: [
+          { text: '팀·역할·토큰', link: '/ko/operate/team-and-roles' },
           { text: 'Mac 리소스 확장', link: '/ko/operate/scaling' },
         ],
       },
@@ -206,7 +233,13 @@ const koSidebar = [
   {
     text: '문제 해결',
     items: [
-      { text: '문제 해결', link: '/ko/guide/troubleshooting' },
+      { text: '개요', link: '/ko/troubleshooting' },
+      { text: '설치와 에이전트', link: '/ko/troubleshooting/install-and-agents' },
+      { text: 'iOS 시뮬레이터', link: '/ko/troubleshooting/ios-simulator' },
+      { text: 'Android 에뮬레이터', link: '/ko/troubleshooting/android-emulator' },
+      { text: '빌드와 업로드', link: '/ko/troubleshooting/builds' },
+      { text: '스트림과 세션', link: '/ko/troubleshooting/streaming' },
+      { text: '로그인과 계정', link: '/ko/troubleshooting/accounts' },
     ],
   },
   {
@@ -255,11 +288,12 @@ export default withMermaid(defineConfig({
       lang: 'en-US',
       themeConfig: {
         nav: [
-          // The `dashboard/*` and `guide/*` alternatives cover the interim entries named above
-          // `enSidebar`; drop each one when its page moves.
+          // The `dashboard/setup` alternative covers the interim entry named above `enSidebar`;
+          // drop it when that page moves. `^/testing` without a slash also matches the section
+          // overview, which is the sibling file `testing.md` rather than `testing/index.md`.
           { text: 'Get started', link: '/get-started/introduction', activeMatch: '^/(get-started/|dashboard/setup)' },
-          { text: 'Test apps', link: '/dashboard/overview', activeMatch: '^/(testing/|dashboard/overview)' },
-          { text: 'Operate', link: '/operate/requirements', activeMatch: '^/(operate/|automation/|guide/self-hosting)' },
+          { text: 'Test apps', link: '/testing', activeMatch: '^/testing(/|$)' },
+          { text: 'Operate', link: '/operate/requirements', activeMatch: '^/(operate|automation)/' },
           { text: 'Reference', link: '/reference/cli', activeMatch: '^/reference/' },
           { text: 'Changelog', link: 'https://github.com/jo-duchan/tapflow/blob/main/CHANGELOG.md' },
         ],
@@ -272,8 +306,8 @@ export default withMermaid(defineConfig({
       themeConfig: {
         nav: [
           { text: '시작하기', link: '/ko/get-started/introduction', activeMatch: '^/ko/(get-started/|dashboard/setup)' },
-          { text: '앱 테스트', link: '/ko/dashboard/overview', activeMatch: '^/ko/(testing/|dashboard/overview)' },
-          { text: '운영', link: '/ko/operate/requirements', activeMatch: '^/ko/(operate/|automation/|guide/self-hosting)' },
+          { text: '앱 테스트', link: '/ko/testing', activeMatch: '^/ko/testing(/|$)' },
+          { text: '운영', link: '/ko/operate/requirements', activeMatch: '^/ko/(operate|automation)/' },
           { text: '레퍼런스', link: '/ko/reference/cli', activeMatch: '^/ko/reference/' },
           { text: '변경 기록', link: 'https://github.com/jo-duchan/tapflow/blob/main/CHANGELOG.md' },
         ],

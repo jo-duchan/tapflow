@@ -41,7 +41,7 @@ tapflow init
 | **Tailscale** | 암호화된 오버레이 네트워크로 외부 접속. VPS가 필요 없습니다. |
 | **rathole** | 직접 보유한 VPS를 통해 완전한 공개 URL로 노출. |
 
-각 터널의 설정 방법과 사전 준비물은 [릴레이 배포](/ko/guide/self-hosting#외부-접속)에서 다룹니다.
+각 터널의 설정 방법과 사전 준비물은 [외부 접속](/ko/operate/external-access)에서 다룹니다.
 
 ::: tip 비대화형 환경(CI)
 프롬프트 없이 터널을 지정하려면 플래그를 씁니다. `tapflow init --tunnel tailscale` 또는 `tapflow init --tunnel rathole`. 이미 설정이 있으면 `--force`로 덮어씁니다. `--force` 없이 `--tunnel`을 주면 플래그를 무시하지 않고 멈춥니다. `--tunnel rathole`은 `tunnel.serverAddr`과 `tunnel.publicUrl`을 빈 값으로 씁니다. 두 값을 채우기 전에는 설정 검증에 실패해 모든 `tapflow` 명령이 종료되므로 바로 `tapflow.config.json`에서 채우세요.
@@ -59,7 +59,7 @@ tapflow init
 브라우저의 하드웨어 디코드는 보안 컨텍스트(HTTPS)에서만 동작하므로, 더 부드럽고 반응이 빠른 화면을 주려면 **Smooth**를 선택해 HTTPS를 설정합니다. 두 선택이 실제 화질·디코더로 어떻게 이어지는지는 [스트림 품질](/ko/operate/streaming-quality)에서 설명합니다.
 
 ::: info 터널을 고르면 이 단계는 나오지 않습니다
-터널은 HTTPS를 터널 계층에서 처리하므로 이 단계는 LAN 직결일 때만 나옵니다. rathole은 VPS의 Caddy가, Tailscale은 `tailscale serve`(무료·선택)가 TLS를 종단하며, 릴레이의 `tls` 설정은 어느 쪽도 필요 없습니다. 터널별 HTTPS 설정은 [릴레이 배포](/ko/guide/self-hosting#외부-접속)를 참고하세요.
+터널은 HTTPS를 터널 계층에서 처리하므로 이 단계는 LAN 직결일 때만 나옵니다. rathole은 VPS의 Caddy가, Tailscale은 `tailscale serve`(무료·선택)가 TLS를 종단하며, 릴레이의 `tls` 설정은 어느 쪽도 필요 없습니다. 터널별 HTTPS 설정은 [외부 접속](/ko/operate/external-access)을 참고하세요.
 :::
 
 ## 3. 인증서 방식 (Smooth 선택 시)
@@ -140,7 +140,7 @@ your-app/                ← 앱 저장소: 리뷰하고 커밋하고 CI에서 �
 
 둘을 가르는 기준은 복구 방법입니다. 저장소 쪽은 `git clone`으로 돌아오고, 머신 쪽은 백업에서 복원합니다. DB와 업로드된 빌드, 서명 키는 커밋할 수 없기 때문입니다. 게다가 플로우 파일은 저장소에 있어야 CI가 실행할 수 있습니다. 러너는 앱 저장소를 checkout하지 홈 디렉터리를 받지 않습니다.
 
-용량이 커지는 쪽은 업로드된 빌드입니다. Mac에서는 홈 디렉터리 안이라 Time Machine 백업에도 함께 들어갑니다. 다른 곳에 두려면 `TAPFLOW_HOME`을 설정하세요. 서버라면 [systemd 예시](/ko/guide/self-hosting#systemd-linux-릴레이-서버)처럼 `/var/lib/tapflow`를 씁니다.
+용량이 커지는 쪽은 업로드된 빌드입니다. Mac에서는 홈 디렉터리 안이라 Time Machine 백업에도 함께 들어갑니다. 다른 곳에 두려면 `TAPFLOW_HOME`을 설정하세요. 서버라면 [systemd 예시](/ko/operate/relay-operations#systemd-linux-릴레이-서버)처럼 `/var/lib/tapflow`를 씁니다.
 
 ## 명령이 쓰는 설치 디렉터리 {#명령이-쓰는-설치-디렉토리}
 
@@ -168,6 +168,36 @@ your-app/                ← 앱 저장소: 리뷰하고 커밋하고 CI에서 �
 
 Claude Code는 `AGENTS.md`를 직접 읽습니다. 읽지 못하는 세션(구버전, Amazon Bedrock 같은 서드파티 제공자, 텔레메트리를 끈 경우)은 `CLAUDE.md`를 읽기 때문에 `init`이 `@AGENTS.md` 한 줄을 담은 파일을 만듭니다. 설치 디렉터리에 이미 `CLAUDE.md`가 있으면 그 줄을 직접 추가하세요. `init`은 직접 쓴 파일을 고치지 않고 안내만 합니다.
 
+## 배포 설정
+
+### JWT_SECRET
+
+단일 릴레이라면 `JWT_SECRET`을 따로 설정하지 않아도 됩니다. 설정하지 않으면 릴레이가 최초 부팅 시 강력한 per-install 시크릿을 생성해 데이터 디렉터리(`jwt-secret`, 소유자 전용)에 저장합니다.
+
+고정 키가 필요한 경우, 예를 들어 여러 릴레이 인스턴스가 하나의 시크릿을 공유해야 한다면 명시적으로 설정하세요. 안전한 랜덤 값을 생성합니다:
+
+```sh
+openssl rand -hex 32
+```
+
+생성된 값을 데이터 디렉터리의 `.env`(기본 설치에서는 `~/.tapflow/data/.env`)에 적으면 재시작할 때마다 다시 export하지 않아도 됩니다. 릴레이가 시작할 때 파일을 읽습니다:
+
+```ini
+JWT_SECRET=YOUR_JWT_SECRET
+```
+
+또는 셸 환경변수로 주입할 수 있으며, 이 값이 파일보다 우선합니다:
+
+```sh
+JWT_SECRET=YOUR_JWT_SECRET tapflow start
+```
+
+한 번 설정한 후에는 값을 유지하세요. 변경하면 기존 세션이 즉시 모두 만료됩니다. 시크릿이 유출됐거나 의도적으로 전체 세션을 초기화할 때만 교체하면 됩니다.
+
+### tapflow.config.json
+
+릴레이는 이 머신의 설치 디렉터리에서 `tapflow.config.json`을 읽습니다. 기본값은 `~/.tapflow`이고 `TAPFLOW_HOME`으로 바꿉니다. 서버에서는 서비스 환경에 `TAPFLOW_HOME`을 설정하세요. 그래야 유닛과 셸, 직접 실행하는 `tapflow` 명령이 같은 설치를 가리킵니다. [설정 파일](/ko/reference/configuration)을 참고하세요.
+
 ## 다음 단계
 
 설정이 끝나면 릴레이와 에이전트를 시작합니다.
@@ -176,4 +206,4 @@ Claude Code는 `AGENTS.md`를 직접 읽습니다. 읽지 못하는 세션(구�
 tapflow start
 ```
 
-배포 시나리오별 시작 방법(단일 Mac, 분리 서버, 터널)은 [릴레이 배포](/ko/guide/self-hosting)를 참고하세요.
+배포 시나리오별 시작 방법(단일 Mac, 분리 서버, 터널)은 [배포 방식 선택](/ko/operate/deployment)을 참고하세요.
