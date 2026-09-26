@@ -1,7 +1,7 @@
 import http from 'http'
 import crypto from 'crypto'
 import { getDb } from '../db.js'
-import { requireAuth, hashPat } from '../middleware/auth.js'
+import { currentRole, requireAuth, hashPat } from '../middleware/auth.js'
 import { json, readJson } from '../router.js'
 import { AGENT_SCOPE } from '../lib/connectionAuth.js'
 
@@ -31,15 +31,32 @@ export async function handleCreateToken(req: http.IncomingMessage, res: http.Ser
     return json(res, 400, { error: `Invalid scope. Allowed: ${[...ALLOWED_SCOPES].join(', ')}` })
   }
   // agent 스코프 토큰은 화면을 공급하는 에이전트의 자격이므로 발급을 Admin으로 제한한다 (#271).
-  if (scopes.includes(AGENT_SCOPE) && auth.role !== 'Admin') {
-    return json(res, 403, { error: `'${AGENT_SCOPE}' scope requires the Admin role` })
+  // The DB role, not the JWT's: a demoted Admin keeps a valid cookie for up to 7 days.
+  if (scopes.includes(AGENT_SCOPE)) {
+    const role = currentRole(res, auth.userId)
+    if (role === null) return
+    if (role !== 'Admin') {
+      return json(res, 403, { error: `'${AGENT_SCOPE}' scope requires the Admin role` })
+    }
+  }
+
+  // Omitted or 0 means no expiry. A negative count used to mint a token that was already expired, and one too
+  // large for a Date threw on toISOString(). No upper cap: 365 is the dialog's limit, and API callers may rely on more.
+  // Only a number or a numeric string counts: `Number()` alone turns "" / " " / [] into 0, so a CI template whose
+  // variable came out empty would get a token that never expires — the most permissive result, silently.
+  const raw: unknown = body.expires_in_days
+  const days = raw == null ? 0
+    : typeof raw === 'number' ? raw
+    : typeof raw === 'string' && raw.trim() !== '' ? Number(raw)
+    : NaN
+  const expiresDate = days ? new Date(Date.now() + days * 24 * 3600 * 1000) : null
+  if (!Number.isFinite(days) || days < 0 || (expiresDate && isNaN(expiresDate.getTime()))) {
+    return json(res, 400, { error: 'expires_in_days must be a number of days, 0 or more and small enough to be a date (omit it or send 0 for no expiry)' })
   }
 
   const rawToken = `tflw_pat_${crypto.randomBytes(32).toString('hex')}`
   const tokenHash = hashPat(rawToken)
-  const expiresAt = body.expires_in_days
-    ? new Date(Date.now() + body.expires_in_days * 24 * 3600 * 1000).toISOString()
-    : null
+  const expiresAt = expiresDate ? expiresDate.toISOString() : null
 
   const db = getDb()
   db.prepare(

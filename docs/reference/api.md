@@ -13,6 +13,8 @@ Only the endpoints below accept a personal access token (PAT), and they accept t
 | `builds:write` | `POST /builds`, `GET /builds`, `GET /builds/:id`, `POST /comments`, every webhook endpoint |
 | `view` | `GET /apps`, `GET /sessions/:sessionId/screenshot`, `GET /sessions/:sessionId/ui-tree`, files under `/uploads/` (at the relay root, not under `/api/v1/`) |
 
+**Roles.** A call made with a PAT is held to its owner's current role. Viewer is read-only: uploading, updating or scheduling deletion of a build, creating, renaming or deleting an app, and every webhook endpoint return `403` for a Viewer. Reading builds and posting comments work for a Viewer too. The endpoints that check roles read the role on every request, so a role change applies there without signing in again or issuing a new token.
+
 
 ## Error responses
 
@@ -22,7 +24,7 @@ All errors return JSON in the form `{ "error": "..." }`.
 |--------|---------|---------|
 | `400` | Bad request (missing field, invalid format, etc.) | `{ "error": "file required" }` |
 | `401` | Not authenticated or session expired | `{ "error": "Unauthorized" }` |
-| `403` | Forbidden | `{ "error": "Forbidden" }` or `{ "error": "Insufficient scope" }` |
+| `403` | Forbidden | `{ "error": "Forbidden" }`, `{ "error": "Insufficient scope" }` or `{ "error": "Viewers have read-only access" }` |
 | `404` | Resource not found | `{ "error": "Build not found" }` |
 | `409` | Not possible in the current state | `{ "error": "Device is not booted" }` |
 | `410` | Token expired | `{ "error": "Invitation expired or not found" }` |
@@ -255,7 +257,7 @@ Return all apps. Each app includes a summary of its latest build.
 
 ### `POST /api/v1/apps`
 
-Create an app manually. Requires **Admin or Developer** role.
+Create an app manually. Requires the **Admin, Developer or QA** role. A Viewer gets `403`.
 
 ```
 Body (JSON):
@@ -273,7 +275,7 @@ Body (JSON):
 
 ### `PATCH /api/v1/apps/:id`
 
-Rename an app. Requires **Admin or Developer** role.
+Rename an app. Requires the **Admin, Developer or QA** role. A Viewer gets `403`.
 
 ```
 Body (JSON):
@@ -289,7 +291,7 @@ Body (JSON):
 
 ### `DELETE /api/v1/apps/:id`
 
-Delete an app and all its builds and comments. Requires **Admin or Developer** role.
+Delete an app and all its builds and comments. Requires the **Admin, Developer or QA** role. A Viewer gets `403`.
 
 **Response `200`**
 
@@ -302,7 +304,7 @@ Delete an app and all its builds and comments. Requires **Admin or Developer** r
 
 ### `POST /api/v1/builds`
 
-Upload a build.
+Upload a build. A Viewer gets `403`, whether it calls with the cookie or with its own PAT.
 
 ```
 Content-Type: multipart/form-data
@@ -394,7 +396,7 @@ Return a single build.
 
 ### `PATCH /api/v1/builds/:id`
 
-Update the status or label of a build.
+Update the status or label of a build. A Viewer gets `403`.
 
 ```
 Body (JSON):
@@ -411,7 +413,7 @@ Body (JSON):
 
 ### `POST /api/v1/builds/:id/schedule-deletion`
 
-Schedule the build for deletion. The server sets `delete_after = now + TAPFLOW_BUILD_TTL_DAYS`; the files and record are purged after that time.
+Schedule the build for deletion. The server sets `delete_after = now + TAPFLOW_BUILD_TTL_DAYS`; the files and record are purged after that time. A Viewer gets `403`.
 
 **Response `200`**
 
@@ -422,7 +424,7 @@ Schedule the build for deletion. The server sets `delete_after = now + TAPFLOW_B
 
 ### `DELETE /api/v1/builds/:id/schedule-deletion`
 
-Cancel a scheduled deletion, clearing `delete_after`.
+Cancel a scheduled deletion, clearing `delete_after`. A Viewer gets `403`.
 
 **Response `200`**
 
@@ -433,7 +435,7 @@ Cancel a scheduled deletion, clearing `delete_after`.
 
 ## Webhooks
 
-Manage the endpoints notified when a build's review status changes. Every call takes the session cookie or a PAT with the `builds:write` scope. Payloads and signature verification are covered in [Webhooks](/operate/webhooks).
+Manage the endpoints notified when a build's review status changes. Every call takes the session cookie or a PAT with the `builds:write` scope. A webhook URL is often a secret in itself, so a Viewer gets `403` from every webhook endpoint, listing included. Payloads and signature verification are covered in [Webhooks](/operate/webhooks).
 
 ### `GET /api/v1/webhooks`
 
@@ -515,7 +517,7 @@ Query:
 
 ### `POST /api/v1/comments`
 
-Post a comment. Supports image attachments. Call it with the session cookie or a PAT with the `builds:write` scope.
+Post a comment. Supports image attachments. Call it with the session cookie or a PAT with the `builds:write` scope. Every role can post, Viewer included.
 
 ```
 Content-Type: multipart/form-data
@@ -640,9 +642,11 @@ Create a PAT. The token value is returned **only once** at creation time.
 ```
 Body (JSON):
   name            string  required
-  expires_in_days number  optional (omit for no expiry)
+  expires_in_days number  optional (omit or send 0 for no expiry)
   scope           string  optional (comma-separated; default: view,builds:write)
 ```
+
+`expires_in_days` takes a number of days, 0 or more (a numeric string such as `"30"` works too). A negative value, anything that is not a number (including an empty string), or a count too large to be a date returns `400`. The dashboard accepts 1–365 days, but the API has no upper limit.
 
 `scope` accepts `view`, `builds:write` and `agent`. The `agent` scope is what an agent on a remote Mac uses to connect to the relay, and only an Admin can issue it; any other role gets `403`.
 

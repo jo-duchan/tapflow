@@ -10,10 +10,12 @@ The main workspace for the team. Shows all uploaded builds organised by app.
 
 | UI element | What it does |
 |---|---|
-| App list | Groups builds by app (bundle ID + platform). Select an app to see its builds, grouped by version. |
+| App list | Groups builds by app (bundle ID + platform). Select an app to see its builds, grouped by version. Use **Add App** to add an app by hand. |
 | Build row | Shows build number, platform, status badge, uploader, and upload date. Click it to open the QA Session page for that build. |
-| Status | **Backlog** · **In Progress** · **Done** · **Rejected** — change it from the status menu on the build row. Any signed-in member can change it. |
+| Status | **Backlog** · **In Progress** · **Done** · **Rejected** — change it from the status menu on the build row. A Viewer sees the status badge only, with no status menu and no schedule-deletion button. |
 | Upload build | Opens the build upload dialog. Accepts `.app.zip` or `.tar.gz`/`.tgz` (iOS simulator builds) and `.apk` (Android). |
+
+Viewer is read-only. When a Viewer presses **Add App** or **Upload build**, a notice says QA or Developer access is needed instead of opening the dialog. For what each role can do, see [Invite your team](/dashboard/setup#_3-invite-your-team).
 
 ## QA Session
 
@@ -60,6 +62,7 @@ Settings has three sub-pages accessible from the left nav.
 Personal profile settings for the currently signed-in user.
 
 - **Workspace** — the team name and logo. Visible to Admins only.
+- **Apps** — rename or delete apps. Visible to Admins, Developers and QA, hidden from Viewers.
 - **Nickname** — shown in comments and session history.
 - **Avatar** — click the pencil icon on the avatar to upload a new image (PNG or JPEG, max 2 MB).
 - **Change password** — requires current password.
@@ -78,7 +81,7 @@ Visible to **Admin** only.
 
 Personal access tokens (PATs) for CI/CD scripts and API access. The sidebar shows this page to **Admin** only.
 
-- **New token** — enter a name, an expiry (1–365 days in this dialog, default 30), and a Type. **API** is for CI uploads and API access (scope `view, builds:write`); **Agent** connects remote Mac agents. The token is shown once — copy it immediately.
+- **New token** — enter a name, an **Expiration**, and a Type. Choose 7, 30, 60 or 90 days, a custom number (1–365 days), or **No expiration**; the default is 30 days. A token with no expiration stays valid until you revoke it, so keep CI tokens to 90 days or less. The list marks these tokens **No expiration** so you can find and clean them up. **API** is for CI uploads and API access (scope `view, builds:write`); **Agent** connects remote Mac agents. The token is shown once — copy it immediately.
 - **Revoke** — instantly invalidates the token.
 
 Use PATs with the `Authorization: Bearer tflw_pat_<token>` header to upload builds from CI. See [Uploading Builds](/testing/app-center).

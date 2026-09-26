@@ -58,6 +58,24 @@ describe('Default settings — what it loads', () => {
     expect(await screen.findByDisplayValue('Coffee')).toBeInTheDocument()
   })
 
+  // QA manages apps like Developer; Viewer is the one role that does not.
+  // Mutation: drop 'QA' from `canEditApps` → this fails; the Viewer twin below holds the other side.
+  it('lists the apps for QA', async () => {
+    auth.user = user('QA')
+    renderPage()
+    expect(await screen.findByDisplayValue('Coffee')).toBeInTheDocument()
+  })
+
+  it('does not ask for the apps for a Viewer', async () => {
+    auth.user = user('Viewer')
+    renderPage()
+    await waitFor(() => expect((screen.getByLabelText('Nickname') as HTMLInputElement).value).toBe('Duchan'))
+    await new Promise((resolve) => setTimeout(resolve, 20))
+    const asked = fetchMock.mock.calls.map((call: unknown[]) => String(call[0]))
+    expect(asked).not.toContain('/api/v1/apps')
+    expect(screen.queryByDisplayValue('Coffee')).toBeNull()
+  })
+
   it('asks for neither the workspace nor the apps for a member', async () => {
     // The twin of the two above: same fixture, only the role differs.
     auth.user = user('Member')

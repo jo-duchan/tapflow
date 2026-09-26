@@ -3,7 +3,7 @@ import fs from 'fs'
 import path from 'path'
 import busboy from 'busboy'
 import { getDb } from '../db.js'
-import { requireAuth, requireBuildAuth } from '../middleware/auth.js'
+import { currentRole, requireAuth, requireBuildAuth } from '../middleware/auth.js'
 import { json } from '../router.js'
 import { unlinkSafe } from '../lib/uploads.js'
 
@@ -160,8 +160,11 @@ export function handleDeleteComment(
   const comment = db.prepare('SELECT author_id FROM comments WHERE id = ?').get(params.id) as { author_id: number } | undefined
   if (!comment) return json(res, 404, { error: 'Comment not found' })
 
-  const user = db.prepare('SELECT role FROM users WHERE id = ?').get(auth.userId) as { role: string }
-  if (comment.author_id !== auth.userId && user.role !== 'Admin') {
+  // A removed member's cookie outlives their row; `currentRole` answers 401 for that instead of the
+  // TypeError a missing row used to throw here.
+  const role = currentRole(res, auth.userId)
+  if (role === null) return
+  if (comment.author_id !== auth.userId && role !== 'Admin') {
     return json(res, 403, { error: 'Forbidden' })
   }
 

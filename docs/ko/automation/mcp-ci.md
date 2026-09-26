@@ -85,7 +85,7 @@ jobs:
 | 항목 | 설명 |
 |------|------|
 | tapflow 릴레이 (상시 가동) | Mac 에이전트가 연결된 릴레이. LAN에 있는 Mac mini 한 대면 충분합니다. |
-| `TAPFLOW_TOKEN` | **API** 유형 개인 액세스 토큰(PAT, `view, builds:write`). **Settings → Tokens**에서 발급하며, Admin에게만 보이는 메뉴입니다. CI 시크릿으로 저장하세요. |
+| `TAPFLOW_TOKEN` | **API** 유형 개인 액세스 토큰(PAT, `view, builds:write`). **Settings → Tokens**에서 발급하며 Admin에게만 보이는 메뉴입니다. CI 시크릿으로 저장하세요. |
 | `ANTHROPIC_API_KEY` | `claude`를 비대화형으로 실행하는 데 필요합니다. CI 시크릿으로 저장하세요. |
 | Claude Code CLI | `npm install -g @anthropic-ai/claude-code` |
 

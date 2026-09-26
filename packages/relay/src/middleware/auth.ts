@@ -53,6 +53,21 @@ export function requireAuth(
   return auth
 }
 
+// The cookie JWT carries a role for its whole 7-day life, so a demoted member would keep their old
+// rights for a week and a promoted one would be refused for a week. Every role decision reads the
+// users table instead; the JWT only says who is asking. A missing row means the member was removed.
+export function currentRole(res: http.ServerResponse, userId: number): string | null {
+  const row = getDb().prepare('SELECT role FROM users WHERE id = ?').get(userId) as
+    | { role: string }
+    | undefined
+  if (!row) {
+    res.writeHead(401, { 'Content-Type': 'application/json' })
+    res.end(JSON.stringify({ error: 'Unauthorized' }))
+    return null
+  }
+  return row.role
+}
+
 export function requireRole(
   req: http.IncomingMessage,
   res: http.ServerResponse,
@@ -60,12 +75,29 @@ export function requireRole(
 ): AuthContext | null {
   const auth = requireAuth(req, res)
   if (!auth) return null
-  if (!roles.includes(auth.role)) {
+  const role = currentRole(res, auth.userId)
+  if (role === null) return null
+  if (!roles.includes(role)) {
     res.writeHead(403, { 'Content-Type': 'application/json' })
     res.end(JSON.stringify({ error: 'Forbidden' }))
     return null
   }
-  return auth
+  return { ...auth, role }
+}
+
+// Viewer is read-only: it can look at builds, test them in a QA Session and comment, but not change
+// builds, apps or webhooks. Called after a route's own auth, so it never changes which credentials
+// the route accepts. The PAT path matters most here: any role can mint a builds:write token through
+// the API, so the owner's role is what decides, at the moment the token is used.
+export function assertCanWrite(res: http.ServerResponse, userId: number): boolean {
+  const role = currentRole(res, userId)
+  if (role === null) return false
+  if (role === 'Viewer') {
+    res.writeHead(403, { 'Content-Type': 'application/json' })
+    res.end(JSON.stringify({ error: 'Viewers have read-only access' }))
+    return false
+  }
+  return true
 }
 
 export function verifyPat(req: http.IncomingMessage): { userId: number; scope: string } | null {

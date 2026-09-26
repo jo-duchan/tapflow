@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Breaking Changes
+
+- **Viewer is read-only.** A Viewer can view builds, test them in a QA Session and comment, and nothing else it does changes builds, apps or webhooks: uploading a build, changing its status, scheduling or cancelling its deletion and every `/api/v1/webhooks` route (listing included) now answer `403 { "error": "Viewers have read-only access" }`, with the dashboard cookie or with a personal access token, since a token is held to its owner's role. In the App Center a Viewer's **Add App** and **Upload build** show a notice instead of a dialog, and build rows drop the status menu and the deletion button. Migrate: give the members who upload builds or change their status the QA or Developer role. A CI token owned by a Viewer starts getting 403 on upload and works again as soon as its owner is promoted, with no new token needed.
+
+### Added
+
+- **A personal access token can be created with no expiration from the dashboard.** The **New token** dialog offers 7, 30, 60 or 90 days, a custom number of days (1–365) or **No expiration**, with 30 days still the default, and warns beside the field that a token with no expiry stays valid until revoked, recommending 90 days or less for CI. The token list marks such tokens **No expiration** so they can be found and cleaned up. The API already allowed this by omitting `expires_in_days`.
+
+### Changed
+
+- **QA manages apps like Developer.** `POST`, `PATCH` and `DELETE /api/v1/apps` accept the QA role, and QA sees the apps section in **Settings**.
+
+- **A role change takes effect immediately on the endpoints that check the role**: team management, workspace settings, password-reset emails, issuing an `agent` scope token, deleting a comment, and uploading or changing builds, apps and webhooks. Roles used to be read from the login cookie, which lasts 7 days, so a demoted member — an Admin included — kept their old rights there and a promoted one was refused until they signed in again. The relay now reads the role from the database on every request to those endpoints, for cookies and tokens alike. A member removed from the team, an Admin included, gets 401 from them on their next request; endpoints that do not check the role still accept a removed member's cookie until it expires.
+
+- **`POST /api/v1/tokens` rejects an invalid `expires_in_days` with a 400.** A negative count used to create a token that had already expired, a value too large for a date failed without a proper response, and an empty or blank string (an unset CI variable) silently created a token that never expires. Omitting it, `null` or `0` still means no expiry, a numeric string like `"30"` still works, and the API keeps no upper limit.
+
 ### Fixed
 
 - **`tapflow flow run --session` points at where a session id can be found.** Its help and the error for a `--device` name matching more than one device said to look in `tapflow status`, which prints no session ids. Both now name the MCP server's `list_devices`.
