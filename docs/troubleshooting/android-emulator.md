@@ -5,6 +5,8 @@ description: An emulator stream that does not start, colors that look less satur
 
 # Android emulator
 
+Fixes for Android emulator stream, color and speed problems.
+
 ## Stream does not start or encoder crashes
 
 Most often the AVD uses an untested `google_apis_playstore` image. Recreate the AVD with the tested `google_apis/arm64-v8a` image:

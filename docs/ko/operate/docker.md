@@ -3,7 +3,9 @@ title: Docker로 배포
 description: 상시 켜 둔 LAN 서버에서 공식 Docker 이미지로 릴레이를 실행합니다. Compose 파일, 필수 볼륨, 초대 링크용 릴레이 URL, 첫 계정 생성을 다룹니다.
 ---
 
-# Docker Compose (LAN 서버)
+<a id="docker-compose-lan-서버"></a>
+
+# Docker로 배포 {#docker-compose-lan-server}
 
 상시 켜져 있는 LAN 서버에서 Docker로 릴레이를 실행할 수 있습니다. 공식 이미지를 사용하여 깔끔하게 배포할 수 있으며, Node.js를 전역으로 설치할 필요가 없습니다.
 

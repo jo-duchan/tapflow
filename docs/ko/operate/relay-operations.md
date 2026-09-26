@@ -5,6 +5,8 @@ description: 릴레이의 데이터 디렉터리를 백업하고(SQLite는 Lites
 
 # 백업과 상시 운영
 
+릴레이 데이터를 백업하고 재부팅이나 크래시 뒤에도 릴레이가 다시 뜨도록 설정합니다.
+
 ## 백업
 
 릴레이의 영속 상태는 실제 사용되는 데이터 디렉터리 아래에 저장됩니다. 기본 설치는 `~/.tapflow/data/`이고, 이전 버전에서 자기 폴더에 만든 설치는 `<설치>/.tapflow/data/`입니다. `tapflow start`와 `tapflow relay start`가 시작할 때 그 경로를 출력하고, `TAPFLOW_DATA_DIR`가 `local.dataDir`를 덮어씁니다. OS 업그레이드, 릴레이 이전, 장기 팀 파일럿 전에는 이 디렉터리를 백업하세요.

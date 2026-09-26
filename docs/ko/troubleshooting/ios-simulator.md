@@ -5,6 +5,8 @@ description: "`spawn unknown error`, CoreSimulator 서비스 버전 불일치, �
 
 # iOS 시뮬레이터
 
+iOS 시뮬레이터가 열리지 않거나 부팅되지 않을 때, 한글 입력이 깨질 때의 해결 방법입니다.
+
 ## 빌드를 열면 `spawn unknown error`가 납니다 {#spawn-unknown-error}
 
 먼저 Mac의 아키텍처를 확인하세요.

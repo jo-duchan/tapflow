@@ -5,6 +5,8 @@ description: 스트림 지연·끊김(Wi-Fi의 AWDL, 호스트 부하, 디스플
 
 # 스트림과 세션
 
+스트림이 끊기거나 흐릴 때, 세션이 저절로 끝날 때의 해결 방법입니다.
+
 ## 스트림 지연·끊김 {#stream-lag}
 
 원인은 보통 셋 중 하나입니다: 에이전트와 릴레이 사이 네트워크, 에이전트 Mac의 자원, 디스플레이 절전.
@@ -48,7 +50,7 @@ AWDL은 트리거(AirDrop 검색·AirPlay 수신·Handoff·Bluetooth 근접)가 
 
 ### LAN에서 화면이 흐리거나 해상도가 낮은 경우
 
-평문 HTTP의 LAN 연결은 **Standard** 프로파일을 사용하며, WASM 디코더의 반응성을 유지하기 위해 스트림을 1280px(가장 긴 변)로 제한합니다. 시뮬레이터 원본 해상도로 스트리밍하려면 릴레이를 HTTPS로 제공하세요 — 그러면 **Smooth** 프로파일(하드웨어 디코딩, 원본 해상도)로 전환됩니다. [외부 접속](/ko/operate/external-access) 참고. HTTPS 없이 제한값만 높이려면 에이전트에서 `TAPFLOW_MAX_SIZE_LAN` 환경변수를 설정합니다 — [스트림 품질](/ko/operate/streaming-quality) 참고.
+평문 HTTP의 LAN 연결은 **Standard** 프로파일을 사용하며, WASM 디코더의 반응성을 유지하기 위해 스트림을 1280px(가장 긴 변)로 제한합니다. 시뮬레이터 원본 해상도로 스트리밍하려면 릴레이를 HTTPS로 제공하세요 — 그러면 **Smooth** 프로파일(하드웨어 디코딩, 원본 해상도)로 전환됩니다. [tapflow 설정의 인증서 방식](/ko/operate/configure#_3-인증서-방식-smooth-선택-시) 참고. HTTPS 없이 제한값만 높이려면 에이전트에서 `TAPFLOW_MAX_SIZE_LAN` 환경변수를 설정합니다 — [스트림 품질](/ko/operate/streaming-quality) 참고.
 
 ## 세션 관련
 

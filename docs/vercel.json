@@ -423,6 +423,26 @@
       "permanent": true
     },
     {
+      "source": "/testing/",
+      "destination": "/testing",
+      "permanent": true
+    },
+    {
+      "source": "/ko/testing/",
+      "destination": "/ko/testing",
+      "permanent": true
+    },
+    {
+      "source": "/troubleshooting/",
+      "destination": "/troubleshooting",
+      "permanent": true
+    },
+    {
+      "source": "/ko/troubleshooting/",
+      "destination": "/ko/troubleshooting",
+      "permanent": true
+    },
+    {
       "source": "/tapflow-demo.mp4",
       "destination": "/media/tapflow-demo.mp4",
       "permanent": true

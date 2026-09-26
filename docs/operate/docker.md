@@ -3,7 +3,7 @@ title: Deploy with Docker
 description: "Run the relay from the official Docker image on an always-on LAN box: the Compose file, the required volume, the relay URL for invite links, and creating the first account."
 ---
 
-# Docker Compose (LAN server)
+# Deploy with Docker {#docker-compose-lan-server}
 
 You can run the relay via Docker on an always-on LAN box. This provides a clean deployment using the official image, freeing you from installing Node.js globally.
 

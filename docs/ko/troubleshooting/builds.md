@@ -5,6 +5,8 @@ description: iOS 업로드 오류(.ipa와 .app.zip), Apple Silicon의 INSTALL_FA
 
 # 빌드와 업로드
 
+빌드 업로드가 실패하거나 업로드한 빌드가 엉뚱한 앱에 붙을 때의 해결 방법입니다.
+
 ## iOS 빌드 업로드 오류
 
 ### 업로드 시 `400` 오류

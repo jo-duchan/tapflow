@@ -5,6 +5,8 @@ description: Back up the relay's data directory (Litestream for SQLite), and kee
 
 # Backups & uptime
 
+Back up the relay's data, and have the relay come back on its own after a reboot or a crash.
+
 ## Backup
 
 The relay keeps its durable state under the resolved data directory — `~/.tapflow/data/` on a default install, or `<install>/.tapflow/data/` for one that lives in its own folder from an earlier version. `tapflow start` and `tapflow relay start` print the directory they resolved; `TAPFLOW_DATA_DIR` overrides `local.dataDir`. Back that directory up before OS upgrades, relay migration, or any long-running team pilot.

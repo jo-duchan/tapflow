@@ -64,7 +64,7 @@ tapflow start
 이 페이지에 있던 섹션은 아래 페이지로 옮겨졌습니다.
 
 - [Docker로 배포](/ko/operate/docker)
-  - <a id="docker-compose-lan-서버" data-moved-to="/ko/operate/docker#docker-compose-lan-서버"></a>[Docker Compose (LAN 서버)](/ko/operate/docker#docker-compose-lan-서버)
+  - <a id="docker-compose-lan-서버" data-moved-to="/ko/operate/docker#docker-compose-lan-서버"></a>[Docker로 배포](/ko/operate/docker#docker-compose-lan-서버)
 - [tapflow 설정](/ko/operate/configure)
   - <a id="배포-설정" data-moved-to="/ko/operate/configure#배포-설정"></a>[배포 설정](/ko/operate/configure#배포-설정)
   - <a id="jwt-secret" data-moved-to="/ko/operate/configure#jwt-secret"></a>[JWT_SECRET](/ko/operate/configure#jwt-secret)

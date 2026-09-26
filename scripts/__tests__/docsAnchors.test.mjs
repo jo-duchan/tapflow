@@ -258,8 +258,10 @@ describe('the docs URLs shipped code opens land on an id', () => {
     // break (DOCS-AUDIT-PLAN) — and the third is how the READMEs are reached. A walk that stopped
     // reaching `packages/dashboard/components`, the agent's `src` or the READMEs would drop one of
     // them without changing any verdict. The READMEs' Docker link lost its fragment when
-    // `guide/self-hosting` was split (it now names `/operate/docker`, whose H1 is that section), so the
-    // README anchor here is the agent one; the old Docker URL stays in `LEGACY_URLS`.
+    // `guide/self-hosting` was split (it now names the page `/operate/docker`, whose H1 "Deploy with
+    // Docker" keeps the old section id explicitly, `{#docker-compose-lan-server}`, and the KO page keeps
+    // `docker-compose-lan-서버` as an `<a id>`), so the README anchor here is the agent one; the old
+    // Docker URL stays in `LEGACY_URLS`.
     expect(urls.map((u) => u.url)).toEqual(expect.arrayContaining([
       'https://www.tapflow.dev/reference/configuration#https-secure-context',
       'https://www.tapflow.dev/guide/troubleshooting#ios-simulator-service-version-mismatch',

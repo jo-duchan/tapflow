@@ -5,6 +5,8 @@ description: "`tapflow admin init`이 Already initialized로 실패할 때, 초�
 
 # 로그인과 계정
 
+관리자 계정 생성, 초대 링크, 비밀번호 재설정 링크 문제를 해결합니다.
+
 ## `tapflow admin init` 실패 (`Already initialized`)
 
 릴레이에 이미 관리자 계정이 존재합니다. 대시보드에 로그인한 뒤 **Settings → Team**에서 팀원을 초대하세요.

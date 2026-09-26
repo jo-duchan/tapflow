@@ -305,3 +305,13 @@
   display: inline-block;
   width: 100%;
 }
+
+/* Moved sections: a fragment from a split page's old URL lands on an empty `<a id data-moved-to>`
+   inside a list item. On a short page nothing scrolls, so tint the entry the reader arrived at.
+   `--vp-c-brand-soft` is redefined under `.dark`, so the tint follows the theme. */
+.vp-doc li:has(> a[data-moved-to]:target) {
+  background-color: var(--vp-c-brand-soft);
+  border-radius: 4px;
+  padding: 2px 6px;
+  margin-left: -6px;
+}

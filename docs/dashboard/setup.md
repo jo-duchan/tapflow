@@ -87,4 +87,4 @@ See [Deployment options](/operate/deployment) for the details of each deployment
 
 What each person can do depends on the role you assigned when inviting them (Admin / Developer / QA / Viewer). See [3. Invite your team](#_3-invite-your-team) above for the role descriptions.
 
-**Next:** Learn what each dashboard section does → [Test apps](/testing)
+**Next:** Learn how teammates find a build in App Center and test it in a QA Session → [Test apps](/testing)

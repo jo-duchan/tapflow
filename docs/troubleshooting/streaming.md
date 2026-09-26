@@ -5,6 +5,8 @@ description: A stream that lags or stutters — Wi-Fi (AWDL), host load, display
 
 # Stream & sessions
 
+Fixes for a stream that stutters or looks blurry, and for a session that ends by itself.
+
 ## Stream lag or stuttering {#stream-lag}
 
 Narrow it to one of three causes — the network between agent and relay, the agent Mac's resources, or display sleep.
@@ -48,7 +50,7 @@ By default the agent keeps the host display awake while a session is active, bec
 
 ### Blurry or low-resolution stream on LAN
 
-A plain-HTTP LAN connection uses the **Standard** profile, which caps the stream at 1280 px (longest side) so the WASM decoder stays responsive. To stream at the simulator's native resolution, serve the relay over HTTPS — that moves you to the **Smooth** profile (hardware decoding, native resolution). See [External access](/operate/external-access). You can also raise the cap without HTTPS by setting `TAPFLOW_MAX_SIZE_LAN` on the agent; see [Streaming Quality](/operate/streaming-quality).
+A plain-HTTP LAN connection uses the **Standard** profile, which caps the stream at 1280 px (longest side) so the WASM decoder stays responsive. To stream at the simulator's native resolution, serve the relay over HTTPS — that moves you to the **Smooth** profile (hardware decoding, native resolution). See the [certificate method in Configuring tapflow](/operate/configure#_3-certificate-method-when-smooth-is-chosen). You can also raise the cap without HTTPS by setting `TAPFLOW_MAX_SIZE_LAN` on the agent; see [Streaming Quality](/operate/streaming-quality).
 
 ## Session issues
 

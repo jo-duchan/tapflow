@@ -5,6 +5,8 @@ description: "`spawn unknown error`, the CoreSimulator service version mismatch,
 
 # iOS simulator
 
+Fixes for an iOS simulator that will not open or boot, and for broken Korean input.
+
 ## Opening a build fails with `spawn unknown error` {#spawn-unknown-error}
 
 Check the Mac's architecture:

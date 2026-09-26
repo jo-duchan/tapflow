@@ -64,7 +64,7 @@ Teammates connect to `http://MACHINE_LOCAL_IP:4000` in their browser. The port m
 Sections that used to be on this page now live on these pages.
 
 - [Deploy with Docker](/operate/docker)
-  - <a id="docker-compose-lan-server" data-moved-to="/operate/docker#docker-compose-lan-server"></a>[Docker Compose (LAN server)](/operate/docker#docker-compose-lan-server)
+  - <a id="docker-compose-lan-server" data-moved-to="/operate/docker#docker-compose-lan-server"></a>[Deploy with Docker](/operate/docker#docker-compose-lan-server)
 - [Configuring tapflow](/operate/configure)
   - <a id="deployment-configuration" data-moved-to="/operate/configure#deployment-configuration"></a>[Deployment configuration](/operate/configure#deployment-configuration)
   - <a id="jwt-secret" data-moved-to="/operate/configure#jwt-secret"></a>[JWT_SECRET](/operate/configure#jwt-secret)

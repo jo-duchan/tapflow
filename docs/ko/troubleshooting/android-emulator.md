@@ -5,6 +5,8 @@ description: 에뮬레이터 스트림이 시작되지 않을 때, 색이 에뮬
 
 # Android 에뮬레이터
 
+Android 에뮬레이터의 스트림, 색, 속도 문제를 해결합니다.
+
 ## 스트림이 시작되지 않거나 인코더 크래시
 
 대개 AVD가 테스트되지 않은 `google_apis_playstore` 이미지를 사용할 때 발생합니다. 테스트된 `google_apis/arm64-v8a` 이미지로 AVD를 다시 생성하세요.

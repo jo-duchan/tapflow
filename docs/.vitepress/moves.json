@@ -24,7 +24,9 @@
   },
   "aliases": {
     "/guide": "/get-started/introduction",
-    "/guide/": "/get-started/introduction"
+    "/guide/": "/get-started/introduction",
+    "/testing/": "/testing",
+    "/troubleshooting/": "/troubleshooting"
   },
   "files": {
     "/tapflow-demo.mp4": "/media/tapflow-demo.mp4",

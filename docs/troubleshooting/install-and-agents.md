@@ -5,6 +5,8 @@ description: An agent that will not start or connect, `tapflow doctor` failures,
 
 # Install & agents
 
+Problems that come up while preparing an agent Mac and connecting its agent to the relay.
+
 ## Agent connection issues
 
 ### It says an agent is already running {#agent-already-running}

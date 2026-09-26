@@ -5,6 +5,8 @@ description: iOS upload errors (.ipa vs .app.zip), INSTALL_FAILED_NO_MATCHING_AB
 
 # Builds & uploads
 
+Fixes for a build upload that fails, or an uploaded build that lands on the wrong app.
+
 ## iOS build upload errors
 
 ### `400` error on upload

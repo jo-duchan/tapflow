@@ -5,6 +5,8 @@ description: 기기 전체 화면 뷰입니다. Mac과 기기를 골라 세션�
 
 # QA 세션
 
+QA 세션에서 기기를 골라 브라우저로 스트리밍하고 빌드를 직접 조작합니다.
+
 **경로**: `/app-center/build`
 
 기기 전체 화면 뷰입니다. App Center에서 빌드 행을 클릭하면 열립니다. **Select Mac**에서 Mac을 고르고 **Select device**에서 기기를 클릭하면 세션이 시작됩니다. 기기 목록에는 **Booted**(부팅됨), **Available**(사용 가능), **In use**(다른 팀원이 사용 중) 상태가 표시됩니다. 화면 위쪽 경로 표시(breadcrumb)를 눌러 이전 단계로 돌아갈 수 있습니다.

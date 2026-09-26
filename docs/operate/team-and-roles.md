@@ -5,7 +5,7 @@ description: "The dashboard's Settings pages: your profile, the member list with
 
 # Team, roles & tokens
 
-Settings has three sub-pages accessible from the left nav.
+The dashboard's **Settings** has three sub-pages accessible from the left nav.
 
 ## Default
 

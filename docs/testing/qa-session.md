@@ -5,6 +5,8 @@ description: "The full-screen device view: pick a Mac and a device to start a se
 
 # QA Session
 
+Pick a device in a QA Session to stream it to your browser and work the build directly.
+
 **Route**: `/app-center/build`
 
 The full-screen device view. Opened when you click a build row in App Center. Pick a Mac under **Select Mac**, then click a device under **Select device** to start a session. The device list shows each device as **Booted**, **Available**, or **In use** (another teammate has it). Use the breadcrumb at the top to go back a step.

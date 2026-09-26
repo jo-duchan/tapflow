@@ -5,6 +5,8 @@ description: "`tapflow admin init` reporting Already initialized, and an invitat
 
 # Sign-in & accounts
 
+Fixes for creating the admin account and for expired invitation or password reset links.
+
 ## `tapflow admin init` fails (`Already initialized`)
 
 An admin account already exists on the relay. Sign in and invite teammates from **Settings → Team**.
