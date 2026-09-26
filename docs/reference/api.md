@@ -11,7 +11,8 @@ Only the endpoints below accept a personal access token (PAT), and they accept t
 | PAT scope | Endpoints |
 |-----------|-----------|
 | `builds:write` | `POST /builds`, `GET /builds`, `GET /builds/:id`, `POST /comments`, every webhook endpoint |
-| `view` | `GET /apps`, `GET /sessions/:sessionId/screenshot`, `GET /sessions/:sessionId/ui-tree`, files under `/uploads/` (at the relay root, not under `/api/v1/`) |
+| `view` | `GET /apps`, `GET /sessions/:sessionId/screenshot`, `GET /sessions/:sessionId/ui-tree`, files under `/uploads/` (at the relay root, not under `/api/v1/`), device-session WebSockets opened from a remote machine |
+| `agent` | A remote agent's WebSocket connection, accepted only while the member who issued the token is an Admin |
 
 **Roles.** A call made with a PAT is held to its owner's current role. Viewer is read-only: uploading, updating or scheduling deletion of a build, creating, renaming or deleting an app, and every webhook endpoint return `403` for a Viewer. Reading builds and posting comments work for a Viewer too. The endpoints that check roles read the role on every request, so a role change applies there without signing in again or issuing a new token.
 
@@ -873,11 +874,17 @@ A value that cannot be determined is `null`. `lanHost` is always `null` when the
 
 ### `GET /api/v1/logs`
 
-Return the relay's in-memory log buffer (last 500 lines).
+Return the relay's in-memory log buffer (last 500 lines). Only requests from the Mac the relay runs on are answered. Another machine, a tunnel, or a remote client behind a trusted proxy gets `403`, signed in or not. To read the logs from elsewhere, look at the relay Mac's own output (terminal, `journalctl`, `docker compose logs`).
 
 ```
 Query:
-  lines  number  optional (default: 100, max: 500)
+  lines  number  optional (an integer from 1 to 500, default: 100). A non-number means 100; a value out of range is clamped to the nearest end.
+```
+
+**Response `403`**
+
+```json
+{ "error": "Logs are only available on the relay host. Run `tapflow logs` there." }
 ```
 
 **Response `200`**

@@ -33,11 +33,40 @@ export function verifyJwt(token: string): AuthContext | null {
   }
 }
 
-export function getAuth(req: http.IncomingMessage): AuthContext | null {
+/** A signed-in session: who the cookie names, as the users table describes them now. */
+export interface SessionAuth extends AuthContext {
+  /** The JWT's `exp` (seconds since the epoch), so an open socket can be closed when it passes. */
+  exp?: number
+}
+
+/**
+ * The cookie's user, **checked against the users table on every call**.
+ *
+ * The JWT lives seven days and removing a member deletes their row, so a signature check alone kept a
+ * removed member signed in for up to a week on every cookie path: this function, `requireViewAuth`,
+ * `requireBuildAuth`, recordings, and the WebSocket handshake. This is the one place all of them pass,
+ * so the row check lives here. User ids are `AUTOINCREMENT`, so a removed id never comes back and "the
+ * row exists" is a sound test. `email` and `role` come from the row, never from the JWT.
+ *
+ * Only the JWT verification failure becomes `null`. A database error propagates: turning a transient
+ * `SQLITE_BUSY` into "not signed in" would sign everyone out and hide the fault.
+ */
+export function getAuth(req: http.IncomingMessage): SessionAuth | null {
   const cookie = req.headers.cookie ?? ''
   const match = /(?:^|;\s*)tapflow_token=([^;]+)/.exec(cookie)
   if (!match) return null
-  return verifyJwt(match[1])
+  const claims = verifyJwt(match[1]) as (AuthContext & { exp?: number }) | null
+  if (!claims) return null
+  const user = findUser(claims.userId)
+  if (!user) return null
+  return { userId: claims.userId, email: user.email, role: user.role, exp: claims.exp }
+}
+
+export function findUser(userId: number): { email: string; role: string } | null {
+  const row = getDb().prepare('SELECT email, role FROM users WHERE id = ?').get(userId) as
+    | { email: string; role: string }
+    | undefined
+  return row ?? null
 }
 
 export function requireAuth(
@@ -100,21 +129,58 @@ export function assertCanWrite(res: http.ServerResponse, userId: number): boolea
   return true
 }
 
-export function verifyPat(req: http.IncomingMessage): { userId: number; scope: string } | null {
+/** A live PAT and its owner, as the database describes them now. */
+export interface PatAuth {
+  patId: number
+  userId: number
+  scopes: string[]
+  ownerEmail: string
+  ownerRole: string
+}
+
+interface PatRow { id: number; user_id: number; scope: string; email: string; role: string }
+
+function toPatAuth(row: PatRow): PatAuth {
+  return {
+    patId: row.id,
+    userId: row.user_id,
+    scopes: row.scope.split(',').map((s) => s.trim()),
+    ownerEmail: row.email,
+    ownerRole: row.role,
+  }
+}
+
+// Joined with users so the owner's current role comes with the token: an `agent` token is only as good
+// as its owner's Admin role, and a Viewer's `builds:write` token is refused on write routes.
+const PAT_SELECT = `
+  SELECT pat.id, pat.user_id, pat.scope, u.email, u.role
+  FROM personal_access_tokens pat
+  JOIN users u ON u.id = pat.user_id
+  WHERE (pat.expires_at IS NULL OR pat.expires_at > datetime('now'))`
+
+/**
+ * The PAT on this request, or null when there is none, it is unknown, or it has expired.
+ *
+ * **Reads only.** `last_used_at` is written by `touchPat` once a caller has accepted the token: a
+ * request the relay refuses (wrong scope, demoted owner) is not a use of it, and a "last used" that
+ * moves on refusals tells an Admin a leaked token is in use when nothing got through.
+ */
+export function verifyPat(req: http.IncomingMessage): PatAuth | null {
   const header = req.headers.authorization ?? ''
   if (!header.startsWith('Bearer tflw_pat_')) return null
-  const token = header.slice(7)
-  const hash = hashPat(token)
-  const db = getDb()
-  const row = db.prepare(`
-    SELECT pat.user_id, pat.scope
-    FROM personal_access_tokens pat
-    WHERE pat.token_hash = ?
-      AND (pat.expires_at IS NULL OR pat.expires_at > datetime('now'))
-  `).get(hash) as { user_id: number; scope: string } | undefined
-  if (!row) return null
-  db.prepare(`UPDATE personal_access_tokens SET last_used_at = datetime('now') WHERE token_hash = ?`).run(hash)
-  return { userId: row.user_id, scope: row.scope }
+  const hash = hashPat(header.slice(7))
+  const row = getDb().prepare(`${PAT_SELECT} AND pat.token_hash = ?`).get(hash) as PatRow | undefined
+  return row ? toPatAuth(row) : null
+}
+
+/** The same lookup by id, for re-checking a token an open socket was accepted with. */
+export function findPat(patId: number): PatAuth | null {
+  const row = getDb().prepare(`${PAT_SELECT} AND pat.id = ?`).get(patId) as PatRow | undefined
+  return row ? toPatAuth(row) : null
+}
+
+export function touchPat(patId: number): void {
+  getDb().prepare(`UPDATE personal_access_tokens SET last_used_at = datetime('now') WHERE id = ?`).run(patId)
 }
 
 export function hashPat(token: string): string {
@@ -133,20 +199,13 @@ export function requireViewAuth(
     res.end(JSON.stringify({ error: 'Unauthorized' }))
     return null
   }
-  if (!pat.scope.split(',').map((s) => s.trim()).includes('view')) {
+  if (!pat.scopes.includes('view')) {
     res.writeHead(403, { 'Content-Type': 'application/json' })
     res.end(JSON.stringify({ error: 'Insufficient scope' }))
     return null
   }
-  const user = getDb()
-    .prepare('SELECT email, role FROM users WHERE id = ?')
-    .get(pat.userId) as { email: string; role: string } | undefined
-  if (!user) {
-    res.writeHead(401, { 'Content-Type': 'application/json' })
-    res.end(JSON.stringify({ error: 'Unauthorized' }))
-    return null
-  }
-  return { userId: pat.userId, email: user.email, role: user.role }
+  touchPat(pat.patId)
+  return { userId: pat.userId, email: pat.ownerEmail, role: pat.ownerRole }
 }
 
 export function requireBuildAuth(
@@ -155,11 +214,12 @@ export function requireBuildAuth(
 ): { userId: number } | null {
   const pat = verifyPat(req)
   if (pat !== null) {
-    if (!pat.scope.split(',').map((s) => s.trim()).includes('builds:write')) {
+    if (!pat.scopes.includes('builds:write')) {
       res.writeHead(403, { 'Content-Type': 'application/json' })
       res.end(JSON.stringify({ error: 'Insufficient scope' }))
       return null
     }
+    touchPat(pat.patId)
     return { userId: pat.userId }
   }
   const auth = requireAuth(req, res)

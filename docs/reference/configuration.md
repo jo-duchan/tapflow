@@ -31,7 +31,7 @@ Paths inside the file are relative to the file itself, the way a `tsconfig.json`
 | Key | Description |
 |-----|-------------|
 | `local` | Settings for the relay server running on this machine. |
-| `relay.url` | URL of the relay to connect to. Used by `tapflow agent start`, `tapflow admin init`, `tapflow status`, and `tapflow logs` as the default — no `--relay` flag needed when this is set. Leave empty for local mode (`ws://localhost:[local.port]`). Write it as `ws://` or `wss://`: `tapflow agent start` rejects any other scheme, and the other commands switch it to HTTP where they need to. |
+| `relay.url` | URL of the relay to connect to. Used by `tapflow agent start`, `tapflow admin init`, and `tapflow status` as the default — no `--relay` flag needed when this is set. `tapflow logs` does not read it and asks the relay on the same Mac (`http://localhost:[local.port]`). Leave empty for local mode (`ws://localhost:[local.port]`). Write it as `ws://` or `wss://`: `tapflow agent start` rejects any other scheme, and the other commands switch it to HTTP where they need to. |
 | `tunnel` | The tunnel that `tapflow start` and `tapflow relay start` bring up alongside the relay. See the Tunnel section below. |
 | `tls` | LAN HTTPS (secure context) settings, required for WebCodecs hardware decode. See the HTTPS section below. |
 | `smtp` | SMTP settings for sending invitation and password reset emails. |
@@ -55,7 +55,7 @@ Secrets can also live in the data directory's `.env` file. The relay loads it fi
 | `TAPFLOW_DATA_DIR` | `local.dataDir` | `<install>/data` | DB and uploads directory. Relative to the current directory here, and to the config file in `local.dataDir`. An install that already holds `.tapflow/data` or `.tapflow-data` keeps using it. |
 | `TAPFLOW_RELAY_URL` | `relay.url` | *(empty)* | Relay URL used as default by CLI commands |
 | `TAPFLOW_AGENT_TOKEN` | — | *(empty)* | Token with the `agent` scope for remote relay authentication. The `--token` flag takes precedence. See [Agent Setup](/guide/agent#remote-relay-authentication). |
-| `TAPFLOW_TOKEN` | — | *(empty)* | Personal access token (PAT) that `tapflow flow run` and the MCP server use to reach a remote relay. For `flow run`, the `--token` flag takes precedence. |
+| `TAPFLOW_TOKEN` | — | *(empty)* | Personal access token (PAT) that `tapflow flow run` and the MCP server use to reach a remote relay. Use an API-type token from the dashboard (`view, builds:write`). For `flow run`, the `--token` flag takes precedence. |
 | `TAPFLOW_TUNNEL_TOKEN` | — | *(empty)* | Shared secret that authenticates the rathole tunnel. Required when `tunnel.provider` is `rathole`. |
 | `TAPFLOW_LEAN` | `agent.lean` | `off` | `on` or `off`. Any other value is ignored with a warning, and the config file's value is used. |
 | `TAPFLOW_TRUSTED_PROXIES` | — | *(empty)* | Comma-separated IPs of trusted reverse proxies (e.g. `127.0.0.1,::1`). Set this when the relay runs behind a same-host reverse proxy so it reads the real client IP from `X-Forwarded-For` instead of the proxy's address. Empty disables forwarded-header parsing. |

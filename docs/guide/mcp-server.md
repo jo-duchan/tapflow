@@ -89,7 +89,7 @@ Any MCP-compatible client can use tapflow. Add the following to your MCP config 
 | Variable | Description | Default |
 |----------|-------------|---------|
 | `TAPFLOW_RELAY_URL` | Relay WebSocket URL | `ws://localhost:4000` |
-| `TAPFLOW_TOKEN` | PAT | (required) |
+| `TAPFLOW_TOKEN` | An **API**-type PAT (`view, builds:write`), created in **Settings → Tokens** | (required) |
 
 ## Available tools
 

@@ -8,8 +8,9 @@ import path from 'path'
 import { WebSocket } from 'ws'
 import { RelayServer } from '../RelayServer'
 import { initDb, closeDb, getDb } from '../db'
-import { hashPat } from '../middleware/auth'
-import { waitForMessage, waitForOpen } from '@tapflowio/test-utils'
+import { hashPat, signJwt } from '../middleware/auth'
+import { WS_AGENT_OWNER_REASON, WS_REJECT_REASON, WS_SCOPE_REASON } from '../lib/connectionAuth'
+import { waitForMessage, waitForOpen, waitForType } from '@tapflowio/test-utils'
 import type { AgentRegistered } from '@tapflowio/protocol'
 
 // The tunnel listener exists because a tunnel client — rathole, `tailscale serve` — connects from
@@ -146,6 +147,116 @@ describe('RelayServer tunnel listener', () => {
 
       const direct = await request(relayPort, 'POST', '/api/v1/auth/init', { email: 'admin@example.com', password: 'password123' })
       expect(direct.status).toBe(201)
+    })
+
+    // `/api/v1/logs` is host-only, and the tunnel listener is never the host. Mutations: the route's
+    // `isLocal` check dropped, or `resolveRequestClient` passing `viaTunnel: false`, turn this red.
+    it('refuses /api/v1/logs through the tunnel and serves it on the relay port', async () => {
+      await start()
+      expect((await request(tunnelPort, 'GET', '/api/v1/logs')).status).toBe(403)
+      expect((await request(relayPort, 'GET', '/api/v1/logs')).status).toBe(200)
+    })
+
+    // ── A remote WebSocket on a PAT needs `view` to be a browser ─────────────────────────────────────
+    //
+    // Mutations: `canView` forced true → the builds:write row; `mayBrowse` forced true → the agent-only
+    // row; `mayRegisterAgent` forced true → the demoted `view,agent` row; `touchPat` moved ahead of the
+    // reject (or `verifyPat` writing again) → the `last_used_at` assertion; `getAuth` without the row
+    // lookup → the removed-member cookie row.
+
+    const seedUser = (id: number, role: string) =>
+      getDb().prepare("INSERT INTO users (id, email, display_name, role, password_hash) VALUES (?, ?, 'U', ?, 'x')").run(id, `u${id}@test.local`, role)
+    const seedToken = (userId: number, scope: string) => {
+      const raw = `tflw_pat_${crypto.randomBytes(16).toString('hex')}`
+      const r = getDb().prepare('INSERT INTO personal_access_tokens (user_id, name, token_hash, scope) VALUES (?, ?, ?, ?)').run(userId, 't', hashPat(raw), scope)
+      return { raw, id: Number(r.lastInsertRowid) }
+    }
+    const lastUsed = (id: number) =>
+      (getDb().prepare('SELECT last_used_at FROM personal_access_tokens WHERE id = ?').get(id) as { last_used_at: string | null }).last_used_at
+    const closeWith = (ws: WebSocket) =>
+      new Promise<{ code: number; reason: string }>((resolve) => ws.once('close', (code, reason) => resolve({ code, reason: reason.toString() })))
+    const viaTunnelWith = (headers: Record<string, string>) => new WebSocket(`ws://127.0.0.1:${tunnelPort}`, { headers })
+    const agentOnRelayPort = async (name: string) => {
+      const agent = new WebSocket(`ws://127.0.0.1:${relayPort}`)
+      await waitForOpen(agent)
+      register(agent, name)
+      const msg = await waitForMessage<AgentRegistered>(agent)
+      return { agent, sessionId: msg.registeredSessions[0]!.sessionId }
+    }
+
+    it('closes a builds:write-only PAT with the scope reason and leaves its last-used alone', async () => {
+      await start()
+      seedUser(7201, 'Admin')
+      const { raw, id } = seedToken(7201, 'builds:write')
+      const ws = viaTunnelWith({ authorization: `Bearer ${raw}` })
+      expect(await closeWith(ws)).toEqual({ code: 1008, reason: WS_SCOPE_REASON })
+      expect(lastUsed(id)).toBeNull()
+    })
+
+    it('lets a view,builds:write PAT join a session, and records the use', async () => {
+      await start()
+      const { agent, sessionId } = await agentOnRelayPort('Tunnel-view-pat')
+      seedUser(7202, 'Viewer')
+      const { raw, id } = seedToken(7202, 'view,builds:write')
+      const ws = viaTunnelWith({ authorization: `Bearer ${raw}` })
+      await waitForOpen(ws)
+      ws.send(JSON.stringify({ type: 'session:start', sessionId }))
+      expect((await waitForType<{ type: string; sessionId: string }>(ws, 'session:joined')).sessionId).toBe(sessionId)
+      expect(lastUsed(id)).not.toBeNull()
+      ws.close(); agent.close()
+    })
+
+    it('closes an agent-only PAT whose first frame is not a handshake', async () => {
+      await start()
+      const { agent, sessionId } = await agentOnRelayPort('Tunnel-agent-as-browser')
+      seedUser(7203, 'Admin')
+      const { raw } = seedToken(7203, 'agent')
+      const ws = viaTunnelWith({ authorization: `Bearer ${raw}` })
+      await waitForOpen(ws)
+      const closed = closeWith(ws)
+      ws.send(JSON.stringify({ type: 'session:start', sessionId }))
+      expect(await closed).toEqual({ code: 1008, reason: WS_SCOPE_REASON })
+      agent.close()
+    })
+
+    it("refuses an agent PAT whose owner is no longer an Admin, at the handshake", async () => {
+      await start()
+      seedUser(7204, 'Developer')
+      const { raw, id } = seedToken(7204, 'agent')
+      const ws = viaTunnelWith({ authorization: `Bearer ${raw}` })
+      expect(await closeWith(ws)).toEqual({ code: 1008, reason: WS_AGENT_OWNER_REASON })
+      expect(lastUsed(id)).toBeNull()
+    })
+
+    it('lets a demoted owner\'s view,agent PAT browse but not register an agent', async () => {
+      await start()
+      const { agent, sessionId } = await agentOnRelayPort('Tunnel-view-agent-demoted')
+      seedUser(7205, 'QA')
+      const { raw } = seedToken(7205, 'view,agent')
+
+      const browser = viaTunnelWith({ authorization: `Bearer ${raw}` })
+      await waitForOpen(browser)
+      browser.send(JSON.stringify({ type: 'session:start', sessionId }))
+      await waitForType(browser, 'session:joined')
+
+      const wouldBeAgent = viaTunnelWith({ authorization: `Bearer ${raw}` })
+      await waitForOpen(wouldBeAgent)
+      const closed = closeWith(wouldBeAgent)
+      register(wouldBeAgent, 'Tunnel-demoted-register')
+      expect(await closed).toEqual({ code: 1008, reason: WS_AGENT_OWNER_REASON })
+      browser.close(); agent.close()
+    })
+
+    it("closes a removed member's validly signed cookie with the sign-in reason", async () => {
+      await start()
+      seedUser(7206, 'Developer')
+      const cookie = `tapflow_token=${signJwt({ userId: 7206, email: 'u7206@test.local', role: 'Developer' })}`
+      const live = viaTunnelWith({ cookie })
+      await waitForOpen(live)
+      live.close()
+
+      getDb().prepare('DELETE FROM users WHERE id = 7206').run()
+      expect(await closeWith(viaTunnelWith({ cookie }))).toEqual({ code: 1008, reason: WS_REJECT_REASON })
     })
 
     // With the loopback proxy trusted, a forwarded `::1` resolves to a loopback client — local on the relay

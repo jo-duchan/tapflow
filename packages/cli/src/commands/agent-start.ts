@@ -113,8 +113,11 @@ export async function cmdAgentStart(opts: AgentStartOptions): Promise<void> {
     } catch (e) {
       spinner.stop(false)
       const message = (e as Error).message
-      // 릴레이의 1008 인증 거절(#271) — 사유만으로는 다음 행동을 모르니 발급 절차를 안내한다
-      const authHint = message.includes('code=1008')
+      // 릴레이의 1008 인증 거절(#271) — 사유만으로는 다음 행동을 모르니 발급 절차를 안내한다.
+      // Only for the "no agent credential" refusal (or a relay that gave no reason): the other 1008s
+      // carry their own instruction in the message — a demoted owner, a token without the right scope —
+      // and "create a PAT with the agent scope" would send the operator to fix the wrong thing.
+      const authHint = /code=1008(: Unauthorized: agents need a PAT|\))/.test(message)
         ? [
             'Remote relays require a PAT with the agent scope.',
             'Create one in Dashboard → Settings → Tokens,',

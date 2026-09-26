@@ -25,7 +25,8 @@ export function handleVerify(req: http.IncomingMessage, res: http.ServerResponse
 export function handleAccept(
   req: http.IncomingMessage,
   res: http.ServerResponse,
-  uploadsDir: string
+  uploadsDir: string,
+  onAuthChanged: () => void = () => {},
 ): void {
   const bb = busboy({ headers: req.headers, limits: { fileSize: 2 * 1024 * 1024 } })
   const fields: Record<string, string> = {}
@@ -92,6 +93,9 @@ export function handleAccept(
     }
 
     db.prepare("UPDATE invitations SET used_at = datetime('now') WHERE id = ?").run(inv.id)
+    // Accepting for an email that already has an account overwrites its role, which can take an
+    // Admin's agent authority away from sockets already open.
+    if (existing) onAuthChanged()
 
     const user = db.prepare('SELECT email, role FROM users WHERE id = ?').get(userId) as { email: string; role: string }
     const jwtToken = signJwt({ userId, email: user.email, role: user.role })

@@ -53,7 +53,8 @@ export async function handleInvite(req: http.IncomingMessage, res: http.ServerRe
 export async function handleUpdateMember(
   req: http.IncomingMessage,
   res: http.ServerResponse,
-  params: Record<string, string>
+  params: Record<string, string>,
+  onAuthChanged: () => void = () => {},
 ): Promise<void> {
   const auth = requireRole(req, res, ['Admin'])
   if (!auth) return
@@ -66,13 +67,16 @@ export async function handleUpdateMember(
   const db = getDb()
   const result = db.prepare('UPDATE users SET role = ? WHERE id = ?').run(body.role, params.id)
   if (result.changes === 0) return json(res, 404, { error: 'Member not found' })
+  // A demoted Admin's agent tokens stop working now, including on sockets already open.
+  onAuthChanged()
   json(res, 200, { ok: true })
 }
 
 export function handleDeleteMember(
   req: http.IncomingMessage,
   res: http.ServerResponse,
-  params: Record<string, string>
+  params: Record<string, string>,
+  onAuthChanged: () => void = () => {},
 ): void {
   const auth = requireRole(req, res, ['Admin'])
   if (!auth) return
@@ -84,5 +88,7 @@ export function handleDeleteMember(
   const db = getDb()
   const result = db.prepare('DELETE FROM users WHERE id = ?').run(params.id)
   if (result.changes === 0) return json(res, 404, { error: 'Member not found' })
+  // Their cookie and PATs (cascaded) stop working on HTTP at once; this closes their open sockets too.
+  onAuthChanged()
   json(res, 204, null)
 }

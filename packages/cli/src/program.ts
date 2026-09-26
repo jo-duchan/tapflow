@@ -101,8 +101,8 @@ export function createCli(): CAC {
     .action((opts: { relay?: string }) => cmdStatus(opts))
 
   cli
-    .command('logs', 'Show recent relay log entries')
-    .option('--relay <url>', 'Relay URL (default: http://localhost:4000)')
+    .command('logs', 'Show recent relay log entries (on the relay host)')
+    .option('--relay <url>', 'Relay URL on this machine (default: http://localhost:<local.port>)')
     .option('--lines <n>', 'Number of lines to show (default: 100)', { default: 100 })
     .action((opts: { relay?: string; lines?: number }) => cmdLogs(opts))
 

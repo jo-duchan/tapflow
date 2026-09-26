@@ -118,7 +118,7 @@ tapflow flow run .tapflow/flows/login.yaml .tapflow/flows/checkout.yaml
 | Option | Description |
 |--------|-------------|
 | `--relay <url>` | Relay URL (default `ws://localhost:4000`) |
-| `--token <token>` | Personal access token (PAT) for a remote relay (or the `TAPFLOW_TOKEN` env var) |
+| `--token <token>` | Personal access token (PAT) for a remote relay (or the `TAPFLOW_TOKEN` env var). Use an API-type token from the dashboard (`view, builds:write`) |
 | `--device <name>` | Target device by name. Boots it when shut down. |
 | `--session <id>` | Session id of the target device. Use it when several devices share a name and `--device` cannot pick one. |
 | `--build <id>` | Build under test. Installed before the run; the `launchApp` step launches it. |

@@ -11,7 +11,8 @@
 | PAT scope | 엔드포인트 |
 |-----------|-----------|
 | `builds:write` | `POST /builds`, `GET /builds`, `GET /builds/:id`, `POST /comments`, 웹훅 엔드포인트 전체 |
-| `view` | `GET /apps`, `GET /sessions/:sessionId/screenshot`, `GET /sessions/:sessionId/ui-tree`, `/uploads/` 아래 파일(`/api/v1/`이 아닌 릴레이 루트 경로) |
+| `view` | `GET /apps`, `GET /sessions/:sessionId/screenshot`, `GET /sessions/:sessionId/ui-tree`, `/uploads/` 아래 파일(`/api/v1/`이 아닌 릴레이 루트 경로), 원격에서 여는 기기 세션 WebSocket |
+| `agent` | 원격 에이전트의 WebSocket 연결. 토큰을 발급한 팀원이 Admin인 동안에만 받습니다 |
 
 **역할.** PAT로 호출해도 토큰 주인의 현재 역할이 적용됩니다. Viewer는 읽기 전용이라 빌드 업로드·수정·삭제 예약, 앱 생성·수정·삭제, 웹훅 엔드포인트 전체에서 `403`을 받습니다. 빌드 조회와 댓글 작성은 Viewer도 할 수 있습니다. 역할을 확인하는 엔드포인트는 요청마다 역할을 다시 읽으므로 역할을 바꾸면 다시 로그인하거나 토큰을 새로 만들지 않아도 바로 적용됩니다.
 
@@ -873,11 +874,17 @@ Query:
 
 ### `GET /api/v1/logs`
 
-릴레이 인메모리 로그 버퍼(최근 500줄)를 반환합니다.
+릴레이 인메모리 로그 버퍼(최근 500줄)를 반환합니다. 릴레이가 실행 중인 Mac에서 보낸 요청에만 응답합니다. 다른 기기나 터널, 신뢰 프록시를 거친 원격 클라이언트는 인증 여부와 관계없이 `403`을 받습니다. 원격에서 로그를 보려면 릴레이 Mac의 출력(터미널, `journalctl`, `docker compose logs`)을 확인하세요.
 
 ```
 Query:
-  lines  number  선택 (기본값: 100, 최대: 500)
+  lines  number  선택 (1~500 사이 정수, 기본값: 100). 숫자가 아니면 100, 범위를 벗어나면 가까운 끝값을 씁니다.
+```
+
+**응답 `403`**
+
+```json
+{ "error": "Logs are only available on the relay host. Run `tapflow logs` there." }
 ```
 
 **응답 `200`**

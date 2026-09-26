@@ -28,6 +28,10 @@ describe('session ownership seam', () => {
   beforeAll(() => {
     tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'tapflow-ownership-seam-'))
     initDb(path.join(tmpDir, 'test.db'))
+    // `browserSocket(…, userId)` signs a cookie, and the cookie check reads the users row.
+    for (const id of [1, 2]) {
+      getDb().prepare("INSERT INTO users (id, email, role, password_hash) VALUES (?, ?, 'Admin', 'x')").run(id, `u${id}@example.test`)
+    }
   })
 
   afterAll(() => {

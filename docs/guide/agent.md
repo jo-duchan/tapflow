@@ -35,7 +35,7 @@ The relay requires authentication on every connection except one that reaches th
 
 ### Create a token
 
-In the dashboard, go to **Settings → Tokens → New token** and set the Type to **Agent**. Only accounts with the Admin role can create `agent`-scope tokens. The success screen shows a ready-to-run agent command — copy it and run it on the agent machine.
+In the dashboard, go to **Settings → Tokens → New token** and set the Type to **Agent**. Only accounts with the Admin role can create `agent`-scope tokens, and a token stops working once the member who issued it is no longer an Admin or is removed from the team. Agents connected with it are disconnected at that moment, and a current Admin has to issue a new token. The success screen shows a ready-to-run agent command — copy it and run it on the agent machine.
 
 ### Pass the token
 

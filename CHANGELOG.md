@@ -11,6 +11,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **Viewer is read-only.** A Viewer can view builds, test them in a QA Session and comment, and nothing else it does changes builds, apps or webhooks: uploading a build, changing its status, scheduling or cancelling its deletion and every `/api/v1/webhooks` route (listing included) now answer `403 { "error": "Viewers have read-only access" }`, with the dashboard cookie or with a personal access token, since a token is held to its owner's role. In the App Center a Viewer's **Add App** and **Upload build** show a notice instead of a dialog, and build rows drop the status menu and the deletion button. Migrate: give the members who upload builds or change their status the QA or Developer role. A CI token owned by a Viewer starts getting 403 on upload and works again as soon as its owner is promoted, with no new token needed.
 
+- **`tapflow logs` works only on the relay host**, and targets `http://localhost:<local.port>` by default instead of `relay.url`. The relay answers `GET /api/v1/logs` only for its own machine now; from anywhere else, including a CLI outside the relay's Docker container, it returns 403 and the CLI says what to run instead. Migrate: run it on the relay machine (`tapflow logs --relay http://localhost:<port>` if the relay uses another port), or read the relay's own output there (terminal, `journalctl`, `docker compose logs`).
+
+- **A remote WebSocket that authenticates with a personal access token needs the `view` scope.** A token without it is closed with 1008 and a reason naming the scope, and an `agent`-only token can no longer be used as a browser. Migrate: tokens created in the dashboard as the API type (`view, builds:write`) are unaffected; replace a token created through the API with only `builds:write` by an API-type token wherever `tapflow flow run` or another WebSocket client uses it.
+
+- **An `agent`-scope token stops working when its owner is no longer an Admin**, and agents connected with it are disconnected at that moment, including when the owner is removed. A `view,agent` token of a non-Admin may still open device sessions but cannot register an agent. Migrate: have a current Admin issue a new agent token (Settings → Tokens, Type **Agent**) for each affected agent; the relay logs at start how many agent tokens are affected.
+
 ### Added
 
 - **A personal access token can be created with no expiration from the dashboard.** The **New token** dialog offers 7, 30, 60 or 90 days, a custom number of days (1–365) or **No expiration**, with 30 days still the default, and warns beside the field that a token with no expiry stays valid until revoked, recommending 90 days or less for CI. The token list marks such tokens **No expiration** so they can be found and cleaned up. The API already allowed this by omitting `expires_in_days`.
@@ -19,7 +25,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **QA manages apps like Developer.** `POST`, `PATCH` and `DELETE /api/v1/apps` accept the QA role, and QA sees the apps section in **Settings**.
 
-- **A role change takes effect immediately on the endpoints that check the role**: team management, workspace settings, password-reset emails, issuing an `agent` scope token, deleting a comment, and uploading or changing builds, apps and webhooks. Roles used to be read from the login cookie, which lasts 7 days, so a demoted member — an Admin included — kept their old rights there and a promoted one was refused until they signed in again. The relay now reads the role from the database on every request to those endpoints, for cookies and tokens alike. A member removed from the team, an Admin included, gets 401 from them on their next request; endpoints that do not check the role still accept a removed member's cookie until it expires.
+- **A role change takes effect immediately on the endpoints that check the role**: team management, workspace settings, password-reset emails, issuing an `agent` scope token, deleting a comment, and uploading or changing builds, apps and webhooks. Roles used to be read from the login cookie, which lasts 7 days, so a demoted member — an Admin included — kept their old rights there and a promoted one was refused until they signed in again. The relay now reads the role from the database on every request to those endpoints, for cookies and tokens alike. A member removed from the team, an Admin included, gets 401 from them on their next request, and from every other endpoint too (see **Security**).
 
 - **`POST /api/v1/tokens` rejects an invalid `expires_in_days` with a 400.** A negative count used to create a token that had already expired, a value too large for a date failed without a proper response, and an empty or blank string (an unset CI variable) silently created a token that never expires. Omitting it, `null` or `0` still means no expiry, a numeric string like `"30"` still works, and the API keeps no upper limit.
 
@@ -29,7 +35,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **`POST /api/v1/comments` accepts a PAT with the `builds:write` scope.** The CI step in the Build Distribution guide that posts branch and commit info as a comment got a 401, because the route accepted only the dashboard cookie, and failed the job under `curl -sf`. It now works with the same token that uploaded the build; a token without `builds:write` gets a 403.
 
-- **A comment the database refuses no longer takes the relay down.** `POST /api/v1/comments` with an unknown `build_id`, or from a browser whose user an Admin had removed, failed a foreign-key check where nothing caught it, and a relay started with the `tapflow` CLI exited. An unknown build now answers 404, anything else 500.
+- **A comment the database refuses no longer takes the relay down.** `POST /api/v1/comments` with an unknown `build_id`, or from a browser whose user an Admin had removed, failed a foreign-key check where nothing caught it, and a relay started with the `tapflow` CLI exited. An unknown build now answers 404, anything else 500, and a removed member is refused with 401 before reaching the insert.
+
+- **`tapflow flow run` reports why the relay closed the connection.** A refused token used to surface as "not connected to relay" or "relay connection closed"; the error now ends with the relay's close code and reason.
+
+- **`tapflow agent start` shows the relay's reason when it refuses an agent token**, instead of always suggesting to create a PAT with the `agent` scope. The suggestion stays for the refusal that means no agent token was given.
+
+- **A token's "last used" time no longer moves when the relay refuses it** (wrong scope, or an agent token whose owner is no longer an Admin).
+
+### Security
+
+- **`GET /api/v1/logs` no longer answers remote clients.** It needed no sign-in and listed the addresses of refused connections. It is served to the relay host only, through the same locality rule as first-admin setup, so the tunnel port and clients behind a trusted proxy are refused too.
+
+- **A personal access token without `view` can no longer open a device session over WebSocket, and an agent token can no longer act as a browser.** An `agent` token is also refused once its owner is no longer an Admin.
+
+- **Removing a member signs them out everywhere at once**: every HTTP endpoint, uploaded files, recordings and open device sessions. Their session cookie used to keep working on endpoints that do not check the role for up to 7 days. Revoking a token, a token or session cookie expiring, and an invitation accepted for an existing account with a different role now also close the WebSocket connections that relied on it, immediately or within 30 seconds.
 
 ## [0.24.0] - 2026-09-26
 

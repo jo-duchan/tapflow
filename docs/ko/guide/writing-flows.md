@@ -118,7 +118,7 @@ tapflow flow run .tapflow/flows/login.yaml .tapflow/flows/checkout.yaml
 | 옵션 | 설명 |
 |------|------|
 | `--relay <url>` | 릴레이 URL (기본값 `ws://localhost:4000`) |
-| `--token <token>` | 원격 릴레이용 개인 액세스 토큰(PAT). `TAPFLOW_TOKEN` 환경변수로도 지정할 수 있습니다 |
+| `--token <token>` | 원격 릴레이용 개인 액세스 토큰(PAT). 대시보드에서 만든 API 유형 토큰(`view, builds:write`)을 쓰세요. `TAPFLOW_TOKEN` 환경변수로도 지정할 수 있습니다 |
 | `--device <name>` | 대상 기기를 이름으로 지정. 꺼져 있으면 부팅합니다. |
 | `--session <id>` | 대상 기기의 세션 ID. 같은 이름의 기기가 여럿이라 `--device`로 하나를 고를 수 없을 때 씁니다. |
 | `--build <id>` | 테스트 대상 빌드. 실행 전 설치되고 `launchApp` 스텝이 이 빌드를 실행합니다. |

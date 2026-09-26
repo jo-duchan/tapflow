@@ -18,7 +18,7 @@ Point it at your tapflow relay:
       "command": "tapflow-mcp",
       "env": {
         "TAPFLOW_RELAY_URL": "ws://localhost:4000",
-        "TAPFLOW_TOKEN": "tflw_pat_..." // view-scope PAT (not needed for a localhost relay WS, but REST endpoints require it)
+        "TAPFLOW_TOKEN": "tflw_pat_..." // API-type PAT (view, builds:write): list_builds calls GET /builds, which needs builds:write; not needed for a localhost relay WS, but REST endpoints require it
       }
     }
   }

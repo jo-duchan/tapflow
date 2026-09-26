@@ -451,9 +451,11 @@ AWDL은 트리거(AirDrop 검색·AirPlay 수신·Handoff·Bluetooth 근접)가 
 
 ## 로그 확인
 
-릴레이의 동작 로그를 확인하려면:
+릴레이가 실행 중인 Mac에서 다음 명령으로 릴레이의 동작 로그를 확인할 수 있습니다. 릴레이는 다른 기기에는 로그를 보여 주지 않습니다.
 
 ```sh
 tapflow logs
 tapflow logs --lines 200
 ```
+
+Docker로 운영한다면 컨테이너 밖의 CLI는 원격으로 취급되므로 `docker compose logs`로 확인하세요.

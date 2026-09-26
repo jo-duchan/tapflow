@@ -89,7 +89,7 @@ MCP를 지원하는 클라이언트라면 모두 tapflow를 사용할 수 있습
 | 변수 | 설명 | 기본값 |
 |------|------|--------|
 | `TAPFLOW_RELAY_URL` | 릴레이 WebSocket URL | `ws://localhost:4000` |
-| `TAPFLOW_TOKEN` | PAT | (필수) |
+| `TAPFLOW_TOKEN` | **API** 유형 PAT(`view, builds:write`). **Settings → Tokens**에서 발급합니다 | (필수) |
 
 ## 사용 가능한 도구
 
