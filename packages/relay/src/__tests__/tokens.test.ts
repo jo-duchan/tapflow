@@ -82,6 +82,46 @@ describe('POST /api/v1/tokens — scope', () => {
     expect(scopeOf(token)).toBe('view,agent')
   })
 
+  describe('expires_in_days', () => {
+    const expiresAtOf = (rawToken: string): string | null => {
+      const row = getDb()
+        .prepare('SELECT expires_at FROM personal_access_tokens WHERE token_hash = ?')
+        .get(hashPat(rawToken)) as { expires_at: string | null }
+      return row.expires_at
+    }
+
+    it.each([
+      ['omitted', {}],
+      ['0', { expires_in_days: 0 }],
+    ])('%s creates a token with no expiry', async (_label, extra) => {
+      const res = await createToken('Admin', { name: 'no-expiry', ...extra })
+      expect(res.status).toBe(201)
+      const { token } = await res.json() as { token: string }
+      expect(expiresAtOf(token)).toBeNull()
+    })
+
+    it('a positive count sets the expiry that many days out, above the dialog limit too', async () => {
+      const res = await createToken('Admin', { name: 'long', expires_in_days: 400 })
+      expect(res.status).toBe(201)
+      const { token } = await res.json() as { token: string }
+      const days = (new Date(expiresAtOf(token) ?? 0).getTime() - Date.now()) / (24 * 3600 * 1000)
+      expect(days).toBeGreaterThan(399)
+      expect(days).toBeLessThanOrEqual(400)
+    })
+
+    it.each([
+      ['negative', -1],
+      ['not a number', 'soon'],
+      ['too large for a date', 1e12],
+    ])('%s is rejected with 400 and creates nothing', async (label, value) => {
+      // A name per case, so one case's stray row cannot fail the next.
+      const name = `bad-expiry-${label}`
+      const res = await createToken('Admin', { name, expires_in_days: value })
+      expect(res.status).toBe(400)
+      expect(getDb().prepare('SELECT COUNT(*) AS n FROM personal_access_tokens WHERE name = ?').get(name)).toEqual({ n: 0 })
+    })
+  })
+
   // #271 follow-up — 대시보드 agent 커맨드용 릴레이 LAN 주소 조회
   describe('GET /api/v1/relay/host', () => {
     it('인증 없으면 401', async () => {

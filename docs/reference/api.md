@@ -640,9 +640,11 @@ Create a PAT. The token value is returned **only once** at creation time.
 ```
 Body (JSON):
   name            string  required
-  expires_in_days number  optional (omit for no expiry)
+  expires_in_days number  optional (omit or send 0 for no expiry)
   scope           string  optional (comma-separated; default: view,builds:write)
 ```
+
+`expires_in_days` takes a non-negative number of days. A negative or non-numeric value returns `400`. The dashboard accepts 1–365 days, but the API has no upper limit.
 
 `scope` accepts `view`, `builds:write` and `agent`. The `agent` scope is what an agent on a remote Mac uses to connect to the relay, and only an Admin can issue it; any other role gets `403`.
 

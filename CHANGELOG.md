@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **A personal access token can be created with no expiration from the dashboard.** The **New token** dialog offers 7, 30, 60 or 90 days, a custom number of days (1–365) or **No expiration**, with 30 days still the default, and warns beside the field that a token with no expiry stays valid until revoked, recommending 90 days or less for CI. The token list marks such tokens **No expiration** so they can be found and cleaned up. The API already allowed this by omitting `expires_in_days`.
+
+### Changed
+
+- **`POST /api/v1/tokens` rejects an invalid `expires_in_days` with a 400.** A negative count used to create a token that had already expired, and a value too large for a date failed without a proper response. Omitting it or sending `0` still means no expiry, and the API keeps no upper limit.
+
 ### Fixed
 
 - **`tapflow flow run --session` points at where a session id can be found.** Its help and the error for a `--device` name matching more than one device said to look in `tapflow status`, which prints no session ids. Both now name the MCP server's `list_devices`.

@@ -53,7 +53,7 @@ CI 잡이 릴레이의 `POST /api/v1/builds`에 접근할 수 있어야 합니�
 대시보드의 **Settings → Tokens → New token**에서 생성합니다. Tokens 메뉴는 Admin에게만 보이므로 Admin 계정으로 진행하세요.
 
 - **Name**: `GitHub Actions`처럼 용도를 알 수 있는 이름
-- **Expires in (days)**: 1~365일 (기본 30일)
+- **Expiration**: 기본 30일. 7·30·60·90일, 직접 입력(1~365일), **No expiration** 중에서 고를 수 있으며 CI용이라면 90일 이하를 권장합니다.
 - **Type**: **API**. `view, builds:write` 권한이 자동으로 부여됩니다.
 
 토큰은 생성 시 한 번만 표시됩니다. CI 시크릿(예: `TAPFLOW_PAT`)으로 저장하세요.
