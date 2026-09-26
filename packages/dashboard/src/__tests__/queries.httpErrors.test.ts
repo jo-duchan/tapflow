@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, afterEach } from 'vitest'
-import { getApps, getBuilds, updateBuildStatus, scheduleBuildDeletion, cancelBuildDeletion, RoleRefusedError } from '@/lib/queries'
+import { getApps, getBuilds, updateBuildStatus, scheduleBuildDeletion, cancelBuildDeletion, ForbiddenError } from '@/lib/queries'
 
 /**
  * **An empty array is an answer, and a 500 is not one.**
@@ -47,7 +47,7 @@ describe('the fetch helpers the App Center reads through', () => {
   })
 })
 
-// A 403 on a build action is a role refusal (a Viewer, or someone demoted mid-session). It is thrown as
+// A 403 on a build action is the relay refusing it (usually a Viewer, or someone demoted mid-session). It is thrown as
 // its own type carrying the relay's sentence, which App Center says and answers by re-reading `/me`.
 // Mutation: drop `throwIfRefused` from one helper → its row fails with the generic status error.
 describe('build actions refused for the caller\'s role', () => {
@@ -55,16 +55,23 @@ describe('build actions refused for the caller\'s role', () => {
     ['updateBuildStatus', () => updateBuildStatus(1, 'Done')],
     ['scheduleBuildDeletion', () => scheduleBuildDeletion(1)],
     ['cancelBuildDeletion', () => cancelBuildDeletion(1)],
-  ])('%s rejects with RoleRefusedError and the server message on a 403', async (_name, call) => {
+  ])('%s rejects with ForbiddenError and the server message on a 403', async (_name, call) => {
     respondWith(403, { error: 'Viewers have read-only access' })
     const err = await call().then(() => null, (e: unknown) => e)
-    expect(err).toBeInstanceOf(RoleRefusedError)
+    expect(err).toBeInstanceOf(ForbiddenError)
     expect((err as Error).message).toBe('Viewers have read-only access')
   })
 
-  it('a 500 is still a plain failure, not a role refusal', async () => {
+  it('a 403 whose body is JSON null still throws ForbiddenError with a fallback message', async () => {
+    respondWith(403, null)
+    const err = await updateBuildStatus(1, 'Done').then(() => null, (e: unknown) => e)
+    expect(err).toBeInstanceOf(ForbiddenError)
+    expect((err as Error).message).toBe('You do not have permission to do this')
+  })
+
+  it('a 500 is still a plain failure, not a ForbiddenError', async () => {
     respondWith(500)
     const err = await updateBuildStatus(1, 'Done').then(() => null, (e: unknown) => e)
-    expect(err).not.toBeInstanceOf(RoleRefusedError)
+    expect(err).not.toBeInstanceOf(ForbiddenError)
   })
 })

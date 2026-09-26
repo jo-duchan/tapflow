@@ -11,7 +11,7 @@ import {
 import { UploadBuildDialog } from '@/components/UploadBuildDialog'
 import { AppSidebar } from '@/components/app-center/AppSidebar'
 import { ReleaseAccordion } from '@/components/app-center/ReleaseAccordion'
-import { getApps, getBuilds, updateBuildStatus, scheduleBuildDeletion, cancelBuildDeletion, groupByRelease, queryKeys, RoleRefusedError } from '@/lib/queries'
+import { getApps, getBuilds, updateBuildStatus, scheduleBuildDeletion, cancelBuildDeletion, groupByRelease, queryKeys, ForbiddenError } from '@/lib/queries'
 import type { Build } from '@/lib/types'
 import { useFocusAfterSwap } from '@/hooks/useFocusAfterSwap'
 import { useReleaseDisclosure } from '@/hooks/useReleaseDisclosure'
@@ -168,10 +168,10 @@ export function AppCenter() {
       },
       onError: (error: unknown, _vars: V, context: MutationContext | undefined) => {
         if (context?.previous) queryClient.setQueryData(context.key, context.previous)
-        // A 403 here means the role changed since this page loaded — a demotion to Viewer, say. The
-        // relay reads the role per request, so asking for `/me` again hides the controls it will keep
-        // refusing, and the server's own sentence says why instead of a generic failure.
-        if (error instanceof RoleRefusedError) {
+        // 403 = the relay refused. Show its message rather than a generic failure, and re-read the
+        // role: if it changed since this page loaded (a demotion to Viewer), the controls the relay
+        // will keep refusing are hidden. A refusal for another reason (CSRF) just refetches `/me`.
+        if (error instanceof ForbiddenError) {
           void queryClient.invalidateQueries({ queryKey: queryKeys.me })
           toast.error(error.message)
           return

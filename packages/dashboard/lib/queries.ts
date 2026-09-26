@@ -135,15 +135,17 @@ export async function createApp(data: {
 }
 
 /**
- * The relay refused a build action for the caller's role (403). Carries the server's sentence, e.g.
- * "Viewers have read-only access", so App Center can say it and re-read the role.
+ * The relay refused a build action (403). Usually the caller's role — "Viewers have read-only
+ * access" — but the CSRF guard answers 403 too, so this does not claim to know which. It carries the
+ * relay's own sentence; App Center shows it and re-reads the role, which is harmless when unchanged.
  */
-export class RoleRefusedError extends Error {}
+export class ForbiddenError extends Error {}
 
 async function throwIfRefused(res: Response): Promise<void> {
   if (res.status !== 403) return
-  const body = await res.json().catch(() => ({})) as { error?: string }
-  throw new RoleRefusedError(body.error ?? 'You do not have permission to do this')
+  // `null` is valid JSON, so the body can parse and still have no fields.
+  const body = await res.json().catch(() => null) as { error?: string } | null
+  throw new ForbiddenError(body?.error ?? 'You do not have permission to do this')
 }
 
 export async function updateBuildStatus(

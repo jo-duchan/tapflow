@@ -14,7 +14,7 @@ import { withQuery } from './withQuery'
 // Mutation: `canWrite = true` in AppCenter (the role never read) → every Viewer case fails.
 // Mutation: `canWrite = user?.role === 'Admin' || user?.role === 'Developer'` → the QA case fails.
 // Mutation: the empty-state line ignores `canWrite` → the Viewer empty-state case fails.
-// Mutation: the `RoleRefusedError` branch in `optimisticRows.onError` removed → the demoted-mid-session
+// Mutation: the `ForbiddenError` branch in `optimisticRows.onError` removed → the demoted-mid-session
 // case fails (generic toast, `/me` never re-read).
 
 const { toastError } = vi.hoisted(() => ({ toastError: vi.fn() }))
@@ -35,7 +35,7 @@ vi.mock('@/lib/queries', async (importOriginal) => ({
 }))
 
 import { AppCenter } from '@/src/pages/AppCenter'
-import { RoleRefusedError, queryKeys } from '@/lib/queries'
+import { ForbiddenError, queryKeys } from '@/lib/queries'
 
 const user = (role: string): AuthUser => ({ id: 1, email: 'a@b.c', displayName: 'A', avatarUrl: null, role })
 
@@ -122,7 +122,7 @@ describe('App Center — a role change mid-session', () => {
 
   // Demoted to Viewer after the page loaded: the controls are still drawn, and the relay refuses.
   it('a 403 on a status change re-reads the role and says the server\'s reason', async () => {
-    updateBuildStatus.mockRejectedValue(new RoleRefusedError('Viewers have read-only access'))
+    updateBuildStatus.mockRejectedValue(new ForbiddenError('Viewers have read-only access'))
     const client = new QueryClient({ defaultOptions: { queries: { retry: 0, gcTime: 0 }, mutations: { retry: 0 } } })
     const invalidate = vi.spyOn(client, 'invalidateQueries')
     render(

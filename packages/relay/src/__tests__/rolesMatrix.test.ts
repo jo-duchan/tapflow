@@ -120,7 +120,8 @@ interface RouteCase {
   ok: number
   run: (port: number, headers: Record<string, string>) => Promise<Res>
   // Evidence the refused request changed nothing: a Viewer 403 whose side effect still ran is a hole.
-  unchanged?: (port: number, headers: Record<string, string>) => Promise<() => void>
+  // Returns the refused response too, so a row cannot pass on an unrelated 400 that also wrote nothing.
+  unchanged?: (port: number, headers: Record<string, string>) => Promise<[Res, () => void]>
 }
 
 const WRITE_ROUTES: RouteCase[] = [
@@ -129,8 +130,8 @@ const WRITE_ROUTES: RouteCase[] = [
     // An upload auto-creates the app row as well as the build, so both counts are the evidence.
     unchanged: async (p, h) => {
       const builds = count('builds'), apps = count('apps')
-      await upload(p, h)
-      return () => { expect(count('builds')).toBe(builds); expect(count('apps')).toBe(apps) }
+      const r = await upload(p, h)
+      return [r, () => { expect(count('builds')).toBe(builds); expect(count('apps')).toBe(apps) }]
     },
   },
   {
@@ -138,8 +139,8 @@ const WRITE_ROUTES: RouteCase[] = [
     run: (p, h) => request(p, 'PATCH', `/api/v1/builds/${newBuild()}`, h, { status_label: 'In Progress' }),
     unchanged: async (p, h) => {
       const id = newBuild()
-      await request(p, 'PATCH', `/api/v1/builds/${id}`, h, { status_label: 'In Progress' })
-      return () => expect(buildRow(id).status_label).toBe('Backlog')
+      const r = await request(p, 'PATCH', `/api/v1/builds/${id}`, h, { status_label: 'In Progress' })
+      return [r, () => expect(buildRow(id).status_label).toBe('Backlog')]
     },
   },
   {
@@ -147,8 +148,8 @@ const WRITE_ROUTES: RouteCase[] = [
     run: (p, h) => request(p, 'POST', `/api/v1/builds/${newBuild()}/schedule-deletion`, h),
     unchanged: async (p, h) => {
       const id = newBuild()
-      await request(p, 'POST', `/api/v1/builds/${id}/schedule-deletion`, h)
-      return () => expect(buildRow(id).delete_after).toBeNull()
+      const r = await request(p, 'POST', `/api/v1/builds/${id}/schedule-deletion`, h)
+      return [r, () => expect(buildRow(id).delete_after).toBeNull()]
     },
   },
   {
@@ -157,8 +158,8 @@ const WRITE_ROUTES: RouteCase[] = [
     unchanged: async (p, h) => {
       const id = newBuild()
       getDb().prepare(`UPDATE builds SET delete_after = '2099-01-01 00:00:00' WHERE id = ?`).run(id)
-      await request(p, 'DELETE', `/api/v1/builds/${id}/schedule-deletion`, h)
-      return () => expect(buildRow(id).delete_after).toBe('2099-01-01 00:00:00')
+      const r = await request(p, 'DELETE', `/api/v1/builds/${id}/schedule-deletion`, h)
+      return [r, () => expect(buildRow(id).delete_after).toBe('2099-01-01 00:00:00')]
     },
   },
   { name: 'GET /webhooks', creds: ['cookie', 'pat'], ok: 200, run: (p, h) => request(p, 'GET', '/api/v1/webhooks', h) },
@@ -167,8 +168,8 @@ const WRITE_ROUTES: RouteCase[] = [
     run: (p, h) => request(p, 'POST', '/api/v1/webhooks', h, { url: 'http://10.0.0.9/hook' }),
     unchanged: async (p, h) => {
       const before = count('webhook_endpoints')
-      await request(p, 'POST', '/api/v1/webhooks', h, { url: 'http://10.0.0.9/hook' })
-      return () => expect(count('webhook_endpoints')).toBe(before)
+      const r = await request(p, 'POST', '/api/v1/webhooks', h, { url: 'http://10.0.0.9/hook' })
+      return [r, () => expect(count('webhook_endpoints')).toBe(before)]
     },
   },
   {
@@ -176,8 +177,8 @@ const WRITE_ROUTES: RouteCase[] = [
     run: (p, h) => request(p, 'PATCH', `/api/v1/webhooks/${newWebhook()}`, h, { enabled: false }),
     unchanged: async (p, h) => {
       const id = newWebhook()
-      await request(p, 'PATCH', `/api/v1/webhooks/${id}`, h, { enabled: false, url: 'http://10.0.0.7/other' })
-      return () => expect(webhookRow(id)).toEqual({ url: 'http://10.0.0.5/hook', enabled: 1 })
+      const r = await request(p, 'PATCH', `/api/v1/webhooks/${id}`, h, { enabled: false, url: 'http://10.0.0.7/other' })
+      return [r, () => expect(webhookRow(id)).toEqual({ url: 'http://10.0.0.5/hook', enabled: 1 })]
     },
   },
   {
@@ -185,8 +186,8 @@ const WRITE_ROUTES: RouteCase[] = [
     run: (p, h) => request(p, 'DELETE', `/api/v1/webhooks/${newWebhook()}`, h),
     unchanged: async (p, h) => {
       const id = newWebhook()
-      await request(p, 'DELETE', `/api/v1/webhooks/${id}`, h)
-      return () => expect(webhookRow(id)).toBeDefined()
+      const r = await request(p, 'DELETE', `/api/v1/webhooks/${id}`, h)
+      return [r, () => expect(webhookRow(id)).toBeDefined()]
     },
   },
   {
@@ -194,8 +195,8 @@ const WRITE_ROUTES: RouteCase[] = [
     run: (p, h) => request(p, 'POST', '/api/v1/apps', h, { name: 'New', bundle_id_key: `com.example.n${Math.random().toString(36).slice(2)}`, platform: 'ios' }),
     unchanged: async (p, h) => {
       const before = count('apps')
-      await request(p, 'POST', '/api/v1/apps', h, { name: 'New', bundle_id_key: 'com.example.viewer', platform: 'ios' })
-      return () => expect(count('apps')).toBe(before)
+      const r = await request(p, 'POST', '/api/v1/apps', h, { name: 'New', bundle_id_key: 'com.example.viewer', platform: 'ios' })
+      return [r, () => expect(count('apps')).toBe(before)]
     },
   },
   {
@@ -203,8 +204,8 @@ const WRITE_ROUTES: RouteCase[] = [
     run: (p, h) => request(p, 'PATCH', `/api/v1/apps/${newApp()}`, h, { name: 'Renamed' }),
     unchanged: async (p, h) => {
       const id = newApp()
-      await request(p, 'PATCH', `/api/v1/apps/${id}`, h, { name: 'Renamed' })
-      return () => expect(appRow(id)?.name).toBe('A')
+      const r = await request(p, 'PATCH', `/api/v1/apps/${id}`, h, { name: 'Renamed' })
+      return [r, () => expect(appRow(id)?.name).toBe('A')]
     },
   },
   {
@@ -212,8 +213,8 @@ const WRITE_ROUTES: RouteCase[] = [
     run: (p, h) => request(p, 'DELETE', `/api/v1/apps/${newApp()}`, h),
     unchanged: async (p, h) => {
       const id = newApp()
-      await request(p, 'DELETE', `/api/v1/apps/${id}`, h)
-      return () => expect(appRow(id)).toBeDefined()
+      const r = await request(p, 'DELETE', `/api/v1/apps/${id}`, h)
+      return [r, () => expect(appRow(id)).toBeDefined()]
     },
   },
 ]
@@ -270,7 +271,8 @@ describe('role matrix — Viewer is read-only, Admin/Developer/QA can write', ()
       if (route.unchanged) {
         const unchanged = route.unchanged
         it(`${route.name} [${cred}] Viewer → nothing changes`, async () => {
-          const check = await unchanged(port, headersFor('Viewer', cred))
+          const [r, check] = await unchanged(port, headersFor('Viewer', cred))
+          expect(r.status).toBe(403)
           check()
         })
       }
