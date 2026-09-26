@@ -124,12 +124,13 @@ describe('POST /api/v1/comments auth', () => {
     expect(again.status).toBe(201)
   })
 
-  // Same listener, another FK: a member removed by an Admin keeps a valid cookie for up to 7 days,
-  // and comments.author_id references users(id). Any throw in there must not reach the process.
-  it('answers an error for a removed user instead of exiting, and keeps serving', async () => {
+  // A member removed by an Admin still holds a validly signed cookie for up to 7 days. It used to get
+  // as far as the insert and fail on the comments.author_id FK (500); the cookie check now reads the
+  // users row, so it is refused at the door — and the relay keeps serving either way.
+  it('refuses a removed user with 401 instead of exiting, and keeps serving', async () => {
     const ghost = `tapflow_token=${signJwt({ userId: 4242, email: 'gone@example.com', role: 'Developer' })}`
     const r = await postComment(port, { Cookie: ghost }, { build_id: buildId, body: 'from a removed member' })
-    expect(r.status).toBe(500)
+    expect(r.status).toBe(401)
     const again = await postComment(port, { Authorization: `Bearer ${WRITE_PAT}` }, { build_id: buildId, body: 'still up' })
     expect(again.status).toBe(201)
   })

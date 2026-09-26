@@ -15,7 +15,7 @@ export function handleVerify(req: http.IncomingMessage, res: http.ServerResponse
   const db = getDb()
   const inv = db.prepare(`
     SELECT role FROM invitations
-    WHERE token = ? AND used_at IS NULL AND expires_at > datetime('now')
+    WHERE token = ? AND used_at IS NULL AND datetime(expires_at) > datetime('now')
   `).get(token) as { role: string } | undefined
 
   if (!inv) return json(res, 410, { error: 'Invitation expired or not found' })
@@ -25,7 +25,8 @@ export function handleVerify(req: http.IncomingMessage, res: http.ServerResponse
 export function handleAccept(
   req: http.IncomingMessage,
   res: http.ServerResponse,
-  uploadsDir: string
+  uploadsDir: string,
+  onAuthChanged: () => void = () => {},
 ): void {
   const bb = busboy({ headers: req.headers, limits: { fileSize: 2 * 1024 * 1024 } })
   const fields: Record<string, string> = {}
@@ -59,7 +60,7 @@ export function handleAccept(
     const db = getDb()
     const inv = db.prepare(`
       SELECT id, email, role FROM invitations
-      WHERE token = ? AND used_at IS NULL AND expires_at > datetime('now')
+      WHERE token = ? AND used_at IS NULL AND datetime(expires_at) > datetime('now')
     `).get(token) as { id: number; email: string | null; role: string } | undefined
 
     if (!inv) return json(res, 410, { error: 'Invitation expired or not found' })
@@ -92,6 +93,9 @@ export function handleAccept(
     }
 
     db.prepare("UPDATE invitations SET used_at = datetime('now') WHERE id = ?").run(inv.id)
+    // Accepting for an email that already has an account overwrites its role, which can take an
+    // Admin's agent authority away from sockets already open.
+    if (existing) onAuthChanged()
 
     const user = db.prepare('SELECT email, role FROM users WHERE id = ?').get(userId) as { email: string; role: string }
     const jwtToken = signJwt({ userId, email: user.email, role: user.role })

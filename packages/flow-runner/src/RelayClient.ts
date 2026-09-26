@@ -342,6 +342,12 @@ const delay = (ms: number) => new Promise<void>((r) => setTimeout(r, ms))
 // the dashboard and mcp-server already use.
 export class RelayClient {
   private ws: WebSocket | null = null
+  /**
+   * How the relay last closed the socket. A relay that refuses a token (wrong scope, owner no longer an
+   * Admin) accepts the upgrade and closes 1008 right after, so `connect()` has already resolved and the
+   * first thing to fail is the next send — which, without this, could only say "not connected".
+   */
+  private lastClose: { code: number; reason: string } | null = null
   /** One identity per process, so a reconnect re-joins its own sessions instead of contending with the
    *  socket it replaces. Minted here rather than supplied: nothing outside this process shares it. */
   private readonly clientId = randomUUID()
@@ -361,6 +367,7 @@ export class RelayClient {
       const ws = new WebSocket(url.toString(), { headers })
       ws.once('open', () => {
         this.ws = ws
+        this.lastClose = null
         resolve()
       })
       ws.once('error', (e) => reject(new RelayUnavailableError(`relay connection failed: ${(e as Error).message}`)))
@@ -370,18 +377,29 @@ export class RelayClient {
           this.dispatch(JSON.parse((data as Buffer).toString()) as RelayMsg)
         } catch { /* ignore malformed */ }
       })
-      ws.on('close', () => {
+      ws.on('close', (code: number, reason: Buffer) => {
+        // Recorded only when the relay closed the socket in use; `disconnect()` lets go of it first, so a
+        // close this client asked for is not reported as the relay's.
+        if (this.ws === ws) this.lastClose = { code, reason: reason.toString() }
         this.ws = null
+        const closed = `relay connection closed${this.closeDetail()}`
         for (const w of this.waiters.splice(0)) {
           clearTimeout(w.timer)
           // The other place a waiter is settled without an answer, so the other place the note belongs. A
           // relay that dropped while its agent was already away has two things to say and only one of them
           // is about the relay.
           const note = w.sessionId ? this.sessionNote(w.sessionId) : undefined
-          w.reject(new RelayClosedError(note ? `relay connection closed — ${note}` : 'relay connection closed'))
+          w.reject(new RelayClosedError(note ? `${closed} — ${note}` : closed))
         }
       })
     })
+  }
+
+  /** ` (relay closed 1008: <reason>)`, or nothing when the relay has not closed this client's socket. */
+  private closeDetail(): string {
+    const c = this.lastClose
+    if (!c) return ''
+    return c.reason ? ` (relay closed ${c.code}: ${c.reason})` : ` (relay closed ${c.code})`
   }
 
   disconnect(): void {
@@ -586,7 +604,7 @@ export class RelayClient {
    *  `mcp-server`'s equivalent was typed in `7637be3`. */
   private send(msg: BrowserToRelay): void {
     if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
-      throw new RelayUnavailableError('not connected to relay')
+      throw new RelayUnavailableError(`not connected to relay${this.closeDetail()}`)
     }
     this.ws.send(JSON.stringify(msg))
   }
@@ -611,14 +629,26 @@ export class RelayClient {
     })
   }
 
+  /**
+   * `send` for the first requests after `connect()`, which are the ones that meet a relay refusing the
+   * token: it accepts the upgrade and closes 1008 at once, so the socket can still be CLOSING here. Its
+   * `close` event carries the code and reason and settles the waiter the caller registers next, which
+   * says more than the "not connected" `send` would throw now. Only while CLOSING; a closed or missing
+   * socket still throws.
+   */
+  private sendFirstRequest(msg: BrowserToRelay): void {
+    if (this.ws?.readyState === WebSocket.CLOSING) return
+    this.send(msg)
+  }
+
   async listDevices(): Promise<AgentSession[]> {
-    this.send({ type: 'agents:list' })
+    this.sendFirstRequest({ type: 'agents:list' })
     const msg = await this.waitFor((m) => m['type'] === 'agents:listed', 5_000, 'agents:list')
     return (msg['sessions'] as AgentSession[]) ?? []
   }
 
   async joinSession(sessionId: string): Promise<void> {
-    this.send({ type: 'session:start', sessionId })
+    this.sendFirstRequest({ type: 'session:start', sessionId })
     const msg = await this.waitFor(
       (m) =>
         (m['type'] === 'session:joined' && m['sessionId'] === sessionId) ||

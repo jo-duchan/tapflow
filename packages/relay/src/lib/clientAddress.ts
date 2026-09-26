@@ -87,3 +87,19 @@ export function markTunnelIngress(req: http.IncomingMessage): void {
 export function isTunnelIngress(req: http.IncomingMessage): boolean {
   return tunnelRequests.has(req)
 }
+
+/**
+ * Locality of an HTTP request, for every door that serves only the relay host (`auth/init`,
+ * `auth/status`, `/api/v1/logs`). The trusted-proxy list is an argument rather than read from config
+ * here, so each caller passes the same list the WebSocket path uses: one locality rule, not one per
+ * route. The tunnel listener's mark is read here, so no caller can forget it.
+ */
+export function resolveRequestClient(req: http.IncomingMessage, trustedProxies: string[]): ResolvedClientAddress {
+  const xff = req.headers['x-forwarded-for']
+  return resolveClientAddress({
+    socketAddr: req.socket.remoteAddress ?? '',
+    forwardedFor: Array.isArray(xff) ? xff[0] : xff,
+    trustedProxies,
+    viaTunnel: isTunnelIngress(req),
+  })
+}

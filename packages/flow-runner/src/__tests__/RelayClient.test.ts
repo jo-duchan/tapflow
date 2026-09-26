@@ -4,6 +4,7 @@ import {
   InputRefusedError,
   InputUnconfirmedError,
   RelayClient,
+  RelayClosedError,
   RelayHttpError,
   SessionEndedError,
   SessionJoinError,
@@ -1275,5 +1276,93 @@ describe('RelayClient — typed environment failures', () => {
     expect(err).toBeInstanceOf(SessionUnavailableError)
     expect((err as Error).message).toMatch(/the relay ended this session \(agent-disconnected\)/)
     expect((err as Error).cause).toBeInstanceOf(Error)
+  })
+})
+
+// A relay that refuses a token accepts the upgrade and closes 1008 with a reason right after, so
+// `connect()` resolves and the first request fails. Both ways it can fail name the relay's code and
+// reason; otherwise a token without `view` reads as "not connected to relay" with nothing to act on.
+//
+// Mutations: `closeDetail()` dropped from the "not connected" error → the first case; dropped from
+// `RelayClosedError` → the second.
+describe('RelayClient — a relay close carries its code and reason', () => {
+  let wss: WebSocketServer | null = null
+  afterEach(async () => {
+    const s = wss
+    wss = null
+    if (!s) return
+    for (const c of s.clients) c.terminate()
+    await new Promise<void>((r) => s.close(() => r()))
+  })
+
+  it('closed right after open, then a join → the error names 1008 and the reason', async () => {
+    const server = new WebSocketServer({ port: 0 })
+    wss = server
+    const serverSideClosed = new Promise<void>((resolve) => {
+      server.on('connection', (ws) => {
+        ws.once('close', () => resolve())
+        ws.close(1008, 'Forbidden: this token lacks the view scope')
+      })
+    })
+    const port = (server.address() as { port: number }).port
+    const client = new RelayClient(`ws://localhost:${port}`, 'tflw_pat_x')
+    await client.connect()
+    await serverSideClosed
+    // The server's close event can land before the client's; wait until the client has handled its own
+    // close (its handler lets go of the socket), so this case is the "not connected" path and not the
+    // CLOSING one below. A condition, not a fixed delay: a slow runner would otherwise take the CLOSING
+    // path and pass for the wrong reason.
+    await vi.waitFor(() => {
+      expect((client as unknown as { ws: WebSocket | null }).ws).toBeNull()
+    })
+    const err = await client.joinSession('s1').catch((e: unknown) => e) as Error
+    expect(err.message).toMatch(/not connected/)
+    expect(err.message).toContain('1008')
+    expect(err.message).toContain('lacks the view scope')
+  })
+
+  // The sequence `tapflow flow run` actually has: the join goes out while the socket is still closing.
+  // Mutation: `sendFirstRequest` throwing while CLOSING (plain `send`) turns this red intermittently —
+  // it is how the gap was found — and the case above covers the CLOSED path deterministically.
+  it('refused at once and joined at once → the error still names 1008 and the reason', async () => {
+    const server = new WebSocketServer({ port: 0 })
+    wss = server
+    server.on('connection', (ws) => ws.close(1008, 'Forbidden: this token lacks the view scope'))
+    const port = (server.address() as { port: number }).port
+    const client = new RelayClient(`ws://localhost:${port}`, 'tflw_pat_x')
+    await client.connect()
+    const err = await client.joinSession('s1').catch((e: unknown) => e) as Error
+    expect(err.message).toContain('1008')
+    expect(err.message).toContain('lacks the view scope')
+  })
+
+  it('closed while a join is pending → RelayClosedError names 1008 and the reason', async () => {
+    const server = new WebSocketServer({ port: 0 })
+    wss = server
+    server.on('connection', (ws) => {
+      ws.on('message', () => ws.close(1008, 'Unauthorized: X'))
+    })
+    const port = (server.address() as { port: number }).port
+    const client = new RelayClient(`ws://localhost:${port}`, 'tflw_pat_x')
+    await client.connect()
+    const err = await client.joinSession('s1').catch((e: unknown) => e) as Error
+    expect(err).toBeInstanceOf(RelayClosedError)
+    expect(err.message).toContain('1008')
+    expect(err.message).toContain('Unauthorized: X')
+  })
+
+  it('a close this client asked for is not reported as the relay\'s', async () => {
+    const server = new WebSocketServer({ port: 0 })
+    wss = server
+    const serverSideClosed = new Promise<void>((resolve) => server.on('connection', (ws) => ws.once('close', () => resolve())))
+    const port = (server.address() as { port: number }).port
+    const client = new RelayClient(`ws://localhost:${port}`, '')
+    await client.connect()
+    client.disconnect()
+    // After the close has landed on both ends, so recording it regardless of who asked would show here.
+    await serverSideClosed
+    await new Promise((r) => setTimeout(r, 20))
+    const err = await client.joinSession('s1').catch((e: unknown) => e) as Error
+    expect(err.message).toBe('not connected to relay')
   })
 })

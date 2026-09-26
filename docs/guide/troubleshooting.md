@@ -465,9 +465,11 @@ Password reset links expire after **2 hours**. An Admin can send a new link with
 
 ## Viewing logs
 
-To inspect relay activity:
+On the relay host, inspect its activity with the commands below. The relay does not show its logs to other machines.
 
 ```sh
 tapflow logs
 tapflow logs --lines 200
 ```
+
+Running under Docker, a CLI outside the container counts as remote; use `docker compose logs` instead.

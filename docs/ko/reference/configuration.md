@@ -31,7 +31,7 @@
 | 키 | 설명 |
 |----|------|
 | `local` | 이 머신에서 실행하는 릴레이 서버 설정 |
-| `relay.url` | 연결할 릴레이 URL. `tapflow agent start`, `tapflow admin init`, `tapflow status`, `tapflow logs`의 기본값으로 사용됩니다. 설정 시 `--relay` 플래그 없이 동작합니다. 비어있으면 로컬 모드(`ws://localhost:[local.port]`)를 사용합니다. `ws://` 또는 `wss://`로 적어야 합니다. `tapflow agent start`는 다른 스킴을 거부하고 나머지 명령은 필요하면 HTTP 스킴으로 바꿔 씁니다. |
+| `relay.url` | 연결할 릴레이 URL. `tapflow agent start`, `tapflow admin init`, `tapflow status`의 기본값으로 사용됩니다. 설정 시 `--relay` 플래그 없이 동작합니다. `tapflow logs`는 이 값을 읽지 않고 명령을 실행한 머신의 릴레이(`http://localhost:[local.port]`)를 조회하므로 릴레이 호스트에서 실행합니다. 비어있으면 로컬 모드(`ws://localhost:[local.port]`)를 사용합니다. `ws://` 또는 `wss://`로 적어야 합니다. `tapflow agent start`는 다른 스킴을 거부하고 나머지 명령은 필요하면 HTTP 스킴으로 바꿔 씁니다. |
 | `tunnel` | `tapflow start`와 `tapflow relay start`가 함께 띄우는 터널 설정. 아래 터널 섹션을 참고하세요. |
 | `tls` | LAN HTTPS(보안 컨텍스트) 설정. WebCodecs 하드웨어 디코드에 필요합니다. 아래 HTTPS 섹션을 참고하세요. |
 | `smtp` | 초대·비밀번호 재설정 이메일 발송을 위한 SMTP 설정 |
@@ -55,7 +55,7 @@
 | `TAPFLOW_DATA_DIR` | `local.dataDir` | `<설치>/data` | DB·업로드 디렉터리. 환경변수는 현재 디렉터리 기준, `local.dataDir`은 설정 파일 기준으로 상대 경로를 풉니다. 이미 `.tapflow/data`나 `.tapflow-data`가 있는 설치는 그대로 씁니다. |
 | `TAPFLOW_RELAY_URL` | `relay.url` | *(비어있음)* | CLI 명령어의 기본 릴레이 URL |
 | `TAPFLOW_AGENT_TOKEN` | — | *(비어있음)* | 원격 릴레이 인증용 `agent` 스코프 토큰. `--token` 플래그가 우선합니다. [에이전트 설정](/ko/operate/agents#원격-릴레이-인증)을 참고하세요. |
-| `TAPFLOW_TOKEN` | — | *(비어있음)* | `tapflow flow run`과 MCP 서버가 원격 릴레이에 접속할 때 쓰는 개인 액세스 토큰(PAT). `flow run`에서는 `--token` 플래그가 우선합니다. |
+| `TAPFLOW_TOKEN` | — | *(비어있음)* | `tapflow flow run`과 MCP 서버가 원격 릴레이에 접속할 때 쓰는 개인 액세스 토큰(PAT). 대시보드에서 만든 API 유형 토큰(`view, builds:write`)을 쓰세요. `flow run`에서는 `--token` 플래그가 우선합니다. |
 | `TAPFLOW_TUNNEL_TOKEN` | — | *(비어있음)* | rathole 터널 인증에 쓰는 비밀 문자열. `tunnel.provider`가 `rathole`일 때 필요합니다. |
 | `TAPFLOW_LEAN` | `agent.lean` | `off` | `on` 또는 `off`. 다른 값은 경고와 함께 무시하고 설정 파일의 값을 씁니다. |
 | `TAPFLOW_TRUSTED_PROXIES` | — | *(비어있음)* | 신뢰하는 리버스 프록시 IP 목록(콤마 구분, 예: `127.0.0.1,::1`). 릴레이를 같은 호스트의 리버스 프록시 뒤에서 실행할 때 이 값을 설정하면, 프록시 주소 대신 `X-Forwarded-For`에 담긴 실제 클라이언트 IP를 사용합니다. 비어 있으면 전달 헤더를 파싱하지 않습니다. |

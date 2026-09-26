@@ -347,13 +347,15 @@ Example output:
 
 Show the recent log entries the relay keeps in memory (last 100 lines by default). Few events are recorded in this buffer. The relay's full log goes to the terminal it runs in.
 
+The relay shows these logs only to the relay host, so run this command there. Pointed at a remote relay from another machine, it gets `403` and the CLI tells you what to run on the relay host instead. Under Docker, a CLI outside the container counts as remote too; use `docker compose logs`.
+
 ```sh
 tapflow logs
 ```
 
 | Option | Default | Description |
 |--------|---------|-------------|
-| `--relay <url>` | `relay.url` in config, or `http://localhost:4000` | Relay URL. Omit if `relay.url` is set in `tapflow.config.json`. |
+| `--relay <url>` | `http://localhost:<local.port>` (4000 by default) | URL of the relay on this machine. Set it when the relay runs on another port. `relay.url` is not read. |
 | `--lines <n>` | `100` | Number of log lines to show (max 500) |
 
 ## `tapflow flow run`
@@ -367,7 +369,7 @@ tapflow flow run .tapflow/flows/login-smoke.yaml
 | Option | Default | Description |
 |--------|---------|-------------|
 | `--relay <url>` | `ws://localhost:4000` | Relay WebSocket URL. Does not read `relay.url`. |
-| `--token <token>` | `TAPFLOW_TOKEN` env | Personal access token (PAT) for a remote relay |
+| `--token <token>` | `TAPFLOW_TOKEN` env | Personal access token (PAT) for a remote relay. Needs an API-type token (`view, builds:write`). |
 | `--session <id>` | — | Target session ID (from the MCP server's `list_devices`) |
 | `--device <name>` | — | Target device by name. Boots it when it is shut down. |
 | `--build <id>` | — | Build under test. Installed before the run and launched by the `launchApp` step. |
