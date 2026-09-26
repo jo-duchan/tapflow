@@ -34,13 +34,14 @@ To apply TLS to the browser ↔ relay leg (WAN), use a reverse proxy or tunnel i
 
 Programmatic access to tapflow is controlled by **personal access tokens (PATs)**.
 
-- Tokens are issued per user. When someone leaves, revoke their token.
+- Tokens are issued per user. Removing a team member deletes their tokens too.
 - Each token carries a **scope** that limits what it can do:
   - `builds:write` — upload builds, for CI/CD pipelines (issued from the dashboard under Settings → Tokens)
-  - `view` — read the app list, uploaded files, session screenshots and UI trees
-  - `agent` — connect an agent on a remote Mac to the relay (only an Admin can issue one)
+  - `view` — read the app list, uploaded files, session screenshots and UI trees. Also required to open a device session over WebSocket from a remote machine.
+  - `agent` — connect an agent on a remote Mac to the relay. Only an Admin can issue one, and it works only while the member who issued it is still an Admin.
 - Dashboard access for team members is governed separately by **roles** (Admin / Developer / QA / Viewer), not by PATs.
 - A call made with a PAT is held to its owner's current role. Viewer is read-only, so a `builds:write` token owned by a Viewer cannot upload builds. The HTTP endpoints that check roles read the role on every request, so a role change applies there right away, for cookies and tokens alike.
+- Open device sessions are covered as well. Removing a member, revoking a token, or changing the role of the Admin who issued an `agent` token makes the relay close the WebSocket connections opened with it at once. A connection whose token or sign-in session expires is closed within 30 seconds.
 
 ## Access control boundaries
 
@@ -48,7 +49,8 @@ Here is what tapflow handles and what you manage as the infrastructure operator.
 
 **tapflow provides:**
 - API authentication: build upload and listing, comments and webhooks accept a signed-in session or a `builds:write` PAT; the app list, uploaded files, screenshots and UI trees accept a signed-in session or a `view` PAT. The [REST API reference](/reference/api) lists which endpoints accept a PAT.
-- Device stream (WebSocket) authentication: a remote connection must present credentials, and a remote agent needs a PAT with the `agent` scope.
+- Device stream (WebSocket) authentication: a remote connection needs a signed-in session or a PAT with the `view` scope, and a remote agent needs an `agent`-scope PAT issued by a current Admin.
+- Relay logs (`GET /api/v1/logs`) are served only to the relay host.
 - Sign-in for every connection that does not reach the relay port over loopback, including tunnel traffic, which arrives on a separate loopback port of its own
 - No outbound data transmission to external services
 

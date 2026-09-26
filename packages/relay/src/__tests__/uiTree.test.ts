@@ -5,7 +5,7 @@ import os from 'os'
 import path from 'path'
 import { WebSocket } from 'ws'
 import { RelayServer } from '../RelayServer'
-import { initDb, closeDb } from '../db'
+import { initDb, closeDb, getDb } from '../db'
 
 import type { UIElement } from '../types'
 import { signJwt } from '../middleware/auth'
@@ -63,6 +63,8 @@ describe('GET /api/v1/sessions/:sessionId/ui-tree', () => {
   beforeAll(() => {
     tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'tapflow-uitree-test-'))
     initDb(path.join(tmpDir, 'test.db'))
+    // The cookie check reads the users row, so the signed-in user has to exist.
+    getDb().prepare("INSERT INTO users (id, email, role, password_hash) VALUES (1, 'test@example.com', 'Admin', 'x')").run()
   })
 
   afterAll(() => {

@@ -69,7 +69,8 @@ export async function handleCreateToken(req: http.IncomingMessage, res: http.Ser
 export function handleRevokeToken(
   req: http.IncomingMessage,
   res: http.ServerResponse,
-  params: Record<string, string>
+  params: Record<string, string>,
+  onAuthChanged: () => void = () => {},
 ): void {
   const auth = requireAuth(req, res)
   if (!auth) return
@@ -80,5 +81,7 @@ export function handleRevokeToken(
   ).run(params.id, auth.userId)
 
   if (result.changes === 0) return json(res, 404, { error: 'Token not found' })
+  // Closes the sockets that were opened with it.
+  onAuthChanged()
   json(res, 204, null)
 }

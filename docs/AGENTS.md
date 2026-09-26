@@ -54,6 +54,8 @@ iOS/Android 양쪽을 지원하는 기능을 설명할 때 특정 플랫폼 도�
 | simulator / emulator | 시뮬레이터 / 에뮬레이터 | simulator / emulator | 시뮬 |
 | personal access token | 처음에 "개인 액세스 토큰(PAT)", 이후 PAT | "personal access token (PAT)" first, then PAT | 설명 없는 첫 PAT |
 | team member | 팀원, 팀 전체 | teammate, the whole team | QA팀 |
+| the machine the relay runs on (Mac, Linux or Docker host) | 릴레이 호스트 | relay host | 릴레이가 Mac이 아닐 수 있는 문맥의 "릴레이 Mac", "the Mac the relay runs on" |
+| dashboard token Type **API** (`view, builds:write`) | API 유형 토큰(또는 API 유형 PAT), 스코프를 괄호로 한 번 병기 | API-type token (or API-type PAT), scopes in parentheses once | "view-scope PAT", "API 토큰", 스코프 없는 "PAT"만으로 종류 지시 |
 
 - 약어는 페이지에서 처음 나올 때 풀어 쓴다(AVD, PAT, TLS 등). 업계에서 그대로 쓰는 약어(API, URL, CI)는 예외다.
 - 새 용어가 두 번 이상 나오면 이 표에 행을 추가한다.

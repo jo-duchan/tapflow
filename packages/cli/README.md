@@ -237,7 +237,7 @@ tapflow agent start --relay wss://your-relay-url --token <agent-token>
 | `tapflow boot <name\|udid>` | Boot a simulator or emulator |
 | `tapflow status` | Show connected agents, devices, active sessions |
 | `tapflow reset` | Shut down all simulators and emulators |
-| `tapflow logs` | Show recent relay log entries |
+| `tapflow logs` | Show recent relay log entries (run on the relay host) |
 
 Full reference → [CLI docs](https://www.tapflow.dev/reference/cli)
 

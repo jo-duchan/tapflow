@@ -12,9 +12,9 @@ import type { ChromePayload, InputErrorReason, RelayOutbound, PosturesPayload } 
 import { directionOf, parseInbound } from '@tapflowio/protocol/validate'
 import type { ParsedInbound, ParseFailure, ParseResult } from '@tapflowio/protocol/validate'
 import { Router, json } from './router.js'
-import { requireViewAuth, requireAuth, getAuth, verifyPat } from './middleware/auth.js'
-import { classifyConnection } from './lib/connectionAuth.js'
-import { isTunnelIngress, markTunnelIngress, resolveClientAddress } from './lib/clientAddress.js'
+import { requireViewAuth, requireAuth, getAuth, verifyPat, touchPat, findPat, findUser } from './middleware/auth.js'
+import { AGENT_SCOPE, WS_AGENT_OWNER_REASON, WS_SCOPE_REASON, classifyConnection, revalidatePrincipal, type SocketPrincipal } from './lib/connectionAuth.js'
+import { isTunnelIngress, markTunnelIngress, resolveClientAddress, resolveRequestClient } from './lib/clientAddress.js'
 import { BuildTicketStore } from './lib/buildTickets.js'
 import { resolveBuildFile } from './lib/buildFiles.js'
 import { resolveCorsHeaders } from './lib/cors.js'
@@ -164,6 +164,23 @@ export function ownerKeyFor(
 /** One line per rejecting socket per second, at most. See `RelayServer.logInboundRejection`. */
 const REJECT_LOG_INTERVAL_MS = 1_000
 
+/** One line per refused credential per minute. See `RelayServer.logConnectionRejection`. */
+const CONNECTION_REJECT_LOG_INTERVAL_MS = 60_000
+
+export const LOGS_FORBIDDEN_MESSAGE = 'Logs are only available on the relay host. Run `tapflow logs` there.'
+
+/**
+ * `?lines=` for `/api/v1/logs`: an integer in [1, 500], 100 when absent or not a number. A bare
+ * `Number()` let `abc` through as NaN, and `slice(-NaN)` returns the whole buffer; `-5` became
+ * `slice(5)`, everything but the oldest five.
+ */
+export function parseLogLines(raw: string | null): number {
+  if (raw === null || raw.trim() === '') return 100
+  const n = Number(raw)
+  if (!Number.isFinite(n)) return 100
+  return Math.min(500, Math.max(1, Math.trunc(n)))
+}
+
 /** What the door refused, as one line. The throttling that decides whether to write it is the
  *  caller's, because it is per socket and this function has no state. */
 function describeRejection(failure: ParseFailure, suppressed: number): string | null {
@@ -262,6 +279,23 @@ export class RelayServer {
   /** Per-socket throttle state for `logInboundRejection`. A `WeakMap` so a closed socket's entry goes
    *  with the socket — there is no cleanup to forget, unlike the maps keyed by session id nearby. */
   private readonly rejectionLog = new WeakMap<WebSocket, { at: number; suppressed: number }>()
+  /**
+   * The credential each remote socket was accepted with, re-checked by `revalidateSockets` on every
+   * heartbeat and after every write that can take access away (`onAuthChanged`). Local sockets have
+   * no entry and are never re-checked: they needed no credential.
+   */
+  private readonly principals = new WeakMap<WebSocket, SocketPrincipal>()
+  /** For a `first-message` socket: what its first frame may make of it. Absent means anything (local). */
+  private readonly firstMessageGrants = new WeakMap<WebSocket, { mayBrowse: boolean; mayRegisterAgent: boolean }>()
+  /**
+   * Sockets the relay closed because their credential stopped being valid. Their frames are dropped
+   * from the moment of the close rather than from the peer's close reply, and an agent socket among
+   * them skips the reconnect grace: the agent will be refused when it comes back, so holding its
+   * sessions for 15 s would only postpone the same end.
+   */
+  private readonly revokedSockets = new WeakSet<WebSocket>()
+  /** Per-credential throttle for `logConnectionRejection`: agents retry forever on a refusal. */
+  private readonly connectionRejectLog = new Map<string, { at: number; suppressed: number }>()
   // Agent sockets whose sessions are being held open, and the timer that gives up on each.
   // Keyed by the dead socket, never by session id: a rebind moves sessions off that socket, so an
   // expiry that fires late has nothing left to evict. That is the invariant — releasing the hold
@@ -379,7 +413,7 @@ export class RelayServer {
 
     // invitations
     this.router.get('/api/v1/invitations/verify', handleVerify)
-    this.router.post('/api/v1/invitations/accept', (req, res) => handleAccept(req, res, u))
+    this.router.post('/api/v1/invitations/accept', (req, res) => handleAccept(req, res, u, this.onAuthChanged))
 
     // apps
     this.router.get('/api/v1/apps', handleListApps)
@@ -415,14 +449,14 @@ export class RelayServer {
     // team
     this.router.get('/api/v1/team/members', handleListMembers)
     this.router.post('/api/v1/team/invite', (req, res) => handleInvite(req, res, this.options.tunnel))
-    this.router.patch('/api/v1/team/members/:id', handleUpdateMember)
-    this.router.delete('/api/v1/team/members/:id', handleDeleteMember)
+    this.router.patch('/api/v1/team/members/:id', (req, res, params) => handleUpdateMember(req, res, params, this.onAuthChanged))
+    this.router.delete('/api/v1/team/members/:id', (req, res, params) => handleDeleteMember(req, res, params, this.onAuthChanged))
     this.router.post('/api/v1/team/members/:id/send-reset', (req, res, params) => handleSendMemberReset(req, res, params, this.options.tunnel))
 
     // tokens
     this.router.get('/api/v1/tokens', handleListTokens)
     this.router.post('/api/v1/tokens', handleCreateToken)
-    this.router.delete('/api/v1/tokens/:id', handleRevokeToken)
+    this.router.delete('/api/v1/tokens/:id', (req, res, params) => handleRevokeToken(req, res, params, this.onAuthChanged))
 
     // settings
     this.router.get('/api/v1/settings', handleGetSettings)
@@ -435,10 +469,16 @@ export class RelayServer {
     this.router.get('/api/v1/recordings', (req, res) => handleListRecordings(req, res))
     this.router.get('/api/v1/recordings/:filename', (req, res) => handleDownloadRecording(req, res, this.recordingsDir))
 
-    // logs
+    // logs — the relay host only. The buffer holds the addresses of refused connections, nothing
+    // remote reads it (`tapflow logs` is its only consumer), and every line is also in the relay's own
+    // output. Same locality rule and proxy list as `auth/init` and the WebSocket handshake, so the tunnel
+    // listener is remote here too.
     this.router.get('/api/v1/logs', (req, res) => {
+      if (!resolveRequestClient(req, this.options.trustedProxies ?? []).isLocal) {
+        return json(res, 403, { error: LOGS_FORBIDDEN_MESSAGE })
+      }
       const url = new URL(req.url ?? '/', `http://localhost`)
-      const lines = Math.min(Number(url.searchParams.get('lines') ?? 100), 500)
+      const lines = parseLogLines(url.searchParams.get('lines'))
       res.writeHead(200, { 'Content-Type': 'application/json' })
       res.end(JSON.stringify(this.logBuffer.slice(-lines)))
     })
@@ -482,6 +522,7 @@ export class RelayServer {
     // Creates this install's JWT secret if it has none. Here rather than at import, so commands
     // that never run a relay stop leaving one behind — and a write failure is still a boot failure.
     getJwtSecret()
+    this.warnOrphanedAgentTokens()
     purgeExpiredRecordings(this.recordingsDir)
     this.purgeRecordingsTimer = setInterval(() => purgeExpiredRecordings(this.recordingsDir), 24 * 60 * 60 * 1000)
     this.purgeRecordingsTimer.unref()
@@ -583,12 +624,104 @@ export class RelayServer {
     return this.tunnelServer?.address() ?? null
   }
 
+  /**
+   * An install upgrading to a relay that checks an agent token's owner stops connecting agents whose
+   * token belongs to a since-demoted Admin. Say how many at boot, with the fix, rather than leaving the
+   * operator to read 1008s off each agent.
+   */
+  private warnOrphanedAgentTokens(): void {
+    const row = getDb().prepare(`
+      SELECT COUNT(*) AS n FROM personal_access_tokens pat JOIN users u ON u.id = pat.user_id
+      WHERE u.role <> 'Admin'
+        AND (',' || REPLACE(pat.scope, ' ', '') || ',') LIKE '%,${AGENT_SCOPE},%'
+        AND (pat.expires_at IS NULL OR datetime(pat.expires_at) > datetime('now'))
+    `).get() as { n: number }
+    if (row.n > 0) {
+      logger.warn(`${row.n} agent token(s) belong to a member who is no longer an Admin and will be refused. An Admin must issue a new agent token (Dashboard → Settings → Tokens) for each agent that uses one.`)
+    }
+  }
+
   // Terminate sockets that missed the previous pong; ping the rest. Covers all roles via wss.clients.
+  // Every socket's credential is re-checked on the same sweep: this is the guarantee that a removed
+  // member, a revoked or expired token, or an expired session cookie loses an open socket within one
+  // interval, whatever path the change took. `onAuthChanged` is the same check run early.
   private runHeartbeat(clients: Iterable<WebSocket> = this.wss.clients): void {
+    this.revalidateSockets(clients)
     for (const ws of clients) {
       if (!this.isAlive(ws)) { ws.terminate(); continue }
       if (ws.readyState === WebSocket.OPEN) ws.ping()
     }
+  }
+
+  /**
+   * Injected into the handlers whose write can take access away — member update and removal, token
+   * revocation, invitation accept — and called after the write commits. It carries no argument on
+   * purpose: the sweep re-derives every socket's standing from the database, so no handler has to know
+   * which sockets its change affects.
+   */
+  private readonly onAuthChanged = (): void => {
+    this.revalidateSockets(this.wss.clients)
+  }
+
+  private revalidateSockets(clients: Iterable<WebSocket>): void {
+    const now = Math.floor(Date.now() / 1000)
+    for (const ws of clients) {
+      const principal = this.principals.get(ws)
+      if (!principal || this.revokedSockets.has(ws) || ws.readyState !== WebSocket.OPEN) continue
+      let reason: string | null
+      try {
+        const pat = principal.via === 'pat' ? findPat(principal.patId) : null
+        const role = this.wsRoles.get(ws)
+        reason = revalidatePrincipal(principal, role, {
+          userExists: principal.via === 'cookie' ? findUser(principal.userId) !== null : true,
+          pat,
+        }, now)
+        // A socket that has not introduced itself yet takes what a fresh handshake would give it now.
+        if (reason === null && role === undefined && pat) {
+          const again = classifyConnection({ isLocal: false, hasCookieAuth: false, patScopes: pat.scopes, patOwnerRole: pat.ownerRole })
+          if (again.action === 'accept') {
+            this.firstMessageGrants.set(ws, again.role === 'browser'
+              ? { mayBrowse: true, mayRegisterAgent: false }
+              : { mayBrowse: again.mayBrowse, mayRegisterAgent: again.mayRegisterAgent })
+          }
+        }
+      } catch (err) {
+        // A database fault is not a revocation: closing every socket on a transient `SQLITE_BUSY` would
+        // disconnect the whole team. The next sweep asks again.
+        logger.error('socket re-validation failed:', err)
+        return
+      }
+      if (reason !== null) this.closeForAuth(ws, reason)
+    }
+  }
+
+  private closeForAuth(ws: WebSocket, reason: string): void {
+    this.revokedSockets.add(ws)
+    this.pushLog(`WS connection closed — ${reason}`)
+    ws.close(1008, reason)
+  }
+
+  /**
+   * One line per refused credential per interval. Agents retry forever on a refusal, so logging each
+   * attempt would fill the 500-line buffer with one agent's reconnects. Keyed by PAT id when there is
+   * one and by address otherwise; the first refusal of each is always written.
+   */
+  private logConnectionRejection(addr: string, reason: string, patId: number | undefined): void {
+    const key = patId !== undefined ? `pat:${patId}` : `addr:${addr}`
+    const now = Date.now()
+    const state = this.connectionRejectLog.get(key)
+    if (state && now - state.at < CONNECTION_REJECT_LOG_INTERVAL_MS) {
+      state.suppressed++
+      return
+    }
+    if (this.connectionRejectLog.size > 1000) {
+      for (const [k, v] of this.connectionRejectLog) {
+        if (now - v.at >= CONNECTION_REJECT_LOG_INTERVAL_MS) this.connectionRejectLog.delete(k)
+      }
+    }
+    const also = state && state.suppressed > 0 ? ` (+${state.suppressed} more in the last minute)` : ''
+    this.connectionRejectLog.set(key, { at: now, suppressed: 0 })
+    this.pushLog(`WS connection rejected from ${addr} — ${reason}${also}`)
   }
 
   /**
@@ -753,17 +886,45 @@ export class RelayServer {
       viaTunnel,
     })
 
-    const hasCookieAuth = getAuth(request) !== null
-    // DB lookup — only when the connection can't be classified without it (remote, no cookie).
-    const pat = !isLocal && !hasCookieAuth ? verifyPat(request) : null
-    const decision = classifyConnection({
-      isLocal,
-      hasCookieAuth,
-      patScopes: pat ? pat.scope.split(',').map((s) => s.trim()) : null,
-    })
-    if (decision.action === 'reject') {
-      this.pushLog(`WS connection rejected from ${addr} — no credentials (agents: PAT with 'agent' scope via --token)`)
-      ws.close(1008, decision.reason)
+    // **Everything that reads the database is inside this try.** `getAuth` and `verifyPat` both query,
+    // and this handler runs synchronously in the `connection` event: a throw here is uncaught and takes
+    // the relay process down with every session on it. A fault closes this one socket instead (1011),
+    // and is never read as "no credentials".
+    let decision: ReturnType<typeof classifyConnection>
+    let userId: number | undefined
+    try {
+      // Resolved once: `hasCookieAuth`, the owner key and the principal all read this one answer. Two
+      // calls were two queries, with a window where they could disagree.
+      const cookie = getAuth(request)
+      // DB lookup — only when the connection can't be classified without it (remote, no cookie).
+      const pat = !isLocal && !cookie ? verifyPat(request) : null
+      decision = classifyConnection({
+        isLocal,
+        hasCookieAuth: cookie !== null,
+        patScopes: pat?.scopes ?? null,
+        patOwnerRole: pat?.ownerRole ?? null,
+      })
+      if (decision.action === 'reject') {
+        this.logConnectionRejection(addr, decision.reason, pat?.patId)
+        ws.close(1008, decision.reason)
+        return
+      }
+      // Only an accepted token was used; a refused one keeps its "last used".
+      if (pat) touchPat(pat.patId)
+      userId = cookie?.userId ?? pat?.userId
+      if (!isLocal) {
+        if (cookie) this.principals.set(ws, { via: 'cookie', userId: cookie.userId, jwtExp: cookie.exp })
+        else if (pat) this.principals.set(ws, { via: 'pat', userId: pat.userId, patId: pat.patId })
+      }
+      if (decision.role === 'first-message') {
+        this.firstMessageGrants.set(ws, { mayBrowse: decision.mayBrowse, mayRegisterAgent: decision.mayRegisterAgent })
+      } else if (pat?.scopes.includes(AGENT_SCOPE)) {
+        // A `view,agent` token whose owner is no longer an Admin: browsing only, and a handshake is told why.
+        this.firstMessageGrants.set(ws, { mayBrowse: true, mayRegisterAgent: false })
+      }
+    } catch (err) {
+      logger.error(`WebSocket handshake failed for ${addr}:`, err)
+      ws.close(1011, 'Internal error')
       return
     }
     this.wsExternal.set(ws, isExternalAddress(addr))
@@ -775,8 +936,8 @@ export class RelayServer {
     // so every agent, `mcp-server` and `flow-runner` connection would have been `anon:` — and the whole
     // point of pairing the claim with a user is that a leaked client id is useless to anyone else. Two
     // processes on the same PAT are the same principal, which is right; two on different PATs are not,
-    // which is what this restores. `pat` is already resolved above and was being discarded.
-    this.ownerKey.set(ws, ownerKeyFor(getAuth(request)?.userId ?? pat?.userId, claimed))
+    // which is what this restores.
+    this.ownerKey.set(ws, ownerKeyFor(userId, claimed))
 
     // Heartbeat liveness: a fresh socket counts as having just answered, and each pong renews it.
     this.lastPongAt.set(ws, Date.now())
@@ -785,6 +946,9 @@ export class RelayServer {
     // 'first-message' → role is determined by the first message (agent:register / stream:register)
 
     ws.on('message', (data, isBinary) => {
+      // Closed for a credential that stopped being valid: nothing it sends after that counts, even
+      // before its close reply arrives.
+      if (this.revokedSockets.has(ws)) return
       if (isBinary) {
         // Binary frames arrive on the dedicated stream WS, route to the session's browser
         const session = this.sessions.getByStreamSocket(ws)
@@ -855,9 +1019,9 @@ export class RelayServer {
       if (!this.settleRole(ws, inbound)) return
       if (!inbound.ok) {
         // **After the role gate, never before it**, so a browser spoofing an agent-only type gets 1008
-        // and no reply. That is the whole of the claim: an agent- or stream-role socket sending a
-        // malformed browser request passes the gate and *is* answered, because the gate only refuses a
-        // `browser` role sending a non-browser type. Harmless, and worth stating rather than implying
+        // and no reply. That is the whole of the claim: an agent- or stream-role socket whose token also
+        // carries `view` (or a local one) sending a malformed browser request passes the gate and *is*
+        // answered — without `view` it was already closed above. Harmless, and worth stating rather than implying
         // otherwise — such a socket already gets an answer on the well-formed path (`refuseInput` tells
         // it `not-session-owner`), and this reply says strictly less than that one.
         if (inbound.reason === 'bad-payload') this.refuseMalformed(ws, inbound)
@@ -938,17 +1102,35 @@ export class RelayServer {
     // inverts the check below: a socket whose first frame is `screenshot:done` would be handed the
     // `agent` role and then waved through the gate that exists to refuse exactly that.
     const handshake = type === 'agent:register' || type === 'stream:register'
+    // What the credentials allow the first frame to make of this socket (`classifyConnection`). No entry
+    // is a socket that may become anything: a local one.
+    const grants = this.firstMessageGrants.get(ws)
     if (!this.wsRoles.has(ws)) {
       // A handshake that did not parse confers nothing. Returning here rather than falling through to
       // `browser` is what keeps an agent whose register is malformed from being closed with
       // `Forbidden` — the caller has already logged it, and the next frame still gets to introduce it.
       if (handshake && !inbound.ok) return false
+      if (handshake && grants && !grants.mayRegisterAgent) {
+        ws.close(1008, WS_AGENT_OWNER_REASON)
+        return false
+      }
       if (type === 'agent:register') this.wsRoles.set(ws, 'agent')
       else if (type === 'stream:register') this.wsRoles.set(ws, 'stream')
-      // Local connection whose first message is not an agent/stream handshake — treat it as a browser
-      // (e.g. dashboard opened on the same machine). This fallback is what puts such a socket under
-      // the gate below.
+      // A first message that is not an agent/stream handshake makes the socket a browser (e.g. the
+      // dashboard opened on the same machine) — but only when its credentials could have opened a
+      // browser socket directly. An `agent`-only token used to land here as a browser too.
+      else if (grants && !grants.mayBrowse) {
+        ws.close(1008, WS_SCOPE_REASON)
+        return false
+      }
+      // This fallback is what puts such a socket under the gate below.
       else this.wsRoles.set(ws, 'browser')
+    }
+    // A `view,agent` token whose owner lost Admin was accepted as a browser; its handshake is told why
+    // it cannot register rather than a bare `Forbidden`.
+    if (handshake && this.wsRoles.get(ws) === 'browser' && grants && !grants.mayRegisterAgent) {
+      ws.close(1008, WS_AGENT_OWNER_REASON)
+      return false
     }
 
     // Browser sockets must not spoof agent control messages.
@@ -958,6 +1140,17 @@ export class RelayServer {
     // against the array it replaces, no literal added and none lost.
     if (this.wsRoles.get(ws) === 'browser' && directionOf(type) !== 'browser') {
       ws.close(1008, 'Forbidden')
+      return false
+    }
+    // The other direction of the same rule. An agent or stream socket on a token without `view` may
+    // not act as a browser after its handshake either — `session:start`, `input:*`, `device:*` — or an
+    // `agent`-only token would drive devices just by registering first. No agent needs this: their
+    // text frames go through `sendMsg`/`sendOn`, typed `AgentToRelay | AgentToBrowser`, and the stream
+    // socket sends only `stream:register`; none of those types is browser-direction (checked against
+    // `BrowserToRelay` when this was added). Local agents carry no grants and are not gated.
+    const role = this.wsRoles.get(ws)
+    if ((role === 'agent' || role === 'stream') && grants && !grants.mayBrowse && directionOf(type) === 'browser') {
+      ws.close(1008, WS_SCOPE_REASON)
       return false
     }
     return true
@@ -1475,8 +1668,15 @@ export class RelayServer {
    */
   private holdAgentSocket(ws: WebSocket): boolean {
     // Shutting down: nothing is coming back, and arming a timer here would leave it running after
-    // `stop()` resolved.
+    // `stop()` resolved. Closed by the relay for a credential that is no longer valid: the agent will be
+    // refused when it returns, so a hold would only postpone the same end.
     if (this.stopping) return this.evictAgentSocket(ws)
+    if (this.revokedSockets.has(ws)) {
+      const evicted = this.evictAgentSocket(ws)
+      // `evictAgentSocket` keeps the resource entry when there were no sessions to end.
+      if (!evicted) this.sessions.removeResources(ws)
+      return evicted
+    }
     const sessions = this.sessions.getAllByAgentSocket(ws)
     if (sessions.length === 0) {
       // No sessions to hold, but the socket may still own a resource entry — `evictAgentSocket`
@@ -2384,7 +2584,15 @@ export class RelayServer {
       }
     }
     if (url.startsWith('/uploads/')) {
-      if (!requireViewAuth(req, res)) return
+      // Outside the router, so outside its catch: the auth check reads the database, and a throw here
+      // would be an unhandled rejection that ends the process.
+      try {
+        if (!requireViewAuth(req, res)) return
+      } catch (err) {
+        logger.error('upload auth failed:', err)
+        if (!res.headersSent) json(res, 500, { error: 'Internal server error' })
+        return
+      }
       this.serveUpload(req, res)
       return
     }

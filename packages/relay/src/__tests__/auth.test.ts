@@ -1,11 +1,10 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { describe, it, expect, vi, beforeAll, afterAll, beforeEach } from 'vitest'
 import { EventEmitter } from 'events'
+import fs from 'fs'
+import os from 'os'
+import path from 'path'
 import type http from 'http'
-
-// getDb는 named import이므로 vi.mock으로 모듈 전체를 교체
-const { mockGet } = vi.hoisted(() => ({ mockGet: vi.fn() }))
-vi.mock('../db.js', () => ({ getDb: mockGet }))
-
+import { initDb, closeDb, getDb } from '../db.js'
 import {
   signJwt,
   verifyJwt,
@@ -13,14 +12,26 @@ import {
   getAuth,
   requireAuth,
   requireRole,
+  requireViewAuth,
   hashPat,
   verifyPat,
+  findPat,
+  touchPat,
   requireBuildAuth,
 } from '../middleware/auth.js'
 import type { AuthContext } from '../middleware/auth.js'
 import { AuthError } from '@tapflowio/agent-core'
 
-// --- 헬퍼 ---
+// Against a real database, not a mocked `getDb`: since the cookie path reads the users row, what these
+// functions return depends on what the table says, and a mock that answers every `get` the same way
+// would pass a lookup that asked the wrong question.
+//
+// Mutations run against this file, each turning it red:
+// - `getAuth` without the row lookup → the removed-member rows (getAuth, requireAuth, requireViewAuth,
+//   requireBuildAuth) fail.
+// - `getAuth` returning the JWT's role / email → the "DB role" row fails.
+// - `getAuth` catching everything into null → the "database fault throws" row fails.
+// - `last_used_at` written in `verifyPat` again → the "verifyPat does not write" and refused-scope rows fail.
 
 function makeReq(headers: Record<string, string> = {}): http.IncomingMessage {
   const em = new EventEmitter() as http.IncomingMessage
@@ -44,20 +55,47 @@ function makeRes() {
 }
 
 const SAMPLE: AuthContext = { userId: 1, email: 'alice@example.com', role: 'Admin' }
+const cookieOf = (ctx: AuthContext) => ({ cookie: `tapflow_token=${signJwt(ctx)}` })
+
+let tmpDir: string
+function openDb(): void { initDb(path.join(tmpDir, 'auth.db')) }
+
+beforeAll(() => {
+  tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'tapflow-auth-'))
+  openDb()
+})
+afterAll(() => {
+  closeDb()
+  fs.rmSync(tmpDir, { recursive: true })
+})
+
+beforeEach(() => {
+  const db = getDb()
+  db.prepare('DELETE FROM personal_access_tokens').run()
+  db.prepare('DELETE FROM users').run()
+  db.prepare("INSERT INTO users (id, email, role, password_hash) VALUES (1, 'alice@example.com', 'Admin', 'x')").run()
+})
+
+let patSeq = 0
+function seedPat(userId: number, scope: string, expiresAt: string | null = null): { raw: string; id: number } {
+  const raw = `tflw_pat_auth_${++patSeq}`
+  const r = getDb().prepare('INSERT INTO personal_access_tokens (user_id, name, token_hash, scope, expires_at) VALUES (?, ?, ?, ?, ?)')
+    .run(userId, 't', hashPat(raw), scope, expiresAt)
+  return { raw, id: Number(r.lastInsertRowid) }
+}
+const lastUsed = (id: number) =>
+  (getDb().prepare('SELECT last_used_at FROM personal_access_tokens WHERE id = ?').get(id) as { last_used_at: string | null }).last_used_at
 
 // --- JWT ---
 
 describe('signJwt / verifyJwt', () => {
   it('서명한 토큰을 그대로 검증할 수 있다', () => {
-    const token = signJwt(SAMPLE)
-    const result = verifyJwt(token)
-    expect(result).toMatchObject(SAMPLE)
+    expect(verifyJwt(signJwt(SAMPLE))).toMatchObject(SAMPLE)
   })
 
   it('변조된 토큰은 null 반환', () => {
     const token = signJwt(SAMPLE)
-    const tampered = token.slice(0, -4) + 'XXXX'
-    expect(verifyJwt(tampered)).toBeNull()
+    expect(verifyJwt(token.slice(0, -4) + 'XXXX')).toBeNull()
   })
 
   it('임의 문자열은 null 반환', () => {
@@ -70,27 +108,24 @@ describe('signJwt / verifyJwt', () => {
   })
 
   it('페이로드에 userId·email·role이 담긴다', () => {
-    const token = signJwt({ userId: 42, email: 'bob@test.com', role: 'Developer' })
-    const result = verifyJwt(token)!
+    const result = verifyJwt(signJwt({ userId: 42, email: 'bob@test.com', role: 'Developer' }))!
     expect(result.userId).toBe(42)
     expect(result.email).toBe('bob@test.com')
     expect(result.role).toBe('Developer')
   })
 })
 
-// --- getAuth (cookie 파싱) ---
+// --- getAuth ---
 
 describe('getAuth', () => {
-  it('유효한 tapflow_token 쿠키가 있으면 AuthContext 반환', () => {
-    const token = signJwt(SAMPLE)
-    const req = makeReq({ cookie: `tapflow_token=${token}` })
-    const ctx = getAuth(req)
+  it('유효한 tapflow_token 쿠키가 있으면 AuthContext와 JWT exp 반환', () => {
+    const ctx = getAuth(makeReq(cookieOf(SAMPLE)))
     expect(ctx).toMatchObject(SAMPLE)
+    expect(ctx?.exp).toBeGreaterThan(Date.now() / 1000)
   })
 
   it('tapflow_token이 없으면 null', () => {
-    const req = makeReq({ cookie: 'other=foo' })
-    expect(getAuth(req)).toBeNull()
+    expect(getAuth(makeReq({ cookie: 'other=foo' }))).toBeNull()
   })
 
   it('cookie 헤더 자체가 없으면 null', () => {
@@ -98,14 +133,33 @@ describe('getAuth', () => {
   })
 
   it('다른 쿠키와 함께 있어도 tapflow_token만 추출', () => {
-    const token = signJwt(SAMPLE)
-    const req = makeReq({ cookie: `session=abc; tapflow_token=${token}; other=xyz` })
+    const req = makeReq({ cookie: `session=abc; tapflow_token=${signJwt(SAMPLE)}; other=xyz` })
     expect(getAuth(req)).toMatchObject(SAMPLE)
   })
 
   it('만료된/변조된 토큰 쿠키는 null', () => {
-    const req = makeReq({ cookie: 'tapflow_token=invalid.jwt.value' })
+    expect(getAuth(makeReq({ cookie: 'tapflow_token=invalid.jwt.value' }))).toBeNull()
+  })
+
+  it('a validly signed cookie for a removed member is null', () => {
+    const req = makeReq(cookieOf(SAMPLE))
+    getDb().prepare('DELETE FROM users WHERE id = 1').run()
     expect(getAuth(req)).toBeNull()
+  })
+
+  it('returns the role and email the users table holds now, not the ones signed into the JWT', () => {
+    getDb().prepare("UPDATE users SET role = 'Viewer', email = 'alice@new.example' WHERE id = 1").run()
+    expect(getAuth(makeReq(cookieOf(SAMPLE)))).toMatchObject({ userId: 1, role: 'Viewer', email: 'alice@new.example' })
+  })
+
+  it('a database fault throws rather than reading as signed out', () => {
+    const req = makeReq(cookieOf(SAMPLE))
+    getDb().close()
+    try {
+      expect(() => getAuth(req)).toThrow()
+    } finally {
+      openDb()
+    }
   })
 })
 
@@ -113,89 +167,69 @@ describe('getAuth', () => {
 
 describe('requireAuth', () => {
   it('유효한 쿠키가 있으면 AuthContext 반환, 응답 없음', () => {
-    const token = signJwt(SAMPLE)
-    const req = makeReq({ cookie: `tapflow_token=${token}` })
     const res = makeRes()
-    const ctx = requireAuth(req, res)
-    expect(ctx).toMatchObject(SAMPLE)
+    expect(requireAuth(makeReq(cookieOf(SAMPLE)), res)).toMatchObject(SAMPLE)
     expect(res.writeHead).not.toHaveBeenCalled()
   })
 
   it('쿠키 없으면 401 반환 후 null', () => {
-    const req = makeReq()
     const res = makeRes()
-    const ctx = requireAuth(req, res)
-    expect(ctx).toBeNull()
+    expect(requireAuth(makeReq(), res)).toBeNull()
     expect(res._calls[0]?.status).toBe(401)
-    const body = JSON.parse(res._calls[0]?.body ?? '{}')
-    expect(body.error).toBe('Unauthorized')
+    expect(JSON.parse(res._calls[0]?.body ?? '{}').error).toBe('Unauthorized')
+  })
+
+  it('a removed member gets 401', () => {
+    const req = makeReq(cookieOf(SAMPLE))
+    getDb().prepare('DELETE FROM users WHERE id = 1').run()
+    const res = makeRes()
+    expect(requireAuth(req, res)).toBeNull()
+    expect(res._calls[0]?.status).toBe(401)
   })
 })
 
 // --- requireRole ---
 
 describe('requireRole', () => {
-  beforeEach(() => vi.resetAllMocks())
-
-  // The role comes from the users table, not the JWT (a cookie lives 7 days).
-  function dbRole(role: string | undefined) {
-    const get = vi.fn().mockReturnValue(role === undefined ? undefined : { role })
-    mockGet.mockReturnValue({ prepare: vi.fn().mockReturnValue({ get }) })
-    return get
-  }
+  const setRole = (role: string) => getDb().prepare('UPDATE users SET role = ? WHERE id = 1').run(role)
 
   it('역할이 허용 목록에 있으면 AuthContext 반환', () => {
-    const get = dbRole('Admin')
-    const token = signJwt(SAMPLE)
-    const req = makeReq({ cookie: `tapflow_token=${token}` })
     const res = makeRes()
-    const ctx = requireRole(req, res, ['Admin', 'Developer'])
-    expect(ctx).toMatchObject(SAMPLE)
-    expect(get).toHaveBeenCalledWith(SAMPLE.userId)
+    expect(requireRole(makeReq(cookieOf(SAMPLE)), res, ['Admin', 'Developer'])).toMatchObject(SAMPLE)
     expect(res.writeHead).not.toHaveBeenCalled()
   })
 
   it('역할이 허용 목록에 없으면 403 반환 후 null', () => {
-    dbRole('Admin')
-    const token = signJwt(SAMPLE) // role: 'Admin'
-    const req = makeReq({ cookie: `tapflow_token=${token}` })
     const res = makeRes()
-    const ctx = requireRole(req, res, ['Developer'])
-    expect(ctx).toBeNull()
+    expect(requireRole(makeReq(cookieOf(SAMPLE)), res, ['Developer'])).toBeNull()
     expect(res._calls[0]?.status).toBe(403)
-    const body = JSON.parse(res._calls[0]?.body ?? '{}')
-    expect(body.error).toBe('Forbidden')
+    expect(JSON.parse(res._calls[0]?.body ?? '{}').error).toBe('Forbidden')
   })
 
   it('a demoted Admin is refused although the JWT still says Admin', () => {
-    dbRole('Developer')
-    const req = makeReq({ cookie: `tapflow_token=${signJwt(SAMPLE)}` })
+    setRole('Developer')
     const res = makeRes()
-    expect(requireRole(req, res, ['Admin'])).toBeNull()
+    expect(requireRole(makeReq(cookieOf(SAMPLE)), res, ['Admin'])).toBeNull()
     expect(res._calls[0]?.status).toBe(403)
   })
 
   it('a promoted member is allowed and gets the DB role back', () => {
-    dbRole('Admin')
-    const req = makeReq({ cookie: `tapflow_token=${signJwt({ ...SAMPLE, role: 'Viewer' })}` })
     const res = makeRes()
-    expect(requireRole(req, res, ['Admin'])).toMatchObject({ userId: SAMPLE.userId, role: 'Admin' })
+    expect(requireRole(makeReq(cookieOf({ ...SAMPLE, role: 'Viewer' })), res, ['Admin'])).toMatchObject({ userId: 1, role: 'Admin' })
     expect(res.writeHead).not.toHaveBeenCalled()
   })
 
   it('a removed member (no users row) gets 401', () => {
-    dbRole(undefined)
-    const req = makeReq({ cookie: `tapflow_token=${signJwt(SAMPLE)}` })
+    const req = makeReq(cookieOf(SAMPLE))
+    getDb().prepare('DELETE FROM users WHERE id = 1').run()
     const res = makeRes()
     expect(requireRole(req, res, ['Admin'])).toBeNull()
     expect(res._calls[0]?.status).toBe(401)
   })
 
   it('인증 자체가 없으면 requireRole도 null (401)', () => {
-    const req = makeReq()
     const res = makeRes()
-    const ctx = requireRole(req, res, ['Admin'])
-    expect(ctx).toBeNull()
+    expect(requireRole(makeReq(), res, ['Admin'])).toBeNull()
     expect(res._calls[0]?.status).toBe(401)
   })
 })
@@ -212,131 +246,117 @@ describe('hashPat', () => {
   })
 
   it('64자 hex 문자열 반환', () => {
-    const hash = hashPat('any-token')
-    expect(hash).toMatch(/^[0-9a-f]{64}$/)
+    expect(hashPat('any-token')).toMatch(/^[0-9a-f]{64}$/)
   })
 })
 
-// --- verifyPat ---
+// --- verifyPat / findPat / touchPat ---
 
 describe('verifyPat', () => {
-  beforeEach(() => vi.resetAllMocks())
-
   it('Bearer tflw_pat_ 아닌 헤더는 null', () => {
-    const req = makeReq({ authorization: 'Bearer other_token' })
-    expect(verifyPat(req)).toBeNull()
-    expect(mockGet).not.toHaveBeenCalled()
+    expect(verifyPat(makeReq({ authorization: 'Bearer other_token' }))).toBeNull()
   })
 
   it('Authorization 헤더 없으면 null', () => {
     expect(verifyPat(makeReq())).toBeNull()
   })
 
-  it('DB에 토큰이 있으면 userId·scope 반환, last_used_at 업데이트', () => {
-    const rawToken = 'tflw_pat_test-token-abc'
-    const tokenHash = hashPat(rawToken)
-
-    const preparedGet = vi.fn().mockReturnValue({ user_id: 7, scope: 'read' })
-    const preparedRun = vi.fn()
-    mockGet.mockReturnValue({
-      prepare: vi.fn()
-        .mockReturnValueOnce({ get: preparedGet })    // SELECT
-        .mockReturnValueOnce({ run: preparedRun }),   // UPDATE
+  it('returns the token id, owner, scopes and the owner role, and does not write last_used_at', () => {
+    const { raw, id } = seedPat(1, 'view, builds:write')
+    expect(verifyPat(makeReq({ authorization: `Bearer ${raw}` }))).toEqual({
+      patId: id, userId: 1, scopes: ['view', 'builds:write'], ownerEmail: 'alice@example.com', ownerRole: 'Admin',
     })
-
-    const req = makeReq({ authorization: `Bearer ${rawToken}` })
-    const result = verifyPat(req)
-
-    expect(result).toEqual({ userId: 7, scope: 'read' })
-    expect(preparedGet).toHaveBeenCalledWith(tokenHash)
-    expect(preparedRun).toHaveBeenCalledWith(tokenHash)
+    expect(lastUsed(id)).toBeNull()
   })
 
   it('DB에 토큰이 없으면 null', () => {
-    const preparedGet = vi.fn().mockReturnValue(undefined)
-    mockGet.mockReturnValue({
-      prepare: vi.fn().mockReturnValue({ get: preparedGet }),
-    })
+    expect(verifyPat(makeReq({ authorization: 'Bearer tflw_pat_unknown-token' }))).toBeNull()
+  })
 
-    const req = makeReq({ authorization: 'Bearer tflw_pat_unknown-token' })
-    expect(verifyPat(req)).toBeNull()
+  it('an expired token is null', () => {
+    const { raw } = seedPat(1, 'view', '2000-01-01 00:00:00')
+    expect(verifyPat(makeReq({ authorization: `Bearer ${raw}` }))).toBeNull()
+  })
+
+  it('findPat answers the same question by id; touchPat records a use', () => {
+    const { id } = seedPat(1, 'agent')
+    expect(findPat(id)).toMatchObject({ patId: id, scopes: ['agent'], ownerRole: 'Admin' })
+    touchPat(id)
+    expect(lastUsed(id)).not.toBeNull()
+    getDb().prepare('DELETE FROM personal_access_tokens WHERE id = ?').run(id)
+    expect(findPat(id)).toBeNull()
+  })
+})
+
+// --- requireViewAuth ---
+
+describe('requireViewAuth', () => {
+  it('a removed member cookie gets 401', () => {
+    const req = makeReq(cookieOf(SAMPLE))
+    getDb().prepare('DELETE FROM users WHERE id = 1').run()
+    const res = makeRes()
+    expect(requireViewAuth(req, res)).toBeNull()
+    expect(res._calls[0]?.status).toBe(401)
+  })
+
+  it('a view PAT is accepted with its owner and marked used', () => {
+    const { raw, id } = seedPat(1, 'view')
+    const res = makeRes()
+    expect(requireViewAuth(makeReq({ authorization: `Bearer ${raw}` }), res)).toEqual({ userId: 1, email: 'alice@example.com', role: 'Admin' })
+    expect(lastUsed(id)).not.toBeNull()
+  })
+
+  it('a PAT without view gets 403 and is not marked used', () => {
+    const { raw, id } = seedPat(1, 'agent')
+    const res = makeRes()
+    expect(requireViewAuth(makeReq({ authorization: `Bearer ${raw}` }), res)).toBeNull()
+    expect(res._calls[0]?.status).toBe(403)
+    expect(lastUsed(id)).toBeNull()
   })
 })
 
 // --- requireBuildAuth ---
 
 describe('requireBuildAuth', () => {
-  beforeEach(() => vi.resetAllMocks())
-
-  it('PAT가 있고 builds:write scope이면 userId 반환', () => {
-    const rawToken = 'tflw_pat_test-build-token'
-    const preparedGet = vi.fn().mockReturnValue({ user_id: 3, scope: 'builds:write' })
-    const preparedRun = vi.fn()
-    mockGet.mockReturnValue({
-      prepare: vi.fn()
-        .mockReturnValueOnce({ get: preparedGet })
-        .mockReturnValueOnce({ run: preparedRun }),
-    })
-
-    const req = makeReq({ authorization: `Bearer ${rawToken}` })
+  it('PAT가 있고 builds:write scope이면 userId 반환, used로 기록', () => {
+    const { raw, id } = seedPat(1, 'builds:write')
     const res = makeRes()
-    const result = requireBuildAuth(req, res)
-
-    expect(result).toEqual({ userId: 3 })
+    expect(requireBuildAuth(makeReq({ authorization: `Bearer ${raw}` }), res)).toEqual({ userId: 1 })
     expect(res.writeHead).not.toHaveBeenCalled()
+    expect(lastUsed(id)).not.toBeNull()
   })
 
-  it('PAT가 있지만 scope이 부족하면 403 반환 후 null', () => {
-    const rawToken = 'tflw_pat_test-wrong-scope'
-    const preparedGet = vi.fn().mockReturnValue({ user_id: 5, scope: 'other:scope' })
-    const preparedRun = vi.fn()
-    mockGet.mockReturnValue({
-      prepare: vi.fn()
-        .mockReturnValueOnce({ get: preparedGet })
-        .mockReturnValueOnce({ run: preparedRun }),
-    })
-
-    const req = makeReq({ authorization: `Bearer ${rawToken}` })
+  it('PAT가 있지만 scope이 부족하면 403 반환 후 null, used로 기록하지 않음', () => {
+    const { raw, id } = seedPat(1, 'view')
     const res = makeRes()
-    const result = requireBuildAuth(req, res)
-
-    expect(result).toBeNull()
+    expect(requireBuildAuth(makeReq({ authorization: `Bearer ${raw}` }), res)).toBeNull()
     expect(res._calls[0]?.status).toBe(403)
     expect(JSON.parse(res._calls[0]?.body ?? '{}')).toMatchObject({ error: 'Insufficient scope' })
+    expect(lastUsed(id)).toBeNull()
   })
 
   it('PAT 없고 유효한 JWT 쿠키면 userId 반환', () => {
-    const token = signJwt(SAMPLE)
-    const req = makeReq({ cookie: `tapflow_token=${token}` })
     const res = makeRes()
-    const result = requireBuildAuth(req, res)
-
-    expect(result).toEqual({ userId: SAMPLE.userId })
+    expect(requireBuildAuth(makeReq(cookieOf(SAMPLE)), res)).toEqual({ userId: SAMPLE.userId })
     expect(res.writeHead).not.toHaveBeenCalled()
   })
 
-  it('PAT 없고 JWT 쿠키도 없으면 401 반환 후 null', () => {
-    const req = makeReq()
+  it('a removed member cookie gets 401', () => {
+    const req = makeReq(cookieOf(SAMPLE))
+    getDb().prepare('DELETE FROM users WHERE id = 1').run()
     const res = makeRes()
-    const result = requireBuildAuth(req, res)
+    expect(requireBuildAuth(req, res)).toBeNull()
+    expect(res._calls[0]?.status).toBe(401)
+  })
 
-    expect(result).toBeNull()
+  it('PAT 없고 JWT 쿠키도 없으면 401 반환 후 null', () => {
+    const res = makeRes()
+    expect(requireBuildAuth(makeReq(), res)).toBeNull()
     expect(res._calls[0]?.status).toBe(401)
   })
 
   it('PAT가 만료/무효이면 JWT 쿠키로 fallback', () => {
-    mockGet.mockReturnValue({
-      prepare: vi.fn().mockReturnValue({ get: vi.fn().mockReturnValue(undefined) }),
-    })
-
-    const token = signJwt(SAMPLE)
-    const req = makeReq({
-      authorization: 'Bearer tflw_pat_expired-token',
-      cookie: `tapflow_token=${token}`,
-    })
-    const res = makeRes()
-    const result = requireBuildAuth(req, res)
-
-    expect(result).toEqual({ userId: SAMPLE.userId })
+    const req = makeReq({ authorization: 'Bearer tflw_pat_expired-token', ...cookieOf(SAMPLE) })
+    expect(requireBuildAuth(req, makeRes())).toEqual({ userId: SAMPLE.userId })
   })
 })

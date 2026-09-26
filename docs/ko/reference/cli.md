@@ -326,13 +326,15 @@ tapflow status
 
 릴레이가 메모리에 보관하는 최근 로그 항목을 출력합니다(기본값: 최근 100줄). 이 버퍼에 기록되는 이벤트는 많지 않습니다. 릴레이의 전체 로그는 릴레이를 실행한 터미널에 출력됩니다.
 
+릴레이는 자기 호스트에만 이 로그를 보여 주므로 이 명령은 릴레이 호스트에서 실행합니다. 다른 머신에서 원격 릴레이를 가리키면 릴레이가 `403`으로 거절하고 CLI는 릴레이 호스트에서 할 일을 안내합니다. Docker로 운영하면 컨테이너 밖의 CLI도 원격으로 취급되니 `docker compose logs`를 쓰세요.
+
 ```sh
 tapflow logs
 ```
 
 | 옵션 | 기본값 | 설명 |
 |------|--------|------|
-| `--relay <url>` | config의 `relay.url`, 없으면 `http://localhost:4000` | 릴레이 URL. `tapflow.config.json`에 `relay.url`이 있으면 생략 가능. |
+| `--relay <url>` | `http://localhost:<local.port>` (기본 4000) | 이 머신의 릴레이 URL. 릴레이를 다른 포트로 띄웠을 때 지정합니다. `relay.url` 설정은 읽지 않습니다. |
 | `--lines <n>` | `100` | 표시할 로그 줄 수 (최대 500) |
 
 ## `tapflow flow run`
@@ -346,7 +348,7 @@ tapflow flow run .tapflow/flows/login-smoke.yaml
 | 옵션 | 기본값 | 설명 |
 |------|--------|------|
 | `--relay <url>` | `ws://localhost:4000` | 릴레이 WebSocket URL. `relay.url` 설정을 읽지 않습니다. |
-| `--token <token>` | `TAPFLOW_TOKEN` 환경변수 | 원격 릴레이에 접속할 개인 액세스 토큰(PAT) |
+| `--token <token>` | `TAPFLOW_TOKEN` 환경변수 | 원격 릴레이에 접속할 개인 액세스 토큰(PAT). API 유형 토큰(`view, builds:write`)이 필요합니다. |
 | `--session <id>` | — | 대상 세션 ID(MCP 서버의 `list_devices`로 확인) |
 | `--device <name>` | — | 대상 기기 이름. 꺼져 있으면 부팅합니다. |
 | `--build <id>` | — | 테스트할 빌드 ID. 실행 전에 설치하고 `launchApp` 스텝이 이 빌드를 실행합니다. |

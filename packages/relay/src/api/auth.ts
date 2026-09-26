@@ -4,18 +4,8 @@ import { makePasswordHash, verifyPassword, isInitialized, createAdminAccount } f
 import { signJwt, requireAuth } from '../middleware/auth.js'
 import { json, readJson } from '../router.js'
 import { config } from '../lib/config.js'
-import { isTunnelIngress, resolveClientAddress } from '../lib/clientAddress.js'
+import { resolveRequestClient } from '../lib/clientAddress.js'
 import { createRateLimiter, type RateLimiter } from '../middleware/rateLimit.js'
-
-function resolveClient(req: http.IncomingMessage, trustedProxies: string[]) {
-  const xff = req.headers['x-forwarded-for']
-  return resolveClientAddress({
-    socketAddr: req.socket.remoteAddress ?? '',
-    forwardedFor: Array.isArray(xff) ? xff[0] : xff,
-    trustedProxies,
-    viaTunnel: isTunnelIngress(req),
-  })
-}
 
 // 로그인 무차별 대입 방어: IP+계정 단위로 실패를 세고 지수 백오프로 잠근다.
 const loginLimiter = createRateLimiter()
@@ -35,7 +25,7 @@ export async function handleLogin(
   const body = await readJson<{ email: string; password: string }>(req)
   if (!body.email || !body.password) return json(res, 400, { error: 'email and password required' })
 
-  const key = `${resolveClient(req, trustedProxies).addr}|${body.email.toLowerCase()}`
+  const key = `${resolveRequestClient(req, trustedProxies).addr}|${body.email.toLowerCase()}`
   const gate = limiter.check(key)
   if (!gate.allowed) {
     res.writeHead(429, { 'Content-Type': 'application/json', 'Retry-After': String(Math.ceil(gate.retryAfterMs / 1000)) })
@@ -101,7 +91,7 @@ export function handleLogout(_req: http.IncomingMessage, res: http.ServerRespons
 // The one rule for who may create the first admin, read by both `auth/init` and `auth/status` so the
 // page that asks for the account and the endpoint that refuses it cannot disagree.
 function mayInitialize(req: http.IncomingMessage, trustedProxies: string[]): boolean {
-  return resolveClient(req, trustedProxies).isLocal
+  return resolveRequestClient(req, trustedProxies).isLocal
 }
 
 // `canInitialize` lets the setup page show the instruction instead of a form this browser could only
