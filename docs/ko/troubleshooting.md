@@ -16,12 +16,14 @@ description: tapflow 문제의 해결 방법을 설치와 에이전트, iOS 시�
 
 ## 로그 확인
 
-릴레이의 동작 로그를 확인하려면:
+릴레이 호스트에서 다음 명령으로 릴레이의 동작 로그를 확인할 수 있습니다. 릴레이는 다른 기기에는 로그를 보여 주지 않습니다.
 
 ```sh
 tapflow logs
 tapflow logs --lines 200
 ```
+
+Docker로 운영한다면 컨테이너 밖의 CLI는 원격으로 취급되므로 `docker compose logs`로 확인하세요.
 
 ## 옮겨진 섹션 {#moved-sections}
 

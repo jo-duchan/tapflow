@@ -24,7 +24,7 @@ Visible to **Admin** only.
 - **Members list** — all accounts with email, role, and join date.
 - **Invite member** — send an email invite or generate a copy-paste link. Invites expire after 7 days.
 - **Change role** — reassign any member's role (Admin / Developer / QA / Viewer).
-- **Remove member** — permanently deletes the account. You cannot remove yourself.
+- **Remove member** — permanently deletes the account. The member is signed out everywhere at once, and their open device sessions and any agents connected with their tokens are disconnected. You cannot remove yourself.
 - **Reset pwd** — send a password reset email to a specific member. Requires SMTP.
 
 ## Tokens

@@ -16,12 +16,14 @@ Problems are grouped by area, one page each:
 
 ## Viewing logs
 
-To inspect relay activity:
+On the relay host, inspect its activity with the commands below. The relay does not show its logs to other machines.
 
 ```sh
 tapflow logs
 tapflow logs --lines 200
 ```
+
+Running under Docker, a CLI outside the container counts as remote; use `docker compose logs` instead.
 
 ## Moved sections {#moved-sections}
 
