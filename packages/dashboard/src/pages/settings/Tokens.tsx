@@ -1,5 +1,5 @@
 import { useEffect, useId, useRef, useState } from 'react'
-import { useForm } from 'react-hook-form'
+import { Controller, useForm, useWatch } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
 import { toast } from 'sonner'
@@ -35,14 +35,28 @@ type TokenType = 'api' | 'agent'
 
 type Token = ApiToken
 
+// 'never' matches the API, which reads an omitted expires_in_days as a token with no expiry.
+const EXPIRY_PRESETS = ['7', '30', '60', '90'] as const
+type Expiry = typeof EXPIRY_PRESETS[number] | 'custom' | 'never'
+
 const schema = z.object({
   name: z.string().min(1, 'Give the token a name'),
-  expiresDays: z.string().refine(
-    (v) => { const n = parseInt(v, 10); return !isNaN(n) && n >= 1 && n <= 365 },
-    { message: 'Must be between 1 and 365' },
-  ),
+  expiry: z.enum([...EXPIRY_PRESETS, 'custom', 'never']),
+  expiresDays: z.string(),
+}).superRefine((d, ctx) => {
+  // Only Custom is validated: its field is unmounted for the other choices, so an error left on it would
+  // block the submit with nothing on screen to explain why.
+  if (d.expiry !== 'custom') return
+  // Number, not parseInt: a number input accepts "1e3" and "1.5", which parseInt reads as 1.
+  const n = Number(d.expiresDays)
+  if (!Number.isInteger(n) || n < 1 || n > 365) ctx.addIssue({ code: 'custom', path: ['expiresDays'], message: 'Must be between 1 and 365' })
 })
 type FormData = z.infer<typeof schema>
+
+function expiresInDays(data: FormData): number | undefined {
+  if (data.expiry === 'never') return undefined
+  return Number(data.expiry === 'custom' ? data.expiresDays : data.expiry)
+}
 
 export function TokenSettings() {
   const queryClient = useQueryClient()
@@ -63,10 +77,12 @@ export function TokenSettings() {
   // Toasts render outside the dialog, which an open dialog hides from assistive technology.
   const [dialogStatus, setDialogStatus] = useState('')
 
-  const { register, handleSubmit, reset, formState: { errors, isSubmitting } } = useForm<FormData>({
+  const expiryWarningId = useId()
+  const { register, control, handleSubmit, reset, formState: { errors, isSubmitting } } = useForm<FormData>({
     resolver: zodResolver(schema),
-    defaultValues: { name: '', expiresDays: '30' },
+    defaultValues: { name: '', expiry: '30', expiresDays: '30' },
   })
+  const expiry = useWatch({ control, name: 'expiry' })
 
   const load = () => { void queryClient.invalidateQueries({ queryKey: queryKeys.tokens }) }
 
@@ -77,13 +93,14 @@ export function TokenSettings() {
   async function onCreate(data: FormData) {
     setDialogStatus('')
     try {
+      const days = expiresInDays(data)
       const res = await fetch('/api/v1/tokens', {
         method: 'POST',
         credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           name: data.name,
-          expires_in_days: parseInt(data.expiresDays, 10),
+          ...(days !== undefined ? { expires_in_days: days } : {}),
           // api 타입은 scope를 보내지 않아 서버 기본값(view,builds:write)을 따른다
           ...(tokenType === 'agent' ? { scope: 'agent' } : {}),
         }),
@@ -175,10 +192,35 @@ export function TokenSettings() {
                   <FieldError id="name-error" message={errors.name?.message} />
                 </div>
                 <div className="grid gap-2">
-                  <Label htmlFor="expires">Expires in (days)</Label>
-                  <Input id="expires" type="number" aria-required="true" aria-invalid={!!errors.expiresDays} aria-describedby={errors.expiresDays ? 'expiresDays-error' : undefined} {...register('expiresDays')} />
-                  <FieldError id="expiresDays-error" message={errors.expiresDays?.message} />
+                  <Label htmlFor="token-expiry">Expiration</Label>
+                  <Controller
+                    control={control}
+                    name="expiry"
+                    render={({ field }) => (
+                      <Select value={field.value} onValueChange={(v) => field.onChange(v as Expiry)}>
+                        {/* The warning is a description of the choice, read when focus comes back to it. */}
+                        <SelectTrigger id="token-expiry" ref={field.ref} onBlur={field.onBlur} aria-describedby={field.value === 'never' ? expiryWarningId : undefined}><SelectValue /></SelectTrigger>
+                        <SelectContent>
+                          {EXPIRY_PRESETS.map((d) => <SelectItem key={d} value={d}>{d} days</SelectItem>)}
+                          <SelectItem value="custom">Custom…</SelectItem>
+                          <SelectItem value="never">No expiration</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    )}
+                  />
+                  {expiry === 'never' && (
+                    <p id={expiryWarningId} className="text-sm text-amber-700 dark:text-amber-300">
+                      A token without an expiry stays valid until you revoke it. For CI, 90 days or less is recommended.
+                    </p>
+                  )}
                 </div>
+                {expiry === 'custom' && (
+                  <div className="grid gap-2">
+                    <Label htmlFor="expires">Expires in (days)</Label>
+                    <Input id="expires" type="number" aria-required="true" aria-invalid={!!errors.expiresDays} aria-describedby={errors.expiresDays ? 'expiresDays-error' : undefined} {...register('expiresDays')} />
+                    <FieldError id="expiresDays-error" message={errors.expiresDays?.message} />
+                  </div>
+                )}
                 <div className="grid gap-2">
                   <Label htmlFor="token-type">Type</Label>
                   <Select value={tokenType} onValueChange={(v) => setTokenType(v as TokenType)}>
@@ -233,7 +275,7 @@ export function TokenSettings() {
                       <span className={isExpired(t) ? 'text-destructive text-sm' : 'text-muted-foreground text-sm'}>
                         {isExpired(t) ? 'Expired' : new Date(t.expires_at).toLocaleDateString()}
                       </span>
-                    ) : <span className="text-muted-foreground text-sm">Never</span>}
+                    ) : <Badge variant="outline">No expiration</Badge>}
                   </TableCell>
                   <TableCell>
                     <Button variant="destructive" size="icon" className="h-7 w-7" aria-label="Revoke token" onClick={() => setRevokeTarget(t.id)}>

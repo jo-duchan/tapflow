@@ -59,7 +59,7 @@ describe('Tokens — scope selection', () => {
   }
 
   async function selectAgentType() {
-    await userEvent.click(screen.getByRole('combobox'))
+    await userEvent.click(screen.getByRole('combobox', { name: /type/i }))
     await userEvent.click(await screen.findByRole('option', { name: /agent/i }))
   }
 
