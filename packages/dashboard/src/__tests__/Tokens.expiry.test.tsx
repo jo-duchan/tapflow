@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { render, screen, waitFor, within } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { MemoryRouter } from 'react-router-dom'
 import { toast } from 'sonner'
@@ -111,6 +111,51 @@ describe('Tokens — optional expiry', () => {
     await submit()
     await waitFor(() => expect(toast.success).toHaveBeenCalled())
     expect(postedBody(fetchMock)).toMatchObject({ expires_in_days: 365 })
+  })
+
+  it('a preset chosen after Custom sends the preset, not the stale custom number', async () => {
+    const fetchMock = stubFetch()
+    renderTokens()
+    await openDialog('ci-deploy')
+    await chooseExpiry(/custom/i)
+    const days = screen.getByLabelText(/expires in \(days\)/i)
+    await userEvent.clear(days)
+    await userEvent.type(days, '5')
+    await chooseExpiry(/^60 days$/i)
+    await submit()
+    await waitFor(() => expect(toast.success).toHaveBeenCalled())
+    expect(postedBody(fetchMock)).toMatchObject({ expires_in_days: 60 })
+  })
+
+  it('an invalid custom number does not block No expiration once Custom is left', async () => {
+    const fetchMock = stubFetch()
+    renderTokens()
+    await openDialog('ci-deploy')
+    await chooseExpiry(/custom/i)
+    const days = screen.getByLabelText(/expires in \(days\)/i)
+    await userEvent.clear(days)
+    await userEvent.type(days, '366')
+    await submit()
+    expect(await screen.findByText('Must be between 1 and 365')).toBeInTheDocument()
+    await chooseExpiry(/no expiration/i)
+    await submit()
+    await waitFor(() => expect(toast.success).toHaveBeenCalled())
+    expect(postedBody(fetchMock)).not.toHaveProperty('expires_in_days')
+  })
+
+  it('Custom reads an exponent number as its value, not as 1 (1e3 is out of range)', async () => {
+    const fetchMock = stubFetch()
+    renderTokens()
+    await openDialog('ci-deploy')
+    await chooseExpiry(/custom/i)
+    const days = screen.getByLabelText(/expires in \(days\)/i)
+    await userEvent.clear(days)
+    // A fraction never reaches the schema: the number input's step blocks the submit first. Set in one
+    // change, because typing it key by key passes through "1e", which the input empties.
+    fireEvent.change(days, { target: { value: '1e3' } })
+    await submit()
+    expect(await screen.findByText('Must be between 1 and 365')).toBeInTheDocument()
+    expect(wasPosted(fetchMock)).toBe(false)
   })
 
   it('marks a token with no expiry in the list, so it can be found and revoked', async () => {

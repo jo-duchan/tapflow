@@ -644,7 +644,7 @@ Body (JSON):
   scope           string  optional (comma-separated; default: view,builds:write)
 ```
 
-`expires_in_days` takes a non-negative number of days. A negative or non-numeric value returns `400`. The dashboard accepts 1–365 days, but the API has no upper limit.
+`expires_in_days` takes a number of days, 0 or more (a numeric string such as `"30"` works too). A negative value, anything that is not a number (including an empty string), or a count too large to be a date returns `400`. The dashboard accepts 1–365 days, but the API has no upper limit.
 
 `scope` accepts `view`, `builds:write` and `agent`. The `agent` scope is what an agent on a remote Mac uses to connect to the relay, and only an Admin can issue it; any other role gets `403`.
 

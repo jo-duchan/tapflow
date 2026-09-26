@@ -44,15 +44,18 @@ const schema = z.object({
   expiry: z.enum([...EXPIRY_PRESETS, 'custom', 'never']),
   expiresDays: z.string(),
 }).superRefine((d, ctx) => {
+  // Only Custom is validated: its field is unmounted for the other choices, so an error left on it would
+  // block the submit with nothing on screen to explain why.
   if (d.expiry !== 'custom') return
-  const n = parseInt(d.expiresDays, 10)
-  if (isNaN(n) || n < 1 || n > 365) ctx.addIssue({ code: 'custom', path: ['expiresDays'], message: 'Must be between 1 and 365' })
+  // Number, not parseInt: a number input accepts "1e3" and "1.5", which parseInt reads as 1.
+  const n = Number(d.expiresDays)
+  if (!Number.isInteger(n) || n < 1 || n > 365) ctx.addIssue({ code: 'custom', path: ['expiresDays'], message: 'Must be between 1 and 365' })
 })
 type FormData = z.infer<typeof schema>
 
 function expiresInDays(data: FormData): number | undefined {
   if (data.expiry === 'never') return undefined
-  return parseInt(data.expiry === 'custom' ? data.expiresDays : data.expiry, 10)
+  return Number(data.expiry === 'custom' ? data.expiresDays : data.expiry)
 }
 
 export function TokenSettings() {

@@ -13,7 +13,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- **`POST /api/v1/tokens` rejects an invalid `expires_in_days` with a 400.** A negative count used to create a token that had already expired, and a value too large for a date failed without a proper response. Omitting it or sending `0` still means no expiry, and the API keeps no upper limit.
+- **`POST /api/v1/tokens` rejects an invalid `expires_in_days` with a 400.** A negative count used to create a token that had already expired, a value too large for a date failed without a proper response, and an empty or blank string (an unset CI variable) silently created a token that never expires. Omitting it, `null` or `0` still means no expiry, a numeric string like `"30"` still works, and the API keeps no upper limit.
 
 ### Fixed
 

@@ -93,6 +93,7 @@ describe('POST /api/v1/tokens — scope', () => {
     it.each([
       ['omitted', {}],
       ['0', { expires_in_days: 0 }],
+      ['null', { expires_in_days: null }],
     ])('%s creates a token with no expiry', async (_label, extra) => {
       const res = await createToken('Admin', { name: 'no-expiry', ...extra })
       expect(res.status).toBe(201)
@@ -109,10 +110,24 @@ describe('POST /api/v1/tokens — scope', () => {
       expect(days).toBeLessThanOrEqual(400)
     })
 
+    it('a numeric string is read as a number, as before', async () => {
+      const res = await createToken('Admin', { name: 'string-days', expires_in_days: '30' })
+      expect(res.status).toBe(201)
+      const { token } = await res.json() as { token: string }
+      const days = (new Date(expiresAtOf(token) ?? 0).getTime() - Date.now()) / (24 * 3600 * 1000)
+      expect(days).toBeGreaterThan(29)
+      expect(days).toBeLessThanOrEqual(30)
+    })
+
     it.each([
       ['negative', -1],
       ['not a number', 'soon'],
       ['too large for a date', 1e12],
+      // An empty template variable must not fall through to a token that never expires.
+      ['empty string', ''],
+      ['blank string', ' '],
+      ['boolean', true],
+      ['array', []],
     ])('%s is rejected with 400 and creates nothing', async (label, value) => {
       // A name per case, so one case's stray row cannot fail the next.
       const name = `bad-expiry-${label}`
