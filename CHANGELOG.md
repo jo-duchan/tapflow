@@ -29,7 +29,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **A role change takes effect immediately on the endpoints that check the role**: team management, workspace settings, password-reset emails, issuing an `agent` scope token, deleting a comment, and uploading or changing builds, apps and webhooks. Roles used to be read from the login cookie, which lasts 7 days, so a demoted member — an Admin included — kept their old rights there and a promoted one was refused until they signed in again. The relay now reads the role from the database on every request to those endpoints, for cookies and tokens alike. A member removed from the team, an Admin included, gets 401 from them on their next request, and from every other endpoint too (see **Security**).
 
-- **`POST /api/v1/tokens` rejects an invalid `expires_in_days` with a 400.** A negative count used to create a token that had already expired, a value too large for a date failed without a proper response, and an empty or blank string (an unset CI variable) silently created a token that never expires. Omitting it, `null` or `0` still means no expiry, a numeric string like `"30"` still works, and the API keeps no upper limit.
+- **`POST /api/v1/tokens` rejects an invalid `expires_in_days` with a 400.** A negative count used to create a token that had already expired, a value too large for a date failed without a proper response, and an empty or blank string (an unset CI variable) silently created a token that never expires. Omitting it, `null` or `0` still means no expiry, a numeric string like `"30"` still works, and the API has no 365-day cap like the dialog's: only a count too large to be a date is refused.
 
 ### Fixed
 
