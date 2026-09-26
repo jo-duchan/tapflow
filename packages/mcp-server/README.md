@@ -32,7 +32,7 @@ Point it at your tapflow relay:
 - `query_ui_tree` returns the accessibility tree as `{ role, label, identifier, frame, enabled }` with frames normalized 0-1 — tap by element instead of guessing coordinates from screenshots.
 - `run_flow` replays a [`@tapflowio/flow-runner`](https://www.npmjs.com/package/@tapflowio/flow-runner) YAML flow deterministically — author once with the agent, replay with zero LLM calls.
 
-Full guide: [tapflow.dev/guide/mcp-server](https://www.tapflow.dev/guide/mcp-server)
+Full guide: [tapflow.dev/automation/mcp-server](https://www.tapflow.dev/automation/mcp-server)
 
 ## License
 

@@ -8,7 +8,7 @@ hero:
   actions:
     - theme: brand
       text: 시작하기
-      link: /ko/guide/getting-started
+      link: /ko/get-started/quick-start
     - theme: alt
       text: GitHub 보기
       link: https://github.com/jo-duchan/tapflow

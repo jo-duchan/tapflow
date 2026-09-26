@@ -38,7 +38,7 @@ the dashboard have no such constraint, so only the machine driving the simulator
 Intel support is possible and tracked in
 [#464](https://github.com/jo-duchan/tapflow/issues/464); it needs a universal build and verification on
 hardware the maintainers do not have, so it is not scheduled. See
-[Requirements](/guide/requirements#agent).
+[Requirements](/operate/requirements#agent).
 
 If `uname -m` says `arm64`, this is a different problem — a helper that is missing or not executable
 produces the same message. Check that the agent package installed completely.
@@ -283,7 +283,7 @@ Installing ends with a distinct code per kind of failure.
 | 7 | The running filter did not answer |
 | 8 | An argument this build does not understand. Can happen when the installed filter app is older than the agent |
 
-What the extension can and cannot see is in [Network Control](/guide/network-control#what-you-are-trusting).
+What the extension can and cannot see is in [Network Control](/testing/network-control#what-you-are-trusting).
 
 ## iOS: the Mac lost its network while the filter was being replaced {#network-lost-on-replace}
 
@@ -342,7 +342,7 @@ Take the device offline again and redo the check from the start. The button draw
 
 Logs are at `/tmp/tapflow-netfilter-host.log`.
 
-For the feature itself, see [Network Control](/guide/network-control).
+For the feature itself, see [Network Control](/testing/network-control).
 
 ## `tapflow doctor` failures
 
@@ -435,11 +435,11 @@ The simulator and the H.264 encoder are the heavy consumers; when the agent Mac 
 
 ### Display sleep
 
-By default the agent keeps the host display awake while a session is active, because a sleeping display parks the GPU and throttles the simulator. If you set `TAPFLOW_ALLOW_DISPLAY_SLEEP=1`, expect the stream to slow whenever the display turns off. See [Agent Setup](/guide/agent#host-display-and-sleep).
+By default the agent keeps the host display awake while a session is active, because a sleeping display parks the GPU and throttles the simulator. If you set `TAPFLOW_ALLOW_DISPLAY_SLEEP=1`, expect the stream to slow whenever the display turns off. See [Agent Setup](/operate/agents#host-display-and-sleep).
 
 ### Blurry or low-resolution stream on LAN
 
-A plain-HTTP LAN connection uses the **Standard** profile, which caps the stream at 1280 px (longest side) so the WASM decoder stays responsive. To stream at the simulator's native resolution, serve the relay over HTTPS — that moves you to the **Smooth** profile (hardware decoding, native resolution). See [Self-Hosting the Relay](/guide/self-hosting). You can also raise the cap without HTTPS by setting `TAPFLOW_MAX_SIZE_LAN` on the agent; see [Streaming Quality](/guide/streaming).
+A plain-HTTP LAN connection uses the **Standard** profile, which caps the stream at 1280 px (longest side) so the WASM decoder stays responsive. To stream at the simulator's native resolution, serve the relay over HTTPS — that moves you to the **Smooth** profile (hardware decoding, native resolution). See [Self-Hosting the Relay](/guide/self-hosting). You can also raise the cap without HTTPS by setting `TAPFLOW_MAX_SIZE_LAN` on the agent; see [Streaming Quality](/operate/streaming-quality).
 
 ## Auth issues
 
@@ -449,7 +449,7 @@ The install already has a `tapflow.config.json`, so `init` left it alone and ref
 
 ### The relay is using a configuration or database you did not expect
 
-`tapflow start` and `tapflow relay start` print the install directory, the configuration file and the data directory they resolved. Commands take the install named by `TAPFLOW_HOME`, then the current directory when it already is an install, and `~/.tapflow` otherwise ([which install a command uses](/guide/configure#which-install-a-command-uses)) — so running from a directory that holds an older install picks that one up. Set `TAPFLOW_HOME` to be explicit.
+`tapflow start` and `tapflow relay start` print the install directory, the configuration file and the data directory they resolved. Commands take the install named by `TAPFLOW_HOME`, then the current directory when it already is an install, and `~/.tapflow` otherwise ([which install a command uses](/operate/configure#which-install-a-command-uses)) — so running from a directory that holds an older install picks that one up. Set `TAPFLOW_HOME` to be explicit.
 
 ### `tapflow admin init` fails (`Already initialized`)
 

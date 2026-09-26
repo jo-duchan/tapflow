@@ -52,7 +52,7 @@ the system extension inside it are versioned separately, because a tapflow relea
 the app has no reason to make macOS replace a running filter. The app is the binary the agent calls,
 so it matters on its own: a stale one meets requests it does not understand. Both are
 warnings rather than failures: a session works without the filter, and only iOS network control does
-not. See [Network Control](/guide/network-control).
+not. See [Network Control](/testing/network-control).
 
 The network hook is the library tapflow injects to tell an app it is offline. It comes with tapflow,
 so a missing one means the install is damaged and reinstalling restores it. It is reported separately
@@ -67,7 +67,7 @@ Use `--json` for machine-readable output. Exits with code `1` if any check fails
 | `[platform]` | `ios` or `android`; omit to check all |
 | `--json` | Emit `{ ok, common, ios, android }` as JSON (no ANSI) |
 
-See [Environment Setup](/guide/environment-setup) for the full workflow.
+See [Environment Setup](/operate/environment-setup) for the full workflow.
 
 
 ## `tapflow setup`
@@ -104,12 +104,12 @@ setup only ensures a bootable device/AVD exists; the relay boots it on demand wh
 |--------|-------------|
 | `[platform]` | `ios` or `android`; omit to auto-detect |
 
-See [Environment Setup](/guide/environment-setup) for the full workflow.
+See [Environment Setup](/operate/environment-setup) for the full workflow.
 
 
 ## `tapflow init`
 
-Set this machine's tapflow up: `tapflow.config.json`, the `AGENTS.md` and `CLAUDE.md` a coding agent reads, and the credentials `.env` when you choose DNS auto-issue. Run it from anywhere — it writes to the install directory, `~/.tapflow` unless `TAPFLOW_HOME` or an install in the current directory says otherwise ([which install a command uses](/guide/configure#which-install-a-command-uses)). It creates the directory when it is missing.
+Set this machine's tapflow up: `tapflow.config.json`, the `AGENTS.md` and `CLAUDE.md` a coding agent reads, and the credentials `.env` when you choose DNS auto-issue. Run it from anywhere — it writes to the install directory, `~/.tapflow` unless `TAPFLOW_HOME` or an install in the current directory says otherwise ([which install a command uses](/operate/configure#which-install-a-command-uses)). It creates the directory when it is missing.
 
 Running it again keeps the configuration and refreshes the tapflow section of `AGENTS.md`, so an existing install can pick that up; pass `--force` to write a fresh configuration. `--tunnel` on an install that already has a configuration stops with an error instead, because keeping the configuration would ignore the flag.
 
@@ -275,7 +275,7 @@ tapflow agent start --relay ws://192.168.x.x:4000 --token tflw_pat_xxxxxxxx
 | `--relay <url>` | `relay.url` in config, or `ws://localhost:4000` | Relay WebSocket URL. Omit if `relay.url` is set in `tapflow.config.json`. |
 | `--platform <ios\|android\|all>` | auto-detect | Platform to start |
 | `--device <name>` | all devices | Limit which devices are exposed to the relay: iOS simulators by name or UDID, Android emulators by AVD name or device ID |
-| `--token <pat>` | `TAPFLOW_AGENT_TOKEN` env | Token with the `agent` scope, required by remote relays. See [Agent Setup](/guide/agent#remote-relay-authentication). |
+| `--token <pat>` | `TAPFLOW_AGENT_TOKEN` env | Token with the `agent` scope, required by remote relays. See [Agent Setup](/operate/agents#remote-relay-authentication). |
 
 `--relay` must start with `ws://` or `wss://`. A Mac runs one agent per platform: when an agent for the same platform is already running, it prints `AGENT ALREADY RUNNING` and exits. When no platform is available, it exits with code `1`.
 
@@ -360,7 +360,7 @@ tapflow logs
 
 ## `tapflow flow run`
 
-Replay saved flow files with no LLM involved. See the [Flow Reference](/guide/writing-flows) for how to write them.
+Replay saved flow files with no LLM involved. See the [Flow Reference](/automation/flows) for how to write them.
 
 ```sh
 tapflow flow run .tapflow/flows/login-smoke.yaml

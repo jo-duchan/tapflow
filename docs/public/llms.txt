@@ -14,47 +14,55 @@
 >
 > Read the page you need rather than the concatenation. A tool that truncates or summarises a large fetch loses the end of `llms-full.txt`, which is where the reference pages are — the CLI, the REST API and every configuration key.
 
-## Getting Started
+## Get started
 
-- [Introduction](https://www.tapflow.dev/guide/introduction): Architecture overview, key concepts (Relay, Agent, Dashboard, MCP Server), and streaming format by platform.
-- [Requirements](https://www.tapflow.dev/guide/requirements): Node.js ≥ 22 for relay and agent; Xcode for iOS; Android SDK + AVD for Android; any modern browser for the dashboard. Names the verified macOS and Xcode versions.
-- [Quick Start](https://www.tapflow.dev/guide/getting-started): Install tapflow, start the relay and agent, create the admin account, and open the dashboard — under 5 minutes.
-
-## Setup
-
-- [Environment Setup](https://www.tapflow.dev/guide/environment-setup): `tapflow doctor` to diagnose what a Mac is missing, and `tapflow setup` to install and configure it — per platform, including the Xcode license and first-launch steps that need sudo.
-- [Configuring tapflow](https://www.tapflow.dev/guide/configure): `tapflow init` and the `tapflow.config.json` it writes — tunnel choice, streaming profile on a LAN, certificate method, and the `.env` that holds secrets. Skippable if port 4000 over HTTP with no tunnel is fine.
-- [Self-Hosting the Relay](https://www.tapflow.dev/guide/self-hosting): Deploy the relay locally, on a Linux server, in Docker, or behind nginx/Caddy. Includes JWT_SECRET setup, ngrok for quick demos, and PM2 for production.
-- [Agent Setup](https://www.tapflow.dev/guide/agent): Start the Mac agent and connect it to the relay. iOS prerequisites (Xcode, Simulator Runtime), Android prerequisites (AVD with google_apis/arm64-v8a image), and authenticating a remote agent with a PAT.
-- [Scaling Mac Resources](https://www.tapflow.dev/guide/scaling): Add more Mac hosts to the same relay for a larger device pool. Agent naming, per-Mac device limits, and monitoring via Mac Resources tab.
-
-## Distribution
-
-- [Uploading Builds](https://www.tapflow.dev/guide/upload-builds): Upload iOS (.app.zip) or Android (.apk) builds from the dashboard. Builds are linked to apps by bundle ID automatically.
-- [Build Distribution](https://www.tapflow.dev/guide/build-distribution): Connect your CI pipeline to upload builds automatically. Includes Personal Access Token setup, curl examples, GitHub Actions full example with branch/commit metadata, and build status reference.
-- [Webhooks](https://www.tapflow.dev/guide/build-status-webhooks): Register a URL that tapflow POSTs to when someone moves a build to Done or Rejected — the review verdict, not a build completion. Payload shape, signature verification, and when it fires.
-
-## Dashboard
-
+- [Introduction](https://www.tapflow.dev/get-started/introduction): Architecture overview, key concepts (Relay, Agent, Dashboard, MCP Server), and streaming format by platform.
+- [Quick Start](https://www.tapflow.dev/get-started/quick-start): Install tapflow, start the relay and agent, create the admin account, and open the dashboard — under 5 minutes.
 - [First-time Setup](https://www.tapflow.dev/dashboard/setup): Create the admin account, sign in, invite teammates with roles (Admin / Developer / QA / Viewer), add the first app, and start a session.
+
+## Test apps
+
 - [Dashboard Overview](https://www.tapflow.dev/dashboard/overview): Reference for every dashboard section — App Center, testing sessions, recordings (72h retention), Mac Resources monitoring, and Settings (profile, team, tokens).
+- [Uploading Builds](https://www.tapflow.dev/testing/app-center): Upload iOS (.app.zip) or Android (.apk) builds from the dashboard. Builds are linked to apps by bundle ID automatically.
+- [Network Control](https://www.tapflow.dev/testing/network-control): Take a simulator or emulator offline from the toolbar and bring it back. Exactly which connections are cut and which are not, why localhost is exempt, and why iOS needs the bundled network extension.
+- [Audio](https://www.tapflow.dev/testing/audio): Device audio in the browser — on by default on both platforms, the one-time permission, per-agent opt-out with TAPFLOW_AUDIO=off, volume, and why the agent Mac itself stays silent.
 
-## AI Automation (MCP and flows — Experimental)
+## Operate
 
-- [MCP Server](https://www.tapflow.dev/guide/mcp-server): Install and configure @tapflowio/mcp-server. Supports Claude Code, Codex, Cursor, and any MCP-compatible client. Available tools: list_builds, list_devices, connect_device, disconnect_device, boot_device, shutdown_device, screenshot, query_ui_tree, tap, swipe, type_text, press_key, press_button, install_app, launch_app, run_flow.
-- [Flow Reference](https://www.tapflow.dev/guide/writing-flows): The YAML flow format replayed deterministically by `tapflow flow run` with no LLM calls — file structure, every step type, selectors, running in CI, and how it relates to the `run_flow` MCP tool.
-- [MCP in CI/CD](https://www.tapflow.dev/guide/mcp-ci): Run automated smoke tests on every build using claude CLI + MCP. Includes GitHub Actions example, multi-device matrix, example test prompts, and tips for reliable agentic test scripts.
+### Set up a Mac
+
+- [Requirements](https://www.tapflow.dev/operate/requirements): Node.js ≥ 22 for relay and agent; Xcode for iOS; Android SDK + AVD for Android; any modern browser for the dashboard. Names the verified macOS and Xcode versions.
+- [Environment Setup](https://www.tapflow.dev/operate/environment-setup): `tapflow doctor` to diagnose what a Mac is missing, and `tapflow setup` to install and configure it — per platform, including the Xcode license and first-launch steps that need sudo.
+- [Configuring tapflow](https://www.tapflow.dev/operate/configure): `tapflow init` and the `tapflow.config.json` it writes — tunnel choice, streaming profile on a LAN, certificate method, and the `.env` that holds secrets. Skippable if port 4000 over HTTP with no tunnel is fine.
+- [Agent Setup](https://www.tapflow.dev/operate/agents): Start the Mac agent and connect it to the relay. iOS prerequisites (Xcode, Simulator Runtime), Android prerequisites (AVD with google_apis/arm64-v8a image), and authenticating a remote agent with a PAT.
+
+### Deploy the relay
+
+- [Self-Hosting the Relay](https://www.tapflow.dev/guide/self-hosting): Deploy the relay locally, on a Linux server, in Docker, or behind nginx/Caddy. Includes JWT_SECRET setup, ngrok for quick demos, and PM2 for production.
+- [Streaming Quality](https://www.tapflow.dev/operate/streaming-quality): The three streaming profiles (Standard / Smooth / Remote), which one a viewer gets from how it connects, the decoder and resolution behind each, and how to tune the resolution.
+
+### Run the team
+
+- [Scaling Mac Resources](https://www.tapflow.dev/operate/scaling): Add more Mac hosts to the same relay for a larger device pool. Agent naming, per-Mac device limits, and monitoring via Mac Resources tab.
+
+### Deliver builds
+
+- [Build Distribution](https://www.tapflow.dev/operate/ci-distribution): Connect your CI pipeline to upload builds automatically. Includes Personal Access Token setup, curl examples, GitHub Actions full example with branch/commit metadata, and build status reference.
+- [Webhooks](https://www.tapflow.dev/operate/webhooks): Register a URL that tapflow POSTs to when someone moves a build to Done or Rejected — the review verdict, not a build completion. Payload shape, signature verification, and when it fires.
+
+### AI automation (MCP and flows — experimental)
+
+- [MCP Server](https://www.tapflow.dev/automation/mcp-server): Install and configure @tapflowio/mcp-server. Supports Claude Code, Codex, Cursor, and any MCP-compatible client. Available tools: list_builds, list_devices, connect_device, disconnect_device, boot_device, shutdown_device, screenshot, query_ui_tree, tap, swipe, type_text, press_key, press_button, install_app, launch_app, run_flow.
+- [Flow Reference](https://www.tapflow.dev/automation/flows): The YAML flow format replayed deterministically by `tapflow flow run` with no LLM calls — file structure, every step type, selectors, running in CI, and how it relates to the `run_flow` MCP tool.
+- [MCP in CI/CD](https://www.tapflow.dev/automation/mcp-ci): Run automated smoke tests on every build using claude CLI + MCP. Includes GitHub Actions example, multi-device matrix, example test prompts, and tips for reliable agentic test scripts.
 
 ## Reference
 
 - [CLI Reference](https://www.tapflow.dev/reference/cli): Every command with a section on that page — doctor, setup, init, admin init, start, relay start, agent start, devices, boot, reset, status, logs, migrate, migrate data-dir, migrate net-filter. `tapflow flow run` is documented under Flow Reference instead.
 - [Configuration](https://www.tapflow.dev/reference/configuration): tapflow.config.json schema and environment variable overrides (JWT_SECRET, TAPFLOW_PORT, TAPFLOW_DATA_DIR, SMTP_*, etc.).
-- [Streaming Quality](https://www.tapflow.dev/guide/streaming): The three streaming profiles (Standard / Smooth / Remote), which one a viewer gets from how it connects, the decoder and resolution behind each, and how to tune the resolution.
-- [Audio](https://www.tapflow.dev/guide/audio): Device audio in the browser — on by default on both platforms, the one-time permission, per-agent opt-out with TAPFLOW_AUDIO=off, volume, and why the agent Mac itself stays silent.
-- [Network Control](https://www.tapflow.dev/guide/network-control): Take a simulator or emulator offline from the toolbar and bring it back. Exactly which connections are cut and which are not, why localhost is exempt, and why iOS needs the bundled network extension.
 - [REST API](https://www.tapflow.dev/reference/api): Full REST API reference — Auth, Invitations, Password reset, Apps, Builds, Comments, Team, Tokens, Profile, Settings, Recordings, Agents, Logs. Base path: /api/v1/.
-- [Performance & Latency](https://www.tapflow.dev/reference/performance): What tapflow streaming actually measures — bandwidth, decode latency on the WASM (tinyh264) path over a real LAN, the glass-to-glass estimate against the ~100 ms direct-manipulation budget, known limitations, and how to reproduce the numbers.
 - [Security & Privacy](https://www.tapflow.dev/reference/security): How tapflow keeps data on-prem — build files, device streams, and session recordings never leave your network. LAN-first architecture, PAT-based authentication with scopes, and TLS via reverse proxy.
+- [Performance & Latency](https://www.tapflow.dev/reference/performance): What tapflow streaming actually measures — bandwidth, decode latency on the WASM (tinyh264) path over a real LAN, the glass-to-glass estimate against the ~100 ms direct-manipulation budget, known limitations, and how to reproduce the numbers.
 - [Sustainability](https://www.tapflow.dev/reference/sustainability): Why reusing Macs a team already owns lowers the hardware footprint of mobile QA — embodied carbon, the SCI standard, what we measured, and the limits of the claim.
 
 ## Troubleshooting
@@ -63,4 +71,4 @@
 
 ## Contributing
 
-- [Contributing Guide](https://www.tapflow.dev/guide/contributing): The monorepo's package layout, where each platform's agent lives, and how to report a bug. The full contributing guide is CONTRIBUTING.md in the repository.
+- [Contributing Guide](https://www.tapflow.dev/contributing): The monorepo's package layout, where each platform's agent lives, and how to report a bug. The full contributing guide is CONTRIBUTING.md in the repository.

@@ -33,7 +33,7 @@ arm64 전용이라 macOS가 실행을 거부하고(`EBADARCH`), Node가 그것�
 
 Intel 지원은 가능하고 [#464](https://github.com/jo-duchan/tapflow/issues/464)에서 다루고 있습니다.
 유니버설 빌드가 필요하고 메인테이너가 갖고 있지 않은 하드웨어에서 검증해야 해서 예정에는 없습니다.
-[시스템 요구사항](/ko/guide/requirements#에이전트)도 참고하세요.
+[시스템 요구사항](/ko/operate/requirements#에이전트)도 참고하세요.
 
 `uname -m`이 `arm64`를 출력하면 다른 문제입니다. 헬퍼 파일이 없거나 실행 권한이 없을 때도 같은
 메시지가 나오므로, 에이전트 패키지가 온전히 설치됐는지 확인하세요.
@@ -278,7 +278,7 @@ tapflow doctor ios
 | 7 | 실행 중인 필터에게서 답을 받지 못함 |
 | 8 | 이 빌드가 이해하지 못하는 인자. 설치된 필터 앱이 에이전트보다 오래된 버전일 때 나올 수 있습니다 |
 
-확장이 무엇을 보고 무엇을 보지 않는지는 [네트워크 제어](/ko/guide/network-control#무엇을-신뢰하게-되는가)에 있습니다.
+확장이 무엇을 보고 무엇을 보지 않는지는 [네트워크 제어](/ko/testing/network-control#무엇을-신뢰하게-되는가)에 있습니다.
 
 ## iOS: 필터를 교체하는 중에 맥의 네트워크가 끊겼습니다 {#network-lost-on-replace}
 
@@ -328,7 +328,7 @@ log show --last 10m --predicate 'subsystem == "dev.tapflow.netfilter"' --info --
 
 로그는 `/tmp/tapflow-netfilter-host.log`에 있습니다.
 
-기능 자체는 [네트워크 제어](/ko/guide/network-control)를 참고하세요.
+기능 자체는 [네트워크 제어](/ko/testing/network-control)를 참고하세요.
 
 ## `tapflow doctor` 실패
 
@@ -421,11 +421,11 @@ AWDL은 트리거(AirDrop 검색·AirPlay 수신·Handoff·Bluetooth 근접)가 
 
 ### 디스플레이 절전
 
-에이전트는 기본적으로 세션이 활성인 동안 호스트 디스플레이를 깨어 있게 유지합니다. 디스플레이가 꺼지면 GPU가 저전력으로 묶여 시뮬레이터가 느려지기 때문입니다. `TAPFLOW_ALLOW_DISPLAY_SLEEP=1`을 설정했다면 디스플레이가 꺼질 때 스트림이 느려질 수 있습니다. [에이전트 설정](/ko/guide/agent#호스트-디스플레이와-절전)을 참고하세요.
+에이전트는 기본적으로 세션이 활성인 동안 호스트 디스플레이를 깨어 있게 유지합니다. 디스플레이가 꺼지면 GPU가 저전력으로 묶여 시뮬레이터가 느려지기 때문입니다. `TAPFLOW_ALLOW_DISPLAY_SLEEP=1`을 설정했다면 디스플레이가 꺼질 때 스트림이 느려질 수 있습니다. [에이전트 설정](/ko/operate/agents#호스트-디스플레이와-절전)을 참고하세요.
 
 ### LAN에서 화면이 흐리거나 해상도가 낮은 경우
 
-평문 HTTP의 LAN 연결은 **Standard** 프로파일을 사용하며, WASM 디코더의 반응성을 유지하기 위해 스트림을 1280px(가장 긴 변)로 제한합니다. 시뮬레이터 원본 해상도로 스트리밍하려면 릴레이를 HTTPS로 제공하세요 — 그러면 **Smooth** 프로파일(하드웨어 디코딩, 원본 해상도)로 전환됩니다. [릴레이 배포](/ko/guide/self-hosting) 참고. HTTPS 없이 제한값만 높이려면 에이전트에서 `TAPFLOW_MAX_SIZE_LAN` 환경변수를 설정합니다 — [스트림 품질](/ko/guide/streaming) 참고.
+평문 HTTP의 LAN 연결은 **Standard** 프로파일을 사용하며, WASM 디코더의 반응성을 유지하기 위해 스트림을 1280px(가장 긴 변)로 제한합니다. 시뮬레이터 원본 해상도로 스트리밍하려면 릴레이를 HTTPS로 제공하세요 — 그러면 **Smooth** 프로파일(하드웨어 디코딩, 원본 해상도)로 전환됩니다. [릴레이 배포](/ko/guide/self-hosting) 참고. HTTPS 없이 제한값만 높이려면 에이전트에서 `TAPFLOW_MAX_SIZE_LAN` 환경변수를 설정합니다 — [스트림 품질](/ko/operate/streaming-quality) 참고.
 
 ## 인증 관련
 
@@ -435,7 +435,7 @@ AWDL은 트리거(AirDrop 검색·AirPlay 수신·Handoff·Bluetooth 근접)가 
 
 ### 릴레이가 예상과 다른 설정이나 DB를 씁니다
 
-`tapflow start`와 `tapflow relay start`는 시작할 때 설치 디렉터리, 설정 파일, 데이터 디렉터리를 출력합니다. 명령은 `TAPFLOW_HOME`, 그다음 현재 디렉터리가 이미 설치인 경우, 마지막으로 `~/.tapflow` 순으로 찾습니다([명령이 쓰는 설치 디렉터리](/ko/guide/configure#명령이-쓰는-설치-디렉토리)). 예전 설치가 있는 디렉터리에서 실행하면 그 설치를 쓰게 되므로, 분명히 하려면 `TAPFLOW_HOME`을 설정하세요.
+`tapflow start`와 `tapflow relay start`는 시작할 때 설치 디렉터리, 설정 파일, 데이터 디렉터리를 출력합니다. 명령은 `TAPFLOW_HOME`, 그다음 현재 디렉터리가 이미 설치인 경우, 마지막으로 `~/.tapflow` 순으로 찾습니다([명령이 쓰는 설치 디렉터리](/ko/operate/configure#명령이-쓰는-설치-디렉토리)). 예전 설치가 있는 디렉터리에서 실행하면 그 설치를 쓰게 되므로, 분명히 하려면 `TAPFLOW_HOME`을 설정하세요.
 
 ### `tapflow admin init` 실패 (`Already initialized`)
 

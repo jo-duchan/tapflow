@@ -26,59 +26,90 @@ function nfcSlugify(str: string): string {
     .toLowerCase()
 }
 
+// Sections follow what the reader is doing, and a page's URL prefix names its section
+// (`/get-started/`, `/testing/`, `/operate/`, `/automation/`, `/reference/`). One sidebar for
+// every page rather than one per section, so each reader can see the other's pages.
+//
+// Interim entries until the pages are split or merged: `/dashboard/setup` (Get started),
+// `/dashboard/overview` (Test apps), `/guide/self-hosting` (Deploy the relay) and
+// `/guide/troubleshooting` keep their old URLs for now.
+//
+// `koSidebar` must mirror this one — same groups, same order, every link prefixed with `/ko` —
+// and `docs/public/llms.txt` lists the same links under the same top-level group names.
+// `scripts/__tests__/agentReadableDocs.test.mjs` checks both.
 const enSidebar = [
   {
-    text: 'Getting Started',
+    text: 'Get started',
     items: [
-      { text: 'Introduction', link: '/guide/introduction' },
-      { text: 'Requirements', link: '/guide/requirements' },
-      { text: 'Quick Start', link: '/guide/getting-started' },
-    ],
-  },
-  {
-    text: 'Setup',
-    items: [
-      { text: 'Environment Setup', link: '/guide/environment-setup' },
-      { text: 'Configuring tapflow', link: '/guide/configure' },
-      { text: 'Self-Hosting the Relay', link: '/guide/self-hosting' },
-      { text: 'Agent Setup', link: '/guide/agent' },
-      { text: 'Scaling Mac Resources', link: '/guide/scaling' },
-    ],
-  },
-  {
-    text: 'Distribution',
-    items: [
-      { text: 'Uploading Builds', link: '/guide/upload-builds' },
-      { text: 'Build Distribution', link: '/guide/build-distribution' },
-      { text: 'Webhooks', link: '/guide/build-status-webhooks' },
-    ],
-  },
-  {
-    text: 'Dashboard',
-    items: [
+      { text: 'Introduction', link: '/get-started/introduction' },
+      { text: 'Quick Start', link: '/get-started/quick-start' },
       { text: 'First-time Setup', link: '/dashboard/setup' },
-      { text: 'Dashboard Overview', link: '/dashboard/overview' },
     ],
   },
   {
-    text: 'AI Automation',
+    text: 'Test apps',
     items: [
-      { text: 'MCP Server', link: '/guide/mcp-server' },
-      { text: 'Flow Reference', link: '/guide/writing-flows' },
-      { text: 'MCP in CI/CD', link: '/guide/mcp-ci' },
+      { text: 'Overview', link: '/dashboard/overview' },
+      { text: 'App Center', link: '/testing/app-center' },
+      { text: 'Network control', link: '/testing/network-control' },
+      { text: 'Audio', link: '/testing/audio' },
+    ],
+  },
+  {
+    text: 'Operate',
+    items: [
+      {
+        text: 'Set up a Mac',
+        collapsed: true,
+        items: [
+          { text: 'Requirements', link: '/operate/requirements' },
+          { text: 'Environment setup', link: '/operate/environment-setup' },
+          { text: 'Configure tapflow', link: '/operate/configure' },
+          { text: 'Agents', link: '/operate/agents' },
+        ],
+      },
+      {
+        text: 'Deploy the relay',
+        collapsed: true,
+        items: [
+          { text: 'Self-Hosting the Relay', link: '/guide/self-hosting' },
+          { text: 'Stream quality', link: '/operate/streaming-quality' },
+        ],
+      },
+      {
+        text: 'Run the team',
+        collapsed: true,
+        items: [
+          { text: 'Scaling Mac resources', link: '/operate/scaling' },
+        ],
+      },
+      {
+        text: 'Deliver builds',
+        collapsed: true,
+        items: [
+          { text: 'Upload from CI', link: '/operate/ci-distribution' },
+          { text: 'Review webhooks', link: '/operate/webhooks' },
+        ],
+      },
+      {
+        text: 'AI automation (experimental)',
+        collapsed: true,
+        items: [
+          { text: 'MCP server', link: '/automation/mcp-server' },
+          { text: 'Flow reference', link: '/automation/flows' },
+          { text: 'MCP in CI/CD', link: '/automation/mcp-ci' },
+        ],
+      },
     ],
   },
   {
     text: 'Reference',
     items: [
-      { text: 'CLI Reference', link: '/reference/cli' },
+      { text: 'CLI', link: '/reference/cli' },
       { text: 'Configuration', link: '/reference/configuration' },
-      { text: 'Streaming Quality', link: '/guide/streaming' },
-      { text: 'Audio', link: '/guide/audio' },
-      { text: 'Network Control', link: '/guide/network-control' },
       { text: 'REST API', link: '/reference/api' },
-      { text: 'Performance & Latency', link: '/reference/performance' },
-      { text: 'Security & Privacy', link: '/reference/security' },
+      { text: 'Security & privacy', link: '/reference/security' },
+      { text: 'Performance & latency', link: '/reference/performance' },
       { text: 'Sustainability', link: '/reference/sustainability' },
     ],
   },
@@ -91,7 +122,7 @@ const enSidebar = [
   {
     text: 'Contributing',
     items: [
-      { text: 'Contributing Guide', link: '/guide/contributing' },
+      { text: 'Contributing guide', link: '/contributing' },
     ],
   },
 ]
@@ -100,42 +131,65 @@ const koSidebar = [
   {
     text: '시작하기',
     items: [
-      { text: '소개', link: '/ko/guide/introduction' },
-      { text: '시스템 요구사항', link: '/ko/guide/requirements' },
-      { text: '빠른 시작', link: '/ko/guide/getting-started' },
-    ],
-  },
-  {
-    text: '설정',
-    items: [
-      { text: '환경 준비', link: '/ko/guide/environment-setup' },
-      { text: 'tapflow 설정', link: '/ko/guide/configure' },
-      { text: '릴레이 배포', link: '/ko/guide/self-hosting' },
-      { text: '에이전트 설정', link: '/ko/guide/agent' },
-      { text: 'Mac 리소스 확장', link: '/ko/guide/scaling' },
-    ],
-  },
-  {
-    text: '빌드 배포',
-    items: [
-      { text: '빌드 업로드', link: '/ko/guide/upload-builds' },
-      { text: '빌드 배포', link: '/ko/guide/build-distribution' },
-      { text: '웹훅', link: '/ko/guide/build-status-webhooks' },
-    ],
-  },
-  {
-    text: '대시보드',
-    items: [
+      { text: '소개', link: '/ko/get-started/introduction' },
+      { text: '빠른 시작', link: '/ko/get-started/quick-start' },
       { text: '최초 설정', link: '/ko/dashboard/setup' },
-      { text: '대시보드 개요', link: '/ko/dashboard/overview' },
     ],
   },
   {
-    text: 'AI 자동화',
+    text: '앱 테스트',
     items: [
-      { text: 'MCP 서버', link: '/ko/guide/mcp-server' },
-      { text: '플로우 레퍼런스', link: '/ko/guide/writing-flows' },
-      { text: 'CI/CD에서 MCP 활용', link: '/ko/guide/mcp-ci' },
+      { text: '개요', link: '/ko/dashboard/overview' },
+      { text: 'App Center', link: '/ko/testing/app-center' },
+      { text: '네트워크 제어', link: '/ko/testing/network-control' },
+      { text: '오디오', link: '/ko/testing/audio' },
+    ],
+  },
+  {
+    text: '운영',
+    items: [
+      {
+        text: 'Mac 준비',
+        collapsed: true,
+        items: [
+          { text: '시스템 요구사항', link: '/ko/operate/requirements' },
+          { text: '환경 준비', link: '/ko/operate/environment-setup' },
+          { text: 'tapflow 설정', link: '/ko/operate/configure' },
+          { text: '에이전트 설정', link: '/ko/operate/agents' },
+        ],
+      },
+      {
+        text: '릴레이 배포',
+        collapsed: true,
+        items: [
+          { text: '릴레이 셀프 호스팅', link: '/ko/guide/self-hosting' },
+          { text: '스트림 품질', link: '/ko/operate/streaming-quality' },
+        ],
+      },
+      {
+        text: '팀 운영',
+        collapsed: true,
+        items: [
+          { text: 'Mac 리소스 확장', link: '/ko/operate/scaling' },
+        ],
+      },
+      {
+        text: '빌드 전달',
+        collapsed: true,
+        items: [
+          { text: 'CI에서 빌드 올리기', link: '/ko/operate/ci-distribution' },
+          { text: '리뷰 웹훅', link: '/ko/operate/webhooks' },
+        ],
+      },
+      {
+        text: 'AI 자동화 (실험적)',
+        collapsed: true,
+        items: [
+          { text: 'MCP 서버', link: '/ko/automation/mcp-server' },
+          { text: '플로우 레퍼런스', link: '/ko/automation/flows' },
+          { text: 'CI/CD에서 MCP 활용', link: '/ko/automation/mcp-ci' },
+        ],
+      },
     ],
   },
   {
@@ -143,17 +197,14 @@ const koSidebar = [
     items: [
       { text: 'CLI 레퍼런스', link: '/ko/reference/cli' },
       { text: '설정 파일', link: '/ko/reference/configuration' },
-      { text: '스트림 품질', link: '/ko/guide/streaming' },
-      { text: '오디오', link: '/ko/guide/audio' },
-      { text: '네트워크 제어', link: '/ko/guide/network-control' },
       { text: 'REST API', link: '/ko/reference/api' },
-      { text: '성능과 지연', link: '/ko/reference/performance' },
       { text: '보안 및 개인정보', link: '/ko/reference/security' },
+      { text: '성능과 지연', link: '/ko/reference/performance' },
       { text: '지속가능성', link: '/ko/reference/sustainability' },
     ],
   },
   {
-    text: '트러블슈팅',
+    text: '문제 해결',
     items: [
       { text: '문제 해결', link: '/ko/guide/troubleshooting' },
     ],
@@ -161,7 +212,7 @@ const koSidebar = [
   {
     text: '기여',
     items: [
-      { text: '기여 가이드', link: '/ko/guide/contributing' },
+      { text: '기여 가이드', link: '/ko/contributing' },
     ],
   },
 ]
@@ -204,8 +255,12 @@ export default withMermaid(defineConfig({
       lang: 'en-US',
       themeConfig: {
         nav: [
-          { text: 'Guide', link: '/guide/introduction', activeMatch: '^/(guide|dashboard)' },
-          { text: 'Reference', link: '/reference/cli', activeMatch: '^/reference' },
+          // The `dashboard/*` and `guide/*` alternatives cover the interim entries named above
+          // `enSidebar`; drop each one when its page moves.
+          { text: 'Get started', link: '/get-started/introduction', activeMatch: '^/(get-started/|dashboard/setup)' },
+          { text: 'Test apps', link: '/dashboard/overview', activeMatch: '^/(testing/|dashboard/overview)' },
+          { text: 'Operate', link: '/operate/requirements', activeMatch: '^/(operate/|automation/|guide/self-hosting)' },
+          { text: 'Reference', link: '/reference/cli', activeMatch: '^/reference/' },
           { text: 'Changelog', link: 'https://github.com/jo-duchan/tapflow/blob/main/CHANGELOG.md' },
         ],
         sidebar: enSidebar,
@@ -216,8 +271,10 @@ export default withMermaid(defineConfig({
       lang: 'ko-KR',
       themeConfig: {
         nav: [
-          { text: '가이드', link: '/ko/guide/introduction', activeMatch: '^/ko/(guide|dashboard)' },
-          { text: '레퍼런스', link: '/ko/reference/cli', activeMatch: '^/ko/reference' },
+          { text: '시작하기', link: '/ko/get-started/introduction', activeMatch: '^/ko/(get-started/|dashboard/setup)' },
+          { text: '앱 테스트', link: '/ko/dashboard/overview', activeMatch: '^/ko/(testing/|dashboard/overview)' },
+          { text: '운영', link: '/ko/operate/requirements', activeMatch: '^/ko/(operate/|automation/|guide/self-hosting)' },
+          { text: '레퍼런스', link: '/ko/reference/cli', activeMatch: '^/ko/reference/' },
           { text: '변경 기록', link: 'https://github.com/jo-duchan/tapflow/blob/main/CHANGELOG.md' },
         ],
         sidebar: koSidebar,

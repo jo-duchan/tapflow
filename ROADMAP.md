@@ -153,7 +153,7 @@ post-launch timing are where it breaks. Hardening is tracked under the
 - [x] Screenshot REST endpoint — `GET /api/v1/sessions/:sessionId/screenshot` for programmatic capture
 - [x] `@tapflowio/mcp-server` — LLM-driven simulator control via MCP tools
 - [x] [#133](https://github.com/jo-duchan/tapflow/issues/133) — UI accessibility tree query (`query_ui_tree`) — unified element schema with normalized frames, so agents tap by element instead of guessing coordinates
-- [x] Deterministic YAML flow format + headless CLI runner — `tapflow flow run`, with state reset, condition-based waits, JUnit report and failure screenshots, and no LLM at replay time ([flow reference](https://www.tapflow.dev/guide/writing-flows))
+- [x] Deterministic YAML flow format + headless CLI runner — `tapflow flow run`, with state reset, condition-based waits, JUnit report and failure screenshots, and no LLM at replay time ([flow reference](https://www.tapflow.dev/automation/flows))
 - [x] `run_flow` MCP tool — agents replay verified flows through the same deterministic engine
 - [ ] **Flow Capture** (the manual↔AI bridge) — a person operates the app in the dashboard; tapflow records the actions as tree-based selectors and drafts a YAML flow, no agent required. Selector-based (via the UI tree), not coordinate recording, so captures stay robust. Blocked on tree fidelity: the selectors have to be trustworthy before capturing them means anything.
 

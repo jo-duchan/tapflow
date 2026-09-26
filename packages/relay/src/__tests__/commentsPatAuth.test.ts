@@ -8,7 +8,7 @@ import { initDb, getDb, closeDb } from '../db'
 import { makePasswordHash } from '../api/auth'
 import { signJwt, hashPat } from '../middleware/auth'
 
-// The CI recipe in docs/guide/build-distribution.md uploads a build with a PAT and then posts a
+// The CI recipe in docs/operate/ci-distribution.md uploads a build with a PAT and then posts a
 // comment with the same PAT. The comment route used to accept the cookie only, so that step got a
 // 401 and failed the job under `curl -sf`.
 

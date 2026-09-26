@@ -436,7 +436,7 @@ Cancel a scheduled deletion, clearing `delete_after`. A Viewer gets `403`.
 
 ## Webhooks
 
-Manage the endpoints notified when a build's review status changes. Every call takes the session cookie or a PAT with the `builds:write` scope. A webhook URL is often a secret in itself, so a Viewer gets `403` from every webhook endpoint, listing included. Payloads and signature verification are covered in [Webhooks](/guide/build-status-webhooks).
+Manage the endpoints notified when a build's review status changes. Every call takes the session cookie or a PAT with the `builds:write` scope. A webhook URL is often a secret in itself, so a Viewer gets `403` from every webhook endpoint, listing included. Payloads and signature verification are covered in [Webhooks](/operate/webhooks).
 
 ### `GET /api/v1/webhooks`
 

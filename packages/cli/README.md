@@ -27,11 +27,11 @@
   <p>
     <a href="https://www.tapflow.dev">📖 Docs</a>
     &nbsp;·&nbsp;
-    <a href="https://www.tapflow.dev/guide/getting-started">🚀 Quick Start</a>
+    <a href="https://www.tapflow.dev/get-started/quick-start">🚀 Quick Start</a>
     &nbsp;·&nbsp;
-    <a href="https://www.tapflow.dev/guide/introduction">🎥 Demo</a>
+    <a href="https://www.tapflow.dev/get-started/introduction">🎥 Demo</a>
     &nbsp;·&nbsp;
-    <a href="https://www.tapflow.dev/guide/environment-setup#tapflow-setup">🎬 Setup</a>
+    <a href="https://www.tapflow.dev/operate/environment-setup#tapflow-setup">🎬 Setup</a>
   </p>
 </div>
 
@@ -109,7 +109,7 @@ On the Mac that will run an agent, install the simulator/emulator prerequisites 
 tapflow setup
 ```
 
-Skip this on a relay-only server (Linux). See [Environment Setup](https://www.tapflow.dev/guide/environment-setup) for details.
+Skip this on a relay-only server (Linux). See [Environment Setup](https://www.tapflow.dev/operate/environment-setup) for details.
 
 ### 3. Start relay + agent
 
@@ -218,7 +218,7 @@ docker run -d -p 4000:4000 -v "$PWD/data:/app/.tapflow/data" tapflow/tapflow:lat
 tapflow agent start --relay wss://your-relay-url --token <agent-token>
 ```
 
-> A relay on a different machine accepts an agent only with an `agent`-scope token — create one in **Settings → Tokens** (Admin only). Agents on the relay's own machine (`tapflow start`) need no token. See [Remote relay authentication](https://www.tapflow.dev/guide/agent#remote-relay-authentication).
+> A relay on a different machine accepts an agent only with an `agent`-scope token — create one in **Settings → Tokens** (Admin only). Agents on the relay's own machine (`tapflow start`) need no token. See [Remote relay authentication](https://www.tapflow.dev/operate/agents#remote-relay-authentication).
 >
 > For nginx / Caddy reverse proxy setup and external access, see [Self-Hosting the Relay](https://www.tapflow.dev/guide/self-hosting).
 
@@ -245,9 +245,9 @@ Full reference → [CLI docs](https://www.tapflow.dev/reference/cli)
 
 Full docs: **[www.tapflow.dev](https://www.tapflow.dev)**
 
-- **Guides** — [Quick Start](https://www.tapflow.dev/guide/getting-started) · [Environment Setup](https://www.tapflow.dev/guide/environment-setup) · [Self-Hosting](https://www.tapflow.dev/guide/self-hosting) · [Uploading Builds (CI/CD)](https://www.tapflow.dev/guide/upload-builds) · [Troubleshooting](https://www.tapflow.dev/guide/troubleshooting)
+- **Guides** — [Quick Start](https://www.tapflow.dev/get-started/quick-start) · [Environment Setup](https://www.tapflow.dev/operate/environment-setup) · [Self-Hosting](https://www.tapflow.dev/guide/self-hosting) · [Uploading Builds (CI/CD)](https://www.tapflow.dev/testing/app-center) · [Troubleshooting](https://www.tapflow.dev/guide/troubleshooting)
 - **Reference** — [CLI](https://www.tapflow.dev/reference/cli) · [Configuration](https://www.tapflow.dev/reference/configuration) · [REST API](https://www.tapflow.dev/reference/api) · [Security & Privacy](https://www.tapflow.dev/reference/security)
-- **AI Agent** — [MCP Server](https://www.tapflow.dev/guide/mcp-server)
+- **AI Agent** — [MCP Server](https://www.tapflow.dev/automation/mcp-server)
 
 ## Contributing
 

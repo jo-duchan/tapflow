@@ -58,7 +58,7 @@ const FORBIDDEN = [
  * does not exist.
  */
 const ALLOW = [
-  { text: '**Agent**', files: ['guide/agent.md', 'guide/troubleshooting.md', 'dashboard/overview.md'], reason: 'token Type label in Settings → Tokens, shown as-is in the dashboard' },
+  { text: '**Agent**', files: ['operate/agents.md', 'guide/troubleshooting.md', 'dashboard/overview.md'], reason: 'token Type label in Settings → Tokens, shown as-is in the dashboard' },
   { text: '**AGENT ALREADY RUNNING**', files: ['guide/troubleshooting.md'], reason: 'literal CLI output the reader will see' },
   { text: '에이전트 (Agents)', files: ['reference/api.md'], reason: 'API reference heading glossing the English resource group' },
   { text: '릴레이 (Relay)', files: ['reference/api.md'], reason: 'API reference heading glossing the English resource group' },
@@ -138,7 +138,7 @@ describe('docs glossary (docs/AGENTS.md 용어집)', () => {
       '디바이스를 고르고 relay가 agent를 부릅니다. 디렉토리와 QA팀.',
       'relay/agent 구간',
     ].join('\n')
-    const { found } = findViolations(body, 'guide/agent.md')
+    const { found } = findViolations(body, 'operate/agents.md')
     expect(found.map((v) => [v.line, v.word])).toEqual([
       [13, '디바이스'], [13, '디렉토리'], [13, 'QA팀'], [13, 'relay'], [13, 'agent'],
       [14, 'relay'], [14, 'agent'],
@@ -146,7 +146,7 @@ describe('docs glossary (docs/AGENTS.md 용어집)', () => {
   })
 
   it('an allowlist entry only covers the files it names', () => {
-    expect(findViolations('**Agent** 토큰', 'guide/agent.md').found).toEqual([])
+    expect(findViolations('**Agent** 토큰', 'operate/agents.md').found).toEqual([])
     expect(findViolations('**Agent** 토큰', 'guide/scaling.md').found.map((v) => v.word)).toEqual(['Agent'])
   })
 

@@ -436,7 +436,7 @@ Body (JSON):
 
 ## 웹훅 (Webhooks)
 
-빌드 리뷰 상태가 바뀔 때 알림을 받을 엔드포인트를 관리합니다. 모두 세션 쿠키나 `builds:write` scope의 PAT로 호출합니다. 웹훅 URL 자체가 비밀인 경우가 많아서 Viewer는 목록 조회를 포함한 모든 웹훅 엔드포인트에서 `403`을 받습니다. 페이로드와 서명 검증은 [웹훅](/ko/guide/build-status-webhooks)에서 다룹니다.
+빌드 리뷰 상태가 바뀔 때 알림을 받을 엔드포인트를 관리합니다. 모두 세션 쿠키나 `builds:write` scope의 PAT로 호출합니다. 웹훅 URL 자체가 비밀인 경우가 많아서 Viewer는 목록 조회를 포함한 모든 웹훅 엔드포인트에서 `403`을 받습니다. 페이로드와 서명 검증은 [웹훅](/ko/operate/webhooks)에서 다룹니다.
 
 ### `GET /api/v1/webhooks`
 
