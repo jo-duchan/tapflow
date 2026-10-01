@@ -91,6 +91,8 @@ describe('a device toolbar draws each control differently', () => {
       .filter((n) => iconsIn(VIEWERS.Android).includes(n))
       .sort()
     expect(shared, 'the set of controls both platforms draw the same way changed')
-      .toEqual(['Home', 'Play'])
+      // Volume and power joined in #785's follow-up: iOS reaches its hardware buttons from the same
+      // "⋯" menu Android's moved into, drawn with the same glyphs.
+      .toEqual(['Home', 'Play', 'Power', 'Volume1', 'Volume2'])
   })
 })

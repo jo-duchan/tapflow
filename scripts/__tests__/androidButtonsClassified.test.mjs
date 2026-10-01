@@ -72,7 +72,9 @@ describe('the Android toolbar places every button the agent offers', () => {
     // wiring, which is a different fact from the lists it pins elsewhere.
     const src = readFileSync(VIEWER, 'utf8')
     expect(src).toContain('const navigationSlot = buttonsIn(NAVIGATION_BUTTONS)')
-    expect(src).toContain('const deviceSlot = buttonsIn(DEVICE_BUTTONS)')
+    // The Device group's buttons sit behind the toolbar's "⋯" menu since #785's follow-up, the same
+    // menu iOS uses, so the list reaches the slot through the menu's items rather than `buttonsIn`.
+    expect(src).toMatch(/const deviceSlot = \(\s*<ToolbarOverflowMenu[\s\S]*?items=\{DEVICE_BUTTONS\b/)
     expect(src, 'a slot is built and never passed').toContain('navigationSlot={navigationSlot}')
     expect(src).toContain('deviceSlot={deviceSlot}')
   })

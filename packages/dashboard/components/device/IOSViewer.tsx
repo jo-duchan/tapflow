@@ -5,7 +5,8 @@ import { newRequestId } from '@/lib/requestId';
 import { buttonHitRect, buttonTargets, buttonTitles } from '@/lib/buttonHit';
 import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState, Fragment } from 'react';
 import { useClientRecording } from '@/hooks/useClientRecording';
-import { Home, Keyboard, Loader2, Play } from 'lucide-react';
+import { CircleStar, Home, Keyboard, Loader2, Play, Power, Volume1, Volume2 } from 'lucide-react';
+import { ToolbarOverflowMenu, type OverflowItem } from './shared/ToolbarOverflowMenu';
 import { useFps } from '@/hooks/useFps';
 import { SimulatorToolbar } from './shared/SimulatorToolbar';
 import { useNetworkControl } from '@/hooks/useNetworkControl';
@@ -19,7 +20,7 @@ import type { ChromeData } from '@/lib/types'
 import { iosToNormScreen, toPinchFingers as makePinchFingers, iosDisplayScale } from '@/lib/coordinate-transform';
 import { useDecoderStream } from '@/hooks/useDecoderStream';
 import type { BinaryFrameHandler } from '@/lib/envelope';
-import type { MutableRefObject } from 'react';
+import type { MutableRefObject, ReactNode } from 'react';
 import type { PerfHook } from '@/components/perf/types';
 import { useClipboardBridge, isBridgedChord, type ClipboardMessageHandler } from '@/hooks/useClipboardBridge';
 import { toast } from 'sonner';
@@ -588,6 +589,28 @@ export function IOSViewer({
 
   const kbdStatusId = useId();
 
+  // The frame's volume, power and Action, reachable from the keyboard: the frame itself has no name
+  // or focus on purpose (AGENTS.md → "The streamed device is out of scope"), and the fix it names is
+  // toolbar parity with Android. Chosen by HID usage, which Apple's chrome states for each input,
+  // and named as the frame's tooltips are — so an iPad's volume follows its orientation here too. A
+  // ring/silent switch is left out: it is a toggle, and "press it once" means nothing clear. One
+  // press each, no phase — the agent's single-press path; long presses stay on the frame.
+  const hardware: Array<{ page: number; usage: number; icon: ReactNode; keepOpen?: boolean }> = [
+    { page: 12, usage: 233, icon: <Volume2 />, keepOpen: true },
+    { page: 12, usage: 234, icon: <Volume1 />, keepOpen: true },
+    { page: 12, usage: 48, icon: <Power /> },
+    { page: 11, usage: 45, icon: <CircleStar /> },
+  ];
+  const hardwareItems: OverflowItem[] = hardware.flatMap(({ page, usage, icon, keepOpen }) => {
+    const i = chrome.buttons.findIndex((b) => b.usagePage === page && b.usage === usage);
+    if (i < 0) return [];
+    const name = chrome.buttons[i].name;
+    return [{
+      key: name, label: titles[i], icon, keepOpen,
+      onSelect: () => send({ type: 'input:button', sessionId, requestId: newRequestId(), payload: { name } }),
+    }];
+  });
+
   const deviceSlot = (
     <>
       {/* **A live region, because a name change on a focused button is not re-announced.** Clicking
@@ -634,6 +657,7 @@ export function IOSViewer({
             : <span className="flex items-center gap-3">Software keyboard <KbdGroup><Kbd>⌘</Kbd><Kbd>⇧</Kbd><Kbd>K</Kbd></KbdGroup></span>}
         </TooltipContent>
       </Tooltip>
+      <ToolbarOverflowMenu label="More device buttons" items={hardwareItems} />
     </>
   );
 

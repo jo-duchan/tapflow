@@ -27,10 +27,12 @@ Once the device is up, the build is installed on it automatically. When the inst
 
 | Platform | Buttons |
 |---|---|
-| iOS | **Home** in the toolbar (<kbd>⌘</kbd> <kbd>⇧</kbd> <kbd>U</kbd>), and the side buttons drawn on the device frame |
-| Android | **Home**, **Back**, **Recent Apps**, **Volume Up**, **Volume Down** and **Power** in the toolbar |
+| iOS | **Home** in the toolbar (<kbd>⌘</kbd> <kbd>⇧</kbd> <kbd>U</kbd>), **Volume Up**, **Volume Down**, **Sleep/Wake** and **Action** (on devices that have it) in the toolbar's **More device buttons** menu, and the side buttons drawn on the device frame |
+| Android | **Home**, **Back** and **Recent Apps** in the toolbar, and **Volume Up**, **Volume Down** and **Power** in its **More device buttons** menu |
 
-On iOS, clicking a side button drawn on the device frame (power, volume and so on) presses it.
+Hardware buttons such as volume and power are in the menu that the toolbar's three-dot button (**More device buttons**) opens. Volume keeps the menu open after you press it, so you can press it several times in a row. From the keyboard, Tab to the button, press Enter to open the menu, choose with the arrow keys, and press Enter.
+
+On iOS you can also click a side button drawn on the device frame. To hold a button down, keep the frame button pressed. On an iPad turned to landscape, the volume buttons are named by what they do, because iPadOS raises the volume with whichever button is on the right or on top as the iPad is held.
 
 ## Software keyboard {#software-keyboard}
 
@@ -72,7 +74,7 @@ If the dashboard is open over plain HTTP, text copied on the device stays on the
 | Feature | iOS | Android |
 |---|---|---|
 | Tap, swipe, pinch, typing | Yes | Yes |
-| Device buttons | Home, side buttons on the device frame | Home, Back, Recent Apps, Volume Up, Volume Down, Power |
+| Device buttons | Home, volume, Sleep/Wake, Action (on devices that have it), side buttons on the device frame | Home, Back, Recent Apps, volume, Power |
 | Software keyboard button | Yes | No |
 | Rotate | Yes | Yes |
 | Fold and unfold | No | Foldable emulators with two postures |

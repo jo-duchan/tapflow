@@ -4,6 +4,7 @@ import type { BrowserToRelay } from '@tapflowio/protocol'
 import { newRequestId } from '@/lib/requestId';
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { useClientRecording } from '@/hooks/useClientRecording';
+import { ToolbarOverflowMenu } from './shared/ToolbarOverflowMenu';
 import { ArrowLeft, Home, LayoutGrid, Loader2, Play, Power, Volume1, Volume2 } from 'lucide-react';
 import { useDecoderStream } from '@/hooks/useDecoderStream';
 import type { Decoder } from '@/lib/decoders/types';
@@ -698,7 +699,24 @@ export function AndroidViewer({
   );
 
   const navigationSlot = buttonsIn(NAVIGATION_BUTTONS);
-  const deviceSlot = buttonsIn(DEVICE_BUTTONS);
+  // The Device group was at its "about four" line, so the hardware buttons sit behind a menu
+  // (`packages/dashboard/AGENTS.md` → "When a group gets too long"), the same one iOS uses — one
+  // layout for both platforms. Volume keeps the menu open so it can be pressed again; power does not.
+  const deviceSlot = (
+    <ToolbarOverflowMenu
+      label="More device buttons"
+      items={DEVICE_BUTTONS
+        .map((name) => androidButtons?.find((b) => b.name === name))
+        .filter((b): b is AndroidButton => b !== undefined)
+        .map((btn) => ({
+          key: btn.name,
+          label: btn.accessibilityTitle,
+          icon: buttonIcon(btn.name),
+          keepOpen: btn.name !== 'power',
+          onSelect: () => send({ type: 'input:button', sessionId, requestId: newRequestId(), payload: { name: btn.name } }),
+        }))}
+    />
+  );
 
   const launchSlot = installed && buildId ? (
     <Tooltip>

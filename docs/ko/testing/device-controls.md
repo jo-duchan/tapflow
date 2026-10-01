@@ -27,10 +27,12 @@ description: QA 세션의 기기를 마우스와 키보드로 다루는 방법�
 
 | 플랫폼 | 버튼 |
 |---|---|
-| iOS | 툴바의 **Home**(<kbd>⌘</kbd> <kbd>⇧</kbd> <kbd>U</kbd>), 기기 테두리에 그려진 측면 버튼 |
-| Android | 툴바의 **Home**, **Back**, **Recent Apps**, **Volume Up**, **Volume Down**, **Power** |
+| iOS | 툴바의 **Home**(<kbd>⌘</kbd> <kbd>⇧</kbd> <kbd>U</kbd>), 툴바 **More device buttons** 메뉴의 **Volume Up**, **Volume Down**, **Sleep/Wake**, **Action**(있는 기기만), 기기 테두리에 그려진 측면 버튼 |
+| Android | 툴바의 **Home**, **Back**, **Recent Apps**, 툴바 **More device buttons** 메뉴의 **Volume Up**, **Volume Down**, **Power** |
 
-iOS는 기기 테두리에 그려진 측면 버튼(전원, 볼륨 등)을 클릭하면 그 버튼이 눌립니다.
+볼륨과 전원 같은 하드웨어 버튼은 툴바의 점 세 개 버튼(**More device buttons**)을 누르면 나오는 메뉴에 있습니다. 볼륨은 누른 뒤에도 메뉴가 닫히지 않아서 여러 번 이어서 누를 수 있습니다. 키보드로는 Tab으로 이 버튼에 가서 Enter로 열고 화살표 키로 고른 뒤 Enter로 누르면 됩니다.
+
+iOS는 기기 테두리에 그려진 측면 버튼을 클릭해도 눌립니다. 버튼을 길게 누르려면 테두리 버튼을 누른 채로 있으면 됩니다. iPad는 가로로 돌리면 볼륨 버튼 이름이 실제 동작에 맞게 바뀝니다. iPadOS는 들고 있는 방향에서 오른쪽이나 위쪽에 있는 버튼으로 볼륨을 올리기 때문입니다.
 
 ## 소프트웨어 키보드 {#software-keyboard}
 
@@ -72,7 +74,7 @@ iOS는 기기 테두리에 그려진 측면 버튼(전원, 볼륨 등)을 클릭
 | 기능 | iOS | Android |
 |---|---|---|
 | 터치, 스와이프, 핀치, 키 입력 | 지원 | 지원 |
-| 기기 버튼 | Home, 기기 테두리의 측면 버튼 | Home, Back, Recent Apps, Volume Up, Volume Down, Power |
+| 기기 버튼 | Home, 볼륨, Sleep/Wake, Action(있는 기기만), 기기 테두리의 측면 버튼 | Home, Back, Recent Apps, 볼륨, Power |
 | 소프트웨어 키보드 버튼 | 지원 | 없음 |
 | 회전 | 지원 | 지원 |
 | 접기와 펼치기 | 없음 | 접힘 상태가 둘인 폴더블 에뮬레이터 |

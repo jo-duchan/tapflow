@@ -329,7 +329,7 @@ device**, not by how the feature is built:
 | Group | What belongs in it | Today |
 |---|---|---|
 | **Navigation** | Move around the app or the OS. Press it and it is over. | launch, home, back, recent apps, deeplink |
-| **Device** | Leave the device in a condition that stays until somebody changes it back. | software keyboard, volume, sleep, rotate, restart |
+| **Device** | Leave the device in a condition that stays until somebody changes it back. | software keyboard, the ⋯ menu (volume, power, iOS Action), rotate, restart |
 | **Capture** | Take the current state out of the session. | screenshot, recording |
 | **Environment** | Change what the device is sitting in. | network on/off |
 
@@ -376,8 +376,8 @@ turning up wherever the array happened to put it.
 
 ### When a group gets too long
 
-Nothing is collapsed today: iOS shows eight buttons and Android twelve, which a vertical toolbar
-still carries. The point to reconsider is when a single group needs more than about four — that is
+Only Device is collapsed today, its hardware buttons behind "⋯" (below); the other groups still
+show every button, which a vertical toolbar carries. The point to reconsider is when a single group needs more than about four — that is
 when its low-frequency members should move behind a popover and the frequent ones stay on the
 surface, rather than the toolbar growing until it runs off the screen.
 
@@ -386,9 +386,14 @@ back, recent apps, deeplink. So the threshold is crossed rather than approaching
 Navigation that crossed it — not Environment, which is the group whose *future* members (location,
 battery, appearance, locale, time zone, permissions) make it the one to watch next.
 
-**And Device followed it**: the restart (#628) takes Android's Device group to four and iOS's to
-three. Both are at the threshold rather than over it, so nothing moves yet — but the next button
-either platform adds to Device is the one that should arrive with a popover rather than a slot.
+**And Device followed it**: the restart (#628) took Android's Device group to four and iOS's to
+three, and the next addition was to arrive with a popover rather than a slot. It did: iOS needed
+volume, power and Action in the toolbar (the frame has no name or focus, see "The streamed device is
+out of scope"), so both platforms' hardware buttons now sit behind one "⋯" in Device —
+`ToolbarOverflowMenu`, a menu rather than a popover because a list of actions is the WAI-ARIA menu
+pattern Radix supplies whole. Android's moved there too, so the two toolbars keep one layout. The
+component is generic (items carry their own action); the next group to cross the line — Navigation
+already has — uses it rather than a copy.
 
 ## HOW NOT
 
@@ -486,13 +491,13 @@ message saying which surface and why.
 rather than the feature: toolbar buttons, dialogs, forms, the app centre, settings, invitations. A
 control that exists as an element is a control that must be reachable and named.
 
-**The line is also the answer when a frame control has no DOM equivalent.** `AndroidViewer` already
-renders volume and power as real toolbar buttons (`deviceSlot = buttonsIn(DEVICE_BUTTONS)`, each an
-`aria-label`led `<Button>`), while iOS has only the keyboard toggle there and leaves volume, action
-and power to the frame. That gap is **platform parity, not accessibility** — the fix is to give iOS
-the toolbar buttons Android has, not to overlay the frame. Read it that way whenever a finding says a
-device control is unreachable: ask whether the control should exist in the DOM at all, and if it
-should, put it in the toolbar where the group rules above already say it belongs.
+**The line is also the answer when a frame control has no DOM equivalent.** iOS used to leave
+volume, Action and power to the frame while Android had them in the toolbar. That gap was **platform
+parity, not accessibility**, and it was closed that way: both viewers now put them in the Device
+group's "⋯" menu (`ToolbarOverflowMenu`), named and keyboard-operable, and the frame stays as it is.
+Read it that way whenever a finding says a device control is unreachable: ask whether the control
+should exist in the DOM at all, and if it should, put it in the toolbar where the group rules above
+already say it belongs.
 
 ### A view that replaces another puts back the focus it destroyed
 

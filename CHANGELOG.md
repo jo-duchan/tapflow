@@ -7,7 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **iOS volume, power and Action buttons in the toolbar.** They were reachable only by clicking the side buttons drawn on the device frame, so not from the keyboard. The toolbar's ⋯ menu (**More device buttons**) now offers Volume Up, Volume Down, Sleep/Wake and, on devices that have one, Action. On an iPad turned to landscape the volume items are named by what they do, as on the frame. The frame buttons still work, and are still how you hold a button down.
+
 ### Changed
+
+- **Android's volume and power buttons moved into the toolbar's ⋯ menu.** They used to sit in the toolbar itself. They are now behind **More device buttons**, the three-dot button in the same group, which iOS uses too, so both toolbars keep one layout. Volume keeps the menu open after a press, so you can press it again without reopening it.
 
 - **Pressing the device frame's body on iOS no longer presses a side button.** The press area of volume, Action and power reached all the way to the screen, so a click on the black frame between a button and the screen pressed the button. It now stops where the frame begins, on iPhone and iPad alike, including iPad buttons on the top edge. Along the edge the press area is now the button's own length, where it used to run about 40 px past each end of it, and outside the device it still ends where the frame's image does.
 
