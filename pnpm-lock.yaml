@@ -510,8 +510,8 @@ importers:
         specifier: ^9.0.3
         version: 9.0.3
       nodemailer:
-        specifier: ^10.0.2
-        version: 10.0.2
+        specifier: ^10.0.9
+        version: 10.0.9
       ws:
         specifier: ^8.21.3
         version: 8.21.3
@@ -4315,8 +4315,8 @@ packages:
     resolution: {integrity: sha512-kQK9LGGFiHtrWiNhZtA7Qbw17AQz+dmsEKODRIVTXA9+e5MS/2gZEBhYJt13GrAz5/IOZKddH/0Z3TP/Zgo+yw==}
     engines: {node: '>=18'}
 
-  nodemailer@10.0.2:
-    resolution: {integrity: sha512-83mO0TnWXySiJXdMAIUYmlXYdJ2KUq/w8EJgc4ogKU2UssaHf7ZPeuHcb4YCxeNiM0DDshnm291U0/ClrSZZsg==}
+  nodemailer@10.0.9:
+    resolution: {integrity: sha512-BF0qcyplCwp+jMk6HCjFykBz/YhhZSsxrARhOldLwFWH+8kGjQsd2WIMIZhqEuyXRoGFi0ONbDeWDMDoL8MhLw==}
     engines: {node: '>=20.0.0'}
 
   non-layered-tidy-tree-layout@2.0.2:
@@ -9225,7 +9225,7 @@ snapshots:
 
   node-releases@2.0.57: {}
 
-  nodemailer@10.0.2: {}
+  nodemailer@10.0.9: {}
 
   non-layered-tidy-tree-layout@2.0.2:
     optional: true

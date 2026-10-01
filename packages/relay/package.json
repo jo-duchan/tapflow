@@ -58,7 +58,7 @@
     "better-sqlite3": "^12.11.1",
     "busboy": "^1.6.0",
     "jsonwebtoken": "^9.0.3",
-    "nodemailer": "^10.0.2",
+    "nodemailer": "^10.0.9",
     "ws": "^8.21.3",
     "zod": "^4.6.5"
   },
