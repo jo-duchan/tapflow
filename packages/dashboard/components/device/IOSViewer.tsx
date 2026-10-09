@@ -2,8 +2,7 @@
 
 import type { BrowserToRelay, FormFactor } from '@tapflowio/protocol'
 import { newRequestId } from '@/lib/requestId';
-import { buttonHitRect, buttonTargets, buttonTitles } from '@/lib/buttonHit';
-import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState, Fragment } from 'react';
+import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
 import { useClientRecording } from '@/hooks/useClientRecording';
 import { Home, Keyboard, Loader2, Play } from 'lucide-react';
 import { useFps } from '@/hooks/useFps';
@@ -16,14 +15,15 @@ import { Button } from '@/components/ui/button';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { Kbd, KbdGroup } from '@/components/ui/kbd';
 import type { ChromeData } from '@/lib/types'
-import { iosToNormScreen, toPinchFingers as makePinchFingers, iosDisplayScale } from '@/lib/coordinate-transform';
-import { useDecoderStream } from '@/hooks/useDecoderStream';
+import { iosToNormScreen, toPinchFingers as makePinchFingers } from '@/lib/coordinate-transform';
+import { useIOSScreen } from '@/hooks/useIOSScreen';
+import { IOSDeviceScreen } from './IOSDeviceScreen';
+import { iosScreenLayout } from '@/lib/iosScreenLayout';
 import type { BinaryFrameHandler } from '@/lib/envelope';
 import type { MutableRefObject } from 'react';
 import type { PerfHook } from '@/components/perf/types';
 import { useClipboardBridge, isBridgedChord, type ClipboardMessageHandler } from '@/hooks/useClipboardBridge';
 import { toast } from 'sonner';
-import { roundedClipMask } from '@/lib/roundedClipMask';
 import { isFramelessChrome } from '@/lib/framelessChrome';
 
 const CURSOR_RING_R = 13;
@@ -71,9 +71,6 @@ interface IOSViewerProps {
   onStreamSize?: (size: { width: number; height: number }) => void;
 }
 
-/** How long fps reads 0, over a picture already painted, before the viewer says it is waiting. */
-const STALL_MS = 2500;
-
 export function IOSViewer({
   sessionId, buildId, send, openUrl, launchApp, connected, joined,
   deviceReady, installing, installed, installError, bootError,
@@ -83,33 +80,11 @@ export function IOSViewer({
   rebootPending, onReboot, restartButtonRef,
   perfHookRef, onStreamSize,
 }: IOSViewerProps) {
-  const canvasRef = useRef<HTMLCanvasElement>(null);
-  const containerRef = useRef<HTMLDivElement>(null);
-  const screenAreaRef = useRef<HTMLDivElement>(null);
   const { fps, frameCount } = useFps();
 
-  const lastFrameRecvAtRef = useRef<number>(0);
   const { recordState, recordCanvasRef, setComposeFrame, startClientRecording, stopClientRecording } = useClientRecording({ sessionId, buildId, onRecordingUploaded });
-  const deviceSeq = useRef(0);
 
   const [deepLinkOpen, setDeepLinkOpen] = useState(false);
-  const [canvasReady, setCanvasReady] = useState(false);
-  // **Over a picture, the wait overlay waits too.** fps is counted in one-second windows, and a still
-  // H.264 screen sends a keep-alive about every 1.03s, so an empty window turns up every half minute on a
-  // healthy stream (the status card says the same of its own fps). With the screen dimmed behind the
-  // text that blink became loud, so once a picture is up the overlay shows only after fps has read 0 for
-  // `STALL_MS` — about 3.5 to 4.5s after the last frame, since fps reports a whole window late. Precise
-  // timing from the last frame would need a second clock on both decode paths; nothing here needs it. Before the first frame it shows at once, as it always did. The clock
-  // starts at the picture, not at mount: a first frame later than `STALL_MS` would otherwise land already
-  // "stalled" and be dimmed until the next fps window.
-  const [stalled, setStalled] = useState(false);
-  if (fps !== 0 && stalled) setStalled(false);
-  useEffect(() => {
-    if (fps !== 0 || !canvasReady) return;
-    const t = setTimeout(() => setStalled(true), STALL_MS);
-    return () => clearTimeout(t);
-  }, [fps, canvasReady]);
-  const [decoderUnsupported, setDecoderUnsupported] = useState(false);
   const [isLandscape, setIsLandscape] = useState(false);
   const [keyboardActive, setKeyboardActive] = useState(false);
   const [flashedButton, setFlashedButton] = useState<string | null>(null);
@@ -149,114 +124,24 @@ export function IOSViewer({
     img.src = `data:image/png;base64,${chrome.framePng}`
   }, [chrome.framePng])
 
-  // ── Decoder + frame routing (shared render pipeline) ──────────────────────
-  // The decoder's surface sits over the canvas, so it takes the canvas's place — when the decoder starts,
-  // and again whenever the chrome changes. The second is not hypothetical: a viewer that opened with no
-  // chrome from the agent (`framelessChrome`) is handed the real one if it arrives, and the surface would
-  // otherwise stay covering the whole canvas, frame included.
-  const decoderSurfaceRef = useRef<HTMLElement | null>(null)
-  const placeSurface = (surface: HTMLElement) => {
-    const c = canvasRef.current
-    if (!c) return
-    surface.style.left = c.style.left
-    surface.style.top = c.style.top
-    surface.style.width = c.style.width
-    surface.style.height = c.style.height
-    surface.style.borderRadius = c.style.borderRadius
-    surface.style.maskImage = c.style.maskImage
-  }
-  useLayoutEffect(() => {
-    if (decoderSurfaceRef.current) placeSurface(decoderSurfaceRef.current)
-  }, [chrome])
-
-  // useDecoderStream owns decoder selection (+ the DEV ?decoder= override) and decode→present
-  // perf tracking — same wiring as AndroidViewer. iOS-specific bits stay here: the H.264
-  // surface mounts over the device chrome (mirrored to canvasRef for recording/screenshot),
-  // and the JPEG path decodes via createImageBitmap onto that canvas.
-  useDecoderStream({
-    binaryFrameHandlerRef,
-    perfHookRef,
-    frameCount,
-    onUnsupported: () => setDecoderUnsupported(true),
-    onResize: (size) => {
-      const canvas = canvasRef.current
-      if (canvas && (canvas.width !== size.width || canvas.height !== size.height)) {
-        canvas.width = size.width; canvas.height = size.height
-        onStreamSize?.({ width: size.width, height: size.height })
-        if (!chromeRef.current) {
-          const rc = recordCanvasRef.current
-          if (rc) { rc.width = size.width; rc.height = size.height }
-        }
+  // ── The picture (decoding, canvas, waiting state) — shared with the watch-only page ──
+  const screen = useIOSScreen({
+    chrome, binaryFrameHandlerRef, perfHookRef, fps, frameCount,
+    onCanvasResize: (size) => {
+      onStreamSize?.(size)
+      if (!chromeRef.current) {
+        const rc = recordCanvasRef.current
+        if (rc) { rc.width = size.width; rc.height = size.height }
       }
-      setCanvasReady(true)
-    },
-    onDecoderReady: (d) => {
-      // Display the decoder surface directly over the chrome; the canvas stays behind,
-      // mirrored, so the existing recording/screenshot paths (which read canvasRef) keep working.
-      const surface = d.surface
-      surface.style.position = 'absolute'
-      placeSurface(surface)
-      decoderSurfaceRef.current = surface
-      surface.style.objectFit = 'fill'
-      surface.style.zIndex = '3'
-      surface.style.pointerEvents = 'none'
-      containerRef.current?.appendChild(surface)
-      let raf: number | null = null
-      const blit = () => {
-        const canvas = canvasRef.current
-        const ctx = canvas?.getContext('2d')
-        if (canvas && ctx && d.size) {
-          try { ctx.drawImage(d.surface, 0, 0, canvas.width, canvas.height) } catch { /* surface not paintable yet */ }
-        }
-        raf = requestAnimationFrame(blit)
-      }
-      raf = requestAnimationFrame(blit)
-      return () => {
-        if (raf !== null) cancelAnimationFrame(raf)
-        if (decoderSurfaceRef.current === surface) decoderSurfaceRef.current = null
-      }
-    },
-    onJpegFrame: (data) => {
-      const recvAt = performance.now()
-      const recvInterval = lastFrameRecvAtRef.current ? recvAt - lastFrameRecvAtRef.current : 0
-      lastFrameRecvAtRef.current = recvAt
-      if (import.meta.env.DEV) perfHookRef?.current?.onFrameBegin()
-
-      const seq = deviceSeq.current
-      createImageBitmap(new Blob([data], { type: 'image/jpeg' }))
-        .then((bitmap) => {
-          const decodeMs = performance.now() - recvAt
-          if (deviceSeq.current !== seq) { bitmap.close(); return }
-          const canvas = canvasRef.current
-          const ctx = canvas?.getContext('2d')
-          if (!canvas || !ctx) { bitmap.close(); return }
-          if (canvas.width !== bitmap.width || canvas.height !== bitmap.height) {
-            canvas.width = bitmap.width; canvas.height = bitmap.height
-            onStreamSize?.({ width: bitmap.width, height: bitmap.height })
-            if (!chromeRef.current) {
-              const rc = recordCanvasRef.current
-              if (rc) { rc.width = bitmap.width; rc.height = bitmap.height }
-            }
-          }
-          const paintStart = performance.now()
-          ctx.drawImage(bitmap, 0, 0)
-          const paintMs = performance.now() - paintStart
-          bitmap.close()
-          setCanvasReady(true)
-          frameCount.current += 1
-          if (import.meta.env.DEV) {
-            perfHookRef?.current?.onFrameEnd({ recvAt, recvInterval, decodeMs, paintMs })
-          }
-        })
-        .catch(() => {})
     },
   })
+  const { canvasRef, containerRef, screenAreaRef, decoderUnsupported } = screen
 
   // Sync record canvas size when chrome arrives
   useEffect(() => {
     const rc = recordCanvasRef.current; const container = containerRef.current
     if (rc && container) { rc.width = container.clientWidth; rc.height = container.clientHeight }
-  }, [chrome, recordCanvasRef])
+  }, [chrome, recordCanvasRef, containerRef])
 
   // ── Recording (composeFrame only — state/refs/lifecycle in useClientRecording) ──
   const composeFrame = useCallback(() => {
@@ -322,10 +207,10 @@ export function IOSViewer({
       }
       ctx.restore()
     }
-  }, [recordCanvasRef])
+  }, [recordCanvasRef, canvasRef])
 
   // **Registered once, and the difference from Android is worth stating.** `composeFrame` here
-  // depends only on `recordCanvasRef`, a ref object whose identity never changes, so this fires on
+  // depends only on `recordCanvasRef` and `canvasRef`, ref objects whose identity never changes, so this fires on
   // mount and never again — there is no newest composer on this platform. A rotation still reaches
   // the frames, because the composer reads `chromeRef`, `canvasRef.current` and the canvas's own
   // layout live on every draw, exactly as it did before the setter existed.
@@ -346,7 +231,7 @@ export function IOSViewer({
       const a = document.createElement('a'); a.href = url; a.download = `tapflow-${Date.now()}.png`; a.click()
       URL.revokeObjectURL(url)
     }, 'image/png')
-  }, [])
+  }, [canvasRef])
 
   const handleRecordToggle = useCallback(() => {
     if (recordState === 'idle') {
@@ -358,7 +243,7 @@ export function IOSViewer({
     } else if (recordState === 'recording') {
       stopClientRecording()
     }
-  }, [recordState, startClientRecording, stopClientRecording, recordCanvasRef])
+  }, [recordState, startClientRecording, stopClientRecording, recordCanvasRef, containerRef, canvasRef])
 
   // **The orientation last sent, kept beside the state rather than read from it** (#910). The agent is
   // sent a target, not "turn", and two presses before a re-render must still send landscape then
@@ -447,7 +332,7 @@ export function IOSViewer({
     }
     document.addEventListener('pointerdown', onDown)
     return () => document.removeEventListener('pointerdown', onDown)
-  }, [keyboardActive])
+  }, [keyboardActive, containerRef, canvasRef])
 
   // ── Coordinate helpers ────────────────────────────────────────────────────
   const toNormScreen = useCallback((e: { clientX: number; clientY: number }) => {
@@ -466,7 +351,7 @@ export function IOSViewer({
       { x: sx, y: sy, width: sw, height: sh },
       isLandscape,
     )
-  }, [chrome, isLandscape])
+  }, [chrome, isLandscape, containerRef, screenAreaRef])
 
   const toPinchFingers = useCallback((e: { clientX: number; clientY: number }) => {
     const f1 = toNormScreen(e); if (!f1) return null
@@ -477,7 +362,7 @@ export function IOSViewer({
     const fc = canvasRef.current; const rc = recordCanvasRef.current
     if (fc && fc.clientWidth > 0) return { x: fc.offsetLeft + norm.x * fc.clientWidth, y: fc.offsetTop + norm.y * fc.clientHeight }
     return { x: norm.x * (rc?.width ?? 1), y: norm.y * (rc?.height ?? 1) }
-  }, [recordCanvasRef])
+  }, [recordCanvasRef, canvasRef])
 
   // ── Pointer interaction ───────────────────────────────────────────────────
   const handlePointerDown = useCallback((e: React.PointerEvent) => {
@@ -613,30 +498,7 @@ export function IOSViewer({
   }, [])
 
   // ── Layout ────────────────────────────────────────────────────────────────
-  const compositeLogicalW = chrome.compositeWidth / 2;
-  const compositeLogicalH = chrome.compositeHeight / 2;
-  const MAX_DISPLAY_H = 750;
-  const displayScale = iosDisplayScale(compositeLogicalH, MAX_DISPLAY_H);
-  const displayW = Math.round(compositeLogicalW * displayScale);
-  const displayH = Math.round(compositeLogicalH * displayScale);
-  const screenPctLeft = (chrome.screenRect.x / chrome.compositeWidth) * 100;
-  const screenPctTop = (chrome.screenRect.y / chrome.compositeHeight) * 100;
-  const screenPctW = (chrome.screenRect.width / chrome.compositeWidth) * 100;
-  const screenPctH = (chrome.screenRect.height / chrome.compositeHeight) * 100;
-  const cssCornerRadius = Math.round((chrome.screenCornerRadius / 2) * displayScale);
-  const clipMask = cssCornerRadius > 0 ? roundedClipMask(navigator.userAgent) : undefined;
-  // **Where the screen is, said once.** The canvas takes these, and so does the box below that holds
-  // what is drawn over the screen, which clips to the same corners — so nothing inside it is placed or
-  // rounded on its own.
-  const screenBox = {
-    left: `${screenPctLeft}%`, top: `${screenPctTop}%`,
-    width: `${screenPctW}%`, height: `${screenPctH}%`,
-    borderRadius: cssCornerRadius > 0 ? `${cssCornerRadius}px` : undefined,
-    maskImage: clipMask,
-  };
-  const box = { width: chrome.compositeWidth, height: chrome.compositeHeight };
-  const targets = buttonTargets(chrome.buttons, box);
-  const titles = buttonTitles(chrome.buttons, box, isLandscape, formFactor);
+  const { screenPctLeft, screenPctTop, screenPctW, screenPctH } = iosScreenLayout(chrome);
 
   // Home moves around the OS; the software keyboard leaves the device in a condition that stays up
   // until somebody puts it away. Two groups, per `packages/dashboard/AGENTS.md` → "Where a new device
@@ -757,40 +619,23 @@ export function IOSViewer({
       />
 
       <div className="flex items-start gap-8">
-        <div ref={screenAreaRef} style={{ width: isLandscape ? displayH : displayW, height: isLandscape ? displayW : displayH, position: 'relative', flexShrink: 0 }}>
-          <div
-            ref={containerRef}
-            className="relative cursor-default"
-            style={{
-              width: displayW, height: displayH,
-              ...(isLandscape ? { position: 'absolute', top: (displayW - displayH) / 2, left: (displayH - displayW) / 2, transform: 'rotate(-90deg)', transformOrigin: 'center center' } : {}),
-            }}
-            onPointerDown={handlePointerDown}
-            onPointerMove={handlePointerMove}
-            onPointerUp={handlePointerUp}
-            onPointerCancel={handlePointerCancel}
-            onPointerLeave={handlePointerLeave}
-          >
-            <img
-              src={`data:image/png;base64,${chrome.framePng}`}
-              style={{ position: 'absolute', top: 0, left: 0, zIndex: 2, width: '100%', height: '100%', display: 'block', pointerEvents: 'none', userSelect: 'none' }}
-              draggable={false} alt=""
-            />
-            <canvas
-              ref={canvasRef}
-              style={{
-                position: 'absolute', zIndex: 3,
-                ...screenBox,
-                backgroundColor: '#010101', cursor: 'none',
-                visibility: canvasReady ? 'visible' : 'hidden',
-              }}
-            />
-            {!canvasReady && (
-              <div className="absolute overflow-hidden" style={{ zIndex: 3, ...screenBox }}>
-                <div className="absolute inset-0 animate-pulse bg-zinc-700" />
-              </div>
-            )}
-            {pinchHint && (() => {
+        <IOSDeviceScreen
+          screen={screen}
+          chrome={chrome}
+          formFactor={formFactor}
+          isLandscape={isLandscape}
+          joined={joined}
+          fps={fps}
+          containerHandlers={{
+            onPointerDown: handlePointerDown,
+            onPointerMove: handlePointerMove,
+            onPointerUp: handlePointerUp,
+            onPointerCancel: handlePointerCancel,
+            onPointerLeave: handlePointerLeave,
+          }}
+          buttons={{ hovered: hoveredButton, flashed: flashedButton, onHoverChange: setHoveredButton, onPress: pressFrameButton }}
+          overlay={
+            pinchHint && (() => {
               const screenLeft = screenPctLeft / 100; const screenTop = screenPctTop / 100
               const screenW = screenPctW / 100; const screenH = screenPctH / 100
               const toCSS = (nx: number, ny: number) => ({
@@ -812,101 +657,19 @@ export function IOSViewer({
                   ))}
                 </>
               )
-            })()}
-            {joined && fps === 0 && (!canvasReady || stalled) && (
-              <div data-testid="screen-waiting" className="absolute overflow-hidden pointer-events-none flex items-center justify-center" style={{ zIndex: 8, ...screenBox }}>
-                {/* Over a picture already on screen — a restart, a stalled stream — white text alone was
-                    unreadable, so the screen is dimmed behind it. Before the first frame the skeleton
-                    under it is dark enough already. */}
-                {canvasReady && <div aria-hidden="true" className="absolute inset-0 bg-black/60 bg-screen-shimmer bg-[length:200%_100%] animate-screen-shimmer motion-reduce:animate-none" />}
-                <span className="relative text-sm text-white">{canvasReady ? 'Waiting for next frame...' : 'Waiting for first frame...'}</span>
-              </div>
-            )}
-            {chrome.buttons.map((btn, i) => {
-              const isFlashed = flashedButton === btn.name; const isHovered = hoveredButton === btn.name
-              const isTopAnchor = btn.anchor === 'top'
-              // **One formula for where a button sits at rest**, shared with the hit test. It used
-              // to be written out three times here — `imgTopPct`, `tooltipTopPct` and the hit test —
-              // and the first two even kept a `bottom` branch whose body was byte-identical to the
-              // default, which is exactly where a future bottom-anchor tweak would land and leave
-              // the target behind the pixels.
-              const rect = buttonHitRect(btn)
-              const imgTopPct = (rect.top / chrome.compositeHeight) * 100
-              const imgHPct = (btn.buttonH / chrome.compositeHeight) * 100
-              const imgWPct = (btn.buttonW / chrome.compositeWidth) * 100
-              const halfW = btn.buttonW / 2
-              const rolloverLeftPct = (rect.left / chrome.compositeWidth) * 100
-              const hoverLeftPct = ((2 * btn.rolloverOffset.x - btn.normalOffset.x - halfW) / chrome.compositeWidth) * 100
-              const tooltipLeftPct = (btn.rolloverOffset.x / chrome.compositeWidth) * 100
-              const tooltipTopPct = imgTopPct
-              const hoverTopPct = isTopAnchor ? ((2 * btn.rolloverOffset.y - btn.normalOffset.y) / chrome.compositeHeight) * 100 : 0
-              const btnZ = btn.onTop ? 4 : 1
-              const target = targets[i]
-              return (
-                <Fragment key={btn.name}>
-                  {/* The press target. Hidden from assistive tech and out of the tab order on
-                      purpose: the frame is part of the streamed device, which this package leaves
-                      out of scope — see "The streamed device is out of scope" in AGENTS.md. It sits
-                      still while the image beside it slides on hover, or hovering would move the
-                      target out from under the pointer. */}
-                  <div
-                    data-frame-button={btn.name}
-                    aria-hidden="true"
-                    onPointerDown={(e) => pressFrameButton(btn.name, e)}
-                    onPointerEnter={() => setHoveredButton(btn.name)}
-                    onPointerLeave={() => setHoveredButton((h) => (h === btn.name ? null : h))}
-                    style={{
-                      position: 'absolute', zIndex: 6, cursor: 'pointer',
-                      left: `${(target.left / chrome.compositeWidth) * 100}%`,
-                      top: `${(target.top / chrome.compositeHeight) * 100}%`,
-                      width: `${((target.right - target.left) / chrome.compositeWidth) * 100}%`,
-                      height: `${((target.bottom - target.top) / chrome.compositeHeight) * 100}%`,
-                    }}
-                  />
-                  {btn.buttonPng && (
-                    <img src={`data:image/png;base64,${btn.buttonPng}`} style={{
-                      position: 'absolute', zIndex: btnZ,
-                      top: `${isTopAnchor ? (isHovered ? hoverTopPct : imgTopPct) : imgTopPct}%`,
-                      left: `${isTopAnchor ? rolloverLeftPct : isHovered ? hoverLeftPct : rolloverLeftPct}%`,
-                      width: `${imgWPct}%`, height: `${imgHPct}%`,
-                      transition: isTopAnchor ? 'top 0.15s ease' : 'left 0.15s ease',
-                      pointerEvents: 'none', userSelect: 'none',
-                    }} draggable={false} alt="" />
-                  )}
-                  {isFlashed && btn.pressedPng && btn.pressedRect && (
-                    <img src={`data:image/png;base64,${btn.pressedPng}`} style={{
-                      position: 'absolute', zIndex: btn.onTop ? 3 : 1,
-                      left: `${isTopAnchor ? rolloverLeftPct : isHovered ? hoverLeftPct : rolloverLeftPct}%`,
-                      top: `${isTopAnchor ? (isHovered ? hoverTopPct : imgTopPct) : imgTopPct}%`,
-                      width: `${(btn.pressedRect.width / chrome.compositeWidth) * 100}%`,
-                      height: `${(btn.pressedRect.height / chrome.compositeHeight) * 100}%`,
-                      pointerEvents: 'none', userSelect: 'none',
-                    }} draggable={false} alt="" />
-                  )}
-                  {isHovered && (
-                    <div
-                      className="bg-foreground/85 text-background text-[11px] px-[7px] py-1.5 rounded-lg whitespace-nowrap pointer-events-none"
-                      style={{
-                        position: 'absolute', zIndex: 5, left: `${tooltipLeftPct}%`, top: `${tooltipTopPct}%`,
-                        transform: 'translate(-50%, calc(-100% - 8px))',
-                      }}
-                    >
-                      {titles[i]}
-                    </div>
-                  )}
-                </Fragment>
-              )
-            })}
-          </div>
-          <div
-            ref={liveCursorRef}
-            style={{
-              display: 'none', position: 'absolute', zIndex: 20, borderRadius: '50%',
-              transform: 'translate(-50%, -50%)', pointerEvents: 'none',
-              transition: 'width 0.1s ease, height 0.1s ease, background 0.1s ease, box-shadow 0.1s ease',
-            }}
-          />
-        </div>
+            })()
+          }
+          areaOverlay={
+            <div
+              ref={liveCursorRef}
+              style={{
+                display: 'none', position: 'absolute', zIndex: 20, borderRadius: '50%',
+                transform: 'translate(-50%, -50%)', pointerEvents: 'none',
+                transition: 'width 0.1s ease, height 0.1s ease, background 0.1s ease, box-shadow 0.1s ease',
+              }}
+            />
+          }
+        />
 
         <SimulatorInfoCard
           joined={joined} fps={fps} connected={connected}

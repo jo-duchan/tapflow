@@ -44,6 +44,24 @@ The audience is the whole team (PO, PM, designers, backend, QA) — not just QA.
 - **An address for someone else comes from `lib/publicLink.ts`** — an invite link, a link to a comment, the relay address in the agent command. The browser's own `location.origin` is right for this page and wrong for a teammate: on the Vite server it is `localhost:3001`, which is how #788 was found. The relay reports what its settings mean and the helper only falls back. `useRelay` is the exception, because it connects this page to its own relay. `scripts/__tests__/teammateUrlsSingleSource.test.mjs` fails on a `location` read other than `pathname`/`search`/`hash`/`hostname`/`protocol` outside the files it allows.
 - **Build order**: dashboard first → relay second (`agent-core → dashboard → relay`).
 
+### The device is drawn in one place, and the viewers add the controls
+
+Each platform's device is a **state hook plus a render component** — `useIOSScreen` + `IOSDeviceScreen`,
+`useAndroidScreen` + `AndroidDeviceScreen` — and neither takes `send`. `IOSViewer` / `AndroidViewer` are
+that pair plus the controls: toolbar, recording, screenshot, rotation, clipboard, network, keyboard and
+pointer input, which reach the device elements through the refs the hook returns and the handler and
+overlay props the component takes. A page that only watches renders the pair alone, so **a change to how
+the device looks goes in the screen component or its hook, never in a viewer**, or the two drift.
+
+State that belongs to a control but changes the picture is an input, not something the screen owns:
+iOS `isLandscape`, Android `userWantsLandscape` and `rotatePending`. A caller with no such control passes
+the default. iOS press targets on the frame exist only when the caller passes `buttons`; without them the
+buttons are drawn at rest and nothing on the frame can be pressed.
+
+`src/__tests__/DeviceScreen.test.tsx` holds the seam directly. Before it, four ways of cutting it (an
+overlay dropped on either platform, Android's pointer handlers dropped, a rotation in flight ignored)
+survived every viewer test.
+
 ### The React Compiler is on
 
 `babel-plugin-react-compiler` runs on this package through `reactPlugin.ts` — **shared by
@@ -360,9 +378,10 @@ button belongs is decided in one place instead of two.
 **How far that is enforced, exactly.** `SimulatorToolbar.groups.test.tsx` holds the toolbar's own
 group order with stand-in buttons, and `scripts/__tests__/androidButtonsClassified.test.mjs` holds
 that every agent button is classified and that each list reaches the slot it is named for. The last
-of those is a source-text check — a floor, not a fence. **Nothing renders `AndroidViewer` or
-`IOSViewer`**, so a viewer that builds its slots some other way would pass; that is the gap to close
-if this ever drifts.
+of those is a source-text check — a floor, not a fence. **No test renders a viewer and reads its
+toolbar slots** — the viewer tests that do render `AndroidViewer` / `IOSViewer` are about recording,
+rotation and the frame buttons — so a viewer that builds its slots some other way would pass; that is
+the gap to close if this ever drifts.
 
 **The dashboard owns the order; the agent owns what exists.** Android's buttons arrive from the
 agent's `ANDROID_BUTTONS`, which is a *capability* list — the key codes are why it lives there.
