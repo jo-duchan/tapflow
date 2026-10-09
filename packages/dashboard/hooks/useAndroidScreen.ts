@@ -6,7 +6,9 @@ import type { BinaryFrameHandler } from '@/lib/envelope'
 import type { PerfHook } from '@/components/perf/types'
 import { composeTurn, framesAgree, showsPicture, surfaceBox } from '@/lib/coordinate-transform'
 
-const MAX_ANDROID_LONG = 720
+/** The longest side the device is drawn at, in CSS px. The recording composer scales its cursor
+ *  rings by the same number, so the two have to stay one constant. */
+export const MAX_ANDROID_LONG = 720
 
 interface UseAndroidScreenOptions {
   binaryFrameHandlerRef: { current: BinaryFrameHandler | undefined }

@@ -56,7 +56,7 @@ const useH264 = this.intervalMs === undefined && envAllowsH264 && state.acceptH2
 
 WebGL2 is the floor (~95% of browsers); the remaining ~5% (no WebGL2) can decode neither WebCodecs nor WASM (tinyh264). The dashboard sends the result to the agent as `acceptH264` at `device:boot`.
 
-On iOS, `acceptH264 === false` makes `useH264` false → the agent streams JPEG → the browser renders it through the existing iOS JPEG pipeline (`onJpegFrame` in `useDecoderStream`, `createImageBitmap` in `IOSViewer`). Because the JPEG pipeline was **already there** from the pre-migration era, covering the ~5% cost almost nothing — so it was kept rather than removed.
+On iOS, `acceptH264 === false` makes `useH264` false → the agent streams JPEG → the browser renders it through the existing iOS JPEG pipeline (`onJpegFrame` in `useDecoderStream`, `createImageBitmap` in `useIOSScreen`). Because the JPEG pipeline was **already there** from the pre-migration era, covering the ~5% cost almost nothing — so it was kept rather than removed.
 
 ## 4. Why Android has no equivalent fallback
 
@@ -85,7 +85,7 @@ Both are net-negative. The JPEG fallback is a near-zero-cost asset iOS already o
 
 - `packages/dashboard/lib/decoders/pickDecoder.ts` — `canDecodeH264()` / `pickDecoder()` (the ~5% floor)
 - `packages/dashboard/hooks/useDecoderStream.ts` — `onJpegFrame` ("iOS-only"), `onUnsupported`
-- `packages/dashboard/components/device/IOSViewer.tsx` — JPEG render path (`createImageBitmap`)
+- `packages/dashboard/hooks/useIOSScreen.ts` — JPEG render path (`createImageBitmap`)
 - `packages/dashboard/components/device/AndroidViewer.tsx` — no JPEG handler; unsupported notice
 - `packages/ios-agent/src/IOSAgent.ts` — `envAllowsH264` / `useH264` / `acceptH264`
 - `packages/ios-agent/AGENTS.md` — `TAPFLOW_IOS_CODEC` env documentation

@@ -18,8 +18,8 @@ export function iosScreenLayout(chrome: ChromeData) {
   const screenPctH = (chrome.screenRect.height / chrome.compositeHeight) * 100;
   const cssCornerRadius = Math.round((chrome.screenCornerRadius / 2) * displayScale);
   const clipMask = cssCornerRadius > 0 ? roundedClipMask(navigator.userAgent) : undefined;
-  // **Where the screen is, said once.** The canvas takes these, and so does the box below that holds
-  // what is drawn over the screen, which clips to the same corners — so nothing inside it is placed or
+  // **Where the screen is, said once.** The canvas takes these, and so does the box `IOSDeviceScreen`
+  // puts over the screen for the skeleton and the waiting overlay, which clips to the same corners — so nothing inside it is placed or
   // rounded on its own.
   const screenBox = {
     left: `${screenPctLeft}%`, top: `${screenPctTop}%`,

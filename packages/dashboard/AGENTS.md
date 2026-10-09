@@ -54,8 +54,12 @@ overlay props the component takes. A page that only watches renders the pair alo
 the device looks goes in the screen component or its hook, never in a viewer**, or the two drift.
 
 State that belongs to a control but changes the picture is an input, not something the screen owns:
-iOS `isLandscape`, Android `userWantsLandscape` and `rotatePending`. A caller with no such control passes
-the default. iOS press targets on the frame exist only when the caller passes `buttons`; without them the
+iOS `isLandscape`, Android `userWantsLandscape` and `rotatePending`. **That state is the controlling
+viewer's own and is not on the wire** — no message tells anyone else the device was turned. So a caller
+with no controls that passes the defaults shows the device upright after somebody else rotated it: on
+iOS and on Android's scrcpy backend the CSS turn is the only rotation, and on gRPC the turned frame is
+not held back while the rotation lands. Following another viewer's rotation needs orientation on the
+wire first. iOS press targets on the frame exist only when the caller passes `buttons`; without them the
 buttons are drawn at rest and nothing on the frame can be pressed.
 
 `src/__tests__/DeviceScreen.test.tsx` holds the seam directly. Before it, four ways of cutting it (an
@@ -495,7 +499,7 @@ controls over those pixels would announce an affordance that leads nowhere, whic
 absence: it is a11y theatre, and it costs the keyboard user tab stops that do not help them.
 
 So the physical side buttons drawn on the frame — volume, action, power, and the press targets behind
-them in `IOSViewer` (`aria-hidden` elements laid out by `buttonTargets`, #785) — carry no accessible
+them in `IOSDeviceScreen` (`aria-hidden` elements laid out by `buttonTargets`, #785) — carry no accessible
 name and take no focus, on purpose. They are elements so the browser can hit-test them, not so
 anything can reach them. An
 `a11y-lens` finding against that surface is answered with `A11Y_LENS_SKIP=1` and a line in the commit

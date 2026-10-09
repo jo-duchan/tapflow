@@ -5,7 +5,7 @@ import { newRequestId } from '@/lib/requestId';
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { useClientRecording } from '@/hooks/useClientRecording';
 import { ArrowLeft, Home, LayoutGrid, Loader2, Play, Power, Volume1, Volume2 } from 'lucide-react';
-import { useAndroidScreen } from '@/hooks/useAndroidScreen';
+import { MAX_ANDROID_LONG, useAndroidScreen } from '@/hooks/useAndroidScreen';
 import { AndroidDeviceScreen } from './AndroidDeviceScreen';
 import { useFps } from '@/hooks/useFps';
 import { SimulatorToolbar } from './shared/SimulatorToolbar';
@@ -27,7 +27,6 @@ const CURSOR_RING_R = 13;
 const CURSOR_DOT_R = 8;
 const MOVE_THROTTLE_MS = 16;
 const DRAG_THRESHOLD = 0.02;
-const MAX_ANDROID_LONG = 720;
 
 interface AndroidViewerProps {
   sessionId: string;
@@ -280,7 +279,7 @@ export function AndroidViewer({
   }, [pendingPosture, postures])
 
   // **A rotation is held the same way a fold is, and for a reason the fold does not have.** Folding
-  // changes the frame's dimensions, so the frame/screen comparison below notices it on its own. A
+  // changes the frame's dimensions, so the frame/screen comparison in `useAndroidScreen` notices it on its own. A
   // rotation does not — the capture follows the skin, which does not move — so the only thing that
   // changes is the correction angle, and applying a new angle to the frame that was drawn under the
   // old one turns the picture. On an idle screen no further frame arrives to correct it, so it

@@ -96,6 +96,7 @@ describe('IOSDeviceScreen', () => {
 
 function AndroidHarness(props: {
   rotatePending?: boolean
+  userWantsLandscape?: boolean
   onPointerDown?: () => void
   overlay?: ReactNode
   expose?: (s: AndroidScreen) => void
@@ -103,7 +104,7 @@ function AndroidHarness(props: {
   const screen = useAndroidScreen({
     binaryFrameHandlerRef: { current: undefined }, frameCount: { current: 0 },
     screenWidth: 1080, screenHeight: 2400, streamRotation: 0,
-    userWantsLandscape: false, rotatePending: props.rotatePending ?? false,
+    userWantsLandscape: props.userWantsLandscape ?? false, rotatePending: props.rotatePending ?? false,
   })
   props.expose?.(screen)
   return (
@@ -130,6 +131,18 @@ describe('AndroidDeviceScreen', () => {
   it('draws the overlay over the screen', () => {
     const { getByTestId } = render(<AndroidHarness overlay={<i data-testid="cursor" />} />)
     expect(getByTestId('cursor')).toBeTruthy()
+  })
+
+  // The viewer maps pointer events through this ref, outside any render — and it is written in the hook
+  // and read in another file. Mutation: never raise it. A portrait-locked app turned by CSS then takes
+  // every tap at unrotated coordinates.
+  it('tells the pointer mapping a portrait app is being turned by CSS', () => {
+    let screen: AndroidScreen | null = null
+    const expose = (s: AndroidScreen) => { screen = s }
+    const view = render(<AndroidHarness expose={expose} />)
+    expect(screen!.needsCSSRotationRef.current).toBe(false)
+    view.rerender(<AndroidHarness userWantsLandscape expose={expose} />)
+    expect(screen!.needsCSSRotationRef.current).toBe(true)
   })
 
   // Mutation: stop reading `rotatePending`. A new correction angle is applied to the frame drawn

@@ -103,12 +103,17 @@ describe('the React Compiler is not being switched off a function at a time', ()
   })
 
   it('still compiles the surfaces a tester spends the session on', () => {
-    // A whole-package count would drift with every page added. These three are the streaming path
-    // and the two files #830 was about, named so that losing one of them says which.
+    // A whole-package count would drift with every page added. These are the streaming path, the two
+    // files #830 was about and the device screen they share with the watch page, named so that losing
+    // one of them says which.
     const files = new Set(result.compiled.map((c) => c.split(':')[0]))
     for (const f of [
       'components/device/AndroidViewer.tsx',
       'components/device/IOSViewer.tsx',
+      'components/device/AndroidDeviceScreen.tsx',
+      'components/device/IOSDeviceScreen.tsx',
+      'hooks/useAndroidScreen.ts',
+      'hooks/useIOSScreen.ts',
       'src/pages/QASession.tsx',
     ]) {
       expect(files, `${f} compiles no functions at all`).toContain(f)
