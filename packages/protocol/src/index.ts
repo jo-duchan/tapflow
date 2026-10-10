@@ -46,7 +46,33 @@ export interface DeviceReport {
 export interface DeviceSummary extends DeviceReport {
   sessionId: string
   busy: boolean
+  /** Who is driving the device, when it is an AI client (`mcp-server`, `flow-runner`) holding a live
+   *  session. Absent for an unheld device and for a person's session — a manual session is not
+   *  watchable, so naming its holder would only say who to look over the shoulder of.
+   *
+   *  **Also the feature gate for watching.** An older relay drops `watch:start` without a reply, so a
+   *  viewer offers Watch only for a device that carries this field.
+   *
+   *  **Never the owner key or the client id.** The owner key is `<userId>:<clientId>` and the client half
+   *  comes off the handshake query: a local socket that learned it could claim it and drive the device. */
+  holder?: SessionHolder
 }
+
+/** A holder as the device list shows it. `user` is a label for people, not an identity to act on. */
+export interface SessionHolder {
+  kind: AiClientKind
+  /** The signed-in user behind the client's credential (their email), or `local` for an
+   *  unauthenticated loopback client — the MCP server on the relay's own Mac, typically. */
+  user: string
+}
+
+/** The clients that drive a device for an agent rather than a person. */
+export type AiClientKind = 'mcp' | 'flow-runner'
+
+/** What a client declares itself to be on `session:start`. **A self-exposure, not a credential:** an AI
+ *  kind makes the declarer's own session watchable by teammates and grants nothing else, so declaring it
+ *  falsely can only expose oneself. Who may *watch* is decided by authentication, never by this. */
+export type ClientKind = 'dashboard' | AiClientKind
 
 /** The `session:deviceInfo` payload.
  *
@@ -907,6 +933,11 @@ export interface SessionJoined {
   type: 'session:joined'
   sessionId: string
   capabilities: string[]
+  /** The dashboard page where teammates can watch this session, for a holder that declared an AI
+   *  `clientKind`. Built by the relay because only it knows the address a teammate's browser can open
+   *  (tunnel, `relay.url`); a client knows only the socket address it dialled. Absent for a person's
+   *  session and from a relay that predates watching. */
+  watchUrl?: string
 }
 
 export interface SessionTerminated {
@@ -1023,6 +1054,51 @@ export interface DeviceShutdownError extends SessionScoped {
   requestId?: string
 }
 
+/** Why a `watch:start` was refused. One member per thing the viewer says differently. */
+export type WatchRefusal =
+  /** No such session — it ended, or the id was never valid. */
+  | 'session-not-found'
+  /** The session exists but is not an AI client's: unheld, held by a person, or by a client that did
+   *  not declare its kind. */
+  | 'not-watchable'
+  /** This connection may not watch: an unauthenticated loopback socket. */
+  | 'not-permitted'
+  /** The session already has as many watchers as the relay allows. */
+  | 'watchers-full'
+
+/** The relay accepted a `watch:start`. The session's cached state follows, as it does for a re-join. */
+export interface WatchStarted {
+  type: 'watch:started'
+  sessionId: string
+}
+
+export interface WatchRefused extends SessionScoped {
+  type: 'watch:refused'
+  reason: WatchRefusal
+  message: string
+}
+
+/** The holder left or its socket dropped; the relay is holding the session for it to come back. The
+ *  stream may continue meanwhile. A re-join by the same client keeps the watch; any other client binding
+ *  the session ends it with `watch:ended`. */
+export interface WatchHolderLeft {
+  type: 'watch:holder-left'
+  sessionId: string
+}
+
+/** Why a watch ended without the watcher asking. */
+export type WatchEndReason =
+  /** The session is gone — its agent left, or its holder ended it. */
+  | 'session-ended'
+  /** A different client now holds the session. It was not the session this watch was admitted to. */
+  | 'holder-changed'
+
+export interface WatchEnded {
+  type: 'watch:ended'
+  sessionId: string
+  reason: WatchEndReason
+}
+
 /** Messages the relay originates and no agent sends. */
 export type RelayToBrowser =
   | RelayOrAgentToBrowser
@@ -1032,6 +1108,10 @@ export type RelayToBrowser =
   | SessionAgentAway
   | SessionRebound
   | GenericError
+  | WatchStarted
+  | WatchRefused
+  | WatchHolderLeft
+  | WatchEnded
 
 export interface DeviceBooting {
   type: 'device:booting'
@@ -1444,6 +1524,30 @@ export interface AgentsList {
 export interface SessionStart {
   type: 'session:start'
   sessionId: string
+  /** What the joining client is. Absent from a client that predates the field, which the relay treats as
+   *  a session nobody may watch — no inference from the credential, which a new auth method would break.
+   *  See `ClientKind`. */
+  clientKind?: ClientKind
+}
+
+/**
+ * Watch a session another client holds, read-only. Only a session whose
+ * holder declared an AI `clientKind` can be watched, and only by a cookie session or a remote PAT with
+ * `view` — never by an unauthenticated loopback socket.
+ *
+ * A watching socket receives the stream and the session's lifecycle (`WATCHER_MESSAGES` in the relay),
+ * and nothing it sends reaches the device: input is refused by the ownership gate, and `session:start`,
+ * `device:boot` and `device:shutdown` for the watched session are refused outright.
+ */
+export interface WatchStart {
+  type: 'watch:start'
+  sessionId: string
+}
+
+/** Stop watching. Unanswered: there is no waiter, and closing the socket does the same. */
+export interface WatchStop {
+  type: 'watch:stop'
+  sessionId: string
 }
 
 // The relay handles `session:end`, but nothing in this repo sends it — the dashboard and
@@ -1694,4 +1798,6 @@ export type BrowserToRelay =
   | InputKeyboardToggle
   | ClipboardRequest
   | NetworkSet
+  | WatchStart
+  | WatchStop
 

@@ -23,6 +23,7 @@ import type {
   StreamRegistered, StreamRequestIdr, UiTreeError, UiTreeRequest, UiTreeResponse,
   NetworkRequestState,
   InputPosture, DevicePostures,
+  WatchStart, WatchStop, WatchStarted, WatchRefused, WatchHolderLeft, WatchEnded,
 } from './index.js'
 
 // ── must NOT compile ─────────────────────────────────────────────────────────
@@ -213,6 +214,12 @@ export const _ScreenshotError: ScreenshotError['type'] = 'screenshot:error'
 export const _StreamRegister: StreamRegister['type'] = 'stream:register'
 export const _UiTreeResponse: UiTreeResponse['type'] = 'ui:tree:response'
 export const _UiTreeError: UiTreeError['type'] = 'ui:tree:error'
+export const _WatchStart: WatchStart['type'] = 'watch:start'
+export const _WatchStop: WatchStop['type'] = 'watch:stop'
+export const _WatchStarted: WatchStarted['type'] = 'watch:started'
+export const _WatchRefused: WatchRefused['type'] = 'watch:refused'
+export const _WatchHolderLeft: WatchHolderLeft['type'] = 'watch:holder-left'
+export const _WatchEnded: WatchEnded['type'] = 'watch:ended'
 
 // ── membership: what a browser may send, and what an agent produces, do not overlap ──────────────
 //

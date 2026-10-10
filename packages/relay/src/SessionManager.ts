@@ -2,7 +2,7 @@ import { randomUUID } from 'crypto'
 import { WebSocket } from 'ws'
 import type { DeviceStatus } from '@tapflowio/agent-core'
 import type { AgentResources, SessionInfo } from './types.js'
-import type { ChromePayload, DeviceDetails, DeviceReport, FormFactor, PosturesPayload } from '@tapflowio/protocol'
+import type { AiClientKind, ChromePayload, ClientKind, DeviceDetails, DeviceReport, FormFactor, PosturesPayload, WatchEndReason } from '@tapflowio/protocol'
 
 export interface Session {
   id: string
@@ -32,6 +32,10 @@ export interface Session {
    *  legacy exemption by claiming an id that looked minted. */
   ownerMinted: boolean
   ownerUser: string | null
+  /** What the holder declared on `session:start`, and a label for the person behind it. Cleared with
+   *  `owner`: a session nobody holds is nobody's kind. Only an AI kind makes the session watchable. */
+  holderKind: ClientKind | null
+  holderLabel: string | null
   streamSocket: WebSocket | null
   deviceId: string
   deviceName: string
@@ -73,6 +77,18 @@ export type AgentIdentity = {
 
 const DEFAULT_IDLE_TIMEOUT_MS = parseInt(process.env['IDLE_TIMEOUT_MS'] ?? String(5 * 60 * 1000))
 
+/** How many sockets may watch one session. Usually one person watches the agent they instructed; the
+ *  rest is headroom. Each iOS watcher costs about 34 Mbit/s of JPEG egress (measured 2026-10-09), so the
+ *  cap is what bounds a session's fan-out. */
+export const MAX_WATCHERS_PER_SESSION = 4
+
+export function isAiClientKind(kind: ClientKind | null | undefined): kind is AiClientKind {
+  return kind === 'mcp' || kind === 'flow-runner'
+}
+
+/** Told which watchers a session lost and why, so the server can say so before the sockets are forgotten. */
+export type WatchersEvicted = (sessionId: string, sockets: WebSocket[], reason: WatchEndReason) => void
+
 export class SessionManager {
   private sessions = new Map<string, Session>()
   private agentResources = new Map<WebSocket, AgentResources>()
@@ -93,10 +109,27 @@ export class SessionManager {
    * another" — is a regression rather than a fix. Two independent design reviews reached it separately.
    */
   private browserSocketIndex = new Map<WebSocket, Set<Session>>()
+  /**
+   * Read-only sockets per session, each with the owner key it was admitted under.
+   *
+   * **A watch follows the holder, not the session.** It is admitted against one client's session, so when
+   * a *different* client binds the session — a tester picking the device after the agent left — every
+   * watcher admitted under the previous owner is evicted in `join()`. Without that a person's manual
+   * session would be watched by whoever was watching the agent before them. The same client re-joining
+   * (an MCP socket blip) keeps its watchers, which is why the comparison is against the admitted key
+   * rather than against whether `owner` changed at all: `clearBrowser` nulls it in between.
+   *
+   * Kept here rather than in the server so `remove()` clears it on every path — it is called from five
+   * places, and each would otherwise have to remember.
+   */
+  private watchers = new Map<string, Map<WebSocket, string>>()
+  private watcherSocketIndex = new Map<WebSocket, Set<string>>()
   private readonly idleTimeoutMs: number
+  private readonly onWatchersEvicted: WatchersEvicted
 
-  constructor(options: { idleTimeoutMs?: number } = {}) {
+  constructor(options: { idleTimeoutMs?: number; onWatchersEvicted?: WatchersEvicted } = {}) {
     this.idleTimeoutMs = options.idleTimeoutMs ?? DEFAULT_IDLE_TIMEOUT_MS
+    this.onWatchersEvicted = options.onWatchersEvicted ?? (() => {})
   }
 
   /**
@@ -137,6 +170,8 @@ export class SessionManager {
         owner: null,
         ownerMinted: false,
         ownerUser: null,
+        holderKind: null,
+        holderLabel: null,
         streamSocket: null,
         deviceId: d.id,
         readySent: false,
@@ -215,6 +250,8 @@ export class SessionManager {
     browserSocket: WebSocket,
     owner: { key: string; user: string; minted: boolean },
     isAlive: (ws: WebSocket) => boolean,
+    /** What the joining client declared itself to be, and who to show behind it. */
+    holder: { kind?: ClientKind; label: string } = { label: owner.user },
   ): JoinResult {
     const session = this.sessions.get(sessionId)
     if (!session) return { ok: false, failure: 'not-found' }
@@ -252,6 +289,9 @@ export class SessionManager {
     session.owner = owner.key
     session.ownerMinted = owner.minted
     session.ownerUser = owner.user
+    session.holderKind = holder.kind ?? null
+    session.holderLabel = holder.label
+    this.evictWatchers(sessionId, 'holder-changed', (admitted) => admitted !== owner.key)
     let held = this.browserSocketIndex.get(browserSocket)
     if (!held) { held = new Set(); this.browserSocketIndex.set(browserSocket, held) }
     held.add(session)
@@ -261,6 +301,7 @@ export class SessionManager {
   remove(sessionId: string): void {
     const session = this.sessions.get(sessionId)
     if (!session) return
+    this.evictWatchers(sessionId, 'session-ended', () => true)
     if (session.idleTimer) { clearTimeout(session.idleTimer); session.idleTimer = null }
     if (session.streamSocket) this.streamSocketIndex.delete(session.streamSocket)
     this.unindexBrowser(session)
@@ -280,6 +321,8 @@ export class SessionManager {
     session.owner = null
     session.ownerMinted = false
     session.ownerUser = null
+    session.holderKind = null
+    session.holderLabel = null
     if (session.idleTimer) { clearTimeout(session.idleTimer); session.idleTimer = null }
     if (onTimeout) {
       session.idleTimer = setTimeout(() => {
@@ -337,6 +380,60 @@ export class SessionManager {
     // early when the socket has no sessions left, which is precisely the case where every one of
     // them was rebound. Without this line the map keeps a dead socket per restart, forever.
     this.agentResources.delete(old)
+  }
+
+  /**
+   * Admit `ws` as a read-only watcher of the session, bound to `admittedOwner` — the holder's key at this
+   * moment. Whether the session may be watched at all, and whether this socket may watch, are the
+   * server's questions; this only keeps the set and its cap. Watching twice is one watch.
+   */
+  addWatcher(sessionId: string, ws: WebSocket, admittedOwner: string): 'ok' | 'not-found' | 'full' {
+    if (!this.sessions.has(sessionId)) return 'not-found'
+    let set = this.watchers.get(sessionId)
+    if (set?.has(ws)) { set.set(ws, admittedOwner); return 'ok' }
+    if ((set?.size ?? 0) >= MAX_WATCHERS_PER_SESSION) return 'full'
+    if (!set) { set = new Map(); this.watchers.set(sessionId, set) }
+    set.set(ws, admittedOwner)
+    let ids = this.watcherSocketIndex.get(ws)
+    if (!ids) { ids = new Set(); this.watcherSocketIndex.set(ws, ids) }
+    ids.add(sessionId)
+    return 'ok'
+  }
+
+  /** @returns whether `ws` was watching the session. */
+  removeWatcher(sessionId: string, ws: WebSocket): boolean {
+    const set = this.watchers.get(sessionId)
+    if (!set?.delete(ws)) return false
+    if (set.size === 0) this.watchers.delete(sessionId)
+    const ids = this.watcherSocketIndex.get(ws)
+    ids?.delete(sessionId)
+    if (ids?.size === 0) this.watcherSocketIndex.delete(ws)
+    return true
+  }
+
+  /** Stop every watch this socket holds — its close. @returns the sessions it was watching. */
+  removeWatcherSocket(ws: WebSocket): string[] {
+    const ids = [...(this.watcherSocketIndex.get(ws) ?? [])]
+    for (const id of ids) this.removeWatcher(id, ws)
+    return ids
+  }
+
+  watchersOf(sessionId: string): WebSocket[] {
+    return [...(this.watchers.get(sessionId)?.keys() ?? [])]
+  }
+
+  isWatching(ws: WebSocket, sessionId: string): boolean {
+    return this.watchers.get(sessionId)?.has(ws) ?? false
+  }
+
+  /** Evict the watchers `which` selects by their admitted owner, telling the server first. */
+  private evictWatchers(sessionId: string, reason: WatchEndReason, which: (admittedOwner: string) => boolean): void {
+    const set = this.watchers.get(sessionId)
+    if (!set) return
+    const evicted = [...set].filter(([, admitted]) => which(admitted)).map(([ws]) => ws)
+    if (evicted.length === 0) return
+    for (const ws of evicted) this.removeWatcher(sessionId, ws)
+    this.onWatchersEvicted(sessionId, evicted, reason)
   }
 
   setResources(agentSocket: WebSocket, resources: AgentResources): void {
@@ -420,6 +517,15 @@ export class SessionManager {
    * Passing the same `isAlive` rather than a second liveness rule is the point — two predicates that
    * disagree would flash a device as free while a join for it is still refused.
    */
+  /** An AI client holds this session on a socket that is answering — the same liveness `busy` reads. */
+  private liveAiHolder(s: Session, isAlive: (ws: WebSocket) => boolean): boolean {
+    return isAiClientKind(s.holderKind) &&
+      s.owner !== null &&
+      s.browserSocket !== null &&
+      s.browserSocket.readyState === WebSocket.OPEN &&
+      isAlive(s.browserSocket)
+  }
+
   list(asker: string, isAlive: (ws: WebSocket) => boolean): SessionInfo[] {
     // Group sessions by agentSocket
     const agentMap = new Map<WebSocket, Session[]>()
@@ -453,6 +559,7 @@ export class SessionManager {
         osVersion: s.deviceOsVersion,
         formFactor: s.deviceFormFactor,
         sessionId: s.id,
+        ...(this.liveAiHolder(s, isAlive) ? { holder: { kind: s.holderKind as AiClientKind, user: s.holderLabel ?? 'unknown' } } : {}),
         busy:
           s.owner !== null &&
           s.owner !== asker &&

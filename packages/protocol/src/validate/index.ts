@@ -62,7 +62,7 @@ import type {
   InputPinchEnd, InputPinchMove, InputPinchStart, InputPosture, InputRotate, InputTouchEnd, InputTouchMove,
   InputTouchStart, InputType, InputTypeDone, InputTypeError, KeyboardToggled, OpenUrl, OpenUrlDone,
   OpenUrlError, ScreenshotDone, ScreenshotError, SessionChrome, SessionDeviceInfo, SessionEnd,
-  SessionLeave, SessionStart, StreamRegister, UiTreeError, UiTreeResponse,
+  SessionLeave, SessionStart, StreamRegister, UiTreeError, UiTreeResponse, WatchStart, WatchStop,
 } from '../index.js'
 import type { Assert, EnvelopeOf, IsEmpty, SchemaExact } from './assert.js'
 
@@ -106,7 +106,13 @@ const envCo = <T extends string>(type: T) =>
 
 const BROWSER_INBOUND = {
   'agents:list': z.object({ type: z.literal('agents:list') }),
-  'session:start': z.object({ type: z.literal('session:start'), sessionId }),
+  // `clientKind` optional: a client that predates it joins as before, and is simply not watchable.
+  'session:start': z.object({
+    type: z.literal('session:start'), sessionId,
+    clientKind: z.enum(['dashboard', 'mcp', 'flow-runner']).optional(),
+  }),
+  'watch:start': z.object({ type: z.literal('watch:start'), sessionId }),
+  'watch:stop': z.object({ type: z.literal('watch:stop'), sessionId }),
   'session:end': z.object({ type: z.literal('session:end'), sessionId }),
   'session:leave': z.object({ type: z.literal('session:leave'), sessionId }),
   'device:boot': z.object({
@@ -541,6 +547,8 @@ type _InputKeyboardToggle = Assert<V<'input:keyboard:toggle', InputKeyboardToggl
 type _ClipboardRead = Assert<V<'clipboard:read', ClipboardRead>>
 type _ClipboardWrite = Assert<V<'clipboard:write', ClipboardWrite>>
 type _NetworkSet = Assert<V<'network:set', NetworkSet>>
+type _WatchStart = Assert<V<'watch:start', WatchStart>>
+type _WatchStop = Assert<V<'watch:stop', WatchStop>>
 
 type _AgentRegister = Assert<V<'agent:register', AgentRegister>>
 type _AgentResources = Assert<V<'agent:resources', AgentResourceReport>>

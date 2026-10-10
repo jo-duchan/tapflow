@@ -131,4 +131,10 @@ export const INBOUND_DISPOSITION = {
       + 'instead. Kept on the wire because third-party agents send it; the field to display it is a '
       + 'feature nobody has asked for, not a handler someone forgot.',
   },
+  // The page that watches an AI client's session sends `watch:start` and reads these. Until it exists no
+  // socket in this dashboard watches, so none of the four can arrive.
+  'watch:started': { ignored: 'Answers `watch:start`, which no page sends yet.' },
+  'watch:refused': { ignored: 'Answers `watch:start`, which no page sends yet.' },
+  'watch:holder-left': { ignored: 'Sent only to a watching socket, and no page watches yet.' },
+  'watch:ended': { ignored: 'Sent only to a watching socket, and no page watches yet.' },
 } satisfies Record<BrowserInbound['type'], Disposition>

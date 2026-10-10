@@ -401,6 +401,31 @@ and naming the join in flight would mean guessing between pending ones, which is
 removes. A first draft keyed on a literal and documented itself as per-session, which made it per-*process* —
 so against an old relay the first refused session logged and every later one was silent.
 
+## Watching a session — the holder declares, authentication decides
+
+A teammate can watch, read-only, a session an AI client holds: `watch:start` / `watch:stop` from the
+browser, `watch:started` / `watch:refused` in answer, then `watch:holder-left` and `watch:ended` as the
+session moves under the watcher.
+
+**Who is an AI client is declared, not inferred.** `session:start` carries `clientKind`. Reading it off the
+credential (a PAT means a tool, a cookie means a person) was the first design and was dropped: a new auth
+method would silently reclassify every session. The declaration is safe to trust because of what it grants
+— it opens the *declarer's own* session to watchers and nothing else, so a false one can only expose
+oneself. **Who may watch is decided by authentication instead** (a cookie, or a remote PAT with `view`),
+never by anything a client says about itself. An absent `clientKind` — any client predating the field — is
+not watchable, deliberately with no fallback.
+
+**`holder` in the device list never carries the owner key or the client id.** The owner key is
+`<userId>:<clientId>` with the client half off the handshake query, so a loopback socket that learned it
+could claim it and pass the ownership gate. The list names the kind and a label for people (an email, or
+`local`), which is all a viewer needs to offer Watch.
+
+**The field is also the feature gate.** An older relay drops `watch:start` without a reply, so a viewer offers
+Watch only for a device whose listing carries `holder` — a relay that sends the field understands the message.
+
+`watch:refused` extends `SessionScoped`; the other three carry `sessionId` directly, because the base is for a
+failure a session is waiting on and they are not failures.
+
 ## Every direction is declared, and an agent's send is typed
 
 The six unions cover the whole wire: `BrowserToRelay`, `AgentToRelay`, `RelayToAgent`, `RelayToBrowser`,

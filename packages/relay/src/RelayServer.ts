@@ -5,15 +5,15 @@ import os from 'os'
 import path from 'path'
 import { randomUUID } from 'crypto'
 import { WebSocketServer, WebSocket } from 'ws'
-import { SessionManager } from './SessionManager.js'
+import { SessionManager, isAiClientKind } from './SessionManager.js'
 import type { Session } from './SessionManager.js'
 import type { DeviceDetails, UIElement } from './types.js'
-import type { ChromePayload, InputErrorReason, RelayOutbound, PosturesPayload } from '@tapflowio/protocol'
+import type { ChromePayload, InputErrorReason, RelayOutbound, PosturesPayload, WatchRefusal } from '@tapflowio/protocol'
 import { directionOf, parseInbound } from '@tapflowio/protocol/validate'
 import type { ParsedInbound, ParseFailure, ParseResult } from '@tapflowio/protocol/validate'
 import { Router, json } from './router.js'
 import { requireViewAuth, requireAuth, getAuth, verifyPat, touchPat, findPat, findUser } from './middleware/auth.js'
-import { AGENT_SCOPE, WS_ACCESS_CHANGED_REASON, WS_AGENT_OWNER_REASON, WS_SCOPE_REASON, classifyConnection, isAffectedBy, revalidatePrincipal, type AuthChange, type SocketPrincipal } from './lib/connectionAuth.js'
+import { AGENT_SCOPE, VIEW_SCOPE, WS_ACCESS_CHANGED_REASON, WS_AGENT_OWNER_REASON, WS_SCOPE_REASON, classifyConnection, isAffectedBy, revalidatePrincipal, type AuthChange, type SocketPrincipal } from './lib/connectionAuth.js'
 import { isTunnelIngress, markTunnelIngress, proxiedWithoutForwardedFor, resolveClientAddress, resolveRequestClient } from './lib/clientAddress.js'
 import { BuildTicketStore } from './lib/buildTickets.js'
 import { resolveBuildFile } from './lib/buildFiles.js'
@@ -21,7 +21,7 @@ import { resolveCorsHeaders } from './lib/cors.js'
 import { isCsrfBlocked } from './lib/csrf.js'
 import { pickLanAddress, runningInContainer } from './lib/lanAddress.js'
 import { config, getJwtSecret } from './lib/config.js'
-import { forTeammates, resolveAgentRelayUrl, resolvePublicBaseUrl, type TunnelRuntime } from './lib/publicUrl.js'
+import { buildInviteBaseUrl, forTeammates, resolveAgentRelayUrl, resolvePublicBaseUrl, type TunnelRuntime } from './lib/publicUrl.js'
 import { createTrailingRequester, systemTimerScheduler, type TrailingRequester } from './lib/trailingRequester.js'
 import { getDb } from './db.js'
 import { handleLogin, handleLogout, handleMe, handleChangePassword, handleInit, handleAuthStatus } from './api/auth.js'
@@ -298,6 +298,19 @@ export class RelayServer {
   private droppers = new Map<string, KeyframeAwareSender>()
   // Per-session throttled "request an IDR from the agent" callbacks (drop recovery).
   private idrRequesters = new Map<string, () => void>()
+  /**
+   * **One keyframe-aware sender per watcher, never the session's.** The sender's `dropping` state lives in
+   * its closure, so sharing the holder's would let a slow watcher put the holder into drop-to-keyframe
+   * too — every P-frame to the holder discarded until the next IDR because someone else's link is slow.
+   * Keyed by socket, then session, because one socket can watch several sessions.
+   */
+  private watcherDroppers = new Map<WebSocket, Map<string, KeyframeAwareSender>>()
+  /**
+   * Whether this connection may watch: a cookie, or a remote PAT with `view` — decided once at the
+   * handshake, from the credential. **Not** an unauthenticated loopback socket: a page in any browser on
+   * the relay's Mac reaches loopback without a credential, and watching shows a device's screen.
+   */
+  private mayWatch = new WeakMap<WebSocket, boolean>()
   /** Unlike `idrRequesters` these hold a timer, which is why the value is not a bare closure — see
    *  `forgetSessionState`. */
   private networkStateRequesters = new Map<string, TrailingRequester>()
@@ -436,7 +449,16 @@ export class RelayServer {
     if (options.agentGraceMs === undefined && graceRaw && !graceUsable) {
       logger.warn(`TAPFLOW_AGENT_GRACE_MS="${graceRaw}" is not a usable number of milliseconds — using ${DEFAULT_AGENT_GRACE_MS}`)
     }
-    this.sessions = new SessionManager({ idleTimeoutMs: options.idleTimeoutMs })
+    this.sessions = new SessionManager({
+      idleTimeoutMs: options.idleTimeoutMs,
+      // Before the sockets are forgotten, so each one is told why its picture stopped.
+      onWatchersEvicted: (sessionId, sockets, reason) => {
+        for (const w of sockets) {
+          this.forgetWatcherDropper(w, sessionId)
+          this.sendTo(w, { type: 'watch:ended', sessionId, reason })
+        }
+      },
+    })
     this.publicDir = options.publicDir ?? path.join(import.meta.dirname, '../public')
     this.uploadsDir = options.uploadsDir ?? path.join(import.meta.dirname, '../uploads')
     this.router = new Router()
@@ -1098,6 +1120,7 @@ export class RelayServer {
       // Only an accepted token was used; a refused one keeps its "last used".
       if (pat) touchPat(pat.patId)
       userId = cookie?.userId ?? pat?.userId
+      this.mayWatch.set(ws, cookie !== null || (!isLocal && pat !== null && pat.scopes.includes(VIEW_SCOPE)))
       if (!isLocal) {
         if (cookie) this.principals.set(ws, { via: 'cookie', userId: cookie.userId, jwtExp: cookie.exp, pwv: cookie.pwv })
         else if (pat) this.principals.set(ws, { via: 'pat', userId: pat.userId, patId: pat.patId })
@@ -1136,43 +1159,56 @@ export class RelayServer {
       // before its close reply arrives.
       if (this.revokedSockets.has(ws)) return
       if (isBinary) {
-        // Binary frames arrive on the dedicated stream WS, route to the session's browser
+        // Binary frames arrive on the dedicated stream WS, route to the session's browser and watchers.
         const session = this.sessions.getByStreamSocket(ws)
-        if (session?.browserSocket) {
-          const frameBuf = data as Buffer
-          // Audio rides the same socket (codec-tagged). Route it through a sender that YIELDS to
-          // video — it drops audio unless the socket is near-empty, so audio never inflates
-          // bufferedAmount enough to trip the video backpressure path. Must branch before the
-          // video dropper, which would (wrongly) treat audio as a droppable P-frame.
-          if (hasEnvelope(frameBuf) && readEnvelopeFlags(frameBuf).codec === CODEC_AUDIO) {
-            patchRelayedAt(frameBuf, Date.now())
-            let onAudioDrop = this.audioDropHandlers.get(session.id)
-            if (!onAudioDrop) {
-              onAudioDrop = createRateLimitedDropWarn(logger, `${session.id} audio`)
-              this.audioDropHandlers.set(session.id, onAudioDrop)
-            }
-            sendAudioYieldingToVideo(session.browserSocket, frameBuf, onAudioDrop)
-            return
+        if (!session) return
+        // **Not gated on the holder.** Watchers keep receiving frames while the holder is away inside its
+        // reconnect grace, which is when `browserSocket` is null.
+        const watchers = this.sessions.watchersOf(session.id)
+        if (!session.browserSocket && watchers.length === 0) return
+        const frameBuf = data as Buffer
+        // Audio rides the same socket (codec-tagged). Route it through a sender that YIELDS to
+        // video — it drops audio unless the socket is near-empty, so audio never inflates
+        // bufferedAmount enough to trip the video backpressure path. Must branch before the
+        // video dropper, which would (wrongly) treat audio as a droppable P-frame.
+        //
+        // **The holder's alone.** A watch page has no audio control, and audio a teammate did not ask
+        // to hear should not start playing in their tab.
+        if (hasEnvelope(frameBuf) && readEnvelopeFlags(frameBuf).codec === CODEC_AUDIO) {
+          if (!session.browserSocket) return
+          patchRelayedAt(frameBuf, Date.now())
+          let onAudioDrop = this.audioDropHandlers.get(session.id)
+          if (!onAudioDrop) {
+            onAudioDrop = createRateLimitedDropWarn(logger, `${session.id} audio`)
+            this.audioDropHandlers.set(session.id, onAudioDrop)
           }
-          let onDrop = this.dropHandlers.get(session.id)
-          if (!onDrop) {
-            onDrop = createRateLimitedDropWarn(logger, session.id)
-            this.dropHandlers.set(session.id, onDrop)
-          }
+          sendAudioYieldingToVideo(session.browserSocket, frameBuf, onAudioDrop)
+          return
+        }
+        let onDrop = this.dropHandlers.get(session.id)
+        if (!onDrop) {
+          onDrop = createRateLimitedDropWarn(logger, session.id)
+          this.dropHandlers.set(session.id, onDrop)
+        }
+        const requestIdr = this.idrRequester(session.id)
+        // JPEG and H.264 IDRs are resync points; only P-frames must wait for a keyframe after a drop.
+        // Patched once: every recipient is sent the same buffer, so it carries one relay timestamp.
+        let isKeyframe = true
+        if (hasEnvelope(frameBuf)) {
+          patchRelayedAt(frameBuf, Date.now())
+          const flags = readEnvelopeFlags(frameBuf)
+          isKeyframe = flags.codec === CODEC_JPEG || flags.keyframe
+        }
+        if (session.browserSocket) {
           let dropper = this.droppers.get(session.id)
           if (!dropper) {
             dropper = createKeyframeAwareSender()
             this.droppers.set(session.id, dropper)
           }
-          const requestIdr = this.idrRequester(session.id)
-          // JPEG and H.264 IDRs are resync points; only P-frames must wait for a keyframe after a drop.
-          let isKeyframe = true
-          if (hasEnvelope(frameBuf)) {
-            patchRelayedAt(frameBuf, Date.now())
-            const flags = readEnvelopeFlags(frameBuf)
-            isKeyframe = flags.codec === CODEC_JPEG || flags.keyframe
-          }
           dropper.send(session.browserSocket, frameBuf, this.backpressureBytes, isKeyframe, onDrop, requestIdr)
+        }
+        for (const w of watchers) {
+          this.watcherDropper(w, session.id).send(w, frameBuf, this.backpressureBytes, isKeyframe, onDrop, requestIdr)
         }
         return
       }
@@ -1251,6 +1287,10 @@ export class RelayServer {
       const streamSession = this.sessions.getByStreamSocket(ws)
       if (streamSession) this.sessions.clearStreamSocket(streamSession.id)
 
+      // A watcher leaving changes nothing for the session it watched — no release, no timer, no IDR.
+      this.sessions.removeWatcherSocket(ws)
+      this.watcherDroppers.delete(ws)
+
       // Browser socket disconnected → release **every** session it held, each with its own idle timer.
       //
       // `getByBrowserSocket` used to answer with one session because the index held one, and a socket
@@ -1264,6 +1304,7 @@ export class RelayServer {
       if (this.stopping) return
       for (const held of this.sessions.getByBrowserSocket(ws)) {
         this.sessions.clearBrowser(held.id, () => this.idleShutdown(held.id))
+        this.tellWatchers(held.id, { type: 'watch:holder-left', sessionId: held.id })
       }
     })
   }
@@ -1417,6 +1458,12 @@ export class RelayServer {
 
       // ── Session / Stream lifecycle ─────────────────────────────────────────
       case 'session:start':    this.handleSessionStart(ws, msg); break
+      case 'watch:start':      this.handleWatchStart(ws, msg); break
+      // Unanswered, like `session:leave`: nobody waits on it, and closing the socket does the same.
+      case 'watch:stop': {
+        if (this.sessions.removeWatcher(msg.sessionId, ws)) this.forgetWatcherDropper(ws, msg.sessionId)
+        break
+      }
       // ── the two session commands, gated but not answered ───────────────────────────────────────
       //
       // Both destroy state a viewer depends on, and until L5c both acted on the strength of the session
@@ -1449,6 +1496,7 @@ export class RelayServer {
         if (this.ownsSession(ws, this.sessions.get(msg.sessionId))) {
           this.sessions.clearBrowser(msg.sessionId)
           this.forgetSessionState(msg.sessionId)
+          this.tellWatchers(msg.sessionId, { type: 'watch:holder-left', sessionId: msg.sessionId })
         }
         break
       }
@@ -1484,6 +1532,7 @@ export class RelayServer {
         if (session.browserSocket?.readyState === WebSocket.OPEN) {
           session.browserSocket.send(JSON.stringify(raw))
         }
+        this.forwardToWatchers(session.id, raw)
         break
       }
       case 'device:postures': {
@@ -1497,6 +1546,7 @@ export class RelayServer {
         if (session.browserSocket?.readyState === WebSocket.OPEN) {
           session.browserSocket.send(JSON.stringify(raw))
         }
+        this.forwardToWatchers(session.id, raw)
         break
       }
       case 'session:deviceInfo': {
@@ -1507,6 +1557,7 @@ export class RelayServer {
         if (session.browserSocket?.readyState === WebSocket.OPEN) {
           session.browserSocket.send(JSON.stringify(raw))
         }
+        this.forwardToWatchers(session.id, raw)
         break
       }
       case 'device:booting': {
@@ -1517,6 +1568,7 @@ export class RelayServer {
         if (session.browserSocket?.readyState === WebSocket.OPEN) {
           session.browserSocket.send(JSON.stringify(raw))
         }
+        this.forwardToWatchers(session.id, raw)
         break
       }
       case 'device:boot-error': {
@@ -1566,6 +1618,7 @@ export class RelayServer {
         if (session.browserSocket?.readyState === WebSocket.OPEN) {
           session.browserSocket.send(JSON.stringify(raw))
         }
+        this.forwardToWatchers(session.id, raw)
         break
       }
       case 'app:install-done':
@@ -1672,6 +1725,18 @@ export class RelayServer {
         // command the relay never answers. `mcp-server`'s `shutdownDevice` waits 30s on `device:shutdown-done`
         // and then reports `Request timed out` with no cause, which is the silence, not a diagnosis.
         const session = this.sessions.get(msg.sessionId)
+        // A watcher's gate comes first: `mayShutDown` passes anyone while the session is unheld, and the
+        // holder's reconnect grace is exactly that — so a watch page closing at that moment would power
+        // off the device an agent is in the middle of testing.
+        if (session && this.sessions.isWatching(ws, session.id)) {
+          this.sendTo(ws, {
+            type: 'device:shutdown-error',
+            sessionId: msg.sessionId,
+            ...(msg.requestId === undefined ? {} : { requestId: msg.requestId }),
+            message: 'This connection is watching the session and cannot shut its device down.',
+          })
+          break
+        }
         if (session && !this.mayShutDown(ws, session)) {
           this.sendTo(ws, {
             type: 'device:shutdown-error',
@@ -2032,6 +2097,7 @@ export class RelayServer {
 
     for (const s of sessions) {
       if (s.browserSocket) this.sendTo(s.browserSocket, { type: 'session:agent-away', sessionId: s.id })
+      this.tellWatchers(s.id, { type: 'session:agent-away', sessionId: s.id })
     }
     const timer = setTimeout(() => {
       this.agentHolds.delete(ws)
@@ -2194,6 +2260,7 @@ export class RelayServer {
       if (s?.browserSocket) {
         this.sendTo(s.browserSocket, { type: 'session:rebound', sessionId, capabilities: msg.capabilities ?? [] })
       }
+      this.tellWatchers(sessionId, { type: 'session:rebound', sessionId, capabilities: msg.capabilities ?? [] })
     }
     // After the rebound frames, so the client records `needsReboot` before the error below
     // arrives and classifies it with the cause attached. Only boots tied to the replaced
@@ -2222,6 +2289,17 @@ export class RelayServer {
     const session = this.sessions.get(msg.sessionId)
     if (!session) {
       this.sendTo(ws, { type: 'error', sessionId: msg.sessionId, message: 'Session not found', reason: 'session-not-found' })
+      return
+    }
+    // **A watcher may not take the session it watches.** Inside the holder's reconnect grace the session
+    // is unheld, so without this a watch page that re-sent `session:start` — a reused viewer path, a
+    // reconnect — would become the holder, and the agent's own re-join would then be refused as busy.
+    // `session-busy` because that is what the caller must act on: someone else's session, in use.
+    if (this.sessions.isWatching(ws, session.id)) {
+      this.sendTo(ws, {
+        type: 'error', sessionId: msg.sessionId, reason: 'session-busy',
+        message: 'This connection is watching the session. Stop watching to join it.',
+      })
       return
     }
     // Occupancy first, because it is the more specific answer and both can be true at once. A tester
@@ -2257,7 +2335,10 @@ export class RelayServer {
       }
     }
     try {
-      const joined = this.sessions.join(msg.sessionId, ws, this.ownerRecord(ws), (h) => this.isAlive(h))
+      const joined = this.sessions.join(
+        msg.sessionId, ws, this.ownerRecord(ws), (h) => this.isAlive(h),
+        { kind: msg.clientKind, label: this.holderLabel(ws) },
+      )
       if (!joined.ok) {
         // Both of these are answered above, so arriving here means the state moved between that check and
         // this call. They are **values now rather than throws** (#515), and that is what fixes the defect:
@@ -2287,6 +2368,7 @@ export class RelayServer {
     // deliberately instead of inferring anything from a timeout.
     this.sendTo(ws, {
       type: 'session:joined', sessionId: msg.sessionId, capabilities: session.agentCapabilities ?? [],
+      ...(isAiClientKind(msg.clientKind) ? { watchUrl: this.watchUrl(msg.sessionId) } : {}),
     })
     if (agentAway) {
       // Joining into a held session. Refusing instead would be worse than it sounds: the viewer
@@ -2353,6 +2435,92 @@ export class RelayServer {
       // about. `deviceStatus` is not the fix — the comment on `device:ready` says why (#440).
       if (hasCapability(session.agentCapabilities, 'network-control')) this.networkStateRequester(session.id)()
     }
+  }
+
+  /**
+   * Admit `ws` as a read-only watcher, or say why not. The order of the refusals is the order a viewer
+   * can act on them: a connection that may never watch is told so before it learns anything about the
+   * session.
+   */
+  private handleWatchStart(ws: WebSocket, msg: Inbound<'watch:start'>): void {
+    const refuse = (reason: WatchRefusal, message: string) =>
+      this.sendTo(ws, { type: 'watch:refused', sessionId: msg.sessionId, reason, message })
+    if (!this.mayWatch.get(ws)) return refuse('not-permitted', 'Sign in to watch a session.')
+    const session = this.sessions.get(msg.sessionId)
+    if (!session) return refuse('session-not-found', 'Session not found')
+    if (session.owner === null || !isAiClientKind(session.holderKind)) {
+      return refuse('not-watchable', 'Only a session an AI client is driving can be watched.')
+    }
+    if (this.sessions.addWatcher(session.id, ws, session.owner) === 'full') {
+      return refuse('watchers-full', 'This session already has as many watchers as it allows.')
+    }
+    this.sendTo(ws, { type: 'watch:started', sessionId: session.id })
+    // The same replay a re-joining viewer gets, for the same reason: a watch can begin mid-session.
+    if (session.agentSocket.readyState !== WebSocket.OPEN) {
+      this.sendTo(ws, { type: 'session:agent-away', sessionId: session.id })
+      return
+    }
+    if (session.chromeData) this.sendTo(ws, { type: 'session:chrome', sessionId: session.id, payload: session.chromeData })
+    if (session.deviceInfo) this.sendTo(ws, { type: 'session:deviceInfo', sessionId: session.id, payload: session.deviceInfo })
+    if (session.postures) this.sendTo(ws, { type: 'device:postures', sessionId: session.id, payload: session.postures })
+    if (session.readySent) {
+      this.sendTo(ws, { type: 'device:ready', payload: { deviceId: session.deviceId } })
+      // Through the session's throttled requester, as the re-join does: a watcher arriving mid-GOP needs
+      // a keyframe, and a socket starting watches repeatedly must not turn into a stream of IDRs.
+      this.idrRequester(session.id)()
+    }
+  }
+
+  /** The keyframe-aware sender for one watcher of one session — see `watcherDroppers`. */
+  private watcherDropper(ws: WebSocket, sessionId: string): KeyframeAwareSender {
+    let bySession = this.watcherDroppers.get(ws)
+    if (!bySession) { bySession = new Map(); this.watcherDroppers.set(ws, bySession) }
+    let dropper = bySession.get(sessionId)
+    if (!dropper) { dropper = createKeyframeAwareSender(); bySession.set(sessionId, dropper) }
+    return dropper
+  }
+
+  private forgetWatcherDropper(ws: WebSocket, sessionId: string): void {
+    const bySession = this.watcherDroppers.get(ws)
+    bySession?.delete(sessionId)
+    if (bySession?.size === 0) this.watcherDroppers.delete(ws)
+  }
+
+  /**
+   * Forward an agent's frame to the session's watchers. **Only the messages that describe the device**
+   * call this — chrome, device info, postures, booting, ready — never a reply to something the holder
+   * asked. An ack, a clipboard payload or a network state is the holder's, and a watcher shown one would
+   * learn what the agent is doing on a channel it was never admitted to.
+   */
+  private forwardToWatchers(sessionId: string, raw: Readonly<Record<string, unknown>>): void {
+    const watchers = this.sessions.watchersOf(sessionId)
+    if (watchers.length === 0) return
+    const frame = JSON.stringify(raw)
+    for (const w of watchers) if (w.readyState === WebSocket.OPEN) w.send(frame)
+  }
+
+  /** The relay-originated half of what watchers hear: holder left, agent away, agent rebound. */
+  private tellWatchers(sessionId: string, msg: RelayOutbound): void {
+    for (const w of this.sessions.watchersOf(sessionId)) this.sendTo(w, msg)
+  }
+
+  /** Who to show behind a holder: the signed-in user's email, or `local` for a loopback client with no
+   *  credential. A label for people only — nothing reads it back. */
+  private holderLabel(ws: WebSocket): string {
+    const user = this.userOf(ws)
+    const id = Number(user)
+    if (!Number.isInteger(id)) return 'local'
+    try {
+      const row = getDb().prepare('SELECT email FROM users WHERE id = ?').get(id) as { email: string } | undefined
+      return row?.email ?? 'unknown'
+    } catch {
+      return 'unknown'
+    }
+  }
+
+  /** The dashboard page that watches a session, at the address a teammate's browser can open. */
+  private watchUrl(sessionId: string): string {
+    return `${buildInviteBaseUrl(config, this.options.tunnel)}/automation/sessions/${encodeURIComponent(sessionId)}`
   }
 
   /** Shut the device down because nobody is watching it any more. The idle timer's payload, hoisted out
