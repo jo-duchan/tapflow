@@ -46,7 +46,7 @@ type Disposition =
   | { ignored: string }
 
 export const INBOUND_DISPOSITION = {
-  'agents:listed': { at: 'useAgentSession, MacResources, useWatchSession, AISessions' },
+  'agents:listed': { at: 'useAgentSession, MacResources, useWatchSession' },
   'app:install-done': { at: 'DeviceViewer' },
   'app:install-error': { at: 'DeviceViewer' },
   'app:launch-done': { at: 'DeviceViewer' },

@@ -62,7 +62,7 @@ const ALLOW = [
   { text: '**AGENT ALREADY RUNNING**', files: ['troubleshooting/install-and-agents.md'], reason: 'literal CLI output the reader will see' },
   { text: '에이전트 (Agents)', files: ['reference/api.md'], reason: 'API reference heading glossing the English resource group' },
   { text: '릴레이 (Relay)', files: ['reference/api.md'], reason: 'API reference heading glossing the English resource group' },
-  { text: '**Coding agent is driving it · Watch**', files: ['automation/mcp-server.md'], reason: 'QA session device-card label, shown as-is in the dashboard' },
+  { text: '**Coding agent is driving it**', files: ['automation/mcp-server.md'], reason: 'QA session device-card label, shown as-is in the dashboard' },
   { text: '디바이스 팜', files: ['reference/sustainability.md'], reason: 'industry term (device farm); "기기 팜" is not a phrase anyone searches for' },
 ]
 

@@ -37,8 +37,9 @@ const AGENTS: SessionInfo[] = [{
 }]
 
 describe('QASession — a device an AI agent is driving', () => {
-  // A person's in-use device stays disabled; only one an AI agent holds — `holder` set — opens its watch page.
-  it('becomes a link to watch it, and a person\'s stays disabled', async () => {
+  // The list says why the device is taken and who is driving it, and offers no way in: watching an AI session
+  // is for the person who started it, through the link their coding agent hands them.
+  it('names the driver and stays disabled, like any device in use', async () => {
     const user = userEvent.setup()
     render(withQuery(
       <MemoryRouter initialEntries={['/qa?id=7']}>
@@ -48,9 +49,10 @@ describe('QASession — a device an AI agent is driving', () => {
     await vi.waitFor(() => expect(deliver).not.toBeNull())
     await act(async () => { deliver!({ type: 'agents:listed', sessions: AGENTS }) })
     await user.click(await screen.findByText('studio-mac'))
-    const watch = await screen.findByRole('link', { name: /iPhone 15/ })
-    expect(watch.getAttribute('href')).toBe('/automation/sessions/sess-a')
-    expect(watch.textContent).toContain('Coding agent is driving it · Watch')
-    expect(screen.getByRole('button', { name: /iPhone SE/ })).toHaveProperty('disabled', true)
+    const driven = await screen.findByRole('button', { name: /iPhone 15/ })
+    expect(driven.textContent).toContain('Coding agent is driving it')
+    expect(driven).toHaveProperty('disabled', true)
+    expect(screen.queryByRole('link', { name: /iPhone 15/ })).toBeNull()
+    expect(screen.getByRole('button', { name: /iPhone SE/ }).textContent).toContain('In use')
   })
 })

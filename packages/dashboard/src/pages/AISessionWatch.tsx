@@ -8,8 +8,9 @@ import { WatchedDevice } from '@/components/device/WatchedDevice'
 import { holderKindLabel, watchEndText, watchRefusalText } from '@/lib/aiSession'
 
 /**
- * **Watch, read-only, the device an AI agent is driving.** Reached from the AI Sessions list, from the QA
- * session's device list, or from the link the MCP server and the flow runner hand out.
+ * **Watch, read-only, the device an AI agent is driving.** Reached only through the link the MCP server and the
+ * flow runner hand out: watching an agent is for the person who asked it to test, so there is no list of AI
+ * sessions to browse. Runs the team cares about — CI — get their own page with the flow run records.
  */
 export function AISessionWatch() {
   const { sessionId = '' } = useParams()
@@ -24,11 +25,7 @@ function WatchView({ sessionId }: { sessionId: string }) {
   const { setNode: setBreadcrumb } = useBreadcrumb()
   useEffect(() => {
     setBreadcrumb(
-      <span className="flex items-center gap-1.5 text-sm">
-        <Link to="/automation/sessions" className="text-muted-foreground hover:text-foreground">AI Sessions</Link>
-        <span aria-hidden="true" className="text-muted-foreground">/</span>
-        <span className="font-medium">{device?.name ?? 'Session'}</span>
-      </span>,
+      <span className="text-sm font-medium">Watching {device?.name ?? 'a device'}</span>,
     )
     return () => setBreadcrumb(null)
   }, [setBreadcrumb, device?.name])
@@ -62,7 +59,7 @@ function WatchView({ sessionId }: { sessionId: string }) {
       {over ? (
         <div>
           <Button asChild variant="outline" size="sm">
-            <Link to="/automation/sessions"><ArrowLeft className="h-4 w-4" aria-hidden="true" />Back to AI Sessions</Link>
+            <Link to="/app-center"><ArrowLeft className="h-4 w-4" aria-hidden="true" />Back to App Center</Link>
           </Button>
         </div>
       ) : (

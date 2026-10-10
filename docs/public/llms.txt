@@ -66,7 +66,7 @@
 
 ### AI automation (MCP and flows — experimental)
 
-- [MCP Server](https://www.tapflow.dev/automation/mcp-server): Install and configure @tapflowio/mcp-server. Supports Claude Code, Codex, Cursor, and any MCP-compatible client. Available tools: list_builds, list_devices, connect_device, disconnect_device, boot_device, shutdown_device, screenshot, query_ui_tree, tap, swipe, type_text, press_key, press_button, install_app, launch_app, run_flow. connect_device returns a dashboard link where teammates watch the device live.
+- [MCP Server](https://www.tapflow.dev/automation/mcp-server): Install and configure @tapflowio/mcp-server. Supports Claude Code, Codex, Cursor, and any MCP-compatible client. Available tools: list_builds, list_devices, connect_device, disconnect_device, boot_device, shutdown_device, screenshot, query_ui_tree, tap, swipe, type_text, press_key, press_button, install_app, launch_app, run_flow. connect_device returns a dashboard link for watching the device live.
 - [Flow Reference](https://www.tapflow.dev/automation/flows): The YAML flow format replayed deterministically by `tapflow flow run` with no LLM calls — file structure, every step type, selectors, running in CI, the link for watching a run, and how it relates to the `run_flow` MCP tool.
 - [MCP in CI/CD](https://www.tapflow.dev/automation/mcp-ci): Run automated smoke tests on every build using claude CLI + MCP. Includes GitHub Actions example, multi-device matrix, example test prompts, and tips for reliable agentic test scripts.
 

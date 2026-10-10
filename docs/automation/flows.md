@@ -134,7 +134,7 @@ tapflow flow run .tapflow/flows/login.yaml .tapflow/flows/checkout.yaml
 
 The `launchApp` step takes no argument and launches the build passed via `--build`. That keeps the build id out of the flow file, so the same flow runs against a fresh build on every CI run.
 
-When the run starts, the runner prints a dashboard link on a `watch this run:` line. Open it to watch, live, the flow driving the device; the watch ends when the run does. In CI the line is not printed (detected from the `CI` environment variable, Jenkins's `JENKINS_URL` or Azure Pipelines' `TF_BUILD`), because the link shows the relay's address and would stay in a public repository's log. Watch a CI run from **AI Sessions** in the dashboard instead. How the address is chosen, and who can watch, are the same as for the [MCP server](/automation/mcp-server#watch-the-device), with the `--relay` address in place of `TAPFLOW_RELAY_URL`.
+When the run starts, the runner prints a dashboard link on a `watch this run:` line. Open it to watch, live, the flow driving the device; the watch ends when the run does. In CI the line is not printed (detected from the `CI` environment variable, Jenkins's `JENKINS_URL` or Azure Pipelines' `TF_BUILD`), because the link shows the relay's address and would stay in a public repository's log. How the address is chosen, and who can watch, are the same as for the [MCP server](/automation/mcp-server#watch-the-device), with the `--relay` address in place of `TAPFLOW_RELAY_URL`.
 
 ### Exit codes
 

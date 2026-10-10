@@ -1,6 +1,6 @@
 ---
 title: MCP Server
-description: "Install @tapflowio/mcp-server and connect a coding agent to it. Teammates can watch the device the coding agent is driving, live, in the dashboard."
+description: "Install @tapflowio/mcp-server and connect a coding agent to it. The coding agent hands you a link to watch, live, the device it is driving."
 ---
 
 # MCP Server
@@ -143,7 +143,7 @@ For running this in a CI pipeline, see [MCP in CI/CD](/automation/mcp-ci).
 
 `connect_device` returns `watchUrl` in its result. Open that link in a browser to watch, live, the device the coding agent is driving. The tool description tells the coding agent to hand the link to the person who asked, so when you ask for something like "test the login screen", the coding agent gives you the link as it starts testing.
 
-Without the link, you can find the devices a coding agent is driving right now under **AI Sessions** in the dashboard sidebar. In the QA session's device list, such a device shows **Coding agent is driving it · Watch** (**Flow runner is driving it · Watch** for the flow runner) and opens the same page.
+The page is reached only through the link. It is for the person who asked the coding agent to test, to watch their own work, so the dashboard has no list of these sessions. A teammate who opens the QA session's device list sees the device as in use, with **Coding agent is driving it** as the reason.
 
 - Watching is read-only. Nothing you click reaches the device, and there is no sound.
 - Any teammate signed in to the dashboard can watch. Whatever the coding agent types on the device shows on screen too, so do not test with values the team should not see.

@@ -3,7 +3,7 @@ import { useQueryClient } from '@tanstack/react-query';
 import { queryKeys } from '@/lib/queries';
 import { toast } from 'sonner';
 import type { SessionTerminatedReason } from '@tapflowio/protocol';
-import { Link, useSearchParams, useNavigate } from 'react-router-dom';
+import { useSearchParams, useNavigate } from 'react-router-dom';
 import { useBreadcrumb } from '@/hooks/useBreadcrumb';
 import { useBuildLoader } from '@/hooks/useBuildLoader';
 import { useAgentSession } from '@/hooks/useAgentSession';
@@ -282,38 +282,17 @@ export function QASession() {
                   {versionedDevices.map((d: DeviceSummary) => {
                     const isBooted = d.status === 'booted'
                     const isBusy = d.busy
-                    const statusLabel = isBusy ? 'In use' : isBooted ? 'Booted' : 'Available'
+                    // **Says who is driving an AI-held device, and offers no way in.** Watching an AI session
+                    // is for the person who started it, through the link their coding agent hands them; the
+                    // device list only explains why the device is taken.
+                    const statusLabel = isBusy
+                      ? (d.holder ? `${holderKindLabel(d.holder.kind)} is driving it` : 'In use')
+                      : isBooted ? 'Booted' : 'Available'
                     const statusDot = isBusy
                       ? 'bg-amber-400'
                       : isBooted
                         ? 'bg-emerald-400'
                         : 'bg-muted-foreground/40'
-                    // **An AI agent's device opens its watch page instead of sitting disabled.** Only a
-                    // device the relay lists with a `holder` — a relay that sends the field understands
-                    // `watch:start`, and a person's session carries none, so it stays "In use".
-                    // Not while this tab is booting a device: leaving the page now would unmount the
-                    // session that is starting, and `useAgentSession` shuts its device down on unmount.
-                    if (isBusy && d.holder && !booting) {
-                      return (
-                        <Link
-                          key={d.id}
-                          to={`/automation/sessions/${encodeURIComponent(d.sessionId)}`}
-                          className={cn(
-                            'flex flex-col gap-3 rounded-lg border p-3 text-left transition-colors min-h-[100px]',
-                            'hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
-                          )}
-                        >
-                          <span className="text-sm font-medium leading-tight">{d.name}</span>
-                          {d.osVersion && (
-                            <span className="font-mono text-xs text-muted-foreground">{d.osVersion}</span>
-                          )}
-                          <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
-                            <span className={cn('inline-block h-1.5 w-1.5 rounded-full', statusDot)} />
-                            {holderKindLabel(d.holder.kind)} is driving it · Watch
-                          </span>
-                        </Link>
-                      )
-                    }
                     return (
                       <button
                         key={d.id}

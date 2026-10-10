@@ -7,7 +7,7 @@ import type { BrowserInbound, SessionInfo } from '@/lib/types'
 import { withQuery } from './withQuery'
 
 /**
- * **The AI session pages: watching an agent's device, read-only.** What matters most is what these pages
+ * **The AI session watch page: watching an agent's device, read-only.** What matters most is what these pages
  * never send — a watch page that sent `device:shutdown` or `session:start` could end or take the session an
  * agent is in the middle of — and that a watch, once ended, stays ended across a reconnect.
  */
@@ -32,7 +32,6 @@ vi.mock('@/components/device/WatchedDevice', () => ({
 }))
 
 const { AISessionWatch } = await import('../pages/AISessionWatch')
-const { AISessions } = await import('../pages/AISessions')
 
 const AGENTS: SessionInfo[] = [{
   agentName: 'studio-mac', platform: 'ios', capabilities: [],
@@ -50,7 +49,6 @@ function renderAt(path: string) {
     <MemoryRouter initialEntries={[path]}>
       <BreadcrumbProvider>
         <Routes>
-          <Route path="/automation/sessions" element={<AISessions />} />
           <Route path="/automation/sessions/:sessionId" element={<AISessionWatch />} />
         </Routes>
       </BreadcrumbProvider>
@@ -96,7 +94,7 @@ describe('the watch page', () => {
     await deliver({ type: 'watch:started', sessionId: 'sess-a' })
     await deliver({ type: 'watch:ended', sessionId: 'sess-a', reason: 'holder-changed' })
     expect(screen.getByRole('status').textContent).toBe('Someone else picked up this device, so the watch ended.')
-    expect(screen.getByRole('link', { name: /Back to AI Sessions/ })).toBeTruthy()
+    expect(screen.getByRole('link', { name: /Back to App Center/ })).toBeTruthy()
     expect(screen.queryByTestId('watched-device')).toBeNull()
     send.mockClear()
     await reconnect()
@@ -136,22 +134,5 @@ describe('the watch page', () => {
     await deliver({ type: 'watch:started', sessionId: 'sess-a' })
     await deliver({ type: 'watch:ended', sessionId: 'other', reason: 'session-ended' })
     expect(screen.getByTestId('watched-device')).toBeTruthy()
-  })
-})
-
-describe('the AI Sessions list', () => {
-  it('lists only devices an AI agent is driving, each a link to watch it', async () => {
-    renderAt('/automation/sessions')
-    await deliver({ type: 'agents:listed', sessions: AGENTS })
-    const link = screen.getByRole('link', { name: /iPhone 15, watch/ })
-    expect(link.getAttribute('href')).toBe('/automation/sessions/sess-a')
-    expect(screen.queryByText('iPhone SE')).toBeNull()
-    expect(screen.queryByText('iPhone 14')).toBeNull()
-  })
-
-  it('says when no agent is driving anything', async () => {
-    renderAt('/automation/sessions')
-    await deliver({ type: 'agents:listed', sessions: [{ ...AGENTS[0]!, devices: [AGENTS[0]!.devices[2]!] }] })
-    expect(screen.getByText('No AI agent is driving a device right now.')).toBeTruthy()
   })
 })

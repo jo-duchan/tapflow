@@ -37,7 +37,6 @@ const FILES = {
   useNetworkControl: 'packages/dashboard/hooks/useNetworkControl.ts',
   MacResources: 'packages/dashboard/src/pages/MacResources.tsx',
   useWatchSession: 'packages/dashboard/hooks/useWatchSession.ts',
-  AISessions: 'packages/dashboard/src/pages/AISessions.tsx',
 }
 
 /** Entries of the table, comments stripped so prose cannot be read as a declaration. */
