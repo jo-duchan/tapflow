@@ -138,6 +138,8 @@ iOS build format: `.app.zip` **or** `.tar.gz`/`.tgz` (EAS `eas build` simulator 
     keep the picture through the holder's reconnect grace.
   - **A holder cannot watch its own session** — it already receives every frame, and the watcher gates would
     then refuse its own shutdown and re-join.
+  - **`watchUrl` follows the invite rule**: sent only when `forTeammates(resolvePublicBaseUrl(…))` gives an
+    address; otherwise omitted and the client builds the link from the address it dialled.
   - **An unauthenticated loopback socket may hold a session but never watch** — any browser on the relay's Mac
     reaches loopback without a credential. `mayWatch` is decided once at the handshake.
 - JWTs are issued based on team invite links.

@@ -111,8 +111,12 @@ export async function cmdFlowRun(files: string[], opts: FlowRunOptions): Promise
     }
 
     const { sessionId, device } = await resolveSession(client, opts)
-    await client.joinSession(sessionId)
+    const { watchUrl } = await client.joinSession(sessionId)
     joinedSessionId = sessionId
+    // Whoever started the run can watch it live from here. **Not in CI**: the link is the relay's address
+    // rewritten (`wss://host` → `https://host/…`), so a secret holding the relay URL does not mask it, and a
+    // public repository's log would show the host the docs keep in a secret.
+    if (!runningInCI()) console.log(`watch this run: ${watchUrl}`)
 
     // Always send device:boot — it is idempotent on a booted device and it is
     // what initializes the agent's touch/stream state for this session (the
@@ -180,4 +184,12 @@ export async function cmdFlowRun(files: string[], opts: FlowRunOptions): Promise
     client?.disconnect()
   }
   process.exitCode = exitCode
+}
+
+/** `CI` is set by GitHub Actions, GitLab CI, CircleCI, Buildkite and most others (`false`, `0` and empty mean
+ *  not CI). Jenkins and Azure Pipelines set no `CI`, so their own markers count too. */
+function runningInCI(): boolean {
+  const v = process.env['CI']
+  if (v !== undefined && v !== '' && v.toLowerCase() !== 'false' && v !== '0') return true
+  return Boolean(process.env['JENKINS_URL'] || process.env['TF_BUILD'])
 }

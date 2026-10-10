@@ -144,6 +144,23 @@ describe('TapflowClient', () => {
       expect(msg).toMatchObject({ type: 'session:start', sessionId: 'sess-1', clientKind: 'mcp' })
     })
 
+    it('returns the watch link the relay gives', async () => {
+      setTimeout(() => relay.send({
+        type: 'session:joined', sessionId: 'sess-1', capabilities: [],
+        watchUrl: 'https://relay.example.test/automation/sessions/sess-1',
+      }), 10)
+      expect(await client.connectDevice('sess-1')).toEqual({ watchUrl: 'https://relay.example.test/automation/sessions/sess-1' })
+    })
+
+    // The relay sends a link only when it knows an address teammates can open. Without one, the address this
+    // client dialled is one the person running it can open — and an older relay sends nothing either.
+    it('builds the watch link from the relay address it dialled when the relay gives none', async () => {
+      setTimeout(() => relay.send({ type: 'session:joined', sessionId: 'sess-1', capabilities: [] }), 10)
+      expect(await client.connectDevice('sess-1')).toEqual({
+        watchUrl: `http://localhost:${relay.port}/automation/sessions/sess-1`,
+      })
+    })
+
     // These two send an **addressed** refusal, as the relay does since L5d. The fake relay's `send` takes
     // `Record<string, unknown>`, so nothing typed them and they carried neither `sessionId` nor the required
     // `reason` — they passed only because the waiter had a `sessionId === undefined` escape. Removing that

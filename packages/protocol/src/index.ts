@@ -935,10 +935,10 @@ export interface SessionJoined {
   sessionId: string
   capabilities: string[]
   /** The dashboard page where teammates can watch this session, for a holder that declared an AI
-   *  `clientKind`. The page ships after the field: until the dashboard has it, the link opens the
-   *  dashboard's not-found view. Built by the relay because only it knows the address a teammate's browser can open
-   *  (tunnel, `relay.url`); a client knows only the socket address it dialled. Absent for a person's
-   *  session and from a relay that predates watching. */
+   *  `clientKind` — **only when the relay knows an address teammates can open** (a tunnel, `relay.url`),
+   *  the rule its invite links follow. Absent otherwise, and from an older relay: the client then builds
+   *  the link from the address it dialled, which the person running it can open. Never sent for a
+   *  person's session. */
   watchUrl?: string
 }
 
@@ -1080,7 +1080,8 @@ export interface WatchRefused extends SessionScoped {
   message: string
 }
 
-/** The holder left or its socket dropped; the relay is holding the session for it to come back. The
+/** The holder's socket dropped; the relay is holding the session for it to come back. A holder that leaves
+ *  on purpose (`session:leave`) ends the watch instead — `watch:ended` with `session-ended`. The
  *  stream may continue meanwhile. A re-join by the same client keeps the watch; any other client binding
  *  the session ends it with `watch:ended`. */
 export interface WatchHolderLeft {
@@ -1090,7 +1091,8 @@ export interface WatchHolderLeft {
 
 /** Why a watch ended without the watcher asking. */
 export type WatchEndReason =
-  /** The session is gone — its agent left, or its holder ended it. */
+  /** The session is gone, or its holder is done with it — its agent left, its holder ended it, or its
+   *  holder left it on purpose (a flow run finishing, an MCP `disconnect_device`). */
   | 'session-ended'
   /** A different client now holds the session. It was not the session this watch was admitted to. */
   | 'holder-changed'

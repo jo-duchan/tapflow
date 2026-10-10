@@ -1,3 +1,8 @@
+---
+title: Flow Reference
+description: "The YAML flow format that tapflow flow run replays deterministically with no LLM calls: file structure, step types, selectors, running in CI, and the link for watching a run."
+---
+
 # Flow Reference
 
 ::: warning Experimental
@@ -128,6 +133,8 @@ tapflow flow run .tapflow/flows/login.yaml .tapflow/flows/checkout.yaml
 | `--timeout <seconds>` | Default per-selector wait (default 10, max 2147483.647) |
 
 The `launchApp` step takes no argument and launches the build passed via `--build`. That keeps the build id out of the flow file, so the same flow runs against a fresh build on every CI run.
+
+When the run starts, the runner prints a dashboard link on a `watch this run:` line. Open it to watch, live, the flow driving the device; the watch ends when the run does. In CI the line is not printed (detected from the `CI` environment variable, Jenkins's `JENKINS_URL` or Azure Pipelines' `TF_BUILD`), because the link shows the relay's address and would stay in a public repository's log. How the address is chosen, and who can watch, are the same as for the [MCP server](/automation/mcp-server#watch-the-device), with the `--relay` address in place of `TAPFLOW_RELAY_URL`.
 
 ### Exit codes
 

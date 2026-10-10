@@ -14,7 +14,7 @@ const mocks = vi.hoisted(() => ({
       devices: [{ sessionId: 's1', name: 'dev', status: 'booted', busy: false, id: 'dev1' }],
     },
   ]),
-  joinSession: vi.fn(async () => {}),
+  joinSession: vi.fn(async () => ({ watchUrl: 'http://localhost:4000/automation/sessions/s1' })),
   bootDevice: vi.fn(async () => {}),
   installApp: vi.fn(async () => {}),
   leaveSession: vi.fn(() => {}),
@@ -83,11 +83,43 @@ describe('cmdFlowRun exit codes (#543)', () => {
 
   afterEach(() => {
     vi.restoreAllMocks()
+    vi.unstubAllEnvs()
     process.exitCode = undefined
     fs.rmSync(dir, { recursive: true, force: true })
   })
 
   const run = (args: string[], opts = {}) => cmdFlowRun(args, opts).catch((e: unknown) => e)
+
+  // Printed before the device boots, so the person who started the run has the link while it is still worth
+  // watching. `vi.stubEnv` because this suite itself may run under CI.
+  it('prints where to watch the run', async () => {
+    vi.stubEnv('CI', '')
+    vi.stubEnv('JENKINS_URL', '')
+    vi.stubEnv('TF_BUILD', '')
+    mocks.runFlow.mockResolvedValue(resultOf('passed'))
+    await run([flowFile('a.yaml')])
+    expect(console.log).toHaveBeenCalledWith('watch this run: http://localhost:4000/automation/sessions/s1')
+    const log = vi.mocked(console.log).mock
+    const printedAt = log.invocationCallOrder[log.calls.findIndex(([line]) => String(line).startsWith('watch this run:'))]!
+    expect(printedAt).toBeLessThan(mocks.bootDevice.mock.invocationCallOrder[0]!)
+  })
+
+  // The link is the relay's address rewritten, which a secret holding the relay URL does not mask — so a
+  // public repository's CI log would show the host. Mutation: print regardless.
+  it.each([
+    ['CI', 'true'],
+    // Jenkins and Azure Pipelines set no `CI`.
+    ['JENKINS_URL', 'https://jenkins.example.test/'],
+    ['TF_BUILD', 'True'],
+  ])('prints no link in CI (%s)', async (name, value) => {
+    vi.stubEnv('CI', '')
+    vi.stubEnv('JENKINS_URL', '')
+    vi.stubEnv('TF_BUILD', '')
+    vi.stubEnv(name, value)
+    mocks.runFlow.mockResolvedValue(resultOf('passed'))
+    await run([flowFile('a.yaml')])
+    expect(vi.mocked(console.log).mock.calls.some(([line]) => String(line).startsWith('watch this run:'))).toBe(false)
+  })
 
   it('exits 0 when every flow passes', async () => {
     mocks.runFlow.mockResolvedValue(resultOf('passed'))

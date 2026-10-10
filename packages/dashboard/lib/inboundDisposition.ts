@@ -46,7 +46,7 @@ type Disposition =
   | { ignored: string }
 
 export const INBOUND_DISPOSITION = {
-  'agents:listed': { at: 'useAgentSession, MacResources' },
+  'agents:listed': { at: 'useAgentSession, MacResources, useWatchSession' },
   'app:install-done': { at: 'DeviceViewer' },
   'app:install-error': { at: 'DeviceViewer' },
   'app:launch-done': { at: 'DeviceViewer' },
@@ -63,8 +63,8 @@ export const INBOUND_DISPOSITION = {
   'network:state': { at: 'DeviceViewer, useNetworkControl' },
   'network:error': { at: 'DeviceViewer, useNetworkControl' },
   'device:boot-error': { at: 'DeviceViewer' },
-  'device:booting': { at: 'DeviceViewer' },
-  'device:ready': { at: 'DeviceViewer' },
+  'device:booting': { at: 'DeviceViewer, useWatchSession' },
+  'device:ready': { at: 'DeviceViewer, useWatchSession' },
   // `DeviceViewer` joined this pair with #628: a reboot is a `device:shutdown` followed by a
   // `device:boot`, because `device:boot` alone no-ops on a running device. Its shutdown is the only
   // **correlated** one this app sends — `useAgentSession`'s three fire on the way out of a view and
@@ -91,12 +91,12 @@ export const INBOUND_DISPOSITION = {
   'keyboard:toggled': { at: 'DeviceViewer' },
   'open-url:done': { at: 'DeviceViewer' },
   'open-url:error': { at: 'DeviceViewer' },
-  'session:agent-away': { at: 'DeviceViewer' },
-  'device:postures': { at: 'DeviceViewer' },
-  'session:chrome': { at: 'DeviceViewer' },
+  'session:agent-away': { at: 'DeviceViewer, useWatchSession' },
+  'device:postures': { at: 'DeviceViewer, useWatchSession' },
+  'session:chrome': { at: 'DeviceViewer, useWatchSession' },
   // Same as `error` above: `useAgentSession`'s branch cannot fire, and is named for the same reason.
   'session:joined': { at: 'DeviceViewer, useAgentSession' },
-  'session:rebound': { at: 'DeviceViewer' },
+  'session:rebound': { at: 'DeviceViewer, useWatchSession' },
   'session:terminated': { at: 'DeviceViewer' },
 
   // ── deliberately not handled ──────────────────────────────────────────────────────────────────────
@@ -131,10 +131,8 @@ export const INBOUND_DISPOSITION = {
       + 'instead. Kept on the wire because third-party agents send it; the field to display it is a '
       + 'feature nobody has asked for, not a handler someone forgot.',
   },
-  // The page that watches an AI client's session sends `watch:start` and reads these. Until it exists no
-  // socket in this dashboard watches, so none of the four can arrive.
-  'watch:started': { ignored: 'Answers `watch:start`, which no page sends yet.' },
-  'watch:refused': { ignored: 'Answers `watch:start`, which no page sends yet.' },
-  'watch:holder-left': { ignored: 'Sent only to a watching socket, and no page watches yet.' },
-  'watch:ended': { ignored: 'Sent only to a watching socket, and no page watches yet.' },
+  'watch:started': { at: 'useWatchSession' },
+  'watch:refused': { at: 'useWatchSession' },
+  'watch:holder-left': { at: 'useWatchSession' },
+  'watch:ended': { at: 'useWatchSession' },
 } satisfies Record<BrowserInbound['type'], Disposition>

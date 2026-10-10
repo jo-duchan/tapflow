@@ -21,7 +21,7 @@ import { resolveCorsHeaders } from './lib/cors.js'
 import { isCsrfBlocked } from './lib/csrf.js'
 import { pickLanAddress, runningInContainer } from './lib/lanAddress.js'
 import { config, getJwtSecret } from './lib/config.js'
-import { buildInviteBaseUrl, forTeammates, resolveAgentRelayUrl, resolvePublicBaseUrl, type TunnelRuntime } from './lib/publicUrl.js'
+import { forTeammates, resolveAgentRelayUrl, resolvePublicBaseUrl, type TunnelRuntime } from './lib/publicUrl.js'
 import { createTrailingRequester, systemTimerScheduler, type TrailingRequester } from './lib/trailingRequester.js'
 import { getDb } from './db.js'
 import { handleLogin, handleLogout, handleMe, handleChangePassword, handleInit, handleAuthStatus } from './api/auth.js'
@@ -1511,7 +1511,10 @@ export class RelayServer {
         if (this.ownsSession(ws, this.sessions.get(msg.sessionId))) {
           this.sessions.clearBrowser(msg.sessionId)
           this.forgetSessionState(msg.sessionId)
-          this.tellWatchers(msg.sessionId, { type: 'watch:holder-left', sessionId: msg.sessionId })
+          // **A leave is the end, not a blip.** The holder said it is done — a flow run finishing, an MCP
+          // `disconnect_device` — so the watch ends. `watch:holder-left` is for a socket that dropped, which
+          // may come back; sent here it left a watcher of every finished CI run waiting forever.
+          this.sessions.endWatches(msg.sessionId, 'session-ended')
         }
         break
       }
@@ -2383,7 +2386,7 @@ export class RelayServer {
     // deliberately instead of inferring anything from a timeout.
     this.sendTo(ws, {
       type: 'session:joined', sessionId: msg.sessionId, capabilities: session.agentCapabilities ?? [],
-      ...(isAiClientKind(msg.clientKind) ? { watchUrl: this.watchUrl(msg.sessionId) } : {}),
+      ...(isAiClientKind(msg.clientKind) ? this.watchUrlField(msg.sessionId) : {}),
     })
     if (agentAway) {
       // Joining into a held session. Refusing instead would be worse than it sounds: the viewer
@@ -2536,9 +2539,15 @@ export class RelayServer {
     }
   }
 
-  /** The dashboard page that watches a session, at the address a teammate's browser can open. */
-  private watchUrl(sessionId: string): string {
-    return `${buildInviteBaseUrl(config, this.options.tunnel)}/automation/sessions/${encodeURIComponent(sessionId)}`
+  /**
+   * The dashboard page that watches a session — **only at an address a teammate's browser can open**, the
+   * gate invite links take (`forTeammates`). With no tunnel and no `relay.url` the only base this relay has
+   * is localhost, which is wrong for a client on another machine; the field is left out and the client
+   * builds the link from the address it dialled, which the person running it can always open.
+   */
+  private watchUrlField(sessionId: string): { watchUrl?: string } {
+    const base = forTeammates(resolvePublicBaseUrl(config, this.options.tunnel))
+    return base === null ? {} : { watchUrl: `${base}/automation/sessions/${encodeURIComponent(sessionId)}` }
   }
 
   /** Shut the device down because nobody is watching it any more. The idle timer's payload, hoisted out

@@ -428,6 +428,11 @@ export class SessionManager {
     return this.watchers.get(sessionId)?.has(ws) ?? false
   }
 
+  /** End every watch of a session that still exists — its holder left it on purpose. */
+  endWatches(sessionId: string, reason: WatchEndReason): void {
+    this.evictWatchers(sessionId, reason, () => true)
+  }
+
   /** Evict the watchers `which` selects by their admitted owner, telling the server first. */
   private evictWatchers(sessionId: string, reason: WatchEndReason, which: (admittedOwner: string) => boolean): void {
     const set = this.watchers.get(sessionId)

@@ -36,6 +36,7 @@ const FILES = {
   useClipboardBridge: 'packages/dashboard/hooks/useClipboardBridge.ts',
   useNetworkControl: 'packages/dashboard/hooks/useNetworkControl.ts',
   MacResources: 'packages/dashboard/src/pages/MacResources.tsx',
+  useWatchSession: 'packages/dashboard/hooks/useWatchSession.ts',
 }
 
 /** Entries of the table, comments stripped so prose cannot be read as a declaration. */
@@ -157,12 +158,6 @@ describe('inbound disposition', () => {
       // when the viewer landed. It has, and they did — which is the whole point of writing "no branch
       // yet" down rather than leaving an absent branch to speak for itself.
       'session:deviceInfo',
-      // No page watches yet. Like `network:*` above, these become `at:` when the AI session page lands
-      // and sends `watch:start` — written down so that arriving is a diff, not a branch nobody noticed.
-      'watch:ended',
-      'watch:holder-left',
-      'watch:refused',
-      'watch:started',
     ])
   })
 })

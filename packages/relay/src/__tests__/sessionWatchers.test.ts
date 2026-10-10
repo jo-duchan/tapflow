@@ -6,6 +6,7 @@ import { WebSocket } from 'ws'
 import crypto from 'crypto'
 import { signJwt, hashPat } from '../middleware/auth'
 import { initDb, closeDb, getDb } from '../db'
+import { config } from '../lib/config'
 import { barrier, waitForOpen, waitForType, waitForTypeOrNull } from '@tapflowio/test-utils'
 import type {
   AgentRegistered, AgentsListed, DeviceShutdownError, GenericError, InputError, SessionJoined,
@@ -243,7 +244,7 @@ describe('session watchers', () => {
     await join(mcp, sessionId, 'mcp')
     const viewer = await socket(undefined, 1)
     await watch(viewer, sessionId)
-    mcp.send(JSON.stringify({ type: 'session:leave', sessionId }))
+    mcp.close()
     await waitForType(viewer, 'watch:holder-left')
     const tester = await socket('tab', 2)
     await join(tester, sessionId, 'dashboard')
@@ -260,6 +261,18 @@ describe('session watchers', () => {
     await watch(viewer, sessionId)
     await join(mcp, sessionId, 'dashboard')
     expect((await waitForType<WatchEnded>(viewer, 'watch:ended')).reason).toBe('holder-changed')
+  })
+
+  // A flow run finishing, an MCP `disconnect_device`: the holder is done, not dropped. Mutation: send
+  // `watch:holder-left` here again — every finished CI run then leaves its watcher waiting forever.
+  it('ends the watch when the holder leaves on purpose', async () => {
+    const { sessionId } = await registerAgent()
+    const mcp = await socket('mcp1')
+    await join(mcp, sessionId, 'mcp')
+    const viewer = await socket(undefined, 1)
+    await watch(viewer, sessionId)
+    mcp.send(JSON.stringify({ type: 'session:leave', sessionId }))
+    expect((await waitForType<WatchEnded>(viewer, 'watch:ended')).reason).toBe('session-ended')
   })
 
   it('ends the watch when the session ends', async () => {
@@ -349,12 +362,31 @@ describe('session watchers', () => {
   })
 
   describe('what the holder and the device list are told', () => {
-    it('hands an AI holder the watch page, and a person none', async () => {
-      const { sessionId } = await registerAgent()
-      const joined = await join(await socket('mcp1'), sessionId, 'mcp')
-      expect(joined.watchUrl).toMatch(new RegExp(`/automation/sessions/${sessionId}$`))
-      const other = await registerAgent('other-mac')
-      expect((await join(await socket('tab', 2), other.sessionId, 'dashboard')).watchUrl).toBeUndefined()
+    it('hands an AI holder the watch page at the team\'s address, and a person none', async () => {
+      const was = config.relay.url
+      config.relay.url = 'https://relay.example.test'
+      try {
+        const { sessionId } = await registerAgent()
+        const joined = await join(await socket('mcp1'), sessionId, 'mcp')
+        expect(joined.watchUrl).toBe(`https://relay.example.test/automation/sessions/${sessionId}`)
+        const other = await registerAgent('other-mac')
+        expect((await join(await socket('tab', 2), other.sessionId, 'dashboard')).watchUrl).toBeUndefined()
+      } finally {
+        config.relay.url = was
+      }
+    })
+
+    // The invite rule: localhost is not an address a teammate can open, so the relay says nothing and the
+    // client builds the link from the address it dialled. Mutation: drop the `forTeammates` gate.
+    it('leaves the link out when it knows no address a teammate can open', async () => {
+      const was = config.relay.url
+      config.relay.url = 'ws://localhost:4000'
+      try {
+        const { sessionId } = await registerAgent()
+        expect((await join(await socket('mcp1'), sessionId, 'mcp')).watchUrl).toBeUndefined()
+      } finally {
+        config.relay.url = was
+      }
     })
 
     // The holder's owner key is `<user>:<client>`, and a local socket that learned the client half could

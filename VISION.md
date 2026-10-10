@@ -49,7 +49,7 @@ This distinction is the moat. Coordinate recording (what Maestro/Appium record p
 ## Always Reviewable: what AI does, a person can see
 
 An agent driving a device, or a flow failing in CI, should not be a black box that reports pass or fail.
-A teammate opens the dashboard and watches the device the agent is driving. A flow run leaves a record
+The person who asked an agent to test watches the device it is driving, through the link the agent hands them. A flow run leaves a record
 next to its build: the flow, each step's result, the failure, and whether the product or the environment
 failed. Those records are kept only as long as the build is.
 

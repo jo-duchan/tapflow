@@ -13,6 +13,7 @@ const Invite = lazy(() => import('./pages/Invite').then((m) => ({ default: m.Inv
 const ResetPassword = lazy(() => import('./pages/ResetPassword').then((m) => ({ default: m.ResetPassword })))
 const AppCenter = lazy(() => import('./pages/AppCenter').then((m) => ({ default: m.AppCenter })))
 const QASession = lazy(() => import('./pages/QASession').then((m) => ({ default: m.QASession })))
+const AISessionWatch = lazy(() => import('./pages/AISessionWatch').then((m) => ({ default: m.AISessionWatch })))
 const MacResources = lazy(() => import('./pages/MacResources').then((m) => ({ default: m.MacResources })))
 const DefaultSettings = lazy(() => import('./pages/settings/Default').then((m) => ({ default: m.DefaultSettings })))
 const TeamSettings = lazy(() => import('./pages/settings/Team').then((m) => ({ default: m.TeamSettings })))
@@ -42,6 +43,7 @@ export function App() {
           <Route index element={<Navigate to="/app-center" replace />} />
           <Route path="/app-center" element={<AppCenter />} />
           <Route path="/app-center/build" element={<QASession />} />
+          <Route path="/automation/sessions/:sessionId" element={<AISessionWatch />} />
           <Route path="/mac-resources" element={<MacResources />} />
           <Route path="/settings/default" element={<DefaultSettings />} />
           <Route path="/settings/team" element={<TeamSettings />} />

@@ -165,6 +165,28 @@ describe('RelayClient — the input senders mint a correlator and await the ack'
     expect(received.find((m) => m['type'] === 'session:start')).toMatchObject({ sessionId: 's1', clientKind: 'flow-runner' })
   })
 
+  // The relay gives a link only when it knows an address teammates can open; otherwise the address this
+  // client dialled is one the person reading the run's output can open.
+  it('builds the watch link from the relay address when the relay gives none, and takes the relay\'s when it does', async () => {
+    const relaySays: { watchUrl?: string } = {}
+    wss = new WebSocketServer({ port: 0 })
+    wss.on('connection', (ws) => {
+      ws.on('message', (data) => {
+        const msg = JSON.parse(String(data)) as Record<string, unknown>
+        if (msg['type'] === 'session:start') {
+          ws.send(JSON.stringify({ type: 'session:joined', sessionId: msg['sessionId'], capabilities: [], ...relaySays }))
+        }
+      })
+    })
+    const port = (wss.address() as { port: number }).port
+    const client = new RelayClient(`ws://localhost:${port}`, '')
+    await client.connect()
+    expect(await client.joinSession('s1')).toEqual({ watchUrl: `http://localhost:${port}/automation/sessions/s1` })
+    relaySays.watchUrl = 'https://relay.example.test/automation/sessions/s2'
+    expect(await client.joinSession('s2')).toEqual({ watchUrl: relaySays.watchUrl })
+    client.disconnect()
+  })
+
   async function typeErrorClient(reason?: unknown) {
     wss = new WebSocketServer({ port: 0 })
     wss.on('connection', (ws) => {

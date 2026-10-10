@@ -30,6 +30,7 @@ import { Label } from '@/components/ui/label';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { SearchInput } from '@/components/ui/search-input';
 import type { DeviceSummary, SessionInfo } from '@/lib/types';
+import { holderKindLabel } from '@/lib/aiSession';
 import { getResourceHealth, RESOURCE_STALE_MS, type ResourceHealth } from '@/lib/resource-health';
 
 /** Why this viewer stopped — a superset of the relay's termination reasons; see `DeviceViewer`'s prop. */
@@ -281,7 +282,12 @@ export function QASession() {
                   {versionedDevices.map((d: DeviceSummary) => {
                     const isBooted = d.status === 'booted'
                     const isBusy = d.busy
-                    const statusLabel = isBusy ? 'In use' : isBooted ? 'Booted' : 'Available'
+                    // **Says who is driving an AI-held device, and offers no way in.** Watching an AI session
+                    // is for the person who started it, through the link their coding agent hands them; the
+                    // device list only explains why the device is taken.
+                    const statusLabel = isBusy
+                      ? (d.holder ? `${holderKindLabel(d.holder.kind)} is driving it` : 'In use')
+                      : isBooted ? 'Booted' : 'Available'
                     const statusDot = isBusy
                       ? 'bg-amber-400'
                       : isBooted
