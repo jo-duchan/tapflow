@@ -321,7 +321,7 @@ describe('requireBuildAuth', () => {
   it('PAT가 있고 builds:write scope이면 userId 반환, used로 기록', () => {
     const { raw, id } = seedPat(1, 'builds:write')
     const res = makeRes()
-    expect(requireBuildAuth(makeReq({ authorization: `Bearer ${raw}` }), res)).toEqual({ userId: 1 })
+    expect(requireBuildAuth(makeReq({ authorization: `Bearer ${raw}` }), res)).toEqual({ userId: 1, patId: id })
     expect(res.writeHead).not.toHaveBeenCalled()
     expect(lastUsed(id)).not.toBeNull()
   })

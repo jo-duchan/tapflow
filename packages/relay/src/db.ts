@@ -10,6 +10,11 @@ export function getDb(): Database.Database {
   return db
 }
 
+/** Whether `initDb` has run — for a socket handler that touches the database when one is there. */
+export function isDbOpen(): boolean {
+  return db !== null
+}
+
 export function closeDb(): void {
   db?.close()
   db = null

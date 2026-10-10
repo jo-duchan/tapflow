@@ -156,6 +156,17 @@ Routes are registered in `RelayServer.ts`; user-facing reference: [`docs/referen
 
 > **Deletion lifecycle (issue #258)**: review status and deletion are orthogonal. `status_label` (incl. `Done`) is a pure review state and never schedules deletion; purge keys off `delete_after` only, which is set by the explicit schedule-deletion action. `completed_at` is informational.
 
+> **A build goes with everything that points at it, on one path.** `deleteBuildsWithDependents` (`lib/buildDeletion.ts`) is used by both the daily purge and app deletion: recordings, run records and their screenshot files, then the build file. App deletion used to delete only the build rows, so an app with a recorded build failed on the recordings foreign key and one without left its build files on disk.
+
+### Flow run records (`/api/v1/runs`)
+
+What `tapflow flow run` did, for the dashboard's runs page (A3). The CLI writes with its `builds:write` token; anyone who may view reads.
+
+- **Only the run's creator writes to it**: the same user, and the same PAT when it was created with one, plus `assertCanWrite`. A run id in a CI log must not let another job rewrite its result.
+- **A run is live while its runner's socket is open.** The flow runner does not reconnect, so the close handler ends its running runs (`holder-lost`). The client id is matched in two key forms, `<userId>:<client>` and `anon:<client>`, because the handshake does not read a PAT on loopback and a runner on the relay's own Mac holds its sessions anonymously. A relay restart closes sockets without that handler; reads and the daily purge close what is left after a minute of quiet. No timer exists for it.
+- **The watch link opens the session the runner holds now**, never a stored one: session ids outlive runs, so a stored id would open whoever took the device next.
+- A run with a build expires with the build; a run with none expires after 7 days.
+
 ## Environment Variables
 
 전체 목록 및 설명: [`docs/reference/configuration.md`](../../docs/reference/configuration.md)
@@ -172,7 +183,7 @@ JWT 시크릿은 `getJwtSecret()`으로 **처음 쓸 때** 만든다. `RelayServ
 
 ## HOW NOT
 
-- Do not store or analyze screen data in the relay.
+- Do not store or analyze screen data in the relay. **One exception**: the failure screenshot a flow run uploads to its run record (`api/runs.ts`) — at most one image per flow (the runner sends one when a flow fails), PNG or JPEG by its bytes, at most 5 MB, served back as its own type with `nosniff`, and deleted with the run. The live stream is still never stored.
 - Do not allow session routing without authentication.
 - Do not introduce designs that require more than a t3.small instance (cost principle).
 - Do not modify files in `public/` directly — they are dashboard build output.

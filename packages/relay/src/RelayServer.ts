@@ -94,6 +94,7 @@ function sniffImageFormat(buf: Buffer): 'png' | 'jpeg' | null {
 import { handleVerifyReset, handleDoReset, handleSendMemberReset } from './api/passwordReset.js'
 import { EMAIL_KEY_SQL } from './lib/email.js'
 import { handleListBuilds, handleGetBuild, handleUpdateBuild, handleUploadBuild, handleScheduleBuildDeletion, handleCancelBuildDeletion, purgeExpiredBuilds } from './api/builds.js'
+import type { BuildFileDirs } from './lib/buildDeletion.js'
 import { handleListApps, handleCreateApp, handleUpdateApp, handleDeleteApp } from './api/apps.js'
 import { handleListWebhooks, handleCreateWebhook, handleUpdateWebhook, handleDeleteWebhook } from './api/webhooks.js'
 import { handleListComments, handleCreateComment, handleDeleteComment } from './api/comments.js'
@@ -102,6 +103,7 @@ import { handleListTokens, handleCreateToken, handleRevokeToken } from './api/to
 import { handleGetSettings, handleUpdateSettings } from './api/settings.js'
 import { handleUpdateProfile } from './api/profile.js'
 import { handleUploadRecording, handleListRecordings, handleDownloadRecording, purgeExpiredRecordings } from './api/recordings.js'
+import { abandonRunsOf, handleCreateRun, handleFinishRun, handleGetFlowScreenshot, handleGetRun, handleListRuns, handleReportFlow, handleUploadFlowScreenshot, purgeExpiredRuns, runScreenshotsDirFor, type RunHolders } from './api/runs.js'
 import { handleListAgents, handleGetAgentResources } from './api/agents.js'
 
 const MIME_TYPES: Record<string, string> = {
@@ -247,6 +249,7 @@ export class RelayServer {
   private resourceBuffers = new Map<string, { cpu: number[]; mem: number[] }>()
   private logBuffer: string[] = []
   private recordingsDir: string = ''
+  private runScreenshotsDir: string = ''
   private purgeRecordingsTimer: ReturnType<typeof setInterval> | null = null
   private purgeOldResourcesTimer: ReturnType<typeof setInterval> | null = null
   private purgeBuildsTimer: ReturnType<typeof setInterval> | null = null
@@ -516,7 +519,7 @@ export class RelayServer {
     this.router.get('/api/v1/apps', handleListApps)
     this.router.post('/api/v1/apps', handleCreateApp)
     this.router.patch('/api/v1/apps/:id', handleUpdateApp)
-    this.router.delete('/api/v1/apps/:id', handleDeleteApp)
+    this.router.delete('/api/v1/apps/:id', (req, res, params) => handleDeleteApp(req, res, params, this.buildFileDirs()))
 
     // builds
     this.router.get('/api/v1/builds', handleListBuilds)
@@ -565,6 +568,16 @@ export class RelayServer {
     this.router.post('/api/v1/recordings/upload', (req, res) => handleUploadRecording(req, res, this.recordingsDir))
     this.router.get('/api/v1/recordings', (req, res) => handleListRecordings(req, res))
     this.router.get('/api/v1/recordings/:filename', (req, res) => handleDownloadRecording(req, res, this.recordingsDir))
+
+    // flow run records — written by `tapflow flow run`, read by the runs page
+    this.runScreenshotsDir = runScreenshotsDirFor(u)
+    this.router.post('/api/v1/runs', handleCreateRun)
+    this.router.get('/api/v1/runs', (req, res) => handleListRuns(req, res, this.runHolders))
+    this.router.get('/api/v1/runs/:id', (req, res, params) => handleGetRun(req, res, params, this.runHolders))
+    this.router.post('/api/v1/runs/:id/finish', handleFinishRun)
+    this.router.post('/api/v1/runs/:id/flows/:idx', handleReportFlow)
+    this.router.post('/api/v1/runs/:id/flows/:idx/screenshot', (req, res, params) => handleUploadFlowScreenshot(req, res, params, this.runScreenshotsDir))
+    this.router.get('/api/v1/runs/:id/flows/:idx/screenshot', (req, res, params) => handleGetFlowScreenshot(req, res, params, this.runScreenshotsDir))
 
     // logs — the relay host only. The buffer holds the addresses of refused connections, nothing
     // remote reads it (`tapflow logs` is its only consumer), and every line is also in the relay's own
@@ -632,8 +645,14 @@ export class RelayServer {
     this.purgeOldResourcesTimer = setInterval(purgeOldResources, 24 * 60 * 60 * 1000)
     this.purgeOldResourcesTimer.unref()
 
-    purgeExpiredBuilds(this.recordingsDir, this.uploadsDir)
-    this.purgeBuildsTimer = setInterval(() => purgeExpiredBuilds(this.recordingsDir, this.uploadsDir), 24 * 60 * 60 * 1000)
+    // Runs ride the builds' daily tick rather than a timer of their own: a build's runs go with it, and the
+    // runs left over (no build) expire on the same clock.
+    const purgeBuildsAndRuns = () => {
+      purgeExpiredBuilds(this.buildFileDirs())
+      purgeExpiredRuns(this.runScreenshotsDir, this.runHolders)
+    }
+    purgeBuildsAndRuns()
+    this.purgeBuildsTimer = setInterval(purgeBuildsAndRuns, 24 * 60 * 60 * 1000)
     this.purgeBuildsTimer.unref()
 
     this.flushResourcesTimer = setInterval(() => this.flushResourceBuffers(), 60_000)
@@ -907,6 +926,26 @@ export class RelayServer {
    * negative beats 30 with one every cycle**, because a false negative here does not merely delay: it
    * hands a live tester's session to whoever asked next.
    */
+  private buildFileDirs(): BuildFileDirs {
+    return { uploadsDir: this.uploadsDir, recordingsDir: this.recordingsDir, runScreenshotsDir: this.runScreenshotsDir }
+  }
+
+  /** Open sockets speaking for any of these owner keys. */
+  private openSocketsOf(keys: string[]): WebSocket[] {
+    return [...this.wss.clients].filter((ws) => ws.readyState === WebSocket.OPEN && keys.includes(this.ownerKey.get(ws)?.key ?? ''))
+  }
+
+  private readonly runHolders: RunHolders = {
+    isConnected: (keys) => this.openSocketsOf(keys).length > 0,
+    heldSession: (keys) => {
+      for (const ws of this.openSocketsOf(keys)) {
+        const held = this.sessions.getByBrowserSocket(ws)
+        if (held.length > 0) return held[0].id
+      }
+      return null
+    },
+  }
+
   private isAlive(ws: WebSocket): boolean {
     const at = this.lastPongAt.get(ws)
     // **No entry means just connected, not dead.** `handleConnection` seeds one, but a socket is in
@@ -1321,6 +1360,10 @@ export class RelayServer {
         this.sessions.clearBrowser(held.id, () => this.idleShutdown(held.id))
         this.tellWatchers(held.id, { type: 'watch:holder-left', sessionId: held.id })
       }
+      // A run is its runner's socket: the flow runner does not reconnect, so the last socket with its key
+      // closing is the end of that run, finished or not. Not done while stopping (above) — a relay going
+      // down has not seen the runner go, and the runner may still finish the run against the next one.
+      abandonRunsOf(this.ownerOf(ws), this.runHolders)
     })
   }
 

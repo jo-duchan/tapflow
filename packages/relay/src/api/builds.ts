@@ -11,7 +11,7 @@ import { assertCanWrite, requireAuth, requireBuildAuth } from '../middleware/aut
 import { json, readJson } from '../router.js'
 import { pipeUpload, unlinkSafe } from '../lib/uploads.js'
 import { deliverWebhooks } from '../lib/webhooks.js'
-import { resolveBuildFile } from '../lib/buildFiles.js'
+import { deleteBuildsWithDependents, type BuildFileDirs } from '../lib/buildDeletion.js'
 
 // ── archive kind ───────────────────────────────────────────────────────────
 
@@ -712,50 +712,14 @@ export function handleUploadBuild(
 // SQLite store delete_after as NULL and silently skip scheduling.
 const ttlEnv = Number(process.env['TAPFLOW_BUILD_TTL_DAYS'])
 const BUILD_TTL_DAYS = Number.isFinite(ttlEnv) && ttlEnv > 0 ? ttlEnv : 7
-const SQLITE_MAX_PARAMS = 999
-
-function chunkArray<T>(arr: T[], size: number): T[][] {
-  const chunks: T[][] = []
-  for (let i = 0; i < arr.length; i += size) chunks.push(arr.slice(i, i + size))
-  return chunks
-}
-
 
 // `uploadsDir` is this install's, because the stored `file_path` names wherever the data directory
 // was at upload time — see `resolveBuildFile`. Without it a moved install's expired builds kept
 // their files for good, and the purge deleted only the rows.
-export function purgeExpiredBuilds(recordingsDir: string, uploadsDir: string): void {
-  const db = getDb()
-  const expired = db.prepare(
-    `SELECT id, file_path FROM builds WHERE delete_after IS NOT NULL AND delete_after < datetime('now')`
-  ).all() as { id: number; file_path: string }[]
-
+export function purgeExpiredBuilds(dirs: BuildFileDirs): void {
+  const expired = getDb().prepare(
+    `SELECT id FROM builds WHERE delete_after IS NOT NULL AND delete_after < datetime('now')`
+  ).all() as { id: number }[]
   if (expired.length === 0) return
-
-  const buildIds = expired.map((r) => r.id)
-  const chunks = chunkArray(buildIds, SQLITE_MAX_PARAMS)
-
-  // 연결된 recording 파일 삭제 후 레코드 제거 (recordings.build_id FK에 CASCADE 없음)
-  const recordings = chunks.flatMap((chunk) => {
-    const ph = chunk.map(() => '?').join(',')
-    return db.prepare(`SELECT filename FROM recordings WHERE build_id IN (${ph})`).all(...chunk) as { filename: string }[]
-  })
-  for (const { filename } of recordings) {
-    unlinkSafe(path.join(recordingsDir, filename), 'recording')
-  }
-  if (recordings.length > 0) {
-    for (const chunk of chunks) {
-      const ph = chunk.map(() => '?').join(',')
-      db.prepare(`DELETE FROM recordings WHERE build_id IN (${ph})`).run(...chunk)
-    }
-  }
-
-  for (const { file_path } of expired) {
-    const found = resolveBuildFile(file_path, uploadsDir)
-    if (found !== null) unlinkSafe(found, 'build')
-  }
-  for (const chunk of chunks) {
-    const ph = chunk.map(() => '?').join(',')
-    db.prepare(`DELETE FROM builds WHERE id IN (${ph})`).run(...chunk)
-  }
+  deleteBuildsWithDependents(expired.map((r) => r.id), dirs)
 }

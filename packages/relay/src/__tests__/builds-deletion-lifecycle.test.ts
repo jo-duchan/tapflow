@@ -75,8 +75,10 @@ describe('purgeExpiredBuilds: delete_after is the purge driver', () => {
   let tmpDir: string
   let recordingsDir: string
   let uploadsDir: string
+  let runScreenshotsDir: string
   beforeAll(() => {
     tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'tapflow-da-purge-'))
+    runScreenshotsDir = path.join(tmpDir, 'run-screenshots')
     recordingsDir = fs.mkdtempSync(path.join(os.tmpdir(), 'tapflow-da-rec-'))
     uploadsDir = fs.mkdtempSync(path.join(os.tmpdir(), 'tapflow-da-up-'))
     initDb(path.join(tmpDir, 'test.db'))
@@ -99,7 +101,7 @@ describe('purgeExpiredBuilds: delete_after is the purge driver', () => {
     // Done but never scheduled: completed_at set, delete_after NULL → must NOT be purged
     db.prepare(`UPDATE builds SET status_label = 'Done', completed_at = datetime('now'), delete_after = NULL WHERE id = ?`).run(doneUnscheduled)
 
-    purgeExpiredBuilds(recordingsDir, uploadsDir)
+    purgeExpiredBuilds({ recordingsDir, uploadsDir, runScreenshotsDir })
 
     const ids = (db.prepare('SELECT id FROM builds').all() as { id: number }[]).map(r => r.id)
     expect(ids).not.toContain(expired)
@@ -115,7 +117,7 @@ describe('purgeExpiredBuilds: delete_after is the purge driver', () => {
     db.prepare(`INSERT INTO recordings (filename, file_size, mime, expires_at, build_id) VALUES (?, 1, 'video/mp4', datetime('now','+1 day'), ?)`).run(recFile, build)
     db.prepare(`UPDATE builds SET delete_after = datetime('now','-1 hour') WHERE id = ?`).run(build)
 
-    purgeExpiredBuilds(recordingsDir, uploadsDir)
+    purgeExpiredBuilds({ recordingsDir, uploadsDir, runScreenshotsDir })
 
     const rec = db.prepare('SELECT id FROM recordings WHERE build_id = ?').get(build)
     expect(rec).toBeUndefined()
@@ -133,7 +135,7 @@ describe('purgeExpiredBuilds: delete_after is the purge driver', () => {
     fs.writeFileSync(moved, 'APK')
     db.prepare(`UPDATE builds SET delete_after = datetime('now','-1 hour') WHERE id = ?`).run(build)
 
-    purgeExpiredBuilds(recordingsDir, uploadsDir)
+    purgeExpiredBuilds({ recordingsDir, uploadsDir, runScreenshotsDir })
 
     expect(fs.existsSync(moved)).toBe(false)
     expect(db.prepare('SELECT id FROM builds WHERE id = ?').get(build)).toBeUndefined()
