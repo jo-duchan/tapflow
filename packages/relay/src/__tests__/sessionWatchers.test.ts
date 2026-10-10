@@ -3,7 +3,8 @@ import fs from 'fs'
 import os from 'os'
 import path from 'path'
 import { WebSocket } from 'ws'
-import { signJwt } from '../middleware/auth'
+import crypto from 'crypto'
+import { signJwt, hashPat } from '../middleware/auth'
 import { initDb, closeDb, getDb } from '../db'
 import { barrier, waitForOpen, waitForType, waitForTypeOrNull } from '@tapflowio/test-utils'
 import type {
@@ -249,6 +250,18 @@ describe('session watchers', () => {
     expect((await waitForType<WatchEnded>(viewer, 'watch:ended')).reason).toBe('holder-changed')
   })
 
+  // The same client, re-joining as something that is not an AI client, is no longer a session that may be
+  // watched — the kind is what admitted the watch, not only the client.
+  it('ends the watch when the holder re-joins as a non-AI client', async () => {
+    const { sessionId } = await registerAgent()
+    const mcp = await socket('mcp1')
+    await join(mcp, sessionId, 'mcp')
+    const viewer = await socket(undefined, 1)
+    await watch(viewer, sessionId)
+    await join(mcp, sessionId, 'dashboard')
+    expect((await waitForType<WatchEnded>(viewer, 'watch:ended')).reason).toBe('holder-changed')
+  })
+
   it('ends the watch when the session ends', async () => {
     const { sessionId, agent } = await registerAgent()
     const mcp = await socket('mcp1')
@@ -297,6 +310,30 @@ describe('session watchers', () => {
       const { sessionId } = await registerAgent()
       await join(await socket('mcp1'), sessionId, 'mcp')
       expect((await watch(await socket(), sessionId))?.reason).toBe('not-permitted')
+    })
+
+    // The other credential that may watch. Every socket above is loopback, so this is the one path through
+    // `mayWatch` that reads the PAT — dropping that disjunct, or its `view` check, survived the suite without it.
+    it('admits a remote socket on a view token', async () => {
+      const { sessionId } = await registerAgent()
+      await join(await socket('mcp1'), sessionId, 'mcp')
+      const raw = `tflw_pat_${crypto.randomBytes(16).toString('hex')}`
+      getDb().prepare('INSERT INTO personal_access_tokens (user_id, name, token_hash, scope) VALUES (?, ?, ?, ?)')
+        .run(1, 'watch', hashPat(raw), 'view')
+      const remote = vi.spyOn(server as unknown as { remoteAddressOf: () => string }, 'remoteAddressOf')
+        .mockReturnValue('192.168.0.99')
+      const ws = new WebSocket(`ws://localhost:${port}`, { headers: { authorization: `Bearer ${raw}` } })
+      await waitForOpen(ws)
+      remote.mockRestore()
+      expect(await watch(ws, sessionId)).toBeNull()
+    })
+
+    // A holder that could otherwise watch — signed in — so the refusal is about holding, not about the credential.
+    it('refuses the holder watching its own session', async () => {
+      const { sessionId } = await registerAgent()
+      const mcp = await socket('mcp1', 1)
+      await join(mcp, sessionId, 'mcp')
+      expect((await watch(mcp, sessionId))?.reason).toBe('not-watchable')
     })
 
     it('refuses an unknown session', async () => {

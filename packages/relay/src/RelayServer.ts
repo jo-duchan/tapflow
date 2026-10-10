@@ -950,6 +950,7 @@ export class RelayServer {
    */
   private forgetSessionState(sessionId: string): void {
     this.dropHandlers.delete(sessionId)
+    this.dropHandlers.delete(`${sessionId} watchers`)
     this.audioDropHandlers.delete(sessionId)
     this.droppers.delete(sessionId)
     this.idrRequesters.delete(sessionId)
@@ -1120,6 +1121,9 @@ export class RelayServer {
       // Only an accepted token was used; a refused one keeps its "last used".
       if (pat) touchPat(pat.patId)
       userId = cookie?.userId ?? pat?.userId
+      // A loopback cookie is not re-judged later — `principals` below records remote sockets only — so a
+      // watch on loopback lasts until the socket closes even if that user is removed. The same is true of
+      // everything else such a socket does; watching adds nothing to it.
       this.mayWatch.set(ws, cookie !== null || (!isLocal && pat !== null && pat.scopes.includes(VIEW_SCOPE)))
       if (!isLocal) {
         if (cookie) this.principals.set(ws, { via: 'cookie', userId: cookie.userId, jwtExp: cookie.exp, pwv: cookie.pwv })
@@ -1207,8 +1211,19 @@ export class RelayServer {
           }
           dropper.send(session.browserSocket, frameBuf, this.backpressureBytes, isKeyframe, onDrop, requestIdr)
         }
-        for (const w of watchers) {
-          this.watcherDropper(w, session.id).send(w, frameBuf, this.backpressureBytes, isKeyframe, onDrop, requestIdr)
+        // **No IDR request on a watcher's drop**, and its own drop warning. An IDR changes the encoder's
+        // output for everyone, so a watcher on a slow link asking for one on every drain would cost the
+        // holder up to two forced keyframes a second — the slow-watcher-hurts-holder case the separate
+        // sender exists to prevent, by another route. A watcher resyncs on the next periodic keyframe.
+        if (watchers.length > 0) {
+          let onWatcherDrop = this.dropHandlers.get(`${session.id} watchers`)
+          if (!onWatcherDrop) {
+            onWatcherDrop = createRateLimitedDropWarn(logger, `${session.id} watchers`)
+            this.dropHandlers.set(`${session.id} watchers`, onWatcherDrop)
+          }
+          for (const w of watchers) {
+            this.watcherDropper(w, session.id).send(w, frameBuf, this.backpressureBytes, isKeyframe, onWatcherDrop)
+          }
         }
         return
       }
@@ -2451,6 +2466,9 @@ export class RelayServer {
     if (session.owner === null || !isAiClientKind(session.holderKind)) {
       return refuse('not-watchable', 'Only a session an AI client is driving can be watched.')
     }
+    // The holder already receives everything. Watching too would deliver each frame twice to one socket,
+    // and the watcher gates would then refuse the holder's own shutdown and re-join.
+    if (this.ownsSession(ws, session)) return refuse('not-watchable', 'This connection already holds the session.')
     if (this.sessions.addWatcher(session.id, ws, session.owner) === 'full') {
       return refuse('watchers-full', 'This session already has as many watchers as it allows.')
     }

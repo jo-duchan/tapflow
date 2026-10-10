@@ -65,7 +65,7 @@ describe('inbound disposition', () => {
     // The compiler already refuses a missing key, so this is not the coverage assertion; it is the
     // parser's own honesty check. Without it the two assertions below pass on an empty map.
     // 29 as of #542: `device:shutdown-error` gave the shutdown pair the failure member it lacked.
-    // 36 with the four `watch:*` replies.
+    // 32 by the next count, and 36 with the four `watch:*` replies.
     expect(table_entries.size).toBe(36)
   })
 

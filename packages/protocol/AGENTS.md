@@ -420,8 +420,10 @@ not watchable, deliberately with no fallback.
 could claim it and pass the ownership gate. The list names the kind and a label for people (an email, or
 `local`), which is all a viewer needs to offer Watch.
 
-**The field is also the feature gate.** An older relay drops `watch:start` without a reply, so a viewer offers
-Watch only for a device whose listing carries `holder` — a relay that sends the field understands the message.
+**The field is what a viewer offers Watch on.** First because it says the session is AI-held and so watchable.
+Second as a version gate, for the cases `SessionInfo`'s "the dashboard cannot skew from the relay" does not
+cover — a third-party viewer, or a relay downgraded under an open tab: an older relay drops `watch:start`
+without a reply, and a relay that sends `holder` understands the message.
 
 `watch:refused` extends `SessionScoped`; the other three carry `sessionId` directly, because the base is for a
 failure a session is waiting on and they are not failures.
@@ -469,7 +471,8 @@ verify `session.agentSocket === ws` before resolving, and these two do not.
 
 ## Browser-inbound messages are split by producer, and one union is shared
 
-A browser receives 31 message types. They come from two producers, and the difference matters to the
+A browser receives every member of `BrowserInbound` — deliberately no count here; the disposition
+tables pin it. They come from two producers, and the difference matters to the
 **relay**, not to the consumer:
 
 - **`RelayToBrowser`** — the relay builds these itself, so `sendTo(socket, msg: RelayOutbound)` holds

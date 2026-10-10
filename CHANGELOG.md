@@ -9,7 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- **The relay can show a teammate the device an AI client is driving.** A session the MCP server or the flow runner holds can be watched, read-only, by anyone signed in to the dashboard. A watcher sees the screen and nothing they send reaches the device. The device list now says which AI client is driving a device, and the MCP server is handed a link to the watch page when it joins. The dashboard page that watches arrives separately; until then nothing changes on screen. An unauthenticated connection from the relay's own Mac cannot watch.
+- **The relay can show a teammate the device an AI client is driving.** A session the MCP server or the flow runner holds can be watched, read-only, by anyone signed in to the dashboard. A watcher sees the screen and nothing they send reaches the device. The device list now says which AI client is driving a device. The dashboard page that watches, and the link to it the MCP server will hand you, arrive separately; until then nothing changes on screen. An unauthenticated connection from the relay's own Mac cannot watch.
 
 ### Changed
 

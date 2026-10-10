@@ -291,7 +291,9 @@ export class SessionManager {
     session.ownerUser = owner.user
     session.holderKind = holder.kind ?? null
     session.holderLabel = holder.label
-    this.evictWatchers(sessionId, 'holder-changed', (admitted) => admitted !== owner.key)
+    // Also when the same client re-joins as something that is not an AI client: a watch is admitted to an
+    // AI client's session, and only that kind may be watched.
+    this.evictWatchers(sessionId, 'holder-changed', (admitted) => admitted !== owner.key || !isAiClientKind(holder.kind))
     let held = this.browserSocketIndex.get(browserSocket)
     if (!held) { held = new Set(); this.browserSocketIndex.set(browserSocket, held) }
     held.add(session)

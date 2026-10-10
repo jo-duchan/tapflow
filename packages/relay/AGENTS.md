@@ -130,9 +130,14 @@ iOS build format: `.app.zip` **or** `.tar.gz`/`.tgz` (EAS `eas build` simulator 
   - **What reaches a watcher is an allowlist**: video frames (not audio), the device's description (chrome,
     device info, postures, booting, ready) and the lifecycle (agent away, rebound, holder left, ended). Every
     reply to something the holder asked — acks, clipboard, network state — stays the holder's.
-  - **One keyframe-aware sender per watcher.** The sender's drop state lives in its closure, so a shared one
-    would let a slow watcher push the holder into drop-to-keyframe. Frame forwarding is not gated on the
-    holder either: watchers keep the picture through the holder's reconnect grace.
+  - **One keyframe-aware sender per watcher, and a watcher's drop asks for no IDR.** The sender's drop state
+    lives in its closure, so a shared one would let a slow watcher push the holder into drop-to-keyframe; and
+    an IDR changes the encoder's output for everyone, so a watcher on a slow link requesting one on every
+    drain would cost the holder forced keyframes. A watcher resyncs on the periodic keyframe (plus the one
+    throttled request when it starts watching). Frame forwarding is not gated on the holder either: watchers
+    keep the picture through the holder's reconnect grace.
+  - **A holder cannot watch its own session** — it already receives every frame, and the watcher gates would
+    then refuse its own shutdown and re-join.
   - **An unauthenticated loopback socket may hold a session but never watch** — any browser on the relay's Mac
     reaches loopback without a credential. `mayWatch` is decided once at the handshake.
 - JWTs are issued based on team invite links.

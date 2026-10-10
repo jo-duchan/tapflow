@@ -106,10 +106,13 @@ const envCo = <T extends string>(type: T) =>
 
 const BROWSER_INBOUND = {
   'agents:list': z.object({ type: z.literal('agents:list') }),
-  // `clientKind` optional: a client that predates it joins as before, and is simply not watchable.
+  // `clientKind` optional: a client that predates it joins as before, and is simply not watchable. A kind
+  // this relay does not know is a newer client, not a broken one — the field goes and the join stands, as
+  // `formFactor` does below. A closed enum would refuse the whole `session:start`, which has no answerable
+  // reply, so the newer client would wait out its join deadline in silence.
   'session:start': z.object({
     type: z.literal('session:start'), sessionId,
-    clientKind: z.enum(['dashboard', 'mcp', 'flow-runner']).optional(),
+    clientKind: z.union([z.enum(['dashboard', 'mcp', 'flow-runner']), z.string().transform(() => undefined)]).optional(),
   }),
   'watch:start': z.object({ type: z.literal('watch:start'), sessionId }),
   'watch:stop': z.object({ type: z.literal('watch:stop'), sessionId }),

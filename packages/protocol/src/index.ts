@@ -50,8 +50,9 @@ export interface DeviceSummary extends DeviceReport {
    *  session. Absent for an unheld device and for a person's session — a manual session is not
    *  watchable, so naming its holder would only say who to look over the shoulder of.
    *
-   *  **Also the feature gate for watching.** An older relay drops `watch:start` without a reply, so a
-   *  viewer offers Watch only for a device that carries this field.
+   *  **What a viewer offers Watch on** — it says the session is watchable — and a version gate for a
+   *  viewer that can meet an older relay (a third-party one, or a downgrade under an open tab): an older
+   *  relay drops `watch:start` without a reply, and one that sends this field understands it.
    *
    *  **Never the owner key or the client id.** The owner key is `<userId>:<clientId>` and the client half
    *  comes off the handshake query: a local socket that learned it could claim it and drive the device. */
@@ -934,7 +935,8 @@ export interface SessionJoined {
   sessionId: string
   capabilities: string[]
   /** The dashboard page where teammates can watch this session, for a holder that declared an AI
-   *  `clientKind`. Built by the relay because only it knows the address a teammate's browser can open
+   *  `clientKind`. The page ships after the field: until the dashboard has it, the link opens the
+   *  dashboard's not-found view. Built by the relay because only it knows the address a teammate's browser can open
    *  (tunnel, `relay.url`); a client knows only the socket address it dialled. Absent for a person's
    *  session and from a relay that predates watching. */
   watchUrl?: string
