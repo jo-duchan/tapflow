@@ -21,7 +21,7 @@ describe('RunRecorder', () => {
     r.finish({ status: 'passed', exitCode: 0 })
     r.finish({ status: 'failed', exitCode: 1 })
     r.reportFlow(1, flow)
-    expect(await r.drain(1000)).toBe('run-1')
+    expect(await r.drain(1000)).toEqual({ runId: 'run-1', complete: true })
     expect(fetchMock.mock.calls.map(([u]) => String(u))).toEqual([
       'http://relay.test/api/v1/runs', 'http://relay.test/api/v1/runs/run-1/flows/0', 'http://relay.test/api/v1/runs/run-1/finish',
     ])
@@ -36,7 +36,7 @@ describe('RunRecorder', () => {
     r.create(planned)
     r.reportFlow(0, flow)
     r.finish({ status: 'passed', exitCode: 0 })
-    expect(await r.drain(2000)).toBeNull()
+    expect((await r.drain(2000)).runId).toBeNull()
     expect(fetchMock).toHaveBeenCalledTimes(1)
     expect(warn).toHaveBeenCalledTimes(1)
     expect(warn.mock.calls[0]![0]).toMatch(/^run not recorded: could not reach the relay/)
@@ -46,9 +46,37 @@ describe('RunRecorder', () => {
     const { r, warn } = recorder(() => new Promise(() => {}), 60_000)
     r.create(planned)
     const started = Date.now()
-    expect(await r.drain(50)).toBeNull()
+    expect(await r.drain(50)).toEqual({ runId: null, complete: false })
     expect(Date.now() - started).toBeLessThan(1000)
     expect(warn).toHaveBeenCalledWith('run record incomplete: the relay did not answer within 0s')
+  })
+
+  it('aborts the call in flight when the drain gives up, and warns only once', async () => {
+    let aborted = false
+    const { r, warn } = recorder((u, init) => u.endsWith('/api/v1/runs') ? ok(u) : new Promise((_res, rej) => {
+      init.signal?.addEventListener('abort', () => { aborted = true; rej(init.signal!.reason as Error) })
+    }), 60_000)
+    r.create(planned)
+    r.reportFlow(0, flow)
+    expect(await r.drain(50)).toEqual({ runId: 'run-1', complete: false })
+    await new Promise((res) => setTimeout(res, 20))
+    expect(aborted).toBe(true)
+    expect(warn).toHaveBeenCalledTimes(1)
+  })
+
+  it('keeps recording when the relay refuses a screenshot, so the run is still finished', async () => {
+    const { r, warn, fetchMock } = recorder((u) => u.endsWith('/screenshot')
+      ? Promise.resolve(Response.json({ error: 'Screenshot larger than 5242880 bytes' }, { status: 413 }))
+      : ok(u))
+    r.create(planned)
+    r.reportFlow(0, { ...flow, status: 'failed' }, Buffer.from('png'))
+    r.reportFlow(1, flow)
+    r.finish({ status: 'failed', exitCode: 1 })
+    expect(await r.drain(1000)).toEqual({ runId: 'run-1', complete: true })
+    expect(fetchMock.mock.calls.map(([u]) => String(u).replace('http://relay.test/api/v1/runs', ''))).toEqual([
+      '', '/run-1/flows/0', '/run-1/flows/0/screenshot', '/run-1/flows/1', '/run-1/finish',
+    ])
+    expect(warn).not.toHaveBeenCalled()
   })
 
   it('says the record is incomplete when a later call fails, and sends nothing after it', async () => {
@@ -56,7 +84,7 @@ describe('RunRecorder', () => {
     r.create(planned)
     r.reportFlow(0, flow)
     r.finish({ status: 'passed', exitCode: 0 })
-    expect(await r.drain(1000)).toBe('run-1')
+    expect(await r.drain(1000)).toEqual({ runId: 'run-1', complete: false })
     expect(warn).toHaveBeenCalledWith('run record incomplete: the relay answered 409 (Run already finished)')
     expect(warn).toHaveBeenCalledTimes(1)
     expect(fetchMock.mock.calls.map(([u]) => String(u)).some((u) => u.endsWith('/finish'))).toBe(false)
@@ -78,10 +106,20 @@ describe('ciContext', () => {
       { provider: 'buildkite', branch: 'x', commit: 'c', jobUrl: 'https://bk.test/1' }],
     [{ JENKINS_URL: 'https://j.test/', BUILD_URL: 'https://j.test/job/1/', GIT_COMMIT: 'd', GIT_BRANCH: 'origin/main' },
       { provider: 'jenkins', branch: 'origin/main', commit: 'd', jobUrl: 'https://j.test/job/1/' }],
-    [{ TF_BUILD: 'True', SYSTEM_COLLECTIONURI: 'https://dev.azure.com/org/', SYSTEM_TEAMPROJECT: 'My Project', BUILD_BUILDID: '9', BUILD_SOURCEVERSION: 'e', BUILD_SOURCEBRANCHNAME: 'main' },
-      { provider: 'azure', branch: 'main', commit: 'e', jobUrl: 'https://dev.azure.com/org/My%20Project/_build/results?buildId=9' }],
+    // Multibranch: `BRANCH_NAME` over the plugin's `origin/…`, and a PR's source branch over `PR-12`.
+    [{ JENKINS_URL: 'https://j.test/', BRANCH_NAME: 'main', GIT_BRANCH: 'origin/main' }, { provider: 'jenkins', branch: 'main' }],
+    [{ JENKINS_URL: 'https://j.test/', BRANCH_NAME: 'PR-12', CHANGE_BRANCH: 'feature/x' }, { provider: 'jenkins', branch: 'feature/x' }],
+    [{ TF_BUILD: 'True', SYSTEM_COLLECTIONURI: 'https://dev.azure.com/org/', SYSTEM_TEAMPROJECT: 'My Project', BUILD_BUILDID: '9', BUILD_SOURCEVERSION: 'e', BUILD_SOURCEBRANCH: 'refs/heads/feature/tools', BUILD_SOURCEBRANCHNAME: 'tools' },
+      { provider: 'azure', branch: 'feature/tools', commit: 'e', jobUrl: 'https://dev.azure.com/org/My%20Project/_build/results?buildId=9' }],
+    // A PR build's own ref is `refs/pull/1/merge`; the branch is the PR's source.
+    [{ TF_BUILD: 'True', BUILD_SOURCEBRANCH: 'refs/pull/1/merge', SYSTEM_PULLREQUEST_SOURCEBRANCH: 'refs/heads/feature/a' },
+      { provider: 'azure', branch: 'feature/a' }],
     [{ CI: 'true', GITHUB_ACTIONS: 'true', GITHUB_SERVER_URL: 'https://github.com', GITHUB_REPOSITORY: 'o/r', GITHUB_RUN_ID: '1', GITHUB_SHA: 'f', GITHUB_HEAD_REF: 'feature', GITHUB_REF_NAME: '12/merge' },
       { provider: 'github', branch: 'feature', commit: 'f', jobUrl: 'https://github.com/o/r/actions/runs/1' }],
+    [{ CI: 'true', GITHUB_ACTIONS: 'true', GITHUB_SERVER_URL: 'https://github.com', GITHUB_REPOSITORY: 'o/r', GITHUB_RUN_ID: '1', GITHUB_RUN_ATTEMPT: '2' },
+      { provider: 'github', jobUrl: 'https://github.com/o/r/actions/runs/1/attempts/2' }],
+    [{ CI: 'true', BUILDKITE: 'true', BUILDKITE_BUILD_URL: 'https://bk.test/1', BUILDKITE_JOB_ID: 'j-9' },
+      { provider: 'buildkite', jobUrl: 'https://bk.test/1#j-9' }],
     [{ CI: 'true' }, { provider: 'ci' }],
   ])('reads %o', (env, expected) => {
     expect(ciContext(env)).toEqual(expected)

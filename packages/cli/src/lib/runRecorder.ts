@@ -46,6 +46,8 @@ export class RunRecorder {
   private id: string | null = null
   private stopped = false
   private finished = false
+  /** Aborts the call in flight when the drain gives up, so nothing keeps the process alive past the cap. */
+  private readonly gaveUp = new AbortController()
   private readonly callTimeoutMs: number
 
   constructor(
@@ -88,7 +90,17 @@ export class RunRecorder {
       }), 'application/json')
       if (screenshot) {
         // Raw bytes: the relay judges the image by its first bytes, not by what this says it is.
-        await this.post(`/api/v1/runs/${this.id}/flows/${idx}/screenshot`, screenshot, 'application/octet-stream')
+        //
+        // **A failed screenshot is not a failed record.** The relay refuses one image for what it is (over 5 MB,
+        // 413), and a large one on a slow link can outrun its deadline; either way the next report still lands.
+        // Stopping here would leave the run unfinished, and the relay would then close it as "runner
+        // disconnected": a real regression shown as an infrastructure blip, the very confusion the record exists
+        // to end. A relay that is really gone fails the next call and stops recording there.
+        try {
+          await this.post(`/api/v1/runs/${this.id}/flows/${idx}/screenshot`, screenshot, 'application/octet-stream')
+        } catch (e) {
+          if (this.gaveUp.signal.aborted) throw e
+        }
       }
     })
   }
@@ -102,17 +114,23 @@ export class RunRecorder {
     })
   }
 
-  /** Wait for what is queued, but never longer than `capMs`. Answers the run id when it was created. */
-  async drain(capMs: number): Promise<string | null> {
+  /**
+   * Wait for what is queued, but never longer than `capMs`. Answers the run id when the relay created the run,
+   * and whether everything queued reached it.
+   */
+  async drain(capMs: number): Promise<{ runId: string | null; complete: boolean }> {
     let timer: NodeJS.Timeout | undefined
     const cap = new Promise<'cap'>((resolve) => { timer = setTimeout(() => resolve('cap'), capMs) })
     const done = await Promise.race([this.queue.then(() => 'done' as const), cap])
     clearTimeout(timer)
-    if (done === 'cap' && !this.stopped) {
+    if (done === 'cap') {
+      const warned = this.stopped
       this.stopped = true
-      this.deps.warn(`run record incomplete: the relay did not answer within ${Math.round(capMs / 1000)}s`)
+      // A call still waiting on its own deadline would hold the process open past the cap.
+      this.gaveUp.abort()
+      if (!warned) this.deps.warn(`run record incomplete: the relay did not answer within ${Math.round(capMs / 1000)}s`)
     }
-    return this.id
+    return { runId: this.id, complete: !this.stopped }
   }
 
   private enqueue(needsRun: boolean, op: () => Promise<void>): void {
@@ -121,6 +139,8 @@ export class RunRecorder {
       try {
         await op()
       } catch (e) {
+        // Already stopped means the drain gave up and said so; this is the call it aborted.
+        if (this.stopped) return
         this.stopped = true
         const reason = e instanceof RecordRefused ? e.message : `could not reach the relay (${(e as Error).message})`
         this.deps.warn(this.id === null ? `run not recorded: ${reason}` : `run record incomplete: ${reason}`)
@@ -133,7 +153,7 @@ export class RunRecorder {
       method: 'POST',
       headers: { Authorization: `Bearer ${this.token}`, 'Content-Type': contentType },
       body: typeof body === 'string' ? body : new Uint8Array(body),
-      signal: AbortSignal.timeout(this.callTimeoutMs),
+      signal: AbortSignal.any([AbortSignal.timeout(this.callTimeoutMs), this.gaveUp.signal]),
     })
     if (!res.ok) throw new RecordRefused(await refusal(res))
     return res

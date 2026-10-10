@@ -35,7 +35,7 @@ const EXIT_ENV_ERROR = 2
 const EXIT_ON_SIGNAL: Record<'SIGINT' | 'SIGTERM', number> = { SIGINT: 130, SIGTERM: 143 }
 /** How long the end of a run waits for its record to reach the relay. */
 const RECORD_DRAIN_MS = 10_000
-/** Shorter on a cancel: CI sends SIGTERM and kills a few seconds later. */
+/** Shorter on a cancel: CI kills soon after. GitHub Actions sends SIGINT, then SIGTERM 7.5 s later, then SIGKILL. */
 const RECORD_DRAIN_ON_SIGNAL_MS = 5_000
 const MAX_TIMEOUT_SECONDS = 2_147_483_647 / 1000
 
@@ -110,11 +110,13 @@ export async function cmdFlowRun(files: string[], opts: FlowRunOptions): Promise
     if (cancelling) process.exit(code)
     cancelling = true
     console.error(`\n✗ cancelled (${signal})`)
+    // Leave first: it stops the device being driven while the record drains, and the relay ends a run on its
+    // runner's socket closing, not on a leave — so the record can still finish before `disconnect`.
+    try {
+      if (client && joinedSessionId !== undefined) client.leaveSession(joinedSessionId)
+    } catch { /* leaving is best effort on the way out */ }
     recorder?.finish({ status: 'aborted', exitCode: code, errorMessage: `cancelled (${signal})` })
     void (recorder?.drain(RECORD_DRAIN_ON_SIGNAL_MS) ?? Promise.resolve(null)).finally(() => {
-      try {
-        if (client && joinedSessionId !== undefined) client.leaveSession(joinedSessionId)
-      } catch { /* leaving is best effort on the way out */ }
       client?.disconnect()
       process.exit(code)
     })
@@ -259,8 +261,9 @@ export async function cmdFlowRun(files: string[], opts: FlowRunOptions): Promise
         ...(exitCode === EXIT_ENV_ERROR ? { failureKind: 'environment' } : exitCode === EXIT_FLOW_FAILED ? { failureKind: 'product' } : {}),
         ...(errorMessage ? { errorMessage } : {}),
       })
-      const runId = await recorder.drain(RECORD_DRAIN_MS)
-      if (runId) console.log(`recorded as run ${runId}`)
+      const { runId, complete } = await recorder.drain(RECORD_DRAIN_MS)
+      // Incomplete has already been warned about; the id is still worth having to find what did arrive.
+      if (runId) console.log(complete ? `recorded as run ${runId}` : `recorded as run ${runId} (incomplete)`)
     }
     if (!cancelling) client?.disconnect()
     process.off('SIGINT', onSignal)

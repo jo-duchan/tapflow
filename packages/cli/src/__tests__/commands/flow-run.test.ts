@@ -325,6 +325,14 @@ describe('cmdFlowRun records the run on the relay (A3)', () => {
     expect(errLines().find((l) => l.startsWith('run not recorded'))).toContain(says)
   })
 
+  it('says the record is incomplete beside its id when a later call failed', async () => {
+    fakeRelay((u) => u.endsWith('/finish') ? Response.json({ error: 'boom' }, { status: 500 }) : defaultAnswer(u))
+    mocks.runFlow.mockResolvedValue(resultOf('passed'))
+    await cmdFlowRun([file], { token: 'tflw_pat_x' })
+    expect(console.log).toHaveBeenCalledWith('recorded as run run-1 (incomplete)')
+    expect(process.exitCode).toBe(0)
+  })
+
   it('on SIGINT finishes the record as aborted, leaves the session and exits 130', async () => {
     const relay = fakeRelay()
     const before = { SIGINT: process.listeners('SIGINT'), SIGTERM: process.listeners('SIGTERM') }
@@ -341,7 +349,10 @@ describe('cmdFlowRun records the run on the relay (A3)', () => {
       body: { status: 'aborted', exitCode: 130, errorMessage: 'cancelled (SIGINT)' },
     })
     expect(mocks.leaveSession).toHaveBeenCalledWith('s1')
-    expect(mocks.disconnect).toHaveBeenCalled()
+    // Left before the record drains, so the device stops being driven; disconnected only after it.
+    const finishAt = relay.fetchMock.mock.invocationCallOrder.at(-1)!
+    expect(mocks.leaveSession.mock.invocationCallOrder[0]!).toBeLessThan(finishAt)
+    expect(mocks.disconnect.mock.invocationCallOrder[0]!).toBeGreaterThan(finishAt)
     // The run never reaches its `finally`, so its handlers are still installed; remove only those.
     for (const sig of ['SIGINT', 'SIGTERM'] as const) {
       for (const l of process.listeners(sig)) if (!before[sig].includes(l)) process.off(sig, l)
