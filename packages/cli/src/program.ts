@@ -117,6 +117,7 @@ export function createCli(): CAC {
     .option('--junit <path>', 'Write a JUnit XML report')
     .option('--artifacts <dir>', 'Failure screenshot directory (default: .tapflow/artifacts)')
     .option('--timeout <seconds>', 'Default per-selector wait (default: 10)')
+    .option('--no-record', 'Do not record this run on the relay')
     .action((subcommand: string, files: string[], opts: FlowRunOptions & { build?: string | number; timeout?: string | number }) => {
       if (subcommand !== 'run') {
         console.error(`unknown flow subcommand: ${subcommand} (expected: run)`)

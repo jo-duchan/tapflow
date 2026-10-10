@@ -131,10 +131,20 @@ tapflow flow run .tapflow/flows/login.yaml .tapflow/flows/checkout.yaml
 | `--junit <path>` | Write a JUnit XML report to this path. |
 | `--artifacts <dir>` | Failure-screenshot directory (default `.tapflow/artifacts`) |
 | `--timeout <seconds>` | Default per-selector wait (default 10, max 2147483.647) |
+| `--no-record` | Do not record this run on the relay. |
 
 The `launchApp` step takes no argument and launches the build passed via `--build`. That keeps the build id out of the flow file, so the same flow runs against a fresh build on every CI run.
 
 When the run starts, the runner prints a dashboard link on a `watch this run:` line. Open it to watch, live, the flow driving the device; the watch ends when the run does. In CI the line is not printed (detected from the `CI` environment variable, Jenkins's `JENKINS_URL` or Azure Pipelines' `TF_BUILD`), because the link shows the relay's address and would stay in a public repository's log. How the address is chosen, and who can watch, are the same as for the [MCP server](/automation/mcp-server#watch-the-device), with the `--relay` address in place of `TAPFLOW_RELAY_URL`.
+
+### Run records {#run-records}
+
+With a token, the runner records the run on the relay: each flow's pass or fail and steps, the screenshot of a failed flow, the device it ran on, and the build passed with `--build`. In CI it also records the provider, branch, commit and a link to the CI run. When the relay created the record, the runner prints its id on a `recorded as run` line at the end of the run.
+
+- Recording never changes the result or the exit code. If the relay does not answer or refuses the record, the runner prints one warning line and records nothing more for that run. A failure screenshot the relay cannot take (for example, one over 5 MB) gets its own warning, and the rest of the run is still recorded. At the end of a run it waits at most 10 seconds for the record to finish sending.
+- Recording needs a token with the `builds:write` scope whose owner is not a Viewer. An API-type token works.
+- A run without a token against a relay on the same Mac is not recorded, and one line says so.
+- A run's record is deleted with its build; a record of a run with no build is deleted after 7 days.
 
 ### Exit codes
 
@@ -145,8 +155,12 @@ The exit codes are a contract so CI can tell what happened.
 | `0` | All flows passed |
 | `1` | At least one product failure, including a run with both product and environment failures |
 | `2` | Environment/config error before execution, or every failed flow was environmental |
+| `130` | Cancelled by `SIGINT` (Ctrl+C, or a cancelled GitHub Actions job) |
+| `143` | Cancelled by `SIGTERM` (what `kill` sends by default) |
 
 Distinguishing `1` from `2` matters: a product failure (`1`) and an infrastructure problem (`2`) should be handled differently on a CI dashboard. A run with both kinds stays at `1` so an infrastructure blip cannot hide a regression.
+
+A run cancelled while its flows are running leaves its session and, when it is being recorded, marks the record cancelled before it exits. A second signal exits at once.
 
 A failed flow leaves a screenshot from the point of failure in the artifacts directory, and with `--junit` each flow is recorded as one `testcase`.
 
