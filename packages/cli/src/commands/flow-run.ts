@@ -204,6 +204,9 @@ export async function cmdFlowRun(files: string[], opts: FlowRunOptions): Promise
     for (const [flowIndex, flow] of flows.entries()) {
       process.stdout.write(`▶ ${flow.name} `)
       const result = await runFlow(flow, driver, engineOpts)
+      // Cancelled meanwhile: the signal path left the session, which fails the step in flight. That failure is
+      // the cancel, not the product, so it is neither printed nor recorded.
+      if (cancelling) return
       results.push(result)
       recorder?.reportFlow(flowIndex, flowReport(result, device), result.failureScreenshot)
       if (result.status === 'failed' && result.failureKind !== 'environment') sawProductFailure = true
@@ -240,6 +243,8 @@ export async function cmdFlowRun(files: string[], opts: FlowRunOptions): Promise
     }
 
   } catch (e) {
+    // Same as above, for a step that rejects rather than reports the leave.
+    if (cancelling) return
     errorMessage = (e as Error).message
     console.error(`✗ ${errorMessage}`)
     if (exitCode === 0) exitCode = sawProductFailure ? EXIT_FLOW_FAILED : EXIT_ENV_ERROR

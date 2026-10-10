@@ -14,7 +14,8 @@ import type { CiContext } from './ci.js'
 
 export interface RunRecorderDeps {
   fetch: typeof fetch
-  /** One line to the person running the command. Called at most once per run. */
+  /** One line to the person running the command. At most twice per run: once if recording stops, and once
+   *  the first time a failure screenshot cannot be sent. */
   warn: (line: string) => void
   callTimeoutMs?: number
 }
@@ -46,6 +47,7 @@ export class RunRecorder {
   private id: string | null = null
   private stopped = false
   private finished = false
+  private screenshotWarned = false
   /** Aborts the call in flight when the drain gives up, so nothing keeps the process alive past the cap. */
   private readonly gaveUp = new AbortController()
   private readonly callTimeoutMs: number
@@ -100,6 +102,12 @@ export class RunRecorder {
           await this.post(`/api/v1/runs/${this.id}/flows/${idx}/screenshot`, screenshot, 'application/octet-stream')
         } catch (e) {
           if (this.gaveUp.signal.aborted) throw e
+          // Said once, so a run of failing flows on a large-screen device is one line rather than one per flow.
+          if (!this.screenshotWarned) {
+            this.screenshotWarned = true
+            const reason = e instanceof RecordRefused ? e.message : (e as Error).message
+            this.deps.warn(`failure screenshot not recorded (flow ${idx + 1}): ${reason}; the rest of the run is still recorded`)
+          }
         }
       }
     })

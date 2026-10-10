@@ -141,7 +141,7 @@ When the run starts, the runner prints a dashboard link on a `watch this run:` l
 
 With a token, the runner records the run on the relay: each flow's pass or fail and steps, the screenshot of a failed flow, the device it ran on, and the build passed with `--build`. In CI it also records the provider, branch, commit and a link to the CI run. When the relay created the record, the runner prints its id on a `recorded as run` line at the end of the run.
 
-- Recording never changes the result or the exit code. If the relay does not answer or refuses the record, the runner prints one warning line and records nothing more for that run. At the end of a run it waits at most 10 seconds for the record to finish sending.
+- Recording never changes the result or the exit code. If the relay does not answer or refuses the record, the runner prints one warning line and records nothing more for that run. A failure screenshot the relay cannot take (for example, one over 5 MB) gets its own warning, and the rest of the run is still recorded. At the end of a run it waits at most 10 seconds for the record to finish sending.
 - Recording needs a token with the `builds:write` scope whose owner is not a Viewer. An API-type token works.
 - A run without a token against a relay on the same Mac is not recorded, and one line says so.
 - A run's record is deleted with its build; a record of a run with no build is deleted after 7 days.

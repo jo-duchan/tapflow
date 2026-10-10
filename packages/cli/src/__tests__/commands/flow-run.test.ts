@@ -333,6 +333,25 @@ describe('cmdFlowRun records the run on the relay (A3)', () => {
     expect(process.exitCode).toBe(0)
   })
 
+  it('prints no flow failure for the step the cancel interrupted', async () => {
+    fakeRelay()
+    vi.spyOn(process, 'exit').mockImplementation((() => {}) as never)
+    const before = { SIGINT: process.listeners('SIGINT'), SIGTERM: process.listeners('SIGTERM') }
+    // The signal path leaves the session, which fails the step in flight — as `RelayClient` does.
+    let failStep: (e: Error) => void = () => {}
+    mocks.leaveSession.mockImplementation(() => failStep(new Error('this client left session s1')))
+    mocks.runFlow.mockImplementation(() => new Promise((_res, rej) => {
+      failStep = rej
+      process.emit('SIGINT', 'SIGINT')
+    }))
+    await cmdFlowRun([file, file], { token: 'tflw_pat_x' })
+    expect(errLines().some((l) => l.includes('left session'))).toBe(false)
+    expect(mocks.runFlow).toHaveBeenCalledTimes(1)
+    for (const sig of ['SIGINT', 'SIGTERM'] as const) {
+      for (const l of process.listeners(sig)) if (!before[sig].includes(l)) process.off(sig, l)
+    }
+  })
+
   it('on SIGINT finishes the record as aborted, leaves the session and exits 130', async () => {
     const relay = fakeRelay()
     const before = { SIGINT: process.listeners('SIGINT'), SIGTERM: process.listeners('SIGTERM') }

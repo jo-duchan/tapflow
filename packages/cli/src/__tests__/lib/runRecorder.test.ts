@@ -76,7 +76,8 @@ describe('RunRecorder', () => {
     expect(fetchMock.mock.calls.map(([u]) => String(u).replace('http://relay.test/api/v1/runs', ''))).toEqual([
       '', '/run-1/flows/0', '/run-1/flows/0/screenshot', '/run-1/flows/1', '/run-1/finish',
     ])
-    expect(warn).not.toHaveBeenCalled()
+    expect(warn).toHaveBeenCalledTimes(1)
+    expect(warn.mock.calls[0]![0]).toMatch(/^failure screenshot not recorded \(flow 1\): .*413 \(Screenshot larger than 5242880 bytes\); the rest of the run is still recorded$/)
   })
 
   it('says the record is incomplete when a later call fails, and sends nothing after it', async () => {
