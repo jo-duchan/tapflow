@@ -287,6 +287,8 @@ describe('cmdFlowRun records the run on the relay (A3)', () => {
     vi.stubEnv('GITHUB_SHA', 'abc')
     vi.stubEnv('GITHUB_HEAD_REF', '')
     vi.stubEnv('GITHUB_REF_NAME', 'main')
+    // Set by GitHub Actions itself, so this suite's own CI run would add `/attempts/1` to the link.
+    vi.stubEnv('GITHUB_RUN_ATTEMPT', '')
     mocks.runFlow.mockResolvedValue(resultOf('passed'))
     await cmdFlowRun([file], { token: 'tflw_pat_x' })
     expect(relay.calls[0]!.body).toMatchObject({
