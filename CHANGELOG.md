@@ -9,7 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- **The relay can show a teammate the device an AI client is driving.** A session the MCP server or the flow runner holds can be watched, read-only, by anyone signed in to the dashboard. A watcher sees the screen and nothing they send reaches the device. The device list now says which AI client is driving a device. The dashboard page that watches, and the link to it the MCP server will hand you, arrive separately; until then nothing changes on screen. An unauthenticated connection from the relay's own Mac cannot watch.
+- **Watch the device an AI agent is driving.** A new **AI Sessions** page in the dashboard lists the devices the MCP server or the flow runner is driving, and anyone signed in can watch one live, read-only: nothing they click reaches the device. In the QA session's device list such a device opens its watch page instead of sitting disabled. `connect_device` returns the link (`watchUrl`), so a coding agent can hand it to you as it starts testing, and `tapflow flow run` prints it on a `watch this run:` line. Up to 4 people can watch a session. An unauthenticated connection from the relay's own Mac cannot watch.
 
 ### Changed
 

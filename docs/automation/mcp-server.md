@@ -1,3 +1,8 @@
+---
+title: MCP Server
+description: "Install @tapflowio/mcp-server and connect a coding agent to it. Teammates can watch the device the coding agent is driving, live, in the dashboard."
+---
+
 # MCP Server
 
 ::: warning Experimental
@@ -97,7 +102,7 @@ Any MCP-compatible client can use tapflow. Add the following to your MCP config 
 |------|-------------|
 | `list_builds` | List the apps and builds on the relay (where the `buildId` for `install_app` and `launch_app` comes from) |
 | `list_devices` | List connected simulators and emulators |
-| `connect_device` | Join a session (required before controlling a device) |
+| `connect_device` | Join a session (required before controlling a device). Also returns `watchUrl`, a dashboard link for watching the device |
 | `disconnect_device` | End a session |
 | `boot_device` | Boot a simulator or emulator |
 | `shutdown_device` | Power the device down (frees resources; forces a cold boot next time) |
@@ -118,7 +123,7 @@ An LLM agent typically calls tools in this order:
 
 ```text
 list_devices       → get available devices and sessionIds
-connect_device     → join a session
+connect_device     → join a session, hand the person the watch link
 boot_device        → wait for the device to be ready (skip if already booted)
 install_app        → install the build
 launch_app         → launch the app
@@ -133,3 +138,18 @@ If `list_devices` returns `"status": "booted"` for a device, you can skip `boot_
 :::
 
 For running this in a CI pipeline, see [MCP in CI/CD](/automation/mcp-ci).
+
+## Watch the device a coding agent drives {#watch-the-device}
+
+`connect_device` returns `watchUrl` in its result. Open that link in a browser to watch, live, the device the coding agent is driving. The tool description tells the coding agent to hand the link to the person who asked, so when you ask for something like "test the login screen", the coding agent gives you the link as it starts testing.
+
+Without the link, you can find the devices a coding agent is driving right now under **AI Sessions** in the dashboard sidebar. In the QA session's device list, such a device shows **Coding agent is driving it · Watch** (**Flow runner is driving it · Watch** for the flow runner) and opens the same page.
+
+- Watching is read-only. Nothing you click reaches the device, and there is no sound.
+- Any teammate signed in to the dashboard can watch. Whatever the coding agent types on the device shows on screen too, so do not test with values the team should not see.
+- Up to 4 people can watch one session at a time.
+- If the coding agent's connection drops briefly, the page keeps the last picture and waits for it to come back. If another teammate starts using the device, the watch ends.
+
+::: details How the link address is chosen
+If the relay has an address teammates can open (a tunnel or `relay.url`), the link uses it, and you can share it with teammates as it is. Otherwise, including when `relay.url` is a `localhost` address, the MCP server builds the link from the `TAPFLOW_RELAY_URL` it connected with. For example, connected with `ws://localhost:4000`, the link starts with `http://localhost:4000/automation/sessions/` and opens on the computer running the MCP server. For an address to send to teammates, see [External access](/operate/external-access).
+:::

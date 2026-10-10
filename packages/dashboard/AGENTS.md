@@ -66,6 +66,15 @@ buttons are drawn at rest and nothing on the frame can be pressed.
 overlay dropped on either platform, Android's pointer handlers dropped, a rotation in flight ignored)
 survived every viewer test.
 
+### The AI session page watches and never drives
+
+`/automation/sessions` lists devices whose `agents:listed` entry carries `holder`; `/automation/sessions/:id`
+watches one through `useWatchSession` and renders `WatchedDevice` (the shared device screens, no controls).
+**That page must never send `session:start`, `device:boot` or `device:shutdown`, and must not use
+`useAgentSession`** — it shuts the device down on unmount, and a watch page closing would end what the agent
+is in the middle of. The relay refuses those from a watching socket too; this is the half that does not depend
+on it. A watch that ended or was refused stays so across a reconnect (`AISession.test.tsx`).
+
 ### The React Compiler is on
 
 `babel-plugin-react-compiler` runs on this package through `reactPlugin.ts` — **shared by

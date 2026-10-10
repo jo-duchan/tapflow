@@ -6,6 +6,7 @@ import { WebSocket } from 'ws'
 import crypto from 'crypto'
 import { signJwt, hashPat } from '../middleware/auth'
 import { initDb, closeDb, getDb } from '../db'
+import { config } from '../lib/config'
 import { barrier, waitForOpen, waitForType, waitForTypeOrNull } from '@tapflowio/test-utils'
 import type {
   AgentRegistered, AgentsListed, DeviceShutdownError, GenericError, InputError, SessionJoined,
@@ -349,12 +350,31 @@ describe('session watchers', () => {
   })
 
   describe('what the holder and the device list are told', () => {
-    it('hands an AI holder the watch page, and a person none', async () => {
-      const { sessionId } = await registerAgent()
-      const joined = await join(await socket('mcp1'), sessionId, 'mcp')
-      expect(joined.watchUrl).toMatch(new RegExp(`/automation/sessions/${sessionId}$`))
-      const other = await registerAgent('other-mac')
-      expect((await join(await socket('tab', 2), other.sessionId, 'dashboard')).watchUrl).toBeUndefined()
+    it('hands an AI holder the watch page at the team\'s address, and a person none', async () => {
+      const was = config.relay.url
+      config.relay.url = 'https://relay.example.test'
+      try {
+        const { sessionId } = await registerAgent()
+        const joined = await join(await socket('mcp1'), sessionId, 'mcp')
+        expect(joined.watchUrl).toBe(`https://relay.example.test/automation/sessions/${sessionId}`)
+        const other = await registerAgent('other-mac')
+        expect((await join(await socket('tab', 2), other.sessionId, 'dashboard')).watchUrl).toBeUndefined()
+      } finally {
+        config.relay.url = was
+      }
+    })
+
+    // The invite rule: localhost is not an address a teammate can open, so the relay says nothing and the
+    // client builds the link from the address it dialled. Mutation: drop the `forTeammates` gate.
+    it('leaves the link out when it knows no address a teammate can open', async () => {
+      const was = config.relay.url
+      config.relay.url = 'ws://localhost:4000'
+      try {
+        const { sessionId } = await registerAgent()
+        expect((await join(await socket('mcp1'), sessionId, 'mcp')).watchUrl).toBeUndefined()
+      } finally {
+        config.relay.url = was
+      }
     })
 
     // The holder's owner key is `<user>:<client>`, and a local socket that learned the client half could

@@ -658,7 +658,8 @@ export class RelayClient {
     return (msg['sessions'] as AgentSession[]) ?? []
   }
 
-  async joinSession(sessionId: string): Promise<void> {
+  /** @returns where a person can watch this run in the dashboard — see `watchUrlFor`. */
+  async joinSession(sessionId: string): Promise<{ watchUrl: string }> {
     this.sendFirstRequest({ type: 'session:start', sessionId, clientKind: 'flow-runner' })
     const msg = await this.waitFor(
       (m) =>
@@ -675,7 +676,7 @@ export class RelayClient {
       'session join',
       sessionId,
     )
-    if (msg['type'] !== 'error') return
+    if (msg['type'] !== 'error') return { watchUrl: this.watchUrlFor(sessionId, msg['watchUrl']) }
     // `reason` is what #506 added this field for: the dashboard was branching on the free prose, handled two
     // of the three wordings, and dropped `Session busy` silently. This client was still reading the prose.
     // It is **required** on `GenericError` — single producer, three sites in the relay's `handleSessionStart`
@@ -913,6 +914,17 @@ export class RelayClient {
       sessionId,
     )
     if (msg['type'] === 'open-url:error') throw this.failed(sessionId, (msg['message'] as string) ?? 'open url failed')
+  }
+
+  /**
+   * The dashboard page that watches this run. **The relay's link when it gives one** — it does only when it
+   * knows an address teammates can open — **else one built from the address this client dialled**, which
+   * the person reading this run's output can open. Mirrors `mcp-server`'s, deliberately not shared: each
+   * client owns its own transport, as `inboundDisposition.ts` already records.
+   */
+  private watchUrlFor(sessionId: string, fromRelay: unknown): string {
+    if (typeof fromRelay === 'string' && fromRelay.length > 0) return fromRelay
+    return new URL(`/automation/sessions/${encodeURIComponent(sessionId)}`, this.httpBase()).toString()
   }
 
   private httpBase(): string {

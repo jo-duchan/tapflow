@@ -654,7 +654,8 @@ export class TapflowClient {
     return (msg['sessions'] as AgentSession[]) ?? []
   }
 
-  async connectDevice(sessionId: string): Promise<void> {
+  /** @returns where a person can watch this session in the dashboard — see `watchUrlFor`. */
+  async connectDevice(sessionId: string): Promise<{ watchUrl: string }> {
     this.send({ type: 'session:start', sessionId, clientKind: 'mcp' })
     const msg = await this.waitFor(
       (m) =>
@@ -693,6 +694,22 @@ export class TapflowClient {
       const detail = reason ? `${prose} (${reason})` : prose
       throw new Error(ended ? `${detail} — the relay ended this session (${ended})` : detail)
     }
+    return { watchUrl: this.watchUrlFor(sessionId, msg['watchUrl']) }
+  }
+
+  /**
+   * The dashboard page that watches a session, for the person who asked the agent to test.
+   *
+   * **The relay's link when it gives one, else one built from the address this client dialled.** The relay
+   * sends a link only when it knows an address teammates can open (a tunnel, `relay.url`) — the rule its
+   * invite links follow. Without one, the person handed the link is the one running this server, and the
+   * address it reached the relay at is one they can open: `localhost` on the relay's own Mac, the relay's
+   * LAN address from a laptop. An older relay sends nothing either, and this path covers it the same way.
+   */
+  private watchUrlFor(sessionId: string, fromRelay: unknown): string {
+    if (typeof fromRelay === 'string' && fromRelay.length > 0) return fromRelay
+    const httpBase = this.relayUrl.replace(/^wss?/, (p) => (p === 'wss' ? 'https' : 'http'))
+    return new URL(`/automation/sessions/${encodeURIComponent(sessionId)}`, httpBase).toString()
   }
 
   /**

@@ -3,7 +3,7 @@ import { useQueryClient } from '@tanstack/react-query';
 import { queryKeys } from '@/lib/queries';
 import { toast } from 'sonner';
 import type { SessionTerminatedReason } from '@tapflowio/protocol';
-import { useSearchParams, useNavigate } from 'react-router-dom';
+import { Link, useSearchParams, useNavigate } from 'react-router-dom';
 import { useBreadcrumb } from '@/hooks/useBreadcrumb';
 import { useBuildLoader } from '@/hooks/useBuildLoader';
 import { useAgentSession } from '@/hooks/useAgentSession';
@@ -30,6 +30,7 @@ import { Label } from '@/components/ui/label';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { SearchInput } from '@/components/ui/search-input';
 import type { DeviceSummary, SessionInfo } from '@/lib/types';
+import { holderKindLabel } from '@/lib/aiSession';
 import { getResourceHealth, RESOURCE_STALE_MS, type ResourceHealth } from '@/lib/resource-health';
 
 /** Why this viewer stopped — a superset of the relay's termination reasons; see `DeviceViewer`'s prop. */
@@ -287,6 +288,30 @@ export function QASession() {
                       : isBooted
                         ? 'bg-emerald-400'
                         : 'bg-muted-foreground/40'
+                    // **An AI agent's device opens its watch page instead of sitting disabled.** Only a
+                    // device the relay lists with a `holder` — a relay that sends the field understands
+                    // `watch:start`, and a person's session carries none, so it stays "In use".
+                    if (isBusy && d.holder) {
+                      return (
+                        <Link
+                          key={d.id}
+                          to={`/automation/sessions/${encodeURIComponent(d.sessionId)}`}
+                          className={cn(
+                            'flex flex-col gap-3 rounded-lg border p-3 text-left transition-colors min-h-[100px]',
+                            'hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
+                          )}
+                        >
+                          <span className="text-sm font-medium leading-tight">{d.name}</span>
+                          {d.osVersion && (
+                            <span className="font-mono text-xs text-muted-foreground">{d.osVersion}</span>
+                          )}
+                          <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                            <span className={cn('inline-block h-1.5 w-1.5 rounded-full', statusDot)} />
+                            {holderKindLabel(d.holder.kind)} is driving it · Watch
+                          </span>
+                        </Link>
+                      )
+                    }
                     return (
                       <button
                         key={d.id}

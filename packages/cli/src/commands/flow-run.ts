@@ -111,8 +111,10 @@ export async function cmdFlowRun(files: string[], opts: FlowRunOptions): Promise
     }
 
     const { sessionId, device } = await resolveSession(client, opts)
-    await client.joinSession(sessionId)
+    const { watchUrl } = await client.joinSession(sessionId)
     joinedSessionId = sessionId
+    // A teammate — or whoever is reading a CI log — can watch the run live from here.
+    console.log(`watch this run: ${watchUrl}`)
 
     // Always send device:boot — it is idempotent on a booted device and it is
     // what initializes the agent's touch/stream state for this session (the

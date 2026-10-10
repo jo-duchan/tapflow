@@ -1,3 +1,8 @@
+---
+title: 플로우 레퍼런스
+description: "tapflow flow run이 LLM 호출 없이 결정적으로 재생하는 YAML 플로우 형식입니다. 파일 구조, 스텝 종류, 셀렉터, CI 실행, 실행을 지켜보는 링크를 다룹니다."
+---
+
 # 플로우 레퍼런스
 
 ::: warning 실험적 기능
@@ -128,6 +133,8 @@ tapflow flow run .tapflow/flows/login.yaml .tapflow/flows/checkout.yaml
 | `--timeout <seconds>` | 셀렉터 기본 대기 시간 (기본값 10, 최대 2147483.647) |
 
 `launchApp` 스텝은 인자를 받지 않고 `--build`로 지정한 빌드를 실행합니다. 덕분에 플로우 파일에 빌드 ID를 하드코딩하지 않아도 되고 CI 실행마다 새 빌드에 그대로 재사용할 수 있습니다.
+
+실행을 시작하면 러너가 `watch this run:` 줄에 대시보드 링크를 출력합니다. CI 로그에서 이 링크를 열면 플로우가 기기를 조작하는 모습을 실시간으로 볼 수 있습니다. 링크 주소가 정해지는 방식과 보기 조건은 [MCP 서버 문서](/ko/automation/mcp-server#watch-the-device)와 같습니다.
 
 ### 종료 코드
 

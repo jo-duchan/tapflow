@@ -1,3 +1,8 @@
+---
+title: MCP 서버
+description: "@tapflowio/mcp-server를 설치하고 코딩 에이전트에 연결합니다. 코딩 에이전트가 조작하는 기기는 대시보드에서 팀원이 실시간으로 볼 수 있습니다."
+---
+
 # MCP 서버
 
 ::: warning 실험적 기능
@@ -97,7 +102,7 @@ MCP를 지원하는 클라이언트라면 모두 tapflow를 사용할 수 있습
 |------|------|
 | `list_builds` | 릴레이의 앱·빌드 목록 조회 (`install_app`·`launch_app`에 넘길 `buildId`의 출처) |
 | `list_devices` | 연결된 시뮬레이터·에뮬레이터 목록 조회 |
-| `connect_device` | 세션 참여 (제어 전 필수) |
+| `connect_device` | 세션 참여 (제어 전 필수). 기기를 지켜볼 수 있는 대시보드 링크 `watchUrl`을 함께 돌려줌 |
 | `disconnect_device` | 세션 종료 |
 | `boot_device` | 시뮬레이터·에뮬레이터 부팅 |
 | `shutdown_device` | 기기 전원 종료 (리소스 반납·다음 콜드 부팅 강제) |
@@ -118,7 +123,7 @@ LLM 에이전트는 보통 아래 순서로 도구를 호출합니다.
 
 ```text
 list_devices       → 사용 가능한 기기와 sessionId 확인
-connect_device     → 세션 참여
+connect_device     → 세션 참여, 지켜볼 링크를 사람에게 전달
 boot_device        → 부팅 대기 (이미 부팅 중이면 생략 가능)
 install_app        → 앱 설치
 launch_app         → 앱 실행
@@ -133,3 +138,18 @@ disconnect_device  → 세션 종료
 :::
 
 CI 파이프라인에서 실행하는 방법은 [CI/CD에서 MCP 활용하기](/ko/automation/mcp-ci)를 참고하세요.
+
+## 코딩 에이전트가 조작하는 기기 보기 {#watch-the-device}
+
+`connect_device`는 결과에 `watchUrl`을 함께 돌려줍니다. 이 링크를 브라우저에서 열면 코딩 에이전트가 조작하는 기기 화면을 실시간으로 볼 수 있습니다. 도구 설명에 요청한 사람에게 이 링크를 전달하라는 안내가 들어 있습니다. 그래서 "로그인 화면을 테스트해 줘"처럼 요청하면 코딩 에이전트가 테스트를 시작하면서 링크를 알려 줍니다.
+
+링크가 없어도 대시보드 사이드바의 **AI Sessions**에서 지금 코딩 에이전트가 조작 중인 기기를 찾을 수 있습니다. QA 세션의 기기 목록에서도 그런 기기에는 **Coding agent is driving it · Watch**(플로우 러너라면 **Flow runner is driving it · Watch**)가 표시되고 누르면 같은 화면이 열립니다.
+
+- 보기 전용입니다. 화면을 눌러도 기기에는 아무것도 전달되지 않고, 소리도 나오지 않습니다.
+- 대시보드에 로그인한 팀원이면 누구나 볼 수 있습니다. 코딩 에이전트가 기기에 입력하는 내용도 화면에 그대로 보이므로, 팀에 보여서는 안 되는 값은 테스트에 쓰지 마세요.
+- 세션 하나를 동시에 4명까지 볼 수 있습니다.
+- 코딩 에이전트의 연결이 잠깐 끊기면 마지막 화면을 둔 채 돌아오기를 기다립니다. 다른 팀원이 그 기기를 이어서 쓰기 시작하면 보기가 끝납니다.
+
+::: details 링크 주소가 정해지는 방식
+릴레이에 팀원이 열 수 있는 주소(터널이나 `relay.url`)가 설정되어 있으면 링크는 그 주소를 씁니다. 팀원에게 그대로 공유할 수 있는 주소입니다. 그런 주소가 없으면(`relay.url`이 `localhost`인 경우 포함) MCP 서버가 접속한 `TAPFLOW_RELAY_URL`로 링크를 만듭니다. 예를 들어 `ws://localhost:4000`으로 접속했다면 링크는 `http://localhost:4000/automation/sessions/`로 시작하며 MCP 서버를 실행한 사람의 컴퓨터에서 열립니다. 팀원에게 보낼 주소가 필요하면 [외부 접속](/ko/operate/external-access)을 참고하세요.
+:::

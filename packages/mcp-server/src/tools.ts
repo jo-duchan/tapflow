@@ -178,15 +178,17 @@ export function registerTools(server: McpServer, client: TapflowClient): void {
   server.registerTool(
     'connect_device',
     {
-      description: 'Join a device session so you can control it. Required before boot_device, install_app, and launch_app.',
+      description: 'Join a device session so you can control it. Required before boot_device, install_app, and launch_app. ' +
+        'The result carries watchUrl, a dashboard page where the person you are working for can watch the device ' +
+        'live while you drive it — give them that link when you start testing.',
       inputSchema: {
         sessionId: z.string().describe('Session ID from list_devices'),
       },
     },
     async ({ sessionId }) => {
       try {
-        await client.connectDevice(sessionId)
-        return ok(JSON.stringify({ connected: true, sessionId }))
+        const { watchUrl } = await client.connectDevice(sessionId)
+        return ok(JSON.stringify({ connected: true, sessionId, watchUrl }))
       } catch (e) {
         return err(`connect_device failed: ${(e as Error).message}`)
       }

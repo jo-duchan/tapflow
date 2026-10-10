@@ -14,7 +14,7 @@ const mocks = vi.hoisted(() => ({
       devices: [{ sessionId: 's1', name: 'dev', status: 'booted', busy: false, id: 'dev1' }],
     },
   ]),
-  joinSession: vi.fn(async () => {}),
+  joinSession: vi.fn(async () => ({ watchUrl: 'http://localhost:4000/automation/sessions/s1' })),
   bootDevice: vi.fn(async () => {}),
   installApp: vi.fn(async () => {}),
   leaveSession: vi.fn(() => {}),
@@ -88,6 +88,13 @@ describe('cmdFlowRun exit codes (#543)', () => {
   })
 
   const run = (args: string[], opts = {}) => cmdFlowRun(args, opts).catch((e: unknown) => e)
+
+  // Printed before the device boots, so a CI log carries the link while the run is still worth watching.
+  it('prints where to watch the run', async () => {
+    mocks.runFlow.mockResolvedValue(resultOf('passed'))
+    await run([flowFile('a.yaml')])
+    expect(console.log).toHaveBeenCalledWith('watch this run: http://localhost:4000/automation/sessions/s1')
+  })
 
   it('exits 0 when every flow passes', async () => {
     mocks.runFlow.mockResolvedValue(resultOf('passed'))

@@ -935,8 +935,9 @@ export interface SessionJoined {
   sessionId: string
   capabilities: string[]
   /** The dashboard page where teammates can watch this session, for a holder that declared an AI
-   *  `clientKind`. The page ships after the field: until the dashboard has it, the link opens the
-   *  dashboard's not-found view. Built by the relay because only it knows the address a teammate's browser can open
+   *  `clientKind` — **only when the relay knows an address teammates can open** (a tunnel, `relay.url`),
+   *  the rule its invite links follow. Absent otherwise, and from an older relay: the client then builds
+   *  the link from the address it dialled, which the person running it can open. Built by the relay because only it knows the address a teammate's browser can open
    *  (tunnel, `relay.url`); a client knows only the socket address it dialled. Absent for a person's
    *  session and from a relay that predates watching. */
   watchUrl?: string
