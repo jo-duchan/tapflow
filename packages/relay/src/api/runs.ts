@@ -307,8 +307,11 @@ export async function handleReportFlow(
   const db = getDb()
   // The run can go while the body arrives — its build purged, its app deleted — and the insert would then
   // fail its foreign key as a 500 with a stack in the log, for an answer that is just "not found".
-  const gone = db.transaction(() => {
-    if (!db.prepare('SELECT 1 FROM flow_runs WHERE seq = ?').get(run.seq)) return true
+  // `ownRun` judged the run before the body arrived; it is judged again here, where nothing can interleave.
+  const refusal = db.transaction((): 'gone' | 'finished' | null => {
+    const now = db.prepare('SELECT finished_by FROM flow_runs WHERE seq = ?').get(run.seq) as { finished_by: string | null } | undefined
+    if (!now) return 'gone'
+    if (now.finished_by === 'client') return 'finished'
     // An upsert that keeps the screenshot: the CLI may retry a report, and the screenshot arrives separately.
     db.prepare(`
       INSERT INTO flow_run_flows (run_seq, idx, name, file, device_id, device_name, platform, status, failure_kind,
@@ -325,9 +328,10 @@ export async function handleReportFlow(
       durationMs, JSON.stringify(steps),
     )
     db.prepare(`UPDATE flow_runs SET last_activity_at = datetime('now') WHERE seq = ?`).run(run.seq)
-    return false
+    return null
   })()
-  if (gone) return json(res, 404, { error: 'Run not found' })
+  if (refusal === 'gone') return json(res, 404, { error: 'Run not found' })
+  if (refusal === 'finished') return json(res, 409, { error: 'Run already finished' })
   json(res, 200, { ok: true })
 }
 
@@ -393,12 +397,20 @@ export async function handleFinishRun(
   if (exitCode === null) return json(res, 400, { error: 'exitCode must be a non-negative integer' })
   // A run the relay closed as `holder-lost` is still finished here: after a relay restart the CLI is alive,
   // reports its own outcome, and knows it better than the relay's guess.
-  getDb().prepare(`
+  // The state is checked in the update itself, not only in `ownRun`: two finishes (a retry after a timeout) can
+  // both pass that check while their bodies arrive, and the second would overwrite the first.
+  const db = getDb()
+  const updated = db.prepare(`
     UPDATE flow_runs
        SET status = ?, finished_by = 'client', exit_code = ?, failure_kind = ?, error_message = ?,
            finished_at = datetime('now'), last_activity_at = datetime('now')
-     WHERE seq = ?
+     WHERE seq = ? AND (finished_by IS NULL OR finished_by = 'relay')
   `).run(body.status, exitCode, str(body.failureKind, 50), str(body.errorMessage, MAX_MESSAGE), run.seq)
+  if (updated.changes === 0) {
+    return db.prepare('SELECT 1 FROM flow_runs WHERE seq = ?').get(run.seq)
+      ? json(res, 409, { error: 'Run already finished' })
+      : json(res, 404, { error: 'Run not found' })
+  }
   json(res, 200, { ok: true })
 }
 

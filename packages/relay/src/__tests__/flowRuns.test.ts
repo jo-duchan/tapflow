@@ -277,6 +277,27 @@ describe('flow run records', () => {
     expect(fs.existsSync(shotsDir) ? fs.readdirSync(shotsDir) : []).toHaveLength(0)
   })
 
+  it('refuses a second finish that overlapped the first, and a finish for a run that went', async () => {
+    const id = await create()
+    const late = sendLate(`/api/v1/runs/${id}/finish`, Buffer.from(JSON.stringify({ status: 'failed', exitCode: 1 })), () => {})
+    expect((await call('POST', `/api/v1/runs/${id}/finish`, bearer(PAT_CI), { status: 'passed', exitCode: 0 })).status).toBe(200)
+    expect(await late).toBe(409)
+    expect((await call('GET', `/api/v1/runs/${id}`, bearer(PAT_VIEW))).body.status).toBe('passed')
+
+    const gone = await create()
+    const status = await sendLate(`/api/v1/runs/${gone}/finish`, Buffer.from(JSON.stringify({ status: 'passed', exitCode: 0 })), () => {
+      getDb().prepare('DELETE FROM flow_runs WHERE id = ?').run(gone)
+    })
+    expect(status).toBe(404)
+  })
+
+  it('refuses a flow report that arrives after the run was finished', async () => {
+    const id = await create()
+    const late = sendLate(`/api/v1/runs/${id}/flows/0`, Buffer.from(JSON.stringify(passed)), () => {})
+    await call('POST', `/api/v1/runs/${id}/finish`, bearer(PAT_CI), { status: 'passed', exitCode: 0 })
+    expect(await late).toBe(409)
+  })
+
   it('answers 404 when the run goes while a flow report is arriving', async () => {
     const id = await create()
     const status = await sendLate(`/api/v1/runs/${id}/flows/0`, Buffer.from(JSON.stringify(passed)), () => {
