@@ -38,9 +38,10 @@
 
 <!-- readme-sync:exempt npm-has-no-video -->
 <div align="center">
-  <video src="https://github.com/user-attachments/assets/dbba8bde-74b6-4fb9-bdb6-3919bc4295c4" 
-         width="800" controls>
-  </video>
+  <a href="https://github.com/user-attachments/assets/dbba8bde-74b6-4fb9-bdb6-3919bc4295c4" target="_blank" rel="noopener noreferrer">
+    <img src="https://raw.githubusercontent.com/jo-duchan/tapflow/main/docs/public/demo-thumbnail.png" alt="tapflow demo — click to play" width="100%" />
+  </a>
+  <p><em>Click to play</em></p>
 </div>
 <!-- /readme-sync:exempt -->
 
