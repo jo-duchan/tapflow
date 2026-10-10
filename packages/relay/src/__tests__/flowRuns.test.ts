@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach } from 'vitest'
 import fs from 'fs'
+import http from 'http'
 import os from 'os'
 import path from 'path'
 import { WebSocket } from 'ws'
@@ -246,8 +247,42 @@ describe('flow run records', () => {
     const id = await create()
     await call('POST', `/api/v1/runs/${id}/flows/0`, bearer(PAT_CI), passed)
     const up = () => call('POST', `/api/v1/runs/${id}/flows/0/screenshot`, bearer(PAT_CI), PNG)
-    await Promise.all([up(), up(), up()])
-    expect(fs.readdirSync(shotsDir)).toHaveLength(1)
+    const answers = await Promise.all([up(), up(), up()])
+    expect(answers.map((a) => a.status)).toEqual([200, 200, 200])
+    const files = fs.readdirSync(shotsDir)
+    expect(files).toHaveLength(1)
+    const row = getDb().prepare('SELECT screenshot_file FROM flow_run_flows').get() as { screenshot_file: string }
+    expect(row.screenshot_file).toBe(files[0])
+  })
+
+  /** Send the headers, run `between` once the relay has authorized the request, then the body. */
+  function sendLate(url: string, body: Buffer, between: () => void): Promise<number> {
+    return new Promise((resolve, reject) => {
+      const req = http.request({ hostname: '127.0.0.1', port, path: url, method: 'POST', headers: { ...bearer(PAT_CI), 'Content-Length': body.length } },
+        (res) => { res.resume(); resolve(res.statusCode!) })
+      req.on('error', reject)
+      req.flushHeaders()
+      // The handler authorizes on the headers and then waits for the body; give it the turn to get there.
+      setTimeout(() => { between(); req.end(body) }, 100)
+    })
+  }
+
+  it('answers 404 and keeps no file when the run goes while a screenshot is arriving', async () => {
+    const id = await create()
+    await call('POST', `/api/v1/runs/${id}/flows/0`, bearer(PAT_CI), passed)
+    const status = await sendLate(`/api/v1/runs/${id}/flows/0/screenshot`, PNG, () => {
+      getDb().prepare('DELETE FROM flow_runs WHERE id = ?').run(id)
+    })
+    expect(status).toBe(404)
+    expect(fs.existsSync(shotsDir) ? fs.readdirSync(shotsDir) : []).toHaveLength(0)
+  })
+
+  it('answers 404 when the run goes while a flow report is arriving', async () => {
+    const id = await create()
+    const status = await sendLate(`/api/v1/runs/${id}/flows/0`, Buffer.from(JSON.stringify(passed)), () => {
+      getDb().prepare('DELETE FROM flow_runs WHERE id = ?').run(id)
+    })
+    expect(status).toBe(404)
   })
 
   it('refuses a screenshot that is not an image, or over 5 MB', async () => {
