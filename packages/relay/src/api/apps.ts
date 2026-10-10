@@ -2,6 +2,7 @@ import http from 'http'
 import { getDb } from '../db.js'
 import { requireRole, requireViewAuth } from '../middleware/auth.js'
 import { json, readJson } from '../router.js'
+import { deleteBuildsWithDependents, type BuildFileDirs } from '../lib/buildDeletion.js'
 
 // Viewer is the one read-only role; QA manages apps like Developer does.
 const APP_MANAGERS = ['Admin', 'Developer', 'QA']
@@ -51,16 +52,17 @@ export async function handleCreateApp(
 export function handleDeleteApp(
   req: http.IncomingMessage,
   res: http.ServerResponse,
-  params: Record<string, string>
+  params: Record<string, string>,
+  dirs: BuildFileDirs,
 ): void {
   if (!requireRole(req, res, APP_MANAGERS)) return
 
   const db = getDb()
-  // builds → comments는 ON DELETE CASCADE로 처리됨
-  db.prepare('DELETE FROM builds WHERE app_id = ?').run(params.id)
-  const result = db.prepare('DELETE FROM apps WHERE id = ?').run(params.id)
-
-  if (result.changes === 0) return json(res, 404, { error: 'App not found' })
+  if (!db.prepare('SELECT 1 FROM apps WHERE id = ?').get(params.id)) return json(res, 404, { error: 'App not found' })
+  const buildIds = (db.prepare('SELECT id FROM builds WHERE app_id = ?').all(params.id) as { id: number }[]).map((b) => b.id)
+  deleteBuildsWithDependents(buildIds, dirs, () => {
+    db.prepare('DELETE FROM apps WHERE id = ?').run(params.id)
+  })
   json(res, 200, { ok: true })
 }
 

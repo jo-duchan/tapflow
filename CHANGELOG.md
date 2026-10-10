@@ -15,6 +15,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **Dashboard pages show the shape of what is loading.** App Center's build list, Mac Resources' charts, and the Team and Tokens tables draw a skeleton of their content while it loads, instead of a "Loading…" line. A load that answers within a quarter second shows nothing, so a fast relay does not flicker.
 
+### Fixed
+
+- **Deleting an app works when one of its builds has a session recording, and removes the files.** It used to fail with an error in that case, and otherwise left every build file of the app on disk. Deleting an app now removes its builds' recordings and files the same way the expiry purge does.
+
 ## [0.27.1] - 2026-10-09
 
 ### Added

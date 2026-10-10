@@ -79,3 +79,23 @@ export async function readJson<T = unknown>(req: http.IncomingMessage): Promise<
   const buf = await readBody(req)
   return JSON.parse(buf.toString('utf-8')) as T
 }
+
+/**
+ * The body, or `null` once it passes `maxBytes`. The rest is read and dropped rather than left unread, so the
+ * caller can still answer 413 on a connection that is not stuck mid-request.
+ */
+export function readBodyLimited(req: http.IncomingMessage, maxBytes: number): Promise<Buffer | null> {
+  return new Promise((resolve, reject) => {
+    const chunks: Buffer[] = []
+    let size = 0
+    let over = false
+    req.on('data', (c: Buffer) => {
+      if (over) return
+      size += c.length
+      if (size > maxBytes) { over = true; chunks.length = 0; return }
+      chunks.push(c)
+    })
+    req.on('end', () => resolve(over ? null : Buffer.concat(chunks)))
+    req.on('error', reject)
+  })
+}

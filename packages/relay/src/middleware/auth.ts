@@ -254,7 +254,7 @@ export function requireViewAuth(
 export function requireBuildAuth(
   req: http.IncomingMessage,
   res: http.ServerResponse
-): { userId: number } | null {
+): { userId: number; patId?: number } | null {
   const pat = verifyPat(req)
   if (pat !== null) {
     if (!pat.scopes.includes('builds:write')) {
@@ -263,7 +263,7 @@ export function requireBuildAuth(
       return null
     }
     touchPat(pat.patId)
-    return { userId: pat.userId }
+    return { userId: pat.userId, patId: pat.patId }
   }
   const auth = requireAuth(req, res)
   if (!auth) return null
