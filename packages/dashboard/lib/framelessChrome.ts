@@ -1,7 +1,7 @@
 import type { ChromeData } from '@/lib/types'
 
-/** A 1×1 transparent PNG. Not an empty string: `IOSViewer` loads `framePng` into an `<img>` and an
- *  `Image`, and an empty data URL is a broken image in both. */
+/** A 1×1 transparent PNG. Not an empty string: `IOSDeviceScreen` loads `framePng` into an `<img>` and
+ *  `IOSViewer` into an `Image` for recording, and an empty data URL is a broken image in both. */
 const TRANSPARENT_PNG = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAAC0lEQVR4nGNgAAIAAAUAAXpeqz8AAAAASUVORK5CYII='
 
 /** In the chrome's 2× units. */
@@ -11,7 +11,7 @@ const made = new Map<string, ChromeData>()
 const frameless = new WeakSet<ChromeData>()
 
 /**
- * The chrome `IOSViewer` is given when the agent sent none: the screen alone, filling the canvas, with
+ * The chrome the iOS viewer is given when the agent sent none: the screen alone, filling the canvas, with
  * no frame image and no side buttons.
  *
  * An iOS agent sends no chrome when it cannot build one — a model missing from Xcode's chrome map, a

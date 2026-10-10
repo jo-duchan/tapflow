@@ -5,7 +5,7 @@ export interface Rect { left: number; top: number; right: number; bottom: number
 /**
  * Where a physical side button sits when nothing is hovering it, in 2× composite px.
  *
- * **These are the numbers `IOSViewer` draws the button at**, and they have to stay that way: a hit
+ * **These are the numbers `IOSDeviceScreen` draws the button at**, and they have to stay that way: a hit
  * area computed from a different position than the pixels the user is aiming at is a target that
  * lies about where it is. The renderer's resting placement is
  * `left: rolloverOffset.x - buttonW / 2`, and a top-edge button (an iPad's power button, an iPad
