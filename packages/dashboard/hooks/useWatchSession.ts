@@ -82,6 +82,8 @@ export function useWatchSession(sessionId: string) {
     if (!connected) return
     send({ type: 'agents:list' })
     if (!finalRef.current) send({ type: 'watch:start', sessionId })
+    // Also how a holder that dropped and came back is noticed — the relay pushes nothing on a re-join — so
+    // the disconnect notice can outlast the return by up to this interval. Accepted: it is the true signal.
     const id = setInterval(() => send({ type: 'agents:list' }), 10_000)
     return () => clearInterval(id)
   }, [connected, send, sessionId])

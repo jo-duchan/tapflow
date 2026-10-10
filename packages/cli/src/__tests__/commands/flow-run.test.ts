@@ -94,6 +94,8 @@ describe('cmdFlowRun exit codes (#543)', () => {
   // watching. `vi.stubEnv` because this suite itself may run under CI.
   it('prints where to watch the run', async () => {
     vi.stubEnv('CI', '')
+    vi.stubEnv('JENKINS_URL', '')
+    vi.stubEnv('TF_BUILD', '')
     mocks.runFlow.mockResolvedValue(resultOf('passed'))
     await run([flowFile('a.yaml')])
     expect(console.log).toHaveBeenCalledWith('watch this run: http://localhost:4000/automation/sessions/s1')
@@ -104,8 +106,16 @@ describe('cmdFlowRun exit codes (#543)', () => {
 
   // The link is the relay's address rewritten, which a secret holding the relay URL does not mask — so a
   // public repository's CI log would show the host. Mutation: print regardless.
-  it('prints no link in CI', async () => {
-    vi.stubEnv('CI', 'true')
+  it.each([
+    ['CI', 'true'],
+    // Jenkins and Azure Pipelines set no `CI`.
+    ['JENKINS_URL', 'https://jenkins.example.test/'],
+    ['TF_BUILD', 'True'],
+  ])('prints no link in CI (%s)', async (name, value) => {
+    vi.stubEnv('CI', '')
+    vi.stubEnv('JENKINS_URL', '')
+    vi.stubEnv('TF_BUILD', '')
+    vi.stubEnv(name, value)
     mocks.runFlow.mockResolvedValue(resultOf('passed'))
     await run([flowFile('a.yaml')])
     expect(vi.mocked(console.log).mock.calls.some(([line]) => String(line).startsWith('watch this run:'))).toBe(false)
