@@ -936,7 +936,14 @@ export class RelayServer {
   }
 
   private readonly runHolders: RunHolders = {
-    isConnected: (keys) => this.openSocketsOf(keys).length > 0,
+    connectedKeys: () => {
+      const keys = new Set<string>()
+      for (const ws of this.wss.clients) {
+        const key = ws.readyState === WebSocket.OPEN ? this.ownerKey.get(ws)?.key : undefined
+        if (key) keys.add(key)
+      }
+      return keys
+    },
     heldSession: (keys) => {
       for (const ws of this.openSocketsOf(keys)) {
         const held = this.sessions.getByBrowserSocket(ws)
@@ -1363,7 +1370,15 @@ export class RelayServer {
       // A run is its runner's socket: the flow runner does not reconnect, so the last socket with its key
       // closing is the end of that run, finished or not. Not done while stopping (above) — a relay going
       // down has not seen the runner go, and the runner may still finish the run against the next one.
-      abandonRunsOf(this.ownerOf(ws), this.runHolders)
+      //
+      // Caught because this is an event listener: a database fault here (a full disk) would be uncaught and end
+      // the relay — the rule `handleConnection` states for its own reads. A run missed here is closed by
+      // `settleOrphanedRuns` on the next read.
+      try {
+        abandonRunsOf(this.ownerOf(ws), this.runHolders)
+      } catch (e) {
+        logger.error('could not close the runs of a disconnected runner:', e)
+      }
     })
   }
 

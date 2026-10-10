@@ -35,8 +35,8 @@ const ORPHAN_GRACE_SECONDS = 60
  * open: the flow runner does not reconnect, so a closed socket is the end of that process's run.
  */
 export interface RunHolders {
-  /** Whether a socket with any of these owner keys is open. */
-  isConnected(keys: string[]): boolean
+  /** The owner keys of every open socket, built once per pass so a check costs a lookup, not a scan. */
+  connectedKeys(): Set<string>
   /** The session a socket with one of these keys holds now — the one a watch link should open — or null. */
   heldSession(keys: string[]): string | null
 }
@@ -168,9 +168,11 @@ export function abandonRunsOf(socketKey: string, holders: RunHolders): void {
     ? db.prepare(`SELECT seq, created_by, holder_client FROM flow_runs WHERE status = 'running' AND holder_client = ?`).all(client)
     : db.prepare(`SELECT seq, created_by, holder_client FROM flow_runs WHERE status = 'running' AND holder_client = ? AND created_by = ?`).all(client, Number(user))
   ) as { seq: number; created_by: number | null; holder_client: string }[]
+  if (runs.length === 0) return
+  const open = holders.connectedKeys()
   const stmt = db.prepare(`${ABANDON} AND seq = ?`)
   for (const r of runs) {
-    if (!holders.isConnected(holderKeys(r.created_by, r.holder_client))) stmt.run(r.seq)
+    if (!holderKeys(r.created_by, r.holder_client).some((k) => open.has(k))) stmt.run(r.seq)
   }
 }
 
@@ -183,9 +185,11 @@ export function settleOrphanedRuns(holders: RunHolders): void {
     SELECT seq, created_by, holder_client FROM flow_runs
      WHERE status = 'running' AND last_activity_at < datetime('now', ?)
   `).all(`-${ORPHAN_GRACE_SECONDS} seconds`) as { seq: number; created_by: number | null; holder_client: string }[]
+  if (running.length === 0) return
+  const open = holders.connectedKeys()
   const stmt = getDb().prepare(`${ABANDON} AND seq = ?`)
   for (const r of running) {
-    if (!holders.isConnected(holderKeys(r.created_by, r.holder_client))) stmt.run(r.seq)
+    if (!holderKeys(r.created_by, r.holder_client).some((k) => open.has(k))) stmt.run(r.seq)
   }
 }
 
@@ -301,7 +305,10 @@ export async function handleReportFlow(
   const planned = (JSON.parse(run.flows_json) as { name: string; file: string | null }[])[idx]
 
   const db = getDb()
-  db.transaction(() => {
+  // The run can go while the body arrives — its build purged, its app deleted — and the insert would then
+  // fail its foreign key as a 500 with a stack in the log, for an answer that is just "not found".
+  const gone = db.transaction(() => {
+    if (!db.prepare('SELECT 1 FROM flow_runs WHERE seq = ?').get(run.seq)) return true
     // An upsert that keeps the screenshot: the CLI may retry a report, and the screenshot arrives separately.
     db.prepare(`
       INSERT INTO flow_run_flows (run_seq, idx, name, file, device_id, device_name, platform, status, failure_kind,
@@ -318,7 +325,9 @@ export async function handleReportFlow(
       durationMs, JSON.stringify(steps),
     )
     db.prepare(`UPDATE flow_runs SET last_activity_at = datetime('now') WHERE seq = ?`).run(run.seq)
+    return false
   })()
+  if (gone) return json(res, 404, { error: 'Run not found' })
   json(res, 200, { ok: true })
 }
 
@@ -340,9 +349,8 @@ export async function handleUploadFlowScreenshot(
 ): Promise<void> {
   const run = ownRun(req, res, params.id)
   if (!run) return
-  const flow = getDb().prepare('SELECT screenshot_file FROM flow_run_flows WHERE run_seq = ? AND idx = ?')
-    .get(run.seq, Number(params.idx)) as { screenshot_file: string | null } | undefined
-  if (!flow) return json(res, 404, { error: 'Report the flow before its screenshot' })
+  const current = getDb().prepare('SELECT screenshot_file FROM flow_run_flows WHERE run_seq = ? AND idx = ?')
+  if (!current.get(run.seq, Number(params.idx))) return json(res, 404, { error: 'Report the flow before its screenshot' })
 
   const buf = await readBodyLimited(req, MAX_SCREENSHOT_BYTES)
   if (buf === null) return json(res, 413, { error: `Screenshot larger than ${MAX_SCREENSHOT_BYTES} bytes` })
@@ -352,9 +360,18 @@ export async function handleUploadFlowScreenshot(
   fs.mkdirSync(screenshotsDir, { recursive: true })
   const filename = `${randomUUID()}${kind.ext}`
   await fs.promises.writeFile(path.join(screenshotsDir, filename), buf)
-  getDb().prepare('UPDATE flow_run_flows SET screenshot_file = ?, screenshot_mime = ? WHERE run_seq = ? AND idx = ?')
+  // **Re-read after the awaits, with nothing awaited between the read and the update.** Two uploads for one
+  // flow (a retry) both read the same old name before their bodies arrived, and a run deleted with its build
+  // meanwhile updates no row. Either way a file no row names would stay forever: nothing sweeps this
+  // directory, so a file kept here outlives the run it was "deleted with".
+  const before = current.get(run.seq, Number(params.idx)) as { screenshot_file: string | null } | undefined
+  const updated = getDb().prepare('UPDATE flow_run_flows SET screenshot_file = ?, screenshot_mime = ? WHERE run_seq = ? AND idx = ?')
     .run(filename, kind.mime, run.seq, Number(params.idx))
-  if (flow.screenshot_file) unlinkSafe(path.join(screenshotsDir, flow.screenshot_file), 'run screenshot')
+  if (updated.changes === 0) {
+    unlinkSafe(path.join(screenshotsDir, filename), 'run screenshot')
+    return json(res, 404, { error: 'Run not found' })
+  }
+  if (before?.screenshot_file) unlinkSafe(path.join(screenshotsDir, before.screenshot_file), 'run screenshot')
   json(res, 200, { ok: true })
 }
 

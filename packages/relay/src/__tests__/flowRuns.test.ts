@@ -242,6 +242,14 @@ describe('flow run records', () => {
     expect(fs.readdirSync(shotsDir)).toHaveLength(1)
   })
 
+  it('keeps one file when two uploads for the same flow overlap', async () => {
+    const id = await create()
+    await call('POST', `/api/v1/runs/${id}/flows/0`, bearer(PAT_CI), passed)
+    const up = () => call('POST', `/api/v1/runs/${id}/flows/0/screenshot`, bearer(PAT_CI), PNG)
+    await Promise.all([up(), up(), up()])
+    expect(fs.readdirSync(shotsDir)).toHaveLength(1)
+  })
+
   it('refuses a screenshot that is not an image, or over 5 MB', async () => {
     const id = await create()
     await call('POST', `/api/v1/runs/${id}/flows/0`, bearer(PAT_CI), passed)
