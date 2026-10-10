@@ -655,7 +655,7 @@ export class TapflowClient {
   }
 
   async connectDevice(sessionId: string): Promise<void> {
-    this.send({ type: 'session:start', sessionId })
+    this.send({ type: 'session:start', sessionId, clientKind: 'mcp' })
     const msg = await this.waitFor(
       (m) =>
         (m['type'] === 'session:joined' && m['sessionId'] === sessionId) ||

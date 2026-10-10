@@ -38,7 +38,7 @@ iOS build format: `.app.zip` **or** `.tar.gz`/`.tgz` (EAS `eas build` simulator 
 
   **The role and direction are settled before the shape is, and the order is load-bearing.** A malformed frame is dropped, but an agent-only type a browser spoofed *badly* must still close the socket — gating after shape validation lets such a spoofer keep its connection. The direction is a fact about the `type` alone, which is known even when the payload is not. A failed handshake is the one exception: it confers no role, so an agent whose `agent:register` does not parse gets its frame dropped rather than a `Forbidden` close, and its next attempt still introduces it.
 - JSON messages and binary frames share the same WebSocket connection, branched by the `isBinary` flag.
-- Control message protocol: `input:touch:*`, `input:pinch:*`, `input:button`, `input:key`, `input:type`, `input:rotate`, `input:keyboard:toggle`, `device:boot`, `device:shutdown`, `session:start`, `session:end`, `clipboard:read`, `clipboard:write`.
+- Control message protocol: `input:touch:*`, `input:pinch:*`, `input:button`, `input:key`, `input:type`, `input:rotate`, `input:keyboard:toggle`, `device:boot`, `device:shutdown`, `session:start`, `session:end`, `clipboard:read`, `clipboard:write`, `watch:start`, `watch:stop`.
 - **The message shapes live in [`@tapflowio/protocol`](../protocol/AGENTS.md), not here.** Every message the relay *originates* goes through `sendTo(socket, msg: RelayOutbound)`, so adding one means adding it to that union first — the compiler will not let you do it in the other order. **Inbound frames are parsed into a discriminated union at the door** (`parseInbound`), not cast — see the header of `protocol/src/validate/`. Which frame gets forwarded differs by direction and is checked by `scripts/__tests__/browserInboundRouting.test.mjs`:
 
   - **agent → browser: the original frame (`raw`).** `z.object` strips undeclared keys, so forwarding the parse product would delete a field a newer agent added — the one direction where the sender is the more recently updated side.
@@ -118,6 +118,28 @@ iOS build format: `.app.zip` **or** `.tar.gz`/`.tgz` (EAS `eas build` simulator 
   deliberately not through `dispatchTarget`: that resolver also decides agent liveness, and using it there
   would move `agent offline` ahead of `Build not found`, changing which of two simultaneous problems the
   caller is told about.
+- **A session an AI client holds can be watched, read-only** (`watch:*`). The rules live with the code, and
+  the ones that are easy to undo are these:
+  - **Watchers are an index in `SessionManager`, never `owner` or `browserSocket`,** each bound to the owner
+    key it was admitted under. A *different* client binding the session evicts them (`holder-changed`) —
+    otherwise whoever watched the agent would go on watching the person who picked the device up next. The
+    same client re-joining keeps them, and `remove()` evicts on every path.
+  - **The ownership gate is not the only gate a watcher meets.** `mayShutDown` passes anyone while the session
+    is unheld, which is exactly the holder's reconnect grace, so a watching socket is refused `device:shutdown`
+    and `session:start` for the session it watches before the usual gates run.
+  - **What reaches a watcher is an allowlist**: video frames (not audio), the device's description (chrome,
+    device info, postures, booting, ready) and the lifecycle (agent away, rebound, holder left, ended). Every
+    reply to something the holder asked — acks, clipboard, network state — stays the holder's.
+  - **One keyframe-aware sender per watcher, and a watcher's drop asks for no IDR.** The sender's drop state
+    lives in its closure, so a shared one would let a slow watcher push the holder into drop-to-keyframe; and
+    an IDR changes the encoder's output for everyone, so a watcher on a slow link requesting one on every
+    drain would cost the holder forced keyframes. A watcher resyncs on the periodic keyframe (plus the one
+    throttled request when it starts watching). Frame forwarding is not gated on the holder either: watchers
+    keep the picture through the holder's reconnect grace.
+  - **A holder cannot watch its own session** — it already receives every frame, and the watcher gates would
+    then refuse its own shutdown and re-join.
+  - **An unauthenticated loopback socket may hold a session but never watch** — any browser on the relay's Mac
+    reaches loopback without a credential. `mayWatch` is decided once at the handshake.
 - JWTs are issued based on team invite links.
 - **Every address handed to someone else is decided in `lib/publicUrl.ts`** — invite mail, the link the dashboard copies, CORS, and what `/api/v1/relay/host` reports. Never from the `Host` header (#6). A tunnel's `publicUrl` is for teammates' browsers and `relay.url` is where agents connect, so the endpoint reports them separately. **What a tunnel actually did beats what config says**: config names a tunnel but not whether it came up or at which address (Tailscale's is detected, #794), so an entry point that starts one passes the outcome as the `RelayServer` `tunnel` option, and the CLI starts the tunnel before the relay for that reason. No option means no entry point manages a tunnel, and config is trusted — the standalone `server.ts` case. `scripts/__tests__/teammateUrlsSingleSource.test.mjs` holds that only `publicUrl.ts` and `config.ts` read those two settings.
 - Serves the `public/` directory as HTTP static files (dashboard build output).

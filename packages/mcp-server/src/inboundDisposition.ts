@@ -107,4 +107,9 @@ export const INBOUND_DISPOSITION = {
       + 'it, the relay caches and replays it, and nothing reads the result. Kept on the wire for '
       + 'third-party agents.',
   },
+  // This client drives a session; it never watches one, so the four watch replies have no waiter here.
+  'watch:started': { ignored: 'Answers `watch:start`, which this client never sends.' },
+  'watch:refused': { ignored: 'Answers `watch:start`, which this client never sends.' },
+  'watch:holder-left': { ignored: 'Sent only to a watching socket; this client never watches.' },
+  'watch:ended': { ignored: 'Sent only to a watching socket; this client never watches.' },
 } satisfies Record<BrowserInbound['type'], Disposition>

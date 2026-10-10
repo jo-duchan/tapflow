@@ -139,7 +139,9 @@ describe('TapflowClient', () => {
         client.connectDevice('sess-1'),
         waitForMessage(relay, 'session:start'),
       ])
-      expect(msg).toMatchObject({ type: 'session:start', sessionId: 'sess-1' })
+      // `clientKind` is what makes the session watchable by a teammate — without it the relay treats this
+      // client as one that predates watching, and the dashboard offers no Watch link.
+      expect(msg).toMatchObject({ type: 'session:start', sessionId: 'sess-1', clientKind: 'mcp' })
     })
 
     // These two send an **addressed** refusal, as the relay does since L5d. The fake relay's `send` takes

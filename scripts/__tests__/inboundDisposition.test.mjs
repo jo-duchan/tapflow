@@ -61,11 +61,12 @@ function entries(src) {
 const table_entries = entries(table)
 
 describe('inbound disposition', () => {
-  it('parsed every entry — 30, the browser-inbound surface', () => {
+  it('parsed every entry — 36, the browser-inbound surface', () => {
     // The compiler already refuses a missing key, so this is not the coverage assertion; it is the
     // parser's own honesty check. Without it the two assertions below pass on an empty map.
     // 29 as of #542: `device:shutdown-error` gave the shutdown pair the failure member it lacked.
-    expect(table_entries.size).toBe(32)
+    // 32 by the next count, and 36 with the four `watch:*` replies.
+    expect(table_entries.size).toBe(36)
   })
 
   it('every entry is exactly one of at / ignored', () => {
@@ -156,6 +157,12 @@ describe('inbound disposition', () => {
       // when the viewer landed. It has, and they did — which is the whole point of writing "no branch
       // yet" down rather than leaving an absent branch to speak for itself.
       'session:deviceInfo',
+      // No page watches yet. Like `network:*` above, these become `at:` when the AI session page lands
+      // and sends `watch:start` — written down so that arriving is a diff, not a branch nobody noticed.
+      'watch:ended',
+      'watch:holder-left',
+      'watch:refused',
+      'watch:started',
     ])
   })
 })

@@ -659,7 +659,7 @@ export class RelayClient {
   }
 
   async joinSession(sessionId: string): Promise<void> {
-    this.sendFirstRequest({ type: 'session:start', sessionId })
+    this.sendFirstRequest({ type: 'session:start', sessionId, clientKind: 'flow-runner' })
     const msg = await this.waitFor(
       (m) =>
         (m['type'] === 'session:joined' && m['sessionId'] === sessionId) ||

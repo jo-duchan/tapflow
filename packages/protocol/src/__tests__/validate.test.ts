@@ -339,3 +339,21 @@ describe('a payload failure the caller can be told about', () => {
     expect(ok(raw).msg).toEqual(raw)
   })
 })
+
+describe('a client newer than this relay still joins', () => {
+  // `session:start` has no answerable reply, so a refused one is silence and the client waits out its join
+  // deadline. A `clientKind` this relay does not know therefore goes — the session is simply not
+  // watchable — and the join stands. A closed enum here broke that for the first kind ever added.
+  it('drops a client kind it does not know, and keeps the join', () => {
+    const r = ok({ type: 'session:start', sessionId: 's1', clientKind: 'some-future-client' })
+    expect(r.msg).toEqual({ type: 'session:start', sessionId: 's1', clientKind: undefined })
+  })
+
+  it('keeps a kind it knows', () => {
+    expect(ok({ type: 'session:start', sessionId: 's1', clientKind: 'mcp' }).msg).toMatchObject({ clientKind: 'mcp' })
+  })
+
+  it('still refuses a kind that is not a string', () => {
+    expect(fail({ type: 'session:start', sessionId: 's1', clientKind: 7 }).reason).toBe('bad-shape')
+  })
+})

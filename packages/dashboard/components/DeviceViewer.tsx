@@ -541,7 +541,7 @@ export function DeviceViewer({ sessionId, deviceId, formFactor, platform = 'ios'
   useLayoutEffect(() => { sendRef.current = send; });
 
   useEffect(() => {
-    if (connected) send({ type: 'session:start', sessionId });
+    if (connected) send({ type: 'session:start', sessionId, clientKind: 'dashboard' });
   }, [connected, send, sessionId]);
 
   // Derive platform from chrome payload shape

@@ -173,8 +173,9 @@ describe('protocol message interfaces', () => {
     // `NetworkRequestState`, #614 — the relay had no way to ask an agent to re-report a device's
     // network condition, so a re-joining viewer had no way to learn it. 72 is the posture pair —
     // `InputPosture` and `DevicePostures`, the foldable work: a device whose screens rearrange needs a
-    // way to be asked and a way to say what it offers.
-    expect(messages.size).toBe(72)
+    // way to be asked and a way to say what it offers. 78 is the six `watch:*` messages — a teammate
+    // watching, read-only, the device an AI client is driving.
+    expect(messages.size).toBe(78)
     // `InputKey` predates L1 and has always been named; it must be in here too.
     expect(messages.has('InputKey')).toBe(true)
   })
@@ -285,7 +286,8 @@ describe('protocol message interfaces', () => {
       if (base !== 'SessionScoped') offenders.push(`${name} ('${literal}')`)
     }
     expect(offenders).toEqual([])
-    expect([...messages].filter(([, m]) => m.extends === 'SessionScoped')).toHaveLength(11)
+    // 12 with `watch:refused`. The other three `watch:*` replies are not failures and carry `sessionId` directly.
+    expect([...messages].filter(([, m]) => m.extends === 'SessionScoped')).toHaveLength(12)
     // `error` is the ninth, as of L5d. Pinned by name rather than only by the count, because the count alone
     // would be satisfied by any new member and this is the one whose membership was argued.
     expect(messages.get('GenericError')).toMatchObject({ literal: 'error', extends: 'SessionScoped' })

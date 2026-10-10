@@ -330,7 +330,8 @@ describe('browser-inbound routing matches the protocol union', () => {
     },
     BrowserToRelay: {
       'agents:list': '',
-      'session:start': 'sessionId',
+      // `clientKind` optional: an older client joins as before and is simply not watchable.
+      'session:start': 'clientKind? sessionId',
       'session:end': 'sessionId',
       'session:leave': 'sessionId',
       'device:boot': 'payload requestId sessionId',
@@ -354,6 +355,8 @@ describe('browser-inbound routing matches the protocol union', () => {
       'clipboard:read': 'payload? requestId sessionId',
       'clipboard:write': 'payload requestId sessionId',
       'network:set': 'payload requestId sessionId',
+      'watch:start': 'sessionId',
+      'watch:stop': 'sessionId',
     },
     RelayToAgent: {
       'agent:registered': 'registeredSessions',
@@ -367,11 +370,16 @@ describe('browser-inbound routing matches the protocol union', () => {
     },
     RelayToBrowser: {
       'agents:listed': 'sessions',
-      'session:joined': 'capabilities sessionId',
+      // `watchUrl` only for a holder that declared an AI client kind, and absent from an older relay.
+      'session:joined': 'capabilities sessionId watchUrl?',
       'session:terminated': 'reason sessionId',
       'session:agent-away': 'sessionId',
       'session:rebound': 'capabilities sessionId',
       error: 'message reason sessionId',
+      'watch:started': 'sessionId',
+      'watch:refused': 'message reason sessionId',
+      'watch:holder-left': 'sessionId',
+      'watch:ended': 'reason sessionId',
     },
   }
 

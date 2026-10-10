@@ -158,6 +158,13 @@ describe('RelayClient — the input senders mint a correlator and await the ack'
     return { client, received }
   }
 
+  // `clientKind` is what makes a CI run watchable by a teammate — without it the relay treats this client
+  // as one that predates watching.
+  it('says it is the flow runner when it joins', async () => {
+    const { received } = await capture()
+    expect(received.find((m) => m['type'] === 'session:start')).toMatchObject({ sessionId: 's1', clientKind: 'flow-runner' })
+  })
+
   async function typeErrorClient(reason?: unknown) {
     wss = new WebSocketServer({ port: 0 })
     wss.on('connection', (ws) => {
