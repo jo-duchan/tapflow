@@ -382,6 +382,7 @@ tapflow flow run .tapflow/flows/login-smoke.yaml
 | `--junit <path>` | — | Where to write a JUnit XML report |
 | `--artifacts <dir>` | `.tapflow/artifacts` | Directory for failure screenshots |
 | `--timeout <seconds>` | `10` | Default wait per selector (seconds) |
+| `--no-record` | — | Do not record this run on the relay |
 
 With neither `--session` nor `--device`, it uses the booted device when exactly one is booted. With none booted, or more than one, it stops with an environment error.
 
@@ -390,6 +391,10 @@ With neither `--session` nor `--device`, it uses the booted device when exactly 
 | `0` | Every flow passed |
 | `1` | At least one flow failed on a product problem |
 | `2` | Environment or config error, or every failed flow failed on an environment problem |
+| `130` | Cancelled by `SIGINT` |
+| `143` | Cancelled by `SIGTERM` |
+
+With a token, the run is recorded on the relay. Recording never changes the exit code. See [Run records](/automation/flows#run-records).
 
 ## `tapflow migrate`
 

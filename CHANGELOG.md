@@ -11,6 +11,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **Watch the device your coding agent is driving.** `connect_device` returns a dashboard link (`watchUrl`) and a coding agent hands it to you as it starts testing; open it to watch the device live, read-only: nothing you click reaches the device. `tapflow flow run` prints the same kind of link on a `watch this run:` line, except in CI, where the link would show the relay's address in the log. In the QA session's device list, a device an AI client holds now says which one is driving it. Up to 4 people can watch a session. An unauthenticated connection from the relay's own Mac cannot watch.
 
+- **`tapflow flow run` records each run on the relay.** With a token, the run's flows, steps, failure screenshots, device and build are sent to the relay as it goes, and in CI the provider, branch, commit and job link too; a page to browse them comes in a later release. Recording never changes the result or the exit code: a relay that does not answer or refuses gets one warning line, and the end of a run waits at most 10 seconds for it. `--no-record` turns it off. A cancelled run (`SIGINT`/`SIGTERM`) now leaves its session and exits `130`/`143`. The token needs `builds:write`, which the API-type token already has.
+
 ### Changed
 
 - **Dashboard pages show the shape of what is loading.** App Center's build list, Mac Resources' charts, and the Team and Tokens tables draw a skeleton of their content while it loads, instead of a "Loading…" line. A load that answers within a quarter second shows nothing, so a fast relay does not flicker.

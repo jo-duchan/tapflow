@@ -356,8 +356,12 @@ export class RelayClient {
    */
   private lastClose: { code: number; reason: string } | null = null
   /** One identity per process, so a reconnect re-joins its own sessions instead of contending with the
-   *  socket it replaces. Minted here rather than supplied: nothing outside this process shares it. */
-  private readonly clientId = randomUUID()
+   *  socket it replaces. Minted here rather than supplied: nothing outside this process shares it.
+   *
+   *  Readable so a run record can name its runner (`POST /api/v1/runs`): the relay keeps a run live while a
+   *  socket with this id is open. It goes to the relay only, which never serves it back — a local socket
+   *  that learned it could claim this client's sessions. */
+  readonly clientId = randomUUID()
   private waiters: Waiter[] = []
 
   constructor(

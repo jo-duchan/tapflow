@@ -148,10 +148,10 @@ describe.each(Object.entries(DOCS))('docs/%s cli.md matches the registered CLI',
   it('documents every command and flag, and nothing the CLI lacks', () => {
     const cli = createCli()
     // Floors, measured 2026-09-26, so an empty walk on either side cannot read as agreement: 16
-    // invocations (14 commands, three of them split into subcommands) and 25 command flags.
+    // invocations (14 commands, three of them split into subcommands) and 25 command flags; 26 since `flow run --no-record` (2026-10-11).
     const code = codeSurface(cli)
     expect(code.invocations.size).toBe(16)
-    expect([...code.flags.values()].reduce((n, s) => n + s.size, 0)).toBe(25)
+    expect([...code.flags.values()].reduce((n, s) => n + s.size, 0)).toBe(26)
     expect(docSurface(markdown).invocations.size).toBe(16)
 
     expect(parity(cli, markdown)).toEqual({ undocumented: [], nonexistent: [] })

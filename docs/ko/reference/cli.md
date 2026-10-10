@@ -361,6 +361,7 @@ tapflow flow run .tapflow/flows/login-smoke.yaml
 | `--junit <path>` | — | JUnit XML 리포트를 쓸 경로 |
 | `--artifacts <dir>` | `.tapflow/artifacts` | 실패 스크린샷을 저장할 디렉터리 |
 | `--timeout <seconds>` | `10` | 셀렉터마다 기다리는 기본 시간(초) |
+| `--no-record` | — | 이 실행을 릴레이에 기록하지 않음 |
 
 `--session`과 `--device`를 모두 생략하면 부팅된 기기가 정확히 하나일 때 그 기기를 씁니다. 부팅된 기기가 없거나 여러 대면 환경 오류로 멈춥니다.
 
@@ -369,6 +370,10 @@ tapflow flow run .tapflow/flows/login-smoke.yaml
 | `0` | 모든 플로우 통과 |
 | `1` | 하나 이상의 플로우가 제품 문제로 실패 |
 | `2` | 환경·설정 오류, 또는 실패한 플로우가 모두 환경 문제 |
+| `130` | `SIGINT`로 취소됨 |
+| `143` | `SIGTERM`으로 취소됨 |
+
+토큰을 주면 실행 결과를 릴레이에 기록합니다. 기록은 종료 코드를 바꾸지 않습니다. 자세한 내용은 [실행 기록](/ko/automation/flows#run-records)을 참고하세요.
 
 ## `tapflow migrate`
 
