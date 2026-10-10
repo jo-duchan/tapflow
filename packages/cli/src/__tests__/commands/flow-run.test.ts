@@ -83,20 +83,32 @@ describe('cmdFlowRun exit codes (#543)', () => {
 
   afterEach(() => {
     vi.restoreAllMocks()
+    vi.unstubAllEnvs()
     process.exitCode = undefined
     fs.rmSync(dir, { recursive: true, force: true })
   })
 
   const run = (args: string[], opts = {}) => cmdFlowRun(args, opts).catch((e: unknown) => e)
 
-  // Printed before the device boots, so a CI log carries the link while the run is still worth watching.
+  // Printed before the device boots, so the person who started the run has the link while it is still worth
+  // watching. `vi.stubEnv` because this suite itself may run under CI.
   it('prints where to watch the run', async () => {
+    vi.stubEnv('CI', '')
     mocks.runFlow.mockResolvedValue(resultOf('passed'))
     await run([flowFile('a.yaml')])
     expect(console.log).toHaveBeenCalledWith('watch this run: http://localhost:4000/automation/sessions/s1')
     const log = vi.mocked(console.log).mock
     const printedAt = log.invocationCallOrder[log.calls.findIndex(([line]) => String(line).startsWith('watch this run:'))]!
     expect(printedAt).toBeLessThan(mocks.bootDevice.mock.invocationCallOrder[0]!)
+  })
+
+  // The link is the relay's address rewritten, which a secret holding the relay URL does not mask — so a
+  // public repository's CI log would show the host. Mutation: print regardless.
+  it('prints no link in CI', async () => {
+    vi.stubEnv('CI', 'true')
+    mocks.runFlow.mockResolvedValue(resultOf('passed'))
+    await run([flowFile('a.yaml')])
+    expect(vi.mocked(console.log).mock.calls.some(([line]) => String(line).startsWith('watch this run:'))).toBe(false)
   })
 
   it('exits 0 when every flow passes', async () => {
