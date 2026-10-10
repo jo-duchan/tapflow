@@ -13,6 +13,12 @@ import { holderKindLabel, watchEndText, watchRefusalText } from '@/lib/aiSession
  */
 export function AISessionWatch() {
   const { sessionId = '' } = useParams()
+  // Keyed by session, so moving to another session's watch starts from nothing: the socket, the decoder and
+  // a final "ended" are all one session's, and frames carry no session to filter by.
+  return <WatchView key={sessionId} sessionId={sessionId} />
+}
+
+function WatchView({ sessionId }: { sessionId: string }) {
   const watch = useWatchSession(sessionId)
   const { phase, device } = watch
   const { setNode: setBreadcrumb } = useBreadcrumb()
@@ -28,14 +34,16 @@ export function AISessionWatch() {
   }, [setBreadcrumb, device?.name])
 
   const over = phase.kind === 'ended' || phase.kind === 'refused'
+  // Never a bare "agent": in tapflow's words that is the process on the Mac, which the line above names.
+  const driver = device?.holder ? holderKindLabel(device.holder.kind).toLowerCase() : 'AI client'
   const status =
     phase.kind === 'refused' ? watchRefusalText(phase.reason)
       : phase.kind === 'ended' ? watchEndText(phase.reason)
-      : !watch.connected ? 'Reconnecting to the relay…'
+      : !watch.connected ? (phase.kind === 'connecting' ? 'Connecting to the relay…' : 'Reconnecting to the relay…')
       : phase.kind === 'connecting' ? 'Connecting…'
       : watch.agentAway ? 'The Mac running this device went away. Waiting for it to come back.'
-      : watch.holderLeft ? 'The agent disconnected. The device stays as it was until it comes back.'
-      : !watch.deviceReady ? 'Waiting for the agent to start the device.'
+      : watch.holderLeft ? `The ${driver} disconnected. The device stays as it was until it comes back.`
+      : !watch.deviceReady ? `Waiting for the ${driver} to start the device.`
       : 'Watching. Nothing you do here reaches the device.'
 
   return (

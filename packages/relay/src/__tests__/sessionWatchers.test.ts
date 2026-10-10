@@ -244,7 +244,7 @@ describe('session watchers', () => {
     await join(mcp, sessionId, 'mcp')
     const viewer = await socket(undefined, 1)
     await watch(viewer, sessionId)
-    mcp.send(JSON.stringify({ type: 'session:leave', sessionId }))
+    mcp.close()
     await waitForType(viewer, 'watch:holder-left')
     const tester = await socket('tab', 2)
     await join(tester, sessionId, 'dashboard')
@@ -261,6 +261,18 @@ describe('session watchers', () => {
     await watch(viewer, sessionId)
     await join(mcp, sessionId, 'dashboard')
     expect((await waitForType<WatchEnded>(viewer, 'watch:ended')).reason).toBe('holder-changed')
+  })
+
+  // A flow run finishing, an MCP `disconnect_device`: the holder is done, not dropped. Mutation: send
+  // `watch:holder-left` here again — every finished CI run then leaves its watcher waiting forever.
+  it('ends the watch when the holder leaves on purpose', async () => {
+    const { sessionId } = await registerAgent()
+    const mcp = await socket('mcp1')
+    await join(mcp, sessionId, 'mcp')
+    const viewer = await socket(undefined, 1)
+    await watch(viewer, sessionId)
+    mcp.send(JSON.stringify({ type: 'session:leave', sessionId }))
+    expect((await waitForType<WatchEnded>(viewer, 'watch:ended')).reason).toBe('session-ended')
   })
 
   it('ends the watch when the session ends', async () => {

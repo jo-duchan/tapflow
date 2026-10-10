@@ -114,8 +114,19 @@ describe('the watch page', () => {
     await deliver({ type: 'watch:started', sessionId: 'sess-a' })
     await deliver({ type: 'device:ready', payload: { deviceId: 'dev-a' } })
     await deliver({ type: 'watch:holder-left', sessionId: 'sess-a' })
-    expect(screen.getByRole('status').textContent).toBe('The agent disconnected. The device stays as it was until it comes back.')
+    expect(screen.getByRole('status').textContent).toBe('The AI client disconnected. The device stays as it was until it comes back.')
     expect(screen.getByTestId('watched-device')).toBeTruthy()
+  })
+
+  // The relay says nothing to watchers when the same client re-joins, and a booted device sends no chrome or
+  // ready — the listing naming a live holder is what says it is back. Mutation: drop that branch.
+  it('clears the disconnect notice once the listing shows the driver back', async () => {
+    renderAt('/automation/sessions/sess-a')
+    await deliver({ type: 'watch:started', sessionId: 'sess-a' })
+    await deliver({ type: 'device:ready', payload: { deviceId: 'dev-a' } })
+    await deliver({ type: 'watch:holder-left', sessionId: 'sess-a' })
+    await deliver({ type: 'agents:listed', sessions: AGENTS })
+    expect(screen.getByRole('status').textContent).toBe('Watching. Nothing you do here reaches the device.')
   })
 
   it('ignores what another session says', async () => {

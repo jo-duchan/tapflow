@@ -148,7 +148,7 @@ Without the link, you can find the devices a coding agent is driving right now u
 - Watching is read-only. Nothing you click reaches the device, and there is no sound.
 - Any teammate signed in to the dashboard can watch. Whatever the coding agent types on the device shows on screen too, so do not test with values the team should not see.
 - Up to 4 people can watch one session at a time.
-- If the coding agent's connection drops briefly, the page keeps the last picture and waits for it to come back. If another teammate starts using the device, the watch ends.
+- If the coding agent's connection drops briefly, the page keeps the last picture and waits for it to come back. The watch ends when the coding agent finishes with the session (`disconnect_device`) or another teammate starts using the device.
 
 ::: details How the link address is chosen
 If the relay has an address teammates can open (a tunnel or `relay.url`), the link uses it, and you can share it with teammates as it is. Otherwise, including when `relay.url` is a `localhost` address, the MCP server builds the link from the `TAPFLOW_RELAY_URL` it connected with. For example, connected with `ws://localhost:4000`, the link starts with `http://localhost:4000/automation/sessions/` and opens on the computer running the MCP server. For an address to send to teammates, see [External access](/operate/external-access).

@@ -94,6 +94,9 @@ describe('cmdFlowRun exit codes (#543)', () => {
     mocks.runFlow.mockResolvedValue(resultOf('passed'))
     await run([flowFile('a.yaml')])
     expect(console.log).toHaveBeenCalledWith('watch this run: http://localhost:4000/automation/sessions/s1')
+    const log = vi.mocked(console.log).mock
+    const printedAt = log.invocationCallOrder[log.calls.findIndex(([line]) => String(line).startsWith('watch this run:'))]!
+    expect(printedAt).toBeLessThan(mocks.bootDevice.mock.invocationCallOrder[0]!)
   })
 
   it('exits 0 when every flow passes', async () => {

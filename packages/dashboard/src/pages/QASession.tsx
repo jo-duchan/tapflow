@@ -291,7 +291,9 @@ export function QASession() {
                     // **An AI agent's device opens its watch page instead of sitting disabled.** Only a
                     // device the relay lists with a `holder` — a relay that sends the field understands
                     // `watch:start`, and a person's session carries none, so it stays "In use".
-                    if (isBusy && d.holder) {
+                    // Not while this tab is booting a device: leaving the page now would unmount the
+                    // session that is starting, and `useAgentSession` shuts its device down on unmount.
+                    if (isBusy && d.holder && !booting) {
                       return (
                         <Link
                           key={d.id}

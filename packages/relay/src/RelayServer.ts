@@ -1511,7 +1511,10 @@ export class RelayServer {
         if (this.ownsSession(ws, this.sessions.get(msg.sessionId))) {
           this.sessions.clearBrowser(msg.sessionId)
           this.forgetSessionState(msg.sessionId)
-          this.tellWatchers(msg.sessionId, { type: 'watch:holder-left', sessionId: msg.sessionId })
+          // **A leave is the end, not a blip.** The holder said it is done — a flow run finishing, an MCP
+          // `disconnect_device` — so the watch ends. `watch:holder-left` is for a socket that dropped, which
+          // may come back; sent here it left a watcher of every finished CI run waiting forever.
+          this.sessions.endWatches(msg.sessionId, 'session-ended')
         }
         break
       }

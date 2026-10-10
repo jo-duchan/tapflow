@@ -39,6 +39,9 @@ export function useWatchSession(sessionId: string) {
     if (msg.type === 'agents:listed') {
       const found = msg.sessions.flatMap((s) => s.devices).find((d) => d.sessionId === sessionId)
       if (found) setDevice(found)
+      // The relay says nothing when the same client re-joins after a drop, and a device already booted sends
+      // no chrome or ready. The listing names an AI holder only while one is live, so it is the signal.
+      if (found?.holder) setHolderLeft(false)
       return
     }
     if ('sessionId' in msg && msg.sessionId !== undefined && msg.sessionId !== sessionId) return
