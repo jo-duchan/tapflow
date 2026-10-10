@@ -51,10 +51,12 @@ export function useWatchSession(sessionId: string) {
     else if (msg.type === 'watch:holder-left') setHolderLeft(true)
     else if (msg.type === 'session:agent-away') setAgentAway(true)
     else if (msg.type === 'session:rebound') { setAgentAway(false); setDeviceReady(false) }
-    else if (msg.type === 'session:chrome') { setChrome(msg.payload); setHolderLeft(false) }
+    // Neither of these says the holder is back: a foldable re-sends its chrome on a screen change, and the
+    // device stays booted while the holder is away. Only the listing does — see `agents:listed` above.
+    else if (msg.type === 'session:chrome') setChrome(msg.payload)
     else if (msg.type === 'device:postures') setPostures(msg.payload)
     else if (msg.type === 'device:booting') { setChrome(null); setPostures(undefined); setDeviceReady(false); setAgentAway(false) }
-    else if (msg.type === 'device:ready') { setDeviceReady(true); setAgentAway(false); setHolderLeft(false) }
+    else if (msg.type === 'device:ready') { setDeviceReady(true); setAgentAway(false) }
   }, [sessionId])
 
   // Video only. The relay sends watchers no audio; an envelope that says audio is dropped here too, so a

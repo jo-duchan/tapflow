@@ -114,6 +114,8 @@ describe('the watch page', () => {
     await deliver({ type: 'watch:started', sessionId: 'sess-a' })
     await deliver({ type: 'device:ready', payload: { deviceId: 'dev-a' } })
     await deliver({ type: 'watch:holder-left', sessionId: 'sess-a' })
+    // A foldable re-sends its chrome on a screen change whoever holds it; that is not the holder coming back.
+    await deliver({ type: 'session:chrome', sessionId: 'sess-a', payload: { buttons: [], streamType: 'h264', screenWidth: 1080, screenHeight: 2400 } })
     expect(screen.getByRole('status').textContent).toBe('The AI client disconnected. The device stays as it was until it comes back.')
     expect(screen.getByTestId('watched-device')).toBeTruthy()
   })
