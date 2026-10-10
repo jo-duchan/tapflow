@@ -71,7 +71,8 @@ survived every viewer test.
 `/automation/sessions/:id` watches one session through `useWatchSession` and renders `WatchedDevice` (the
 shared device screens, no controls). **It is reached only through the link** an AI client hands out: watching
 an agent is part of making a test, and it belongs to the person who asked. There is deliberately no list of AI
-sessions; CI runs — tests the team handed to automation — get their own page with the flow run records.
+sessions; CI runs — tests the team handed to automation — are to get their own page with the flow run records
+(ROADMAP, "Flow run records"). Until that ships a CI run cannot be watched, which is no change from before.
 **That page must never send `session:start`, `device:boot` or `device:shutdown`, and must not use
 `useAgentSession`** — it shuts the device down on unmount, and a watch page closing would end what the agent
 is in the middle of. The relay refuses those from a watching socket too; this is the half that does not depend

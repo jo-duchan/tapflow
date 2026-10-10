@@ -161,19 +161,20 @@ post-launch timing are where it breaks. Hardening is tracked under the
 
 What an agent or a flow run does should be something a person can see, and the same record should
 be readable by an agent ([VISION.md](./VISION.md#always-reviewable-what-ai-does-a-person-can-see)).
-Today a device an agent holds shows as "In use" and cannot be opened, and a flow run's result exists
-only as JUnit and screenshots in the CI job. This track ships in two stages. **First make it usable,
+A device an agent held used to show only as "In use", and a flow run's result exists only as JUnit and
+screenshots in the CI job. This track ships in two stages. **First make it usable,
 then refine it.** Every step is additive, so a team picks it up by upgrading.
 
 Usable:
 
-- [ ] **AI session page**: watch a device an MCP or flow-runner client is driving, live and read-only,
-  on its own dashboard page. The QA session page stays built for manual testing, and the two share
-  the device view.
+- [x] **AI session page**: watch a device an MCP or flow-runner client is driving, live and read-only,
+  through the link the client hands to the person who started it. The QA session page stays built for
+  manual testing, and the two share the device view.
 - [ ] **Agent action timeline** on that page. The relay passes the agent's actions to watchers as they
   happen and does not store them.
 - [ ] **Flow run records**: the flow, per-step results, the failure screenshot, and whether the product
-  or the environment failed. Records attach to the build and are deleted with it.
+  or the environment failed. Records attach to the build and are deleted with it. This is where CI runs
+  are seen, live and afterwards, sorted and grouped by build, status and flow.
 - [ ] **Run recording** that works without a browser, as in CI.
 
 Refine:
