@@ -54,10 +54,10 @@ npm install -g @tapflowio/mcp-server
 `claude mcp add` 명령어로 바로 등록할 수 있습니다.
 
 ```sh
-claude mcp add --scope project \
+claude mcp add tapflow --scope project \
   --env TAPFLOW_RELAY_URL=ws://localhost:4000 \
   --env TAPFLOW_TOKEN=tflw_pat_your_token_here \
-  tapflow -- tapflow-mcp
+  -- tapflow-mcp
 ```
 
 `--scope project`로 등록하면 `.mcp.json`에 저장되어 팀과 공유됩니다. 본인만 사용할 경우 `--scope local`(기본값)을 사용하세요.
@@ -65,10 +65,10 @@ claude mcp add --scope project \
 릴레이가 원격 서버에 있다면 URL을 변경합니다.
 
 ```sh
-claude mcp add --scope project \
+claude mcp add tapflow --scope project \
   --env TAPFLOW_RELAY_URL=wss://your-relay.example.com \
   --env TAPFLOW_TOKEN=tflw_pat_your_token_here \
-  tapflow -- tapflow-mcp
+  -- tapflow-mcp
 ```
 
 ### 다른 MCP 클라이언트 (Cursor, VS Code, Codex)

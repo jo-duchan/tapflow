@@ -54,10 +54,10 @@ npm install -g @tapflowio/mcp-server
 Register tapflow with the `claude mcp add` command:
 
 ```sh
-claude mcp add --scope project \
+claude mcp add tapflow --scope project \
   --env TAPFLOW_RELAY_URL=ws://localhost:4000 \
   --env TAPFLOW_TOKEN=tflw_pat_your_token_here \
-  tapflow -- tapflow-mcp
+  -- tapflow-mcp
 ```
 
 `--scope project` saves the config to `.mcp.json` so the whole team shares it. Use `--scope local` (the default) if you only want it for yourself.
@@ -65,10 +65,10 @@ claude mcp add --scope project \
 If the relay is on a remote server, change the URL:
 
 ```sh
-claude mcp add --scope project \
+claude mcp add tapflow --scope project \
   --env TAPFLOW_RELAY_URL=wss://your-relay.example.com \
   --env TAPFLOW_TOKEN=tflw_pat_your_token_here \
-  tapflow -- tapflow-mcp
+  -- tapflow-mcp
 ```
 
 ### Other MCP clients (Cursor, VS Code, Codex)
