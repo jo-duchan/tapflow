@@ -24,7 +24,7 @@
     "ws": "^8.22.0"
   },
   "devDependencies": {
-    "concurrently": "^9.2.4",
+    "concurrently": "^9.2.5",
     "tsx": "^4.23.15",
     "typescript": "^5.0.0"
   }

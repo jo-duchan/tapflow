@@ -13,8 +13,8 @@
     "lint": "eslint src"
   },
   "devDependencies": {
-    "@types/node": "^22.20.4",
-    "@types/ws": "^8.0.0",
+    "@types/node": "^22.20.5",
+    "@types/ws": "^8.18.2",
     "typescript": "^5.0.0",
     "ws": "^8.22.0"
   }
