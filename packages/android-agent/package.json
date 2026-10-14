@@ -54,7 +54,7 @@
     "download-scrcpy-server": "node scripts/download-scrcpy-server.mjs"
   },
   "dependencies": {
-    "@grpc/grpc-js": "^1.14.5",
+    "@grpc/grpc-js": "^1.14.6",
     "@grpc/proto-loader": "^0.8.1",
     "@tapflowio/agent-core": "workspace:*",
     "@tapflowio/protocol": "workspace:*",

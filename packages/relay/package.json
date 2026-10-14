@@ -58,14 +58,14 @@
     "better-sqlite3": "^12.11.1",
     "busboy": "^1.6.0",
     "jsonwebtoken": "^9.0.3",
-    "nodemailer": "^10.0.14",
+    "nodemailer": "^10.1.0",
     "ws": "^8.22.0",
-    "zod": "^4.6.5"
+    "zod": "^4.6.6"
   },
   "devDependencies": {
     "@tapflowio/test-utils": "workspace:*",
     "@types/better-sqlite3": "^7.6.13",
-    "@types/busboy": "^1.5.4",
+    "@types/busboy": "^1.5.5",
     "@types/jsonwebtoken": "^9.0.10",
     "@types/node": "^22.20.5",
     "@types/nodemailer": "^8.0.2",
