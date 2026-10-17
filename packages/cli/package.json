@@ -62,7 +62,7 @@
     "@tapflowio/relay": "workspace:*",
     "cac": "^6.7.14",
     "ws": "^8.22.0",
-    "zod": "^4.6.5"
+    "zod": "^4.6.7"
   },
   "devDependencies": {
     "@types/node": "^22.20.5",
