@@ -196,7 +196,7 @@ describe('teammate-facing URLs from the relay', () => {
   })
 
   describe('GET /api/v1/relay/host', () => {
-    interface HostInfo { lanHost: string | null; port: number; publicBaseUrl: string | null; agentRelayUrl: string | null }
+    interface HostInfo { lanHost: string | null; port: number; publicBaseUrl: string | null; agentRelayUrl: string | null; publicUrlWarning?: 'container-without-public-url' }
     const hostInfo = async (port: number): Promise<HostInfo> => {
       const res = await fetch(`http://localhost:${port}/api/v1/relay/host`, { headers: { cookie: cookie() } })
       expect(res.status).toBe(200)
@@ -209,6 +209,7 @@ describe('teammate-facing URLs from the relay', () => {
         const body = await hostInfo(port)
         expect(body.publicBaseUrl).toBe('https://vps.example.com')
         expect(body.agentRelayUrl).toBe('ws://192.168.0.9:4000')
+        expect(body).not.toHaveProperty('publicUrlWarning')
         expect(body.port).toBe(port)
         if (body.lanHost !== null) expect(body.lanHost).toMatch(/^\d+\.\d+\.\d+\.\d+$/)
       })
@@ -217,7 +218,9 @@ describe('teammate-facing URLs from the relay', () => {
     it('reports null for both when nothing usable is configured', async () => {
       configure(null, null)
       await withServer(undefined, async (port) => {
-        expect(await hostInfo(port)).toMatchObject({ publicBaseUrl: null, agentRelayUrl: null })
+        const body = await hostInfo(port)
+        expect(body).toMatchObject({ publicBaseUrl: null, agentRelayUrl: null })
+        expect(body).not.toHaveProperty('publicUrlWarning')
       })
       configure(null, 'ws://localhost:4000')
       await withServer(undefined, async (port) => {
@@ -236,6 +239,51 @@ describe('teammate-facing URLs from the relay', () => {
         const body = await hostInfo(port)
         expect(body.port).toBe(port)
         expect(body.lanHost).toBeNull()
+      })
+    })
+
+    it('adds only the structured warning reason for a container without a teammate URL', async () => {
+      configure(null, null)
+      state.inContainer = true
+      await withServer(undefined, async (port) => {
+        expect(await hostInfo(port)).toMatchObject({
+          lanHost: null,
+          port,
+          publicBaseUrl: null,
+          agentRelayUrl: null,
+          publicUrlWarning: 'container-without-public-url',
+        })
+      })
+    })
+
+    it('suppresses the warning for a reachable runtime tunnel URL', async () => {
+      configure({ provider: 'tailscale' }, 'http://192.168.0.9:4000')
+      state.inContainer = true
+      await withServer({ publicUrl: 'https://mac.tailnet.ts.net:4000' }, async (port) => {
+        const body = await hostInfo(port)
+        expect(body.publicBaseUrl).toBe('https://mac.tailnet.ts.net:4000')
+        expect(body.publicUrlWarning).toBeUndefined()
+      })
+    })
+
+    it('uses failed runtime state instead of a configured tunnel URL', async () => {
+      configure(rathole('https://stale.example.com'), null)
+      state.inContainer = true
+      await withServer({ publicUrl: null }, async (port) => {
+        const body = await hostInfo(port)
+        expect(body.publicBaseUrl).toBeNull()
+        expect(body.publicUrlWarning).toBe('container-without-public-url')
+      })
+    })
+
+    it('warns for an unusable selected tunnel even when relay.url is a valid secondary candidate', async () => {
+      configure(rathole('http://127.0.0.1:4000'), 'https://relay.example.com')
+      state.inContainer = true
+      await withServer({ publicUrl: 'http://127.0.0.1:4000' }, async (port) => {
+        const body = await hostInfo(port)
+        expect(body.publicBaseUrl).toBeNull()
+        expect(body.agentRelayUrl).toBe('wss://relay.example.com')
+        expect(body.publicUrlWarning).toBe('container-without-public-url')
       })
     })
   })

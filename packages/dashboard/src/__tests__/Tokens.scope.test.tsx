@@ -7,7 +7,7 @@ import { TokenSettings } from '@/src/pages/settings/Tokens'
 import { withQuery } from './withQuery'
 import { resetTeammateBasesForTests } from '@/lib/publicLink'
 
-vi.mock('sonner', () => ({ toast: { success: vi.fn(), error: vi.fn() } }))
+vi.mock('sonner', () => ({ toast: { success: vi.fn(), error: vi.fn(), warning: vi.fn() } }))
 // The page offers the Agent type to Admins only; these cases are about an Admin's dialog.
 vi.mock('@/hooks/useAuth', () => ({ useAuth: () => ({ user: { id: 1, email: 'a@test.local', displayName: null, avatarUrl: null, role: 'Admin' }, loading: false }) }))
 
@@ -25,6 +25,7 @@ function stubFetch(opts: {
   lanHost?: string | null
   publicBaseUrl?: string | null
   agentRelayUrl?: string | null
+  publicUrlWarning?: string
 } = {}) {
   const fetchMock = vi.fn().mockImplementation((url: string, init?: RequestInit) => {
     if (url.includes('/api/v1/relay/host')) {
@@ -33,6 +34,7 @@ function stubFetch(opts: {
         port: 4000,
         publicBaseUrl: opts.publicBaseUrl ?? null,
         agentRelayUrl: opts.agentRelayUrl ?? null,
+        ...(opts.publicUrlWarning !== undefined ? { publicUrlWarning: opts.publicUrlWarning } : {}),
       }) })
     }
     if (init?.method === 'POST') {
@@ -98,6 +100,52 @@ describe('Tokens — scope selection', () => {
     const cmd = await screen.findByDisplayValue(/tapflow agent start --relay/) as HTMLInputElement
     expect(cmd.value).toContain('--relay ws://192.168.0.50:4000')
     expect(cmd.value).toContain('--token tflw_pat_abc')
+  })
+
+  it('agent token shows the selected public URL warning and describes the command with it', async () => {
+    stubFetch({ createRes: { ok: true, body: { token: 'tflw_pat_abc' } }, lanHost: '192.168.0.50', publicUrlWarning: 'container-without-public-url' })
+    renderTokens()
+    await openDialogAndType('agent-mac-1')
+    await selectAgentType()
+    await userEvent.click(screen.getByRole('button', { name: /create token/i }))
+
+    const command = await screen.findByDisplayValue(/tapflow agent start --relay/)
+    const note = screen.getByRole('note', { name: /teammates cannot open this relay's public url/i })
+    expect(command).toHaveAttribute('aria-describedby', note.id)
+    expect(note).toHaveTextContent('TAPFLOW_RELAY_URL')
+  })
+
+  it('keeps an issued agent token in the open dialog while its host warning lookup is pending', async () => {
+    let resolveCreate: (value: unknown) => void = () => {}
+    let resolveHost: (value: unknown) => void = () => {}
+    const createResponse = new Promise<unknown>((resolve) => { resolveCreate = resolve })
+    const hostResponse = new Promise<unknown>((resolve) => { resolveHost = resolve })
+    const fetchMock = vi.fn((url: string, init?: RequestInit) => {
+      if (url.includes('/api/v1/relay/host')) return hostResponse.then((body) => ({ ok: true, json: () => Promise.resolve(body) }))
+      if (init?.method === 'POST') return createResponse.then((body) => ({ ok: true, json: () => Promise.resolve(body) }))
+      return Promise.resolve({ ok: true, json: () => Promise.resolve([]) })
+    })
+    vi.stubGlobal('fetch', fetchMock)
+    renderTokens()
+    await openDialogAndType('agent-mac-1')
+    await selectAgentType()
+    await userEvent.click(screen.getByRole('button', { name: /create token/i }))
+    await userEvent.click(screen.getByRole('button', { name: /close/i }))
+    expect(screen.getByRole('dialog')).toBeInTheDocument()
+    expect(screen.getByRole('status')).toHaveTextContent(/still in progress/i)
+    expect(toast.warning).toHaveBeenCalledWith(expect.stringMatching(/still in progress/i))
+
+    resolveCreate({ token: 'tflw_pat_once' })
+    await waitFor(() => expect(fetchMock.mock.calls.some(([url]) => String(url).includes('/api/v1/relay/host'))).toBe(true))
+    await userEvent.click(screen.getByRole('button', { name: /close/i }))
+    expect(screen.getByRole('dialog')).toBeInTheDocument()
+
+    resolveHost({ lanHost: '192.168.0.50', port: 4000, publicBaseUrl: null, agentRelayUrl: null, publicUrlWarning: 'container-without-public-url' })
+    const token = await screen.findByDisplayValue('tflw_pat_once')
+    const command = await screen.findByDisplayValue(/tapflow agent start --relay/)
+    const note = screen.getByRole('note', { name: /teammates cannot open this relay's public url/i })
+    expect(command).toHaveAttribute('aria-describedby', note.id)
+    await waitFor(() => expect(token).toHaveFocus())
   })
 
   it('릴레이가 LAN 주소를 모르면 뷰어 주소로 폴백한다', async () => {

@@ -28,6 +28,7 @@ import { resolveBuildFile } from './lib/buildFiles.js'
 import { resolveCorsHeaders } from './lib/cors.js'
 import { isCsrfBlocked } from './lib/csrf.js'
 import { pickLanAddress, runningInContainer } from './lib/lanAddress.js'
+import { containerWithoutPublicUrlWarning } from './lib/proxyConfig.js'
 import { config, getJwtSecret, type LaunchDefaults } from './lib/config.js'
 import { mergeLaunch, unmatchedLaunchKeys } from './lib/launchDefaults.js'
 import { forTeammates, resolveAgentRelayUrl, resolvePublicBaseUrl, type TunnelRuntime } from './lib/publicUrl.js'
@@ -670,12 +671,15 @@ export class RelayServer {
       if (!requireAuth(req, res)) return
       const addr = this.httpServer.address()
       const port = typeof addr === 'object' && addr !== null ? addr.port : this.options.port
+      const inContainer = runningInContainer()
+      const warning = containerWithoutPublicUrlWarning(config, inContainer, this.options.tunnel)
       res.writeHead(200, { 'Content-Type': 'application/json' })
       res.end(JSON.stringify({
-        lanHost: runningInContainer() ? null : pickLanAddress(os.networkInterfaces()),
+        lanHost: inContainer ? null : pickLanAddress(os.networkInterfaces()),
         port,
         publicBaseUrl: forTeammates(resolvePublicBaseUrl(config, this.options.tunnel)),
         agentRelayUrl: forTeammates(resolveAgentRelayUrl(config)),
+        ...(warning !== null ? { publicUrlWarning: 'container-without-public-url' } : {}),
       }))
     })
 
