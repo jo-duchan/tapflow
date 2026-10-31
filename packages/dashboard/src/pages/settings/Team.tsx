@@ -24,7 +24,8 @@ import {
 } from '@/components/ui/table'
 import { UserPlus } from 'lucide-react'
 import { toast } from 'sonner'
-import { joinPath, loadTeammateBases } from '@/lib/publicLink'
+import { joinPath, loadTeammateBases, type PublicUrlWarningReason } from '@/lib/publicLink'
+import { PublicUrlWarning } from '@/components/PublicUrlWarning'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { getTeamMembers, queryKeys } from '@/lib/queries'
 import { ListStateRow } from '@/components/ListStateRow'
@@ -64,14 +65,14 @@ function copyToClipboard(text: string): Promise<boolean> {
  * A link the Admin hands to a teammate, shown whether or not it was copied. Focus goes to it on mount,
  * where it can be selected and copied by hand — the only way on a plain-HTTP page.
  */
-function CopyableLink({ link, copied, noun }: { link: string; copied: boolean; noun: string }) {
+function CopyableLink({ link, copied, noun, warningId }: { link: string; copied: boolean; noun: string; warningId?: string }) {
   const labelId = useId()
   const ref = useRef<HTMLInputElement>(null)
   useEffect(() => { ref.current?.focus() }, [link])
   return (
     <>
       <p id={labelId} className="text-sm text-muted-foreground">{copied ? `${noun[0].toUpperCase()}${noun.slice(1)} copied to clipboard:` : `Copy this ${noun}:`}</p>
-      <Input ref={ref} readOnly value={link} aria-labelledby={labelId} onFocus={(e) => e.currentTarget.select()} className="font-mono" />
+      <Input ref={ref} readOnly value={link} aria-labelledby={labelId} aria-describedby={warningId} onFocus={(e) => e.currentTarget.select()} className="font-mono" />
     </>
   )
 }
@@ -94,7 +95,12 @@ export function TeamSettings() {
   const [linkCopied, setLinkCopied] = useState(false)
   const [inviteStatus, setInviteStatus] = useState('')
   const [inviteOpen, setInviteOpen] = useState(false)
+  const [invitePublicUrlWarning, setInvitePublicUrlWarning] = useState<PublicUrlWarningReason>()
+  const inviteWarningId = useId()
+  const [inviteController, setInviteController] = useState<AbortController | null>(null)
   const [pendingDeleteId, setPendingDeleteId] = useState<number | null>(null)
+
+  useEffect(() => () => inviteController?.abort(), [inviteController])
 
   const { register, handleSubmit, control, reset, setError, formState: { errors, isSubmitting, submitCount } } = useForm<InviteData>({
     shouldFocusError: false, // FormErrorCount focuses, once the field is described (#824)
@@ -105,15 +111,20 @@ export function TeamSettings() {
   const load = () => { void queryClient.invalidateQueries({ queryKey: queryKeys.teamMembers }) }
 
   async function onInvite(data: InviteData) {
+    const controller = inviteController
+    if (!controller || controller.signal.aborted) return
+    const isCurrentInvite = () => !controller.signal.aborted
     // Cleared first, so a retry that fails the same way is announced again.
     setInviteStatus('')
     try {
       const res = await fetch('/api/v1/team/invite', {
         method: 'POST',
         credentials: 'include',
+        signal: controller.signal,
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email: data.email, role: data.role }),
       })
+      if (!isCurrentInvite()) return
       // The relay refuses an address that already has an account: an invitation never changes one.
       if (res.status === 409) {
         setError('email', { message: 'Already a member. Change their role in the list instead.' })
@@ -124,7 +135,9 @@ export function TeamSettings() {
       // The relay returns the link it mailed (#788). It has none to offer when its only address is one a
       // teammate cannot open, and then the link is built from the teammate base.
       const link = json.inviteUrl ?? joinPath((await loadTeammateBases()).linkBase, `/invite?token=${json.token}`)
+      if (!isCurrentInvite()) return
       const copied = await copyToClipboard(link)
+      if (!isCurrentInvite()) return
       setInviteLink(link)
       setLinkCopied(copied)
       // Toasts render outside the dialog, and an open dialog hides everything outside it from assistive
@@ -138,6 +151,7 @@ export function TeamSettings() {
         toast.warning('Email could not be sent. Copy the invite link from the dialog, and check your SMTP settings.')
       }
     } catch {
+      if (!isCurrentInvite()) return
       toast.error('Failed to create invite link')
       setInviteStatus('Failed to create invite link.')
     }
@@ -147,7 +161,17 @@ export function TeamSettings() {
     setInviteOpen(open)
     // Cleared on the way in, not on the way out: a closing dialog stays on screen through its exit animation,
     // and clearing it then showed the empty form fading out in place of what was just issued.
-    if (open) { setInviteLink(''); setLinkCopied(false); setInviteStatus(''); reset() }
+    if (open) {
+      const controller = new AbortController()
+      setInviteController(controller)
+      setInviteLink(''); setLinkCopied(false); setInviteStatus(''); setInvitePublicUrlWarning(undefined); reset()
+      void loadTeammateBases().then((bases) => {
+        if (!controller.signal.aborted) setInvitePublicUrlWarning(bases.publicUrlWarning)
+      })
+    } else {
+      inviteController?.abort()
+      setInviteController(null)
+    }
   }
 
   async function handleRoleChange(id: number, role: string) {
@@ -241,7 +265,7 @@ export function TeamSettings() {
             <p role="status" className="sr-only">{inviteStatus}</p>
             {inviteLink ? (
               <div className="flex flex-col gap-3 pt-2">
-                <CopyableLink link={inviteLink} copied={linkCopied} noun="invite link" />
+                <CopyableLink link={inviteLink} copied={linkCopied} noun="invite link" warningId={invitePublicUrlWarning ? inviteWarningId : undefined} />
                 <Button onClick={() => handleDialogClose(false)}>Done</Button>
               </div>
             ) : (
@@ -282,6 +306,7 @@ export function TeamSettings() {
                 <FormErrorCount errors={errors} submitCount={submitCount} />
               </form>
             )}
+            {invitePublicUrlWarning && <PublicUrlWarning id={inviteWarningId} />}
           </DialogContent>
         </Dialog>
       </div>

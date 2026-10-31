@@ -1,3 +1,5 @@
+import { z } from 'zod'
+
 /**
  * Addresses the dashboard hands to someone else: a link a teammate opens, and the relay address an
  * agent on another Mac connects to. Built here and nowhere else (#788).
@@ -17,12 +19,18 @@
  * the right answer for that.
  */
 
-export interface RelayHostInfo {
-  lanHost: string | null
-  port: number
-  publicBaseUrl: string | null
-  agentRelayUrl: string | null
-}
+const publicUrlWarningReason = 'container-without-public-url'
+export type PublicUrlWarningReason = typeof publicUrlWarningReason
+
+const relayHostInfoSchema = z.object({
+  lanHost: z.string().nullable().optional().catch(undefined),
+  port: z.number().optional().catch(undefined),
+  publicBaseUrl: z.string().nullable().optional().catch(undefined),
+  agentRelayUrl: z.string().nullable().optional().catch(undefined),
+  publicUrlWarning: z.literal(publicUrlWarningReason).optional().catch(undefined),
+})
+
+export type RelayHostInfo = z.infer<typeof relayHostInfoSchema>
 
 export interface Viewer {
   protocol: string
@@ -34,16 +42,20 @@ export interface Viewer {
 export interface TeammateBases {
   linkBase: string
   agentWsBase: string
+  publicUrlWarning?: PublicUrlWarningReason
 }
 
 const LOCAL_HOSTNAMES = ['localhost', '127.0.0.1', '[::1]']
 
 export function resolveTeammateBases(info: RelayHostInfo | null, viewer: Viewer): TeammateBases {
   const wsScheme = viewer.protocol === 'https:' ? 'wss' : 'ws'
-  const lan = info?.lanHost && LOCAL_HOSTNAMES.includes(viewer.hostname) ? `${info.lanHost}:${info.port}` : null
+  const lan = info?.lanHost && info.port !== undefined && LOCAL_HOSTNAMES.includes(viewer.hostname)
+    ? `${info.lanHost}:${info.port}`
+    : null
   return {
     linkBase: info?.publicBaseUrl ?? (lan ? `${viewer.protocol}//${lan}` : viewer.origin),
     agentWsBase: info?.agentRelayUrl ?? (lan ? `${wsScheme}://${lan}` : `${wsScheme}://${viewer.host}`),
+    ...(info?.publicUrlWarning ? { publicUrlWarning: info.publicUrlWarning } : {}),
   }
 }
 
@@ -70,7 +82,8 @@ export function loadTeammateBases(): Promise<TeammateBases> {
   const controller = new AbortController()
   const deadline = setTimeout(() => controller.abort(), LOOKUP_DEADLINE_MS)
   pending = fetch('/api/v1/relay/host', { credentials: 'include', signal: controller.signal })
-    .then((res) => (res.ok ? (res.json() as Promise<RelayHostInfo>) : Promise.reject(new Error(`relay host lookup: ${res.status}`))))
+    .then((res) => (res.ok ? res.json() : Promise.reject(new Error(`relay host lookup: ${res.status}`))))
+    .then((body: unknown) => relayHostInfoSchema.parse(body))
     .catch(() => {
       pending = null
       return null
