@@ -85,9 +85,8 @@ describe('app command failures reach the caller (#445)', () => {
 
   function insertBuild(bundleId: string | null): number {
     const db = getDb()
-    const key = `com.example.${Math.abs(Number(process.hrtime.bigint() % 100000n))}`
-    db.prepare(`INSERT INTO apps (name, bundle_id_key, platform) VALUES ('Demo', ?, 'ios')`).run(key)
-    const app = db.prepare('SELECT id FROM apps WHERE bundle_id_key = ?').get(key) as { id: number }
+    db.prepare(`INSERT INTO apps (name, platform) VALUES ('Demo', 'ios')`).run()
+    const app = db.prepare('SELECT id FROM apps ORDER BY id DESC LIMIT 1').get() as { id: number }
     const r = db.prepare(`
       INSERT INTO builds (app_id, version_name, build_number, bundle_id, file_path)
       VALUES (?, '1.0.0', '1', ?, ?)

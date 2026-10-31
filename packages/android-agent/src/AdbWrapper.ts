@@ -49,6 +49,10 @@ export class StorageFullError extends ValidationError {
 const AM_START_WAIT_SEC = 10
 const RESOLVE_WAIT_SEC = 3
 
+/** Each adb call of a device list re-read (#1085). `adb devices` answers in about 10 ms and `emu avd name` and `getprop`
+ *  in well under a second; this is only there so a wedged emulator cannot hold the re-read for ever. */
+const PEEK_CALL_TIMEOUT_MS = 10_000
+
 export class AdbWrapper {
   // avdId ("avd:<name>") → ADB serial ("emulator-5554")
   private readonly serialMap = new Map<string, string>()
@@ -94,15 +98,40 @@ export class AdbWrapper {
       }
     }
 
+    return this.describe(avdNames, bootedMap)
+  }
+
+  /**
+   * The same list as `listDevices`, without syncing `serialMap` (#1085). That sync is part of how a boot learns which
+   * emulator it launched, and a re-read every 30 s running into a boot's own bookkeeping would move it under it. Each
+   * serial here comes from this read's `adb devices` instead.
+   */
+  async peekDevices(): Promise<Device[]> {
+    // Bounded, unlike the boot path: the watcher runs one read at a time, so a read stuck on a wedged emulator's
+    // console or an offline device's shell would otherwise stop every later re-read for the life of the agent.
+    const run = (...args: string[]) => this.runner.execBounded?.(PEEK_CALL_TIMEOUT_MS, ...args) ?? this.runner.exec(...args)
+    const [avdNames, bootedMap] = await Promise.all([
+      this.runner.listAvds(),
+      this.getBootedAvdMap(run),
+    ])
+    return this.describe(avdNames, bootedMap, run)
+  }
+
+  private async describe(
+    avdNames: string[],
+    bootedMap: Map<string, string>,
+    run: (...args: string[]) => Promise<string> = (...args) => this.runner.exec(...args),
+  ): Promise<Device[]> {
+    const serialOf = new Map([...bootedMap].map(([serial, avdName]) => [avdName, serial]))
     const devices: Device[] = []
     for (const avdName of avdNames) {
       const avdId = `avd:${avdName}`
-      const serial = this.serialMap.get(avdId)
+      const serial = serialOf.get(avdName)
       const isBooted = Boolean(serial)
 
       let osVersion: string | undefined
       if (isBooted && serial) {
-        osVersion = await this.getOsVersion(serial).catch(() => undefined)
+        osVersion = await run('-s', serial, 'shell', 'getprop', 'ro.build.version.release').then((o) => o.trim(), () => undefined)
         if (osVersion) osVersion = `Android ${osVersion}`
       }
 
@@ -118,10 +147,12 @@ export class AdbWrapper {
     return devices
   }
 
-  private async getBootedAvdMap(): Promise<Map<string, string>> {
+  private async getBootedAvdMap(
+    run: (...args: string[]) => Promise<string> = (...args) => this.runner.exec(...args),
+  ): Promise<Map<string, string>> {
     const result = new Map<string, string>()
     try {
-      const output = await this.runner.exec('devices')
+      const output = await run('devices')
       const serials = output
         .split('\n')
         .slice(1)
@@ -131,8 +162,7 @@ export class AdbWrapper {
 
       await Promise.all(
         serials.map(async (serial) => {
-          const avdName = await this.runner
-            .exec('-s', serial, 'emu', 'avd', 'name')
+          const avdName = await run('-s', serial, 'emu', 'avd', 'name')
             .then((o) => o.split('\n')[0].trim())
             .catch(() => null)
           if (avdName) result.set(serial, avdName)
@@ -140,11 +170,6 @@ export class AdbWrapper {
       )
     } catch { /* adb server not running */ }
     return result
-  }
-
-  private async getOsVersion(serial: string): Promise<string> {
-    const output = await this.runner.exec('-s', serial, 'shell', 'getprop', 'ro.build.version.release')
-    return output.trim()
   }
 
   async getScreenSize(serial: string): Promise<{ width: number; height: number }> {

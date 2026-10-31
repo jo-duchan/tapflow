@@ -159,7 +159,7 @@ export function TokenSettings() {
           <DialogTrigger asChild>
             <Button ref={createButtonRef} size="sm"><Plus className="mr-2 h-4 w-4" />New token</Button>
           </DialogTrigger>
-          <DialogContent className="sm:max-w-md">
+          <DialogContent size="md">
             <DialogHeader><DialogTitle>Create token</DialogTitle></DialogHeader>
             {/* Mounted before any outcome arrives, so a change is announced. */}
             <p role="status" className="sr-only">{dialogStatus}</p>

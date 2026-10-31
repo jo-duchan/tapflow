@@ -37,11 +37,11 @@ vi.mock('../lib/webhookTransport', async (importOriginal) => {
 
 function insertAppAndBuild(): number {
   const db = getDb()
-  db.prepare(`INSERT INTO apps (name, bundle_id_key, platform) VALUES ('Coffee', 'com.example.coffee', 'ios')`).run()
-  const app = db.prepare('SELECT id FROM apps WHERE bundle_id_key = ?').get('com.example.coffee') as { id: number }
+  db.prepare(`INSERT INTO apps (name, platform) VALUES ('Coffee', 'ios')`).run()
+  const app = db.prepare('SELECT id FROM apps ORDER BY id DESC LIMIT 1').get() as { id: number }
   const r = db.prepare(`
-    INSERT INTO builds (app_id, version_name, build_number, bundle_id, file_path)
-    VALUES (?, '1.0.0', '1', 'com.example.coffee', '/tmp/x.zip')
+    INSERT INTO builds (app_id, version_name, build_number, bundle_id, file_path, platform)
+    VALUES (?, '1.0.0', '1', 'com.example.coffee', '/tmp/x.zip', 'ios')
   `).run(app.id)
   return Number(r.lastInsertRowid)
 }
@@ -373,6 +373,14 @@ describe('webhook firing on build status transition', () => {
     expect(got.headers['x-tapflow-signature']).toBe(signPayload('sig-secret', got.body))
     // metadata only: no binary / file path / download url leaked
     expect(got.body).not.toMatch(/file_path|uploads|\.zip|\.tar/)
+  })
+
+  // The app is on both platforms; the build is one. The payload used to carry the app's `both`, which the docs do not allow.
+  it('sends the build\'s platform, not its app\'s', async () => {
+    getDb().prepare("UPDATE apps SET platform = 'both' WHERE id = (SELECT app_id FROM builds WHERE id = ?)").run(buildId)
+    await httpJson(port, 'PATCH', `/api/v1/builds/${buildId}`, cookie, { status_label: 'Done' })
+    await waitFor(() => receiver.requests.length === 1)
+    expect((JSON.parse(receiver.requests[0].body) as WebhookPayload).build.platform).toBe('ios')
   })
 
   it('#2 fires on transition to Rejected', async () => {

@@ -33,10 +33,10 @@ source of truth. `scripts/__tests__/designSpecMatchesCva.test.mjs` fails when th
 | Value | Surface / text | Call sites | Use |
 |-------|----------------|-----------:|-----|
 | `default` | `--primary` / `--primary-foreground` | most (it is the default) | Primary action — one per view |
-| `destructive` | `--destructive` at 10% / `--destructive` | 6 | Delete, leave, revoke |
+| `destructive` | `--destructive` at 10% / `--destructive` | 5 | Delete, leave, revoke |
 | `outline` | `--background` + 1px `--input` border / `--foreground` | 16 | Secondary action |
 | `secondary` | `--secondary` / `--secondary-foreground` | 1 | Tertiary action |
-| `ghost` | transparent / `--foreground` | 18 | Icon buttons, inline actions in lists and toolbars |
+| `ghost` | transparent / `--foreground` | 20 | Icon buttons, inline actions in lists and toolbars |
 | `link` | transparent / `--primary` | 0 | Defined, not used yet |
 
 `destructive` is a **soft tint**, not a solid red fill. This is a local choice — upstream shadcn uses a solid

@@ -28,9 +28,10 @@ The audience is the whole team (PO, PM, designers, backend, QA) — not just QA.
 
 - **App sidebar**: `GET /api/v1/apps` → selecting an app manages state via `?appId=N` URL parameter.
 - **Release Accordion**: `GET /api/v1/builds?app_id=N` → grouped by `version_name` (`groupByRelease()`). No dedicated `releases` table — UI grouping uses `version_name` metadata.
-- **Build card**: shows `build_number`, `platform`, `status_label`, uploader, `uploaded_at`. Inline status dropdown. **"Start QA" CTA** → `/app-center/build?id={build_id}`.
-- **Viewer is read-only**: `AppCenter` reads the role once (`useAuth`) and passes `canWrite` down. For a Viewer the build card draws no status dropdown or deletion button, and **Add App** / **Upload build** stay as plain buttons whose click raises a toast instead of opening a dialog. The relay enforces the same rule (`assertCanWrite`), so this only decides what is offered.
-- **Upload**: `UploadBuildDialog` — iOS `.app.zip` or `.tar.gz`/`.tgz` (EAS simulator build) / Android `.apk`. `version_name` / `build_number` are auto-extracted from plist, so no manual input fields.
+- **Build card**: shows `build_number`, the label (`version_label`), an **Edited** badge when the version or build number differs from `binary` (what the file says), `platform`, `status_label`, uploader, `uploaded_at`. Inline status dropdown, and a ⋯ menu with **Edit build** and scheduling or cancelling deletion. **"Start QA" CTA** → `/app-center/build?id={build_id}`.
+- **Edit build** (#1084) is one dialog in `AppCenter`, not one per row: a version edit moves the row into another release, which React draws as a new row, and a dialog inside the old one would vanish and drop focus. The save writes the cache and opens the target release before the dialog closes; the refetch waits for the dialog's focus hand-back (`onClosed`), or it can take the row away while the dialog still holds focus.
+- **Viewer is read-only**: `AppCenter` reads the role once (`useAuth`) and passes `canWrite` down. For a Viewer the build card draws no status dropdown or ⋯ menu, and **Add App** / **Upload build** stay as plain buttons whose click raises a toast instead of opening a dialog. The relay enforces the same rule (`assertCanWrite`), so this only decides what is offered.
+- **Upload**: `UploadBuildDialog` — iOS `.app.zip` or `.tar.gz`/`.tgz` (EAS simulator build) / Android `.apk`. `version_name` / `build_number` are read from the file; an optional **Label** and a folded **Override version** (Version, Build number) are sent when filled in. The dialog closes on submit and the answer is a toast, so each field carries the relay's 100-character bound.
 
 ## HOW
 
@@ -112,6 +113,29 @@ buttons are drawn at rest and nothing on the frame can be pressed.
 `src/__tests__/DeviceScreen.test.tsx` holds the seam directly. Before it, four ways of cutting it (an
 overlay dropped on either platform, Android's pointer handlers dropped, a rotation in flight ignored)
 survived every viewer test.
+
+### A session URL is read once, and decided from a listing (#1087)
+
+The QA page puts `session` and `device` in its URL when a device starts (`replace`) and takes them out on every way
+out. **The URL is read once, when the page mounts** (`useState` initializer): reading it on every render would send the
+URL the page itself just wrote back through the decision and re-decide the session the tester is in.
+
+**A URL entry is never a join on sight.** A session id is a device slot, so a join succeeds for a device that is off
+and the viewer then boots it. The page waits for a device listing and decides with `classifyResume`
+(`lib/resumeEntry.ts`, a pure function with its own tests): join only a session the relay says is waiting for this
+person (`resumable`); wait while another tab of theirs holds it (`heldBySelf`, and then only after it has been free
+for 10 s, so the tab that dropped wins), while an AI client borrows it, or while its Mac is not listed; otherwise go
+to the list, with a dialog for a device that is no longer theirs. The order of those checks is the decision, and the
+comment beside it says why.
+
+**The decision runs in the listing's message handler, not in an effect over `sessions`** — it sets state, and
+`set-state-in-effect` is on. `useAgentSession` takes an `onListed` callback for that.
+
+A wait is a `role="status"` banner above the list, never a dialog: it resolves on its own, and a dialog closing itself
+would move focus. A decision is a dialog over the list. Both dialogs are opened by state, so each returns focus itself.
+
+A resumed device is a `DeviceViewer` mounted with `resume` and keyed by session, and its boot never carries a full
+reset — that is for a fresh start.
 
 ### The AI session page watches and never drives
 
@@ -342,7 +366,13 @@ and the disposition table above cannot show the difference. Three rules, each ho
   absent one is not, because both the replay and an agent predating the echo arrive that way — and while
   the correlator is optional those two are indistinguishable. So what this newly catches is a straggler
   from an earlier boot cycle releasing the current rebind, and *not* the replayed ready firing a duplicate
-  install, which stays as it was.
+  install, which stays as it was. Since #1087 the duplicate is harmless once this mount's own install has
+  landed: from then on every install carries `keepIfInstalled` (`keepInstalledRef`), and the relay answers it
+  without touching the device. **The flag turns on at the first done, not the first send** — a device someone
+  left running answers the first join with the replay and then the real ready, and the second install must
+  not be folded into the first while the device is still booting. `DeviceViewer.keepInstalled.test.tsx` sends
+  the real reconnect order (joined, replayed ready, booting, correlated ready); one ready per join passes a
+  design that fails in the browser.
 
 And a fourth rule, about the set rather than the gate — **`bootIdsRef` is cleared on `session:joined` and
 nowhere else.** Not on `device:booting`, even though that branch is where every other per-cycle record is
@@ -637,7 +667,9 @@ lives in a portal under `body` and still goes with its owner.
 
 **A dialog opened by state rather than by a trigger returns focus itself.** Radix returns focus to an
 `AlertDialogTrigger`; without one it drops it on `body`. `BuildRow`'s deletion dialog is opened from
-its trash button's `onClick`, so it passes `onCloseAutoFocus` to put focus back on that button.
+an item of the row's ⋯ menu, so it passes `onCloseAutoFocus` to put focus back on the ⋯. Edit build is the case
+where the trigger moves: a version edit redraws the row under another release, so its dialog looks the ⋯ up by
+`[data-row-menu]` when it closes rather than holding a ref.
 
 ### A toast fired while a dialog is open is not heard
 

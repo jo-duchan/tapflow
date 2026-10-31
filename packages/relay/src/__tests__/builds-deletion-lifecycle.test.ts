@@ -16,8 +16,8 @@ import { signJwt } from '../middleware/auth'
 
 function insertAppAndBuild(filePath: string): number {
   const db = getDb()
-  db.prepare(`INSERT INTO apps (name, bundle_id_key, platform) VALUES ('Coffee', 'com.example.coffee', 'ios')`).run()
-  const app = db.prepare('SELECT id FROM apps WHERE bundle_id_key = ?').get('com.example.coffee') as { id: number }
+  db.prepare(`INSERT INTO apps (name, platform) VALUES ('Coffee', 'ios')`).run()
+  const app = db.prepare('SELECT id FROM apps ORDER BY id DESC LIMIT 1').get() as { id: number }
   const r = db.prepare(`
     INSERT INTO builds (app_id, version_name, build_number, bundle_id, file_path)
     VALUES (?, '1.0.0', '1', 'com.example.coffee', ?)

@@ -1,6 +1,8 @@
 import { useEffect, useId, useLayoutEffect, useRef, useState } from 'react'
 import { useMutation, useQuery, useQueryClient, keepPreviousData } from '@tanstack/react-query'
 import { useNavigate, useSearchParams } from 'react-router-dom'
+import { useInterruptedSessions } from '@/hooks/useInterruptedSessions'
+import { InterruptedSessionsBanner } from '@/components/session-resume/SessionResumeNotices'
 import { toast } from 'sonner'
 import { Ban, Layers, Package } from 'lucide-react'
 import { Button } from '@/components/ui/button'
@@ -12,7 +14,8 @@ import { UploadBuildDialog } from '@/components/UploadBuildDialog'
 import { AppSidebar } from '@/components/app-center/AppSidebar'
 import { ReleaseAccordion } from '@/components/app-center/ReleaseAccordion'
 import { ReleaseListSkeleton } from '@/components/app-center/ReleaseListSkeleton'
-import { getApps, getBuilds, updateBuildStatus, scheduleBuildDeletion, cancelBuildDeletion, groupByRelease, queryKeys, ForbiddenError } from '@/lib/queries'
+import { getApps, getBuilds, updateBuildStatus, updateBuildDetails, scheduleBuildDeletion, cancelBuildDeletion, groupByRelease, queryKeys, ForbiddenError, type BuildEdit } from '@/lib/queries'
+import { EditBuildDialog } from '@/components/app-center/EditBuildDialog'
 import type { Build } from '@/lib/types'
 import { useFocusAfterSwap } from '@/hooks/useFocusAfterSwap'
 import { SKELETON_DELAY_MS, useShownAfter } from '@/hooks/useShownAfter'
@@ -50,6 +53,7 @@ function byDistance<T>(items: T[], at: number): T[] {
 
 export function AppCenter() {
   const navigate = useNavigate()
+  const { interrupted, end: endInterrupted } = useInterruptedSessions()
   const [searchParams, setSearchParams] = useSearchParams()
 
   const queryClient = useQueryClient()
@@ -99,8 +103,12 @@ export function AppCenter() {
   })
   const builds = buildsQuery.data ?? []
 
+  // No app named, or one that is gone — a merge removes the app it moved out of (#1086), and a tab or bookmark can
+  // still name it. Either way the first app, rather than an empty page uploads would 404 on.
   useEffect(() => {
-    if (!appsQuery.data || searchParams.get('appId') || appsQuery.data.length === 0) return
+    if (!appsQuery.data || appsQuery.data.length === 0) return
+    const named = searchParams.get('appId')
+    if (named && appsQuery.data.some((a) => String(a.id) === named)) return
     setSearchParams({ appId: String(appsQuery.data[0].id) }, { replace: true })
   }, [appsQuery.data, searchParams, setSearchParams])
 
@@ -320,6 +328,56 @@ export function AppCenter() {
     statusMutation.mutate({ buildId, status })
   }
 
+  // ── Edit build (#1084) ──────────────────────────────────────────────────
+  const [editing, setEditing] = useState<Build | null>(null)
+  // Set by a save, read when the dialog has handed focus back: see `onClosed`.
+  const refetchAfterEdit = useRef(false)
+  const editMutation = useMutation({
+    mutationFn: ({ buildId, edit }: { buildId: number; edit: BuildEdit }) => updateBuildDetails(buildId, edit),
+  })
+
+  /**
+   * Saves, then puts the build where it now belongs before the dialog closes, so the dialog's focus return finds the
+   * row's ⋯ in its new release rather than in the one it is leaving. Resolves to what to say inside the dialog when
+   * the save failed.
+   */
+  const saveEdit = async (edit: BuildEdit): Promise<string | null> => {
+    const build = editing
+    if (!build) return null
+    const key = buildsKey
+    try {
+      await editMutation.mutateAsync({ buildId: build.id, edit })
+    } catch (error) {
+      if (error instanceof ForbiddenError) void queryClient.invalidateQueries({ queryKey: queryKeys.me })
+      return error instanceof Error ? error.message : 'Could not save the build'
+    }
+    // What the relay now returns for it: an empty version or build number is the file's again.
+    const next: Build = {
+      ...build,
+      version_label: edit.version_label,
+      version_name: edit.version_name ?? build.binary.version_name,
+      build_number: edit.build_number ?? build.binary.build_number,
+    }
+    // A search the build no longer matches takes it off the list on the refetch: focus goes to its neighbours then, as
+    // for a status change under a filter.
+    // ASCII case only, as the relay's SQLite `LIKE` folds it: a Unicode fold here would keep a row the refetch drops.
+    const fold = (v: string) => v.replace(/[A-Z]/g, (c) => c.toLowerCase())
+    const query = fold(settledSearch)
+    const stillFound = query === '' || [next.version_name, next.version_label].some((v) => v !== null && fold(v).includes(query))
+    const candidates = stillFound ? [] : rankTargets(build.id)
+    if (candidates.length > 0) {
+      const leaving = { leaving: build.id, candidates, text: `${buildRowName(next)} no longer matches the search "${settledSearch}".`, key: buildsKeyId }
+      pendingFocus.current = leaving
+      landedOn.current = null
+      setLeftNote(leaving)
+    }
+    queryClient.setQueryData<Build[]>(key, (old) => old?.map((b) => (b.id === build.id ? next : b)))
+    disclosure.open(next.version_name ?? 'Unversioned')
+    refetchAfterEdit.current = true
+    setEditing(null)
+    return null
+  }
+
   // A change of key is answered by the layout effect below, which drops the note with the move.
   const noteShown = leftNote !== null && !builds.some(b => b.id === leftNote.leaving)
   const noteTarget = noteShown ? firstDrawn(leftNote.candidates, drawnKey) : null
@@ -485,6 +543,13 @@ export function AppCenter() {
       />
 
       <div className="flex-1 flex flex-col gap-4 p-4 overflow-y-auto min-w-0">
+        <InterruptedSessionsBanner
+          sessions={interrupted}
+          canResume={(s) => s.device.waiting?.buildId !== undefined}
+          onResume={(s) => navigate(`/app-center/build?${new URLSearchParams({ id: String(s.device.waiting!.buildId), session: s.device.sessionId, device: s.device.id })}`)}
+          // The row goes with the next listing; move focus off it now.
+          onEnd={(s) => { endInterrupted(s); searchRef.current?.focus() }}
+        />
         <div className="flex items-center justify-between flex-wrap gap-2">
           <h1 className="text-xl font-semibold tracking-display-sm">
             {selectedApp ? selectedApp.name : 'App Center'}
@@ -518,8 +583,8 @@ export function AppCenter() {
           <SearchInput
             ref={searchRef}
             aria-describedby={`${loadingId} ${emptyTitleId}`}
-            aria-label="Search versions"
-            placeholder="Search version…"
+            aria-label="Search versions and labels"
+            placeholder="Search version or label…"
             value={search}
             onChange={setSearch}
           />
@@ -629,6 +694,7 @@ export function AppCenter() {
                 onStatusChange={handleStatusChange}
                 onScheduleDeletion={handleScheduleDeletion}
                 onCancelDeletion={handleCancelDeletion}
+                onEdit={setEditing}
                 canWrite={canWrite}
               />
             ))}
@@ -638,6 +704,16 @@ export function AppCenter() {
         </>
         )}
       </div>
+      <EditBuildDialog
+        build={editing}
+        onClose={() => setEditing(null)}
+        onClosed={() => {
+          if (!refetchAfterEdit.current) return
+          refetchAfterEdit.current = false
+          void queryClient.invalidateQueries({ queryKey: ['builds'] })
+        }}
+        onSave={saveEdit}
+      />
     </div>
   )
 }

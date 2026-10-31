@@ -43,7 +43,7 @@ describe('GET /api/v1/builds?q= matches the text literally', () => {
     db.prepare('INSERT INTO users (email, display_name, role, password_hash) VALUES (?, ?, ?, ?)')
       .run('admin@example.com', 'Admin', 'Admin', makePasswordHash('password123'))
     cookie = `tapflow_token=${signJwt({ userId: 1, email: 'admin@example.com', role: 'Admin' })}`
-    db.prepare(`INSERT INTO apps (name, bundle_id_key, platform) VALUES ('Coffee', 'com.example.coffee', 'ios')`).run()
+    db.prepare(`INSERT INTO apps (name, platform) VALUES ('Coffee', 'ios')`).run()
     const insert = db.prepare(`INSERT INTO builds (app_id, version_name, build_number, bundle_id, file_path) VALUES (1, ?, '1', 'com.example.coffee', ?)`)
     for (const v of ['1.2.0', '1.0.5', '1_0', '50%', 'a\\b', 'Beta-1']) insert.run(v, `/tmp/${v}.zip`)
     uploadsDir = fs.mkdtempSync(path.join(os.tmpdir(), 'tapflow-search-up-'))

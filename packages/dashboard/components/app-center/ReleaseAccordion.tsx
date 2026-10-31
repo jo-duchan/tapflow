@@ -13,6 +13,7 @@ interface Props {
   onStatusChange: (buildId: number, status: string | null) => void
   onScheduleDeletion: (buildId: number) => void
   onCancelDeletion: (buildId: number) => void
+  onEdit: (build: Build) => void
   /** False for Viewer: the rows show their status but offer no control that changes it. */
   canWrite: boolean
   /** Ids describing the header — App Center passes its status line to the first release, which is
@@ -31,6 +32,7 @@ export function ReleaseAccordion({
   onStatusChange,
   onScheduleDeletion,
   onCancelDeletion,
+  onEdit,
   canWrite,
   describedBy,
   rowNote,
@@ -80,6 +82,7 @@ export function ReleaseAccordion({
               onStatusChange={onStatusChange}
               onScheduleDeletion={onScheduleDeletion}
               onCancelDeletion={onCancelDeletion}
+              onEdit={onEdit}
               canWrite={canWrite}
               statusDescribedBy={rowNote?.buildId === b.id ? rowNote.id : undefined}
             />

@@ -21,7 +21,10 @@ import {
 } from '@/components/ui/alert-dialog';
 import { Separator } from '@/components/ui/separator';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
-import { Play, Trash2, TimerOff } from 'lucide-react';
+import { Ellipsis, Play } from 'lucide-react';
+import {
+  DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
 import type { Build } from '@/lib/types';
 import { PLATFORM_LABEL, STATUS_TONE, buildRowName, formatDeletionCountdown } from '@/lib/build-format';
 
@@ -32,7 +35,9 @@ interface Props {
   onStatusChange: (buildId: number, status: string | null) => void;
   onScheduleDeletion: (buildId: number) => void;
   onCancelDeletion: (buildId: number) => void;
-  /** False for Viewer. The status Select and the deletion button are then not rendered at all: the
+  /** Opens Edit build, which App Center holds: a version edit moves the row, and a dialog inside it would go too. */
+  onEdit: (build: Build) => void;
+  /** False for Viewer. The status Select and the ⋯ menu are then not rendered at all: the
    *  status and deletion badges already say the state, and a control that can only be refused is
    *  one more stop in the tab order with nothing behind it. */
   canWrite: boolean;
@@ -48,16 +53,18 @@ export function BuildRow({
   onStatusChange,
   onScheduleDeletion,
   onCancelDeletion,
+  onEdit,
   canWrite,
   statusDescribedBy,
 }: Props) {
   const [pendingSchedule, setPendingSchedule] = useState(false);
-  // The dialog is opened by state rather than by an `AlertDialogTrigger`, so Radix has no trigger to
-  // hand focus back to when it closes and drops it on `body`. This is where it goes instead: the
-  // button that opened it. Its slot holds "Schedule deletion" or "Cancel scheduled deletion" — the
-  // same `Button` in the same position either way, so it is the same node after a deletion is
-  // scheduled and focus lands on the control that can undo it.
-  const deletionButtonRef = useRef<HTMLButtonElement>(null);
+  // The dialog is opened from a menu item rather than an `AlertDialogTrigger`, so Radix has no trigger to hand focus
+  // back to when it closes and drops it on `body`. It goes to the row's ⋯ instead, which also holds the item that
+  // undoes a scheduled deletion.
+  const menuRef = useRef<HTMLButtonElement>(null);
+  // Different from the build file's when a person set them (#1084): `binary` says what the file says.
+  const overridden = build.version_name !== build.binary.version_name || build.build_number !== build.binary.build_number;
+  const fromFile = `From the build file: ${build.binary.version_name ?? 'no version'} (${build.binary.build_number ?? 'no build number'})`;
   const isDone = build.status_label === 'Done';
   const deletion = build.delete_after ? formatDeletionCountdown(build.delete_after) : null;
   const rowName = buildRowName(build);
@@ -72,7 +79,7 @@ export function BuildRow({
         <AlertDialogContent
           onCloseAutoFocus={(e) => {
             e.preventDefault();
-            deletionButtonRef.current?.focus();
+            menuRef.current?.focus();
           }}
         >
           <AlertDialogHeader>
@@ -102,6 +109,22 @@ export function BuildRow({
             <span className="text-sm font-medium">
               build <TechLabel>{build.build_number ?? '—'}</TechLabel>
             </span>
+            {/* Focusable, so the tooltip with the file's values opens for a keyboard too. A focused element needs a role
+                and a name to be read at all, so it is an image named with the same words. */}
+            {overridden && (
+              <TooltipProvider delayDuration={400}>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Badge variant="outline" tabIndex={0} role="img" aria-label={`Edited. ${fromFile}`} className="text-xs">
+                      Edited
+                    </Badge>
+                  </TooltipTrigger>
+                  <TooltipContent>{fromFile}</TooltipContent>
+                </Tooltip>
+              </TooltipProvider>
+            )}
+            {/* Not truncated: the line wraps, and a tooltip on cut-off text would not reach a keyboard. */}
+            {build.version_label && <span className="text-sm text-muted-foreground">{build.version_label}</span>}
             <Badge
               tone={build.platform === 'ios' ? 'ios' : 'android'}
               className="text-xs"
@@ -163,39 +186,6 @@ export function BuildRow({
           </SelectContent>
         </Select>
 
-        {/* Named per row, and explained by a tooltip that also opens on keyboard focus. `title` did
-            neither: it was the same on every row, so voice control could not address one, and it
-            appears on hover only, so a keyboard user landing on the icon could not tell what it does.
-            One `Tooltip` around both branches: the slot keeps the same node either way (see
-            `deletionButtonRef`), and so does the trigger wrapping it. */}
-        <TooltipProvider delayDuration={400}>
-          <Tooltip>
-            <TooltipTrigger asChild>
-              {deletion ? (
-                <Button
-                  ref={deletionButtonRef}
-                  size="icon-sm"
-                  variant="outline"
-                  onClick={() => onCancelDeletion(build.id)}
-                  aria-label={`Cancel scheduled deletion of ${rowName}`}
-                >
-                  <TimerOff className="h-3.5 w-3.5" aria-hidden />
-                </Button>
-              ) : (
-                <Button
-                  ref={deletionButtonRef}
-                  size="icon-sm"
-                  variant="destructive"
-                  onClick={() => setPendingSchedule(true)}
-                  aria-label={`Schedule deletion of ${rowName}`}
-                >
-                  <Trash2 className="h-3.5 w-3.5" aria-hidden />
-                </Button>
-              )}
-            </TooltipTrigger>
-            <TooltipContent>{deletion ? 'Cancel scheduled deletion' : 'Schedule deletion'}</TooltipContent>
-          </Tooltip>
-        </TooltipProvider>
         </>)}
 
         {/* The visible words first, so the name still contains what a voice-control user reads. */}
@@ -203,6 +193,32 @@ export function BuildRow({
           <Play className="mr-1.5 h-3.5 w-3.5" />
           Start QA
         </Button>
+
+        {canWrite && (<>
+        {/* Last on the row, as on the app and device cards: Start QA, the row's main action, sits by the status.
+            Named per row like every control on it (`buildRowName`). `data-row-menu` is how Edit build finds this
+            button again after a version edit has moved the row into another release. */}
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <Button ref={menuRef} variant="ghost" size="icon-sm" aria-label={`Actions for ${rowName}`} data-row-menu={build.id}>
+              <Ellipsis aria-hidden="true" />
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end" className="w-52">
+            <DropdownMenuItem onSelect={() => onEdit(build)}>Edit build</DropdownMenuItem>
+            <DropdownMenuSeparator />
+            {deletion ? (
+              // Undoes something rather than destroying anything, so it does not take the destructive look.
+              <DropdownMenuItem onSelect={() => onCancelDeletion(build.id)}>Cancel scheduled deletion</DropdownMenuItem>
+            ) : (
+              <DropdownMenuItem onSelect={() => setPendingSchedule(true)}
+                className="text-destructive focus:bg-destructive/10 focus:text-destructive">
+                Schedule deletion
+              </DropdownMenuItem>
+            )}
+          </DropdownMenuContent>
+        </DropdownMenu>
+        </>)}
       </div>
     </>
   );

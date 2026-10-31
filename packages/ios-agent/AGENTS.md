@@ -120,6 +120,16 @@ An unmapped **button** still answers success: the device genuinely has no such b
 unmapped **key code** answers `unsupported` and keeps its existing prose, which names the code. That
 asymmetry is a decision, and it is why iOS never sends `unsupported` for a button while Android does.
 
+### The device list is re-read every 30 s (#1085)
+
+For a relay that announced `'device-updates'`, `DeviceListWatcher` (agent-core) re-reads `simctl list` and sends
+`agent:devices` when the list changed. `offerDevices` builds the list for both the register and the re-read, so the
+`--device` filter, form factors and the multi-panel exclusion cannot differ between them. **A re-read only adds to
+what it knows about device types**: it asks `integratedPanelCounts` only about a type it has not seen, because that
+call reads a plist it cannot open as one panel, and asking again could drop a Duo in use onto the Indigo path. A
+connect still re-reads every type, as before. `agent:devices-applied` is the one relay message with no `sessionId`,
+so it is handled before the filter that drops those.
+
 ## HOW NOT
 
 - Do not expose iOS-specific methods as public API if they are not in the `DeviceAgent` interface.

@@ -37,7 +37,7 @@ in the base class but nothing changes color.
 | Value | Looks like | Call sites | Where |
 |-------|------------|-----------:|-------|
 | `default` | `--primary` fill (ink black; white in dark), `--primary-foreground` text, no visible border | 0 | The fallback under every `tone` badge, never seen while the relay sends one of the four build statuses (below) |
-| `secondary` | `--secondary` fill, `--secondary-foreground` text, no visible border | 3 | Token scope in the token table and in the Create token dialog; app platform `both` in Settings → Apps |
+| `secondary` | `--secondary` fill, `--secondary-foreground` text, no visible border | 2 | Token scope in the token table and in the Create token dialog |
 | `destructive` | `--destructive` fill, `--destructive-foreground` text, no visible border | 0 | Defined, used nowhere. A red status uses `tone="rejected"` |
 | `outline` | No fill, 1px `--border`, `--foreground` text | 2 | `No expiration` in the token table; the build filter chip on Runs |
 
@@ -69,8 +69,8 @@ after them and win (`tailwind-merge` keeps the last fill and the last text color
 only like its tone. In Figma the set is effectively one list of ten looks: four variants, six tones, no cross
 product. That is how DESIGN.md counts it.
 
-The one call site that switches between axes is the app platform in Settings → Apps: `tone` for `ios` and
-`android`, `variant="secondary"` for `both`.
+No call site switches between the axes. Settings → Apps used to show `both` as `secondary`; it now shows one `tone`
+badge per platform row (#1086).
 
 ## Variations at the call site
 

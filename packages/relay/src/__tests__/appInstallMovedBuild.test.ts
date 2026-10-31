@@ -43,8 +43,8 @@ describe('app:install for a build whose data directory moved', () => {
     fs.mkdirSync(path.dirname(moved), { recursive: true })
     fs.writeFileSync(moved, 'a real file in the new location')
     const db = getDb()
-    db.prepare(`INSERT INTO apps (name, bundle_id_key, platform) VALUES ('Demo', 'com.example.moved', 'ios')`).run()
-    const app = db.prepare(`SELECT id FROM apps WHERE bundle_id_key = 'com.example.moved'`).get() as { id: number }
+    db.prepare(`INSERT INTO apps (name, platform) VALUES ('Demo', 'ios')`).run()
+    const app = db.prepare('SELECT id FROM apps ORDER BY id DESC LIMIT 1').get() as { id: number }
     const buildId = Number(db.prepare(`
       INSERT INTO builds (app_id, version_name, build_number, bundle_id, file_path)
       VALUES (?, '1.0.0', '1', 'com.example.moved', ?)

@@ -106,7 +106,7 @@ saved with the form.
   new-password fields have both, and their error says the rule itself (`Password must be at least 8 characters`).
   On a field without a hint the error adds a line, and what is under the field moves down 28px.
 - **13 fields have no error slot**: the Add App dialog's three, Upload build's two, the sliders, the Settings logo
-  and avatar, the token's Expiration and Type, the invite page's Nickname, and the App Name rows. Their failures
+  and avatar, the token's Expiration and Type, the invite page's Nickname, and the Edit app dialog's App name. Their failures
   are said elsewhere: in a form message (below), a toast, or the browser's own required-field bubble (Add App's
   Name and Bundle ID, not drawn). The Settings logo and avatar reject a file over 2MB with
   the toast `Image must be 2MB or less`, while the invite page's avatar says `Max 2MB for avatar` under the field.
@@ -143,7 +143,7 @@ Call-site counts are a snapshot (2026-10-21).
 | Sign-in, setup, password reset, invite page, Settings, Team, Tokens and Upload build dialogs | 16px (`gap-4`) | 8px |
 | Add App dialog | 16px | **6px** (`gap-1.5`) |
 | Flow run videos | 24px (`gap-6`) | 12px (slider) |
-| App Name rows (Settings → Apps) | One field per row, rows 32px apart with a 1px `--border` between | 8px |
+| Edit app dialog (Settings → Apps) | One field | 8px |
 
 The Add App dialog's 6px is a code inconsistency, not a second size. Draw 8px.
 

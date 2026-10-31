@@ -19,11 +19,43 @@ A single process on a single configurable port (default: 4000) handles both WebS
 
 `apps` and `builds` are separate entities.
 
-- **apps**: product-level app identity, keyed by `bundle_id_key` alone (migration 007 dropped the old `UNIQUE(bundle_id_key, platform)`; uniqueness is enforced in `upsertApp` for uploads, and `POST /apps` refuses a manual create for a key that already has a row with 409, whatever the platform — restoring the dropped per-platform constraint would leave a row `upsertApp` never routes to). `platform` is `ios` | `android` | `both` — the same bundle ID uploaded on both platforms is **one** row promoted to `both`, not separate rows.
+- **apps**: product-level app identity. Its bundle IDs live in `app_bundle_ids` (migration 020, #1086), one row per (app, platform), so an app can have a different ID on iOS and Android. Two rules the table does not hold are kept in `lib/appBundleIds.ts`: **an ID belongs to one app whatever the platform** (every ownership lookup ignores the platform; `POST /apps` refuses a taken ID with 409) and **an app has at most one ID per platform** (a different ID for a platform the app already has goes to that ID's own app, so a build flavor stays separate). `platform` is `ios` | `android` | `both`, widened when a build or ID for the other platform arrives. `__unknown__` collects builds whose ID could not be read and never takes part in a create or a merge. `POST /apps/:id/merge` moves one platform's ID and builds into another app and deletes the source when it has nothing left, and `POST /apps/:id/split` moves them into a new app, the way back (the source must keep its other platform). The rules for the side that leaves are one function, `cannotLeave`, shared by both; everything else a build has hangs off `build_id` and follows it, and only `builds.app_id` points at `apps`.
 - **builds**: build artifacts. `app_id FK → apps.id`. Contains `version_name`, `build_number`, `file_path`.
-- `bundle_id_key` is used to auto-lookup/create the `apps` row → re-uploading the same app adds only a new `builds` row.
+  `version_name` / `build_number` are what the build file says and never change after upload; a person's values go
+  in `version_name_override` / `build_number_override` (migration 022, #1084). **Read builds through the
+  `builds_effective` view**, which is the one place the value in use is made (`binary_*` keeps the file's).
+  `__tests__/buildsEffectiveReads.test.ts` finds a query that reads them straight from `builds` — a floor; the fence
+  is `buildOverride.test.ts`. Write rules (trim, empty = none, 100 characters, an override equal to the file's value
+  is none) are `lib/buildVersion.ts`, shared by the upload and the edit. The label (`version_label`) is not the app's
+  name when the file has none: that is the file name.
+- An upload's bundle ID finds its app (`routeUploadToApp` / `upsertApp`) → re-uploading the same app adds only a new `builds` row. `app_id` adds the ID to the named app only when that app has none on the platform and no other app holds it; an `app_id` naming no app (merged away) is routed by the ID. A build's `platform` is its file type, never the caller's field.
 
 Build file storage path: `uploads/builds/`.
+
+## Schema conventions
+
+What the schema already does, written down so the next table follows it rather than whatever the last migration
+happened to show. Each cites where it holds.
+
+1. **A fact is stored once.** A value a person may set beside one tapflow derives goes in its own NULL-able column,
+   NULL meaning "not set", and the value in use is made in SQL with `COALESCE`: `users.display_name` (the email's
+   name part otherwise), `builds.*_override`. When several queries read it, one VIEW makes it (`builds_effective`),
+   so no query can forget. `device_prefs.display_name` falls back in the dashboard instead, because devices are not
+   in the database. NULL is the only "not set": `users.display_name` keeps that in code (`api/profile.ts` stores
+   `trim() || null`); from 022 a CHECK holds it in the schema too (`trim(x) <> ''`).
+2. **Many of a thing to one is a table, not columns**: `app_bundle_ids` (an app's ID per platform),
+   `flow_run_video_chunks` (a video's chunks). `flow_run_videos` is a table of its own for timing, not count: its
+   chunks arrive before the flow row exists.
+3. **A closed set of values is a CHECK**: `status_label`, `platform`, a skipped flow's reason only with a skip
+   (017).
+4. **A rule the table cannot hold lives in one `lib/` function with tests**: `lib/appBundleIds.ts` (an ID belongs
+   to one app whatever the platform), `lib/buildVersion.ts`.
+5. **Migrations are numbered and only added.** A table another references is never rebuilt — inside the migration
+   transaction `PRAGMA foreign_keys = OFF` does nothing, so dropping it fails (020). One nothing references may be,
+   inside the transaction (017). 007 rebuilt `apps`, which `builds` references, under that same no-op pragma: it is
+   the case 020 warns about, not a precedent. A view references nothing and is dropped and recreated when its table
+   gains a column. Dropping a column is a decision of its own. A column nothing reads: `builds.label` (the upload
+   still writes it).
 
 iOS build format: `.app.zip` **or** `.tar.gz`/`.tgz` (EAS `eas build` simulator artifacts). `.ipa` uploads return 400. `.tar.gz` is stored natively (no re-zip) so the `.app`'s exec bits / symlinks survive to install time; `tar` extraction happens on the macOS agent.
 - Auto-extracts `CFBundleIdentifier`, `CFBundleShortVersionString`, `CFBundleVersion`, `CFBundleDisplayName`/`CFBundleName` from the top-level `*.app/Info.plist` (zip: `unzip -p`; tar: `tar -xzOf`).
@@ -118,6 +150,37 @@ iOS build format: `.app.zip` **or** `.tar.gz`/`.tgz` (EAS `eas build` simulator 
   deliberately not through `dispatchTarget`: that resolver also decides agent liveness, and using it there
   would move `agent offline` ahead of `Build not found`, changing which of two simultaneous problems the
   caller is told about.
+- **The relay keeps a record of the build on each device, so a viewer coming back does not wipe it** (#1087).
+  An install clears the app's data first, and a reconnecting viewer sends one per `device:ready`. An
+  `app:install` with `keepIfInstalled` is answered here when `Session.installed` names the same build (id and
+  stored path), or joins `Session.pendingInstall` when that build is already on its way. The record is
+  dropped wherever the app may have gone without the relay installing over it — a shutdown, a ready that is
+  not explicitly warm, a full-erase or run-reset boot, another install starting — and the pending half also
+  in `rejectPending`, which every way an agent leaves passes through (a restart that replaces its socket
+  skips the hold). Treating an unknown ready as cold has a cost, written down rather than hidden: a device
+  that was shut down outside tapflow (Simulator.app, DeviceHub, a crash) and came back with the app's data
+  intact is reinstalled anyway. The relay cannot tell that case from iOS's zombie recovery, which erases.
+  The opposite direction has a cost too: an app deleted on the device by hand, or a simulator erased and booted
+  again outside tapflow before tapflow boots it, stays recorded — the next boot reads as warm — so a
+  reconnect answers "installed" and Launch fails, where it used to reinstall. Picking the device again
+  installs it. Fixing it needs the agent to report a shutdown it did not perform; no one has hit it.
+  `appInstallKeepIfInstalled.test.ts` walks each way the record is dropped.
+- **A device remembers the person it is waiting for** (#1087, `Session.waitingOwner`). The owner fields are
+  cleared on release, so without it the same person coming back from another browser read as anyone. It is
+  tied to the idle countdown the relay already keeps, not a second timer: set where a person's countdown starts
+  in `clearBrowser`, kept while an AI client borrows the device (the existing `lastHolderWasAi` /
+  `idleResumeOnLeave` rule decides whose countdown it is) and restored in full when it leaves, ended by a
+  person's join, the timer, or a shutdown. A person taking it, or shutting it down, leaves `endedBy` for the one
+  waited for. **A shutdown counts when it is forwarded to the agent** (`noteShutdown`), so a refused one ends
+  nothing, and **the countdown is cancelled when the agent reports the device down** (`settleShutdown`), so a
+  shutdown that fails keeps its backstop, and the wait and notice it ended are put back (`undoShutdown`) — unless a boot went out after that shutdown (`bootAfterShutdown`): its
+  done then answers a device someone has picked up again, and the wait and countdown on the session are that later
+  pick-up's. A waiting device is also not a candidate for a capacity shutdown, as a person's countdown is not one
+  for a lease. Nothing here refuses a join: a teammate may take a waiting device, and
+  the dashboard asks first. The listing reads all of it per asker *user* (`list(…, askerUser)`), because a person
+  is a different client in each browser. `endedBy` is not cleared by being read: every open tab polls. Held by
+  `sessionWaitingOwner.test.ts` (rules) and `sessionResumeRelay.test.ts` (wiring, two signed-in users through the
+  tunnel port, since loopback sockets are all one anonymous user).
 - **A session an AI client holds can be watched, read-only** (`watch:*`). The rules live with the code, and
   the ones that are easy to undo are these:
   - **Watchers are an index in `SessionManager`, never `owner` or `browserSocket`,** each bound to the owner
@@ -158,6 +221,33 @@ Routes are registered in `RelayServer.ts`; user-facing reference: [`docs/referen
 > **Deletion lifecycle (issue #258)**: review status and deletion are orthogonal. `status_label` (incl. `Done`) is a pure review state and never schedules deletion; purge keys off `delete_after` only, which is set by the explicit schedule-deletion action. `completed_at` is informational.
 
 > **A build goes with everything that points at it, on one path.** `deleteBuildsWithDependents` (`lib/buildDeletion.ts`) is used by both the daily purge and app deletion: recordings, run records and their screenshot files, then the build file. App deletion used to delete only the build rows, so an app with a recorded build failed on the recordings foreign key and one without left its build files on disk.
+
+### A device list after registration (`agent:devices`, #1085)
+
+An agent re-reads its simulators or emulators every 30 s and sends the whole list when it changed, to a relay that
+announced `'device-updates'` on `agent:registered`. `handleAgentDevices` diffs it against that socket's sessions:
+
+- **A new device gets a session under the identity the socket registered with** (`agentIdentities`), not one read
+  off its other sessions — an agent that registered with no devices has none to read, and its first device would
+  otherwise come out with no agent name, no capabilities, and no way for the next restart to rebind it.
+- **A listed device is refreshed by `refreshDevice`, not `agentFields`.** Name, form factor, and a version the list
+  still carries. `deviceStatus` and `deviceServiceTier` come from `device:ready` and shutdowns and the lease reads
+  them, so a list read in between must not move them. `REFRESHED_FIELDS` is held against `deviceFields` by a test.
+- **A device that left is removed only if nobody holds it.** One in use is marked `deviceGone`, left out of the
+  listing and the lease, and removed by the heartbeat (`sweepGoneDevices`) once `goneAndVacant`: an idle shutdown
+  sends `device:shutdown` and keeps the session, so no single place sees a session stop being held. Removal goes
+  through `removeSession`, which also releases the boot gate.
+- **Only the one who was on a gone device may re-join it** (`SessionManager.join`): the same client, or the person a
+  dropped session is waiting for. Anyone else holding the id would boot a device that is no longer there and, as its
+  holder, keep the session from being swept.
+- **Only the socket that registered last takes a list** (`latestAgentSocket`). A re-register evicts the sockets it
+  finds through their sessions, so one that registered with no devices lingers until the heartbeat.
+- The two-reads-in-a-row rule for a missing device lives in the agent (`DeviceListWatcher`): the agent sends only on
+  change, so the relay never hears the second absence.
+
+Device prefs and favourites (`api/devicePrefs.ts`, migration 021) are laid over `agents:listed` by
+`withDevicePrefs`, keyed by `SessionInfo.agentKey` (`agentId ?? agentName`) and the device id. **Nothing is removed
+from the listing**: an MCP client and the lease read the same one, and a hidden device must stay usable to them.
 
 ### Flow run records (`/api/v1/runs`)
 

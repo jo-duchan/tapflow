@@ -3,8 +3,17 @@ import { useRelay } from '@/hooks/useRelay'
 import type { DeviceSummary, BrowserInbound, SessionInfo } from '@/lib/types'
 import type { FormFactor } from '@tapflowio/protocol'
 
-export function useAgentSession(os: string) {
+/**
+ * `onListed` runs on every device listing, in the message handler: what a page decides from a listing (#1087's
+ * resume) is a reaction to that message, and doing it in an effect over `sessions` would set state in an effect.
+ */
+export function useAgentSession(os: string, onListed?: (sessions: SessionInfo[]) => void) {
   const [sessions, setSessions] = useState<SessionInfo[]>([])
+  // Whether the active device was entered as a return to the tester's own session: its viewer then keeps the
+  // installed app from the first install on (`DeviceViewer`'s `resume`).
+  const [resumed, setResumed] = useState(false)
+  const onListedRef = useRef(onListed)
+  useLayoutEffect(() => { onListedRef.current = onListed })
   const [selectedAgent, setSelectedAgent] = useState<string | null>(null)
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null)
   const [deviceId, setDeviceId] = useState('')
@@ -28,6 +37,7 @@ export function useAgentSession(os: string) {
       const { deviceId: active } = activeSessionRef.current
       const known = active ? msg.sessions.flatMap((s) => s.devices).find((d) => d.id === active)?.formFactor : undefined
       if (known) setActiveFormFactor(known)
+      onListedRef.current?.(msg.sessions)
     }
     if (msg.type === 'session:joined') { setBooting(false); setStatus('Connected') }
     if (msg.type === 'error') { setBooting(false); setStatus(`Error: ${msg.message}`) }
@@ -65,7 +75,8 @@ export function useAgentSession(os: string) {
 
   const agentGroups = sessions.filter((s) => s.devices.some((d) => d.platform === os))
 
-  const startDevice = useCallback((d: DeviceSummary) => {
+  const startDevice = useCallback((d: DeviceSummary, opts: { resume?: boolean } = {}) => {
+    setResumed(opts.resume === true)
     setActiveFormFactor(d.formFactor)
     setDeviceId(d.id)
     setBooting(true)
@@ -81,6 +92,7 @@ export function useAgentSession(os: string) {
       send({ type: 'device:shutdown', sessionId, payload: { deviceId: dId } })
     }
     setActiveSessionId(null)
+    setResumed(false)
     setBooting(false)
     setStatus('')
   }, [send])
@@ -91,6 +103,7 @@ export function useAgentSession(os: string) {
       send({ type: 'device:shutdown', sessionId, payload: { deviceId: dId } })
     }
     setActiveSessionId(null)
+    setResumed(false)
     setSelectedAgent(null)
     setBooting(false)
     setStatus('')
@@ -110,6 +123,7 @@ export function useAgentSession(os: string) {
    */
   const handleSessionEnded = useCallback(() => {
     setActiveSessionId(null)
+    setResumed(false)
     setSelectedAgent(null)
     setBooting(false)
     setStatus('')
@@ -122,6 +136,7 @@ export function useAgentSession(os: string) {
     selectedAgent,
     setSelectedAgent,
     activeSessionId,
+    resumed,
     deviceId,
     booting,
     status,

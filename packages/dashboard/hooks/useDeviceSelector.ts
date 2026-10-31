@@ -1,11 +1,16 @@
 import { useCallback, useState } from 'react'
 import type { SessionInfo } from '@/lib/types'
+import { compareVersions, groupDevices } from '@/lib/deviceGroups'
 
 export function useDeviceSelector(
   selectedSession: SessionInfo | undefined,
   os: string,
+  isAdmin = false,
 ) {
   const [osVersion, setOsVersion] = useState('')
+  // Hidden devices are for an Admin to bring back, so only an Admin is offered them (#1085).
+  const [showHiddenChosen, setShowHidden] = useState(false)
+  const showHidden = isAdmin && showHiddenChosen
   const [deviceSearch, setDeviceSearch] = useState('')
   const [resetMode, setResetMode] = useState<'app-only' | 'full-erase'>('app-only')
   // What the device currently on screen was actually booted with. Held apart from `resetMode`
@@ -39,30 +44,28 @@ export function useDeviceSelector(
   const filteredDevices = selectedSession?.devices.filter((d) => d.platform === os) ?? []
 
   const osVersions = [
-    ...new Set(filteredDevices.map((d) => d.osVersion).filter(Boolean)),
-  ].sort((a, b) => {
-    const parts = (s: string) => s.replace(/^[^\d]*/, '').split('.').map(Number)
-    const [aParts, bParts] = [parts(a as string), parts(b as string)]
-    for (let i = 0; i < Math.max(aParts.length, bParts.length); i++) {
-      const diff = (bParts[i] ?? 0) - (aParts[i] ?? 0)
-      if (diff !== 0) return diff
-    }
-    return 0
-  }) as string[]
+    ...new Set(filteredDevices.flatMap((d) => (d.osVersion && (showHidden || !d.hidden) ? [d.osVersion] : []))),
+  ].sort(compareVersions)
+  const hiddenCount = filteredDevices.filter((d) => d.hidden).length
 
-  const versionedDevices = (osVersion
-    ? filteredDevices.filter((d) => d.osVersion === osVersion)
-    : filteredDevices
-  ).filter((d) => !deviceSearch || d.name.toLowerCase().includes(deviceSearch.toLowerCase()))
+  // A version whose last device was just hidden is no longer offered; the filter falls back to every version rather
+  // than naming one the Select has no item for.
+  const shownVersion = osVersions.includes(osVersion) ? osVersion : ''
+  const deviceGroups = groupDevices(filteredDevices, { osVersion: shownVersion, search: deviceSearch, showHidden })
+  const versionedDevices = deviceGroups.flatMap((g) => g.devices)
 
   return {
     filteredDevices,
     osVersions,
-    osVersion,
+    osVersion: shownVersion,
     setOsVersion,
     deviceSearch,
     setDeviceSearch,
     versionedDevices,
+    deviceGroups,
+    hiddenCount,
+    showHidden,
+    setShowHidden,
     resetMode,
     setResetMode,
     appliedResetMode,

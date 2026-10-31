@@ -29,7 +29,10 @@ export function AppSidebar({ apps, selectedAppId, onSelect, onAdd, canWrite }: P
           ].join(' ')}
         >
           <span className="truncate">{app.name}</span>
-          <TechLabel className="text-muted-foreground truncate">{app.bundle_id_key}</TechLabel>
+          {/* Both IDs when they differ (#1086); one when the app uses the same on both, or has only one. */}
+          {[...new Set([app.bundle_ids.ios, app.bundle_ids.android].filter((id): id is string => id !== null))].map((id) => (
+            <TechLabel key={id} className="text-muted-foreground truncate">{id}</TechLabel>
+          ))}
         </button>
       ))}
       <div className="mt-1 border-t pt-1">

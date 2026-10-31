@@ -36,7 +36,7 @@ function post(port: number, body: object): Promise<Res> {
 }
 
 const appCount = (key: string) =>
-  (getDb().prepare('SELECT COUNT(*) AS n FROM apps WHERE bundle_id_key = ?').get(key) as { n: number }).n
+  (getDb().prepare('SELECT COUNT(DISTINCT app_id) AS n FROM app_bundle_ids WHERE bundle_id = ?').get(key) as { n: number }).n
 
 describe('POST /api/v1/apps — duplicate bundle ID', () => {
   let server: RelayServer

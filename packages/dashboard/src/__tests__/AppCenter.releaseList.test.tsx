@@ -23,14 +23,15 @@ vi.mock('@/lib/queries', async (importOriginal) => ({
 import { AppCenter } from '@/src/pages/AppCenter'
 
 const APPS = [
-  { id: 1, name: 'Coffee', bundle_id_key: 'com.a.coffee', platform: 'ios' },
-  { id: 2, name: 'Tea', bundle_id_key: 'com.a.tea', platform: 'ios' },
+  { id: 1, name: 'Coffee', bundle_id_key: 'com.a.coffee', bundle_ids: { ios: 'com.a.coffee', android: null }, build_platforms: ['ios'], platform: 'ios' },
+  { id: 2, name: 'Tea', bundle_id_key: 'com.a.tea', bundle_ids: { ios: 'com.a.tea', android: null }, build_platforms: ['ios'], platform: 'ios' },
 ] as unknown as App[]
 
 function build(id: number, version: string, status: Build['status_label'] = 'Backlog', appId = 1): Build {
   return {
     id, app_id: appId, version_name: version, build_number: String(id), platform: 'ios',
     status_label: status, uploaded_at: '2026-09-21T00:00:00Z', uploader: `uploader-${id}`, delete_after: null,
+    binary: { version_name: version, build_number: String(id) },
   } as unknown as Build
 }
 
@@ -262,7 +263,7 @@ describe('a row whose status change takes it out of the filtered list (#833)', (
     await setStatus(1, '1.0.0', 'Done')
 
     await screen.findByText('No matching builds')
-    await waitFor(() => expect(document.activeElement).toBe(screen.getByLabelText('Search versions')))
+    await waitFor(() => expect(document.activeElement).toBe(screen.getByLabelText('Search versions and labels')))
   })
 
   it('treats clearing the status as leaving a status filter', async () => {
@@ -423,7 +424,7 @@ describe('a row whose status change takes it out of the filtered list (#833)', (
     })
 
     await setStatus(1, '1.0.0', 'Done')
-    const search = screen.getByLabelText('Search versions')
+    const search = screen.getByLabelText('Search versions and labels')
     await userEvent.click(search)
     answer.resolve()
 
@@ -536,7 +537,8 @@ describe('deletion outcomes are announced (#834)', () => {
     renderAppCenter()
     await screen.findByText('uploader-1')
 
-    await userEvent.click(screen.getByRole('button', { name: 'Schedule deletion of ios build 1, 1.0.0' }))
+    await userEvent.click(screen.getByRole('button', { name: 'Actions for ios build 1, 1.0.0' }))
+    await userEvent.click(await screen.findByRole('menuitem', { name: 'Schedule deletion' }))
     await userEvent.click(screen.getByRole('button', { name: 'Schedule deletion' }))
     expect(toastSuccess).not.toHaveBeenCalled()
 
@@ -551,7 +553,8 @@ describe('deletion outcomes are announced (#834)', () => {
     renderAppCenter()
     await screen.findByText('uploader-1')
 
-    await userEvent.click(screen.getByRole('button', { name: 'Cancel scheduled deletion of ios build 1, 1.0.0' }))
+    await userEvent.click(screen.getByRole('button', { name: 'Actions for ios build 1, 1.0.0' }))
+    await userEvent.click(await screen.findByRole('menuitem', { name: 'Cancel scheduled deletion' }))
 
     await waitFor(() => expect(toastSuccess).toHaveBeenCalledWith('Scheduled deletion cancelled for ios build 1, 1.0.0'))
   })
@@ -562,7 +565,8 @@ describe('deletion outcomes are announced (#834)', () => {
     renderAppCenter()
     await screen.findByText('uploader-1')
 
-    await userEvent.click(screen.getByRole('button', { name: 'Schedule deletion of ios build 1, 1.0.0' }))
+    await userEvent.click(screen.getByRole('button', { name: 'Actions for ios build 1, 1.0.0' }))
+    await userEvent.click(await screen.findByRole('menuitem', { name: 'Schedule deletion' }))
     await userEvent.click(screen.getByRole('button', { name: 'Schedule deletion' }))
 
     await waitFor(() => expect(toastError).toHaveBeenCalledWith('Failed to schedule deletion'))

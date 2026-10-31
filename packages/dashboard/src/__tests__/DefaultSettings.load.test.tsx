@@ -21,7 +21,7 @@ beforeEach(() => {
     const url = String(input)
     if (url === '/api/v1/settings') return new Response(JSON.stringify({ team_name: 'QA Team', logo_url: '/logos/team.png' }))
     if (url === '/api/v1/apps') {
-      return new Response(JSON.stringify({ items: [{ id: 7, name: 'Coffee', bundle_id_key: 'com.a.coffee', platform: 'ios' }] }))
+      return new Response(JSON.stringify({ items: [{ id: 7, name: 'Coffee', bundle_id_key: 'com.a.coffee', bundle_ids: { ios: 'com.a.coffee', android: null }, build_platforms: ['ios'], platform: 'ios' }] }))
     }
     return new Response('{}', { status: 404 })
   })
@@ -55,7 +55,7 @@ describe('Default settings — what it loads', () => {
   it('lists the apps for someone who can edit them', async () => {
     auth.user = user('Developer')
     renderPage()
-    expect(await screen.findByDisplayValue('Coffee')).toBeInTheDocument()
+    expect(await screen.findByRole('button', { name: 'Actions for Coffee' })).toBeInTheDocument()
   })
 
   // `platform` arrives lowercase; the badge names it the way the platform does ("Ios" was CSS `capitalize`).
@@ -70,7 +70,7 @@ describe('Default settings — what it loads', () => {
   it('lists the apps for QA', async () => {
     auth.user = user('QA')
     renderPage()
-    expect(await screen.findByDisplayValue('Coffee')).toBeInTheDocument()
+    expect(await screen.findByRole('button', { name: 'Actions for Coffee' })).toBeInTheDocument()
   })
 
   it('does not ask for the apps for a Viewer', async () => {
@@ -80,7 +80,7 @@ describe('Default settings — what it loads', () => {
     await new Promise((resolve) => setTimeout(resolve, 20))
     const asked = fetchMock.mock.calls.map((call: unknown[]) => String(call[0]))
     expect(asked).not.toContain('/api/v1/apps')
-    expect(screen.queryByDisplayValue('Coffee')).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Actions for Coffee' })).toBeNull()
   })
 
   it('asks for neither the workspace nor the apps for a member', async () => {

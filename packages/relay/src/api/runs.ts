@@ -628,7 +628,7 @@ function buildSummary(buildId: number | null): BuildSummary | null {
   if (buildId === null) return null
   const b = getDb().prepare(`
     SELECT b.id, ap.name AS app_name, b.version_name, b.build_number, ap.platform
-      FROM builds b LEFT JOIN apps ap ON ap.id = b.app_id WHERE b.id = ?
+      FROM builds_effective b LEFT JOIN apps ap ON ap.id = b.app_id WHERE b.id = ?
   `).get(buildId) as { id: number; app_name: string | null; version_name: string | null; build_number: string | null; platform: string | null } | undefined
   if (!b) return null
   return { id: b.id, appName: b.app_name, versionName: b.version_name, buildNumber: b.build_number, platform: b.platform }

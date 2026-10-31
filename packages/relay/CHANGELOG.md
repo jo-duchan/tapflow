@@ -1,5 +1,30 @@
 # @tapflowio/relay
 
+## 0.32.0
+
+### Minor Changes
+
+- 38f0dc5: Settings → Apps has a merge mode: drag an app's bundle ID row onto another app to move that platform's ID and builds there, from the mouse or the keyboard. Renaming and deleting an app moved into each app's ⋯ menu there. App Center lists both bundle IDs of an app whose iOS and Android IDs differ, and opens the first app when the URL names one a merge removed.
+- 355376b: Settings → Apps can split one platform of an app into a new app: in arrange mode (formerly merge mode), drop a bundle ID row into New app below its own app. `POST /api/v1/apps/:id/split` does the same. A merge is no longer one-way.
+- 9c12778: A build's label shows on its row in App Center and can be changed, along with its version and build number, from the row's ⋯ menu (Edit build); scheduling and cancelling deletion moved into the same menu. The upload dialog takes a label and, folded away, a version and build number. `POST /api/v1/builds` accepts `version_name` and `build_number`, and `PATCH /api/v1/builds/:id` accepts both (empty goes back to the file's). The file's values are kept (migration 022, read through the `builds_effective` view) and returned as `binary`; `version_name` and `build_number` keep returning the values in use. Search also matches the label. An upload's `label` no longer names the app when the build file has no app name.
+- 78a6545: The QA session device list follows the Mac without an agent restart: agents re-read their simulators and emulators every 30 s and send the list when it changed (`agent:devices`, to a relay that announces `'device-updates'` on `agent:registered`). The list is grouped by OS version with each person's favourites on top, and an Admin can rename or hide devices for the team (`PUT /api/v1/device-prefs`, `PUT`/`DELETE /api/v1/device-favourites`, migration 021). Hidden and renamed devices stay listed under their own names for MCP clients and runs. An Android emulator that is not running reports the version of its system image.
+- b8f7ddb: An app can have a different bundle ID on iOS and Android. Upload a build with `app_id` and its ID is added to that app when the app has none on that platform, instead of starting a new app. `POST /api/v1/apps/:id/merge` moves one platform of an app, with its builds, into another. `GET /api/v1/apps` adds `bundle_ids` and `build_platforms`, and MCP `list_builds` gives each build its own bundle ID. A build's platform now comes from its file, and the build list's `platform` filter and the `build.status_changed` webhook use the build's platform rather than the app's.
+- f967adf: A tester can come back to a QA session. The QA page's URL carries `session` and `device` once a device starts; opening or reloading it rejoins that device, keeping the installed app, when the device is waiting for that tester. A device that is off, or on and not theirs, is offered for a fresh start instead of being booted unasked. The relay remembers who a device is waiting for after a person's connection drops, for as long as the existing idle countdown runs, and the device listing says so: `waiting` (the person's `name` — display name, else the email's local part — and email as `user`, with `remainingMs`, and `aiHolding` while an AI client borrows the device) to everyone, and only to that person `resumable`, `releasedAgoMs`, `waiting.yours` and `waiting.buildId`; `heldBySelf` when another tab of the asker's account holds the device live; and `endedBy` (`name` and email) when someone else took or shut down the device while it waited, kept on every listing until the idle window passes. A shutdown counts only once it is forwarded to the agent, and the countdown is cancelled when the device reports it is down rather than when the shutdown is sent. The dashboard shows a notice for an interrupted session on App Center and the QA page, asks before a teammate takes a device someone is coming back to, and tells the owner who took it when they come back within the idle window. A device waiting for a person is not a candidate for the relay's capacity shutdowns, as a person's countdown is already not one for a lease, and a `device:shutdown-done` that arrives after a boot went out behind its shutdown no longer ends the wait and countdown that boot's session started.
+
+### Patch Changes
+
+- ce25ceb: Dashboard dialogs take one of three widths (sm 384px, md 448px, lg 512px) instead of one per dialog; the Streaming notice goes from 440px to 448px.
+- 66fa54f: A viewer that reconnects to a device no longer wipes the app under test. Every install clears the app's data first (iOS uninstalls, Android clears), and the dashboard sent one on each `device:ready`, which a reconnect produces twice, so a Wi-Fi drop of a second cost the tester the app's state. `app:install` takes an optional `keepIfInstalled`: the relay then answers `app:install-done` itself when it last installed that build on the device, identified by build id and stored path, and joins an install of it already in flight instead of sending a second one. The dashboard sets it on every install after the first one of a session has landed, so picking a device still starts with a clean install. The relay drops its record on a shutdown, a cold boot or a ready that does not say, a full-erase or run-reset boot, and another install; a request joined to an install in flight is answered with an error when its agent leaves. `app:install-done` moves to `RelayOrAgentToBrowser`, since the relay now produces it too.
+- 6065c82: The interrupted-session banner's Resume and End buttons are the same width.
+
+  <!-- changelog: internal — polish of the unreleased session resume banner, already covered by its Added entry -->
+
+- Updated dependencies [78a6545]
+- Updated dependencies [f967adf]
+- Updated dependencies [66fa54f]
+  - @tapflowio/protocol@0.32.0
+  - @tapflowio/agent-core@0.32.0
+
 ## 0.31.0
 
 ### Minor Changes

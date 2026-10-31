@@ -12,6 +12,8 @@ import { json, readJson } from '../router.js'
 import { pipeUpload, unlinkSafe } from '../lib/uploads.js'
 import { deliverWebhooks } from '../lib/webhooks.js'
 import { deleteBuildsWithDependents, type BuildFileDirs } from '../lib/buildDeletion.js'
+import { clampLabel, cleanBuildText, overrideOf, withBinary, MAX_BUILD_TEXT } from '../lib/buildVersion.js'
+import { attachIfFree, holdsUnknown, idOn, ownerOf, promote, UNKNOWN_BUNDLE_ID, type Platform } from '../lib/appBundleIds.js'
 
 // ── archive kind ───────────────────────────────────────────────────────────
 
@@ -221,35 +223,38 @@ export type UploadRoute =
  * The reject keys off `isAndroidArtifact` (derived from the uploaded file, not the caller-supplied
  * `platform` field) so an APK sent with `platform=ios` can't bypass the guard. iOS degrades
  * gracefully instead, mirroring the lipo/findAapt Linux-relay precedent.
+ *
+ * With a bundle ID, the ID decides (#1086, rules in `lib/appBundleIds.ts`): `app_id` only adds the ID to that app when
+ * the app has none on this platform and no other app holds it. An `app_id` naming no app — one a merge removed — is
+ * routed by the ID instead of refused, so CI that pinned it keeps uploading.
  */
 export function routeUploadToApp(
   db: ReturnType<typeof getDb>,
-  opts: { appId: number | null; bundleId: string | null; appName: string; platform: string; isAndroidArtifact: boolean },
+  opts: { appId: number | null; bundleId: string | null; appName: string; platform: Platform; isAndroidArtifact: boolean },
 ): UploadRoute {
   const { appId, bundleId, appName, platform, isAndroidArtifact } = opts
 
   if (appId != null) {
-    const app = db.prepare('SELECT id, bundle_id_key, platform FROM apps WHERE id = ?')
-      .get(appId) as { id: number; bundle_id_key: string | null; platform: string } | undefined
-    if (!app) return { kind: 'app-not-found' }
-    if (bundleId === null && isAndroidArtifact) return { kind: 'reject-null-bundle' }
-    // A bundle_id that differs from the named app routes to (or creates) the app for that bundle_id.
-    if (bundleId !== null && app.bundle_id_key && app.bundle_id_key !== bundleId) {
+    const app = db.prepare('SELECT id FROM apps WHERE id = ?').get(appId)
+    if (!app) {
+      if (bundleId === null) return { kind: 'app-not-found' }
       return { kind: 'ok', appId: upsertApp(appName, bundleId, platform) }
     }
-    if (app.platform !== 'both' && app.platform !== platform) {
-      db.prepare('UPDATE apps SET platform = ? WHERE id = ?').run('both', appId)
+    if (bundleId === null && isAndroidArtifact) return { kind: 'reject-null-bundle' }
+    if (bundleId !== null) {
+      // The app that collects unreadable builds never takes a real ID, which would also leave that ID unmergeable.
+      if (holdsUnknown(db, appId)) return { kind: 'ok', appId: upsertApp(appName, bundleId, platform) }
+      const owner = ownerOf(db, bundleId)
+      const taken = owner !== null && owner !== appId
+      const otherIdHere = owner === null && idOn(db, appId, platform) !== null
+      if (taken || otherIdHere) return { kind: 'ok', appId: upsertApp(appName, bundleId, platform) }
+      attachIfFree(db, appId, platform, bundleId)
     }
-    // Sets the key without asking whether another row holds it, so it relies on there being no row with
-    // an empty key to reach: POST /apps requires one and upsertApp always supplies one. A way to create an
-    // app without a bundle ID would reopen a second row per key here (see POST /apps' 409 in apps.ts).
-    if (!app.bundle_id_key && bundleId !== null) {
-      db.prepare('UPDATE apps SET bundle_id_key = ? WHERE id = ?').run(bundleId, appId)
-    }
+    promote(db, appId, platform)
     return { kind: 'ok', appId }
   }
 
-  return { kind: 'ok', appId: upsertApp(appName, bundleId ?? '__unknown__', platform) }
+  return { kind: 'ok', appId: upsertApp(appName, bundleId ?? UNKNOWN_BUNDLE_ID, platform) }
 }
 
 /** Rejection message for an app_id-targeted APK upload whose metadata (bundleId) couldn't be read. Calls out a missing build-tools install specifically. */
@@ -297,27 +302,24 @@ function hasSimulatorSlice(filePath: string, appDir: string): boolean | null {
 
 // ── app 자동 생성 / 조회 ──────────────────────────────────────────────────
 
-export function upsertApp(name: string, bundleIdKey: string, platform: string): number {
+export function upsertApp(name: string, bundleId: string, platform: Platform): number {
   const db = getDb()
-  const existing = db.prepare(
-    'SELECT id, platform FROM apps WHERE bundle_id_key = ? LIMIT 1'
-  ).get(bundleIdKey) as { id: number; platform: string } | undefined
-
-  if (existing) {
-    // 다른 플랫폼 빌드가 올라오면 both로 업그레이드
-    if (existing.platform !== 'both' && existing.platform !== platform) {
-      db.prepare('UPDATE apps SET platform = ? WHERE id = ?').run('both', existing.id)
-    }
-    return existing.id
+  const owner = ownerOf(db, bundleId)
+  if (owner !== null) {
+    // The same ID on another platform joins the app, as it always has. An app that already has a different ID here
+    // keeps it; the build still lands in the app that owns this one.
+    attachIfFree(db, owner, platform, bundleId)
+    promote(db, owner, platform)
+    return owner
   }
-
-  const result = db.prepare(
-    'INSERT INTO apps (name, bundle_id_key, platform) VALUES (?, ?, ?)'
-  ).run(name, bundleIdKey, platform)
-  return result.lastInsertRowid as number
+  const id = db.prepare('INSERT INTO apps (name, platform) VALUES (?, ?)').run(name, platform).lastInsertRowid as number
+  attachIfFree(db, id, platform, bundleId)
+  return id
 }
 
 // ── handlers ──────────────────────────────────────────────────────────────
+
+type BuildRowWithBinary = { binary_version_name: string | null; binary_build_number: string | null } & Record<string, unknown>
 
 export function handleListBuilds(req: http.IncomingMessage, res: http.ServerResponse): void {
   const auth = requireBuildAuth(req, res)
@@ -338,15 +340,20 @@ export function handleListBuilds(req: http.IncomingMessage, res: http.ServerResp
   const conds: string[] = []
   const params: unknown[] = []
 
-  // A substring search: `%`, `_` and the escape character itself are text to find, not wildcards.
-  if (q)        { conds.push(`b.version_name LIKE ? ESCAPE '\\'`); params.push(`%${q.replace(/[\\%_]/g, '\\$&')}%`) }
-  if (platform) { conds.push('ap.platform = ?'); params.push(platform) }
+  // A substring search: `%`, `_` and the escape character itself are text to find, not wildcards. The version in use
+  // and the label, now that the label is shown (#1084).
+  if (q) {
+    const pattern = `%${q.replace(/[\\%_]/g, '\\$&')}%`
+    conds.push(`(b.version_name LIKE ? ESCAPE '\\' OR b.version_label LIKE ? ESCAPE '\\')`)
+    params.push(pattern, pattern)
+  }
+  if (platform) { conds.push('b.platform = ?'); params.push(platform) }
   if (status)   { conds.push('b.status_label = ?'); params.push(status) }
   if (appId)    { conds.push('b.app_id = ?'); params.push(Number(appId)) }
 
   const where = conds.length ? `WHERE ${conds.join(' AND ')}` : ''
   const baseFrom = `
-    FROM builds b
+    FROM builds_effective b
     LEFT JOIN apps ap ON ap.id = b.app_id
     LEFT JOIN users u  ON u.id  = b.uploader_id
   `
@@ -355,8 +362,8 @@ export function handleListBuilds(req: http.IncomingMessage, res: http.ServerResp
     `SELECT COUNT(*) as n ${baseFrom} ${where}`
   ).get(...params) as { n: number }).n
 
-  const items = db.prepare(`
-    SELECT b.id, b.app_id, ap.name, b.version_name, b.build_number,
+  const items = (db.prepare(`
+    SELECT b.id, b.app_id, ap.name, b.version_name, b.build_number, b.binary_version_name, b.binary_build_number,
            b.version_label, b.status_label, b.platform,
            b.bundle_id, b.uploaded_at, b.completed_at, b.delete_after,
            COALESCE(u.display_name, substr(u.email, 1, instr(u.email, '@') - 1)) as uploader
@@ -364,7 +371,7 @@ export function handleListBuilds(req: http.IncomingMessage, res: http.ServerResp
     ${where}
     ORDER BY b.${sortKey} ${sortDir}
     LIMIT ? OFFSET ?
-  `).all(...params, limit, page * limit)
+  `).all(...params, limit, page * limit) as BuildRowWithBinary[]).map(withBinary)
 
   json(res, 200, { items, total })
 }
@@ -377,15 +384,15 @@ export function handleGetBuild(
   if (!requireBuildAuth(req, res)) return
 
   const build = getDb().prepare(`
-    SELECT b.id, b.app_id, ap.name, b.version_name, b.build_number,
+    SELECT b.id, b.app_id, ap.name, b.version_name, b.build_number, b.binary_version_name, b.binary_build_number,
            b.version_label, b.status_label, b.platform, b.bundle_id, b.uploaded_at, b.completed_at, b.delete_after
-    FROM builds b
+    FROM builds_effective b
     LEFT JOIN apps ap ON ap.id = b.app_id
     WHERE b.id = ?
-  `).get(params.id)
+  `).get(params.id) as BuildRowWithBinary | undefined
 
   if (!build) return json(res, 404, { error: 'Build not found' })
-  json(res, 200, build)
+  json(res, 200, withBinary(build))
 }
 
 export async function handleUpdateBuild(
@@ -399,11 +406,14 @@ export async function handleUpdateBuild(
   // Parse the body before reading current state, so the SELECT and UPDATE below run
   // with no await between them. Closes a TOCTOU window where two concurrent PATCHes
   // could both observe the old status_label and both fire the webhook.
-  const body = await readJson<{ status_label?: string | null; version_label?: string | null }>(req)
+  const body = await readJson<{
+    status_label?: string | null; version_label?: unknown; version_name?: unknown; build_number?: unknown
+  } | null>(req)
+  if (!body || typeof body !== 'object') return json(res, 400, { error: 'Nothing to update' })
 
   const db = getDb()
-  const existing = db.prepare('SELECT status_label FROM builds WHERE id = ?').get(params.id) as
-    | { status_label: string | null }
+  const existing = db.prepare('SELECT status_label, version_name, build_number FROM builds WHERE id = ?').get(params.id) as
+    | { status_label: string | null; version_name: string | null; build_number: string | null }
     | undefined
   if (!existing) return json(res, 404, { error: 'Build not found' })
 
@@ -423,9 +433,19 @@ export async function handleUpdateBuild(
       updates.push('completed_at = NULL')
     }
   }
-  if ('version_label' in body) {
-    updates.push('version_label = ?')
-    values.push(body.version_label ?? null)
+  // Each text field: trimmed, empty means none, at most MAX_BUILD_TEXT. An empty version or build number goes back to
+  // what the build file says (#1084).
+  const text: Array<[key: 'version_label' | 'version_name' | 'build_number', column: string, fromFile?: string | null]> = [
+    ['version_label', 'version_label'],
+    ['version_name', 'version_name_override', existing.version_name],
+    ['build_number', 'build_number_override', existing.build_number],
+  ]
+  for (const [key, column, fromFile] of text) {
+    if (!(key in body)) continue
+    const value = cleanBuildText(body[key])
+    if (value === false) return json(res, 400, { error: `${key} must be text of at most ${MAX_BUILD_TEXT} characters` })
+    updates.push(`${column} = ?`)
+    values.push(fromFile === undefined ? value : overrideOf(value, fromFile))
   }
 
   if (updates.length === 0) return json(res, 400, { error: 'Nothing to update' })
@@ -441,7 +461,7 @@ export async function handleUpdateBuild(
   if ('status_label' in body && (next === 'Done' || next === 'Rejected') && existing.status_label !== next) {
     try {
       const info = db
-        .prepare('SELECT b.version_name, a.platform FROM builds b JOIN apps a ON a.id = b.app_id WHERE b.id = ?')
+        .prepare('SELECT version_name, platform FROM builds_effective WHERE id = ?')
         .get(params.id) as { version_name: string | null; platform: string | null } | undefined
       void deliverWebhooks({
         event: 'build.status_changed',
@@ -625,10 +645,19 @@ export function handleUploadBuild(
       return json(res, 400, { error: fileError })
     }
     if (!savedPath) return json(res, 400, { error: 'File required' })
+    // Before any archive work, so a refused request does not pay for validating it.
+    const label = clampLabel(fields.label)
+    const versionInput = cleanBuildText(fields.version_name)
+    const buildInput = cleanBuildText(fields.build_number)
+    if (versionInput === false || buildInput === false) {
+      unlinkSafe(savedPath, 'rejected upload')
+      return json(res, 400, { error: `version_name and build_number are at most ${MAX_BUILD_TEXT} characters` })
+    }
 
     const kind = buildFileKind(originalName)
     const isIos = kind === 'ios-zip' || kind === 'ios-tar'
-    const platform = fields.platform ?? (isIos ? 'ios' : 'android')
+    // What the file is, not the caller's `platform` field: it decides which of the app's IDs the build's becomes.
+    const platform: Platform = isIos ? 'ios' : 'android'
     const status = ['Backlog', 'In Progress', 'Done', 'Rejected'].includes(fields.status)
       ? fields.status : null
 
@@ -677,37 +706,46 @@ export function handleUploadBuild(
       aaptFound       = info.aaptFound
     }
 
-    const appName = resolvedAppName ?? fields.label ?? stripArchiveExt(originalName)
+    // Not the label: it is a note on the build, and naming an app after "staging" is how the two used to mix (#1084).
+    const appName = resolvedAppName ?? stripArchiveExt(originalName)
 
     const db = getDb()
-    const route = routeUploadToApp(db, {
-      appId: fields.app_id ? Number(fields.app_id) : null,
-      bundleId, appName, platform,
-      isAndroidArtifact: !isIos, // from the uploaded file kind, not the caller-supplied platform field
-    })
-    if (route.kind === 'app-not-found') {
+    const filePath = savedPath
+    // Routing can add an ID and widen the app's platform before the build row goes in; one transaction, so a failed
+    // insert leaves no ID behind on an app that never got the build.
+    const outcome = db.transaction(() => {
+      const route = routeUploadToApp(db, {
+        appId: fields.app_id ? Number(fields.app_id) : null,
+        bundleId, appName, platform,
+        isAndroidArtifact: !isIos, // from the uploaded file kind, not the caller-supplied platform field
+      })
+      if (route.kind !== 'ok') return route
+      const result = db.prepare(`
+        INSERT INTO builds (app_id, version_name, build_number, version_name_override, build_number_override,
+                            bundle_id, status_label, file_path, label, version_label, uploader_id, platform)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `).run(route.appId, versionName, buildNumber, overrideOf(versionInput, versionName), overrideOf(buildInput, buildNumber),
+        bundleId, status, filePath, label, label, auth.userId, platform)
+      return { kind: 'inserted' as const, buildId: result.lastInsertRowid }
+    })()
+    if (outcome.kind === 'app-not-found') {
       unlinkSafe(savedPath, 'app not found')
       return json(res, 404, { error: 'App not found' })
     }
-    if (route.kind === 'reject-null-bundle') {
+    if (outcome.kind === 'reject-null-bundle') {
       unlinkSafe(savedPath, 'rejected upload')
       return json(res, 400, { error: nullBundleMessage(aaptFound) })
     }
-    const appId = route.appId
-
-    const result = db.prepare(`
-      INSERT INTO builds (app_id, version_name, build_number, bundle_id, status_label, file_path, label, version_label, uploader_id, platform)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `).run(appId, versionName, buildNumber, bundleId, status, savedPath, fields.label ?? null, fields.label ?? null, auth.userId, platform)
+    const result = { lastInsertRowid: outcome.buildId }
 
     const build = db.prepare(`
-      SELECT b.id, b.app_id, ap.name, b.version_name, b.build_number,
-             b.bundle_id, b.status_label, b.platform, b.uploaded_at
-      FROM builds b LEFT JOIN apps ap ON ap.id = b.app_id
+      SELECT b.id, b.app_id, ap.name, b.version_name, b.build_number, b.binary_version_name, b.binary_build_number,
+             b.version_label, b.bundle_id, b.status_label, b.platform, b.uploaded_at
+      FROM builds_effective b LEFT JOIN apps ap ON ap.id = b.app_id
       WHERE b.id = ?
-    `).get(result.lastInsertRowid)
+    `).get(result.lastInsertRowid) as BuildRowWithBinary
 
-    json(res, 201, build)
+    json(res, 201, withBinary(build))
   })
 
   bb.on('error', () => json(res, 500, { error: 'Upload failed' }))

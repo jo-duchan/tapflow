@@ -2,7 +2,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'fs'
 import { tmpdir } from 'os'
 import { join } from 'path'
 import { afterEach, describe, expect, it } from 'vitest'
-import { avdHomes, avdRotationLockMemory, classifyAvd, formFactorOf, parseIni } from '../avdConfig'
+import { avdHomes, avdRotationLockMemory, classifyAvd, formFactorOf, osVersionFromConfig, osVersionOf, parseIni } from '../avdConfig'
 
 // What kind of device an AVD is, read from its config.ini before it boots — the dashboard draws the
 // boot skeleton from it. Fixtures are the keys that matter, copied from AVDs on a real Mac on
@@ -176,5 +176,37 @@ describe('avdRotationLockMemory', () => {
     avdRotationLockMemory.forget('Pixel')
     expect(avdRotationLockMemory.freed('Pixel')).toBe(false)
     avdRotationLockMemory.forget('Missing')
+  })
+})
+
+// #1085: an emulator that is not running has a version too, from the image it was built on.
+describe('osVersionFromConfig', () => {
+  it('reads the API level off the system image and writes it as a running emulator reports it', () => {
+    expect(osVersionFromConfig({ 'image.sysdir.1': 'system-images/android-34/google_apis/arm64-v8a/' })).toBe('Android 14')
+    expect(osVersionFromConfig({ 'image.sysdir.1': 'system-images/android-35/google_apis_playstore/arm64-v8a/' })).toBe('Android 15')
+    // 12L reports 12 when running, so it groups with 12.
+    expect(osVersionFromConfig({ 'image.sysdir.1': 'system-images/android-32/google_apis/arm64-v8a/' })).toBe('Android 12')
+  })
+
+  it('falls back to the older target key', () => {
+    expect(osVersionFromConfig({ target: 'android-33' })).toBe('Android 13')
+  })
+
+  it('names a level it has no release for by its number', () => {
+    expect(osVersionFromConfig({ 'image.sysdir.1': 'system-images/android-99/google_apis/arm64-v8a/' })).toBe('API 99')
+  })
+
+  it('gives nothing for a codename image or no image', () => {
+    expect(osVersionFromConfig({ 'image.sysdir.1': 'system-images/android-VanillaIceCream/google_apis/arm64-v8a/' })).toBeUndefined()
+    expect(osVersionFromConfig({})).toBeUndefined()
+  })
+
+  it('is found by AVD name the way the form factor is', () => {
+    const fs = {
+      existsSync: (p: string) => ['/h/.android/avd/P.ini', '/h/.android/avd/P.avd/config.ini'].includes(p),
+      readFileSync: (p: string) => (p.endsWith('P.ini') ? '' : 'image.sysdir.1=system-images/android-36/google_apis/arm64-v8a/\n'),
+    }
+    expect(osVersionOf('P', {}, '/h', fs)).toBe('Android 16')
+    expect(osVersionOf('Missing', {}, '/h', fs)).toBeUndefined()
   })
 })

@@ -42,3 +42,5 @@ export {
 } from './sps.js'
 export type { SpsVuiInfo } from './sps.js'
 export { createKeyedSerialQueue } from './serialQueue.js'
+export { DeviceListWatcher, DEVICE_REREAD_MS } from './deviceListWatcher.js'
+export type { DeviceListWatcherOptions } from './deviceListWatcher.js'

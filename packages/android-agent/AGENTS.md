@@ -203,6 +203,17 @@ new gesture. iOS reaches the same reason by a different route (its gesture-owner
 not yet injecting; here a path either has a channel or does not. Written down so the gap is a fact
 about the platform rather than an oversight.
 
+### The device list is re-read every 30 s (#1085)
+
+Same mechanism as iOS (`DeviceListWatcher`, `offerDevices`), with one Android rule: **the re-read uses
+`AdbWrapper.peekDevices`, never `listDevices`.** `listDevices` syncs `serialMap` from `adb devices`, which is how a
+boot learns the serial of the emulator it launched; a re-read every 30 s must not move it under a boot. Every adb call of a
+re-read is bounded (`execBounded`, 10 s), unlike the boot path's: the watcher runs one read at a time, so a call
+stuck on a wedged emulator would otherwise stop every later re-read. Each AVD's
+config is read once per connection (`avdInfo`): its form factor, and its version from the system image
+(`osVersionFromConfig`), so an emulator that is not running is grouped by version too. A running emulator's
+`getprop` answer wins.
+
 ## HOW NOT
 
 - Do not hardcode the ADB or emulator path, or read `ANDROID_HOME` directly — call `getAdbPath()` / `getEmulatorPath()` from `sdk.ts`.

@@ -44,7 +44,12 @@ export interface Recording {
 export interface App {
   id: number
   name: string
-  bundle_id_key: string
+  /** Null for an app a merge left with builds but no ID (#1086). */
+  bundle_id_key: string | null
+  /** The app's bundle ID on each platform, null where it has none (#1086). */
+  bundle_ids: { ios: string | null; android: string | null }
+  /** The platforms the app has builds on — a platform can have builds and no ID. */
+  build_platforms: Array<'ios' | 'android'>
   platform: 'ios' | 'android' | 'both'
   latest_build_id: number | null
   version_name: string | null
@@ -60,6 +65,9 @@ export interface Build {
   version_name: string | null
   build_number: string | null
   version_label: string | null
+  /** What the build file says (#1084). `version_name` and `build_number` above are the values in use, which a person
+   *  may have set; where they differ from these, the build is marked overridden. */
+  binary: { version_name: string | null; build_number: string | null }
   status_label: 'Backlog' | 'In Progress' | 'Done' | 'Rejected' | null
   platform: 'ios' | 'android'
   bundle_id: string | null

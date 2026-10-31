@@ -17,6 +17,9 @@ const XML_PLIST = `<?xml version="1.0" encoding="UTF-8"?>
 
 // ── Migration schema tests ─────────────────────────────────────────────────
 
+const idOf = (appId: number, platform: 'ios' | 'android') =>
+  (getDb().prepare('SELECT bundle_id FROM app_bundle_ids WHERE app_id = ? AND platform = ?').get(appId, platform) as { bundle_id: string } | undefined)?.bundle_id
+
 describe('Migration 004: apps/builds split', () => {
   let tmpDir: string
 
@@ -27,9 +30,11 @@ describe('Migration 004: apps/builds split', () => {
 
   afterAll(() => { closeDb(); fs.rmSync(tmpDir, { recursive: true }) })
 
-  it('apps table has bundle_id_key, platform, no file_path', () => {
+  it('apps table has platform, no file_path, and its bundle IDs in their own table (#1086)', () => {
     const cols = (getDb().prepare('PRAGMA table_info(apps)').all() as { name: string }[]).map(c => c.name)
-    expect(cols).toContain('bundle_id_key')
+    expect(cols).not.toContain('bundle_id_key')
+    const idCols = (getDb().prepare('PRAGMA table_info(app_bundle_ids)').all() as { name: string }[]).map(c => c.name)
+    expect(idCols).toEqual(['app_id', 'platform', 'bundle_id'])
     expect(cols).toContain('platform')
     expect(cols).not.toContain('file_path')
   })
@@ -44,8 +49,7 @@ describe('Migration 004: apps/builds split', () => {
 
   it('inserts app and build, FK is enforced', () => {
     const db = getDb()
-    db.prepare(`INSERT INTO apps (name, bundle_id_key, platform) VALUES ('Test', 'com.test', 'ios')`).run()
-    const app = db.prepare('SELECT * FROM apps WHERE bundle_id_key = ?').get('com.test') as { id: number }
+    const app = { id: Number(db.prepare(`INSERT INTO apps (name, platform) VALUES ('Test', 'ios')`).run().lastInsertRowid) }
     db.prepare(`
       INSERT INTO builds (app_id, version_name, build_number, bundle_id, file_path)
       VALUES (?, '1.0.0', '1', 'com.test', '/tmp/test.app.zip')
@@ -57,13 +61,13 @@ describe('Migration 004: apps/builds split', () => {
   it('GET /api/v1/apps returns items with latest_build — shape check via query', () => {
     const db = getDb()
     const rows = db.prepare(`
-      SELECT a.id, a.name, a.bundle_id_key, a.platform,
+      SELECT a.id, a.name, a.platform,
              b.version_name, b.build_number, b.status_label, b.uploaded_at
       FROM apps a
       LEFT JOIN builds b ON b.id = (
         SELECT id FROM builds WHERE app_id = a.id ORDER BY uploaded_at DESC LIMIT 1
       )
-      WHERE a.bundle_id_key = 'com.test'
+      WHERE a.name = 'Test'
     `).all()
     expect(rows).toHaveLength(1)
     expect((rows[0] as { version_name: string }).version_name).toBe('1.0.0')
@@ -135,38 +139,20 @@ describe('upload: app_id provided but bundle_id differs → new app', () => {
 
   afterAll(() => { closeDb(); fs.rmSync(tmpDir, { recursive: true }) })
 
-  it('bundle_id가 다른 앱을 app_id 지정 업로드 시 새 앱에 라우팅된다', () => {
-    const db = getDb()
+  it('bundle_id가 다른 앱을 app_id 지정 업로드 시 새 앱에 라우팅된다', async () => {
+    const { routeUploadToApp } = await import('../api/builds')
     const bankioId = upsertApp('Bankio', 'com.bankio.mobile', 'ios')
-    const bankio = db.prepare('SELECT id, bundle_id_key FROM apps WHERE id = ?')
-      .get(bankioId) as { id: number; bundle_id_key: string }
-
-    // 핸들러 분기 시뮬레이션: bundleId !== app.bundle_id_key → upsertApp으로 라우팅
-    const uploadedBundleId = 'com.theapp.bundle'
-    const appId =
-      uploadedBundleId && bankio.bundle_id_key && bankio.bundle_id_key !== uploadedBundleId
-        ? upsertApp('TheApp', uploadedBundleId, 'ios')
-        : bankioId
-
-    expect(appId).not.toBe(bankioId)
-    const newApp = db.prepare('SELECT name, bundle_id_key FROM apps WHERE id = ?')
-      .get(appId) as { name: string; bundle_id_key: string }
-    expect(newApp.bundle_id_key).toBe('com.theapp.bundle')
+    const route = routeUploadToApp(getDb(), { appId: bankioId, bundleId: 'com.theapp.bundle', appName: 'TheApp', platform: 'ios', isAndroidArtifact: false })
+    expect(route.kind === 'ok' && route.appId).not.toBe(bankioId)
+    if (route.kind !== 'ok') return
+    expect(idOf(route.appId, 'ios')).toBe('com.theapp.bundle')
   })
 
-  it('bundle_id가 같으면 기존 app_id를 그대로 사용한다', () => {
-    const db = getDb()
+  it('bundle_id가 같으면 기존 app_id를 그대로 사용한다', async () => {
+    const { routeUploadToApp } = await import('../api/builds')
     const bankioId = upsertApp('Bankio2', 'com.bankio2.mobile', 'ios')
-    const bankio = db.prepare('SELECT id, bundle_id_key FROM apps WHERE id = ?')
-      .get(bankioId) as { id: number; bundle_id_key: string }
-
-    const uploadedBundleId = 'com.bankio2.mobile'
-    const appId =
-      uploadedBundleId && bankio.bundle_id_key && bankio.bundle_id_key !== uploadedBundleId
-        ? upsertApp('Bankio2', uploadedBundleId, 'ios')
-        : bankioId
-
-    expect(appId).toBe(bankioId)
+    const route = routeUploadToApp(getDb(), { appId: bankioId, bundleId: 'com.bankio2.mobile', appName: 'Bankio2', platform: 'ios', isAndroidArtifact: false })
+    expect(route).toEqual({ kind: 'ok', appId: bankioId })
   })
 })
 
@@ -205,8 +191,7 @@ describe('routeUploadToApp: unidentifiable builds never corrupt a named app', ()
     expect(route.kind).toBe('ok')
     if (route.kind !== 'ok') return
     expect(route.appId).not.toBe(realId)
-    const app = db.prepare('SELECT bundle_id_key FROM apps WHERE id = ?').get(route.appId) as { bundle_id_key: string }
-    expect(app.bundle_id_key).toBe('__unknown__')
+    expect(idOf(route.appId, 'android')).toBe('__unknown__')
   })
 
   it('app_id + matching bundleId → same app, no new row', () => {
@@ -223,13 +208,19 @@ describe('routeUploadToApp: unidentifiable builds never corrupt a named app', ()
     expect(route.kind).toBe('ok')
     if (route.kind !== 'ok') return
     expect(route.appId).not.toBe(bankId)
-    const app = db.prepare('SELECT bundle_id_key FROM apps WHERE id = ?').get(route.appId) as { bundle_id_key: string }
-    expect(app.bundle_id_key).toBe('com.other.app')
+    expect(idOf(route.appId, 'ios')).toBe('com.other.app')
   })
 
-  it('unknown app_id → app-not-found', () => {
-    const route = mod.routeUploadToApp(getDb(), { appId: 999999, bundleId: 'com.x.y', appName: 'X', platform: 'ios', isAndroidArtifact: false })
+  it('unknown app_id and no bundle ID → app-not-found', () => {
+    const route = mod.routeUploadToApp(getDb(), { appId: 999999, bundleId: null, appName: 'X', platform: 'ios', isAndroidArtifact: false })
     expect(route.kind).toBe('app-not-found')
+  })
+
+  // An app a merge removed: CI that pinned its id keeps uploading, routed by the build's ID (#1086).
+  it('unknown app_id with a bundle ID → routed by the ID', () => {
+    const owner = mod.upsertApp('Kept', 'com.x.kept', 'ios')
+    expect(mod.routeUploadToApp(getDb(), { appId: 999999, bundleId: 'com.x.kept', appName: 'X', platform: 'ios', isAndroidArtifact: false }))
+      .toEqual({ kind: 'ok', appId: owner })
   })
 
   // The reject guard keys off the artifact (isAndroidArtifact), not `platform`: iOS degrades gracefully.

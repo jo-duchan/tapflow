@@ -137,6 +137,59 @@ export interface DeviceSummary extends DeviceReport {
    *  **Never the owner key or the client id.** The owner key is `<userId>:<clientId>` and the client half
    *  comes off the handshake query: a local socket that learned it could claim it and drive the device. */
   holder?: SessionHolder
+  /**
+   * The device is waiting for a person whose connection dropped, and will shut down if they do not come back (#1087).
+   * Sent to everyone, so a teammate picking it knows it is someone's before taking it: this is the one place a
+   * person's session is named to others, because what it protects is that person's app state, which taking the
+   * device wipes. A connected person's session still is not named (`holder` above).
+   */
+  waiting?: DeviceWaiting
+  /** Present when the person the device is waiting for is the one asking — from any browser, since it is the
+   *  signed-in user that matches, not the tab. Absent while an AI client is borrowing the device. */
+  resumable?: true
+  /** How long ago the device started waiting, with `resumable`. A tab that finds its own session held by another of
+   *  its user's tabs waits this long before retrying, so the tab that dropped gets back first. */
+  releasedAgoMs?: number
+  /** A person is holding it from another tab of the asker's own account, live. Absent for an AI client of the same
+   *  account: nothing about that holder is going away, so waiting for it would wait forever. */
+  heldBySelf?: true
+  /** Someone else took or shut down the device while it was waiting for the asker. Sent only to that person, on every
+   *  listing until it expires — never cleared by being read, since every open tab polls. */
+  endedBy?: DeviceEndedBy
+  /** The name an Admin gave the device on the relay (#1085). For people only: `name` stays the device's own, which
+   *  is what an MCP client or a flow picks a device by. */
+  displayName?: string
+  /** An Admin hid the device from the dashboard's device list. The device is still listed, and still offered to
+   *  automation: hiding is for people picking a device by eye. */
+  hidden?: true
+  /** The asker starred the device. Per person. */
+  favourite?: true
+}
+
+export interface DeviceWaiting {
+  /** A label for people (an email, or `local`), as `SessionHolder.user`. Shown on hover, under `name`. */
+  user: string
+  /** What to call them: their display name, or the part of the email before `@` (the rule `/auth/me` uses). */
+  name: string
+  /** Until the device shuts down. Absent while an AI client holds it: its countdown is stopped and starts again in
+   *  full when the client leaves. */
+  remainingMs?: number
+  aiHolding?: true
+  /** The asker is the person waited for. Unlike `resumable` it holds while an AI client borrows the device, so a
+   *  viewer can tell its own borrowed session from someone else's. */
+  yours?: true
+  /** The build last installed on the device, with `yours`: what a link back into the session opens. Absent when the
+   *  relay has no record of one. */
+  buildId?: number
+}
+
+export interface DeviceEndedBy {
+  /** The email of whoever took it, or `local`. */
+  by: string
+  /** What to call them, as `DeviceWaiting.name`. */
+  name: string
+  /** The relay's clock. Only for telling one notice from the next; never compared with the viewer's clock. */
+  at: number
 }
 
 /** A holder as the device list shows it. `user` is a label for people, not an identity to act on. */
@@ -211,6 +264,9 @@ export interface UIElement {
 /** `agents:listed` groups devices by agent machine. */
 export interface SessionInfo {
   agentName?: string
+  /** The Mac's key for settings kept on the relay (device prefs, favourites): its machine id, else its name — the
+   *  identity the relay already dedups agents by. Sent back verbatim as `agent` in those requests. */
+  agentKey?: string
   platform?: string
   resources?: AgentResources
   /** What this agent implements, mirroring `AgentRegister.capabilities`.
@@ -422,6 +478,25 @@ export type ChromePayload = ChromeData | AndroidChrome
 export interface AgentRegistered {
   type: 'agent:registered'
   registeredSessions: Array<{ deviceId: string; sessionId: string }>
+  /** What this relay accepts from an agent beyond the messages every relay does. Optional: an older relay omits
+   *  it, and an agent reads the absence as "send only what every relay understands". The relay → agent half of
+   *  the skew markers (protocol AGENTS.md, #662); `capabilities` is agent → relay, `AgentsListed.features` is
+   *  relay → browser. */
+  features?: RelayAgentFeature[]
+}
+
+/** Values of `AgentRegistered.features`. An agent meeting one it does not know ignores it.
+ *  `'device-updates'`: the relay takes `agent:devices` and answers `agent:devices-applied`. */
+export type RelayAgentFeature = 'device-updates'
+
+/** The relay's answer to `agent:devices`: the sessions it made for devices that appeared, and the ones it removed
+ *  for devices that left. Not correlated: the agent sends at most one list at a time per socket, and a list lost
+ *  with its socket is replaced by the next `agent:register`. A device still in use when it left is kept until its
+ *  session ends, so it is in neither array. */
+export interface AgentDevicesApplied {
+  type: 'agent:devices-applied'
+  added: Array<{ deviceId: string; sessionId: string }>
+  removed: Array<{ deviceId: string; sessionId: string }>
 }
 
 export interface StreamRequestIdr {
@@ -571,6 +646,7 @@ export interface UiTreeRequest {
 
 export type RelayToAgent =
   | AgentRegistered
+  | AgentDevicesApplied
   | StreamRequestIdr
   | NetworkRequestState
   | DeviceShutdown
@@ -1154,6 +1230,10 @@ export type RelayOrAgentToBrowser =
   | NetworkError
   | ClipboardError
   | DeviceShutdownError
+  // Moved out of `AgentToBrowser` for the same reason as `input:type-error`: the relay answers an install with
+  // `keepIfInstalled` itself when the build is already on the device, and it answers in the shape the install's
+  // waiter reads.
+  | AppInstallDone
 
 export interface AgentsListed {
   type: 'agents:listed'
@@ -1548,11 +1628,12 @@ export interface ClipboardWriteDone {
  *  than re-creating them, so it never constructs one — which is exactly why they were missing from
  *  this file until L3: nothing on the relay's own send path referenced them.
  *
- *  The twelve declared below carry `sessionId` as required, on two independent grounds: both agents
+ *  The ones declared below carry `sessionId` as required, on two independent grounds: both agents
  *  include it in every send literal, and the relay's forward gate resolves `sessions.get(msg.sessionId)`
  *  before forwarding, so a message with no sessionId never reaches a browser by this path.
  *
- *  Nine of the ten inherited from `RelayOrAgentToBrowser` now carry it too. Three of them
+ *  Every member inherited from `RelayOrAgentToBrowser` carries it too except `device:ready` — deliberately no
+ *  count, because members move into that union whenever the relay starts producing one. Three of them
  *  (`session:chrome`, `session:deviceInfo`, `device:ready`) were `sessionId?` for as long as the relay's
  *  replay omitted what both agents stamped. Two ways to tighten the *declaration* were weighed and
  *  rejected — declaring the three twice (drift, which is the finding this surface exists to remove), and
@@ -1571,7 +1652,6 @@ export type AgentToBrowser =
   | RelayOrAgentToBrowser
   | DeviceBooting
   | DeviceShutdownDone
-  | AppInstallDone
   | AppLaunchDone
   | AppClearStateDone
   | OpenUrlDone
@@ -1621,6 +1701,14 @@ export interface AgentRegister {
    *  `undefined` off darwin**, and the relay falls back to `agentName` for dedup. */
   agentId?: string
   agentName: string
+  devices: DeviceReport[]
+}
+
+/** The agent's whole device list, sent when it changed after registration (#1085). Full rather than a delta: the
+ *  relay diffs it against its own sessions, so a lost reply cannot leave the two out of step. Sent only to a relay
+ *  that announced `'device-updates'`. */
+export interface AgentDevices {
+  type: 'agent:devices'
   devices: DeviceReport[]
 }
 
@@ -1686,6 +1774,7 @@ export interface UiTreeError {
 
 export type AgentToRelay =
   | AgentRegister
+  | AgentDevices
   | AgentResourceReport
   | ScreenshotDone
   | ScreenshotError
@@ -1966,6 +2055,16 @@ export interface AppInstallToRelay {
   sessionId: string
   requestId: string
   buildId: number
+  /**
+   * Install only if this build is not already on the device. The relay answers `app:install-done` itself when it
+   * last installed this build there, and joins an install of it already in flight. A viewer sends it when coming
+   * back to a device it was using, because every install clears the app's data first (iOS uninstalls, Android
+   * clears) — so reinstalling on a reconnect would cost the tester the state they came back for.
+   *
+   * Absent means install as before. A relay that predates the field strips it and reinstalls, which is the
+   * behaviour from before it existed.
+   */
+  keepIfInstalled?: boolean
 }
 
 export interface AppLaunchToRelay extends LaunchOptions {

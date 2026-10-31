@@ -166,6 +166,8 @@ disconnect_device  → 세션 종료, 다른 사람이 기기를 쓸 수 있게 
 `list_devices` 응답의 `status` 필드가 `"booted"`이면 `boot_device`를 생략할 수 있습니다.
 :::
 
+`list_devices` 응답에는 대시보드에서 정한 `displayName`(Admin이 붙인 이름), `hidden`(Admin이 목록에서 숨김), `favourite`(토큰 주인의 즐겨찾기)이 함께 올 수 있습니다. 대시보드 표시용 값이라 기기 선택에는 영향이 없습니다. 숨긴 기기도 목록에 있고 연결할 수 있으며, 기기를 가리킬 때는 `displayName`이 아니라 `name`을 씁니다. [기기 목록 정리](/ko/testing/qa-session#organize-devices)를 참고하세요.
+
 CI 파이프라인에서 실행하는 방법은 [CI/CD에서 MCP 활용하기](/ko/automation/mcp-ci)를 참고하세요.
 
 ## 에이전트가 받는 안내 {#agent-guidance}

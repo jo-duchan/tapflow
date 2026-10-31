@@ -56,4 +56,4 @@ A plain-HTTP LAN connection uses the **Standard** profile, which caps the stream
 
 ### Session ends automatically
 
-5 minutes after the browser disconnects, the relay asks the agent to shut the device down. While a browser stays connected, nothing times out, even with no input. Change the delay with the relay's `IDLE_TIMEOUT_MS` environment variable (in milliseconds). Reconnect from the dashboard.
+5 minutes after the browser disconnects, the relay asks the agent to shut the device down. While a browser stays connected, nothing times out, even with no input. Change the delay with the relay's `IDLE_TIMEOUT_MS` environment variable (in milliseconds). Until it runs out you can come back to the same session. See [Return to a session](/testing/qa-session#return-to-a-session).

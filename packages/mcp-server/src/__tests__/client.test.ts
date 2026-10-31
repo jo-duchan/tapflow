@@ -1100,6 +1100,26 @@ describe('TapflowClient', () => {
         globalThis.fetch = origFetch
       }
     })
+
+    // An agent writing a flow for an Android build needs that build's ID, not the app's iOS one (#1086).
+    it('gives each build its own bundle ID, and the app its ID per platform', async () => {
+      const origFetch = globalThis.fetch
+      globalThis.fetch = async (url: RequestInfo | URL) => {
+        const u = new URL(String(url))
+        if (u.pathname.endsWith('/apps')) {
+          return new Response(JSON.stringify({ items: [{ id: 1, name: 'Kupp', bundle_id_key: 'no.vg.lab.kupp', bundle_ids: { ios: 'no.vg.lab.kupp', android: 'com.vgkupp' }, platform: 'both' }] }), { status: 200, headers: { 'Content-Type': 'application/json' } })
+        }
+        const items = [{ id: 3, app_id: 1, version_name: '1.0', build_number: '1', platform: 'android', bundle_id: 'com.vgkupp', status_label: null, uploaded_at: '2026-10-30' }]
+        return new Response(JSON.stringify({ items, total: 1 }), { status: 200, headers: { 'Content-Type': 'application/json' } })
+      }
+      try {
+        const [app] = await client.listBuilds()
+        expect(app!.bundleIds).toEqual({ ios: 'no.vg.lab.kupp', android: 'com.vgkupp' })
+        expect(app!.builds[0]!.bundleId).toBe('com.vgkupp')
+      } finally {
+        globalThis.fetch = origFetch
+      }
+    })
   })
 
   // #512, finding 4. The relay reports a session's fate on three messages and sends them **without closing

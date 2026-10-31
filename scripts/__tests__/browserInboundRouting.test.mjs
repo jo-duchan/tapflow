@@ -276,20 +276,20 @@ describe('browser-inbound routing matches the protocol union', () => {
 
   it('RelayOrAgentToBrowser is shared by both directions rather than copied', () => {
     const shared = unionMembers(protocolSrc, 'RelayOrAgentToBrowser')
-    expect(shared.size).toBe(14)
+    expect(shared.size).toBe(15)
     for (const name of ['RelayToBrowser', 'AgentToBrowser']) {
       expect(protocolSrc).toContain(`export type ${name} =\n  | RelayOrAgentToBrowser`)
     }
   })
 
   // The field sets, pinned. Without these the check is name-only, and every drift it was written in
-  // response to comes back green: turning all twelve `sessionId` optional, re-optionalising
+  // response to comes back green: turning every forwarded `sessionId` optional, re-optionalising
   // `capabilities`, dropping `payload` off `device:shutdown-done` — same names, same counts. `tsc`
   // does not object either, because the dashboard's consumers compare `msg.sessionId === sessionId`
   // and that still compiles against `string | undefined`.
   //
-  // `sessionId` is required on all twelve forwarded messages and on the seven shared errors, and on two
-  // of the three the relay also replays. `device:ready` is the one exception, and it is deliberate —
+  // `sessionId` is required on every forwarded message and on every shared one except one of the three
+  // the relay replays. `device:ready` is the one exception, and it is deliberate —
   // see the note above the declarations for the measurement.
   //
   // All five message unions are here, not just the browser-inbound three. The bindings in
@@ -305,7 +305,6 @@ describe('browser-inbound routing matches the protocol union', () => {
     AgentToBrowser: {
       'device:booting': 'sessionId',
       'device:shutdown-done': 'payload requestId? sessionId',
-      'app:install-done': 'requestId sessionId',
       'app:launch-done': 'applied? requestId sessionId',
       'app:clear-state-done': 'requestId sessionId',
       'open-url:done': 'requestId sessionId',
@@ -338,6 +337,9 @@ describe('browser-inbound routing matches the protocol union', () => {
       // Moved here from RelayToBrowser (#455): both agents answer a shutdown they could not confirm.
       'device:shutdown-error': 'message requestId? sessionId',
       'network:error': 'message requestId sessionId',
+      // Moved here from AgentToBrowser (#1087): the relay answers an install with `keepIfInstalled` itself when the
+      // build is already on the device.
+      'app:install-done': 'requestId sessionId',
     },
     BrowserToRelay: {
       'agents:list': '',
@@ -349,7 +351,7 @@ describe('browser-inbound routing matches the protocol union', () => {
       'device:boot': 'payload requestId sessionId',
       'device:lease': 'payload requestId',
       'device:shutdown': 'payload requestId? sessionId',
-      'app:install': 'buildId requestId sessionId',
+      'app:install': 'buildId keepIfInstalled? requestId sessionId',
       'app:launch': 'arguments? buildId env? requestId sessionId',
       'app:clear-state': 'payload requestId sessionId',
       'open-url': 'payload requestId sessionId',
@@ -374,7 +376,9 @@ describe('browser-inbound routing matches the protocol union', () => {
       'session:activity': 'label sessionId',
     },
     RelayToAgent: {
-      'agent:registered': 'registeredSessions',
+      // #1085: what the relay accepts beyond every relay's messages; absent from an older one.
+      'agent:registered': 'features? registeredSessions',
+      'agent:devices-applied': 'added removed',
       'stream:request-idr': 'sessionId',
       'network:request-state': 'sessionId',
       'device:shutdown': 'payload requestId? sessionId',

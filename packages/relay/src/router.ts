@@ -35,6 +35,7 @@ export class Router {
   post(path: string, handler: Handler) { this.on('POST', path, handler) }
   patch(path: string, handler: Handler) { this.on('PATCH', path, handler) }
   delete(path: string, handler: Handler) { this.on('DELETE', path, handler) }
+  put(path: string, handler: Handler) { this.on('PUT', path, handler) }
 
   async handle(req: http.IncomingMessage, res: http.ServerResponse): Promise<boolean> {
     const url = (req.url ?? '/').split('?')[0]

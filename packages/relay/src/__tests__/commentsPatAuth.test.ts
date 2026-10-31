@@ -61,7 +61,7 @@ describe('POST /api/v1/comments auth', () => {
       .run('ci', hashPat(WRITE_PAT), 'builds:write')
     db.prepare('INSERT INTO personal_access_tokens (user_id, name, token_hash, scope) VALUES (2, ?, ?, ?)')
       .run('viewer', hashPat(VIEW_PAT), 'view')
-    db.prepare(`INSERT INTO apps (name, bundle_id_key, platform) VALUES ('Coffee', 'com.example.coffee', 'ios')`).run()
+    db.prepare(`INSERT INTO apps (name, platform) VALUES ('Coffee', 'ios')`).run()
     const r = db.prepare(`
       INSERT INTO builds (app_id, version_name, build_number, bundle_id, file_path)
       VALUES (1, '1.0.0', '1', 'com.example.coffee', '/tmp/x.zip')

@@ -86,7 +86,7 @@ describe('POST /api/v1/builds — .apk metadata guard', () => {
   it('app_id + unextractable metadata → 400, no stored file, named app untouched', async () => {
     const db = getDb()
     // A pre-existing iOS app — the unidentifiable apk must not be absorbed here.
-    const info = db.prepare("INSERT INTO apps (name, bundle_id_key, platform) VALUES ('Foods', 'com.example.foods', 'ios')").run()
+    const info = db.prepare("INSERT INTO apps (name, platform) VALUES ('Foods', 'ios')").run()
     const appId = Number(info.lastInsertRowid)
 
     const r = await postApk(port, 'A1', [
@@ -107,7 +107,7 @@ describe('POST /api/v1/builds — .apk metadata guard', () => {
 
   it('app_id + spoofed platform=ios on an .apk → still 400 (guard keys off the file, not the field)', async () => {
     const db = getDb()
-    const info = db.prepare("INSERT INTO apps (name, bundle_id_key, platform) VALUES ('Spoof', 'com.example.spoof', 'ios')").run()
+    const info = db.prepare("INSERT INTO apps (name, platform) VALUES ('Spoof', 'ios')").run()
     const appId = Number(info.lastInsertRowid)
 
     const r = await postApk(port, 'A3', [
@@ -130,7 +130,7 @@ describe('POST /api/v1/builds — .apk metadata guard', () => {
 
     expect(r.status).toBe(201)
     // Verify it landed in the __unknown__ bucket, not a real app.
-    const app = db.prepare('SELECT bundle_id_key FROM apps WHERE id = ?').get(r.body.app_id) as { bundle_id_key: string } | undefined
-    expect(app?.bundle_id_key).toBe('__unknown__')
+    const id = db.prepare("SELECT bundle_id FROM app_bundle_ids WHERE app_id = ? AND platform = 'android'").get(r.body.app_id) as { bundle_id: string } | undefined
+    expect(id?.bundle_id).toBe('__unknown__')
   })
 })

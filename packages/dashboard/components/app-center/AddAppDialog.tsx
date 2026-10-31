@@ -79,7 +79,7 @@ export function AddAppDialog({ onSuccess, canWrite }: Props) {
       <DialogTrigger asChild>
         {trigger()}
       </DialogTrigger>
-      <DialogContent className="sm:max-w-sm">
+      <DialogContent size="sm">
         <DialogHeader>
           <DialogTitle>Add App</DialogTitle>
         </DialogHeader>

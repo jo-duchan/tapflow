@@ -237,6 +237,18 @@ describe('a browser frame is stripped, because its product is what gets forwarde
     expect(ok({ type: 'app:install', sessionId: 's', requestId: 'r', buildId: 3 }).msg).toMatchObject({ buildId: 3 })
   })
 
+  // Stripped, the relay would reinstall on every reconnect and wipe the app's data, with nothing failing to say so.
+  it('carries keepIfInstalled through', () => {
+    const install = { type: 'app:install', sessionId: 's', requestId: 'r', buildId: 3, keepIfInstalled: true }
+    expect(ok(install).msg).toEqual(install)
+  })
+
+  it('refuses a keepIfInstalled that is not a boolean, answerably', () => {
+    for (const keepIfInstalled of ['yes', 1, {}]) {
+      expect(fail({ type: 'app:install', sessionId: 's', requestId: 'r', buildId: 3, keepIfInstalled }).reason).toBe('bad-payload')
+    }
+  })
+
   // The relay forwards the parse product, so a field the schema does not name never reaches an agent. These two must be
   // named, or every launch option is stripped here and the launch still succeeds.
   it('carries launch arguments and env through', () => {

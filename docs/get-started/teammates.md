@@ -42,7 +42,7 @@ An address with `localhost` in it only opens on the operator's own Mac. If that 
 ## 3. Test a build {#test-a-build}
 
 1. In App Center, pick the app in the **Apps** list on the left. The first app in the list is selected when the page opens, so check it when there are several.
-2. Find the build to test. The **Search version…** box and the status filter narrow the list.
+2. Find the build to test. The **Search version or label…** box and the status filter narrow the list.
 3. Click **Start QA** on the build's row. The button is off for a build whose review status is **Done**.
 4. Pick a Mac on the **Select Mac** page, then click a device on the **Select device** page. A device a teammate is using shows **In use** and cannot be picked.
 5. Once the device is up and the build has installed, click **Launch app** in the toolbar to open the app.

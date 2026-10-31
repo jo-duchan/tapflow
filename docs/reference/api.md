@@ -252,7 +252,9 @@ Return all apps. Each app includes a summary of its latest build.
       "id": 7,
       "name": "My App",
       "bundle_id_key": "com.example.app",
-      "platform": "ios",
+      "bundle_ids": { "ios": "com.example.app", "android": "com.example.android" },
+      "build_platforms": ["android", "ios"],
+      "platform": "both",
       "created_at": "2025-05-01T00:00:00.000Z",
       "latest_build_id": 42,
       "version_name": "1.2.3",
@@ -264,10 +266,12 @@ Return all apps. Each app includes a summary of its latest build.
 }
 ```
 
+`bundle_ids` is the app's bundle ID per platform, `null` where it has none. `bundle_id_key` stays for older clients; when the two IDs differ, it holds the iOS one. `build_platforms` lists the platforms the app has builds on.
+
 
 ### `POST /api/v1/apps`
 
-Create an app manually. Requires the **Admin, Developer or QA** role. A Viewer gets `403`. If an app with the same `bundle_id_key` already exists, on any platform, you get `409`. Create an app for iOS and Android once, with `both`.
+Create an app manually. Requires the **Admin, Developer or QA** role. A Viewer gets `403`. If an app with the same `bundle_id_key` already exists, on any platform, you get `409`. Create an app that uses the same bundle ID on iOS and Android once, with `both`. If the IDs differ, create it for one platform and upload the other platform's build with `app_id`; that build's bundle ID is added to the app. `__unknown__` is reserved and gets `400`.
 
 ```
 Body (JSON):
@@ -310,6 +314,45 @@ Delete an app and all its builds, with their comments, recordings, run records a
 ```
 
 
+### `POST /api/v1/apps/:id/merge`
+
+Move one platform of another app into this one. That platform's bundle ID and builds move together, and the builds' comments, recordings and run records go with them. If the other app has nothing left, it is deleted. The app keeps this app's name. To undo it, split the platform out again with [`POST /api/v1/apps/:id/split`](#post-api-v1-apps-id-split); the deleted app's name does not come back. Requires the **Admin, Developer or QA** role.
+
+```
+Body (JSON):
+  fromAppId  number        required  the app to move from
+  platform   ios|android   required  the platform to move
+```
+
+**Response `200`**
+
+```json
+{ "ok": true, "appId": 7, "removedAppId": 9 }
+```
+
+`removedAppId` is there only when the other app was deleted. You get `409` if the platform you move has a bundle ID and this app already has one there, or if the other app has builds carrying the bundle ID of its other platform, or uses one ID on both, so one platform cannot be moved on its own. You get `404` if either app is missing. You get `400` for an app merged into itself, a platform the other app has nothing on, or when either app is the one that collects builds whose bundle ID could not be read (`__unknown__`).
+
+### `POST /api/v1/apps/:id/split`
+
+Move one platform of this app into a new app: the other way round from a merge. That platform's bundle ID and builds move together, and the builds' comments, recordings and run records go with them. The new app is listed first. Requires the **Admin, Developer or QA** role.
+
+```
+Body (JSON):
+  platform   ios|android   required  the platform to move
+  name       string        required  the new app's name
+```
+
+**Response `200`**
+
+```json
+{ "ok": true, "appId": 12 }
+```
+
+`appId` is the new app. This app must keep its other platform, so an app with only one gets `400`. You get `409` if this app uses one bundle ID on both platforms, or has builds carrying the bundle ID of its other platform. You get `404` if the app is missing, and `400` for an empty name, a platform this app has nothing on, or the app that collects builds whose bundle ID could not be read (`__unknown__`).
+
+Uploads that name this app's `app_id` and carry the moved bundle ID go to the new app. Builds whose bundle ID could not be read follow `app_id`, so if the platform you moved had no bundle ID, point CI at the new app's `app_id`.
+
+
 ## Builds
 
 ### `POST /api/v1/builds`
@@ -327,13 +370,17 @@ Only `file` is required; every other field is optional.
 |-------|----------|-------------|
 | `file` | Yes | The build artifact. iOS: `.app.zip` or `.tar.gz` / `.tgz` (a simulator build); Android: `.apk`. Max 500 MB by default (`TAPFLOW_MAX_BUILD_BYTES` changes it). `.ipa` and `.aab` are rejected. |
 | `status` | No | Initial review status — one of `Backlog`, `In Progress`, `Done`, `Rejected`. Omit to leave it unset. |
-| `label` | No | Free-text label to identify the build in App Center (e.g. a branch name or `rc-1`). |
-| `platform` | No | `ios` or `android`. Derived from the file type when omitted. |
-| `app_id` | No | Attach to an existing app explicitly. Normally the app is resolved automatically from the bundle ID. |
+| `label` | No | Free-text label to identify the build in App Center (e.g. a branch name or `rc-1`). Returned as `version_label`. Not used as the app's name when the build file has none (the file name is). |
+| `version_name` | No | A version to use instead of the build file's. It is used to show and group the build; the file is not changed. Empty uses the file's value. |
+| `build_number` | No | A build number to use instead of the build file's, as for `version_name`. |
+| `platform` | No | Ignored. The platform comes from the file type. |
+| `app_id` | No | Attach to an existing app. If that app has no bundle ID on the build's platform and no other app holds the build's ID, the ID is added to the app. Otherwise the build goes to the app for its bundle ID. An upload naming an app a merge removed is routed by its bundle ID instead. When omitted, the bundle ID decides the app. |
 
 ::: warning iOS builds
 `.ipa` files are not supported. Upload `.app.zip`, or the `.tar.gz` / `.tgz` a cloud simulator build produces. Build `.app.zip` with `xcodebuild -sdk iphonesimulator` and zip the `.app` folder.
 :::
+
+`label`, `version_name` and `build_number` are trimmed. A `label` longer than 100 characters is cut to 100; a longer `version_name` or `build_number` gets `400`.
 
 **Response `201`**
 
@@ -344,12 +391,16 @@ Only `file` is required; every other field is optional.
   "name": "My App",
   "version_name": "1.2.3",
   "build_number": "89",
+  "binary": { "version_name": "1.2.3", "build_number": "89" },
+  "version_label": "rc-1",
   "bundle_id": "com.example.app",
   "status_label": "In Progress",
   "platform": "ios",
   "uploaded_at": "2025-05-15T12:00:00.000Z"
 }
 ```
+
+`version_name` and `build_number` are the values in use, which are the overrides when there are any. `binary` holds what was read from the build file; where the two differ, the build was overridden. The list and single-build responses are the same.
 
 
 ### `GET /api/v1/builds`
@@ -360,7 +411,7 @@ Return a paginated list of builds.
 Query:
   page      number                                   page number (default: 0)
   limit     number                                   page size (default: 20, max: 100)
-  q         string                                   search by version name
+  q         string                                   search by version name or label (version_label)
   platform  ios|android                              platform filter
   status    Backlog|In Progress|Done|Rejected        status filter
   app_id    number                                   filter by app
@@ -391,6 +442,7 @@ Return a single build.
   "name": "My App",
   "version_name": "1.2.3",
   "build_number": "89",
+  "binary": { "version_name": "1.2.3", "build_number": "89" },
   "version_label": "rc-1",
   "status_label": "In Progress",
   "platform": "ios",
@@ -406,13 +458,17 @@ Return a single build.
 
 ### `PATCH /api/v1/builds/:id`
 
-Update the status or label of a build. A Viewer gets `403`.
+Update the status, label, version or build number of a build. A Viewer gets `403`.
 
 ```
 Body (JSON):
   status_label  Backlog|In Progress|Done|Rejected|null  optional
   version_label string|null                              optional
+  version_name  string|null                              optional  empty or null goes back to the build file's
+  build_number  string|null                              optional  empty or null goes back to the build file's
 ```
+
+Text fields are trimmed and at most 100 characters; a longer one, or one that is not text, gets `400`. An empty `version_label` removes the label. A version or build number equal to the build file's is stored as not overridden.
 
 **Response `200`**
 
@@ -1043,6 +1099,51 @@ Query:
 ```
 
 Data is sampled once per minute and retained for 30 days.
+
+
+## Device settings {#device-settings}
+
+Settings for the QA session device list. They are stored on the relay; the devices on the Mac don't change. A device is named by `agent` and `deviceId`: `agent` is the `agentKey` from the device list (`agents:listed`), and `deviceId` is the device's `id` (the UDID on iOS, `avd:<AVD name>` on Android). See [Organize the device list](/testing/qa-session#organize-devices).
+
+### `PUT /api/v1/device-prefs`
+
+Hides a device or gives it a name, for every teammate's list. Requires the **Admin** role; other roles get `403`.
+
+```
+Body (JSON):
+  agent        string          required
+  deviceId     string          required
+  hidden       boolean         optional  keeps the current value when left out
+  displayName  string | null   optional  keeps the current value when left out. An empty string or null goes back to the device's own name (at most 100 characters)
+```
+
+**Response `200`**
+
+```json
+{ "ok": true, "hidden": true, "displayName": "Release phone" }
+```
+
+When a device ends up neither hidden nor renamed, its stored settings are deleted. The device list doesn't leave hidden devices out; it marks them `hidden: true`, so MCP clients and automated runs can keep using them.
+
+### `PUT /api/v1/device-favourites`
+
+Adds a device to your favourites. Each person has their own. Call it with a session cookie or a PAT with the `view` scope; any role can. Calling it again for a device that is already a favourite returns `200`.
+
+```
+Body (JSON):
+  agent     string  required
+  deviceId  string  required
+```
+
+**Response `200`**
+
+```json
+{ "ok": true }
+```
+
+### `DELETE /api/v1/device-favourites`
+
+Removes a device from your favourites. The body and the response are the same as for `PUT`.
 
 
 ## Sessions

@@ -23,8 +23,8 @@ vi.mock('@/lib/queries', async (importOriginal) => ({
 import { AppCenter } from '@/src/pages/AppCenter'
 
 const APPS: App[] = [
-  { id: 1, name: 'Coffee', bundle_id_key: 'com.a.coffee', platform: 'ios' },
-  { id: 2, name: 'Tea', bundle_id_key: 'com.a.tea', platform: 'ios' },
+  { id: 1, name: 'Coffee', bundle_id_key: 'com.a.coffee', bundle_ids: { ios: 'com.a.coffee', android: null }, build_platforms: ['ios'], platform: 'ios' },
+  { id: 2, name: 'Tea', bundle_id_key: 'com.a.tea', bundle_ids: { ios: 'com.a.tea', android: null }, build_platforms: ['ios'], platform: 'ios' },
 ] as unknown as App[]
 
 function build(id: number, version: string): Build {
@@ -38,6 +38,7 @@ function build(id: number, version: string): Build {
     uploaded_at: '2026-09-21T00:00:00Z',
     uploader: `uploader-${id}`,
     delete_after: null,
+    binary: { version_name: version, build_number: String(id) },
   } as unknown as Build
 }
 
@@ -114,6 +115,13 @@ describe('App Center — switching apps', () => {
     updateBuildStatus.mockResolvedValue(undefined)
   })
   afterEach(() => vi.restoreAllMocks())
+
+  // A merge removes the app it moved out of (#1086), and a tab or bookmark can still name it.
+  it('opens the first app when the URL names one that is gone', async () => {
+    getBuilds.mockResolvedValue([build(1, '1.0.0')])
+    renderAppCenter('/app-center?appId=99')
+    await waitFor(() => expect(getBuilds).toHaveBeenLastCalledWith(expect.objectContaining({ appId: 1 })))
+  })
 
   it('never shows the empty state while the next app is loading', async () => {
     // **The reported bug.** `handleAppSelect` cleared `builds` synchronously while `loading` was
@@ -203,13 +211,13 @@ describe('App Center — switching apps', () => {
     await screen.findByText('uploader-1')
 
     getBuilds.mockResolvedValue([])
-    await userEvent.type(screen.getByLabelText('Search versions'), 'zz')
+    await userEvent.type(screen.getByLabelText('Search versions and labels'), 'zz')
     await waitFor(() => expect(screen.getByText('No matching builds')).toBeInTheDocument())
 
     const loading = watchForText('Loading…')
     const settled = deferred<Build[]>()
     getBuilds.mockReturnValueOnce(settled.promise)
-    await userEvent.type(screen.getByLabelText('Search versions'), 'z')
+    await userEvent.type(screen.getByLabelText('Search versions and labels'), 'z')
     settled.resolve([])
     await waitFor(() => expect(getBuilds).toHaveBeenCalledWith(expect.objectContaining({ search: 'zzz' })))
     loading.stop()
@@ -276,7 +284,7 @@ describe('App Center — switching apps', () => {
     await userEvent.click(button)
 
     getBuilds.mockRejectedValueOnce(new Error('relay down'))
-    await userEvent.type(screen.getByLabelText('Search versions'), '2')
+    await userEvent.type(screen.getByLabelText('Search versions and labels'), '2')
     await waitFor(() => expect(getBuilds).toHaveBeenCalledTimes(3))
     await act(async () => {})
 
@@ -333,7 +341,7 @@ describe('App Center — switching apps', () => {
     getBuilds.mockClear()
 
     getBuilds.mockResolvedValue([])
-    await userEvent.type(screen.getByLabelText('Search versions'), 'zzzz')
+    await userEvent.type(screen.getByLabelText('Search versions and labels'), 'zzzz')
     await waitFor(() => expect(screen.getByText('No matching builds')).toBeInTheDocument())
 
     expect(getBuilds).toHaveBeenCalledTimes(1)
@@ -369,7 +377,7 @@ describe('App Center — switching apps', () => {
 
     // Every keystroke is its own query key, so this answers all three.
     getBuilds.mockResolvedValue([])
-    await userEvent.type(screen.getByLabelText('Search versions'), 'zzz')
+    await userEvent.type(screen.getByLabelText('Search versions and labels'), 'zzz')
 
     await waitFor(() => expect(screen.getByText('No matching builds')).toBeInTheDocument())
     expect(screen.queryByText('No builds yet')).toBeNull()
@@ -410,7 +418,7 @@ describe('App Center — switching apps', () => {
 
     const typed = deferred<Build[]>()
     getBuilds.mockReturnValueOnce(typed.promise)
-    await userEvent.type(screen.getByLabelText('Search versions'), '1')
+    await userEvent.type(screen.getByLabelText('Search versions and labels'), '1')
 
     expect(status).not.toHaveTextContent('Loading builds')
 
@@ -572,7 +580,7 @@ describe('App Center — focus survives the list being swapped out (#829)', () =
     await screen.findByText('uploader-1')
 
     getBuilds.mockRejectedValueOnce(new Error('relay down'))
-    await userEvent.type(screen.getByLabelText('Search versions'), '1')
+    await userEvent.type(screen.getByLabelText('Search versions and labels'), '1')
     releaseTrigger().focus()
     expect(releaseTrigger()).toHaveFocus()
 
@@ -609,7 +617,7 @@ describe('App Center — focus survives the list being swapped out (#829)', () =
     await screen.findByText('uploader-1')
 
     getBuilds.mockResolvedValueOnce([])
-    const search = screen.getByLabelText('Search versions')
+    const search = screen.getByLabelText('Search versions and labels')
     await userEvent.type(search, 'zz')
     releaseTrigger().focus()
 
@@ -644,19 +652,20 @@ describe('App Center — focus survives the list being swapped out (#829)', () =
     expect(visited).not.toContain(releaseTrigger())
   })
 
-  it('returns focus to the row\'s deletion control when its dialog closes', async () => {
+  it('returns focus to the row\'s ⋯ menu when its deletion dialog closes', async () => {
     // The dialog is opened by state, not by an `AlertDialogTrigger`, so Radix had nothing to hand
     // focus back to and dropped it on `body` — the same loss #829 is about, from a row's own control.
     getBuilds.mockResolvedValueOnce([build(1, '1.0.0')])
     renderAppCenter()
     await screen.findByText('uploader-1')
 
-    const schedule = screen.getByRole('button', { name: /schedule deletion/i })
-    await userEvent.click(schedule)
+    // Opened from a menu item since #1084, which has no trigger either.
+    await userEvent.click(screen.getByRole('button', { name: /^Actions for/ }))
+    await userEvent.click(await screen.findByRole('menuitem', { name: 'Schedule deletion' }))
     await userEvent.click(await screen.findByRole('button', { name: 'Cancel' }))
     await waitFor(() => expect(screen.queryByRole('alertdialog')).toBeNull())
 
-    await waitFor(() => expect(screen.getByRole('button', { name: /schedule deletion/i })).toHaveFocus())
+    await waitFor(() => expect(screen.getByRole('button', { name: /^Actions for/ })).toHaveFocus())
   })
 
   it('holds a first-load failure while a background refetch retries it', async () => {
@@ -712,7 +721,7 @@ describe('App Center — focus survives the list being swapped out (#829)', () =
     await screen.findByText('uploader-1')
 
     getBuilds.mockRejectedValueOnce(new Error('relay down'))
-    await userEvent.type(screen.getByLabelText('Search versions'), '1')
+    await userEvent.type(screen.getByLabelText('Search versions and labels'), '1')
     releaseTrigger().focus()
     await screen.findByText("Couldn't load builds")
     const button = screen.getByRole('button', { name: /try again/i })
@@ -742,7 +751,7 @@ describe('App Center — focus survives the list being swapped out (#829)', () =
     await screen.findByText('uploader-1')
 
     getBuilds.mockRejectedValueOnce(new Error('relay down'))
-    await userEvent.type(screen.getByLabelText('Search versions'), '1')
+    await userEvent.type(screen.getByLabelText('Search versions and labels'), '1')
     await screen.findByText("Couldn't load builds")
 
     const retry = deferred<Build[]>()
@@ -765,7 +774,7 @@ describe('App Center — focus survives the list being swapped out (#829)', () =
 
     const next = deferred<Build[]>()
     getBuilds.mockReturnValueOnce(next.promise)
-    const search = screen.getByLabelText('Search versions')
+    const search = screen.getByLabelText('Search versions and labels')
     await userEvent.type(search, '1')
     tryAgain.focus()
     await screen.findByText('Loading…')
@@ -784,7 +793,7 @@ describe('App Center — focus survives the list being swapped out (#829)', () =
     getBuilds.mockResolvedValueOnce([build(1, '1.0.0')])
     renderAppCenter(undefined, { gcTime: 60_000 })
     await screen.findByText('uploader-1')
-    const search = screen.getByLabelText('Search versions')
+    const search = screen.getByLabelText('Search versions and labels')
 
     getBuilds.mockRejectedValueOnce(new Error('relay down'))
     await userEvent.type(search, '1')
@@ -848,7 +857,7 @@ describe('App Center — focus survives the list being swapped out (#829)', () =
     await screen.findByText('uploader-1')
 
     getBuilds.mockRejectedValueOnce(new Error('relay down'))
-    const search = screen.getByLabelText('Search versions')
+    const search = screen.getByLabelText('Search versions and labels')
     await userEvent.type(search, '1')
     await screen.findByText("Couldn't load builds")
 

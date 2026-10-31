@@ -105,6 +105,29 @@ describe('POST /api/v1/builds — .tar.gz (EAS simulator) ingest', () => {
     expect(leftover()).toHaveLength(1)
   })
 
+  // The build's platform decides which of its app's IDs it gets (#1086), so a caller's field does not choose it.
+  it('takes the platform from the file, not from a `platform` field', async () => {
+    const tarPath = makeAppTarGz(fixtureDir, 'FieldApp', XML_PLIST)
+    const body = multipartBody('T9', [
+      { name: 'platform', data: 'android' },
+      { name: 'file', filename: 'FieldApp.tar.gz', contentType: 'application/gzip', data: fs.readFileSync(tarPath) },
+    ])
+    const r = await new Promise<UploadResult>((resolve, reject) => {
+      const req = http.request(
+        { hostname: '127.0.0.1', port, path: '/api/v1/builds', method: 'POST', headers: { 'Content-Type': 'multipart/form-data; boundary=T9', 'Content-Length': body.length, Cookie: cookie } },
+        (res) => {
+          const chunks: Buffer[] = []
+          res.on('data', (c: Buffer) => chunks.push(c))
+          res.on('end', () => resolve({ status: res.statusCode!, body: JSON.parse(Buffer.concat(chunks).toString() || '{}') }))
+        },
+      )
+      req.on('error', reject)
+      req.end(body)
+    })
+    expect(r.status).toBe(201)
+    expect(r.body.platform).toBe('ios')
+  })
+
   // #3 — .tgz 확장자
   it('accepts the .tgz extension', async () => {
     const tarPath = makeAppTarGz(fixtureDir, 'TgzApp', XML_PLIST, '.tgz')

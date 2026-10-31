@@ -5,7 +5,7 @@ import path from 'path'
 import { WebSocket } from 'ws'
 import { RelayServer } from '../RelayServer'
 import { initDb, closeDb } from '../db'
-import { waitForOpen, waitForType, waitForTypeOrNull } from '@tapflowio/test-utils'
+import { barrier, waitForOpen, waitForType, waitForTypeOrNull } from '@tapflowio/test-utils'
 import type { AgentRegistered, AgentsListed, DeviceBoot, DeviceBootError, DeviceBootWaiting, GenericError, SessionJoined } from '@tapflowio/protocol'
 
 // The wiring half of `admission/HostBootGate.ts`. The gate's rules are in `hostBootGate.test.ts`; these check
@@ -387,6 +387,25 @@ describe('the relay routes boots through the per-Mac boot gate', () => {
       const shutdown = await waitForType<{ type: 'device:shutdown'; sessionId: string }>(mac.ws, 'device:shutdown')
       expect(shutdown.sessionId).toBe(mac.session.get('a'))
       expect((await waitForType<DeviceBoot>(mac.ws, 'device:boot')).sessionId).toBe(mac.session.get('b'))
+    })
+
+    // #1087: a person picked up a device automation left running, then their connection dropped. The device is waiting
+    // for them, which makes it theirs, as a person's countdown already is to a lease.
+    it('does not shut down a device waiting for a person to come back', async () => {
+      process.env['TAPFLOW_MAX_AUTOMATED_DEVICES'] = '1'
+      await start(quickGate)
+      const mac = await agent('mac-1', ['a', 'b'])
+      await runAndLeave(mac, 'a')
+      const person = await join(mac.session.get('a')!)
+      person.terminate()
+      await new Promise((r) => setTimeout(r, 50))
+
+      const robot = await join(mac.session.get('b')!, 'flow-runner')
+      boot(robot, mac.session.get('b')!, 'b')
+      expect((await waitForType<DeviceBootError>(robot, 'device:boot-error')).reason).toBe('host-at-capacity')
+      await barrier(robot)
+      await barrier(mac.ws)
+      expect(await waitForTypeOrNull(mac.ws, 'device:shutdown', 0)).toBeNull()
     })
 
     it('refuses with host-at-capacity when every automation device is in use', async () => {

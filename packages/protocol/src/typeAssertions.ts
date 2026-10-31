@@ -7,7 +7,7 @@
 // the failure mode this whole package was built to remove.
 
 import type {
-  AgentRegister, AgentRegistered, AgentResourceReport, AgentToBrowser, AgentsList, AgentsListed,
+  AgentDevices, AgentDevicesApplied, AgentRegister, AgentRegistered, AgentResourceReport, AgentToBrowser, AgentsList, AgentsListed,
   AppClearState, AppClearStateDone, AppClearStateError, AppInstallDone, AppInstallError, AppInstallToAgent,
   AppInstallToRelay, AppLaunchDone, AppLaunchError, AppLaunchToAgent, AppLaunchToRelay, BrowserInbound,
   BrowserToRelay, ClipboardData, ClipboardError, ClipboardRead, ClipboardWrite, ClipboardWriteDone,
@@ -83,8 +83,9 @@ export const relayCannotOriginateKeyboard: RelayOutbound = { type: 'keyboard:tog
 export const inboundFromAgent: BrowserInbound = { type: 'input:done', sessionId: 's', requestId: 'rq' }
 export const inboundFromRelay: BrowserInbound = { type: 'error', sessionId: 's', message: 'x', reason: 'session-busy' }
 
-// @ts-expect-error - sessionId is required on every one of the twelve forward-only messages
-export const forwardWithoutSession: AgentToBrowser = { type: 'app:install-done' }
+// @ts-expect-error - sessionId is required on every forward-only message. `device:booting` because sessionId is its only
+// field: a message with another required field would keep this error for that field alone.
+export const forwardWithoutSession: AgentToBrowser = { type: 'device:booting' }
 
 // The shape an agent actually sends for the three shared messages the relay also replays. `sessionId`
 // is optional on the shared declaration because the replay omits it, so this direction cannot reject
@@ -125,6 +126,7 @@ export const errorWithFreeReason: RelayOutbound = { type: 'input:error', session
 // `scripts/__tests__/protocolMessageNames.test.mjs` asserts every message interface has a line here —
 // a guard you can forget one entry of is a guard with 57-of-58 coverage, and the gap is invisible.
 export const _AgentRegistered: AgentRegistered['type'] = 'agent:registered'
+export const _AgentDevicesApplied: AgentDevicesApplied['type'] = 'agent:devices-applied'
 export const _AgentsList: AgentsList['type'] = 'agents:list'
 export const _AgentsListed: AgentsListed['type'] = 'agents:listed'
 export const _AppClearState: AppClearState['type'] = 'app:clear-state'
@@ -212,6 +214,7 @@ export const _StreamRequestIdr: StreamRequestIdr['type'] = 'stream:request-idr'
 export const _NetworkRequestState: NetworkRequestState['type'] = 'network:request-state'
 export const _UiTreeRequest: UiTreeRequest['type'] = 'ui:tree:request'
 export const _AgentRegister: AgentRegister['type'] = 'agent:register'
+export const _AgentDevices: AgentDevices['type'] = 'agent:devices'
 export const _AgentResourceReport: AgentResourceReport['type'] = 'agent:resources'
 export const _ScreenshotDone: ScreenshotDone['type'] = 'screenshot:done'
 export const _ScreenshotError: ScreenshotError['type'] = 'screenshot:error'

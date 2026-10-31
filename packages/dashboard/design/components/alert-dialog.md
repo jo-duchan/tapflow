@@ -47,13 +47,14 @@ that is destructive or hard to undo. `action` below is how the call site styles 
 
 | Value | Looks like | Call sites | Where |
 |-------|------------|-----------:|-------|
-| `primary` | `Button` `default` — ink fill, white text | 2 | Schedule deletion (build row), Restart this device (toolbar) |
-| `destructive` | `Button` `destructive` — the soft tint: `--destructive` at 10% fill (20% on hover), `--destructive` text, no border | 3 | Revoke token, Delete app (96px, `w-24`), Remove member |
+| `primary` | `Button` `default` — ink fill, white text | 3 | Schedule deletion (build row's ⋯ menu), Restart this device (toolbar), Start again (a session link to a device that has shut down) |
+| `destructive` | `Button` `destructive` — the soft tint: `--destructive` at 10% fill (20% on hover), `--destructive` text, no border | 5 | Revoke token, Delete app (96px, `w-24`), Remove member, Take over (a device a teammate is coming back to), Merge (a bundle ID moved into another app) |
 
-Call-site counts are a snapshot (2026-10-18). Each button keeps its own `Button` states (hover, focus, pressed);
+Call-site counts are a snapshot (2026-10-30). Each button keeps its own `Button` states (hover, focus, pressed);
 see [button.md](./button.md). `destructive` is not a solid red fill anywhere in the dashboard.
 
-All three removals look the same; only Delete app differs, by its fixed 96px width. Remove member gets there by
+All five look the same; only Delete app differs, by its fixed 96px width. Take over and Merge pass
+`buttonVariants({ variant: 'destructive' })` as their class, so they follow the variant. Remove member gets there by
 writing the variant's classes out by hand (`bg-destructive/10 text-destructive hover:bg-destructive/20 border-0`)
 instead of passing `variant="destructive"`, so it would not follow a change to the variant.
 
@@ -68,6 +69,7 @@ There is no state axis: the panel is not interactive.
 |-------|----------|-----|
 | Delete app (Settings → Apps) | Both buttons `w-24` (96px) | Equal-width pair. Below 640px they keep 96px instead of stretching, stacked at the left edge |
 | Revoke token | The action is a plain `Button`, not `AlertDialogAction` | It waits for the revoke and closes only when it succeeds; a failure leaves the dialog open with a toast. There is no pending look: the label and enabled state do not change while it waits |
+| Merge (Settings → Apps, arrange mode) | The action is a plain `Button` with `aria-disabled` while it waits; a `role="status"` line between the description and the footer | Waits for the relay like Revoke, then for the app list that shows the row moved, and says a refusal inside the dialog (a toast is hidden while it is open). Behind it the dropped row shows landed in the target, which takes the `ring-2` drop ring, and fades to 40% where it still is. Opened by a drop, not a trigger, so `onCloseAutoFocus` puts focus back itself: on the kept app's ⋯ menu after a merge (two apps becoming one removes the mode button), else on the row that was dropped. The busy action reads `Merging…` and dims with `aria-disabled:` classes |
 
 ## Usage
 
@@ -78,7 +80,7 @@ There is no state axis: the panel is not interactive.
   title (`Revoke`, `Restart`), never `OK` or `Yes`.
 - Focus starts on Cancel, so Enter right after it opens does not confirm.
 - **Open it from an `AlertDialogTrigger`, or return focus yourself.** As with Dialog, Radix puts focus back only on
-  a trigger. The build row's deletion dialog passes `onCloseAutoFocus`. Revoke token, Remove member and Restart
+  a trigger. The build row's deletion dialog, opened from its ⋯ menu, passes `onCloseAutoFocus` to the ⋯. Revoke token, Remove member and Restart
   this device do neither, so focus drops to the page when they close. Delete app has a trigger, but confirming
   disables it (`Deleting…`) before focus comes back, so focus drops there too; Cancel and Escape return it. All
   four are tracked in #979.

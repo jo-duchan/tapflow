@@ -326,7 +326,7 @@ describe('the relay leases a device to an automation client', () => {
   it('reads the platform from the build', async () => {
     await start()
     const db = getDb()
-    const app = db.prepare("INSERT INTO apps (name, bundle_id_key, platform) VALUES ('Shop', 'com.example.shop', 'android')").run()
+    const app = db.prepare("INSERT INTO apps (name, platform) VALUES ('Shop', 'android')").run()
     const build = db.prepare("INSERT INTO builds (app_id, version_name, build_number, bundle_id, file_path, platform) VALUES (?, '1.0', '1', 'com.example.shop', 'x.apk', 'android')").run(app.lastInsertRowid)
     await agent('mac-1', ['ios-1'])
     const droid = await agent('mac-1', ['emu-1'], { platform: 'android' })

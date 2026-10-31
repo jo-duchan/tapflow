@@ -13,7 +13,7 @@ The page every member opens first. Its profile settings (nickname, avatar, passw
 
 - **Workspace** — the team name and logo. Visible to Admins only.
 - **Flow run videos** — how long passed flows' videos are kept and how much storage videos may use, with what is in use now. Visible to Admins only. See [Flow Runs](/automation/runs#recording).
-- **Apps** — rename or delete apps. Visible to Admins, Developers and QA, hidden from Viewers.
+- **Apps** — rename or delete apps, or [merge and split](/testing/app-center#merge-apps) apps. Visible to Admins, Developers and QA, hidden from Viewers.
 
 ## Team
 
@@ -33,7 +33,7 @@ Once signed in as Admin, go to **Settings → Team** and create invite links:
 
 1. Click **Invite member**.
 2. Enter the team member's email and select a role. The role defaults to **QA**.
-   - **Admin** — can do everything except remove their own account. Inviting members, changing roles, removing members, resetting passwords, workspace settings and issuing **Agent** tokens are Admin-only.
+   - **Admin** — can do everything except remove their own account. Inviting members, changing roles, removing members, resetting passwords, workspace settings, issuing **Agent** tokens, and [renaming and hiding devices](/testing/qa-session#organize-devices) in the QA session device list are Admin-only.
    - **Developer**, **QA** — can add, edit and delete apps, upload builds, change a build's status, schedule build deletion, manage webhooks and create their own API tokens in **Settings → Tokens**. The two roles have the same permissions.
    - **Viewer** — read-only. Can view builds, test them on a simulator or emulator in a QA Session, and comment. Cannot change builds or apps, and can neither see nor change webhooks.
 

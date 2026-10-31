@@ -59,7 +59,7 @@ describe('flow run videos', () => {
     const db = getDb()
     db.exec('DELETE FROM flow_runs; DELETE FROM builds; DELETE FROM apps')
     db.prepare('UPDATE team_settings SET video_pass_retention_days = 3, video_storage_cap_mb = 20480 WHERE id = 1').run()
-    db.prepare(`INSERT INTO apps (id, name, bundle_id_key, platform) VALUES (1, 'Coffee', 'com.example.coffee', 'ios')`).run()
+    db.prepare(`INSERT INTO apps (id, name, platform) VALUES (1, 'Coffee', 'ios')`).run()
     const file = path.join(uploadsDir, 'builds', 'coffee.zip')
     fs.writeFileSync(file, 'zip')
     buildId = Number(db.prepare(`INSERT INTO builds (app_id, version_name, build_number, bundle_id, file_path) VALUES (1, '1.0', '1', 'com.example.coffee', ?)`).run(file).lastInsertRowid)

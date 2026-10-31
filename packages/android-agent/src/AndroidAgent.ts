@@ -5,9 +5,9 @@ import type {
   AndroidButton, BootAbandonReason, ClipboardErrorPayload, Device, DeviceAgent,
   NetworkControlCapability, NetworkStatePayload, UIElement,
 } from '@tapflowio/agent-core'
-import { avdRotationLockMemory, formFactorOf, type RotationLockMemory } from './avdConfig.js'
+import { avdRotationLockMemory, formFactorOf, osVersionOf, type RotationLockMemory } from './avdConfig.js'
 import type {
-  AgentControlOutbound, ClipboardReplyBody, OpenUrlReplyBody,
+  AgentControlOutbound, AgentDevicesApplied, DeviceReport, ClipboardReplyBody, OpenUrlReplyBody,
   AppInstallReplyBody, AppLaunchReplyBody, AppLaunchToAgent, LaunchOptions, AppClearStateReplyBody, DevicePosture, FormFactor, RunResetReport, RunResetRequest,
   InputPinchStart, InputTouchStart, PointSpace,
 } from '@tapflowio/protocol'
@@ -49,6 +49,7 @@ import {
   runResetSteps,
   RUN_RESET_BUDGET_MS,
   type RunResetStep,
+  DeviceListWatcher,
 } from '@tapflowio/agent-core/utils'
 import { execFile } from 'child_process'
 import { AdbWrapper } from './AdbWrapper.js'
@@ -368,6 +369,10 @@ export function pickAndroidBackend(serial: string, env: NodeJS.ProcessEnv = proc
 }
 
 export interface AndroidAgentOptions {
+  /** How often the device list is re-read for a relay that takes updates. Injectable for tests. */
+  deviceRereadMs?: number
+  /** An AVD's Android version by name, for one that is not running. Defaults to its system image (`avdConfig`). */
+  avdOsVersion?: (avdName: string) => string | undefined
   fps?: number
   /** AVD name or emulator serial to expose. Omit to expose all detected devices. */
   deviceFilter?: string
@@ -506,6 +511,12 @@ export class AndroidAgent implements DeviceAgent, NetworkControlCapability {
   private readonly runResetCmdTimeoutMs: number
   private readonly lean: boolean
   private readonly avdFormFactor: (avdName: string) => FormFactor | undefined
+  private readonly avdOsVersion: (avdName: string) => string | undefined
+  /** What each AVD's config says, read once per AVD per connection. The re-read runs every 30 s and the config does
+   *  not change under a running agent; a new connection reads it again, which covers an AVD recreated in between. */
+  private avdInfo = new Map<string, { formFactor?: FormFactor; osVersion?: string }>()
+  /** Re-reads the device list for a relay that takes `agent:devices` (#1085). */
+  private readonly deviceWatcher: DeviceListWatcher
   private readonly rotationLock: RotationLockMemory
   /** How long a shutdown whose kill failed watches for the emulator to finish exiting. A field so tests can
    *  shorten it — see `handleDeviceShutdown` for why it waits at all. */
@@ -520,6 +531,15 @@ export class AndroidAgent implements DeviceAgent, NetworkControlCapability {
     this.runResetCmdTimeoutMs = options.runResetCmdTimeoutMs ?? RUN_RESET_CMD_TIMEOUT_MS
     this.lean = options.lean ?? false
     this.avdFormFactor = options.avdFormFactor ?? ((name) => formFactorOf(name))
+    // Never the developer's real AVDs under vitest: a suite's expectations would follow whatever images this Mac has.
+    this.avdOsVersion = options.avdOsVersion ?? (process.env.VITEST ? () => undefined : (name) => osVersionOf(name))
+    // `peekDevices`, not `listDevices`: the re-read must not sync the serial map a boot is relying on.
+    this.deviceWatcher = new DeviceListWatcher({
+      read: async () => this.offerDevices(await this.adb.peekDevices()),
+      send: (devices) => { if (this.ws) this.sendOn(this.ws, { type: 'agent:devices', devices }) },
+      onReadError: (e) => logger.debug(`device list re-read failed, trying again later: ${e instanceof Error ? e.message : String(e)}`),
+      intervalMs: options.deviceRereadMs,
+    })
     this.rotationLock = options.rotationLockMemory
       ?? (process.env.VITEST ? { freed: () => true, markFreed: () => {}, forget: () => {} } : avdRotationLockMemory)
     this.reconnectDelays = options.reconnectDelays ?? [1000, 2000, 4000, 8000, 16000, 30000]
@@ -548,10 +568,8 @@ export class AndroidAgent implements DeviceAgent, NetworkControlCapability {
     this._stopping = false
     if (this._reconnectTimer) { clearTimeout(this._reconnectTimer); this._reconnectTimer = null }
     this.relayUrl = relayUrl
-    const allDevices = await this.adb.listDevices()
-    const devices = this.deviceFilter
-      ? allDevices.filter((d) => d.name === this.deviceFilter || d.id === this.deviceFilter)
-      : allDevices
+    this.avdInfo.clear()
+    const offered = this.offerDevices(await this.adb.listDevices())
 
     return new Promise((resolve, reject) => {
       const ws = new WebSocket(relayUrl, this.wsClientOptions())
@@ -573,21 +591,12 @@ export class AndroidAgent implements DeviceAgent, NetworkControlCapability {
           capabilities: AGENT_CAPABILITIES,
           agentId: getMachineId(),
           agentName: os.hostname(),
-          devices: devices.map((d) => ({
-            id: d.id,
-            name: d.name,
-            platform: d.platform,
-            status: d.status,
-            osVersion: d.osVersion,
-            // Read here and nowhere else — `listDevices` runs in the boot and refresh paths too, and
-            // the config does not change while the agent is connected.
-            formFactor: this.avdFormFactor(d.name),
-          })),
+          devices: offered,
         })
       })
 
       ws.once('message', (data) => {
-        let msg: { type?: string; registeredSessions?: unknown }
+        let msg: { type?: string; registeredSessions?: unknown; features?: unknown }
         try {
           msg = JSON.parse(data.toString())
         } catch {
@@ -607,7 +616,13 @@ export class AndroidAgent implements DeviceAgent, NetworkControlCapability {
           )
           ws.on('message', (d) => {
             try {
-              const m = JSON.parse(d.toString()) as { type?: unknown; sessionId?: unknown }
+              const m = JSON.parse(d.toString()) as { type?: unknown; sessionId?: unknown; added?: unknown; removed?: unknown }
+              // The one relay message that names no session: it is about the device list as a whole.
+              if (m.type === 'agent:devices-applied') {
+                const applied = m as AgentDevicesApplied
+                this.applyDevices(applied.added ?? [], applied.removed ?? [])
+                return
+              }
               // Every type `handleRelayMessage` dispatches is session-scoped, and the relay resolves the
               // session before forwarding — so a message without one did not come from that path. Rejecting
               // it here is what lets the dispatcher declare `sessionId: string` instead of threading an
@@ -618,6 +633,8 @@ export class AndroidAgent implements DeviceAgent, NetworkControlCapability {
           })
           void this.reportResources()
           this.resourcesTimer = setInterval(() => { void this.reportResources() }, 5000)
+          // Only a relay that said it takes `agent:devices`; see the same line in IOSAgent.
+          if (Array.isArray(msg.features) && msg.features.includes('device-updates')) this.deviceWatcher.start(offered)
           this.lastPingAt = null
           this.lastSocketError = undefined
           ws.on('ping', () => { this.lastPingAt = Date.now() })
@@ -657,6 +674,46 @@ export class AndroidAgent implements DeviceAgent, NetworkControlCapability {
 
       ws.once('error', (e) => { clearTimeout(timer); reject(e) })
     })
+  }
+
+  /**
+   * What this agent offers the relay out of `allDevices`: the `--device` filter, and what each AVD's config says — its
+   * form factor, and its version when the emulator is not running to say it (#1085). Shared by the register and the
+   * periodic re-read, so the two cannot offer different lists.
+   */
+  private offerDevices(allDevices: Device[]): DeviceReport[] {
+    const devices = this.deviceFilter
+      ? allDevices.filter((d) => d.name === this.deviceFilter || d.id === this.deviceFilter)
+      : allDevices
+    return devices.map((d) => {
+      let info = this.avdInfo.get(d.name)
+      if (!info) {
+        info = { formFactor: this.avdFormFactor(d.name), osVersion: this.avdOsVersion(d.name) }
+        this.avdInfo.set(d.name, info)
+      }
+      return {
+        id: d.id,
+        name: d.name,
+        platform: d.platform,
+        status: d.status,
+        // A running emulator's own answer wins over what its image was built as.
+        osVersion: d.osVersion ?? info.osVersion,
+        formFactor: info.formFactor,
+      }
+    })
+  }
+
+  /** The relay made sessions for devices that appeared and removed the ones for devices that left (#1085). A removed
+   *  session had nobody on it, so its state is retired as a reconnect retires it. */
+  private applyDevices(added: Array<{ deviceId: string; sessionId: string }>, removed: Array<{ deviceId: string; sessionId: string }>): void {
+    for (const { sessionId } of removed) {
+      const state = this.deviceStates.get(sessionId)
+      if (!state) continue
+      this.bumpBootSeq(state, 'shut-down')
+      this.cleanupDeviceState(state)
+      this.deviceStates.delete(sessionId)
+    }
+    this.initDeviceStates(added.filter(({ sessionId }) => !this.deviceStates.has(sessionId)))
   }
 
   private initDeviceStates(
@@ -706,6 +763,7 @@ export class AndroidAgent implements DeviceAgent, NetworkControlCapability {
     this._stopping = true
     if (this._reconnectTimer) { clearTimeout(this._reconnectTimer); this._reconnectTimer = null }
     if (this.resourcesTimer) { clearInterval(this.resourcesTimer); this.resourcesTimer = null }
+    this.deviceWatcher.stop()
     for (const state of this.deviceStates.values()) {
       this.bumpBootSeq(state, 'relay-lost')
       this.cleanupDeviceState(state)
@@ -723,6 +781,7 @@ export class AndroidAgent implements DeviceAgent, NetworkControlCapability {
   private _scheduleReconnect(loss?: RelayLoss): void {
     if (this._stopping) return
     if (this.resourcesTimer) { clearInterval(this.resourcesTimer); this.resourcesTimer = null }
+    this.deviceWatcher.stop()
     for (const state of this.deviceStates.values()) {
       // **Invalidate any boot still in flight, which this agent did not do until now.** The map is dropped
       // just below, but a `handleDeviceBoot` awaiting the emulator holds its own reference and its seq

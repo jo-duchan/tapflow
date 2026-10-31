@@ -211,7 +211,7 @@ export function TeamSettings() {
         </AlertDialogContent>
       </AlertDialog>
       <Dialog open={resetOpen} onOpenChange={setResetOpen}>
-        <DialogContent className="sm:max-w-md" onCloseAutoFocus={(e) => { e.preventDefault(); resetReturnRef.current?.focus() }}>
+        <DialogContent size="md" onCloseAutoFocus={(e) => { e.preventDefault(); resetReturnRef.current?.focus() }}>
           <DialogHeader>
             <DialogTitle>Password reset link</DialogTitle>
             <DialogDescription>
@@ -235,7 +235,7 @@ export function TeamSettings() {
           <DialogTrigger asChild>
             <Button ref={inviteButtonRef} size="sm"><UserPlus className="mr-2 h-4 w-4" />Invite member</Button>
           </DialogTrigger>
-          <DialogContent className="sm:max-w-md">
+          <DialogContent size="md">
             <DialogHeader><DialogTitle>Invite team member</DialogTitle></DialogHeader>
             {/* Mounted before the outcome arrives, so the change is announced. */}
             <p role="status" className="sr-only">{inviteStatus}</p>

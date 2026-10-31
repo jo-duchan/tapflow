@@ -67,5 +67,11 @@ export function useReleaseDisclosure(appId: number | null, releaseNames: readonl
     setVisit((prev) => new Map(prev).set(appId, next))
   }
 
-  return { isOpen, toggle }
+  /** Opens a release and leaves an open one open — unlike `toggle`. A build whose version was edited lands in its new
+   *  release, which has to be open for focus to reach it (#1084). */
+  const open = (name: string): void => {
+    if (!isOpen(name)) toggle(name)
+  }
+
+  return { isOpen, toggle, open }
 }

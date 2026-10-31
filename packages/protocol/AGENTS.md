@@ -181,6 +181,14 @@ rides for free. `app:install` / `app:launch` arrive with a `buildId` and the rel
 forwards without inspecting, cannot be attributed. Required on the `…ToAgent` members makes dropping the
 copy a compile error; only a test says the copied value is the request's.
 
+**`app:install` can also be answered by the relay, and that is why `app:install-done` sits in
+`RelayOrAgentToBrowser`.** An install uninstalls (iOS) or clears (Android) the app before installing it, so a
+viewer coming back to a device would wipe the state it came back for. With `keepIfInstalled` the relay answers
+`app:install-done` itself when it last installed that build there (identified by id *and* stored path, since
+`builds.id` is reused), and joins an install of it already in flight. It is a request the viewer makes, not a
+policy the relay imposes: a viewer that picks a device fresh sends no flag and gets a clean install, as before.
+The record and every place it is dropped live beside `Session.installed` in the relay.
+
 **No fallback, and one policy at the door.** There is deliberately no fall-back to `sessionId` + type: a
 second correlation strategy is what this work removes. Every browser request declaring a required
 `requestId` is gated at the relay before it is forwarded, rebuilt or answered, because every reply it can
@@ -257,6 +265,8 @@ the id it most recently sent, never `bootIdsRef` membership. The distinction to 
 in-flight install records whoever asked, so correlating it would suppress the case the message exists for.
 What the correlator does buy on the consumer side is narrower and real — `DeviceViewer` decrements a pending
 rebind on `device:ready`, and a replayed ready currently consumes one and fires a duplicate `app:install`.
+That duplicate stopped costing anything in #1087: once the mount's own install has landed, every install it sends
+carries `keepIfInstalled`, and the relay answers it without touching the device.
 
 **The request side is asymmetric for a mechanical reason, not a stylistic one.** A request passes *through* the
 relay, so one door gates and logs every sender at once. A reply does not — the relay forwards it with
@@ -598,6 +608,11 @@ So a change to what an existing wire value *means* is made like this:
    pair; for **open tab ↔ relay** it is `AgentsListed.features` (`RelayFeature`), a closed union the relay
    announces on the listing, so a client can tell a relay that understands a new message from one that
    drops it in silence. `device:lease` and launch options are gated on it.
+   **Capabilities run agent → relay; nothing ran relay → agent until #1085.** An agent sending a new message to
+   an older relay is the third pair, and `capabilities` cannot cover it: they describe the sender. So
+   `AgentRegistered.features` (`RelayAgentFeature`) is the relay's answer at registration, and an agent sends
+   `agent:devices` only to a relay that said `'device-updates'`. An older relay would have dropped each one with
+   a debug line and no harm; the marker is what keeps the agent from re-reading a list nobody will take.
 
 #662 asked for a version field on `agent:register`. It was not added: the two skews it described never
 shipped (network control, the reason split and `enforcement-lost` all first released together in

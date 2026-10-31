@@ -9,7 +9,7 @@ import type { BootAbandonReason, ClipboardErrorPayload, Device, DeviceAgent, Dev
 import type { RunResetStep } from '@tapflowio/agent-core/utils'
 import { createLogger, PlatformError, ValidationError, bootAbandonMessage, BOOT_NO_SESSION_STATE, SHUTDOWN_NO_SESSION_STATE, downloadBuild } from '@tapflowio/agent-core'
 import type {
-  AgentControlOutbound, InputErrorReason, ClipboardReplyBody, OpenUrlReplyBody,
+  AgentControlOutbound, AgentDevicesApplied, DeviceReport, InputErrorReason, ClipboardReplyBody, OpenUrlReplyBody,
   AppInstallReplyBody, AppLaunchReplyBody, AppLaunchToAgent, LaunchOptions, AppClearStateReplyBody, FormFactor, ServiceTier, RunResetReport, RunResetRequest,
 } from '@tapflowio/protocol'
 import { appliedKeys, compactLaunchOptions, launchOptionsProblem } from '@tapflowio/protocol/launch'
@@ -79,6 +79,7 @@ import {
   CODEC_H264,
   CODEC_AUDIO,
   sendAudioYieldingToVideo,
+  DeviceListWatcher,
 } from '@tapflowio/agent-core/utils'
 import type { AudioFrame } from '@tapflowio/agent-core'
 import { SimctlWrapper, isDeviceMissingError, ClipboardTooLargeError, firstLine, launchFailureReason } from './SimctlWrapper.js'
@@ -128,6 +129,8 @@ export function leanSupported(osVersion: string | undefined): boolean {
 }
 
 export interface IOSAgentOptions {
+  /** How often the device list is re-read for a relay that takes updates. Injectable for tests. */
+  deviceRereadMs?: number
   fps?: number
   intervalMs?: number
   reconnectDelays?: number[]
@@ -377,6 +380,12 @@ export class IOSAgent implements DeviceAgent, NetworkControlCapability, Posturab
    *  lookup fails this is still right — and the relay overwrites device fields on every register, so
    *  falling back to nothing would blank a form factor it already had until the next reconnect. */
   private formFactors = new Map<string, FormFactor>()
+  /** Device type → integrated panels, from every lookup that answered. See `offerDevices` for why it only grows. */
+  private panelCounts = new Map<string, number>()
+  /** Multi-panel devices already reported as not offered, so a re-read does not say it again every 30 s. */
+  private unofferedSaid = new Set<string>()
+  /** Re-reads the device list for a relay that takes `agent:devices` (#1085). */
+  private readonly deviceWatcher: DeviceListWatcher
   private resourcesTimer: ReturnType<typeof setInterval> | null = null
   private resourcesInFlight: WebSocket | null = null
   private readonly resources = createResourceSampler()
@@ -438,6 +447,12 @@ export class IOSAgent implements DeviceAgent, NetworkControlCapability, Posturab
     this.deviceFilter = options.deviceFilter
     this.token = options.token
     this.handshakeTimeoutMs = options.handshakeTimeoutMs ?? 10_000
+    this.deviceWatcher = new DeviceListWatcher({
+      read: async () => this.offerDevices(await this.simctl.listDevices(RECONNECT_LIST_TIMEOUT_MS), false),
+      send: (devices) => { if (this.ws) this.sendOn(this.ws, { type: 'agent:devices', devices }) },
+      onReadError: (e) => logger.debug(`device list re-read failed, trying again later: ${e instanceof Error ? e.message : String(e)}`),
+      intervalMs: options.deviceRereadMs,
+    })
     // No-op under vitest so the suite never spawns real `caffeinate` processes.
     this.sleepBlocker = options.sleepBlocker ?? (process.env.VITEST ? { acquire() {}, release() {} } : createSleepBlocker())
   }
@@ -466,44 +481,10 @@ export class IOSAgent implements DeviceAgent, NetworkControlCapability, Posturab
     this.relayUrl = relayUrl
     const allDevices = await this.simctl.listDevices(listTimeoutMs)
     this.revertLeftoverLean(allDevices)
-    const devices = this.deviceFilter
-      ? allDevices.filter((d) => d.name === this.deviceFilter || d.id === this.deviceFilter)
-      : allDevices
     // A `disconnect()` during this await or the one above does not cancel the connect. Every caller
     // today exits the process on the next line (the CLI's SIGINT handlers); one that keeps running
     // needs a generation check here before the socket is built.
-    // An answer the lookup cannot give costs the field, not the register: a viewer draws a device with
-    // no form factor as a phone, which is what it did before there was one. A reconnect falls back to
-    // the last answer rather than to none (see `formFactors`).
-    const formFactors = await this.simctl.formFactorsByType().then(
-      (map) => (this.formFactors = map),
-      (e: unknown) => {
-        logger.warn(`device types unavailable, registering with the last known form factors: ${e instanceof Error ? e.message : String(e)}`)
-        return this.formFactors
-      },
-    )
-    // Whether each device has more than one integrated panel. A failed lookup keeps the last answer, like the
-    // form factors above; with no answer at all every device stays on the Indigo path, which is how a
-    // multi-panel device behaved before this existed. Wrapped so a simctl without the method cannot throw here.
-    await Promise.resolve()
-      .then(() => this.simctl.integratedPanelCounts([...new Set(allDevices.flatMap((d) => (d.typeId ? [d.typeId] : [])))]))
-      .then(
-        (counts) => {
-          this.multiPanelDevices = new Set(allDevices.filter((d) => d.typeId && (counts.get(d.typeId) ?? 1) > 1).map((d) => d.id))
-          this.deviceTypeIds = new Map(allDevices.flatMap((d) => (d.typeId ? [[d.id, d.typeId] as const] : [])))
-        },
-        (e: unknown) => logger.warn(`could not read the devices' panels, keeping the last answer: ${e instanceof Error ? e.message : String(e)}`),
-      )
-    // **A multi-panel device this Mac cannot drive is not offered.** Its input has no other path, so listing it
-    // would let a tester — or an MCP agent's `list_devices` — pick a device that boots and then refuses.
-    let offered = devices
-    if (devices.some((d) => this.multiPanelDevices.has(d.id))) {
-      const reason = await this.guestHelperNative.unavailableReason().catch((e: unknown) => String(e))
-      if (reason) {
-        logger.warn(`not offering ${devices.filter((d) => this.multiPanelDevices.has(d.id)).map((d) => d.name).join(', ')}: ${reason}`)
-        offered = devices.filter((d) => !this.multiPanelDevices.has(d.id))
-      }
-    }
+    const offered = await this.offerDevices(allDevices, true)
 
     return new Promise((resolve, reject) => {
       const ws = new WebSocket(relayUrl, this.wsClientOptions())
@@ -525,21 +506,12 @@ export class IOSAgent implements DeviceAgent, NetworkControlCapability, Posturab
           capabilities: AGENT_CAPABILITIES,
           agentId: getMachineId(),
           agentName: os.hostname(),
-          devices: offered.map((d) => ({
-            id: d.id,
-            name: d.name,
-            platform: d.platform,
-            status: d.status,
-            osVersion: d.osVersion,
-            // A device with more than one panel folds, whatever its product family says (the Duo is an iPhone).
-            formFactor: this.multiPanelDevices.has(d.id) ? 'foldable' : d.typeId ? formFactors.get(d.typeId) : undefined,
-            serviceTier: this.reportedTier(d),
-          })),
+          devices: offered,
         })
       })
 
       ws.once('message', (data) => {
-        let msg: { type?: string; registeredSessions?: unknown }
+        let msg: { type?: string; registeredSessions?: unknown; features?: unknown }
         try {
           msg = JSON.parse(data.toString())
         } catch {
@@ -559,7 +531,13 @@ export class IOSAgent implements DeviceAgent, NetworkControlCapability, Posturab
           )
           ws.on('message', (d) => {
             try {
-              const m = JSON.parse(d.toString()) as { type?: unknown; sessionId?: unknown }
+              const m = JSON.parse(d.toString()) as { type?: unknown; sessionId?: unknown; added?: unknown; removed?: unknown }
+              // The one relay message that names no session: it is about the device list as a whole.
+              if (m.type === 'agent:devices-applied') {
+                const applied = m as AgentDevicesApplied
+                this.applyDevices(applied.added ?? [], applied.removed ?? [])
+                return
+              }
               // Every type `handleRelayMessage` dispatches is session-scoped, and the relay resolves the
               // session before forwarding — so a message without one did not come from that path. Rejecting
               // it here is what lets the dispatcher declare `sessionId: string` instead of threading an
@@ -570,6 +548,9 @@ export class IOSAgent implements DeviceAgent, NetworkControlCapability, Posturab
           })
           void this.reportResources()
           this.resourcesTimer = setInterval(() => { void this.reportResources() }, 5000)
+          // Only a relay that said it takes `agent:devices`: an older one would drop each with a log line, and
+          // the sessions it never made would leave nothing for the list to be about.
+          if (Array.isArray(msg.features) && msg.features.includes('device-updates')) this.deviceWatcher.start(offered)
           this.lastPingAt = null
           this.lastSocketError = undefined
           ws.on('ping', () => { this.lastPingAt = Date.now() })
@@ -611,6 +592,93 @@ export class IOSAgent implements DeviceAgent, NetworkControlCapability, Posturab
     })
   }
 
+  /**
+   * What this agent offers the relay out of `allDevices`: the `--device` filter, each device's form factor, and
+   * multi-panel devices left out where this Mac cannot drive them. Shared by the register and the periodic re-read
+   * (#1085), so the two cannot offer different lists.
+   *
+   * `refresh` re-reads every device type and panel count, which a connect does. A re-read asks only about types it has
+   * not seen, and only ever adds to what it knows: a type's panels do not change, and `integratedPanelCounts` reads a
+   * plist it cannot open as one panel, so asking again could drop a Duo that is in use onto the Indigo path, where
+   * input answers success and lands nowhere.
+   */
+  private async offerDevices(allDevices: Device[], refresh: boolean): Promise<DeviceReport[]> {
+    const devices = this.deviceFilter
+      ? allDevices.filter((d) => d.name === this.deviceFilter || d.id === this.deviceFilter)
+      : allDevices
+    // An answer the lookup cannot give costs the field, not the register: a viewer draws a device with
+    // no form factor as a phone, which is what it did before there was one. A reconnect falls back to
+    // the last answer rather than to none (see `formFactors`).
+    if (refresh || allDevices.some((d) => d.typeId && !this.formFactors.has(d.typeId))) {
+      await this.simctl.formFactorsByType().then(
+        (map) => { this.formFactors = map },
+        (e: unknown) => {
+          logger.warn(`device types unavailable, registering with the last known form factors: ${e instanceof Error ? e.message : String(e)}`)
+        },
+      )
+    }
+    // Whether each device has more than one integrated panel. A failed lookup keeps the last answer, like the
+    // form factors above; with no answer at all every device stays on the Indigo path, which is how a
+    // multi-panel device behaved before this existed. Wrapped so a simctl without the method cannot throw here.
+    const types = [...new Set(allDevices.flatMap((d) => (d.typeId ? [d.typeId] : [])))]
+    const ask = refresh ? types : types.filter((t) => !this.panelCounts.has(t))
+    if (ask.length > 0) {
+      await Promise.resolve()
+        .then(() => this.simctl.integratedPanelCounts(ask))
+        .then(
+          (counts) => { for (const [type, n] of counts) this.panelCounts.set(type, n) },
+          (e: unknown) => logger.warn(`could not read the devices' panels, keeping the last answer: ${e instanceof Error ? e.message : String(e)}`),
+        )
+    }
+    const multiPanel = allDevices.filter((d) => d.typeId && (this.panelCounts.get(d.typeId) ?? 1) > 1).map((d) => d.id)
+    const typeIds = allDevices.flatMap((d) => (d.typeId ? [[d.id, d.typeId] as const] : []))
+    if (refresh) {
+      this.multiPanelDevices = new Set(multiPanel)
+      this.deviceTypeIds = new Map(typeIds)
+    } else {
+      for (const id of multiPanel) this.multiPanelDevices.add(id)
+      for (const [id, type] of typeIds) this.deviceTypeIds.set(id, type)
+    }
+    // **A multi-panel device this Mac cannot drive is not offered.** Its input has no other path, so listing it
+    // would let a tester — or an MCP agent's `list_devices` — pick a device that boots and then refuses.
+    let offered = devices
+    if (devices.some((d) => this.multiPanelDevices.has(d.id))) {
+      const reason = await this.guestHelperNative.unavailableReason().catch((e: unknown) => String(e))
+      if (reason) {
+        const left = devices.filter((d) => this.multiPanelDevices.has(d.id))
+        // Said once per device, not on every re-read.
+        const unsaid = left.filter((d) => !this.unofferedSaid.has(d.id))
+        if (unsaid.length > 0) logger.warn(`not offering ${unsaid.map((d) => d.name).join(', ')}: ${reason}`)
+        for (const d of left) this.unofferedSaid.add(d.id)
+        offered = devices.filter((d) => !this.multiPanelDevices.has(d.id))
+      }
+    }
+    return offered.map((d) => ({
+      id: d.id,
+      name: d.name,
+      platform: d.platform,
+      status: d.status,
+      osVersion: d.osVersion,
+      // A device with more than one panel folds, whatever its product family says (the Duo is an iPhone).
+      formFactor: this.multiPanelDevices.has(d.id) ? 'foldable' : d.typeId ? this.formFactors.get(d.typeId) : undefined,
+      serviceTier: this.reportedTier(d),
+    }))
+  }
+
+  /** The relay made sessions for devices that appeared and removed the ones for devices that left (#1085). A removed
+   *  session had nobody on it, so there is nothing to tell anyone: its state is retired as a reconnect retires it. */
+  private applyDevices(added: Array<{ deviceId: string; sessionId: string }>, removed: Array<{ deviceId: string; sessionId: string }>): void {
+    for (const { sessionId } of removed) {
+      const state = this.deviceStates.get(sessionId)
+      if (!state) continue
+      this.bumpBootSeq(state, 'shut-down')
+      this.cleanupDeviceState(state)
+      this.deviceStates.delete(sessionId)
+      if (![...this.deviceStates.values()].some((s) => s.deviceId === state.deviceId)) this.stopGuest(state.deviceId)
+    }
+    this.initDeviceStates(added.filter(({ sessionId }) => !this.deviceStates.has(sessionId)))
+  }
+
   private initDeviceStates(
     registeredSessions: Array<{ deviceId: string; sessionId: string }>,
   ): void {
@@ -648,6 +716,7 @@ export class IOSAgent implements DeviceAgent, NetworkControlCapability, Posturab
     this._stopping = true
     if (this._reconnectTimer) { clearTimeout(this._reconnectTimer); this._reconnectTimer = null }
     if (this.resourcesTimer) { clearInterval(this.resourcesTimer); this.resourcesTimer = null }
+    this.deviceWatcher.stop()
     for (const state of this.deviceStates.values()) {
       this.bumpBootSeq(state, 'relay-lost')
       this.cleanupDeviceState(state)
@@ -671,6 +740,7 @@ export class IOSAgent implements DeviceAgent, NetworkControlCapability, Posturab
   private _scheduleReconnect(loss?: RelayLoss): void {
     if (this._stopping) return
     if (this.resourcesTimer) { clearInterval(this.resourcesTimer); this.resourcesTimer = null }
+    this.deviceWatcher.stop()
     for (const state of this.deviceStates.values()) {
       // Invalidate any boot still in flight against this state. The map is dropped just below, but a
       // `handleDeviceBoot` awaiting simctl holds its own reference and its seq would still match, so it

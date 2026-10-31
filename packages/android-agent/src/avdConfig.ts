@@ -60,16 +60,14 @@ interface Files {
 }
 const realFiles: Files = { existsSync, readFileSync: (p, e) => readFileSync(p, e) }
 
-/**
- * An AVD's form factor by name, or nothing when its files cannot be found or read. Never throws: it
- * runs inside `connect()`, and a skeleton is not worth a Mac dropping out of the device list.
- */
-export function formFactorOf(
+/** An AVD's config.ini, parsed, or nothing when its files cannot be found or read. Never throws: it runs inside
+ *  `connect()`, and a skeleton is not worth a Mac dropping out of the device list. */
+export function avdConfigOf(
   avdName: string,
   env: NodeJS.ProcessEnv = process.env,
   home: string = homedir(),
   fs: Files = realFiles,
-): FormFactor | undefined {
+): Record<string, string> | undefined {
   try {
     for (const dir of avdHomes(env, home)) {
       const ini = join(dir, `${avdName}.ini`)
@@ -79,12 +77,57 @@ export function formFactorOf(
       const named = parseIni(fs.readFileSync(ini, 'utf8')).path
       const candidates = [named, join(dir, `${avdName}.avd`)].filter((p): p is string => Boolean(p))
       const config = candidates.map((d) => join(d, 'config.ini')).find((p) => fs.existsSync(p))
-      return config ? classifyAvd(parseIni(fs.readFileSync(config, 'utf8'))) : undefined
+      return config ? parseIni(fs.readFileSync(config, 'utf8')) : undefined
     }
   } catch {
     // Unreadable is the same as unknown.
   }
   return undefined
+}
+
+/** An AVD's form factor by name, or nothing when its files cannot be found or read. */
+export function formFactorOf(
+  avdName: string,
+  env: NodeJS.ProcessEnv = process.env,
+  home: string = homedir(),
+  fs: Files = realFiles,
+): FormFactor | undefined {
+  const cfg = avdConfigOf(avdName, env, home, fs)
+  return cfg ? classifyAvd(cfg) : undefined
+}
+
+/**
+ * Android's version by API level, written the way a running emulator reports it (`getprop ro.build.version.release`,
+ * which the agent prefixes with `Android `), so a device lands in the same group running or not. 32 is 12L, which
+ * reports 12. A level missing here is shown as `API <n>` until a line is added.
+ */
+const RELEASE_BY_API: Record<number, string> = {
+  21: '5.0', 22: '5.1', 23: '6.0', 24: '7.0', 25: '7.1.1', 26: '8.0.0', 27: '8.1.0', 28: '9', 29: '10', 30: '11',
+  31: '12', 32: '12', 33: '13', 34: '14', 35: '15', 36: '16',
+}
+
+/**
+ * The Android version an AVD's system image carries, from its config (#1085) — so an emulator that is not running has
+ * one too, where only `getprop` on a running one used to give it. `image.sysdir.1` names the image
+ * (`system-images/android-34/google_apis/arm64-v8a/`); `target` (`android-34`) is the older key for the same thing.
+ * A codename image (`android-VanillaIceCream`) has no level and gives nothing.
+ */
+export function osVersionFromConfig(cfg: Record<string, string>): string | undefined {
+  const level = /(?:^|\/)android-(\d+)/.exec(cfg['image.sysdir.1'] ?? '')?.[1] ?? /^android-(\d+)/.exec(cfg['target'] ?? '')?.[1]
+  if (level === undefined) return undefined
+  const release = RELEASE_BY_API[Number(level)]
+  return release ? `Android ${release}` : `API ${level}`
+}
+
+/** An AVD's Android version by name, from its config, or nothing when it cannot tell. */
+export function osVersionOf(
+  avdName: string,
+  env: NodeJS.ProcessEnv = process.env,
+  home: string = homedir(),
+  fs: Files = realFiles,
+): string | undefined {
+  const cfg = avdConfigOf(avdName, env, home, fs)
+  return cfg ? osVersionFromConfig(cfg) : undefined
 }
 
 /** An AVD's own directory (`<name>.avd`), or nothing when it cannot be found. Same search as `formFactorOf`. */

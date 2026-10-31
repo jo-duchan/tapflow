@@ -166,6 +166,8 @@ disconnect_device  → end the session, freeing the device for others
 If `list_devices` returns `"status": "booted"` for a device, you can skip `boot_device`.
 :::
 
+A `list_devices` response can also carry values set in the dashboard: `displayName` (a name an Admin gave the device), `hidden` (an Admin hid it from the list) and `favourite` (the token owner starred it). They are for the dashboard's display and don't affect which devices you can use. A hidden device is still listed and can be connected to, and you refer to a device by its `name`, not its `displayName`. See [Organize the device list](/testing/qa-session#organize-devices).
+
 For running this in a CI pipeline, see [MCP in CI/CD](/automation/mcp-ci).
 
 ## What the agent is told {#agent-guidance}

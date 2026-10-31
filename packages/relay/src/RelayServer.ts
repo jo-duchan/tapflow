@@ -6,7 +6,7 @@ import path from 'path'
 import { randomUUID } from 'crypto'
 import { WebSocketServer, WebSocket } from 'ws'
 import { SessionManager, isAiClientKind } from './SessionManager.js'
-import type { Session } from './SessionManager.js'
+import type { AgentIdentity, InstalledBuild, Session } from './SessionManager.js'
 import type { AgentResources } from './types.js'
 import type { DeviceDetails, UIElement } from './types.js'
 import type { AdmissionRefusal, BootRefusalReason, ChromePayload, LeaseRefusalReason, InputErrorReason, MacAdmission, RelayOutbound, PosturesPayload, WatchActionKind, WatchRefusal } from '@tapflowio/protocol'
@@ -104,7 +104,8 @@ import { handleVerifyReset, handleDoReset, handleSendMemberReset } from './api/p
 import { EMAIL_KEY_SQL } from './lib/email.js'
 import { handleListBuilds, handleGetBuild, handleUpdateBuild, handleUploadBuild, handleScheduleBuildDeletion, handleCancelBuildDeletion, purgeExpiredBuilds } from './api/builds.js'
 import type { BuildFileDirs } from './lib/buildDeletion.js'
-import { handleListApps, handleCreateApp, handleUpdateApp, handleDeleteApp } from './api/apps.js'
+import { handleListApps, handleCreateApp, handleUpdateApp, handleDeleteApp, handleMergeApp, handleSplitApp } from './api/apps.js'
+import { handleDeviceFavourite, handlePutDevicePrefs, withDevicePrefs } from './api/devicePrefs.js'
 import { handleListWebhooks, handleCreateWebhook, handleUpdateWebhook, handleDeleteWebhook } from './api/webhooks.js'
 import { handleListComments, handleCreateComment, handleDeleteComment } from './api/comments.js'
 import { handleListMembers, handleInvite, handleUpdateMember, handleDeleteMember } from './api/team.js'
@@ -155,6 +156,10 @@ const BOOT_REFUSAL_MESSAGES: Record<BootRefusalReason, string> = {
  *  idle steers it off a device it could have had. Shared so the two never drift. */
 function ownershipRefusal(session: Session): string {
   return session.browserSocket ? 'session held by another client' : 'session not joined'
+}
+
+function sameBuild(a: InstalledBuild, b: InstalledBuild): boolean {
+  return a.buildId === b.buildId && a.filePath === b.filePath
 }
 
 /**
@@ -285,6 +290,14 @@ export class RelayServer {
   /** Names agents give at registration, kept apart from the session map so an agent with no sessions
    *  can still be named when its socket goes. */
   private agentNames = new WeakMap<WebSocket, string>()
+  /** What each agent socket said about itself when it registered. `agent:devices` carries only devices, and an agent
+   *  that registered with none has no session to read its identity off — yet its first device needs one (#1085). A
+   *  socket missing here never registered, so its `agent:devices` is not taken: a stream socket cannot add devices. */
+  private agentIdentities = new WeakMap<WebSocket, AgentIdentity>()
+  /** The socket that registered last for each agent identity and platform. A re-register evicts the sockets it finds
+   *  through their sessions, so one that registered with no devices is not found and lingers until the heartbeat; its
+   *  `agent:devices` would make a second session for a device the new socket already has. Only the latest is taken. */
+  private latestAgentSocket = new Map<string, WebSocket>()
   private releaseStallWatch: (() => void) | null = null
   /** Agent sockets whose close was already explained — ended by a sweep, or replaced by the same agent
    *  registering again — so the close handler does not log them as a fresh drop. */
@@ -561,6 +574,11 @@ export class RelayServer {
     this.router.get('/api/v1/apps', handleListApps)
     this.router.post('/api/v1/apps', handleCreateApp)
     this.router.patch('/api/v1/apps/:id', handleUpdateApp)
+    this.router.post('/api/v1/apps/:id/merge', handleMergeApp)
+    this.router.post('/api/v1/apps/:id/split', handleSplitApp)
+    this.router.put('/api/v1/device-prefs', handlePutDevicePrefs)
+    this.router.put('/api/v1/device-favourites', handleDeviceFavourite)
+    this.router.delete('/api/v1/device-favourites', handleDeviceFavourite)
     this.router.delete('/api/v1/apps/:id', (req, res, params) => handleDeleteApp(req, res, params, this.buildFileDirs()))
 
     // builds
@@ -891,6 +909,7 @@ export class RelayServer {
     if (others.size > 0) {
       this.pushLog(`heartbeat terminated ${[...others].map(([role, n]) => `${n} ${role}`).join(', ')} socket(s)`)
     }
+    this.sweepGoneDevices()
   }
 
   /** A sweep that runs late means this process was held, or the machine slept: the pongs it judges were
@@ -1598,6 +1617,7 @@ export class RelayServer {
       // ── Agent → Relay ─────────────────────────────────────────────────────
       case 'agent:resources':    this.handleAgentResources(ws, msg); break
       case 'agent:register':     this.handleAgentRegister(ws, msg); break
+      case 'agent:devices':      this.handleAgentDevices(ws, msg); break
       case 'screenshot:done':    this.handleScreenshotDone(msg); break
       case 'screenshot:error':   this.handleScreenshotError(msg); break
       case 'ui:tree:response':   this.handleUITreeResponse(msg); break
@@ -1605,7 +1625,10 @@ export class RelayServer {
       case 'agents:list': {
         this.sendTo(ws, {
           type: 'agents:listed',
-          sessions: this.sessions.list(this.ownerOf(ws), (holder) => this.isAlive(holder), (group) => this.macAdmission(group)),
+          sessions: withDevicePrefs(
+            this.sessions.list(this.ownerOf(ws), (holder) => this.isAlive(holder), (group) => this.macAdmission(group), this.userOf(ws)),
+            this.userOf(ws),
+          ),
           features: ['device-lease', 'launch-options'],
         })
         break
@@ -1769,6 +1792,8 @@ export class RelayServer {
         this.sessions.updateDeviceStatus(session.id, 'shutdown')
         this.sessions.setReadySent(session.id, false)
         this.sessions.setDeviceServiceTier(session.id, undefined)
+        this.forgetInstall(session, 'The device shut down')
+        this.sessions.settleShutdown(session.id)
         // Unless a boot went out after the shutdown this answers: the shutdown carries no correlator, and a device
         // the relay shut down to make room can be picked up and started again before the agent reports back.
         if (session.lastBootPending === undefined) session.lastBoot = undefined
@@ -1791,6 +1816,7 @@ export class RelayServer {
           session.evictingAt = undefined
           this.sessions.updateDeviceStatus(session.id, 'booted')
         }
+        this.sessions.undoShutdown(session.id)
         if (session.browserSocket?.readyState === WebSocket.OPEN) {
           session.browserSocket.send(JSON.stringify(raw))
         }
@@ -1807,6 +1833,13 @@ export class RelayServer {
         const session = this.sessions.get(msg.sessionId)
         if (!session) break
         const facts = readyFacts(raw)
+        // Anything other than a warm ready: the device came up from off, possibly after something outside tapflow shut
+        // it down (Simulator.app, DeviceHub, a crash), and iOS's zombie recovery erases on the way. An agent that does
+        // not say is counted as cold, which costs a reinstall and nothing worse. Handled before the ready is forwarded,
+        // so the install the viewer sends in answer to it already meets no record.
+        // `pendingInstall` is left: every client installs after a ready, so none is in flight across a cold boot, and one
+        // that were would settle itself with its own done or error.
+        if (facts.cold !== false) session.installed = undefined
         if (facts.serviceTier !== undefined) this.sessions.setDeviceServiceTier(session.id, facts.serviceTier)
         this.settleLastBoot(session, msg.requestId, facts.cold)
         this.gateEvent({ kind: 'ready', hostKey: hostKeyOf(session), sessionId: session.id, cold: facts.cold })
@@ -1832,6 +1865,10 @@ export class RelayServer {
       case 'input:error':
       case 'keyboard:toggled': {
         const session = this.sessions.get(msg.sessionId)
+        if (session && (msg.type === 'app:install-done' || msg.type === 'app:install-error')) {
+          const reason = typeof raw['message'] === 'string' ? raw['message'] : undefined
+          this.settleInstall(session, msg.requestId, msg.type === 'app:install-done', reason)
+        }
         if (session?.browserSocket?.readyState === WebSocket.OPEN) {
           session.browserSocket.send(JSON.stringify(raw))
         }
@@ -1940,6 +1977,8 @@ export class RelayServer {
           break
         }
         this.rememberShutdownRequester(ws, target.session.id, msg.requestId)
+        // Here and not at the top: a refused shutdown ends nobody's wait (#1087).
+        this.sessions.noteShutdown(target.session.id, { user: this.userOf(ws), label: this.holderLabel(ws), name: this.personName(ws) })
         target.session.agentSocket.send(JSON.stringify(msg))
         break
       }
@@ -2168,6 +2207,12 @@ export class RelayServer {
    * timeout, minutes later, having told the caller nothing in between.
    */
   private rejectPending(sessionIds: Set<string>, reason: string): void {
+    // An install in flight goes too, and here rather than at one caller: a restart that replaces the socket rebinds
+    // without passing through the hold. `installed` stays — the app is still on the device.
+    for (const id of sessionIds) {
+      const session = this.sessions.get(id)
+      if (session) this.dropPendingInstall(session, reason)
+    }
     for (const pendings of [this.pendingScreenshots, this.pendingUITrees]) {
       for (const [reqId, pending] of pendings.entries()) {
         if (!sessionIds.has(pending.sessionId)) continue
@@ -2281,6 +2326,9 @@ export class RelayServer {
     // Tracked by the socket it actually goes to (#885): a rebind invalidates only the boots
     // tied to the replaced socket, so a boot dispatched after the rebind stays answerable.
     this.rememberBoot(msg.sessionId, msg.requestId, boot.session.agentSocket)
+    this.sessions.noteBootSent(msg.sessionId)
+    // `=== 'full-erase'`, never truthy: the dashboard sends `app-only` on every boot, which erases nothing.
+    if (msg.payload.resetMode === 'full-erase' || msg.payload.runReset) this.forgetInstall(boot.session, 'The device is being reset')
     // The parse product, so a key a viewer appended from devtools is gone before the agent sees it.
     boot.session.agentSocket.send(JSON.stringify(msg))
   }
@@ -2480,6 +2528,8 @@ export class RelayServer {
       agentId: msg.agentId, agentName: msg.agentName,
       agentPlatform: msg.platform, agentCapabilities: msg.capabilities,
     }
+    this.agentIdentities.set(ws, agent)
+    if (identity) this.latestAgentSocket.set(`${identity}\u0000${msg.platform}`, ws)
     // deviceId → the session id kept across the restart. Also the guard that a device is rebound at
     // most once (#426): before rebinding existed, `create()` ran after every old session had been
     // evicted, so one device could not be behind two sessions. It can now, and `list()` does not
@@ -2549,7 +2599,7 @@ export class RelayServer {
     // which only held while every device got a session — now that some are rebound, the arrays have
     // different lengths and index alignment would hand the agent someone else's session id.
     const registeredSessions = devices.map((d) => ({ deviceId: d.id, sessionId: byDeviceId.get(d.id)! }))
-    this.sendTo(ws, { type: 'agent:registered', registeredSessions })
+    this.sendTo(ws, { type: 'agent:registered', registeredSessions, features: ['device-updates'] })
 
     // After the state is final: the browser answers this with `device:boot` on the same session id.
     for (const sessionId of rebound.values()) {
@@ -2573,6 +2623,75 @@ export class RelayServer {
     this.agentNames.set(ws, msg.agentName || msg.agentId || 'unknown')
     // Through `pushLog` too, so `tapflow logs` shows an agent coming back after the line about it leaving.
     this.pushLog(`agent connected: ${msg.agentName || msg.agentId || 'unknown'} (${msg.platform || 'unknown'}) — ${registeredSessions.length} device(s)`)
+  }
+
+  /**
+   * A registered agent's device list, sent when it changed (#1085). Diffed against this socket's sessions: a new
+   * device gets a session, a listed one has its name, form factor and version refreshed, and one that left is removed
+   * — unless someone is on it, in which case it is kept and marked, and the heartbeat removes it once nobody is
+   * (`sweepGoneDevices`). Ending a tester's session because a list read said so would cost them their screen for
+   * what may be a simulator deleted by mistake or a runtime briefly unavailable.
+   *
+   * The answer goes out before anything else can be sent on this socket, so the agent has the new session's state
+   * before any boot for it arrives: no `await` belongs in here.
+   */
+  private handleAgentDevices(ws: WebSocket, msg: Inbound<'agent:devices'>): void {
+    const agent = this.agentIdentities.get(ws)
+    if (!agent) {
+      logger.debug('[tapflow] agent:devices from a socket that never registered — dropped')
+      return
+    }
+    const identity = agent.agentId ?? agent.agentName
+    if (identity && this.latestAgentSocket.get(`${identity}\u0000${agent.agentPlatform}`) !== ws) {
+      logger.debug('[tapflow] agent:devices from a socket its agent has since replaced — dropped')
+      return
+    }
+    const devices = new Map(msg.devices.map((d) => [d.id, d]))
+    const current = this.sessions.getAllByAgentSocket(ws)
+    const removed: Array<{ deviceId: string; sessionId: string }> = []
+    let kept = 0
+    for (const s of current) {
+      const report = devices.get(s.deviceId)
+      if (report) {
+        this.sessions.refreshDevice(s.id, report)
+        continue
+      }
+      s.deviceGone = true
+      if (this.sessions.goneAndVacant(s)) {
+        removed.push({ deviceId: s.deviceId, sessionId: s.id })
+        this.settleShutdownRequesters(s, SHUTDOWN_OUTCOME_LOST)
+        this.removeSession(s.id)
+      } else {
+        kept++
+      }
+    }
+    const known = new Set(current.map((s) => s.deviceId))
+    const fresh = [...devices.values()].filter((d) => !known.has(d.id))
+    const ids = this.sessions.create(ws, fresh, agent.agentName, agent.agentPlatform, agent.agentId, agent.agentCapabilities)
+    const added = fresh.map((d, i) => ({ deviceId: d.id, sessionId: ids[i]! }))
+    this.sendTo(ws, { type: 'agent:devices-applied', added, removed })
+    if (added.length > 0 || removed.length > 0 || kept > 0) {
+      this.pushLog(`devices updated: ${agent.agentName || agent.agentId || 'unknown'} — +${added.length} −${removed.length}` +
+        (kept > 0 ? `, ${kept} gone but still in use` : ''))
+    }
+  }
+
+  /** Removes the sessions `handleAgentDevices` kept for a device that left, once nobody holds them, and tells their
+   *  agent the same way it was told at the time. Run from the heartbeat, because the ways a session stops being held
+   *  (a tab closing, an idle shutdown, a watcher leaving) have no one place to hook. */
+  private sweepGoneDevices(): void {
+    const byAgent = new Map<WebSocket, Array<{ deviceId: string; sessionId: string }>>()
+    for (const s of this.sessions.all()) {
+      if (!this.sessions.goneAndVacant(s)) continue
+      const list = byAgent.get(s.agentSocket) ?? []
+      list.push({ deviceId: s.deviceId, sessionId: s.id })
+      byAgent.set(s.agentSocket, list)
+      this.settleShutdownRequesters(s, SHUTDOWN_OUTCOME_LOST)
+      this.removeSession(s.id)
+    }
+    for (const [ws, removed] of byAgent) {
+      if (ws.readyState === WebSocket.OPEN) this.sendTo(ws, { type: 'agent:devices-applied', added: [], removed })
+    }
   }
 
   /** `device:boot`, and the boot a lease sends for the device it chose. */
@@ -2667,6 +2786,7 @@ export class RelayServer {
     const sessionOf = new Map<string, Session>()
     for (const s of ofPlatform) {
       if (s.agentSocket.readyState !== WebSocket.OPEN) continue
+      if (s.deviceGone) continue
       if (s.owner !== null || this.sessions.watchersOf(s.id).length > 0) continue
       if (s.evictingAt !== undefined && now - s.evictingAt < this.evictionGraceMs) continue
       if (s.lastBootPending !== undefined) continue
@@ -2809,7 +2929,7 @@ export class RelayServer {
       const joined = this.sessions.join(
         msg.sessionId, ws, this.ownerRecord(ws), (h) => this.isAlive(h),
         // Recorded by the join itself, so it holds before the agent-away return below and across a rebind.
-        { kind: msg.clientKind, label: this.holderLabel(ws), ...(msg.stream === false ? { stream: false } : {}) },
+        { kind: msg.clientKind, label: this.holderLabel(ws), name: this.personName(ws), ...(msg.stream === false ? { stream: false } : {}) },
       )
       if (!joined.ok) {
         // Both of these are answered above, so arriving here means the state moved between that check and
@@ -3010,6 +3130,20 @@ export class RelayServer {
     for (const w of this.sessions.watchersOf(sessionId)) this.sendTo(w, msg)
   }
 
+  /** What to call a person to their teammates (#1087): their display name, else the part of the email before `@` —
+   *  the rule `/auth/me` uses. `local` for a loopback client with no credential, as `holderLabel`. */
+  private personName(ws: WebSocket): string {
+    const id = Number(this.userOf(ws))
+    if (!Number.isInteger(id)) return 'local'
+    try {
+      const row = getDb().prepare('SELECT email, display_name FROM users WHERE id = ?').get(id) as { email: string; display_name: string | null } | undefined
+      if (!row) return 'unknown'
+      return row.display_name ?? row.email.split('@')[0]!
+    } catch {
+      return 'unknown'
+    }
+  }
+
   /** Who to show behind a holder: the signed-in user's email, or `local` for a loopback client with no
    *  credential. A label for people only — nothing reads it back. */
   private holderLabel(ws: WebSocket): string {
@@ -3040,6 +3174,7 @@ export class RelayServer {
   private idleShutdown(sessionId: string): void {
     const session = this.sessions.get(sessionId)
     if (session?.agentSocket.readyState !== WebSocket.OPEN) return
+    this.sessions.noteShutdownSent(session.id)
     this.sendTo(session.agentSocket, {
       type: 'device:shutdown',
       sessionId: session.id,
@@ -3114,7 +3249,8 @@ export class RelayServer {
         // the agent (filtered above while within it) is taken as not having happened: still up, and idle.
         automated: s.lastBoot?.booterClass === 'automated' && (s.deviceStatus === 'booted' || s.evictingAt !== undefined || s.lastBootPending !== undefined),
         booted: (s.deviceStatus === 'booted' || s.evictingAt !== undefined) && s.lastBootPending === undefined,
-        inUse: s.owner !== null || this.sessions.watchersOf(s.id).length > 0,
+        // A device waiting for a person to come back is theirs too, as the lease treats a person's countdown (#1087).
+        inUse: s.owner !== null || s.waitingOwner !== undefined || this.sessions.watchersOf(s.id).length > 0,
         reachable: s.agentSocket.readyState === WebSocket.OPEN,
         bootedAt: s.lastBoot?.at ?? 0,
       }))
@@ -3137,6 +3273,7 @@ export class RelayServer {
     this.sessions.updateDeviceStatus(session.id, 'shutdown')
     this.sessions.setReadySent(session.id, false)
     logger.info(`boot gate: shutting down idle automation device ${session.deviceName} on ${hostKeyOf(session)} to make room`)
+    this.sessions.noteShutdownSent(session.id)
     this.sendTo(session.agentSocket, { type: 'device:shutdown', sessionId: session.id, payload: { deviceId: session.deviceId } })
   }
 
@@ -3437,6 +3574,22 @@ export class RelayServer {
     // Answer now rather than letting the caller time out — the same shape as `open-url` above.
     if (session.agentSocket.readyState !== WebSocket.OPEN) return fail('agent offline')
 
+    // The stored path, not the resolved one: it is what identifies the upload, and it does not move when the data
+    // directory does.
+    const thisBuild = { buildId: msg.buildId, filePath: build.file_path }
+    if (msg.keepIfInstalled) {
+      // Joined rather than sent again. A second install would uninstall the first one's app mid-install on iOS.
+      const pending = session.pendingInstall
+      if (pending && sameBuild(pending, thisBuild)) {
+        pending.waiters.push(requestId)
+        return
+      }
+      if (!pending && session.installed && sameBuild(session.installed, thisBuild)) {
+        this.sendTo(ws, { type: 'app:install-done', sessionId, requestId })
+        return
+      }
+    }
+
     // The correlator rides across the rebuild. `open-url` got this for free — the relay re-serialises
     // that message whole — but this is a *different* message from the one the browser sent, and the
     // agent's reply is forwarded back generically without the relay looking at it. So if the id does not
@@ -3463,6 +3616,9 @@ export class RelayServer {
       return fail('The relay cannot read this build file. It may have been deleted — re-upload the build.')
     }
 
+    // Whatever was on the device is uninstalled first, so the record goes now rather than when this one lands.
+    this.forgetInstall(session, 'Replaced by another install on this device')
+    session.pendingInstall = { ...thisBuild, requestId, waiters: [] }
     this.sendTo(session.agentSocket, {
       type: 'app:install',
       sessionId,
@@ -3477,6 +3633,46 @@ export class RelayServer {
       },
     })
     this.tellWatchersAction(sessionId, { kind: 'install' })
+  }
+
+  /**
+   * An agent answered an install. Only the latest one sent says what is on the device: a reply to one it replaced is
+   * forwarded as before and changes no record. Read whether or not a browser holds the session — an install that
+   * finishes while the tester is reconnecting is exactly the one they are coming back to.
+   */
+  private settleInstall(session: Session, requestId: string, done: boolean, reason?: string): void {
+    const pending = session.pendingInstall
+    if (!pending || pending.requestId !== requestId) return
+    session.pendingInstall = undefined
+    session.installed = done ? { buildId: pending.buildId, filePath: pending.filePath } : undefined
+    for (const waiter of pending.waiters) {
+      // The agent's own reason. Its reply goes out under the original id, which a reconnected viewer has let go of.
+      this.answerInstallWaiter(session, waiter, done ? null : (reason ?? 'The install this was waiting on failed'))
+    }
+  }
+
+  /** The device may no longer have the app the record names. */
+  private forgetInstall(session: Session, reason: string): void {
+    session.installed = undefined
+    this.dropPendingInstall(session, reason)
+  }
+
+  /** The install in flight will not land as recorded. Its waiters are answered: each holds a viewer's install
+   *  spinner, and nothing else would stop it. */
+  private dropPendingInstall(session: Session, reason: string): void {
+    const pending = session.pendingInstall
+    if (!pending) return
+    session.pendingInstall = undefined
+    for (const waiter of pending.waiters) this.answerInstallWaiter(session, waiter, reason)
+  }
+
+  /** To whoever holds the session now, as the agent's own reply is: a waiter joined from a socket that held it. */
+  private answerInstallWaiter(session: Session, requestId: string, failure: string | null): void {
+    const holder = session.browserSocket
+    if (!holder) return
+    this.sendTo(holder, failure === null
+      ? { type: 'app:install-done', sessionId: session.id, requestId }
+      : { type: 'app:install-error', sessionId: session.id, requestId, message: failure })
   }
 
   /**

@@ -13,7 +13,7 @@ description: 대시보드 Settings의 하위 페이지입니다. 워크스페이
 
 - **Workspace** — 팀 이름과 로고를 설정합니다. Admin에게만 보입니다.
 - **Flow run videos** — 통과한 플로우의 영상을 며칠 남길지와 영상에 쓸 저장 공간을 정하고 지금 쓰는 용량을 봅니다. Admin에게만 보입니다. [플로우 실행 기록](/ko/automation/runs#recording)을 참고하세요.
-- **Apps** — 앱 이름을 바꾸거나 앱을 삭제합니다. Admin, Developer, QA에게 보이고 Viewer에게는 보이지 않습니다.
+- **Apps** — 앱 이름을 바꾸거나 앱을 삭제합니다. 앱을 [합치거나 나눌](/ko/testing/app-center#merge-apps) 수도 있습니다. Admin, Developer, QA에게 보이고 Viewer에게는 보이지 않습니다.
 
 ## Team
 
@@ -33,7 +33,7 @@ Admin으로 로그인한 뒤 **Settings → Team**에서 초대 링크를 만듭
 
 1. **Invite member**를 클릭합니다.
 2. 팀원의 이메일과 역할을 선택합니다. 역할의 기본값은 **QA**입니다.
-   - **Admin** — 자기 계정 삭제를 빼고 모든 작업을 할 수 있습니다. 팀원 초대·역할 변경·삭제, 비밀번호 재설정, 워크스페이스 설정, **Agent** 토큰 발급은 Admin만 할 수 있습니다.
+   - **Admin** — 자기 계정 삭제를 빼고 모든 작업을 할 수 있습니다. 팀원 초대·역할 변경·삭제, 비밀번호 재설정, 워크스페이스 설정, **Agent** 토큰 발급, QA 세션 기기 목록의 [이름 바꾸기와 숨기기](/ko/testing/qa-session#organize-devices)는 Admin만 할 수 있습니다.
    - **Developer**, **QA** — 앱 추가·수정·삭제, 빌드 업로드, 빌드 상태 변경, 빌드 삭제 예약, 웹훅 관리를 할 수 있고 **Settings → Tokens**에서 자기 API 토큰을 만들 수 있습니다. 두 역할의 권한은 같습니다.
    - **Viewer** — 읽기 전용입니다. 빌드를 보고 QA 세션에서 시뮬레이터나 에뮬레이터로 테스트하고 댓글을 남길 수 있습니다. 빌드와 앱은 바꿀 수 없습니다. 웹훅은 조회도 변경도 할 수 없습니다.
 

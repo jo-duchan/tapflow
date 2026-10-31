@@ -23,7 +23,7 @@ export function PerformanceModeNotice({
 }) {
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-[440px]">
+      <DialogContent size="md">
         <DialogHeader>
           <DialogTitle>Streaming in Standard mode</DialogTitle>
           <DialogDescription className="space-y-3 pt-1">

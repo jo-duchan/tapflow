@@ -34,7 +34,7 @@ Two kinds of people use tapflow. One operator installs it; everyone else install
 - **Relay** — the server between the dashboard and the agents. It serves the dashboard, stores accounts and uploaded builds, and carries the device screen and your input between the browser and an agent. A team runs one.
 - **Agent** — the tapflow process on a Mac that runs iOS simulators and Android emulators and sends their screens to the relay. In these docs "agent" always means the tapflow agent; tools like Claude Code are called "coding agents".
 - **Dashboard** — the tapflow screens you open in a browser. The relay serves it, so there is nothing separate to deploy.
-- **App Center** — the build list inside the dashboard. It has nothing to do with Microsoft App Center. Builds are grouped by app, and an app is a bundle ID on a platform.
+- **App Center** — the build list inside the dashboard. It has nothing to do with Microsoft App Center. Builds are grouped by app, and an app is identified by its bundle ID, which can differ between iOS and Android.
 - **Build** — the app file you test: a simulator `.app.zip` or `.tar.gz`/`.tgz` for iOS, an `.apk` for Android.
 - **QA Session** — the screen where you pick a Mac and a device for a build from App Center and drive the device from your browser.
 - **Role** — what an account may do: Admin, Developer, QA or Viewer. See [Team, roles & tokens](/operate/team-and-roles).

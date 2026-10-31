@@ -20,6 +20,9 @@ let warnedListAvds = false
 
 export interface AdbRunner {
   exec(...args: string[]): Promise<string>
+  /** `exec` with the child killed after `timeoutMs`. Optional so a test double need not have it; a runner without it
+   *  is called through `exec`, unbounded. */
+  execBounded?(timeoutMs: number, ...args: string[]): Promise<string>
   execBinary(...args: string[]): Promise<Buffer>
   listAvds(): Promise<string[]>
 }
@@ -27,6 +30,10 @@ export interface AdbRunner {
 export const defaultRunner: AdbRunner = {
   async exec(...args: string[]): Promise<string> {
     const { stdout } = await execFileAsync(getAdbPath(), args, { maxBuffer: ADB_MAXBUFFER })
+    return stdout
+  },
+  async execBounded(timeoutMs: number, ...args: string[]): Promise<string> {
+    const { stdout } = await execFileAsync(getAdbPath(), args, { maxBuffer: ADB_MAXBUFFER, timeout: timeoutMs })
     return stdout
   },
   async execBinary(...args: string[]): Promise<Buffer> {

@@ -53,7 +53,7 @@
 import * as z from 'zod'
 
 import type {
-  AgentRegister, AgentResourceReport, AgentsList, AppClearState, AppClearStateDone,
+  AgentDevices, AgentRegister, AgentResourceReport, AgentsList, AppClearState, AppClearStateDone,
   AppClearStateError, AppInstallDone, AppInstallError, AppInstallToRelay, AppLaunchDone,
   AppLaunchError, AppLaunchToRelay, RunResetItem, RunResetReport, ServiceTier, ClipboardData, ClipboardError, ClipboardRead, ClipboardWrite,
   NetworkError, NetworkSet, NetworkState,
@@ -183,7 +183,9 @@ const BROWSER_INBOUND = {
   // worked, and left this message as the single special case in a class the door now handles uniformly.
   // It was also the wrong diagnosis: nothing was looked up, so "not found" describes a query that never
   // ran.
-  'app:install': z.object({ type: z.literal('app:install'), sessionId, requestId, buildId: z.number().int() }),
+  'app:install': z.object({
+    type: z.literal('app:install'), sessionId, requestId, buildId: z.number().int(), keepIfInstalled: z.boolean().optional(),
+  }),
   // Shape only. The rules (key form, reserved names, size) are `launchOptionsProblem`'s, which the relay applies in its
   // handler so the caller is told which key and why, rather than this door's `malformed app:launch payload`.
   'app:launch': z.object({
@@ -263,6 +265,16 @@ const BROWSER_INBOUND = {
  *
  *  This is what makes rejection affordable here: `z.input` stays as loose as the wire has ever been
  *  while `z.output` matches the interface, which is what the tier assertion compares. */
+const deviceReports = z.array(z.object({
+  id: z.string(), name: z.string(), platform: z.string(), status: z.string(),
+  osVersion: z.string().optional(),
+  // A form factor this relay does not know is a newer agent, not a broken one: the field goes and
+  // the register stands. Anything that is not a string is still refused, the line `capabilities`
+  // draws — `.catch` over the whole field would swallow that too.
+  formFactor: z.union([z.enum(['phone', 'tablet', 'foldable']), z.string().transform(() => undefined)]).optional(),
+  serviceTier: reportedTier,
+}))
+
 const AGENT_CONSUMED = {
   'agent:register': z.object({
     type: z.literal('agent:register'),
@@ -284,15 +296,13 @@ const AGENT_CONSUMED = {
     agentId: z.string().optional(),
     agentName: z.string().default(''),
     // Deduplication by device id stays in the handler — it is a policy about the *set*, not a shape.
-    devices: z.array(z.object({
-      id: z.string(), name: z.string(), platform: z.string(), status: z.string(),
-      osVersion: z.string().optional(),
-      // A form factor this relay does not know is a newer agent, not a broken one: the field goes and
-      // the register stands. Anything that is not a string is still refused, the line `capabilities`
-      // draws — `.catch` over the whole field would swallow that too.
-      formFactor: z.union([z.enum(['phone', 'tablet', 'foldable']), z.string().transform(() => undefined)]).optional(),
-      serviceTier: reportedTier,
-    })).default([]),
+    devices: deviceReports.default([]),
+  }),
+  'agent:devices': z.object({
+    type: z.literal('agent:devices'),
+    // The same device object as the register's, so the two cannot drift: a list the relay takes at
+    // registration it takes on a refresh too. Required here — an empty list is a list, an absent one is not.
+    devices: deviceReports,
   }),
   'agent:resources': z.object({
     type: z.literal('agent:resources'),
@@ -614,6 +624,7 @@ type _SessionActivity = Assert<V<'session:activity', SessionActivity>>
 
 type _AgentRegister = Assert<V<'agent:register', AgentRegister>>
 type _AgentResources = Assert<V<'agent:resources', AgentResourceReport>>
+type _AgentDevices = Assert<V<'agent:devices', AgentDevices>>
 type _ScreenshotDone = Assert<V<'screenshot:done', ScreenshotDone>>
 type _ScreenshotError = Assert<V<'screenshot:error', ScreenshotError>>
 type _UiTreeResponse = Assert<V<'ui:tree:response', UiTreeResponse>>

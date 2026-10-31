@@ -21,6 +21,8 @@ export interface BuildInfo {
   versionName: string
   buildNumber: string
   platform: string
+  /** The build's own bundle ID: the one a flow's `appId` must match on this build's platform. */
+  bundleId: string | null
   statusLabel: string | null
   createdAt: string
 }
@@ -28,7 +30,9 @@ export interface BuildInfo {
 export interface AppInfo {
   id: number
   name: string
+  /** The iOS ID when the app has different ones per platform (#1086); `bundleIds` has both. */
   bundleId: string
+  bundleIds: { ios: string | null; android: string | null }
   platform: string
   builds: BuildInfo[]
 }
@@ -1424,8 +1428,9 @@ export class TapflowClient {
 
     const appsRes = await get(new URL('/api/v1/apps', httpBase).toString())
     if (!appsRes.ok) throw refused('apps', appsRes.status)
-    // GET /apps → { items } (unpaginated); the bundle id column is bundle_id_key.
-    const apps = ((await appsRes.json()) as { items?: Array<{ id: number; name: string; bundle_id_key: string; platform: string }> }).items ?? []
+    // GET /apps → { items } (unpaginated). `bundle_ids` is per platform; `bundle_id_key` is its iOS-first summary, and
+    // a relay from before #1086 sends only that.
+    const apps = ((await appsRes.json()) as { items?: Array<{ id: number; name: string; bundle_id_key: string; bundle_ids?: { ios: string | null; android: string | null }; platform: string }> }).items ?? []
 
     // GET /builds is paginated (limit ≤ 100, default 20) — page through `total`
     // so list_builds returns every build, not just the newest page.
@@ -1435,6 +1440,7 @@ export class TapflowClient {
       version_name: string
       build_number: string
       platform: string
+      bundle_id: string | null
       status_label: string | null
       uploaded_at: string
     }
@@ -1455,6 +1461,7 @@ export class TapflowClient {
       id: app.id,
       name: app.name,
       bundleId: app.bundle_id_key,
+      bundleIds: app.bundle_ids ?? { ios: null, android: null },
       platform: app.platform,
       builds: builds
         .filter((b) => b.app_id === app.id)
@@ -1463,6 +1470,7 @@ export class TapflowClient {
           versionName: b.version_name,
           buildNumber: b.build_number,
           platform: b.platform,
+          bundleId: b.bundle_id ?? null,
           statusLabel: b.status_label,
           createdAt: b.uploaded_at,
         })),

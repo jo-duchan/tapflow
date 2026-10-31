@@ -5,34 +5,21 @@ import { useTheme } from 'next-themes'
 import { useForm, useWatch, Controller } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
-import { Button, buttonVariants } from '@/components/ui/button'
-import { cn } from '@/lib/utils'
+import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { FieldError } from '@/components/ui/field-error'
 import { FormErrorCount } from '@/components/ui/form-error-count'
 import { FieldHint } from '@/components/ui/field-hint'
 import { PASSWORD_HINT, PASSWORD_MIN_LENGTH, PASSWORD_TOO_SHORT, describedBy } from '@/lib/password'
 import { Label } from '@/components/ui/label'
-import { Badge } from '@/components/ui/badge'
-import { PLATFORM_LABEL } from '@/lib/build-format'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Separator } from '@/components/ui/separator'
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-  AlertDialogTrigger,
-} from '@/components/ui/alert-dialog'
 import { toast } from 'sonner'
 import { Pencil } from 'lucide-react'
 import { avatarColors } from '@/lib/avatar'
 import { useAuth } from '@/hooks/useAuth'
 import { VideoStorageCard } from '@/components/settings/VideoStorageCard'
+import { AppsCard } from '@/components/settings/AppsCard'
 
 
 const workspaceSchema = z.object({
@@ -156,47 +143,9 @@ export function DefaultSettings() {
   }
 
   // ── Apps (Admin + Developer) ──────────────────────────────────────────────
-  // The same list App Center reads, so a rename or delete here shows there too.
+  // The same list App Center reads, so a rename, delete or merge here shows there too.
   const appsQuery = useQuery({ queryKey: queryKeys.apps, queryFn: getApps, enabled: canEditApps })
   const apps = appsQuery.data ?? []
-  // Names being edited, by app. An app not in here shows its saved name.
-  const [appNames, setAppNames] = useState<Record<number, string>>({})
-  const [appsSaving, setAppsSaving] = useState<Record<number, boolean>>({})
-  const [appsDeleting, setAppsDeleting] = useState<Record<number, boolean>>({})
-
-  async function handleAppDelete(appId: number) {
-    setAppsDeleting((p) => ({ ...p, [appId]: true }))
-    try {
-      const res = await fetch(`/api/v1/apps/${appId}`, { method: 'DELETE', credentials: 'include' })
-      if (!res.ok) { toast.error('Failed to delete app'); return }
-      void queryClient.invalidateQueries({ queryKey: queryKeys.apps })
-      toast.success('App deleted')
-    } catch {
-      toast.error('Failed to delete app')
-    } finally {
-      setAppsDeleting((p) => ({ ...p, [appId]: false }))
-    }
-  }
-
-  async function handleAppNameSave(appId: number) {
-    setAppsSaving((p) => ({ ...p, [appId]: true }))
-    try {
-      const res = await fetch(`/api/v1/apps/${appId}`, {
-        method: 'PATCH',
-        credentials: 'include',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name: appNames[appId] ?? apps.find((a) => a.id === appId)?.name }),
-      })
-      if (!res.ok) { toast.error('Failed to update app'); return }
-      toast.success('App updated')
-      setAppNames(({ [appId]: _saved, ...rest }) => rest)
-      void queryClient.invalidateQueries({ queryKey: queryKeys.apps })
-    } catch {
-      toast.error('Failed to update app')
-    } finally {
-      setAppsSaving((p) => ({ ...p, [appId]: false }))
-    }
-  }
 
   const profileDisplayName = useWatch({ control: profileForm.control, name: 'displayName' })
 
@@ -347,70 +296,7 @@ export function DefaultSettings() {
       </Card>
 
       {/* Apps — Admin + Developer */}
-      {canEditApps && apps.length > 0 && (
-        <Card>
-          <CardHeader><CardTitle>Apps</CardTitle></CardHeader>
-          <CardContent>
-            <div className="flex flex-col divide-y divide-border">
-              {apps.map((app) => (
-                <div key={app.id} className="flex flex-col gap-2 py-4 first:pt-0 last:pb-0">
-                  <Label htmlFor={`app-${app.id}`}>App Name</Label>
-                  <Input
-                    id={`app-${app.id}`}
-                    value={appNames[app.id] ?? app.name}
-                    onChange={(e) => setAppNames((p) => ({ ...p, [app.id]: e.target.value }))}
-                  />
-                  <div className="flex flex-col gap-1.5 mt-1">
-                    <div className="flex items-center gap-2">
-                      <span className="text-xs text-muted-foreground font-mono">{app.bundle_id_key}</span>
-                      <Badge
-                        tone={app.platform === 'ios' ? 'ios' : app.platform === 'android' ? 'android' : undefined}
-                        variant={app.platform === 'both' ? 'secondary' : undefined}
-                      >
-                        {PLATFORM_LABEL[app.platform]}
-                      </Badge>
-                    </div>
-                    <div className="flex items-center justify-end gap-2">
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        disabled={appsSaving[app.id]}
-                        onClick={() => handleAppNameSave(app.id)}
-                      >
-                        {appsSaving[app.id] ? 'Saving…' : 'Save'}
-                      </Button>
-                      <AlertDialog>
-                        <AlertDialogTrigger asChild>
-                          <Button size="sm" variant="destructive" disabled={appsDeleting[app.id]}>
-                            {appsDeleting[app.id] ? 'Deleting…' : 'Delete'}
-                          </Button>
-                        </AlertDialogTrigger>
-                        <AlertDialogContent>
-                          <AlertDialogHeader>
-                            <AlertDialogTitle>Delete app?</AlertDialogTitle>
-                            <AlertDialogDescription>
-                              This will permanently delete <strong>{app.name}</strong> and all its builds. This action cannot be undone.
-                            </AlertDialogDescription>
-                          </AlertDialogHeader>
-                          <AlertDialogFooter>
-                            <AlertDialogCancel className="w-24">Cancel</AlertDialogCancel>
-                            <AlertDialogAction
-                              className={cn(buttonVariants({ variant: 'destructive' }), 'w-24')}
-                              onClick={() => handleAppDelete(app.id)}
-                            >
-                              Delete
-                            </AlertDialogAction>
-                          </AlertDialogFooter>
-                        </AlertDialogContent>
-                      </AlertDialog>
-                    </div>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </CardContent>
-        </Card>
-      )}
+      {canEditApps && apps.length > 0 && <AppsCard apps={apps} />}
     </div>
   )
 }

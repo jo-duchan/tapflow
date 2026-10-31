@@ -39,10 +39,11 @@ import { ForbiddenError, queryKeys } from '@/lib/queries'
 
 const user = (role: string): AuthUser => ({ id: 1, email: 'a@b.c', displayName: 'A', avatarUrl: null, role })
 
-const APPS = [{ id: 1, name: 'Coffee', bundle_id_key: 'com.a.coffee', platform: 'ios' }] as unknown as App[]
+const APPS = [{ id: 1, name: 'Coffee', bundle_id_key: 'com.a.coffee', bundle_ids: { ios: 'com.a.coffee', android: null }, build_platforms: ['ios'], platform: 'ios' }] as unknown as App[]
 const BUILDS = [{
   id: 1, app_id: 1, version_name: '1.0.0', build_number: '7', platform: 'ios', status_label: 'Backlog',
   uploaded_at: '2026-09-21T00:00:00Z', uploader: 'ci', delete_after: null,
+  binary: { version_name: '1.0.0', build_number: '7' },
 }] as unknown as Build[]
 
 function renderAppCenter() {
@@ -67,7 +68,7 @@ describe('App Center — Viewer is read-only', () => {
     expect(await screen.findByRole('button', { name: 'Start QA on ios build 7, 1.0.0' })).toBeInTheDocument()
     expect(screen.getByText('Backlog', { selector: '[class*="text-xs"]' })).toBeInTheDocument()
     expect(screen.queryByRole('combobox', { name: /^Status for/ })).toBeNull()
-    expect(screen.queryByRole('button', { name: /deletion of/ })).toBeNull()
+    expect(screen.queryByRole('button', { name: /^Actions for/ })).toBeNull()
   })
 
   it('Add App raises the toast and opens nothing', async () => {
@@ -96,10 +97,10 @@ describe('App Center — Viewer is read-only', () => {
 describe('App Center — QA can write', () => {
   beforeEach(() => { auth.user = user('QA') })
 
-  it('rows draw the status Select and deletion button, and both dialogs open', async () => {
+  it('rows draw the status Select and the ⋯ menu, and both dialogs open', async () => {
     renderAppCenter()
     expect(await screen.findByRole('combobox', { name: 'Status for ios build 7, 1.0.0' })).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: 'Schedule deletion of ios build 7, 1.0.0' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Actions for ios build 7, 1.0.0' })).toBeInTheDocument()
 
     await userEvent.click(screen.getByRole('button', { name: /upload build/i }))
     expect(await screen.findByRole('dialog', { name: 'Upload build' })).toBeInTheDocument()

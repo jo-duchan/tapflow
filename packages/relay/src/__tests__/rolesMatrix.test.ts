@@ -91,16 +91,15 @@ const upload = (port: number, headers: Record<string, string>) =>
 
 function newBuild(): number {
   const db = getDb()
-  db.prepare(`INSERT OR IGNORE INTO apps (name, bundle_id_key, platform) VALUES ('Coffee', 'com.example.coffee', 'ios')`).run()
-  const app = db.prepare(`SELECT id FROM apps WHERE bundle_id_key = 'com.example.coffee'`).get() as { id: number }
+  db.prepare(`INSERT OR IGNORE INTO apps (name, platform) VALUES ('Coffee', 'ios')`).run()
+  const app = db.prepare('SELECT id FROM apps ORDER BY id DESC LIMIT 1').get() as { id: number }
   return Number(db.prepare(`
     INSERT INTO builds (app_id, version_name, build_number, bundle_id, file_path, status_label)
     VALUES (?, '1.0.0', '1', 'com.example.coffee', '/tmp/x.zip', 'Backlog')
   `).run(app.id).lastInsertRowid)
 }
 function newApp(): number {
-  const key = `com.example.a${Math.random().toString(36).slice(2)}`
-  return Number(getDb().prepare(`INSERT INTO apps (name, bundle_id_key, platform) VALUES ('A', ?, 'ios')`).run(key).lastInsertRowid)
+  return Number(getDb().prepare(`INSERT INTO apps (name, platform) VALUES ('A', 'ios')`).run().lastInsertRowid)
 }
 function newWebhook(): number {
   return Number(getDb().prepare(`INSERT INTO webhook_endpoints (url, enabled) VALUES ('http://10.0.0.5/hook', 1)`).run().lastInsertRowid)

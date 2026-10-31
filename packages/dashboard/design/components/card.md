@@ -62,7 +62,7 @@ component — propose it as a code change first.
 
 ## Variations at the call site
 
-These are `className` overrides, not props. They change layout, not the look of the card.
+These are `className` overrides, not props. All but one change layout, not the look of the card.
 
 | Where | Override | Why |
 |-------|----------|-----|

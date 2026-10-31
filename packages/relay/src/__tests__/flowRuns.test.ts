@@ -77,7 +77,7 @@ describe('flow run records', () => {
     shotsDir = path.join(uploadsDir, '../run-screenshots')
     const db = getDb()
     db.exec('DELETE FROM flow_runs; DELETE FROM recordings; DELETE FROM builds; DELETE FROM apps')
-    db.prepare(`INSERT INTO apps (id, name, bundle_id_key, platform) VALUES (1, 'Coffee', 'com.example.coffee', 'ios')`).run()
+    db.prepare(`INSERT INTO apps (id, name, platform) VALUES (1, 'Coffee', 'ios')`).run()
     const file = path.join(uploadsDir, 'builds', 'coffee.zip')
     fs.writeFileSync(file, 'zip')
     buildId = Number(db.prepare(`

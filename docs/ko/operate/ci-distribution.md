@@ -79,7 +79,17 @@ curl -X POST https://your-relay/api/v1/builds \
 ```
 
 `status=In Progress`는 팀에게 리뷰 준비가 됐다는 신호입니다.  
-`label`에는 브랜치명, 티켓 번호 등 맥락을 담을 수 있습니다.
+`label`에는 브랜치명, 티켓 번호 등 맥락을 담을 수 있습니다. App Center의 빌드 행에 표시되고 검색으로 찾을 수 있습니다.
+
+빌드 파일의 버전이나 빌드 번호로는 어떤 빌드인지 알 수 없을 때(같은 버전의 QA 빌드가 여러 개인 경우 등)는 `version_name`과 `build_number`도 보내세요. tapflow에서 빌드를 보여 주고 묶을 때 빌드 파일의 값 대신 쓰이며 파일 자체는 바뀌지 않습니다. 100자를 넘는 `label`은 100자로 잘립니다. `version_name`과 `build_number`는 100자를 넘으면 거절됩니다.
+
+```sh
+curl -X POST https://your-relay/api/v1/builds \
+  -H "Authorization: Bearer $TAPFLOW_PAT" \
+  -F "file=@MyApp.app.zip" \
+  -F "label=$GIT_BRANCH" \
+  -F "build_number=$CI_PIPELINE_ID"
+```
 
 ::: warning iOS 빌드
 `.ipa` 파일은 지원하지 않습니다. 시뮬레이터 빌드는 `.app.zip` 또는 `.tar.gz`/`.tgz`를 올립니다. `.app.zip`은 `xcodebuild -sdk iphonesimulator`로 빌드해 `.app` 폴더를 zip으로 압축하고, `.tar.gz`/`.tgz`는 클라우드 시뮬레이터 빌드가 만드는 아카이브입니다.
