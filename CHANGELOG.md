@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Docker relay:** `/api/v1/relay/host` explains when teammates cannot reach its URL, and invitation and agent-token dialogs show the warning. Set `TAPFLOW_RELAY_URL` to a teammate-reachable URL; a working tunnel clears it.
+
 ## [0.32.0] - 2026-10-31
 
 Picking up where you left off: resumable sessions, one app across platforms, and devices and builds you can organize.
