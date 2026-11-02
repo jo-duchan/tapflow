@@ -146,7 +146,8 @@ describe('Tokens — scope selection', () => {
     await userEvent.click(screen.getByRole('button', { name: /create token/i }))
     await userEvent.click(screen.getByRole('button', { name: /close/i }))
     expect(screen.getByRole('dialog')).toBeInTheDocument()
-    expect(screen.getByRole('status')).toHaveTextContent(/still in progress/i)
+    const status = screen.getByRole('status')
+    expect(status).toHaveTextContent(/still in progress/i)
     expect(toast.warning).not.toHaveBeenCalled()
 
     resolveCreate({ token: 'tflw_pat_once' })
@@ -159,6 +160,7 @@ describe('Tokens — scope selection', () => {
     const command = await screen.findByDisplayValue(/tapflow agent start --relay/)
     const note = screen.getByRole('note', { name: /this relay has no address agents can use/i })
     expect(command).toHaveAttribute('aria-describedby', note.id)
+    await waitFor(() => expect(status).toHaveTextContent(/This relay has no address agents can use/))
     await waitFor(() => expect(token).toHaveFocus())
   })
 

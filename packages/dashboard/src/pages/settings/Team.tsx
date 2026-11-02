@@ -25,7 +25,7 @@ import {
 import { UserPlus } from 'lucide-react'
 import { toast } from 'sonner'
 import { joinPath, loadTeammateBases, type PublicUrlWarningReason } from '@/lib/publicLink'
-import { PublicUrlWarning } from '@/components/PublicUrlWarning'
+import { PublicUrlWarning, publicUrlWarningAnnouncement } from '@/components/PublicUrlWarning'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { getTeamMembers, queryKeys } from '@/lib/queries'
 import { ListStateRow } from '@/components/ListStateRow'
@@ -168,6 +168,9 @@ export function TeamSettings() {
       setInviteLink(''); setLinkCopied(false); setInviteStatus(''); setInvitePublicUrlWarning(undefined); reset()
       void loadTeammateBases().then((bases) => {
         setInvitePublicUrlWarning(bases.publicUrlWarning)
+        if (bases.publicUrlWarning) {
+          setInviteStatus((current) => current ? `${current} ${publicUrlWarningAnnouncement}` : publicUrlWarningAnnouncement)
+        }
       })
     }
   }

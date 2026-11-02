@@ -113,6 +113,8 @@ describe('Team — the invite link a teammate gets', () => {
 
     render(withQuery(<TeamSettings />))
     await userEvent.click(await screen.findByRole('button', { name: /invite member/i }))
+    const status = screen.getByRole('status')
+    expect(status).toBeEmptyDOMElement()
     await userEvent.type(screen.getByLabelText(/email/i), 'qa@test.local')
     await userEvent.click(screen.getByRole('button', { name: /generate invite link/i }))
 
@@ -125,6 +127,7 @@ describe('Team — the invite link a teammate gets', () => {
     expect(field).toHaveAttribute('aria-describedby', note.id)
     expect(note).toHaveTextContent('TAPFLOW_RELAY_URL')
     expect(note.querySelector('a')).toHaveAttribute('href', 'https://www.tapflow.dev/operate/docker')
+    await waitFor(() => expect(status).toHaveTextContent(/This relay has no address teammates can open/))
     expect(field).toHaveFocus()
   })
 

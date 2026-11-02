@@ -26,7 +26,7 @@ import {
 } from '@/components/ui/table'
 import { Plus, Trash2 } from 'lucide-react'
 import { loadTeammateBases, type AgentUrlWarningReason } from '@/lib/publicLink'
-import { AgentUrlWarning } from '@/components/AgentUrlWarning'
+import { AgentUrlWarning, agentUrlWarningAnnouncement } from '@/components/AgentUrlWarning'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { getTokens, queryKeys } from '@/lib/queries'
 import { ListStateRow } from '@/components/ListStateRow'
@@ -121,13 +121,15 @@ export function TokenSettings() {
       }
       const json = await res.json() as { token: string }
       // Looked up only for an agent token: the relay address matters only to the command shown for one.
+      let status = ''
       if (tokenType === 'agent') {
         const bases = await loadTeammateBases()
         setAgentWsBase(bases.agentWsBase)
         setAgentUrlWarning(bases.agentUrlWarning)
+        if (bases.agentUrlWarning) status = agentUrlWarningAnnouncement
       }
       toast.success('Token created')
-      setDialogStatus('')
+      setDialogStatus(status)
       setNewToken(json.token)
       load()
     } catch {

@@ -1,3 +1,5 @@
+export const publicUrlWarningAnnouncement = 'This relay has no address teammates can open. Set TAPFLOW_RELAY_URL to a reachable address or configure a working tunnel public URL.'
+
 export function PublicUrlWarning({ id }: { id: string }) {
   return (
     <div id={id} role="note" aria-labelledby={`${id}-label`} className="rounded-lg border border-warning-border bg-warning px-4 py-3 text-sm">
