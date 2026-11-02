@@ -3,6 +3,7 @@ import { act, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { toast } from 'sonner'
 import { TeamSettings } from '@/src/pages/settings/Team'
+import { publicUrlWarningAnnouncement, publicUrlWarningBody, publicUrlWarningTitle } from '@/components/relayUrlWarningCopy'
 import { withQuery } from './withQuery'
 import { resetTeammateBasesForTests } from '@/lib/publicLink'
 
@@ -95,7 +96,9 @@ describe('Team — the invite link a teammate gets', () => {
     expect(screen.getByLabelText(/email/i)).toBeInTheDocument()
     const submit = screen.getByRole('button', { name: /generate invite link/i })
     expect(note.compareDocumentPosition(submit) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
-    expect(note).toHaveTextContent('TAPFLOW_RELAY_URL')
+    expect(note).toHaveAccessibleName(publicUrlWarningTitle)
+    expect(note).toHaveTextContent(`${publicUrlWarningBody.beforeRelayUrl}${publicUrlWarningBody.relayUrl}${publicUrlWarningBody.afterRelayUrl}`)
+    expect(screen.getByRole('status')).toHaveTextContent(publicUrlWarningAnnouncement)
   })
 
   it('loads the warning even when the relay supplied the invite URL, without moving focus when it arrives', async () => {
@@ -125,9 +128,10 @@ describe('Team — the invite link a teammate gets', () => {
     resolveHost({ ...noHost, publicUrlWarning: 'container-without-public-url' })
     const note = await screen.findByRole('note', { name: /this relay has no address teammates can open/i })
     expect(field).toHaveAttribute('aria-describedby', note.id)
-    expect(note).toHaveTextContent('TAPFLOW_RELAY_URL')
+    expect(note).toHaveAccessibleName(publicUrlWarningTitle)
+    expect(note).toHaveTextContent(`${publicUrlWarningBody.beforeRelayUrl}${publicUrlWarningBody.relayUrl}${publicUrlWarningBody.afterRelayUrl}`)
     expect(note.querySelector('a')).toHaveAttribute('href', 'https://www.tapflow.dev/operate/docker')
-    await waitFor(() => expect(status).toHaveTextContent(/This relay has no address teammates can open/))
+    await waitFor(() => expect(status).toHaveTextContent(publicUrlWarningAnnouncement))
     expect(field).toHaveFocus()
   })
 

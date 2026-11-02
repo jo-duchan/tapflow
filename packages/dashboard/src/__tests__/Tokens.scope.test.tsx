@@ -4,6 +4,7 @@ import userEvent from '@testing-library/user-event'
 import { MemoryRouter } from 'react-router-dom'
 import { toast } from 'sonner'
 import { TokenSettings } from '@/src/pages/settings/Tokens'
+import { agentUrlWarningAnnouncement, agentUrlWarningBody, agentUrlWarningTitle } from '@/components/relayUrlWarningCopy'
 import { withQuery } from './withQuery'
 import { resetTeammateBasesForTests } from '@/lib/publicLink'
 
@@ -114,7 +115,8 @@ describe('Tokens — scope selection', () => {
     const command = await screen.findByDisplayValue(/tapflow agent start --relay/)
     const note = screen.getByRole('note', { name: /this relay has no address agents can use/i })
     expect(command).toHaveAttribute('aria-describedby', note.id)
-    expect(note).toHaveTextContent('TAPFLOW_RELAY_URL')
+    expect(note).toHaveAccessibleName(agentUrlWarningTitle)
+    expect(note).toHaveTextContent(`${agentUrlWarningBody.beforeRelayUrl}${agentUrlWarningBody.relayUrl}${agentUrlWarningBody.afterRelayUrl}`)
   })
 
   it('does not use a teammate URL warning for the agent command', async () => {
@@ -161,7 +163,9 @@ describe('Tokens — scope selection', () => {
     const note = screen.getByRole('note', { name: /this relay has no address agents can use/i })
     expect(token).toHaveAttribute('aria-describedby', note.id)
     expect(command).toHaveAttribute('aria-describedby', note.id)
-    await waitFor(() => expect(status).toHaveTextContent(/This relay has no address agents can use/))
+    expect(note).toHaveAccessibleName(agentUrlWarningTitle)
+    expect(note).toHaveTextContent(`${agentUrlWarningBody.beforeRelayUrl}${agentUrlWarningBody.relayUrl}${agentUrlWarningBody.afterRelayUrl}`)
+    await waitFor(() => expect(status).toHaveTextContent(agentUrlWarningAnnouncement))
     await waitFor(() => expect(token).toHaveFocus())
   })
 
