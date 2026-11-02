@@ -65,9 +65,11 @@ describe('resolveTeammateBases', () => {
     expect(resolveTeammateBases(info({
       publicBaseUrl: 'https://relay.example.com',
       publicUrlWarning: 'container-without-public-url',
+      agentUrlWarning: 'container-without-relay-url',
     }), viewer('http://localhost:3000'))).toMatchObject({
       linkBase: 'https://relay.example.com',
       publicUrlWarning: 'container-without-public-url',
+      agentUrlWarning: 'container-without-relay-url',
     })
   })
 
@@ -110,6 +112,7 @@ describe('loadTeammateBases', () => {
     const fetchMock = stubRelayHost({ ok: true, body: info() })
     const result = await loadTeammateBases()
     expect(result).not.toHaveProperty('publicUrlWarning')
+    expect(result).not.toHaveProperty('agentUrlWarning')
     expect(fetchMock).toHaveBeenCalledTimes(1)
   })
 
@@ -121,15 +124,27 @@ describe('loadTeammateBases', () => {
     })
   })
 
-  it('ignores an unknown warning reason without losing the host addresses', async () => {
-    stubRelayHost({ ok: true, body: { ...info({ publicBaseUrl: 'https://relay.example.com' }), publicUrlWarning: 'future-reason' } })
+  it('ignores unknown warning reasons without losing the host addresses', async () => {
+    stubRelayHost({ ok: true, body: {
+      ...info({ publicBaseUrl: 'https://relay.example.com' }),
+      publicUrlWarning: 'future-reason',
+      agentUrlWarning: 'future-agent-reason',
+    } })
     await expect(loadTeammateBases()).resolves.toMatchObject({ linkBase: 'https://relay.example.com' })
     await expect(loadTeammateBases()).resolves.not.toHaveProperty('publicUrlWarning')
+    await expect(loadTeammateBases()).resolves.not.toHaveProperty('agentUrlWarning')
   })
 
-  it('preserves the known warning reason from the host response', async () => {
-    stubRelayHost({ ok: true, body: { ...info(), publicUrlWarning: 'container-without-public-url' } })
-    await expect(loadTeammateBases()).resolves.toMatchObject({ publicUrlWarning: 'container-without-public-url' })
+  it('preserves each known warning reason from the host response', async () => {
+    stubRelayHost({ ok: true, body: {
+      ...info(),
+      publicUrlWarning: 'container-without-public-url',
+      agentUrlWarning: 'container-without-relay-url',
+    } })
+    await expect(loadTeammateBases()).resolves.toMatchObject({
+      publicUrlWarning: 'container-without-public-url',
+      agentUrlWarning: 'container-without-relay-url',
+    })
   })
 
   it('gives up on a lookup that never settles, falls back, and does not cache it', async () => {

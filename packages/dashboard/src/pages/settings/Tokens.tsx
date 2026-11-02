@@ -25,8 +25,8 @@ import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from '@/components/ui/table'
 import { Plus, Trash2 } from 'lucide-react'
-import { loadTeammateBases, type PublicUrlWarningReason } from '@/lib/publicLink'
-import { PublicUrlWarning } from '@/components/PublicUrlWarning'
+import { loadTeammateBases, type AgentUrlWarningReason } from '@/lib/publicLink'
+import { AgentUrlWarning } from '@/components/AgentUrlWarning'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { getTokens, queryKeys } from '@/lib/queries'
 import { ListStateRow } from '@/components/ListStateRow'
@@ -74,7 +74,7 @@ export function TokenSettings() {
   const [newToken, setNewToken] = useState('')
   const [tokenType, setTokenType] = useState<TokenType>('api')
   const [agentWsBase, setAgentWsBase] = useState('')
-  const [publicUrlWarning, setPublicUrlWarning] = useState<PublicUrlWarningReason>()
+  const [agentUrlWarning, setAgentUrlWarning] = useState<AgentUrlWarningReason>()
   const [revokeTarget, setRevokeTarget] = useState<number | null>(null)
   const tokenLabelId = useId()
   const commandLabelId = useId()
@@ -99,7 +99,7 @@ export function TokenSettings() {
 
   async function onCreate(data: FormData) {
     setDialogStatus('')
-    setPublicUrlWarning(undefined)
+    setAgentUrlWarning(undefined)
     try {
       const days = expiresInDays(data)
       const res = await fetch('/api/v1/tokens', {
@@ -124,7 +124,7 @@ export function TokenSettings() {
       if (tokenType === 'agent') {
         const bases = await loadTeammateBases()
         setAgentWsBase(bases.agentWsBase)
-        setPublicUrlWarning(bases.publicUrlWarning)
+        setAgentUrlWarning(bases.agentUrlWarning)
       }
       toast.success('Token created')
       setDialogStatus('')
@@ -140,13 +140,12 @@ export function TokenSettings() {
     if (!o && isSubmitting) {
       const message = 'Token creation is still in progress. Wait for it to finish before closing this dialog.'
       setDialogStatus(message)
-      toast.warning(message)
       return
     }
     setOpen(o)
     // Cleared on the way in, not on the way out: a closing dialog stays on screen through its exit animation,
     // and clearing it then showed the empty form fading out in place of what was just issued.
-    if (o) { setNewToken(''); setTokenType('api'); setAgentWsBase(''); setPublicUrlWarning(undefined); setDialogStatus(''); reset() }
+    if (o) { setNewToken(''); setTokenType('api'); setAgentWsBase(''); setAgentUrlWarning(undefined); setDialogStatus(''); reset() }
   }
 
   async function handleRevoke(id: number): Promise<boolean> {
@@ -186,8 +185,8 @@ export function TokenSettings() {
                 {tokenType === 'agent' && agentWsBase && (
                   <>
                     <p id={commandLabelId} className="text-sm text-muted-foreground">Run this on the agent Mac to connect it to this relay:</p>
-                    <Input readOnly value={`tapflow agent start --relay ${agentWsBase} --token ${newToken}`} aria-labelledby={commandLabelId} aria-describedby={publicUrlWarning ? tokenWarningId : undefined} onFocus={(e) => e.currentTarget.select()} className="font-mono" />
-                    {publicUrlWarning && <PublicUrlWarning id={tokenWarningId} />}
+                    <Input readOnly value={`tapflow agent start --relay ${agentWsBase} --token ${newToken}`} aria-labelledby={commandLabelId} aria-describedby={agentUrlWarning ? tokenWarningId : undefined} onFocus={(e) => e.currentTarget.select()} className="font-mono" />
+                    {agentUrlWarning && <AgentUrlWarning id={tokenWarningId} />}
                   </>
                 )}
                 <Button onClick={() => {

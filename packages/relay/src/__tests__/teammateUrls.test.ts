@@ -6,7 +6,7 @@ import {
   buildInviteBaseUrl,
   type TunnelRuntime,
 } from '../lib/publicUrl'
-import { buildCorsOrigins, containerWithoutPublicUrlWarning, proxyWithoutPublicUrlWarning } from '../lib/proxyConfig'
+import { buildCorsOrigins, containerWithoutAgentUrlWarning, containerWithoutPublicUrlWarning, proxyWithoutPublicUrlWarning } from '../lib/proxyConfig'
 import type { TapflowConfig } from '../lib/config'
 
 // Kept apart from publicUrl.test.ts on purpose: an open external PR (#777) appends to that file, and
@@ -147,6 +147,25 @@ describe('containerWithoutPublicUrlWarning — the Docker mistake is said out lo
 
   it('stays quiet outside a container, where a missing public URL is the normal LAN setup', () => {
     expect(containerWithoutPublicUrlWarning(cfg(), false)).toBeNull()
+  })
+})
+
+describe('containerWithoutAgentUrlWarning — a browser tunnel is not an agent address', () => {
+  it('warns in a container with no usable relay.url, even when a tunnel is configured', () => {
+    expect(containerWithoutAgentUrlWarning(cfg({ tunnel: rathole('https://vps.example.com') }), true))
+      .toContain('TAPFLOW_RELAY_URL')
+  })
+
+  it.each(['ws://localhost:4000', 'http://0.0.0.0:4000', 'not a url'])('%s cannot be used as an agent address', (relayUrl) => {
+    expect(containerWithoutAgentUrlWarning(cfg({ relayUrl }), true)).toContain('TAPFLOW_RELAY_URL')
+  })
+
+  it('stays quiet when relay.url is usable by an agent', () => {
+    expect(containerWithoutAgentUrlWarning(cfg({ relayUrl: 'http://192.168.0.9:4000' }), true)).toBeNull()
+  })
+
+  it('stays quiet outside a container', () => {
+    expect(containerWithoutAgentUrlWarning(cfg(), false)).toBeNull()
   })
 })
 

@@ -196,7 +196,14 @@ describe('teammate-facing URLs from the relay', () => {
   })
 
   describe('GET /api/v1/relay/host', () => {
-    interface HostInfo { lanHost: string | null; port: number; publicBaseUrl: string | null; agentRelayUrl: string | null; publicUrlWarning?: 'container-without-public-url' }
+    interface HostInfo {
+      lanHost: string | null
+      port: number
+      publicBaseUrl: string | null
+      agentRelayUrl: string | null
+      publicUrlWarning?: 'container-without-public-url'
+      agentUrlWarning?: 'container-without-relay-url'
+    }
     const hostInfo = async (port: number): Promise<HostInfo> => {
       const res = await fetch(`http://localhost:${port}/api/v1/relay/host`, { headers: { cookie: cookie() } })
       expect(res.status).toBe(200)
@@ -242,7 +249,7 @@ describe('teammate-facing URLs from the relay', () => {
       })
     })
 
-    it('adds only the structured warning reason for a container without a teammate URL', async () => {
+    it('adds structured warnings for a container missing the teammate and agent URLs', async () => {
       configure(null, null)
       state.inContainer = true
       await withServer(undefined, async (port) => {
@@ -252,7 +259,20 @@ describe('teammate-facing URLs from the relay', () => {
           publicBaseUrl: null,
           agentRelayUrl: null,
           publicUrlWarning: 'container-without-public-url',
+          agentUrlWarning: 'container-without-relay-url',
         })
+      })
+    })
+
+    it('warns about the missing agent URL even when a tunnel makes teammate links work', async () => {
+      configure({ provider: 'tailscale' }, null)
+      state.inContainer = true
+      await withServer({ publicUrl: 'https://mac.tailnet.ts.net:4000' }, async (port) => {
+        const body = await hostInfo(port)
+        expect(body.publicBaseUrl).toBe('https://mac.tailnet.ts.net:4000')
+        expect(body.agentRelayUrl).toBeNull()
+        expect(body.publicUrlWarning).toBeUndefined()
+        expect(body.agentUrlWarning).toBe('container-without-relay-url')
       })
     })
 
@@ -263,6 +283,7 @@ describe('teammate-facing URLs from the relay', () => {
         const body = await hostInfo(port)
         expect(body.publicBaseUrl).toBe('https://mac.tailnet.ts.net:4000')
         expect(body.publicUrlWarning).toBeUndefined()
+        expect(body.agentUrlWarning).toBeUndefined()
       })
     })
 

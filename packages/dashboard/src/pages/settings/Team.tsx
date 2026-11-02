@@ -97,10 +97,13 @@ export function TeamSettings() {
   const [inviteOpen, setInviteOpen] = useState(false)
   const [invitePublicUrlWarning, setInvitePublicUrlWarning] = useState<PublicUrlWarningReason>()
   const inviteWarningId = useId()
-  const [inviteController, setInviteController] = useState<AbortController | null>(null)
+  const inviteMountedRef = useRef(true)
   const [pendingDeleteId, setPendingDeleteId] = useState<number | null>(null)
 
-  useEffect(() => () => inviteController?.abort(), [inviteController])
+  useEffect(() => {
+    inviteMountedRef.current = true
+    return () => { inviteMountedRef.current = false }
+  }, [])
 
   const { register, handleSubmit, control, reset, setError, formState: { errors, isSubmitting, submitCount } } = useForm<InviteData>({
     shouldFocusError: false, // FormErrorCount focuses, once the field is described (#824)
@@ -111,20 +114,16 @@ export function TeamSettings() {
   const load = () => { void queryClient.invalidateQueries({ queryKey: queryKeys.teamMembers }) }
 
   async function onInvite(data: InviteData) {
-    const controller = inviteController
-    if (!controller || controller.signal.aborted) return
-    const isCurrentInvite = () => !controller.signal.aborted
     // Cleared first, so a retry that fails the same way is announced again.
     setInviteStatus('')
     try {
       const res = await fetch('/api/v1/team/invite', {
         method: 'POST',
         credentials: 'include',
-        signal: controller.signal,
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email: data.email, role: data.role }),
       })
-      if (!isCurrentInvite()) return
+      if (!inviteMountedRef.current) return
       // The relay refuses an address that already has an account: an invitation never changes one.
       if (res.status === 409) {
         setError('email', { message: 'Already a member. Change their role in the list instead.' })
@@ -135,9 +134,9 @@ export function TeamSettings() {
       // The relay returns the link it mailed (#788). It has none to offer when its only address is one a
       // teammate cannot open, and then the link is built from the teammate base.
       const link = json.inviteUrl ?? joinPath((await loadTeammateBases()).linkBase, `/invite?token=${json.token}`)
-      if (!isCurrentInvite()) return
+      if (!inviteMountedRef.current) return
       const copied = await copyToClipboard(link)
-      if (!isCurrentInvite()) return
+      if (!inviteMountedRef.current) return
       setInviteLink(link)
       setLinkCopied(copied)
       // Toasts render outside the dialog, and an open dialog hides everything outside it from assistive
@@ -151,26 +150,25 @@ export function TeamSettings() {
         toast.warning('Email could not be sent. Copy the invite link from the dialog, and check your SMTP settings.')
       }
     } catch {
-      if (!isCurrentInvite()) return
+      if (!inviteMountedRef.current) return
       toast.error('Failed to create invite link')
       setInviteStatus('Failed to create invite link.')
     }
   }
 
   function handleDialogClose(open: boolean) {
+    if (!open && isSubmitting) {
+      setInviteStatus('Invite creation is still in progress. Wait for it to finish before closing this dialog.')
+      return
+    }
     setInviteOpen(open)
     // Cleared on the way in, not on the way out: a closing dialog stays on screen through its exit animation,
     // and clearing it then showed the empty form fading out in place of what was just issued.
     if (open) {
-      const controller = new AbortController()
-      setInviteController(controller)
       setInviteLink(''); setLinkCopied(false); setInviteStatus(''); setInvitePublicUrlWarning(undefined); reset()
       void loadTeammateBases().then((bases) => {
-        if (!controller.signal.aborted) setInvitePublicUrlWarning(bases.publicUrlWarning)
+        setInvitePublicUrlWarning(bases.publicUrlWarning)
       })
-    } else {
-      inviteController?.abort()
-      setInviteController(null)
     }
   }
 
@@ -263,13 +261,14 @@ export function TeamSettings() {
             <DialogHeader><DialogTitle>Invite team member</DialogTitle></DialogHeader>
             {/* Mounted before the outcome arrives, so the change is announced. */}
             <p role="status" className="sr-only">{inviteStatus}</p>
+            {invitePublicUrlWarning && <PublicUrlWarning id={inviteWarningId} />}
             {inviteLink ? (
               <div className="flex flex-col gap-3 pt-2">
                 <CopyableLink link={inviteLink} copied={linkCopied} noun="invite link" warningId={invitePublicUrlWarning ? inviteWarningId : undefined} />
                 <Button onClick={() => handleDialogClose(false)}>Done</Button>
               </div>
             ) : (
-              <form onSubmit={handleSubmit(onInvite)} className="flex flex-col gap-4 pt-2">
+              <form onSubmit={(event) => { void handleSubmit(onInvite)(event) }} className="flex flex-col gap-4 pt-2">
                 <div className="grid gap-2">
                   <Label htmlFor="invite-email">Email</Label>
                   <Input id="invite-email" type="email" aria-required="true" aria-invalid={!!errors.email} aria-describedby={errors.email ? 'email-error' : undefined} {...register('email')} />
@@ -306,7 +305,6 @@ export function TeamSettings() {
                 <FormErrorCount errors={errors} submitCount={submitCount} />
               </form>
             )}
-            {invitePublicUrlWarning && <PublicUrlWarning id={inviteWarningId} />}
           </DialogContent>
         </Dialog>
       </div>

@@ -2,4 +2,4 @@
 "@tapflowio/relay": patch
 ---
 
-Expose a structured warning when a container's selected public URL cannot be opened by teammates.
+Expose separate warnings when a container lacks a teammate-reachable public URL or an agent-reachable relay URL.

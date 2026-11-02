@@ -90,9 +90,11 @@ describe('Team — the invite link a teammate gets', () => {
     await userEvent.click(await screen.findByRole('button', { name: /invite member/i }))
 
     const email = screen.getByLabelText(/email/i)
-    const note = await screen.findByRole('note', { name: /teammates cannot open this relay's public url/i })
+    const note = await screen.findByRole('note', { name: /this relay has no address teammates can open/i })
     expect(email).toHaveFocus()
     expect(screen.getByLabelText(/email/i)).toBeInTheDocument()
+    const submit = screen.getByRole('button', { name: /generate invite link/i })
+    expect(note.compareDocumentPosition(submit) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
     expect(note).toHaveTextContent('TAPFLOW_RELAY_URL')
   })
 
@@ -119,14 +121,14 @@ describe('Team — the invite link a teammate gets', () => {
     expect(fetchMock.mock.calls.some(([url]) => String(url).includes('/api/v1/relay/host'))).toBe(true)
 
     resolveHost({ ...noHost, publicUrlWarning: 'container-without-public-url' })
-    const note = await screen.findByRole('note', { name: /teammates cannot open this relay's public url/i })
+    const note = await screen.findByRole('note', { name: /this relay has no address teammates can open/i })
     expect(field).toHaveAttribute('aria-describedby', note.id)
     expect(note).toHaveTextContent('TAPFLOW_RELAY_URL')
     expect(note.querySelector('a')).toHaveAttribute('href', 'https://www.tapflow.dev/operate/docker')
     expect(field).toHaveFocus()
   })
 
-  it('does not let an invite request from a closed dialog overwrite the reopened form', async () => {
+  it('keeps the dialog open while the invite request is in flight', async () => {
     let resolveInvite: (value: unknown) => void = () => {}
     const inviteResponse = new Promise<unknown>((resolve) => { resolveInvite = resolve })
     const writeText = vi.fn(async (_text: string) => {})
@@ -144,19 +146,21 @@ describe('Team — the invite link a teammate gets', () => {
     await userEvent.click(await screen.findByRole('button', { name: /invite member/i }))
     await userEvent.type(screen.getByLabelText(/email/i), 'first@test.local')
     await userEvent.click(screen.getByRole('button', { name: /generate invite link/i }))
-    await waitFor(() => expect(fetchMock.mock.calls.some(([, init]) => init?.method === 'POST')).toBe(true))
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith('/api/v1/team/invite', expect.objectContaining({ method: 'POST' })))
+    const post = fetchMock.mock.calls.find(([url, init]) => url.includes('/api/v1/team/invite') && init?.method === 'POST')
+    expect(post?.[1]).not.toHaveProperty('signal')
 
     await userEvent.click(screen.getByRole('button', { name: /close/i }))
-    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
-    await userEvent.click(screen.getByRole('button', { name: /invite member/i }))
-    expect(screen.getByLabelText(/email/i)).toHaveValue('')
+    expect(screen.getByRole('dialog')).toBeInTheDocument()
+    expect(screen.getByRole('status')).toHaveTextContent(/still in progress/i)
 
     await act(async () => {
-      resolveInvite({ token: 'old', emailSent: false, inviteUrl: 'https://relay.example.com/invite?token=old' })
+      resolveInvite({ token: 'first', emailSent: false, inviteUrl: 'https://relay.example.com/invite?token=first' })
       await new Promise((resolve) => setTimeout(resolve, 0))
     })
-    expect(screen.getByLabelText(/email/i)).toHaveValue('')
-    expect(writeText).not.toHaveBeenCalled()
+    expect(await screen.findByDisplayValue('https://relay.example.com/invite?token=first')).toBeInTheDocument()
+    expect(writeText).toHaveBeenCalledWith('https://relay.example.com/invite?token=first')
+    expect(screen.getByRole('dialog')).toBeInTheDocument()
   })
 
   it('does not copy or toast a late invite response after the settings page unmounts', async () => {

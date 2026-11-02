@@ -21,6 +21,8 @@ import { z } from 'zod'
 
 const publicUrlWarningReason = 'container-without-public-url'
 export type PublicUrlWarningReason = typeof publicUrlWarningReason
+const agentUrlWarningReason = 'container-without-relay-url'
+export type AgentUrlWarningReason = typeof agentUrlWarningReason
 
 const relayHostInfoSchema = z.object({
   lanHost: z.string().nullable().optional().catch(undefined),
@@ -28,6 +30,7 @@ const relayHostInfoSchema = z.object({
   publicBaseUrl: z.string().nullable().optional().catch(undefined),
   agentRelayUrl: z.string().nullable().optional().catch(undefined),
   publicUrlWarning: z.literal(publicUrlWarningReason).optional().catch(undefined),
+  agentUrlWarning: z.literal(agentUrlWarningReason).optional().catch(undefined),
 })
 
 export type RelayHostInfo = z.infer<typeof relayHostInfoSchema>
@@ -43,6 +46,7 @@ export interface TeammateBases {
   linkBase: string
   agentWsBase: string
   publicUrlWarning?: PublicUrlWarningReason
+  agentUrlWarning?: AgentUrlWarningReason
 }
 
 const LOCAL_HOSTNAMES = ['localhost', '127.0.0.1', '[::1]']
@@ -56,6 +60,7 @@ export function resolveTeammateBases(info: RelayHostInfo | null, viewer: Viewer)
     linkBase: info?.publicBaseUrl ?? (lan ? `${viewer.protocol}//${lan}` : viewer.origin),
     agentWsBase: info?.agentRelayUrl ?? (lan ? `${wsScheme}://${lan}` : `${wsScheme}://${viewer.host}`),
     ...(info?.publicUrlWarning ? { publicUrlWarning: info.publicUrlWarning } : {}),
+    ...(info?.agentUrlWarning ? { agentUrlWarning: info.agentUrlWarning } : {}),
   }
 }
 

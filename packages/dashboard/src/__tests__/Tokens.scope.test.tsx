@@ -26,6 +26,7 @@ function stubFetch(opts: {
   publicBaseUrl?: string | null
   agentRelayUrl?: string | null
   publicUrlWarning?: string
+  agentUrlWarning?: string
 } = {}) {
   const fetchMock = vi.fn().mockImplementation((url: string, init?: RequestInit) => {
     if (url.includes('/api/v1/relay/host')) {
@@ -35,6 +36,7 @@ function stubFetch(opts: {
         publicBaseUrl: opts.publicBaseUrl ?? null,
         agentRelayUrl: opts.agentRelayUrl ?? null,
         ...(opts.publicUrlWarning !== undefined ? { publicUrlWarning: opts.publicUrlWarning } : {}),
+        ...(opts.agentUrlWarning !== undefined ? { agentUrlWarning: opts.agentUrlWarning } : {}),
       }) })
     }
     if (init?.method === 'POST') {
@@ -102,17 +104,29 @@ describe('Tokens — scope selection', () => {
     expect(cmd.value).toContain('--token tflw_pat_abc')
   })
 
-  it('agent token shows the selected public URL warning and describes the command with it', async () => {
-    stubFetch({ createRes: { ok: true, body: { token: 'tflw_pat_abc' } }, lanHost: '192.168.0.50', publicUrlWarning: 'container-without-public-url' })
+  it('agent token shows the separate agent URL warning and describes the command with it', async () => {
+    stubFetch({ createRes: { ok: true, body: { token: 'tflw_pat_abc' } }, lanHost: '192.168.0.50', agentUrlWarning: 'container-without-relay-url' })
     renderTokens()
     await openDialogAndType('agent-mac-1')
     await selectAgentType()
     await userEvent.click(screen.getByRole('button', { name: /create token/i }))
 
     const command = await screen.findByDisplayValue(/tapflow agent start --relay/)
-    const note = screen.getByRole('note', { name: /teammates cannot open this relay's public url/i })
+    const note = screen.getByRole('note', { name: /this relay has no address agents can use/i })
     expect(command).toHaveAttribute('aria-describedby', note.id)
     expect(note).toHaveTextContent('TAPFLOW_RELAY_URL')
+  })
+
+  it('does not use a teammate URL warning for the agent command', async () => {
+    stubFetch({ createRes: { ok: true, body: { token: 'tflw_pat_abc' } }, publicUrlWarning: 'container-without-public-url' })
+    renderTokens()
+    await openDialogAndType('agent-mac-1')
+    await selectAgentType()
+    await userEvent.click(screen.getByRole('button', { name: /create token/i }))
+
+    const command = await screen.findByDisplayValue(/tapflow agent start --relay/)
+    expect(command).not.toHaveAttribute('aria-describedby')
+    expect(screen.queryByRole('note')).not.toBeInTheDocument()
   })
 
   it('keeps an issued agent token in the open dialog while its host warning lookup is pending', async () => {
@@ -133,17 +147,17 @@ describe('Tokens — scope selection', () => {
     await userEvent.click(screen.getByRole('button', { name: /close/i }))
     expect(screen.getByRole('dialog')).toBeInTheDocument()
     expect(screen.getByRole('status')).toHaveTextContent(/still in progress/i)
-    expect(toast.warning).toHaveBeenCalledWith(expect.stringMatching(/still in progress/i))
+    expect(toast.warning).not.toHaveBeenCalled()
 
     resolveCreate({ token: 'tflw_pat_once' })
     await waitFor(() => expect(fetchMock.mock.calls.some(([url]) => String(url).includes('/api/v1/relay/host'))).toBe(true))
     await userEvent.click(screen.getByRole('button', { name: /close/i }))
     expect(screen.getByRole('dialog')).toBeInTheDocument()
 
-    resolveHost({ lanHost: '192.168.0.50', port: 4000, publicBaseUrl: null, agentRelayUrl: null, publicUrlWarning: 'container-without-public-url' })
+    resolveHost({ lanHost: '192.168.0.50', port: 4000, publicBaseUrl: null, agentRelayUrl: null, agentUrlWarning: 'container-without-relay-url' })
     const token = await screen.findByDisplayValue('tflw_pat_once')
     const command = await screen.findByDisplayValue(/tapflow agent start --relay/)
-    const note = screen.getByRole('note', { name: /teammates cannot open this relay's public url/i })
+    const note = screen.getByRole('note', { name: /this relay has no address agents can use/i })
     expect(command).toHaveAttribute('aria-describedby', note.id)
     await waitFor(() => expect(token).toHaveFocus())
   })
