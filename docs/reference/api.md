@@ -1197,7 +1197,7 @@ Return the relay address details the dashboard uses to build addresses for teamm
 
 ```json
 {
-  "lanHost": "192.168.0.10",
+  "lanHost": null,
   "port": 4000,
   "publicBaseUrl": "https://tap.example.com",
   "agentRelayUrl": "wss://tap.example.com",
