@@ -61,6 +61,9 @@
     /* semantic                                                   */
     --destructive: 0 100% 47%;       /* error        #ee0000     */
     --destructive-foreground: 0 0% 100%;
+    --warning: 48 100% 96%;          /* notice box   #fffbeb     */
+    --warning-foreground: 31 85% 25%; /* title, avatar-3 fg       */
+    --warning-border: 48 97% 77%;    /*              #fde68a     */
 
     /* border / input                                             */
     --border: 0 0% 92%;              /* hairline     #ebebeb     */
@@ -110,6 +113,9 @@
     --accent-foreground: 0 0% 98%;
     --destructive: 0 70% 62%;        /* shadcn dark — oklch(0.704) 기준 */
     --destructive-foreground: 0 0% 98%;
+    --warning: 31 60% 14%;           /* desaturated like the avatar slots */
+    --warning-foreground: 48 65% 78%; /* avatar-3 fg (dark)       */
+    --warning-border: 31 50% 30%;
     --border: 0 0% 18%;
     --input: 0 0% 18%;
     --ring: 0 0% 98%;

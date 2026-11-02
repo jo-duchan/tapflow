@@ -35,8 +35,8 @@ Use at least 8 characters             line: hint or message, 14px on a 20px line
   with one.
 - **Label** — [label.md](./label.md): 14px medium, `--foreground`, with an optional inline hint in parentheses.
 - **Control** — one of the five under `control`.
-- **Line** (optional) — a hint (`--muted-foreground`) or a message (`--destructive`, or amber for the one warning),
-  14px regular on a 20px line. It wraps rather than truncating.
+- **Line** (optional) — a hint (`--muted-foreground`) or an error (`--destructive`), 14px regular on a 20px line. It
+  wraps rather than truncating. The one warning is a notice box instead of a line (`message` below).
 - **The error slot takes no space while it is empty.** `FieldError` is always in the page, so an error is announced
   into a region that already existed, but while it has no text it is `absolute` and the field is 62px, as if it
   were not there. Do not draw a reserved blank line.
@@ -100,7 +100,7 @@ saved with the form.
 |-------|------------|-----------:|
 | `none` | No line. Either the slot is empty or the field has none | 32 — every field at rest |
 | `error` | `FieldError`: 14px regular `--destructive` (`#f00000` / `#e25a5a`) | 19 — one cannot fire (below) |
-| `warning` | 14px regular, Tailwind amber (`#b45309` / `#fcd34d`), not a token | 1 |
+| `warning` | A notice box: `--warning` fill, `--warning-border`, a `--warning-foreground` title and a `--foreground` body ([DESIGN.md](../DESIGN.md#semantic)) | 1 |
 
 - **`error` replaces a `below` hint**, in the same place and size, so the field keeps its 90px. Only the
   new-password fields have both, and their error says the rule itself (`Password must be at least 8 characters`).
@@ -112,11 +112,12 @@ saved with the form.
   the toast `Image must be 2MB or less`, while the invite page's avatar says `Max 2MB for avatar` under the field.
 - The invite dialog's Role field has a slot, but its Select starts on `QA` and has no empty choice, so it never
   shows an error.
-- **`warning`** is on the token's Expiration field when `No expiration` is picked: `A token without an expiry stays
-  valid until you revoke it. For CI, 90 days or less is recommended.` It is advice, not a refusal, and the form
-  still submits.
-- Error text on `--card` is 4.46:1 in light mode and 4.74:1 in dark (4.28:1 and 4.99:1 on `--background`). Warning
-  is 5.02:1 and 11.82:1 on `--card`. The light error is under 4.5:1; that is left to the designer's color pass, not
+- **`warning`** is on the token's Expiration field when `No expiration` is picked: the title `This token never
+  expires.` over `It stays valid until you revoke it. For CI, 90 days or less is recommended.` The whole box is
+  the field's description. It is advice, not a refusal, and the form still submits. Being two lines in a padded
+  box, it is taller than the 90px a one-line field measures.
+- Error text on `--card` is 4.46:1 in light mode and 4.74:1 in dark (4.28:1 and 4.99:1 on `--background`). The
+  warning's title is 7.93:1 and 10.75:1 on its fill, its body 17.29:1 and 14.04:1. The light error is under 4.5:1; that is left to the designer's color pass, not
   a value to aim for.
 
 Call-site counts are a snapshot (2026-10-21).

@@ -9,7 +9,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- **Docker relay:** `/api/v1/relay/host` explains when teammates cannot reach its URL, and invitation and agent-token dialogs show the warning. Set `TAPFLOW_RELAY_URL` to a teammate-reachable URL; a working tunnel clears it.
+- **Docker relay URLs:** `/api/v1/relay/host` distinguishes a missing teammate-reachable URL from a missing agent `relay.url`. The invite and agent-token dialogs show guidance for the address each link uses; a working tunnel clears only the teammate warning.
+
+### Changed
+
+- **The warning for a token with no expiry is a notice box.** Choosing **No expiration** under Settings → Tokens used to add one line of amber text; it now shows a boxed notice with a title, in a warning colour that follows light and dark mode.
+
+### Security
+
+- **`node-forge` 1.4.2 and `follow-redirects` 1.16.2 in the Docker image.** Both come in through `acme-client`, which the relay uses only to issue LAN HTTPS certificates, and the advisories (GHSA-7wch-p9px-956x, GHSA-mrwp-f3q8-3g9p and ten more) sit in code paths that issuance does not reach: forge's TLS, PKCS#12 and certificate-chain checks, and redirects carrying custom sensitive headers. An npm install already resolved the patched versions; the image is built from the lockfile, which pinned the old ones until this release.
 
 ## [0.32.0] - 2026-10-31
 

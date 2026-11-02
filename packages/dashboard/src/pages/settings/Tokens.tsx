@@ -231,9 +231,10 @@ export function TokenSettings() {
                     )}
                   />
                   {expiry === 'never' && (
-                    <p id={expiryWarningId} className="text-sm text-amber-700 dark:text-amber-300">
-                      A token without an expiry stays valid until you revoke it. For CI, 90 days or less is recommended.
-                    </p>
+                    <div id={expiryWarningId} className="rounded-lg border border-warning-border bg-warning px-4 py-3 text-sm">
+                      <p className="font-medium text-warning-foreground">This token never expires.</p>
+                      <p className="mt-1">It stays valid until you revoke it. For CI, 90 days or less is recommended.</p>
+                    </div>
                   )}
                 </div>
                 {expiry === 'custom' && (

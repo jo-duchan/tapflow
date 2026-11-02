@@ -88,6 +88,8 @@ describe('Tokens — optional expiry', () => {
     const trigger = screen.getByRole('combobox', { name: /expiration/i })
     expect(screen.getByText(WARNING)).toBeInTheDocument()
     expect(trigger).toHaveAccessibleDescription(WARNING)
+    // The whole notice describes the choice, title included, not only its body.
+    expect(trigger).toHaveAccessibleDescription(/never expires/i)
 
     await chooseExpiry(/^90 days$/i)
     expect(screen.queryByText(WARNING)).not.toBeInTheDocument()
