@@ -15,7 +15,6 @@ pre-push:
     - name: no-direct-main-push
       run: |
         branch=$(git symbolic-ref HEAD 2>/dev/null | sed 's|refs/heads/||')
-        if [ "$branch" = "main" ]; then
-          echo "Direct push to main is not allowed. Please open a PR."
-          exit 1
-        fi
+        case $branch in
+          main) echo 'Direct push to main is not allowed. Please open a PR.'; exit 1 ;;
+        esac
