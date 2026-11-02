@@ -159,6 +159,7 @@ describe('Tokens — scope selection', () => {
     const token = await screen.findByDisplayValue('tflw_pat_once')
     const command = await screen.findByDisplayValue(/tapflow agent start --relay/)
     const note = screen.getByRole('note', { name: /this relay has no address agents can use/i })
+    expect(token).toHaveAttribute('aria-describedby', note.id)
     expect(command).toHaveAttribute('aria-describedby', note.id)
     await waitFor(() => expect(status).toHaveTextContent(/This relay has no address agents can use/))
     await waitFor(() => expect(token).toHaveFocus())

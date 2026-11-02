@@ -183,7 +183,7 @@ export function TokenSettings() {
               <div className="flex flex-col gap-3 pt-2">
                 <p id={tokenLabelId} className="text-sm text-muted-foreground">Copy this token now — it won&apos;t be shown again.</p>
                 {/* Fields rather than text: a keyboard user can only select what can take focus. */}
-                <Input ref={tokenRef} readOnly value={newToken} aria-labelledby={tokenLabelId} onFocus={(e) => e.currentTarget.select()} className="font-mono" />
+                <Input ref={tokenRef} readOnly value={newToken} aria-labelledby={tokenLabelId} aria-describedby={agentUrlWarning && agentWsBase ? tokenWarningId : undefined} onFocus={(e) => e.currentTarget.select()} className="font-mono" />
                 {tokenType === 'agent' && agentWsBase && (
                   <>
                     <p id={commandLabelId} className="text-sm text-muted-foreground">Run this on the agent Mac to connect it to this relay:</p>
