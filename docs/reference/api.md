@@ -1199,8 +1199,8 @@ Return the relay address details the dashboard uses to build addresses for teamm
 {
   "lanHost": null,
   "port": 4000,
-  "publicBaseUrl": "https://tap.example.com",
-  "agentRelayUrl": "wss://tap.example.com",
+  "publicBaseUrl": null,
+  "agentRelayUrl": null,
   "publicUrlWarning": "container-without-public-url",
   "agentUrlWarning": "container-without-relay-url"
 }
