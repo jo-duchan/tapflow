@@ -102,5 +102,6 @@ as part of the picker, not as a size of UserAvatar.
 
 ## Figma
 
-Component **UserAvatar** (`104:569`) in the `Design System` page — `content` × 7. The value names were not checked
-against this spec. The two call-site layouts and the picker previews are not in it.
+Component set **UserAvatar** (`1:2667`) on the `Data display` page of tapflow-design-system — `content` × 7, named
+as in this spec, with a `Letter` property. The spec frame also draws the two call-site layouts. The picker previews
+are the ImagePicker component ([field.md](./field.md)).

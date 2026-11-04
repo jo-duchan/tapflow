@@ -246,8 +246,10 @@ and keep their code names** — `default`, not `primary`. To rename one, change 
 `scripts/__tests__/designSpecMatchesCva.test.mjs` checks each spec's property values against the `cva`
 it names, and that every spec below is linked and exists.
 
-Axes match the Figma `Design System` page. A component with a spec lists only the axis names — the values and
-their count live in the spec, which the check holds to code. A component without a spec yet is `pending`.
+Axes match the Figma library
+[tapflow-design-system](https://www.figma.com/design/9RPM7LAjqD4pJQNuEGY16b/tapflow-design-system), where each
+spec has its own `— spec` frame. A component with a spec lists only the axis names — the values and their count
+live in the spec, which the check holds to code. A component without a spec yet is `pending`.
 
 | Component | Source | Axes | Spec |
 |-----------|--------|------|------|
@@ -256,7 +258,7 @@ their count live in the spec, which the check holds to code. A component without
 | Card | `components/ui/card.tsx` | level | [card.md](./design/components/card.md) |
 | Input | `components/ui/input.tsx` | state 3 × content 3 | [input.md](./design/components/input.md) |
 | Select | `components/ui/select.tsx` | size 4 × state 3 × content 2 | [select.md](./design/components/select.md) |
-| Dialog | `components/ui/dialog.tsx` | footer 2 | [dialog.md](./design/components/dialog.md) |
+| Dialog | `components/ui/dialog.tsx` | size 3 × actions 4 | [dialog.md](./design/components/dialog.md) |
 | Separator | `components/ui/separator.tsx` | orientation 2 | [separator.md](./design/components/separator.md) |
 | Badge | `components/ui/badge.tsx` | variant 10 (variant 4 + tone 6) | [badge.md](./design/components/badge.md) |
 | AlertDialog | `components/ui/alert-dialog.tsx` | — | [alert-dialog.md](./design/components/alert-dialog.md) |
@@ -272,7 +274,7 @@ their count live in the spec, which the check holds to code. A component without
 | Breadcrumb | `components/ui/breadcrumb.tsx` | item 3; state 3 (link only) | [breadcrumb.md](./design/components/breadcrumb.md) |
 | Switch | `components/ui/switch.tsx` | checked 2 × state 3 | [switch.md](./design/components/switch.md) |
 | Toast (sonner) | `components/ui/sonner.tsx` (`toast.*()`) | type 5 (4 + loading) | [toast.md](./design/components/toast.md) |
-| Field | assembly pattern — `Label` + control + `FieldHint` / `FieldError` | control 5 × hint 3 × message 3 | [field.md](./design/components/field.md) |
+| Field | assembly pattern — `Label` + control + `FieldHint` / `FieldError` | control 6 × hint 3 × message 3 | [field.md](./design/components/field.md) |
 | UserAvatar | `components/UserAvatar.tsx` | content 7 (image + 6 colors) | [user-avatar.md](./design/components/user-avatar.md) |
 
 Not in this list on purpose: components with no call site, or reachable by no device today (`form.tsx`,

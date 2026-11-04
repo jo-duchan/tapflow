@@ -74,8 +74,8 @@ button stretched to the panel's width. A dialog whose form is replaced by a resu
 token, the reset link) keeps the same shape — the copy field, then one full-width button (`Done`, `Copy & close`),
 12px apart (`gap-3`) where the form's fields are 16px apart (`gap-4`).
 
-`DialogFooter` is used three times. `stacked` and `end` are plain `div`s or the `<form>` itself, which is why the
-Figma set's `footer` axis (with / without) does not describe what ships.
+`DialogFooter` is used three times. `stacked` and `end` are plain `div`s or the `<form>` itself, so `actions` names
+the layout, not the component that draws it.
 
 There is no state axis: the panel itself is not interactive. The buttons, fields and Close follow their own
 specs.
@@ -121,6 +121,9 @@ They share the panel, overlay and motion, and AlertDialog has Dialog's `lg` widt
 
 ## Figma
 
-Component set **Dialog** (`85:454`) in the `Design System` page — `footer` × 2. As above, that axis does not
-match the four `actions` layouts in code; this is one of the items for the Figma sync. It has no `size` axis
-either; adding sm / md / lg (384 / 448 / 512) is another.
+Two components on the `Overlays` page of tapflow-design-system:
+
+- **Dialog** (`22:851`) — `size` × `actions`, 9 variants (`stacked`, `end`, `footer`), with `Title` and
+  `Description` properties and one **Body** slot for the fields, copy field or text.
+- **Dialog / Command bar** (`22:852`) — the deeplink bar, `actions` `inline` above. It is a separate component
+  because it is not a panel.

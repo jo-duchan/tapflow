@@ -101,6 +101,5 @@ tooltip with no delay. Moving the pointer onto the tooltip keeps it open.
 
 ## Figma
 
-A single component **Tooltip** (`83:432`) in the `Design System` page, with no variants, and deliberately no
-`side` axis (see Placement). The `shortcut` content and the inverted `Kbd` are not in it; adding `content` is one of
-the items for the Figma sync.
+A single component **Tooltip** (`1:2418`) on the `Overlays` page of tapflow-design-system, with no variants, and
+deliberately no `side` axis (see Placement). The `shortcut` content and the inverted `Kbd` are not in it yet.

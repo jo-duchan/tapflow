@@ -87,5 +87,5 @@ There is no state axis: the panel is not interactive.
 
 ## Figma
 
-A single component **AlertDialog** (`85:468`) in the `Design System` page, with no variants. The two `action`
-looks above are not in it; adding them as an axis is one of the items for the Figma sync.
+A single component **AlertDialog** (`1:2552`) on the `Overlays` page of tapflow-design-system, with no variants. The
+two `action` looks above are not in it yet.

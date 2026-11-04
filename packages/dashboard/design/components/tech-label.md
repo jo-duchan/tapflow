@@ -80,5 +80,5 @@ the code, not a second style, so draw them as TechLabel. The rest are not techni
 
 ## Figma
 
-Component set **TechLabel** in the `Design System` page — `tone` × 2. The value names were not checked against
-this spec.
+Component set **TechLabel** (`1:2652`) on the `Data display` page of tapflow-design-system — `tone` × 2. The names
+match this spec.

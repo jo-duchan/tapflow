@@ -97,6 +97,6 @@ Call-site counts are a snapshot (2026-10-20).
 
 ## Figma
 
-Component set **TableRow** (`84:487`) in the `Design System` page — `type` × `state`, 6 variants. The value names
-were not checked against this spec. The table container is not in the set; draw the rows on it, as the spec frame
+Component set **TableRow** (`1:2461`) on the `Data display` page of tapflow-design-system — `type` × `state`, 6
+variants. The names match this spec. The table container is not in the set; draw the rows on it, as the spec frame
 does.

@@ -118,6 +118,6 @@ that frame too, with both avatars. Without a photo the trigger is then named onl
 
 ## Figma
 
-Component set **DropdownMenuItem** in the `Design System` page — `state` × 3. The value names were not checked
-against this spec. The content panel, the separator and the destructive item's red text and tint are not in the set; draw them from the
-anatomy and the table above.
+Component set **DropdownMenuItem** (`1:2619`) on the `Overlays` page of tapflow-design-system — `state` × 3. The
+names match this spec. The content panel, the separator and the destructive item's red text and tint are not in the
+set; draw them from the anatomy and the table above.

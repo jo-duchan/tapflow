@@ -99,5 +99,5 @@ draw 16px. The chip around it stays non-interactive.
 
 ## Figma
 
-Component set **Badge** in the `Design System` page — `variant` × 10 (the four variants and six tones in one
-axis). The value names were not checked against this spec.
+Component set **Badge** (`1:1867`) on the `Data display` page of tapflow-design-system — one `variant` axis of 10:
+the four variants and the six tones in one list, as described above. The names match this spec.

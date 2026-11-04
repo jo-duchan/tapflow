@@ -100,6 +100,9 @@ when pressed, and changes color on hover at once, with no transition. Draw it as
 
 ## Figma
 
-Component set **Breadcrumb** (`90:559`) in the `Design System` page — `hover` × 2. That axis covers a link at rest
-and hovered; it does not match `item` × `state` above, and the page item, the separator and the focus look are
-not in it. Matching them is one of the items for the Figma sync.
+Two components on the `Navigation` page of tapflow-design-system:
+
+- **BreadcrumbItem** (`25:694`) — `item` × `state`, 5 variants: `link` at `default`, `hover` and `focus`, `page`,
+  `separator`, with a `Text` property. The focus look approximates the browser's default outline.
+- **Breadcrumb** (`25:695`) — the trail, with one **Items** slot that accepts only BreadcrumbItem: links and
+  separators alternating, ending with one page. The spec frame draws the three QA-session trails.

@@ -95,5 +95,5 @@ QA session → side panel → Comments. The panel is 320px wide with 4px on each
 
 ## Figma
 
-Component set **Textarea** (`64:153`) in the `Design System` page — `state` × `content`, 6 variants. The value
-names were not checked against this spec. The composer is not in the set.
+Component set **Textarea** (`1:1967`) on the `Forms` page of tapflow-design-system — `state` × `content`, 6
+variants. The names match this spec. The composer is not in the set.

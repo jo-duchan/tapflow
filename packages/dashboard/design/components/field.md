@@ -54,6 +54,10 @@ Use at least 8 characters             line: hint or message, 14px on a 20px line
 | `slider` | Slider, with its current value at the right end of the label row (below) | 2 |
 | `image` | Image picker: a preview with a 24px round edit button on its corner (below) | 3 |
 | `file` | File drop zone, 96px (below) | 1 |
+| `textarea` | [Textarea](./textarea.md) | 0 |
+
+This table is the list of controls a field may hold, not only the ones in use: `textarea` has no call site yet,
+and a field takes no other control without a row here first.
 
 **Slider** (Flow run videos, Settings). The label row puts the label on the left and the value on the right
 (`3 days`, `20 GB`), 14px regular, figures at fixed width, on one baseline. The gaps are 12px, not 8px
@@ -182,7 +186,8 @@ underlined.
 
 ## Figma
 
-Component set **Field** (`75:335`) in the `Design System` page — `control` × `hint` × `message`, 12 variants
-(3 × 2 × 2). It was made before `FieldHint` existed, so its `hint` axis likely means the inline hint only. The value
-names were not checked against this spec, and it has no slider, image picker, file drop zone or warning. Matching
-it is one of the items for the Figma sync.
+Component set **Field** (`20:650`) on the `Forms` page of tapflow-design-system — `hint` × `message`, 9 variants,
+with one **Control** slot. The slot accepts only the controls in the `control` table above, one at a time, so
+`control` is not an axis there. Slider (`19:577`), ImagePicker (`19:613`) and FileDrop (`19:622`) are their own
+component sets on the same page. Text properties carry the label, hints, error and warning, and `Value` shows a
+slider's value.

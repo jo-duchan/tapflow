@@ -78,5 +78,5 @@ The Flow Runs list sits 36px high beside 32px controls (`h-8`); the heights are 
 
 ## Figma
 
-Component set **TabsTrigger** in the `Design System` page — `state` × 4. The value names were not checked against
-this spec. The list is not in the set; draw it from the anatomy above.
+Component set **TabsTrigger** (`1:2599`) on the `Navigation` page of tapflow-design-system — `state` × 4. The names
+match this spec. The list is not in the set; draw it from the anatomy above.
