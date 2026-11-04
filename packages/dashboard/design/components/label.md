@@ -70,6 +70,5 @@ renders. Do not draw a disabled Label; a disabled field is shown by its control 
 
 ## Figma
 
-Component set **Label** (`103:559`) in the `Design System` page — `hint` × `state`. The `state` axis there has
-a disabled value that code never renders (see above), so its disabled variants can be removed. The Figma
-value names for `hint` were not checked against this spec.
+Component set **Label** (`1:2635`) on the `Forms` page of tapflow-design-system — `hint` × 2, named as in this spec.
+There is no disabled variant.

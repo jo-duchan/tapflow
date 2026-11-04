@@ -121,5 +121,5 @@ There is no focus ring inside the list: the highlighted fill is the focus indica
 
 ## Figma
 
-Component set **Select** (`64:154`) in the `Design System` page — `size` × `state` × `content`, 24 variants.
-The value names were not checked against this spec. The content list and items are not in that set.
+Component set **Select** (`1:1993`) on the `Forms` page of tapflow-design-system — `size` × `state` × `content`, 24
+variants. The names match this spec. The content list and items are not in that set.

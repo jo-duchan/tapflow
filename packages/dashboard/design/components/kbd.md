@@ -72,7 +72,7 @@ Stop recording, by state), and appear on Android too; two are the iOS viewer's.
 
 ## Figma
 
-A single component **Kbd** (`104:546`) in the `Design System` page, with no variants: the `tooltip` look only, on
-the `Kbd/Background` token (`--background` at 20%). It was not checked whether that token is 10% in dark mode, as
-the code is. `default` is deliberately not drawn, since nothing uses it. Kbd is not yet inside the Tooltip
-component, whose `shortcut` content is one of the items for the Figma sync (see [tooltip.md](./tooltip.md)).
+A single component **Kbd** (`1:2662`) on the `Data display` page of tapflow-design-system, with no variants: the
+`tooltip` look only, on the `Kbd/Background` token (`--background` at 20% in light mode, 10% in dark). `default` is
+deliberately not drawn, since nothing uses it. Kbd is not yet inside the Tooltip component (see
+[tooltip.md](./tooltip.md)).
