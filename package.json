@@ -45,11 +45,11 @@
     "@manypkg/get-packages": "1.1.3",
     "@vitest/coverage-v8": "^4.1.12",
     "concurrently": "^9.2.5",
-    "eslint": "^10.13.0",
-    "globals": "^17.13.0",
+    "eslint": "^10.14.0",
+    "globals": "^17.14.0",
     "lefthook": "^2.2.2",
     "typescript": "^5.0.0",
-    "typescript-eslint": "^8.72.0",
+    "typescript-eslint": "^8.72.1",
     "vitest": "^4.1.12"
   },
   "pnpm": {
