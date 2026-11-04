@@ -55,10 +55,10 @@ lifespan and four concurrent simulators.
 | Agent host | O (energy) | M (embodied) | **SCI** | M share |
 |---|---:|---:|---:|---:|
 | Mac mini M4 | 2.30 g | 0.198 g | 2.50 gCO₂e / session-hour | 7.9% |
-| MacBook Pro 14" M2 Pro | 2.39 g | 1.404 g | **3.79 gCO₂e / session-hour** (certified) | 37.0% |
+| MacBook Pro 14" M2 Pro | 2.39 g | 1.404 g | **3.79 gCO₂e / session-hour** (self-certified) | 37.0% |
 
-Only the MacBook Pro figure is certified, because the active increment was measured on
-that machine. The Mac mini figure is in the disclosure as a model, not as a certified
+Only the MacBook Pro figure is self-certified, because the active increment was measured on
+that machine. The Mac mini figure is in the disclosure as a model, not as a self-certified
 score: it would carry the M2 Pro's increment over to a different chip.
 
 For scale, one QA session-hour is about a third of charging a phone once (~6.8 g).
@@ -81,8 +81,8 @@ conformity (item 8). Docs and README copy keep both: GSF's own wording is "verif
 the Green Software Foundation", and the Korean docs translate it as 확인, not 검증,
 because 검증 reads as validation of the figure.
 
-The certificate expires on 2027-11-03, and the score has not been re-measured since
-v0.18.0. Renewing means re-measuring, not re-submitting the same figure.
+The certificate is valid until 2027-11-03. The score was measured once, on v0.18.0
+(2026-08-03), and has not been re-measured since.
 
 It is worth having ready for three situations: an enterprise buyer asking for an ESG
 figure, a Blue Angel DE-UZ 215 application (which needs a legal entity we do not have),
