@@ -22,6 +22,7 @@
     <a href="https://github.com/jo-duchan/tapflow/releases"><img src="https://img.shields.io/github/v/release/jo-duchan/tapflow?include_prereleases&sort=semver" alt="Latest release" /></a>
     <a href="https://github.com/jo-duchan/tapflow/commits/main"><img src="https://img.shields.io/github/last-commit/jo-duchan/tapflow" alt="Last commit" /></a>
     <a href="https://www.bestpractices.dev/projects/15158"><img src="https://www.bestpractices.dev/projects/15158/badge" alt="OpenSSF Best Practices" /></a>
+    <a href="https://badges.greensoftware.foundation/awards/sci/gsf-sci-2026-00003"><img src="https://img.shields.io/badge/GSF%20SCI-self--certified-2e7d6b" alt="GSF SCI self-certified (GSF-SCI-2026-00003)" /></a>
     <img src="https://img.shields.io/badge/platform-macOS%20agent-lightgrey" alt="macOS Agent" />
   </p>
 
