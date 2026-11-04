@@ -1,5 +1,5 @@
 import type { TapflowConfig } from './config.js'
-import { buildInviteBaseUrl, forTeammates, resolvePublicBaseUrl, resolvePublicBaseUrls, type TunnelRuntime } from './publicUrl.js'
+import { buildInviteBaseUrl, forTeammates, resolveAgentRelayUrl, resolvePublicBaseUrl, resolvePublicBaseUrls, type TunnelRuntime } from './publicUrl.js'
 
 type ProxyCfg = Pick<TapflowConfig, 'tunnel' | 'relay' | 'local'>
 
@@ -45,10 +45,17 @@ export function proxyWithoutPublicUrlWarning(cfg: ProxyCfg, tunnel?: TunnelRunti
 // silently: invitation mail opens the recipient's own machine. The Docker docs ask for TAPFLOW_RELAY_URL;
 // this is the same request at the moment it was skipped. Outside a container a missing public URL is the
 // normal LAN setup, so it says nothing there. `inContainer` is a parameter so the decision is testable.
-export function containerWithoutPublicUrlWarning(cfg: ProxyCfg, inContainer: boolean): string | null {
-  if (!inContainer || forTeammates(resolvePublicBaseUrl(cfg)) !== null) return null
+export function containerWithoutPublicUrlWarning(cfg: ProxyCfg, inContainer: boolean, tunnel?: TunnelRuntime): string | null {
+  if (!inContainer || forTeammates(resolvePublicBaseUrl(cfg, tunnel)) !== null) return null
   return (
-    `Running in a container with no public URL a teammate can open, so invitation links point at ${buildInviteBaseUrl(cfg)}. ` +
+    `Running in a container with no public URL a teammate can open, so invitation links point at ${buildInviteBaseUrl(cfg, tunnel)}. ` +
     'Set TAPFLOW_RELAY_URL to the address people type, e.g. http://<this-box-ip>:4000.'
   )
+}
+
+// Agents connect directly to relay.url. A public tunnel can make browser invitation links work, but it
+// cannot replace the address passed to an agent, so this warning is deliberately independent of tunnel state.
+export function containerWithoutAgentUrlWarning(cfg: ProxyCfg, inContainer: boolean): string | null {
+  if (!inContainer || forTeammates(resolveAgentRelayUrl(cfg)) !== null) return null
+  return 'Running in a container without a relay URL agents can use. Set TAPFLOW_RELAY_URL to an address reachable from the agent Mac.'
 }

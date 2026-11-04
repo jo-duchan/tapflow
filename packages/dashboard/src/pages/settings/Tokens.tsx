@@ -25,7 +25,9 @@ import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from '@/components/ui/table'
 import { Plus, Trash2 } from 'lucide-react'
-import { loadTeammateBases } from '@/lib/publicLink'
+import { loadTeammateBases, type AgentUrlWarningReason } from '@/lib/publicLink'
+import { AgentUrlWarning } from '@/components/AgentUrlWarning'
+import { agentUrlWarningAnnouncement } from '@/components/relayUrlWarningCopy'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { getTokens, queryKeys } from '@/lib/queries'
 import { ListStateRow } from '@/components/ListStateRow'
@@ -73,9 +75,11 @@ export function TokenSettings() {
   const [newToken, setNewToken] = useState('')
   const [tokenType, setTokenType] = useState<TokenType>('api')
   const [agentWsBase, setAgentWsBase] = useState('')
+  const [agentUrlWarning, setAgentUrlWarning] = useState<AgentUrlWarningReason>()
   const [revokeTarget, setRevokeTarget] = useState<number | null>(null)
   const tokenLabelId = useId()
   const commandLabelId = useId()
+  const tokenWarningId = useId()
   const tokenRef = useRef<HTMLInputElement>(null)
   // Toasts render outside the dialog, which an open dialog hides from assistive technology.
   const [dialogStatus, setDialogStatus] = useState('')
@@ -96,6 +100,7 @@ export function TokenSettings() {
 
   async function onCreate(data: FormData) {
     setDialogStatus('')
+    setAgentUrlWarning(undefined)
     try {
       const days = expiresInDays(data)
       const res = await fetch('/api/v1/tokens', {
@@ -117,8 +122,15 @@ export function TokenSettings() {
       }
       const json = await res.json() as { token: string }
       // Looked up only for an agent token: the relay address matters only to the command shown for one.
-      if (tokenType === 'agent') setAgentWsBase((await loadTeammateBases()).agentWsBase)
+      let status = ''
+      if (tokenType === 'agent') {
+        const bases = await loadTeammateBases()
+        setAgentWsBase(bases.agentWsBase)
+        setAgentUrlWarning(bases.agentUrlWarning)
+        if (bases.agentUrlWarning) status = agentUrlWarningAnnouncement
+      }
       toast.success('Token created')
+      setDialogStatus(status)
       setNewToken(json.token)
       load()
     } catch {
@@ -128,10 +140,15 @@ export function TokenSettings() {
   }
 
   function handleDialogClose(o: boolean) {
+    if (!o && isSubmitting) {
+      const message = 'Token creation is still in progress. Wait for it to finish before closing this dialog.'
+      setDialogStatus(message)
+      return
+    }
     setOpen(o)
     // Cleared on the way in, not on the way out: a closing dialog stays on screen through its exit animation,
     // and clearing it then showed the empty form fading out in place of what was just issued.
-    if (o) { setNewToken(''); setTokenType('api'); setAgentWsBase(''); setDialogStatus(''); reset() }
+    if (o) { setNewToken(''); setTokenType('api'); setAgentWsBase(''); setAgentUrlWarning(undefined); setDialogStatus(''); reset() }
   }
 
   async function handleRevoke(id: number): Promise<boolean> {
@@ -167,11 +184,12 @@ export function TokenSettings() {
               <div className="flex flex-col gap-3 pt-2">
                 <p id={tokenLabelId} className="text-sm text-muted-foreground">Copy this token now — it won&apos;t be shown again.</p>
                 {/* Fields rather than text: a keyboard user can only select what can take focus. */}
-                <Input ref={tokenRef} readOnly value={newToken} aria-labelledby={tokenLabelId} onFocus={(e) => e.currentTarget.select()} className="font-mono" />
+                <Input ref={tokenRef} readOnly value={newToken} aria-labelledby={tokenLabelId} aria-describedby={agentUrlWarning && agentWsBase ? tokenWarningId : undefined} onFocus={(e) => e.currentTarget.select()} className="font-mono" />
                 {tokenType === 'agent' && agentWsBase && (
                   <>
                     <p id={commandLabelId} className="text-sm text-muted-foreground">Run this on the agent Mac to connect it to this relay:</p>
-                    <Input readOnly value={`tapflow agent start --relay ${agentWsBase} --token ${newToken}`} aria-labelledby={commandLabelId} onFocus={(e) => e.currentTarget.select()} className="font-mono" />
+                    <Input readOnly value={`tapflow agent start --relay ${agentWsBase} --token ${newToken}`} aria-labelledby={commandLabelId} aria-describedby={agentUrlWarning ? tokenWarningId : undefined} onFocus={(e) => e.currentTarget.select()} className="font-mono" />
+                    {agentUrlWarning && <AgentUrlWarning id={tokenWarningId} />}
                   </>
                 )}
                 <Button onClick={() => {

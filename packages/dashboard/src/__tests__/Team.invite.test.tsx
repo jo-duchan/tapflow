@@ -1,8 +1,9 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { render, screen, waitFor } from '@testing-library/react'
+import { act, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { toast } from 'sonner'
 import { TeamSettings } from '@/src/pages/settings/Team'
+import { publicUrlWarningAnnouncement, publicUrlWarningBody, publicUrlWarningTitle } from '@/components/relayUrlWarningCopy'
 import { withQuery } from './withQuery'
 import { resetTeammateBasesForTests } from '@/lib/publicLink'
 
@@ -82,6 +83,122 @@ describe('Team — the invite link a teammate gets', () => {
     expect(screen.queryByDisplayValue(/localhost:3000/)).not.toBeInTheDocument()
     // The form and its focused button are gone; focus lands on the link, where it can be selected by hand.
     await waitFor(() => expect(field).toHaveFocus())
+  })
+
+  it('shows the warning in the invite form without taking focus from the email field', async () => {
+    stubFetch({ token: 't', emailSent: false, inviteUrl: null }, { ...noHost, publicUrlWarning: 'container-without-public-url' })
+    render(withQuery(<TeamSettings />))
+    await userEvent.click(await screen.findByRole('button', { name: /invite member/i }))
+
+    const email = screen.getByLabelText(/email/i)
+    const note = await screen.findByRole('note', { name: /this relay has no address teammates can open/i })
+    expect(email).toHaveFocus()
+    expect(screen.getByLabelText(/email/i)).toBeInTheDocument()
+    const submit = screen.getByRole('button', { name: /generate invite link/i })
+    expect(note.compareDocumentPosition(submit) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    expect(note).toHaveAccessibleName(publicUrlWarningTitle)
+    expect(note).toHaveTextContent(`${publicUrlWarningBody.beforeRelayUrl}${publicUrlWarningBody.relayUrl}${publicUrlWarningBody.afterRelayUrl}`)
+    expect(screen.getByRole('status')).toHaveTextContent(publicUrlWarningAnnouncement)
+  })
+
+  it('loads the warning even when the relay supplied the invite URL, without moving focus when it arrives', async () => {
+    let resolveHost: (value: unknown) => void = () => {}
+    const hostResponse = new Promise<unknown>((resolve) => { resolveHost = resolve })
+    const fetchMock = vi.fn((url: string, init?: RequestInit) => {
+      if (url.includes('/api/v1/relay/host')) return hostResponse.then((body) => ({ ok: true, json: () => Promise.resolve(body) }))
+      if (url.includes('/api/v1/team/invite') && init?.method === 'POST') {
+        return Promise.resolve({ ok: true, status: 201, json: () => Promise.resolve({ token: 't', emailSent: false, inviteUrl: 'http://localhost:4000/invite?token=t' }) })
+      }
+      if (url.includes('/api/v1/team/members')) return Promise.resolve({ ok: true, json: () => Promise.resolve([member]) })
+      return Promise.resolve({ ok: true, json: () => Promise.resolve([]) })
+    })
+    vi.stubGlobal('fetch', fetchMock)
+
+    render(withQuery(<TeamSettings />))
+    await userEvent.click(await screen.findByRole('button', { name: /invite member/i }))
+    const status = screen.getByRole('status')
+    expect(status).toBeEmptyDOMElement()
+    await userEvent.type(screen.getByLabelText(/email/i), 'qa@test.local')
+    await userEvent.click(screen.getByRole('button', { name: /generate invite link/i }))
+
+    const field = await screen.findByDisplayValue('http://localhost:4000/invite?token=t')
+    await waitFor(() => expect(field).toHaveFocus())
+    expect(fetchMock.mock.calls.some(([url]) => String(url).includes('/api/v1/relay/host'))).toBe(true)
+
+    resolveHost({ ...noHost, publicUrlWarning: 'container-without-public-url' })
+    const note = await screen.findByRole('note', { name: /this relay has no address teammates can open/i })
+    expect(field).toHaveAttribute('aria-describedby', note.id)
+    expect(note).toHaveAccessibleName(publicUrlWarningTitle)
+    expect(note).toHaveTextContent(`${publicUrlWarningBody.beforeRelayUrl}${publicUrlWarningBody.relayUrl}${publicUrlWarningBody.afterRelayUrl}`)
+    expect(note.querySelector('a')).toHaveAttribute('href', 'https://www.tapflow.dev/operate/docker')
+    await waitFor(() => expect(status).toHaveTextContent(publicUrlWarningAnnouncement))
+    expect(field).toHaveFocus()
+  })
+
+  it('keeps the dialog open while the invite request is in flight', async () => {
+    let resolveInvite: (value: unknown) => void = () => {}
+    const inviteResponse = new Promise<unknown>((resolve) => { resolveInvite = resolve })
+    const writeText = vi.fn(async (_text: string) => {})
+    stubClipboard(writeText)
+    const fetchMock = vi.fn((url: string, init?: RequestInit) => {
+      if (url.includes('/api/v1/relay/host')) return Promise.resolve({ ok: true, json: () => Promise.resolve(noHost) })
+      if (url.includes('/api/v1/team/invite') && init?.method === 'POST') {
+        return inviteResponse.then((body) => ({ ok: true, status: 201, json: () => Promise.resolve(body) }))
+      }
+      if (url.includes('/api/v1/team/members')) return Promise.resolve({ ok: true, json: () => Promise.resolve([member]) })
+      return Promise.resolve({ ok: true, json: () => Promise.resolve([]) })
+    })
+    vi.stubGlobal('fetch', fetchMock)
+    render(withQuery(<TeamSettings />))
+    await userEvent.click(await screen.findByRole('button', { name: /invite member/i }))
+    await userEvent.type(screen.getByLabelText(/email/i), 'first@test.local')
+    await userEvent.click(screen.getByRole('button', { name: /generate invite link/i }))
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith('/api/v1/team/invite', expect.objectContaining({ method: 'POST' })))
+    const post = fetchMock.mock.calls.find(([url, init]) => url.includes('/api/v1/team/invite') && init?.method === 'POST')
+    expect(post?.[1]).not.toHaveProperty('signal')
+
+    await userEvent.click(screen.getByRole('button', { name: /close/i }))
+    expect(screen.getByRole('dialog')).toBeInTheDocument()
+    expect(screen.getByRole('status')).toHaveTextContent(/still in progress/i)
+
+    await act(async () => {
+      resolveInvite({ token: 'first', emailSent: false, inviteUrl: 'https://relay.example.com/invite?token=first' })
+      await new Promise((resolve) => setTimeout(resolve, 0))
+    })
+    expect(await screen.findByDisplayValue('https://relay.example.com/invite?token=first')).toBeInTheDocument()
+    expect(writeText).toHaveBeenCalledWith('https://relay.example.com/invite?token=first')
+    expect(screen.getByRole('dialog')).toBeInTheDocument()
+  })
+
+  it('does not copy or toast a late invite response after the settings page unmounts', async () => {
+    let resolveInvite: (value: unknown) => void = () => {}
+    const inviteResponse = new Promise<unknown>((resolve) => { resolveInvite = resolve })
+    const writeText = vi.fn(async (_text: string) => {})
+    stubClipboard(writeText)
+    const fetchMock = vi.fn((url: string, init?: RequestInit) => {
+      if (url.includes('/api/v1/relay/host')) return Promise.resolve({ ok: true, json: () => Promise.resolve(noHost) })
+      if (url.includes('/api/v1/team/invite') && init?.method === 'POST') {
+        return inviteResponse.then((body) => ({ ok: true, status: 201, json: () => Promise.resolve(body) }))
+      }
+      if (url.includes('/api/v1/team/members')) return Promise.resolve({ ok: true, json: () => Promise.resolve([member]) })
+      return Promise.resolve({ ok: true, json: () => Promise.resolve([]) })
+    })
+    vi.stubGlobal('fetch', fetchMock)
+    const { unmount } = render(withQuery(<TeamSettings />))
+    await userEvent.click(await screen.findByRole('button', { name: /invite member/i }))
+    await userEvent.type(screen.getByLabelText(/email/i), 'late@test.local')
+    await userEvent.click(screen.getByRole('button', { name: /generate invite link/i }))
+    await waitFor(() => expect(fetchMock.mock.calls.some(([, init]) => init?.method === 'POST')).toBe(true))
+
+    unmount()
+    await act(async () => {
+      resolveInvite({ token: 'late', emailSent: false, inviteUrl: 'https://relay.example.com/invite?token=late' })
+      await new Promise((resolve) => setTimeout(resolve, 0))
+    })
+    expect(writeText).not.toHaveBeenCalled()
+    expect(toast.success).not.toHaveBeenCalled()
+    expect(toast.warning).not.toHaveBeenCalled()
+    expect(toast.error).not.toHaveBeenCalled()
   })
 
   it('builds the link from the teammate base when the relay offers none', async () => {

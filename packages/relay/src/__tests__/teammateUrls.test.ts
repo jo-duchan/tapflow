@@ -6,7 +6,7 @@ import {
   buildInviteBaseUrl,
   type TunnelRuntime,
 } from '../lib/publicUrl'
-import { buildCorsOrigins, containerWithoutPublicUrlWarning, proxyWithoutPublicUrlWarning } from '../lib/proxyConfig'
+import { buildCorsOrigins, containerWithoutAgentUrlWarning, containerWithoutPublicUrlWarning, proxyWithoutPublicUrlWarning } from '../lib/proxyConfig'
 import type { TapflowConfig } from '../lib/config'
 
 // Kept apart from publicUrl.test.ts on purpose: an open external PR (#777) appends to that file, and
@@ -133,8 +133,39 @@ describe('containerWithoutPublicUrlWarning — the Docker mistake is said out lo
     expect(containerWithoutPublicUrlWarning(cfg({ tunnel: rathole('https://vps.example.com') }), true)).toBeNull()
   })
 
+  it('uses the runtime tunnel URL when the relay is started with tunnel state', () => {
+    expect(containerWithoutPublicUrlWarning(cfg({ tunnel: tailscale() }), true, { publicUrl: 'https://mac.tailnet.ts.net:4000' })).toBeNull()
+    expect(containerWithoutPublicUrlWarning(cfg({ tunnel: rathole('https://stale.example.com') }), true, { publicUrl: null }))
+      .toContain('http://localhost:4000')
+  })
+
+  it('warns when the selected runtime tunnel URL is unusable even if relay.url is reachable', () => {
+    const configWithFallback = cfg({ tunnel: rathole('http://127.0.0.1:4000'), relayUrl: 'https://relay.example.com' })
+    expect(containerWithoutPublicUrlWarning(configWithFallback, true, { publicUrl: 'http://127.0.0.1:4000' }))
+      .toContain('127.0.0.1:4000')
+  })
+
   it('stays quiet outside a container, where a missing public URL is the normal LAN setup', () => {
     expect(containerWithoutPublicUrlWarning(cfg(), false)).toBeNull()
+  })
+})
+
+describe('containerWithoutAgentUrlWarning — a browser tunnel is not an agent address', () => {
+  it('warns in a container with no usable relay.url, even when a tunnel is configured', () => {
+    expect(containerWithoutAgentUrlWarning(cfg({ tunnel: rathole('https://vps.example.com') }), true))
+      .toContain('TAPFLOW_RELAY_URL')
+  })
+
+  it.each(['ws://localhost:4000', 'http://0.0.0.0:4000', 'not a url'])('%s cannot be used as an agent address', (relayUrl) => {
+    expect(containerWithoutAgentUrlWarning(cfg({ relayUrl }), true)).toContain('TAPFLOW_RELAY_URL')
+  })
+
+  it('stays quiet when relay.url is usable by an agent', () => {
+    expect(containerWithoutAgentUrlWarning(cfg({ relayUrl: 'http://192.168.0.9:4000' }), true)).toBeNull()
+  })
+
+  it('stays quiet outside a container', () => {
+    expect(containerWithoutAgentUrlWarning(cfg(), false)).toBeNull()
   })
 })
 

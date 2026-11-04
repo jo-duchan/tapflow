@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Docker relay URLs:** `/api/v1/relay/host` distinguishes a missing teammate-reachable URL from a missing agent `relay.url`. The invite and agent-token dialogs show guidance for the address each link uses; a working tunnel clears only the teammate warning.
+
 ### Changed
 
 - **The warning for a token with no expiry is a notice box.** Choosing **No expiration** under Settings → Tokens used to add one line of amber text; it now shows a boxed notice with a title, in a warning colour that follows light and dark mode.

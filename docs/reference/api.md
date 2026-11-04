@@ -1197,14 +1197,17 @@ Return the relay address details the dashboard uses to build addresses for teamm
 
 ```json
 {
-  "lanHost": "192.168.0.10",
+  "lanHost": null,
   "port": 4000,
-  "publicBaseUrl": "https://tap.example.com",
-  "agentRelayUrl": "wss://tap.example.com"
+  "publicBaseUrl": null,
+  "agentRelayUrl": null,
+  "publicUrlWarning": "container-without-public-url",
+  "agentUrlWarning": "container-without-relay-url"
 }
 ```
 
 A value that cannot be determined is `null`. `lanHost` is always `null` when the relay runs in a container.
+`publicUrlWarning` is included only when the relay runs in a container without a public URL for teammate links. `agentUrlWarning` is included only when it runs in a container without `TAPFLOW_RELAY_URL` for agents. Both fields are omitted otherwise.
 
 
 ## Logs
