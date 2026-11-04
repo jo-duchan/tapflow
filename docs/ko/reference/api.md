@@ -1199,14 +1199,18 @@ Query:
 
 ```json
 {
-  "lanHost": "192.168.0.10",
+  "lanHost": null,
   "port": 4000,
-  "publicBaseUrl": "https://tap.example.com",
-  "agentRelayUrl": "wss://tap.example.com"
+  "publicBaseUrl": null,
+  "agentRelayUrl": null,
+  "publicUrlWarning": "container-without-public-url",
+  "agentUrlWarning": "container-without-relay-url"
 }
 ```
 
 값을 정할 수 없는 항목은 `null`입니다. 컨테이너 안에서 실행하면 `lanHost`는 항상 `null`입니다.
+
+`publicUrlWarning`은 릴레이가 컨테이너 안에서 실행되는데 팀원 링크에 쓸 공개 URL이 없을 때만 들어갑니다. `agentUrlWarning`은 컨테이너 안에서 실행되는데 에이전트용 `TAPFLOW_RELAY_URL`이 없을 때만 들어갑니다. 그 밖의 경우에는 두 필드 모두 응답에 없습니다.
 
 
 ## 로그 (Logs)
