@@ -2,7 +2,7 @@
 type: reference
 topics: [sustainability, carbon, measurement, methodology]
 status: living
-updated: 2026-08-03
+updated: 2026-11-04
 related: [streaming-latency-log, agent-keep-awake, workshop-lab-fork-observations, relay-resource-rejection]
 ---
 
@@ -45,31 +45,49 @@ who knows the spec.
 
 ### The SCI score itself
 
-Computed once, recorded here, and deliberately **not** published as a page. Functional
+Computed once and self-certified with the Green Software Foundation as
+[GSF-SCI-2026-00003](https://badges.greensoftware.foundation/awards/sci/gsf-sci-2026-00003)
+(issued 2026-11-03, valid until 2027-11-03, measured on v0.18.0). Functional
 unit `R` = one QA session-hour. `E` = (idle + measured increment × 30% active) × 1 h,
 `I` = 417.3 gCO₂e/kWh, `M = TE × (1/35,040 h) × (1/4 slots)` using Apple's four-year
 lifespan and four concurrent simulators.
 
 | Agent host | O (energy) | M (embodied) | **SCI** | M share |
 |---|---:|---:|---:|---:|
-| Mac mini M4 | 2.30 g | 0.198 g | **2.50 gCO₂e / session-hour** | 7.9% |
-| MacBook Pro 14" M2 Pro | 2.39 g | 1.404 g | 3.79 gCO₂e / session-hour | 37.0% |
+| Mac mini M4 | 2.30 g | 0.198 g | 2.50 gCO₂e / session-hour | 7.9% |
+| MacBook Pro 14" M2 Pro | 2.39 g | 1.404 g | **3.79 gCO₂e / session-hour** (certified) | 37.0% |
+
+Only the MacBook Pro figure is certified, because the active increment was measured on
+that machine. The Mac mini figure is in the disclosure as a model, not as a certified
+score: it would carry the M2 Pro's increment over to a different chip.
 
 For scale, one QA session-hour is about a third of charging a phone once (~6.8 g).
 
-**Why it stays in this file rather than in the docs.** The score is a faithful SCI
-figure and it measures the wrong thing for our purposes. It accounts for what tapflow
-consumes and reserves — energy plus its share of the Mac's embodied carbon — while not
-buying four test devices registers as exactly zero. Publishing it as the headline would
-foreground the weakest reading of our own case, and there is nothing to gain in
-exchange: SCI is self-declared, with no registry, no badge, and no reviewer. The one
-public venue, the GSF `case-studies/` directory, has had no merged contribution since
-2024.
+**Why the score is now in the docs.** This file used to keep it out. The score is a
+faithful SCI figure that measures the wrong thing for our case: it accounts for what
+tapflow consumes and reserves, while not buying four test devices registers as exactly
+zero. And SCI was self-declared, with no registry, no badge and no reviewer, so there
+was nothing to gain in exchange for foregrounding it.
+
+The certificate changed the second half. It is a public registry entry, and GSF checked
+the disclosure for completeness, so the Sustainability page now states the score in its
+intro. The first half still holds, which is how the page states it: as tapflow's own
+footprint, with the comparison kept to its own section, as
+[Two frames, kept apart](#two-frames-kept-apart) requires.
+
+What GSF checked is completeness, not the calculation. The signed attestation says so
+(item 7), and also commits us to the "self-certified" qualifier on every claim of
+conformity (item 8). Docs and README copy keep both: GSF's own wording is "verified by
+the Green Software Foundation", and the Korean docs translate it as 확인, not 검증,
+because 검증 reads as validation of the figure.
+
+The certificate expires on 2027-11-03, and the score has not been re-measured since
+v0.18.0. Renewing means re-measuring, not re-submitting the same figure.
 
 It is worth having ready for three situations: an enterprise buyer asking for an ESG
 figure, a Blue Angel DE-UZ 215 application (which needs a legal entity we do not have),
 or a conversation with the GSF community. Recomputing from scratch each time would be
-wasteful, and the decision not to lead with it should not have to be re-argued.
+wasteful, and the reasoning above should not have to be re-argued.
 
 ---
 

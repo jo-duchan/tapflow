@@ -9,6 +9,8 @@ tapflow makes better use of the Macs a team already owns and lowers the need for
 
 A significant share of a phone or laptop's carbon is emitted during manufacturing rather than during use, as Apple's own [product environmental reports](https://www.apple.com/environment/reports/) show. This is embodied carbon, and [Software Carbon Intensity (SCI)](https://sci.greensoftware.foundation/), now an international standard, weighs it alongside energy consumption. Keeping existing hardware in service longer and buying fewer new devices can therefore help reduce the burden from manufacturing.
 
+tapflow is self-certified compliant with ISO/IEC 21031:2024 (SCI), verified by the Green Software Foundation ([certificate GSF-SCI-2026-00003](https://badges.greensoftware.foundation/awards/sci/gsf-sci-2026-00003)). The self-certified score is 3.79 gCO₂e per QA session-hour (one teammate using one simulator for an hour), measured on v0.18.0.
+
 ## Using Macs you already have
 
 tapflow turns Macs that a team already owns, but does not use continuously, into shared QA infrastructure. Instead of building out a device farm or a dedicated test server, you make better use of hardware you already own.

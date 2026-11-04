@@ -9,6 +9,8 @@ tapflow는 팀이 이미 보유한 Mac을 활용해 기존 하드웨어의 활�
 
 스마트폰과 노트북은 탄소 배출의 상당 부분이 사용 단계보다 제조 단계에서 발생합니다. Apple이 공개하는 [제품별 환경 보고서](https://www.apple.com/environment/reports/)에서도 이 비중을 확인할 수 있습니다. 이를 내재탄소(Embodied Carbon)라고 하며 국제 표준으로 채택된 [Software Carbon Intensity(SCI)](https://sci.greensoftware.foundation/)도 전력 사용량뿐 아니라 내재탄소를 함께 고려합니다. 따라서 기존 장비의 사용 기간을 늘리고 추가 장비 구매를 줄이는 것은 제조 단계에서 발생하는 탄소 부담을 줄이는 데 도움이 될 수 있습니다.
 
+tapflow는 ISO/IEC 21031:2024(SCI) 기준으로 자체 인증했고 Green Software Foundation의 확인을 거쳤습니다([인증서 GSF-SCI-2026-00003](https://badges.greensoftware.foundation/awards/sci/gsf-sci-2026-00003)). 자체 인증한 점수는 QA 세션 1시간당 3.79 gCO₂e(팀원 한 명이 시뮬레이터 하나를 1시간 사용 기준)이며 v0.18.0에서 측정한 값입니다.
+
 ## 이미 보유한 Mac 활용
 
 tapflow는 팀에 이미 있지만 상시 사용하지 않는 Mac을 공유 QA 인프라로 전환합니다. 디바이스 팜이나 테스트 전용 서버를 새로 구축하는 대신, 이미 보유한 장비의 활용도를 높이는 방식입니다.
