@@ -34,7 +34,7 @@ Use at least 8 characters             line: hint or message, 14px on a 20px line
 - **Stack** — label, control, line, 8px apart (`gap-2`), full width of the form. Measured: 62px without a line, 90px
   with one.
 - **Label** — [label.md](./label.md): 14px medium, `--foreground`, with an optional inline hint in parentheses.
-- **Control** — one of the five under `control`.
+- **Control** — one of the controls in the `control` table.
 - **Line** (optional) — a hint (`--muted-foreground`) or an error (`--destructive`), 14px regular on a 20px line. It
   wraps rather than truncating. The one warning is a notice box instead of a line (`message` below).
 - **The error slot takes no space while it is empty.** `FieldError` is always in the page, so an error is announced

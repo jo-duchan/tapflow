@@ -74,7 +74,7 @@ button stretched to the panel's width. A dialog whose form is replaced by a resu
 token, the reset link) keeps the same shape — the copy field, then one full-width button (`Done`, `Copy & close`),
 12px apart (`gap-3`) where the form's fields are 16px apart (`gap-4`).
 
-`DialogFooter` is used three times. `stacked` and `end` are plain `div`s or the `<form>` itself, so `actions` names
+`DialogFooter` is used five times. `stacked` and `end` are plain `div`s or the `<form>` itself, so `actions` names
 the layout, not the component that draws it.
 
 There is no state axis: the panel itself is not interactive. The buttons, fields and Close follow their own
