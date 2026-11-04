@@ -1210,7 +1210,7 @@ Query:
 
 값을 정할 수 없는 항목은 `null`입니다. 컨테이너 안에서 실행하면 `lanHost`는 항상 `null`입니다.
 
-`publicUrlWarning`은 릴레이가 컨테이너 안에서 실행되는데 팀원 링크에 쓸 공개 URL이 없을 때만 들어갑니다. `agentUrlWarning`은 컨테이너 안에서 실행되는데 에이전트용 `TAPFLOW_RELAY_URL`이 없을 때만 들어갑니다. 그 밖의 경우에는 두 필드 모두 응답에 없습니다.
+`publicUrlWarning`은 릴레이가 컨테이너 안에서 실행되는데 팀원 링크에 쓸 공개 URL이 없을 때만 들어갑니다. `agentUrlWarning`은 컨테이너 안에서 실행되는데 에이전트용 `TAPFLOW_RELAY_URL`이 없을 때만 들어갑니다. 조건에 맞지 않는 필드는 응답에 들어가지 않습니다.
 
 
 ## 로그 (Logs)
