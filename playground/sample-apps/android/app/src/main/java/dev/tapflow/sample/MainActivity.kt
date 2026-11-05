@@ -5,9 +5,14 @@ import android.os.Bundle
 import android.webkit.JavascriptInterface
 import android.webkit.WebView
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.gestures.calculateZoom
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -24,6 +29,7 @@ import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.List
+import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.Button
 import androidx.compose.material3.Icon
@@ -38,6 +44,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TextField
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.MutableState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -48,12 +55,14 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.testTagsAsResourceId
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 
@@ -63,9 +72,20 @@ import androidx.compose.ui.viewinterop.AndroidView
 // `testTagsAsResourceId` on the root — without it Compose keeps them out of the accessibility tree.
 
 class MainActivity : ComponentActivity() {
+    // Held here rather than in `Root`, so leaving the app can be written to it from `onPause`.
+    private val status = mutableStateOf("tapped:none")
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        setContent { MaterialTheme { Root() } }
+        setContent { MaterialTheme { Root(status) } }
+    }
+
+    // What a flow's `pressButton: home` leaves behind, read once the app is brought back. `onPause`, not `onStop`: a
+    // `launchApp` right after the press brings the app back before it is stopped (measured on API 34), so a status
+    // written on stop is never written at all.
+    override fun onPause() {
+        super.onPause()
+        status.value = "tapped:app.background"
     }
 }
 
@@ -76,14 +96,17 @@ private val TABS = listOf(
     Tab("tab.list", "List", Icons.Filled.List),
     Tab("tab.hard", "Hard", Icons.Filled.Warning),
     Tab("tab.web", "Web", Icons.Filled.Info),
+    Tab("tab.gestures", "Gestures", Icons.Filled.Star),
 )
 
 @OptIn(ExperimentalComposeUiApi::class)
 @Composable
-private fun Root() {
-    var status by remember { mutableStateOf("tapped:none") }
+private fun Root(statusState: MutableState<String>) {
+    var status by statusState
     var tab by remember { mutableStateOf("tab.form") }
     val tapped: (String) -> Unit = { status = "tapped:$it" }
+    // `pressButton: back` on the Gestures screen, which would otherwise close the app.
+    BackHandler(enabled = tab == "tab.gestures") { tapped("app.back") }
 
     Scaffold(
         modifier = Modifier.semantics { testTagsAsResourceId = true },
@@ -114,6 +137,7 @@ private fun Root() {
                 "tab.form" -> FormScreen(tapped)
                 "tab.list" -> ListScreen(tapped)
                 "tab.hard" -> HardScreen(tapped)
+                "tab.gestures" -> GesturesScreen(tapped)
                 else -> WebScreen(tapped)
             }
         }
@@ -209,6 +233,39 @@ private fun HardScreen(tapped: (String) -> Unit) {
             modifier = Modifier.fillMaxWidth().onFocusChanged { if (it.isFocused) tapped("hard.field") },
         )
         Spacer(Modifier.weight(1f))
+    }
+}
+
+/**
+ * What a flow's `longPressOn` and `pinch` steps act on. A quick tap and a long press on the hold area say different
+ * things, so a long press that arrived as a tap shows as one.
+ */
+@Composable
+private fun GesturesScreen(tapped: (String) -> Unit) {
+    Column(Modifier.padding(20.dp).fillMaxSize(), verticalArrangement = Arrangement.spacedBy(20.dp)) {
+        Text(
+            "Hold me",
+            textAlign = TextAlign.Center,
+            modifier = Modifier.fillMaxWidth().height(64.dp).background(Color(0x332196F3)).testTag("gesture.hold")
+                .pointerInput(Unit) {
+                    detectTapGestures(onTap = { tapped("gesture.hold.short") }, onLongPress = { tapped("gesture.hold.long") })
+                },
+        )
+        // Judged once every finger lifts, by which way the scale went, so how far a pinch spread does not matter.
+        Box(
+            Modifier.fillMaxWidth().weight(1f).background(Color(0x334CAF50)).testTag("gesture.zoom")
+                .pointerInput(Unit) {
+                    awaitEachGesture {
+                        awaitFirstDown(requireUnconsumed = false)
+                        var scale = 1f
+                        do {
+                            val event = awaitPointerEvent()
+                            scale *= event.calculateZoom()
+                        } while (event.changes.any { it.pressed })
+                        if (scale > 1.2f) tapped("gesture.zoom.in") else if (scale < 0.8f) tapped("gesture.zoom.out")
+                    }
+                },
+        )
     }
 }
 
