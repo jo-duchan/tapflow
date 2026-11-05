@@ -9,7 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- **Flows can press hardware buttons, hold an element and pinch.** Three steps join the flow vocabulary: `pressButton: home` (also `lock`, `volume_up`, `volume_down`, and on Android `back`, `recent_apps`, `power`), `longPressOn: <selector>` (held 1000 ms, or `{ on, durationMs }`), and `pinch: { on, scale }` about an element or a point. A flow that presses a button the device lacks now fails before its first step, as an environment failure, instead of passing the press and failing later at an assertion. When `--build` or `--parallel --platform` says the platform up front, that flow fails without a device being booted for it and the rest still run. In MCP, `tap` takes `holdMs` for a long press, and `run_flow` accepts the new steps.
+- **Flows can press hardware buttons, hold an element and pinch.** Three steps join the flow vocabulary: `pressButton: home` (also `lock`, `power`, `volume_up`, `volume_down` where the device has them, and on Android `back` and `recent_apps`), `longPressOn: <selector>` (held 1000 ms, or `{ on, durationMs }`), and `pinch: { on, scale }` about an element or a point. A flow that presses a button the device lacks now fails before its first step, as an environment failure, instead of passing the press and failing later at an assertion. When `--build` or `--parallel --platform` says the platform up front, that flow fails without a device being booted for it and the rest still run. In MCP, `tap` takes `holdMs` for a long press, and `run_flow` accepts the new steps.
 - **Docker relay URLs:** `/api/v1/relay/host` distinguishes a missing teammate-reachable URL from a missing agent `relay.url`. The invite and agent-token dialogs show guidance for the address each link uses; a working tunnel clears only the teammate warning.
 
 ### Changed
@@ -18,7 +18,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- **A long press on an Android device streaming over adb arrived as a tap.** The adb fallback, used when a device has no gRPC or scrcpy pointer channel, sent every touch that did not move as `input tap` and answered success. A touch held past a quarter of a second is now replayed as a long press of the same length.
+- **A long press on an Android device streaming over adb arrived as a tap.** The adb fallback, used when a device has no gRPC or scrcpy pointer channel, sent every touch that did not move as `input tap` and answered success. A touch held past a quarter of a second is now replayed as a long press of the same length. The fix is in android-agent, so an older agent still delivers a hold as a tap.
 - **Cancelling `flow run` during a swipe left the touch pressed on the device.** A run that is stopped mid-gesture now ends the gesture before it leaves the session.
 
 ### Security

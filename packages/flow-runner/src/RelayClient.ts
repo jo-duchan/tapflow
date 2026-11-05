@@ -447,6 +447,9 @@ const BOOT_DEADLINE_MS = 240_000
 
 const delay = (ms: number) => new Promise<void>((r) => setTimeout(r, ms))
 
+/** A gesture this client has begun and not ended — what a leave closes on the device's behalf. */
+type OpenGesture = { kind: 'touch'; at: { x: number; y: number } } | { kind: 'pinch' }
+
 // Minimal relay client for the deterministic runner: WebSocket for session and
 // input control, REST for ui-tree and screenshots. Mirrors the message shapes
 // the dashboard and mcp-server already use.
@@ -602,7 +605,7 @@ export class RelayClient {
    *  against before a flow runs. Same lifetime as `lifecycle`. */
   private readonly chromes = new Map<string, ChromePayload>()
   /** A gesture this client opened and has not ended, per session — what `leaveSession` closes before it goes. */
-  private readonly openGestures = new Map<string, { kind: 'touch'; at: { x: number; y: number } } | { kind: 'pinch' }>()
+  private readonly openGestures = new Map<string, OpenGesture>()
 
   private lifecycleOf(sessionId: string): SessionLifecycle {
     let s = this.lifecycle.get(sessionId)
@@ -1099,10 +1102,11 @@ export class RelayClient {
     const interval = durationMs / STEPS
     const requestId = randomUUID()
     this.send({ type: 'input:touch:start', sessionId, payload: { x: from[0], y: from[1] } })
-    this.openGestures.set(sessionId, { kind: 'touch', at: { x: from[0], y: from[1] } })
+    const gesture: OpenGesture = { kind: 'touch', at: { x: from[0], y: from[1] } }
+    this.openGestures.set(sessionId, gesture)
     for (let i = 1; i < STEPS; i++) {
       await delay(interval)
-      if (!this.openGestures.has(sessionId)) return this.leftMidGesture(sessionId, 'swipe')
+      if (this.openGestures.get(sessionId) !== gesture) return this.leftMidGesture(sessionId, 'swipe')
       const t = i / STEPS
       this.send({
         type: 'input:touch:move',
@@ -1111,7 +1115,7 @@ export class RelayClient {
       })
     }
     await delay(interval)
-    if (!this.openGestures.delete(sessionId)) return this.leftMidGesture(sessionId, 'swipe')
+    if (!this.closeGesture(sessionId, gesture)) return this.leftMidGesture(sessionId, 'swipe')
     this.send({ type: 'input:touch:end', sessionId, requestId, payload: { x: to[0], y: to[1] } })
     await this.awaitInputAck(sessionId, requestId, 'swipe')
   }
@@ -1153,9 +1157,10 @@ export class RelayClient {
     const payload = { x, y }
     const requestId = randomUUID()
     this.send({ type: 'input:touch:start', sessionId, payload })
-    this.openGestures.set(sessionId, { kind: 'touch', at: payload })
+    const gesture: OpenGesture = { kind: 'touch', at: payload }
+    this.openGestures.set(sessionId, gesture)
     await delay(durationMs)
-    if (!this.openGestures.delete(sessionId)) return this.leftMidGesture(sessionId, 'longPress')
+    if (!this.closeGesture(sessionId, gesture)) return this.leftMidGesture(sessionId, 'longPress')
     this.send({ type: 'input:touch:end', sessionId, requestId, payload })
     await this.awaitInputAck(sessionId, requestId, 'longPress', durationMs)
   }
@@ -1173,16 +1178,25 @@ export class RelayClient {
       f1: { x: start[1][0] + (end[1][0] - start[1][0]) * t, y: start[1][1] + (end[1][1] - start[1][1]) * t },
     })
     this.send({ type: 'input:pinch:start', sessionId, payload: at(0) })
-    this.openGestures.set(sessionId, { kind: 'pinch' })
+    const gesture: OpenGesture = { kind: 'pinch' }
+    this.openGestures.set(sessionId, gesture)
     for (let i = 1; i <= STEPS; i++) {
       await delay(interval)
-      if (!this.openGestures.has(sessionId)) return this.leftMidGesture(sessionId, 'pinch')
+      if (this.openGestures.get(sessionId) !== gesture) return this.leftMidGesture(sessionId, 'pinch')
       this.send({ type: 'input:pinch:move', sessionId, payload: at(i / STEPS) })
     }
-    this.openGestures.delete(sessionId)
+    this.closeGesture(sessionId, gesture)
     const requestId = randomUUID()
     this.send({ type: 'input:pinch:end', sessionId, requestId })
     await this.awaitInputAck(sessionId, requestId, 'pinch')
+  }
+
+  /** Whether `gesture` was still this session's open one, forgetting it if so. Compared by identity, not by session:
+   *  a gesture opened after a leave and a re-join must not be closed, or moved, by one the leave already ended. */
+  private closeGesture(sessionId: string, gesture: OpenGesture): boolean {
+    if (this.openGestures.get(sessionId) !== gesture) return false
+    this.openGestures.delete(sessionId)
+    return true
   }
 
   /** A gesture `leaveSession` closed while its sender was still pacing it: the leave is why, and it says so. */

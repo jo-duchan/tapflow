@@ -114,6 +114,8 @@ A bare `longPressOn` holds for 1000 ms, which is past the point where both platf
 - longPressOn: { on: { id: "row-3" }, durationMs: 2500 }
 ```
 
+On an Android device streaming over the adb fallback, a hold needs android-agent from the same release. An older agent delivers it as a tap and still reports success, so follow `longPressOn` with an assertion on what the hold opens.
+
 `durationMs` goes beside the selector, never inside it. `{ label: "Message", durationMs: 2500 }` is refused, because turning a bare string into `label:` would also change how it matches: `label:` does not look at identifiers.
 
 ### Pinch {#pinch}
@@ -139,9 +141,9 @@ An Android device streaming over the adb fallback, without a gRPC or scrcpy poin
 | Name | iOS | Android |
 |------|-----|---------|
 | `home` | Yes | Yes |
-| `lock` | When the device has a power button | Yes (the power key) |
+| `lock`, `power` | When the device has a power button | Yes (the power key) |
 | `volume_up`, `volume_down` | When the device has volume buttons | Yes |
-| `back`, `recent_apps`, `power` | No | Yes |
+| `back`, `recent_apps` | No | Yes |
 
 On iOS, any other button the device's frame declares can be pressed by its name as well, such as `action`.
 

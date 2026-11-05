@@ -114,6 +114,8 @@ steps:
 - longPressOn: { on: { id: "row-3" }, durationMs: 2500 }
 ```
 
+adb fallback으로 스트리밍하는 Android 기기에서 길게 누르려면 같은 릴리스의 android-agent가 필요합니다. 이전 에이전트는 길게 누르기를 탭으로 보내면서도 성공으로 알리므로 `longPressOn` 뒤에는 길게 눌러야 나타나는 결과를 단언으로 확인하세요.
+
 `durationMs`는 셀렉터 안이 아니라 옆에 둡니다. `{ label: "메시지", durationMs: 2500 }`은 거부됩니다. 문자열 셀렉터를 `label:`로 바꾸면 매칭 방식까지 달라지기 때문입니다. `label:`은 식별자를 보지 않습니다.
 
 ### 핀치 {#pinch}
@@ -139,9 +141,9 @@ gRPC나 scrcpy 포인터 채널 없이 adb fallback으로 스트리밍하는 And
 | 이름 | iOS | Android |
 |------|-----|---------|
 | `home` | 지원 | 지원 |
-| `lock` | 기기에 전원 버튼이 있을 때 | 지원(전원 키) |
+| `lock`, `power` | 기기에 전원 버튼이 있을 때 | 지원(전원 키) |
 | `volume_up`, `volume_down` | 기기에 볼륨 버튼이 있을 때 | 지원 |
-| `back`, `recent_apps`, `power` | 미지원 | 지원 |
+| `back`, `recent_apps` | 미지원 | 지원 |
 
 iOS에서는 기기 프레임이 선언한 다른 버튼도 이름으로 누를 수 있습니다(예: `action`).
 

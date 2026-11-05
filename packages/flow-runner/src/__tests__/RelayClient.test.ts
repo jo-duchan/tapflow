@@ -350,6 +350,20 @@ describe('RelayClient — the input senders mint a correlator and await the ack'
     if (end === 'input:touch:end') expect(received.find((m) => m['type'] === end)).toHaveProperty('payload')
   })
 
+  it('a gesture the leave ended does not touch one opened after a re-join', async () => {
+    const { client, received } = await capture()
+    const first = client.longPress('s1', 0.1, 0.1, 400).catch((e: unknown) => e)
+    await new Promise((r) => setTimeout(r, 100))
+    client.leaveSession('s1')
+    await client.joinSession('s1')
+    const second = client.longPress('s1', 0.9, 0.9, 600)
+    expect(await first).toBeInstanceOf(SessionLeftError)
+    await second
+    const ends = received.filter((m) => m['type'] === 'input:touch:end').map((m) => m['payload'])
+    // One end for the gesture the leave closed, one for the second gesture's own release, none sent by the first.
+    expect(ends).toEqual([{ x: 0.1, y: 0.1 }, { x: 0.9, y: 0.9 }])
+  })
+
   it('a refused pinch names the reason', async () => {
     const { client } = await capture((m) => ({
       type: 'input:error', sessionId: m['sessionId'], requestId: m['requestId'], reason: 'unsupported', message: 'pinch is not available on this path',

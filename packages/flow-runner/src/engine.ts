@@ -4,6 +4,7 @@ import type { Flow, Selector, Step, ScrollDirection } from './schema.js'
 import { matchSelector } from './selector.js'
 import { suggestSelectors, type SelectorSuggestion } from './suggest.js'
 import { EnvironmentStepError, isEnvironmentStepFailure, TransientQueryError } from './errors.js'
+import { buttonAvailability } from '@tapflowio/protocol/buttons'
 import { unavailableButton, unavailableButtonMessage } from './platformCheck.js'
 
 /** Two fingers, each `[x, y]` normalized 0-1. */
@@ -534,11 +535,18 @@ async function refuseButtons(flow: Flow, driver: FlowDriver, platform: string, t
   let verdict = unavailableButton(flow, platform)
   if (verdict === 'needs-chrome') {
     if (!driver.chrome) return null
-    const chrome = await driver.chrome(timeoutMs)
+    // The step that could not be checked, not merely the first press: a `home` before it was never in question.
+    const index = flow.steps.findIndex((s) => s.type === 'pressButton' && buttonAvailability(platform, s.name) === 'unknown')
+    // The device's fault rather than the flow's, so neither refusal below is marked `beforeRun`: a device that never
+    // describes itself, or whose session went while it was asked, may be one to leave. Returned rather than thrown, so
+    // the run records this flow and goes on to the next, as a step's failure would.
+    let chrome
+    try {
+      chrome = await driver.chrome(timeoutMs)
+    } catch (e) {
+      return refusedFlow(flow, index, `whether the device can press this could not be checked: ${e instanceof Error ? e.message : String(e)}`, { beforeRun: false })
+    }
     if (chrome === null) {
-      const index = flow.steps.findIndex((s) => s.type === 'pressButton')
-      // The device's fault rather than the flow's, so not marked `beforeRun`: a device that never describes itself may
-      // be one to leave.
       return refusedFlow(flow, index, `the device did not report its buttons within ${timeoutMs / 1000}s, so whether it can press this cannot be checked`, { beforeRun: false })
     }
     verdict = unavailableButton(flow, platform, chrome)

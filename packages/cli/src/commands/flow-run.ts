@@ -373,7 +373,8 @@ async function runParallel(run: ParallelRun, workerCount: number): Promise<Paral
         if (result.status === 'failed') printFailure(result, flow, idx, opts, prefix)
         // The device, not the app: whatever went wrong may still be wrong for the next flow, so this worker stops.
         // Unless nothing reached the device — a flow pressing a button this device lacks says nothing about the device,
-        // and leaving over it would cost the run a healthy one per such flow.
+        // and leaving over it would cost the run a healthy one per such flow. A pinch refused as unsupported does leave:
+        // that is Android's adb fallback, which an emulator reaches only when its pointer channel is down — the device.
         if (result.status === 'failed' && result.failureKind === 'environment' && !result.failedBeforeRun) {
           leftBehind.add(lease.sessionId)
           console.error(`${prefix}leaving this device: the flow failed for a reason outside the app`)

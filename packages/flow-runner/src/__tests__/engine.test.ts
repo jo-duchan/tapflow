@@ -930,6 +930,23 @@ describe('runFlow — a button the device lacks', () => {
     expect(driver.calls).toEqual([])
   })
 
+  it('marks the press it could not check, not an earlier one that needed no checking', async () => {
+    const driver = fakeDriver([[]])
+    driver.chrome = vi.fn(async () => null)
+    const result = await runFlow(flowOf('steps:\n  - pressButton: home\n  - pressButton: volume_up\n'), driver, { ...OPTS, platform: 'ios' })
+    expect(result.steps.map((s) => s.status)).toEqual(['skipped', 'failed'])
+  })
+
+  // A session that ends while its chrome is awaited is a result for this flow, so the run can record it and go on.
+  it('reports a session lost while asking for the chrome as the flow\'s environment failure, not a rejection', async () => {
+    const driver = fakeDriver([[]])
+    driver.chrome = vi.fn(async () => { throw new Error('device chrome failed: the relay ended this session') })
+    const result = await runFlow(flowOf('steps:\n  - pressButton: lock\n'), driver, { ...OPTS, platform: 'ios' })
+    expect(result).toMatchObject({ status: 'failed', failureKind: 'environment' })
+    expect(result.failureMessage).toMatch(/could not be checked: device chrome failed: the relay ended this session/)
+    expect(result.failedBeforeRun).toBeUndefined()
+  })
+
   it('does not ask the chrome for a flow that presses nothing, nor check a platform it has no table for', async () => {
     const driver = fakeDriver([[el({ label: 'ok' })]])
     driver.chrome = vi.fn(async () => null)
