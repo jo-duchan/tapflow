@@ -30,6 +30,7 @@ vi.mock('../TouchHelper', () => ({
     touchStart: vi.fn(() => true),
     touchMove: vi.fn(() => true),
     touchEnd: vi.fn(() => true),
+    touchCancel: vi.fn(() => true),
     pressButton: vi.fn(() => true),
     pressButtonDown: vi.fn(() => true),
     pressButtonUp: vi.fn(() => true),
@@ -683,6 +684,33 @@ describe('IOSAgent', () => {
         expect(th.touchEnd).toHaveBeenCalledTimes(1)
       }, { timeout: 500 })
 
+      agent.disconnect()
+      browser.close()
+    })
+  })
+
+  // A client leaving mid-gesture sends a cancel before its end (#1115): the helper is asked to cancel, unanswered.
+  describe('input:touch:cancel', () => {
+    beforeEach(() => { MockTouchHelper.mockClear() })
+
+    it('asks the helper to cancel the touch, and sends no ack', async () => {
+      const browser = new WebSocket(`ws://localhost:${port}`)
+      await waitForOpen(browser)
+      const seen: string[] = []
+      browser.on('message', (d, binary) => { if (!binary) seen.push((JSON.parse(String(d)) as { type: string }).type) })
+      const agent = new IOSAgent({ intervalMs: 50 }, mockSimctl(true))
+      await agent.connect(`ws://localhost:${port}`)
+      browser.send(JSON.stringify({ type: 'session:start', sessionId: agent.sessionId }))
+      await waitForType(browser, 'session:joined')
+      browser.send(JSON.stringify({ type: 'device:boot', requestId: 'rq-cancel', sessionId: agent.sessionId, payload: { deviceId: 'dev-1' } }))
+      await waitForType(browser, 'device:ready')
+      await vi.waitFor(() => expect(MockTouchHelper.mock.results.length).toBeGreaterThan(0))
+      const th = MockTouchHelper.mock.results.at(-1)!.value
+      browser.send(JSON.stringify({ type: 'input:touch:start', sessionId: agent.sessionId, payload: { x: 0.5, y: 0.5 } }))
+      browser.send(JSON.stringify({ type: 'input:touch:cancel', sessionId: agent.sessionId }))
+      await vi.waitFor(() => expect(th.touchCancel).toHaveBeenCalledTimes(1))
+      await new Promise((r) => setTimeout(r, 100))
+      expect(seen.filter((t) => t.startsWith('input:'))).toEqual([])
       agent.disconnect()
       browser.close()
     })

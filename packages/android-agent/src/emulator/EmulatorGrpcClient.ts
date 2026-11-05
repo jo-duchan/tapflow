@@ -1,4 +1,4 @@
-import { credentials, loadPackageDefinition, type ClientReadableStream } from '@grpc/grpc-js'
+import { credentials, loadPackageDefinition, type ClientReadableStream, type ClientWritableStream } from '@grpc/grpc-js'
 import { loadSync } from '@grpc/proto-loader'
 import { fileURLToPath } from 'node:url'
 import path from 'node:path'
@@ -54,6 +54,9 @@ interface MouseEventMsg { x: number; y: number; buttons: number; display: number
 interface WheelEventMsg { dx: number; dy: number; display: number }
 
 type UnaryCb = (err: Error | null) => void
+// A raw evdev event, delivered to the guest kernel as sent (`EmulatorController.streamInputEvent`).
+interface AndroidEventMsg { type: number; code: number; value: number; display: number }
+interface InputEventMsg { android_event: AndroidEventMsg }
 interface CallOptions { deadline: number }
 interface ClipDataMsg { text: string }
 
@@ -76,6 +79,7 @@ export interface RawEmulatorController {
   streamScreenshot(format: ImageFormatMsg): ClientReadableStream<ImageMsg>
   streamAudio(format: AudioFormatMsg): ClientReadableStream<AudioPacketMsg>
   sendTouch(event: TouchEventMsg, options: CallOptions, cb: UnaryCb): void
+  streamInputEvent(options: CallOptions, cb: UnaryCb): ClientWritableStream<InputEventMsg>
   getDisplayConfigurations(empty: Record<string, never>, options: CallOptions, cb: DisplayCb): void
   sendKey(event: KeyboardEventMsg, options: CallOptions, cb: UnaryCb): void
   sendMouse(event: MouseEventMsg, cb: UnaryCb): void
@@ -103,6 +107,10 @@ function loadController(): EmulatorControllerCtor {
   return ctorCache
 }
 
+// linux/input-event-codes.h — the events a cancel sends (`touchCancel`).
+const EV_SYN = 0, SYN_REPORT = 0, EV_ABS = 3, ABS_MT_SLOT = 0x2f, ABS_MT_TOOL_TYPE = 0x37
+const MT_TOOL_FINGER = 0, MT_TOOL_PALM = 2
+
 /**
  * Thin gRPC wrapper over the Android emulator's EmulatorController — host-side video capture
  * (`streamScreenshot`, bypassing the guest SW H.264 encoder) plus input injection
@@ -118,6 +126,10 @@ export class EmulatorGrpcClient {
   // touch was already up), then applied the down, and the touch stayed pressed until the next one. iOS
   // writes its frames down one pipe and cannot reorder; this is that, for gRPC.
   private touchQueue: Promise<void> = Promise.resolve()
+  // A cancel marks its slot a palm and puts it back to a finger after (`touchCancel`). The emulator's own touches
+  // never set the tool type, so a slot left a palm would cancel every later touch on it while each was acked
+  // delivered. When putting it back fails, the next press puts it back first.
+  private toolTypeDirty = false
 
   /** `raw` is injectable so tests can drive it without a live emulator. */
   constructor(addr: string, raw?: RawEmulatorController) {
@@ -202,24 +214,67 @@ export class EmulatorGrpcClient {
   // --- input (coords are display-resolution px, top-left origin; pressure 0 = up) ---
 
   private touch(touches: TouchMsg[], display = 0): Promise<void> {
-    // The deadline starts when the call is sent, not when it was queued. A failed call still lets the next one
-    // go — the queue only ever holds settled-and-swallowed promises — because holding an up back behind a
-    // failed down would leave the touch pressed, the defect this queue fixes. So the order holds for calls the
-    // emulator answered; one our deadline abandoned may still be applied after the next (AGENTS.md).
-    const send = (): Promise<void> => new Promise((resolve, reject) => {
+    return this.enqueue(() => this.sendTouch(touches, display))
+  }
+
+  // The deadline starts when the call is sent, not when it was queued. A failed call still lets the next one
+  // go — the queue only ever holds settled-and-swallowed promises — because holding an up back behind a
+  // failed down would leave the touch pressed, the defect this queue fixes. So the order holds for calls the
+  // emulator answered; one our deadline abandoned may still be applied after the next (AGENTS.md).
+  private enqueue(step: () => Promise<void>): Promise<void> {
+    const call = this.touchQueue.then(step)
+    this.touchQueue = call.catch(() => {})
+    return call
+  }
+
+  private sendTouch(touches: TouchMsg[], display = 0): Promise<void> {
+    return new Promise((resolve, reject) => {
       this.raw.sendTouch(
         { touches, display },
         { deadline: Date.now() + INPUT_DEADLINE_MS },
         (err) => (err ? reject(err) : resolve()),
       )
     })
-    const call = this.touchQueue.then(send)
-    this.touchQueue = call.catch(() => {})
-    return call
+  }
+
+  /** Raw evdev events, settled when the emulator answers the stream — so the queue's order holds for them too. */
+  private sendEvents(events: Array<[type: number, code: number, value: number]>): Promise<void> {
+    return new Promise((resolve, reject) => {
+      const stream = this.raw.streamInputEvent({ deadline: Date.now() + INPUT_DEADLINE_MS }, (err) => (err ? reject(err) : resolve()))
+      for (const [type, code, value] of events) stream.write({ android_event: { type, code, value, display: 0 } })
+      stream.end()
+    })
+  }
+
+  private toolType(slot: number, tool: number): Promise<void> {
+    return this.sendEvents([[EV_ABS, ABS_MT_SLOT, slot], [EV_ABS, ABS_MT_TOOL_TYPE, tool], [EV_SYN, SYN_REPORT, 0]])
   }
 
   touchDown(pointerId: number, x: number, y: number): Promise<void> {
-    return this.touch([{ x, y, identifier: pointerId, pressure: 1 }])
+    if (!this.toolTypeDirty) return this.touch([{ x, y, identifier: pointerId, pressure: 1 }])
+    return this.enqueue(async () => {
+      await this.toolType(pointerId, MT_TOOL_FINGER).then(() => { this.toolTypeDirty = false }, () => {})
+      await this.sendTouch([{ x, y, identifier: pointerId, pressure: 1 }])
+    })
+  }
+
+  /**
+   * Lift the touch as cancelled (#1115): its slot is marked a palm, which Android's input reader turns into
+   * `ACTION_CANCEL` (Android 11 and later), then released and put back to a finger — one unit on the touch queue, so
+   * nothing slips between. The emulator's touch API has no cancel of its own. Measured on a Pixel 6 (Android 14): a
+   * hold cancelled this way fires no tap and no long press, and the next tap is a tap. **The release goes out whether
+   * or not the palm did**, so a touch is never left down; where the palm is not understood, that release is an up, as
+   * an end would be. The slot is the pointer id, which holds while only the session's holder touches the device.
+   */
+  touchCancel(pointerId: number, x = 0, y = 0): Promise<void> {
+    return this.enqueue(async () => {
+      await this.toolType(pointerId, MT_TOOL_PALM).catch(() => {})
+      try {
+        await this.sendTouch([{ x, y, identifier: pointerId, pressure: 0 }])
+      } finally {
+        await this.toolType(pointerId, MT_TOOL_FINGER).then(() => { this.toolTypeDirty = false }, () => { this.toolTypeDirty = true })
+      }
+    })
   }
 
   touchMove(pointerId: number, x: number, y: number): Promise<void> {

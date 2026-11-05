@@ -15,7 +15,7 @@ import type {
   DeviceBoot, DeviceBootError, DeviceBootWaiting, DeviceBooting, DeviceLease, DeviceLeased, DeviceLeaseRefused, DeviceReady, DeviceShutdown, DeviceShutdownDone,
   DeviceShutdownError, GenericError,
   InputButton, InputDone, InputError, InputKey, InputKeyboardToggle, InputPinchEnd, InputPinchMove,
-  InputPinchStart, InputRotate, InputTouchEnd, InputTouchMove, InputTouchStart, InputType, InputTypeDone,
+  InputPinchStart, InputRotate, InputTouchCancel, InputTouchEnd, InputTouchMove, InputTouchStart, InputType, InputTypeDone,
   InputTypeError, KeyboardToggled, OpenUrl, OpenUrlDone, OpenUrlError, RelayOutbound, ScreenshotDone,
   ScreenshotError, ScreenshotRequest, SessionAgentAway, SessionChrome, SessionDeviceInfo, SessionEnd,
   SessionJoined, SessionLeave, SessionRebound, SessionStart, SessionTerminated, StreamRegister,
@@ -189,6 +189,7 @@ export const _InputPinchStart: InputPinchStart['type'] = 'input:pinch:start'
 export const _InputRotate: InputRotate['type'] = 'input:rotate'
 export const _InputPosture: InputPosture['type'] = 'input:posture'
 export const _InputTouchEnd: InputTouchEnd['type'] = 'input:touch:end'
+export const _InputTouchCancel: InputTouchCancel['type'] = 'input:touch:cancel'
 export const _InputTouchMove: InputTouchMove['type'] = 'input:touch:move'
 export const _InputTouchStart: InputTouchStart['type'] = 'input:touch:start'
 export const _InputType: InputType['type'] = 'input:type'

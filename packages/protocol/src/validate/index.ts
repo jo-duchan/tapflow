@@ -59,7 +59,7 @@ import type {
   NetworkError, NetworkSet, NetworkState,
   ClipboardWriteDone, DeviceBoot, DeviceBootError, DeviceLease, DeviceBooting, DeviceReady, DeviceShutdown,
   DeviceShutdownDone, DeviceShutdownError, InputButton, InputDone, InputError, InputKey, InputKeyboardToggle,
-  InputPinchEnd, InputPinchMove, InputPinchStart, InputPosture, InputRotate, InputTouchEnd, InputTouchMove,
+  InputPinchEnd, InputPinchMove, InputPinchStart, InputPosture, InputRotate, InputTouchCancel, InputTouchEnd, InputTouchMove,
   InputTouchStart, InputType, InputTypeDone, InputTypeError, KeyboardToggled, OpenUrl, OpenUrlDone,
   OpenUrlError, ScreenshotDone, ScreenshotError, SessionChrome, SessionDeviceInfo, SessionEnd,
   SessionActivity, SessionLeave, SessionStart, StreamRegister, UiTreeError, UiTreeResponse, WatchStart, WatchStop,
@@ -207,6 +207,7 @@ const BROWSER_INBOUND = {
   'input:touch:end': z.object({
     type: z.literal('input:touch:end'), sessionId, requestId, payload: point.optional(),
   }),
+  'input:touch:cancel': z.object({ type: z.literal('input:touch:cancel'), sessionId }),
   'input:pinch:start': z.object({
     type: z.literal('input:pinch:start'), sessionId, payload: z.object({ f0: point, f1: point, space }),
   }),
@@ -610,6 +611,7 @@ type _OpenUrl = Assert<V<'open-url', OpenUrl>>
 type _InputTouchStart = Assert<V<'input:touch:start', InputTouchStart>>
 type _InputTouchMove = Assert<V<'input:touch:move', InputTouchMove>>
 type _InputTouchEnd = Assert<V<'input:touch:end', InputTouchEnd>>
+type _InputTouchCancel = Assert<V<'input:touch:cancel', InputTouchCancel>>
 type _InputPinchStart = Assert<V<'input:pinch:start', InputPinchStart>>
 type _InputPinchMove = Assert<V<'input:pinch:move', InputPinchMove>>
 type _InputPinchEnd = Assert<V<'input:pinch:end', InputPinchEnd>>

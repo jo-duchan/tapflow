@@ -10,6 +10,7 @@ vi.mock('../AndroidTouchHelper', () => ({
     touchStart: vi.fn(),
     touchMove: vi.fn(),
     touchEnd: vi.fn(async () => 'delivered'),
+    touchCancel: vi.fn(),
     pinchStart: vi.fn(() => 'unsupported'),
     pinchMove: vi.fn(() => 'unsupported'),
     pinchEnd: vi.fn(() => 'unsupported'),
@@ -48,6 +49,7 @@ vi.mock('../scrcpy/ScrcpySession', () => ({
       touchDown: vi.fn(),
       touchMove: vi.fn(),
       touchUp: vi.fn(),
+      touchCancel: vi.fn(),
       pinchStart: vi.fn(),
       pinchMove: vi.fn(),
       pinchEnd: vi.fn(),
@@ -99,7 +101,7 @@ vi.mock('../emulator/EmulatorGrpcClient', () => ({
     // The divisor for injected touch pixels. `grpcDisplaySize` lets a test say the emulator and
     // the guest disagree, which is the whole foldable case.
     getDisplaySize: vi.fn(async () => grpcDisplaySize),
-    touchDown: vi.fn(), touchMove: vi.fn(), touchUp: vi.fn(),
+    touchDown: vi.fn(), touchMove: vi.fn(), touchUp: vi.fn(), touchCancel: vi.fn(),
     pinchStart: vi.fn(), pinchMove: vi.fn(), pinchEnd: vi.fn(),
     streamAudio: vi.fn(() => ({ frames: () => new ReadableStream({ start() {} }), cancel: vi.fn() })), // AudioStream shape: { frames, cancel }
     getClipboard: vi.fn(() => grpcClipboardError
@@ -169,6 +171,7 @@ interface TestState {
     pressButton: ReturnType<typeof vi.fn>
     touchMove: ReturnType<typeof vi.fn>
     touchEnd: ReturnType<typeof vi.fn>
+    touchCancel: ReturnType<typeof vi.fn>
     pinchEnd: ReturnType<typeof vi.fn>
   } | null
   videoWidth: number
@@ -2821,6 +2824,40 @@ describe('AndroidAgent', () => {
         inject({ type: 'input:touch:end', requestId: 'rq-lift' })
         // last px from start: 0.1*1080 = 108, 0.2*2400 = 480
         expect(control.touchUp).toHaveBeenCalledWith(0, 108, 480)
+      })
+
+      // A client leaving mid-gesture sends a cancel, then an end (#1115). The cancel closes the gesture's record before
+      // anything awaits, so the end finds nothing to complete and lifts nothing.
+      it('touch:cancel cancels at the last touched px, and the end after it lifts nothing', async () => {
+        const control = getState().scrcpySession!.control
+        const errored = waitForType(browser, 'input:error')
+        inject({ type: 'input:touch:start', payload: { x: 0.1, y: 0.2 } })
+        inject({ type: 'input:touch:cancel' })
+        inject({ type: 'input:touch:end', requestId: 'rq-after-cancel' })
+        expect(control.touchCancel).toHaveBeenCalledWith(0, 108, 480)
+        expect(control.touchUp).not.toHaveBeenCalled()
+        expect((await errored)['reason']).toBe('no-gesture')
+      })
+
+      it('touch:cancel on the adb path drops the gesture instead of replaying it', () => {
+        const state = getState()
+        state.scrcpySession = null
+        state.grpcClient = null
+        inject({ type: 'input:touch:start', payload: { x: 0.5, y: 0.5 } })
+        inject({ type: 'input:touch:cancel' })
+        inject({ type: 'input:touch:end', requestId: 'rq-adb-cancel' })
+        expect(state.touchHelper!.touchCancel).toHaveBeenCalledTimes(1)
+        expect(state.touchHelper!.touchEnd).not.toHaveBeenCalled()
+      })
+
+      // A touch cancel closes a touch only: taking an open pinch's record would leave its second pointer down.
+      it('touch:cancel leaves an open pinch to its own end', () => {
+        const control = getState().scrcpySession!.control
+        inject({ type: 'input:pinch:start', payload: { f0: { x: 0.4, y: 0.5 }, f1: { x: 0.6, y: 0.5 } } })
+        inject({ type: 'input:touch:cancel' })
+        inject({ type: 'input:pinch:end', requestId: 'rq-pinch-after' })
+        expect(control.touchCancel).not.toHaveBeenCalled()
+        expect(control.pinchEnd).toHaveBeenCalledTimes(1)
       })
 
       // followups H-F: touch:end acks input:done when dispatched to a booted device (pointer channel present + adb reports booted).

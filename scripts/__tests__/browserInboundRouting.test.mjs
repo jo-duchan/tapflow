@@ -358,6 +358,7 @@ describe('browser-inbound routing matches the protocol union', () => {
       'input:touch:start': 'payload sessionId',
       'input:touch:move': 'payload sessionId',
       'input:touch:end': 'payload? requestId sessionId',
+      'input:touch:cancel': 'sessionId',
       'input:pinch:start': 'payload sessionId',
       'input:pinch:move': 'payload sessionId',
       'input:pinch:end': 'requestId sessionId',

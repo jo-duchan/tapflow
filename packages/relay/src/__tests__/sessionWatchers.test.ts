@@ -67,11 +67,11 @@ describe('session watchers', () => {
 
   /** `name` must differ between agents in one test: the same name re-registering is a restart, and the
    *  relay rebinds the first agent's session to it. */
-  async function registerAgent(name = 'mac') {
+  async function registerAgent(name = 'mac', capabilities?: string[]) {
     const agent = new WebSocket(`ws://localhost:${port}`)
     await waitForOpen(agent)
     agent.send(JSON.stringify({
-      type: 'agent:register', platform: 'ios', agentName: name,
+      type: 'agent:register', platform: 'ios', agentName: name, ...(capabilities ? { capabilities } : {}),
       devices: [{ id: 'dev0', name: 'iPhone', platform: 'ios', status: 'shutdown' }],
     }))
     const reply = await waitForType<AgentRegistered>(agent, 'agent:registered')
@@ -234,8 +234,8 @@ describe('session watchers', () => {
 
   // ── A2: what the holder does, told to its watchers ──────────────────────────────────────────────────
   /** A watched MCP session, and every frame its watcher receives, raw. */
-  async function watched() {
-    const { sessionId, agent, fromAgent } = await registerAgent()
+  async function watched(capabilities?: string[]) {
+    const { sessionId, agent, fromAgent } = await registerAgent('mac', capabilities)
     const mcp = await socket('mcp1')
     await join(mcp, sessionId, 'mcp')
     const viewer = await socket(undefined, 1)
@@ -252,6 +252,27 @@ describe('session watchers', () => {
     const w = await watched()
     w.send({ type: 'input:touch:start', payload: { x: 0.5, y: 0.8 } })
     w.send({ type: 'input:touch:end', requestId: 'r1', payload: { x: 0.505, y: 0.8 } })
+    await w.settled()
+    expect(w.actions()).toEqual([{ kind: 'tap', x: 0.5, y: 0.8 }])
+  })
+
+  // A client leaving mid-gesture sends a cancel, then an end (#1115). An agent that cancels injects nothing for that
+  // end, so the watcher is told nothing; one that predates the cancel completes the gesture with it, a real tap.
+  it('tells nothing for a touch the holder cancelled, where the agent cancels', async () => {
+    const w = await watched(['touch-cancel'])
+    w.send({ type: 'input:touch:start', payload: { x: 0.5, y: 0.8 } })
+    w.send({ type: 'input:touch:cancel' })
+    w.send({ type: 'input:touch:end', requestId: 'r1', payload: { x: 0.5, y: 0.8 } })
+    await w.settled()
+    expect(w.actions()).toEqual([])
+    expect(w.fromAgent.map((m) => m['type'])).toContain('input:touch:cancel')
+  })
+
+  it('tells the tap an agent without cancel made of a cancelled touch', async () => {
+    const w = await watched()
+    w.send({ type: 'input:touch:start', payload: { x: 0.5, y: 0.8 } })
+    w.send({ type: 'input:touch:cancel' })
+    w.send({ type: 'input:touch:end', requestId: 'r1', payload: { x: 0.5, y: 0.8 } })
     await w.settled()
     expect(w.actions()).toEqual([{ kind: 'tap', x: 0.5, y: 0.8 }])
   })

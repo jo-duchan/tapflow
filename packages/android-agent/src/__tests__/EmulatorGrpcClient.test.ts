@@ -30,6 +30,7 @@ function makeRaw(overrides: Partial<RawEmulatorController> = {}): RawEmulatorCon
     streamScreenshot: vi.fn() as unknown as RawEmulatorController['streamScreenshot'],
     streamAudio: vi.fn() as unknown as RawEmulatorController['streamAudio'],
     sendTouch: vi.fn((_e, _o, cb) => cb(null)),
+    streamInputEvent: vi.fn((_o, cb) => ({ write: vi.fn(), end: vi.fn(() => cb(null)) })) as unknown as RawEmulatorController['streamInputEvent'],
     sendKey: vi.fn((_e, _o, cb) => cb(null)),
     sendMouse: vi.fn((_e, cb) => cb(null)),
     sendWheel: vi.fn((_e, cb) => cb(null)),
@@ -309,5 +310,54 @@ describe('EmulatorGrpcClient — input readiness and deadline', () => {
       calls[1]!.cb(null)
       await expect(up).resolves.toBeUndefined()
     })
+  })
+})
+
+// A cancel marks the slot a palm (Android's input reader then cancels the touch), releases it and puts the slot back to
+// a finger, as one unit on the touch queue (#1115). Measured on a Pixel 6 (Android 14).
+describe('touchCancel', () => {
+  function recording(opts: { palmFails?: boolean; restoreFails?: boolean } = {}) {
+    const log: string[] = []
+    let streams = 0
+    const raw = makeRaw({
+      sendTouch: vi.fn((e: { touches: Array<{ pressure: number }> }, _o, cb) => { log.push(e.touches[0]!.pressure ? 'down' : 'up'); cb(null) }) as never,
+      streamInputEvent: vi.fn((_o, cb) => {
+        const n = streams++
+        const events: number[][] = []
+        return {
+          write: (m: { android_event: { type: number; code: number; value: number } }) => { events.push([m.android_event.type, m.android_event.code, m.android_event.value]) },
+          end: () => {
+            const tool = events.find(([t, c]) => t === 3 && c === 0x37)?.[2]
+            log.push(tool === 2 ? 'palm' : 'finger')
+            const fail = tool === 2 ? opts.palmFails : opts.restoreFails && n <= 1
+            cb(fail ? new Error('UNIMPLEMENTED') : null)
+          },
+        }
+      }) as never,
+    })
+    return { client: new EmulatorGrpcClient('x', raw), log }
+  }
+
+  it('palms the slot, releases it, then puts it back to a finger, in that order', async () => {
+    const { client, log } = recording()
+    await client.touchDown(0, 10, 10)
+    await client.touchCancel(0, 10, 10)
+    expect(log).toEqual(['down', 'palm', 'up', 'finger'])
+  })
+
+  // The release is what keeps a touch from being left down, so it does not depend on the palm.
+  it('still releases the touch when the palm is refused', async () => {
+    const { client, log } = recording({ palmFails: true })
+    await client.touchCancel(0, 10, 10)
+    expect(log).toEqual(['palm', 'up', 'finger'])
+  })
+
+  // A slot left a palm would cancel every later touch on it while each was acked delivered.
+  it('puts the slot back before the next press when putting it back failed', async () => {
+    const { client, log } = recording({ restoreFails: true })
+    await client.touchCancel(0, 10, 10)
+    await client.touchDown(0, 10, 10)
+    await client.touchDown(0, 10, 10)
+    expect(log).toEqual(['palm', 'up', 'finger', 'finger', 'down', 'down'])
   })
 })

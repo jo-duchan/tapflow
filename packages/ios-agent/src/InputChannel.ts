@@ -34,6 +34,9 @@ export interface InputChannel {
   touchMove(x: number, y: number): boolean
   touchEnd(): boolean
   touchEndAfterMinContact(): Promise<boolean>
+  /** Lift the open single-finger touch as cancelled, or with an up where the channel cannot cancel. False when no
+   *  touch is down. The end that follows writes nothing. */
+  touchCancel(): boolean
 
   pinchStart(x1: number, y1: number, x2: number, y2: number): boolean
   pinchMove(x1: number, y1: number, x2: number, y2: number): boolean

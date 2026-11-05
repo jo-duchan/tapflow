@@ -177,6 +177,7 @@ only to the process that received the frame that opened it, and never revives a 
 | 9 | key press | self-contained — modifier down/up completes inside the frame |
 | 10 | button down (a=usagePage, b=usage) | self-contained |
 | 11 | button up (a=usagePage, b=usage) | self-contained — the helper keeps no record of which buttons are down, so a paired down is not a precondition |
+| 13 | touch cancel (coords unused — `lastX/lastY`) | continues — lifts the touch with a digitizer event masked Range\|Touch\|Cancel, which the app receives as `touchesCancelled`, not a tap (#1115; measured on Xcode 26 and 27.1, UIKit and SwiftUI). The helper records whether the down went out on the digitizer path; a mouse-path touch, or a cancel event that cannot be built, is lifted with an up instead, so a touch is never left down. **With nothing down it is dropped**: a cancel sent with no touch in progress crashed backboardd in another tool, which is also why `TouchHelper` writes it only while its own `touchDown` is set — `ownsGesture()` stays true after a gesture ends. It releases ownership, so the client's end that follows writes nothing |
 
 When changing the Swift source, **always update both locations simultaneously**:
 1. `src/touch-helper.swift` — stdin protocol changes
