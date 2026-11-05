@@ -54,7 +54,8 @@ export class ScrcpyControl {
 
   /**
    * Cancel the touch (#1115), then release it: the server forgets a pointer only on an up, and one left in its state
-   * turns the next touch into a second pointer. Android drops that up as inconsistent once the cancel has landed.
+   * turns the next touch into a second pointer. Android is expected to drop that up as inconsistent once the cancel
+   * has landed (an up with no touched window) — read from the dispatcher, not measured on a device.
    */
   touchCancel(pointerId: number, x = 0, y = 0): void {
     this.writeTouchEvent(ACTION_CANCEL, pointerId, x, y)

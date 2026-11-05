@@ -2067,7 +2067,7 @@ export class RelayServer {
         // These carry no correlator by declaration, so nothing was ever gated on one here — and the
         // address is now the schema's business rather than this clause's. What the split still buys is
         // unchanged and is the reason it exists: a correlator gate written into a shared body would have
-        // reached these six as well, dropping every opening and move frame with the answered five.
+        // reached these eight as well, dropping every opening and move frame with the answered five.
         this.forwardUnacked(ws, msg)
         break
       }
@@ -3117,7 +3117,9 @@ export class RelayServer {
         session.gesture = null
         // The end a leaving client sends after its cancel. An agent that announced `touch-cancel` lifted the touch
         // on the cancel and injects nothing for this end, so there is nothing to show; one that did not completes
-        // the gesture with this end, and the watcher is told the tap it was.
+        // the gesture with this end, and the watcher is told the tap it was. The capability is per agent, not per
+        // device: where that agent can only lift with an up (a Duo's guest helper, iOS's mouse path, an Android 10
+        // or older image), the cancel was a tap the watcher is not shown — the device does what it did before.
         if (session.touchCancelled) { session.touchCancelled = false; break }
         action = gestureAction(g?.start ?? null, msg.payload ?? g?.last ?? null)
         break

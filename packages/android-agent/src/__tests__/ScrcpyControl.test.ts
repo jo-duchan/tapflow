@@ -57,6 +57,22 @@ describe('ScrcpyControl', () => {
     })
   })
 
+  // CANCEL (3), then UP: the server forgets a pointer only on an up, and one it kept turns the next touch into a
+  // second pointer (#1115). Both carry no pressure.
+  describe('touchCancel', () => {
+    it('writes CANCEL then UP for the pointer, at the point given, with zero pressure', () => {
+      ctrl.touchCancel(0, 270, 1800)
+      const bufs: Buffer[] = (socket.write as ReturnType<typeof vi.fn>).mock.calls.map((c) => c[0] as Buffer)
+      expect(bufs.map((b) => b.readUInt8(1))).toEqual([3, 1])
+      for (const b of bufs) {
+        expect(b.readBigInt64BE(2)).toBe(0n)
+        expect(b.readInt32BE(10)).toBe(270)
+        expect(b.readInt32BE(14)).toBe(1800)
+        expect(b.readUInt16BE(22)).toBe(0)
+      }
+    })
+  })
+
   describe('pinchStart', () => {
     it('sends touchDown for pointerId 0 then pointerId 1', () => {
       ctrl.pinchStart(100, 200, 300, 400)

@@ -61,6 +61,8 @@ export interface Device {
 // `touch-cancel`: the agent takes `input:touch:cancel` as a cancel — the app sees its touch cancelled, and the
 // `input:touch:end` a leaving client sends after it injects nothing (#1115). The relay reads it to leave that end out
 // of what a watcher is shown; an agent without it completes the gesture with the end, which is a tap worth showing.
+// It says the agent takes the message, not that every device of it can cancel: where one can only lift with an up,
+// the cancel itself is a tap, which the watcher then misses.
 //
 // **The vocabulary, not a declaration (#700).** This is every capability any agent can name. What one
 // agent *implements* is its own list, typed against this — an agent that announced the whole set

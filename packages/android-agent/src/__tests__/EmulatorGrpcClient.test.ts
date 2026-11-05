@@ -360,4 +360,19 @@ describe('touchCancel', () => {
     await client.touchDown(0, 10, 10)
     expect(log).toEqual(['palm', 'up', 'finger', 'finger', 'down', 'down'])
   })
+
+  // The check happens in the press's own queued step: a press made while the cancel is still queued must see its
+  // put-back fail, not the state at the moment it was called.
+  it('puts the slot back for a press queued behind the cancel, and for a pinch', async () => {
+    const queued = recording({ restoreFails: true })
+    const cancel = queued.client.touchCancel(0, 10, 10)
+    const press = queued.client.touchDown(0, 10, 10)
+    await Promise.all([cancel, press])
+    expect(queued.log).toEqual(['palm', 'up', 'finger', 'finger', 'down'])
+
+    const pinch = recording({ restoreFails: true })
+    await pinch.client.touchCancel(0, 10, 10)
+    await pinch.client.pinchStart(10, 10, 20, 20)
+    expect(pinch.log).toEqual(['palm', 'up', 'finger', 'finger', 'down'])
+  })
 })

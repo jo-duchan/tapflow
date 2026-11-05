@@ -128,8 +128,9 @@ export class EmulatorGrpcClient {
   private touchQueue: Promise<void> = Promise.resolve()
   // A cancel marks its slot a palm and puts it back to a finger after (`touchCancel`). The emulator's own touches
   // never set the tool type, so a slot left a palm would cancel every later touch on it while each was acked
-  // delivered. When putting it back fails, the next press puts it back first.
-  private toolTypeDirty = false
+  // delivered. A slot whose put-back failed is kept here, and the next press on it puts it back first — checked
+  // inside the press's queued step, so a press queued behind the cancel sees the cancel's outcome.
+  private readonly palmSlots = new Set<number>()
 
   /** `raw` is injectable so tests can drive it without a live emulator. */
   constructor(addr: string, raw?: RawEmulatorController) {
@@ -250,10 +251,16 @@ export class EmulatorGrpcClient {
     return this.sendEvents([[EV_ABS, ABS_MT_SLOT, slot], [EV_ABS, ABS_MT_TOOL_TYPE, tool], [EV_SYN, SYN_REPORT, 0]])
   }
 
+  private async restoreFingers(slots: number[]): Promise<void> {
+    for (const slot of slots) {
+      if (!this.palmSlots.has(slot)) continue
+      await this.toolType(slot, MT_TOOL_FINGER).then(() => { this.palmSlots.delete(slot) }, () => {})
+    }
+  }
+
   touchDown(pointerId: number, x: number, y: number): Promise<void> {
-    if (!this.toolTypeDirty) return this.touch([{ x, y, identifier: pointerId, pressure: 1 }])
     return this.enqueue(async () => {
-      await this.toolType(pointerId, MT_TOOL_FINGER).then(() => { this.toolTypeDirty = false }, () => {})
+      await this.restoreFingers([pointerId])
       await this.sendTouch([{ x, y, identifier: pointerId, pressure: 1 }])
     })
   }
@@ -272,7 +279,7 @@ export class EmulatorGrpcClient {
       try {
         await this.sendTouch([{ x, y, identifier: pointerId, pressure: 0 }])
       } finally {
-        await this.toolType(pointerId, MT_TOOL_FINGER).then(() => { this.toolTypeDirty = false }, () => { this.toolTypeDirty = true })
+        await this.toolType(pointerId, MT_TOOL_FINGER).then(() => { this.palmSlots.delete(pointerId) }, () => { this.palmSlots.add(pointerId) })
       }
     })
   }
@@ -286,10 +293,13 @@ export class EmulatorGrpcClient {
   }
 
   pinchStart(x1: number, y1: number, x2: number, y2: number): Promise<void> {
-    return this.touch([
-      { x: x1, y: y1, identifier: 0, pressure: 1 },
-      { x: x2, y: y2, identifier: 1, pressure: 1 },
-    ])
+    return this.enqueue(async () => {
+      await this.restoreFingers([0, 1])
+      await this.sendTouch([
+        { x: x1, y: y1, identifier: 0, pressure: 1 },
+        { x: x2, y: y2, identifier: 1, pressure: 1 },
+      ])
+    })
   }
 
   pinchMove(x1: number, y1: number, x2: number, y2: number): Promise<void> {

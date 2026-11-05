@@ -2737,7 +2737,13 @@ export class AndroidAgent implements DeviceAgent, NetworkControlCapability {
    * `channel-down` would toast "not reaching this device" and tell MCP to reconnect for nothing. Only
    * with no gesture at all and no backend either is the channel what there is to report.
    */
-  private closeGesture(state: DeviceState, kind: 'touch' | 'pinch'): GestureBackend | { via: 'none'; outcome: InputOutcome } {
+  private closeGesture(
+    state: DeviceState,
+    kind: 'touch' | 'pinch',
+    // How a pointer left down on a replaced channel is let go: an up for an end, a cancel for a cancel (#1115) —
+    // an up there would complete the gesture the cancel exists to stop.
+    release: (pc: PointerControl) => void | Promise<void> = (pc) => (kind === 'touch' ? pc.touchUp(0, state.lastTouchPx.x, state.lastTouchPx.y) : pc.pinchEnd()),
+  ): GestureBackend | { via: 'none'; outcome: InputOutcome } {
     // An end of the other kind closes nothing: a stray touch end must not take an open pinch's record
     // with it, or the pinch's own end would find nothing and leave its second pointer down.
     if (state.gesture && state.gesture.kind !== kind) return { via: 'none', outcome: 'no-gesture' }
@@ -2753,7 +2759,7 @@ export class AndroidAgent implements DeviceAgent, NetworkControlCapability {
     // after a press still in flight on the replaced one — a restart in mid-tap is the window.
     const pc = this.pointerControl(state)
     if (opened?.via === 'channel' && pc) {
-      this.fire(kind === 'touch' ? pc.touchUp(0, state.lastTouchPx.x, state.lastTouchPx.y) : pc.pinchEnd())
+      this.fire(release(pc))
     }
     if (!opened && !pc && !state.touchHelper) return { via: 'none', outcome: 'channel-down' }
     return { via: 'none', outcome: 'no-gesture' }
@@ -3039,8 +3045,8 @@ export class AndroidAgent implements DeviceAgent, NetworkControlCapability {
       case 'input:touch:cancel': {
         const state = this.deviceStates.get(msg.sessionId)
         if (!state) break
-        const closed = this.closeGesture(state, 'touch')
         const { x, y } = state.lastTouchPx
+        const closed = this.closeGesture(state, 'touch', (pc) => pc.touchCancel(0, x, y))
         if (closed.via === 'helper') closed.owner.touchCancel()
         else if (closed.via === 'channel') {
           const owner = closed.owner

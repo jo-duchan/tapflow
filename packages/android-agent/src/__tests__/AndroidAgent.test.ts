@@ -3483,6 +3483,17 @@ describe('AndroidAgent', () => {
         expect(helper().touchEnd).not.toHaveBeenCalled()
       })
 
+      // A cancel lets go with a cancel there too: an up on the channel serving now would complete the gesture (#1115).
+      it('cancels on the channel serving now when the one that opened the touch was replaced', () => {
+        inject({ type: 'input:touch:start', payload: { x: 0.25, y: 0.75 } })
+        const old = control()
+        replaceSession()
+        inject({ type: 'input:touch:cancel' })
+        expect(old.touchCancel).not.toHaveBeenCalled()
+        expect(control().touchCancel).toHaveBeenCalledWith(0, 270, 1800)
+        expect(control().touchUp).not.toHaveBeenCalled()
+      })
+
       it('answers no-gesture, not channel-down, when a restart has emptied everything', async () => {
         // The touch-down did land, on the channel the restart just dropped; the stream heals by itself
         // a moment later. `channel-down` would toast "not reaching this device" and tell MCP to reconnect.

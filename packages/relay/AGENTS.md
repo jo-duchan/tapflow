@@ -102,8 +102,9 @@ iOS build format: `.app.zip` **or** `.tar.gz`/`.tgz` (EAS `eas build` simulator 
   and both want a reconnect or a re-join; the machine field was right for both while the prose was
   wrong for one, which is the concrete case for reading `reason` rather than `message` (#492).
   **Everything else gets nothing, and that is the contract**: opening and move frames, `input:rotate`,
-  `input:posture` and `input:keyboard:toggle` have no waiter, so a reply would be one nobody is listening for.
-  The twelve `input:*` cases are **two clauses**, split by whether an ack answers them, and the split is
+  `input:posture`, `input:keyboard:toggle` and `input:touch:cancel` (whose sender is leaving, #1115) have no
+  waiter, so a reply would be one nobody is listening for.
+  The thirteen `input:*` cases are **two clauses**, split by whether an ack answers them, and the split is
   load-bearing rather than tidy — the correlator gate belongs on the answered five, and written into the
   shared body it would have dropped every opening and move frame with it.
 - **A browser-role command is acted on only from the client the session is bound to** — one client's several sockets are one holder, which is what a browser tab needs and what a socket could not express. The mirror of the
