@@ -58,14 +58,14 @@ describe('lookupBuild', () => {
   const answer = (status: number, body: unknown) =>
     vi.fn(async () => new Response(typeof body === 'string' ? body : JSON.stringify(body), { status }))
 
-  it('returns the bundle id of a found build', async () => {
-    const f = answer(200, { id: 42, bundle_id: 'com.a' })
-    expect(await lookupBuild('http://relay', tokens, 42, f)).toEqual({ kind: 'found', bundleId: 'com.a' })
+  it('returns the bundle id and platform of a found build', async () => {
+    const f = answer(200, { id: 42, bundle_id: 'com.a', platform: 'ios' })
+    expect(await lookupBuild('http://relay', tokens, 42, f)).toEqual({ kind: 'found', bundleId: 'com.a', platform: 'ios' })
     expect(f).toHaveBeenCalledWith('http://relay/api/v1/builds/42', expect.anything())
   })
 
   it('returns a null bundle id when the relay has none', async () => {
-    expect(await lookupBuild('http://relay', tokens, 42, answer(200, { id: 42, bundle_id: null }))).toEqual({ kind: 'found', bundleId: null })
+    expect(await lookupBuild('http://relay', tokens, 42, answer(200, { id: 42, bundle_id: null }))).toEqual({ kind: 'found', bundleId: null, platform: null })
   })
 
   it('treats 404 as a build that does not exist', async () => {

@@ -116,7 +116,38 @@
               }
             },
             "assertVisible": { "$ref": "#/definitions/selector" },
-            "assertNotVisible": { "$ref": "#/definitions/selector" }
+            "assertNotVisible": { "$ref": "#/definitions/selector" },
+            "pressButton": {
+              "type": "string",
+              "minLength": 1,
+              "description": "Press a hardware button: home, lock, volume_up, volume_down on both platforms; back, recent_apps, power on Android. A flow pressing a button the device lacks fails before it runs."
+            },
+            "longPressOn": {
+              "description": "Press and hold the element a selector names. A bare selector holds for 1000ms; to change the time, put the selector under \"on\".",
+              "oneOf": [
+                { "$ref": "#/definitions/selector" },
+                {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": ["on"],
+                  "properties": {
+                    "on": { "$ref": "#/definitions/selector" },
+                    "durationMs": { "type": "number", "exclusiveMinimum": 0, "maximum": 60000, "default": 1000 }
+                  }
+                }
+              ]
+            },
+            "pinch": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["on", "scale"],
+              "description": "Two fingers about the center of an element or a point: scale above 1 spreads them (zoom in), below 1 closes them.",
+              "properties": {
+                "on": { "oneOf": [{ "$ref": "#/definitions/selector" }, { "$ref": "#/definitions/point" }] },
+                "scale": { "type": "number", "minimum": 0.1, "maximum": 10, "not": { "const": 1 } },
+                "durationMs": { "type": "number", "exclusiveMinimum": 0, "maximum": 60000, "default": 500 }
+              }
+            }
           }
         }
       ]

@@ -237,6 +237,79 @@ steps:
     })
   })
 
+  describe('pressButton', () => {
+    it('takes any non-empty name: whether the device has it is decided against the device, not here', () => {
+      expect(parseFlow('steps:\n  - pressButton: home\n', 'x.yaml').steps[0]).toEqual({ type: 'pressButton', name: 'home' })
+      expect(parseFlow('steps:\n  - pressButton: action\n', 'x.yaml').steps[0]).toEqual({ type: 'pressButton', name: 'action' })
+    })
+
+    it.each([['a number', 'pressButton: 3'], ['an empty name', 'pressButton: ""'], ['a mapping', 'pressButton: { name: home }']])(
+      'refuses %s', (_, step) => {
+        expect(() => parseFlow(`steps:\n  - ${step}\n`, 'x.yaml')).toThrow(/steps\[0\]: "pressButton" must be a button name/)
+      },
+    )
+  })
+
+  describe('longPressOn', () => {
+    it('holds a bare selector for the default time, matched exactly as tapOn matches it', () => {
+      expect(parseFlow('steps:\n  - longPressOn: "Save"\n', 'x.yaml').steps[0])
+        .toEqual({ type: 'longPressOn', selector: { text: 'Save' }, durationMs: 1000 })
+      expect(parseFlow('steps:\n  - longPressOn: { id: save }\n', 'x.yaml').steps[0])
+        .toEqual({ type: 'longPressOn', selector: { id: 'save' }, durationMs: 1000 })
+    })
+
+    // `{ label, durationMs }` would have changed how "Save" matches (label only, never the identifier) just to change
+    // the time, and put a seconds field and a milliseconds field in one mapping.
+    it('takes a duration only around the selector, which keeps the bare string\'s matching', () => {
+      expect(parseFlow('steps:\n  - longPressOn: { on: "Save", durationMs: 1500 }\n', 'x.yaml').steps[0])
+        .toEqual({ type: 'longPressOn', selector: { text: 'Save' }, durationMs: 1500 })
+      expect(parseFlow('steps:\n  - longPressOn: { on: { label: Save, timeout: 3 } }\n', 'x.yaml').steps[0])
+        .toEqual({ type: 'longPressOn', selector: { label: 'Save', timeoutMs: 3000 }, durationMs: 1000 })
+    })
+
+    it.each([
+      ['a duration on the selector itself', 'longPressOn: { label: Save, durationMs: 1500 }', /put the selector under "on"/],
+      ['a negative duration', 'longPressOn: { on: Save, durationMs: -1 }', /"durationMs" must be a positive number no greater than 60000ms/],
+      ['a hold past a minute', 'longPressOn: { on: Save, durationMs: 61000 }', /no greater than 60000ms/],
+      ['an unknown key beside "on"', 'longPressOn: { on: Save, hold: 2 }', /unknown longPressOn keys: hold/],
+      ['an empty selector', 'longPressOn: ""', /selector must not be empty/],
+    ])('refuses %s', (_, step, message) => {
+      expect(() => parseFlow(`steps:\n  - ${step}\n`, 'x.yaml')).toThrow(message)
+    })
+  })
+
+  describe('pinch', () => {
+    it('pinches around an element or a point, by a scale', () => {
+      expect(parseFlow('steps:\n  - pinch: { on: Map, scale: 2 }\n', 'x.yaml').steps[0])
+        .toEqual({ type: 'pinch', on: { text: 'Map' }, scale: 2, durationMs: 500 })
+      expect(parseFlow('steps:\n  - pinch: { on: [0.5, 0.4], scale: 0.5, durationMs: 800 }\n', 'x.yaml').steps[0])
+        .toEqual({ type: 'pinch', on: [0.5, 0.4], scale: 0.5, durationMs: 800 })
+    })
+
+    it.each([
+      ['no scale', 'pinch: { on: Map }', /"scale" must be a number from 0.1 to 10, other than 1/],
+      ['a scale of 1', 'pinch: { on: Map, scale: 1 }', /other than 1/],
+      ['a zero scale', 'pinch: { on: Map, scale: 0 }', /from 0.1 to 10/],
+      ['a scale past 10', 'pinch: { on: Map, scale: 11 }', /from 0.1 to 10/],
+      ['no target', 'pinch: { scale: 2 }', /"on" must be a selector or \[x, y\]/],
+      ['a point off the screen', 'pinch: { on: [1.2, 0.5], scale: 2 }', /"on" must be \[x, y\] with normalized 0-1 coordinates/],
+      ['an unknown key', 'pinch: { on: Map, scale: 2, angle: 30 }', /unknown pinch keys: angle/],
+      ['a bare string', 'pinch: Map', /"pinch" must be \{ on, scale, durationMs\? \}/],
+    ])('refuses %s', (_, step, message) => {
+      expect(() => parseFlow(`steps:\n  - ${step}\n`, 'x.yaml')).toThrow(message)
+    })
+  })
+
+  it('agrees with the JSON schema on the input steps\' limits', () => {
+    const schema = JSON.parse(readFileSync(join(dirname(fileURLToPath(import.meta.url)), '..', '..', 'schema', 'tapflow-flow.schema.json'), 'utf8'))
+    const steps = schema.definitions.step.oneOf.find((s: { properties?: Record<string, unknown> }) => s.properties?.pinch).properties
+    expect(steps.pressButton.minLength).toBe(1)
+    const hold = steps.longPressOn.oneOf[1].properties.durationMs
+    expect([hold.exclusiveMinimum, hold.maximum, hold.default]).toEqual([0, 60000, 1000])
+    const pinch = steps.pinch.properties
+    expect([pinch.scale.minimum, pinch.scale.maximum, pinch.durationMs.maximum, pinch.durationMs.default]).toEqual([0.1, 10, 60000, 500])
+  })
+
   it('keeps the JSON schema timeout floor consistent with the parser', () => {
     // The parser rejects timeouts that round to 0ms, i.e. anything below
     // 0.0005s — so the shipped JSON schema must reject them too, or

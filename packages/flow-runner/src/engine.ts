@@ -1,9 +1,13 @@
 import type { UIElement } from '@tapflowio/agent-core'
-import type { LaunchApplied, LaunchOptions } from '@tapflowio/protocol'
+import type { ChromePayload, LaunchApplied, LaunchOptions } from '@tapflowio/protocol'
 import type { Flow, Selector, Step, ScrollDirection } from './schema.js'
 import { matchSelector } from './selector.js'
 import { suggestSelectors, type SelectorSuggestion } from './suggest.js'
 import { EnvironmentStepError, isEnvironmentStepFailure, TransientQueryError } from './errors.js'
+import { unavailableButton, unavailableButtonMessage } from './platformCheck.js'
+
+/** Two fingers, each `[x, y]` normalized 0-1. */
+export type PinchFingers = [[number, number], [number, number]]
 
 // Transport-agnostic device surface the engine drives (DIP): the relay-backed
 // implementation lives in RelayDriver, tests use fakes, and mcp-server adapts
@@ -23,6 +27,16 @@ export interface FlowDriver {
   launchApp(options?: LaunchOptions): Promise<LaunchApplied | void>
   clearState(appId: string): Promise<void>
   screenshot(signal?: AbortSignal): Promise<Buffer>
+  pressButton(name: string): Promise<void>
+  /** Press at a point, hold it for `durationMs`, release. */
+  longPress(x: number, y: number, durationMs: number): Promise<void>
+  /** Two fingers from `start` to `end` over `durationMs`, moving in steps rather than jumping. */
+  pinch(start: PinchFingers, end: PinchFingers, durationMs: number): Promise<void>
+  /**
+   * The device's chrome, waiting up to `timeoutMs` for one to arrive; `null` when none did. Optional: only an iOS
+   * `pressButton` other than home needs it, and a driver without it runs those flows unchecked, as before.
+   */
+  chrome?(timeoutMs: number): Promise<ChromePayload | null>
 }
 
 export interface EngineOptions {
@@ -37,6 +51,11 @@ export interface EngineOptions {
   /** Told as each step starts and ends — the run's video marks its timeline with them. Must not throw. */
   /** `label`, on a step's start, is its name as watchers may see it (`activityLabel`). */
   onStep?: (mark: { index: number; name: string; phase: 'start' | 'end'; status?: 'passed' | 'failed'; label?: string }) => void
+  /**
+   * The device's platform (`ios`, `android`). With it, a flow pressing a button the device lacks is refused before its
+   * first step instead of answered with a press that did nothing (`failedBeforeRun`). Without it, nothing is checked.
+   */
+  platform?: string
 }
 
 export interface StepResult {
@@ -69,6 +88,12 @@ export interface FlowResult {
    * (CLI, MCP) never branch on prose.
    */
   failureKind?: 'environment' | 'product'
+  /**
+   * The flow was refused before any step reached the device, because of what the flow asks for — a button this
+   * device lacks. Environmental for the exit code, but **the device is not suspect**: a `--parallel` worker leaves a
+   * device after an environment failure, and must not leave a healthy one over a flow that could never run on it.
+   */
+  failedBeforeRun?: true
 }
 
 const DEFAULT_TIMEOUT_MS = 10_000
@@ -152,6 +177,9 @@ function describeStep(step: Step): string {
     case 'openUrl': return `openUrl(${step.url})`
     case 'assertVisible': return `assertVisible(${describeSelector(step.selector)})`
     case 'assertNotVisible': return `assertNotVisible(${describeSelector(step.selector)})`
+    case 'pressButton': return `pressButton(${step.name})`
+    case 'longPressOn': return `longPressOn(${describeSelector(step.selector)}, ${step.durationMs}ms)`
+    case 'pinch': return `pinch(${Array.isArray(step.on) ? `[${step.on.join(',')}]` : describeSelector(step.on)}, ×${step.scale})`
   }
 }
 
@@ -403,6 +431,32 @@ function screenShape(tree: UIElement[]): string {
   return JSON.stringify(tree.map((e) => [e.role, e.label, e.identifier ?? '']))
 }
 
+// Fingers keep this far inside the screen's edge; an edge pixel is often the system's own gesture area.
+const PINCH_EDGE = 0.02
+// The wider of the two spacings, as a half-width. Spread out further and a recogniser gains nothing.
+const PINCH_WIDE_HALF = 0.3
+// The narrower one may not close past this: two touches that near can be read as one.
+const PINCH_NARROW_HALF = 0.02
+
+/**
+ * Two fingers mirrored about `center` whose spacing changes by exactly `scale`. The scale is what the flow means, so it
+ * is kept; the spacing is what adapts — the axis with more room, as wide as that room allows up to
+ * `PINCH_WIDE_HALF`. `null` when even that cannot fit the narrower spacing, which only a center at a corner reaches.
+ */
+function pinchFingers(center: [number, number], scale: number): { start: PinchFingers; end: PinchFingers } | null {
+  const [cx, cy] = center
+  const roomX = Math.min(cx - PINCH_EDGE, 1 - PINCH_EDGE - cx)
+  const roomY = Math.min(cy - PINCH_EDGE, 1 - PINCH_EDGE - cy)
+  const alongX = roomX >= roomY
+  const wide = Math.min(PINCH_WIDE_HALF, alongX ? roomX : roomY)
+  const narrow = wide / Math.max(scale, 1 / scale)
+  if (narrow < PINCH_NARROW_HALF) return null
+  const fingers = (half: number): PinchFingers => alongX
+    ? [[round4(cx - half), cy], [round4(cx + half), cy]]
+    : [[cx, round4(cy - half)], [cx, round4(cy + half)]]
+  return scale > 1 ? { start: fingers(narrow), end: fingers(wide) } : { start: fingers(wide), end: fingers(narrow) }
+}
+
 // Resolves to what a launch applied; every other step to nothing.
 async function executeStep(step: Step, flow: Flow, driver: FlowDriver, timeoutMs: number, pollIntervalMs: number): Promise<LaunchApplied | void> {
   switch (step.type) {
@@ -436,12 +490,70 @@ async function executeStep(step: Step, flow: Flow, driver: FlowDriver, timeoutMs
     case 'openUrl': return driver.openUrl(step.url)
     case 'assertVisible': return waitVisible(driver, step.selector, timeoutMs, pollIntervalMs)
     case 'assertNotVisible': return waitNotVisible(driver, step.selector, timeoutMs, pollIntervalMs)
+    case 'pressButton': return driver.pressButton(step.name)
+    case 'longPressOn': {
+      const el = await resolveOne(driver, step.selector, timeoutMs, pollIntervalMs)
+      return driver.longPress(round4(el.frame.x + el.frame.width / 2), round4(el.frame.y + el.frame.height / 2), step.durationMs)
+    }
+    case 'pinch': {
+      let center: [number, number]
+      if (Array.isArray(step.on)) center = step.on
+      else {
+        const el = await resolveOne(driver, step.on, timeoutMs, pollIntervalMs)
+        center = [round4(el.frame.x + el.frame.width / 2), round4(el.frame.y + el.frame.height / 2)]
+      }
+      const path = pinchFingers(center, step.scale)
+      if (!path) throw new StepFailure(`the pinch center [${center.join(', ')}] is too close to the edge of the screen to fit two fingers changing their spacing ×${step.scale} — pinch on a point further in`)
+      return driver.pinch(path.start, path.end, step.durationMs)
+    }
   }
+}
+
+/**
+ * A flow refused before its first step: the step that could not run is `failed`, every other `skipped`, and nothing
+ * reached the device. Exported so the CLI can refuse a flow the same way before a device is even chosen.
+ */
+export function refusedFlow(flow: Flow, index: number, message: string, options: { beforeRun: boolean }): FlowResult {
+  const failed = describeStep(flow.steps[index]!)
+  return {
+    name: flow.name,
+    ...(flow.file !== undefined ? { file: flow.file } : {}),
+    status: 'failed',
+    steps: flow.steps.map((step, i) => i === index
+      ? { index: i, name: failed, status: 'failed', durationMs: 0, message }
+      : { index: i, name: describeStep(step), status: 'skipped', durationMs: 0 }),
+    durationMs: 0,
+    failureMessage: `${failed}: ${message}`,
+    failureKind: 'environment',
+    ...(options.beforeRun ? { failedBeforeRun: true as const } : {}),
+  }
+}
+
+/** The refusal for a button this device lacks, or `null` to run. See `unavailableButton`. */
+async function refuseButtons(flow: Flow, driver: FlowDriver, platform: string, timeoutMs: number): Promise<FlowResult | null> {
+  let verdict = unavailableButton(flow, platform)
+  if (verdict === 'needs-chrome') {
+    if (!driver.chrome) return null
+    const chrome = await driver.chrome(timeoutMs)
+    if (chrome === null) {
+      const index = flow.steps.findIndex((s) => s.type === 'pressButton')
+      // The device's fault rather than the flow's, so not marked `beforeRun`: a device that never describes itself may
+      // be one to leave.
+      return refusedFlow(flow, index, `the device did not report its buttons within ${timeoutMs / 1000}s, so whether it can press this cannot be checked`, { beforeRun: false })
+    }
+    verdict = unavailableButton(flow, platform, chrome)
+  }
+  if (verdict === null || verdict === 'needs-chrome') return null
+  return refusedFlow(flow, verdict.index, unavailableButtonMessage(verdict, platform), { beforeRun: true })
 }
 
 export async function runFlow(flow: Flow, driver: FlowDriver, options: EngineOptions = {}): Promise<FlowResult> {
   const timeoutMs = normalizeTimeoutMs(options.defaultTimeoutMs ?? DEFAULT_TIMEOUT_MS, 'default timeout')
   const pollIntervalMs = options.pollIntervalMs ?? DEFAULT_POLL_INTERVAL_MS
+  if (options.platform !== undefined) {
+    const refused = await refuseButtons(flow, driver, options.platform, timeoutMs)
+    if (refused) return refused
+  }
   const started = Date.now()
   const steps: StepResult[] = []
   let failureMessage: string | undefined

@@ -174,12 +174,13 @@ describe('both clients declare what they do with every browser-inbound message',
   it('the two tables disagree, which is why they are not one file', () => {
     // If they were identical, a shared module would be right and the duplication would be waste. They are
     // not: `flow-runner` sends no shutdown, so it ignores a pair `mcp-server` settles waiters on, and it reads the
-    // chrome and device info into a run's video (A4), which `mcp-server` has no use for. Asserted rather than
-    // trusted, because the day they *do* converge is the day this decision should be revisited. The lease pair
-    // differs too: only the flow runner leases, an MCP agent picks its device.
+    // device info into a run's video (A4), which `mcp-server` has no use for. Asserted rather than trusted, because
+    // the day they *do* converge is the day this decision should be revisited. The lease pair differs too: only the
+    // flow runner leases, an MCP agent picks its device. `session:chrome` left this list when both began keeping it
+    // for the buttons a flow's `pressButton` is checked against before it runs.
     const [mcp, flow] = PACKAGES.map(({ dir }) =>
       entries(readFileSync(join(root, dir, 'inboundDisposition.ts'), 'utf8')))
     const differing = [...mcp].filter(([t, v]) => HANDLED.test(v) !== HANDLED.test(flow.get(t) ?? ''))
-    expect(differing.map(([t]) => t).sort()).toEqual(['device:lease-refused', 'device:leased', 'device:shutdown-done', 'device:shutdown-error', 'session:chrome', 'session:deviceInfo'])
+    expect(differing.map(([t]) => t).sort()).toEqual(['device:lease-refused', 'device:leased', 'device:shutdown-done', 'device:shutdown-error', 'session:deviceInfo'])
   })
 })

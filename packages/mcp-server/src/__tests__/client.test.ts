@@ -19,7 +19,7 @@ function createMockRelay(): {
   const received: Record<string, unknown>[] = []
   let conn: WebSocket | null = null
   let inputAck: 'done' | 'error' | 'error-with-reason' | 'none' = 'done'
-  const TERMINAL = new Set(['input:touch:end', 'input:key', 'input:button'])
+  const TERMINAL = new Set(['input:touch:end', 'input:key', 'input:button', 'input:pinch:end'])
 
   wss.on('connection', (ws) => {
     conn = ws
@@ -634,6 +634,59 @@ describe('TapflowClient', () => {
       await client.pressKey('sess-1', 'Backspace')
       const msg = await waitForMessage(relay, 'input:key')
       expect(msg).toMatchObject({ payload: { code: 'Backspace', modifiers: 0 } })
+    })
+  })
+
+  describe('longPress', () => {
+    it('holds one point for the duration with no moves, and refuses a hold past a minute', async () => {
+      const started = Date.now()
+      await client.longPress('sess-1', 0.3, 0.7, 100)
+      expect(Date.now() - started).toBeGreaterThanOrEqual(95)
+      const msgs = relay.sentMessages().filter((m) => String(m['type']).startsWith('input:'))
+      expect(msgs.map((m) => m['type'])).toEqual(['input:touch:start', 'input:touch:end'])
+      expect(msgs[1]).toMatchObject({ payload: { x: 0.3, y: 0.7 } })
+      await expect(client.longPress('sess-1', 0.3, 0.7, 60_001)).rejects.toThrow(/no greater than 60000ms/)
+    })
+
+    // Android's adb path replays the hold after the end arrives, so the ack comes that much later than a tap's.
+    it('waits for its ack a hold longer than a tap does', async () => {
+      const timeouts: number[] = []
+      const real = globalThis.setTimeout
+      const spy = vi.spyOn(globalThis, 'setTimeout').mockImplementation(((fn: () => void, ms?: number) => {
+        timeouts.push(ms ?? 0)
+        return real(fn, ms)
+      }) as typeof setTimeout)
+      try {
+        await client.longPress('sess-1', 0.5, 0.5, 40)
+      } finally {
+        spy.mockRestore()
+      }
+      expect(timeouts).toContain(2_000 + 40)
+    })
+  })
+
+  describe('pinch', () => {
+    // `pinch:end` carries no position, so the last move must be the end; and the agents inject each move as it
+    // arrives, so the pace is set here.
+    it('paces eight moves over the duration, ending on the end position', async () => {
+      const started = Date.now()
+      await client.pinch('sess-1', [[0.4, 0.5], [0.6, 0.5]], [[0.2, 0.5], [0.8, 0.5]], 80)
+      expect(Date.now() - started).toBeGreaterThanOrEqual(75)
+      const msgs = relay.sentMessages().filter((m) => String(m['type']).startsWith('input:pinch'))
+      expect(msgs[0]).toMatchObject({ type: 'input:pinch:start', payload: { f0: { x: 0.4, y: 0.5 }, f1: { x: 0.6, y: 0.5 } } })
+      const moves = msgs.filter((m) => m['type'] === 'input:pinch:move')
+      expect(moves).toHaveLength(8)
+      expect(moves.at(-1)).toMatchObject({ payload: { f0: { x: 0.2 }, f1: { x: 0.8 } } })
+      expect(msgs.at(-1)!['type']).toBe('input:pinch:end')
+    })
+  })
+
+  describe('chrome', () => {
+    it('keeps the chrome the relay sent, and answers null when none comes', async () => {
+      expect(await client.chrome('sess-1', 20)).toBeNull()
+      relay.send({ type: 'session:chrome', sessionId: 'sess-1', payload: { buttons: [], streamType: 'h264' } })
+      await settle(relay, client)
+      expect(await client.chrome('sess-1', 1)).toEqual({ buttons: [], streamType: 'h264' })
     })
   })
 

@@ -13,6 +13,10 @@ import type {
   AppInstallReplyBody, AppLaunchReplyBody, AppLaunchToAgent, LaunchOptions, AppClearStateReplyBody, FormFactor, ServiceTier, RunResetReport, RunResetRequest,
 } from '@tapflowio/protocol'
 import { appliedKeys, compactLaunchOptions, launchOptionsProblem } from '@tapflowio/protocol/launch'
+// Cross-platform button name → iOS device-chrome button name. Chrome uses hyphens and "power" (not "lock"); MCP's
+// vocabulary uses underscores. Names not listed (incl. the raw chrome names the dashboard sends) pass through. In
+// protocol so flow-runner refuses, before a run, exactly the names this handler would answer with a no-op.
+import { IOS_BUTTON_ALIASES } from '@tapflowio/protocol/buttons'
 
 const logger = createLogger('ios-agent')
 
@@ -45,14 +49,6 @@ const INPUT_ERROR_MESSAGES: Record<InputErrorReason, string> = {
   'not-session-owner': 'this input was addressed to a session the sender does not hold',
 }
 
-// Cross-platform button name → iOS device-chrome button name. Chrome uses
-// hyphens and "power" (not "lock"); MCP's vocabulary uses underscores. Names
-// not listed here (incl. the raw chrome names the dashboard sends) pass through.
-export const IOS_BUTTON_ALIASES: Record<string, string> = {
-  lock: 'power',
-  volume_up: 'volume-up',
-  volume_down: 'volume-down',
-}
 import {
   createResourceSampler,
   registerStreamWs,

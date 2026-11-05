@@ -90,7 +90,8 @@ export const INBOUND_DISPOSITION = {
   },
   'session:chrome': {
     does: 'handed to the stream listener when one is set, so the run\'s video can draw the device frame it was '
-      + 'recorded in; the engine never reads it — selectors come from the UI tree in normalized coordinates',
+      + 'recorded in, and kept per session so the engine can check a flow\'s `pressButton` steps against the buttons '
+      + 'the device declares before running it — selectors still come from the UI tree, never from this',
   },
   'session:deviceInfo': {
     does: 'handed to the stream listener when one is set and written into the run\'s video beside the chrome; '

@@ -3,7 +3,7 @@ import fs from 'fs'
 import os from 'os'
 import path from 'path'
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
-import { EnvironmentStepError, isEligible, parseFlow, runFlow, type FlowDriver } from '@tapflowio/flow-runner'
+import { EnvironmentStepError, isEligible, parseFlow, refusedFlow, runFlow, unavailableButton, unavailableButtonMessage, type FlowDriver, type FlowResult } from '@tapflowio/flow-runner'
 import { SessionEndedError, SessionLeftError, type TapflowClient } from './client.js'
 import { TESTING_GUIDE } from './guide.js'
 import { compactLaunchOptions, launchOptionsProblem, type LaunchApplied } from '@tapflowio/protocol/launch'
@@ -96,6 +96,32 @@ export function makeFlowDriver(client: TapflowClient, sessionId: string, buildId
     },
     clearState: (appId) => guard(() => client.clearState(sessionId, appId)),
     screenshot: (signal) => guard(() => client.screenshot(sessionId, 'png', signal)),
+    pressButton: (name) => guard(() => client.pressButton(sessionId, name)),
+    longPress: (x, y, durationMs) => guard(() => client.longPress(sessionId, x, y, durationMs)),
+    // `unsupported` stays product for every other input (it names the request), but a pinch refused as unsupported
+    // is Android's adb fallback — the device's backend, not the app. Same rule as flow-runner's `RelayDriver.pinch`.
+    pinch: async (start, end, durationMs) => {
+      try {
+        await guard(() => client.pinch(sessionId, start, end, durationMs))
+      } catch (e) {
+        if (!(e instanceof EnvironmentStepError) && e instanceof Error && e.message.includes('(unsupported)')) {
+          throw new EnvironmentStepError(e.message, { cause: e })
+        }
+        throw e
+      }
+    },
+    chrome: (timeoutMs) => guard(() => client.chrome(sessionId, timeoutMs)),
+  }
+}
+
+/** The platform of the agent holding `sessionId`, or undefined when the listing does not say — then nothing is
+ *  checked against the platform, as before. */
+async function platformOf(client: TapflowClient, sessionId: string): Promise<string | undefined> {
+  try {
+    const agents = await client.listDevices()
+    return agents.find((a) => a.devices.some((d) => d.sessionId === sessionId))?.platform
+  } catch {
+    return undefined
   }
 }
 
@@ -402,6 +428,25 @@ export function registerTools(server: McpServer, client: TapflowClient): void {
     },
   )
 
+  function flowResponse(result: FlowResult, appCheckSkipped?: string): Record<string, unknown> {
+    let screenshotPath: string | undefined
+    if (result.failureScreenshot) {
+      screenshotPath = path.join(os.tmpdir(), `tapflow-flow-failure-${Date.now()}.png`)
+      fs.writeFileSync(screenshotPath, result.failureScreenshot)
+    }
+    return {
+      name: result.name,
+      status: result.status,
+      durationMs: result.durationMs,
+      steps: result.steps,
+      ...(result.failureMessage ? { failureMessage: result.failureMessage } : {}),
+      ...(result.failureKind ? { failureKind: result.failureKind } : {}),
+      ...(screenshotPath ? { failureScreenshotPath: screenshotPath } : {}),
+      // The flow ran without its appId being compared with the build's, and why.
+      ...(appCheckSkipped ? { appCheckSkipped } : {}),
+    }
+  }
+
   register(
     'run_flow',
     {
@@ -409,7 +454,8 @@ export function registerTools(server: McpServer, client: TapflowClient): void {
         'Replay a tapflow flow (YAML) deterministically — no LLM in the loop. Use this for verified scenarios instead of ' +
         'tapping step by step: author the flow once, then replay it idempotently. Pass the YAML inline via "flow", or a ' +
         'file path via "path" (resolved from the MCP server process cwd). Steps: clearState / launchApp / tapOn / ' +
-        'inputText / pressKey / swipe / scroll / openUrl / assertVisible / assertNotVisible. launchApp launches the ' +
+        'inputText / pressKey / swipe / scroll / openUrl / assertVisible / assertNotVisible / pressButton / ' +
+        'longPressOn / pinch. launchApp launches the ' +
         'buildId argument. When buildId is set, the build is installed before replaying (like `tapflow flow run --build`) ' +
         'so clearState/launchApp have the app present — pass install:false to skip. A flow whose appId differs from ' +
         "the build's bundle id is not run and returns an error naming both. Returns per-step results; on failure " +
@@ -440,6 +486,15 @@ export function registerTools(server: McpServer, client: TapflowClient): void {
           yamlText = fs.readFileSync(resolved, 'utf-8')
         }
         const parsed = parseFlow(yamlText, flowPath ?? 'inline-flow.yaml')
+        const platform = await platformOf(client, sessionId)
+        // A button the platform has none of, refused before anything is installed — the same verdict `flow run`
+        // reaches before it picks a device, and reported as the same result a run would give.
+        if (platform !== undefined) {
+          const missing = unavailableButton(parsed, platform)
+          if (missing !== null && missing !== 'needs-chrome') {
+            return ok(JSON.stringify(flowResponse(refusedFlow(parsed, missing.index, unavailableButtonMessage(missing, platform), { beforeRun: true })), null, 2))
+          }
+        }
         // The same check as `flow run --build`, before the device is touched. With one flow, "skipped" leaves nothing
         // run, which `flow run` also treats as an error rather than a pass.
         let appCheckSkipped: string | undefined
@@ -461,24 +516,9 @@ export function registerTools(server: McpServer, client: TapflowClient): void {
         // Each step as it starts, for whoever watches this session (A2); named without anything it types.
         const result = await runFlow(parsed, driver, {
           onStep: (mark) => { if (mark.phase === 'start' && mark.label) client.activity(sessionId, `step ${mark.index + 1}: ${mark.label}`) },
+          ...(platform !== undefined ? { platform } : {}),
         })
-
-        let screenshotPath: string | undefined
-        if (result.failureScreenshot) {
-          screenshotPath = path.join(os.tmpdir(), `tapflow-flow-failure-${Date.now()}.png`)
-          fs.writeFileSync(screenshotPath, result.failureScreenshot)
-        }
-        return ok(JSON.stringify({
-          name: result.name,
-          status: result.status,
-          durationMs: result.durationMs,
-          steps: result.steps,
-          ...(result.failureMessage ? { failureMessage: result.failureMessage } : {}),
-          ...(result.failureKind ? { failureKind: result.failureKind } : {}),
-          ...(screenshotPath ? { failureScreenshotPath: screenshotPath } : {}),
-          // The flow ran without its appId being compared with the build's, and why.
-          ...(appCheckSkipped ? { appCheckSkipped } : {}),
-        }, null, 2))
+        return ok(JSON.stringify(flowResponse(result, appCheckSkipped), null, 2))
       } catch (e) {
         return err(`run_flow failed: ${(e as Error).message}`)
       }
@@ -542,12 +582,16 @@ export function registerTools(server: McpServer, client: TapflowClient): void {
         y: z.number().describe('Y pixel coordinate (from screenshot, 0 = top)'),
         screenshotWidth: z.number().int().describe('Screenshot width in pixels (from screenshot tool)'),
         screenshotHeight: z.number().int().describe('Screenshot height in pixels (from screenshot tool)'),
+        holdMs: z.number().optional().describe('Hold before releasing, ms: a long press (1000 typical)'),
       },
     },
-    async ({ sessionId, x, y, screenshotWidth, screenshotHeight }) => {
+    // A long press is a held tap rather than a tool of its own: every tool's schema rides in every session (the
+    // budget in guide.test.ts), and a pinch is reachable through run_flow's `pinch` step.
+    async ({ sessionId, x, y, screenshotWidth, screenshotHeight, holdMs }) => {
       try {
-        await client.tap(sessionId, x / screenshotWidth, y / screenshotHeight)
-        return ok(JSON.stringify({ tapped: true, x, y }))
+        if (holdMs !== undefined) await client.longPress(sessionId, x / screenshotWidth, y / screenshotHeight, holdMs)
+        else await client.tap(sessionId, x / screenshotWidth, y / screenshotHeight)
+        return ok(JSON.stringify({ tapped: true, x, y, ...(holdMs !== undefined ? { holdMs } : {}) }))
       } catch (e) {
         return err(`tap failed: ${(e as Error).message}`)
       }

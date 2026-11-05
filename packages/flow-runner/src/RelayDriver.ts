@@ -1,5 +1,5 @@
-import type { FlowDriver } from './engine.js'
-import type { LaunchApplied, LaunchOptions } from '@tapflowio/protocol'
+import type { FlowDriver, PinchFingers } from './engine.js'
+import type { ChromePayload, LaunchApplied, LaunchOptions } from '@tapflowio/protocol'
 import {
   ENVIRONMENTAL_INPUT_REASONS,
   InputRefusedError,
@@ -85,6 +85,32 @@ export class RelayDriver implements FlowDriver {
   }
 
   openUrl(url: string) { return this.guard(() => this.client.openUrl(this.sessionId, url)) }
+
+  pressButton(name: string): Promise<void> {
+    return this.guard(() => this.client.pressButton(this.sessionId, name))
+  }
+
+  longPress(x: number, y: number, durationMs: number): Promise<void> {
+    return this.guard(() => this.client.longPress(this.sessionId, x, y, durationMs))
+  }
+
+  /**
+   * `unsupported` is a product reason everywhere else — it names the test's own request, a misspelt key — but a pinch
+   * refused as unsupported is Android's adb fallback, the backend a device lands on without a pointer channel. That is
+   * the device, not the app, so it is the environment's here and only here.
+   */
+  async pinch(start: PinchFingers, end: PinchFingers, durationMs: number): Promise<void> {
+    try {
+      await this.guard(() => this.client.pinch(this.sessionId, start, end, durationMs))
+    } catch (e) {
+      if (e instanceof InputRefusedError && e.reason === 'unsupported') throw markEnvironmentFailure(e)
+      throw e
+    }
+  }
+
+  chrome(timeoutMs: number): Promise<ChromePayload | null> {
+    return this.guard(() => this.client.chrome(this.sessionId, timeoutMs))
+  }
 
   async launchApp(options?: LaunchOptions): Promise<LaunchApplied | undefined> {
     const buildId = this.buildId

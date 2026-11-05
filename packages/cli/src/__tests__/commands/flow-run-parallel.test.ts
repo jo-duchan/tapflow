@@ -9,7 +9,7 @@ import path from 'path'
 interface FakeDevice { sessionId: string; deviceId: string; deviceName: string; source?: 'pool' | 'boot'; boot?: { cold?: boolean } }
 
 const mocks = vi.hoisted(() => ({
-  parseFlow: vi.fn((_text: string, file?: string) => ({ name: path.basename(file ?? 'flow', '.yaml'), steps: [] })),
+  parseFlow: vi.fn((_text: string, file?: string): { name: string; file?: string; steps: unknown[] } => ({ name: path.basename(file ?? 'flow', '.yaml'), steps: [] })),
   runFlow: vi.fn(),
   canLease: vi.fn(async () => true),
   lease: vi.fn(),
@@ -187,6 +187,40 @@ describe('flow run --parallel', () => {
     const brokenOn = ranOn.find(([f]) => f === 'one')![1]
     expect(ranOn.filter(([, s]) => s === brokenOn).map(([f]) => f)).toEqual(['one'])
     expect(ranOn).toHaveLength(4)
+    expect(process.exitCode).toBe(2)
+  })
+
+  // D1: a flow pressing a button the platform has none of is refused before a device is chosen, like a compile error.
+  it('fails a flow that presses a button the platform lacks before leasing for it, and runs the rest', async () => {
+    leases(A, B)
+    mocks.parseFlow.mockImplementation((_text: string, file?: string) => {
+      const name = path.basename(file ?? 'flow', '.yaml')
+      return { name, file, steps: name === 'back' ? [{ type: 'pressButton', name: 'back' }] : [] }
+    })
+    const junit = path.join(dir, 'report.xml')
+    await cmdFlowRun(flowFiles('back', 'two'), { parallel: 2, platform: 'ios', junit })
+    expect(ranOn.map(([f]) => f)).toEqual(['two'])
+    expect(mocks.lease).toHaveBeenCalledTimes(1)
+    expect(errLines().some((l) => l.includes('iOS has no "back" button'))).toBe(true)
+    expect(fs.readFileSync(junit, 'utf-8')).toContain('<testsuite name="tapflow-flows (cannot run on ios)"')
+    expect(logLines()).toContain('\n1/2 flows passed on 1 device')
+    expect(process.exitCode).toBe(2)
+    mocks.parseFlow.mockImplementation((_text: string, file?: string) => ({ name: path.basename(file ?? 'flow', '.yaml'), steps: [] }))
+  })
+
+  // The engine's own check, for what only the device knows: the flow could never run there, which says nothing about
+  // the device, so the worker keeps it.
+  it('keeps a device after a flow it refused before running, and tells the engine the device\'s platform', async () => {
+    leases(A)
+    mocks.runFlow.mockImplementation(async (flow: { name: string }, driver: { sessionId: string }, opts: { platform?: string }) => {
+      ranOn.push([flow.name, driver.sessionId])
+      expect(opts.platform).toBe('ios')
+      if (flow.name === 'one') return { ...result('one', 'environment'), failedBeforeRun: true as const }
+      return result(flow.name)
+    })
+    await cmdFlowRun(flowFiles('one', 'two', 'three'), { parallel: 1, platform: 'ios' })
+    expect(ranOn.map(([, s]) => s)).toEqual(['sa', 'sa', 'sa'])
+    expect(errLines().some((l) => l.includes('leaving this device'))).toBe(false)
     expect(process.exitCode).toBe(2)
   })
 

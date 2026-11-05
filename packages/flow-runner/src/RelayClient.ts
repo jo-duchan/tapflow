@@ -1,11 +1,12 @@
 import { randomUUID } from 'node:crypto'
 import type {
-  AdmissionRefusal, BootRefusalReason, BrowserToRelay, LaunchApplied, LaunchOptions, RunResetRequest, ServiceTier, DeviceSummary, InputErrorReason, SessionStartFailure, SessionTerminatedReason,
+  AdmissionRefusal, BootRefusalReason, BrowserToRelay, ChromePayload, LaunchApplied, LaunchOptions, RunResetRequest, ServiceTier, DeviceSummary, InputErrorReason, SessionStartFailure, SessionTerminatedReason,
 } from '@tapflowio/protocol'
 import { WebSocket } from 'ws'
 import type { UIElement } from '@tapflowio/agent-core'
 import { PlatformError } from '@tapflowio/agent-core'
 import { TransientQueryError, markEnvironmentFailure } from './errors.js'
+import type { PinchFingers } from './engine.js'
 import { authHeader, fetchWithToken, fixedToken, tokenRefusal, type TokenSource } from './credentials.js'
 
 // Carries the HTTP status so ui-tree queries can tell a transient failure (retry) from a permanent one.
@@ -597,6 +598,11 @@ export class RelayClient {
    *  one per device per agent registration — slow enough that a run cannot outlive its usefulness, unlike
    *  a ledger keyed on request ids. A flow run holds one client for one run. */
   private readonly lifecycle = new Map<string, SessionLifecycle>()
+  /** The latest chrome the relay sent for each session — the device's buttons, which a `pressButton` is checked
+   *  against before a flow runs. Same lifetime as `lifecycle`. */
+  private readonly chromes = new Map<string, ChromePayload>()
+  /** A gesture this client opened and has not ended, per session — what `leaveSession` closes before it goes. */
+  private readonly openGestures = new Map<string, { kind: 'touch'; at: { x: number; y: number } } | { kind: 'pinch' }>()
 
   private lifecycleOf(sessionId: string): SessionLifecycle {
     let s = this.lifecycle.get(sessionId)
@@ -728,6 +734,11 @@ export class RelayClient {
           break
       }
     }
+    // Kept whether or not anything waits: the relay sends a session's chrome once, at join or boot, and the flow that
+    // needs it — a `pressButton` checked against the device — asks afterwards.
+    if (msg['type'] === 'session:chrome' && typeof msg['sessionId'] === 'string' && typeof msg['payload'] === 'object' && msg['payload'] !== null) {
+      this.chromes.set(msg['sessionId'], msg['payload'] as ChromePayload)
+    }
     if (msg['type'] === 'error' && typeof msg['sessionId'] !== 'string' && !this.addressSkewLogged) {
       // A relay older than L5d. The refusal matches no waiter, so the join times out with no reason — this is
       // the only trace. One flow run holds one client, so once is once.
@@ -852,6 +863,17 @@ export class RelayClient {
    * before it reaches the wire. Without this the request simply runs to its deadline (#514).
    */
   leaveSession(sessionId: string): void {
+    // A gesture still open would stay pressed on the device: nothing on the relay or the agent lifts a pointer its
+    // client left down, and a long press or a pinch is open for its whole length — a cancel lands inside one. Closed
+    // first, unanswered: the leave below settles whatever was waiting on it.
+    const open = this.openGestures.get(sessionId)
+    if (open) {
+      this.openGestures.delete(sessionId)
+      const requestId = randomUUID()
+      this.send(open.kind === 'touch'
+        ? { type: 'input:touch:end', sessionId, requestId, payload: open.at }
+        : { type: 'input:pinch:end', sessionId, requestId })
+    }
     this.send({ type: 'session:leave', sessionId })
     this.settleSessionWaiters(sessionId, (w) => new SessionLeftError(
       `${w.what} failed: this client left session ${sessionId} while the request was in flight. Whether it ` +
@@ -1077,8 +1099,10 @@ export class RelayClient {
     const interval = durationMs / STEPS
     const requestId = randomUUID()
     this.send({ type: 'input:touch:start', sessionId, payload: { x: from[0], y: from[1] } })
+    this.openGestures.set(sessionId, { kind: 'touch', at: { x: from[0], y: from[1] } })
     for (let i = 1; i < STEPS; i++) {
       await delay(interval)
+      if (!this.openGestures.has(sessionId)) return this.leftMidGesture(sessionId, 'swipe')
       const t = i / STEPS
       this.send({
         type: 'input:touch:move',
@@ -1087,6 +1111,7 @@ export class RelayClient {
       })
     }
     await delay(interval)
+    if (!this.openGestures.delete(sessionId)) return this.leftMidGesture(sessionId, 'swipe')
     this.send({ type: 'input:touch:end', sessionId, requestId, payload: { x: to[0], y: to[1] } })
     await this.awaitInputAck(sessionId, requestId, 'swipe')
   }
@@ -1111,6 +1136,74 @@ export class RelayClient {
     const requestId = randomUUID()
     this.send({ type: 'input:key', sessionId, requestId, payload: { code, modifiers: 0 } })
     await this.awaitInputAck(sessionId, requestId, `pressKey ${code}`)
+  }
+
+  async pressButton(sessionId: string, name: string): Promise<void> {
+    const requestId = randomUUID()
+    this.send({ type: 'input:button', sessionId, requestId, payload: { name } })
+    await this.awaitInputAck(sessionId, requestId, `pressButton ${name}`)
+  }
+
+  /**
+   * A touch held still for `durationMs`. No move frames: a long press is recognised by the app's own timer, so a
+   * pointer that stays down is the whole gesture on every backend. The ack may come up to `durationMs` later than a
+   * tap's, because Android's adb path replays the hold after the end arrives.
+   */
+  async longPress(sessionId: string, x: number, y: number, durationMs: number): Promise<void> {
+    const payload = { x, y }
+    const requestId = randomUUID()
+    this.send({ type: 'input:touch:start', sessionId, payload })
+    this.openGestures.set(sessionId, { kind: 'touch', at: payload })
+    await delay(durationMs)
+    if (!this.openGestures.delete(sessionId)) return this.leftMidGesture(sessionId, 'longPress')
+    this.send({ type: 'input:touch:end', sessionId, requestId, payload })
+    await this.awaitInputAck(sessionId, requestId, 'longPress', durationMs)
+  }
+
+  /**
+   * Two fingers from `start` to `end` over `durationMs`. Both agents inject each move the moment it arrives, so the
+   * pace is set here: the moves are spread over the duration as `swipe`'s are, and sent at once a recogniser would
+   * read them as a jump. The last move is the end position — `input:pinch:end` carries none.
+   */
+  async pinch(sessionId: string, start: PinchFingers, end: PinchFingers, durationMs: number): Promise<void> {
+    const STEPS = 8
+    const interval = durationMs / STEPS
+    const at = (t: number) => ({
+      f0: { x: start[0][0] + (end[0][0] - start[0][0]) * t, y: start[0][1] + (end[0][1] - start[0][1]) * t },
+      f1: { x: start[1][0] + (end[1][0] - start[1][0]) * t, y: start[1][1] + (end[1][1] - start[1][1]) * t },
+    })
+    this.send({ type: 'input:pinch:start', sessionId, payload: at(0) })
+    this.openGestures.set(sessionId, { kind: 'pinch' })
+    for (let i = 1; i <= STEPS; i++) {
+      await delay(interval)
+      if (!this.openGestures.has(sessionId)) return this.leftMidGesture(sessionId, 'pinch')
+      this.send({ type: 'input:pinch:move', sessionId, payload: at(i / STEPS) })
+    }
+    this.openGestures.delete(sessionId)
+    const requestId = randomUUID()
+    this.send({ type: 'input:pinch:end', sessionId, requestId })
+    await this.awaitInputAck(sessionId, requestId, 'pinch')
+  }
+
+  /** A gesture `leaveSession` closed while its sender was still pacing it: the leave is why, and it says so. */
+  private leftMidGesture(sessionId: string, what: string): never {
+    throw new SessionLeftError(`${what} failed: this client left session ${sessionId} while the gesture was in progress — it was ended where it was`)
+  }
+
+  /**
+   * The session's chrome, or the next one to arrive within `timeoutMs`; `null` when none did. The relay sends it at
+   * join and boot, so by the time a flow starts it is normally here already.
+   */
+  async chrome(sessionId: string, timeoutMs: number): Promise<ChromePayload | null> {
+    const known = this.chromes.get(sessionId)
+    if (known) return known
+    try {
+      const msg = await this.waitFor((m) => m['type'] === 'session:chrome' && m['sessionId'] === sessionId, timeoutMs, 'device chrome', sessionId)
+      return msg['payload'] as ChromePayload
+    } catch (e) {
+      if (e instanceof RequestTimeoutError) return null
+      throw e
+    }
   }
 
   /**
@@ -1138,13 +1231,13 @@ export class RelayClient {
    * the step fails — but "tap timed out" reads as *the tap did not happen*, which is the same false certainty
    * this change exists to remove with the sign flipped.
    */
-  private async awaitInputAck(sessionId: string, requestId: string, what: string): Promise<void> {
+  private async awaitInputAck(sessionId: string, requestId: string, what: string, extraMs = 0): Promise<void> {
     let msg: RelayMsg
     try {
       msg = await this.waitFor(
         (m) => (m['type'] === 'input:done' || m['type'] === 'input:error')
           && m['sessionId'] === sessionId && m['requestId'] === requestId,
-        INPUT_ACK_TIMEOUT_MS,
+        INPUT_ACK_TIMEOUT_MS + extraMs,
         what,
         sessionId,
       )

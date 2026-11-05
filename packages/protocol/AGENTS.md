@@ -50,6 +50,13 @@ The cost of a broad name is ambiguity about what belongs — answered by the two
     correlated request set is `scripts/__tests__/correlatedRequestsGated.test.mjs`'s job, because
     nothing else compares the two.
 
+- **Which hardware buttons a platform can press** lives in `src/buttons/`, reached as
+  `@tapflowio/protocol/buttons`: Android's closed map, iOS's aliases onto chrome button names, and
+  `buttonAvailability`. Both agents read it and so does flow-runner, which refuses a flow pressing a
+  button the device lacks before it runs. Here rather than in either agent for the reason the package
+  exists — two copies of "which buttons exist" drift, and the drift would be a flow refused where it works
+  or let through where the agent presses nothing.
+
 - **The connection handshake's query parameters**, as prose rather than types — see
   [Connection handshake](#connection-handshake--what-the-upgrade-url-carries). No message carries them, but a
   client written outside this repo needs them as much as it needs the messages (#581).
