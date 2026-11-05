@@ -132,7 +132,7 @@ Connected straight to the relay's port on the Mac it runs on, the MCP server sta
 | `shutdown_device` | Power the device down (frees resources; forces a cold boot next time) |
 | `screenshot` | Capture the current screen (PNG, or JPEG on iOS when requested) |
 | `query_ui_tree` | Read the on-screen UI as a structured accessibility tree (role, label, identifier, frame) |
-| `tap` | Tap at a coordinate. With `holdMs`, press and hold (a long press) |
+| `tap` | Tap at a coordinate. With `holdMs`, press and hold (a long press); on Android's adb fallback this needs a current agent, see [Holding an element](/automation/flows#holding-an-element) |
 | `swipe` | Swipe between two coordinates |
 | `type_text` | Type text into the focused field |
 | `press_key` | Press a keyboard key |
