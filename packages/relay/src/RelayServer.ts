@@ -236,7 +236,7 @@ type HeldBoot = { ws: WebSocket; msg: Inbound<'device:boot'>; cost: 'cold' | 'wa
  *  compiling if one of them lost the field. */
 type Acked = Inbound<'input:touch:end' | 'input:pinch:end' | 'input:key' | 'input:button' | 'input:type'>
 type Unacked = Inbound<
-  'input:touch:start' | 'input:touch:move' | 'input:pinch:start' | 'input:pinch:move'
+  'input:touch:start' | 'input:touch:move' | 'input:touch:cancel' | 'input:pinch:start' | 'input:pinch:move'
   | 'input:rotate' | 'input:posture' | 'input:keyboard:toggle'
 >
 
@@ -2054,6 +2054,8 @@ export class RelayServer {
       // sharing the next non-empty body, so it would have read one gate as covering all eleven.
       case 'input:touch:start':
       case 'input:touch:move':
+      // A terminal frame, but unanswered: the client sending it is leaving the session (#1115).
+      case 'input:touch:cancel':
       case 'input:pinch:start':
       case 'input:pinch:move':
       case 'input:rotate':
@@ -2065,7 +2067,7 @@ export class RelayServer {
         // These carry no correlator by declaration, so nothing was ever gated on one here — and the
         // address is now the schema's business rather than this clause's. What the split still buys is
         // unchanged and is the reason it exists: a correlator gate written into a shared body would have
-        // reached these six as well, dropping every opening and move frame with the answered five.
+        // reached these eight as well, dropping every opening and move frame with the answered five.
         this.forwardUnacked(ws, msg)
         break
       }
@@ -3113,6 +3115,12 @@ export class RelayServer {
       case 'input:touch:end': {
         const g = session.gesture
         session.gesture = null
+        // The end a leaving client sends after its cancel. An agent that announced `touch-cancel` lifted the touch
+        // on the cancel and injects nothing for this end, so there is nothing to show; one that did not completes
+        // the gesture with this end, and the watcher is told the tap it was. The capability is per agent, not per
+        // device: where that agent can only lift with an up (a Duo's guest helper, iOS's mouse path, an Android 10
+        // or older image), the cancel was a tap the watcher is not shown — the device does what it did before.
+        if (session.touchCancelled) { session.touchCancelled = false; break }
         action = gestureAction(g?.start ?? null, msg.payload ?? g?.last ?? null)
         break
       }
@@ -3428,8 +3436,16 @@ export class RelayServer {
       session.agentSocket.send(JSON.stringify(msg))
       // Where a touch began and last was, for its end to be told to watchers (A2). Moves are not sent on: one
       // action per gesture, at its end.
-      if (msg.type === 'input:touch:start') session.gesture = { start: msg.payload, last: msg.payload }
-      else if (msg.type === 'input:touch:move' && session.gesture) session.gesture.last = msg.payload
+      if (msg.type === 'input:touch:start') {
+        session.gesture = { start: msg.payload, last: msg.payload }
+        session.touchCancelled = false
+      } else if (msg.type === 'input:touch:move' && session.gesture) session.gesture.last = msg.payload
+      else if (msg.type === 'input:touch:cancel') {
+        // An agent without the capability ignores the cancel and completes the touch with the end that follows, so
+        // the gesture is kept for that end to describe.
+        session.touchCancelled = hasCapability(session.agentCapabilities, 'touch-cancel')
+        if (session.touchCancelled) session.gesture = null
+      }
     }
   }
 

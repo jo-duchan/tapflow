@@ -45,6 +45,8 @@ export interface Session {
   /** Where the holder's current touch began and last was, so its end can be told to watchers as a tap or a swipe
    *  (A2). Kept whether or not anyone watches: a watcher can arrive mid-gesture. Cleared at the end and with the holder. */
   gesture: { start: Point; last: Point } | null
+  /** A `input:touch:cancel` reached an agent that cancels, so the end following it completed nothing to tell. */
+  touchCancelled: boolean
   streamSocket: WebSocket | null
   deviceId: string
   deviceName: string
@@ -277,6 +279,7 @@ export class SessionManager {
         holderLabel: null,
         holderStream: true,
         gesture: null,
+        touchCancelled: false,
         streamSocket: null,
         deviceId: d.id,
         readySent: false,
@@ -420,6 +423,7 @@ export class SessionManager {
     session.holderStream = holder.stream !== false
     // A touch the previous holder began is not this one's to end.
     session.gesture = null
+    session.touchCancelled = false
     // A person taking the device ends the wait, and if it was not theirs, the one waiting is told who. An AI client
     // only borrows it: the wait is kept and comes back when the client leaves.
     if (!isAiClientKind(holder.kind)) {
@@ -475,6 +479,7 @@ export class SessionManager {
     session.holderName = null
     session.holderStream = true
     session.gesture = null
+    session.touchCancelled = false
     if (session.idleTimer) { clearTimeout(session.idleTimer); session.idleTimer = null }
     if (onTimeout) {
       session.idleTimer = setTimeout(() => {

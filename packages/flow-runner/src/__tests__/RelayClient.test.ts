@@ -364,7 +364,12 @@ describe('RelayClient — the input senders mint a correlator and await the ack'
     expect(ends).toHaveLength(1)
     expect(types.indexOf(end)).toBeLessThan(types.indexOf('session:leave'))
     expect(types.slice(types.indexOf('session:leave') + 1)).toEqual([])
-    if (end === 'input:touch:end') expect(received.find((m) => m['type'] === end)).toHaveProperty('payload')
+    if (end === 'input:touch:end') {
+      expect(received.find((m) => m['type'] === end)).toHaveProperty('payload')
+      // A touch is cancelled first, so an agent that knows the cancel has nothing left for the end (#1115).
+      expect(types.filter((t) => t === 'input:touch:cancel')).toHaveLength(1)
+      expect(types.indexOf('input:touch:cancel')).toBe(types.indexOf(end) - 1)
+    } else expect(types).not.toContain('input:touch:cancel')
   })
 
   it('a gesture the leave ended does not touch one opened after a re-join', async () => {

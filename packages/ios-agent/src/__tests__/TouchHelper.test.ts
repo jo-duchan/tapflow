@@ -106,6 +106,59 @@ describe('TouchHelper.stop()', () => {
   })
 })
 
+// A client leaving mid-gesture cancels the touch instead of ending it, so the app does not take it for a tap (#1115).
+// The end it sends next must write nothing, and a cancel must never reach a helper with nothing down — one sent that
+// way crashed backboardd in another tool.
+describe('TouchHelper.touchCancel()', () => {
+  const types = (proc: FakeProc) => proc.stdin.write.mock.calls.map((c) => (c[0] as Buffer)[0])
+
+  it('writes a cancel frame for a touch that is down, and the end after it writes nothing', async () => {
+    const { helper, proc } = await setupHelper()
+    helper.touchStart(0.5, 0.5)
+    expect(helper.touchCancel()).toBe(true)
+    expect(helper.touchEnd()).toBe(false)
+    expect(types(proc)).toEqual([1, 13])
+  })
+
+  it('writes nothing when no touch is down: never started, or already ended', async () => {
+    const { helper, proc } = await setupHelper()
+    expect(helper.touchCancel()).toBe(false)
+    helper.touchStart(0.5, 0.5)
+    helper.touchEnd()
+    expect(helper.touchCancel()).toBe(false)
+    expect(types(proc)).toEqual([1, 3])
+  })
+
+  it('drops an up held back for the minimum contact, and cancels instead', async () => {
+    const { helper, proc } = await setupHelper()
+    helper.touchStart(0.5, 0.5)
+    const held = helper.touchEndAfterMinContact()
+    expect(helper.touchCancel()).toBe(true)
+    // Answered at the cancel, not when the minimum contact would have run out.
+    await expect(Promise.race([held, new Promise((r) => setTimeout(() => r('still held'), 0))])).resolves.toBe(false)
+    await new Promise((r) => setTimeout(r, 80))
+    expect(types(proc)).toEqual([1, 13])
+  })
+
+  it('does not reach a helper that replaced the one the touch went down on', async () => {
+    const first = makeFakeProc()
+    const second = makeFakeProc()
+    const { helper } = await startedHelper([first, second])
+    helper.touchStart(0.5, 0.5)
+    die(first)
+    announceReady(second)
+    expect(helper.touchCancel()).toBe(false)
+    expect(types(second)).toEqual([])
+  })
+
+  it('leaves an open pinch alone', async () => {
+    const { helper, proc } = await setupHelper()
+    helper.pinchStart(0.4, 0.5, 0.6, 0.5)
+    expect(helper.touchCancel()).toBe(false)
+    expect(types(proc)).toEqual([6])
+  })
+})
+
 // What a boot waits on before it announces the device (#1114): a client acting on `device:ready` at once was refused
 // its first input while the helper the boot had just started was still coming up.
 describe('TouchHelper.whenReady()', () => {

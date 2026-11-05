@@ -879,16 +879,21 @@ export class RelayClient {
   leaveSession(sessionId: string): void {
     // A gesture still open would stay pressed on the device: nothing on the relay or the agent lifts a pointer its
     // client left down, and a long press or a pinch is open for its whole length — a cancel lands inside one. Closed
-    // first, unanswered: the leave below settles whatever was waiting on it. An end also *completes* the gesture —
-    // a tap on iOS, and on Android's adb path the whole hold replayed — which is the lesser harm until the wire has a
-    // cancel (#1115).
+    // first, unanswered: the leave below settles whatever was waiting on it.
+    //
+    // **A touch is cancelled, then ended** (#1115). The cancel lifts it without completing it, so the app sees no tap
+    // and no long press; an agent that knows the cancel then has nothing for the end to complete. The end is for one
+    // that does not, or a relay that drops the cancel: it completes the gesture as before, which beats a pointer left
+    // down. No pairing is worse than today, so this needs no capability check. A pinch is only ended: its moves have
+    // already applied it, and the wire has no pinch cancel.
     const open = this.openGestures.get(sessionId)
     if (open) {
       this.openGestures.delete(sessionId)
       const requestId = randomUUID()
-      this.send(open.kind === 'touch'
-        ? { type: 'input:touch:end', sessionId, requestId, payload: open.at }
-        : { type: 'input:pinch:end', sessionId, requestId })
+      if (open.kind === 'touch') {
+        this.send({ type: 'input:touch:cancel', sessionId })
+        this.send({ type: 'input:touch:end', sessionId, requestId, payload: open.at })
+      } else this.send({ type: 'input:pinch:end', sessionId, requestId })
     }
     this.send({ type: 'session:leave', sessionId })
     this.settleSessionWaiters(sessionId, (w) => new SessionLeftError(

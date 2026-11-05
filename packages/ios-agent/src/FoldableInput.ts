@@ -99,6 +99,16 @@ export class FoldableInput implements InputChannel {
     return this.deps.guest()?.touch(g.screen, 'u', g.points[0], g.points[1], g.edge) ?? false
   }
 
+  /**
+   * The guest helper has no cancel, so a cancelled touch is lifted with an up now — what an end does, and never left
+   * down (#1115). The end that follows finds no gesture and writes nothing. A held-back up is sent at once instead.
+   */
+  touchCancel(): boolean {
+    if (this.heldEnd) { this.releaseHeldEnd(this.touchEnd()); return true }
+    if (this.gesture?.points.length !== 2) return false
+    return this.touchEnd()
+  }
+
   /** TouchHelper's minimum contact, for the same reason (a client sends down and up back to back). */
   touchEndAfterMinContact(): Promise<boolean> {
     const wait = this.touchStartedAt + (this.deps.minContactMs ?? MIN_CONTACT_MS) - Date.now()

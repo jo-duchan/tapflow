@@ -58,6 +58,12 @@ export interface Device {
 // reads it to leave a per-app env default out of a launch on a device that cannot take it, rather than naming a
 // platform — a caller's own `env` is still the agent's to refuse.
 //
+// `touch-cancel`: the agent takes `input:touch:cancel` as a cancel — the app sees its touch cancelled, and the
+// `input:touch:end` a leaving client sends after it injects nothing (#1115). The relay reads it to leave that end out
+// of what a watcher is shown; an agent without it completes the gesture with the end, which is a tap worth showing.
+// It says the agent takes the message, not that every device of it can cancel: where one can only lift with an up,
+// the cancel itself is a tap, which the watcher then misses.
+//
 // **The vocabulary, not a declaration (#700).** This is every capability any agent can name. What one
 // agent *implements* is its own list, typed against this — an agent that announced the whole set
 // would start claiming a feature the moment another platform gained it. Same split as
@@ -66,7 +72,7 @@ export interface Device {
 // A runtime value rather than only a union so the relay, which can import from here, checks its
 // gates through `hasCapability` and a rename fails to compile there. The dashboard still cannot, and
 // `scripts/__tests__/agentCapabilityConsumers.test.mjs` holds its literals against this array.
-export const KNOWN_AGENT_CAPABILITIES = ['clipboard', 'full-reset', 'network-control', 'build-download', 'launch-options', 'launch-env'] as const
+export const KNOWN_AGENT_CAPABILITIES = ['clipboard', 'full-reset', 'network-control', 'build-download', 'launch-options', 'launch-env', 'touch-cancel'] as const
 export type AgentCapability = (typeof KNOWN_AGENT_CAPABILITIES)[number]
 
 export function isAgentCapability(s: string): s is AgentCapability {

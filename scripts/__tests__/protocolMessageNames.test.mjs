@@ -179,7 +179,8 @@ describe('protocol message interfaces', () => {
     // a person their boot is held behind another on the same Mac. 84 is the lease trio (S5): `DeviceLease`, a flow
     // runner asking the relay to choose a device, and its two answers. 86 is the device list re-read (#1085):
     // `AgentDevices`, an agent's list after it changed, and `AgentDevicesApplied`, the sessions the relay made and removed.
-    expect(messages.size).toBe(86)
+    // 87 is `InputTouchCancel` (#1115): a client leaving mid-gesture had only an end, which completes the touch.
+    expect(messages.size).toBe(87)
     // `InputKey` predates L1 and has always been named; it must be in here too.
     expect(messages.has('InputKey')).toBe(true)
   })

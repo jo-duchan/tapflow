@@ -30,7 +30,7 @@ const RUN_RESET_PASTEBOARD_TIMEOUT_MS = 10_000
 // actually took is per device and per app, and `network:state.available` carries that — the split the
 // protocol documents. Added last, after the handler and the boot-time arming, because the string on
 // its own is what puts a control on screen.
-const AGENT_CAPABILITIES: AgentCapability[] = ['clipboard', 'full-reset', 'network-control', 'build-download', 'launch-options', 'launch-env']
+const AGENT_CAPABILITIES: AgentCapability[] = ['clipboard', 'full-reset', 'network-control', 'build-download', 'launch-options', 'launch-env', 'touch-cancel']
 
 // Human prose for each reason. Not in `@tapflowio/protocol`: that package's main entry must stay
 // runtime-free so it erases under `import type` and never reaches the dashboard bundle — a lookup
@@ -2115,6 +2115,11 @@ export class IOSAgent implements DeviceAgent, NetworkControlCapability, Posturab
         // `no-gesture`, where the stopped one it replaced would say the channel is gone.
         void (helper ? helper.touchEndAfterMinContact() : Promise.resolve(false))
           .then((sent) => this.ackInput(state, sent ? 'delivered' : this.refusalReason(state.touchHelper, 'continuation'), requestId))
+        break
+      }
+      // A client leaving mid-gesture (#1115). No ack: the client is leaving, and the end it sends next is answered.
+      case 'input:touch:cancel': {
+        this.deviceStates.get(msg.sessionId)?.touchHelper?.touchCancel()
         break
       }
       case 'input:pinch:start': {

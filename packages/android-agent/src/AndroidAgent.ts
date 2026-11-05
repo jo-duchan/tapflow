@@ -77,7 +77,7 @@ const logger = createLogger('android-agent')
 // actually works on a given image is per device, and `network:state.available` carries that — the
 // split the protocol documents. Added last, after the handler and the boot-time reset, because the
 // string on its own is what puts a control on screen.
-const AGENT_CAPABILITIES: AgentCapability[] = ['clipboard', 'full-reset', 'network-control', 'build-download', 'launch-options']
+const AGENT_CAPABILITIES: AgentCapability[] = ['clipboard', 'full-reset', 'network-control', 'build-download', 'launch-options', 'touch-cancel']
 
 // Parse H.264 SPS NAL unit to extract frame dimensions.
 // scrcpy sends a new SPS (inside an IDR keyframe) whenever the capture size changes —
@@ -362,6 +362,8 @@ interface PointerControl {
   touchDown(pointerId: number, x: number, y: number): void | Promise<void>
   touchMove(pointerId: number, x: number, y: number): void | Promise<void>
   touchUp(pointerId: number, x?: number, y?: number): void | Promise<void>
+  /** Lift the touch as cancelled, so the app does not take it for a tap — or with an up where the backend cannot. */
+  touchCancel(pointerId: number, x?: number, y?: number): void | Promise<void>
   pinchStart(x1: number, y1: number, x2: number, y2: number): void | Promise<void>
   pinchMove(x1: number, y1: number, x2: number, y2: number): void | Promise<void>
   pinchEnd(): void | Promise<void>
@@ -2735,7 +2737,13 @@ export class AndroidAgent implements DeviceAgent, NetworkControlCapability {
    * `channel-down` would toast "not reaching this device" and tell MCP to reconnect for nothing. Only
    * with no gesture at all and no backend either is the channel what there is to report.
    */
-  private closeGesture(state: DeviceState, kind: 'touch' | 'pinch'): GestureBackend | { via: 'none'; outcome: InputOutcome } {
+  private closeGesture(
+    state: DeviceState,
+    kind: 'touch' | 'pinch',
+    // How a pointer left down on a replaced channel is let go: an up for an end, a cancel for a cancel (#1115) —
+    // an up there would complete the gesture the cancel exists to stop.
+    release: (pc: PointerControl) => void | Promise<void> = (pc) => (kind === 'touch' ? pc.touchUp(0, state.lastTouchPx.x, state.lastTouchPx.y) : pc.pinchEnd()),
+  ): GestureBackend | { via: 'none'; outcome: InputOutcome } {
     // An end of the other kind closes nothing: a stray touch end must not take an open pinch's record
     // with it, or the pinch's own end would find nothing and leave its second pointer down.
     if (state.gesture && state.gesture.kind !== kind) return { via: 'none', outcome: 'no-gesture' }
@@ -2751,7 +2759,7 @@ export class AndroidAgent implements DeviceAgent, NetworkControlCapability {
     // after a press still in flight on the replaced one — a restart in mid-tap is the window.
     const pc = this.pointerControl(state)
     if (opened?.via === 'channel' && pc) {
-      this.fire(kind === 'touch' ? pc.touchUp(0, state.lastTouchPx.x, state.lastTouchPx.y) : pc.pinchEnd())
+      this.fire(release(pc))
     }
     if (!opened && !pc && !state.touchHelper) return { via: 'none', outcome: 'channel-down' }
     return { via: 'none', outcome: 'no-gesture' }
@@ -3029,6 +3037,21 @@ export class AndroidAgent implements DeviceAgent, NetworkControlCapability {
             : await this.dispatchTo(closed.owner, () => closed.owner.touchUp(0, upX, upY)),
           seq, requestId,
         ))().catch((e) => logger.error('input:touch:end ack failed:', e))
+        break
+      }
+      // A client leaving mid-gesture (#1115). Closed through `closeGesture` like an end — the record goes now, before
+      // anything awaits, so the end the client sends next finds nothing to complete — but cancelled rather than
+      // completed. No ack: the client is leaving, and that end is answered.
+      case 'input:touch:cancel': {
+        const state = this.deviceStates.get(msg.sessionId)
+        if (!state) break
+        const { x, y } = state.lastTouchPx
+        const closed = this.closeGesture(state, 'touch', (pc) => pc.touchCancel(0, x, y))
+        if (closed.via === 'helper') closed.owner.touchCancel()
+        else if (closed.via === 'channel') {
+          const owner = closed.owner
+          void this.dispatchTo(owner, () => owner.touchCancel(0, x, y))
+        }
         break
       }
       case 'input:pinch:start': {

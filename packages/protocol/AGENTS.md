@@ -300,6 +300,16 @@ Five requests carry a required `requestId`: the four terminal frames (`input:tou
 (`ios-agent/AGENTS.md`: *"Opening frames stay silent: they carry no ack obligation"*), so an id there would
 name a waiter that does not exist. `input:keyboard:toggle` is out for a different reason — see below.
 
+**`input:touch:cancel` is a terminal frame with no correlator, and that is not a contradiction** (#1115). Only a
+client leaving the session sends it, so nothing is left to wait on it; it is followed by an `input:touch:end`,
+which is answered. That pairing is also the skew answer, by the rule in *Changing what a value means*: an agent that
+cancels injects nothing for the end, and one that predates the message (or a relay that drops it as an unknown type)
+completes the gesture with the end, as before — on the device no combination is worse than today, so no client
+needs a marker.
+The one reader that does need to know is the relay's watcher feed, which would otherwise show that end as a tap: it
+asks for the agent's `touch-cancel` capability. There is no pinch cancel: a pinch is applied by its moves, and scrcpy
+keeps the pointers a cancel leaves.
+
 **Required on both sides, unlike the lifecycle pair**, and the discriminator is the one this file already
 uses: no producer of these four replies sends one unsolicited. `ackInput` on both agents fires on terminal
 outcomes only; `ackNoSession` answers a terminal input for a session the agent lost; the relay answers a

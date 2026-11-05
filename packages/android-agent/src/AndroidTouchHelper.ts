@@ -79,6 +79,11 @@ export class AndroidTouchHelper {
     this.lastX = x; this.lastY = y
   }
 
+  /** Drop the accumulated gesture: nothing was dispatched yet, so a cancel dispatches nothing (#1115). */
+  touchCancel(): void {
+    this.touching = false
+  }
+
   // The whole gesture is dispatched here — start/move only accumulate — so this is where the
   // outcome comes from. The first call also pays a `wm size` round trip (cached after).
   async touchEnd(): Promise<InputOutcome> {
