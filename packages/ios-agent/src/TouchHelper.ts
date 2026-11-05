@@ -47,6 +47,7 @@ export class TouchHelper implements InputChannel {
   private ready = false
   private readyTimer: ReturnType<typeof setTimeout> | null = null
   private spawns: number[] = []
+  private readyWaiters: Array<(ready: boolean) => void> = []
   // When the current touch went down, and the up held back until it has lasted `MIN_CONTACT_MS`.
   private touchStartedAt = 0
   private heldEnd: { timer: ReturnType<typeof setTimeout>; resolve: (sent: boolean) => void } | null = null
@@ -65,6 +66,7 @@ export class TouchHelper implements InputChannel {
     // A held-back up is answered, not dropped: its caller is waiting on it to ack the tap.
     this.releaseHeldEnd(false)
     this.stopped = true
+    this.settleReadyWaiters(false)
     this.clearReadyDeadline()
     killWithSigkillFallback(this.proc)
     this.proc = null
@@ -76,6 +78,16 @@ export class TouchHelper implements InputChannel {
   // very much alive and must not be replaced, but a frame written to it is dropped on the floor.
   isReady(): boolean {
     return this.isRunning() && this.ready
+  }
+
+  whenReady(): Promise<boolean> {
+    if (this.isReady()) return Promise.resolve(true)
+    if (this.stopped) return Promise.resolve(false)
+    return new Promise((resolve) => this.readyWaiters.push(resolve))
+  }
+
+  private settleReadyWaiters(ready: boolean): void {
+    for (const resolve of this.readyWaiters.splice(0)) resolve(ready)
   }
 
   // Whether the helper process exists with an open pipe — the question a *replacement* decision
@@ -347,6 +359,7 @@ export class TouchHelper implements InputChannel {
           this.ready = true
           tail = ''
           this.clearReadyDeadline()
+          this.settleReadyWaiters(true)
         // Retain only enough to rejoin a marker split across two chunks.
         } else tail = seen.slice(-READY_MARKER.length)
       }

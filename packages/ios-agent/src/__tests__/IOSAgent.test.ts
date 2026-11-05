@@ -11,6 +11,8 @@ import { SimulatorNetwork } from '../SimulatorNetwork.js'
 // A live helper. Since #482 every write reports whether it reached the helper process and the
 // agent acks on that answer, so the mock has to state it — returning undefined would model a
 // helper that silently drops everything. `killHelper()` below flips one over to that state.
+const touchGate = vi.hoisted(() => ({ ready: (): Promise<boolean> => Promise.resolve(true) }))
+
 vi.mock('../TouchHelper', () => ({
   TouchHelper: vi.fn(function () { return withMinContact({
     start: vi.fn(),
@@ -20,6 +22,8 @@ vi.mock('../TouchHelper', () => ({
     // without it makes the ws dispatch swallow a TypeError and send no ack at all, which surfaces
     // as tests hanging with no message rather than failing.
     inputState: vi.fn(() => 'ready'),
+    // A boot holds `device:ready` until this resolves (#1114); a test swaps the gate to hold it.
+    whenReady: vi.fn(() => touchGate.ready()),
     // Asked before readiness for a continuation frame: a gesture whose open never landed can never
     // be finished, however ready the helper becomes.
     ownsGesture: vi.fn(() => true),
@@ -679,6 +683,68 @@ describe('IOSAgent', () => {
         expect(th.touchEnd).toHaveBeenCalledTimes(1)
       }, { timeout: 500 })
 
+      agent.disconnect()
+      browser.close()
+    })
+  })
+
+  // The touch helper is started by the boot and drops what it is sent until it says it is ready, so a client acting on
+  // `device:ready` at once was refused its first input (#1114).
+  describe('device:ready waits for the touch helper', () => {
+    beforeEach(() => { MockTouchHelper.mockClear() })
+    afterEach(() => { touchGate.ready = () => Promise.resolve(true) })
+
+    async function boot(options: { touchReadyWaitMs?: number } = {}) {
+      const browser = new WebSocket(`ws://localhost:${port}`)
+      await waitForOpen(browser)
+      const seen: string[] = []
+      browser.on('message', (d, binary) => { if (!binary) seen.push((JSON.parse(String(d)) as { type: string }).type) })
+      const agent = new IOSAgent({ intervalMs: 50, ...options }, mockSimctl(true))
+      await agent.connect(`ws://localhost:${port}`)
+      browser.send(JSON.stringify({ type: 'session:start', sessionId: agent.sessionId }))
+      await waitForType(browser, 'session:joined')
+      browser.send(JSON.stringify({ type: 'device:boot', requestId: 'rq-touch', sessionId: agent.sessionId, payload: { deviceId: 'dev-1' } }))
+      return { agent, browser, seen }
+    }
+
+    it('is not sent until the helper is ready', async () => {
+      let release: ((ready: boolean) => void) | undefined
+      touchGate.ready = () => new Promise((resolve) => { release = resolve })
+      const { agent, browser, seen } = await boot()
+      // This boot's wait has asked, not merely a helper having been built.
+      await vi.waitFor(() => expect(release).toBeDefined())
+      await new Promise((r) => setTimeout(r, 200))
+      expect(seen).not.toContain('device:ready')
+      release!(true)
+      await vi.waitFor(() => expect(seen).toContain('device:ready'), { timeout: 1000 })
+      agent.disconnect()
+      browser.close()
+    })
+
+    // A shutdown during the wait stops the helper, which ends the wait with `false`; the boot must be abandoned there,
+    // not carry on to announce a device that was just shut down. Holds the order of the wait and the seq check.
+    it('is not sent for a boot a shutdown abandoned during the wait', async () => {
+      let release: ((ready: boolean) => void) | undefined
+      touchGate.ready = () => new Promise((resolve) => { release = resolve })
+      const { agent, browser, seen } = await boot()
+      // This boot's wait has asked, not merely a helper having been built.
+      await vi.waitFor(() => expect(release).toBeDefined())
+      // Past the local stream connect, so the shutdown lands while the boot is waiting on the helper alone.
+      await new Promise((r) => setTimeout(r, 300))
+      browser.send(JSON.stringify({ type: 'device:shutdown', sessionId: agent.sessionId, payload: { deviceId: 'dev-1' } }))
+      await vi.waitFor(() => expect(seen).toContain('device:shutdown-done'), { timeout: 2000 })
+      release!(false)
+      await new Promise((r) => setTimeout(r, 200))
+      expect(seen).not.toContain('device:ready')
+      agent.disconnect()
+      browser.close()
+    })
+
+    // A helper being replaced past its own start-up deadline must not leave a device with a picture and no answer.
+    it('is sent anyway once the wait runs out', async () => {
+      touchGate.ready = () => new Promise(() => {})
+      const { agent, browser, seen } = await boot({ touchReadyWaitMs: 100 })
+      await vi.waitFor(() => expect(seen).toContain('device:ready'), { timeout: 2000 })
       agent.disconnect()
       browser.close()
     })

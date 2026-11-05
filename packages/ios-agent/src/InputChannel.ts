@@ -25,6 +25,9 @@ export interface InputChannel {
    *  reconnect and is stopped by the device teardown, not by whoever drops the channel. */
   stop(): void
   inputState(): 'ready' | 'starting' | 'unavailable'
+  /** Resolves `true` once a write would reach the device, `false` once this channel is stopped. Unbounded otherwise:
+   *  a helper that dies before it is ready is replaced, and the waiter keeps waiting, so the caller sets the limit. */
+  whenReady(): Promise<boolean>
   ownsGesture(): boolean
 
   touchStart(x: number, y: number): boolean
