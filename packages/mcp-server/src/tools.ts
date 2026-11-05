@@ -126,11 +126,14 @@ export function makeFlowDriver(client: TapflowClient, sessionId: string, buildId
     },
     chrome: (timeoutMs) => guard(() => client.chrome(sessionId, timeoutMs)),
     // After the device turns, read which way the app stands until two reads agree (at most 2 s), as `RelayDriver`
-    // does: the chrome answers before the app has finished turning.
+    // does: the chrome answers before the app has finished turning. Where a turn is expected (an iOS chrome, or one
+    // already read), a read with none is a turn caught mid-way and is passed over; elsewhere (Android) it ends the loop.
     setOrientation: async (orientation, timeoutMs) => {
       await guard(() => client.setOrientation(sessionId, orientation, timeoutMs))
+      const chrome = await client.chrome(sessionId, 1).catch(() => null)
+      const expected = turn !== undefined || (chrome !== null && 'framePng' in chrome)
       const until = Date.now() + 2_000
-      let previous: InterfaceTurn | undefined | null = null
+      let previous: InterfaceTurn | null = null
       while (Date.now() < until) {
         let read: InterfaceTurn | undefined
         try {
@@ -138,9 +141,16 @@ export function makeFlowDriver(client: TapflowClient, sessionId: string, buildId
         } catch {
           return
         }
-        turn = read
-        if (read === undefined || read === previous) return
-        previous = read
+        if (read === undefined) {
+          if (!expected) {
+            turn = undefined
+            return
+          }
+        } else {
+          turn = read
+          if (read === previous) return
+          previous = read
+        }
         await new Promise((r) => setTimeout(r, 200))
       }
     },

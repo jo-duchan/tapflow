@@ -135,13 +135,22 @@ export class RelayDriver implements FlowDriver {
   /**
    * Turn the device, then read which way the app now stands. The device's chrome answers before the app has
    * finished turning, so a single read could keep the old turn for a coordinate step that follows: read until two in
-   * a row agree, for at most `TURN_SETTLE_MS`. A first read with no turn at all (Android, an older agent) ends it —
-   * there is nothing to settle. Best effort: a read that fails leaves the last value, and the step still passes.
+   * a row agree, for at most `TURN_SETTLE_MS`. Best effort: a read that fails leaves the last value, and the step still
+   * passes.
+   *
+   * **A read with no turn means one of two things**, and which is decided before the loop. Where no turn is expected —
+   * Android, whose tree and touch share a space, so nothing this run read said otherwise — it ends the loop on the
+   * first read, which on Android costs a second of uiautomator. Where one is (an iOS chrome, or a turn already read this
+   * run) it is a turn caught mid-way: the runner answers 0 when its two reads of the app disagree, and taking that as
+   * the answer left the next coordinate step untransformed in exactly the window this loop exists for. Those reads are
+   * passed over. An iOS agent too old to report a turn reads none for the whole budget and ends with none, as before.
    */
   async setOrientation(orientation: 'portrait' | 'landscape', timeoutMs: number): Promise<void> {
     await this.guard(() => this.client.setOrientation(this.sessionId, orientation, timeoutMs))
+    const chrome = await this.client.chrome(this.sessionId, 1).catch(() => null)
+    const expected = this.turn !== undefined || (chrome !== null && 'framePng' in chrome)
     const until = Date.now() + TURN_SETTLE_MS
-    let previous: InterfaceTurn | undefined | null = null
+    let previous: InterfaceTurn | null = null
     while (Date.now() < until) {
       let read: InterfaceTurn | undefined
       try {
@@ -149,9 +158,16 @@ export class RelayDriver implements FlowDriver {
       } catch {
         return
       }
-      this.turn = read
-      if (read === undefined || read === previous) return
-      previous = read
+      if (read === undefined) {
+        if (!expected) {
+          this.turn = undefined
+          return
+        }
+      } else {
+        this.turn = read
+        if (read === previous) return
+        previous = read
+      }
       await new Promise((r) => setTimeout(r, TURN_SETTLE_POLL_MS))
     }
   }

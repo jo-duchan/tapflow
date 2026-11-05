@@ -400,6 +400,32 @@ describe('makeFlowDriver — points turned by the app\'s interface turn', () => 
     expect(vi.mocked(client.tap).mock.calls).toEqual([['s1', 0.25, 0.1], ['s1', 0.9, 0.25]])
   })
 
+  // The runner answers 0 — no turn on the wire — when its two reads of the app disagree, most likely right after the
+  // chrome said the device turned. On iOS that read is passed over; on Android the first read ends the wait.
+  it('passes over a read with no turn on iOS after setOrientation, and stops at once on Android', async () => {
+    const ios = fakeClient([])
+    const reads = [undefined, 270, 270]
+    Object.assign(ios, {
+      setOrientation: vi.fn(async () => {}),
+      chrome: vi.fn(async () => ({ framePng: '', buttons: [] })),
+      queryUITreeWithTurn: vi.fn(async () => ({ elements: [], interfaceTurn: reads.shift() })),
+    })
+    const driver = makeFlowDriver(ios, 's1', undefined)
+    await driver.setOrientation!('landscape', 1000)
+    await driver.tap(0.25, 0.1)
+    expect(ios.tap).toHaveBeenCalledWith('s1', 0.9, 0.25)
+
+    const android = fakeClient([])
+    const read = vi.fn(async () => ({ elements: [] }))
+    Object.assign(android, {
+      setOrientation: vi.fn(async () => {}),
+      chrome: vi.fn(async () => ({ buttons: [], streamType: 'h264', bodyRotation: 90 })),
+      queryUITreeWithTurn: read,
+    })
+    await makeFlowDriver(android, 's1', undefined).setOrientation!('landscape', 1000)
+    expect(read).toHaveBeenCalledTimes(1)
+  })
+
   it('does not carry a turn from one driver to the next', async () => {
     const client = fakeClient([])
     ;(client as unknown as Record<string, unknown>).queryUITreeWithTurn = vi.fn(async () => ({ elements: [], interfaceTurn: 90 }))

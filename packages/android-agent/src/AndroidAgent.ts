@@ -150,9 +150,12 @@ const METRICS_SAMPLE_GAP_MS = 300
 const POSTURE_COMMIT_POLL_MS = 50
 const POSTURE_COMMIT_TIMEOUT_MS = 3_000
 // Folding puts up a keyguard (`dismissFoldKeyguard`). Measured on a Pixel 9 Pro Fold, it is already up at the read that
-// sees the commit, so the wait for it is short and only folds pay it. The read itself is ~55ms.
+// sees the commit (~0.3 s after the write), and the read itself is ~55ms. The wait is a second rather than a hair over
+// that one measurement: a keyguard that comes up after it is missed, and the flow's next step then fails behind it, on
+// a Mac slower than the one measured. Only a fold pays it in full, and only where no keyguard comes at all (a real
+// device, Android 14 and older); where one comes, the wait ends when it does.
 const KEYGUARD_POLL_MS = 50
-const KEYGUARD_APPEAR_MS = 500
+const KEYGUARD_APPEAR_MS = 1_000
 const KEYGUARD_DISMISS_MS = 1_000
 // `emu rotate` lands at once (the next gRPC frame came 53 ms later, measured); the console read that confirms it
 // is tens of ms. The stop is for an emulator that took the command and did not turn.
@@ -1003,6 +1006,8 @@ export class AndroidAgent implements DeviceAgent, NetworkControlCapability {
    * written before it is overwritten by whatever the incoming panel had.
    */
   async setPosture(deviceId: string, postureId: string): Promise<void> {
+    // Not behind `posturing`, which only the wire handler takes: every caller in production arrives as `input:posture`,
+    // and a caller of this entry point orders its own changes. The keyguard step made a change ~1.5 s longer.
     const { serial, before } = await this.beginPosture(deviceId, postureId)
     // `deviceStates` is keyed by session and this entry point takes a device, so the device's live state is looked
     // up: `finishPosture` needs it to tell a body-drawn (gRPC) emulator, which must never get a lock, from one on

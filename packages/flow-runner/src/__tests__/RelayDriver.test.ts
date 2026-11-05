@@ -18,6 +18,10 @@ import {
 
 // RelayDriver takes the concrete client; the fake below satisfies the methods
 // the driver calls, cast once at construction rather than per test.
+// A chrome with a frame is an iOS one, which is what tells the settle loop a turn is expected.
+const IOS_CHROME = { framePng: '', buttons: [] }
+const ANDROID_CHROME = { buttons: [], streamType: 'h264', bodyRotation: 90 }
+
 function driverWith(client: Record<string, (...args: never[]) => Promise<unknown>>) {
   // A fake that answers only `queryUITree` reads as a tree with no turn: the driver asks `queryUITreeWithTurn`.
   const { queryUITree } = client
@@ -214,7 +218,20 @@ describe('RelayDriver — points turned by the app\'s interface turn', () => {
     const reads = [0, 270, 270, 90]
     const queryUITreeWithTurn = vi.fn(async () => ({ elements: [], interfaceTurn: reads.shift() }))
     const tap = vi.fn(async () => {})
-    const driver = driverWith({ setOrientation: vi.fn(async () => {}), queryUITreeWithTurn, tap })
+    const driver = driverWith({ setOrientation: vi.fn(async () => {}), chrome: vi.fn(async () => IOS_CHROME), queryUITreeWithTurn, tap })
+    await driver.setOrientation('landscape', 1000)
+    await driver.tap(0.25, 0.1)
+    expect(queryUITreeWithTurn).toHaveBeenCalledTimes(3)
+    expect(tap).toHaveBeenCalledWith('s1', 0.9, 0.25)
+  })
+
+  // The runner answers 0 — no turn on the wire — when its two reads of the app disagree, which is most likely right
+  // after the chrome said the device turned. Taking that as the answer left the next coordinate step untransformed.
+  it('passes over a read with no turn on iOS, as a turn caught mid-way', async () => {
+    const reads = [undefined, 270, 270]
+    const queryUITreeWithTurn = vi.fn(async () => ({ elements: [], interfaceTurn: reads.shift() }))
+    const tap = vi.fn(async () => {})
+    const driver = driverWith({ setOrientation: vi.fn(async () => {}), chrome: vi.fn(async () => IOS_CHROME), queryUITreeWithTurn, tap })
     await driver.setOrientation('landscape', 1000)
     await driver.tap(0.25, 0.1)
     expect(queryUITreeWithTurn).toHaveBeenCalledTimes(3)
@@ -223,7 +240,7 @@ describe('RelayDriver — points turned by the app\'s interface turn', () => {
 
   it('stops after one read when the device reports no turn at all (Android)', async () => {
     const queryUITreeWithTurn = tree()
-    const driver = driverWith({ setOrientation: vi.fn(async () => {}), queryUITreeWithTurn })
+    const driver = driverWith({ setOrientation: vi.fn(async () => {}), chrome: vi.fn(async () => ANDROID_CHROME), queryUITreeWithTurn })
     await driver.setOrientation('landscape', 1000)
     expect(queryUITreeWithTurn).toHaveBeenCalledTimes(1)
   })

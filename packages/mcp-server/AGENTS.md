@@ -46,7 +46,7 @@ Connects to the relay over WebSocket + REST (`TapflowClient`), registers MCP too
 
 `run_flow` replays a `@tapflowio/flow-runner` YAML flow deterministically (no LLM at replay time) over this process's existing relay connection — it shares the session joined via `connect_device`, so it never opens a second WebSocket or hits "Session busy".
 
-`query_ui_tree` returns the unified element schema (`role`/`label`/`identifier`/`placeholder`/`frame`/`enabled`/`rawRole`) via `GET /api/v1/sessions/:sessionId/ui-tree`. Frames are normalized 0-1, so a frame center multiplied by the screenshot pixel size feeds straight into `tap`.
+`query_ui_tree` returns the unified element schema (`role`/`label`/`identifier`/`placeholder`/`frame`/`enabled`/`rawRole`) via `GET /api/v1/sessions/:sessionId/ui-tree`. Frames are normalized 0-1, so a frame center multiplied by the screenshot pixel size feeds straight into `tap` — except on an iOS app drawn in landscape, where the frames are in the app's space and the screenshot is the portrait framebuffer (#1119). `run_flow` turns its points by the tree's `interfaceTurn`; these two tools do not.
 
 ### Input acks: silence is answered "could not confirm", and never retried here
 

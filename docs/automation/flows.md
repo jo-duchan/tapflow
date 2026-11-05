@@ -169,7 +169,7 @@ With `landscape`, the device turns to whichever of its two sideways directions i
 
 A foldable on Android 15 or later puts up a "Swipe up to continue" lock screen when it folds. The agent takes it down, so the steps after a fold see the app. A device that was locked before the fold, or one with a PIN, pattern or password, is left locked, so do not set a secure lock on a device you run flows on.
 
-A step the device cannot do ends as an environment failure: `setPosture` on a device that does not fold, and `setOrientation` on a device that does not report which way it is held. Those are an iOS device with more than one panel, and an Android device streaming over scrcpy without gRPC. With `--parallel`, the worker does not leave the device over this failure, because other flows still run fine on it.
+A step the device cannot do ends as an environment failure. `setPosture` fails this way on a device that does not fold. `setOrientation` fails this way on a device that does not report which way it is held: an iOS device with more than one panel, or an Android device streaming over scrcpy without gRPC. With `--parallel`, the worker does not leave the device over this failure, because other flows still run fine on it.
 
 ### Resetting state
 
