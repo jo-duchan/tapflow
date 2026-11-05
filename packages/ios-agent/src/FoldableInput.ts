@@ -69,6 +69,11 @@ export class FoldableInput implements InputChannel {
     return state === 'ready' && this.deps.litScreen() === null ? 'starting' : state
   }
 
+  whenReady(): Promise<boolean> {
+    if (this.stopped) return Promise.resolve(false)
+    return this.deps.guest()?.whenReady() ?? Promise.resolve(false)
+  }
+
   ownsGesture(): boolean {
     return this.gesture !== null && (this.deps.guest()?.ownsGesture() ?? false)
   }

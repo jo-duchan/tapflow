@@ -166,6 +166,8 @@ export interface IOSAgentOptions {
   panelQuietMs?: number
   /** How long a boot waits for a multi-panel device's helper to be ready. Injectable for the same reason. */
   helperBootReadyMs?: number
+  /** How long a boot waits for a single-panel device's touch helper before announcing the device. Injectable for tests. */
+  touchReadyWaitMs?: number
 }
 
 // The postures of a multi-panel device (iPhone Duo), most closed first as the protocol requires. Two, not
@@ -189,6 +191,12 @@ const PANEL_QUIET_MS = 30_000
 // relaunched on a rolling budget for ever, which is right for a session already on the device and wrong for a
 // boot, which would otherwise never answer. Four of the helper's own 15 s start-up deadlines.
 const HELPER_BOOT_READY_MS = 60_000
+// How long a boot holds `device:ready` for a single-panel device's touch helper (#1114). The helper is replaced on every
+// boot and drops what it is sent until it says it is ready — 186–247ms when measured, ~2.5 s in a run of flows — so a
+// client that acts on `ready` at once was refused its first input. The same as `TouchHelper`'s own start-up deadline:
+// a helper not ready by then is being replaced, and `ready` goes out anyway, leaving the input refused with
+// `channel-starting` as before rather than a device with a picture and no boot answer.
+const TOUCH_READY_WAIT_MS = 5_000
 // How long a turn sent through the helper has to show up in `devicectl device orientation get`. M1 read each
 // one back 2.5 s after sending and every one had landed; the wait ends as soon as it does.
 const ROTATE_SETTLE_MS = 3_000
@@ -355,6 +363,7 @@ export class IOSAgent implements DeviceAgent, NetworkControlCapability, Posturab
   private readonly panelIdlePollMs: number
   private readonly panelQuietMs: number
   private readonly helperBootReadyMs: number
+  private readonly touchReadyWaitMs: number
   private readonly panelPolls = new Map<string, ReturnType<typeof setTimeout>>()
   // When each device's panel or orientation last moved, or tapflow last moved it: the poll is fast after that.
   private readonly panelActivity = new Map<string, number>()
@@ -423,6 +432,7 @@ export class IOSAgent implements DeviceAgent, NetworkControlCapability, Posturab
     this.panelIdlePollMs = options.panelIdlePollMs ?? PANEL_IDLE_POLL_MS
     this.panelQuietMs = options.panelQuietMs ?? PANEL_QUIET_MS
     this.helperBootReadyMs = options.helperBootReadyMs ?? HELPER_BOOT_READY_MS
+    this.touchReadyWaitMs = options.touchReadyWaitMs ?? TOUCH_READY_WAIT_MS
     this.leanStore = options.leanStore ?? new LeanStore(process.env.VITEST ? path.join(tmpdir(), 'tapflow-no-lean-store') : undefined, MANAGED_LABELS)
     this.network = options.network ?? new SimulatorNetwork(
       this.simctl,
@@ -1251,7 +1261,12 @@ export class IOSAgent implements DeviceAgent, NetworkControlCapability, Posturab
         }
       }
 
+      // **`device:ready` means a client can act on the device**, so a single-panel device's touch helper — started
+      // by `sendChromeData` above — is waited for too, alongside opening the stream (#1114). The multi-panel case
+      // waited above, and fails the boot; this one does not (`TOUCH_READY_WAIT_MS`).
+      const touchReady = this.multiPanelDevices.has(deviceId) ? null : this.awaitTouchReady(state)
       const streamWs = await this.openStreamWs(state)
+      await touchReady
       if (seq !== state.bootSeq) {
         streamWs.close()
         this.abandonBoot(state, seq, sessionId, requestId)
@@ -1485,6 +1500,20 @@ export class IOSAgent implements DeviceAgent, NetworkControlCapability, Posturab
     })
     queued.catch(() => {})
     return Promise.race([queued, late]).finally(() => clearTimeout(timer))
+  }
+
+  /** Resolves when the device's input channel is ready, or after `touchReadyWaitMs` with a warning. Never rejects. */
+  private async awaitTouchReady(state: DeviceState): Promise<void> {
+    const channel = state.touchHelper
+    if (!channel) return
+    let limit: ReturnType<typeof setTimeout> | undefined
+    const started = Date.now()
+    const ready = await Promise.race([
+      channel.whenReady(),
+      new Promise<boolean>((resolve) => { limit = setTimeout(() => resolve(false), this.touchReadyWaitMs) }),
+    ]).finally(() => clearTimeout(limit))
+    if (ready) logger.info(`touch input ready ${Date.now() - started}ms into the wait`)
+    else logger.warn(`touch input not ready within ${this.touchReadyWaitMs}ms; announcing the device anyway`)
   }
 
   // Lazily set up the touch channel: a reconnect re-issues the session with touchHelper=null while the sim stays booted, so input self-heals without a fresh device:boot. Sync so a tap's start+end stay paired (async would drop touchEnd → stuck finger).

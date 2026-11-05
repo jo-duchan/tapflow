@@ -106,6 +106,50 @@ describe('TouchHelper.stop()', () => {
   })
 })
 
+// What a boot waits on before it announces the device (#1114): a client acting on `device:ready` at once was refused
+// its first input while the helper the boot had just started was still coming up.
+describe('TouchHelper.whenReady()', () => {
+  it('resolves once the helper announces itself, and at once when it already has', async () => {
+    const proc = makeFakeProc()
+    const { helper } = await loadHelper([proc])
+    helper.start()
+    let settled: boolean | undefined
+    void helper.whenReady().then((r) => { settled = r })
+    await Promise.resolve()
+    expect(settled).toBeUndefined()
+    announceReady(proc)
+    await Promise.resolve()
+    expect(settled).toBe(true)
+    await expect(helper.whenReady()).resolves.toBe(true)
+  })
+
+  // A helper that dies before it is ready is replaced, so the wait carries on to the replacement.
+  it('keeps waiting across a helper that died before it was ready', async () => {
+    const first = makeFakeProc()
+    const second = makeFakeProc()
+    const { helper } = await loadHelper([first, second])
+    helper.start()
+    const ready = helper.whenReady()
+    die(first)
+    announceReady(second)
+    await expect(ready).resolves.toBe(true)
+  })
+
+  it('answers false when the channel is stopped before it is ready', async () => {
+    vi.useFakeTimers()
+    try {
+      const { helper } = await loadHelper([makeFakeProc()])
+      helper.start()
+      const ready = helper.whenReady()
+      helper.stop()
+      await expect(ready).resolves.toBe(false)
+      await expect(helper.whenReady()).resolves.toBe(false)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+})
+
 // A running helper is not a usable one. Measured: ~200ms between the two, and a frame written in
 // between is silently ineffective — which is #482's failure in a narrower window, so it must not
 // be reported as delivered.

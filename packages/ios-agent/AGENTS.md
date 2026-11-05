@@ -204,9 +204,16 @@ Five things about it are easy to undo by accident:
   does not, and they answer different questions: writes are gated on the first, replacement
   decisions on the second. Gating replacement on readiness would spawn a second helper while the
   first was still starting.
-  This window is not only reached after a death. `sendChromeData` starts the helper and
-  `device:ready` follows a local socket connect later — tens of ms — so **an MCP caller that taps
-  as soon as `boot_device` returns lands inside it**, which is how it was found.
+  This window is not only reached after a death. `sendChromeData` starts a fresh helper on every
+  boot, so **a client that acted on `device:ready` at once landed inside it** — an MCP caller tapping
+  as soon as `boot_device` returned, and a flow whose first step was an input (#1114). So a boot now
+  holds `device:ready` until the helper is ready (`awaitTouchReady`, ~185ms measured, overlapping the
+  stream connect), up to `TOUCH_READY_WAIT_MS` (5s, the helper's own start-up deadline); past that it
+  announces the device anyway, and the input is refused as `channel-starting` as before. It does not
+  fail the boot, unlike a multi-panel device's helper: here the stream works without input, and a
+  device with a picture and no boot answer would be worse. Restarting the helper on every boot is kept
+  rather than reusing a ready one: a simulator shut down or erased between two boots leaves the old
+  helper's HID client pointing at a device that is gone, ready and injecting nothing.
   A helper that never announces itself is replaced after `READY_DEADLINE_MS`. Without that,
   running-but-never-ready has no exit at all: nothing asks for a replacement because it is running,
   and every input is refused because it is not ready, so a wedge in the CoreSimulator device lookup
