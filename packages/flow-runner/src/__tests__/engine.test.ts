@@ -2,7 +2,7 @@ import { describe, it, expect, vi } from 'vitest'
 import type { UIElement } from '@tapflowio/agent-core'
 import { runFlow, type FlowDriver } from '../engine.js'
 import { parseFlow } from '../schema.js'
-import { EnvironmentStepError, TransientQueryError } from '../errors.js'
+import { DeviceLacksError, EnvironmentStepError, TransientQueryError } from '../errors.js'
 import type { PinchFingers } from '../engine.js'
 import type { ChromeButton, ChromeData } from '@tapflowio/protocol'
 
@@ -34,6 +34,8 @@ function fakeDriver(trees: UIElement[][]): FlowDriver & { calls: Array<[string, 
     pressButton: vi.fn(async (name: string) => { calls.push(['pressButton', name]) }),
     longPress: vi.fn(async (x: number, y: number, durationMs: number) => { calls.push(['longPress', x, y, durationMs]) }),
     pinch: vi.fn(async (start: PinchFingers, end: PinchFingers, durationMs: number) => { calls.push(['pinch', start, end, durationMs]) }),
+    setOrientation: vi.fn(async (orientation: string, timeoutMs: number) => { calls.push(['setOrientation', orientation, timeoutMs]) }),
+    setPosture: vi.fn(async (posture: string, timeoutMs: number) => { calls.push(['setPosture', posture, timeoutMs]) }),
   }
 }
 
@@ -954,5 +956,29 @@ describe('runFlow — a button the device lacks', () => {
     expect((await runFlow(flowOf('steps:\n  - pressButton: back\n'), driver, { ...OPTS, platform: 'tvos' })).status).toBe('passed')
     expect((await runFlow(flowOf('steps:\n  - pressButton: back\n'), driver, OPTS)).status).toBe('passed')
     expect(driver.chrome).not.toHaveBeenCalled()
+  })
+})
+
+describe('runFlow — orientation and posture', () => {
+  it('asks the driver to turn and fold, with the step timeout, and names the steps', async () => {
+    const driver = fakeDriver([[]])
+    const result = await runFlow(flowOf('steps:\n  - setOrientation: landscape\n  - setPosture: unfolded\n'), driver, OPTS)
+    expect(result.status).toBe('passed')
+    expect(driver.calls).toEqual([['setOrientation', 'landscape', 20], ['setPosture', 'unfolded', 20]])
+    expect(result.steps.map((s) => s.name)).toEqual(['setOrientation(landscape)', 'setPosture(unfolded)'])
+  })
+
+  // A device that cannot fold is not a broken device: the flow fails as the environment's, and the device is kept.
+  it('marks a step the device cannot do as deviceLacks, and an ordinary environment failure not', async () => {
+    const lacks = fakeDriver([[]])
+    lacks.setPosture = vi.fn(async () => { throw new DeviceLacksError('setPosture: no postures') })
+    const a = await runFlow(flowOf('steps:\n  - setPosture: folded\n'), lacks, OPTS)
+    expect(a).toMatchObject({ status: 'failed', failureKind: 'environment', deviceLacks: true })
+
+    const broken = fakeDriver([[]])
+    broken.setOrientation = vi.fn(async () => { throw new EnvironmentStepError('did not turn') })
+    const b = await runFlow(flowOf('steps:\n  - setOrientation: landscape\n'), broken, OPTS)
+    expect(b.failureKind).toBe('environment')
+    expect(b.deviceLacks).toBeUndefined()
   })
 })

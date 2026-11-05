@@ -85,13 +85,14 @@ export const INBOUND_DISPOSITION = {
       + 'depend on the on-screen keyboard\'s visibility.',
   },
   'device:postures': {
-    ignored: 'Which postures a foldable offers, and which it is in. A replay engine does not fold '
-      + 'the device: a flow that needs a posture would have to say so as a step, and none does.',
+    does: 'kept per session for a flow\'s `setPosture`, which picks the end of the list it names and waits for a '
+      + 'later one whose current posture is that id — an empty list is waited past, not taken as an answer',
   },
   'session:chrome': {
     does: 'handed to the stream listener when one is set, so the run\'s video can draw the device frame it was '
       + 'recorded in, and kept per session so the engine can check a flow\'s `pressButton` steps against the buttons '
-      + 'the device declares before running it — selectors still come from the UI tree, never from this',
+      + 'the device declares before running it, and `setOrientation` can tell which way the device is held and wait '
+      + 'for the turn — selectors, and the turn a point is placed by, still come from the UI tree, never from this'
   },
   'session:deviceInfo': {
     does: 'handed to the stream listener when one is set and written into the run\'s video beside the chrome; '

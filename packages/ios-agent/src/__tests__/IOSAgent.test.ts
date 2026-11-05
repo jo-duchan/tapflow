@@ -684,6 +684,44 @@ describe('IOSAgent', () => {
     })
   })
 
+  // A client turns a tree point into a touch point by the app's turn; a multi-panel device gets none (#1116).
+  describe('ui:tree:response carries the app\'s interface turn', () => {
+    afterEach(() => { vi.restoreAllMocks() })
+
+    it.each([[false, 270], [true, undefined]] as const)('multi-panel %s → interfaceTurn %s', async (multiPanel, expected) => {
+      vi.spyOn(XCUITreeReader.prototype, 'warm').mockImplementation(() => {})
+      vi.spyOn(XCUITreeReader.prototype, 'readWithTurn').mockResolvedValue({ elements: [], interfaceTurn: 270 })
+      const browser = new WebSocket(`ws://localhost:${port}`)
+      await waitForOpen(browser)
+      const agent = new IOSAgent({ intervalMs: 50 }, mockSimctl(true))
+      await agent.connect(`ws://localhost:${port}`)
+      browser.send(JSON.stringify({ type: 'session:start', sessionId: agent.sessionId, clientKind: 'flow-runner' }))
+      await waitForType(browser, 'session:joined')
+      browser.send(JSON.stringify({ type: 'device:boot', requestId: 'rq-tree', sessionId: agent.sessionId, payload: { deviceId: 'dev-1' } }))
+      await waitForType(browser, 'device:ready')
+      // Driven at the agent's dispatcher: the relay sends `ui:tree:request` for an HTTP caller, not a browser one.
+      const internals = agent as unknown as {
+        lastBundleIds: Map<string, string>
+        multiPanelDevices: Set<string>
+        handleRelayMessage(msg: { type: string; sessionId: string; requestId?: string }): void
+        sendMsg(msg: { type: string }): void
+      }
+      internals.lastBundleIds.set('dev-1', 'com.app')
+      if (multiPanel) internals.multiPanelDevices.add('dev-1')
+      const sent: Array<{ type: string; interfaceTurn?: number }> = []
+      const real = internals.sendMsg.bind(agent)
+      internals.sendMsg = (msg) => { sent.push(msg); real(msg as never) }
+      internals.handleRelayMessage({ type: 'ui:tree:request', sessionId: agent.sessionId!, requestId: 'rq-t' })
+      await vi.waitFor(() => expect(sent.some((m) => m.type === 'ui:tree:response')).toBe(true), { timeout: 2000 })
+      const reply = sent.find((m) => m.type === 'ui:tree:response')!
+      expect(reply.interfaceTurn).toBe(expected)
+      if (expected === undefined) expect(reply).not.toHaveProperty('interfaceTurn')
+
+      agent.disconnect()
+      browser.close()
+    })
+  })
+
   // The relay tags a boot `automation` when a flow runner or MCP client holds the session; the agent then starts
   // the UI-tree runner so the first selector step does not spend its cold start. A dashboard boot never does: the
   // runner costs about 650 MB per device, and manual testing never reads the tree.

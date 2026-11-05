@@ -5145,6 +5145,82 @@ describe('a posture change reports as soon as the guest commits', () => {
   })
 })
 
+describe('a fold takes down the keyguard it put up', () => {
+  const STATES = `DeviceState{identifier=0, name='CLOSED'}\nDeviceState{identifier=1, name='HALF_OPENED'}`
+
+  /**
+   * Drives `input:posture` to `target` ('1' folds, '2' unfolds) with the keyguard reads answering `reads` in turn
+   * (the last repeating), and records the order of what the agent did.
+   */
+  function change(target: '1' | '2', reads: Array<{ showing: boolean; secure: boolean } | null>) {
+    const adb = mockAdb(true)
+    const order: string[] = []
+    vi.spyOn(adb, 'printDeviceStates').mockResolvedValue(STATES)
+    vi.spyOn(adb, 'deviceState').mockResolvedValue(`Committed state: DeviceState{identifier=0, name='${target === '1' ? 'CLOSED' : 'HALF_OPENED'}'}`)
+    vi.spyOn(adb, 'setPosture').mockImplementation(async () => { order.push('setPosture') })
+    vi.spyOn(adb, 'getDisplayMetrics').mockResolvedValue(null)
+    let n = 0
+    vi.spyOn(adb, 'keyguardState').mockImplementation(async () => { order.push('keyguardState'); return reads[Math.min(n++, reads.length - 1)]! })
+    const dismiss = vi.spyOn(adb, 'dismissKeyguard').mockImplementation(async () => { order.push('dismissKeyguard') })
+    const agent = new AndroidAgent({}, adb)
+    ;(agent as unknown as { ws: { readyState: number; send(d: string): void } }).ws = {
+      readyState: 1,
+      send: (d: string) => { if ((JSON.parse(d) as { type: string }).type === 'device:postures') order.push('device:postures') },
+    }
+    const state = { deviceId: 'avd:Pixel_8_API_34', sessionId: 's1', booted: true } as unknown as TestState
+    internals(agent).deviceStates.set('s1', state)
+    internals(agent).handleRelayMessage({ type: 'input:posture', sessionId: 's1', payload: { postureId: target } })
+    return { order, dismiss }
+  }
+
+  const settle = () => new Promise((r) => setTimeout(r, 400))
+  const up = { showing: true, secure: false }
+  const down = { showing: false, secure: false }
+
+  // Before the report, because the report is what a flow's `setPosture` waits for: its next step must find the app.
+  it('dismisses the keyguard a fold put up before reporting the posture, and reads it back', async () => {
+    const { order, dismiss } = change('1', [down, up, down])
+    await settle()
+    expect(dismiss).toHaveBeenCalledTimes(1)
+    const reported = order.indexOf('device:postures')
+    expect(order.indexOf('dismissKeyguard')).toBeLessThan(reported)
+    expect(order.slice(order.indexOf('dismissKeyguard'), reported)).toContain('keyguardState')
+  })
+
+  // Measured: the keyguard can still be on its way at the read that sees the commit.
+  it('waits a moment on a fold for the keyguard to come up', async () => {
+    const { dismiss } = change('1', [down, down, down, up, down])
+    await settle()
+    expect(dismiss).toHaveBeenCalledTimes(1)
+  })
+
+  it('leaves a keyguard that was already up before the change', async () => {
+    const { dismiss } = change('1', [up])
+    await settle()
+    expect(dismiss).not.toHaveBeenCalled()
+  })
+
+  it('leaves a secure keyguard for its credential', async () => {
+    const { dismiss } = change('1', [down, { showing: true, secure: true }])
+    await settle()
+    expect(dismiss).not.toHaveBeenCalled()
+  })
+
+  it('leaves the keyguard alone when it cannot be read', async () => {
+    const { dismiss } = change('1', [null, up])
+    await settle()
+    expect(dismiss).not.toHaveBeenCalled()
+  })
+
+  // Unfolding does not put one up, so it pays one read and no wait.
+  it('reads once after an unfold and does not wait', async () => {
+    const { order, dismiss } = change('2', [down])
+    await settle()
+    expect(dismiss).not.toHaveBeenCalled()
+    expect(order.filter((o) => o === 'keyguardState')).toHaveLength(2)
+  })
+})
+
 describe('what the delta review found', () => {
   const metrics = (rot: 0 | 90 | 180 | 270 = 0) => ({
     natural: { width: 1080, height: 2424 },

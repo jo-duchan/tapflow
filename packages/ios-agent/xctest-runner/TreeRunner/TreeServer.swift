@@ -8,7 +8,8 @@ import XCTest
 //
 // Routes:
 //   GET /health                     → the token the host passed, or "ok" without one (readiness probe)
-//   GET /tree?bundleId=<id>         → the app's XCUIApplication.debugDescription (text)
+//   GET /tree?bundleId=<id>         → `TAPFLOW_INTERFACE_ORIENTATION <UIInterfaceOrientation or 0>`, then the app's
+//                                     XCUIApplication.debugDescription (text)
 final class TreeServer {
     private let listener: NWListener
     private let queue = DispatchQueue(label: "dev.tapflow.treeserver")
@@ -93,9 +94,27 @@ final class TreeServer {
                 return ("400 Bad Request", "missing bundleId")
             }
             let app = XCUIApplication(bundleIdentifier: bundleId)
-            return ("200 OK", app.debugDescription)
+            // The app's own interface orientation, which the tree's frames are in. Touches go to the portrait
+            // framebuffer, so this — not the device's held orientation — is what turns a tree point into a touch
+            // point (a portrait-locked app stays portrait on a turned device). Read as WebDriverAgent does, through a
+            // private XCUIApplication property, and only once the app is up: while it is still starting, the tree is
+            // a "not found" query chain and the getter has no app to ask. Read on both sides of the tree, and 0 when
+            // the two differ — a turn caught mid-way is no information, not the wrong one. One line ahead of the tree.
+            // `state` is public and asks nothing of the app; the private getter is only reached past it.
+            let up = app.state == .runningForeground
+            let before = up ? Self.interfaceOrientation(app) : 0
+            let tree = app.debugDescription
+            let orientation = up && tree.contains("Element subtree:") && before == Self.interfaceOrientation(app) ? before : 0
+            return ("200 OK", "TAPFLOW_INTERFACE_ORIENTATION \(orientation)\n" + tree)
         }
         return ("404 Not Found", "unknown route")
+    }
+
+    /// UIInterfaceOrientation (1 portrait, 2 upside down, 3 landscape right, 4 landscape left), or 0 when the
+    /// runtime has no such property — guarded, so a missing getter answers 0 rather than raising.
+    private static func interfaceOrientation(_ app: XCUIApplication) -> Int {
+        guard app.responds(to: NSSelectorFromString("interfaceOrientation")) else { return 0 }
+        return (app.value(forKey: "interfaceOrientation") as? Int) ?? 0
     }
 
     private static func query(_ path: String, _ key: String) -> String? {

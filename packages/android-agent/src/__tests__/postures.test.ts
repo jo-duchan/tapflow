@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { parsePostures, parseCurrentPosture, bootPostureId } from '../postures'
+import { parsePostures, parseCurrentPosture, bootPostureId, parseKeyguard } from '../postures'
 
 // Verbatim from a Pixel 9 Pro Fold (API 36) on 2026-09-18 — `adb shell cmd device_state
 // print-states`. Kept whole rather than trimmed to the fields the parser reads: the trailing
@@ -97,5 +97,32 @@ describe('bootPostureId', () => {
     // leaves the device alone rather than folding it somewhere arbitrary.
     expect(bootPostureId([])).toBeNull()
     expect(bootPostureId([{ id: '1', label: 'Folded' }])).toBeNull()
+  })
+})
+
+// The `KeyguardServiceDelegate` block of `adb shell dumpsys window policy`, verbatim from a Pixel 9 Pro Fold (API 36).
+const POLICY = (showing: boolean, secure: boolean) => `    KeyguardServiceDelegate
+      showing=${showing}
+      inputRestricted=false
+      occluded=false
+      secure=${secure}
+      dreaming=false
+      systemIsReady=true
+      deviceHasKeyguard=true
+    KeyguardStateMonitor
+        mIsShowing=${showing}
+        mSimSecure=false`
+
+describe('parseKeyguard', () => {
+  it('reads whether the keyguard is up and whether it is a secure one', () => {
+    expect(parseKeyguard(POLICY(true, false))).toEqual({ showing: true, secure: false })
+    expect(parseKeyguard(POLICY(false, false))).toEqual({ showing: false, secure: false })
+    expect(parseKeyguard(POLICY(true, true))).toEqual({ showing: true, secure: true })
+  })
+
+  // An image that words it differently is left alone rather than read as unlocked.
+  it('answers null when the dump does not say', () => {
+    expect(parseKeyguard('')).toBeNull()
+    expect(parseKeyguard('      showing=true')).toBeNull()
   })
 })

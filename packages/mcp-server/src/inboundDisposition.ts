@@ -98,12 +98,13 @@ export const INBOUND_DISPOSITION = {
       + 'which is a viewer concern — this client has no surface to reflect it on.',
   },
   'device:postures': {
-    ignored: 'Which postures a foldable offers, and which it is in. No tool changes a device\'s '
-      + 'posture, so there is nothing here that would act on the list.',
+    does: 'kept per session for `run_flow`\'s `setPosture`, which picks the end of the list it names and waits '
+      + 'for a later one whose current posture is that id. No tool of its own changes a posture.',
   },
   'session:chrome': {
     does: 'kept per session for `run_flow`, which checks a flow\'s `pressButton` steps against the buttons the device '
-      + 'declares before replaying it. The bezel geometry it also carries is for drawing a frame, which this client does not.',
+      + 'declares before replaying it, and reads which way the device is held for `setOrientation`. The bezel '
+      + 'geometry it also carries is for drawing a frame, which this client does not.',
   },
   'session:deviceInfo': {
     ignored: 'Nothing here displays a device; `list_devices` already carries its name and platform. The only '

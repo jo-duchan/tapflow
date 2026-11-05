@@ -137,6 +137,14 @@
                 }
               ]
             },
+            "setOrientation": {
+              "enum": ["portrait", "landscape"],
+              "description": "Turn the device and wait until it reports the new orientation. Points in later steps are placed in the app as it is drawn."
+            },
+            "setPosture": {
+              "enum": ["folded", "unfolded"],
+              "description": "Fold or unfold a foldable and wait until it reports the posture. A device that does not fold fails the step as the environment's."
+            },
             "pinch": {
               "type": "object",
               "additionalProperties": false,

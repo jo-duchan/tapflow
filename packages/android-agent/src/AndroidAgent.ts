@@ -149,6 +149,11 @@ const METRICS_SAMPLE_GAP_MS = 300
 // never commits should still end with an honest report rather than a spinner.
 const POSTURE_COMMIT_POLL_MS = 50
 const POSTURE_COMMIT_TIMEOUT_MS = 3_000
+// Folding puts up a keyguard (`dismissFoldKeyguard`). Measured on a Pixel 9 Pro Fold, it is already up at the read that
+// sees the commit, so the wait for it is short and only folds pay it. The read itself is ~55ms.
+const KEYGUARD_POLL_MS = 50
+const KEYGUARD_APPEAR_MS = 500
+const KEYGUARD_DISMISS_MS = 1_000
 // `emu rotate` lands at once (the next gRPC frame came 53 ms later, measured); the console read that confirms it
 // is tens of ms. The stop is for an emulator that took the command and did not turn.
 const BODY_TURN_POLL_MS = 50
@@ -1031,6 +1036,7 @@ export class AndroidAgent implements DeviceAgent, NetworkControlCapability {
       throw new PlatformError(`Unknown posture "${postureId}" for ${deviceId}`)
     }
     const before = (await this.adb.getDisplayMetrics(serial).catch(() => null))?.rotation ?? null
+    const lockedBefore = (await this.adb.keyguardState(serial).catch(() => null))?.showing
     await this.adb.setPosture(serial, postureId)
     const started = Date.now()
     // Measured against the clock, not by adding up the sleeps: each pass also costs a read, so
@@ -1039,12 +1045,57 @@ export class AndroidAgent implements DeviceAgent, NetworkControlCapability {
       const current = await this.adb.deviceState(serial).then(parseCurrentPosture).catch(() => null)
       if (current === postureId) {
         logger.info(`posture ${postureId}: guest committed in ${Date.now() - started}ms`)
+        // Before the report goes out, because the report is what a flow's `setPosture` waits for: its next step must
+        // find the app, not the keyguard.
+        await this.dismissFoldKeyguard(serial, postures[0]!.id === postureId, lockedBefore)
         return { serial, before }
       }
       await new Promise((resolve) => setTimeout(resolve, POSTURE_COMMIT_POLL_MS))
     }
     logger.warn(`posture ${postureId}: guest did not commit within ${POSTURE_COMMIT_TIMEOUT_MS}ms`)
     return { serial, before }
+  }
+
+  /**
+   * Take down the keyguard a fold put up, and only that one.
+   *
+   * Folding asks the device to sleep, and Android 15 and later answer with a keyguard that a swipe dismisses
+   * ("Swipe up to continue") instead of sleeping: `FoldGracePeriodProvider` in `PowerManagerService`. The setting
+   * that would turn it off, `fold_lock_behavior_setting`, is read only where `config_fold_lock_behavior` is on, and
+   * the emulator images leave it off — measured, setting it changed nothing, and neither did
+   * `locksettings set-disabled` (a secure lock's switch) or `svc power stayon`. So every fold left a flow's next
+   * step facing the keyguard instead of the app, and a tester swiping it away by hand.
+   *
+   * `wm dismiss-keyguard` is what Appium's `dismissKeyguard` sends. It passes only the keyguard that needs no
+   * credential, so a **secure** one is left as it is: dismissing it would raise the PIN entry, which is not ours to
+   * open. A keyguard that was **already up** before the change is left too — a person locked that device, and a
+   * fold is not a reason to unlock it. Read back, because a write that did nothing reads the same as one that worked.
+   */
+  private async dismissFoldKeyguard(serial: string, closing: boolean, lockedBefore: boolean | undefined): Promise<void> {
+    if (lockedBefore !== false) return
+    const read = () => this.adb.keyguardState(serial).catch(() => null)
+    const sleep = () => new Promise((resolve) => setTimeout(resolve, KEYGUARD_POLL_MS))
+    const appearBy = Date.now() + (closing ? KEYGUARD_APPEAR_MS : 0)
+    let keyguard = await read()
+    while (!keyguard?.showing && Date.now() < appearBy) {
+      await sleep()
+      keyguard = await read()
+    }
+    if (!keyguard?.showing) return
+    if (keyguard.secure) {
+      logger.info('posture: the change put up a secure keyguard, which is left for the credential')
+      return
+    }
+    await this.adb.dismissKeyguard(serial).catch((e: unknown) => logger.warn(`could not dismiss the keyguard: ${(e as Error).message}`))
+    const goneBy = Date.now() + KEYGUARD_DISMISS_MS
+    while (Date.now() < goneBy) {
+      if ((await read())?.showing === false) {
+        logger.info('posture: dismissed the keyguard the change put up')
+        return
+      }
+      await sleep()
+    }
+    logger.warn(`posture: the keyguard the change put up was still showing ${KEYGUARD_DISMISS_MS}ms after dismissing it`)
   }
 
   /**

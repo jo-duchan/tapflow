@@ -9,6 +9,7 @@ import { defaultRunner, type AdbRunner } from './adb.js'
 import type { LaunchOptions } from '@tapflowio/protocol'
 import { hasLaunchOptions } from '@tapflowio/protocol/launch'
 import { androidLaunchExtras } from './launchExtras.js'
+import { parseKeyguard } from './postures.js'
 
 const logger = createLogger('android-agent:adb-wrapper')
 
@@ -223,6 +224,17 @@ export class AdbWrapper {
     // The console answers `KO: <reason>` on a refusal with a zero exit code, so the text is the
     // only signal that the device did not move.
     if (/^KO\b/m.test(out)) throw new PlatformError(`emu posture ${identifier} refused: ${out.trim()}`)
+  }
+
+  /** The keyguard as the window manager has it (`parseKeyguard`). */
+  async keyguardState(serial: string): Promise<{ showing: boolean; secure: boolean } | null> {
+    const out = await this.runner.exec('-s', serial, 'shell', 'dumpsys', 'window', 'policy')
+    return parseKeyguard(out)
+  }
+
+  /** Ask the window manager to take the keyguard down. A secure one is not passed: it asks for the credential. */
+  async dismissKeyguard(serial: string): Promise<void> {
+    await this.runner.exec('-s', serial, 'shell', 'wm', 'dismiss-keyguard')
   }
 
   // pm clear prints "Failed" with exit code 0 (e.g. unknown package), so the

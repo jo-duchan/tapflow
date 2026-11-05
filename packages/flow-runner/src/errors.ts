@@ -25,6 +25,19 @@ export class EnvironmentStepError extends PlatformError {
   }
 }
 
+/**
+ * The device cannot do what the step asks — a posture on a device that does not fold, an orientation on one that does
+ * not report how it is held. The environment's for the exit code, like any device fault, but **the device is not
+ * suspect**: a `--parallel` worker keeps it for the next flow (`FlowResult.deviceLacks`), as it keeps one after a
+ * button refusal (`failedBeforeRun`). Leaving it would cost the run a healthy device per such flow.
+ */
+export class DeviceLacksError extends EnvironmentStepError {
+  constructor(message: string, options?: ErrorOptions) {
+    super(message, options)
+    this.name = 'DeviceLacksError'
+  }
+}
+
 const markedEnvironmentFailures = new WeakSet<object>()
 
 // Keep the original error object for callers that already narrow on a public error class, while

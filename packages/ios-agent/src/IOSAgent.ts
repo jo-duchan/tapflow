@@ -2614,8 +2614,10 @@ export class IOSAgent implements DeviceAgent, NetworkControlCapability, Posturab
           this.sendMsg({ type: 'ui:tree:error', sessionId, requestId, message: 'No booted device' })
           break
         }
-        this.readUITree(state)
-          .then((elements) => this.sendMsg({ type: 'ui:tree:response', sessionId, requestId, elements }))
+        this.readUITreeWithTurn(state)
+          .then(({ elements, interfaceTurn }) => this.sendMsg({
+            type: 'ui:tree:response', sessionId, requestId, elements, ...(interfaceTurn !== undefined ? { interfaceTurn } : {}),
+          }))
           .catch((e: unknown) => {
             const message = e instanceof Error ? e.message : String(e)
             this.sendMsg({ type: 'ui:tree:error', sessionId, requestId, message })
@@ -2629,11 +2631,21 @@ export class IOSAgent implements DeviceAgent, NetworkControlCapability, Posturab
   // via app:launch), reading its tree from inside the simulator — no Simulator.app
   // window required.
   private async readUITree(state: DeviceState): Promise<UIElement[]> {
+    return (await this.readUITreeWithTurn(state)).elements
+  }
+
+  /**
+   * The tree and the turn of the app it was read from — what a client turns a frame by before it touches. Not for a
+   * multi-panel device: its panels are drawn with their own turn and touched by another path, and turning a point by
+   * the app's turn there is unmeasured (#1116), so it gets the absent value every client already handles.
+   */
+  private async readUITreeWithTurn(state: DeviceState): Promise<{ elements: UIElement[]; interfaceTurn?: 0 | 90 | 180 | 270 }> {
     const bundleId = this.lastBundleIds.get(state.deviceId)
     if (!bundleId) {
       throw new PlatformError('no app launched — launch an app before querying the UI tree')
     }
-    return this.uiTreeReader.read(state.deviceId, bundleId)
+    const read = await this.uiTreeReader.readWithTurn(state.deviceId, bundleId)
+    return this.multiPanelDevices.has(state.deviceId) ? { elements: read.elements } : read
   }
 
   /**

@@ -18,10 +18,12 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
@@ -53,6 +55,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
@@ -242,31 +245,58 @@ private fun HardScreen(tapped: (String) -> Unit) {
  */
 @Composable
 private fun GesturesScreen(tapped: (String) -> Unit) {
+    // Which way the app itself is drawn — what a flow's `setOrientation` should leave.
+    val configuration = LocalConfiguration.current
+    val landscape = configuration.screenWidthDp > configuration.screenHeightDp
     Column(Modifier.padding(20.dp).fillMaxSize(), verticalArrangement = Arrangement.spacedBy(20.dp)) {
         Text(
-            "Hold me",
+            if (landscape) "orientation:landscape" else "orientation:portrait",
             textAlign = TextAlign.Center,
-            modifier = Modifier.fillMaxWidth().height(64.dp).background(Color(0x332196F3)).testTag("gesture.hold")
-                .pointerInput(Unit) {
-                    detectTapGestures(onTap = { tapped("gesture.hold.short") }, onLongPress = { tapped("gesture.hold.long") })
-                },
+            modifier = Modifier.fillMaxWidth().testTag("gesture.orientation"),
         )
-        // Judged once every finger lifts, by which way the scale went, so how far a pinch spread does not matter.
-        Box(
-            Modifier.fillMaxWidth().weight(1f).background(Color(0x334CAF50)).testTag("gesture.zoom")
-                .pointerInput(Unit) {
-                    awaitEachGesture {
-                        awaitFirstDown(requireUnconsumed = false)
-                        var scale = 1f
-                        do {
-                            val event = awaitPointerEvent()
-                            scale *= event.calculateZoom()
-                        } while (event.changes.any { it.pressed })
-                        if (scale > 1.2f) tapped("gesture.zoom.in") else if (scale < 0.8f) tapped("gesture.zoom.out")
-                    }
-                },
-        )
+        // A phone in landscape has no height left for the two stacked, so they sit side by side there. The zoom area
+        // stays wide because a pinch at a point spreads its fingers across the screen, not across the element.
+        if (landscape) {
+            Row(Modifier.fillMaxWidth().weight(1f), horizontalArrangement = Arrangement.spacedBy(20.dp)) {
+                ZoomArea(tapped, Modifier.weight(1f).fillMaxHeight())
+                HoldArea(tapped, Modifier.width(120.dp).fillMaxHeight())
+            }
+        } else {
+            HoldArea(tapped, Modifier.fillMaxWidth().height(64.dp))
+            ZoomArea(tapped, Modifier.fillMaxWidth().weight(1f))
+        }
     }
+}
+
+@Composable
+private fun HoldArea(tapped: (String) -> Unit, modifier: Modifier) {
+    Text(
+        "Hold me",
+        textAlign = TextAlign.Center,
+        modifier = modifier.background(Color(0x332196F3)).testTag("gesture.hold")
+            .pointerInput(Unit) {
+                detectTapGestures(onTap = { tapped("gesture.hold.short") }, onLongPress = { tapped("gesture.hold.long") })
+            },
+    )
+}
+
+// Judged once every finger lifts, by which way the scale went, so how far a pinch spread does not matter.
+@Composable
+private fun ZoomArea(tapped: (String) -> Unit, modifier: Modifier) {
+    Box(
+        modifier.background(Color(0x334CAF50)).testTag("gesture.zoom")
+            .pointerInput(Unit) {
+                awaitEachGesture {
+                    awaitFirstDown(requireUnconsumed = false)
+                    var scale = 1f
+                    do {
+                        val event = awaitPointerEvent()
+                        scale *= event.calculateZoom()
+                    } while (event.changes.any { it.pressed })
+                    if (scale > 1.2f) tapped("gesture.zoom.in") else if (scale < 0.8f) tapped("gesture.zoom.out")
+                }
+            },
+    )
 }
 
 /** Receives taps from the page, the Android side of the bridge `web/index.html` calls. */

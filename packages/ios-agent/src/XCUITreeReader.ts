@@ -5,7 +5,7 @@ import { readdirSync, readFileSync, writeFileSync } from 'fs'
 import { join, relative } from 'path'
 import type { UIElement } from '@tapflowio/agent-core'
 import { createLogger, PlatformError } from '@tapflowio/agent-core'
-import { parseTreeText } from './xcuiTree.js'
+import { parseTreeText, splitInterfaceTurn } from './xcuiTree.js'
 
 const logger = createLogger('ios-agent:xcui-tree')
 const execFileAsync = promisify(execFile)
@@ -329,6 +329,11 @@ export class XCUITreeReader {
   }
 
   async read(udid: string, bundleId: string): Promise<UIElement[]> {
+    return (await this.readWithTurn(udid, bundleId)).elements
+  }
+
+  /** The tree with the app's interface turn the runner read beside it (`UiTreeResponse.interfaceTurn`). */
+  async readWithTurn(udid: string, bundleId: string): Promise<{ elements: UIElement[]; interfaceTurn?: 0 | 90 | 180 | 270 }> {
     if (!bundleId) throw new PlatformError('UI tree query needs a foreground app — launch an app first')
     const handle = await this.ensureRunner(udid)
     let text: string
@@ -349,10 +354,12 @@ export class XCUITreeReader {
     // Load-bearing for launch readiness too: while a launched app is still starting the runner answers a "not found"
     // query chain, and this error is what tells flow-runner's `launchApp` the screen is not up yet (see agent-core's
     // `DeviceAgent.launchApp`). Turning it into an empty tree would make every launch read as ready at once.
-    if (!text.includes('Element subtree:') && !text.includes('Application,')) {
+    const { body, interfaceTurn } = splitInterfaceTurn(text)
+    if (!body.includes('Element subtree:') && !body.includes('Application,')) {
       throw new PlatformError(`tree runner returned an unexpected response for ${bundleId} — is the app running in the foreground?`)
     }
-    return parseTreeText(text)
+    const elements = parseTreeText(body)
+    return interfaceTurn === undefined ? { elements } : { elements, interfaceTurn }
   }
 
   // Drop one device's runner, if `handle` is still the one it holds. Every fault path goes through here rather than
