@@ -132,7 +132,7 @@ On an Android device streaming over the adb fallback, a hold needs android-agent
 
 The `scale` is kept exactly and the space between the fingers is what adapts. The fingers spread along whichever axis has more room, and they stay inside the screen. When the center is so close to a corner that even the narrowest spacing does not fit, the step fails and says so.
 
-An Android device streaming over the adb fallback, without a gRPC or scrcpy pointer channel, cannot pinch. The step then fails as an environment failure (exit code 2), not as a failure of the app.
+An Android device streaming over the adb fallback, without a gRPC or scrcpy pointer channel, cannot pinch. The step then fails as an environment failure, not as a failure of the app: the run exits with code 2 unless another flow failed in the app, which makes it 1.
 
 ### Hardware buttons {#hardware-buttons}
 
@@ -147,7 +147,7 @@ An Android device streaming over the adb fallback, without a gRPC or scrcpy poin
 
 On iOS, any other button the device's frame declares can be pressed by its name as well, such as `action`.
 
-A flow that presses a button the device lacks fails before its first step, instead of running on to fail one step later at an assertion that would not explain why. When `flow run` knows the platform before it picks a device, from the build in `--build` or from `--platform` with `--parallel`, the flow fails without a device being booted for it, and the other flows still run. A button that depends on the device, such as `lock` on iOS, is checked against the device before the first step. Either way the failure is an environment failure (exit code 2), since the app was never tested. On iOS, use the app's own back control with `tapOn` instead of `back`, or tag the flow and run it only where the button exists.
+A flow that presses a button the device lacks fails before its first step, instead of running on to fail one step later at an assertion that would not explain why. When `flow run` knows the platform before it picks a device, from the build in `--build` or from `--platform` with `--parallel`, the flow fails without a device being booted for it, and the other flows still run. A button that depends on the device, such as `lock` on iOS, is checked against the device before the first step. Either way the failure is an environment failure, since the app was never tested: the run exits with code 2 unless another flow failed in the app, which makes it 1. On iOS, use the app's own back control with `tapOn` instead of `back`, or tag the flow and run it only where the button exists.
 
 ### Resetting state
 

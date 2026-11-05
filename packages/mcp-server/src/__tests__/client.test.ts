@@ -663,6 +663,22 @@ describe('TapflowClient', () => {
       }
       expect(timeouts).toContain(2_000 + 40)
     })
+
+    // A swipe that stays put is replayed as a long press there too, as long as the swipe lasted.
+    it('a swipe waits for its ack its own duration longer than a tap does', async () => {
+      const timeouts: number[] = []
+      const real = globalThis.setTimeout
+      const spy = vi.spyOn(globalThis, 'setTimeout').mockImplementation(((fn: () => void, ms?: number) => {
+        timeouts.push(ms ?? 0)
+        return real(fn, ms)
+      }) as typeof setTimeout)
+      try {
+        await client.swipe('sess-1', 0.5, 0.5, 0.5, 0.5, 80)
+      } finally {
+        spy.mockRestore()
+      }
+      expect(timeouts).toContain(2_000 + 80)
+    })
   })
 
   describe('pinch', () => {

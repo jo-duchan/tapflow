@@ -868,7 +868,9 @@ export class RelayClient {
   leaveSession(sessionId: string): void {
     // A gesture still open would stay pressed on the device: nothing on the relay or the agent lifts a pointer its
     // client left down, and a long press or a pinch is open for its whole length — a cancel lands inside one. Closed
-    // first, unanswered: the leave below settles whatever was waiting on it.
+    // first, unanswered: the leave below settles whatever was waiting on it. An end also *completes* the gesture —
+    // a tap on iOS, and on Android's adb path the whole hold replayed — which is the lesser harm until the wire has a
+    // cancel (#1115).
     const open = this.openGestures.get(sessionId)
     if (open) {
       this.openGestures.delete(sessionId)
@@ -1117,7 +1119,8 @@ export class RelayClient {
     await delay(interval)
     if (!this.closeGesture(sessionId, gesture)) return this.leftMidGesture(sessionId, 'swipe')
     this.send({ type: 'input:touch:end', sessionId, requestId, payload: { x: to[0], y: to[1] } })
-    await this.awaitInputAck(sessionId, requestId, 'swipe')
+    // A swipe that stays put is a hold to Android's adb path, which replays it after the end arrives — as a long press.
+    await this.awaitInputAck(sessionId, requestId, 'swipe', durationMs)
   }
 
   async typeText(sessionId: string, text: string): Promise<void> {

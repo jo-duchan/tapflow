@@ -306,6 +306,23 @@ describe('RelayClient — the input senders mint a correlator and await the ack'
     expect(timeouts).toContain(tapWait + 40)
   })
 
+  // A swipe that stays put is replayed as a long press there too, as long as the swipe lasted.
+  it('swipe waits for its ack its own duration longer than a tap does', async () => {
+    const { client } = await capture()
+    const timeouts: number[] = []
+    const real = globalThis.setTimeout
+    const spy = vi.spyOn(globalThis, 'setTimeout').mockImplementation(((fn: () => void, ms?: number) => {
+      timeouts.push(ms ?? 0)
+      return real(fn, ms)
+    }) as typeof setTimeout)
+    try {
+      await client.swipe('s1', [0.5, 0.5], [0.5, 0.5], 80)
+    } finally {
+      spy.mockRestore()
+    }
+    expect(timeouts).toContain(10_000 + 80)
+  })
+
   // Both agents inject a move the moment it arrives, so a pinch sent at once is a jump. `pinch:end` carries no
   // position, so the last move has to be the end.
   it('pinch paces its moves over the duration, ends on the end position, and acks on pinch:end', async () => {

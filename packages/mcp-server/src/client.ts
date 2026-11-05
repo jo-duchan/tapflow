@@ -1133,7 +1133,8 @@ export class TapflowClient {
     await delay(interval)
     const requestId = randomUUID()
     this.send({ type: 'input:touch:end', sessionId, requestId, payload: { x: endX, y: endY } })
-    await this.awaitInputAck(sessionId, requestId)
+    // A swipe that stays put is a hold to Android's adb path, which replays it after the end arrives — as a long press.
+    await this.awaitInputAck(sessionId, requestId, durationMs)
   }
 
   // Awaits the agent's ack so a following input (e.g. pressKey Enter) is sent
