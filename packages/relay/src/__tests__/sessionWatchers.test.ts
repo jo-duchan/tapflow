@@ -277,6 +277,16 @@ describe('session watchers', () => {
     expect(w.actions()).toEqual([{ kind: 'tap', x: 0.5, y: 0.8 }])
   })
 
+  // The end may carry no point (the dashboard's never does): the gesture the cancel left in place describes the tap.
+  it('keeps the gesture for that tap when the end carries no point', async () => {
+    const w = await watched()
+    w.send({ type: 'input:touch:start', payload: { x: 0.5, y: 0.8 } })
+    w.send({ type: 'input:touch:cancel' })
+    w.send({ type: 'input:touch:end', requestId: 'r1' })
+    await w.settled()
+    expect(w.actions()).toEqual([{ kind: 'tap', x: 0.5, y: 0.8 }])
+  })
+
   it('tells a drag as one swipe at its end, not a frame per move', async () => {
     const w = await watched()
     w.send({ type: 'input:touch:start', payload: { x: 0.5, y: 0.8 } })

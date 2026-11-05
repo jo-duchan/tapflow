@@ -2181,7 +2181,8 @@ export interface InputTouchEnd {
 }
 
 /**
- * Lift the open touch **without completing it**: the app sees its touch cancelled, not a tap or a long press (#1115).
+ * Lift the open touch **without completing it**: the app sees its touch cancelled, not a tap (#1115) — nor a long press,
+ * if the cancel arrives before the app recognised one; a long press the app already acted on cannot be undone.
  * Sent by a client leaving a session mid-gesture, followed by an `input:touch:end` — an agent that knows this message
  * has nothing left for that end to complete, and one that predates it (or a relay that drops it) completes the gesture
  * with the end as before, so no pairing is worse than today. No ack and no `requestId`: it is a terminal frame, but the

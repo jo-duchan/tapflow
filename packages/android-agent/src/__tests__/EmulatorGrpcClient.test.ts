@@ -316,7 +316,7 @@ describe('EmulatorGrpcClient — input readiness and deadline', () => {
 // A cancel marks the slot a palm (Android's input reader then cancels the touch), releases it and puts the slot back to
 // a finger, as one unit on the touch queue (#1115). Measured on a Pixel 6 (Android 14).
 describe('touchCancel', () => {
-  function recording(opts: { palmFails?: boolean; restoreFails?: boolean } = {}) {
+  function recording(opts: { palmFails?: boolean; restoreFails?: boolean; restoreFailsUpTo?: number } = {}) {
     const log: string[] = []
     let streams = 0
     const raw = makeRaw({
@@ -329,7 +329,7 @@ describe('touchCancel', () => {
           end: () => {
             const tool = events.find(([t, c]) => t === 3 && c === 0x37)?.[2]
             log.push(tool === 2 ? 'palm' : 'finger')
-            const fail = tool === 2 ? opts.palmFails : opts.restoreFails && n <= 1
+            const fail = tool === 2 ? opts.palmFails : opts.restoreFails && n <= (opts.restoreFailsUpTo ?? 1)
             cb(fail ? new Error('UNIMPLEMENTED') : null)
           },
         }
@@ -376,5 +376,15 @@ describe('touchCancel', () => {
     await pinch.client.touchCancel(0, 10, 10)
     await pinch.client.pinchStart(10, 10, 20, 20)
     expect(pinch.log).toEqual(['palm', 'up', 'finger', 'finger', 'down'])
+  })
+
+  // A press on a slot still a palm would be cancelled while reported delivered, so it is refused instead, and the
+  // slot is tried again on the next press.
+  it('refuses a press whose slot cannot be put back, and tries again on the next', async () => {
+    const { client, log } = recording({ restoreFails: true, restoreFailsUpTo: 2 })
+    await client.touchCancel(0, 10, 10)
+    await expect(client.touchDown(0, 10, 10)).rejects.toThrow('UNIMPLEMENTED')
+    await client.touchDown(0, 10, 10)
+    expect(log).toEqual(['palm', 'up', 'finger', 'finger', 'finger', 'down'])
   })
 })

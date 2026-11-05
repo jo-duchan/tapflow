@@ -129,7 +129,8 @@ export class EmulatorGrpcClient {
   // A cancel marks its slot a palm and puts it back to a finger after (`touchCancel`). The emulator's own touches
   // never set the tool type, so a slot left a palm would cancel every later touch on it while each was acked
   // delivered. A slot whose put-back failed is kept here, and the next press on it puts it back first — checked
-  // inside the press's queued step, so a press queued behind the cancel sees the cancel's outcome.
+  // inside the press's queued step, so a press queued behind the cancel sees the cancel's outcome. If that fails
+  // too, the press is refused rather than sent: on a palm slot it would be cancelled while reported delivered.
   private readonly palmSlots = new Set<number>()
 
   /** `raw` is injectable so tests can drive it without a live emulator. */
@@ -254,7 +255,8 @@ export class EmulatorGrpcClient {
   private async restoreFingers(slots: number[]): Promise<void> {
     for (const slot of slots) {
       if (!this.palmSlots.has(slot)) continue
-      await this.toolType(slot, MT_TOOL_FINGER).then(() => { this.palmSlots.delete(slot) }, () => {})
+      await this.toolType(slot, MT_TOOL_FINGER)
+      this.palmSlots.delete(slot)
     }
   }
 

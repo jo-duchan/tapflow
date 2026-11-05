@@ -3441,8 +3441,10 @@ export class RelayServer {
         session.touchCancelled = false
       } else if (msg.type === 'input:touch:move' && session.gesture) session.gesture.last = msg.payload
       else if (msg.type === 'input:touch:cancel') {
-        session.gesture = null
+        // An agent without the capability ignores the cancel and completes the touch with the end that follows, so
+        // the gesture is kept for that end to describe.
         session.touchCancelled = hasCapability(session.agentCapabilities, 'touch-cancel')
+        if (session.touchCancelled) session.gesture = null
       }
     }
   }
