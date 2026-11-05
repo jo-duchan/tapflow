@@ -192,7 +192,7 @@ const PANEL_QUIET_MS = 30_000
 // boot, which would otherwise never answer. Four of the helper's own 15 s start-up deadlines.
 const HELPER_BOOT_READY_MS = 60_000
 // How long a boot holds `device:ready` for a single-panel device's touch helper (#1114). The helper is replaced on every
-// boot and drops what it is sent until it says it is ready — 186–247ms when measured, ~2.5 s in a run of flows — so a
+// boot and drops what it is sent until it says it is ready — 180–250ms when measured, at a boot and after a death — so a
 // client that acts on `ready` at once was refused its first input. The same as `TouchHelper`'s own start-up deadline:
 // a helper not ready by then is being replaced, and `ready` goes out anyway, leaving the input refused with
 // `channel-starting` as before rather than a device with a picture and no boot answer.
@@ -1502,18 +1502,23 @@ export class IOSAgent implements DeviceAgent, NetworkControlCapability, Posturab
     return Promise.race([queued, late]).finally(() => clearTimeout(timer))
   }
 
-  /** Resolves when the device's input channel is ready, or after `touchReadyWaitMs` with a warning. Never rejects. */
+  /**
+   * Resolves when the device's input channel is ready, when it is stopped (a shutdown or a newer boot — the caller's
+   * seq check then abandons the boot), or after `touchReadyWaitMs`. Never rejects. Only the last is warned about: a
+   * stopped channel is not a helper that was slow, and saying so put a 5 s timeout that never happened beside every
+   * abandoned boot.
+   */
   private async awaitTouchReady(state: DeviceState): Promise<void> {
     const channel = state.touchHelper
     if (!channel) return
     let limit: ReturnType<typeof setTimeout> | undefined
     const started = Date.now()
-    const ready = await Promise.race([
-      channel.whenReady(),
-      new Promise<boolean>((resolve) => { limit = setTimeout(() => resolve(false), this.touchReadyWaitMs) }),
+    const outcome = await Promise.race([
+      channel.whenReady().then((ready) => (ready ? 'ready' as const : 'stopped' as const)),
+      new Promise<'timeout'>((resolve) => { limit = setTimeout(() => resolve('timeout'), this.touchReadyWaitMs) }),
     ]).finally(() => clearTimeout(limit))
-    if (ready) logger.info(`touch input ready ${Date.now() - started}ms into the wait`)
-    else logger.warn(`touch input not ready within ${this.touchReadyWaitMs}ms; announcing the device anyway`)
+    if (outcome === 'ready') logger.info(`touch input ready ${Date.now() - started}ms into the wait`)
+    else if (outcome === 'timeout') logger.warn(`touch input not ready within ${this.touchReadyWaitMs}ms; announcing the device anyway`)
   }
 
   // Lazily set up the touch channel: a reconnect re-issues the session with touchHelper=null while the sim stays booted, so input self-heals without a fresh device:boot. Sync so a tap's start+end stay paired (async would drop touchEnd → stuck finger).

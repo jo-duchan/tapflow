@@ -719,6 +719,24 @@ describe('IOSAgent', () => {
       browser.close()
     })
 
+    // A shutdown during the wait stops the helper, which ends the wait with `false`; the boot must be abandoned there,
+    // not carry on to announce a device that was just shut down. Holds the order of the wait and the seq check.
+    it('is not sent for a boot a shutdown abandoned during the wait', async () => {
+      let release: (ready: boolean) => void = () => {}
+      touchGate.ready = () => new Promise((resolve) => { release = resolve })
+      const { agent, browser, seen } = await boot()
+      await vi.waitFor(() => expect(MockTouchHelper.mock.results.length).toBeGreaterThan(0))
+      // Past the local stream connect, so the shutdown lands while the boot is waiting on the helper alone.
+      await new Promise((r) => setTimeout(r, 300))
+      browser.send(JSON.stringify({ type: 'device:shutdown', sessionId: agent.sessionId, payload: { deviceId: 'dev-1' } }))
+      await vi.waitFor(() => expect(seen).toContain('device:shutdown-done'), { timeout: 2000 })
+      release(false)
+      await new Promise((r) => setTimeout(r, 200))
+      expect(seen).not.toContain('device:ready')
+      agent.disconnect()
+      browser.close()
+    })
+
     // A helper being replaced past its own start-up deadline must not leave a device with a picture and no answer.
     it('is sent anyway once the wait runs out', async () => {
       touchGate.ready = () => new Promise(() => {})
