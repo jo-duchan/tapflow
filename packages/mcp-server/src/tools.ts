@@ -132,6 +132,8 @@ export function makeFlowDriver(client: TapflowClient, sessionId: string, buildId
       await guard(() => client.setOrientation(sessionId, orientation, timeoutMs))
       const chrome = await client.chrome(sessionId, 1).catch(() => null)
       const expected = turn !== undefined || (chrome !== null && 'framePng' in chrome)
+      // The turn from before the call is wrong now; a loop that never settles leaves none rather than that one.
+      turn = undefined
       const until = Date.now() + 2_000
       let previous: InterfaceTurn | null = null
       while (Date.now() < until) {

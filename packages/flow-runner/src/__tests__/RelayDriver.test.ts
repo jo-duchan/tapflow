@@ -238,6 +238,20 @@ describe('RelayDriver — points turned by the app\'s interface turn', () => {
     expect(tap).toHaveBeenCalledWith('s1', 0.9, 0.25)
   })
 
+  // The device has turned, so the turn read before it is wrong; a loop that never settles must not leave it in place.
+  it('drops the turn from before the call when the settle never reads one', async () => {
+    const reads: Array<() => { elements: never[]; interfaceTurn?: number }> = [
+      () => ({ elements: [], interfaceTurn: 90 }), () => ({ elements: [] }), () => { throw new Error('tree read failed') },
+    ]
+    const queryUITreeWithTurn = vi.fn(async () => reads.shift()!())
+    const tap = vi.fn(async () => {})
+    const driver = driverWith({ setOrientation: vi.fn(async () => {}), chrome: vi.fn(async () => IOS_CHROME), queryUITreeWithTurn, tap })
+    await driver.queryUITree()
+    await driver.setOrientation('portrait', 1000)
+    await driver.tap(0.25, 0.1)
+    expect(tap).toHaveBeenCalledWith('s1', 0.25, 0.1)
+  })
+
   it('stops after one read when the device reports no turn at all (Android)', async () => {
     const queryUITreeWithTurn = tree()
     const driver = driverWith({ setOrientation: vi.fn(async () => {}), chrome: vi.fn(async () => ANDROID_CHROME), queryUITreeWithTurn })

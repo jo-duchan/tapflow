@@ -135,8 +135,9 @@ export class RelayDriver implements FlowDriver {
   /**
    * Turn the device, then read which way the app now stands. The device's chrome answers before the app has
    * finished turning, so a single read could keep the old turn for a coordinate step that follows: read until two in
-   * a row agree, for at most `TURN_SETTLE_MS`. Best effort: a read that fails leaves the last value, and the step still
-   * passes.
+   * a row agree, for at most `TURN_SETTLE_MS`. The turn from before the call is dropped first: the device has turned,
+   * so it is wrong, and a loop that never settles must leave none rather than that one. Best effort: a read that fails
+   * leaves the last value read in this call, and the step still passes.
    *
    * **A read with no turn means one of two things**, and which is decided before the loop. Where no turn is expected —
    * Android, whose tree and touch share a space, so nothing this run read said otherwise — it ends the loop on the
@@ -149,6 +150,7 @@ export class RelayDriver implements FlowDriver {
     await this.guard(() => this.client.setOrientation(this.sessionId, orientation, timeoutMs))
     const chrome = await this.client.chrome(this.sessionId, 1).catch(() => null)
     const expected = this.turn !== undefined || (chrome !== null && 'framePng' in chrome)
+    this.turn = undefined
     const until = Date.now() + TURN_SETTLE_MS
     let previous: InterfaceTurn | null = null
     while (Date.now() < until) {

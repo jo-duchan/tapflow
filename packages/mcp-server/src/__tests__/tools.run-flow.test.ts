@@ -426,6 +426,23 @@ describe('makeFlowDriver — points turned by the app\'s interface turn', () => 
     expect(read).toHaveBeenCalledTimes(1)
   })
 
+  it('drops the turn from before setOrientation when the settle never reads one', async () => {
+    const client = fakeClient([])
+    const reads: Array<() => { elements: never[]; interfaceTurn?: number }> = [
+      () => ({ elements: [], interfaceTurn: 90 }), () => ({ elements: [] }), () => { throw new Error('tree read failed') },
+    ]
+    Object.assign(client, {
+      setOrientation: vi.fn(async () => {}),
+      chrome: vi.fn(async () => ({ framePng: '', buttons: [] })),
+      queryUITreeWithTurn: vi.fn(async () => reads.shift()!()),
+    })
+    const driver = makeFlowDriver(client, 's1', undefined)
+    await driver.queryUITree()
+    await driver.setOrientation!('portrait', 1000)
+    await driver.tap(0.25, 0.1)
+    expect(client.tap).toHaveBeenCalledWith('s1', 0.25, 0.1)
+  })
+
   it('does not carry a turn from one driver to the next', async () => {
     const client = fakeClient([])
     ;(client as unknown as Record<string, unknown>).queryUITreeWithTurn = vi.fn(async () => ({ elements: [], interfaceTurn: 90 }))
