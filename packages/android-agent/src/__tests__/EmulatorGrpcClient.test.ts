@@ -346,10 +346,12 @@ describe('touchCancel', () => {
   })
 
   // The release is what keeps a touch from being left down, so it does not depend on the palm.
+  // Nor is the slot put back or marked then: the palm never reached it, and every later press would pay for it.
   it('still releases the touch when the palm is refused', async () => {
     const { client, log } = recording({ palmFails: true })
     await client.touchCancel(0, 10, 10)
-    expect(log).toEqual(['palm', 'up', 'finger'])
+    await client.touchDown(0, 10, 10)
+    expect(log).toEqual(['palm', 'up', 'down'])
   })
 
   // A slot left a palm would cancel every later touch on it while each was acked delivered.

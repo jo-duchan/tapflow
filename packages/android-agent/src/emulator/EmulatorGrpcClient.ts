@@ -275,11 +275,13 @@ export class EmulatorGrpcClient {
    */
   touchCancel(pointerId: number, x = 0, y = 0): Promise<void> {
     return this.enqueue(async () => {
-      await this.toolType(pointerId, MT_TOOL_PALM).catch(() => {})
+      const palmed = await this.toolType(pointerId, MT_TOOL_PALM).then(() => true, () => false)
       try {
         await this.sendTouch([{ x, y, identifier: pointerId, pressure: 0 }])
       } finally {
-        await this.toolType(pointerId, MT_TOOL_FINGER).then(() => { this.palmSlots.delete(pointerId) }, () => { this.palmSlots.add(pointerId) })
+        // Only a slot the palm reached needs putting back. One whose palm was refused (an emulator without
+        // `streamInputEvent`) was never changed, and marking it would cost every later press a call that fails.
+        if (palmed) await this.toolType(pointerId, MT_TOOL_FINGER).then(() => { this.palmSlots.delete(pointerId) }, () => { this.palmSlots.add(pointerId) })
       }
     })
   }
