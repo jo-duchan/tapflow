@@ -1,5 +1,9 @@
 import type { FlowDriver, PinchFingers } from './engine.js'
+
+const TURN_SETTLE_MS = 2_000
+const TURN_SETTLE_POLL_MS = 200
 import type { ChromePayload, LaunchApplied, LaunchOptions } from '@tapflowio/protocol'
+import { toFramePoint, type InterfaceTurn } from '@tapflowio/protocol/screen'
 import {
   ENVIRONMENTAL_INPUT_REASONS,
   InputRefusedError,
@@ -51,11 +55,24 @@ function isEnvironmentFailure(e: unknown): boolean {
 // else (selector misses, assertion timeouts, and transient query blips) is
 // rethrown untouched, messages verbatim either way.
 export class RelayDriver implements FlowDriver {
+  /**
+   * The app's interface turn from the latest tree this driver read (`UiTreeResponse.interfaceTurn`). A flow's points
+   * — a selector's center, or a coordinate it wrote — are in the app's upright interface, and a touch is in the
+   * portrait framebuffer, so each is turned by this before it is sent. Held per driver, which is one run on one
+   * session: a value from an earlier run, or from someone else's read, is never applied. Undefined turns nothing —
+   * Android, an older agent, a multi-panel device.
+   */
+  private turn: InterfaceTurn | undefined
+
   constructor(
     private readonly client: RelayClient,
     private readonly sessionId: string,
     private readonly buildId?: number,
   ) {}
+
+  private point(x: number, y: number): [number, number] {
+    return toFramePoint(this.turn, [x, y])
+  }
 
   private async guard<T>(fn: () => Promise<T>): Promise<T> {
     try {
@@ -66,14 +83,19 @@ export class RelayDriver implements FlowDriver {
     }
   }
 
-  queryUITree(signal?: AbortSignal) { return this.guard(() => this.client.queryUITree(this.sessionId, signal)) }
+  async queryUITree(signal?: AbortSignal) {
+    const { elements, interfaceTurn } = await this.guard(() => this.client.queryUITreeWithTurn(this.sessionId, signal))
+    this.turn = interfaceTurn
+    return elements
+  }
 
   tap(x: number, y: number): Promise<void> {
-    return this.guard(() => this.client.tap(this.sessionId, x, y))
+    const [fx, fy] = this.point(x, y)
+    return this.guard(() => this.client.tap(this.sessionId, fx, fy))
   }
 
   swipe(from: [number, number], to: [number, number], durationMs: number) {
-    return this.guard(() => this.client.swipe(this.sessionId, from, to, durationMs))
+    return this.guard(() => this.client.swipe(this.sessionId, this.point(...from), this.point(...to), durationMs))
   }
 
   inputText(text: string): Promise<void> {
@@ -91,7 +113,8 @@ export class RelayDriver implements FlowDriver {
   }
 
   longPress(x: number, y: number, durationMs: number): Promise<void> {
-    return this.guard(() => this.client.longPress(this.sessionId, x, y, durationMs))
+    const [fx, fy] = this.point(x, y)
+    return this.guard(() => this.client.longPress(this.sessionId, fx, fy, durationMs))
   }
 
   /**
@@ -101,11 +124,58 @@ export class RelayDriver implements FlowDriver {
    */
   async pinch(start: PinchFingers, end: PinchFingers, durationMs: number): Promise<void> {
     try {
-      await this.guard(() => this.client.pinch(this.sessionId, start, end, durationMs))
+      const turned = (f: PinchFingers): PinchFingers => [this.point(...f[0]), this.point(...f[1])]
+      await this.guard(() => this.client.pinch(this.sessionId, turned(start), turned(end), durationMs))
     } catch (e) {
       if (e instanceof InputRefusedError && e.reason === 'unsupported') throw markEnvironmentFailure(e)
       throw e
     }
+  }
+
+  /**
+   * Turn the device, then read which way the app now stands. The device's chrome answers before the app has
+   * finished turning, so a single read could keep the old turn for a coordinate step that follows: read until two in
+   * a row agree, for at most `TURN_SETTLE_MS`. The turn from before the call is dropped first: the device has turned,
+   * so it is wrong, and a loop that never settles must leave none rather than that one. Best effort: a read that fails
+   * leaves the last value read in this call, and the step still passes.
+   *
+   * **A read with no turn means one of two things**, and which is decided before the loop. Where no turn is expected —
+   * Android, whose tree and touch share a space, so nothing this run read said otherwise — it ends the loop on the
+   * first read, which on Android costs a second of uiautomator. Where one is (an iOS chrome, or a turn already read this
+   * run) it is a turn caught mid-way: the runner answers 0 when its two reads of the app disagree, and taking that as
+   * the answer left the next coordinate step untransformed in exactly the window this loop exists for. Those reads are
+   * passed over. An iOS agent too old to report a turn reads none for the whole budget and ends with none, as before.
+   */
+  async setOrientation(orientation: 'portrait' | 'landscape', timeoutMs: number): Promise<void> {
+    await this.guard(() => this.client.setOrientation(this.sessionId, orientation, timeoutMs))
+    const chrome = await this.client.chrome(this.sessionId, 1).catch(() => null)
+    const expected = this.turn !== undefined || (chrome !== null && 'framePng' in chrome)
+    this.turn = undefined
+    const until = Date.now() + TURN_SETTLE_MS
+    let previous: InterfaceTurn | null = null
+    while (Date.now() < until) {
+      let read: InterfaceTurn | undefined
+      try {
+        read = (await this.client.queryUITreeWithTurn(this.sessionId, AbortSignal.timeout(Math.max(1, until - Date.now())))).interfaceTurn
+      } catch {
+        return
+      }
+      if (read === undefined) {
+        if (!expected) {
+          this.turn = undefined
+          return
+        }
+      } else {
+        this.turn = read
+        if (read === previous) return
+        previous = read
+      }
+      await new Promise((r) => setTimeout(r, TURN_SETTLE_POLL_MS))
+    }
+  }
+
+  setPosture(posture: 'folded' | 'unfolded', timeoutMs: number): Promise<void> {
+    return this.guard(() => this.client.setPosture(this.sessionId, posture, timeoutMs))
   }
 
   chrome(timeoutMs: number): Promise<ChromePayload | null> {

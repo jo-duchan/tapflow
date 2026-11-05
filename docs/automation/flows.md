@@ -42,11 +42,11 @@ steps:
 | `tags` | No | A list of tags. Use them to pick flows with `--include-tags` and `--exclude-tags`. A tag cannot contain a comma. |
 | `steps` | Yes | The list of steps, run top to bottom. |
 
-Coordinates are normalized 0–1 everywhere. Selectors point at screen elements directly, so you will rarely write pixel coordinates into a flow.
+Coordinates are normalized 0–1 everywhere. Selectors point at screen elements directly, so you will rarely write pixel coordinates into a flow. Coordinates are measured on the screen as the app draws it. When the app is drawn in landscape, `[0.5, 0.1]` is the top center of the landscape screen.
 
 ## Steps
 
-The vocabulary is deliberately small. These thirteen cover most scenarios.
+The vocabulary is deliberately small. These fifteen cover most scenarios.
 
 | Step | Form | Behavior |
 |------|------|----------|
@@ -63,6 +63,8 @@ The vocabulary is deliberately small. These thirteen cover most scenarios.
 | `pressButton` | button name | Presses a hardware button. See [Hardware buttons](#hardware-buttons). |
 | `longPressOn` | selector or `{ on, durationMs? }` | Presses the center of the matched element and holds it, 1000 ms by default, at most 60000. To change the time, put the selector under `on`. |
 | `pinch` | `{ on, scale, durationMs? }` | Two fingers about the center of an element or a point. See [Pinch](#pinch). |
+| `setOrientation` | `portrait` or `landscape` | Turns the device upright or sideways. See [Orientation and posture](#orientation-and-posture). |
+| `setPosture` | `folded` or `unfolded` | Folds or unfolds a foldable device. See [Orientation and posture](#orientation-and-posture). |
 
 There is no fixed `sleep` step. Waiting is always condition-based. To wait for a transition, give `assertVisible` a `timeout`.
 
@@ -148,6 +150,26 @@ An Android device streaming over the adb fallback, without a gRPC or scrcpy poin
 On iOS, any other button the device's frame declares can be pressed by its name as well, such as `action`.
 
 A flow that presses a button the device lacks fails before its first step, instead of running on to fail one step later at an assertion that would not explain why. When `flow run` knows the platform before it picks a device, from the build in `--build` or from `--platform` with `--parallel`, the flow fails without a device being booted for it, and the other flows still run. A button that depends on the device, such as `lock` on iOS, is checked against the device before the first step. Either way the failure is an environment failure, since the app was never tested: the run exits with code 2 unless another flow failed in the app, which makes it 1. On iOS, use the app's own back control with `tapOn` instead of `back`, or tag the flow and run it only where the button exists.
+
+### Orientation and posture {#orientation-and-posture}
+
+`setOrientation` turns the device to `portrait` or `landscape`. `setPosture` folds a foldable device (`folded`) or opens it (`unfolded`).
+
+```yaml
+- setOrientation: landscape
+- assertVisible: "Landscape layout"
+- setOrientation: portrait
+- setPosture: folded
+- setPosture: unfolded
+```
+
+Both steps wait until the device reports that it is in the requested state. When it already is, they send nothing. If the report does not arrive within the default per-selector wait (`--timeout`, 10 seconds by default), the step ends as an environment failure.
+
+With `landscape`, the device turns to whichever of its two sideways directions it picks. An app locked to portrait is still drawn upright after the device turns, so check the screen after a turn with `assertVisible`. Selectors and coordinates after a turn are measured on the screen as the app draws it. A step that takes only coordinates (`swipe`, `scroll`, `pinch` on a point) reads the app's orientation from the last UI tree it read. If someone turns the device from the dashboard while a flow runs, those steps are placed by the previous orientation until the next tree read.
+
+A foldable on Android 15 or later puts up a "Swipe up to continue" lock screen when it folds. The agent takes it down, so the steps after a fold see the app. A device that was locked before the fold, or one with a PIN, pattern or password, is left locked, so do not set a secure lock on a device you run flows on.
+
+A step the device cannot do ends as an environment failure. `setPosture` fails this way on a device that does not fold. `setOrientation` fails this way on a device that does not report which way it is held: an iOS device with more than one panel, or an Android device streaming over scrcpy without gRPC. With `--parallel`, the worker does not leave the device over this failure, because other flows still run fine on it.
 
 ### Resetting state
 

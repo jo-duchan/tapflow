@@ -1180,11 +1180,14 @@ Return the UI elements on the session device's current screen.
       "frame": { "x": 0.1, "y": 0.8, "width": 0.8, "height": 0.06 },
       "enabled": true
     }
-  ]
+  ],
+  "interfaceTurn": 90
 }
 ```
 
-`frame` is a 0–1 fraction of the screen size. The error status codes match the screenshot endpoint, with a 15-second timeout.
+`frame` is a 0–1 fraction of the screen size, measured on the screen as the app draws it. The error status codes match the screenshot endpoint, with a 15-second timeout.
+
+`interfaceTurn` is how many degrees clockwise the device's portrait screen has to turn for the app's interface to stand upright: `0`, `90`, `180` or `270`. It is present only when the agent can read the app's orientation, which today is iOS only. When it is absent, there is no information about the turn.
 
 
 ## Relay

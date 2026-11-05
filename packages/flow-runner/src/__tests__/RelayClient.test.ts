@@ -15,7 +15,7 @@ import {
   SessionUnavailableError,
 } from '../RelayClient.js'
 import { RelayDriver } from '../RelayDriver.js'
-import { TransientQueryError, isEnvironmentStepFailure } from '../errors.js'
+import { DeviceLacksError, TransientQueryError, isEnvironmentStepFailure } from '../errors.js'
 
 // Minimal Response stub for the ui-tree GET.
 function jsonResponse(status: number, body: unknown): Response {
@@ -1241,7 +1241,7 @@ describe('RelayClient — session lifecycle (#512, finding 4)', () => {
       message: 'session s1 rebounded to a new agent while this boot was in flight',
     }, 's1')
     const bootErr = await boot.catch((e: unknown) => e)
-    const stub = { queryUITree: async (): Promise<never> => { throw bootErr } } as unknown as RelayClient
+    const stub = { queryUITreeWithTurn: async (): Promise<never> => { throw bootErr } } as unknown as RelayClient
     const err = await new RelayDriver(stub, 's1').queryUITree().catch((e: unknown) => e)
     expect(err).toBe(bootErr) // the guard marks without replacing the object
     expect(isEnvironmentStepFailure(err)).toBe(true)
@@ -2026,5 +2026,115 @@ describe('RelayClient.chrome — the device\'s buttons, for checking a flow befo
     const never = await joined(null)
     expect(await never.chrome('s1', 30)).toBeNull()
     never.disconnect()
+  })
+})
+
+describe('RelayClient.setOrientation / setPosture — wait for the state, not the first event', () => {
+  let wss: WebSocketServer | null = null
+  afterEach(async () => {
+    const s = wss
+    wss = null
+    if (!s) return
+    for (const c of s.clients) c.terminate()
+    await new Promise<void>((r) => s.close(() => r()))
+  })
+
+  const iosChrome = (streamRotation?: number, extra: Record<string, unknown> = {}) => ({
+    framePng: '', bezelWidth: 1, bezelHeight: 1, compositeWidth: 1, compositeHeight: 1,
+    padding: { left: 0, right: 0, top: 0, bottom: 0 }, screenRect: { x: 0, y: 0, width: 1, height: 1 },
+    screenCornerRadius: 0, logicalWidth: 1, logicalHeight: 1, buttons: [], ...(streamRotation === undefined ? {} : { streamRotation }), ...extra,
+  })
+
+  /** A relay that sends `initial` after the join and answers each request with the frames `answer` returns. */
+  async function relay(initial: Record<string, unknown>[], answer: (m: Record<string, unknown>) => Record<string, unknown>[]) {
+    const received: Record<string, unknown>[] = []
+    wss = new WebSocketServer({ port: 0 })
+    wss.on('connection', (ws) => {
+      ws.on('message', (data) => {
+        const msg = JSON.parse(String(data)) as Record<string, unknown>
+        received.push(msg)
+        if (msg['type'] === 'session:start') {
+          ws.send(JSON.stringify({ type: 'session:joined', sessionId: 's1', capabilities: [] }))
+          for (const f of initial) ws.send(JSON.stringify({ sessionId: 's1', ...f }))
+          return
+        }
+        for (const f of answer(msg)) setTimeout(() => ws.send(JSON.stringify({ sessionId: 's1', ...f })), 20)
+      })
+    })
+    const client = new RelayClient(`ws://localhost:${(wss.address() as { port: number }).port}`, '')
+    await client.connect()
+    await client.joinSession('s1')
+    await new Promise((r) => setTimeout(r, 30))
+    return { client, received }
+  }
+
+  it('sends nothing when the device is already held that way', async () => {
+    const { client, received } = await relay([{ type: 'session:chrome', payload: iosChrome(270) }], () => [])
+    await client.setOrientation('s1', 'landscape', 500)
+    expect(received.some((m) => m['type'] === 'input:rotate')).toBe(false)
+  })
+
+  // An Android body coming upright sends several chromes on the way; only the one that names the target ends the wait.
+  it('turns, and waits past an intermediate chrome for the one that names the target', async () => {
+    const { client, received } = await relay([{ type: 'session:chrome', payload: { buttons: [], streamType: 'h264', bodyRotation: 90 } }], (m) =>
+      m['type'] === 'input:rotate'
+        ? [{ type: 'session:chrome', payload: { buttons: [], streamType: 'h264', bodyRotation: 90 } }, { type: 'session:chrome', payload: { buttons: [], streamType: 'h264', bodyRotation: 0 } }]
+        : [])
+    await client.setOrientation('s1', 'portrait', 1000)
+    expect(received.find((m) => m['type'] === 'input:rotate')).toMatchObject({ payload: { orientation: 'portrait' } })
+  })
+
+  it('turns an upside-down device to portrait rather than calling it done', async () => {
+    const { client, received } = await relay([{ type: 'session:chrome', payload: iosChrome(180) }], (m) =>
+      m['type'] === 'input:rotate' ? [{ type: 'session:chrome', payload: iosChrome(0) }] : [])
+    await client.setOrientation('s1', 'portrait', 1000)
+    expect(received.some((m) => m['type'] === 'input:rotate')).toBe(true)
+  })
+
+  it('refuses a device that cannot say which way it is held, as a device that lacks it', async () => {
+    const { client } = await relay([{ type: 'session:chrome', payload: iosChrome(90, { scaleBasis: 2000 }) }], () => [])
+    await expect(client.setOrientation('s1', 'landscape', 300)).rejects.toBeInstanceOf(DeviceLacksError)
+  })
+
+  it('fails as the environment when the turn never shows', async () => {
+    const { client } = await relay([{ type: 'session:chrome', payload: iosChrome(0) }], () => [])
+    const err = await client.setOrientation('s1', 'landscape', 200).catch((e: unknown) => e)
+    expect(isEnvironmentStepFailure(err)).toBe(true)
+    expect(err).not.toBeInstanceOf(DeviceLacksError)
+    expect((err as Error).message).toMatch(/did not report landscape/)
+  })
+
+  const two = (currentId: string) => ({ type: 'device:postures', payload: { postures: [{ id: 'closed', label: 'Folded' }, { id: 'open', label: 'Unfolded' }], currentId } })
+
+  // iOS sends an empty list before the device is ready and in the middle of a fold (measured).
+  it('waits past an empty list, then folds and waits for the posture to be current', async () => {
+    const { client, received } = await relay([{ type: 'device:postures', payload: { postures: [], currentId: null } }], (m) =>
+      m['type'] === 'input:posture' ? [{ type: 'device:postures', payload: { postures: [], currentId: null } }, two('closed')] : [])
+    const pending = client.setPosture('s1', 'folded', 1000)
+    // A second empty list while it waits must not end the wait either: only one with postures in it does.
+    const push = (f: Record<string, unknown>) => { for (const c of wss!.clients) c.send(JSON.stringify({ sessionId: 's1', ...f })) }
+    setTimeout(() => push({ type: 'device:postures', payload: { postures: [], currentId: null } }), 30)
+    setTimeout(() => push(two('open')), 80)
+    await pending
+    expect(received.find((m) => m['type'] === 'input:posture')).toMatchObject({ payload: { postureId: 'closed' } })
+  })
+
+  it('sends nothing when the device is already in that posture', async () => {
+    const { client, received } = await relay([two('closed')], () => [])
+    await client.setPosture('s1', 'folded', 500)
+    expect(received.some((m) => m['type'] === 'input:posture')).toBe(false)
+  })
+
+  it('refuses a device with no postures as one that lacks them, and a list of three as uncertain', async () => {
+    const none = await relay([{ type: 'device:postures', payload: { postures: [], currentId: null } }], () => [])
+    await expect(none.client.setPosture('s1', 'unfolded', 200)).rejects.toBeInstanceOf(DeviceLacksError)
+    none.client.disconnect()
+    const first = wss!
+    for (const c of first.clients) c.terminate()
+    await new Promise<void>((r) => first.close(() => r()))
+    const three = await relay([{ type: 'device:postures', payload: { postures: [{ id: '1', label: 'a' }, { id: '2', label: 'b' }, { id: '3', label: 'c' }], currentId: '1' } }], () => [])
+    const err = await three.client.setPosture('s1', 'unfolded', 200).catch((e: unknown) => e)
+    expect((err as Error).message).toMatch(/offers 3 postures/)
+    expect(err).not.toBeInstanceOf(DeviceLacksError)
   })
 })

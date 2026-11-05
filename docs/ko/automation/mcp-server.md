@@ -139,7 +139,7 @@ MCP를 지원하는 클라이언트라면 모두 tapflow를 사용할 수 있습
 | `press_button` | 하드웨어 버튼 입력 (홈, 잠금 등) |
 | `install_app` | 앱 설치 |
 | `launch_app` | 앱 실행. `arguments`·`env`로 [실행 인자](/ko/automation/flows#launch-arguments)를 넘길 수 있습니다. 결과의 `applied`에 앱이 받은 키가 [실행 기본값](/ko/reference/configuration#launch-defaults)까지 포함해 남습니다 |
-| `run_flow` | YAML 플로우를 결정적으로 재생 (추가 LLM 호출 없음). 에이전트가 핀치할 때도 이 툴로 [`pinch`](/ko/automation/flows#pinch) 스텝을 씁니다 |
+| `run_flow` | YAML 플로우를 결정적으로 재생 (추가 LLM 호출 없음). 코딩 에이전트가 핀치하거나 기기를 돌리거나 접을 때도 이 툴로 [`pinch`](/ko/automation/flows#pinch), [`setOrientation`, `setPosture`](/ko/automation/flows#orientation-and-posture) 스텝을 씁니다 |
 | `list_runs` | `tapflow flow run`이 릴레이에 남긴 실행 기록 목록 조회 (상태·빌드·플로우 이름·CI 여부로 거르기) |
 | `get_run` | 실행 기록 하나 조회. 실패한 플로우의 단계(통과한 플로우는 단계 수)·실패 메시지·플로우 파일 경로와 실패한 플로우의 스크린샷(최대 4장) |
 | `get_testing_guide` | 이 도구들로 모바일 기능을 테스트하는 방법. 다룰 경우, 여기서 테스트할 수 없는 것, 잘못된 버그 판정을 피하는 법, 검증된 경로를 플로우로 남기는 법, 보고 형식 |

@@ -3,6 +3,7 @@ import fs from 'fs'
 import os from 'os'
 import path from 'path'
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
+import { toFramePoint, type InterfaceTurn } from '@tapflowio/protocol/screen'
 import { EnvironmentStepError, isEligible, parseFlow, refusedFlow, runFlow, unavailableButton, unavailableButtonMessage, type FlowDriver, type FlowResult } from '@tapflowio/flow-runner'
 import { SessionEndedError, SessionLeftError, type TapflowClient } from './client.js'
 import { TESTING_GUIDE } from './guide.js'
@@ -78,10 +79,22 @@ export function makeFlowDriver(client: TapflowClient, sessionId: string, buildId
       throw toEnvironmentError(e)
     }
   }
+  // The app's interface turn from the latest tree this driver read, held by this driver — one `run_flow` call — so a
+  // value from another call or from `query_ui_tree` is never applied. Every point a flow sends is turned by it, the way
+  // flow-runner's `RelayDriver` does; undefined (Android, an older agent) turns nothing.
+  let turn: InterfaceTurn | undefined
+  const at = (x: number, y: number) => toFramePoint(turn, [x, y])
   return {
-    queryUITree: (signal) => guard(() => client.queryUITree(sessionId, signal)),
-    tap: async (x, y) => guard(() => client.tap(sessionId, x, y)),
-    swipe: (from, to, durationMs) => guard(() => client.swipe(sessionId, from[0], from[1], to[0], to[1], durationMs)),
+    queryUITree: async (signal) => {
+      const read = await guard(() => client.queryUITreeWithTurn(sessionId, signal))
+      turn = read.interfaceTurn
+      return read.elements
+    },
+    tap: async (x, y) => { const [fx, fy] = at(x, y); return guard(() => client.tap(sessionId, fx, fy)) },
+    swipe: (from, to, durationMs) => {
+      const [fx, fy] = at(...from), [tx, ty] = at(...to)
+      return guard(() => client.swipe(sessionId, fx, fy, tx, ty, durationMs))
+    },
     inputText: async (text) => guard(() => client.typeText(sessionId, text)),
     pressKey: async (code) => guard(() => client.pressKey(sessionId, code)),
     openUrl: (url) => guard(() => client.openUrl(sessionId, url)),
@@ -97,12 +110,13 @@ export function makeFlowDriver(client: TapflowClient, sessionId: string, buildId
     clearState: (appId) => guard(() => client.clearState(sessionId, appId)),
     screenshot: (signal) => guard(() => client.screenshot(sessionId, 'png', signal)),
     pressButton: (name) => guard(() => client.pressButton(sessionId, name)),
-    longPress: (x, y, durationMs) => guard(() => client.longPress(sessionId, x, y, durationMs)),
+    longPress: (x, y, durationMs) => { const [fx, fy] = at(x, y); return guard(() => client.longPress(sessionId, fx, fy, durationMs)) },
     // `unsupported` stays product for every other input (it names the request), but a pinch refused as unsupported
     // is Android's adb fallback — the device's backend, not the app. Same rule as flow-runner's `RelayDriver.pinch`.
     pinch: async (start, end, durationMs) => {
       try {
-        await guard(() => client.pinch(sessionId, start, end, durationMs))
+        const turned = (f: [[number, number], [number, number]]): [[number, number], [number, number]] => [at(...f[0]), at(...f[1])]
+        await guard(() => client.pinch(sessionId, turned(start), turned(end), durationMs))
       } catch (e) {
         if (!(e instanceof EnvironmentStepError) && e instanceof Error && e.message.includes('(unsupported)')) {
           throw new EnvironmentStepError(e.message, { cause: e })
@@ -111,6 +125,38 @@ export function makeFlowDriver(client: TapflowClient, sessionId: string, buildId
       }
     },
     chrome: (timeoutMs) => guard(() => client.chrome(sessionId, timeoutMs)),
+    // After the device turns, read which way the app stands until two reads agree (at most 2 s), as `RelayDriver`
+    // does: the chrome answers before the app has finished turning. Where a turn is expected (an iOS chrome, or one
+    // already read), a read with none is a turn caught mid-way and is passed over; elsewhere (Android) it ends the loop.
+    setOrientation: async (orientation, timeoutMs) => {
+      await guard(() => client.setOrientation(sessionId, orientation, timeoutMs))
+      const chrome = await client.chrome(sessionId, 1).catch(() => null)
+      const expected = turn !== undefined || (chrome !== null && 'framePng' in chrome)
+      // The turn from before the call is wrong now; a loop that never settles leaves none rather than that one.
+      turn = undefined
+      const until = Date.now() + 2_000
+      let previous: InterfaceTurn | null = null
+      while (Date.now() < until) {
+        let read: InterfaceTurn | undefined
+        try {
+          read = (await client.queryUITreeWithTurn(sessionId, AbortSignal.timeout(Math.max(1, until - Date.now())))).interfaceTurn
+        } catch {
+          return
+        }
+        if (read === undefined) {
+          if (!expected) {
+            turn = undefined
+            return
+          }
+        } else {
+          turn = read
+          if (read === previous) return
+          previous = read
+        }
+        await new Promise((r) => setTimeout(r, 200))
+      }
+    },
+    setPosture: (posture, timeoutMs) => guard(() => client.setPosture(sessionId, posture, timeoutMs)),
   }
 }
 
@@ -455,7 +501,7 @@ export function registerTools(server: McpServer, client: TapflowClient): void {
         'tapping step by step: author the flow once, then replay it idempotently. Pass the YAML inline via "flow", or a ' +
         'file path via "path" (resolved from the MCP server process cwd). Steps: clearState / launchApp / tapOn / ' +
         'inputText / pressKey / swipe / scroll / openUrl / assertVisible / assertNotVisible / pressButton / ' +
-        'longPressOn / pinch. launchApp launches the ' +
+        'longPressOn / pinch / setOrientation / setPosture. launchApp launches the ' +
         'buildId argument. When buildId is set, the build is installed before replaying (like `tapflow flow run --build`) ' +
         'so clearState/launchApp have the app present — pass install:false to skip. A flow whose appId differs from ' +
         "the build's bundle id is not run and returns an error naming both. Returns per-step results; on failure " +

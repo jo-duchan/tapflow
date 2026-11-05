@@ -1,14 +1,15 @@
 import { randomUUID } from 'node:crypto'
 import type {
-  BootRefusalReason, BrowserToRelay, ChromePayload, DeviceSummary, InputErrorReason, LaunchApplied, LaunchOptions, SessionTerminatedReason, UIElement,
+  BootRefusalReason, BrowserToRelay, ChromePayload, DeviceSummary, PosturesPayload, InputErrorReason, LaunchApplied, LaunchOptions, SessionTerminatedReason, UIElement,
 } from '@tapflowio/protocol'
-import { AdmissionRefusedError, EnvironmentStepError, TransientQueryError, markEnvironmentFailure, authHeader, fetchWithToken, fixedToken, lookupBuild, tokenRefusal, type BuildLookup, type TokenSource } from '@tapflowio/flow-runner'
+import { AdmissionRefusedError, DeviceLacksError, EnvironmentStepError, TransientQueryError, markEnvironmentFailure, authHeader, fetchWithToken, fixedToken, lookupBuild, tokenRefusal, type BuildLookup, type TokenSource } from '@tapflowio/flow-runner'
 
 // Protocol owns the wire shape; this file used to declare an identical copy under a name the
 // relay uses for a *different* shape. Kept exported as `DeviceInfo` because that is this
 // package's public name for it.
 export type { DeviceSummary as DeviceInfo }
 import { WebSocket } from 'ws'
+import { chromeOrientation, interfaceTurnOf, type InterfaceTurn } from '@tapflowio/protocol/screen'
 
 export interface AgentSession {
   agentName?: string
@@ -580,6 +581,8 @@ export class TapflowClient {
   /** The latest chrome the relay sent for each session — the device's buttons, which `run_flow` checks a
    *  `pressButton` against before replaying. Same lifetime as `lifecycle`. */
   private readonly chromes = new Map<string, ChromePayload>()
+  /** The latest postures the relay sent for each session — what `run_flow`'s `setPosture` picks an id from. */
+  private readonly postures = new Map<string, PosturesPayload>()
 
   private lifecycleOf(sessionId: string): SessionLifecycle {
     let s = this.lifecycle.get(sessionId)
@@ -667,6 +670,9 @@ export class TapflowClient {
     // asks afterwards.
     if (msg['type'] === 'session:chrome' && typeof msg['sessionId'] === 'string' && typeof msg['payload'] === 'object' && msg['payload'] !== null) {
       this.chromes.set(msg['sessionId'], msg['payload'] as ChromePayload)
+    }
+    if (msg['type'] === 'device:postures' && typeof msg['sessionId'] === 'string' && isPostures(msg['payload'])) {
+      this.postures.set(msg['sessionId'], msg['payload'])
     }
     // Read before the waiter loop, and read whether or not anything is waiting — the same rule the ack
     // ledger below is written to, for the same reason. `terminated` settles every waiter for its session;
@@ -1230,6 +1236,68 @@ export class TapflowClient {
     await this.awaitInputAck(sessionId, requestId)
   }
 
+  /**
+   * Turn the device to `orientation`, resolving once a chrome names it; nothing is sent when the latest already does.
+   * The same rules as flow-runner's `RelayClient.setOrientation`, which documents why (this client is a deliberate copy).
+   */
+  async setOrientation(sessionId: string, orientation: 'portrait' | 'landscape', timeoutMs: number): Promise<void> {
+    const chrome = await this.chrome(sessionId, timeoutMs)
+    if (!chrome) throw new EnvironmentStepError(this.failed(sessionId, `setOrientation: the device sent no chrome within ${timeoutMs / 1000}s, so which way it is held is unknown`).message)
+    const now = chromeOrientation(chrome)
+    if (now === undefined) {
+      const which = 'framePng' in chrome ? 'a multi-panel iOS device, whose turn includes its panel\'s own (#1116)' : 'an Android backend without a body turn (scrcpy)'
+      throw new DeviceLacksError(this.failed(sessionId, `setOrientation: this is ${which}, which does not report which way it is held, so a turn could not be confirmed`).message)
+    }
+    if (now === orientation) return
+    const turned = this.waitFor(
+      (m) => m['type'] === 'session:chrome' && m['sessionId'] === sessionId && typeof m['payload'] === 'object' && m['payload'] !== null
+        && chromeOrientation(m['payload'] as ChromePayload) === orientation,
+      timeoutMs, sessionId,
+    )
+    this.send({ type: 'input:rotate', sessionId, payload: { orientation } })
+    try {
+      await turned
+    } catch (e) {
+      if (e instanceof RequestTimeoutError) throw new EnvironmentStepError(this.failed(sessionId, `setOrientation: the device did not report ${orientation} within ${timeoutMs / 1000}s`).message)
+      throw e
+    }
+  }
+
+  /** Fold or unfold to the end of the device's posture list. Same rules as flow-runner's `RelayClient.setPosture`. */
+  async setPosture(sessionId: string, posture: 'folded' | 'unfolded', timeoutMs: number): Promise<void> {
+    let list = this.postures.get(sessionId)
+    if (!list || list.postures.length === 0) {
+      try {
+        const msg = await this.waitFor(
+          (m) => m['type'] === 'device:postures' && m['sessionId'] === sessionId && isPostures(m['payload']) && m['payload'].postures.length > 0,
+          timeoutMs, sessionId,
+        )
+        list = msg['payload'] as PosturesPayload
+      } catch (e) {
+        if (e instanceof RequestTimeoutError) {
+          throw new DeviceLacksError(this.failed(sessionId, `setPosture: this device reported no postures within ${timeoutMs / 1000}s — it does not fold`).message)
+        }
+        throw e
+      }
+    }
+    if (list.postures.length !== 2) {
+      throw new EnvironmentStepError(this.failed(sessionId, `setPosture: the device offers ${list.postures.length} postures, so which is ${posture} is not certain (expected two)`).message)
+    }
+    const target = (posture === 'folded' ? list.postures[0] : list.postures[1])!.id
+    if (list.currentId === target) return
+    const arrived = this.waitFor(
+      (m) => m['type'] === 'device:postures' && m['sessionId'] === sessionId && isPostures(m['payload']) && m['payload'].currentId === target,
+      timeoutMs, sessionId,
+    )
+    this.send({ type: 'input:posture', sessionId, payload: { postureId: target } })
+    try {
+      await arrived
+    } catch (e) {
+      if (e instanceof RequestTimeoutError) throw new EnvironmentStepError(this.failed(sessionId, `setPosture: the device did not report ${posture} within ${timeoutMs / 1000}s`).message)
+      throw e
+    }
+  }
+
   /** The session's chrome, or the next to arrive within `timeoutMs`; `null` when none did. */
   async chrome(sessionId: string, timeoutMs: number): Promise<ChromePayload | null> {
     const known = this.chromes.get(sessionId)
@@ -1345,6 +1413,11 @@ export class TapflowClient {
   }
 
   async queryUITree(sessionId: string, signal?: AbortSignal): Promise<UIElement[]> {
+    return (await this.queryUITreeWithTurn(sessionId, signal)).elements
+  }
+
+  /** The tree with the app's interface turn beside it, when the agent sent one (`UiTreeResponse.interfaceTurn`). */
+  async queryUITreeWithTurn(sessionId: string, signal?: AbortSignal): Promise<{ elements: UIElement[]; interfaceTurn?: InterfaceTurn }> {
     const httpBase = this.relayUrl.replace(/^wss?/, (p) => (p === 'wss' ? 'https' : 'http'))
     const url = new URL(`/api/v1/sessions/${sessionId}/ui-tree`, httpBase)
     let res: Response
@@ -1386,7 +1459,8 @@ export class TapflowClient {
       const cause = this.failed(sessionId, 'UI tree query returned an invalid response shape')
       throw new EnvironmentStepError(`UI tree query failed: ${cause.message}`, { cause })
     }
-    return body.elements
+    const interfaceTurn = interfaceTurnOf((body as { interfaceTurn?: unknown }).interfaceTurn)
+    return interfaceTurn === undefined ? { elements: body.elements } : { elements: body.elements, interfaceTurn }
   }
 
   /**
@@ -1556,4 +1630,8 @@ export class TapflowClient {
 function isLaunchApplied(v: unknown): v is LaunchApplied {
   const names = (x: unknown) => Array.isArray(x) && x.every((s) => typeof s === 'string')
   return typeof v === 'object' && v !== null && names((v as Record<string, unknown>)['arguments']) && names((v as Record<string, unknown>)['env'])
+}
+
+function isPostures(v: unknown): v is PosturesPayload {
+  return typeof v === 'object' && v !== null && Array.isArray((v as PosturesPayload).postures)
 }

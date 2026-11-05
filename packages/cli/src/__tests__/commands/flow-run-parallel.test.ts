@@ -224,6 +224,19 @@ describe('flow run --parallel', () => {
     expect(process.exitCode).toBe(2)
   })
 
+  // A step the device cannot do — a posture on one that does not fold — says nothing about the device either.
+  it('keeps a device after a flow asked it for something it lacks', async () => {
+    leases(A)
+    mocks.runFlow.mockImplementation(async (flow: { name: string }, driver: { sessionId: string }) => {
+      ranOn.push([flow.name, driver.sessionId])
+      if (flow.name === 'one') return { ...result('one', 'environment'), deviceLacks: true as const }
+      return result(flow.name)
+    })
+    await cmdFlowRun(flowFiles('one', 'two'), { parallel: 1, platform: 'ios' })
+    expect(ranOn.map(([f]) => f)).toEqual(['one', 'two'])
+    expect(errLines().some((l) => l.includes('leaving this device'))).toBe(false)
+  })
+
   // A device chosen and then failed to boot is the lease's to leave, and the run's to keep out of later leases.
   it('keeps a device that failed to boot out of the next lease another worker makes', async () => {
     const busy = new AdmissionRefusedError('lease refused (all-held): every device in use', 'all-held')

@@ -375,7 +375,9 @@ async function runParallel(run: ParallelRun, workerCount: number): Promise<Paral
         // Unless nothing reached the device — a flow pressing a button this device lacks says nothing about the device,
         // and leaving over it would cost the run a healthy one per such flow. A pinch refused as unsupported does leave:
         // that is Android's adb fallback, which an emulator reaches only when its pointer channel is down — the device.
-        if (result.status === 'failed' && result.failureKind === 'environment' && !result.failedBeforeRun) {
+        // And not over a step the device cannot do (`deviceLacks`, a posture on a device that does not fold): the
+        // device is fine for every other flow.
+        if (result.status === 'failed' && result.failureKind === 'environment' && !result.failedBeforeRun && !result.deviceLacks) {
           leftBehind.add(lease.sessionId)
           console.error(`${prefix}leaving this device: the flow failed for a reason outside the app`)
           return

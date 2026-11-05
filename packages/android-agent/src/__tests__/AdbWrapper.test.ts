@@ -972,6 +972,17 @@ describe('AdbWrapper', () => {
     })
   })
 
+  describe('keyguard', () => {
+    it('reads the keyguard from the window policy dump, and dismisses it through the window manager', async () => {
+      const runner = { exec: vi.fn().mockResolvedValue('      showing=true\n      secure=false\n'), execBinary: vi.fn(), listAvds: vi.fn() }
+      const adb = new AdbWrapper(runner as never)
+      expect(await adb.keyguardState('emulator-5554')).toEqual({ showing: true, secure: false })
+      expect(runner.exec).toHaveBeenCalledWith('-s', 'emulator-5554', 'shell', 'dumpsys', 'window', 'policy')
+      await adb.dismissKeyguard('emulator-5554')
+      expect(runner.exec).toHaveBeenCalledWith('-s', 'emulator-5554', 'shell', 'wm', 'dismiss-keyguard')
+    })
+  })
+
   describe('Lean mode commands', () => {
     const recorder = (answers: Record<string, string> = {}) => {
       const calls: string[] = []

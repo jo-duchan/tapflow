@@ -32,6 +32,8 @@ export type Step =
   | { type: 'pressButton'; name: string }
   | { type: 'longPressOn'; selector: Selector; durationMs: number }
   | { type: 'pinch'; on: Selector | [number, number]; scale: number; durationMs: number }
+  | { type: 'setOrientation'; orientation: 'portrait' | 'landscape' }
+  | { type: 'setPosture'; posture: 'folded' | 'unfolded' }
 
 export interface Flow {
   name: string
@@ -227,6 +229,17 @@ function parseStep(raw: unknown, ctx: string): Step {
         throw new ValidationError(`${ctx}: "scale" must be a number from ${MIN_PINCH_SCALE} to ${MAX_PINCH_SCALE}, other than 1 (above 1 spreads the fingers, below 1 closes them)`)
       }
       return { type: 'pinch', on: target, scale, durationMs: parseGestureMs(durationMs, ctx, DEFAULT_PINCH_MS) }
+    }
+    case 'setOrientation': {
+      // A target, never "turn it": a toggle repeated is a different result, which a replay may not be (#910).
+      if (value !== 'portrait' && value !== 'landscape') throw new ValidationError(`${ctx}: "setOrientation" must be portrait or landscape`)
+      return { type: 'setOrientation', orientation: value }
+    }
+    case 'setPosture': {
+      // The names the dashboard shows. A posture's id is the platform's and differs between them, so a flow names the
+      // end of the device's list it wants: folded is the most closed posture, unfolded the most open.
+      if (value !== 'folded' && value !== 'unfolded') throw new ValidationError(`${ctx}: "setPosture" must be folded or unfolded`)
+      return { type: 'setPosture', posture: value }
     }
     default:
       throw new ValidationError(`${ctx}: unknown step "${key}"`)

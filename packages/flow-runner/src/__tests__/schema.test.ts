@@ -300,6 +300,21 @@ steps:
     })
   })
 
+  describe('setOrientation and setPosture', () => {
+    it('takes a target, never a toggle', () => {
+      expect(parseFlow('steps:\n  - setOrientation: landscape\n', 'x.yaml').steps[0]).toEqual({ type: 'setOrientation', orientation: 'landscape' })
+      expect(parseFlow('steps:\n  - setPosture: folded\n', 'x.yaml').steps[0]).toEqual({ type: 'setPosture', posture: 'folded' })
+    })
+
+    it.each([
+      ['a toggle', 'setOrientation: rotate', /"setOrientation" must be portrait or landscape/],
+      ['a platform posture id', 'setPosture: HALF_OPENED', /"setPosture" must be folded or unfolded/],
+      ['a mapping', 'setOrientation: { to: landscape }', /must be portrait or landscape/],
+    ])('refuses %s', (_, step, message) => {
+      expect(() => parseFlow(`steps:\n  - ${step}\n`, 'x.yaml')).toThrow(message)
+    })
+  })
+
   it('agrees with the JSON schema on the input steps\' limits', () => {
     const schema = JSON.parse(readFileSync(join(dirname(fileURLToPath(import.meta.url)), '..', '..', 'schema', 'tapflow-flow.schema.json'), 'utf8'))
     const steps = schema.definitions.step.oneOf.find((s: { properties?: Record<string, unknown> }) => s.properties?.pinch).properties

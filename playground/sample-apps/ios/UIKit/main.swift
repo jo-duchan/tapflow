@@ -180,9 +180,20 @@ final class HardViewController: UIViewController {
 /// What a flow's `longPressOn` and `pinch` steps act on. Plain views with identifiers, like `CustomControl`. A quick
 /// tap and a long press on the hold area say different things, so a long press that arrived as a tap shows as one.
 final class GesturesViewController: UIViewController {
+    // Which way the app itself is drawn — what a flow's `setOrientation` should leave — read from the view's own size,
+    // so a portrait-locked build stays portrait on a turned device.
+    private let orientation = UILabel()
+
+    override func viewDidLayoutSubviews() {
+        super.viewDidLayoutSubviews()
+        orientation.text = view.bounds.width > view.bounds.height ? "orientation:landscape" : "orientation:portrait"
+    }
+
     override func viewDidLoad() {
         super.viewDidLoad()
         view.backgroundColor = .systemBackground
+        orientation.textAlignment = .center
+        orientation.accessibilityIdentifier = "gesture.orientation"
 
         let hold = UILabel()
         hold.text = "Hold me"
@@ -204,7 +215,7 @@ final class GesturesViewController: UIViewController {
         zoom.accessibilityIdentifier = "gesture.zoom"
         zoom.addGestureRecognizer(UIPinchGestureRecognizer(target: self, action: #selector(pinched(_:))))
 
-        let stack = UIStackView(arrangedSubviews: [hold, zoom])
+        let stack = UIStackView(arrangedSubviews: [orientation, hold, zoom])
         stack.axis = .vertical
         stack.spacing = 20
         stack.translatesAutoresizingMaskIntoConstraints = false

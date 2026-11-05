@@ -57,6 +57,16 @@ The cost of a broad name is ambiguity about what belongs — answered by the two
   exists — two copies of "which buttons exist" drift, and the drift would be a flow refused where it works
   or let through where the agent presses nothing.
 
+- **Which way a screen is turned** lives in `src/screen/`, reached as `@tapflowio/protocol/screen`:
+  `chromeOrientation` reads portrait or landscape off a device's chrome, and `toFramePoint` carries a point
+  from the app's interface onto the portrait framebuffer a touch is sent on, by the tree response's
+  `interfaceTurn`. flow-runner and mcp-server both read it, because the two drivers place touches from the
+  same tree and a second copy of the transform would let them disagree about where a landscape tap lands.
+  `interfaceTurn` is the **app's** turn, not the device's: measured, a portrait-locked app on a device held
+  sideways reports turn 0, and a device-based transform would move every tap on it. Its skew is the
+  add-a-member case below: an older agent or relay omits the field, and every consumer reads absence as
+  no turn, which is what it did before the field existed.
+
 - **The connection handshake's query parameters**, as prose rather than types — see
   [Connection handshake](#connection-handshake--what-the-upgrade-url-carries). No message carries them, but a
   client written outside this repo needs them as much as it needs the messages (#581).

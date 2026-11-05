@@ -1,3 +1,4 @@
+import { DeviceLacksError } from '@tapflowio/flow-runner'
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import type { IncomingMessage } from 'node:http'
 import { WebSocketServer, WebSocket } from 'ws'
@@ -703,6 +704,44 @@ describe('TapflowClient', () => {
       relay.send({ type: 'session:chrome', sessionId: 'sess-1', payload: { buttons: [], streamType: 'h264' } })
       await settle(relay, client)
       expect(await client.chrome('sess-1', 1)).toEqual({ buttons: [], streamType: 'h264' })
+    })
+  })
+
+  describe('setOrientation / setPosture', () => {
+    const chrome = (bodyRotation: number) => ({ type: 'session:chrome', sessionId: 'sess-1', payload: { buttons: [], streamType: 'h264', bodyRotation } })
+
+    it('sends nothing when already there, and otherwise waits for the chrome that names the target', async () => {
+      relay.send(chrome(90))
+      await settle(relay, client)
+      await client.setOrientation('sess-1', 'landscape', 500)
+      expect(relay.sentMessages().some((m) => m['type'] === 'input:rotate')).toBe(false)
+      const turning = client.setOrientation('sess-1', 'portrait', 1000)
+      await waitForMessage(relay, 'input:rotate')
+      relay.send(chrome(90))
+      relay.send(chrome(0))
+      await turning
+    })
+
+    it('waits past an empty posture list, and refuses a device with none as one that lacks them', async () => {
+      relay.send({ type: 'device:postures', sessionId: 'sess-1', payload: { postures: [], currentId: null } })
+      await settle(relay, client)
+      await expect(client.setPosture('sess-1', 'folded', 100)).rejects.toBeInstanceOf(DeviceLacksError)
+      const folding = client.setPosture('sess-1', 'folded', 1000)
+      // A second empty list while it waits must not end the wait either.
+      relay.send({ type: 'device:postures', sessionId: 'sess-1', payload: { postures: [], currentId: null } })
+      await settle(relay, client)
+      relay.send({ type: 'device:postures', sessionId: 'sess-1', payload: { postures: [{ id: '1', label: 'Folded' }, { id: '2', label: 'Unfolded' }], currentId: '2' } })
+      const sent = await waitForMessage(relay, 'input:posture')
+      expect(sent).toMatchObject({ payload: { postureId: '1' } })
+      relay.send({ type: 'device:postures', sessionId: 'sess-1', payload: { postures: [{ id: '1', label: 'Folded' }, { id: '2', label: 'Unfolded' }], currentId: '1' } })
+      await folding
+    })
+
+    it('sends nothing when the device is already in that posture', async () => {
+      relay.send({ type: 'device:postures', sessionId: 'sess-1', payload: { postures: [{ id: '1', label: 'Folded' }, { id: '2', label: 'Unfolded' }], currentId: '1' } })
+      await settle(relay, client)
+      await client.setPosture('sess-1', 'folded', 500)
+      expect(relay.sentMessages().some((m) => m['type'] === 'input:posture')).toBe(false)
     })
   })
 

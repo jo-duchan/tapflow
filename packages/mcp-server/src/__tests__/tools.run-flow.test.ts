@@ -23,6 +23,9 @@ function fakeClient(calls: string[]): TapflowClient {
     launchApp: vi.fn(async () => { calls.push('launch') }),
     clearState: vi.fn(async () => { calls.push('clearState') }),
     queryUITree: vi.fn(async () => []),
+    queryUITreeWithTurn: vi.fn(async function (this: TapflowClient, ...args: Parameters<TapflowClient['queryUITree']>) {
+      return { elements: await (this as unknown as { queryUITree: TapflowClient['queryUITree'] }).queryUITree(...args) }
+    }),
     screenshot: vi.fn(async () => Buffer.from('')),
     tap: vi.fn(),
     swipe: vi.fn(async () => {}),
@@ -382,5 +385,69 @@ describe('tap — holdMs is a long press', () => {
     expect(client.tap).not.toHaveBeenCalled()
     await tap({ sessionId: 's1', x: 50, y: 100, screenshotWidth: 100, screenshotHeight: 200 })
     expect(client.tap).toHaveBeenCalledWith('s1', 0.5, 0.5)
+  })
+})
+
+// The same rule as flow-runner's RelayDriver: a point is turned by the app's turn from the latest tree this run read.
+describe('makeFlowDriver — points turned by the app\'s interface turn', () => {
+  it('turns a tap by 270 after a tree said so, and not before', async () => {
+    const client = fakeClient([])
+    ;(client as unknown as Record<string, unknown>).queryUITreeWithTurn = vi.fn(async () => ({ elements: [], interfaceTurn: 270 }))
+    const driver = makeFlowDriver(client, 's1', undefined)
+    await driver.tap(0.25, 0.1)
+    await driver.queryUITree()
+    await driver.tap(0.25, 0.1)
+    expect(vi.mocked(client.tap).mock.calls).toEqual([['s1', 0.25, 0.1], ['s1', 0.9, 0.25]])
+  })
+
+  // The runner answers 0 — no turn on the wire — when its two reads of the app disagree, most likely right after the
+  // chrome said the device turned. On iOS that read is passed over; on Android the first read ends the wait.
+  it('passes over a read with no turn on iOS after setOrientation, and stops at once on Android', async () => {
+    const ios = fakeClient([])
+    const reads = [undefined, 270, 270]
+    Object.assign(ios, {
+      setOrientation: vi.fn(async () => {}),
+      chrome: vi.fn(async () => ({ framePng: '', buttons: [] })),
+      queryUITreeWithTurn: vi.fn(async () => ({ elements: [], interfaceTurn: reads.shift() })),
+    })
+    const driver = makeFlowDriver(ios, 's1', undefined)
+    await driver.setOrientation!('landscape', 1000)
+    await driver.tap(0.25, 0.1)
+    expect(ios.tap).toHaveBeenCalledWith('s1', 0.9, 0.25)
+
+    const android = fakeClient([])
+    const read = vi.fn(async () => ({ elements: [] }))
+    Object.assign(android, {
+      setOrientation: vi.fn(async () => {}),
+      chrome: vi.fn(async () => ({ buttons: [], streamType: 'h264', bodyRotation: 90 })),
+      queryUITreeWithTurn: read,
+    })
+    await makeFlowDriver(android, 's1', undefined).setOrientation!('landscape', 1000)
+    expect(read).toHaveBeenCalledTimes(1)
+  })
+
+  it('drops the turn from before setOrientation when the settle never reads one', async () => {
+    const client = fakeClient([])
+    const reads: Array<() => { elements: never[]; interfaceTurn?: number }> = [
+      () => ({ elements: [], interfaceTurn: 90 }), () => ({ elements: [] }), () => { throw new Error('tree read failed') },
+    ]
+    Object.assign(client, {
+      setOrientation: vi.fn(async () => {}),
+      chrome: vi.fn(async () => ({ framePng: '', buttons: [] })),
+      queryUITreeWithTurn: vi.fn(async () => reads.shift()!()),
+    })
+    const driver = makeFlowDriver(client, 's1', undefined)
+    await driver.queryUITree()
+    await driver.setOrientation!('portrait', 1000)
+    await driver.tap(0.25, 0.1)
+    expect(client.tap).toHaveBeenCalledWith('s1', 0.25, 0.1)
+  })
+
+  it('does not carry a turn from one driver to the next', async () => {
+    const client = fakeClient([])
+    ;(client as unknown as Record<string, unknown>).queryUITreeWithTurn = vi.fn(async () => ({ elements: [], interfaceTurn: 90 }))
+    await makeFlowDriver(client, 's1', undefined).queryUITree()
+    await makeFlowDriver(client, 's1', undefined).tap(0.25, 0.1)
+    expect(client.tap).toHaveBeenCalledWith('s1', 0.25, 0.1)
   })
 })

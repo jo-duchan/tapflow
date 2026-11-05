@@ -49,6 +49,13 @@
       "tsx": "./src/buttons/index.ts",
       "import": "./dist/buttons/index.js",
       "default": "./dist/buttons/index.js"
+    },
+    "./screen": {
+      "types": "./dist/screen/index.d.ts",
+      "source": "./src/screen/index.ts",
+      "tsx": "./src/screen/index.ts",
+      "import": "./dist/screen/index.js",
+      "default": "./dist/screen/index.js"
     }
   },
   "files": [

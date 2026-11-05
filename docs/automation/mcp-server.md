@@ -139,7 +139,7 @@ Connected straight to the relay's port on the Mac it runs on, the MCP server sta
 | `press_button` | Press a hardware button (home, lock, etc.) |
 | `install_app` | Install an app |
 | `launch_app` | Launch an installed app. `arguments` and `env` pass [launch arguments](/automation/flows#launch-arguments). The result's `applied` names the keys the app received, [launch defaults](/reference/configuration#launch-defaults) included |
-| `run_flow` | Replay a YAML flow deterministically (no further LLM calls). Also how an agent pinches: a [`pinch`](/automation/flows#pinch) step |
+| `run_flow` | Replay a YAML flow deterministically (no further LLM calls). Also how a coding agent pinches, turns or folds the device: a [`pinch`](/automation/flows#pinch), [`setOrientation` or `setPosture`](/automation/flows#orientation-and-posture) step |
 | `list_runs` | List the run records `tapflow flow run` left on the relay (filter by status, build, flow name, CI or local) |
 | `get_run` | Read one run record: each failed flow's steps (a passed flow's step count), failure message and file path, and screenshots of up to four failed flows |
 | `get_testing_guide` | How to test a mobile feature with these tools: cases to cover, what cannot be tested here, how to avoid false bugs, how to save a verified flow, and the report format |

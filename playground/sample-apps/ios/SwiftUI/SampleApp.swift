@@ -161,7 +161,17 @@ struct GesturesScreen: View {
     @EnvironmentObject private var status: Status
 
     var body: some View {
+        // Which way the app itself is drawn — what a flow's `setOrientation` should leave — read from the screen's
+        // own size, so a portrait-locked build stays portrait on a turned device.
+        GeometryReader { geo in
+            content(landscape: geo.size.width > geo.size.height)
+        }
+    }
+
+    private func content(landscape: Bool) -> some View {
         VStack(spacing: 20) {
+            Text(landscape ? "orientation:landscape" : "orientation:portrait")
+                .accessibilityIdentifier("gesture.orientation")
             Text("Hold me")
                 .frame(maxWidth: .infinity, minHeight: 64)
                 .background(Color.blue.opacity(0.2))

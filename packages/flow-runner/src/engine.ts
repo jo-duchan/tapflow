@@ -3,7 +3,7 @@ import type { ChromePayload, LaunchApplied, LaunchOptions } from '@tapflowio/pro
 import type { Flow, Selector, Step, ScrollDirection } from './schema.js'
 import { matchSelector } from './selector.js'
 import { suggestSelectors, type SelectorSuggestion } from './suggest.js'
-import { EnvironmentStepError, isEnvironmentStepFailure, TransientQueryError } from './errors.js'
+import { DeviceLacksError, EnvironmentStepError, isEnvironmentStepFailure, TransientQueryError } from './errors.js'
 import { buttonAvailability } from '@tapflowio/protocol/buttons'
 import { unavailableButton, unavailableButtonMessage } from './platformCheck.js'
 
@@ -38,6 +38,16 @@ export interface FlowDriver {
    * `pressButton` other than home needs it, and a driver without it runs those flows unchecked, as before.
    */
   chrome?(timeoutMs: number): Promise<ChromePayload | null>
+  /**
+   * Turn the device to `orientation` and resolve once its chrome says so, sending nothing when it already does.
+   * Rejects with a `DeviceLacksError` when the device does not report which way it is held.
+   */
+  setOrientation(orientation: 'portrait' | 'landscape', timeoutMs: number): Promise<void>
+  /**
+   * Put the device in its most closed (`folded`) or most open (`unfolded`) posture and resolve once it reports being
+   * there. Rejects with a `DeviceLacksError` when the device has no postures.
+   */
+  setPosture(posture: 'folded' | 'unfolded', timeoutMs: number): Promise<void>
 }
 
 export interface EngineOptions {
@@ -95,6 +105,11 @@ export interface FlowResult {
    * device after an environment failure, and must not leave a healthy one over a flow that could never run on it.
    */
   failedBeforeRun?: true
+  /**
+   * A step asked for something this device cannot do (`DeviceLacksError`) — a posture on a device that does not
+   * fold. Environmental, and like `failedBeforeRun` it does not make the device suspect.
+   */
+  deviceLacks?: true
 }
 
 const DEFAULT_TIMEOUT_MS = 10_000
@@ -181,6 +196,8 @@ function describeStep(step: Step): string {
     case 'pressButton': return `pressButton(${step.name})`
     case 'longPressOn': return `longPressOn(${describeSelector(step.selector)}, ${step.durationMs}ms)`
     case 'pinch': return `pinch(${Array.isArray(step.on) ? `[${step.on.join(',')}]` : describeSelector(step.on)}, ×${step.scale})`
+    case 'setOrientation': return `setOrientation(${step.orientation})`
+    case 'setPosture': return `setPosture(${step.posture})`
   }
 }
 
@@ -507,6 +524,8 @@ async function executeStep(step: Step, flow: Flow, driver: FlowDriver, timeoutMs
       if (!path) throw new StepFailure(`the pinch center [${center.join(', ')}] is too close to the edge of the screen to fit two fingers changing their spacing ×${step.scale} — pinch on a point further in`)
       return driver.pinch(path.start, path.end, step.durationMs)
     }
+    case 'setOrientation': return driver.setOrientation(step.orientation, timeoutMs)
+    case 'setPosture': return driver.setPosture(step.posture, timeoutMs)
   }
 }
 
@@ -566,6 +585,7 @@ export async function runFlow(flow: Flow, driver: FlowDriver, options: EngineOpt
   const steps: StepResult[] = []
   let failureMessage: string | undefined
   let failureKind: 'environment' | 'product' | undefined
+  let deviceLacks = false
   let failureScreenshot: Buffer | undefined
 
   for (const [index, step] of flow.steps.entries()) {
@@ -587,6 +607,7 @@ export async function runFlow(flow: Flow, driver: FlowDriver, options: EngineOpt
       const message = e instanceof Error ? e.message : String(e)
       failureMessage = `${name}: ${message}`
       if (failureKind === undefined) failureKind = isEnvironmentStepFailure(e) ? 'environment' : 'product'
+      if (e instanceof DeviceLacksError) deviceLacks = true
       const suggestions = e instanceof StepFailure ? e.suggestions : undefined
       steps.push({ index, name, status: 'failed', durationMs: Date.now() - stepStart, message, ...(suggestions ? { suggestions } : {}) })
       options.onStep?.({ index, name, phase: 'end', status: 'failed' })
@@ -608,6 +629,7 @@ export async function runFlow(flow: Flow, driver: FlowDriver, options: EngineOpt
   if (flow.file !== undefined) result.file = flow.file
   if (failureMessage !== undefined) result.failureMessage = failureMessage
   if (failureKind !== undefined) result.failureKind = failureKind
+  if (deviceLacks) result.deviceLacks = true
   if (failureScreenshot !== undefined) result.failureScreenshot = failureScreenshot
   return result
 }

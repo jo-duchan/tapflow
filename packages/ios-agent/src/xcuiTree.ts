@@ -102,6 +102,23 @@ function parseLine(line: string): RawNode | null {
   return node
 }
 
+const ORIENTATION_HEADER = /^TAPFLOW_INTERFACE_ORIENTATION (\d+)\r?\n/
+
+/**
+ * The runner's first line (`TAPFLOW_INTERFACE_ORIENTATION <UIInterfaceOrientation>`) split off the tree, as the
+ * clockwise turn that stands the app's interface up in the portrait framebuffer: landscape right — the home button on
+ * the right, the device turned left — is 270, measured on an iPhone simulator. 0, an unknown value or no line (a
+ * runner built before it) is no information. Split here rather than left to `parseTreeText`, whose fallback for a body
+ * with no `Element subtree:` stops at the first line it cannot read and would return an empty tree.
+ */
+export function splitInterfaceTurn(text: string): { body: string; interfaceTurn?: 0 | 90 | 180 | 270 } {
+  const m = ORIENTATION_HEADER.exec(text)
+  if (!m) return { body: text }
+  const body = text.slice(m[0].length)
+  const turn = ({ 1: 0, 2: 180, 3: 270, 4: 90 } as const)[Number(m[1]) as 1 | 2 | 3 | 4]
+  return turn === undefined ? { body } : { body, interfaceTurn: turn }
+}
+
 export function parseTreeText(text: string): UIElement[] {
   const lines = text.split('\n')
   const startIdx = lines.findIndex((l) => l.trim() === 'Element subtree:')

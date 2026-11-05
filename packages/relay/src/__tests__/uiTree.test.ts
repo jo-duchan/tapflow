@@ -130,6 +130,21 @@ describe('GET /api/v1/sessions/:sessionId/ui-tree', () => {
     agent.close()
   })
 
+  // The app's turn rides beside the tree when the agent sent one, and only then (absent = no information).
+  it.each([[270, { interfaceTurn: 270 }], [45, {}]] as const)('TC1b: interfaceTurn %s from the agent → %j in the body', async (sent, extra) => {
+    const { agent, sessionId } = await setupAgent()
+    agent.on('message', (data) => {
+      const msg = JSON.parse(data.toString()) as AgentSocketInbound
+      if (msg.type === 'ui:tree:request') {
+        agent.send(JSON.stringify({ type: 'ui:tree:response', sessionId: msg.sessionId, requestId: msg.requestId, elements: ELEMENTS, interfaceTurn: sent }))
+      }
+    })
+    const res = await httpGet(port, `/api/v1/sessions/${sessionId}/ui-tree`, { Cookie: makeAuthCookie() })
+    expect(res.status).toBe(200)
+    expect(JSON.parse(res.body.toString())).toEqual({ elements: ELEMENTS, ...extra })
+    agent.close()
+  })
+
   it('TC2: no auth → 401', async () => {
     const { agent, sessionId } = await setupAgent()
 

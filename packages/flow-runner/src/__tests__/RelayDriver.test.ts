@@ -18,7 +18,16 @@ import {
 
 // RelayDriver takes the concrete client; the fake below satisfies the methods
 // the driver calls, cast once at construction rather than per test.
+// A chrome with a frame is an iOS one, which is what tells the settle loop a turn is expected.
+const IOS_CHROME = { framePng: '', buttons: [] }
+const ANDROID_CHROME = { buttons: [], streamType: 'h264', bodyRotation: 90 }
+
 function driverWith(client: Record<string, (...args: never[]) => Promise<unknown>>) {
+  // A fake that answers only `queryUITree` reads as a tree with no turn: the driver asks `queryUITreeWithTurn`.
+  const { queryUITree } = client
+  if (queryUITree && !client.queryUITreeWithTurn) {
+    client.queryUITreeWithTurn = (async (...args: never[]) => ({ elements: await queryUITree(...args) })) as never
+  }
   return new RelayDriver(client as unknown as RelayClient, 's1', 7)
 }
 
@@ -85,7 +94,7 @@ describe('RelayDriver failure-kind mapping (#543)', () => {
 
   it('carries a marked relay failure through the engine as environmental', async () => {
     const client = {
-      queryUITree: vi.fn(async () => { throw new RelayHttpError('relay unavailable', 503) }),
+      queryUITreeWithTurn: vi.fn(async () => { throw new RelayHttpError('relay unavailable', 503) }),
       screenshot: vi.fn(async () => Buffer.from('PNG')),
     } as unknown as RelayClient
     const result = await runFlow(parseFlow('steps:\n  - assertVisible: "OK"\n', 'test.yaml'), new RelayDriver(client, 's1'), {
@@ -128,7 +137,7 @@ describe('RelayDriver failure-kind mapping (#543)', () => {
     const original = new RelayHttpError(`ui-tree query failed: ${label}`, status, { cause: new Error(label) }, permanent)
     const queryUITree = vi.fn(async (): Promise<never> => { throw original })
     const client = {
-      queryUITree,
+      queryUITreeWithTurn: queryUITree,
       screenshot: vi.fn(async () => Buffer.from('PNG')),
     } as unknown as RelayClient
     const result = await runFlow(parseFlow('steps:\n  - assertVisible: "OK"\n', 'test.yaml'), new RelayDriver(client, 's1'), {
@@ -173,5 +182,80 @@ describe('RelayDriver — pinch refused as unsupported', () => {
     })
     const result = await runFlow(parseFlow('steps:\n  - pinch: { on: [0.5, 0.5], scale: 2 }\n', 'x.yaml'), driver, { pollIntervalMs: 1, defaultTimeoutMs: 20 })
     expect(result.failureKind).toBe('environment')
+  })
+})
+
+// A tree point is in the app's upright interface and a touch in the portrait framebuffer: the driver turns every
+// point by the turn of the latest tree it read, and nothing when that tree carried none.
+describe('RelayDriver — points turned by the app\'s interface turn', () => {
+  const tree = (interfaceTurn?: number) => vi.fn(async () => (interfaceTurn === undefined ? { elements: [] } : { elements: [], interfaceTurn }))
+
+  it('turns tap, longPress, swipe and pinch points by 270 after a tree said so', async () => {
+    const tap = vi.fn(async () => {}), longPress = vi.fn(async () => {}), swipe = vi.fn(async () => {}), pinch = vi.fn(async () => {})
+    const driver = driverWith({ queryUITreeWithTurn: tree(270), tap, longPress, swipe, pinch })
+    await driver.queryUITree()
+    await driver.tap(0.25, 0.1)
+    await driver.longPress(0.25, 0.1, 1000)
+    await driver.swipe([0.25, 0.1], [0.5, 0.5], 300)
+    await driver.pinch([[0.25, 0.1], [0.75, 0.1]], [[0.1, 0.1], [0.9, 0.1]], 500)
+    expect(tap).toHaveBeenCalledWith('s1', 0.9, 0.25)
+    expect(longPress).toHaveBeenCalledWith('s1', 0.9, 0.25, 1000)
+    expect(swipe).toHaveBeenCalledWith('s1', [0.9, 0.25], [0.5, 0.5], 300)
+    expect(pinch).toHaveBeenCalledWith('s1', [[0.9, 0.25], [0.9, 0.75]], [[0.9, 0.1], [0.9, 0.9]], 500)
+  })
+
+  it('sends points as they are when the tree carried no turn, or before any tree', async () => {
+    const tap = vi.fn(async () => {})
+    const driver = driverWith({ queryUITreeWithTurn: tree(), tap })
+    await driver.tap(0.25, 0.1)
+    await driver.queryUITree()
+    await driver.tap(0.25, 0.1)
+    expect(tap.mock.calls).toEqual([['s1', 0.25, 0.1], ['s1', 0.25, 0.1]])
+  })
+
+  // The chrome says the device turned before the app has; one read could keep the old turn for the next swipe.
+  it('reads the app\'s turn again after setOrientation until two reads agree', async () => {
+    const reads = [0, 270, 270, 90]
+    const queryUITreeWithTurn = vi.fn(async () => ({ elements: [], interfaceTurn: reads.shift() }))
+    const tap = vi.fn(async () => {})
+    const driver = driverWith({ setOrientation: vi.fn(async () => {}), chrome: vi.fn(async () => IOS_CHROME), queryUITreeWithTurn, tap })
+    await driver.setOrientation('landscape', 1000)
+    await driver.tap(0.25, 0.1)
+    expect(queryUITreeWithTurn).toHaveBeenCalledTimes(3)
+    expect(tap).toHaveBeenCalledWith('s1', 0.9, 0.25)
+  })
+
+  // The runner answers 0 — no turn on the wire — when its two reads of the app disagree, which is most likely right
+  // after the chrome said the device turned. Taking that as the answer left the next coordinate step untransformed.
+  it('passes over a read with no turn on iOS, as a turn caught mid-way', async () => {
+    const reads = [undefined, 270, 270]
+    const queryUITreeWithTurn = vi.fn(async () => ({ elements: [], interfaceTurn: reads.shift() }))
+    const tap = vi.fn(async () => {})
+    const driver = driverWith({ setOrientation: vi.fn(async () => {}), chrome: vi.fn(async () => IOS_CHROME), queryUITreeWithTurn, tap })
+    await driver.setOrientation('landscape', 1000)
+    await driver.tap(0.25, 0.1)
+    expect(queryUITreeWithTurn).toHaveBeenCalledTimes(3)
+    expect(tap).toHaveBeenCalledWith('s1', 0.9, 0.25)
+  })
+
+  // The device has turned, so the turn read before it is wrong; a loop that never settles must not leave it in place.
+  it('drops the turn from before the call when the settle never reads one', async () => {
+    const reads: Array<() => { elements: never[]; interfaceTurn?: number }> = [
+      () => ({ elements: [], interfaceTurn: 90 }), () => ({ elements: [] }), () => { throw new Error('tree read failed') },
+    ]
+    const queryUITreeWithTurn = vi.fn(async () => reads.shift()!())
+    const tap = vi.fn(async () => {})
+    const driver = driverWith({ setOrientation: vi.fn(async () => {}), chrome: vi.fn(async () => IOS_CHROME), queryUITreeWithTurn, tap })
+    await driver.queryUITree()
+    await driver.setOrientation('portrait', 1000)
+    await driver.tap(0.25, 0.1)
+    expect(tap).toHaveBeenCalledWith('s1', 0.25, 0.1)
+  })
+
+  it('stops after one read when the device reports no turn at all (Android)', async () => {
+    const queryUITreeWithTurn = tree()
+    const driver = driverWith({ setOrientation: vi.fn(async () => {}), chrome: vi.fn(async () => ANDROID_CHROME), queryUITreeWithTurn })
+    await driver.setOrientation('landscape', 1000)
+    expect(queryUITreeWithTurn).toHaveBeenCalledTimes(1)
   })
 })

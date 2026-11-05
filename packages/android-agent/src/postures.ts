@@ -71,3 +71,16 @@ export function parseCurrentPosture(output: string): string | null {
   if (!m) return null
   return KNOWN.find((k) => k.name === m[1])?.emuId ?? null
 }
+
+/**
+ * Parse `dumpsys window policy` for the keyguard: whether it is up, and whether it is a secure one (a PIN, a
+ * pattern, a password). Read from the `KeyguardServiceDelegate` block, whose `showing=` and `secure=` lines are
+ * the only ones of those names in the dump. `null` when either is missing, so an image that words it differently
+ * is left alone rather than read as unlocked.
+ */
+export function parseKeyguard(output: string): { showing: boolean; secure: boolean } | null {
+  const showing = output.match(/^\s*showing=(true|false)\s*$/m)
+  const secure = output.match(/^\s*secure=(true|false)\s*$/m)
+  if (!showing || !secure) return null
+  return { showing: showing[1] === 'true', secure: secure[1] === 'true' }
+}

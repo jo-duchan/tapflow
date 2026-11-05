@@ -109,6 +109,23 @@ describe('XCUITreeReader', () => {
     reader.stop()
   })
 
+  it('returns the app turn the runner reads beside the tree, and the same tree as before', async () => {
+    const reader = new XCUITreeReader(setup())
+    fetchMock.mockImplementation(async (url: string) =>
+      url.includes('/tree') ? ({ ok: true, text: async () => `TAPFLOW_INTERFACE_ORIENTATION 3\n${TREE}` } as Response) : healthy(url))
+    const read = await reader.readWithTurn('udid-A', 'com.app')
+    expect(read.interfaceTurn).toBe(270)
+    expect(read.elements.length).toBeGreaterThan(0)
+    expect(await reader.read('udid-A', 'com.app')).toEqual(read.elements)
+  })
+
+  it('rejects a body that is only the header, as it rejects garbage', async () => {
+    const reader = new XCUITreeReader(setup())
+    fetchMock.mockImplementation(async (url: string) =>
+      url.includes('/tree') ? ({ ok: true, text: async () => 'TAPFLOW_INTERFACE_ORIENTATION 0\nNo matches found for Application' } as Response) : healthy(url))
+    await expect(reader.readWithTurn('udid-A', 'com.app')).rejects.toThrow(/unexpected response/)
+  })
+
   it('rejects a garbage body instead of returning an empty tree', async () => {
     fetchMock.mockImplementation(async (url: string) =>
       url.includes('/health') ? healthy(url) : ({ ok: true, text: async () => '<html>error</html>' } as Response),

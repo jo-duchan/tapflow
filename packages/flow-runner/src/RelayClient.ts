@@ -1,12 +1,14 @@
 import { randomUUID } from 'node:crypto'
 import type {
-  AdmissionRefusal, BootRefusalReason, BrowserToRelay, ChromePayload, LaunchApplied, LaunchOptions, RunResetRequest, ServiceTier, DeviceSummary, InputErrorReason, SessionStartFailure, SessionTerminatedReason,
+  AdmissionRefusal, BootRefusalReason, BrowserToRelay, ChromePayload, PosturesPayload, LaunchApplied, LaunchOptions, RunResetRequest, ServiceTier, DeviceSummary, InputErrorReason, SessionStartFailure, SessionTerminatedReason,
 } from '@tapflowio/protocol'
 import { WebSocket } from 'ws'
 import type { UIElement } from '@tapflowio/agent-core'
 import { PlatformError } from '@tapflowio/agent-core'
 import { TransientQueryError, markEnvironmentFailure } from './errors.js'
 import type { PinchFingers } from './engine.js'
+import { chromeOrientation, interfaceTurnOf, type InterfaceTurn } from '@tapflowio/protocol/screen'
+import { DeviceLacksError } from './errors.js'
 import { authHeader, fetchWithToken, fixedToken, tokenRefusal, type TokenSource } from './credentials.js'
 
 // Carries the HTTP status so ui-tree queries can tell a transient failure (retry) from a permanent one.
@@ -447,6 +449,10 @@ const BOOT_DEADLINE_MS = 240_000
 
 const delay = (ms: number) => new Promise<void>((r) => setTimeout(r, ms))
 
+function isPostures(v: unknown): v is PosturesPayload {
+  return typeof v === 'object' && v !== null && Array.isArray((v as PosturesPayload).postures)
+}
+
 /** A gesture this client has begun and not ended — what a leave closes on the device's behalf. */
 type OpenGesture = { kind: 'touch'; at: { x: number; y: number } } | { kind: 'pinch' }
 
@@ -604,6 +610,8 @@ export class RelayClient {
   /** The latest chrome the relay sent for each session — the device's buttons, which a `pressButton` is checked
    *  against before a flow runs. Same lifetime as `lifecycle`. */
   private readonly chromes = new Map<string, ChromePayload>()
+  /** The latest postures the relay sent for each session — what `setPosture` picks an id from. Same lifetime. */
+  private readonly postures = new Map<string, PosturesPayload>()
   /** A gesture this client opened and has not ended, per session — what `leaveSession` closes before it goes. */
   private readonly openGestures = new Map<string, OpenGesture>()
 
@@ -741,6 +749,9 @@ export class RelayClient {
     // needs it — a `pressButton` checked against the device — asks afterwards.
     if (msg['type'] === 'session:chrome' && typeof msg['sessionId'] === 'string' && typeof msg['payload'] === 'object' && msg['payload'] !== null) {
       this.chromes.set(msg['sessionId'], msg['payload'] as ChromePayload)
+    }
+    if (msg['type'] === 'device:postures' && typeof msg['sessionId'] === 'string' && isPostures(msg['payload'])) {
+      this.postures.set(msg['sessionId'], msg['payload'])
     }
     if (msg['type'] === 'error' && typeof msg['sessionId'] !== 'string' && !this.addressSkewLogged) {
       // A relay older than L5d. The refusal matches no waiter, so the join times out with no reason — this is
@@ -1202,6 +1213,77 @@ export class RelayClient {
     return true
   }
 
+  /**
+   * Turn the device to `orientation`, resolving once a chrome says it is held that way. Sends nothing when the latest
+   * chrome already does. Waits for **the chrome that names the target**, not the first one: an Android body coming
+   * upright sends two to four on the way (measured). The waiter is registered before the turn is sent, so a fast
+   * answer is not missed. Not the app's orientation — a portrait-locked app stays portrait, and that is right: the
+   * step turns the device, as the dashboard's Rotate does.
+   */
+  async setOrientation(sessionId: string, orientation: 'portrait' | 'landscape', timeoutMs: number): Promise<void> {
+    const chrome = await this.chrome(sessionId, timeoutMs)
+    if (!chrome) throw markEnvironmentFailure(this.failed(sessionId, `setOrientation: the device sent no chrome within ${timeoutMs / 1000}s, so which way it is held is unknown`))
+    const now = chromeOrientation(chrome)
+    if (now === undefined) {
+      const which = 'framePng' in chrome ? 'a multi-panel iOS device, whose turn includes its panel\'s own (#1116)' : 'an Android backend without a body turn (scrcpy)'
+      throw new DeviceLacksError(this.failed(sessionId, `setOrientation: this is ${which}, which does not report which way it is held, so a turn could not be confirmed`).message)
+    }
+    if (now === orientation) return
+    const turned = this.waitFor(
+      (m) => m['type'] === 'session:chrome' && m['sessionId'] === sessionId && typeof m['payload'] === 'object' && m['payload'] !== null
+        && chromeOrientation(m['payload'] as ChromePayload) === orientation,
+      timeoutMs, `turn to ${orientation}`, sessionId,
+    )
+    this.send({ type: 'input:rotate', sessionId, payload: { orientation } })
+    try {
+      await turned
+    } catch (e) {
+      if (e instanceof RequestTimeoutError) throw markEnvironmentFailure(this.failed(sessionId, `setOrientation: the device did not report ${orientation} within ${timeoutMs / 1000}s`))
+      throw e
+    }
+  }
+
+  /**
+   * Put the device in its most closed (`folded`) or most open (`unfolded`) posture, resolving once it reports that
+   * posture as current. **An empty list is not an answer**: iOS sends one before the device is ready and one in the
+   * middle of a fold (measured), so this waits for a list with postures in it, and only a deadline with none says the
+   * device does not fold. A list of other than two refuses: which end is "open" is then not certain (protocol
+   * `DevicePosture`; a rear-display posture would sort last).
+   */
+  async setPosture(sessionId: string, posture: 'folded' | 'unfolded', timeoutMs: number): Promise<void> {
+    let list = this.postures.get(sessionId)
+    if (!list || list.postures.length === 0) {
+      try {
+        const msg = await this.waitFor(
+          (m) => m['type'] === 'device:postures' && m['sessionId'] === sessionId && isPostures(m['payload']) && m['payload'].postures.length > 0,
+          timeoutMs, 'device postures', sessionId,
+        )
+        list = msg['payload'] as PosturesPayload
+      } catch (e) {
+        if (e instanceof RequestTimeoutError) {
+          throw new DeviceLacksError(this.failed(sessionId, `setPosture: this device reported no postures within ${timeoutMs / 1000}s — it does not fold`).message)
+        }
+        throw e
+      }
+    }
+    if (list.postures.length !== 2) {
+      throw markEnvironmentFailure(this.failed(sessionId, `setPosture: the device offers ${list.postures.length} postures, so which is ${posture} is not certain (expected two)`))
+    }
+    const target = (posture === 'folded' ? list.postures[0] : list.postures[1])!.id
+    if (list.currentId === target) return
+    const arrived = this.waitFor(
+      (m) => m['type'] === 'device:postures' && m['sessionId'] === sessionId && isPostures(m['payload']) && m['payload'].currentId === target,
+      timeoutMs, `posture ${posture}`, sessionId,
+    )
+    this.send({ type: 'input:posture', sessionId, payload: { postureId: target } })
+    try {
+      await arrived
+    } catch (e) {
+      if (e instanceof RequestTimeoutError) throw markEnvironmentFailure(this.failed(sessionId, `setPosture: the device did not report ${posture} within ${timeoutMs / 1000}s`))
+      throw e
+    }
+  }
+
   /** A gesture `leaveSession` closed while its sender was still pacing it: the leave is why, and it says so. */
   private leftMidGesture(sessionId: string, what: string): never {
     throw new SessionLeftError(`${what} failed: this client left session ${sessionId} while the gesture was in progress — it was ended where it was`)
@@ -1378,12 +1460,18 @@ export class RelayClient {
    * - no record — unchanged: the status decides, as before.
    */
   async queryUITree(sessionId: string, signal?: AbortSignal): Promise<UIElement[]> {
+    return (await this.queryUITreeWithTurn(sessionId, signal)).elements
+  }
+
+  /** The tree with the app's interface turn beside it, when the agent sent one (`UiTreeResponse.interfaceTurn`). */
+  async queryUITreeWithTurn(sessionId: string, signal?: AbortSignal): Promise<{ elements: UIElement[]; interfaceTurn?: InterfaceTurn }> {
     try {
       const body = await this.getJson<unknown>(`/api/v1/sessions/${sessionId}/ui-tree`, 'ui-tree query', signal)
       if (typeof body !== 'object' || body === null || Array.isArray(body) || !('elements' in body) || !Array.isArray(body.elements) || !body.elements.every(isUIElement)) {
         throw new RelayHttpError('ui-tree query returned an invalid response shape', 200, undefined, true)
       }
-      return body.elements
+      const interfaceTurn = interfaceTurnOf((body as { interfaceTurn?: unknown }).interfaceTurn)
+      return interfaceTurn === undefined ? { elements: body.elements } : { elements: body.elements, interfaceTurn }
     } catch (e) {
       const s = this.lifecycle.get(sessionId)
       if (s && (s.terminated || s.needsReboot)) {

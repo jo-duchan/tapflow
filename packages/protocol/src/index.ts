@@ -1762,6 +1762,19 @@ export interface UiTreeResponse {
   sessionId: string
   requestId: string
   elements: UIElement[]
+  /**
+   * How many quarter turns **clockwise** the portrait framebuffer takes to stand the app's interface up — the
+   * convention `ChromeData.streamRotation` uses, and the same value when the app turns with the device. The
+   * elements' frames are in that upright interface; a touch is in the framebuffer, so a client placing a touch
+   * from a frame turns the point by this first (`@tapflowio/protocol/screen` `toFramePoint`).
+   *
+   * **The app's, not the device's.** A portrait-locked app on a device held sideways stays 0, and an app on a device
+   * held upside down usually stays in the landscape it was in. Sent by the iOS agent, read from the app itself.
+   * **Absent means no information**: Android (whose tree and touches share the display's space), an older agent,
+   * a multi-panel device (#1116) or a reading that failed. A client then turns nothing, which is what every
+   * client did before this field.
+   */
+  interfaceTurn?: 0 | 90 | 180 | 270
 }
 
 /** Request-scoped, for the same reasons as `ScreenshotError`. */

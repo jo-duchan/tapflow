@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import { readFileSync } from 'fs'
 import { join } from 'path'
-import { parseTreeText } from '../xcuiTree'
+import { parseTreeText, splitInterfaceTurn } from '../xcuiTree'
 
 // Real XCUIApplication.debugDescription captured from the resident runner
 // (io.cloudgrey.the-app main screen). This is the format-regression fixture
@@ -174,5 +174,29 @@ describe('parseTreeText field-boundary edge cases', () => {
 
   it('returns empty when there is no usable frame basis', () => {
     expect(parseTreeText('Element subtree:\n →Application, 0x1, pid: 1, label: \'App\'')).toEqual([])
+  })
+})
+
+describe('splitInterfaceTurn', () => {
+  // Measured on an iPhone simulator: UIInterfaceOrientation 3 (landscape right) needs the framebuffer turned 270.
+  it.each([[1, 0], [2, 180], [3, 270], [4, 90]] as const)('reads orientation %i as a %i° turn and keeps the tree', (o, turn) => {
+    const { body, interfaceTurn } = splitInterfaceTurn(`TAPFLOW_INTERFACE_ORIENTATION ${o}\n${FIXTURE}`)
+    expect(interfaceTurn).toBe(turn)
+    expect(parseTreeText(body)).toEqual(parseTreeText(FIXTURE))
+  })
+
+  it('reads 0, an unknown value or no line as no information', () => {
+    expect(splitInterfaceTurn(`TAPFLOW_INTERFACE_ORIENTATION 0\n${FIXTURE}`).interfaceTurn).toBeUndefined()
+    expect(splitInterfaceTurn(`TAPFLOW_INTERFACE_ORIENTATION 7\n${FIXTURE}`).interfaceTurn).toBeUndefined()
+    expect(splitInterfaceTurn(FIXTURE)).toEqual({ body: FIXTURE })
+  })
+
+  // parseTreeText's fallback for a body with no "Element subtree:" stops at the first line it cannot read, so a
+  // header left on would turn such a tree into an empty one with nothing saying so.
+  it('leaves a tree without "Element subtree:" parseable', () => {
+    const bare = FIXTURE.slice(FIXTURE.indexOf('Element subtree:') + 'Element subtree:'.length).replace(/^\n/, '')
+    const withHeader = splitInterfaceTurn(`TAPFLOW_INTERFACE_ORIENTATION 3\n${bare}`)
+    expect(parseTreeText(withHeader.body).length).toBe(parseTreeText(bare).length)
+    expect(parseTreeText(bare).length).toBeGreaterThan(0)
   })
 })
