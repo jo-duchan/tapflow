@@ -44,7 +44,7 @@ describe('run_flow — runs only a flow for the build\'s app', () => {
   it('refuses a flow for another app without installing or touching the device', async () => {
     const calls: string[] = []
     const client = fakeClient(calls)
-    vi.mocked(client.lookupBuild).mockResolvedValue({ kind: 'found', bundleId: 'com.a.debug' })
+    vi.mocked(client.lookupBuild).mockResolvedValue({ kind: 'found', bundleId: 'com.a.debug', platform: 'ios' })
     const res = await runFlowHandler(client)({ sessionId: 's1', flow, buildId: 5 })
     expect(res.isError).toBe(true)
     expect(text(res)).toContain('flow is for com.a, build 5 is com.a.debug')
@@ -54,7 +54,7 @@ describe('run_flow — runs only a flow for the build\'s app', () => {
   it('runs a flow whose appId matches the build', async () => {
     const calls: string[] = []
     const client = fakeClient(calls)
-    vi.mocked(client.lookupBuild).mockResolvedValue({ kind: 'found', bundleId: 'com.a' })
+    vi.mocked(client.lookupBuild).mockResolvedValue({ kind: 'found', bundleId: 'com.a', platform: 'ios' })
     const res = await runFlowHandler(client)({ sessionId: 's1', flow, buildId: 5 })
     expect(res.isError).toBeFalsy()
     expect(calls).toEqual(['install', 'clearState'])
@@ -303,5 +303,84 @@ describe('launch_app — launch options', () => {
     expect(res.isError).toBe(true)
     expect((res.content as { text: string }[])[0]!.text).toMatch(/reserved/)
     expect(client.launchApp).not.toHaveBeenCalled()
+  })
+})
+
+// D1: a button the device lacks is refused before anything is installed or pressed, as `flow run` refuses it.
+describe('run_flow — a button the device lacks', () => {
+  const runFlowHandler = (client: TapflowClient) => captureTools(client).get('run_flow') as Handler
+  const text = (res: ToolResult) => (res.content[0] as { text: string }).text
+  const onPlatform = (client: TapflowClient, platform: string) => {
+    ;(client as unknown as { listDevices: () => Promise<unknown> }).listDevices = vi.fn(async () => [
+      { platform: 'android', devices: [{ sessionId: 'other' }] },
+      { platform, devices: [{ sessionId: 's1' }] },
+    ])
+    ;(client as unknown as { pressButton: () => Promise<void> }).pressButton = vi.fn(async () => {})
+  }
+
+  it('refuses back on iOS without installing, as a result the run would have given', async () => {
+    const calls: string[] = []
+    const client = fakeClient(calls)
+    onPlatform(client, 'ios')
+    const res = await runFlowHandler(client)({ sessionId: 's1', flow: 'steps:\n  - pressButton: back\n', buildId: 5 })
+    expect(res.isError).toBeFalsy()
+    expect(JSON.parse(text(res))).toMatchObject({ status: 'failed', failureKind: 'environment', failureMessage: expect.stringMatching(/iOS has no "back" button/) })
+    expect(calls).toEqual([])
+    expect(client.installApp).not.toHaveBeenCalled()
+  })
+
+  it('presses it where the platform has it', async () => {
+    const client = fakeClient([])
+    onPlatform(client, 'android')
+    const res = await runFlowHandler(client)({ sessionId: 's1', flow: 'steps:\n  - pressButton: back\n' })
+    expect(JSON.parse(text(res))).toMatchObject({ status: 'passed' })
+    expect((client as unknown as { pressButton: ReturnType<typeof vi.fn> }).pressButton).toHaveBeenCalledWith('s1', 'back')
+  })
+
+  // What only the device knows: iOS's lock exists when the device's chrome declares a power button it can press.
+  it('checks an iOS button that depends on the device against its chrome before the first step', async () => {
+    const client = fakeClient([])
+    onPlatform(client, 'ios')
+    ;(client as unknown as Record<string, unknown>).chrome = vi.fn(async () => ({
+      framePng: '', bezelWidth: 1, bezelHeight: 1, compositeWidth: 1, compositeHeight: 1,
+      padding: { left: 0, right: 0, top: 0, bottom: 0 }, screenRect: { x: 0, y: 0, width: 1, height: 1 },
+      screenCornerRadius: 0, logicalWidth: 1, logicalHeight: 1,
+      buttons: [{ name: 'power', accessibilityTitle: 'Power', anchor: 'right', onTop: false, normalOffset: { x: 0, y: 0 }, rolloverOffset: { x: 0, y: 0 }, buttonW: 1, buttonH: 1, usagePage: 12, usage: 0 }],
+    }))
+    const res = await runFlowHandler(client)({ sessionId: 's1', flow: 'steps:\n  - pressButton: lock\n' })
+    expect(JSON.parse(text(res))).toMatchObject({ status: 'failed', failureKind: 'environment', failureMessage: expect.stringMatching(/this device has no "lock" button/) })
+    expect((client as unknown as { pressButton: ReturnType<typeof vi.fn> }).pressButton).not.toHaveBeenCalled()
+  })
+
+  it('runs unchecked when the listing does not name the session\'s platform', async () => {
+    const client = fakeClient([])
+    ;(client as unknown as { pressButton: () => Promise<void> }).pressButton = vi.fn(async () => {})
+    const res = await runFlowHandler(client)({ sessionId: 's1', flow: 'steps:\n  - pressButton: back\n' })
+    expect(JSON.parse(text(res))).toMatchObject({ status: 'passed' })
+  })
+})
+
+describe('makeFlowDriver — a pinch refused as unsupported', () => {
+  it('is the environment\'s, while any other unsupported refusal stays the product\'s', async () => {
+    const client = fakeClient([])
+    const refused = (what: string) => async () => { throw new Error(`${what} was refused (unsupported) — not available on this path`) }
+    ;(client as unknown as Record<string, unknown>).pinch = vi.fn(refused('Input'))
+    ;(client as unknown as Record<string, unknown>).pressButton = vi.fn(refused('Input'))
+    const driver = makeFlowDriver(client, 's1', undefined)
+    expect(isEnvironmentStepFailure(await driver.pinch([[0.4, 0.5], [0.6, 0.5]], [[0.2, 0.5], [0.8, 0.5]], 100).catch((e: unknown) => e))).toBe(true)
+    expect(isEnvironmentStepFailure(await driver.pressButton('x').catch((e: unknown) => e))).toBe(false)
+  })
+})
+
+describe('tap — holdMs is a long press', () => {
+  it('holds when asked and taps when not', async () => {
+    const client = fakeClient([])
+    ;(client as unknown as Record<string, unknown>).longPress = vi.fn(async () => {})
+    const tap = captureTools(client).get('tap') as Handler
+    await tap({ sessionId: 's1', x: 50, y: 100, screenshotWidth: 100, screenshotHeight: 200, holdMs: 1200 })
+    expect((client as unknown as { longPress: ReturnType<typeof vi.fn> }).longPress).toHaveBeenCalledWith('s1', 0.5, 0.5, 1200)
+    expect(client.tap).not.toHaveBeenCalled()
+    await tap({ sessionId: 's1', x: 50, y: 100, screenshotWidth: 100, screenshotHeight: 200 })
+    expect(client.tap).toHaveBeenCalledWith('s1', 0.5, 0.5)
   })
 })

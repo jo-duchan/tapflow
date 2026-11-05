@@ -29,6 +29,9 @@ export type Step =
   | { type: 'openUrl'; url: string }
   | { type: 'assertVisible'; selector: Selector }
   | { type: 'assertNotVisible'; selector: Selector }
+  | { type: 'pressButton'; name: string }
+  | { type: 'longPressOn'; selector: Selector; durationMs: number }
+  | { type: 'pinch'; on: Selector | [number, number]; scale: number; durationMs: number }
 
 export interface Flow {
   name: string
@@ -40,6 +43,16 @@ export interface Flow {
 
 const SCROLL_DIRECTIONS = new Set<string>(['up', 'down', 'left', 'right'])
 const DEFAULT_SWIPE_DURATION_MS = 300
+// Both platforms recognise a long press at about half a second; twice that leaves room for a busy Mac's timing
+// (#1037). Holding past the threshold changes nothing for an ordinary long press, so the margin costs only time.
+const DEFAULT_LONG_PRESS_MS = 1000
+const DEFAULT_PINCH_MS = 500
+// A hold or a pinch keeps a pointer down for its whole length, and nothing on the agent or the relay lifts one a
+// client left open, so a length is capped at what a test could mean rather than at what a timer can hold.
+const MAX_GESTURE_MS = 60_000
+// Wider than this and the two fingers no longer fit on a screen at a spacing a recogniser reads as two.
+const MIN_PINCH_SCALE = 0.1
+const MAX_PINCH_SCALE = 10
 const MAX_TIMER_MS = 2_147_483_647
 const MAX_TIMEOUT_SECONDS = MAX_TIMER_MS / 1000
 
@@ -99,6 +112,14 @@ function parsePoint(v: unknown, ctx: string, key: string): [number, number] {
     throw new ValidationError(`${ctx}: "${key}" must be [x, y] with normalized 0-1 coordinates`)
   }
   return [v[0] as number, v[1] as number]
+}
+
+function parseGestureMs(v: unknown, ctx: string, fallback: number): number {
+  if (v === undefined) return fallback
+  if (typeof v !== 'number' || !Number.isFinite(v) || !(v > 0) || v > MAX_GESTURE_MS) {
+    throw new ValidationError(`${ctx}: "durationMs" must be a positive number no greater than ${MAX_GESTURE_MS}ms`)
+  }
+  return v
 }
 
 function parseStep(raw: unknown, ctx: string): Step {
@@ -173,6 +194,39 @@ function parseStep(raw: unknown, ctx: string): Step {
         parsed.durationMs = durationMs
       }
       return parsed
+    }
+    case 'pressButton': {
+      // Any name: whether the device has the button is the device's question, answered before the run starts
+      // (`unavailableButton`), not one this file can settle.
+      if (typeof value !== 'string' || value.length === 0) throw new ValidationError(`${ctx}: "pressButton" must be a button name like home, back, lock, volume_up`)
+      return { type: 'pressButton', name: value }
+    }
+    case 'longPressOn': {
+      // A duration rides beside the selector under "on", never inside it: `{ label, durationMs }` would change how
+      // a bare string matches (label only, never the identifier) to change how long it is held.
+      if (isRecord(value) && Object.hasOwn(value, 'on')) {
+        const { on, durationMs, ...rest } = value
+        const unknownKeys = Object.keys(rest)
+        if (unknownKeys.length > 0) throw new ValidationError(`${ctx}: unknown longPressOn keys: ${unknownKeys.join(', ')} (expected on, durationMs)`)
+        return { type: 'longPressOn', selector: parseSelector(on, ctx), durationMs: parseGestureMs(durationMs, ctx, DEFAULT_LONG_PRESS_MS) }
+      }
+      if (isRecord(value) && Object.hasOwn(value, 'durationMs')) {
+        throw new ValidationError(`${ctx}: "longPressOn" takes a duration beside the selector — put the selector under "on": { on: <selector>, durationMs }`)
+      }
+      return { type: 'longPressOn', selector: parseSelector(value, ctx), durationMs: DEFAULT_LONG_PRESS_MS }
+    }
+    case 'pinch': {
+      if (!isRecord(value)) throw new ValidationError(`${ctx}: "pinch" must be { on, scale, durationMs? }`)
+      const { on, scale, durationMs, ...rest } = value
+      const unknownKeys = Object.keys(rest)
+      if (unknownKeys.length > 0) throw new ValidationError(`${ctx}: unknown pinch keys: ${unknownKeys.join(', ')} (expected on, scale, durationMs)`)
+      if (on === undefined || on === null) throw new ValidationError(`${ctx}: "on" must be a selector or [x, y]`)
+      // An array is a point and anything else a selector, so the two never compete for one value.
+      const target = Array.isArray(on) ? parsePoint(on, ctx, 'on') : parseSelector(on, ctx)
+      if (typeof scale !== 'number' || !Number.isFinite(scale) || scale < MIN_PINCH_SCALE || scale > MAX_PINCH_SCALE || scale === 1) {
+        throw new ValidationError(`${ctx}: "scale" must be a number from ${MIN_PINCH_SCALE} to ${MAX_PINCH_SCALE}, other than 1 (above 1 spreads the fingers, below 1 closes them)`)
+      }
+      return { type: 'pinch', on: target, scale, durationMs: parseGestureMs(durationMs, ctx, DEFAULT_PINCH_MS) }
     }
     default:
       throw new ValidationError(`${ctx}: unknown step "${key}"`)

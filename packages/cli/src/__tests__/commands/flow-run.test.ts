@@ -25,8 +25,8 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock('@tapflowio/flow-runner', async (importOriginal) => ({
   // The real tap and token resolution: these tests feed it frames and tokens and check what reaches the relay.
-  ...(({ VideoTap, resolveToken, tokenRefusal, fetchWithToken, fixedToken, isEligible, lookupBuild, parseTagList, retryAdmission, admissionRefusalOf, AdmissionRefusedError, parseServiceTier }) => ({
-    VideoTap, resolveToken, tokenRefusal, fetchWithToken, fixedToken, isEligible, lookupBuild, parseTagList, retryAdmission, admissionRefusalOf, AdmissionRefusedError, parseServiceTier,
+  ...(({ VideoTap, resolveToken, tokenRefusal, fetchWithToken, fixedToken, isEligible, lookupBuild, parseTagList, retryAdmission, admissionRefusalOf, AdmissionRefusedError, parseServiceTier, refusedFlow, unavailableButton, unavailableButtonMessage }) => ({
+    VideoTap, resolveToken, tokenRefusal, fetchWithToken, fixedToken, isEligible, lookupBuild, parseTagList, retryAdmission, admissionRefusalOf, AdmissionRefusedError, parseServiceTier, refusedFlow, unavailableButton, unavailableButtonMessage,
   }))(
     await importOriginal<typeof import('@tapflowio/flow-runner')>(),
   ),
@@ -629,6 +629,36 @@ describe('cmdFlowRun runs only the flows that apply to this build and these tags
     expect(relay.calls.find((c) => c.url.endsWith('/finish'))!.body).toEqual({
       status: 'failed', exitCode: 2, failureKind: 'environment', errorMessage: 'no flow ran: 1 skipped (app-mismatch 1)',
     })
+    expect(process.exitCode).toBe(2)
+  })
+
+  // D1: the build says the platform before a device is chosen, so a flow pressing a button that platform has none of
+  // fails there, like a compile error, and the rest run.
+  it('fails a flow pressing a button the build\'s platform lacks before choosing a device, records it, and runs the rest', async () => {
+    const relay = relayWith(() => Response.json({ id: 7, bundle_id: 'com.b', platform: 'ios' }))
+    const back = flowFile('back.yaml')
+    flowsByFile.set(back, { steps: [{ type: 'pressButton', name: 'back' }] } as never)
+    const fine = flowFile('fine.yaml')
+    await cmdFlowRun([back, fine], { token: 'tflw_pat_x', build: 7 })
+
+    expect(mocks.runFlow).toHaveBeenCalledTimes(1)
+    expect(mocks.runFlow.mock.calls[0]![0]).toMatchObject({ name: 'fine.yaml' })
+    // The engine is told the device's platform, for what only the device can answer.
+    expect(mocks.runFlow.mock.calls[0]![2]).toMatchObject({ platform: 'ios' })
+    expect(errLines().some((l) => l.includes('iOS has no "back" button'))).toBe(true)
+    expect(relay.calls.find((c) => c.url.endsWith('/flows/0'))!.body).toMatchObject({ status: 'failed', failureKind: 'environment' })
+    expect(relay.calls.find((c) => c.url.endsWith('/flows/0'))!.body).not.toHaveProperty('deviceId')
+    expect(logLines()).toContain('\n1/2 flows passed')
+    expect(process.exitCode).toBe(2)
+  })
+
+  it('exits 2 without touching a device when every flow presses a button the platform lacks', async () => {
+    relayWith(() => Response.json({ id: 7, bundle_id: 'com.b', platform: 'ios' }))
+    const back = flowFile('back.yaml')
+    flowsByFile.set(back, { steps: [{ type: 'pressButton', name: 'recent_apps' }] } as never)
+    await cmdFlowRun([back], { token: 'tflw_pat_x', build: 7 })
+    expect(mocks.listDevices).not.toHaveBeenCalled()
+    expect(errLines()).toContain('✗ no flow ran: 1 cannot run on ios')
     expect(process.exitCode).toBe(2)
   })
 

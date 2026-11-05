@@ -150,3 +150,28 @@ describe('RelayDriver failure-kind mapping (#543)', () => {
     expect(isEnvironmentStepFailure(err)).toBe(false)
   })
 })
+
+describe('RelayDriver — pinch refused as unsupported', () => {
+  // Android's adb fallback has no pinch: the device's backend, not the app, so it must not read as a regression.
+  it('is the environment\'s for a pinch, and stays the product\'s for anything else', async () => {
+    const pinchRefused = new InputRefusedError('unsupported', new PlatformError('pinch was refused by the device (unsupported): no pinch on this path'))
+    const driver = driverWith({ pinch: vi.fn(async () => { throw pinchRefused }) })
+    const err = await driver.pinch([[0.4, 0.5], [0.6, 0.5]], [[0.2, 0.5], [0.8, 0.5]], 100).catch((e: unknown) => e)
+    expect(err).toBe(pinchRefused)
+    expect(isEnvironmentStepFailure(err)).toBe(true)
+
+    const keyRefused = new InputRefusedError('unsupported', new PlatformError('pressButton x was refused by the device (unsupported): Unknown button'))
+    const buttons = driverWith({ pressButton: vi.fn(async () => { throw keyRefused }) })
+    expect(isEnvironmentStepFailure(await buttons.pressButton('x').catch((e: unknown) => e))).toBe(false)
+  })
+
+  it('reports a pinch the adb path refused as an environment failure of the flow', async () => {
+    const driver = driverWith({
+      queryUITree: vi.fn(async () => []),
+      pinch: vi.fn(async () => { throw new InputRefusedError('unsupported', new PlatformError('pinch was refused by the device (unsupported): x')) }),
+      screenshot: vi.fn(async () => Buffer.from('')),
+    })
+    const result = await runFlow(parseFlow('steps:\n  - pinch: { on: [0.5, 0.5], scale: 2 }\n', 'x.yaml'), driver, { pollIntervalMs: 1, defaultTimeoutMs: 20 })
+    expect(result.failureKind).toBe('environment')
+  })
+})

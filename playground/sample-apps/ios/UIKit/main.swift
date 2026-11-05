@@ -175,6 +175,61 @@ final class HardViewController: UIViewController {
     @objc private func textTapped() { Status.shared.tapped("hard.text") }
 }
 
+// MARK: - Gestures
+
+/// What a flow's `longPressOn` and `pinch` steps act on. Plain views with identifiers, like `CustomControl`. A quick
+/// tap and a long press on the hold area say different things, so a long press that arrived as a tap shows as one.
+final class GesturesViewController: UIViewController {
+    override func viewDidLoad() {
+        super.viewDidLoad()
+        view.backgroundColor = .systemBackground
+
+        let hold = UILabel()
+        hold.text = "Hold me"
+        hold.textAlignment = .center
+        hold.backgroundColor = UIColor.systemBlue.withAlphaComponent(0.2)
+        hold.isUserInteractionEnabled = true
+        hold.accessibilityIdentifier = "gesture.hold"
+        hold.heightAnchor.constraint(equalToConstant: 64).isActive = true
+        let press = UILongPressGestureRecognizer(target: self, action: #selector(held(_:)))
+        press.minimumPressDuration = 0.5
+        hold.addGestureRecognizer(press)
+        let tap = UITapGestureRecognizer(target: self, action: #selector(holdTapped))
+        tap.require(toFail: press)
+        hold.addGestureRecognizer(tap)
+
+        // Judged once the fingers lift, by which way the scale went, so how far a pinch spread does not matter.
+        let zoom = UIView()
+        zoom.backgroundColor = UIColor.systemGreen.withAlphaComponent(0.2)
+        zoom.accessibilityIdentifier = "gesture.zoom"
+        zoom.addGestureRecognizer(UIPinchGestureRecognizer(target: self, action: #selector(pinched(_:))))
+
+        let stack = UIStackView(arrangedSubviews: [hold, zoom])
+        stack.axis = .vertical
+        stack.spacing = 20
+        stack.translatesAutoresizingMaskIntoConstraints = false
+        view.addSubview(stack)
+        NSLayoutConstraint.activate([
+            stack.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor, constant: 16),
+            stack.bottomAnchor.constraint(equalTo: view.safeAreaLayoutGuide.bottomAnchor, constant: -16),
+            stack.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 20),
+            stack.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -20),
+        ])
+    }
+
+    @objc private func held(_ recognizer: UILongPressGestureRecognizer) {
+        if recognizer.state == .began { Status.shared.tapped("gesture.hold.long") }
+    }
+
+    @objc private func holdTapped() { Status.shared.tapped("gesture.hold.short") }
+
+    @objc private func pinched(_ recognizer: UIPinchGestureRecognizer) {
+        guard recognizer.state == .ended else { return }
+        if recognizer.scale > 1.2 { Status.shared.tapped("gesture.zoom.in") }
+        else if recognizer.scale < 0.8 { Status.shared.tapped("gesture.zoom.out") }
+    }
+}
+
 // MARK: - Web
 
 final class WebViewController: UIViewController, WKScriptMessageHandler {
@@ -208,7 +263,7 @@ final class WebViewController: UIViewController, WKScriptMessageHandler {
 /// The status label sits above the tab bar controller, so it is on screen whichever tab is selected.
 final class RootViewController: UIViewController, UITabBarControllerDelegate {
     private let tabs = UITabBarController()
-    private let tabIds = ["tab.form", "tab.list", "tab.hard", "tab.web"]
+    private let tabIds = ["tab.form", "tab.list", "tab.hard", "tab.web", "tab.gestures"]
 
     override func viewDidLoad() {
         super.viewDidLoad()
@@ -219,6 +274,7 @@ final class RootViewController: UIViewController, UITabBarControllerDelegate {
             (ListViewController(style: .plain), "List", "list.bullet"),
             (HardViewController(), "Hard", "exclamationmark.triangle"),
             (WebViewController(), "Web", "globe"),
+            (GesturesViewController(), "Gestures", "hand.tap"),
         ]
         tabs.viewControllers = screens.enumerated().map { index, screen in
             let (vc, title, symbol) = screen
@@ -227,6 +283,10 @@ final class RootViewController: UIViewController, UITabBarControllerDelegate {
             return vc
         }
         tabs.delegate = self
+        // What a flow's `pressButton: home` leaves behind, read once the app is brought back.
+        NotificationCenter.default.addObserver(forName: UIApplication.didEnterBackgroundNotification, object: nil, queue: .main) { _ in
+            Status.shared.tapped("app.background")
+        }
 
         let status = Status.shared.label
         status.translatesAutoresizingMaskIntoConstraints = false

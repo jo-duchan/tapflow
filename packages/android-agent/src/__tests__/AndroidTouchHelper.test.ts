@@ -37,6 +37,36 @@ describe('AndroidTouchHelper', () => {
       expect(action).toBe('tap')
     })
 
+    // `adb input tap` has no duration, so a held touch dispatched as one became a tap answered `delivered` — a
+    // flow's long press landing as a tap with nothing reporting it. A swipe that stays put is adb's long press.
+    it('replays a held touch that did not move as a same-point swipe lasting as long as it was held', async () => {
+      vi.useFakeTimers()
+      try {
+        helper.touchStart(0.5, 0.5)
+        vi.advanceTimersByTime(1000)
+        const outcome = helper.touchEnd()
+        await vi.runAllTimersAsync()
+        expect(await outcome).toBe('delivered')
+        expect(adb.sendInput).toHaveBeenCalledWith('emulator-5554', 'swipe', '540', '960', '540', '960', '1000')
+      } finally {
+        vi.useRealTimers()
+      }
+    })
+
+    it('keeps a quick touch a tap', async () => {
+      vi.useFakeTimers()
+      try {
+        helper.touchStart(0.5, 0.5)
+        vi.advanceTimersByTime(120)
+        const outcome = helper.touchEnd()
+        await vi.runAllTimersAsync()
+        expect(await outcome).toBe('delivered')
+        expect(adb.sendInput).toHaveBeenCalledWith('emulator-5554', 'tap', '540', '960')
+      } finally {
+        vi.useRealTimers()
+      }
+    })
+
     it('충분히 이동하면 swipe 호출', async () => {
       helper.touchStart(0.1, 0.5)
       helper.touchMove(0.9, 0.5)

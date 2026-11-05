@@ -9,11 +9,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Flows can press hardware buttons, hold an element and pinch.** Three steps join the flow vocabulary: `pressButton: home` (also `lock`, `power`, `volume_up`, `volume_down` where the device has them, and on Android `back` and `recent_apps`), `longPressOn: <selector>` (held 1000 ms, or `{ on, durationMs }`), and `pinch: { on, scale }` about an element or a point. A flow that presses a button the device lacks now fails before its first step, as an environment failure, instead of passing the press and failing later at an assertion. A button the platform never has, such as `back` on iOS, fails without a device being booted for it when `--build` or `--parallel --platform` names the platform, and the rest still run. One that depends on the device, such as `lock` on iOS, is checked against the device before the first step. In MCP, `tap` takes `holdMs` for a long press, and `run_flow` accepts the new steps.
 - **Docker relay URLs:** `/api/v1/relay/host` distinguishes a missing teammate-reachable URL from a missing agent `relay.url`. The invite and agent-token dialogs show guidance for the address each link uses; a working tunnel clears only the teammate warning.
 
 ### Changed
 
 - **The warning for a token with no expiry is a notice box.** Choosing **No expiration** under Settings → Tokens used to add one line of amber text; it now shows a boxed notice with a title, in a warning colour that follows light and dark mode.
+
+### Fixed
+
+- **A long press on an Android device streaming over adb arrived as a tap.** The adb fallback, used when a device has no gRPC or scrcpy pointer channel, sent every touch that did not move as `input tap` and answered success. A touch held past a quarter of a second is now replayed as a long press of the same length. The fix is in android-agent, so an older agent still delivers a hold as a tap.
+- **Cancelling `flow run` during a swipe left the touch pressed on the device.** A run that is stopped mid-gesture now ends the gesture before it leaves the session.
 
 ### Security
 

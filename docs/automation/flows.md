@@ -46,7 +46,7 @@ Coordinates are normalized 0–1 everywhere. Selectors point at screen elements 
 
 ## Steps
 
-The vocabulary is deliberately small. These ten cover most scenarios.
+The vocabulary is deliberately small. These thirteen cover most scenarios.
 
 | Step | Form | Behavior |
 |------|------|----------|
@@ -60,12 +60,15 @@ The vocabulary is deliberately small. These ten cover most scenarios.
 | `openUrl` | URL string | Opens a deep link or URL. |
 | `assertVisible` | selector | Waits until the element appears; fails if it does not. |
 | `assertNotVisible` | selector | Waits until the element disappears; fails if it does not. |
+| `pressButton` | button name | Presses a hardware button. See [Hardware buttons](#hardware-buttons). |
+| `longPressOn` | selector or `{ on, durationMs? }` | Presses the center of the matched element and holds it, 1000 ms by default, at most 60000. To change the time, put the selector under `on`. |
+| `pinch` | `{ on, scale, durationMs? }` | Two fingers about the center of an element or a point. See [Pinch](#pinch). |
 
 There is no fixed `sleep` step. Waiting is always condition-based. To wait for a transition, give `assertVisible` a `timeout`.
 
 ### Selectors
 
-`tapOn`, `assertVisible`, and `assertNotVisible` target an element with a selector, which takes three forms.
+`tapOn`, `assertVisible`, `assertNotVisible`, `longPressOn` and the `on` of `pinch` target an element with a selector, which takes three forms.
 
 ```yaml
 # a single string — resolved in the order below
@@ -100,6 +103,51 @@ To resolve an ambiguous match, add a disambiguator to the object form:
 The object form needs at least one of `id`, `label`, or `role`; `role`/`index` refine that set.
 
 `timeout` is in seconds and defaults to 10 (max 2147483.647, about 24.8 days). You can set it per selector. Values that round to 0ms (e.g. 0.0004s) are rejected.
+
+### Holding an element {#holding-an-element}
+
+A bare `longPressOn` holds for 1000 ms, which is past the point where both platforms read a press as a long press. To hold for a different time, put the selector under `on`:
+
+```yaml
+- longPressOn: "Message"
+- longPressOn: { on: "Message", durationMs: 2500 }
+- longPressOn: { on: { id: "row-3" }, durationMs: 2500 }
+```
+
+On an Android device streaming over the adb fallback, a hold needs android-agent from the same release. An older agent delivers it as a tap and still reports success, so follow `longPressOn` with an assertion on what the hold opens.
+
+`durationMs` goes beside the selector, never inside it. `{ label: "Message", durationMs: 2500 }` is refused, because turning a bare string into `label:` would also change how it matches: `label:` does not look at identifiers.
+
+### Pinch {#pinch}
+
+`pinch` puts two fingers on either side of a center and changes the space between them by `scale`. A `scale` above 1 spreads them apart, which zooms in. Below 1 brings them together, which zooms out. It takes any value from 0.1 to 10 except 1.
+
+```yaml
+- pinch: { on: "Map", scale: 2 }               # zoom in on the element's center
+- pinch: { on: [0.5, 0.4], scale: 0.5 }        # zoom out about a point (0–1)
+- pinch: { on: "Photo", scale: 3, durationMs: 800 }
+```
+
+`on` is a selector or a point. A point is for a screen with nothing in the UI tree to name, such as a map or a canvas. The gesture takes 500 ms by default, at most 60000.
+
+The `scale` is kept exactly and the space between the fingers is what adapts. The fingers spread along whichever axis has more room, and they stay inside the screen. When the center is so close to a corner that even the narrowest spacing does not fit, the step fails and says so.
+
+An Android device streaming over the adb fallback, without a gRPC or scrcpy pointer channel, cannot pinch. The step then fails as an environment failure, not as a failure of the app: the run exits with code 2 unless another flow failed in the app, which makes it 1.
+
+### Hardware buttons {#hardware-buttons}
+
+`pressButton` takes a button name.
+
+| Name | iOS | Android |
+|------|-----|---------|
+| `home` | Yes | Yes |
+| `lock`, `power` | When the device has a power button | Yes (the power key) |
+| `volume_up`, `volume_down` | When the device has volume buttons | Yes |
+| `back`, `recent_apps` | No | Yes |
+
+On iOS, any other button the device's frame declares can be pressed by its name as well, such as `action`.
+
+A flow that presses a button the device lacks fails before its first step, instead of running on to fail one step later at an assertion that would not explain why. When `flow run` knows the platform before it picks a device, from the build in `--build` or from `--platform` with `--parallel`, the flow fails without a device being booted for it, and the other flows still run. A button that depends on the device, such as `lock` on iOS, is checked against the device before the first step. Either way the failure is an environment failure, since the app was never tested: the run exits with code 2 unless another flow failed in the app, which makes it 1. On iOS, use the app's own back control with `tapOn` instead of `back`, or tag the flow and run it only where the button exists.
 
 ### Resetting state
 

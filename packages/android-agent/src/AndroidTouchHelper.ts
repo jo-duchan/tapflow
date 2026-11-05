@@ -1,10 +1,17 @@
 import type { AdbWrapper } from './AdbWrapper.js'
 import { createLogger } from '@tapflowio/agent-core'
 import type { InputOutcome } from './inputOutcome.js'
+import type { AndroidButtonName } from '@tapflowio/protocol/buttons'
 
 const logger = createLogger('android-agent:touch')
 
-const BUTTON_KEY_MAP: Record<string, string> = {
+// Below every platform long-press threshold (Android's is 400–500 ms), so a quick tap stays `input tap`, which has
+// no duration, and anything held longer keeps the time it was held.
+const HELD_TOUCH_MS = 250
+
+// Keyed by protocol's `ANDROID_BUTTONS`, which flow-runner reads to refuse a flow before it runs: a name added here
+// and not there would be refused by a flow it works for, and the type makes the two lists one.
+const BUTTON_KEY_MAP: Record<AndroidButtonName, string> = {
   home: 'KEYCODE_HOME',
   back: 'KEYCODE_BACK',
   recent_apps: 'KEYCODE_APP_SWITCH',
@@ -36,6 +43,7 @@ export class AndroidTouchHelper {
   private lastX = 0
   private lastY = 0
   private touching = false
+  private startedAt = 0
 
   constructor(
     private readonly adb: AdbWrapper,
@@ -62,6 +70,7 @@ export class AndroidTouchHelper {
 
   touchStart(x: number, y: number): void {
     this.touching = true
+    this.startedAt = Date.now()
     this.startX = x; this.startY = y
     this.lastX = x;  this.lastY = y
   }
@@ -83,9 +92,16 @@ export class AndroidTouchHelper {
     // gesture's position while answering for the old one.
     const [sx, sy, ex, ey] = [this.startX, this.startY, this.lastX, this.lastY]
     const isTap = Math.abs(ex - sx) < 0.01 && Math.abs(ey - sy) < 0.01
+    const heldMs = Date.now() - this.startedAt
     try {
       const { width, height } = await this.getScreenSize()
-      if (isTap) {
+      if (isTap && heldMs >= HELD_TOUCH_MS) {
+        // `input tap` has no duration, so a held touch sent as one is a tap — a long press answered `delivered`
+        // while the app saw a tap. A swipe that does not move is adb's long press, and it lasts as long as the
+        // touch was held. The hold is replayed after the end arrived, so the ack comes that much later.
+        const x = String(Math.round(sx * width)), y = String(Math.round(sy * height))
+        await this.adb.sendInput(this.serial, 'swipe', x, y, x, y, String(heldMs))
+      } else if (isTap) {
         await this.adb.sendInput(this.serial, 'tap', String(Math.round(sx * width)), String(Math.round(sy * height)))
       } else {
         const x0 = Math.round(sx * width), y0 = Math.round(sy * height)
@@ -107,13 +123,13 @@ export class AndroidTouchHelper {
   pinchEnd(): InputOutcome { return 'unsupported' }
 
   async pressButton(name: string): Promise<InputOutcome> {
-    const keyCode = BUTTON_KEY_MAP[name]
     // Not "the device has no such button" — this map is ours, so an unmapped name means we do not
     // support it. iOS answers success for its own unmapped case because there the button genuinely
     // does not exist on the device; see inputOutcome.ts.
     // `Object.hasOwn`: `name` comes off the wire, so a prototype member would otherwise resolve to
     // a function and be dispatched as a keycode — answering `failed` where `unsupported` is true.
     if (!Object.hasOwn(BUTTON_KEY_MAP, name)) { logger.error(`Unknown button: ${name}`); return 'unsupported' }
+    const keyCode = BUTTON_KEY_MAP[name as AndroidButtonName]
     try {
       await this.adb.sendKeyEvent(this.serial, keyCode)
       return 'delivered'

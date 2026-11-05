@@ -12,6 +12,7 @@ proven without looking at the screen.
 | `expected/` | What each app's screens should expose, per screen and group |
 | `build.sh` | Builds the iOS targets and the Android app into `playground/test-builds/` (gitignored); `ios` or `android` builds one |
 | `measure.ts` | Uploads a build, drives it through the relay, prints recall and round trip per group |
+| `flows/` | Flows that drive the Gestures tab: `gestures.yaml` (long press, pinch, the home button) on every app, `android-back.yaml` on Android |
 
 Only source is committed. Nothing built here is, for the same reasons as `packages/ios-agent/netprobe`. The one
 binary is `android/gradle/wrapper/gradle-wrapper.jar`, which every Gradle project commits so it builds without a
@@ -35,6 +36,19 @@ pnpm --filter @tapflowio/playground measure-tree \
 `--device` takes a name or the device id. A name repeats once per installed runtime, so the id is the safe
 choice. `--dump` prints each screen's tree, which is how a miss in the tree is told apart from a miss in the
 matching.
+
+## The Gestures tab
+
+The tab the flow input steps are checked on, outside the tree measurement (`expected/` does not list it). A short
+tap and a long press on **Hold me** set different statuses (`gesture.hold.short`, `gesture.hold.long`), so a long
+press that arrived as a tap fails the flow rather than passing it. A pinch on the green area sets
+`gesture.zoom.in` or `gesture.zoom.out` by which way the scale went. Going to the background sets
+`app.background`, which is what `pressButton: home` leaves for the next `launchApp` to show, and Android's back
+button on this tab sets `app.back` instead of closing the app.
+
+```sh
+tapflow flow run playground/sample-apps/flows/gestures.yaml --build <id>
+```
 
 ## Reading a result
 

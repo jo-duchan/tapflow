@@ -3,6 +3,8 @@ import type { UIElement } from '@tapflowio/agent-core'
 import { runFlow, type FlowDriver } from '../engine.js'
 import { parseFlow } from '../schema.js'
 import { EnvironmentStepError, TransientQueryError } from '../errors.js'
+import type { PinchFingers } from '../engine.js'
+import type { ChromeButton, ChromeData } from '@tapflowio/protocol'
 
 const el = (over: Partial<UIElement>): UIElement => ({
   role: 'button',
@@ -29,8 +31,22 @@ function fakeDriver(trees: UIElement[][]): FlowDriver & { calls: Array<[string, 
     launchApp: vi.fn(async (options?: unknown) => { calls.push(options === undefined ? ['launchApp'] : ['launchApp', options]) }),
     clearState: vi.fn(async (appId: string) => { calls.push(['clearState', appId]) }),
     screenshot: vi.fn(async () => Buffer.from('PNG')),
+    pressButton: vi.fn(async (name: string) => { calls.push(['pressButton', name]) }),
+    longPress: vi.fn(async (x: number, y: number, durationMs: number) => { calls.push(['longPress', x, y, durationMs]) }),
+    pinch: vi.fn(async (start: PinchFingers, end: PinchFingers, durationMs: number) => { calls.push(['pinch', start, end, durationMs]) }),
   }
 }
+
+const chromeButton = (name: string, usage: number): ChromeButton => ({
+  name, accessibilityTitle: name, anchor: 'left', onTop: false,
+  normalOffset: { x: 0, y: 0 }, rolloverOffset: { x: 0, y: 0 }, buttonW: 1, buttonH: 1, usagePage: 12, usage,
+})
+
+const iosChrome = (...buttons: ChromeButton[]): ChromeData => ({
+  framePng: '', bezelWidth: 1, bezelHeight: 1, compositeWidth: 1, compositeHeight: 1,
+  padding: { left: 0, right: 0, top: 0, bottom: 0 }, screenRect: { x: 0, y: 0, width: 1, height: 1 },
+  screenCornerRadius: 0, logicalWidth: 1, logicalHeight: 1, buttons,
+})
 
 const OPTS = { pollIntervalMs: 1, defaultTimeoutMs: 20 }
 
@@ -800,5 +816,143 @@ describe('runFlow onStep (the run video\'s timeline)', () => {
       { index: 1, name: expect.any(String), phase: 'start', label: 'openUrl' },
       { index: 1, name: expect.any(String), phase: 'end', status: 'failed' },
     ])
+  })
+})
+
+describe('runFlow — hardware buttons, long press and pinch', () => {
+  it('presses a button by name', async () => {
+    const driver = fakeDriver([[]])
+    const result = await runFlow(flowOf('steps:\n  - pressButton: home\n'), driver, OPTS)
+    expect(result.status).toBe('passed')
+    expect(driver.calls).toEqual([['pressButton', 'home']])
+  })
+
+  it('waits for the element, then holds its center for the step\'s time', async () => {
+    const driver = fakeDriver([[], [el({ label: 'Save' })]])
+    const result = await runFlow(flowOf('steps:\n  - longPressOn: { on: "Save", durationMs: 1500 }\n'), driver, { ...OPTS, defaultTimeoutMs: 1000 })
+    expect(result.status).toBe('passed')
+    expect(driver.calls).toEqual([['longPress', 0.5, 0.55, 1500]])
+    expect(result.steps[0]!.name).toBe('longPressOn("Save", 1500ms)')
+  })
+
+  // The scale is what the person meant, so it is kept exactly; the spacing is what adapts to the screen.
+  it('pinches about the element\'s center by exactly the scale, fingers mirrored and on the screen', async () => {
+    for (const [yaml, scale] of [['scale: 2', 2], ['scale: 0.5', 0.5], ['scale: 10', 10]] as const) {
+      const driver = fakeDriver([[el({ label: 'Map', frame: { x: 0.2, y: 0.3, width: 0.6, height: 0.4 } })]])
+      const result = await runFlow(flowOf(`steps:\n  - pinch: { on: Map, ${yaml} }\n`), driver, OPTS)
+      expect(result.status).toBe('passed')
+      const [, start, end, ms] = driver.calls[0] as [string, PinchFingers, PinchFingers, number]
+      expect(ms).toBe(500)
+      const gap = (f: PinchFingers) => Math.hypot(f[1][0] - f[0][0], f[1][1] - f[0][1])
+      expect(gap(end) / gap(start)).toBeCloseTo(scale, 6)
+      for (const f of [start, end]) {
+        expect((f[0][0] + f[1][0]) / 2).toBeCloseTo(0.5, 6)
+        expect((f[0][1] + f[1][1]) / 2).toBeCloseTo(0.5, 6)
+        for (const [x, y] of f) for (const v of [x, y]) expect(v >= 0 && v <= 1).toBe(true)
+      }
+    }
+  })
+
+  it('fits the fingers to a point near an edge by spreading them along the other axis', async () => {
+    const driver = fakeDriver([[]])
+    const result = await runFlow(flowOf('steps:\n  - pinch: { on: [0.95, 0.5], scale: 3 }\n'), driver, OPTS)
+    expect(result.status).toBe('passed')
+    const [, start, end] = driver.calls[0] as [string, PinchFingers, PinchFingers]
+    for (const f of [start, end]) for (const [x, y] of f) {
+      expect(x).toBeCloseTo(0.95, 6)
+      expect(y >= 0 && y <= 1).toBe(true)
+    }
+  })
+
+  it('fails a pinch it cannot fit on the screen, and says why, without touching the device', async () => {
+    const driver = fakeDriver([[]])
+    const result = await runFlow(flowOf('steps:\n  - pinch: { on: [0.99, 0.01], scale: 2 }\n'), driver, OPTS)
+    expect(result.status).toBe('failed')
+    expect(result.failureMessage).toMatch(/too close to the edge of the screen/)
+    expect(driver.calls).toEqual([])
+  })
+
+  it('names the steps for watchers', async () => {
+    const marks: Record<string, unknown>[] = []
+    const driver = fakeDriver([[el({ label: 'Map' })]])
+    await runFlow(flowOf('steps:\n  - pressButton: volume_up\n  - longPressOn: Map\n  - pinch: { on: Map, scale: 2 }\n  - pinch: { on: [0.5, 0.5], scale: 0.5 }\n'), driver, { ...OPTS, onStep: (m) => marks.push(m) })
+    expect(marks.filter((m) => m['phase'] === 'start').map((m) => m['label'])).toEqual([
+      'pressButton(volume_up)', 'longPressOn("Map", 1000ms)', 'pinch("Map", ×2)', 'pinch([0.5,0.5], ×0.5)',
+    ])
+  })
+})
+
+// D1: a flow pressing a button the device lacks is refused before its first step, rather than answered with a press
+// that did nothing and failed one step later under the wrong name.
+describe('runFlow — a button the device lacks', () => {
+  const backFlow = 'steps:\n  - tapOn: ok\n  - pressButton: back\n  - assertVisible: Home\n'
+
+  it('refuses a platform\'s missing button before anything reaches the device', async () => {
+    const driver = fakeDriver([[el({ label: 'ok' })]])
+    const result = await runFlow(flowOf(backFlow), driver, { ...OPTS, platform: 'ios' })
+    expect(result.status).toBe('failed')
+    expect(result.failureKind).toBe('environment')
+    expect(result.failedBeforeRun).toBe(true)
+    expect(result.failureMessage).toMatch(/^pressButton\(back\): iOS has no "back" button/)
+    expect(result.steps.map((s) => s.status)).toEqual(['skipped', 'failed', 'skipped'])
+    expect(driver.calls).toEqual([])
+    expect(driver.screenshot).not.toHaveBeenCalled()
+  })
+
+  it('runs the same flow where the button exists', async () => {
+    const driver = fakeDriver([[el({ label: 'ok' }), el({ label: 'Home' })]])
+    const result = await runFlow(flowOf(backFlow), driver, { ...OPTS, platform: 'android' })
+    expect(result.status).toBe('passed')
+    expect(result.failedBeforeRun).toBeUndefined()
+  })
+
+  it('asks an iOS device\'s chrome about a button that depends on it', async () => {
+    const has = fakeDriver([[]])
+    has.chrome = vi.fn(async () => iosChrome(chromeButton('power', 48)))
+    expect((await runFlow(flowOf('steps:\n  - pressButton: lock\n'), has, { ...OPTS, platform: 'ios' })).status).toBe('passed')
+
+    const lacks = fakeDriver([[]])
+    lacks.chrome = vi.fn(async () => iosChrome(chromeButton('power', 0)))
+    const refused = await runFlow(flowOf('steps:\n  - pressButton: lock\n'), lacks, { ...OPTS, platform: 'ios' })
+    expect(refused.failureMessage).toMatch(/this device has no "lock" button/)
+    expect(refused.failedBeforeRun).toBe(true)
+    expect(lacks.calls).toEqual([])
+  })
+
+  it('fails as the environment when the device never says which buttons it has', async () => {
+    const driver = fakeDriver([[]])
+    driver.chrome = vi.fn(async () => null)
+    const result = await runFlow(flowOf('steps:\n  - pressButton: volume_up\n'), driver, { ...OPTS, platform: 'ios' })
+    expect(result.failureKind).toBe('environment')
+    expect(result.failureMessage).toMatch(/did not report its buttons/)
+    // Not the flow's fault, so not marked as one: a device that will not describe itself may be a device to leave.
+    expect(result.failedBeforeRun).toBeUndefined()
+    expect(driver.calls).toEqual([])
+  })
+
+  it('marks the press it could not check, not an earlier one that needed no checking', async () => {
+    const driver = fakeDriver([[]])
+    driver.chrome = vi.fn(async () => null)
+    const result = await runFlow(flowOf('steps:\n  - pressButton: home\n  - pressButton: volume_up\n'), driver, { ...OPTS, platform: 'ios' })
+    expect(result.steps.map((s) => s.status)).toEqual(['skipped', 'failed'])
+  })
+
+  // A session that ends while its chrome is awaited is a result for this flow, so the run can record it and go on.
+  it('reports a session lost while asking for the chrome as the flow\'s environment failure, not a rejection', async () => {
+    const driver = fakeDriver([[]])
+    driver.chrome = vi.fn(async () => { throw new Error('device chrome failed: the relay ended this session') })
+    const result = await runFlow(flowOf('steps:\n  - pressButton: lock\n'), driver, { ...OPTS, platform: 'ios' })
+    expect(result).toMatchObject({ status: 'failed', failureKind: 'environment' })
+    expect(result.failureMessage).toMatch(/could not be checked: device chrome failed: the relay ended this session/)
+    expect(result.failedBeforeRun).toBeUndefined()
+  })
+
+  it('does not ask the chrome for a flow that presses nothing, nor check a platform it has no table for', async () => {
+    const driver = fakeDriver([[el({ label: 'ok' })]])
+    driver.chrome = vi.fn(async () => null)
+    expect((await runFlow(flowOf('steps:\n  - tapOn: ok\n'), driver, { ...OPTS, platform: 'ios' })).status).toBe('passed')
+    expect((await runFlow(flowOf('steps:\n  - pressButton: back\n'), driver, { ...OPTS, platform: 'tvos' })).status).toBe('passed')
+    expect((await runFlow(flowOf('steps:\n  - pressButton: back\n'), driver, OPTS)).status).toBe('passed')
+    expect(driver.chrome).not.toHaveBeenCalled()
   })
 })

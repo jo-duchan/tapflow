@@ -42,6 +42,13 @@
       "tsx": "./src/launch/index.ts",
       "import": "./dist/launch/index.js",
       "default": "./dist/launch/index.js"
+    },
+    "./buttons": {
+      "types": "./dist/buttons/index.d.ts",
+      "source": "./src/buttons/index.ts",
+      "tsx": "./src/buttons/index.ts",
+      "import": "./dist/buttons/index.js",
+      "default": "./dist/buttons/index.js"
     }
   },
   "files": [

@@ -1,0 +1,18 @@
+# The flow input steps on the Gestures tab, the same YAML on every sample app. Each step is followed by the status
+# it should leave, and the long and short holds are told apart, so a long press that arrived as a tap fails here.
+# Run with --build: the three apps have different bundle ids, so the flow names none.
+name: Gestures
+steps:
+  - launchApp
+  - tapOn: "Gestures"
+  - tapOn: { id: gesture.hold }
+  - assertVisible: "tapped:gesture.hold.short"
+  - longPressOn: { id: gesture.hold }
+  - assertVisible: "tapped:gesture.hold.long"
+  - pinch: { on: { id: gesture.zoom }, scale: 2 }
+  - assertVisible: "tapped:gesture.zoom.in"
+  - pinch: { on: { id: gesture.zoom }, scale: 0.5 }
+  - assertVisible: "tapped:gesture.zoom.out"
+  - pressButton: home
+  - launchApp
+  - assertVisible: "tapped:app.background"

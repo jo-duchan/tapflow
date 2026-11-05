@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto'
 import type {
-  BootRefusalReason, BrowserToRelay, DeviceSummary, InputErrorReason, LaunchApplied, LaunchOptions, SessionTerminatedReason, UIElement,
+  BootRefusalReason, BrowserToRelay, ChromePayload, DeviceSummary, InputErrorReason, LaunchApplied, LaunchOptions, SessionTerminatedReason, UIElement,
 } from '@tapflowio/protocol'
 import { AdmissionRefusedError, EnvironmentStepError, TransientQueryError, markEnvironmentFailure, authHeader, fetchWithToken, fixedToken, lookupBuild, tokenRefusal, type BuildLookup, type TokenSource } from '@tapflowio/flow-runner'
 
@@ -113,6 +113,9 @@ type RelayMsg = Record<string, unknown>
 const UI_ROLES = new Set(['button', 'text', 'input', 'image', 'checkbox', 'switch', 'slider', 'list', 'cell', 'tab', 'other'])
 const PERMANENT_QUERY_STATUSES = new Set([400, 401, 403, 404, 409])
 const MAX_TIMER_MS = 2_147_483_647
+// Same cap as a flow's `durationMs`: a hold or a pinch keeps a pointer down for its whole length, and nothing lifts one
+// a client left open.
+const MAX_GESTURE_MS = 60_000
 
 function isUIElement(value: unknown): value is UIElement {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) return false
@@ -574,6 +577,9 @@ export class TapflowClient {
    *  device per agent registration — slow enough that this does not become the never-shrinking set the ack
    *  ledger above rules out, because that one would have grown per *request*. */
   private readonly lifecycle = new Map<string, SessionLifecycle>()
+  /** The latest chrome the relay sent for each session — the device's buttons, which `run_flow` checks a
+   *  `pressButton` against before replaying. Same lifetime as `lifecycle`. */
+  private readonly chromes = new Map<string, ChromePayload>()
 
   private lifecycleOf(sessionId: string): SessionLifecycle {
     let s = this.lifecycle.get(sessionId)
@@ -657,6 +663,11 @@ export class TapflowClient {
   }
 
   private dispatch(msg: RelayMsg): void {
+    // Kept whether or not anything waits: the relay sends a session's chrome once, at join or boot, and `run_flow`
+    // asks afterwards.
+    if (msg['type'] === 'session:chrome' && typeof msg['sessionId'] === 'string' && typeof msg['payload'] === 'object' && msg['payload'] !== null) {
+      this.chromes.set(msg['sessionId'], msg['payload'] as ChromePayload)
+    }
     // Read before the waiter loop, and read whether or not anything is waiting — the same rule the ack
     // ledger below is written to, for the same reason. `terminated` settles every waiter for its session;
     // `rebound` settles nothing — the relay answers the stranded boots itself (#885) — and the copy that
@@ -1000,7 +1011,7 @@ export class TapflowClient {
    * its own input had timed out was consumed by the next input's waiter — which then reported the previous
    * input's outcome. The predicate below now requires the id, with no fallback for an absent one.
    */
-  private async awaitInputAck(sessionId: string, requestId: string): Promise<void> {
+  private async awaitInputAck(sessionId: string, requestId: string, extraMs = 0): Promise<void> {
     const strict = this.ackedSessions.has(sessionId)
     let msg: RelayMsg
     try {
@@ -1013,7 +1024,7 @@ export class TapflowClient {
         (m) =>
           (m['type'] === 'input:done' || m['type'] === 'input:error') &&
           m['sessionId'] === sessionId && m['requestId'] === requestId,
-        2_000,
+        2_000 + extraMs,
         sessionId,
       )
     } catch (e) {
@@ -1122,7 +1133,8 @@ export class TapflowClient {
     await delay(interval)
     const requestId = randomUUID()
     this.send({ type: 'input:touch:end', sessionId, requestId, payload: { x: endX, y: endY } })
-    await this.awaitInputAck(sessionId, requestId)
+    // A swipe that stays put is a hold to Android's adb path, which replays it after the end arrives — as a long press.
+    await this.awaitInputAck(sessionId, requestId, durationMs)
   }
 
   // Awaits the agent's ack so a following input (e.g. pressKey Enter) is sent
@@ -1166,6 +1178,69 @@ export class TapflowClient {
     const requestId = randomUUID()
     this.send({ type: 'input:button', sessionId, requestId, payload: { name: button } })
     await this.awaitInputAck(sessionId, requestId)
+  }
+
+  /**
+   * A touch held still for `durationMs` — no moves: the app's own timer is what sees a long press. The ack may come up
+   * to `durationMs` later than a tap's, because Android's adb path replays the hold after the end arrives.
+   *
+   * Unlike flow-runner's `RelayClient`, a leave does not close a gesture this method left open: a tool call is
+   * awaited before the next, so nothing here leaves a session mid-hold. A client that killed the process mid-hold
+   * would leave the pointer down until the next touch, as a killed swipe always has.
+   */
+  async longPress(sessionId: string, x: number, y: number, durationMs: number): Promise<void> {
+    if (!Number.isFinite(durationMs) || !(durationMs > 0) || durationMs > MAX_GESTURE_MS) {
+      throw this.failed(sessionId, `long press duration must be a positive finite number no greater than ${MAX_GESTURE_MS}ms`)
+    }
+    const payload = { x, y }
+    this.send({ type: 'input:touch:start', sessionId, payload })
+    await delay(durationMs)
+    const requestId = randomUUID()
+    this.send({ type: 'input:touch:end', sessionId, requestId, payload })
+    await this.awaitInputAck(sessionId, requestId, durationMs)
+  }
+
+  /**
+   * Two fingers from `start` to `end` over `durationMs`, each `[x, y]` normalized. Both agents inject a move the
+   * moment it arrives, so the pace is set here; the last move is the end position, since `input:pinch:end` carries
+   * none.
+   */
+  async pinch(
+    sessionId: string,
+    start: [[number, number], [number, number]],
+    end: [[number, number], [number, number]],
+    durationMs: number,
+  ): Promise<void> {
+    if (!Number.isFinite(durationMs) || !(durationMs > 0) || durationMs > MAX_GESTURE_MS) {
+      throw this.failed(sessionId, `pinch duration must be a positive finite number no greater than ${MAX_GESTURE_MS}ms`)
+    }
+    const STEPS = 8
+    const interval = durationMs / STEPS
+    const at = (t: number) => ({
+      f0: { x: start[0][0] + (end[0][0] - start[0][0]) * t, y: start[0][1] + (end[0][1] - start[0][1]) * t },
+      f1: { x: start[1][0] + (end[1][0] - start[1][0]) * t, y: start[1][1] + (end[1][1] - start[1][1]) * t },
+    })
+    this.send({ type: 'input:pinch:start', sessionId, payload: at(0) })
+    for (let i = 1; i <= STEPS; i++) {
+      await delay(interval)
+      this.send({ type: 'input:pinch:move', sessionId, payload: at(i / STEPS) })
+    }
+    const requestId = randomUUID()
+    this.send({ type: 'input:pinch:end', sessionId, requestId })
+    await this.awaitInputAck(sessionId, requestId)
+  }
+
+  /** The session's chrome, or the next to arrive within `timeoutMs`; `null` when none did. */
+  async chrome(sessionId: string, timeoutMs: number): Promise<ChromePayload | null> {
+    const known = this.chromes.get(sessionId)
+    if (known) return known
+    try {
+      const msg = await this.waitFor((m) => m['type'] === 'session:chrome' && m['sessionId'] === sessionId, timeoutMs, sessionId)
+      return msg['payload'] as ChromePayload
+    } catch (e) {
+      if (e instanceof RequestTimeoutError) return null
+      throw e
+    }
   }
 
   async openUrl(sessionId: string, url: string): Promise<void> {
