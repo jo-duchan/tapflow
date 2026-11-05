@@ -691,6 +691,7 @@ describe('IOSAgent', () => {
   // The touch helper is started by the boot and drops what it is sent until it says it is ready, so a client acting on
   // `device:ready` at once was refused its first input (#1114).
   describe('device:ready waits for the touch helper', () => {
+    beforeEach(() => { MockTouchHelper.mockClear() })
     afterEach(() => { touchGate.ready = () => Promise.resolve(true) })
 
     async function boot(options: { touchReadyWaitMs?: number } = {}) {
@@ -707,13 +708,14 @@ describe('IOSAgent', () => {
     }
 
     it('is not sent until the helper is ready', async () => {
-      let release: (ready: boolean) => void = () => {}
+      let release: ((ready: boolean) => void) | undefined
       touchGate.ready = () => new Promise((resolve) => { release = resolve })
       const { agent, browser, seen } = await boot()
-      await vi.waitFor(() => expect(MockTouchHelper.mock.results.length).toBeGreaterThan(0))
+      // This boot's wait has asked, not merely a helper having been built.
+      await vi.waitFor(() => expect(release).toBeDefined())
       await new Promise((r) => setTimeout(r, 200))
       expect(seen).not.toContain('device:ready')
-      release(true)
+      release!(true)
       await vi.waitFor(() => expect(seen).toContain('device:ready'), { timeout: 1000 })
       agent.disconnect()
       browser.close()
@@ -722,15 +724,16 @@ describe('IOSAgent', () => {
     // A shutdown during the wait stops the helper, which ends the wait with `false`; the boot must be abandoned there,
     // not carry on to announce a device that was just shut down. Holds the order of the wait and the seq check.
     it('is not sent for a boot a shutdown abandoned during the wait', async () => {
-      let release: (ready: boolean) => void = () => {}
+      let release: ((ready: boolean) => void) | undefined
       touchGate.ready = () => new Promise((resolve) => { release = resolve })
       const { agent, browser, seen } = await boot()
-      await vi.waitFor(() => expect(MockTouchHelper.mock.results.length).toBeGreaterThan(0))
+      // This boot's wait has asked, not merely a helper having been built.
+      await vi.waitFor(() => expect(release).toBeDefined())
       // Past the local stream connect, so the shutdown lands while the boot is waiting on the helper alone.
       await new Promise((r) => setTimeout(r, 300))
       browser.send(JSON.stringify({ type: 'device:shutdown', sessionId: agent.sessionId, payload: { deviceId: 'dev-1' } }))
       await vi.waitFor(() => expect(seen).toContain('device:shutdown-done'), { timeout: 2000 })
-      release(false)
+      release!(false)
       await new Promise((r) => setTimeout(r, 200))
       expect(seen).not.toContain('device:ready')
       agent.disconnect()
