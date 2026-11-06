@@ -454,62 +454,67 @@ const SCROLL_UNTIL_MS = 30_000
 // and one unchanged read after it would end the step at the top of a list that scrolls fine.
 const SCROLL_END_READS = 2
 
-/** On screen, not merely in the tree: a list can report rows past its edge, and a row there cannot be tapped. */
-function onScreen(el: UIElement): boolean {
-  const cx = el.frame.x + el.frame.width / 2
-  const cy = el.frame.y + el.frame.height / 2
-  return cx > 0 && cx < 1 && cy > 0 && cy < 1
+// Both agents clip a frame to the screen and drop what is wholly off it, so an element cut by the edge the list
+// scrolls in from reaches that edge exactly. Such a sliver is not arrived: under a translucent bar its center is the
+// bar's. Keyed by the scroll direction, which names where new content enters (scroll down → from the bottom).
+const CLEAR_OF_ENTERING_EDGE: Record<ScrollDirection, (f: UIElement['frame']) => boolean> = {
+  down: (f) => f.y + f.height < 1,
+  up: (f) => f.y > 0,
+  right: (f) => f.x + f.width < 1,
+  left: (f) => f.x > 0,
+}
+
+/** What the end-of-list check compares: the structure and where it is, since one long text scrolls by moving alone. */
+function scrolledShape(tree: UIElement[]): string {
+  return JSON.stringify(tree.map((e) => [e.role, e.label, e.identifier ?? '', Math.round(e.frame.x * 100), Math.round(e.frame.y * 100)]))
 }
 
 /**
  * Swipe the way `scroll` does until an element matching `sel` is on screen. How far one swipe goes differs from run to
  * run (a fling's length depends on its speed and the platform), so a flow that means "the row is now in view" says
- * that rather than a number of swipes. Reads before the first swipe, so an element already in view costs none. Fails
- * as the product's when the screen stops changing — the end of the list — or at the selector's timeout.
+ * that rather than a number of swipes. Reads before the first swipe, so an element already in view costs none. At the
+ * end of the list — the screen stops changing — any match on screen is taken, cut or not; none fails as the product's,
+ * as does the selector's timeout.
+ *
+ * No selector suggestions on failure, for `assertVisible`'s reason (see `suggest.ts`): a `tapOn` line offered in place
+ * of a check that something is there would turn a regression green.
  */
 async function scrollUntil(driver: FlowDriver, direction: ScrollDirection, sel: Selector, timeoutMs: number, pollIntervalMs: number): Promise<void> {
   const waitMs = normalizeTimeoutMs(sel.timeoutMs ?? Math.max(timeoutMs, SCROLL_UNTIL_MS), 'selector timeout')
   const deadline = Date.now() + waitMs
   const gesture = SCROLL_GESTURES[direction]
+  const clear = CLEAR_OF_ENTERING_EDGE[direction]
   let lastError: TransientQueryError | undefined
   let sawTree = false
-  let lastTree: UIElement[] | null = null
   let shape: string | undefined
   // A screen read without the element is followed by one swipe and a failed read by none, so between any two screens
   // read lies exactly one swipe: a screen equal to the last one is a swipe that moved nothing.
   let unchanged = 0
-  try {
-    for (;;) {
-      const q = await queryOrRetry(driver, deadline)
-      // Swipe only after a screen was read and the element was not on it: a failed read says nothing about where the
-      // list is, and a blind swipe could carry the element past.
-      let read = false
-      if ('tree' in q) {
-        sawTree = true
-        read = true
-        lastTree = q.tree
-        lastError = undefined
-        if (matchSelector(q.tree, sel).some(onScreen)) return
-        const next = screenShape(q.tree)
-        unchanged = next === shape ? unchanged + 1 : 0
-        shape = next
-        if (unchanged >= SCROLL_END_READS) {
-          throw new StepFailure(`scrolled ${direction} to the end without ${describeSelector(sel)} coming on screen`)
-        }
-      } else {
-        lastError = latestError(lastError, q.transient)
+  for (;;) {
+    const q = await queryOrRetry(driver, deadline)
+    // Swipe only after a screen was read and the element was not on it: a failed read says nothing about where the
+    // list is, and a blind swipe could carry the element past.
+    let read = false
+    if ('tree' in q) {
+      sawTree = true
+      read = true
+      lastError = undefined
+      const matches = matchSelector(q.tree, sel)
+      if (matches.some((m) => clear(m.frame))) return
+      const next = scrolledShape(q.tree)
+      unchanged = next === shape ? unchanged + 1 : 0
+      shape = next
+      if (unchanged >= SCROLL_END_READS) {
+        if (matches.length > 0) return
+        throw new StepFailure(`scrolled ${direction} to the end without ${describeSelector(sel)} coming on screen`)
       }
-      const base = `no element matched ${describeSelector(sel)} on screen after scrolling ${direction} for ${waitMs / 1000}s`
-      if (Date.now() >= deadline) throw deadlineError(base, lastError, sawTree)
-      if (read) await driver.swipe(gesture.from, gesture.to, 300)
-      await waitForNextPoll(deadline, pollIntervalMs, base, lastError, sawTree)
+    } else {
+      lastError = latestError(lastError, q.transient)
     }
-  } catch (e) {
-    if (e instanceof StepFailure && lastTree) {
-      const suggestions = suggestSelectors(lastTree, sel)
-      if (suggestions.length > 0) e.suggestions = suggestions
-    }
-    throw e
+    const base = `no element matched ${describeSelector(sel)} on screen after scrolling ${direction} for ${waitMs / 1000}s`
+    if (Date.now() >= deadline) throw deadlineError(base, lastError, sawTree)
+    if (read) await driver.swipe(gesture.from, gesture.to, 300)
+    await waitForNextPoll(deadline, pollIntervalMs, base, lastError, sawTree)
   }
 }
 

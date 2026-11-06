@@ -579,11 +579,49 @@ describe('runFlow', () => {
       expect(swipes(driver)).toEqual([['swipe', [0.5, 0.3], [0.5, 0.7], 300], ['swipe', [0.5, 0.3], [0.5, 0.7], 300]])
     })
 
-    it('does not count a match past the screen edge as on screen', async () => {
-      const driver = fakeDriver([[row('Row 1', 0.3), row('Row 16', 1.3)], [row('Row 16', 0.5)]])
+    // The agents clip frames to the screen, so a row cut by the edge content enters from ends exactly on it — and a
+    // tap on its center can land on a bar drawn over that edge.
+    it('keeps scrolling past a match cut by the edge the list scrolls in from', async () => {
+      const cut = el({ label: 'Row 16', role: 'cell', frame: { x: 0, y: 0.97, width: 1, height: 0.03 } })
+      const driver = fakeDriver([[row('Row 1', 0.3), cut], [row('Row 16', 0.5)]])
       const result = await runFlow(flowOf('steps:\n  - scroll: { until: "Row 16" }\n'), driver, OPTS)
       expect(result.status).toBe('passed')
       expect(swipes(driver)).toHaveLength(1)
+    })
+
+    it('judges the cut by the direction: scrolling up, the top edge', async () => {
+      const top = el({ label: 'Header', frame: { x: 0, y: 0, width: 1, height: 0.04 } })
+      const bottom = el({ label: 'Header', frame: { x: 0, y: 0.96, width: 1, height: 0.04 } })
+      const up = fakeDriver([[top], [row('Header', 0.3)]])
+      expect((await runFlow(flowOf('steps:\n  - scroll: { direction: up, until: "Header" }\n'), up, OPTS)).status).toBe('passed')
+      expect(swipes(up)).toHaveLength(1)
+      const down = fakeDriver([[bottom]])
+      expect((await runFlow(flowOf('steps:\n  - scroll: { direction: up, until: "Header" }\n'), down, OPTS)).status).toBe('passed')
+      expect(swipes(down)).toHaveLength(0)
+    })
+
+    it('takes a cut match at the end of the list, where scrolling cannot bring more of it', async () => {
+      const cut = el({ label: 'Footer', frame: { x: 0, y: 0.98, width: 1, height: 0.02 } })
+      const driver = fakeDriver([[row('Row 1', 0.3), cut]])
+      const result = await runFlow(flowOf('steps:\n  - scroll: { until: "Footer" }\n'), driver, OPTS)
+      expect(result.status).toBe('passed')
+      expect(swipes(driver)).toHaveLength(2)
+    })
+
+    // Rows that share a label scroll by moving, not by changing what the screen holds.
+    it('does not take a screen whose elements only moved for the end of the list', async () => {
+      const page = (shift: number) => [0.2, 0.4, 0.6, 0.8].map((y) => row('Item', y - shift))
+      const driver = fakeDriver([page(0), page(0.1), page(0.15), [...page(0.15), row('Done', 0.9)]])
+      const result = await runFlow(flowOf('steps:\n  - scroll: { until: "Done" }\n'), driver, OPTS)
+      expect(result.status).toBe('passed')
+    })
+
+    // assertVisible's rule (suggest.ts): a tapOn line offered for a check that something is there turns a regression green.
+    it('offers no selector suggestions when it fails', async () => {
+      const driver = fakeDriver([[row('Checkout later', 0.3)]])
+      const result = await runFlow(flowOf('steps:\n  - scroll: { until: "Checkout now" }\n'), driver, OPTS)
+      expect(result.status).toBe('failed')
+      expect(result.steps[0]!.suggestions).toBeUndefined()
     })
 
     // Two unchanged reads, not one: a single one can follow a swipe the app dropped.
