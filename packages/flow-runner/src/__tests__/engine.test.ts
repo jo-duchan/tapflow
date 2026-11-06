@@ -623,6 +623,16 @@ describe('runFlow', () => {
       expect(swipes(driver)).toHaveLength(2)
     })
 
+    it('does not take a match larger than the screen for one that stays put: clipped, it reads the same anywhere', async () => {
+      const big = el({ label: 'Target', frame: { x: 0, y: 0, width: 1, height: 1 } })
+      const driver = fakeDriver([[]])
+      let n = 0
+      vi.mocked(driver.queryUITree).mockImplementation(async () => (n++ < 5 ? [row(`Synced ${n}s ago`, 0.1), big] : [row('Target', 0.4)]))
+      const result = await runFlow(flowOf('steps:\n  - scroll: { until: { label: "Target", timeout: 5 } }\n'), driver, OPTS)
+      expect(result.status).toBe('passed')
+      expect(swipes(driver)).toHaveLength(5)
+    })
+
     it('counts a match as still only while it stays put: one that moves again is being scrolled in', async () => {
       const cut = (y: number) => el({ label: 'Row 16', role: 'cell', frame: { x: 0, y, width: 1, height: 1 - y } })
       const driver = fakeDriver([[cut(0.97)], [cut(0.97)], [cut(0.96)], [cut(0.96)], [row('Row 16', 0.5)]])

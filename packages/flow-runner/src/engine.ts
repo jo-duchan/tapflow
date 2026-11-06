@@ -464,6 +464,15 @@ const CLEAR_OF_ENTERING_EDGE: Record<ScrollDirection, (f: UIElement['frame']) =>
   left: (f) => f.x > 0,
 }
 
+// Cut at both ends of the scroll axis: an element larger than the screen, whose clipped frame reads the same wherever
+// the list is — so its staying put says nothing about having arrived.
+const SPANS_SCROLL_AXIS: Record<ScrollDirection, (f: UIElement['frame']) => boolean> = {
+  down: (f) => f.y <= 0 && f.y + f.height >= 1,
+  up: (f) => f.y <= 0 && f.y + f.height >= 1,
+  right: (f) => f.x <= 0 && f.x + f.width >= 1,
+  left: (f) => f.x <= 0 && f.x + f.width >= 1,
+}
+
 /** What the end-of-list check compares: the structure and where it is, since one long text scrolls by moving alone. */
 function scrolledShape(tree: UIElement[]): string {
   return JSON.stringify(tree.map((e) => [e.role, e.label, e.identifier ?? '', Math.round(e.frame.x * 100), Math.round(e.frame.y * 100)]))
@@ -484,6 +493,7 @@ async function scrollUntil(driver: FlowDriver, direction: ScrollDirection, sel: 
   const deadline = Date.now() + waitMs
   const gesture = SCROLL_GESTURES[direction]
   const clear = CLEAR_OF_ENTERING_EDGE[direction]
+  const spans = SPANS_SCROLL_AXIS[direction]
   let lastError: TransientQueryError | undefined
   let sawTree = false
   let shape: string | undefined
@@ -505,7 +515,8 @@ async function scrollUntil(driver: FlowDriver, direction: ScrollDirection, sel: 
       lastError = undefined
       const matches = matchSelector(q.tree, sel)
       if (matches.some((m) => clear(m.frame))) return
-      const at = matches.length > 0 ? scrolledShape(matches) : undefined
+      const pinned = matches.filter((m) => !spans(m.frame))
+      const at = pinned.length > 0 ? scrolledShape(pinned) : undefined
       matchStill = at !== undefined && at === matchShape ? matchStill + 1 : 0
       matchShape = at
       if (matchStill >= SCROLL_END_READS) return
