@@ -600,6 +600,37 @@ describe('runFlow', () => {
       expect(swipes(down)).toHaveLength(0)
     })
 
+    it('judges the cut by the direction: left and right, the side edges', async () => {
+      const at = (x: number) => el({ label: 'Tab', frame: { x, y: 0.1, width: 0.04, height: 0.05 } })
+      const right = fakeDriver([[at(0.96)], [at(0.5)]])
+      expect((await runFlow(flowOf('steps:\n  - scroll: { direction: right, until: "Tab" }\n'), right, OPTS)).status).toBe('passed')
+      expect(swipes(right)).toEqual([['swipe', [0.8, 0.5], [0.2, 0.5], 300]])
+      const left = fakeDriver([[at(0)], [at(0.5)]])
+      expect((await runFlow(flowOf('steps:\n  - scroll: { direction: left, until: "Tab" }\n'), left, OPTS)).status).toBe('passed')
+      expect(swipes(left)).toEqual([['swipe', [0.2, 0.5], [0.8, 0.5], 300]])
+      const notCut = fakeDriver([[at(0)]])
+      expect((await runFlow(flowOf('steps:\n  - scroll: { direction: right, until: "Tab" }\n'), notCut, OPTS)).status).toBe('passed')
+      expect(swipes(notCut)).toEqual([])
+    })
+
+    it('takes a match pinned to the entering edge while something else keeps changing', async () => {
+      const cta = el({ label: 'Continue', frame: { x: 0, y: 0.92, width: 1, height: 0.08 } })
+      const driver = fakeDriver([[]])
+      let n = 0
+      vi.mocked(driver.queryUITree).mockImplementation(async () => [row(`Synced ${n++}s ago`, 0.1), cta])
+      const result = await runFlow(flowOf('steps:\n  - scroll: { until: { label: "Continue", timeout: 5 } }\n'), driver, OPTS)
+      expect(result.status).toBe('passed')
+      expect(swipes(driver)).toHaveLength(2)
+    })
+
+    it('counts a match as still only while it stays put: one that moves again is being scrolled in', async () => {
+      const cut = (y: number) => el({ label: 'Row 16', role: 'cell', frame: { x: 0, y, width: 1, height: 1 - y } })
+      const driver = fakeDriver([[cut(0.97)], [cut(0.97)], [cut(0.96)], [cut(0.96)], [row('Row 16', 0.5)]])
+      const result = await runFlow(flowOf('steps:\n  - scroll: { until: "Row 16" }\n'), driver, OPTS)
+      expect(result.status).toBe('passed')
+      expect(swipes(driver)).toHaveLength(4)
+    })
+
     it('takes a cut match at the end of the list, where scrolling cannot bring more of it', async () => {
       const cut = el({ label: 'Footer', frame: { x: 0, y: 0.98, width: 1, height: 0.02 } })
       const driver = fakeDriver([[row('Row 1', 0.3), cut]])

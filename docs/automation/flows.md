@@ -119,7 +119,7 @@ How far one swipe scrolls differs from run to run: a list travels further or les
 - The screen is read first, and nothing is scrolled when the element is already in view.
 - An element cut by the edge the list scrolls in from has not arrived yet: the bottom edge when you scroll down. A tap on its center can land on a tab bar drawn over it, so the step scrolls once more.
 - The wait is the `until` selector's `timeout`. Without one it is 30 seconds or the run's default wait (`--timeout`), whichever is longer. An emulator takes over 2 seconds to read the screen once, so the default selector wait would allow only a few scrolls.
-- When the screen is unchanged for two scrolls in a row, the step takes it as the end of the list. It passes if the element is on screen there, even cut, and fails if it is not.
+- When the screen is unchanged for two scrolls in a row, the step takes it as the end of the list. It passes if the element is on screen there, even cut, and fails if it is not. A cut element that stays put for two scrolls, such as a button fixed to the bottom, also counts as arrived.
 - A screen that scrolls one long text filling the screen, with nothing else moving, reads as unchanged and can be taken for the end of the list. A list that loads more items at its end must show them within two reads of the screen (2–5 seconds).
 
 ### Holding an element {#holding-an-element}

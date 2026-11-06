@@ -490,6 +490,10 @@ async function scrollUntil(driver: FlowDriver, direction: ScrollDirection, sel: 
   // A screen read without the element is followed by one swipe and a failed read by none, so between any two screens
   // read lies exactly one swipe: a screen equal to the last one is a swipe that moved nothing.
   let unchanged = 0
+  // A match that stays where it is across swipes cannot be brought further in, even while something else on the screen
+  // keeps changing (a clock, a spinner) and so keeps the screen from ever reading unchanged.
+  let matchShape: string | undefined
+  let matchStill = 0
   for (;;) {
     const q = await queryOrRetry(driver, deadline)
     // Swipe only after a screen was read and the element was not on it: a failed read says nothing about where the
@@ -501,6 +505,10 @@ async function scrollUntil(driver: FlowDriver, direction: ScrollDirection, sel: 
       lastError = undefined
       const matches = matchSelector(q.tree, sel)
       if (matches.some((m) => clear(m.frame))) return
+      const at = matches.length > 0 ? scrolledShape(matches) : undefined
+      matchStill = at !== undefined && at === matchShape ? matchStill + 1 : 0
+      matchShape = at
+      if (matchStill >= SCROLL_END_READS) return
       const next = scrolledShape(q.tree)
       unchanged = next === shape ? unchanged + 1 : 0
       shape = next
