@@ -7,6 +7,7 @@ import type { UIElement } from '@tapflowio/agent-core'
 import { PlatformError } from '@tapflowio/agent-core'
 import { TransientQueryError, markEnvironmentFailure } from './errors.js'
 import type { PinchFingers } from './engine.js'
+import { keyModifierBits, type KeyModifier } from './schema.js'
 import { chromeOrientation, interfaceTurnOf, type InterfaceTurn } from '@tapflowio/protocol/screen'
 import { DeviceLacksError } from './errors.js'
 import { authHeader, fetchWithToken, fixedToken, tokenRefusal, type TokenSource } from './credentials.js'
@@ -1155,9 +1156,9 @@ export class RelayClient {
     }
   }
 
-  async pressKey(sessionId: string, code: string): Promise<void> {
+  async pressKey(sessionId: string, code: string, modifiers?: readonly KeyModifier[]): Promise<void> {
     const requestId = randomUUID()
-    this.send({ type: 'input:key', sessionId, requestId, payload: { code, modifiers: 0 } })
+    this.send({ type: 'input:key', sessionId, requestId, payload: { code, modifiers: keyModifierBits(modifiers) } })
     await this.awaitInputAck(sessionId, requestId, `pressKey ${code}`)
   }
 

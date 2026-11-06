@@ -341,9 +341,10 @@ describe('runFlow', () => {
   it('names each step for watchers without what it types', async () => {
     const marks: Record<string, unknown>[] = []
     const driver = fakeDriver([[el({ label: 'ok' })]])
-    await runFlow(flowOf('steps:\n  - inputText: "hunter2"\n  - openUrl: "myapp://reset?token=s3cret"\n  - pressKey: KeyA\n  - pressKey: NumpadComma\n  - pressKey: NumpadStar\n  - pressKey: Enter\n  - tapOn: "ok"\n'), driver, { ...OPTS, onStep: (m) => marks.push(m) })
+    await runFlow(flowOf('steps:\n  - inputText: "hunter2"\n  - openUrl: "myapp://reset?token=s3cret"\n  - pressKey: KeyA\n  - pressKey: NumpadComma\n  - pressKey: NumpadStar\n  - pressKey: Enter\n  - pressKey: { code: KeyQ, modifiers: [shift] }\n  - pressKey: { code: ArrowLeft, modifiers: [alt] }\n  - tapOn: "ok"\n'), driver, { ...OPTS, onStep: (m) => marks.push(m) })
     expect(marks.filter((m) => m['phase'] === 'start').map((m) => m['label'])).toEqual([
-      'inputText (7 chars)', 'openUrl', 'pressKey(character)', 'pressKey(character)', 'pressKey(character)', 'pressKey(Enter)', 'tapOn("ok")',
+      'inputText (7 chars)', 'openUrl', 'pressKey(character)', 'pressKey(character)', 'pressKey(character)', 'pressKey(Enter)',
+      'pressKey(shift+character)', 'pressKey(alt+ArrowLeft)', 'tapOn("ok")',
     ])
     expect(JSON.stringify(marks.map((m) => m['label']))).not.toMatch(/hunter2|s3cret/)
   })
@@ -557,6 +558,97 @@ describe('runFlow', () => {
       ['swipe', [0.5, 0.7], [0.5, 0.3], 300],
       ['swipe', [0.5, 0.3], [0.5, 0.7], 300],
     ])
+  })
+
+  describe('scroll until an element is on screen', () => {
+    const row = (label: string, y: number) => el({ label, role: 'cell', frame: { x: 0, y, width: 1, height: 0.05 } })
+    const swipes = (driver: ReturnType<typeof fakeDriver>) => driver.calls.filter((c) => c[0] === 'swipe')
+
+    it('sends no swipe when the element is already on screen', async () => {
+      const driver = fakeDriver([[row('Row 16', 0.5)]])
+      const result = await runFlow(flowOf('steps:\n  - scroll: { until: "Row 16" }\n'), driver, OPTS)
+      expect(result.status).toBe('passed')
+      expect(swipes(driver)).toEqual([])
+      expect(result.steps[0]!.name).toBe('scroll(down until "Row 16")')
+    })
+
+    it('swipes the scroll gesture until it appears, in the given direction', async () => {
+      const driver = fakeDriver([[row('Row 1', 0.3)], [row('Row 8', 0.3)], [row('Row 16', 0.3)]])
+      const result = await runFlow(flowOf('steps:\n  - scroll: { direction: up, until: "Row 16" }\n'), driver, OPTS)
+      expect(result.status).toBe('passed')
+      expect(swipes(driver)).toEqual([['swipe', [0.5, 0.3], [0.5, 0.7], 300], ['swipe', [0.5, 0.3], [0.5, 0.7], 300]])
+    })
+
+    it('does not count a match past the screen edge as on screen', async () => {
+      const driver = fakeDriver([[row('Row 1', 0.3), row('Row 16', 1.3)], [row('Row 16', 0.5)]])
+      const result = await runFlow(flowOf('steps:\n  - scroll: { until: "Row 16" }\n'), driver, OPTS)
+      expect(result.status).toBe('passed')
+      expect(swipes(driver)).toHaveLength(1)
+    })
+
+    // Two unchanged reads, not one: a single one can follow a swipe the app dropped.
+    it('fails as the product\'s at the end of the list, before the timeout', async () => {
+      const driver = fakeDriver([[row('Row 1', 0.3)], [row('Row 30', 0.3)], [row('Row 30', 0.3)], [row('Row 30', 0.3)]])
+      const started = Date.now()
+      const result = await runFlow(flowOf('steps:\n  - scroll: { until: "Row 99" }\n'), driver, OPTS)
+      expect(result.status).toBe('failed')
+      expect(result.failureKind).toBe('product')
+      expect(result.failureMessage).toMatch(/scrolled down to the end without "Row 99" coming on screen/)
+      expect(swipes(driver)).toHaveLength(3)
+      expect(Date.now() - started).toBeLessThan(5_000)
+    })
+
+    it('two unchanged reads that are not in a row are not the end', async () => {
+      const driver = fakeDriver([[row('Row 1', 0.3)], [row('Row 1', 0.3)], [row('Row 8', 0.3)], [row('Row 8', 0.3)], [row('Row 16', 0.3)]])
+      const result = await runFlow(flowOf('steps:\n  - scroll: { until: "Row 16" }\n'), driver, OPTS)
+      expect(result.status).toBe('passed')
+    })
+
+    it('one unchanged read after a swipe is not the end', async () => {
+      const driver = fakeDriver([[row('Row 1', 0.3)], [row('Row 1', 0.3)], [row('Row 16', 0.3)]])
+      const result = await runFlow(flowOf('steps:\n  - scroll: { until: "Row 16" }\n'), driver, OPTS)
+      expect(result.status).toBe('passed')
+    })
+
+    // A dump takes ~2.5 s on an emulator: the default step wait would allow about three swipes.
+    it('waits past the default step timeout when until names none', async () => {
+      const driver = fakeDriver([[]])
+      let n = 0
+      vi.mocked(driver.queryUITree).mockImplementation(async () => {
+        await new Promise((r) => setTimeout(r, 3))
+        return [row(`Row ${n++}`, 0.3)]
+      })
+      const result = await runFlow(flowOf('steps:\n  - scroll: { until: "Row 15" }\n'), driver, OPTS) // OPTS waits 20 ms
+      expect(result.status).toBe('passed')
+      expect(swipes(driver)).toHaveLength(15)
+    })
+
+    it('fails at the selector\'s timeout while the screen keeps changing', async () => {
+      const driver = fakeDriver([[]])
+      let n = 0
+      vi.mocked(driver.queryUITree).mockImplementation(async () => [row(`Row ${n++}`, 0.3)])
+      const result = await runFlow(flowOf('steps:\n  - scroll: { until: { label: "Row 99999", timeout: 0.05 } }\n'), driver, OPTS)
+      expect(result.status).toBe('failed')
+      expect(result.failureKind).toBe('product')
+      expect(result.failureMessage).toMatch(/on screen after scrolling down for 0.05s/)
+    })
+
+    // A failed read says nothing about where the list is; swiping blind could carry the element past.
+    it('does not swipe after a read that failed, and fails as the environment\'s with no screen seen', async () => {
+      const driver = fakeDriver([[]])
+      vi.mocked(driver.queryUITree).mockRejectedValue(new TransientQueryError('agent busy'))
+      const result = await runFlow(flowOf('steps:\n  - scroll: { until: { label: "Row 16", timeout: 0.05 } }\n'), driver, OPTS)
+      expect(result.failureKind).toBe('environment')
+      expect(swipes(driver)).toEqual([])
+    })
+  })
+
+  it('passes a pressKey step\'s modifiers, and a plain press with no second argument', async () => {
+    const driver = fakeDriver([[]])
+    const result = await runFlow(flowOf('steps:\n  - pressKey: { code: KeyA, modifiers: [shift, meta] }\n  - pressKey: Enter\n'), driver, OPTS)
+    expect(result.status).toBe('passed')
+    expect(vi.mocked(driver.pressKey).mock.calls).toEqual([['KeyA', ['shift', 'meta']], ['Enter']])
+    expect(result.steps.map((s) => s.name)).toEqual(['pressKey(shift+meta+KeyA)', 'pressKey(Enter)'])
   })
 
   it('clearState uses the flow appId, inline bundle id wins', async () => {

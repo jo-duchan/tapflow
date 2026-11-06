@@ -1,6 +1,6 @@
 import type { UIElement } from '@tapflowio/agent-core'
 import type { ChromePayload, LaunchApplied, LaunchOptions } from '@tapflowio/protocol'
-import type { Flow, Selector, Step, ScrollDirection } from './schema.js'
+import type { Flow, KeyModifier, Selector, Step, ScrollDirection } from './schema.js'
 import { matchSelector } from './selector.js'
 import { suggestSelectors, type SelectorSuggestion } from './suggest.js'
 import { DeviceLacksError, EnvironmentStepError, isEnvironmentStepFailure, TransientQueryError } from './errors.js'
@@ -19,7 +19,8 @@ export interface FlowDriver {
   tap(x: number, y: number): Promise<void>
   swipe(from: [number, number], to: [number, number], durationMs: number): Promise<void>
   inputText(text: string): Promise<void>
-  pressKey(code: string): Promise<void>
+  /** `modifiers` are held while the key is pressed; absent for a plain press. */
+  pressKey(code: string, modifiers?: KeyModifier[]): Promise<void>
   openUrl(url: string): Promise<void>
   /**
    * With options, the app is started fresh with them, or the launch fails; they are never dropped (#1047). Resolves to
@@ -187,9 +188,9 @@ function describeStep(step: Step): string {
     case 'launchApp': return describeLaunch(step.options, undefined)
     case 'tapOn': return `tapOn(${describeSelector(step.selector)})`
     case 'inputText': return `inputText("${step.text}")`
-    case 'pressKey': return `pressKey(${step.code})`
+    case 'pressKey': return `pressKey(${withModifiers(step.modifiers, step.code)})`
     case 'swipe': return `swipe(${step.from} → ${step.to})`
-    case 'scroll': return `scroll(${step.direction})`
+    case 'scroll': return step.until ? `scroll(${step.direction} until ${describeSelector(step.until)})` : `scroll(${step.direction})`
     case 'openUrl': return `openUrl(${step.url})`
     case 'assertVisible': return `assertVisible(${describeSelector(step.selector)})`
     case 'assertNotVisible': return `assertNotVisible(${describeSelector(step.selector)})`
@@ -211,9 +212,14 @@ export function activityLabel(step: Step): string {
   switch (step.type) {
     case 'inputText': return `inputText (${[...step.text].length} chars)`
     case 'openUrl': return 'openUrl'
-    case 'pressKey': return `pressKey(${typesCharacter(step.code) ? 'character' : step.code})`
+    // The modifiers stay: a shortcut names no secret, and the character under it is hidden as before.
+    case 'pressKey': return `pressKey(${withModifiers(step.modifiers, typesCharacter(step.code) ? 'character' : step.code)})`
     default: return describeStep(step)
   }
+}
+
+function withModifiers(modifiers: readonly string[] | undefined, key: string): string {
+  return modifiers?.length ? `${modifiers.join('+')}+${key}` : key
 }
 
 function typesCharacter(code: string): boolean {
@@ -441,6 +447,72 @@ async function waitForScreen(driver: FlowDriver, timeoutMs: number, pollInterval
   }
 }
 
+// A dump takes ~2.5 s on an emulator, so the default step timeout would allow about three swipes; a list is longer than
+// that. The end of the list stops it sooner (below), so the wider default costs time only when the element is missing.
+const SCROLL_UNTIL_MS = 30_000
+// Two, not one: a swipe sent while the screen is still changing can be acknowledged and dropped (see `waitForScreen`),
+// and one unchanged read after it would end the step at the top of a list that scrolls fine.
+const SCROLL_END_READS = 2
+
+/** On screen, not merely in the tree: a list can report rows past its edge, and a row there cannot be tapped. */
+function onScreen(el: UIElement): boolean {
+  const cx = el.frame.x + el.frame.width / 2
+  const cy = el.frame.y + el.frame.height / 2
+  return cx > 0 && cx < 1 && cy > 0 && cy < 1
+}
+
+/**
+ * Swipe the way `scroll` does until an element matching `sel` is on screen. How far one swipe goes differs from run to
+ * run (a fling's length depends on its speed and the platform), so a flow that means "the row is now in view" says
+ * that rather than a number of swipes. Reads before the first swipe, so an element already in view costs none. Fails
+ * as the product's when the screen stops changing — the end of the list — or at the selector's timeout.
+ */
+async function scrollUntil(driver: FlowDriver, direction: ScrollDirection, sel: Selector, timeoutMs: number, pollIntervalMs: number): Promise<void> {
+  const waitMs = normalizeTimeoutMs(sel.timeoutMs ?? Math.max(timeoutMs, SCROLL_UNTIL_MS), 'selector timeout')
+  const deadline = Date.now() + waitMs
+  const gesture = SCROLL_GESTURES[direction]
+  let lastError: TransientQueryError | undefined
+  let sawTree = false
+  let lastTree: UIElement[] | null = null
+  let shape: string | undefined
+  // A screen read without the element is followed by one swipe and a failed read by none, so between any two screens
+  // read lies exactly one swipe: a screen equal to the last one is a swipe that moved nothing.
+  let unchanged = 0
+  try {
+    for (;;) {
+      const q = await queryOrRetry(driver, deadline)
+      // Swipe only after a screen was read and the element was not on it: a failed read says nothing about where the
+      // list is, and a blind swipe could carry the element past.
+      let read = false
+      if ('tree' in q) {
+        sawTree = true
+        read = true
+        lastTree = q.tree
+        lastError = undefined
+        if (matchSelector(q.tree, sel).some(onScreen)) return
+        const next = screenShape(q.tree)
+        unchanged = next === shape ? unchanged + 1 : 0
+        shape = next
+        if (unchanged >= SCROLL_END_READS) {
+          throw new StepFailure(`scrolled ${direction} to the end without ${describeSelector(sel)} coming on screen`)
+        }
+      } else {
+        lastError = latestError(lastError, q.transient)
+      }
+      const base = `no element matched ${describeSelector(sel)} on screen after scrolling ${direction} for ${waitMs / 1000}s`
+      if (Date.now() >= deadline) throw deadlineError(base, lastError, sawTree)
+      if (read) await driver.swipe(gesture.from, gesture.to, 300)
+      await waitForNextPoll(deadline, pollIntervalMs, base, lastError, sawTree)
+    }
+  } catch (e) {
+    if (e instanceof StepFailure && lastTree) {
+      const suggestions = suggestSelectors(lastTree, sel)
+      if (suggestions.length > 0) e.suggestions = suggestions
+    }
+    throw e
+  }
+}
+
 const SETTLE_MS = 1000
 const SETTLE_CAP_MS = 3 * SETTLE_MS
 
@@ -499,9 +571,11 @@ async function executeStep(step: Step, flow: Flow, driver: FlowDriver, timeoutMs
       return driver.tap(round4(el.frame.x + el.frame.width / 2), round4(el.frame.y + el.frame.height / 2))
     }
     case 'inputText': return driver.inputText(step.text)
-    case 'pressKey': return driver.pressKey(step.code)
+    // A plain press passes no second argument, so a driver written before modifiers sees the call it always did.
+    case 'pressKey': return step.modifiers ? driver.pressKey(step.code, step.modifiers) : driver.pressKey(step.code)
     case 'swipe': return driver.swipe(step.from, step.to, step.durationMs)
     case 'scroll': {
+      if (step.until) return scrollUntil(driver, step.direction, step.until, timeoutMs, pollIntervalMs)
       const g = SCROLL_GESTURES[step.direction]
       return driver.swipe(g.from, g.to, 300)
     }

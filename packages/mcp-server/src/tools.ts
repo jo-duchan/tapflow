@@ -96,7 +96,9 @@ export function makeFlowDriver(client: TapflowClient, sessionId: string, buildId
       return guard(() => client.swipe(sessionId, fx, fy, tx, ty, durationMs))
     },
     inputText: async (text) => guard(() => client.typeText(sessionId, text)),
-    pressKey: async (code) => guard(() => client.pressKey(sessionId, code)),
+    // Names the modifiers for the reason `launchApp` names its options below: a function that drops the second
+    // parameter still satisfies `FlowDriver.pressKey`, and would press Cmd+A as a plain A with nothing failing.
+    pressKey: async (code, modifiers) => guard(() => client.pressKey(sessionId, code, modifiers)),
     openUrl: (url) => guard(() => client.openUrl(sessionId, url)),
     // Takes the options explicitly: a function with no parameter still satisfies `FlowDriver.launchApp`, and would
     // have run a flow's launch arguments as a plain launch with nothing failing to compile. The return type is spelled
@@ -501,7 +503,7 @@ export function registerTools(server: McpServer, client: TapflowClient): void {
         'tapping step by step: author the flow once, then replay it idempotently. Pass the YAML inline via "flow", or a ' +
         'file path via "path" (resolved from the MCP server process cwd). Steps: clearState / launchApp / tapOn / ' +
         'inputText / pressKey / swipe / scroll / openUrl / assertVisible / assertNotVisible / pressButton / ' +
-        'longPressOn / pinch / setOrientation / setPosture. launchApp launches the ' +
+        'longPressOn / pinch / setOrientation / setPosture; scroll: { until: <selector> } scrolls to an element. launchApp launches the ' +
         'buildId argument. When buildId is set, the build is installed before replaying (like `tapflow flow run --build`) ' +
         'so clearState/launchApp have the app present — pass install:false to skip. A flow whose appId differs from ' +
         "the build's bundle id is not run and returns an error naming both. Returns per-step results; on failure " +

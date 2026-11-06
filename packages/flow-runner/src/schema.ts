@@ -1,6 +1,5 @@
 import { parse as parseYaml } from 'yaml'
 import { ValidationError } from '@tapflowio/agent-core'
-import path from 'path'
 import type { LaunchOptions } from '@tapflowio/protocol'
 import { compactLaunchOptions, launchOptionsProblem } from '@tapflowio/protocol/launch'
 
@@ -18,14 +17,26 @@ export interface Selector {
 
 export type ScrollDirection = 'up' | 'down' | 'left' | 'right'
 
+/** Held with a key. The names are the flow's; the wire carries them as the HID bitmap `keyModifierBits` builds. */
+export type KeyModifier = 'shift' | 'ctrl' | 'alt' | 'meta'
+
+// The HID modifier bits both agents read from `input:key` (protocol `InputKey`; iOS passes them to the touch helper,
+// Android maps each to its left-hand meta key).
+const KEY_MODIFIER_BITS: Record<KeyModifier, number> = { ctrl: 0x01, shift: 0x02, alt: 0x04, meta: 0x08 }
+
+export function keyModifierBits(modifiers: readonly KeyModifier[] = []): number {
+  return modifiers.reduce((bits, m) => bits | KEY_MODIFIER_BITS[m], 0)
+}
+
 export type Step =
   | { type: 'clearState'; appId?: string }
   | { type: 'launchApp'; options?: LaunchOptions }
   | { type: 'tapOn'; selector: Selector }
   | { type: 'inputText'; text: string }
-  | { type: 'pressKey'; code: string }
+  | { type: 'pressKey'; code: string; modifiers?: KeyModifier[] }
   | { type: 'swipe'; from: [number, number]; to: [number, number]; durationMs: number }
-  | { type: 'scroll'; direction: ScrollDirection }
+  /** With `until`, scrolls until that element is on screen rather than once — what a swipe was for, not how far it went. */
+  | { type: 'scroll'; direction: ScrollDirection; until?: Selector }
   | { type: 'openUrl'; url: string }
   | { type: 'assertVisible'; selector: Selector }
   | { type: 'assertNotVisible'; selector: Selector }
@@ -44,6 +55,7 @@ export interface Flow {
 }
 
 const SCROLL_DIRECTIONS = new Set<string>(['up', 'down', 'left', 'right'])
+const KEY_MODIFIERS = new Set<string>(['shift', 'ctrl', 'alt', 'meta'])
 const DEFAULT_SWIPE_DURATION_MS = 300
 // Both platforms recognise a long press at about half a second; twice that leaves room for a busy Mac's timing
 // (#1037). Holding past the threshold changes nothing for an ordinary long press, so the margin costs only time.
@@ -163,7 +175,18 @@ function parseStep(raw: unknown, ctx: string): Step {
       return { type: 'inputText', text: value }
     }
     case 'pressKey': {
-      if (typeof value !== 'string' || value.length === 0) throw new ValidationError(`${ctx}: "pressKey" must be a key code like Enter, Backspace, Escape`)
+      if (isRecord(value)) {
+        const { code, modifiers, ...rest } = value
+        const unknownKeys = Object.keys(rest)
+        if (unknownKeys.length > 0) throw new ValidationError(`${ctx}: unknown pressKey keys: ${unknownKeys.join(', ')} (expected code, modifiers)`)
+        if (typeof code !== 'string' || code.length === 0) throw new ValidationError(`${ctx}: "code" must be a key code like KeyA, Enter, ArrowLeft`)
+        if (!Array.isArray(modifiers) || modifiers.length === 0
+          || modifiers.some((m) => typeof m !== 'string' || !KEY_MODIFIERS.has(m)) || new Set(modifiers).size !== modifiers.length) {
+          throw new ValidationError(`${ctx}: "modifiers" must be a list of distinct shift, ctrl, alt, meta`)
+        }
+        return { type: 'pressKey', code, modifiers: modifiers as KeyModifier[] }
+      }
+      if (typeof value !== 'string' || value.length === 0) throw new ValidationError(`${ctx}: "pressKey" must be a key code like Enter, Backspace, Escape, or { code, modifiers }`)
       return { type: 'pressKey', code: value }
     }
     case 'openUrl': {
@@ -171,6 +194,17 @@ function parseStep(raw: unknown, ctx: string): Step {
       return { type: 'openUrl', url: value }
     }
     case 'scroll': {
+      if (isRecord(value)) {
+        const { direction, until, ...rest } = value
+        const unknownKeys = Object.keys(rest)
+        if (unknownKeys.length > 0) throw new ValidationError(`${ctx}: unknown scroll keys: ${unknownKeys.join(', ')} (expected direction, until)`)
+        if (direction !== undefined && (typeof direction !== 'string' || !SCROLL_DIRECTIONS.has(direction))) {
+          throw new ValidationError(`${ctx}: "scroll" direction must be one of up, down, left, right`)
+        }
+        // The only reason for the mapping form: a direction alone is the string form.
+        if (until === undefined || until === null) throw new ValidationError(`${ctx}: "scroll" as a mapping needs "until": the element to scroll to`)
+        return { type: 'scroll', direction: (direction ?? 'down') as ScrollDirection, until: parseSelector(until, ctx) }
+      }
       if (typeof value !== 'string' || !SCROLL_DIRECTIONS.has(value)) {
         throw new ValidationError(`${ctx}: "scroll" direction must be one of up, down, left, right`)
       }
@@ -246,6 +280,12 @@ function parseStep(raw: unknown, ctx: string): Step {
   }
 }
 
+// Not `path.basename`: this module is to load in a browser too (Flow Capture), where there is no `path`. Both
+// separators, as Windows' basename takes them.
+function baseName(file: string): string {
+  return file.slice(Math.max(file.lastIndexOf('/'), file.lastIndexOf('\\')) + 1)
+}
+
 export function parseFlow(yamlText: string, file: string): Flow {
   let doc: unknown
   try {
@@ -275,7 +315,7 @@ export function parseFlow(yamlText: string, file: string): Flow {
   }
 
   return {
-    name: (name as string | undefined) ?? path.basename(file).replace(/\.ya?ml$/i, ''),
+    name: (name as string | undefined) ?? baseName(file).replace(/\.ya?ml$/i, ''),
     ...(appId !== undefined ? { appId: appId as string } : {}),
     ...(tags !== undefined ? { tags: (tags as string[]).map((t) => t.trim()) } : {}),
     steps: parsedSteps,

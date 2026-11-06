@@ -102,9 +102,37 @@
             },
             "tapOn": { "$ref": "#/definitions/selector" },
             "inputText": { "type": "string", "description": "Type into the focused input." },
-            "pressKey": { "type": "string", "minLength": 1, "description": "KeyboardEvent.code name: Enter, Backspace, Escape, Tab, ArrowDown, …" },
+            "pressKey": {
+              "description": "Press a key. A KeyboardEvent.code name (Enter, Backspace, Escape, Tab, ArrowDown, …), or { code, modifiers } to hold shift/ctrl/alt/meta while it is pressed.",
+              "oneOf": [
+                { "type": "string", "minLength": 1 },
+                {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": ["code", "modifiers"],
+                  "properties": {
+                    "code": { "type": "string", "minLength": 1 },
+                    "modifiers": { "type": "array", "minItems": 1, "uniqueItems": true, "items": { "enum": ["shift", "ctrl", "alt", "meta"] } }
+                  }
+                }
+              ]
+            },
             "openUrl": { "type": "string", "minLength": 1, "description": "Open a deep link / URL." },
-            "scroll": { "enum": ["up", "down", "left", "right"], "description": "Direction to reveal more content." },
+            "scroll": {
+              "description": "Scroll once in a direction (where to reveal more content), or { direction, until } to keep scrolling until an element is on screen. until's timeout defaults to 30s; the step also fails once the screen stops changing.",
+              "oneOf": [
+                { "enum": ["up", "down", "left", "right"] },
+                {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": ["until"],
+                  "properties": {
+                    "direction": { "enum": ["up", "down", "left", "right"], "default": "down" },
+                    "until": { "$ref": "#/definitions/selector" }
+                  }
+                }
+              ]
+            },
             "swipe": {
               "type": "object",
               "additionalProperties": false,

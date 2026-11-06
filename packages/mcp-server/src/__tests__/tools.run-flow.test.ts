@@ -124,6 +124,14 @@ describe('run_flow — install before replay', () => {
     expect(client.launchApp).toHaveBeenCalledWith('s1', 5, { arguments: { flag: true }, env: { A: 'x' } })
   })
 
+  // The same trap as launchApp's options: a driver whose pressKey drops the second parameter still compiles.
+  it('passes a pressKey step\'s modifiers to the client', async () => {
+    const client = fakeClient([])
+    const res = await runFlowHandler(client)({ sessionId: 's1', flow: 'steps:\n  - pressKey: { code: KeyA, modifiers: [meta] }\n' })
+    expect(res.isError).toBeFalsy()
+    expect(client.pressKey).toHaveBeenCalledWith('s1', 'KeyA', ['meta'])
+  })
+
   it('install:false skips the install but still launches', async () => {
     const calls: string[] = []
     const client = fakeClient(calls)
