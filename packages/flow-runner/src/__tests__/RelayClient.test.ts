@@ -262,6 +262,15 @@ describe('RelayClient — the input senders mint a correlator and await the ack'
     usable(received.find((m) => m['type'] === 'input:key'), 'input:key')
   })
 
+  it('pressKey sends its modifiers as the HID bitmap, and none as 0', async () => {
+    const { client, received } = await capture()
+    await client.pressKey('s1', 'KeyA', ['shift', 'meta'])
+    await client.pressKey('s1', 'Enter')
+    expect(received.filter((m) => m['type'] === 'input:key').map((m) => m['payload'])).toEqual([
+      { code: 'KeyA', modifiers: 0x0a }, { code: 'Enter', modifiers: 0 },
+    ])
+  })
+
   it('pressButton sends the name with a usable id', async () => {
     const { client, received } = await capture()
     await client.pressButton('s1', 'volume_up')

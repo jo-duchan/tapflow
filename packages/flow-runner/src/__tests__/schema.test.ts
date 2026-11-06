@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest'
 import { readFileSync } from 'fs'
 import { dirname, join } from 'path'
 import { fileURLToPath } from 'url'
-import { parseFlow } from '../schema.js'
+import { keyModifierBits, parseFlow } from '../schema.js'
 
 describe('parseFlow', () => {
   it('parses the full step vocabulary', () => {
@@ -53,6 +53,8 @@ steps:
   it('defaults name to the file name when omitted', () => {
     const flow = parseFlow('steps:\n  - launchApp\n', '.tapflow/flows/checkout.yaml')
     expect(flow.name).toBe('checkout')
+    expect(parseFlow('steps:\n  - launchApp\n', 'login.YML').name).toBe('login')
+    expect(parseFlow('steps:\n  - launchApp\n', 'C:\\app\\flows\\pay.yaml').name).toBe('pay')
   })
 
   it('rejects a flow without steps', () => {
@@ -297,6 +299,52 @@ steps:
       ['a bare string', 'pinch: Map', /"pinch" must be \{ on, scale, durationMs\? \}/],
     ])('refuses %s', (_, step, message) => {
       expect(() => parseFlow(`steps:\n  - ${step}\n`, 'x.yaml')).toThrow(message)
+    })
+  })
+
+  describe('scroll until', () => {
+    it('takes a selector and defaults the direction to down; the string forms are unchanged', () => {
+      const steps = parseFlow('steps:\n  - scroll: { until: "Row 16" }\n  - scroll: { direction: up, until: { id: row.16, timeout: 5 } }\n  - scroll\n  - scroll: left\n', 'x.yaml').steps
+      expect(steps).toEqual([
+        { type: 'scroll', direction: 'down', until: { text: 'Row 16' } },
+        { type: 'scroll', direction: 'up', until: { id: 'row.16', timeoutMs: 5000 } },
+        { type: 'scroll', direction: 'down' },
+        { type: 'scroll', direction: 'left' },
+      ])
+    })
+
+    it.each([
+      ['no until', 'scroll: { direction: up }', /needs "until"/],
+      ['an empty mapping', 'scroll: {}', /needs "until"/],
+      ['a bad direction', 'scroll: { direction: sideways, until: x }', /direction must be one of/],
+      ['an unknown key', 'scroll: { until: x, times: 3 }', /unknown scroll keys: times/],
+      ['an empty selector', 'scroll: { until: "" }', /selector must not be empty/],
+    ])('refuses %s', (_, step, message) => {
+      expect(() => parseFlow(`steps:\n  - ${step}\n`, 'x.yaml')).toThrow(message)
+    })
+  })
+
+  describe('pressKey with modifiers', () => {
+    it('takes a code and the modifiers to hold; the string form is unchanged', () => {
+      const steps = parseFlow('steps:\n  - pressKey: { code: KeyA, modifiers: [shift, meta] }\n  - pressKey: Enter\n', 'x.yaml').steps
+      expect(steps).toEqual([{ type: 'pressKey', code: 'KeyA', modifiers: ['shift', 'meta'] }, { type: 'pressKey', code: 'Enter' }])
+    })
+
+    it.each([
+      ['no modifiers', 'pressKey: { code: KeyA }', /"modifiers" must be a list/],
+      ['an empty list', 'pressKey: { code: KeyA, modifiers: [] }', /"modifiers" must be a list/],
+      ['an unknown modifier', 'pressKey: { code: KeyA, modifiers: [hyper] }', /distinct shift, ctrl, alt, meta/],
+      ['a repeated modifier', 'pressKey: { code: KeyA, modifiers: [shift, shift] }', /distinct/],
+      ['no code', 'pressKey: { modifiers: [shift] }', /"code" must be a key code/],
+      ['an unknown key', 'pressKey: { code: KeyA, modifiers: [shift], hold: 1 }', /unknown pressKey keys: hold/],
+    ])('refuses %s', (_, step, message) => {
+      expect(() => parseFlow(`steps:\n  - ${step}\n`, 'x.yaml')).toThrow(message)
+    })
+
+    it('turns the names into the HID bitmap the agents read', () => {
+      expect(keyModifierBits()).toBe(0)
+      expect([keyModifierBits(['ctrl']), keyModifierBits(['shift']), keyModifierBits(['alt']), keyModifierBits(['meta'])]).toEqual([1, 2, 4, 8])
+      expect(keyModifierBits(['shift', 'ctrl', 'alt', 'meta'])).toBe(15)
     })
   })
 

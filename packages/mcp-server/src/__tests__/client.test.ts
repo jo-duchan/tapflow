@@ -636,6 +636,12 @@ describe('TapflowClient', () => {
       const msg = await waitForMessage(relay, 'input:key')
       expect(msg).toMatchObject({ payload: { code: 'Backspace', modifiers: 0 } })
     })
+
+    it('sends a flow\'s modifiers as the HID bitmap', async () => {
+      await client.pressKey('sess-1', 'KeyZ', ['ctrl', 'shift'])
+      const msg = await waitForMessage(relay, 'input:key')
+      expect(msg).toMatchObject({ payload: { code: 'KeyZ', modifiers: 0x03 } })
+    })
   })
 
   describe('longPress', () => {

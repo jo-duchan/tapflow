@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto'
 import type {
   BootRefusalReason, BrowserToRelay, ChromePayload, DeviceSummary, PosturesPayload, InputErrorReason, LaunchApplied, LaunchOptions, SessionTerminatedReason, UIElement,
 } from '@tapflowio/protocol'
-import { AdmissionRefusedError, DeviceLacksError, EnvironmentStepError, TransientQueryError, markEnvironmentFailure, authHeader, fetchWithToken, fixedToken, lookupBuild, tokenRefusal, type BuildLookup, type TokenSource } from '@tapflowio/flow-runner'
+import { AdmissionRefusedError, DeviceLacksError, EnvironmentStepError, TransientQueryError, markEnvironmentFailure, authHeader, fetchWithToken, fixedToken, lookupBuild, tokenRefusal, keyModifierBits, type BuildLookup, type KeyModifier, type TokenSource } from '@tapflowio/flow-runner'
 
 // Protocol owns the wire shape; this file used to declare an identical copy under a name the
 // relay uses for a *different* shape. Kept exported as `DeviceInfo` because that is this
@@ -1170,10 +1170,10 @@ export class TapflowClient {
 
   // Agents consume KeyboardEvent.code names ({ code, modifiers }) on input:key.
   // 'Return' is accepted as an alias — neither platform maps it, 'Enter' is the code.
-  async pressKey(sessionId: string, key: string): Promise<void> {
+  async pressKey(sessionId: string, key: string, modifiers?: readonly KeyModifier[]): Promise<void> {
     const code = key === 'Return' ? 'Enter' : key
     const requestId = randomUUID()
-    this.send({ type: 'input:key', sessionId, requestId, payload: { code, modifiers: 0 } })
+    this.send({ type: 'input:key', sessionId, requestId, payload: { code, modifiers: keyModifierBits(modifiers) } })
     await this.awaitInputAck(sessionId, requestId)
   }
 

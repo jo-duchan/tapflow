@@ -54,9 +54,9 @@ The vocabulary is deliberately small. These fifteen cover most scenarios.
 | `launchApp` | keyword or `launchApp: { arguments, env }` | Launches the build under test and waits for its screen to settle: the role, label and id of every UI tree element unchanged for a second, so a splash screen is not taken for the first screen. A screen with no UI tree elements, such as a game, moves on after that second too. A screen whose labels keep changing moves on 3 seconds after it was first read, and one that cannot be read at all after the default per-selector wait. The wait never fails the step. A splash that stays unchanged for longer than a second can still be taken for the first screen. To pass launch arguments, see [Launch arguments](#launch-arguments). |
 | `tapOn` | selector | Taps the center of the matched element. |
 | `inputText` | string | Types text into the focused input field. |
-| `pressKey` | key name | Presses a keyboard key (`Enter`, `Backspace`, `Escape`, …). |
+| `pressKey` | key name or `{ code, modifiers }` | Presses a keyboard key (`Enter`, `Backspace`, `Escape`, …). For a key combination, list the keys to hold from `shift`, `ctrl`, `alt` and `meta`, as in `{ code: ArrowLeft, modifiers: [shift] }`. On Android the only letter keys that take `ctrl` or `meta` are C, V and X, and `alt` does not apply to letter keys. |
 | `swipe` | `{ from, to, durationMs? }` | Swipes between two points. Coordinates are 0–1. `durationMs` is milliseconds as a number, default 300, max 2147483647. Fractional values (e.g. 250.5) are accepted. |
-| `scroll` | keyword or `scroll: <direction>` | Scrolls the screen. The bare keyword scrolls down. |
+| `scroll` | keyword, `scroll: <direction>` or `{ direction, until }` | Scrolls the screen. The bare keyword scrolls down. With `until`, it scrolls until that element is on screen. See [Scrolling to an element](#scrolling-to-an-element). |
 | `openUrl` | URL string | Opens a deep link or URL. |
 | `assertVisible` | selector | Waits until the element appears; fails if it does not. |
 | `assertNotVisible` | selector | Waits until the element disappears; fails if it does not. |
@@ -105,6 +105,22 @@ To resolve an ambiguous match, add a disambiguator to the object form:
 The object form needs at least one of `id`, `label`, or `role`; `role`/`index` refine that set.
 
 `timeout` is in seconds and defaults to 10 (max 2147483.647, about 24.8 days). You can set it per selector. Values that round to 0ms (e.g. 0.0004s) are rejected.
+
+### Scrolling to an element {#scrolling-to-an-element}
+
+How far one swipe scrolls differs from run to run: a list travels further or less depending on the speed at release and on the platform. When you need a row further down a list, name the element to reach with `until` instead of counting swipes.
+
+```yaml
+- scroll: { until: "Row 16" }
+- scroll: { direction: up, until: { id: "header" } }
+- tapOn: "Row 16"
+```
+
+- The screen is read first, and nothing is scrolled when the element is already in view.
+- An element cut by the edge the list scrolls in from has not arrived yet: the bottom edge when you scroll down. A tap on its center can land on a tab bar drawn over it, so the step scrolls once more.
+- The wait is the `until` selector's `timeout`. Without one it is 30 seconds or the run's default wait (`--timeout`), whichever is longer. An emulator takes over 2 seconds to read the screen once, so the default selector wait would allow only a few scrolls.
+- When the screen is unchanged for two scrolls in a row, the step takes it as the end of the list. It passes if the element is on screen there, even cut, and fails if it is not. A cut element that stays put for two scrolls, such as a button fixed to the bottom, also counts as arrived.
+- A screen that scrolls one long text filling the screen, with nothing else moving, reads as unchanged and can be taken for the end of the list. A list that loads more items at its end must show them within two reads of the screen (2–5 seconds).
 
 ### Holding an element {#holding-an-element}
 

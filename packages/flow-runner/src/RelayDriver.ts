@@ -1,4 +1,5 @@
 import type { FlowDriver, PinchFingers } from './engine.js'
+import type { KeyModifier } from './schema.js'
 
 const TURN_SETTLE_MS = 2_000
 const TURN_SETTLE_POLL_MS = 200
@@ -102,8 +103,8 @@ export class RelayDriver implements FlowDriver {
     return this.guard(() => this.client.typeText(this.sessionId, text))
   }
 
-  pressKey(code: string): Promise<void> {
-    return this.guard(() => this.client.pressKey(this.sessionId, code))
+  pressKey(code: string, modifiers?: KeyModifier[]): Promise<void> {
+    return this.guard(() => this.client.pressKey(this.sessionId, code, modifiers))
   }
 
   openUrl(url: string) { return this.guard(() => this.client.openUrl(this.sessionId, url)) }

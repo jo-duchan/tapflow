@@ -1,5 +1,5 @@
-export { parseFlow } from './schema.js'
-export type { Flow, Step, Selector, ScrollDirection } from './schema.js'
+export { parseFlow, keyModifierBits } from './schema.js'
+export type { Flow, Step, Selector, ScrollDirection, KeyModifier } from './schema.js'
 export { runFlow, matchSelector, activityLabel, refusedFlow } from './engine.js'
 export type { FlowDriver, FlowResult, StepResult, EngineOptions, SelectorSuggestion, PinchFingers } from './engine.js'
 export { unavailableButton, unavailableButtonMessage } from './platformCheck.js'
