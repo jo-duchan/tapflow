@@ -287,6 +287,7 @@ export function DeviceViewer({ sessionId, deviceId, formFactor, platform = 'ios'
       return;
     }
     if (msg.type === 'session:rebound') {
+      setAppLogState({ sessionId, text: '' });
       // The agent restarted under us. Nothing is streaming, but until the new agent answers, every
       // flag here still describes the old one — and the relay cannot tell a viewer to stop, since
       // its own "agent offline" check sees a live socket (the new agent's). So tear down first,
@@ -412,6 +413,7 @@ export function DeviceViewer({ sessionId, deviceId, formFactor, platform = 'ios'
     // and there is no latch.
 
     if (msg.type === 'device:booting') {
+      setAppLogState({ sessionId, text: '' });
       setBootWaiting(null);
       setServicesOff(false);
       setDeviceReady(false);
@@ -649,6 +651,7 @@ export function DeviceViewer({ sessionId, deviceId, formFactor, platform = 'ios'
     // condition narrowed `buildId` to `number`; hoisting it here lost that, and `buildId!` would have been
     // the same species as the `msg.requestId!` this layer removed from the relay.
     if (buildId === undefined) return;
+    setAppLogState({ sessionId, text: '' });
     const requestId = newRequestId();
     appLaunchIdsRef.current.add(requestId);
     setLaunching(true);

@@ -270,6 +270,21 @@ describe('AdbWrapper', () => {
     })
   })
 
+  describe('getAppPid', () => {
+    it('reads a positive process id and treats malformed output as no running process', async () => {
+      const runner = mockRunner()
+      ;(runner.exec as ReturnType<typeof vi.fn>).mockResolvedValueOnce('456\n')
+      const wrapper = new AdbWrapper(runner)
+      await expect(wrapper.getAppPid('emulator-5554', 'com.example.app')).resolves.toBe(456)
+      expect(runner.exec).toHaveBeenCalledWith('-s', 'emulator-5554', 'shell', 'pidof', '-s', 'com.example.app')
+
+      for (const output of ['', '0', '123 456', 'not-a-pid']) {
+        ;(runner.exec as ReturnType<typeof vi.fn>).mockResolvedValueOnce(output)
+        await expect(wrapper.getAppPid('emulator-5554', 'com.example.app')).resolves.toBeNull()
+      }
+    })
+  })
+
   describe('launchApp', () => {
     const PKG = 'com.example.app'
     const START_FIELDS = ['-a', 'android.intent.action.MAIN', '-c', 'android.intent.category.LAUNCHER', '-f', '0x10200000']

@@ -63,4 +63,32 @@ describe('DeviceViewer app log feed', () => {
     const log = screen.getByRole('log', { name: 'App log output' })
     expect(log.textContent).toBe('first\nsecond\t🚀')
   })
+
+  it('clears the previous app output when launching again or starting a new boot', () => {
+    render(<DeviceViewer sessionId="mine" deviceId="dev-1" buildId={7} />)
+    act(() => {
+      deliver!({ type: 'session:joined', sessionId: 'mine', capabilities: [] })
+    })
+    act(() => {
+      deliver!({ type: 'device:ready', sessionId: 'mine', payload: { deviceId: 'dev-1' } })
+    })
+    const install = send.mock.calls.map(([message]) => message).findLast((message) => message.type === 'app:install')!
+    act(() => {
+      deliver!({ type: 'app:install-done', sessionId: 'mine', requestId: install.requestId })
+      deliver!({ type: 'session:chrome', sessionId: 'mine', payload: CHROME })
+      deliver!({ type: 'app:log', sessionId: 'mine', text: 'previous app output' })
+    })
+
+    expect(screen.getByRole('log', { name: 'App log output' }).textContent).toBe('previous app output')
+    act(() => {
+      screen.getByLabelText('Launch app').click()
+    })
+    expect(screen.getByRole('log', { name: 'App log output' }).textContent).toMatch(/Waiting for app logs/)
+
+    act(() => {
+      deliver!({ type: 'app:log', sessionId: 'mine', text: 'new app output' })
+      deliver!({ type: 'device:booting', sessionId: 'mine' })
+    })
+    expect(screen.getByRole('log', { name: 'App log output' }).textContent).toMatch(/Waiting for app logs/)
+  })
 })
