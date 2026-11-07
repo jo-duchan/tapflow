@@ -4,7 +4,15 @@ import type { Flow, KeyModifier, Selector, Step, ScrollDirection } from './schem
 import { matchSelector } from './selector.js'
 import { suggestSelectors, type SelectorSuggestion } from './suggest.js'
 import { DeviceLacksError, EnvironmentStepError, isEnvironmentStepFailure, markEnvironmentFailure, TransientQueryError } from './errors.js'
-import { InputRefusedError } from './sessionErrors.js'
+import {
+  InputRefusedError, RelayClosedError, RelayUnavailableError, RequestTimeoutError, SessionEndedError, SessionLeftError,
+  SessionUnavailableError,
+} from './sessionErrors.js'
+
+/** Failures the session channel builds from what the relay said, which never quote what was typed. */
+const SESSION_FAILURES = [
+  SessionEndedError, SessionLeftError, SessionUnavailableError, RelayClosedError, RelayUnavailableError, RequestTimeoutError,
+]
 import { buttonAvailability } from '@tapflowio/protocol/buttons'
 import { unavailableButton, unavailableButtonMessage } from './platformCheck.js'
 
@@ -612,15 +620,19 @@ async function executeStep(
     case 'tapPoint': return driver.tap(step.at[0], step.at[1])
     case 'inputText': return driver.inputText(step.text)
     case 'inputSecret': {
-      const value = secrets?.[step.name]
+      // Own properties only: a name like `constructor` would otherwise read Object's and type that.
+      const value = secrets && Object.hasOwn(secrets, step.name) ? secrets[step.name] : undefined
       // Checked before the run; this is for a caller that ran a flow without going through `runFlow`'s check.
       if (value === undefined) throw new EnvironmentStepError(`the secret ${step.name} was not given to this run`)
       try {
         return await driver.inputText(value)
       } catch (e) {
         // A driver's failure may quote what it typed (adb's did, in argv): said again here with the name only, and
-        // classified as the original was.
-        const failure = new Error(`typing the secret ${step.name} failed${e instanceof InputRefusedError ? ` (${e.reason})` : ''}`)
+        // classified as the original was. What the relay said about the session is kept: those messages are built by
+        // the channel and carry no text. An agent's refusal is not, since an older agent's could quote it.
+        const cause = e instanceof InputRefusedError ? ` (${e.reason})`
+          : SESSION_FAILURES.some((C) => e instanceof C) ? `: ${(e as Error).message}` : ''
+        const failure = new Error(`typing the secret ${step.name} failed${cause}`)
         throw isEnvironmentStepFailure(e) ? markEnvironmentFailure(failure) : failure
       }
     }
@@ -660,7 +672,7 @@ async function executeStep(
 /** The first `inputText: { secret }` step naming a secret `secrets` does not hold, or `null`. A caller checks it before
  *  choosing or preparing a device, so a run that cannot type one costs no boot; the engine checks it again. */
 export function missingSecret(flow: Flow, secrets: Readonly<Record<string, string>> | undefined): { index: number; name: string } | null {
-  const index = flow.steps.findIndex((s) => s.type === 'inputSecret' && secrets?.[s.name] === undefined)
+  const index = flow.steps.findIndex((s) => s.type === 'inputSecret' && !(secrets && Object.hasOwn(secrets, s.name)))
   return index < 0 ? null : { index, name: (flow.steps[index] as Extract<Step, { type: 'inputSecret' }>).name }
 }
 

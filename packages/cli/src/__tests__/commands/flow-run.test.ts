@@ -148,6 +148,8 @@ describe('cmdFlowRun exit codes (#543)', () => {
     it.each([
       [['MISSING'], /--secret MISSING: MISSING is not set in the environment/],
       [['NOT-A-NAME'], /--secret takes the name of an environment variable/],
+      // Inherited by process.env, never set: read as a variable, the run would type a function's source.
+      [['toString'], /--secret toString: toString is not set in the environment/],
     ])('stops with exit 2 before the device for %j', async (names, message) => {
       await run([flowFile('a.yaml')], { secret: names })
       expect(process.exitCode).toBe(2)

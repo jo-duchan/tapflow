@@ -2,6 +2,7 @@ import { describe, it, expect, vi } from 'vitest'
 import type { UIElement } from '@tapflowio/agent-core'
 import { runFlow, type FlowDriver } from '../engine.js'
 import { parseFlow } from '../schema.js'
+import { SessionEndedError } from '../sessionErrors.js'
 import { DeviceLacksError, EnvironmentStepError, markEnvironmentFailure, TransientQueryError } from '../errors.js'
 import type { PinchFingers } from '../engine.js'
 import type { ChromeButton, ChromeData } from '@tapflowio/protocol'
@@ -1200,6 +1201,20 @@ describe('points and secrets', () => {
     const result = await runFlow(flowOf('steps:\n  - tapOn: { id: pw }\n'), driver, OPTS)
     expect(result.failureMessage).toMatch(/candidates/)
     expect(result.failureMessage).not.toMatch(/hunter2|••••/)
+  })
+
+  it('reads only the secrets it was given, not what every object inherits', async () => {
+    const driver = fakeDriver([[]])
+    const result = await runFlow(flowOf('steps:\n  - inputText: { secret: constructor }\n'), driver, { ...OPTS, secrets: { PASSWORD: 'x' } })
+    expect(driver.calls).toEqual([])
+    expect(result.failedBeforeRun).toBe(true)
+  })
+
+  it('keeps what the relay said about the session when typing a secret failed', async () => {
+    const driver = fakeDriver([[]])
+    vi.mocked(driver.inputText).mockRejectedValueOnce(new SessionEndedError('session s1 ended: the device was shut down', 'unknown'))
+    const result = await runFlow(flowOf('steps:\n  - inputText: { secret: PASSWORD }\n'), driver, { ...OPTS, secrets: { PASSWORD: 'hunter2' } })
+    expect(result.failureMessage).toBe('inputText(secret PASSWORD): typing the secret PASSWORD failed: session s1 ended: the device was shut down')
   })
 
   it('refuses it with no secrets at all, as run_flow runs', async () => {

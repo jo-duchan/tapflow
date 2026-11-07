@@ -115,7 +115,7 @@ function readSecrets(names: string[] | undefined): Record<string, string> | unde
   const out: Record<string, string> = {}
   for (const name of names) {
     if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(name)) envFail(`--secret takes the name of an environment variable, like PASSWORD (got ${JSON.stringify(name)})`)
-    const value = process.env[name]
+    const value = Object.hasOwn(process.env, name) ? process.env[name] : undefined
     // Empty is what CI expands a missing secret to (`\${{ secrets.X }}`), and typing nothing would fail later as the app's fault.
     if (value === undefined || value === '') envFail(`--secret ${name}: ${name} is not set in the environment, or is empty`)
     out[name] = value
