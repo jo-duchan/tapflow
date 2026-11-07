@@ -20,6 +20,14 @@ import { IOS_BUTTON_ALIASES } from '@tapflowio/protocol/buttons'
 
 const logger = createLogger('ios-agent')
 
+/**
+ * How long after the paste chord the pasteboard is put back (#1129). The chord is sent, not read: the app reads the
+ * pasteboard when it handles it. Measured on iPhone 17 Pro iOS 26.4 (UIKit sample, 2026-11-08): a restore after 0,
+ * 30 and 100 ms landed the typed text 20/20 each, idle and at a load average of 137 — the restore's own `simctl
+ * pbcopy` takes ~145 ms, which is what protects it today. This is a margin that does not lean on simctl being slow.
+ */
+const PASTE_SETTLE_MS = 100
+
 /** The run reset's pasteboard step, the wait for the clipboard queue included; one step's bound like the others. */
 const RUN_RESET_PASTEBOARD_TIMEOUT_MS = 10_000
 
@@ -1886,6 +1894,23 @@ export class IOSAgent implements DeviceAgent, NetworkControlCapability, Posturab
     else this.parkedSentinels.delete(deviceId)
   }
 
+  /** Put `before` back on the pasteboard and wait until it reads back, as `clipboard:read`'s restore does: a queue
+   *  released early lets the next clipboard operation read what was typed. Best effort — the text already landed — and
+   *  logged without either value. Each read can take simctl's 5 s timeout, so a wedged CoreSimulator can hold the
+   *  ack past a client's wait; accepted, since giving up the restore before the ack would leave the text behind. */
+  private async restorePasteboard(deviceId: string, before: string): Promise<void> {
+    try {
+      await this.simctl.setPasteboard(deviceId, before)
+      const deadline = Date.now() + CLIPBOARD_RESTORE_DEADLINE_MS
+      while ((await this.simctl.getPasteboard(deviceId).catch(() => before)) !== before) {
+        if (Date.now() >= deadline) throw new PlatformError('the restored contents did not read back in time')
+        await new Promise((r) => setTimeout(r, CLIPBOARD_POLL_MS))
+      }
+    } catch (e) {
+      logger.warn(`input:type: could not put the pasteboard back after typing (${e instanceof Error ? e.message : String(e)})`)
+    }
+  }
+
   private sentinelParked(deviceId: string): boolean {
     return (this.parkedSentinels.get(deviceId) ?? 0) > 0
   }
@@ -2227,17 +2252,32 @@ export class IOSAgent implements DeviceAgent, NetworkControlCapability, Posturab
         // keyboard context and the chord is dropped (same guard as input:key).
         const doType = async (): Promise<void> => {
           if (!text) return
-          await this.simctl.setPasteboard(state.deviceId, text)
-          if (state.softKeyboardVisible) {
-            state.softKeyboardVisible = false
-            await this.simctl.hideSoftwareKeyboard(state.deviceId).catch(() => {})
-          }
-          // Throwing routes into the input:type-error below. Without it a dropped chord still
-          // answers input:type-done: the text sits on the device pasteboard, nothing was pasted
-          // into the app, and the caller moves on. Unlike the copy path in clipboard:read there
-          // is no pasteboard deadline here to fail loudly in its place.
-          if (!state.touchHelper?.sendKey(KEY_CODE_MAP['KeyV'], MODIFIER_BITS['MetaLeft'])) {
-            throw new PlatformError('Cannot paste the text — no input channel to the device')
+          // What the pasteboard held goes back once the paste has landed (#1129): the text can be a flow's secret,
+          // and left there anyone who opens this simulator next could paste it. Unreadable, it is emptied instead.
+          // A sentinel a `clipboard:read` gave up restoring is not something to put back.
+          const raw = await this.simctl.getPasteboard(state.deviceId).catch(() => '')
+          const before = isSentinel(raw) ? '' : raw
+          try {
+            // Inside the try: the write can reject after the device took the text (a killed pbcopy), as
+            // `clipboard:read` records for its sentinel, and the text must not stay then either.
+            await this.simctl.setPasteboard(state.deviceId, text)
+            if (state.softKeyboardVisible) {
+              state.softKeyboardVisible = false
+              await this.simctl.hideSoftwareKeyboard(state.deviceId).catch(() => {})
+            }
+            // Throwing routes into the input:type-error below. Without it a dropped chord still
+            // answers input:type-done: the text sits on the device pasteboard, nothing was pasted
+            // into the app, and the caller moves on. Unlike the copy path in clipboard:read there
+            // is no pasteboard deadline here to fail loudly in its place.
+            if (!state.touchHelper?.sendKey(KEY_CODE_MAP['KeyV'], MODIFIER_BITS['MetaLeft'])) {
+              throw new PlatformError('Cannot paste the text — no input channel to the device')
+            }
+            // The chord is sent, not read: the app reads the pasteboard when it handles it, and restoring
+            // sooner pastes the old contents instead. Measured against host load, not against an app whose main
+            // thread is stalled past the wait plus the restore's own pbcopy: there it would paste `before`.
+            await new Promise((r) => setTimeout(r, PASTE_SETTLE_MS))
+          } finally {
+            await this.restorePasteboard(state.deviceId, before)
           }
         }
         // Ack on completion so a following input step (e.g. pressKey Enter) is

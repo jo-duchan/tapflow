@@ -4,7 +4,7 @@ import http from 'http'
 import os from 'os'
 import path from 'path'
 import { spawnSync } from 'child_process'
-import { ValidationError, PlatformError, MAX_CLIPBOARD_BYTES, SHUTDOWN_NO_SESSION_STATE } from '@tapflowio/agent-core'
+import { ValidationError, PlatformError, MAX_CLIPBOARD_BYTES, SHUTDOWN_NO_SESSION_STATE, CLIPBOARD_SENTINEL_PREFIX } from '@tapflowio/agent-core'
 import { ClipboardTooLargeError } from '../SimctlWrapper.js'
 import { SimulatorNetwork } from '../SimulatorNetwork.js'
 
@@ -2085,6 +2085,70 @@ describe('IOSAgent', () => {
       // budget is what CI twice proved too small.
     }, 25_000)
 
+    // #1129: the typed text can be a flow's secret, and the pasteboard is where the next person to open this simulator
+    // would find it. What was there goes back once the paste has landed.
+    it('puts back what the pasteboard held, after the paste and before the ack', async () => {
+      const { browser, agent, simctl, th } = await bootedSession()
+      pasteboard = 'hello'
+      const done = waitForType(browser, 'input:type-done')
+      browser.send(JSON.stringify({ type: 'input:type', requestId: 'rq-pb1', sessionId: agent.sessionId, payload: { text: 'hunter2' } }))
+      await done
+      expect(pasteboard).toBe('hello')
+      const sets = (simctl.setPasteboard as ReturnType<typeof vi.fn>).mock
+      const typed = sets.calls.findIndex((c) => c[1] === 'hunter2')
+      const restored = sets.calls.findIndex((c, i) => i > typed && c[1] === 'hello')
+      expect(typed).toBeGreaterThanOrEqual(0)
+      expect(restored).toBeGreaterThan(typed)
+      const paste = th.sendKey.mock.invocationCallOrder.at(-1)!
+      expect(paste).toBeGreaterThan(sets.invocationCallOrder[typed]!)
+      expect(paste).toBeLessThan(sets.invocationCallOrder[restored]!)
+      agent.disconnect()
+      browser.close()
+    })
+
+    it('empties the pasteboard when what it held cannot be read, and still answers done when the restore fails', async () => {
+      const { browser, agent, simctl } = await bootedSession()
+      pasteboard = 'unreadable'
+      ;(simctl.getPasteboard as ReturnType<typeof vi.fn>).mockRejectedValueOnce(new Error('pbpaste failed'))
+      let done = waitForType(browser, 'input:type-done')
+      browser.send(JSON.stringify({ type: 'input:type', requestId: 'rq-pb2', sessionId: agent.sessionId, payload: { text: 'hunter2' } }))
+      await done
+      expect(pasteboard).toBe('')
+
+      const set = simctl.setPasteboard as ReturnType<typeof vi.fn>
+      set.mockImplementation(async (_d: string, t: string) => { if (t !== 'hunter2') throw new Error('pbcopy failed'); pasteboard = t })
+      done = waitForType(browser, 'input:type-done')
+      browser.send(JSON.stringify({ type: 'input:type', requestId: 'rq-pb3', sessionId: agent.sessionId, payload: { text: 'hunter2' } }))
+      await done
+      agent.disconnect()
+      browser.close()
+    })
+
+    it('puts the pasteboard back when writing the text failed after the device took it', async () => {
+      const { browser, agent, simctl } = await bootedSession()
+      pasteboard = 'hello'
+      const set = simctl.setPasteboard as ReturnType<typeof vi.fn>
+      set.mockImplementationOnce(async (_d: string, t: string) => { pasteboard = t; throw new Error('pbcopy killed') })
+      const errored = waitForType(browser, 'input:type-error')
+      browser.send(JSON.stringify({ type: 'input:type', requestId: 'rq-pb4', sessionId: agent.sessionId, payload: { text: 'hunter2' } }))
+      const e = await errored
+      expect(pasteboard).toBe('hello')
+      expect(JSON.stringify(e)).not.toContain('hunter2')
+      agent.disconnect()
+      browser.close()
+    })
+
+    it('does not put back a sentinel a clipboard read left behind', async () => {
+      const { browser, agent } = await bootedSession()
+      pasteboard = `${CLIPBOARD_SENTINEL_PREFIX}left-behind`
+      const done = waitForType(browser, 'input:type-done')
+      browser.send(JSON.stringify({ type: 'input:type', requestId: 'rq-pb5', sessionId: agent.sessionId, payload: { text: 'hunter2' } }))
+      await done
+      expect(pasteboard).toBe('')
+      agent.disconnect()
+      browser.close()
+    })
+
     it('answers input:type-error when the paste chord is dropped', async () => {
       // No pasteboard deadline guards this path, unlike the copy in clipboard:read — the text
       // lands on the device clipboard and nothing reaches the app under test.
@@ -2099,6 +2163,8 @@ describe('IOSAgent', () => {
       // The client tests that echo it echo it correctly, so a predicate that stopped checking matched either
       // way — which is what makes an assertion at the producer the only real one.
       expect(e.requestId).toBe('rq-in22')
+      // Nothing was pasted, and the text does not stay behind either.
+      expect(pasteboard).toBe('')
 
       agent.disconnect()
       browser.close()
