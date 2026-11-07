@@ -1,5 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import { CaptureStore, type CapturedMessage, type Holder } from '../capture/CaptureStore'
+import { chromeOrientation } from '@tapflowio/protocol/screen'
+import type { ChromePayload } from '@tapflowio/protocol'
 
 // The rules of Flow Capture's in-memory record (#1125). `flowCaptureRelay.test.ts` holds the wiring through the relay.
 
@@ -77,6 +79,25 @@ describe('what is recorded', () => {
     const { s } = store({ chromeOf: () => ({ streamRotation: 90 }) })
     s.recordInput('s', ALICE, tap()[0]!)
     expect(entries(s)[0]).toMatchObject({ kind: 'chrome', chrome: { streamRotation: 90 } })
+  })
+
+  // A bezel is hundreds of kilobytes of base64; kept, every turn would eat the budget and push out the steps.
+  it('keeps the chrome\'s geometry and drops its pictures, on both ways in', () => {
+    const iosChrome = {
+      framePng: 'x'.repeat(200_000), streamRotation: 90, screenCornerRadius: 40,
+      buttons: [{ name: 'action', buttonPng: 'y'.repeat(10_000), pressedPng: 'z'.repeat(10_000), anchor: 'left' }],
+    }
+    const { s } = store({ chromeOf: () => iosChrome })
+    s.recordInput('s', ALICE, tap()[0]!)
+    s.recordChrome('s', ALICE, iosChrome)
+    for (const e of entries(s).filter((x) => x.kind === 'chrome')) {
+      const chrome = (e as { chrome: Record<string, unknown> }).chrome
+      expect(chrome).toMatchObject({ framePng: '', streamRotation: 90, screenCornerRadius: 40, buttons: [{ name: 'action', anchor: 'left' }] })
+      expect(JSON.stringify(chrome).length).toBeLessThan(500)
+      // Still read as iOS chrome: the key is what says so.
+      expect(chromeOrientation(chrome as unknown as ChromePayload)).toBe('landscape')
+    }
+    expect(iosChrome.framePng).toHaveLength(200_000)
   })
 
   it('never throws into the input path', () => {

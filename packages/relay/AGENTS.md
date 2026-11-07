@@ -260,7 +260,8 @@ of what follows exists because of that.
 - **Recorded after the send, never before.** One `captures.recordInput` call follows each `agentSocket.send` in the
   input, app-command, clipboard and network paths, so a refused input is not recorded. `CaptureStore` never throws into
   that path. The agent's ack is recorded too (`recordAck`), so a refused or failed input reads differently from one that
-  landed, and so is each chrome change (a turn or fold: points on either side are in different frames).
+  landed, and so is each chrome change (a turn or fold: points on either side are in different frames) — its geometry
+  only: the bezel and button images are emptied (`withoutImages`), keeping `framePng` as a key since it marks iOS chrome.
 - **Who is recorded**: a holder that declared `clientKind: 'dashboard'`, whose user is a real user id (not `anon` or
   `unidentified:*` — nobody could read that back with a cookie), and whose own setting is on (`users.flow_capture`,
   migration 023). The setting is read from `FlowCapturePreference`, a memory map the preferences route writes through,

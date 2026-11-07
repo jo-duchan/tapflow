@@ -85,6 +85,25 @@ const isAnchor = (e: CaptureEntry): boolean => e.kind === 'input' && ANCHORS.has
 const startsClean = (e: CaptureEntry): boolean =>
   e.kind === 'input' && (OPENS.has(e.msg.type) || !/^input:(touch|pinch):(move|end|cancel)$/.test(e.msg.type))
 
+/**
+ * The chrome with its pictures emptied: the bezel (`framePng`) and each button's images are base64 PNGs, often hundreds
+ * of kilobytes, and a capture needs the geometry, not the artwork. `framePng` is kept as a key, set to `''`, because its
+ * presence is what marks an iOS chrome (`chromeOrientation` in `@tapflowio/protocol/screen` reads it that way).
+ */
+export function withoutImages(chrome: unknown): unknown {
+  if (typeof chrome !== 'object' || chrome === null || Array.isArray(chrome)) return chrome
+  const out: Record<string, unknown> = { ...chrome }
+  if (typeof out['framePng'] === 'string') out['framePng'] = ''
+  if (Array.isArray(out['buttons'])) {
+    out['buttons'] = out['buttons'].map((b: unknown) => {
+      if (typeof b !== 'object' || b === null) return b
+      const { buttonPng: _b, pressedPng: _p, ...rest } = b as Record<string, unknown>
+      return rest
+    })
+  }
+  return out
+}
+
 /** Only a signed-in person: `anon` and `unidentified:*` have no cookie to read their capture back with. */
 export const isPersonUser = (user: string | null): user is string => user !== null && /^\d+$/.test(user)
 
@@ -132,7 +151,7 @@ export class CaptureStore {
   recordChrome(sessionId: string, holder: Holder, chrome: unknown): void {
     try {
       const capture = this.captureFor(sessionId, holder)
-      if (capture) this.append(capture, { at: this.now(), kind: 'chrome', chrome })
+      if (capture) this.append(capture, { at: this.now(), kind: 'chrome', chrome: withoutImages(chrome) })
     } catch { /* see recordInput */ }
   }
 
@@ -231,7 +250,7 @@ export class CaptureStore {
       capture = { id: randomUUID(), ownerUser: holder.user, startedAt: this.now(), entries: [], bytes: 0, thinned: false }
       this.captures.set(sessionId, capture)
       const chrome = this.opts.chromeOf?.(sessionId)
-      if (chrome !== undefined) this.append(capture, { at: this.now(), kind: 'chrome', chrome })
+      if (chrome !== undefined) this.append(capture, { at: this.now(), kind: 'chrome', chrome: withoutImages(chrome) })
     }
     return capture
   }
