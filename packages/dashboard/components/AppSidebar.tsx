@@ -17,6 +17,7 @@ import {
 } from '@/components/ui/sidebar'
 import {
   DropdownMenu,
+  DropdownMenuCheckboxItem,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuSeparator,
@@ -24,8 +25,10 @@ import {
 } from '@/components/ui/dropdown-menu'
 import { useAuth } from '@/hooks/useAuth'
 import { maySeeSettingsPage } from '@/lib/settingsAccess'
-import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { getSettings, hasAnyRun, queryKeys } from '@/lib/queries'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { getSettings, hasAnyRun, queryKeys, setFlowCapture } from '@/lib/queries'
+import type { AuthUser } from '@/hooks/useAuth'
+import { toast } from 'sonner'
 import { UserAvatar } from '@/components/UserAvatar'
 
 const FLOW_RUNS_HREF = '/automation/runs'
@@ -74,6 +77,26 @@ export function AppSidebar() {
   const anyRun = useQuery({ queryKey: queryKeys.anyRun, queryFn: ({ signal }) => hasAnyRun(signal) })
   const showFlowRuns = anyRun.data === true || anyRun.isError || pathname.startsWith(FLOW_RUNS_HREF)
   const visibleNavItems = navItems.filter((item) => item.href !== FLOW_RUNS_HREF || showFlowRuns)
+
+  // Written into the cached user at once, so the info card's chip follows the click; put back if the relay refuses.
+  const flowCapture = useMutation({
+    mutationFn: setFlowCapture,
+    onMutate: async (on) => {
+      // A `me` refetch already in flight (window focus) would land after this and put the old value back.
+      await queryClient.cancelQueries({ queryKey: queryKeys.me })
+      const before = queryClient.getQueryData<AuthUser | null>(queryKeys.me)
+      if (before) queryClient.setQueryData<AuthUser>(queryKeys.me, { ...before, flowCapture: on })
+      return { before }
+    },
+    onError: (_e, _on, ctx) => {
+      if (ctx?.before) queryClient.setQueryData(queryKeys.me, ctx.before)
+      toast.error('Could not change step capturing. Try again.')
+    },
+    onSuccess: (on) => {
+      const now = queryClient.getQueryData<AuthUser | null>(queryKeys.me)
+      if (now) queryClient.setQueryData<AuthUser>(queryKeys.me, { ...now, flowCapture: on })
+    },
+  })
 
   async function handleLogout() {
     await fetch('/api/v1/auth/logout', { method: 'POST', credentials: 'include' })
@@ -159,13 +182,36 @@ export function AppSidebar() {
                 </div>
               </button>
             </DropdownMenuTrigger>
-            <DropdownMenuContent side="top" align="start" className="w-56">
+            <DropdownMenuContent side="top" align="start" className="w-72">
               <DropdownMenuItem asChild>
                 <Link to="/settings/default" onClick={closeSheet}>
                   <Settings className="mr-2 h-4 w-4" />
                   Settings
                 </Link>
               </DropdownMenuItem>
+              {/* Absent from a relay that predates Flow Capture (#1125): nothing to turn off there. */}
+              {user.flowCapture !== undefined && (
+                <>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuCheckboxItem
+                    checked={user.flowCapture}
+                    onCheckedChange={(on) => flowCapture.mutate(on)}
+                    // Kept open: the description says what changed, and a second click undoes it.
+                    onSelect={(e) => e.preventDefault()}
+                    className="items-start"
+                    // Named by the first line and described by the second, so the name is not the whole paragraph.
+                    aria-labelledby="flow-capture-label"
+                    aria-describedby="flow-capture-hint"
+                  >
+                    <span className="flex flex-col">
+                      <span id="flow-capture-label">Capture my steps</span>
+                      <span id="flow-capture-hint" className="mt-0.5 text-xs leading-snug text-muted-foreground">
+                        Remember taps, swipes and typing in my sessions so I can save them as a flow. Kept only until the session ends.
+                      </span>
+                    </span>
+                  </DropdownMenuCheckboxItem>
+                </>
+              )}
               <DropdownMenuSeparator />
               <DropdownMenuItem onClick={handleLogout} className="text-destructive focus:bg-destructive/10 focus:text-destructive">
                 <LogOut className="mr-2 h-4 w-4" />

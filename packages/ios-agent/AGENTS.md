@@ -322,6 +322,7 @@ The iOS UI tree comes from a resident **XCUITest runner** that runs *inside* the
 - Frames: debugDescription frames are points; the parser normalizes them 0-1 against the `Window` frame (same coordinate space as the touch path).
 - Lifecycle: started when an automation client (flow runner, MCP) boots the device, otherwise on the first UI-tree query, so the manual QA / streaming path never pays for it (about 650 MB per device). Killed on that device's shutdown, before an erase boot, and for every device on disconnect.
 - `enabled`: debugDescription does not expose it, so elements default to `enabled: true`. If fidelity needs it, switch to the private snapshot API (plan Open Q9).
+- `secure` / `focused` (Flow Capture, #1125): `secure` is `type === 'SecureTextField'`, stated `true` or `false` on **every** input so that an input without it means "unknown" to a consumer deciding whether typed text may be written down. `focused` comes from `Keyboard Focused` in the line's **trailing flags only** — the whole line would match a quoted label containing those words — and only on an input: a tab prints `Selected, Focused` and is not where typing goes. Measured on iOS 26.5 / Xcode 26.6 and iOS 27.0 / Xcode 27.1, UIKit and SwiftUI alike: `SecureTextField, …, placeholderValue: 'Password', value: •••, Keyboard Focused`.
 
 When changing the tree output shape, **update both locations simultaneously**:
 1. `xctest-runner/TreeRunner/TreeServer.swift` — server / debugDescription source

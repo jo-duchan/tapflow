@@ -3,7 +3,6 @@
 import { useMemo, useState } from 'react';
 import { ScanLine } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import { Separator } from '@/components/ui/separator';
 import { performanceMode } from '@/lib/decoders/pickDecoder';
 import { PerformanceModeNotice } from '@/components/perf/PerformanceModeNotice';
 import { shouldAutoShowPerfNotice, PERF_NOTICE_KEY } from '@/lib/perfNotice';
@@ -40,7 +39,13 @@ interface SimulatorInfoCardProps {
   /** A fact about this session that does not change, shown under the status. Outside the live region:
    *  it is not a transition, and announcing it would only repeat what is on screen. */
   note?: string;
+  /** Flow Capture (#1125): whether the relay is keeping this person's steps, by their own setting. A state only —
+   *  the setting is changed in the account menu. Absent shows no chip, for a relay that predates it. */
+  capturingSteps?: boolean;
 }
+
+/** One cell of the card's grid. Figma `tapflow-product` 284:2 (287:611). */
+const CHIP = 'flex min-w-0 items-center gap-1.5 rounded bg-muted px-2.5 py-[5px] text-[11px] leading-[18px] text-muted-foreground';
 
 function getStatusText(props: SimulatorInfoCardProps): string | null {
   const { connected, joined, bootError, bootWaiting, deviceReady, installing, installError, agentAway, decoderUnsupported } = props;
@@ -64,9 +69,8 @@ export function SimulatorInfoCard(props: SimulatorInfoCardProps) {
   // fps is intentionally low when screen is static (idle keep-alive ~10fps).
   // Use "active/idle" framing instead of red/green to avoid false alarm.
   const isActive = fps > 15;
-  // fps 0 (fully static screen / between frames) is still idle, not a blank state — keep the gray
-  // dot and "Idle" label instead of hiding them.
-  const dotColor = isActive ? '#10b981' : '#94a3b8';
+  // fps 0 (fully static screen / between frames) is still idle, not a blank state — keep the "Idle"
+  // label instead of hiding it.
   const stateLabel = isActive ? 'Active' : 'Idle';
   // Decode path is a stable per-browser capability; compute once, not per device card.
   const mode = useMemo(() => performanceMode(), []);
@@ -93,62 +97,53 @@ export function SimulatorInfoCard(props: SimulatorInfoCardProps) {
   };
 
   return (
-    <div className="w-[300px] shrink-0 mt-3 rounded-xl border bg-background px-4 py-4 flex flex-col gap-3">
-      {/* The state is a word, not only the colour (#747, WCAG 1.4.1): emerald against grey was the whole
-          difference, which anyone who cannot separate those two colours, or who hears the card, could not
-          read. */}
-      <div
-        className={cn(
-          'flex items-center',
-          keyboardActive ? 'text-emerald-500' : 'text-muted-foreground',
+    <div className="w-[300px] shrink-0 mt-3 rounded-xl border bg-background p-3.5 flex flex-col gap-3">
+      <div className="grid grid-cols-2 gap-2.5">
+        {/* The state is a word, not only the colour (#747, WCAG 1.4.1): emerald against grey was the whole
+            difference, which anyone who cannot separate those two colours, or who hears the card, could not
+            read. */}
+        <div className={cn(CHIP, keyboardActive && 'text-emerald-500')}>
+          <ScanLine className="h-3.5 w-3.5 shrink-0" />
+          <span>Focus</span>
+          {/* Styled like the fps cell's `· Active` / `· Idle`, so the card has one look for a state word. */}
+          <span aria-hidden="true" className="text-muted-foreground/60">·</span>
+          <span className={keyboardActive ? 'text-emerald-500' : 'text-muted-foreground/60'}>{keyboardActive ? 'On' : 'Off'}</span>
+        </div>
+        {props.capturingSteps !== undefined && (
+          // A different look from the screen recording's red dot on purpose: this records steps, not video.
+          <div className={CHIP}>
+            <span
+              aria-hidden="true"
+              className={cn('h-2 w-2 shrink-0 rounded-full', props.capturingSteps ? 'bg-amber-400' : 'bg-muted-foreground/40')}
+            />
+            <span>{props.capturingSteps ? 'Capturing steps' : 'Not capturing steps'}</span>
+          </div>
         )}
-        style={{ gap: 6 }}
-      >
-        <ScanLine className="h-3.5 w-3.5 shrink-0" />
-        <span className="text-[12px] font-medium">Focus</span>
-        {/* Styled like the fps row's `· Active` / `· Idle`, so the card has one look for a state word. */}
-        <span aria-hidden="true" className="text-[11px] text-muted-foreground/60">·</span>
-        <span className={cn('text-[11px]', keyboardActive ? 'text-emerald-500' : 'text-muted-foreground/60')}>
-          {keyboardActive ? 'On' : 'Off'}
-        </span>
-      </div>
 
-      {joined && (
-        <div className="flex items-center gap-[12px]">
-          <div className="flex items-center gap-[4px]">
-            <span className="h-2 w-2 rounded-full shrink-0 mr-1" style={{ background: dotColor }} />
-            <span className="text-[12px] font-mono text-foreground/75">{fps}</span>
-            <span className="text-[12px] text-muted-foreground">fps</span>
-            {stateLabel && <span className="text-[11px] text-muted-foreground/60">·</span>}
-            {stateLabel && (
-              <span
-                className={cn(
-                  'text-[11px]',
-                  isActive ? 'text-emerald-500' : 'text-muted-foreground/60',
-                )}
+        {joined && (
+          <div className={cn(CHIP, 'gap-1')}>
+            <span className="font-mono text-foreground/75">{fps}</span>
+            <span>fps</span>
+            <span aria-hidden="true" className="text-muted-foreground/60">·</span>
+            <span className={isActive ? 'text-emerald-500' : 'text-muted-foreground/60'}>{stateLabel}</span>
+          </div>
+        )}
+        {joined && modeLabel && (
+          <div className={CHIP}>
+            {mode === 'standard' ? (
+              <button
+                type="button"
+                onClick={() => setNoticeOpen(true)}
+                className="text-foreground/70 hover:text-foreground underline-offset-2 hover:underline"
               >
-                {stateLabel}
-              </span>
+                {modeLabel}
+              </button>
+            ) : (
+              <span>{modeLabel}</span>
             )}
           </div>
-          {modeLabel && (
-            <>
-              <Separator orientation="vertical" className="h-3" />
-              {mode === 'standard' ? (
-                <button
-                  type="button"
-                  onClick={() => setNoticeOpen(true)}
-                  className="text-[11px] text-foreground/70 hover:text-foreground underline-offset-2 hover:underline"
-                >
-                  {modeLabel}
-                </button>
-              ) : (
-                <span className="text-[11px] text-muted-foreground">{modeLabel}</span>
-              )}
-            </>
-          )}
-        </div>
-      )}
+        )}
+      </div>
 
       {/* **The region is always mounted and the sentence arrives inside it**, which is the shape a
           live region has to have. This sentence is the only thing that says what a boot is doing, and
@@ -166,7 +161,7 @@ export function SimulatorInfoCard(props: SimulatorInfoCardProps) {
           mounting it early. */}
       <div role="status" className={statusText ? undefined : 'sr-only'}>
       {statusText && (
-        <p className="text-[12px] text-muted-foreground leading-relaxed break-words">{statusText}</p>
+        <p className="rounded bg-muted px-2.5 py-[5px] text-[12px] text-muted-foreground leading-relaxed break-words">{statusText}</p>
       )}
       </div>
 

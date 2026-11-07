@@ -64,6 +64,9 @@ interface RawNode {
   identifier?: string
   label?: string
   placeholder?: string
+  /** Text-input focus: the line's trailing flags carry `Keyboard Focused`. A bare `Focused` is not it — a focused
+   *  button prints that too (`Selected, Focused` on a tab), and typing does not go there. */
+  focused?: boolean
 }
 
 const FRAME_RE = /\{\{(-?[\d.]+), (-?[\d.]+)\}, \{(-?[\d.]+), (-?[\d.]+)\}\}/
@@ -82,6 +85,9 @@ const LABEL_RE = new RegExp(String.raw`, label: '(.*?)'(?=, placeholderValue: |,
 // Kept after typing: measured, a field holding "abc" still prints `placeholderValue: 'Email', value: abc`. An
 // empty field echoes the placeholder into `value` too, which is one reason `value` is not read here.
 const PLACEHOLDER_RE = new RegExp(String.raw`, placeholderValue: '(.*?)'(?=, value: |${TRAILING_FLAGS})`)
+// Read from the flags at the end of the line only. Searching the whole line would take `label: 'Tap, Keyboard
+// Focused'` for a flag; a quoted field ends in `'`, so the tail cannot reach into one.
+const FLAG_TAIL_RE = new RegExp(TRAILING_FLAGS)
 
 function parseLine(line: string): RawNode | null {
   // Strip indentation + the root arrow, then take the type up to ", 0x<addr>".
@@ -99,6 +105,8 @@ function parseLine(line: string): RawNode | null {
   if (lm) node.label = lm[1]
   const pm = PLACEHOLDER_RE.exec(line)
   if (pm && pm[1] !== '') node.placeholder = pm[1]
+  const tail = FLAG_TAIL_RE.exec(line)?.[0] ?? ''
+  if (tail.split(', ').includes('Keyboard Focused')) node.focused = true
   return node
 }
 
@@ -169,6 +177,9 @@ export function parseTreeText(text: string): UIElement[] {
     if (node.identifier) element.identifier = node.identifier
     if (node.placeholder) element.placeholder = node.placeholder
     element.rawRole = node.type
+    // Stated on every input so that a missing value means "unknown" (see `UIElement.secure`).
+    if (role === 'input') element.secure = node.type === 'SecureTextField'
+    if (node.focused && role === 'input') element.focused = true
     elements.push(element)
   }
   return elements

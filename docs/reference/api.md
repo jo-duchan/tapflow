@@ -117,11 +117,12 @@ Return the currently signed-in user's info.
   "email": "admin@example.com",
   "displayName": "Admin",
   "avatarUrl": "/uploads/avatars/user-1.png",
-  "role": "Admin"
+  "role": "Admin",
+  "flowCapture": true
 }
 ```
 
-`avatarUrl` is `null` when there is no profile image.
+`avatarUrl` is `null` when there is no profile image. `flowCapture` says whether the relay remembers this user's QA steps ([`PATCH /api/v1/me/preferences`](#patch-api-v1-me-preferences)).
 
 
 ### `POST /api/v1/auth/change-password`
@@ -752,6 +753,26 @@ File:
 ```
 
 
+### `PATCH /api/v1/me/preferences`
+
+Change the signed-in user's own settings. Call it with the session cookie only; every role can, Viewer included.
+
+```
+Body (JSON):
+  flowCapture  boolean  required
+```
+
+When `flowCapture` is `true`, the relay remembers the taps, swipes and typing this user does in the dashboard, in memory, for the length of the session. It is `true` by default. Setting it to `false` also discards what was already remembered.
+
+**Response `200`**
+
+```json
+{ "flowCapture": false }
+```
+
+Returns `400` when the value is not a boolean.
+
+
 ## Settings {#settings}
 
 ### `GET /api/v1/settings`
@@ -1188,6 +1209,39 @@ Return the UI elements on the session device's current screen.
 `frame` is a 0–1 fraction of the screen size, measured on the screen as the app draws it. The error status codes match the screenshot endpoint, with a 15-second timeout.
 
 `interfaceTurn` is how many degrees clockwise the device's portrait screen has to turn for the app's interface to stand upright: `0`, `90`, `180` or `270`. It is present only when the agent can read the app's orientation, which today is iOS only. When it is absent, there is no information about the turn.
+
+Text fields (`role: "input"`) carry `secure`: `true` for a field that hides what is typed, such as a password, and `false` otherwise. Any other element that reports hiding its text has `secure: true` too. A text field without `secure` means the agent could not tell, so treat it as a password field. The field that is taking typing now has `focused: true`.
+
+
+## Flow Capture
+
+The dashboard uses these endpoints to save what you tested as a flow. They are for the dashboard and may change between releases. Call them with the session cookie only; a PAT gets `401`. The remembered steps include what was typed, so only the user whose steps they are gets an answer. Anyone else gets `404`.
+
+### `POST /api/v1/sessions/:sessionId/capture/snapshot`
+
+Make a fixed copy of the steps remembered so far, and return it. Calling it again makes a new copy. Returns `404` when no steps are remembered.
+
+### `GET /api/v1/sessions/:sessionId/capture/snapshot`
+
+Return the last copy made. Returns `404` when there is none.
+
+### `DELETE /api/v1/sessions/:sessionId/capture/snapshot`
+
+Discard the copy. Returns `404` when there is none.
+
+### `PUT /api/v1/sessions/:sessionId/capture/pause`
+
+Stop remembering for a while. The dashboard uses it while it replays the remembered steps on the device, so the replay is not remembered as the person's input. The pause lifts on its own after the `ttlMs` in the response (30 seconds), and calling it again extends it. Returns `404` when no steps are remembered. A `404` during a replay means remembering has already ended, so stop the replay.
+
+**Response `200`**
+
+```json
+{ "ok": true, "ttlMs": 30000 }
+```
+
+### `DELETE /api/v1/sessions/:sessionId/capture/pause`
+
+Lift the pause now. Returns `404` when nothing is paused.
 
 
 ## Relay

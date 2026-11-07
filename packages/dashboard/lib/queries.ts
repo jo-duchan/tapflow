@@ -55,6 +55,14 @@ export async function getMe(): Promise<AuthUser | null> {
   return data
 }
 
+/** Flow Capture (#1125): whether the relay keeps the signed-in person's QA steps. Turning it off also discards what
+ *  it already kept. */
+export async function setFlowCapture(on: boolean): Promise<boolean> {
+  const { data, error } = await api.patch<{ flowCapture: boolean }>('/api/v1/me/preferences', { flowCapture: on })
+  if (!data) throw new Error(error ?? 'Could not save the setting')
+  return data.flowCapture
+}
+
 /** The role an invitation grants. Throws for a token the relay refuses. */
 export async function verifyInvitation(token: string): Promise<{ role: string }> {
   const res = await fetch(`/api/v1/invitations/verify?token=${token}`)

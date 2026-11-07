@@ -76,6 +76,9 @@ interface IOSViewerProps {
   onReboot: () => void;
   /** The toolbar's restart button, so `DeviceViewer` can put focus back on it after a restart. */
   restartButtonRef: MutableRefObject<HTMLButtonElement | null>;
+  /** Flow Capture (#1125): whether the relay is keeping this person's steps — their own setting. Absent shows no
+   *  chip (a relay that predates the setting). */
+  capturingSteps?: boolean;
   perfHookRef?: MutableRefObject<PerfHook>;
   /** Told the size the stream arrives at, so a viewer with no chrome from the agent can take the
    *  device's real aspect (see `framelessChrome`). */
@@ -90,7 +93,7 @@ export function IOSViewer({
   launching, chrome, formFactor,
   binaryFrameHandlerRef, clipboardHandlerRef, clipboardSupported, networkHandlerRef, networkSupported, onRecordingUploaded,
   swKeyboardVisible, swKeyboardPending, onKbdToggle,
-  rebootPending, onReboot, restartButtonRef,
+  rebootPending, onReboot, restartButtonRef, capturingSteps,
   perfHookRef, onStreamSize, postures,
 }: IOSViewerProps) {
   const { fps, frameCount } = useFps();
@@ -780,6 +783,7 @@ export function IOSViewer({
           installing={installing} installError={installError}
           decoderUnsupported={decoderUnsupported}
           keyboardActive={keyboardActive}
+          capturingSteps={capturingSteps}
           note={isFramelessChrome(chrome)
             ? "The device frame couldn't be loaded, so its side buttons (lock, volume) are unavailable this session."
             : undefined}

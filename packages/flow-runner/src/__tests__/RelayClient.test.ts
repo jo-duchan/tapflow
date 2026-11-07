@@ -80,6 +80,8 @@ describe('RelayClient.queryUITree — transient vs permanent classification', ()
     { elements: [{}] },
     { elements: [{ role: 'button', label: 'x', frame: { x: -1, y: 0, width: 1, height: 1 }, enabled: true }] },
     { elements: [{ role: 'future-role', label: 'x', frame: { x: 0, y: 0, width: 1, height: 1 }, enabled: true }] },
+    { elements: [{ role: 'input', label: 'x', frame: { x: 0, y: 0, width: 1, height: 1 }, enabled: true, secure: 'true' }] },
+    { elements: [{ role: 'input', label: 'x', frame: { x: 0, y: 0, width: 1, height: 1 }, enabled: true, focused: 1 }] },
   ])('classifies invalid response shapes as permanent relay errors', async (body) => {
     vi.spyOn(globalThis, 'fetch').mockResolvedValue({
       ok: true,

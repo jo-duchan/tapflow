@@ -117,11 +117,12 @@ Body (JSON):
   "email": "admin@example.com",
   "displayName": "Admin",
   "avatarUrl": "/uploads/avatars/user-1.png",
-  "role": "Admin"
+  "role": "Admin",
+  "flowCapture": true
 }
 ```
 
-`avatarUrl`은 프로필 이미지가 없으면 `null`입니다.
+`avatarUrl`은 프로필 이미지가 없으면 `null`입니다. `flowCapture`는 이 사용자의 QA 단계를 릴레이가 기억하는지 여부입니다([`PATCH /api/v1/me/preferences`](#patch-api-v1-me-preferences)).
 
 
 ### `POST /api/v1/auth/change-password`
@@ -752,6 +753,26 @@ File:
 ```
 
 
+### `PATCH /api/v1/me/preferences`
+
+현재 로그인한 사용자의 개인 설정을 바꿉니다. 세션 쿠키로만 호출할 수 있으며 Viewer를 포함한 모든 역할이 쓸 수 있습니다.
+
+```
+Body (JSON):
+  flowCapture  boolean  필수
+```
+
+`flowCapture`가 `true`이면 사용자가 대시보드에서 한 탭, 스와이프, 입력을 릴레이가 세션 동안 메모리에 기억합니다. 기본값은 `true`입니다. `false`로 바꾸면 이미 기억한 내용도 바로 버립니다.
+
+**응답 `200`**
+
+```json
+{ "flowCapture": false }
+```
+
+값이 boolean이 아니면 `400`을 반환합니다.
+
+
 ## 설정 (Settings) {#settings}
 
 <a id="설정-settings"></a>
@@ -1190,6 +1211,39 @@ Query:
 `frame`은 화면 크기에 대한 0–1 비율이며 앱이 그려진 방향의 화면을 기준으로 합니다. 오류 상태 코드는 스크린샷과 같으며 시간 초과는 15초입니다.
 
 `interfaceTurn`은 기기의 세로 화면을 시계 방향으로 몇 도 돌려야 앱 화면이 똑바로 서는지 나타냅니다(`0`, `90`, `180`, `270`). 에이전트가 앱의 방향을 읽을 수 있을 때만 들어 있으며 현재는 iOS만 보냅니다. 값이 없으면 방향 정보가 없다는 뜻입니다.
+
+입력 칸(`role: "input"`)에는 `secure`가 함께 옵니다. 비밀번호처럼 입력한 글자를 가리는 칸이면 `true`, 아니면 `false`입니다. 입력 칸이 아니어도 글자를 가린다고 알려 온 요소에는 `secure: true`가 붙습니다. 입력 칸인데 `secure`가 없으면 에이전트가 판단하지 못했다는 뜻이므로 비밀번호 칸으로 다루세요. 지금 입력을 받는 칸에는 `focused: true`가 붙습니다.
+
+
+## Flow Capture
+
+대시보드가 테스트한 내용을 플로우로 저장할 때 쓰는 엔드포인트입니다. 대시보드용이라 릴리스 사이에 바뀔 수 있습니다. 세션 쿠키로만 호출할 수 있고 PAT는 `401`을 받습니다. 기억한 단계에는 입력한 글자가 들어 있어서 그 단계의 주인인 사용자에게만 응답합니다. 다른 사용자에게는 `404`를 반환합니다.
+
+### `POST /api/v1/sessions/:sessionId/capture/snapshot`
+
+지금까지 기억한 단계를 고정한 사본을 만들어 반환합니다. 다시 호출하면 사본을 새로 만듭니다. 기억한 단계가 없으면 `404`를 반환합니다.
+
+### `GET /api/v1/sessions/:sessionId/capture/snapshot`
+
+마지막으로 만든 사본을 반환합니다. 사본이 없으면 `404`를 반환합니다.
+
+### `DELETE /api/v1/sessions/:sessionId/capture/snapshot`
+
+사본을 버립니다. 사본이 없으면 `404`를 반환합니다.
+
+### `PUT /api/v1/sessions/:sessionId/capture/pause`
+
+기억을 잠시 멈춥니다. 대시보드가 기억한 단계를 기기에서 재생하는 동안 그 입력이 사람의 입력으로 기억되지 않게 하려고 씁니다. 멈춤은 응답의 `ttlMs`(30초)가 지나면 저절로 풀리며 다시 호출하면 연장됩니다. 기억한 단계가 없으면 `404`를 반환합니다. 재생 중에 이 응답을 받으면 기억이 이미 끝난 것이므로 재생을 멈춰야 합니다.
+
+**응답 `200`**
+
+```json
+{ "ok": true, "ttlMs": 30000 }
+```
+
+### `DELETE /api/v1/sessions/:sessionId/capture/pause`
+
+멈춤을 바로 풉니다. 멈춰 있지 않으면 `404`를 반환합니다.
 
 
 ## 릴레이 (Relay)

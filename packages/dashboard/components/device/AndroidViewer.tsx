@@ -61,6 +61,9 @@ interface AndroidViewerProps {
   onReboot: () => void;
   /** The toolbar's restart button, so `DeviceViewer` can put focus back on it after a restart. */
   restartButtonRef: MutableRefObject<HTMLButtonElement | null>;
+  /** Flow Capture (#1125): whether the relay is keeping this person's steps — their own setting. Absent shows no
+   *  chip (a relay that predates the setting). */
+  capturingSteps?: boolean;
   screenWidth?: number;
   screenHeight?: number;
   /** Foldable postures from `device:postures`, already in most-closed→most-open order. */
@@ -82,7 +85,7 @@ export function AndroidViewer({
   deviceReady, installing, installed, installError, bootError, bootWaiting, servicesOff,
   launching, androidButtons,
   binaryFrameHandlerRef, clipboardHandlerRef, clipboardSupported, networkHandlerRef, networkSupported, onRecordingUploaded,
-  rebootPending, onReboot, restartButtonRef,
+  rebootPending, onReboot, restartButtonRef, capturingSteps,
   screenWidth, screenHeight, cornerRadius, postures, streamRotation = 0, bodyRotation,
   perfHookRef,
 }: AndroidViewerProps) {
@@ -689,6 +692,7 @@ export function AndroidViewer({
           installing={installing} installError={installError}
           decoderUnsupported={decoderUnsupported}
           keyboardActive={keyboardActive}
+          capturingSteps={capturingSteps}
         />
       </div>
     </div>

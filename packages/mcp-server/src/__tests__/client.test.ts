@@ -1148,6 +1148,8 @@ describe('TapflowClient', () => {
       {},
       { elements: [{}] },
       { elements: [{ role: 'button', label: 'x', frame: { x: 0, y: 0, width: 2, height: 1 }, enabled: true }] },
+      { elements: [{ role: 'input', label: 'x', frame: { x: 0, y: 0, width: 1, height: 1 }, enabled: true, secure: 'true' }] },
+      { elements: [{ role: 'input', label: 'x', frame: { x: 0, y: 0, width: 1, height: 1 }, enabled: true, focused: 1 }] },
     ])('rejects malformed successful ui-tree responses', async (body) => {
       const origFetch = globalThis.fetch
       globalThis.fetch = async () => new Response(JSON.stringify(body), { status: 200 })

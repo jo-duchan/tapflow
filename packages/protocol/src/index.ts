@@ -252,13 +252,24 @@ export interface UIElement {
   role: UIElementRole
   label: string
   identifier?: string
-  /** A text field's placeholder (iOS `placeholderValue`, Android `hint`), apart from `label` on purpose: a
+  /** A text field's placeholder (iOS `placeholderValue`; Android's dump carries no `hint`, measured, so Android sends
+   *  none), apart from `label` on purpose: a
    *  placeholder is not a name, and folding it into one hides the app's missing label. Absent when there is
    *  none — and from an agent that predates the field, which reads the same as none. */
   placeholder?: string
   frame: UIElementFrame
   enabled: boolean
   rawRole?: string
+  /** Whether a text field hides what is typed into it (iOS `SecureTextField`, Android `password`). Stated as
+   *  `true` or `false` on every `role: 'input'` element, and `true` on any other element that says it hides its text
+   *  (an Android password node of another class); absent on the rest, so an input **without** it
+   *  means "unknown" — an agent that predates the field, or one that cannot tell — and a consumer deciding
+   *  whether typed text may be written down treats unknown as secret. A secure element's `label` can hold
+   *  what was typed: never store it or build a selector from it. */
+  secure?: boolean
+  /** The element has text-input focus — where typing goes now. Not view or button focus: iOS also marks a
+   *  focused button and Android a focused host view, and neither receives the text. Present only when true. */
+  focused?: boolean
 }
 
 /** `agents:listed` groups devices by agent machine. */
