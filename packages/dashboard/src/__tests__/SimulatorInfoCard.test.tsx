@@ -112,3 +112,20 @@ describe('SimulatorInfoCard — whether keys go to the device (#747)', () => {
     expect(row()).toBe('Focus·Off')
   })
 })
+
+describe('SimulatorInfoCard — whether steps are being captured (#1125)', () => {
+  // The chip is a state, not a control: the setting lives in the account menu, so the card offers nothing to press.
+  it('says so either way, in words', () => {
+    const { rerender } = render(<SimulatorInfoCard {...healthy({ capturingSteps: true })} />)
+    expect(screen.getByText('Capturing steps')).toBeInTheDocument()
+    rerender(<SimulatorInfoCard {...healthy({ capturingSteps: false })} />)
+    expect(screen.getByText('Not capturing steps')).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /capturing/i })).toBeNull()
+  })
+
+  // A relay that predates the setting sends no `flowCapture`; claiming either state there would be a guess.
+  it('shows nothing when the relay does not say', () => {
+    render(<SimulatorInfoCard {...healthy()} />)
+    expect(screen.queryByText(/capturing steps/i)).toBeNull()
+  })
+})

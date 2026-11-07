@@ -85,3 +85,28 @@ describe('ui:tree:response interfaceTurn', () => {
     }
   })
 })
+
+describe('ui:tree:response secure and focused', () => {
+  const el = (extra: Record<string, unknown>) => ({
+    type: 'ui:tree:response', sessionId: 's', requestId: 'r',
+    elements: [{ role: 'input', label: '', frame: { x: 0, y: 0, width: 1, height: 1 }, enabled: true, ...extra }],
+  })
+  const first = (raw: unknown) => {
+    const r = parseInbound(raw)
+    if (!r.ok) throw new Error(r.reason)
+    return (r.msg as { elements: Record<string, unknown>[] }).elements[0]!
+  }
+
+  // zod strips keys it does not declare, so a field missing from the schema vanishes at the relay with no error.
+  it('carries both through the relay', () => {
+    expect(first(el({ secure: true, focused: true }))).toMatchObject({ secure: true, focused: true })
+    expect(first(el({ secure: false }))).toMatchObject({ secure: false })
+  })
+
+  // A third-party spelling costs the field, never the tree — and a dropped `secure` reads as unknown, which is secret.
+  it('drops a malformed value and keeps the tree', () => {
+    const e = first(el({ secure: 'true', focused: 1 }))
+    expect(e.secure).toBeUndefined()
+    expect(e.focused).toBeUndefined()
+  })
+})

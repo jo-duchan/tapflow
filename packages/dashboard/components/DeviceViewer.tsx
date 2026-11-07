@@ -45,9 +45,11 @@ interface Props {
    *  the session is alive and another socket holds it, so no protocol reason describes it, and widening
    *  `SessionTerminatedReason` would let `session:terminated` carry a reason it can never mean. */
   onSessionEnded?: (reason: SessionTerminatedReason | 'busy-elsewhere' | 'mac-overloaded') => void;
+  /** See `SimulatorInfoCard.capturingSteps`. */
+  capturingSteps?: boolean;
 }
 
-export function DeviceViewer({ sessionId, deviceId, formFactor, platform = 'ios', buildId, resetMode, resume = false, onRecordingUploaded, onSessionEnded }: Props) {
+export function DeviceViewer({ sessionId, deviceId, formFactor, platform = 'ios', buildId, resetMode, resume = false, onRecordingUploaded, onSessionEnded, capturingSteps }: Props) {
   const sendRef = useRef<(msg: BrowserToRelay) => void>(() => {});
   // One reset per mount; see the boot handler below.
   const resetSentRef = useRef(false);
@@ -737,6 +739,7 @@ export function DeviceViewer({ sessionId, deviceId, formFactor, platform = 'ios'
     swKeyboardVisible, swKeyboardPending, onKbdToggle,
     rebootPending, onReboot: reboot,
     restartButtonRef,
+    capturingSteps,
   };
 
   // Before chrome arrives, show a phone skeleton + status card so the layout isn't empty

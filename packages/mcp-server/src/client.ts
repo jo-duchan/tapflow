@@ -128,6 +128,8 @@ function isUIElement(value: unknown): value is UIElement {
   if (record.identifier !== undefined && typeof record.identifier !== 'string') return false
   if (record.rawRole !== undefined && typeof record.rawRole !== 'string') return false
   if (record.placeholder !== undefined && typeof record.placeholder !== 'string') return false
+  if (record.secure !== undefined && typeof record.secure !== 'boolean') return false
+  if (record.focused !== undefined && typeof record.focused !== 'boolean') return false
   const x = rect.x
   const y = rect.y
   const width = rect.width

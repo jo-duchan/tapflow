@@ -196,3 +196,50 @@ describe('parseUiAutomatorDump', () => {
     expect(() => parseUiAutomatorDump('')).toThrow()
   })
 })
+describe('secure and focused', () => {
+  const field = (over: Record<string, string>) =>
+    `<node ${attrs({ class: 'android.widget.EditText', clickable: 'true', bounds: '[0,100][1080,200]', ...over })} />`
+
+  // `secure` is stated on every input so a missing one means "unknown", which a capture treats as secret.
+  it('states secure on every input, true only for a password field', () => {
+    const els = parseUiAutomatorDump(wrap([
+      field({ text: 'Email' }),
+      field({ text: '••••', password: 'true' }),
+      `<node ${attrs({ class: 'android.widget.Button', text: 'Go', clickable: 'true', bounds: '[0,300][1080,400]' })} />`,
+    ].join('\n')))
+    expect(els.map((e) => e.secure)).toEqual([false, true, undefined])
+    expect('secure' in els[2]!).toBe(false)
+  })
+
+  it('keeps a password node that has nothing else to keep it, and marks it secure', () => {
+    const els = parseUiAutomatorDump(wrap(
+      `<node ${attrs({ class: 'android.view.View', password: 'true', bounds: '[0,100][1080,200]' })} />`,
+    ))
+    expect(els).toHaveLength(1)
+    expect(els[0]).toMatchObject({ role: 'other', secure: true })
+  })
+
+  // As `uiautomator dump` printed them on Pixel_6_tapflow (Android 14), Compose sample app, after typing into the
+  // password field: masked text, `password` and `focused` on the field only, and no `hint` attribute at all.
+  it('reads a measured Compose dump', () => {
+    const els = parseUiAutomatorDump(wrap([
+      '<node index="0" text="" resource-id="form.email" class="android.widget.EditText" package="dev.tapflow.sample.compose" content-desc="" checkable="false" checked="false" clickable="true" enabled="true" focusable="true" focused="false" scrollable="false" long-clickable="true" password="false" selected="false" bounds="[53,538][1027,685]" />',
+      '<node index="1" text="••••••••" resource-id="form.password" class="android.widget.EditText" package="dev.tapflow.sample.compose" content-desc="" checkable="false" checked="false" clickable="true" enabled="true" focusable="true" focused="true" scrollable="false" long-clickable="true" password="true" selected="false" bounds="[53,727][1027,874]" />',
+    ].join('\n')))
+    expect(els.map((e) => [e.identifier, e.secure, e.focused ?? null])).toEqual([
+      ['form.email', false, null],
+      ['form.password', true, true],
+    ])
+  })
+
+  // A WebView or Compose host reports `focused` beside the field inside it; only the field receives typing.
+  it('marks focus on an input only', () => {
+    const els = parseUiAutomatorDump(wrap([
+      `<node ${attrs({ class: 'android.webkit.WebView', focused: 'true', scrollable: 'true', bounds: '[0,0][1080,2400]' })} />`,
+      field({ text: 'Email', focused: 'true' }),
+      field({ text: 'Name' }),
+    ].join('\n')))
+    expect(els.map((e) => [e.role, e.focused ?? null])).toEqual([['other', null], ['input', true], ['input', null]])
+  })
+})
+

@@ -107,7 +107,10 @@ export function parseUiAutomatorDump(xml: string): UIElement[] {
     // it. Without this a node that is neither clickable nor labelled was dropped even when the app named it —
     // measured on a Compose `SeekBar` and on a selected navigation item, which stops being clickable.
     const id = attrs['resource-id'] ?? ''
-    if (!interactive && label === '' && (id === '' || DECOR_IDS.has(id))) continue
+    // A password field is kept whatever else it lacks: whether typed text may be written down depends on finding it,
+    // and a Compose field with no click semantics, no text and no test tag would otherwise drop out like the SeekBar.
+    const password = attrs['password'] === 'true'
+    if (!interactive && !password && label === '' && (id === '' || DECOR_IDS.has(id))) continue
 
     const className = attrs['class'] ?? ''
     const element: UIElement = {
@@ -126,6 +129,14 @@ export function parseUiAutomatorDump(xml: string): UIElement[] {
     }
     if (id) element.identifier = id
     if (className) element.rawRole = className
+    // Stated on every input so a missing value means "unknown" (see `UIElement.secure`), and on any node that says it
+    // is a password whatever its class.
+    if (element.role === 'input' || password) element.secure = password
+    if (element.role === 'input') {
+      // Only an input: a WebView or Compose host view reports `focused` alongside the field inside it, and a button
+      // takes focus once a key event leaves touch mode. Neither is where typing goes.
+      if (attrs['focused'] === 'true') element.focused = true
+    }
     elements.push(element)
   }
   return elements

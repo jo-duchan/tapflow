@@ -167,6 +167,49 @@ describe('parseTreeText field-boundary edge cases', () => {
     ])
   })
 
+  // `secure` is stated on every input so a missing one means "unknown", which a capture treats as secret.
+  it('marks a SecureTextField secure and every other input not secure', () => {
+    const els = sample(
+      "      TextField, 0x3, {{20.0, 120.0}, {362.0, 34.0}}, identifier: 'form.email', placeholderValue: 'Email'",
+      "      SecureTextField, 0x4, {{20.0, 170.0}, {362.0, 34.0}}, identifier: 'form.password', placeholderValue: 'Password'",
+      "      Button, 0x5, {{20.0, 220.0}, {362.0, 34.0}}, identifier: 'go', label: 'Go'",
+    )
+    expect(els.map((e) => e.secure)).toEqual([false, true, undefined])
+    expect('secure' in els[2]!).toBe(false)
+  })
+
+  it('reads text-input focus from the trailing flags only', () => {
+    const els = sample(
+      "      TextField, 0x3, {{20.0, 122.0}, {362.0, 34.0}}, identifier: 'form.email', placeholderValue: 'Email', value: abc, Keyboard Focused",
+      "      TextField, 0x4, {{20.0, 170.0}, {362.0, 34.0}}, identifier: 'other', label: 'Tap, Keyboard Focused, then type'",
+      "      TextField, 0x5, {{20.0, 220.0}, {362.0, 34.0}}, identifier: 'plain', Focused",
+    )
+    expect(els.map((e) => e.focused ?? null)).toEqual([true, null, null])
+  })
+
+  // As the runner printed them after typing three letters into the password field (iOS 26.5, Xcode 26.6), the UIKit
+  // and SwiftUI samples alike: the masked value is unquoted, and the focus flag ends the line.
+  it('reads a measured SecureTextField being typed into', () => {
+    const els = sample(
+      "      TextField, 0x115ce4500, {{20.0, 122.0}, {362.0, 34.0}}, identifier: 'form.email', placeholderValue: 'Email'",
+      "      SecureTextField, 0x115ce4640, {{20.0, 172.0}, {362.0, 34.0}}, identifier: 'form.password', placeholderValue: 'Password', value: •••, Keyboard Focused",
+    )
+    expect(els.map((e) => [e.identifier, e.secure, e.focused ?? null, e.placeholder])).toEqual([
+      ['form.email', false, null, 'Email'],
+      ['form.password', true, true, 'Password'],
+    ])
+  })
+
+  // A tab prints `Selected, Focused` and a focused button `Keyboard Focused` can only mean the hardware keyboard's
+  // focus ring — neither is where typed text goes.
+  it('never marks a non-input focused', () => {
+    const els = sample(
+      "      Button, 0x3, {{25.0, 795.0}, {98.0, 54.0}}, identifier: 'tab.web', Selected, Focused",
+      "      Button, 0x4, {{125.0, 795.0}, {98.0, 54.0}}, identifier: 'tab.x', Keyboard Focused",
+    )
+    expect(els.map((e) => 'focused' in e)).toEqual([false, false])
+  })
+
   it('leaves no placeholder on an element without one', () => {
     const els = sample("      Button, 0x3, {{0.0, 0.0}, {50.0, 20.0}}, identifier: 'ok', label: 'OK'")
     expect(els[0] && 'placeholder' in els[0]).toBe(false)

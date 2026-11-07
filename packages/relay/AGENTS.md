@@ -250,6 +250,39 @@ Device prefs and favourites (`api/devicePrefs.ts`, migration 021) are laid over 
 `withDevicePrefs`, keyed by `SessionInfo.agentKey` (`agentId ?? agentName`) and the device id. **Nothing is removed
 from the listing**: an MCP client and the lease read the same one, and a hidden device must stay usable to them.
 
+### Flow Capture's record (`capture/`, #1125)
+
+The relay keeps, in memory, every input a person's dashboard sent to the agent — the parse product, stamped with the
+relay's clock — so the dashboard can later turn a stretch of it into a flow. It holds **what was typed** (`input:key`,
+`input:type`, a pasted `clipboard:write`), which the relay otherwise never keeps: watchers get a character count. Most
+of what follows exists because of that.
+
+- **Recorded after the send, never before.** One `captures.recordInput` call follows each `agentSocket.send` in the
+  input, app-command, clipboard and network paths, so a refused input is not recorded. `CaptureStore` never throws into
+  that path. The agent's ack is recorded too (`recordAck`), so a refused or failed input reads differently from one that
+  landed, and so is each chrome change (a turn or fold: points on either side are in different frames).
+- **Who is recorded**: a holder that declared `clientKind: 'dashboard'`, whose user is a real user id (not `anon` or
+  `unidentified:*` — nobody could read that back with a cookie), and whose own setting is on (`users.flow_capture`,
+  migration 023). The setting is read from `FlowCapturePreference`, a memory map the preferences route writes through,
+  so the input path never reads the database and turning it back on takes effect at the next input, not the next join.
+- **When a capture ends** (`seal`, which for a Manual capture means discarded): any join that is not the same user in a
+  dashboard — the person's own `flow run` or MCP client borrowing the device included, since the record would otherwise
+  have a hole in it; a `device:shutdown` forwarded to the agent (the dashboard sends one on Back and on unmount, and
+  `settleShutdown` then cancels the countdown, so hanging the seal on the countdown alone left it alive for days); a
+  cold `device:ready`; `idleShutdown`; `removeSession` — **not** `forgetSessionState`, which `session:leave` also runs, so
+  a borrowing MCP client leaving would take the person's record with it. A reload or a dropped socket keeps it.
+- **Read back with the browser cookie only** (`api/captures.ts`, `requireAuth`). `requireViewAuth` would take the
+  person's own `view` PAT, which is what their MCP server and CI hold, and hand typed passwords to a model. Anyone but the
+  owner gets `404`, so the routes do not say whose sessions are being recorded.
+- **The replay pause is a lease, not a flag on a socket**: `PUT …/capture/pause` stops recording for 30 s and is renewed
+  by calling it again. A Wi-Fi blink in the middle of the dialog's replay keeps it; a tab that dies lets it run out. The
+  dialog reads a snapshot (`POST …/capture/snapshot`), a copy, so recording can go on beside it.
+- **Bounded per capture and across the relay.** Over budget, moves are thinned first (a drag keeps its ends), then whole
+  gestures are cut off the head — never `app:launch`, `app:clear-state` or `app:install`, which anchor where a flow
+  starts. Trimmed to three quarters, so the next input does not trim again.
+- **Never on disk and never in a log line.** Not in the database, not in `logger`; a capture lives as long as the device
+  stays the person's.
+
 ### Flow run records (`/api/v1/runs`)
 
 What `tapflow flow run` did, for the dashboard's runs page (A3). The CLI writes with its `builds:write` token; anyone who may view reads.

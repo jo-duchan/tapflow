@@ -117,6 +117,9 @@ import { handleUploadRecording, handleListRecordings, handleDownloadRecording, p
 import { handleEndVideo, handleOpenVideo, handleVideoChunk, handleVideoData, handleVideoIndex, purgeRunVideos, releaseStaleVideoReservations, runVideosDirFor, videoSummaries } from './api/runVideos.js'
 import { abandonRunsOf, handleCreateRun, handleFinishRun, handleReportDevice, handleStartFlow, handleGetFlowScreenshot, handleGetRun, handleListRuns, handleReportFlow, handleUploadFlowScreenshot, purgeExpiredRuns, runScreenshotsDirFor, type RunHolders } from './api/runs.js'
 import { handleListAgents, handleGetAgentResources } from './api/agents.js'
+import { handleDropSnapshot, handleGetSnapshot, handlePause, handleTakeSnapshot, handleUpdatePreferences } from './api/captures.js'
+import { CaptureStore, type Holder } from './capture/CaptureStore.js'
+import { FlowCapturePreference } from './capture/preference.js'
 
 const MIME_TYPES: Record<string, string> = {
   '.html': 'text/html',
@@ -190,6 +193,11 @@ export function ownerKeyFor(
   // power the device off. Encoding a security-relevant fact in a caller-supplied string is the forgery
   // this whole key was introduced to avoid, reintroduced one layer down.
   return { key: `${user}:${claimed || randomUUID()}`, user, minted: !claimed }
+}
+
+/** Who drives a session, as Flow Capture judges it: the kind the client declared and the person behind it. */
+function captureHolder(session: Session): Holder {
+  return { kind: session.holderKind, user: session.ownerUser }
 }
 
 /** One line per rejecting socket per second, at most. See `RelayServer.logInboundRejection`. */
@@ -411,6 +419,9 @@ export class RelayServer {
   /** `<bundle id>:<what was left out>` already warned about. Bounded by the config's keys, two reasons each. */
   private readonly warnedDroppedDefaults = new Set<string>()
   private readonly buildTickets = new BuildTicketStore()
+  /** Flow Capture (#1125): each person's setting, and the steps kept for them in memory. */
+  private readonly flowCapturePref = new FlowCapturePreference()
+  private readonly captures = new CaptureStore({ isEnabled: (user) => this.flowCapturePref.isEnabled(user) })
   private pendingScreenshots = new Map<string, {
     sessionId: string
     resolve: (buf: Buffer, format: 'png' | 'jpeg') => void
@@ -623,6 +634,12 @@ export class RelayServer {
     this.router.get('/api/v1/settings', (req, res) => handleGetSettings(req, res, this.runVideosDir))
     this.router.patch('/api/v1/settings', (req, res) => handleUpdateSettings(req, res, u))
     this.router.patch('/api/v1/profile', (req, res) => handleUpdateProfile(req, res, u))
+    this.router.patch('/api/v1/me/preferences', (req, res) => handleUpdatePreferences(req, res, this.captures, this.flowCapturePref))
+    this.router.post('/api/v1/sessions/:sessionId/capture/snapshot', (req, res, params) => handleTakeSnapshot(req, res, params, this.captures))
+    this.router.get('/api/v1/sessions/:sessionId/capture/snapshot', (req, res, params) => handleGetSnapshot(req, res, params, this.captures))
+    this.router.delete('/api/v1/sessions/:sessionId/capture/snapshot', (req, res, params) => handleDropSnapshot(req, res, params, this.captures))
+    this.router.put('/api/v1/sessions/:sessionId/capture/pause', (req, res, params) => handlePause(req, res, params, this.captures))
+    this.router.delete('/api/v1/sessions/:sessionId/capture/pause', (req, res, params) => handlePause(req, res, params, this.captures))
 
     // recordings
     this.recordingsDir = path.join(u, '../recordings')
@@ -1089,6 +1106,9 @@ export class RelayServer {
    */
   /** A session is gone for good: from the manager, from the per-session state, and from the boot gate. */
   private removeSession(sessionId: string): void {
+    // Here and not in `forgetSessionState`, which `session:leave` also runs: an MCP client that borrowed the device and
+    // leaves must not take the person's capture with it (a borrow has sealed it already, at the join).
+    this.captures.seal(sessionId)
     this.sessions.remove(sessionId)
     this.forgetSessionState(sessionId)
     this.gateEvent({ kind: 'session-removed', sessionId })
@@ -1716,6 +1736,8 @@ export class RelayServer {
       case 'session:chrome': {
         const session = this.sessions.get(msg.sessionId)
         if (!session) break
+        // A turn or a fold: the points before and after it are in different frames.
+        this.captures.recordChrome(session.id, captureHolder(session), raw['payload'])
         // **Off `raw`, and still a cast — deliberately both.**
         //
         // `session:chrome` is Envelope tier, so the parser proved `type` and `sessionId` and nothing
@@ -1846,6 +1868,8 @@ export class RelayServer {
         // `pendingInstall` is left: every client installs after a ready, so none is in flight across a cold boot, and one
         // that were would settle itself with its own done or error.
         if (facts.cold !== false) session.installed = undefined
+        // The steps were taken on a device that has since been off; replaying them would start somewhere else.
+        if (facts.cold !== false) this.captures.seal(session.id)
         if (facts.serviceTier !== undefined) this.sessions.setDeviceServiceTier(session.id, facts.serviceTier)
         this.settleLastBoot(session, msg.requestId, facts.cold)
         this.gateEvent({ kind: 'ready', hostKey: hostKeyOf(session), sessionId: session.id, cold: facts.cold })
@@ -1871,6 +1895,9 @@ export class RelayServer {
       case 'input:error':
       case 'keyboard:toggled': {
         const session = this.sessions.get(msg.sessionId)
+        if (session && (msg.type === 'input:done' || msg.type === 'input:error' || msg.type === 'input:type-done' || msg.type === 'input:type-error')) {
+          this.captures.recordAck(session.id, captureHolder(session), msg.requestId, msg.type.endsWith('-done') || msg.type === 'input:done')
+        }
         if (session && (msg.type === 'app:install-done' || msg.type === 'app:install-error')) {
           const reason = typeof raw['message'] === 'string' ? raw['message'] : undefined
           this.settleInstall(session, msg.requestId, msg.type === 'app:install-done', reason)
@@ -1985,6 +2012,9 @@ export class RelayServer {
         this.rememberShutdownRequester(ws, target.session.id, msg.requestId)
         // Here and not at the top: a refused shutdown ends nobody's wait (#1087).
         this.sessions.noteShutdown(target.session.id, { user: this.userOf(ws), label: this.holderLabel(ws), name: this.personName(ws) })
+        // The dashboard shuts the device down on Back and when it unmounts, and that cancels the countdown the wait would
+        // have ended on — so the capture ends here, not only when the countdown runs out.
+        this.captures.seal(target.session.id)
         target.session.agentSocket.send(JSON.stringify(msg))
         break
       }
@@ -2015,6 +2045,7 @@ export class RelayServer {
         const target = this.dispatchTarget(ws, msg.sessionId)
         if (target.ok) {
           target.session.agentSocket.send(JSON.stringify(msg))
+          this.captures.recordInput(target.session.id, captureHolder(target.session), msg)
           // No URL: a deep link can carry a token, and watchers are the whole team.
           this.tellWatchersAction(msg.sessionId, { kind: 'open-url' })
         } else {
@@ -2033,6 +2064,7 @@ export class RelayServer {
         const target = this.dispatchTarget(ws, msg.sessionId)
         if (target.ok) {
           target.session.agentSocket.send(JSON.stringify(msg))
+          this.captures.recordInput(target.session.id, captureHolder(target.session), msg)
           this.tellWatchersAction(msg.sessionId, { kind: 'clear-state' })
         } else {
           this.sendTo(ws, {
@@ -2101,6 +2133,7 @@ export class RelayServer {
         const clip = this.dispatchTarget(ws, msg.sessionId)
         if (clip.ok) {
           clip.session.agentSocket.send(JSON.stringify(msg))
+          this.captures.recordInput(clip.session.id, captureHolder(clip.session), msg)
         } else if (ws.readyState === WebSocket.OPEN) {
           this.sendTo(ws, {
             type: 'clipboard:error', sessionId: msg.sessionId, requestId: msg.requestId, message: clip.message,
@@ -2116,6 +2149,7 @@ export class RelayServer {
         const net = this.dispatchTarget(ws, msg.sessionId)
         if (net.ok) {
           net.session.agentSocket.send(JSON.stringify(msg))
+          this.captures.recordInput(net.session.id, captureHolder(net.session), msg)
         } else if (ws.readyState === WebSocket.OPEN) {
           this.sendTo(ws, {
             type: 'network:error', sessionId: msg.sessionId, requestId: msg.requestId, message: net.message,
@@ -2950,6 +2984,7 @@ export class RelayServer {
         this.sendTo(ws, { type: 'error', sessionId: msg.sessionId, message, reason })
         return
       }
+      this.captures.noteJoin(msg.sessionId, captureHolder(session))
     } catch (e) {
       // Only a bug reaches here now — the two expected failures return above instead of throwing, which is
       // what stops this arm from having to guess. It still answers rather than dropping: both clients await
@@ -3186,6 +3221,8 @@ export class RelayServer {
   /** Shut the device down because nobody is watching it any more. The idle timer's payload, hoisted out
    *  of the close handler so the release loop there reads as one line per session. */
   private idleShutdown(sessionId: string): void {
+    // The person did not come back in time: before the early return, since a capture outlives an agent that is away.
+    this.captures.seal(sessionId)
     const session = this.sessions.get(sessionId)
     if (session?.agentSocket.readyState !== WebSocket.OPEN) return
     this.sessions.noteShutdownSent(session.id)
@@ -3434,6 +3471,7 @@ export class RelayServer {
     }
     if (session?.agentSocket.readyState === WebSocket.OPEN) {
       session.agentSocket.send(JSON.stringify(msg))
+      this.captures.recordInput(session.id, captureHolder(session), msg)
       // Where a touch began and last was, for its end to be told to watchers (A2). Moves are not sent on: one
       // action per gesture, at its end.
       if (msg.type === 'input:touch:start') {
@@ -3476,6 +3514,7 @@ export class RelayServer {
 
     if (session?.agentSocket.readyState === WebSocket.OPEN) {
       session.agentSocket.send(JSON.stringify(msg))
+      this.captures.recordInput(session.id, captureHolder(session), msg)
       this.tellWatchersInput(session, msg)
       return
     }
@@ -3654,6 +3693,8 @@ export class RelayServer {
         buildBytes: bytes,
       },
     })
+    // What the person asked for, not what the relay made of it: the build id is what a flow can name.
+    this.captures.recordInput(sessionId, captureHolder(session), msg)
     this.tellWatchersAction(sessionId, { kind: 'install' })
   }
 
@@ -3774,6 +3815,7 @@ export class RelayServer {
       requestId,
       payload: { bundleId: build.bundle_id, ...options, ...(merged.defaultsOnly ? { defaultsOnly: true } : {}) },
     })
+    this.captures.recordInput(sessionId, captureHolder(session), msg)
     this.tellWatchersAction(sessionId, { kind: 'launch' })
   }
 

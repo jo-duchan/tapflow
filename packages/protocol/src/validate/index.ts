@@ -338,6 +338,10 @@ const AGENT_CONSUMED = {
       frame: z.object({ x: z.number(), y: z.number(), width: z.number(), height: z.number() }),
       enabled: z.boolean(),
       rawRole: z.string().optional(),
+      // Forgiving for the reason `interfaceTurn` is: a strict boolean would refuse the whole tree over one
+      // field a third-party agent spelled `"true"`. A dropped `secure` reads as unknown, which is secret.
+      secure: z.boolean().optional().catch(undefined),
+      focused: z.boolean().optional().catch(undefined),
     })).default([]),
     // Optional and forgiving: a value this relay does not know drops the field, not the frame. A closed enum
     // would refuse the whole tree for one unknown turn, and the caller would wait out the 15 s deadline for a

@@ -457,7 +457,7 @@ export function registerTools(server: McpServer, client: TapflowClient): void {
     {
       description:
         'Query the accessibility tree of the current screen: interactive, text-bearing or identified elements as ' +
-        '{ role, label, identifier, placeholder, frame, enabled, rawRole }. placeholder is a text field\'s hint, present only ' +
+        '{ role, label, identifier, placeholder, frame, enabled, rawRole, secure, focused }. placeholder is a text field\'s hint, present only ' +
         'when it has one; a bare-text selector falls back to it after label. Frames are normalized 0-1 relative to the screen. ' +
         'Prefer this over guessing coordinates from a screenshot: to tap an element, multiply the frame center by the ' +
         'screenshot pixel size — x = (frame.x + frame.width / 2) * screenshotWidth, y = (frame.y + frame.height / 2) * screenshotHeight — ' +
