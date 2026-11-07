@@ -1902,12 +1902,16 @@ export class IOSAgent implements DeviceAgent, NetworkControlCapability, Posturab
     try {
       await this.simctl.setPasteboard(deviceId, before)
       const deadline = Date.now() + CLIPBOARD_RESTORE_DEADLINE_MS
-      while ((await this.simctl.getPasteboard(deviceId).catch(() => before)) !== before) {
+      // A read that fails confirms nothing: the typed text may still be there, and the next clipboard operation would
+      // read it. Unlike `clipboard:read`'s restore, where what is at stake is a sentinel rather than a secret.
+      while ((await this.simctl.getPasteboard(deviceId).catch(() => null)) !== before) {
         if (Date.now() >= deadline) throw new PlatformError('the restored contents did not read back in time')
         await new Promise((r) => setTimeout(r, CLIPBOARD_POLL_MS))
       }
     } catch (e) {
-      logger.warn(`input:type: could not put the pasteboard back after typing (${e instanceof Error ? e.message : String(e)})`)
+      // Losing what the person had copied is the lesser harm: emptied, so the typed text does not stay behind.
+      const emptied = await this.simctl.setPasteboard(deviceId, '').then(() => true, () => false)
+      logger.warn(`input:type: could not put the pasteboard back after typing (${e instanceof Error ? e.message : String(e)}); ${emptied ? 'emptied it instead' : 'could not empty it either'}`)
     }
   }
 

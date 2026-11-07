@@ -2149,6 +2149,24 @@ describe('IOSAgent', () => {
       browser.close()
     })
 
+    // A restore that cannot be confirmed may have left the text there: the pasteboard is emptied rather than trusted.
+    it('empties the pasteboard when the restore cannot be read back', async () => {
+      // Real time: the restore's deadline is half a second.
+      const { browser, agent, simctl } = await bootedSession()
+      pasteboard = 'hello'
+      let reads = 0
+      ;(simctl.getPasteboard as ReturnType<typeof vi.fn>).mockImplementation(async () => {
+        if (++reads > 1) throw new Error('pbpaste failed')
+        return pasteboard
+      })
+      const done = waitForType(browser, 'input:type-done')
+      browser.send(JSON.stringify({ type: 'input:type', requestId: 'rq-pb6', sessionId: agent.sessionId, payload: { text: 'hunter2' } }))
+      await done
+      expect(pasteboard).toBe('')
+      agent.disconnect()
+      browser.close()
+    })
+
     it('answers input:type-error when the paste chord is dropped', async () => {
       // No pasteboard deadline guards this path, unlike the copy in clipboard:read — the text
       // lands on the device clipboard and nothing reaches the app under test.
