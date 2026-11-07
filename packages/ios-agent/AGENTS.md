@@ -151,6 +151,10 @@ call reads a plist it cannot open as one panel, and asking again could drop a Du
 connect still re-reads every type, as before. `agent:devices-applied` is the one relay message with no `sessionId`,
 so it is handled before the filter that drops those.
 
+App logs use a process-scoped `simctl spawn ... log stream` child after a successful app launch. The `DeviceState`
+owns it; a generation check prevents a launch that finishes after install, shutdown or disconnect from reviving it.
+Only a relay advertising `'app-logs'` receives these frames, and each bounded text chunk is forwarded unchanged.
+
 ## HOW NOT
 
 - Do not expose iOS-specific methods as public API if they are not in the `DeviceAgent` interface.

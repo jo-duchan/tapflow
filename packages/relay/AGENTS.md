@@ -238,6 +238,12 @@ announced `'device-updates'` on `agent:registered`. `handleAgentDevices` diffs i
   listing and the lease, and removed by the heartbeat (`sweepGoneDevices`) once `goneAndVacant`: an idle shutdown
   sends `device:shutdown` and keeps the session, so no single place sees a session stop being held. Removal goes
   through `removeSession`, which also releases the boot gate.
+
+### App log routing (#153)
+
+`app:log` is accepted only from the session's own agent socket and is sent only to its current holder. It is not
+cached or sent through `forwardToWatchers`: app logs belong to the active QA holder, and an unrelated agent must not
+be able to address another session's viewer with them.
 - **Only the one who was on a gone device may re-join it** (`SessionManager.join`): the same client, or the person a
   dropped session is waiting for. Anyone else holding the id would boot a device that is no longer there and, as its
   holder, keep the session from being swept.

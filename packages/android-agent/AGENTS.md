@@ -216,6 +216,10 @@ config is read once per connection (`avdInfo`): its form factor, and its version
 (`osVersionFromConfig`), so an emulator that is not running is grouped by version too. A running emulator's
 `getprop` answer wins.
 
+App logs use a process-scoped `adb logcat --pid ... -v raw` child after a successful app launch. The `DeviceState`
+owns it; install, shutdown and disconnect stop it, while a generation check prevents a late launch from reviving a
+retired stream. The agent starts capture only when the relay advertises `'app-logs'`.
+
 ## HOW NOT
 
 - Do not hardcode the ADB or emulator path, or read `ANDROID_HOME` directly — call `getAdbPath()` / `getEmulatorPath()` from `sdk.ts`.

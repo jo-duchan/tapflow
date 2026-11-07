@@ -71,6 +71,20 @@ describe('the door rejects what it cannot name', () => {
   })
 })
 
+describe('app log frames', () => {
+  it('keeps the app text unchanged in the agent direction', () => {
+    const text = 'first line\n\u0000\ud83d\ude80'
+    const parsed = ok({ type: 'app:log', sessionId: 'session-1', text })
+    expect(directionOf(parsed.msg.type)).toBe('agent')
+    expect(parsed.msg).toEqual({ type: 'app:log', sessionId: 'session-1', text })
+  })
+
+  it('rejects app log chunks over the wire limit', () => {
+    expect(fail({ type: 'app:log', sessionId: 'session-1', text: 'x'.repeat(8193) }).reason).toBe('bad-shape')
+    expect(fail({ type: 'app:log', sessionId: 'session-1', text: '🚀'.repeat(2049) }).reason).toBe('bad-shape')
+  })
+})
+
 describe('an empty correlator is not a correlator', () => {
   // The predicates this replaced (`isAddressed` / `isCorrelated`) rejected `''` as well as absence,
   // and a bare `z.string()` accepts it. Losing that half is invisible to every type-level assertion:
@@ -436,7 +450,7 @@ describe('a boot can ask for a service tier', () => {
   })
 })
 
-describe('readServiceTier checks a tier from outside a frame against the boot\'s schema', () => {
+describe("readServiceTier checks a tier from outside a frame against the boot's schema", () => {
   it('takes a tier, and nothing else', () => {
     expect(readServiceTier({ name: 'slim', keep: ['push'] })).toEqual({ name: 'slim', keep: ['push'] })
     expect(readServiceTier({ name: 'turbo', keep: [] })).toBeUndefined()
@@ -449,7 +463,8 @@ describe('readServiceTier checks a tier from outside a frame against the boot\'s
 
 describe('a boot can ask for a run reset', () => {
   const boot = (runReset: unknown) => parseInbound({ type: 'device:boot', sessionId: 's', requestId: 'r', payload: { deviceId: 'd', runReset } })
-  const payloadOf = (r: ReturnType<typeof boot>) => (r.ok ? (r.msg as { payload: Record<string, unknown> }).payload : undefined)
+  const payloadOf = (r: ReturnType<typeof boot>) =>
+    r.ok ? (r.msg as { payload: Record<string, unknown> }).payload : undefined
   it('forwards a well-formed request', () => {
     expect(payloadOf(boot({ uninstall: ['com.example.app'], clear: [] }))?.runReset).toEqual({ uninstall: ['com.example.app'], clear: [] })
   })
@@ -479,7 +494,8 @@ describe('readRunResetReport reads what an agent reported resetting', () => {
 // `correlatedRequestsGated` exempts `device:lease` from `ANSWERABLE` on the strength of this test.
 describe('a lease is never dropped for its payload', () => {
   const lease = (payload: unknown) => parseInbound({ type: 'device:lease', requestId: 'r', payload })
-  const payloadOf = (r: ReturnType<typeof lease>) => (r.ok ? JSON.parse(JSON.stringify((r.msg as { payload: unknown }).payload)) as Record<string, unknown> : undefined)
+  const payloadOf = (r: ReturnType<typeof lease>) =>
+    r.ok ? (JSON.parse(JSON.stringify((r.msg as { payload: unknown }).payload)) as Record<string, unknown>) : undefined
 
   it('keeps every well-formed field', () => {
     const full = {

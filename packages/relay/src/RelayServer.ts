@@ -244,7 +244,7 @@ type HeldBoot = { ws: WebSocket; msg: Inbound<'device:boot'>; cost: 'cold' | 'wa
  *  compiling if one of them lost the field. */
 type Acked = Inbound<'input:touch:end' | 'input:pinch:end' | 'input:key' | 'input:button' | 'input:type'>
 type Unacked = Inbound<
-  'input:touch:start' | 'input:touch:move' | 'input:touch:cancel' | 'input:pinch:start' | 'input:pinch:move'
+  | 'input:touch:start' | 'input:touch:move' | 'input:touch:cancel' | 'input:pinch:start' | 'input:pinch:move'
   | 'input:rotate' | 'input:posture' | 'input:keyboard:toggle'
 >
 
@@ -925,7 +925,11 @@ export class RelayServer {
       if (!this.isAlive(ws)) {
         const role = this.wsRoles.get(ws)
         if (role === 'agent') {
-          this.pushLog(`heartbeat terminated agent ${this.agentNames.get(ws) ?? 'unknown'} — last pong ${this.pongAgeSeconds(ws)}s ago`)
+          this.pushLog(
+            `heartbeat terminated agent ${this.agentNames.get(ws) ?? 'unknown'} — last pong ${this.pongAgeSeconds(
+              ws
+            )}s ago`
+          )
           this.explainedCloses.set(ws, 'terminated')
         } else {
           const key = role ?? 'unregistered'
@@ -947,7 +951,11 @@ export class RelayServer {
   private noteLateSweep(now: number = Date.now()): void {
     const late = now - this.lastSweepAt - HEARTBEAT_MS
     if (late > HEARTBEAT_MS / 2) {
-      this.pushLog(`heartbeat sweep ran ${Math.round(late / 1000)}s late — the relay was stalled or the system slept; this sweep may end sockets that were alive`)
+      this.pushLog(
+        `heartbeat sweep ran ${Math.round(
+          late / 1000
+        )}s late — the relay was stalled or the system slept; this sweep may end sockets that were alive`
+      )
     }
     this.lastSweepAt = now
   }
@@ -1888,6 +1896,14 @@ export class RelayServer {
         this.forwardToWatchers(session.id, raw)
         break
       }
+      case 'app:log': {
+        const session = this.sessions.get(msg.sessionId)
+        if (session?.agentSocket !== ws) break
+        if (session.browserSocket?.readyState === WebSocket.OPEN) {
+          session.browserSocket.send(JSON.stringify(raw))
+        }
+        break
+      }
       case 'app:install-done':
       case 'app:install-error':
       case 'app:launch-done':
@@ -2648,7 +2664,7 @@ export class RelayServer {
     // which only held while every device got a session — now that some are rebound, the arrays have
     // different lengths and index alignment would hand the agent someone else's session id.
     const registeredSessions = devices.map((d) => ({ deviceId: d.id, sessionId: byDeviceId.get(d.id)! }))
-    this.sendTo(ws, { type: 'agent:registered', registeredSessions, features: ['device-updates'] })
+    this.sendTo(ws, { type: 'agent:registered', registeredSessions, features: ['device-updates', 'app-logs'] })
 
     // After the state is final: the browser answers this with `device:boot` on the same session id.
     for (const sessionId of rebound.values()) {
@@ -2671,7 +2687,11 @@ export class RelayServer {
     // would print an empty name and an empty platform where this used to print `unknown`.
     this.agentNames.set(ws, msg.agentName || msg.agentId || 'unknown')
     // Through `pushLog` too, so `tapflow logs` shows an agent coming back after the line about it leaving.
-    this.pushLog(`agent connected: ${msg.agentName || msg.agentId || 'unknown'} (${msg.platform || 'unknown'}) — ${registeredSessions.length} device(s)`)
+    this.pushLog(
+      `agent connected: ${msg.agentName || msg.agentId || 'unknown'} (${msg.platform || 'unknown'}) — ${
+        registeredSessions.length
+      } device(s)`
+    )
   }
 
   /**
@@ -2816,7 +2836,8 @@ export class RelayServer {
     const { payload } = msg
     let platform = payload.platform
     if (payload.buildId !== undefined) {
-      const build = getDb().prepare('SELECT platform FROM builds WHERE id = ?').get(payload.buildId) as { platform: string | null } | undefined
+      const build = getDb().prepare('SELECT platform FROM builds WHERE id = ?').get(payload.buildId) as
+        | { platform: string | null } | undefined
       if (!build) return refuse('bad-request', `build ${payload.buildId} not found`)
       if (build.platform === 'ios' || build.platform === 'android') platform = build.platform
     }
@@ -3192,7 +3213,8 @@ export class RelayServer {
     const id = Number(this.userOf(ws))
     if (!Number.isInteger(id)) return 'local'
     try {
-      const row = getDb().prepare('SELECT email, display_name FROM users WHERE id = ?').get(id) as { email: string; display_name: string | null } | undefined
+      const row = getDb().prepare('SELECT email, display_name FROM users WHERE id = ?').get(id) as
+        | { email: string; display_name: string | null } | undefined
       if (!row) return 'unknown'
       return row.display_name ?? row.email.split('@')[0]!
     } catch {
@@ -3296,7 +3318,8 @@ export class RelayServer {
         this.undoLastBoot(s, s.lastBootPending.requestId)
       }
     }
-    return onHost
+    return (
+      onHost
       // A device being shut down to make room is neither up nor available, until the agent says otherwise.
       .filter((s) => s.evictingAt === undefined || now - s.evictingAt >= this.evictionGraceMs)
       .map((s) => ({
@@ -3311,7 +3334,7 @@ export class RelayServer {
         inUse: s.owner !== null || s.waitingOwner !== undefined || this.sessions.watchersOf(s.id).length > 0,
         reachable: s.agentSocket.readyState === WebSocket.OPEN,
         bootedAt: s.lastBoot?.at ?? 0,
-      }))
+      })))
   }
 
   private freeOneForMemory(requester: Session): void {
@@ -3636,7 +3659,8 @@ export class RelayServer {
     // exception was swallowed by the message-loop catch; the door makes both unreachable.
     const build = getDb()
       .prepare('SELECT file_path, bundle_id FROM builds WHERE id = ?')
-      .get(msg.buildId) as { file_path: string; bundle_id: string | null } | undefined
+      .get(msg.buildId) as
+      | { file_path: string; bundle_id: string | null } | undefined
     if (!build) return fail('Build not found')
 
     // Answer now rather than letting the caller time out — the same shape as `open-url` above.
@@ -3717,7 +3741,7 @@ export class RelayServer {
     session.installed = done ? { buildId: pending.buildId, filePath: pending.filePath } : undefined
     for (const waiter of pending.waiters) {
       // The agent's own reason. Its reply goes out under the original id, which a reconnected viewer has let go of.
-      this.answerInstallWaiter(session, waiter, done ? null : (reason ?? 'The install this was waiting on failed'))
+      this.answerInstallWaiter(session, waiter, done ? null : reason ?? 'The install this was waiting on failed')
     }
   }
 
@@ -3790,7 +3814,8 @@ export class RelayServer {
     // See `handleBrowserAppInstall` — the door refuses a malformed id and answers it.
     const build = getDb()
       .prepare('SELECT bundle_id FROM builds WHERE id = ?')
-      .get(msg.buildId) as { bundle_id: string | null } | undefined
+      .get(msg.buildId) as
+      | { bundle_id: string | null } | undefined
     if (!build?.bundle_id) return fail('Bundle ID not available for this build')
 
     if (session.agentSocket.readyState !== WebSocket.OPEN) return fail('agent offline')
@@ -3801,7 +3826,8 @@ export class RelayServer {
     const caller = compactLaunchOptions({ arguments: msg.arguments, env: msg.env })
     // An agent that predates the options ignores both fields and launches without them, then answers done.
     if (caller && !hasCapability(session.agentCapabilities, 'launch-options')) {
-      return fail('This device\'s tapflow agent is too old to pass launch arguments. Update tapflow on the Mac running it', 'agent-outdated')
+      return fail(
+        "This device's tapflow agent is too old to pass launch arguments. Update tapflow on the Mac running it", 'agent-outdated')
     }
     // `Object.hasOwn` is not needed: a Map holds only what the config named, whatever the uploaded id is called.
     const merged = mergeLaunch(this.options.launchDefaults?.get(build.bundle_id), caller, {

@@ -2,8 +2,9 @@
 
 import { skeletonSize } from '@/lib/deviceSkeleton';
 import { framelessChrome } from '@/lib/framelessChrome';
+import { appendAppLogText } from '@/lib/appLogs';
 
-import type { BootRefusalReason, BrowserToRelay, FormFactor, SessionTerminatedReason } from '@tapflowio/protocol'
+import type { BootRefusalReason, BrowserToRelay, FormFactor, SessionTerminatedReason } from '@tapflowio/protocol';
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { useRelay } from '@/hooks/useRelay';
 import { usePerfMode } from '@/hooks/usePerfMode';
@@ -116,6 +117,7 @@ export function DeviceViewer({ sessionId, deviceId, formFactor, platform = 'ios'
   const [installing, setInstalling] = useState(false);
   const [installed, setInstalled] = useState(false);
   const [installError, setInstallError] = useState<string | null>(null);
+  const [appLogState, setAppLogState] = useState({ sessionId, text: '' });
   const [bootError, setBootError] = useState<string | null>(null);
   // Set while the relay holds this viewer's boot behind another on the same Mac; cleared by anything that
   // ends the wait — the boot starting, finishing or failing.
@@ -239,6 +241,14 @@ export function DeviceViewer({ sessionId, deviceId, formFactor, platform = 'ios'
     // can put `''` on the wire, and a future producer echoing it back should not be applied to whichever
     // viewer happens to be mounted.
     if ('sessionId' in msg && msg.sessionId !== sessionId) return;
+
+    if (msg.type === 'app:log') {
+      setAppLogState((previous) => ({
+        sessionId,
+        text: appendAppLogText(previous.sessionId === sessionId ? previous.text : '', msg.text),
+      }));
+      return;
+    }
 
     if (msg.type === 'session:joined') {
       // A join starts a boot cycle of its own (socket blip, re-entry). Any rebind still waiting for
@@ -728,6 +738,7 @@ export function DeviceViewer({ sessionId, deviceId, formFactor, platform = 'ios'
 
   const commonProps = {
     sessionId, buildId, send, openUrl, launchApp, connected, joined,
+    appLogText: appLogState.sessionId === sessionId ? appLogState.text : '',
     deviceReady, installing, installed, installError, bootError, bootWaiting, servicesOff,
     launching,
     binaryFrameHandlerRef,
@@ -790,6 +801,7 @@ export function DeviceViewer({ sessionId, deviceId, formFactor, platform = 'ios'
           </div>
           <SimulatorInfoCard
             joined={joined} fps={0} connected={connected}
+            appLogText={appLogState.sessionId === sessionId ? appLogState.text : ''}
             deviceReady={deviceReady} bootError={bootError} bootWaiting={bootWaiting} servicesOff={servicesOff}
             installing={installing} installError={installError}
             decoderUnsupported={false}

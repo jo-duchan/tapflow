@@ -642,9 +642,10 @@ So a change to what an existing wire value *means* is made like this:
    drops it in silence. `device:lease` and launch options are gated on it.
    **Capabilities run agent → relay; nothing ran relay → agent until #1085.** An agent sending a new message to
    an older relay is the third pair, and `capabilities` cannot cover it: they describe the sender. So
-   `AgentRegistered.features` (`RelayAgentFeature`) is the relay's answer at registration, and an agent sends
-   `agent:devices` only to a relay that said `'device-updates'`. An older relay would have dropped each one with
-   a debug line and no harm; the marker is what keeps the agent from re-reading a list nobody will take.
+   `AgentRegistered.features` (`RelayAgentFeature`) is the relay's answer at registration. An agent sends
+   `agent:devices` only to a relay that said `'device-updates'`, and emits `app:log` only when the relay said
+   `'app-logs'`; the latter is routed only to the session holder, never to watchers. An older relay would have
+   rejected an unknown app-log frame, so the marker keeps the agent silent until the relay understands it.
 
 #662 asked for a version field on `agent:register`. It was not added: the two skews it described never
 shipped (network control, the reason split and `enforcement-lost` all first released together in

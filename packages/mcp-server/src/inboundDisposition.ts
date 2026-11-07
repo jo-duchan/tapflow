@@ -110,6 +110,9 @@ export const INBOUND_DISPOSITION = {
     ignored: 'Nothing here displays a device; `list_devices` already carries its name and platform. The only '
       + 'reader in the repo is flow-runner, which copies it into a run\'s video (A4).',
   },
+  'app:log': {
+    ignored: 'Logs are for a person watching in the dashboard; an agent tool does not consume them.'
+  },
   // This client drives a session; it never watches one, so the four watch replies have no waiter here.
   'watch:started': { ignored: 'Answers `watch:start`, which this client never sends.' },
   'watch:refused': { ignored: 'Answers `watch:start`, which this client never sends.' },

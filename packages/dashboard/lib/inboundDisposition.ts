@@ -133,6 +133,7 @@ export const INBOUND_DISPOSITION = {
       + 'reader in the repo is flow-runner, which copies it into a run\'s video (A4); displaying it is a '
       + 'feature nobody has asked for, not a handler someone forgot.',
   },
+  'app:log': { at: 'DeviceViewer' },
   'watch:started': { at: 'useWatchSession' },
   'watch:refused': { at: 'useWatchSession' },
   'watch:holder-left': { at: 'useWatchSession' },

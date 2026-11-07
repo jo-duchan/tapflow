@@ -54,6 +54,7 @@ import * as z from 'zod'
 
 import type {
   AgentDevices, AgentRegister, AgentResourceReport, AgentsList, AppClearState, AppClearStateDone,
+  AppLog,
   AppClearStateError, AppInstallDone, AppInstallError, AppInstallToRelay, AppLaunchDone,
   AppLaunchError, AppLaunchToRelay, RunResetItem, RunResetReport, ServiceTier, ClipboardData, ClipboardError, ClipboardRead, ClipboardWrite,
   NetworkError, NetworkSet, NetworkState,
@@ -107,6 +108,10 @@ const touchPoint = z.object({ x: z.number(), y: z.number(), space })
 const env = <T extends string>(type: T) => z.object({ type: z.literal(type), sessionId })
 /** `{ type, sessionId, requestId }`. */
 const envC = <T extends string>(type: T) => z.object({ type: z.literal(type), sessionId, requestId })
+const appLogText = z
+  .string()
+  .max(8192)
+  .refine((text) => new TextEncoder().encode(text).byteLength <= 8192)
 /** `{ type, sessionId, requestId? }` — the relay originates some of these itself, so the agent's copy
  *  is not always a reply. */
 const envCo = <T extends string>(type: T) =>
@@ -353,7 +358,7 @@ const AGENT_CONSUMED = {
   }),
 } as const
 
-/** The 26 the relay only forwards. Envelope tier — see the header for why there is no exception. */
+/** The 27 the relay only forwards. Envelope tier — see the header for why there is no exception. */
 const AGENT_FORWARDED = {
   'session:chrome': env('session:chrome'),
   'session:deviceInfo': env('session:deviceInfo'),
@@ -392,6 +397,8 @@ const AGENT_FORWARDED = {
   // Absent means "not the answer to a request", never "an old agent".
   'network:state': envCo('network:state'),
   'network:error': envC('network:error'),
+  // The active app's text stream is addressed to its holder, never replayed or broadcast to watchers.
+  'app:log': z.object({ type: z.literal('app:log'), sessionId, text: appLogText }),
 } as const
 
 const AGENT_INBOUND = { ...AGENT_CONSUMED, ...AGENT_FORWARDED } as const
@@ -667,6 +674,7 @@ type _ClipboardWriteDone = Assert<E<'clipboard:write-done', ClipboardWriteDone>>
 type _ClipboardError = Assert<E<'clipboard:error', ClipboardError>>
 type _NetworkState = Assert<E<'network:state', NetworkState>>
 type _NetworkError = Assert<E<'network:error', NetworkError>>
+type _AppLog = Assert<V<'app:log', AppLog>>
 
 const READY_FACTS = z.object({ payload: z.object({ cold: z.boolean().optional().catch(undefined), serviceTier: reportedTier }) })
 

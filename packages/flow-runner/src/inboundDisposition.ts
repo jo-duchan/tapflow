@@ -95,6 +95,9 @@ export const INBOUND_DISPOSITION = {
     does: 'handed to the stream listener when one is set and written into the run\'s video beside the chrome; '
       + 'nothing else here reads it',
   },
+  'app:log': {
+    ignored: 'Logs are for a person watching in the dashboard; a replay does not consume them.'
+  },
   // A replay engine drives a session; it never watches one, so the four watch replies have no waiter here.
   'watch:started': { ignored: 'Answers `watch:start`, which this client never sends.' },
   'watch:refused': { ignored: 'Answers `watch:start`, which this client never sends.' },

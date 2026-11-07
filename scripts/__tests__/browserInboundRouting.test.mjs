@@ -211,9 +211,9 @@ describe('browser-inbound routing matches the protocol union', () => {
   // empty set. L2 shipped exactly that mistake in the other direction — a lazy regex truncated a
   // nested literal to 6 of 11 fields and the by-name assertion passed anyway.
   it('the parser reached every forward site', () => {
-    expect(forwarded.size).toBe(26)
+    expect(forwarded.size).toBe(27)
     const sends = (relaySrc.match(/browserSocket\.send\(JSON\.stringify\(raw\)\)/g) ?? []).length
-    expect(sends).toBe(9) // 7 single-label blocks + the 13-label block + the owner-gated block
+    expect(sends).toBe(10) // 7 single-label blocks + the 13-label block + owner-gated and app-log blocks
   })
 
   it('forwards an agent\'s boot error as it arrived, less only the relay-owned reason', () => {
@@ -314,6 +314,7 @@ describe('browser-inbound routing matches the protocol union', () => {
       'clipboard:data': 'payload requestId sessionId',
       'clipboard:write-done': 'requestId sessionId',
       'network:state': 'payload requestId? sessionId',
+      'app:log': 'sessionId text',
     },
     RelayOrAgentToBrowser: {
       'session:chrome': 'payload sessionId',

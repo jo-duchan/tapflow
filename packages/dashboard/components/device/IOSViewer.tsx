@@ -47,7 +47,8 @@ interface IOSViewerProps {
   /** Mints and records the correlation id, then sends — the viewer above consumes the reply. */
   launchApp: () => void;
   connected: boolean;
-  joined: boolean;
+  joined: boolean
+  appLogText: string
   deviceReady: boolean;
   installing: boolean;
   installed: boolean;
@@ -89,6 +90,7 @@ interface IOSViewerProps {
 
 export function IOSViewer({
   sessionId, buildId, send, openUrl, launchApp, connected, joined,
+  appLogText,
   deviceReady, installing, installed, installError, bootError, bootWaiting, servicesOff,
   launching, chrome, formFactor,
   binaryFrameHandlerRef, clipboardHandlerRef, clipboardSupported, networkHandlerRef, networkSupported, onRecordingUploaded,
@@ -618,7 +620,8 @@ export function IOSViewer({
             <Home className="h-4 w-4" />
           </Button>
         </TooltipTrigger>
-        <TooltipContent side="left"><span className="flex items-center gap-3">Home <KbdGroup><Kbd>⌘</Kbd><Kbd>⇧</Kbd><Kbd>U</Kbd></KbdGroup></span></TooltipContent>
+        <TooltipContent side="left"><span className="flex items-center gap-3">Home{' '}
+            <KbdGroup><Kbd>⌘</Kbd><Kbd>⇧</Kbd><Kbd>U</Kbd></KbdGroup></span></TooltipContent>
       </Tooltip>
     </>
   );
@@ -667,8 +670,12 @@ export function IOSViewer({
         </TooltipTrigger>
         <TooltipContent side="left">
           {swKeyboardPending
-            ? <span>Software keyboard — changing it</span>
-            : <span className="flex items-center gap-3">Software keyboard <KbdGroup><Kbd>⌘</Kbd><Kbd>⇧</Kbd><Kbd>K</Kbd></KbdGroup></span>}
+            ? (
+            <span>Software keyboard — changing it</span>
+          ) : (
+            <span className="flex items-center gap-3">Software keyboard{' '}
+              <KbdGroup><Kbd>⌘</Kbd><Kbd>⇧</Kbd><Kbd>K</Kbd></KbdGroup></span>
+          )}
         </TooltipContent>
       </Tooltip>
     </>
@@ -778,7 +785,9 @@ export function IOSViewer({
         />
 
         <SimulatorInfoCard
-          joined={joined} fps={fps} connected={connected}
+          joined={joined} fps={fps}
+          appLogText={appLogText}
+          connected={connected}
           deviceReady={deviceReady} bootError={bootError} bootWaiting={bootWaiting} servicesOff={servicesOff}
           installing={installing} installError={installError}
           decoderUnsupported={decoderUnsupported}

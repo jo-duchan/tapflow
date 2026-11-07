@@ -9,6 +9,7 @@ import { avdRotationLockMemory, formFactorOf, osVersionOf, type RotationLockMemo
 import type {
   AgentControlOutbound, AgentDevicesApplied, DeviceReport, ClipboardReplyBody, OpenUrlReplyBody,
   AppInstallReplyBody, AppLaunchReplyBody, AppLaunchToAgent, LaunchOptions, AppClearStateReplyBody, DevicePosture, FormFactor, RunResetReport, RunResetRequest,
+  RelayAgentFeature,
   InputPinchStart, InputTouchStart, PointSpace,
 } from '@tapflowio/protocol'
 import { appliedKeys, compactLaunchOptions, launchOptionsProblem } from '@tapflowio/protocol/launch'
@@ -53,6 +54,7 @@ import {
 } from '@tapflowio/agent-core/utils'
 import { execFile } from 'child_process'
 import { AdbWrapper } from './AdbWrapper.js'
+import { AppLogStream, APP_LOG_SOCKET_BUFFER_LIMIT } from './AppLogStream.js'
 import { EmulatorLauncher, findEmulatorPid, probeEmulator, stopEmulatorProcess } from './EmulatorLauncher.js'
 import { ensureHelperApp, launchMuteOnlyTap, isAudioSupported } from '@tapflowio/audiotap-helper'
 import { AndroidTouchHelper } from './AndroidTouchHelper.js'
@@ -199,7 +201,7 @@ export function parseSpsFromNal(nal: Buffer): { width: number; height: number } 
   const readU = (n: number): number => {
     let v = 0
     for (let i = 0; i < n; i++) {
-      if ((bit >> 3) >= bytes.length) throw new Error('truncated')
+      if (bit >> 3 >= bytes.length) throw new Error('truncated')
       v = (v << 1) | ((bytes[bit >> 3]! >> (7 - (bit & 7))) & 1)
       bit++
     }
@@ -263,6 +265,8 @@ const ANDROID_BUTTONS: AndroidButton[] = [
 
 interface DeviceState {
   sessionId: string
+  appLogStream: AppLogStream | null
+  appLogGeneration: number
   /** Why each abandoned boot was abandoned, keyed by **the seq it lost**. A single slot would tell the
    *  wrong story the moment two boots overlap: boot A, boot B, then a shutdown leaves one slot saying
    *  `shut-down`, which is what B lost to — A lost to B.
@@ -346,7 +350,7 @@ interface DeviceState {
   landscape: boolean   // rotation intent toggle — only to request device rotation on input:rotate
   lastTouchPx: { x: number; y: number }
   /** The gesture in progress and the backend that opened it (#487). See `gestureOwner`. */
-  gesture: { kind: 'touch' | 'pinch' } & GestureBackend | null
+  gesture: ({ kind: 'touch' | 'pinch' } & GestureBackend) | null
   bootSeq: number
   restarting: boolean
 }
@@ -458,21 +462,22 @@ export class AndroidAgent implements DeviceAgent, NetworkControlCapability {
   private readonly adb: AdbWrapper
   private readonly launcher: EmulatorLauncher
   private ws: WebSocket | null = null
+  private relayFeatures: RelayAgentFeature[] = []
 
   /** Send on the control socket, if there is one. The `?.` is the point: 66 call sites relied on a send
    *  being a no-op between reconnects, and this preserves that exactly.
    *
    *  Typed with `AgentControlOutbound`, which is why this exists — an agent's literal used to reach `ws.send`
    *  with nothing checking it, and #489/#490 are what that cost. *
- *  **The guard is not defensive tidying.** `ws.send` on anything other than OPEN takes the `sendAfterClose`
- *  path, which adds the payload to a buffer nobody will flush and neither throws nor emits — so a reply
- *  sent to a closing socket is indistinguishable from a delivered one at the call site. `reportResources`
- *  has always checked; this did not, and the boot answers this file now owes a caller are exactly the
- *  messages whose purpose is to end someone's wait.
- *
- *  The body is held character for character by `scripts/__tests__/agentSendTyped.test.mjs`, so the comment
- *  lives out here: that check strips comments and matches the body exactly, having watched three earlier
- *  drafts get bypassed by a renamed socket. */
+   *  **The guard is not defensive tidying.** `ws.send` on anything other than OPEN takes the `sendAfterClose`
+   *  path, which adds the payload to a buffer nobody will flush and neither throws nor emits — so a reply
+   *  sent to a closing socket is indistinguishable from a delivered one at the call site. `reportResources`
+   *  has always checked; this did not, and the boot answers this file now owes a caller are exactly the
+   *  messages whose purpose is to end someone's wait.
+   *
+   *  The body is held character for character by `scripts/__tests__/agentSendTyped.test.mjs`, so the comment
+   *  lives out here: that check strips comments and matches the body exactly, having watched three earlier
+   *  drafts get bypassed by a renamed socket. */
   private sendMsg(msg: AgentControlOutbound): void {
     if (this.ws?.readyState !== WebSocket.OPEN) return
     this.ws.send(JSON.stringify(msg))
@@ -618,6 +623,12 @@ export class AndroidAgent implements DeviceAgent, NetworkControlCapability {
         }
         if (msg.type === 'agent:registered') {
           registered = true
+          this.relayFeatures = Array.isArray(msg.features)
+            ? msg.features.filter(
+                (feature: unknown): feature is RelayAgentFeature =>
+                  feature === 'device-updates' || feature === 'app-logs'
+              )
+            : []
           clearTimeout(timer)
           this.ws = ws
           this.sleepBlocker.acquire() // idempotent across reconnects
@@ -733,6 +744,8 @@ export class AndroidAgent implements DeviceAgent, NetworkControlCapability {
       this.deviceStates.set(sessionId, {
         sessionId,
         deviceId,
+        appLogStream: null,
+        appLogGeneration: 0,
         touchHelper: null,
         booted: false,
         streamWs: null,
@@ -770,6 +783,7 @@ export class AndroidAgent implements DeviceAgent, NetworkControlCapability {
   }
 
   disconnect(): void {
+    this.relayFeatures = []
     this._stopping = true
     if (this._reconnectTimer) { clearTimeout(this._reconnectTimer); this._reconnectTimer = null }
     if (this.resourcesTimer) { clearInterval(this.resourcesTimer); this.resourcesTimer = null }
@@ -809,8 +823,10 @@ export class AndroidAgent implements DeviceAgent, NetworkControlCapability {
     const delay = delays[Math.min(this._reconnectAttempt, delays.length - 1)]
     this._reconnectAttempt++
     logger.warn(loss
-      ? `relay disconnected (${describeRelayLoss(loss)}) — reconnecting in ${delay / 1000}s (attempt ${this._reconnectAttempt})`
-      : `reconnecting in ${delay / 1000}s (attempt ${this._reconnectAttempt})`)
+      ? `relay disconnected (${describeRelayLoss(loss)}) — reconnecting in ${delay / 1000}s (attempt ${
+            this._reconnectAttempt
+          })`
+        : `reconnecting in ${delay / 1000}s (attempt ${this._reconnectAttempt})`)
 
     this._reconnectTimer = setTimeout(() => {
       this._reconnectTimer = null
@@ -860,6 +876,7 @@ export class AndroidAgent implements DeviceAgent, NetworkControlCapability {
   }
 
   private cleanupDeviceState(state: DeviceState): void {
+    this.stopAppLogStream(state)
     if (state.screenWatch) clearInterval(state.screenWatch)
     state.screenWatch = null
     const serial = this.adb.getSerial(state.deviceId)
@@ -880,6 +897,13 @@ export class AndroidAgent implements DeviceAgent, NetworkControlCapability {
     // A restart still waiting to start belongs to the stream torn down above; it will see it lost its
     // seq and return. Left set, the next stream's own death would not restart it until then.
     state.restarting = false
+  }
+
+  private stopAppLogStream(state: DeviceState): number {
+    const generation = ++state.appLogGeneration
+    state.appLogStream?.stop()
+    state.appLogStream = null
+    return generation
   }
 
   /**
@@ -955,8 +979,10 @@ export class AndroidAgent implements DeviceAgent, NetworkControlCapability {
       logger.info(`touch → viewer ${x.toFixed(4)},${y.toFixed(4)}`
         + ` · shown ${state.displayWidth}×${state.displayHeight} rot ${state.rotation ?? 0}`
         + ` · natural ${p.x.toFixed(4)},${p.y.toFixed(4)}`
-        + ` of ${grid ? `${grid.width}×${grid.height} (emulator display)` : `${state.videoWidth}×${state.videoHeight}`}`
-        + ` · px ${px},${py}`)
+        +
+          ` of ${
+            grid ? `${grid.width}×${grid.height} (emulator display)` : `${state.videoWidth}×${state.videoHeight}`
+          }` + ` · px ${px},${py}`)
     }
     return { px, py }
   }
@@ -1452,7 +1478,7 @@ export class AndroidAgent implements DeviceAgent, NetworkControlCapability {
     if (skin !== null && skinDegrees === null) logger.warn(`unknown skin orientation ${skin}; not correcting`)
     const streamRotation = skinDegrees === null
       ? 0
-      : ((((skinDegrees - rotation) % 360) + 360) % 360) as 0 | 90 | 180 | 270
+      : (((((skinDegrees - rotation) % 360) + 360) % 360) as 0 | 90 | 180 | 270)
     const same = natural.width === state.videoWidth && natural.height === state.videoHeight
       && current.width === state.displayWidth && current.height === state.displayHeight
       && rotation === state.rotation && streamRotation === state.streamRotation && skin === state.skin
@@ -1598,9 +1624,10 @@ export class AndroidAgent implements DeviceAgent, NetworkControlCapability {
     // only for a boot that brought it up or a run — the orientation is otherwise the device's. A real
     // device keeps #910's stand-up of a locked rotation.
     if (!opts.restart) {
-      await this.enqueueRotation(state.deviceId, () => (serial.startsWith('emulator-')
+      await this.enqueueRotation(state.deviceId, () =>
+        serial.startsWith('emulator-')
         ? this.prepareBody(state, serial, opts.upright === true)
-        : this.uprightOnBoot(serial)))
+        : this.uprightOnBoot(serial))
     }
 
     // Emulator: capture via gRPC streamScreenshot + Mac VideoToolbox (bypasses the guest SW H.264
@@ -1728,7 +1755,9 @@ export class AndroidAgent implements DeviceAgent, NetworkControlCapability {
       ? setInterval(() => {
           const s = metrics.sample()
           logger.info(
-            `stream metrics [${state.deviceId}] ${s.fpsSent}fps ${s.kbPerSec}KB/s avg=${s.avgFrameKB}KB drop=${(s.dropRate * 100).toFixed(1)}% (${s.droppedFrames}/${s.producedFrames})`,
+            `stream metrics [${state.deviceId}] ${s.fpsSent}fps ${s.kbPerSec}KB/s avg=${s.avgFrameKB}KB drop=${(
+              s.dropRate * 100
+            ).toFixed(1)}% (${s.droppedFrames}/${s.producedFrames})`
           )
         }, 5000)
       : undefined
@@ -1833,9 +1862,13 @@ export class AndroidAgent implements DeviceAgent, NetworkControlCapability {
     const touchRange = await client.getDisplaySize()
     if (!owns()) throw new StreamSuperseded()
     state.touchRange = touchRange
-    logger.info(`input scale ${state.touchRange
-      ? `${state.touchRange.width}×${state.touchRange.height} (emulator display 0)`
-      : 'unknown — falling back to the panel size'}`)
+    logger.info(
+      `input scale ${
+        state.touchRange
+          ? `${state.touchRange.width}×${state.touchRange.height} (emulator display 0)`
+          : 'unknown — falling back to the panel size'
+      }`
+    )
     // Assign before start() so the caller's fallback cleanup can tear these down on failure.
     state.grpcClient = client
     state.emulatorVideo = video
@@ -2665,7 +2698,7 @@ export class AndroidAgent implements DeviceAgent, NetworkControlCapability {
     // knows why it failed, and asking adb would add a round trip to say the same thing.
     const resolved: InputOutcome = outcome !== 'delivered'
       ? outcome
-      : (state.booted || (await this.isBooted(state.deviceId))) ? 'delivered' : 'not-booted'
+      : state.booted || (await this.isBooted(state.deviceId)) ? 'delivered' : 'not-booted'
     if (resolved === 'delivered' && seq === state.bootSeq) state.booted = true // cache the verify
     this.sendMsg(
       resolved === 'delivered'
@@ -2742,7 +2775,8 @@ export class AndroidAgent implements DeviceAgent, NetworkControlCapability {
     kind: 'touch' | 'pinch',
     // How a pointer left down on a replaced channel is let go: an up for an end, a cancel for a cancel (#1115) —
     // an up there would complete the gesture the cancel exists to stop.
-    release: (pc: PointerControl) => void | Promise<void> = (pc) => (kind === 'touch' ? pc.touchUp(0, state.lastTouchPx.x, state.lastTouchPx.y) : pc.pinchEnd()),
+    release: (pc: PointerControl) => void | Promise<void> = (pc) =>
+      kind === 'touch' ? pc.touchUp(0, state.lastTouchPx.x, state.lastTouchPx.y) : pc.pinchEnd(),
   ): GestureBackend | { via: 'none'; outcome: InputOutcome } {
     // An end of the other kind closes nothing: a stray touch end must not take an open pinch's record
     // with it, or the pinch's own end would find nothing and leave its second pointer down.
@@ -2916,6 +2950,7 @@ export class AndroidAgent implements DeviceAgent, NetworkControlCapability {
           })
           break
         }
+        this.stopAppLogStream(state)
         const doInstall = async () => {
           // Not past a run reset's `pm clear` still running: it would land on the app installed here. A client that
           // joined without booting (MCP's `connect_device`) reaches this without the boot's own wait.
@@ -2977,11 +3012,48 @@ export class AndroidAgent implements DeviceAgent, NetworkControlCapability {
           break
         }
         const options = compactLaunchOptions({ arguments: args, env })
+        const appLogGeneration = this.stopAppLogStream(state!)
         // Same reason as `app:install`: a launched app writes data a late `pm clear` would take.
         this.awaitPendingClears(state!.deviceId)
           .then(() => this.adb.launchApp(serial, bundleId, options, defaultsOnly === true))
           // What was delivered, which for the relay's defaults can be less than what was sent, down to nothing.
-          .then((applied) => respond(options ? { type: 'app:launch-done', applied: appliedKeys(applied ?? {}) } : { type: 'app:launch-done' }))
+          .then(async (applied) => {
+            if (
+              this.relayFeatures.includes('app-logs') &&
+              state!.appLogGeneration === appLogGeneration &&
+              this.deviceStates.get(sessionId) === state
+            ) {
+              try {
+                const pid = await this.adb.getAppPid(serial, bundleId)
+                if (
+                  pid !== null &&
+                  state!.appLogGeneration === appLogGeneration &&
+                  this.deviceStates.get(sessionId) === state
+                ) {
+                  state!.appLogStream = new AppLogStream(
+                    serial,
+                    pid,
+                    (text) => {
+                      if (state!.appLogGeneration !== appLogGeneration || this.deviceStates.get(sessionId) !== state)
+                        return true
+                      if (
+                        !this.ws ||
+                        this.ws.readyState !== WebSocket.OPEN ||
+                        this.ws.bufferedAmount >= APP_LOG_SOCKET_BUFFER_LIMIT
+                      )
+                        return false
+                      this.sendMsg({ type: 'app:log', sessionId, text })
+                      return true
+                    },
+                    (error) => logger.warn('app log stream failed:', error.message)
+                  )
+                }
+              } catch (error) {
+                logger.warn('could not start app log stream:', error instanceof Error ? error.message : String(error))
+              }
+            }
+            respond(options ? { type: 'app:launch-done', applied: appliedKeys(applied ?? {}) } : { type: 'app:launch-done' })
+          })
           .catch((e: unknown) => {
             const message = e instanceof Error ? e.message : String(e)
             // The toast gets the reason alone; the full adb output (the cause) stays in this log.
@@ -3116,7 +3188,8 @@ export class AndroidAgent implements DeviceAgent, NetworkControlCapability {
         // only once the device took it: a step queued behind another toggles from what that one
         // applied, and a failed one leaves the memory where the device still is.
         const sessionId = msg.sessionId
-        const payload = msg.payload as { orientation?: 'portrait' | 'landscape'; direction?: 'clockwise' | 'counterclockwise' } | undefined
+        const payload = msg.payload as
+          | { orientation?: 'portrait' | 'landscape'; direction?: 'clockwise' | 'counterclockwise' } | undefined
         const target = payload?.orientation
         void this.enqueueRotation(state.deviceId, async () => {
           const live = this.deviceStates.get(sessionId) ?? state
@@ -3134,14 +3207,14 @@ export class AndroidAgent implements DeviceAgent, NetworkControlCapability {
             return
           }
           if (bodyTurn) {
-            const held = await this.adb.readBodyRotation(serial).catch(() => null) ?? live.body
+            const held = (await this.adb.readBodyRotation(serial).catch(() => null)) ?? live.body
             if (held === null) { logger.warn(`rotate ${serial}: could not read where the body is, not turning`); return }
             const landscape = held === 90 || held === 270
             const want = payload?.direction === 'clockwise' ? (held + 90) % 360
               : payload?.direction === 'counterclockwise' ? (held + 270) % 360
-              : target === 'portrait' ? (held === 0 ? null : 0)
-              : target === 'landscape' ? (landscape ? null : 90)
-              : (landscape ? 0 : 90)
+              : target === 'portrait' ? held === 0 ? null : 0
+                : target === 'landscape' ? landscape ? null : 90
+                : landscape ? 0 : 90
             if (want !== null) await this.turnBodyTo(live, serial, want as 0 | 90 | 180 | 270)
           } else {
             const next = target ? target === 'landscape' : !live.landscape
@@ -3639,7 +3712,7 @@ export class AndroidAgent implements DeviceAgent, NetworkControlCapability {
         '1': '!', '2': '@', '3': '#', '4': '$', '5': '%',
         '6': '^', '7': '&', '8': '*', '9': '(', '0': ')',
       }
-      char = shift ? (shiftDigits[digit] ?? digit) : digit
+      char = shift ? shiftDigits[digit] ?? digit : digit
     } else {
       const PUNCT: Record<string, [string, string]> = {
         Minus: ['-', '_'], Equal: ['=', '+'],

@@ -384,9 +384,15 @@ export class AdbWrapper {
       }
     }
     const component = resolved ? resolved.component : await this.launcherComponent(serial, packageName)
-    if (component && await this.startAndWait(serial, component)) return undefined
+    if (component && (await this.startAndWait(serial, component))) return undefined
     await this.launchWithMonkey(serial, packageName)
     return undefined
+  }
+
+  async getAppPid(serial: string, packageName: string): Promise<number | null> {
+    const output = await this.runner.exec('-s', serial, 'shell', 'pidof', '-s', packageName)
+    const pid = Number(output.trim())
+    return Number.isSafeInteger(pid) && pid > 0 ? pid : null
   }
 
   /**
@@ -399,9 +405,11 @@ export class AdbWrapper {
    */
   private async launchFresh(serial: string, packageName: string, options: LaunchOptions, resolved?: string): Promise<void> {
     if (Object.keys(options.env ?? {}).length > 0) {
-      throw new ValidationError('env is iOS-only: Android has no way to set an app\'s environment. Pass it in arguments instead, read from the intent extras')
+      throw new ValidationError(
+        "env is iOS-only: Android has no way to set an app's environment. Pass it in arguments instead, read from the intent extras"
+      )
     }
-    const component = resolved ?? await this.launcherComponent(serial, packageName)
+    const component = resolved ?? (await this.launcherComponent(serial, packageName))
     if (!component) {
       throw new ValidationError(`Could not find a single launcher activity for ${packageName}, so the launch arguments cannot be delivered`)
     }
@@ -557,7 +565,10 @@ export class AdbWrapper {
     if (!pushed) {
       pushed = (async () => {
         try {
-          this.uidumpDevicePath ??= `/data/local/tmp/tapflow-uidump-${createHash('sha256').update(readFileSync(UIDUMP_JAR)).digest('hex').slice(0, 12)}.jar`
+          this.uidumpDevicePath ??= `/data/local/tmp/tapflow-uidump-${createHash('sha256')
+            .update(readFileSync(UIDUMP_JAR))
+            .digest('hex')
+            .slice(0, 12)}.jar`
           await this.runner.exec('-s', serial, 'push', UIDUMP_JAR, this.uidumpDevicePath)
           return this.uidumpDevicePath
         } catch (e) {
