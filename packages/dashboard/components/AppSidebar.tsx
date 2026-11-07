@@ -81,7 +81,9 @@ export function AppSidebar() {
   // Written into the cached user at once, so the info card's chip follows the click; put back if the relay refuses.
   const flowCapture = useMutation({
     mutationFn: setFlowCapture,
-    onMutate: (on) => {
+    onMutate: async (on) => {
+      // A `me` refetch already in flight (window focus) would land after this and put the old value back.
+      await queryClient.cancelQueries({ queryKey: queryKeys.me })
       const before = queryClient.getQueryData<AuthUser | null>(queryKeys.me)
       if (before) queryClient.setQueryData<AuthUser>(queryKeys.me, { ...before, flowCapture: on })
       return { before }
@@ -89,6 +91,10 @@ export function AppSidebar() {
     onError: (_e, _on, ctx) => {
       if (ctx?.before) queryClient.setQueryData(queryKeys.me, ctx.before)
       toast.error('Could not change step capturing. Try again.')
+    },
+    onSuccess: (on) => {
+      const now = queryClient.getQueryData<AuthUser | null>(queryKeys.me)
+      if (now) queryClient.setQueryData<AuthUser>(queryKeys.me, { ...now, flowCapture: on })
     },
   })
 

@@ -132,8 +132,8 @@ export function parseUiAutomatorDump(xml: string): UIElement[] {
     // Stated on every input so a missing value means "unknown" (see `UIElement.secure`), and on any node that says it
     // is a password whatever its class.
     if (element.role === 'input' || password) element.secure = password
-    if (element.role === 'input') {
-      // Only an input: a WebView or Compose host view reports `focused` alongside the field inside it, and a button
+    if (element.role === 'input' || password) {
+      // Only an input, or a node that says it is a password field: a WebView or Compose host view reports `focused` alongside the field inside it, and a button
       // takes focus once a key event leaves touch mode. Neither is where typing goes.
       if (attrs['focused'] === 'true') element.focused = true
     }

@@ -217,6 +217,11 @@ describe('secure and focused', () => {
     ))
     expect(els).toHaveLength(1)
     expect(els[0]).toMatchObject({ role: 'other', secure: true })
+    // Focused too, when it says so: this is the field typing goes to, whatever its class.
+    const focused = parseUiAutomatorDump(wrap(
+      `<node ${attrs({ class: 'android.view.View', password: 'true', focused: 'true', bounds: '[0,100][1080,200]' })} />`,
+    ))
+    expect(focused[0]).toMatchObject({ secure: true, focused: true })
   })
 
   // As `uiautomator dump` printed them on Pixel_6_tapflow (Android 14), Compose sample app, after typing into the

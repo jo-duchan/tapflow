@@ -261,7 +261,8 @@ export interface UIElement {
   enabled: boolean
   rawRole?: string
   /** Whether a text field hides what is typed into it (iOS `SecureTextField`, Android `password`). Stated as
-   *  `true` or `false` on every `role: 'input'` element and absent on the rest, so an input **without** it
+   *  `true` or `false` on every `role: 'input'` element, and `true` on any other element that says it hides its text
+   *  (an Android password node of another class); absent on the rest, so an input **without** it
    *  means "unknown" — an agent that predates the field, or one that cannot tell — and a consumer deciding
    *  whether typed text may be written down treats unknown as secret. A secure element's `label` can hold
    *  what was typed: never store it or build a selector from it. */

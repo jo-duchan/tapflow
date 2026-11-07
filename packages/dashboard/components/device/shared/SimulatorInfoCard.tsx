@@ -116,7 +116,7 @@ export function SimulatorInfoCard(props: SimulatorInfoCardProps) {
               aria-hidden="true"
               className={cn('h-2 w-2 shrink-0 rounded-full', props.capturingSteps ? 'bg-amber-400' : 'bg-muted-foreground/40')}
             />
-            <span className="truncate">{props.capturingSteps ? 'Capturing steps' : 'Not capturing steps'}</span>
+            <span>{props.capturingSteps ? 'Capturing steps' : 'Not capturing steps'}</span>
           </div>
         )}
 

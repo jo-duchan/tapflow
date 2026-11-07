@@ -73,6 +73,12 @@ describe('what is recorded', () => {
     expect(s.takeSnapshot('s', '3')).toBeNull()
   })
 
+  it('starts with the chrome the relay holds, so its first points have a frame', () => {
+    const { s } = store({ chromeOf: () => ({ streamRotation: 90 }) })
+    s.recordInput('s', ALICE, tap()[0]!)
+    expect(entries(s)[0]).toMatchObject({ kind: 'chrome', chrome: { streamRotation: 90 } })
+  })
+
   it('never throws into the input path', () => {
     const { s } = store({ isEnabled: () => { throw new Error('db gone') } })
     expect(() => s.recordInput('s', ALICE, tap()[0]!)).not.toThrow()
@@ -197,6 +203,16 @@ describe('the budget', () => {
     s.recordInput('s', ALICE, { type: 'input:key', sessionId: 's', requestId: 'k', payload: { code: 'KeyA', modifiers: 0 } })
     for (let i = 0; i < 10; i++) for (const m of tap(`r${i}`)) s.recordInput('s', ALICE, m)
     expect(types(s)[0]).toBe('input:touch:start')
+  })
+
+  // A turn early on, then enough taps to cut it off the head: the points that are left are still in its frame.
+  it('keeps the last chrome before a head cut', () => {
+    const { s } = store({ maxEntries: 20 })
+    s.recordChrome('s', ALICE, { turn: 0 })
+    s.recordChrome('s', ALICE, { turn: 90 })
+    for (let i = 0; i < 12; i++) for (const m of tap(`r${i}`)) s.recordInput('s', ALICE, m)
+    const kept = entries(s).filter((e) => e.kind === 'chrome')
+    expect(kept).toEqual([expect.objectContaining({ chrome: { turn: 90 } })])
   })
 
   it('bounds every capture together, trimming the largest', () => {

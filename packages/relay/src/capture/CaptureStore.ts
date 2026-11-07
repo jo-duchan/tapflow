@@ -59,10 +59,15 @@ export interface Holder {
 export interface CaptureStoreOptions {
   /** The person's own setting (`users.flow_capture`), read from memory on every input. */
   isEnabled: (user: string) => boolean
+  /** The device's chrome as the relay holds it now. A capture starts with it, since a capture begun after a turn would
+   *  otherwise not know which frame its first points are in. */
+  chromeOf?: (sessionId: string) => unknown
   now?: () => number
   maxEntries?: number
   maxBytes?: number
-  /** Across every capture on this relay: N held sessions × the per-session cap would otherwise be the bound. */
+  /** Sizes are JSON characters, not bytes: an estimate of what is held, good for a bound. A snapshot shares its
+   *  entries with the capture and is not counted, so one capture can hold up to twice its budget while a dialog is open.
+   *  Across every capture on this relay: N held sessions × the per-session cap would otherwise be the bound. */
   maxTotalBytes?: number
   pauseTtlMs?: number
 }
@@ -225,6 +230,8 @@ export class CaptureStore {
     if (!capture) {
       capture = { id: randomUUID(), ownerUser: holder.user, startedAt: this.now(), entries: [], bytes: 0, thinned: false }
       this.captures.set(sessionId, capture)
+      const chrome = this.opts.chromeOf?.(sessionId)
+      if (chrome !== undefined) this.append(capture, { at: this.now(), kind: 'chrome', chrome })
     }
     return capture
   }
@@ -269,7 +276,11 @@ export class CaptureStore {
       cut++
     }
     while (cut < capture.entries.length && !startsClean(capture.entries[cut]!)) cut++
-    this.replace(capture, [...capture.entries.slice(0, cut).filter(isAnchor), ...capture.entries.slice(cut)])
+    // The last chrome before the cut goes with the anchors: the points after it are in its frame.
+    const head = capture.entries.slice(0, cut)
+    let lastChrome = -1
+    for (let i = 0; i < head.length; i++) if (head[i]!.kind === 'chrome') lastChrome = i
+    this.replace(capture, [...head.filter((e, i) => isAnchor(e) || i === lastChrome), ...capture.entries.slice(cut)])
   }
 
   private replace(capture: Capture, entries: CaptureEntry[]): void {

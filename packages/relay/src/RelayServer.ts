@@ -421,7 +421,10 @@ export class RelayServer {
   private readonly buildTickets = new BuildTicketStore()
   /** Flow Capture (#1125): each person's setting, and the steps kept for them in memory. */
   private readonly flowCapturePref = new FlowCapturePreference()
-  private readonly captures = new CaptureStore({ isEnabled: (user) => this.flowCapturePref.isEnabled(user) })
+  private readonly captures = new CaptureStore({
+    isEnabled: (user) => this.flowCapturePref.isEnabled(user),
+    chromeOf: (sessionId) => this.sessions.get(sessionId)?.chromeData,
+  })
   private pendingScreenshots = new Map<string, {
     sessionId: string
     resolve: (buf: Buffer, format: 'png' | 'jpeg') => void
@@ -622,7 +625,11 @@ export class RelayServer {
     this.router.get('/api/v1/team/members', handleListMembers)
     this.router.post('/api/v1/team/invite', (req, res) => handleInvite(req, res, this.options.tunnel))
     this.router.patch('/api/v1/team/members/:id', (req, res, params) => handleUpdateMember(req, res, params, this.onAuthChanged))
-    this.router.delete('/api/v1/team/members/:id', (req, res, params) => handleDeleteMember(req, res, params, this.onAuthChanged))
+    this.router.delete('/api/v1/team/members/:id', (req, res, params) => handleDeleteMember(req, res, params, (change) => {
+      this.onAuthChanged(change)
+      // A removed member's typing goes with them, not when their device's countdown runs out.
+      if (change) { this.captures.sealUser(String(change.userId)); this.flowCapturePref.forget(String(change.userId)) }
+    }))
     this.router.post('/api/v1/team/members/:id/send-reset', (req, res, params) => handleSendMemberReset(req, res, params, this.options.tunnel))
 
     // tokens

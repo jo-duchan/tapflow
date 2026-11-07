@@ -233,6 +233,19 @@ describe('Flow Capture through the relay', () => {
     expect((await snapshot(3))!.entries).toHaveLength(3)
   })
 
+  it('ends it when the member is removed', async () => {
+    getDb().prepare("INSERT OR IGNORE INTO users (id, email, role, password_hash) VALUES (4, 'u4@test.local', 'QA', 'x')").run()
+    const tab = await browser(4)
+    await join(tab)
+    await tap(tab, 'r1')
+    expect(await snapshot(4)).not.toBeNull()
+    const removed = await api('DELETE', '/team/members/4', { cookie: cookieFor(2) })
+    expect(removed.status).toBe(204)
+    // Put back only so the owner's cookie is accepted again and can ask: what it finds is what removal left.
+    getDb().prepare("INSERT INTO users (id, email, role, password_hash) VALUES (4, 'u4@test.local', 'QA', 'x')").run()
+    expect(await snapshot(4)).toBeNull()
+  })
+
   it('refuses a setting that is not a boolean, and a PAT', async () => {
     expect((await api('PATCH', '/me/preferences', { cookie: cookieFor(1) }, { flowCapture: 'no' })).status).toBe(400)
     expect((await api('PATCH', '/me/preferences', { authorization: `Bearer ${VIEW_PAT}` }, { flowCapture: false })).status).toBe(401)

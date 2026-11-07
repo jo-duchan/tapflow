@@ -794,6 +794,7 @@ export function DeviceViewer({ sessionId, deviceId, formFactor, platform = 'ios'
             installing={installing} installError={installError}
             decoderUnsupported={false}
             keyboardActive={false} agentAway={agentAway}
+            capturingSteps={capturingSteps}
           />
         </div>
       </div>

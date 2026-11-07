@@ -269,7 +269,7 @@ of what follows exists because of that.
   dashboard — the person's own `flow run` or MCP client borrowing the device included, since the record would otherwise
   have a hole in it; a `device:shutdown` forwarded to the agent (the dashboard sends one on Back and on unmount, and
   `settleShutdown` then cancels the countdown, so hanging the seal on the countdown alone left it alive for days); a
-  cold `device:ready`; `idleShutdown`; `removeSession` — **not** `forgetSessionState`, which `session:leave` also runs, so
+  cold `device:ready`; `idleShutdown`; a member removed under Settings → Team; `removeSession` — **not** `forgetSessionState`, which `session:leave` also runs, so
   a borrowing MCP client leaving would take the person's record with it. A reload or a dropped socket keeps it.
 - **Read back with the browser cookie only** (`api/captures.ts`, `requireAuth`). `requireViewAuth` would take the
   person's own `view` PAT, which is what their MCP server and CI hold, and hand typed passwords to a model. Anyone but the
@@ -279,7 +279,10 @@ of what follows exists because of that.
   dialog reads a snapshot (`POST …/capture/snapshot`), a copy, so recording can go on beside it.
 - **Bounded per capture and across the relay.** Over budget, moves are thinned first (a drag keeps its ends), then whole
   gestures are cut off the head — never `app:launch`, `app:clear-state` or `app:install`, which anchor where a flow
-  starts. Trimmed to three quarters, so the next input does not trim again.
+  starts, and never the last chrome before the cut, which says which frame the points after it are in (a capture also
+  starts with the chrome the relay holds). Trimmed to three quarters, so the next input does not trim again. Sizes are
+  JSON characters, an estimate; a dialog's snapshot shares entries and is not counted, so a capture can hold up to twice
+  its budget while one is open.
 - **Never on disk and never in a log line.** Not in the database, not in `logger`; a capture lives as long as the device
   stays the person's.
 

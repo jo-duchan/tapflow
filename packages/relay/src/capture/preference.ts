@@ -24,7 +24,7 @@ export class FlowCapturePreference {
     this.known.set(user, on)
   }
 
-  /** A user removed or recreated: read them again. */
+  /** A member was removed (`DELETE /api/v1/team/members/:id`): drop what is cached for them. */
   forget(user: string): void {
     this.known.delete(user)
   }
