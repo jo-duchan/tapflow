@@ -67,6 +67,11 @@ The cost of a broad name is ambiguity about what belongs — answered by the two
   add-a-member case below: an older agent or relay omits the field, and every consumer reads absence as
   no turn, which is what it did before the field existed.
 
+- **Flow Capture's record** lives in `src/capture/`, reached as `@tapflowio/protocol/capture`, types only: the
+  entries the relay keeps and returns from the capture snapshot route. A REST body rather than a message, here because
+  the relay writes it and flow-runner's capture module reads it. `CapturedMessage` is derived from `BrowserToRelay`,
+  not from `./validate`'s parse product, so the readers' type graph does not reach the relay-only validator.
+
 - **The connection handshake's query parameters**, as prose rather than types — see
   [Connection handshake](#connection-handshake--what-the-upgrade-url-carries). No message carries them, but a
   client written outside this repo needs them as much as it needs the messages (#581).

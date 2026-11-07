@@ -385,3 +385,39 @@ steps:
     expect(flow.steps[0]).toEqual({ type: 'tapOn', selector: { label: 'OK', timeoutMs: 1 } })
   })
 })
+
+// Flow Capture (#1125): a tap whose point the tree names nothing at, and a typed password, need a way into a flow.
+describe('points and secrets', () => {
+  const step = (yaml: string) => parseFlow(`steps:\n  - ${yaml}\n`, 'x.yaml').steps[0]
+
+  it('reads an array under tapOn and longPressOn as a point, and leaves selectors as they were', () => {
+    expect(step('tapOn: [0.4, 0.6]')).toEqual({ type: 'tapPoint', at: [0.4, 0.6] })
+    expect(step('longPressOn: [0.4, 0.6]')).toEqual({ type: 'longPressPoint', at: [0.4, 0.6], durationMs: 1000 })
+    expect(step('longPressOn: { on: [0.4, 0.6], durationMs: 800 }')).toEqual({ type: 'longPressPoint', at: [0.4, 0.6], durationMs: 800 })
+    expect(step('tapOn: "0.4"')).toEqual({ type: 'tapOn', selector: { text: '0.4' } })
+    expect(step('longPressOn: { on: Save, durationMs: 800 }')).toEqual({ type: 'longPressOn', selector: { text: 'Save' }, durationMs: 800 })
+  })
+
+  it.each([
+    ['tapOn: [0.4]'], ['tapOn: [1.2, 0.5]'], ['tapOn: [.nan, 0.5]'], ['longPressOn: [0.4, 0.6, 0.1]'],
+    ['longPressOn: { on: [0.4, -0.1] }'], ['longPressOn: { on: [0.4, 0.6], durationMs: 60001 }'],
+  ])('refuses the point in %s', (yaml) => {
+    expect(() => step(yaml)).toThrow(/\[x, y\]|durationMs/)
+  })
+
+  it('reads inputText { secret } as a named secret, never as text', () => {
+    expect(step('inputText: { secret: PASSWORD }')).toEqual({ type: 'inputSecret', name: 'PASSWORD' })
+    expect(step('inputText: { secret: _pin2 }')).toEqual({ type: 'inputSecret', name: '_pin2' })
+    expect(step('inputText: "PASSWORD"')).toEqual({ type: 'inputText', text: 'PASSWORD' })
+  })
+
+  it.each([
+    ['inputText: { secret: 2FA }', /"secret" must be a name/],
+    ['inputText: { secret: "MY-PASS" }', /"secret" must be a name/],
+    ['inputText: { secret: "" }', /"secret" must be a name/],
+    ['inputText: { env: PASSWORD }', /unknown inputText keys: env/],
+    ['inputText: { secret: A, text: b }', /unknown inputText keys: text/],
+  ])('refuses %s', (yaml, error) => {
+    expect(() => step(yaml)).toThrow(error)
+  })
+})

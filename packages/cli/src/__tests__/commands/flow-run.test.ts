@@ -25,8 +25,8 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock('@tapflowio/flow-runner', async (importOriginal) => ({
   // The real tap and token resolution: these tests feed it frames and tokens and check what reaches the relay.
-  ...(({ VideoTap, resolveToken, tokenRefusal, fetchWithToken, fixedToken, isEligible, lookupBuild, parseTagList, retryAdmission, admissionRefusalOf, AdmissionRefusedError, parseServiceTier, refusedFlow, unavailableButton, unavailableButtonMessage }) => ({
-    VideoTap, resolveToken, tokenRefusal, fetchWithToken, fixedToken, isEligible, lookupBuild, parseTagList, retryAdmission, admissionRefusalOf, AdmissionRefusedError, parseServiceTier, refusedFlow, unavailableButton, unavailableButtonMessage,
+  ...(({ VideoTap, resolveToken, tokenRefusal, fetchWithToken, fixedToken, isEligible, lookupBuild, parseTagList, retryAdmission, admissionRefusalOf, AdmissionRefusedError, parseServiceTier, refusedFlow, unavailableButton, unavailableButtonMessage, missingSecret, missingSecretMessage }) => ({
+    VideoTap, resolveToken, tokenRefusal, fetchWithToken, fixedToken, isEligible, lookupBuild, parseTagList, retryAdmission, admissionRefusalOf, AdmissionRefusedError, parseServiceTier, refusedFlow, unavailableButton, unavailableButtonMessage, missingSecret, missingSecretMessage,
   }))(
     await importOriginal<typeof import('@tapflowio/flow-runner')>(),
   ),
@@ -50,7 +50,7 @@ vi.mock('@tapflowio/flow-runner', async (importOriginal) => ({
   },
 }))
 
-import { cmdFlowRun, tagsArg } from '../../commands/flow-run.js'
+import { cmdFlowRun, secretArg, tagsArg } from '../../commands/flow-run.js'
 
 // A developer's own credentials file must never reach these runs: every test starts with none.
 beforeEach(() => { vi.stubEnv('TAPFLOW_TOKEN_FILE', path.join(os.tmpdir(), 'tapflow-no-such-credentials.json')) })
@@ -125,6 +125,57 @@ describe('cmdFlowRun exit codes (#543)', () => {
     })
     await run([flowFile('a.yaml')])
     expect(mocks.activity.mock.calls).toEqual([['s1', 'step 2: inputText (7 chars)']])
+  })
+
+  // Flow Capture: a flow types only the secrets the run names, and the run reads them before it touches a device.
+  describe('--secret', () => {
+    it('hands the engine exactly the named variables', async () => {
+      vi.stubEnv('PASSWORD', 'hunter2')
+      vi.stubEnv('OTHER', 'not-this')
+      mocks.runFlow.mockResolvedValue(resultOf('passed'))
+      await run([flowFile('a.yaml')], { secret: ['PASSWORD'] })
+      expect(mocks.runFlow.mock.calls[0]![2]).toMatchObject({ secrets: { PASSWORD: 'hunter2' } })
+      expect(JSON.stringify(mocks.runFlow.mock.calls[0]![2])).not.toContain('not-this')
+    })
+
+    it('hands it none without the flag, whatever the environment holds', async () => {
+      vi.stubEnv('PASSWORD', 'hunter2')
+      mocks.runFlow.mockResolvedValue(resultOf('passed'))
+      await run([flowFile('a.yaml')])
+      expect(mocks.runFlow.mock.calls[0]![2]).not.toHaveProperty('secrets')
+    })
+
+    it.each([
+      [['MISSING'], /--secret MISSING: MISSING is not set in the environment/],
+      [['NOT-A-NAME'], /--secret takes the name of an environment variable/],
+    ])('stops with exit 2 before the device for %j', async (names, message) => {
+      await run([flowFile('a.yaml')], { secret: names })
+      expect(process.exitCode).toBe(2)
+      expect(mocks.joinSession).not.toHaveBeenCalled()
+      expect(console.error).toHaveBeenCalledWith(expect.stringMatching(message))
+    })
+
+    // What CI expands a missing secret to: typing nothing would fail later, as the app's fault.
+    it('refuses an empty variable as it refuses a missing one', async () => {
+      vi.stubEnv('PASSWORD', '')
+      await run([flowFile('a.yaml')], { secret: ['PASSWORD'] })
+      expect(process.exitCode).toBe(2)
+      expect(mocks.joinSession).not.toHaveBeenCalled()
+    })
+
+    it('stops before choosing a device when a flow types a secret the run was not given', async () => {
+      mocks.parseFlow.mockImplementationOnce(() => ({ name: 'login', steps: [{ type: 'inputSecret', name: 'PASSWORD' }] as never[] }))
+      await run([flowFile('login.yaml')])
+      expect(process.exitCode).toBe(2)
+      expect(mocks.joinSession).not.toHaveBeenCalled()
+      expect(console.error).toHaveBeenCalledWith(expect.stringMatching(/login: the secret PASSWORD was not given to this run/))
+    })
+
+    it('keeps a repeated or numeric-looking name as typed', () => {
+      expect(secretArg(undefined)).toBeUndefined()
+      expect(secretArg('PASSWORD')).toEqual(['PASSWORD'])
+      expect(secretArg(['A', 'B'])).toEqual(['A', 'B'])
+    })
   })
 
   // L2: a Mac busy booting another device is waited out, and the run lets go of the session while it waits so a

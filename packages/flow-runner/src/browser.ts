@@ -4,7 +4,7 @@
 // from here and fails on a Node builtin, `ws`, or a secure-context-only API.
 export { parseFlow, keyModifierBits } from './schema.js'
 export type { Flow, Step, Selector, ScrollDirection, KeyModifier } from './schema.js'
-export { runFlow, matchSelector, activityLabel, refusedFlow } from './engine.js'
+export { runFlow, missingSecret, missingSecretMessage, matchSelector, activityLabel, refusedFlow } from './engine.js'
 export type { FlowDriver, FlowResult, StepResult, EngineOptions, SelectorSuggestion, PinchFingers } from './engine.js'
 export { unavailableButton, unavailableButtonMessage } from './platformCheck.js'
 export type { UnavailableButton } from './platformCheck.js'
@@ -14,6 +14,8 @@ export {
   RelayUnavailableError, RequestTimeoutError, SessionEndedError, SessionLeftError, SessionUnavailableError,
 } from './sessionErrors.js'
 export { SessionChannel, newRequestId } from './sessionChannel.js'
-export type { RelayMsg } from './sessionChannel.js'
+export type { RelayMsg, ReplayInput } from './sessionChannel.js'
 export { SocketFlowDriver } from './SocketFlowDriver.js'
 export type { SessionDevice } from './SocketFlowDriver.js'
+// Flow Capture (#1125): a capture's record turned into a flow, for the dashboard's dialog.
+export * from './capture/index.js'

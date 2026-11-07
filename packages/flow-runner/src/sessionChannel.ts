@@ -106,12 +106,30 @@ interface Waiter {
 
 const delay = (ms: number) => new Promise<void>((r) => setTimeout(r, ms))
 
+/** `delay`, cut short when `signal` aborts; the caller looks at the signal after it. */
+function abortableDelay(ms: number, signal: AbortSignal | undefined): Promise<void> {
+  if (!signal) return delay(ms)
+  if (signal.aborted) return Promise.resolve()
+  return new Promise<void>((resolve) => {
+    const timer = setTimeout(() => { signal.removeEventListener('abort', done); resolve() }, ms)
+    const done = () => { clearTimeout(timer); resolve() }
+    signal.addEventListener('abort', done, { once: true })
+  })
+}
+
 function isPostures(v: unknown): v is PosturesPayload {
   return typeof v === 'object' && v !== null && Array.isArray((v as PosturesPayload).postures)
 }
 
 /** A gesture this client has begun and not ended — what a leave closes on the device's behalf. */
-type OpenGesture = { kind: 'touch'; at: { x: number; y: number } } | { kind: 'pinch' }
+type OpenGesture = { kind: 'touch'; at: { x: number; y: number } } | { kind: 'pinch' } | { kind: 'button'; name: string }
+
+/** The input messages a capture replays as they were sent — the gestures, a held button, keys, a turn, a fold. */
+export type ReplayInput = Extract<BrowserToRelay, { type:
+  | 'input:touch:start' | 'input:touch:move' | 'input:touch:end' | 'input:touch:cancel'
+  | 'input:pinch:start' | 'input:pinch:move' | 'input:pinch:end'
+  | 'input:key' | 'input:button' | 'input:rotate' | 'input:posture' | 'input:keyboard:toggle'
+}>
 
 /** The relay's cap on a `session:activity` label; a longer one is dropped whole, so it is cut here first. */
 const ACTIVITY_MAX = 200
@@ -409,20 +427,85 @@ export abstract class SessionChannel {
     // that does not, or a relay that drops the cancel: it completes the gesture as before, which beats a pointer left
     // down. No pairing is worse than today, so this needs no capability check. A pinch is only ended: its moves have
     // already applied it, and the wire has no pinch cancel.
-    const open = this.openGestures.get(sessionId)
-    if (open) {
-      this.openGestures.delete(sessionId)
-      const requestId = newRequestId()
-      if (open.kind === 'touch') {
-        this.send({ type: 'input:touch:cancel', sessionId })
-        this.send({ type: 'input:touch:end', sessionId, requestId, payload: open.at })
-      } else this.send({ type: 'input:pinch:end', sessionId, requestId })
-    }
+    this.liftOpenGesture(sessionId)
     this.send({ type: 'session:leave', sessionId })
     this.settleSessionWaiters(sessionId, (w) => new SessionLeftError(
       `${w.what} failed: this client left session ${sessionId} while the request was in flight. Whether it ` +
       'reached the device is unknown, so do not repeat it blindly — re-join the session if you still want it',
     ))
+  }
+
+  /** Close the gesture this client left open on the session, unanswered — see `leaveSession`. A held button is let go. */
+  private liftOpenGesture(sessionId: string): void {
+    const open = this.openGestures.get(sessionId)
+    if (!open) return
+    this.openGestures.delete(sessionId)
+    const requestId = newRequestId()
+    if (open.kind === 'touch') {
+      this.send({ type: 'input:touch:cancel', sessionId })
+      this.send({ type: 'input:touch:end', sessionId, requestId, payload: open.at })
+    } else if (open.kind === 'pinch') this.send({ type: 'input:pinch:end', sessionId, requestId })
+    else this.send({ type: 'input:button', sessionId, requestId, payload: { name: open.name, phase: 'up' } })
+  }
+
+  /**
+   * Send recorded input messages again, at the pace they were recorded (Flow Capture's replay, #1125): a gesture's
+   * moves are what an app's recogniser reads, so their spacing is kept, not respread. Each gets this session's id and,
+   * where it carries one, a new correlator; each acked one is awaited before the next is sent. A gesture or a held
+   * button left open by an abort, or by the session being left, is closed as `leaveSession` closes one.
+   *
+   * `at` is any clock: only the differences are read.
+   */
+  async replayInputs(sessionId: string, messages: ReadonlyArray<{ at: number; msg: ReplayInput }>, signal?: AbortSignal): Promise<void> {
+    if (messages.length === 0) return
+    const t0 = messages[0]!.at
+    const started = Date.now()
+    let opened: { gesture: OpenGesture; at: number } | null = null
+    for (const { at, msg } of messages) {
+      const wait = at - t0 - (Date.now() - started)
+      // A recorded pause can be a 60 s hold: a cancel ends it now, not when it would have ended.
+      if (wait > 0) await abortableDelay(wait, signal)
+      if (opened && this.openGestures.get(sessionId) !== opened.gesture) return this.leftMidGesture(sessionId, 'replay')
+      if (signal?.aborted) {
+        this.liftOpenGesture(sessionId)
+        throw new SessionLeftError(this.failed(sessionId, 'replay stopped: it was cancelled, and the gesture in progress was ended where it was').message)
+      }
+      const requestId = 'requestId' in msg ? newRequestId() : undefined
+      const out = { ...msg, sessionId, ...(requestId ? { requestId } : {}) } as ReplayInput
+      if (out.type === 'input:touch:start' || out.type === 'input:pinch:start'
+        || (out.type === 'input:button' && out.payload.phase === 'down')) {
+        const gesture: OpenGesture = out.type === 'input:touch:start' ? { kind: 'touch', at: { x: out.payload.x, y: out.payload.y } }
+          : out.type === 'input:pinch:start' ? { kind: 'pinch' } : { kind: 'button', name: (out as Extract<ReplayInput, { type: 'input:button' }>).payload.name }
+        this.openGestures.set(sessionId, gesture)
+        opened = { gesture, at }
+      } else if (out.type === 'input:touch:move' && opened?.gesture.kind === 'touch') {
+        opened.gesture.at = { x: out.payload.x, y: out.payload.y }
+      }
+      const closes = out.type === 'input:touch:end' || out.type === 'input:touch:cancel' || out.type === 'input:pinch:end'
+        || (out.type === 'input:button' && out.payload.phase === 'up')
+      const held = closes && opened ? at - opened.at : 0
+      if (closes && opened) { this.closeGesture(sessionId, opened.gesture); opened = null }
+      this.send(out)
+      // Android's adb path replays a held touch after its end arrives, so that ack comes the hold's length later.
+      if (requestId) await this.awaitInputAck(sessionId, requestId, `replay ${out.type}`, held)
+    }
+  }
+
+  /** Paste `text` into the focused field, as the dashboard's paste does: written to the device's clipboard, then
+   *  pasted. A replayed paste, never a flow step — `inputText` types through the agent's own handshake. */
+  async pasteText(sessionId: string, text: string): Promise<void> {
+    const requestId = newRequestId()
+    this.send({ type: 'clipboard:write', sessionId, requestId, payload: { text, pasteAfter: true } })
+    const msg = await this.waitFor(
+      (m) => (m['type'] === 'clipboard:write-done' || m['type'] === 'clipboard:error')
+        && m['sessionId'] === sessionId && m['requestId'] === requestId,
+      15_000,
+      'paste',
+      sessionId,
+    )
+    if (msg['type'] === 'clipboard:error') {
+      throw this.failed(sessionId, `paste was refused by the device: ${(msg['message'] as string) ?? 'no detail'}`)
+    }
   }
 
   /** What the relay says it understands beyond the base protocol. An older relay omits the list. */

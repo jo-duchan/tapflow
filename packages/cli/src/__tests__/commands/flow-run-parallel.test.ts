@@ -141,6 +141,14 @@ describe('flow run --parallel', () => {
     expect(mocks.lease).not.toHaveBeenCalled()
   })
 
+  it('hands every device the secrets the run named', async () => {
+    vi.stubEnv('PASSWORD', 'hunter2')
+    leases(A, B)
+    await cmdFlowRun(flowFiles('one', 'two'), { parallel: 2, platform: 'ios', secret: ['PASSWORD'] })
+    expect(process.exitCode).toBe(0)
+    expect(mocks.runFlow.mock.calls.map((c) => (c[2] as { secrets?: unknown }).secrets)).toEqual([{ PASSWORD: 'hunter2' }, { PASSWORD: 'hunter2' }])
+  })
+
   it('shares the flows across the devices it leased, each run once, as one holder', async () => {
     leases(A, B)
     await cmdFlowRun(flowFiles('one', 'two', 'three', 'four'), { parallel: 2, platform: 'ios' })

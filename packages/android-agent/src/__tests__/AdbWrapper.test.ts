@@ -635,6 +635,17 @@ describe('AdbWrapper', () => {
       expect(runner.exec).toHaveBeenCalledWith('-s', 'emulator-5554', 'shell', 'input', 'text', '50\\%%soff')
     })
 
+    // The text can be a flow's secret, and a failed exec's message is its whole command line.
+    it('fails without the typed text in its message', async () => {
+      const runner = mockRunner()
+      vi.mocked(runner.exec).mockRejectedValueOnce(Object.assign(new Error('Command failed: adb -s emulator-5554 shell input text hunter2'), { code: 1 }))
+      const wrapper = new AdbWrapper(runner)
+      const error = await wrapper.inputText('emulator-5554', 'hunter2').then(() => null, (e: unknown) => e as Error)
+      expect(error).toBeInstanceOf(PlatformError)
+      expect(error!.message).toBe('adb input text failed (exit 1)')
+      expect(JSON.stringify(error, Object.getOwnPropertyNames(error!))).not.toContain('hunter2')
+    })
+
     it('rejects non-ASCII text instead of silently typing nothing', async () => {
       const runner = mockRunner()
       const wrapper = new AdbWrapper(runner)
