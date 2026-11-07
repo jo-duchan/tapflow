@@ -2158,27 +2158,36 @@ export class IOSAgent implements DeviceAgent, NetworkControlCapability, Posturab
               launchState.appLogGeneration === appLogGeneration &&
               this.deviceStates.get(sessionId!) === launchState
             ) {
-              launchState.appLogStream?.stop()
-              launchState.appLogStream = new AppLogStream(
-                launchState.deviceId,
-                pid,
-                (text) => {
+              void this.simctl.getAppExecutablePath(launchState.deviceId, bundleId)
+                .then((processImagePath) => {
                   if (
                     launchState.appLogGeneration !== appLogGeneration ||
                     this.deviceStates.get(sessionId!) !== launchState
+                  ) return
+                  launchState.appLogStream?.stop()
+                  launchState.appLogStream = new AppLogStream(
+                    launchState.deviceId,
+                    pid,
+                    processImagePath,
+                    (text) => {
+                      if (
+                        launchState.appLogGeneration !== appLogGeneration ||
+                        this.deviceStates.get(sessionId!) !== launchState
+                      )
+                        return true
+                      if (
+                        !this.ws ||
+                        this.ws.readyState !== WebSocket.OPEN ||
+                        this.ws.bufferedAmount >= APP_LOG_SOCKET_BUFFER_LIMIT
+                      )
+                        return false
+                      this.sendMsg({ type: 'app:log', sessionId: sessionId!, text })
+                      return true
+                    },
+                    (error) => logger.warn('app log stream failed:', error.message)
                   )
-                    return true
-                  if (
-                    !this.ws ||
-                    this.ws.readyState !== WebSocket.OPEN ||
-                    this.ws.bufferedAmount >= APP_LOG_SOCKET_BUFFER_LIMIT
-                  )
-                    return false
-                  this.sendMsg({ type: 'app:log', sessionId: sessionId!, text })
-                  return true
-                },
-                (error) => logger.warn('app log stream failed:', error.message)
-              )
+                })
+                .catch((error: unknown) => logger.warn('could not resolve app log process image:', (error as Error).message))
             }
             // Audio: the whole-sim tap's poll picks up the launched app process within one interval;
             // no per-launch helper needed.
