@@ -1,0 +1,13 @@
+// Flow Capture (#1125): a capture's raw record turned into a flow. Pure functions — the dashboard replays each step,
+// reads the screen around it, and passes what it read in; nothing here touches a device.
+export { segment, LONG_PRESS_MS, TAP_SLOP, KEY_RUN_GAP_MS } from './segment.js'
+export type { RawStep, Outcome, Point, Fingers, TimedMessage } from './segment.js'
+export { defaultRange, rangeWarnings } from './range.js'
+export type { StepRange, RangeWarning } from './range.js'
+export { matchStep, toFlowSteps, flowSteps, toScreen, hitTest } from './match.js'
+export type { MatchContext, CapturedStep, CapturedFlow, SkipReason, FragileReason } from './match.js'
+export { flowToYaml } from './yaml.js'
+export { rawStepLabel, capturedStepLabel } from './label.js'
+export { keyChar } from './keys.js'
+export { replayStep, replaySteps, rangeStartOrientation } from './replay.js'
+export type { ReplayChannel, ReplayOutcome, ReplayHooks } from './replay.js'

@@ -52,8 +52,8 @@ The vocabulary is deliberately small. These fifteen cover most scenarios.
 |------|------|----------|
 | `clearState` | keyword or `clearState: <bundleId>` | Resets the app data. The keyword form uses the top-level `appId`. |
 | `launchApp` | keyword or `launchApp: { arguments, env }` | Launches the build under test and waits for its screen to settle: the role, label and id of every UI tree element unchanged for a second, so a splash screen is not taken for the first screen. A screen with no UI tree elements, such as a game, moves on after that second too. A screen whose labels keep changing moves on 3 seconds after it was first read, and one that cannot be read at all after the default per-selector wait. The wait never fails the step. A splash that stays unchanged for longer than a second can still be taken for the first screen. To pass launch arguments, see [Launch arguments](#launch-arguments). |
-| `tapOn` | selector | Taps the center of the matched element. |
-| `inputText` | string | Types text into the focused input field. |
+| `tapOn` | selector or `[x, y]` | Taps the center of the matched element, or a point. See [Tapping a point](#tapping-a-point). |
+| `inputText` | string or `{ secret: NAME }` | Types text into the focused input field. For a value that must not be written in the flow file, such as a password, see [Secrets](#secrets). |
 | `pressKey` | key name or `{ code, modifiers }` | Presses a keyboard key (`Enter`, `Backspace`, `Escape`, …). For a key combination, list the keys to hold from `shift`, `ctrl`, `alt` and `meta`, as in `{ code: ArrowLeft, modifiers: [shift] }`. On Android the only letter keys that take `ctrl` or `meta` are C, V and X, and `alt` does not apply to letter keys. |
 | `swipe` | `{ from, to, durationMs? }` | Swipes between two points. Coordinates are 0–1. `durationMs` is milliseconds as a number, default 300, max 2147483647. Fractional values (e.g. 250.5) are accepted. |
 | `scroll` | keyword, `scroll: <direction>` or `{ direction, until }` | Scrolls the screen. The bare keyword scrolls down. With `until`, it scrolls until that element is on screen. See [Scrolling to an element](#scrolling-to-an-element). |
@@ -61,7 +61,7 @@ The vocabulary is deliberately small. These fifteen cover most scenarios.
 | `assertVisible` | selector | Waits until the element appears; fails if it does not. |
 | `assertNotVisible` | selector | Waits until the element disappears; fails if it does not. |
 | `pressButton` | button name | Presses a hardware button. See [Hardware buttons](#hardware-buttons). |
-| `longPressOn` | selector or `{ on, durationMs? }` | Presses the center of the matched element and holds it, 1000 ms by default, at most 60000. To change the time, put the selector under `on`. |
+| `longPressOn` | selector, `[x, y]` or `{ on, durationMs? }` | Presses the center of the matched element, or a point, and holds it, 1000 ms by default, at most 60000. To change the time, put the selector or point under `on`. |
 | `pinch` | `{ on, scale, durationMs? }` | Two fingers about the center of an element or a point. See [Pinch](#pinch). |
 | `setOrientation` | `portrait` or `landscape` | Turns the device upright or sideways. See [Orientation and posture](#orientation-and-posture). |
 | `setPosture` | `folded` or `unfolded` | Folds or unfolds a foldable device. See [Orientation and posture](#orientation-and-posture). |
@@ -135,6 +135,37 @@ A bare `longPressOn` holds for 1000 ms, which is past the point where both platf
 On an Android device streaming over the adb fallback, a hold needs android-agent from the same release. An older agent delivers it as a tap and still reports success, so follow `longPressOn` with an assertion on what the hold opens.
 
 `durationMs` goes beside the selector, never inside it. `{ label: "Message", durationMs: 2500 }` is refused, because turning a bare string into `label:` would also change how it matches: `label:` does not look at identifiers.
+
+### Tapping a point {#tapping-a-point}
+
+A place the UI tree has no name for (a game, a map, a canvas) cannot be reached with a selector. Give a point instead. Points are 0–1 on the screen as the app draws it, so on a landscape screen they are landscape.
+
+```yaml
+- tapOn: [0.42, 0.61]
+- longPressOn: { on: [0.5, 0.5], durationMs: 1500 }
+```
+
+A point is the last resort. It does not wait for anything to appear, and a different screen size or layout puts it somewhere else. Use a selector wherever one reaches the element, and put an `assertVisible` before a point tap to check the screen is the one you expect.
+
+### Secrets {#secrets}
+
+Type a value that must not be written in the flow file, such as a password, by name:
+
+```yaml
+- tapOn: { id: "password" }
+- inputText: { secret: PASSWORD }
+```
+
+Pass the value with `--secret` when you run `tapflow flow run`. It is read from the environment variable of the same name.
+
+```sh
+PASSWORD=hunter2 tapflow flow run .tapflow/flows/login.yaml --secret PASSWORD
+```
+
+- Only the names given with `--secret` are read. The environment holds other secrets too, such as the relay token, so changing a flow file alone cannot type one of them into the app.
+- The value appears in no run record, JUnit report or step name. The step is named `inputText(secret PASSWORD)`.
+- A flow that uses a secret the run was not given stops the run with an environment error before a device is chosen. So does a `--secret` whose environment variable is not set or is empty, since CI passes a secret it does not have as an empty value.
+- `run_flow` over MCP is given no secrets, so it does not run a flow with this step.
 
 ### Pinch {#pinch}
 

@@ -253,9 +253,9 @@ from the listing**: an MCP client and the lease read the same one, and a hidden 
 ### Flow Capture's record (`capture/`, #1125)
 
 The relay keeps, in memory, every input a person's dashboard sent to the agent — the parse product, stamped with the
-relay's clock — so the dashboard can later turn a stretch of it into a flow. It holds **what was typed** (`input:key`,
-`input:type`, a pasted `clipboard:write`), which the relay otherwise never keeps: watchers get a character count. Most
-of what follows exists because of that.
+relay's clock — so the dashboard can later turn a stretch of it into a flow; its shape is `@tapflowio/protocol/capture`.
+It holds **what was typed** (`input:key`, `input:type`, a pasted `clipboard:write`), which the relay otherwise never
+keeps: watchers get a character count. Most of what follows exists because of that.
 
 - **Recorded after the send, never before.** One `captures.recordInput` call follows each `agentSocket.send` in the
   input, app-command, clipboard and network paths, so a refused input is not recorded. `CaptureStore` never throws into
@@ -278,8 +278,10 @@ of what follows exists because of that.
 - **The replay pause is a lease, not a flag on a socket**: `PUT …/capture/pause` stops recording for 30 s and is renewed
   by calling it again. A Wi-Fi blink in the middle of the dialog's replay keeps it; a tab that dies lets it run out. The
   dialog reads a snapshot (`POST …/capture/snapshot`), a copy, so recording can go on beside it.
-- **Bounded per capture and across the relay.** Over budget, moves are thinned first (a drag keeps its ends), then whole
-  gestures are cut off the head — never `app:launch`, `app:clear-state` or `app:install`, which anchor where a flow
+- **Bounded per capture and across the relay.** Over budget, moves are thinned first (a drag keeps its start and its
+  first and last moves — the dashboard's end carries no point, so the last move is where the finger lifted, and the
+  first move's time tells a swipe from a drag after a hold), then whole gestures are
+  cut off the head — never `app:launch`, `app:clear-state` or `app:install`, which anchor where a flow
   starts, and never the last chrome before the cut, which says which frame the points after it are in (a capture also
   starts with the chrome the relay holds). Trimmed to three quarters, so the next input does not trim again. Sizes are
   JSON characters, an estimate; a dialog's snapshot shares entries and is not counted, so a capture can hold up to twice

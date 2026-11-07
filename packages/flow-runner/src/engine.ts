@@ -3,7 +3,16 @@ import type { ChromePayload, LaunchApplied, LaunchOptions } from '@tapflowio/pro
 import type { Flow, KeyModifier, Selector, Step, ScrollDirection } from './schema.js'
 import { matchSelector } from './selector.js'
 import { suggestSelectors, type SelectorSuggestion } from './suggest.js'
-import { DeviceLacksError, EnvironmentStepError, isEnvironmentStepFailure, TransientQueryError } from './errors.js'
+import { DeviceLacksError, EnvironmentStepError, isEnvironmentStepFailure, markEnvironmentFailure, TransientQueryError } from './errors.js'
+import {
+  InputRefusedError, RelayClosedError, RelayUnavailableError, RequestTimeoutError, SessionEndedError, SessionLeftError,
+  SessionUnavailableError,
+} from './sessionErrors.js'
+
+/** Failures the session channel builds from what the relay said, which never quote what was typed. */
+const SESSION_FAILURES = [
+  SessionEndedError, SessionLeftError, SessionUnavailableError, RelayClosedError, RelayUnavailableError, RequestTimeoutError,
+]
 import { buttonAvailability } from '@tapflowio/protocol/buttons'
 import { unavailableButton, unavailableButtonMessage } from './platformCheck.js'
 
@@ -68,6 +77,13 @@ export interface EngineOptions {
    * first step instead of answered with a press that did nothing (`failedBeforeRun`). Without it, nothing is checked.
    */
   platform?: string
+  /**
+   * The values `inputText: { secret: NAME }` types, by name. Only what the caller chose to give: the CLI the names its
+   * `--secret` flags declare, `run_flow` none — a server's own environment holds its relay token, and a flow an agent
+   * wrote must not be able to type that into a field it can read back. A flow naming a secret it was not given is
+   * refused before its first step. A value is read only when its step runs and appears in no name, label or log.
+   */
+  secrets?: Readonly<Record<string, string>>
 }
 
 export interface StepResult {
@@ -187,7 +203,9 @@ function describeStep(step: Step): string {
     case 'clearState': return step.appId ? `clearState(${step.appId})` : 'clearState'
     case 'launchApp': return describeLaunch(step.options, undefined)
     case 'tapOn': return `tapOn(${describeSelector(step.selector)})`
+    case 'tapPoint': return `tapOn([${step.at.join(',')}])`
     case 'inputText': return `inputText("${step.text}")`
+    case 'inputSecret': return `inputText(secret ${step.name})`
     case 'pressKey': return `pressKey(${withModifiers(step.modifiers, step.code)})`
     case 'swipe': return `swipe(${step.from} → ${step.to})`
     case 'scroll': return step.until ? `scroll(${step.direction} until ${describeSelector(step.until)})` : `scroll(${step.direction})`
@@ -196,6 +214,7 @@ function describeStep(step: Step): string {
     case 'assertNotVisible': return `assertNotVisible(${describeSelector(step.selector)})`
     case 'pressButton': return `pressButton(${step.name})`
     case 'longPressOn': return `longPressOn(${describeSelector(step.selector)}, ${step.durationMs}ms)`
+    case 'longPressPoint': return `longPressOn([${step.at.join(',')}], ${step.durationMs}ms)`
     case 'pinch': return `pinch(${Array.isArray(step.on) ? `[${step.on.join(',')}]` : describeSelector(step.on)}, ×${step.scale})`
     case 'setOrientation': return `setOrientation(${step.orientation})`
     case 'setPosture': return `setPosture(${step.posture})`
@@ -211,6 +230,7 @@ function describeStep(step: Step): string {
 export function activityLabel(step: Step): string {
   switch (step.type) {
     case 'inputText': return `inputText (${[...step.text].length} chars)`
+    case 'inputSecret': return 'inputText (secret)'
     case 'openUrl': return 'openUrl'
     // The modifiers stay: a shortcut names no secret, and the character under it is hidden as before.
     case 'pressKey': return `pressKey(${withModifiers(step.modifiers, typesCharacter(step.code) ? 'character' : step.code)})`
@@ -327,7 +347,7 @@ async function resolveOne(
         const matches = matchSelector(q.tree, sel)
         if (matches.length === 1) return matches[0]
         if (matches.length > 1) {
-          const described = matches.slice(0, 5).map((m) => `${m.role} "${m.label}"${m.identifier ? ` id=${m.identifier}` : ''}${m.placeholder ? ` placeholder="${m.placeholder}"` : ''}`).join(' | ')
+          const described = matches.slice(0, 5).map((m) => `${m.role} "${m.role === 'input' || m.secure === true ? '' : m.label}"${m.identifier ? ` id=${m.identifier}` : ''}${m.placeholder ? ` placeholder="${m.placeholder}"` : ''}`).join(' | ')
           throw new StepFailure(`${matches.length} elements match ${describeSelector(sel)} — add an index or a more specific role/label (candidates: ${described})`)
         }
       } else {
@@ -572,7 +592,10 @@ function pinchFingers(center: [number, number], scale: number): { start: PinchFi
 }
 
 // Resolves to what a launch applied; every other step to nothing.
-async function executeStep(step: Step, flow: Flow, driver: FlowDriver, timeoutMs: number, pollIntervalMs: number): Promise<LaunchApplied | void> {
+async function executeStep(
+  step: Step, flow: Flow, driver: FlowDriver, timeoutMs: number, pollIntervalMs: number,
+  secrets: EngineOptions['secrets'],
+): Promise<LaunchApplied | void> {
   switch (step.type) {
     case 'clearState': {
       // `parseFlow` rejects the bare form without a flow-level appId, but `runFlow` is exported and does not
@@ -594,7 +617,25 @@ async function executeStep(step: Step, flow: Flow, driver: FlowDriver, timeoutMs
       const el = await resolveOne(driver, step.selector, timeoutMs, pollIntervalMs)
       return driver.tap(round4(el.frame.x + el.frame.width / 2), round4(el.frame.y + el.frame.height / 2))
     }
+    case 'tapPoint': return driver.tap(step.at[0], step.at[1])
     case 'inputText': return driver.inputText(step.text)
+    case 'inputSecret': {
+      // Own properties only: a name like `constructor` would otherwise read Object's and type that.
+      const value = secrets && Object.hasOwn(secrets, step.name) ? secrets[step.name] : undefined
+      // Checked before the run; this is for a caller that ran a flow without going through `runFlow`'s check.
+      if (value === undefined) throw new EnvironmentStepError(`the secret ${step.name} was not given to this run`)
+      try {
+        return await driver.inputText(value)
+      } catch (e) {
+        // A driver's failure may quote what it typed (adb's did, in argv): said again here with the name only, and
+        // classified as the original was. What the relay said about the session is kept: those messages are built by
+        // the channel and carry no text. An agent's refusal is not, since an older agent's could quote it.
+        const cause = e instanceof InputRefusedError ? ` (${e.reason})`
+          : SESSION_FAILURES.some((C) => e instanceof C) ? `: ${(e as Error).message}` : ''
+        const failure = new Error(`typing the secret ${step.name} failed${cause}`)
+        throw isEnvironmentStepFailure(e) ? markEnvironmentFailure(failure) : failure
+      }
+    }
     // A plain press passes no second argument, so a driver written before modifiers sees the call it always did.
     case 'pressKey': return step.modifiers ? driver.pressKey(step.code, step.modifiers) : driver.pressKey(step.code)
     case 'swipe': return driver.swipe(step.from, step.to, step.durationMs)
@@ -611,6 +652,7 @@ async function executeStep(step: Step, flow: Flow, driver: FlowDriver, timeoutMs
       const el = await resolveOne(driver, step.selector, timeoutMs, pollIntervalMs)
       return driver.longPress(round4(el.frame.x + el.frame.width / 2), round4(el.frame.y + el.frame.height / 2), step.durationMs)
     }
+    case 'longPressPoint': return driver.longPress(step.at[0], step.at[1], step.durationMs)
     case 'pinch': {
       let center: [number, number]
       if (Array.isArray(step.on)) center = step.on
@@ -625,6 +667,17 @@ async function executeStep(step: Step, flow: Flow, driver: FlowDriver, timeoutMs
     case 'setOrientation': return driver.setOrientation(step.orientation, timeoutMs)
     case 'setPosture': return driver.setPosture(step.posture, timeoutMs)
   }
+}
+
+/** The first `inputText: { secret }` step naming a secret `secrets` does not hold, or `null`. A caller checks it before
+ *  choosing or preparing a device, so a run that cannot type one costs no boot; the engine checks it again. */
+export function missingSecret(flow: Flow, secrets: Readonly<Record<string, string>> | undefined): { index: number; name: string } | null {
+  const index = flow.steps.findIndex((s) => s.type === 'inputSecret' && !(secrets && Object.hasOwn(secrets, s.name)))
+  return index < 0 ? null : { index, name: (flow.steps[index] as Extract<Step, { type: 'inputSecret' }>).name }
+}
+
+export function missingSecretMessage(name: string): string {
+  return `the secret ${name} was not given to this run (tapflow flow run --secret ${name}, with ${name} set in the environment; run_flow takes none)`
 }
 
 /**
@@ -675,6 +728,8 @@ async function refuseButtons(flow: Flow, driver: FlowDriver, platform: string, t
 export async function runFlow(flow: Flow, driver: FlowDriver, options: EngineOptions = {}): Promise<FlowResult> {
   const timeoutMs = normalizeTimeoutMs(options.defaultTimeoutMs ?? DEFAULT_TIMEOUT_MS, 'default timeout')
   const pollIntervalMs = options.pollIntervalMs ?? DEFAULT_POLL_INTERVAL_MS
+  const missing = missingSecret(flow, options.secrets)
+  if (missing) return refusedFlow(flow, missing.index, missingSecretMessage(missing.name), { beforeRun: true })
   if (options.platform !== undefined) {
     const refused = await refuseButtons(flow, driver, options.platform, timeoutMs)
     if (refused) return refused
@@ -695,7 +750,7 @@ export async function runFlow(flow: Flow, driver: FlowDriver, options: EngineOpt
     const stepStart = Date.now()
     options.onStep?.({ index, name: started, phase: 'start', label: activityLabel(step) })
     try {
-      const applied = await executeStep(step, flow, driver, timeoutMs, pollIntervalMs)
+      const applied = await executeStep(step, flow, driver, timeoutMs, pollIntervalMs, options.secrets)
       // Known only once the launch answers, so the start mark carries the name without the relay's defaults.
       const name = step.type === 'launchApp' && applied ? describeLaunch(step.options, applied) : started
       steps.push({ index, name, status: 'passed', durationMs: Date.now() - stepStart })

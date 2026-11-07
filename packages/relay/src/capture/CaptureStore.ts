@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto'
 import type { ClientKind } from '@tapflowio/protocol'
-import type { ParsedInbound } from '@tapflowio/protocol/validate'
+import type { CapturedMessage, CaptureEntry, CaptureSnapshot } from '@tapflowio/protocol/capture'
 
 /**
  * Flow Capture's raw record of what a person did on a device (#1125): every input the relay passed on to the agent,
@@ -14,29 +14,7 @@ import type { ParsedInbound } from '@tapflowio/protocol/validate'
  * whenever the device stops being theirs.
  */
 
-/** The browser messages a capture keeps: the inputs, and the commands that change what is on the device. The parse
- *  product the relay forwards, so what is kept is what reached the agent — a key appended from devtools is gone. */
-export type CapturedMessage = Extract<ParsedInbound, { type:
-  | 'input:touch:start' | 'input:touch:move' | 'input:touch:end' | 'input:touch:cancel'
-  | 'input:pinch:start' | 'input:pinch:move' | 'input:pinch:end'
-  | 'input:key' | 'input:button' | 'input:type' | 'input:rotate' | 'input:posture' | 'input:keyboard:toggle'
-  | 'app:install' | 'app:launch' | 'app:clear-state' | 'open-url'
-  | 'clipboard:write' | 'clipboard:read' | 'network:set'
-}>
-
-export type CaptureEntry =
-  | { at: number; kind: 'input'; msg: CapturedMessage }
-  /** The agent's answer to an acked input, so a refused or failed one can be told from one that landed. */
-  | { at: number; kind: 'ack'; requestId: string; ok: boolean }
-  /** The device's chrome changed (a turn, a fold): coordinates before and after it are in different frames. */
-  | { at: number; kind: 'chrome'; chrome: unknown }
-
-export interface CaptureSnapshot {
-  id: string
-  takenAt: number
-  entries: CaptureEntry[]
-  thinned: boolean
-}
+export type { CapturedMessage, CaptureEntry, CaptureSnapshot }
 
 interface Capture {
   id: string
@@ -81,6 +59,22 @@ const MOVES = new Set(['input:touch:move', 'input:pinch:move'])
 
 const isMove = (e: CaptureEntry): boolean => e.kind === 'input' && MOVES.has(e.msg.type)
 const isAnchor = (e: CaptureEntry): boolean => e.kind === 'input' && ANCHORS.has(e.msg.type)
+/** The index of each gesture's first and final move: the moves at either end of a row of moves. */
+function gestureMoveEnds(entries: CaptureEntry[]): Set<number> {
+  const out = new Set<number>()
+  let pending = -1
+  for (let i = 0; i < entries.length; i++) {
+    const e = entries[i]!
+    if (e.kind !== 'input') continue
+    if (isMove(e)) {
+      if (pending < 0) out.add(i)
+      pending = i
+    } else { if (pending >= 0) out.add(pending); pending = -1 }
+  }
+  if (pending >= 0) out.add(pending)
+  return out
+}
+
 /** An entry a head cut may start at: one that does not continue something before it. */
 const startsClean = (e: CaptureEntry): boolean =>
   e.kind === 'input' && (OPENS.has(e.msg.type) || !/^input:(touch|pinch):(move|end|cancel)$/.test(e.msg.type))
@@ -277,10 +271,13 @@ export class CaptureStore {
     if (!over()) return
     capture.thinned = true
     // Every other move goes, start and end stay: the path keeps its shape at half the resolution. Repeated while it
-    // still helps; a gesture never loses its endpoints.
+    // still helps. A gesture's first and last moves are kept too: the dashboard's end carries no point, so the last
+    // move is where the finger lifted (without it a short swipe reads as a tap and a pinch as no pinch), and the first
+    // move's time is what tells a swipe from a drag after a hold.
     for (let pass = 0; pass < 4 && over(); pass++) {
       let odd = false
-      const kept = capture.entries.filter((e) => !isMove(e) || (odd = !odd))
+      const ends = gestureMoveEnds(capture.entries)
+      const kept = capture.entries.filter((e, i) => !isMove(e) || ends.has(i) || (odd = !odd))
       if (kept.length === capture.entries.length) break
       this.replace(capture, kept)
     }
