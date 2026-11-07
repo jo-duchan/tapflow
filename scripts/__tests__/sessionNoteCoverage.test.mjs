@@ -90,15 +90,29 @@ const FILES = [
     exempt: [],
   },
   {
-    pkg: '@tapflowio/flow-runner',
-    path: 'packages/flow-runner/src/RelayClient.ts',
+    // The session half of the client: waiters, inputs, the lifecycle record. Split out of `RelayClient` so a
+    // browser can run it (#1125); the waiter paths and the input-ack wrapper moved with it.
+    pkg: '@tapflowio/flow-runner (session channel)',
+    path: 'packages/flow-runner/src/sessionChannel.ts',
     failedCalls: 8,
+    // Every construction here is session-scoped: the connection failures that had no session to name stayed in
+    // `RelayClient` with the socket. The other half of the split is held by that file's entry instead.
+    unscoped: false,
     // **Empty, and it started as one entry.** The plan reserved a line-anchored escape for this package's
     // `awaitInputAck` wrapper, which deliberately appends no note because the `e.message` it interpolates
     // already carries one. Reading cause from the enclosing function made the escape unnecessary — and
     // that is a weakening, not a win, so it is named here rather than left as an absence: that wrapper is
     // one of the three constructions this check holds only weakly (see the header).
     exempt: [],
+  },
+  {
+    // What stays on the Node side: the connection, join, boot, lease and the REST reads. Its waits go through the
+    // channel's `waitFor`, so the two settle-without-an-answer paths are judged there, not here.
+    pkg: '@tapflowio/flow-runner (relay client)',
+    path: 'packages/flow-runner/src/RelayClient.ts',
+    failedCalls: 3,
+    exempt: [],
+    ownsWaiters: false,
   },
 ]
 
@@ -142,7 +156,7 @@ function enclosingFn(lines, at) {
     // what keeps `ws.once('error', (e) => reject(new PlatformError(…)))` its own scope — a connection
     // failure with no session, which the enclosing promise would otherwise lend one to.
     const opensBlock = lines[i].includes('{') || i === at
-    if (depth === 0 && opensBlock && /(?:=>|function\b|^ {2}(?:private |public |static )*(?:async )?[\w[\]]+\s*[(<])/.test(lines[i])) {
+    if (depth === 0 && opensBlock && /(?:=>|function\b|^ {2}(?:private |protected |public |static |override )*(?:async )?[\w[\]]+\s*[(<])/.test(lines[i])) {
       let d = 0
       let end = lines.length - 1
       for (let j = i; j < lines.length; j++) {
@@ -194,7 +208,7 @@ function constructions(src) {
 }
 
 describe('a session-scoped failure carries what the client knows about the session', () => {
-  for (const { pkg, path, failedCalls, exempt } of FILES) {
+  for (const { pkg, path, failedCalls, exempt, ownsWaiters = true, unscoped = true } of FILES) {
     describe(pkg, () => {
       const src = code(path)
       const built = constructions(src)
@@ -211,7 +225,7 @@ describe('a session-scoped failure carries what the client knows about the sessi
         // Both halves of the scope split have to be non-empty, or the filter above is doing nothing and
         // every offender disappears into "not session-scoped". Measured: each file has both.
         expect(built.filter((b) => b.sessionScoped).length, 'nothing was judged session-scoped').toBeGreaterThanOrEqual(4)
-        expect(built.filter((b) => !b.sessionScoped).length, 'everything was judged session-scoped').toBeGreaterThanOrEqual(1)
+        if (unscoped) expect(built.filter((b) => !b.sessionScoped).length, 'everything was judged session-scoped').toBeGreaterThanOrEqual(1)
       })
 
       it('every bare Error construction reaches a cause', () => {
@@ -233,12 +247,18 @@ describe('a session-scoped failure carries what the client knows about the sessi
       // measured, it survived. These two classes mean *settled without an answer*, which is precisely when
       // nothing else will ever say why, and there are exactly two of them, so naming them costs nothing
       // and does not depend on inferring anything.
-      it('the two paths that settle a waiter without an answer read the record', () => {
+      it.runIf(ownsWaiters)('the two paths that settle a waiter without an answer read the record', () => {
         const lines = src.split('\n')
         for (const cls of ['RequestTimeoutError', 'RelayClosedError']) {
           const at = lines.findIndex((l) => l.includes(`new ${cls}(`))
           expect(at, `${cls} is no longer constructed in ${path}`).toBeGreaterThan(-1)
           const fn = enclosingFn(lines, at)
+          // The construction itself has to carry the note. Reading it two lines up and then dropping it from the
+          // message left an unused variable — a lint *warning*, which fails nothing — and passed the check below.
+          expect(
+            /\bnote\b|sessionNote\(/.test(lines.slice(at, at + 2).join('\n')),
+            `${path}:${at + 1} — ${cls} is built without the session note in its message`,
+          ).toBe(true)
           expect(
             CAUSE.test(lines.slice(fn.start, at + 1).join('\n')),
             `${path}:${at + 1} — ${cls} is built without reading what the relay said about the session, ` +
@@ -252,7 +272,15 @@ describe('a session-scoped failure carries what the client knows about the sessi
       // path may run — so the cause test passes on that read even with the note deleted. Measured: it did.
       // Anchored on the wording instead, which is stable because it is the contract this package's
       // AGENTS.md states ("could not confirm", never "dropped").
-      it('the input-ack wrapper reads the record', () => {
+      // A file that leaves its waits to the channel must not grow one of its own: the two checks above are skipped
+      // for it, so a wait it settled here would be judged by nothing.
+      it.runIf(!ownsWaiters)('settles no waiter of its own', () => {
+        for (const cls of ['RequestTimeoutError', 'RelayClosedError']) {
+          expect(src.includes(`new ${cls}(`), `${path} constructs ${cls}; judge it with ownsWaiters`).toBe(false)
+        }
+      })
+
+      it.runIf(ownsWaiters)('the input-ack wrapper reads the record', () => {
         const lines = src.split('\n')
         const at = lines.findIndex((l) => /(Could not confirm|was not confirmed)/.test(l))
         expect(at, `${path} no longer builds an unconfirmed-input message`).toBeGreaterThan(-1)

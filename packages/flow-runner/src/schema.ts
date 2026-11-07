@@ -1,5 +1,5 @@
 import { parse as parseYaml } from 'yaml'
-import { ValidationError } from '@tapflowio/agent-core'
+import { ValidationError } from '@tapflowio/agent-core/errors'
 import type { LaunchOptions } from '@tapflowio/protocol'
 import { compactLaunchOptions, launchOptionsProblem } from '@tapflowio/protocol/launch'
 

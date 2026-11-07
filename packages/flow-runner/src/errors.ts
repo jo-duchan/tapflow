@@ -1,4 +1,4 @@
-import { PlatformError } from '@tapflowio/agent-core'
+import { PlatformError } from '@tapflowio/agent-core/errors'
 
 // A ui-tree query failure the runner should treat as transient — poll again until the step deadline
 // instead of failing the step (e.g. the app isn't in the foreground yet right after launch, or the

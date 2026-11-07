@@ -30,6 +30,12 @@
       "import": "./dist/index.js",
       "default": "./dist/index.js"
     },
+    "./browser": {
+      "types": "./dist/browser.d.ts",
+      "source": "./src/browser.ts",
+      "import": "./dist/browser.js",
+      "default": "./dist/browser.js"
+    },
     "./schema/tapflow-flow.schema.json": "./schema/tapflow-flow.schema.json"
   },
   "files": [
