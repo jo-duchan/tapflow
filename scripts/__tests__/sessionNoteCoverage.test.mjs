@@ -253,6 +253,12 @@ describe('a session-scoped failure carries what the client knows about the sessi
           const at = lines.findIndex((l) => l.includes(`new ${cls}(`))
           expect(at, `${cls} is no longer constructed in ${path}`).toBeGreaterThan(-1)
           const fn = enclosingFn(lines, at)
+          // The construction itself has to carry the note. Reading it two lines up and then dropping it from the
+          // message left an unused variable — a lint *warning*, which fails nothing — and passed the check below.
+          expect(
+            /\bnote\b|sessionNote\(/.test(lines.slice(at, at + 2).join('\n')),
+            `${path}:${at + 1} — ${cls} is built without the session note in its message`,
+          ).toBe(true)
           expect(
             CAUSE.test(lines.slice(fn.start, at + 1).join('\n')),
             `${path}:${at + 1} — ${cls} is built without reading what the relay said about the session, ` +
@@ -266,6 +272,14 @@ describe('a session-scoped failure carries what the client knows about the sessi
       // path may run — so the cause test passes on that read even with the note deleted. Measured: it did.
       // Anchored on the wording instead, which is stable because it is the contract this package's
       // AGENTS.md states ("could not confirm", never "dropped").
+      // A file that leaves its waits to the channel must not grow one of its own: the two checks above are skipped
+      // for it, so a wait it settled here would be judged by nothing.
+      it.runIf(!ownsWaiters)('settles no waiter of its own', () => {
+        for (const cls of ['RequestTimeoutError', 'RelayClosedError']) {
+          expect(src.includes(`new ${cls}(`), `${path} constructs ${cls}; judge it with ownsWaiters`).toBe(false)
+        }
+      })
+
       it.runIf(ownsWaiters)('the input-ack wrapper reads the record', () => {
         const lines = src.split('\n')
         const at = lines.findIndex((l) => /(Could not confirm|was not confirmed)/.test(l))

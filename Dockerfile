@@ -53,6 +53,7 @@ RUN pnpm install --frozen-lockfile
 # separate lists of the same graph, which is what #261 (topological build) would remove.
 RUN pnpm --filter @tapflowio/protocol build
 RUN pnpm --filter @tapflowio/agent-core build
+RUN pnpm --filter @tapflowio/flow-runner build
 RUN pnpm --filter @tapflowio/dashboard build
 RUN pnpm --filter @tapflowio/relay build
 

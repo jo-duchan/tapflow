@@ -26,6 +26,7 @@ const NODE_ONLY = new Set([...builtinModules, 'ws'])
 const FORBIDDEN_CODE = [
   { pattern: /\bBuffer\s*\.\s*(from|alloc|allocUnsafe|concat|isBuffer)\b/, what: 'Buffer (a Node global)' },
   { pattern: /\bprocess\s*\./, what: 'process (a Node global)' },
+  { pattern: /\b(setImmediate|require)\s*\(/, what: 'setImmediate or require (Node only)' },
   { pattern: /\bcrypto\.randomUUID\s*\(/, what: 'crypto.randomUUID (secure-context only)' },
   { pattern: /\bcrypto\.subtle\b/, what: 'crypto.subtle (secure-context only)' },
 ]
@@ -50,7 +51,7 @@ function runtimeSpecifiers(path, src) {
       if (!onlyTypes) out.push(n.moduleSpecifier.text)
     } else if (ts.isExportDeclaration(n) && n.moduleSpecifier && !n.isTypeOnly) {
       out.push(n.moduleSpecifier.text)
-    } else if (ts.isCallExpression(n) && n.expression.kind === ts.SyntaxKind.ImportKeyword && ts.isStringLiteral(n.arguments[0])) {
+    } else if (ts.isCallExpression(n) && n.expression.kind === ts.SyntaxKind.ImportKeyword && n.arguments[0] && ts.isStringLiteralLike(n.arguments[0])) {
       out.push(n.arguments[0].text)
     }
     ts.forEachChild(n, visit)
@@ -75,6 +76,7 @@ function workspaceSource(base, spec) {
 export function walkBrowserGraph(base, entry) {
   const seen = new Set()
   const violations = []
+  const thirdParty = new Set()
   const queue = [join(base, entry)]
   while (queue.length > 0) {
     const file = queue.pop()
@@ -97,17 +99,18 @@ export function walkBrowserGraph(base, entry) {
       }
       const ws = workspaceSource(base, spec)
       if (ws) queue.push(ws)
+      else thirdParty.add(spec)
     }
     const body = code(src)
     for (const { pattern, what } of FORBIDDEN_CODE) {
       if (pattern.test(body)) violations.push(`${rel} uses ${what}`)
     }
   }
-  return { seen: [...seen].map((f) => relative(base, f)).sort(), violations }
+  return { seen: [...seen].map((f) => relative(base, f)).sort(), violations, thirdParty: [...thirdParty].sort() }
 }
 
 describe('@tapflowio/flow-runner/browser reaches no Node', () => {
-  const { seen, violations } = walkBrowserGraph(root, ENTRY)
+  const { seen, violations, thirdParty } = walkBrowserGraph(root, ENTRY)
 
   it('the walk reached the engine, the session channel and across into workspace packages', () => {
     // Anti-vacuity: a walk that stopped at the entry would find nothing and pass.
@@ -124,6 +127,12 @@ describe('@tapflowio/flow-runner/browser reaches no Node', () => {
 
   it('no module in the graph imports a Node builtin or ws, or uses a Node global or a secure-context API', () => {
     expect(violations).toEqual([])
+  })
+
+  it('the only third-party package in reach is yaml, which the walk does not descend into', () => {
+    // `yaml` maps `default` to its browser build. A new dependency here is not walked, so it has to be looked at
+    // and added by hand — the list is the record that someone did.
+    expect(thirdParty).toEqual(['yaml'])
   })
 
   it('the entry is the one package.json exports as ./browser', () => {
@@ -147,6 +156,8 @@ describe('the walk catches what it exists to catch', () => {
     'a bare builtin': { 'e.ts': "import { readFileSync } from 'fs'\n" },
     'ws': { 'e.ts': "import { WebSocket } from 'ws'\n" },
     'a dynamic import': { 'e.ts': "export const f = () => import('node:crypto')\n" },
+    'a dynamic import of a template literal': { 'e.ts': "export const f = () => import(`node:fs`)\n" },
+    'setImmediate': { 'e.ts': 'setImmediate(() => {})\n' },
     'a workspace package index that reaches Node': {
       'e.ts': "import { x } from '@tapflowio/pkg'\n",
       'packages/pkg/package.json': JSON.stringify({ exports: { '.': { source: './src/index.ts' } } }),

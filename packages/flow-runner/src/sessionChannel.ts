@@ -117,13 +117,6 @@ type OpenGesture = { kind: 'touch'; at: { x: number; y: number } } | { kind: 'pi
 const ACTIVITY_MAX = 200
 
 /**
- * One relay socket's sessions, as a browser-role client sees them: what a request is waiting for, what the relay has
- * said about each session, and what an input means on the wire — a swipe's eight moves, the gesture a leave closes,
- * the ack an input waits for. **No transport**: a host supplies `send` and feeds every inbound message to `dispatch`,
- * so the same semantics run over `ws` in Node (`RelayClient`) and over the dashboard's socket in a browser. Nothing
- * here may reach Node; `scripts/__tests__/flowRunnerBrowserGraph.test.mjs` holds that.
- */
-/**
  * A request's correlator. **Not `crypto.randomUUID`**, which is secure-context only: a dashboard served over LAN http
  * has none (`dashboard/lib/requestId.ts` for the same reason). `getRandomValues` has no such restriction.
  */
@@ -133,6 +126,13 @@ export function newRequestId(): string {
   return Array.from(b, (x) => x.toString(16).padStart(2, '0')).join('')
 }
 
+/**
+ * One relay socket's sessions, as a browser-role client sees them: what a request is waiting for, what the relay has
+ * said about each session, and what an input means on the wire — a swipe's eight moves, the gesture a leave closes,
+ * the ack an input waits for. **No transport**: a host supplies `send` and feeds every inbound message to `dispatch`,
+ * so the same semantics run over `ws` in Node (`RelayClient`) and over the dashboard's socket in a browser. Nothing
+ * here may reach Node; `scripts/__tests__/flowRunnerBrowserGraph.test.mjs` holds that.
+ */
 export abstract class SessionChannel {
   /** Serialize `msg` onto the socket, or throw when there is none. */
   protected abstract send(msg: BrowserToRelay): void
