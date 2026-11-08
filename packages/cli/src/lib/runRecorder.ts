@@ -116,7 +116,7 @@ export class RunRecorder {
     this.id = body.id
   }
 
-  reportFlow(idx: number, report: FlowReport, screenshot?: Buffer): void {
+  reportFlow(idx: number, report: FlowReport, screenshot?: Uint8Array): void {
     // A report after `finish` would be refused (409) and print a warning about a run that already ended.
     if (this.finished) return
     this.enqueue(true, async () => {
@@ -251,7 +251,7 @@ export class RunRecorder {
     })
   }
 
-  private async post(path: string, body: string | Buffer, contentType: string): Promise<Response> {
+  private async post(path: string, body: string | Uint8Array, contentType: string): Promise<Response> {
     const res = await fetchWithToken(this.tokens, new URL(path, this.httpBase).toString(), {
       method: 'POST',
       headers: { 'Content-Type': contentType },

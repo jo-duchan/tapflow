@@ -37,7 +37,8 @@ export interface FlowDriver {
    */
   launchApp(options?: LaunchOptions): Promise<LaunchApplied | void>
   clearState(appId: string): Promise<void>
-  screenshot(signal?: AbortSignal): Promise<Buffer>
+  /** The screen as image bytes. `Uint8Array` so a browser host can implement it; a Node one returns a `Buffer`. */
+  screenshot(signal?: AbortSignal): Promise<Uint8Array>
   pressButton(name: string): Promise<void>
   /** Press at a point, hold it for `durationMs`, release. */
   longPress(x: number, y: number, durationMs: number): Promise<void>
@@ -106,9 +107,9 @@ export interface FlowResult {
   steps: StepResult[]
   durationMs: number
   failureMessage?: string
-  failureScreenshot?: Buffer
+  failureScreenshot?: Uint8Array
   /** The screen a passed flow ended on, when `captureLastScreen` asked for it and it could be taken. */
-  lastScreenshot?: Buffer
+  lastScreenshot?: Uint8Array
   /**
    * Which side failed: 'environment' for relay/agent/session-level causes (the CLI
    * exits 2), 'product' for selector, assertion and other failures (exit 1). Present
@@ -148,7 +149,7 @@ const SCROLL_GESTURES: Record<ScrollDirection, { from: [number, number]; to: [nu
 const delay = (ms: number) => new Promise<void>((r) => setTimeout(r, ms))
 const round4 = (n: number): number => Math.round(n * 10000) / 10000
 
-async function captureScreenshot(driver: FlowDriver, timeoutMs: number): Promise<Buffer | undefined> {
+async function captureScreenshot(driver: FlowDriver, timeoutMs: number): Promise<Uint8Array | undefined> {
   const controller = new AbortController()
   let timer: ReturnType<typeof setTimeout> | undefined
   try {
@@ -430,40 +431,62 @@ async function waitNotVisible(driver: FlowDriver, sel: Selector, timeoutMs: numb
  * step's to report, as it was before. A splash that holds still for longer than `SETTLE_MS` still reads as ready.
  */
 async function waitForScreen(driver: FlowDriver, timeoutMs: number, pollIntervalMs: number): Promise<void> {
-  const deadline = Date.now() + timeoutMs
-  let shape: string | undefined
-  // When this structure was first read. Not the previous read's time: iOS reads land ~550 ms apart, so requiring
-  // SETTLE_MS between two consecutive reads would never be met there.
-  let shapeSince = 0
-  let settleBy = deadline
   try {
-    for (;;) {
-      const started = Date.now()
-      // Bounded by the step's deadline, not the cap: the cap only decides whether to start another read. Cutting a
-      // read at the cap would abort every confirming read on a device whose dump takes close to it (~2.5 s on an
-      // emulator), and a screen that holds still would always wait the full cap there.
-      const q = await queryOrRetry(driver, deadline)
-      const now = Date.now()
-      // A failed read neither confirms nor resets: on iOS it means "not up yet", and on Android one costs a dump.
-      if ('tree' in q) {
-        if (shape === undefined) settleBy = Math.min(deadline, now + SETTLE_CAP_MS)
-        const next = screenShape(q.tree)
-        if (next !== shape) {
-          shape = next
-          shapeSince = now
-        } else if (now - shapeSince >= SETTLE_MS) {
-          return
-        }
-      }
-      if (now >= settleBy) return
-      // The poll interval counts from the read's start: an Android dump alone takes ~2.5 s.
-      await delay(Math.min(Math.max(0, pollIntervalMs - (now - started)), settleBy - now))
-    }
+    await waitForStableScreen((signal) => driver.queryUITree(signal).then((elements) => ({ elements })), { timeoutMs, pollIntervalMs })
   } catch {
     // Not this step's to report, permanent errors included. `launchApp` never read the tree before, so failing
     // here would fail flows that use no selector on any agent whose tree is unusable — one predating the frame
     // clipping answers `invalid response shape`, permanently. A session that is really gone fails the next step,
     // which names it the same way.
+  }
+}
+
+/**
+ * Read the screen until its structure — each element's role, label and identifier — has held still for a second, capped
+ * 3 s after the first successful read, and answer the last read: what `launchApp` waits for, and what Flow Capture's
+ * replay reads before each step (#1125), so the host matches against a settled screen without reading it once more (an
+ * emulator dump takes ~2.5 s). `undefined` when no read succeeded before `timeoutMs`. A `TransientQueryError` is polled
+ * past; anything else is thrown.
+ */
+export async function waitForStableScreen<T extends { elements: UIElement[] }>(
+  read: (signal: AbortSignal) => Promise<T>,
+  { timeoutMs, pollIntervalMs = DEFAULT_POLL_INTERVAL_MS }: { timeoutMs: number; pollIntervalMs?: number },
+): Promise<T | undefined> {
+  const deadline = Date.now() + timeoutMs
+  let last: T | undefined
+  let shape: string | undefined
+  // When this structure was first read. Not the previous read's time: iOS reads land ~550 ms apart, so requiring
+  // SETTLE_MS between two consecutive reads would never be met there.
+  let shapeSince = 0
+  let settleBy = deadline
+  for (;;) {
+    const started = Date.now()
+    // Bounded by the step's deadline, not the cap: the cap only decides whether to start another read. Cutting a
+    // read at the cap would abort every confirming read on a device whose dump takes close to it (~2.5 s on an
+    // emulator), and a screen that holds still would always wait the full cap there.
+    const signal = AbortSignal.timeout(Math.max(1, deadline - started))
+    let got: T | undefined
+    try {
+      got = await read(signal)
+    } catch (e) {
+      // A failed read neither confirms nor resets: on iOS it means "not up yet", and on Android one costs a dump.
+      if (!(e instanceof TransientQueryError)) throw e
+    }
+    const now = Date.now()
+    if (got) {
+      last = got
+      if (shape === undefined) settleBy = Math.min(deadline, now + SETTLE_CAP_MS)
+      const next = screenShape(got.elements)
+      if (next !== shape) {
+        shape = next
+        shapeSince = now
+      } else if (now - shapeSince >= SETTLE_MS) {
+        return last
+      }
+    }
+    if (now >= settleBy) return last
+    // The poll interval counts from the read's start: an Android dump alone takes ~2.5 s.
+    await delay(Math.min(Math.max(0, pollIntervalMs - (now - started)), settleBy - now))
   }
 }
 
@@ -746,7 +769,7 @@ export async function runFlow(flow: Flow, driver: FlowDriver, options: EngineOpt
   let failureMessage: string | undefined
   let failureKind: 'environment' | 'product' | undefined
   let deviceLacks = false
-  let failureScreenshot: Buffer | undefined
+  let failureScreenshot: Uint8Array | undefined
 
   for (const [index, step] of flow.steps.entries()) {
     const started = describeStep(step)

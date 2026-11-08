@@ -29,7 +29,7 @@ export type SessionDevice = Pick<SessionChannel,
   | 'setPosture' | 'chrome' | 'launchApp' | 'clearState'
 > & {
   queryUITreeWithTurn(sessionId: string, signal?: AbortSignal): Promise<{ elements: UIElement[]; interfaceTurn?: InterfaceTurn }>
-  screenshot(sessionId: string, signal?: AbortSignal): Promise<Buffer>
+  screenshot(sessionId: string, signal?: AbortSignal): Promise<Uint8Array>
 }
 import { EnvironmentStepError, markEnvironmentFailure } from './errors.js'
 

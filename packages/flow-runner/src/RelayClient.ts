@@ -5,43 +5,16 @@ import type {
 import { WebSocket } from 'ws'
 import type { UIElement } from '@tapflowio/agent-core'
 import { PlatformError } from '@tapflowio/agent-core/errors'
-import { TransientQueryError } from './errors.js'
-import { interfaceTurnOf, type InterfaceTurn } from '@tapflowio/protocol/screen'
+import type { InterfaceTurn } from '@tapflowio/protocol/screen'
 import { authHeader, fetchWithToken, fixedToken, tokenRefusal, type TokenSource } from './credentials.js'
 import { SessionChannel, type RelayMsg } from './sessionChannel.js'
-import { RelayHttpError, RelayUnavailableError, SessionUnavailableError } from './sessionErrors.js'
+import { parseUITreeResponse } from './uiTreeRead.js'
+import { RelayHttpError, RelayUnavailableError } from './sessionErrors.js'
 
 export {
   ENVIRONMENTAL_INPUT_REASONS, InputRefusedError, InputUnconfirmedError, RelayClosedError, RelayHttpError,
   RelayUnavailableError, RequestTimeoutError, SessionEndedError, SessionLeftError, SessionUnavailableError,
 } from './sessionErrors.js'
-
-// Statuses that won't self-heal by polling: bad request, auth, missing session, device-not-booted
-// (a flow always boots first, so mid-flow 409 is a dead device, not a race). Everything else
-// (agent/foreground-race 502, idle-timeout 504, 5xx, network 0) is retryable.
-const PERMANENT_QUERY_STATUSES = new Set([400, 401, 403, 404, 409])
-const UI_ROLES = new Set(['button', 'text', 'input', 'image', 'checkbox', 'switch', 'slider', 'list', 'cell', 'tab', 'other'])
-
-function isUIElement(value: unknown): value is UIElement {
-  if (typeof value !== 'object' || value === null || Array.isArray(value)) return false
-  const record = value as Record<string, unknown>
-  const frame = record.frame
-  if (typeof frame !== 'object' || frame === null || Array.isArray(frame)) return false
-  const rect = frame as Record<string, unknown>
-  if (typeof record.role !== 'string' || !UI_ROLES.has(record.role) || typeof record.label !== 'string' || typeof record.enabled !== 'boolean') return false
-  if (record.identifier !== undefined && typeof record.identifier !== 'string') return false
-  if (record.rawRole !== undefined && typeof record.rawRole !== 'string') return false
-  if (record.placeholder !== undefined && typeof record.placeholder !== 'string') return false
-  if (record.secure !== undefined && typeof record.secure !== 'boolean') return false
-  if (record.focused !== undefined && typeof record.focused !== 'boolean') return false
-  const x = rect.x
-  const y = rect.y
-  const width = rect.width
-  const height = rect.height
-  if (![x, y, width, height].every((n) => typeof n === 'number' && Number.isFinite(n))) return false
-  return (x as number) >= 0 && (y as number) >= 0 && (width as number) >= 0 && (height as number) >= 0
-    && (x as number) + (width as number) <= 1 && (y as number) + (height as number) <= 1
-}
 
 /**
  * A runtime mirror of `SessionStartFailure`, which `protocol` cannot export as a value — its main entry has
@@ -617,34 +590,9 @@ export class RelayClient extends SessionChannel {
   /** The tree with the app's interface turn beside it, when the agent sent one (`UiTreeResponse.interfaceTurn`). */
   async queryUITreeWithTurn(sessionId: string, signal?: AbortSignal): Promise<{ elements: UIElement[]; interfaceTurn?: InterfaceTurn }> {
     try {
-      const body = await this.getJson<unknown>(`/api/v1/sessions/${sessionId}/ui-tree`, 'ui-tree query', signal)
-      if (typeof body !== 'object' || body === null || Array.isArray(body) || !('elements' in body) || !Array.isArray(body.elements) || !body.elements.every(isUIElement)) {
-        throw new RelayHttpError('ui-tree query returned an invalid response shape', 200, undefined, true)
-      }
-      const interfaceTurn = interfaceTurnOf((body as { interfaceTurn?: unknown }).interfaceTurn)
-      return interfaceTurn === undefined ? { elements: body.elements } : { elements: body.elements, interfaceTurn }
+      return parseUITreeResponse(await this.getJson<unknown>(`/api/v1/sessions/${sessionId}/ui-tree`, 'ui-tree query', signal))
     } catch (e) {
-      const s = this.lifecycle.get(sessionId)
-      if (s && (s.terminated || s.needsReboot)) {
-        // **The note is built from the field this branched on, not from `sessionNote`.** The two disagree on
-        // one state and it is reachable: a flapping agent — away, back, away again — carries `needsReboot`
-        // *and* `away` at once, because only a boot clears the first and nothing in a flow boots.
-        // `sessionNote` ranks `away` above `needsReboot`, deliberately, since for a caller that can still
-        // act the away-ness is what is current. Here the caller cannot act — the step is being failed — so
-        // taking that precedence would report a permanent failure in the sentence for a transient one, and
-        // never mention the binding. That is #573's mis-blame, one layer up.
-        const why = s.terminated
-          ? `the relay ended this session (${s.terminated})`
-          : 'the agent reconnected and cleared its device binding, so this session needs booting again ' +
-            'and nothing in a flow can (the app itself is still running)'
-        throw new SessionUnavailableError(`ui-tree query failed — ${why}`, { cause: e })
-      }
-      // A retryable condition (foreground race, idle timeout, agent blip, network) → let the runner
-      // poll again until the step deadline. Permanent failures keep their type and fail the step now.
-      if (e instanceof RelayHttpError && !e.permanent && !PERMANENT_QUERY_STATUSES.has(e.status)) {
-        throw new TransientQueryError(e.message, { cause: e })
-      }
-      throw e
+      throw this.treeQueryFailure(sessionId, e)
     }
   }
 
