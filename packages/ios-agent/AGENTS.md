@@ -78,6 +78,27 @@ It also takes **one** simulator off the network and puts it back (#607), which o
     `this.ws != null`: `ws.send` on a closing socket buffers the payload and neither throws nor emits, so
     an answer sent there is indistinguishable from a delivered one at the call site.
 
+### Typing leaves the pasteboard as it found it (#1129)
+
+`input:type` types by writing the text to the simulator's pasteboard and pressing Cmd+V — the only path that takes any
+Unicode — so the text used to stay there, and with a flow's `inputText: { secret }` that is a password the next person to
+open the simulator can paste. `doType` now reads what the pasteboard held, pastes, waits `PASTE_SETTLE_MS` and puts it
+back, confirmed by reading it back as `clipboard:read`'s restore is (a queue released early would let the next clipboard
+operation read the typed text). Unreadable, it is emptied. A restore that cannot be confirmed — a read-back that fails
+counts as unconfirmed, not as done — empties the pasteboard instead, losing what the person had copied rather than leaving
+the text. Either way it is logged without the values, and the input still answers done: the text landed.
+
+**The wait is the part to measure before touching.** The chord is sent, not read: the app reads the pasteboard when it
+handles Cmd+V, and a restore that lands first pastes the old contents. Measured on iPhone 17 Pro iOS 26.4 with the UIKit
+sample (2026-11-08): restoring 0, 30 and 100 ms after the chord landed the typed text 20/20 each, idle and at a load
+average of 137 — the restore's own `simctl pbcopy` takes ~145 ms, and that is what protects it. 100 ms is a margin that
+does not lean on simctl staying slow. The host Mac's clipboard was not touched (Simulator.app's pasteboard sync did not
+carry the text). No test can hold the wait: a zero passes every one, which is why the numbers are here. **What was not
+measured**: an app whose main thread is stalled past the wait plus that pbcopy when the chord arrives (a tap that set off
+heavy layout) would paste the restored contents and the input would still answer done. The text is written inside the
+guard, so a write that fails after the device took it is put back too, and a sentinel a `clipboard:read` gave up
+restoring is not put back.
+
 ### Input acks carry a reason
 
 `ackInput` answers `'delivered'` or an `InputErrorReason` from `@tapflowio/protocol` (the contract and
