@@ -71,6 +71,9 @@ import { LEAN_MARKER_PATH, reconcileLean, type LeanDevice } from './LeanPackages
 import { BootSupersededError, installReclaimingStorage, type ReclaimDevice } from './StorageReclaim.js'
 
 const logger = createLogger('android-agent')
+const APP_LOG_DISCOVERY_TIMEOUT_MS = 5_000
+const APP_LOG_ADB_COMMAND_TIMEOUT_MS = 2_000
+const APP_LOG_PID_RETRY_INTERVAL_MS = 250
 
 // Typed so a typo cannot ship silently — the viewer gates the whole clipboard bridge on this, and
 // since #447 the Full reset toggle too. `full-reset` is honoured in `handleDeviceBoot`, which stops
@@ -79,7 +82,7 @@ const logger = createLogger('android-agent')
 // actually works on a given image is per device, and `network:state.available` carries that — the
 // split the protocol documents. Added last, after the handler and the boot-time reset, because the
 // string on its own is what puts a control on screen.
-const AGENT_CAPABILITIES: AgentCapability[] = ['clipboard', 'full-reset', 'network-control', 'build-download', 'launch-options', 'touch-cancel']
+const AGENT_CAPABILITIES: AgentCapability[] = ['clipboard', 'full-reset', 'network-control', 'build-download', 'launch-options', 'touch-cancel', 'app-logs']
 
 // Parse H.264 SPS NAL unit to extract frame dimensions.
 // scrcpy sends a new SPS (inside an IDR keyframe) whenever the capture size changes —
@@ -904,6 +907,84 @@ export class AndroidAgent implements DeviceAgent, NetworkControlCapability {
     state.appLogStream?.stop()
     state.appLogStream = null
     return generation
+  }
+
+  private async startAppLogStreamAfterLaunch(
+    sessionId: string,
+    state: DeviceState,
+    serial: string,
+    bundleId: string,
+    launchId: string,
+    generation: number
+  ): Promise<void> {
+    const deadline = Date.now() + APP_LOG_DISCOVERY_TIMEOUT_MS
+    let lastError: unknown
+    const isCurrent = () => state.appLogGeneration === generation && this.deviceStates.get(sessionId) === state
+
+    while (Date.now() < deadline) {
+      if (!isCurrent()) return
+      const timeoutMs = Math.max(1, Math.min(APP_LOG_ADB_COMMAND_TIMEOUT_MS, deadline - Date.now()))
+      try {
+        const uid = await this.adb.getAppUid(serial, bundleId, timeoutMs)
+        if (!isCurrent()) return
+        if (Date.now() >= deadline) break
+        if (uid !== null) {
+          const packagesTimeoutMs = Math.max(1, Math.min(APP_LOG_ADB_COMMAND_TIMEOUT_MS, deadline - Date.now()))
+          const packages = await this.adb.getPackagesForUid(serial, uid, packagesTimeoutMs)
+          if (!isCurrent()) return
+          if (Date.now() >= deadline) break
+          if (packages.length > 1 && packages.includes(bundleId)) {
+            logger.warn(`not capturing app logs for ${bundleId}: Android UID ${uid} is shared by ${packages.join(', ')}`)
+            return
+          }
+          if (packages.length === 1 && packages[0] === bundleId) {
+            const processTimeoutMs = Math.max(1, Math.min(APP_LOG_ADB_COMMAND_TIMEOUT_MS, deadline - Date.now()))
+            const hasProcess = await this.adb.hasAppProcessForUid(serial, uid, processTimeoutMs)
+            if (!isCurrent()) return
+            if (Date.now() >= deadline) break
+            if (!hasProcess) continue
+            state.appLogStream = new AppLogStream(
+              serial,
+              uid,
+              (text) => {
+                if (!isCurrent()) return true
+                if (
+                  !this.ws ||
+                  this.ws.readyState !== WebSocket.OPEN ||
+                  this.ws.bufferedAmount >= APP_LOG_SOCKET_BUFFER_LIMIT
+                )
+                  return false
+                this.sendMsg({ type: 'app:log', sessionId, launchId, text })
+                return true
+              },
+              (error) => logger.warn('app log stream failed:', error.message),
+              {
+                isTargetAlive: async () => {
+                  if (!isCurrent()) return false
+                  const currentPackages = await this.adb.getPackagesForUid(serial, uid, APP_LOG_ADB_COMMAND_TIMEOUT_MS)
+                  if (!isCurrent() || currentPackages.length !== 1 || currentPackages[0] !== bundleId) return false
+                  return this.adb.hasAppProcessForUid(serial, uid, APP_LOG_ADB_COMMAND_TIMEOUT_MS)
+                },
+              }
+            )
+            return
+          }
+        }
+      } catch (error) {
+        if (!isCurrent()) return
+        lastError = error
+      }
+
+      const remaining = deadline - Date.now()
+      if (remaining <= 0) break
+      await new Promise<void>((resolve) => {
+        const timer = setTimeout(resolve, Math.min(APP_LOG_PID_RETRY_INTERVAL_MS, remaining))
+        timer.unref()
+      })
+      if (!isCurrent()) return
+    }
+
+    if (lastError) logger.warn('could not start app log stream:', lastError instanceof Error ? lastError.message : String(lastError))
   }
 
   /**
@@ -3017,42 +3098,16 @@ export class AndroidAgent implements DeviceAgent, NetworkControlCapability {
         this.awaitPendingClears(state!.deviceId)
           .then(() => this.adb.launchApp(serial, bundleId, options, defaultsOnly === true))
           // What was delivered, which for the relay's defaults can be less than what was sent, down to nothing.
-          .then(async (applied) => {
+          .then((applied) => {
+            respond(options ? { type: 'app:launch-done', applied: appliedKeys(applied ?? {}) } : { type: 'app:launch-done' })
             if (
               this.relayFeatures.includes('app-logs') &&
               state!.appLogGeneration === appLogGeneration &&
               this.deviceStates.get(sessionId) === state
             ) {
-              try {
-                const pid = await this.adb.getAppPid(serial, bundleId)
-                if (
-                  pid !== null &&
-                  state!.appLogGeneration === appLogGeneration &&
-                  this.deviceStates.get(sessionId) === state
-                ) {
-                  state!.appLogStream = new AppLogStream(
-                    serial,
-                    pid,
-                    (text) => {
-                      if (state!.appLogGeneration !== appLogGeneration || this.deviceStates.get(sessionId) !== state)
-                        return true
-                      if (
-                        !this.ws ||
-                        this.ws.readyState !== WebSocket.OPEN ||
-                        this.ws.bufferedAmount >= APP_LOG_SOCKET_BUFFER_LIMIT
-                      )
-                        return false
-                      this.sendMsg({ type: 'app:log', sessionId, text })
-                      return true
-                    },
-                    (error) => logger.warn('app log stream failed:', error.message)
-                  )
-                }
-              } catch (error) {
-                logger.warn('could not start app log stream:', error instanceof Error ? error.message : String(error))
-              }
+              void this.startAppLogStreamAfterLaunch(sessionId, state!, serial, bundleId, requestId, appLogGeneration)
+                .catch((error: unknown) => logger.warn('could not start app log stream:', error instanceof Error ? error.message : String(error)))
             }
-            respond(options ? { type: 'app:launch-done', applied: appliedKeys(applied ?? {}) } : { type: 'app:launch-done' })
           })
           .catch((e: unknown) => {
             const message = e instanceof Error ? e.message : String(e)

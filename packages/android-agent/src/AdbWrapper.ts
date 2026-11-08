@@ -389,10 +389,36 @@ export class AdbWrapper {
     return undefined
   }
 
-  async getAppPid(serial: string, packageName: string): Promise<number | null> {
-    const output = await this.runner.exec('-s', serial, 'shell', 'pidof', '-s', packageName)
-    const pid = Number(output.trim())
-    return Number.isSafeInteger(pid) && pid > 0 ? pid : null
+  async getAppUid(serial: string, packageName: string, timeoutMs = 2_000): Promise<number | null> {
+    const args = ['-s', serial, 'shell', 'cmd', 'package', 'list', 'packages', '-U', packageName]
+    const output = this.runner.execBounded
+      ? await this.runner.execBounded(timeoutMs, ...args)
+      : await this.runner.exec(...args)
+    const packageLine = output.split(/\r?\n/).map((line) => line.trim()).find((line) =>
+      line.startsWith(`package:${packageName} `) || line === `package:${packageName}`
+    )
+    const uidText = packageLine?.match(/(?:^|\s)uid:(\d+)(?:\s|$)/)?.[1]
+    const uid = Number(uidText)
+    return uidText && Number.isSafeInteger(uid) && uid >= 0 ? uid : null
+  }
+
+  async getPackagesForUid(serial: string, uid: number, timeoutMs = 2_000): Promise<string[]> {
+    const args = ['-s', serial, 'shell', 'cmd', 'package', 'list', 'packages', '--uid', String(uid)]
+    const output = this.runner.execBounded
+      ? await this.runner.execBounded(timeoutMs, ...args)
+      : await this.runner.exec(...args)
+    const packages = output.split(/\r?\n/).map((line) =>
+      /^package:([^\s]+)(?:\s|$)/.exec(line.trim())?.[1]
+    ).filter((name): name is string => name !== undefined)
+    return [...new Set(packages)]
+  }
+
+  async hasAppProcessForUid(serial: string, uid: number, timeoutMs = 2_000): Promise<boolean> {
+    const args = ['-s', serial, 'shell', 'ps', '-A', '-o', 'PID', '-u', String(uid)]
+    const output = this.runner.execBounded
+      ? await this.runner.execBounded(timeoutMs, ...args)
+      : await this.runner.exec(...args)
+    return output.split(/\r?\n/).some((line) => /^\d+$/.test(line.trim()))
   }
 
   /**

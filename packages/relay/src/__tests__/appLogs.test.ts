@@ -60,12 +60,12 @@ describe('app log routing', () => {
     await waitForType(browser, 'session:joined')
 
     const text = 'raw app output\nnext line\t\u0000🚀'
-    first.agent.send(JSON.stringify({ type: 'app:log', sessionId: first.sessionId, text }))
+    first.agent.send(JSON.stringify({ type: 'app:log', sessionId: first.sessionId, launchId: 'launch-1', text }))
     const delivered = await waitForType<BrowserInbound>(browser, 'app:log')
-    expect(delivered).toEqual({ type: 'app:log', sessionId: first.sessionId, text })
+    expect(delivered).toEqual({ type: 'app:log', sessionId: first.sessionId, launchId: 'launch-1', text })
 
     other.agent.send(
-      JSON.stringify({ type: 'app:log', sessionId: first.sessionId, text: 'spoofed' })
+      JSON.stringify({ type: 'app:log', sessionId: first.sessionId, launchId: 'launch-1', text: 'spoofed' })
     )
     await barrier(other.agent)
     await barrier(browser)

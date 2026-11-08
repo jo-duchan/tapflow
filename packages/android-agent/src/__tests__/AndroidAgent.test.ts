@@ -223,6 +223,9 @@ interface AndroidAgentInternals {
   prepareBody(state: TestState, serial: string, upright: boolean): Promise<void>
   sendChrome(state: TestState): void
   reconcileSerial(state: TestState, serial: string, w: number, h: number, skin: SkinRotation | null): Promise<boolean>
+  startAppLogStreamAfterLaunch(
+    sessionId: string, state: TestState, serial: string, bundleId: string, launchId: string, generation: number
+  ): Promise<void>
 }
 const internals = (agent: AndroidAgent): AndroidAgentInternals =>
   agent as unknown as AndroidAgentInternals
@@ -3810,6 +3813,93 @@ describe('AndroidAgent', () => {
         expect(launchSpy).toHaveBeenCalledWith('emulator-5554', 'com.example.app', undefined, false)
       })
 
+      it('answers app:launch before process discovery completes', async () => {
+        let releaseUidLookup!: (uid: number | null) => void
+        const getAppUidSpy = vi.spyOn(adb, 'getAppUid').mockImplementation(() => new Promise((resolve) => {
+          releaseUidLookup = resolve
+        }))
+        const done = waitForType(browser, 'app:launch-done')
+        inject({ type: 'app:launch', requestId: 'rqi-log', payload: { bundleId: 'com.example.app' } })
+
+        expect((await done)['requestId']).toBe('rqi-log')
+        await vi.waitFor(() => expect(getAppUidSpy).toHaveBeenCalledWith('emulator-5554', 'com.example.app', expect.any(Number)))
+        releaseUidLookup(null)
+      })
+
+      it('does not continue UID-scoped discovery after its deadline', async () => {
+        let now = 10_000
+        const clock = vi.spyOn(Date, 'now').mockImplementation(() => now)
+        const previousAdbPath = process.env['ADB_PATH']
+        process.env['ADB_PATH'] = process.execPath
+        const state = getState() as TestState & {
+          appLogGeneration: number
+          appLogStream: { stop(): void } | null
+        }
+        state.appLogGeneration = 1
+        state.appLogStream = null
+        let packageTimeoutMs = 0
+        const getAppUidSpy = vi.spyOn(adb, 'getAppUid').mockImplementation(async (_serial, _bundleId, timeoutMs = 2_000) => {
+          expect(timeoutMs).toBe(2_000)
+          now = 14_900
+          return 10_123
+        })
+        const getPackagesSpy = vi.spyOn(adb, 'getPackagesForUid').mockImplementation(async (_serial, _uid, timeoutMs = 2_000) => {
+          packageTimeoutMs = timeoutMs
+          now = 15_000
+          return ['com.example.app']
+        })
+        const hasProcessSpy = vi.spyOn(adb, 'hasAppProcessForUid').mockResolvedValue(true)
+
+        try {
+          await internals(agent).startAppLogStreamAfterLaunch(
+            agent.sessionId!, state, 'emulator-5554', 'com.example.app', 'launch-deadline', 1
+          )
+
+          expect(getAppUidSpy).toHaveBeenCalledOnce()
+          expect(getPackagesSpy).toHaveBeenCalledOnce()
+          expect(packageTimeoutMs).toBe(100)
+          expect(hasProcessSpy).not.toHaveBeenCalled()
+          expect(state.appLogStream).toBeNull()
+        } finally {
+          const stream = (state as unknown as { appLogStream: { stop(): void } | null }).appLogStream
+          stream?.stop()
+          if (previousAdbPath === undefined) delete process.env['ADB_PATH']
+          else process.env['ADB_PATH'] = previousAdbPath
+          clock.mockRestore()
+        }
+      })
+
+      it('does not stream logs for a UID shared by another package', async () => {
+        const state = getState() as TestState & {
+          appLogGeneration: number
+          appLogStream: { stop(): void } | null
+        }
+        state.appLogGeneration = 1
+        state.appLogStream = null
+        const previousAdbPath = process.env['ADB_PATH']
+        process.env['ADB_PATH'] = process.execPath
+        vi.spyOn(adb, 'getAppUid').mockResolvedValue(10_123)
+        const packagesSpy = vi.spyOn(adb, 'getPackagesForUid').mockResolvedValue([
+          'com.example.app', 'com.example.helper'
+        ])
+        const hasProcessSpy = vi.spyOn(adb, 'hasAppProcessForUid').mockResolvedValue(true)
+
+        try {
+          await internals(agent).startAppLogStreamAfterLaunch(
+            agent.sessionId!, state, 'emulator-5554', 'com.example.app', 'shared-uid', 1
+          )
+
+          expect(packagesSpy).toHaveBeenCalledOnce()
+          expect(hasProcessSpy).not.toHaveBeenCalled()
+          expect(state.appLogStream).toBeNull()
+        } finally {
+          const stream = (state as unknown as { appLogStream: { stop(): void } | null }).appLogStream
+          stream?.stop()
+          if (previousAdbPath === undefined) delete process.env['ADB_PATH']
+          else process.env['ADB_PATH'] = previousAdbPath
+        }
+      })
+
       it('passes launch arguments through and reports their names', async () => {
         const launchSpy = vi.spyOn(adb, 'launchApp').mockResolvedValue({ arguments: { flag: true } })
         const done = waitForType(browser, 'app:launch-done')
@@ -5037,9 +5127,10 @@ describe('what a rotation does on each backend', () => {
     const state = stateOn(backend)
     internals(agent).deviceStates.set('s1', state)
     internals(agent).handleRelayMessage({ type: 'input:rotate', sessionId: 's1' })
-    // The gRPC path samples `dumpsys` until it settles (3 reads, `TAPFLOW_METRICS_GAP_MS=1`
-    // in this suite), so a microtask drain is not enough — wait real time for both branches.
-    await new Promise((r) => setTimeout(r, 60))
+    // The body turn and display reconciliation run asynchronously; wait for the actual state
+    // change rather than assuming a fixed delay covers both on every host.
+    if (backend === 'grpc') await vi.waitFor(() => expect(state.rotation).toBe(270))
+    else await vi.waitFor(() => expect(state.landscape).toBe(true))
     return { metrics, state }
   }
 

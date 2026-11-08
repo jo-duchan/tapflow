@@ -243,7 +243,8 @@ announced `'device-updates'` on `agent:registered`. `handleAgentDevices` diffs i
 
 `app:log` is accepted only from the session's own agent socket and is sent only to its current holder. It is not
 cached or sent through `forwardToWatchers`: app logs belong to the active QA holder, and an unrelated agent must not
-be able to address another session's viewer with them.
+be able to address another session's viewer with them. Each `app:log.launchId` is the launch request that owns the
+stream; the viewer uses it to discard late chunks from an earlier launch.
 - **Only the one who was on a gone device may re-join it** (`SessionManager.join`): the same client, or the person a
   dropped session is waiting for. Anyone else holding the id would boot a device that is no longer there and, as its
   holder, keep the session from being swept.

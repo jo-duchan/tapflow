@@ -860,6 +860,8 @@ export interface SessionScoped {
  *  values in arrival order reconstructs the stream exactly. */
 export interface AppLog extends SessionScoped {
   type: 'app:log'
+  /** The app:launch request that owns this stream. Lets a viewer discard late chunks from an older app. */
+  launchId: string
   text: string
 }
 

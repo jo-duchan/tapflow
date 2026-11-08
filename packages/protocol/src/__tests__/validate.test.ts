@@ -74,14 +74,16 @@ describe('the door rejects what it cannot name', () => {
 describe('app log frames', () => {
   it('keeps the app text unchanged in the agent direction', () => {
     const text = 'first line\n\u0000\ud83d\ude80'
-    const parsed = ok({ type: 'app:log', sessionId: 'session-1', text })
+    const parsed = ok({ type: 'app:log', sessionId: 'session-1', launchId: 'launch-1', text })
     expect(directionOf(parsed.msg.type)).toBe('agent')
-    expect(parsed.msg).toEqual({ type: 'app:log', sessionId: 'session-1', text })
+    expect(parsed.msg).toEqual({ type: 'app:log', sessionId: 'session-1', launchId: 'launch-1', text })
   })
 
   it('rejects app log chunks over the wire limit', () => {
-    expect(fail({ type: 'app:log', sessionId: 'session-1', text: 'x'.repeat(8193) }).reason).toBe('bad-shape')
-    expect(fail({ type: 'app:log', sessionId: 'session-1', text: '🚀'.repeat(2049) }).reason).toBe('bad-shape')
+    expect(fail({ type: 'app:log', sessionId: 'session-1', launchId: 'launch-1', text: 'x'.repeat(8193) }).reason).toBe('bad-shape')
+    expect(fail({ type: 'app:log', sessionId: 'session-1', launchId: 'launch-1', text: '🚀'.repeat(2049) }).reason).toBe('bad-shape')
+    expect(fail({ type: 'app:log', sessionId: 'session-1', text: 'unscoped' }).reason).toBe('bad-shape')
+    expect(fail({ type: 'app:log', sessionId: 'session-1', launchId: '', text: 'unscoped' }).reason).toBe('bad-shape')
   })
 })
 

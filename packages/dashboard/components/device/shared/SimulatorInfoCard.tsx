@@ -20,6 +20,7 @@ interface SimulatorInfoCardProps {
   joined: boolean;
   fps: number
   appLogText?: string
+  appLogsSupported?: boolean
   connected: boolean;
   deviceReady: boolean;
   bootError: string | null;
@@ -167,7 +168,7 @@ export function SimulatorInfoCard(props: SimulatorInfoCardProps) {
       )}
       </div>
 
-      {joined && <AppLogViewer text={props.appLogText ?? ''} />}
+      {joined && <AppLogViewer text={props.appLogText ?? ''} supported={props.appLogsSupported ?? false} />}
 
       {props.servicesOff && (
         <p className="text-[12px] text-muted-foreground leading-relaxed break-words">

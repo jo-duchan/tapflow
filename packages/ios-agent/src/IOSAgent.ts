@@ -39,7 +39,7 @@ const RUN_RESET_PASTEBOARD_TIMEOUT_MS = 10_000
 // actually took is per device and per app, and `network:state.available` carries that — the split the
 // protocol documents. Added last, after the handler and the boot-time arming, because the string on
 // its own is what puts a control on screen.
-const AGENT_CAPABILITIES: AgentCapability[] = ['clipboard', 'full-reset', 'network-control', 'build-download', 'launch-options', 'launch-env', 'touch-cancel']
+const AGENT_CAPABILITIES: AgentCapability[] = ['clipboard', 'full-reset', 'network-control', 'build-download', 'launch-options', 'launch-env', 'touch-cancel', 'app-logs']
 
 // Human prose for each reason. Not in `@tapflowio/protocol`: that package's main entry must stay
 // runtime-free so it erases under `import type` and never reaches the dashboard bundle — a lookup
@@ -1113,6 +1113,7 @@ export class IOSAgent implements DeviceAgent, NetworkControlCapability, Posturab
     state.acceptH264 = acceptH264
     if (tier) { state.secureContext = tier.secureContext; state.external = tier.external }
     const seq = this.bumpBootSeq(state, 'superseded')
+    this.stopAppLogStream(state)
     state.bootsInFlight.add(seq)
 
     // **The teardown runs inside the try, and that is a fix rather than tidying.** It ran before it, so a
@@ -1446,6 +1447,7 @@ export class IOSAgent implements DeviceAgent, NetworkControlCapability, Posturab
     }
 
     this.bumpBootSeq(state, 'shut-down')
+    this.stopAppLogStream(state)
     // **Said here as well as in `cleanupDeviceState`, because this path does not go through it.**
     // The teardown below is a copy of that method's, and the copy is older than the network rule —
     // so a device shut down from the dashboard while offline kept its udid in the host filter for
@@ -2154,11 +2156,16 @@ export class IOSAgent implements DeviceAgent, NetworkControlCapability, Posturab
             this.lastBundleIds.set(launchState.deviceId, bundleId)
             if (
               this.relayFeatures.includes('app-logs') &&
-              pid !== null &&
+              typeof pid === 'number' &&
+              Number.isSafeInteger(pid) &&
+              pid > 0 &&
               launchState.appLogGeneration === appLogGeneration &&
               this.deviceStates.get(sessionId!) === launchState
             ) {
-              void this.simctl.getAppExecutablePath(launchState.deviceId, bundleId)
+              // This setup is optional and must not turn a successful launch into an error. Starting
+              // with Promise.resolve also captures a synchronous throw from an older/test SimctlWrapper.
+              void Promise.resolve()
+                .then(() => this.simctl.getAppExecutablePath(launchState.deviceId, bundleId))
                 .then((processImagePath) => {
                   if (
                     launchState.appLogGeneration !== appLogGeneration ||
@@ -2181,7 +2188,7 @@ export class IOSAgent implements DeviceAgent, NetworkControlCapability, Posturab
                         this.ws.bufferedAmount >= APP_LOG_SOCKET_BUFFER_LIMIT
                       )
                         return false
-                      this.sendMsg({ type: 'app:log', sessionId: sessionId!, text })
+                      this.sendMsg({ type: 'app:log', sessionId: sessionId!, launchId: requestId, text })
                       return true
                     },
                     (error) => logger.warn('app log stream failed:', error.message)

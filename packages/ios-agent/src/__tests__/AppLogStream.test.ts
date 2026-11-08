@@ -34,12 +34,14 @@ describe('iOS app log stream', () => {
         'sim-1',
         'log',
         'stream',
+        '--level',
+        'debug',
         '--style',
         'compact',
         '--predicate',
         'processIdentifier == 123 AND processImagePath == "/Applications/Example.app/Example"',
       ],
-      { stdio: ['ignore', 'pipe', 'ignore'] }
+      { stdio: ['ignore', 'pipe', 'pipe'] }
     )
     const text = `${'x'.repeat(8191)}🚀\nnext`
     stdout.emit('data', text)
@@ -60,17 +62,16 @@ describe('iOS app log stream', () => {
         pause: vi.fn(),
         resume: vi.fn(),
       })
-      const child = {
+      const child = Object.assign(new EventEmitter(), {
         pid: 789,
         stdout,
         exitCode: null,
         killed: false,
-        once: vi.fn(),
         kill: vi.fn(function (this: { killed: boolean }) {
           this.killed = true
           return true
         }),
-      } as unknown as ChildProcess
+      }) as unknown as ChildProcess
       const spawnProcess = vi.fn(() => child) as unknown as typeof import('child_process').spawn
       const isPidAlive = vi.fn(() => true)
       const onText = vi.fn()
@@ -78,6 +79,7 @@ describe('iOS app log stream', () => {
 
       isPidAlive.mockReturnValue(false)
       vi.advanceTimersByTime(APP_LOG_PID_POLL_INTERVAL_MS)
+      child.emit('close', 143, 'SIGTERM')
       stdout.emit('data', 'late output')
 
       expect(isPidAlive).toHaveBeenCalledWith(123)
@@ -87,6 +89,68 @@ describe('iOS app log stream', () => {
     } finally {
       vi.useRealTimers()
     }
+  })
+
+  it('drains queued final output after target exit when the socket was backpressured', () => {
+    vi.useFakeTimers()
+    try {
+      const stdout = Object.assign(new EventEmitter(), {
+        setEncoding: vi.fn(),
+        pause: vi.fn(),
+        resume: vi.fn(),
+      })
+      const child = Object.assign(new EventEmitter(), {
+        pid: 789,
+        stdout,
+        stderr: Object.assign(new EventEmitter(), { setEncoding: vi.fn() }),
+        exitCode: null,
+        killed: false,
+        kill: vi.fn(function (this: { killed: boolean }) {
+          this.killed = true
+          return true
+        }),
+      }) as unknown as ChildProcess
+      const isPidAlive = vi.fn(() => true)
+      let writable = false
+      const onText = vi.fn(() => writable)
+      new AppLogStream('sim-1', 123, '/Applications/Example.app/Example', onText, vi.fn(), vi.fn(() => child) as unknown as typeof import('child_process').spawn, isPidAlive)
+
+      stdout.emit('data', 'last line')
+      expect(onText).toHaveBeenCalledTimes(1)
+      isPidAlive.mockReturnValue(false)
+      vi.advanceTimersByTime(APP_LOG_PID_POLL_INTERVAL_MS)
+      expect(child.kill).toHaveBeenCalledWith('SIGTERM')
+
+      onText.mockClear()
+      writable = true
+      vi.advanceTimersByTime(20)
+      expect(onText).toHaveBeenCalled()
+      expect(onText).toHaveBeenLastCalledWith('last line')
+      child.emit('close', 143, 'SIGTERM')
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('reports nonzero exits with bounded stderr detail', () => {
+    const stdout = Object.assign(new EventEmitter(), { setEncoding: vi.fn(), pause: vi.fn(), resume: vi.fn() })
+    const stderr = Object.assign(new EventEmitter(), { setEncoding: vi.fn() })
+    const child = Object.assign(new EventEmitter(), {
+      pid: 789,
+      stdout,
+      stderr,
+      exitCode: 1,
+      killed: false,
+      kill: vi.fn(),
+    }) as unknown as ChildProcess
+    const onError = vi.fn()
+    new AppLogStream('sim-1', 123, '/Applications/Example.app/Example', vi.fn(), onError, vi.fn(() => child) as unknown as typeof import('child_process').spawn, () => true)
+
+    stderr.emit('data', 'x'.repeat(5000))
+    child.emit('close', 1, null)
+
+    expect(onError).toHaveBeenCalledTimes(1)
+    expect(onError.mock.calls[0]![0].message.length).toBeLessThan(2200)
   })
 
   it('stops polling when the log child fails to start', () => {

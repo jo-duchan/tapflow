@@ -2,14 +2,16 @@ import { useLayoutEffect, useRef } from 'react'
 
 interface AppLogViewerProps {
   text: string
+  supported: boolean
 }
 
-export function AppLogViewer({ text }: AppLogViewerProps) {
+export function AppLogViewer({ text, supported }: AppLogViewerProps) {
   const containerRef = useRef<HTMLDivElement>(null)
   const atBottomRef = useRef(true)
 
   useLayoutEffect(() => {
     const container = containerRef.current
+    if (text === '') atBottomRef.current = true
     if (container && atBottomRef.current) container.scrollTop = container.scrollHeight
   }, [text])
 
@@ -28,7 +30,7 @@ export function AppLogViewer({ text }: AppLogViewerProps) {
         className="max-h-40 min-h-16 overflow-auto rounded-md border bg-muted/30 p-2"
       >
         <pre className="whitespace-pre-wrap break-all font-mono text-[10px] leading-relaxed text-foreground/80">
-          {text || 'Waiting for app logs…'}
+          {!supported ? 'Update the device agent to view app logs.' : (text || 'Waiting for app logs…')}
         </pre>
       </div>
     </section>

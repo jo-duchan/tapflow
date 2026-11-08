@@ -398,7 +398,7 @@ const AGENT_FORWARDED = {
   'network:state': envCo('network:state'),
   'network:error': envC('network:error'),
   // The active app's text stream is addressed to its holder, never replayed or broadcast to watchers.
-  'app:log': z.object({ type: z.literal('app:log'), sessionId, text: appLogText }),
+  'app:log': z.object({ type: z.literal('app:log'), sessionId, launchId: z.string().min(1), text: appLogText }),
 } as const
 
 const AGENT_INBOUND = { ...AGENT_CONSUMED, ...AGENT_FORWARDED } as const
