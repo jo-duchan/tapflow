@@ -79,6 +79,14 @@ interface IOSViewerProps {
   /** Flow Capture (#1125): whether the relay is keeping this person's steps — their own setting. Absent shows no
    *  chip (a relay that predates the setting). */
   capturingSteps?: boolean;
+  /** Flow Capture's dialog is open (#1125): nothing typed or pressed here reaches the device while it replays the
+   *  person's steps — a modal dialog stops pointer input, but these shortcuts listen on the window. */
+  captureOpen?: boolean;
+  /** Opens Flow Capture's dialog; absent hides the button (capturing off, or no build to capture against). */
+  onCaptureFlow?: () => void;
+  captureButtonRef?: MutableRefObject<HTMLButtonElement | null>;
+  /** Where Flow Capture's dialog reads the picture it shows the replay on. */
+  captureSurfaceRef?: MutableRefObject<(() => CanvasImageSource | null) | null>;
   perfHookRef?: MutableRefObject<PerfHook>;
   /** Told the size the stream arrives at, so a viewer with no chrome from the agent can take the
    *  device's real aspect (see `framelessChrome`). */
@@ -93,7 +101,7 @@ export function IOSViewer({
   launching, chrome, formFactor,
   binaryFrameHandlerRef, clipboardHandlerRef, clipboardSupported, networkHandlerRef, networkSupported, onRecordingUploaded,
   swKeyboardVisible, swKeyboardPending, onKbdToggle,
-  rebootPending, onReboot, restartButtonRef, capturingSteps,
+  rebootPending, onReboot, restartButtonRef, capturingSteps, captureOpen = false, onCaptureFlow, captureButtonRef, captureSurfaceRef,
   perfHookRef, onStreamSize, postures,
 }: IOSViewerProps) {
   const { fps, frameCount } = useFps();
@@ -166,6 +174,11 @@ export function IOSViewer({
     },
   })
   const { canvasRef, containerRef, screenAreaRef, decoderUnsupported } = screen
+  useLayoutEffect(() => {
+    if (!captureSurfaceRef) return
+    captureSurfaceRef.current = () => canvasRef.current
+    return () => { captureSurfaceRef.current = null }
+  }, [captureSurfaceRef, canvasRef])
 
   const shownTurn: Turn = pendingTurn?.target ?? iosTurn(chrome.streamRotation, isLandscape)
 
@@ -380,7 +393,7 @@ export function IOSViewer({
     send({ type: 'input:key', sessionId, requestId: newRequestId(), payload: { code, modifiers } })
   }, [send, sessionId])
   useClipboardBridge({
-    sessionId, send, active: keyboardActive, supported: clipboardSupported,
+    sessionId, send, active: keyboardActive && !captureOpen, supported: clipboardSupported,
     handlerRef: clipboardHandlerRef, sendChord, onError: (m) => toast.error(m),
   })
 
@@ -393,6 +406,7 @@ export function IOSViewer({
   useEffect(() => {
     const MODIFIER_CODES = new Set(['ShiftLeft', 'ShiftRight', 'ControlLeft', 'ControlRight', 'MetaLeft', 'MetaRight'])
     const onKeyDown = (e: KeyboardEvent) => {
+      if (captureOpen) return
       if (e.code === 'AltLeft' || e.code === 'AltRight') { isOptionHeld.current = true; return }
       if (e.metaKey) {
         const el = document.activeElement
@@ -424,7 +438,7 @@ export function IOSViewer({
     const onBlur = () => { if (isOptionHeld.current) endPinch() }
     window.addEventListener('keydown', onKeyDown); window.addEventListener('keyup', onKeyUp); window.addEventListener('blur', onBlur)
     return () => { window.removeEventListener('keydown', onKeyDown); window.removeEventListener('keyup', onKeyUp); window.removeEventListener('blur', onBlur) }
-  }, [keyboardActive, clipboardSupported, send, sessionId, handleScreenshot, handleRecordToggle, handleRotate, onKbdToggle, swKeyboardPending])
+  }, [captureOpen, keyboardActive, clipboardSupported, send, sessionId, handleScreenshot, handleRecordToggle, handleRotate, onKbdToggle, swKeyboardPending])
 
   useEffect(() => {
     if (!keyboardActive) return
@@ -721,6 +735,8 @@ export function IOSViewer({
         launchSlot={launchSlot}
         network={networkSupported ? { position: network.position, steerable: network.steerable, reason: network.reason, pending: network.pending, onToggle: network.toggle } : undefined}
         reboot={{ pending: rebootPending, onReboot, buttonRef: restartButtonRef }}
+        onCaptureFlow={onCaptureFlow}
+        captureButtonRef={captureButtonRef}
       />
 
       <div className="flex items-start gap-8">

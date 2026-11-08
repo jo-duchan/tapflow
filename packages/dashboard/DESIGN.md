@@ -258,7 +258,7 @@ live in the spec, which the check holds to code. A component without a spec yet 
 | Card | `components/ui/card.tsx` | level | [card.md](./design/components/card.md) |
 | Input | `components/ui/input.tsx` | state 3 × content 3 | [input.md](./design/components/input.md) |
 | Select | `components/ui/select.tsx` | size 4 × state 3 × content 2 | [select.md](./design/components/select.md) |
-| Dialog | `components/ui/dialog.tsx` | size 3 × actions 4 | [dialog.md](./design/components/dialog.md) |
+| Dialog | `components/ui/dialog.tsx` | size 4 × actions 4 | [dialog.md](./design/components/dialog.md) |
 | Separator | `components/ui/separator.tsx` | orientation 2 | [separator.md](./design/components/separator.md) |
 | Badge | `components/ui/badge.tsx` | variant 10 (variant 4 + tone 6) | [badge.md](./design/components/badge.md) |
 | AlertDialog | `components/ui/alert-dialog.tsx` | — | [alert-dialog.md](./design/components/alert-dialog.md) |
@@ -276,6 +276,7 @@ live in the spec, which the check holds to code. A component without a spec yet 
 | Toast (sonner) | `components/ui/sonner.tsx` (`toast.*()`) | type 5 (4 + loading) | [toast.md](./design/components/toast.md) |
 | Field | assembly pattern — `Label` + control + `FieldHint` / `FieldError` | control 6 × hint 3 × message 3 | [field.md](./design/components/field.md) |
 | UserAvatar | `components/UserAvatar.tsx` | content 7 (image + 6 colors) | [user-avatar.md](./design/components/user-avatar.md) |
+| Stepper | `components/ui/stepper.tsx` | state 3 | [stepper.md](./design/components/stepper.md) |
 
 Not in this list on purpose: components with no call site, or reachable by no device today (`form.tsx`,
 `avatar.tsx`, `CardFooter`, `Sheet`, `DropdownMenuRadioItem`, and others). Code kept for later is not

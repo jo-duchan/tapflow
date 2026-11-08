@@ -34,8 +34,12 @@ export type RawStep = StepBase & (
   /** Held, then moved: a drag after a long press. No flow step says it. */
   | { kind: 'holdDrag'; from: Point; to: Point; space?: PointSpace; durationMs: number }
   | { kind: 'pinch'; start: Fingers; end: Fingers; space?: PointSpace; durationMs: number }
-  /** Keys that each typed a character, in a row. `text` is what they typed. */
-  | { kind: 'text'; text: string }
+  /** Keys that each typed a character, in a row. `text` is what they typed on a US layout.
+   *  `capsLock`: a letter was typed after an odd number of Caps Lock presses. What
+   *  Caps Lock does is the device's setting, not the recording's: measured on iOS 26.5, a simulator with Korean and
+   *  English keyboards switched language on it (`KeyA CapsLock KeyB CapsLock KeyC` typed `aㅠc`), where one with a
+   *  single language turns letters upper case. So `text` is a guess, marked in the dialog until the field's value is recorded (#1135). */
+  | { kind: 'text'; text: string; capsLock?: true }
   /** A key that types no character — Enter, Tab, Backspace, an arrow — or a chord. */
   | { kind: 'key'; code: string; modifiers: number }
   | { kind: 'paste'; text: string }
@@ -87,11 +91,11 @@ export function segment(entries: readonly CaptureEntry[]): RawStep[] {
   let chrome: unknown
   let touch: TimedMessage[] | null = null
   let pinch: TimedMessage[] | null = null
-  let run: { steps: TimedMessage[]; text: string } | null = null
+  let run: { steps: TimedMessage[]; text: string; capsLock: boolean } | null = null
   const buttonsDown = new Map<string, TimedMessage>()
-  // Caps Lock is a state the device keeps, not a step: it changes what the letters after it type. Measured on iOS, a
-  // person turned it on and off mid-field. A press the device refused toggled nothing.
-  let capsLock = false
+  // Caps Lock is a state the device keeps, across steps: whether it has been pressed an odd number of times. What it
+  // changes the letters to is not known here (see `capsLock` on the text step). A press the device refused does not count.
+  let capsOdd = false
 
   const push = (step: RawStep): void => {
     out.push(chrome === undefined ? step : { ...step, chrome })
@@ -100,7 +104,7 @@ export function segment(entries: readonly CaptureEntry[]): RawStep[] {
     at: messages[0]!.at, endAt: messages[messages.length - 1]!.at, outcome, messages,
   })
   const endRun = (): void => {
-    if (run && run.text.length > 0) push({ ...base(run.steps, 'landed'), kind: 'text', text: run.text })
+    if (run && run.text.length > 0) push({ ...base(run.steps, 'landed'), kind: 'text', text: run.text, ...(run.capsLock ? { capsLock: true as const } : {}) })
     // Caps Lock with nothing typed after it still changed the device, so it is a step of its own.
     else if (run) for (const t of run.steps) push({ ...base([t], outcomeOf((t.msg as Msg<'input:key'>).requestId)), kind: 'key', code: (t.msg as Msg<'input:key'>).payload.code, modifiers: 0 })
     run = null
@@ -117,22 +121,23 @@ export function segment(entries: readonly CaptureEntry[]): RawStep[] {
       const refused = outcomeOf(m.requestId) === 'refused'
       if (m.payload.code === 'CapsLock' && modifiers === 0) {
         // Refused, it toggled nothing; and it is not replayed, since a refusal can be transient (the input channel
-        // still starting) and would land on replay, turning every letter after it.
+        // still starting) and would land on replay, changing what every letter after it types.
         if (refused) continue
-        capsLock = !capsLock
-        run ??= { steps: [], text: '' }
+        capsOdd = !capsOdd
+        run ??= { steps: [], text: '', capsLock: false }
         run.steps.push(timed)
         continue
       }
-      const char = keyChar(m.payload.code, modifiers, capsLock)
+      const char = keyChar(m.payload.code, modifiers)
       if (char !== null) {
         const last = run?.steps[run.steps.length - 1]
         if (run && last && e.at - last.at > KEY_RUN_GAP_MS) endRun()
         // A key the device refused typed nothing: neither written down nor sent again, for the reason above.
         if (refused) continue
-        run ??= { steps: [], text: '' }
+        run ??= { steps: [], text: '', capsLock: false }
         run.steps.push(timed)
         run.text += char
+        if (capsOdd) run.capsLock = true
         continue
       }
       endRun()

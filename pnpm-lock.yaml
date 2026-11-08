@@ -242,6 +242,9 @@ importers:
       '@tanstack/react-query':
         specifier: ^5.105.3
         version: 5.105.3(@types/react@19.3.0)(react@19.3.1)
+      '@tapflowio/flow-runner':
+        specifier: workspace:*
+        version: link:../flow-runner
       '@tapflowio/protocol':
         specifier: workspace:*
         version: link:../protocol

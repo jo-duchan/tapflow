@@ -124,12 +124,26 @@ describe('segment: a recording as the actions a person took', () => {
     expect(steps.map((s) => s.kind === 'text' ? s.text : s.kind)).toEqual(['abcd', 'ef', 'key'])
   })
 
-  it('types letters as Caps Lock left them, and keeps a Caps Lock nothing followed', () => {
+  it('never reads Caps Lock as upper case, and keeps a Caps Lock nothing followed', () => {
+    // Measured on iOS 26.5 with Korean and English keyboards: Caps Lock switched the language, `aㅠc`, not the case.
     const steps = new Rec().key('CapsLock').key('KeyA').key('KeyB', 0x02).key('CapsLock').key('KeyC').key('Tab')
       .key('CapsLock').key('Enter').steps()
-    expect(steps.map((s) => s.kind === 'text' ? s.text : s.kind === 'key' ? s.code : s.kind)).toEqual(['Abc', 'Tab', 'CapsLock', 'Enter'])
+    expect(steps.map((s) => s.kind === 'text' ? s.text : s.kind === 'key' ? s.code : s.kind)).toEqual(['aBc', 'Tab', 'CapsLock', 'Enter'])
+  })
+
+  const caps = (r: Rec) => r.steps().flatMap((s) => s.kind === 'text' ? [`${s.text}${s.capsLock ? '!' : ''}`] : [])
+
+  it('marks a run whose text is a guess: a letter typed after an odd count of Caps Lock', () => {
+    expect(caps(new Rec().key('CapsLock').key('KeyA').key('KeyB'))).toEqual(['ab!'])
+    // On and off before the letters, as the iOS fixture's person did: nothing is in force.
+    expect(caps(new Rec().key('CapsLock').key('CapsLock').key('KeyA'))).toEqual(['a'])
+    // Pressed after the letters: they were typed before it.
+    expect(caps(new Rec().key('KeyA').key('CapsLock').key('Tab'))).toEqual(['a'])
+    // The state outlives the run it was pressed in.
+    expect(caps(new Rec().key('CapsLock').key('Tab').key('KeyA'))).toEqual(['a!'])
+    expect(caps(new Rec().key('CapsLock').key('Tab').key('CapsLock').key('Tab').key('KeyA'))).toEqual(['a'])
     // A press the device refused turned nothing on.
-    expect(new Rec().key('CapsLock', 0, false).key('KeyA').steps().map((s) => s.kind === 'text' ? s.text : s.kind)).toEqual(['a'])
+    expect(caps(new Rec().key('CapsLock', 0, false).key('KeyA'))).toEqual(['a'])
   })
 
   it('leaves a key the device refused out of the text and out of the replay', () => {
@@ -238,6 +252,13 @@ describe('matchStep', () => {
       const m = matchStep(text!, ctxOf([field(over)]))
       expect(m.step).toBeNull()
       expect(m.secret).toEqual({ value: 'hunter', known })
+    })
+
+    it('marks text typed with Caps Lock in force as a guess, a secret\'s value too', () => {
+      const [guess] = new Rec().key('CapsLock').type('hunter').steps().filter((s) => s.kind === 'text')
+      expect(matchStep(guess!, ctxOf([field({ focused: true, secure: false })]))).toMatchObject({ step: { type: 'inputText', text: 'hunter' }, fragile: 'caps-lock' })
+      expect(matchStep(guess!, ctxOf([field({ focused: true, secure: true })]))).toMatchObject({ step: null, secret: { value: 'hunter' }, fragile: 'caps-lock' })
+      expect(matchStep(text!, ctxOf([field({ focused: true, secure: false })])).fragile).toBeUndefined()
     })
 
     it('keeps it out when no field has focus', () => {
@@ -412,8 +433,10 @@ describe('recorded in the dashboard', () => {
   it('types the email and the password each as one run, Caps Lock and a pause in the middle included', () => {
     // On iOS the person turned Caps Lock on and off before the email, and paused 2.1 s inside the password.
     for (const file of ['capture-ios-uikit.json', 'capture-android-compose.json']) {
-      const texts = segment(load(file)).flatMap((s) => s.kind === 'text' ? [s.text] : [])
-      expect(texts.slice(-2)).toEqual(['a@b.co', 'hunter2'])
+      const runs = segment(load(file)).flatMap((s) => s.kind === 'text' ? [s] : [])
+      expect(runs.slice(-2).map((s) => s.text)).toEqual(['a@b.co', 'hunter2'])
+      // Turned on and off before a letter: nothing in force, so the email is not a guess.
+      expect(runs.some((s) => s.capsLock)).toBe(false)
     }
   })
 })

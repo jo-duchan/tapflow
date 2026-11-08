@@ -41,8 +41,11 @@ const MAX_RAW_JS_CHUNK_SIZE = 500_000
 
 function buildDashboardDist() {
   const env = { ...process.env, NODE_ENV: 'production' }
-  execFileSync('pnpm', ['--filter', '@tapflowio/protocol', 'build'], { cwd: ROOT, env, stdio: 'inherit' })
-  execFileSync('pnpm', ['--filter', '@tapflowio/dashboard', 'build'], { cwd: ROOT, env, stdio: 'inherit' })
+  // agent-core and flow-runner too: the dashboard's Flow Capture dialog imports flow-runner from its dist, and a
+  // checkout that never built them would fail the dashboard's own build here.
+  for (const pkg of ['@tapflowio/protocol', '@tapflowio/agent-core', '@tapflowio/flow-runner', '@tapflowio/dashboard']) {
+    execFileSync('pnpm', ['--filter', pkg, 'build'], { cwd: ROOT, env, stdio: 'inherit' })
+  }
 }
 
 function attributes(tag) {
@@ -187,5 +190,50 @@ describe('dashboard first-load JavaScript budget', () => {
       oversized,
       `JavaScript chunks exceed ${MAX_RAW_JS_CHUNK_SIZE} B raw:\n${details}`,
     ).toHaveLength(0)
+  })
+})
+
+// Flow Capture's dialog brings flow-runner's engine and `yaml` (#1125). Every QA session loads the session page; only
+// one that captures should download those. The page is already a lazy route, so this is not about first load: it is
+// about what the session page's own chunks pull in statically. Markers are string literals that survive minifying.
+// One from the session channel, which any use of flow-runner reaches, and one each from the YAML writer and the schema;
+// tree-shaking keeps only what is used, so a single marker would miss an import of just the channel (measured).
+const FLOW_RUNNER_MARKERS = ['agent predates input correlation', 'does not read back as the same steps', 'requires a flow-level appId']
+
+/** The chunks `start` imports statically, itself included — `import("…")` is a later download and is not followed. */
+function staticClosure(start) {
+  const assetsDir = resolve(DASHBOARD_DIST, 'assets')
+  const seen = new Set()
+  const queue = [start]
+  while (queue.length) {
+    const name = queue.pop()
+    if (seen.has(name)) continue
+    seen.add(name)
+    const text = readFileSync(resolve(assetsDir, name), 'utf8')
+    for (const m of text.matchAll(/(?:^|[;\s}])import\s*(?:[\w${}*,\s]+from\s*)?["']\.\/([^"']+\.js)["']/g)) queue.push(m[1])
+  }
+  return [...seen]
+}
+
+function chunkNamed(prefix) {
+  const found = readdirSync(resolve(DASHBOARD_DIST, 'assets')).filter((n) => n.startsWith(prefix) && n.endsWith('.js'))
+  if (found.length !== 1) throw new Error(`expected one ${prefix}*.js chunk, found ${found.join(', ') || 'none'}`)
+  return found[0]
+}
+
+const carriesFlowRunner = (name) => {
+  const text = readFileSync(resolve(DASHBOARD_DIST, 'assets', name), 'utf8')
+  return FLOW_RUNNER_MARKERS.some((m) => text.includes(m))
+}
+
+describe('Flow Capture is downloaded only by a session that captures', () => {
+  it('leaves flow-runner out of everything the session page imports statically', () => {
+    const reached = staticClosure(chunkNamed('QASession-'))
+    expect(reached.length).toBeGreaterThan(1)
+    expect(reached.filter(carriesFlowRunner)).toEqual([])
+  })
+
+  it('puts it in the dialog\'s own chunks — so the check above is looking at something that exists', () => {
+    expect(staticClosure(chunkNamed('FlowCaptureDialog-')).some(carriesFlowRunner)).toBe(true)
   })
 })

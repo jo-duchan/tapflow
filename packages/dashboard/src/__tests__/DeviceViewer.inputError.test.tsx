@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { render, act } from '@testing-library/react'
+import { render, act, screen, fireEvent } from '@testing-library/react'
 import type { InputErrorReason } from '@tapflowio/protocol'
 import type { BrowserInbound } from '@/lib/types'
 import { INPUT_ERROR_NOTICE } from '@/lib/inputErrorNotice'
@@ -35,6 +35,9 @@ vi.mock('sonner', () => ({
 /** Every surface a latch could be rebuilt on. A guard that watched only `dismiss` would pass a latch
  *  implemented as a second toast. */
 const quiet = () => [toastDismiss, toastInfo, toastSuccess].forEach((f) => expect(f).not.toHaveBeenCalled())
+
+// The dialog itself is not what is tested here, only that the viewer knows it is open.
+vi.mock('@/components/flow-capture/FlowCaptureDialog', () => ({ default: () => null }))
 
 const { DeviceViewer } = await import('@/components/DeviceViewer')
 
@@ -276,5 +279,40 @@ describe('INPUT_ERROR_NOTICE', () => {
       const values = shown.map(([, n]) => n[field])
       expect(new Set(values).size, field).toBe(values.length)
     }
+  })
+})
+
+// Flow Capture's dialog replays and verifies through the same socket, and a step that does not land answers with
+// `input:error`. The dialog says so itself; a toast behind it would be hidden from a screen reader and repeat the
+// dialog's own message to everyone else.
+describe('DeviceViewer — input:error while Flow Capture is open', () => {
+  beforeEach(() => { [toastError, toastDismiss, toastInfo, toastSuccess].forEach((f) => f.mockClear()); deliver = null })
+
+  const CHROME = {
+    framePng: 'iVBORw0KGgo=', bezelWidth: 10, bezelHeight: 10,
+    compositeWidth: 100, compositeHeight: 200,
+    padding: { left: 0, right: 0, top: 0, bottom: 0 },
+    screenRect: { x: 0, y: 0, width: 100, height: 200 },
+    screenCornerRadius: 0, logicalWidth: 50, logicalHeight: 100, buttons: [],
+  }
+
+  function capturing() {
+    render(<DeviceViewer sessionId="s1" deviceId="dev-1" buildId={7} capturingSteps />)
+    act(() => { deliver!({ type: 'session:joined', sessionId: 's1', capabilities: [] }) })
+    act(() => { deliver!({ type: 'device:ready', sessionId: 's1', payload: { deviceId: 'dev-1' } }) })
+    act(() => { deliver!({ type: 'session:chrome', sessionId: 's1', payload: CHROME } as unknown as BrowserInbound) })
+  }
+
+  it('toasts while the dialog is closed', () => {
+    capturing()
+    inputError('channel-unavailable')
+    expect(toastError).toHaveBeenCalledTimes(1)
+  })
+
+  it('does not toast while the dialog is open', () => {
+    capturing()
+    fireEvent.click(screen.getByRole('button', { name: 'Capture flow' }))
+    inputError('channel-unavailable')
+    expect(toastError).not.toHaveBeenCalled()
   })
 })

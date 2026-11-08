@@ -318,6 +318,32 @@ Two limits, both written beside the rule:
   A helper such as `getBuild()`, `window.fetch`, or a renamed `api` import also passes. A reviewer has
   to look for these.
 
+### Flow Capture's dialog is its own chunk, and the viewer goes quiet while it is open
+
+The **Capture flow** button (Capture group, offered only while the session records steps and has a build) opens
+`components/flow-capture/FlowCaptureDialog.tsx` by state. The dialog replays the person's steps through
+flow-runner's own `SessionChannel` (`lib/flowCapture/channel.ts`), so a flow verified here behaves as it does under
+`tapflow flow run`.
+
+- **The viewer hands over a `CaptureTap` (`lib/flowCapture/tap.ts`), which imports nothing from flow-runner.** That
+  is what keeps the engine and `yaml` out of the QA page's first load: the dialog is `lazy()`, and only its chunk
+  brings them. `scripts/__tests__/dashboardFirstLoadBudget.test.mjs` walks the static imports of the `QASession`
+  chunk and fails if a flow-runner marker is reachable. A static import of `channel.ts` from viewer code is what it
+  catches, measured.
+- **While the dialog is open the viewer sends nothing of its own.** Its shortcuts and keys, the clipboard bridge,
+  and the `input:error` toast all stop, because a key pressed mid-replay (⌘⇧O turns the device) would break the
+  match, and a toast behind a modal is not heard (below). Each viewer carries the guard separately, and each has its
+  own test (`viewerFlowCapture.test.tsx`, `AndroidViewer.flowCapture.test.tsx`).
+- **The dialog holds the relay's pause on recording while it replays or verifies** (`PauseLease`, a 30 s lease
+  renewed every 10 s and before each step). Otherwise its own inputs would be recorded into the capture they come
+  from. A tab that dies lets the lease lapse, so the person is not left unrecorded.
+- **The replay is of the flow that will be exported, not of everything the person did.** An install in the range is
+  matched (as skipped) but not sent: the flow has none, and replaying one uninstalled the app the replay had just
+  launched, leaving every later step to be matched on the home screen.
+- **`vite` reads flow-runner's `dist`, the tests read its source.** After changing flow-runner, rebuild it
+  (`pnpm --filter @tapflowio/flow-runner build`) before checking the dialog in `pnpm dev` or a dashboard build. CI
+  builds it before the dashboard for the same reason.
+
 ## Testing
 
 - `pnpm test` is always run foreground (terminal). **Never run vitest as a background process** — worker forks accumulate as zombies and exhaust CPU/RAM.
@@ -429,7 +455,8 @@ diagnostic detail (`unknown key code: KeyFoo`) belongs. Absent or unrecognised r
 Suppressed entirely while the agent is away. An absent agent cannot send this, so in that state the
 *relay* answers every terminal input itself (`agent offline`, `channel-unavailable` since #492); a
 tapping tester would refresh the toast indefinitely, with advice contradicting the status card, which
-already says the relay is holding the session open and waiting.
+already says the relay is holding the session open and waiting. Also suppressed while Flow Capture's dialog is
+open, which reports a step that did not land itself (see that section above).
 
 A persistent indicator needs a protocol-level input-health signal, or acks that identify their channel
 and arrive in order. Two tests guard the decision (`DeviceViewer.inputError.test.tsx`): `input:done`

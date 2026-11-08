@@ -44,6 +44,8 @@ export type FragileReason =
   | 'not-centre'
   /** A swipe replays its two ends at the speed it was made, not what it brought on screen. */
   | 'swipe'
+  /** Typed with Caps Lock in force (`capsLock` on the text step): the text is a US-layout guess at what the device typed. */
+  | 'caps-lock'
 
 export interface CapturedStep {
   raw: RawStep
@@ -127,8 +129,10 @@ function typedSecretly(ctx: MatchContext): boolean {
 const knownSecret = (ctx: MatchContext): boolean => focusedIn(ctx.tree)?.secure === true
 
 function typed(raw: RawStep, text: string, ctx: MatchContext): CapturedStep {
-  if (typedSecretly(ctx)) return { raw, step: null, secret: { value: text, known: knownSecret(ctx) } }
-  return { raw, step: { type: 'inputText', text } }
+  // A secret's value is the same guess, so it is marked too.
+  const guess = raw.kind === 'text' && raw.capsLock ? { fragile: 'caps-lock' as const } : {}
+  if (typedSecretly(ctx)) return { raw, step: null, secret: { value: text, known: knownSecret(ctx) }, ...guess }
+  return { raw, step: { type: 'inputText', text }, ...guess }
 }
 
 /**
