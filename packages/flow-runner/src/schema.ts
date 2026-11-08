@@ -32,7 +32,12 @@ export type Step =
   | { type: 'clearState'; appId?: string }
   | { type: 'launchApp'; options?: LaunchOptions }
   | { type: 'tapOn'; selector: Selector }
+  /** `tapOn: [x, y]` — a point, for a screen whose tree names nothing there. The last resort: it waits for nothing and
+   *  lands wherever the layout puts that point. Its own type so every reader of `selector` stays one. */
+  | { type: 'tapPoint'; at: [number, number] }
   | { type: 'inputText'; text: string }
+  /** `inputText: { secret: NAME }` — the value is given to the run, never written in the flow, and never logged. */
+  | { type: 'inputSecret'; name: string }
   | { type: 'pressKey'; code: string; modifiers?: KeyModifier[] }
   | { type: 'swipe'; from: [number, number]; to: [number, number]; durationMs: number }
   /** With `until`, scrolls until that element is on screen rather than once — what a swipe was for, not how far it went. */
@@ -42,6 +47,8 @@ export type Step =
   | { type: 'assertNotVisible'; selector: Selector }
   | { type: 'pressButton'; name: string }
   | { type: 'longPressOn'; selector: Selector; durationMs: number }
+  /** `longPressOn: [x, y]` or `{ on: [x, y], durationMs }` — a point, as `tapPoint`. */
+  | { type: 'longPressPoint'; at: [number, number]; durationMs: number }
   | { type: 'pinch'; on: Selector | [number, number]; scale: number; durationMs: number }
   | { type: 'setOrientation'; orientation: 'portrait' | 'landscape' }
   | { type: 'setPosture'; posture: 'folded' | 'unfolded' }
@@ -56,6 +63,8 @@ export interface Flow {
 
 const SCROLL_DIRECTIONS = new Set<string>(['up', 'down', 'left', 'right'])
 const KEY_MODIFIERS = new Set<string>(['shift', 'ctrl', 'alt', 'meta'])
+// The shape of an environment variable's name, since that is where the CLI reads the value from.
+const SECRET_NAME = /^[A-Za-z_][A-Za-z0-9_]*$/
 const DEFAULT_SWIPE_DURATION_MS = 300
 // Both platforms recognise a long press at about half a second; twice that leaves room for a busy Mac's timing
 // (#1037). Holding past the threshold changes nothing for an ordinary long press, so the margin costs only time.
@@ -167,11 +176,23 @@ function parseStep(raw: unknown, ctx: string): Step {
       const options = compactLaunchOptions({ arguments: args, env } as LaunchOptions)
       return options ? { type: 'launchApp', options } : { type: 'launchApp' }
     }
-    case 'tapOn': return { type: 'tapOn', selector: parseSelector(value, ctx) }
+    // An array is a point and anything else a selector, as `pinch.on` reads them.
+    case 'tapOn': return Array.isArray(value)
+      ? { type: 'tapPoint', at: parsePoint(value, ctx, 'tapOn') }
+      : { type: 'tapOn', selector: parseSelector(value, ctx) }
     case 'assertVisible': return { type: 'assertVisible', selector: parseSelector(value, ctx) }
     case 'assertNotVisible': return { type: 'assertNotVisible', selector: parseSelector(value, ctx) }
     case 'inputText': {
-      if (typeof value !== 'string') throw new ValidationError(`${ctx}: "inputText" must be a string`)
+      if (isRecord(value)) {
+        const { secret, ...rest } = value
+        const unknownKeys = Object.keys(rest)
+        if (unknownKeys.length > 0) throw new ValidationError(`${ctx}: unknown inputText keys: ${unknownKeys.join(', ')} (expected secret)`)
+        if (typeof secret !== 'string' || !SECRET_NAME.test(secret)) {
+          throw new ValidationError(`${ctx}: "secret" must be a name like PASSWORD (letters, digits and _, not starting with a digit)`)
+        }
+        return { type: 'inputSecret', name: secret }
+      }
+      if (typeof value !== 'string') throw new ValidationError(`${ctx}: "inputText" must be a string or { secret: NAME }`)
       return { type: 'inputText', text: value }
     }
     case 'pressKey': {
@@ -244,11 +265,15 @@ function parseStep(raw: unknown, ctx: string): Step {
         const { on, durationMs, ...rest } = value
         const unknownKeys = Object.keys(rest)
         if (unknownKeys.length > 0) throw new ValidationError(`${ctx}: unknown longPressOn keys: ${unknownKeys.join(', ')} (expected on, durationMs)`)
-        return { type: 'longPressOn', selector: parseSelector(on, ctx), durationMs: parseGestureMs(durationMs, ctx, DEFAULT_LONG_PRESS_MS) }
+        const ms = parseGestureMs(durationMs, ctx, DEFAULT_LONG_PRESS_MS)
+        return Array.isArray(on)
+          ? { type: 'longPressPoint', at: parsePoint(on, ctx, 'on'), durationMs: ms }
+          : { type: 'longPressOn', selector: parseSelector(on, ctx), durationMs: ms }
       }
       if (isRecord(value) && Object.hasOwn(value, 'durationMs')) {
         throw new ValidationError(`${ctx}: "longPressOn" takes a duration beside the selector — put the selector under "on": { on: <selector>, durationMs }`)
       }
+      if (Array.isArray(value)) return { type: 'longPressPoint', at: parsePoint(value, ctx, 'longPressOn'), durationMs: DEFAULT_LONG_PRESS_MS }
       return { type: 'longPressOn', selector: parseSelector(value, ctx), durationMs: DEFAULT_LONG_PRESS_MS }
     }
     case 'pinch': {

@@ -70,11 +70,8 @@ export const INBOUND_DISPOSITION = {
     ignored: 'No clipboard step exists, and one could not be deterministic — the payload lands on the host '
       + 'OS clipboard, which is shared mutable state outside the flow.',
   },
-  'clipboard:error': { ignored: 'Same as `clipboard:data` — nothing here sends a clipboard request.' },
-  'clipboard:write-done': {
-    ignored: 'Same as `clipboard:data` — no clipboard step exists, so a confirmation here answers nothing a flow '
-      + 'asked for.',
-  },
+  'clipboard:error': { settles: 'pasteText' },
+  'clipboard:write-done': { settles: 'pasteText' },
   'network:state': {
     ignored: 'No network step exists. A flow that took its own device offline would be asserting against a '
       + 'device it can no longer drive, and the step after it could not report why it failed.',

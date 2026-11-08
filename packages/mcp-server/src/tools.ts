@@ -4,7 +4,7 @@ import os from 'os'
 import path from 'path'
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import { toFramePoint, type InterfaceTurn } from '@tapflowio/protocol/screen'
-import { EnvironmentStepError, isEligible, parseFlow, refusedFlow, runFlow, unavailableButton, unavailableButtonMessage, type FlowDriver, type FlowResult } from '@tapflowio/flow-runner'
+import { EnvironmentStepError, isEligible, missingSecret, missingSecretMessage, parseFlow, refusedFlow, runFlow, unavailableButton, unavailableButtonMessage, type FlowDriver, type FlowResult } from '@tapflowio/flow-runner'
 import { SessionEndedError, SessionLeftError, type TapflowClient } from './client.js'
 import { TESTING_GUIDE } from './guide.js'
 import { compactLaunchOptions, launchOptionsProblem, type LaunchApplied } from '@tapflowio/protocol/launch'
@@ -543,6 +543,10 @@ export function registerTools(server: McpServer, client: TapflowClient): void {
             return ok(JSON.stringify(flowResponse(refusedFlow(parsed, missing.index, unavailableButtonMessage(missing, platform), { beforeRun: true })), null, 2))
           }
         }
+        // run_flow is given no secrets (a server's environment holds its relay token), so a flow that types one is
+        // refused here, before the install, as the engine would refuse it after.
+        const secret = missingSecret(parsed, undefined)
+        if (secret) return ok(JSON.stringify(flowResponse(refusedFlow(parsed, secret.index, missingSecretMessage(secret.name), { beforeRun: true })), null, 2))
         // The same check as `flow run --build`, before the device is touched. With one flow, "skipped" leaves nothing
         // run, which `flow run` also treats as an error rather than a pass.
         let appCheckSkipped: string | undefined

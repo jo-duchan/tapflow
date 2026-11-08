@@ -52,8 +52,8 @@ steps:
 |------|------|------|
 | `clearState` | 키워드 또는 `clearState: <bundleId>` | 앱 데이터를 초기화합니다. 키워드 형태는 최상위 `appId`를 씁니다. |
 | `launchApp` | 키워드 또는 `launchApp: { arguments, env }` | 테스트 대상 빌드를 실행한 다음 앱 화면이 자리 잡을 때까지 기다립니다. UI 트리 요소의 역할·라벨·id가 1초 동안 그대로이면 화면이 뜬 것으로 보므로 스플래시를 첫 화면으로 착각하지 않습니다. 게임처럼 UI 트리 요소가 없는 화면도 1초 뒤에 넘어갑니다. 라벨이 계속 바뀌는 화면은 처음 읽힌 뒤 3초가 지나면 넘어가고 화면을 전혀 읽지 못하면 셀렉터 기본 대기 시간이 지나야 넘어갑니다. 이 대기 때문에 스텝이 실패하지는 않습니다. 1초 넘게 그대로 있는 스플래시는 첫 화면으로 잘못 볼 수 있습니다. 실행 인자를 넘기는 방법은 [실행 인자](#launch-arguments)에 있습니다. |
-| `tapOn` | 셀렉터 | 매칭된 요소의 중심을 탭합니다. |
-| `inputText` | 문자열 | 포커스된 입력 필드에 텍스트를 입력합니다. |
+| `tapOn` | 셀렉터 또는 `[x, y]` | 매칭된 요소의 중심을 탭합니다. 좌표를 주면 그 지점을 탭합니다. [좌표 탭](#tapping-a-point)을 참고하세요. |
+| `inputText` | 문자열 또는 `{ secret: NAME }` | 포커스된 입력 필드에 텍스트를 입력합니다. 비밀번호처럼 플로우 파일에 적으면 안 되는 값은 [비밀 값](#secrets)을 참고하세요. |
 | `pressKey` | 키 이름 또는 `{ code, modifiers }` | 키보드 키를 누릅니다(`Enter`, `Backspace`, `Escape` 등). 조합 키는 `{ code: ArrowLeft, modifiers: [shift] }`처럼 함께 누를 키를 `shift`, `ctrl`, `alt`, `meta` 중에서 적습니다. Android에서 `ctrl`이나 `meta`와 함께 누를 수 있는 문자 키는 C, V, X뿐이고 문자 키에는 `alt`가 적용되지 않습니다. |
 | `swipe` | `{ from, to, durationMs? }` | 두 지점 사이를 스와이프합니다. 좌표는 0~1. `durationMs`는 밀리초 단위 숫자이며 기본값 300, 최대 2147483647입니다. 소수(예: 250.5)도 허용됩니다. |
 | `scroll` | 키워드, `scroll: <방향>` 또는 `{ direction, until }` | 화면을 스크롤합니다. 인자 없는 형태는 아래로 스크롤합니다. `until`을 주면 그 요소가 화면에 나올 때까지 스크롤합니다. [요소까지 스크롤](#scrolling-to-an-element)을 참고하세요. |
@@ -61,7 +61,7 @@ steps:
 | `assertVisible` | 셀렉터 | 요소가 나타날 때까지 기다립니다. 나타나지 않으면 실패합니다. |
 | `assertNotVisible` | 셀렉터 | 요소가 사라질 때까지 기다립니다. 사라지지 않으면 실패합니다. |
 | `pressButton` | 버튼 이름 | 하드웨어 버튼을 누릅니다. [하드웨어 버튼](#hardware-buttons)을 보세요. |
-| `longPressOn` | 셀렉터 또는 `{ on, durationMs? }` | 매칭된 요소의 중심을 누른 채로 유지합니다. 기본 1000ms, 최대 60000ms입니다. 시간을 바꾸려면 셀렉터를 `on` 아래에 둡니다. |
+| `longPressOn` | 셀렉터, `[x, y]` 또는 `{ on, durationMs? }` | 매칭된 요소의 중심이나 좌표를 누른 채로 유지합니다. 기본 1000ms, 최대 60000ms입니다. 시간을 바꾸려면 셀렉터나 좌표를 `on` 아래에 둡니다. |
 | `pinch` | `{ on, scale, durationMs? }` | 요소나 지점의 중심을 두고 두 손가락으로 핀치합니다. [핀치](#pinch)를 보세요. |
 | `setOrientation` | `portrait` 또는 `landscape` | 기기를 세로나 가로로 돌립니다. [화면 방향과 자세](#orientation-and-posture)를 보세요. |
 | `setPosture` | `folded` 또는 `unfolded` | 폴더블 기기를 접거나 펼칩니다. [화면 방향과 자세](#orientation-and-posture)를 보세요. |
@@ -135,6 +135,37 @@ steps:
 adb fallback으로 스트리밍하는 Android 기기에서 길게 누르려면 같은 릴리스의 android-agent가 필요합니다. 이전 에이전트는 길게 누르기를 탭으로 보내면서도 성공으로 알리므로 `longPressOn` 뒤에는 길게 눌러야 나타나는 결과를 단언으로 확인하세요.
 
 `durationMs`는 셀렉터 안이 아니라 옆에 둡니다. `{ label: "메시지", durationMs: 2500 }`은 거부됩니다. 문자열 셀렉터를 `label:`로 바꾸면 매칭 방식까지 달라지기 때문입니다. `label:`은 식별자를 보지 않습니다.
+
+### 좌표 탭 {#tapping-a-point}
+
+UI 트리에 이름이 없는 곳(게임, 지도, 캔버스)은 셀렉터로 가리킬 수 없습니다. 그럴 때는 좌표를 줍니다. 좌표는 앱이 그리는 화면 기준 0~1이고 가로 화면이면 가로 화면 기준입니다.
+
+```yaml
+- tapOn: [0.42, 0.61]
+- longPressOn: { on: [0.5, 0.5], durationMs: 1500 }
+```
+
+좌표 탭은 마지막 수단입니다. 요소가 나타날 때까지 기다리지 않고 화면 크기나 레이아웃이 바뀌면 다른 곳을 누릅니다. 셀렉터로 가리킬 수 있으면 셀렉터를 쓰고 좌표 탭 앞에는 그 화면이 떴는지 `assertVisible`로 확인하세요.
+
+### 비밀 값 {#secrets}
+
+비밀번호처럼 플로우 파일에 적으면 안 되는 값은 이름으로 입력합니다.
+
+```yaml
+- tapOn: { id: "password" }
+- inputText: { secret: PASSWORD }
+```
+
+값은 `tapflow flow run`을 실행할 때 `--secret`으로 넘깁니다. 같은 이름의 환경 변수에서 읽습니다.
+
+```sh
+PASSWORD=hunter2 tapflow flow run .tapflow/flows/login.yaml --secret PASSWORD
+```
+
+- `--secret`으로 넘긴 이름만 읽습니다. 환경 변수에는 릴레이 토큰 같은 다른 비밀도 있으므로 플로우 파일만 바꿔서 그 값을 화면에 입력할 수는 없습니다.
+- 값은 실행 기록, JUnit 리포트, 단계 이름 어디에도 남지 않습니다. 단계 이름은 `inputText(secret PASSWORD)`처럼 이름만 보입니다.
+- 넘기지 않은 비밀을 쓰는 플로우가 있으면 기기를 고르기 전에 환경 오류로 멈춥니다. `--secret`에 적은 환경 변수가 없거나 비어 있어도 실행이 시작되지 않습니다. CI에서 등록하지 않은 시크릿은 빈 값으로 들어오기 때문입니다.
+- MCP의 `run_flow`로 실행하면 비밀 값을 받지 않으므로 이 단계가 있는 플로우는 실행되지 않습니다.
 
 ### 핀치 {#pinch}
 

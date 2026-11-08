@@ -100,8 +100,22 @@
                 }
               ]
             },
-            "tapOn": { "$ref": "#/definitions/selector" },
-            "inputText": { "type": "string", "description": "Type into the focused input." },
+            "tapOn": {
+              "description": "Tap the element a selector names, or [x, y] to tap a point — the last resort, for a screen whose tree names nothing there.",
+              "oneOf": [{ "$ref": "#/definitions/selector" }, { "$ref": "#/definitions/point" }]
+            },
+            "inputText": {
+              "description": "Type into the focused input, or { secret: NAME } to type a value given to the run (tapflow flow run --secret NAME) that is never written in the flow.",
+              "oneOf": [
+                { "type": "string" },
+                {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": ["secret"],
+                  "properties": { "secret": { "type": "string", "pattern": "^[A-Za-z_][A-Za-z0-9_]*$" } }
+                }
+              ]
+            },
             "pressKey": {
               "description": "Press a key. A KeyboardEvent.code name (Enter, Backspace, Escape, Tab, ArrowDown, …), or { code, modifiers } to hold shift/ctrl/alt/meta while it is pressed.",
               "oneOf": [
@@ -151,7 +165,7 @@
               "description": "Press a hardware button: home on both platforms; lock, power, volume_up, volume_down where the device has them; back, recent_apps on Android. A flow pressing a button the device lacks fails before it runs."
             },
             "longPressOn": {
-              "description": "Press and hold the element a selector names. A bare selector holds for 1000ms; to change the time, put the selector under \"on\".",
+              "description": "Press and hold the element a selector names, or a point [x, y]. A bare selector or point holds for 1000ms; to change the time, put it under \"on\".",
               "oneOf": [
                 { "$ref": "#/definitions/selector" },
                 {
@@ -159,10 +173,11 @@
                   "additionalProperties": false,
                   "required": ["on"],
                   "properties": {
-                    "on": { "$ref": "#/definitions/selector" },
+                    "on": { "oneOf": [{ "$ref": "#/definitions/selector" }, { "$ref": "#/definitions/point" }] },
                     "durationMs": { "type": "number", "exclusiveMinimum": 0, "maximum": 60000, "default": 1000 }
                   }
-                }
+                },
+                { "$ref": "#/definitions/point" }
               ]
             },
             "setOrientation": {

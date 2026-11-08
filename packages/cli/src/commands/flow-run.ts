@@ -13,6 +13,8 @@ import {
   isEligible,
   lookupBuild,
   refusedFlow,
+  missingSecret,
+  missingSecretMessage,
   unavailableButton,
   unavailableButtonMessage,
   parseTagList,
@@ -63,6 +65,9 @@ export interface FlowRunOptions {
   parallel?: number
   /** The platform of a `--parallel` run without `--build`; with one, the relay reads the build's. */
   platform?: string
+  /** Environment variables an `inputText: { secret }` step may type. Only these: the rest of the environment holds
+   *  the relay token and CI's other secrets, and a flow is a file anyone with the repo can change. */
+  secret?: string[]
 }
 
 // Exit codes are part of the CI contract: 0 = all flows passed,
@@ -96,6 +101,27 @@ const ADMISSION_WAITS: Record<AdmissionReason, string> = {
 }
 
 class FlowRunEnvironmentError extends Error {}
+
+/** `--secret`, once or repeated, as the parser hands it back; a value is kept as typed, since it is a name. */
+export function secretArg(value: TagsArg | undefined): string[] | undefined {
+  if (value === undefined) return undefined
+  return (Array.isArray(value) ? value : [value]).map(String)
+}
+
+/** The values `--secret` names, read once before the run. A name the environment does not hold is the run's mistake
+ *  to report now, not a flow's to fail on later. */
+function readSecrets(names: string[] | undefined): Record<string, string> | undefined {
+  if (!names?.length) return undefined
+  const out: Record<string, string> = {}
+  for (const name of names) {
+    if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(name)) envFail(`--secret takes the name of an environment variable, like PASSWORD (got ${JSON.stringify(name)})`)
+    const value = Object.hasOwn(process.env, name) ? process.env[name] : undefined
+    // Empty is what CI expands a missing secret to (`\${{ secrets.X }}`), and typing nothing would fail later as the app's fault.
+    if (value === undefined || value === '') envFail(`--secret ${name}: ${name} is not set in the environment, or is empty`)
+    out[name] = value
+  }
+  return out
+}
 
 /** What the argument parser hands back for `--include-tags` / `--exclude-tags`. */
 export type TagsArg = string | number | boolean | (string | number | boolean)[]
@@ -245,6 +271,7 @@ interface ParallelRun {
   eligible: number[]
   serviceTier?: ServiceTier
   runReset?: { uninstall: string[]; clear: string[] }
+  secrets?: Record<string, string>
   admissionTimeoutMs: number
   recorder?: RunRecorder
   lane?: VideoLane
@@ -349,6 +376,7 @@ async function runParallel(run: ParallelRun, workerCount: number): Promise<Paral
       const engineOpts = {
         ...(opts.timeout !== undefined ? { defaultTimeoutMs: Math.round(opts.timeout * 1000) } : {}),
         ...(recorder ? { captureLastScreen: true } : {}),
+        ...(run.secrets ? { secrets: run.secrets } : {}),
         platform: lease.platform,
         onStep: ({ label: step, ...mark }: Parameters<NonNullable<EngineOptions['onStep']>>[0]) => {
           if (mark.phase === 'start' && step) client.activity(lease.sessionId, `step ${mark.index + 1}: ${step}`)
@@ -495,6 +523,7 @@ export async function cmdFlowRun(files: string[], opts: FlowRunOptions): Promise
     } else if (opts.platform !== undefined) {
       envFail('--platform is for --parallel; without it, pick the device with --device or --session')
     }
+    const secrets = readSecrets(opts.secret)
     const admissionTimeout = opts.admissionTimeout ?? DEFAULT_ADMISSION_TIMEOUT_SECONDS
     if (!(Number.isFinite(admissionTimeout) && admissionTimeout >= 0 && admissionTimeout <= MAX_TIMEOUT_SECONDS)) {
       envFail(`--admission-timeout must be a number of seconds from 0 to ${MAX_TIMEOUT_SECONDS}`)
@@ -590,6 +619,12 @@ export async function cmdFlowRun(files: string[], opts: FlowRunOptions): Promise
       skipCounts.set(verdict.reason, (skipCounts.get(verdict.reason) ?? 0) + 1)
       recorder?.reportSkipped(flowIndex, { reason: verdict.reason, message: verdict.message })
     }
+    // A secret the run was not given is the run's mistake, like a variable missing from CI: said before any device is
+    // booted, reset or installed for it, rather than as one flow's failure after all of that.
+    for (const idx of eligible) {
+      const missing = missingSecret(flows[idx], secrets)
+      if (missing) envFail(`${flows[idx].name}: ${missingSecretMessage(missing.name)}`)
+    }
     // A flow pressing a button the platform has none of fails here, before a device is chosen: the compile error to
     // the engine's runtime check, which still runs for what only the device knows (iOS buttons other than home) and
     // for a run that learns its platform only from the device. Failed rather than skipped (a person's decision): a
@@ -625,7 +660,7 @@ export async function cmdFlowRun(files: string[], opts: FlowRunOptions): Promise
     if (parallel !== undefined) {
       const { ran, problems } = await runParallel({
         relayUrl, tokens, clientId: client.clientId, opts, flows, eligible,
-        ...(serviceTier ? { serviceTier } : {}), ...(runReset ? { runReset } : {}),
+        ...(serviceTier ? { serviceTier } : {}), ...(runReset ? { runReset } : {}), ...(secrets ? { secrets } : {}),
         admissionTimeoutMs: admissionTimeout * 1000, ...(recorder ? { recorder } : {}), ...(parallelLane ? { lane: parallelLane } : {}),
         workers, cancelled: () => cancelling,
         onLease: (lease) => {
@@ -710,6 +745,7 @@ export async function cmdFlowRun(files: string[], opts: FlowRunOptions): Promise
       // A passed flow's last screen is evidence for the record; with nothing recording, it would be a screenshot per
       // flow taken for nobody.
       ...(recorder ? { captureLastScreen: true } : {}),
+      ...(secrets ? { secrets } : {}),
       platform: device.platform,
       onStep: ({ label, ...mark }: Parameters<NonNullable<EngineOptions['onStep']>>[0]) => {
         // Whoever watches the run sees each step as it starts (A2), named without anything it types.

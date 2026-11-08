@@ -2,7 +2,8 @@ import { describe, it, expect, vi } from 'vitest'
 import type { UIElement } from '@tapflowio/agent-core'
 import { runFlow, type FlowDriver } from '../engine.js'
 import { parseFlow } from '../schema.js'
-import { DeviceLacksError, EnvironmentStepError, TransientQueryError } from '../errors.js'
+import { SessionEndedError } from '../sessionErrors.js'
+import { DeviceLacksError, EnvironmentStepError, markEnvironmentFailure, TransientQueryError } from '../errors.js'
 import type { PinchFingers } from '../engine.js'
 import type { ChromeButton, ChromeData } from '@tapflowio/protocol'
 
@@ -1151,5 +1152,84 @@ describe('runFlow — orientation and posture', () => {
     const b = await runFlow(flowOf('steps:\n  - setOrientation: landscape\n'), broken, OPTS)
     expect(b.failureKind).toBe('environment')
     expect(b.deviceLacks).toBeUndefined()
+  })
+})
+
+describe('points and secrets', () => {
+  it('taps and holds a point as written, without reading the tree for it', async () => {
+    const driver = fakeDriver([[]])
+    const result = await runFlow(flowOf('steps:\n  - tapOn: [0.4, 0.6]\n  - longPressOn: { on: [0.1, 0.2], durationMs: 700 }\n'), driver, OPTS)
+    expect(result.status).toBe('passed')
+    expect(driver.calls).toEqual([['tap', 0.4, 0.6], ['longPress', 0.1, 0.2, 700]])
+    expect(result.steps.map((s) => s.name)).toEqual(['tapOn([0.4,0.6])', 'longPressOn([0.1,0.2], 700ms)'])
+  })
+
+  it('types a secret it was given, and names it nowhere by value', async () => {
+    const driver = fakeDriver([[]])
+    const marks: Array<{ name: string; label?: string }> = []
+    const result = await runFlow(flowOf('steps:\n  - inputText: { secret: PASSWORD }\n'), driver,
+      { ...OPTS, secrets: { PASSWORD: 'hunter2' }, onStep: (m) => marks.push(m) })
+    expect(result.status).toBe('passed')
+    expect(driver.calls).toEqual([['inputText', 'hunter2']])
+    expect(result.steps[0]!.name).toBe('inputText(secret PASSWORD)')
+    expect(marks[0]!.label).toBe('inputText (secret)')
+    expect(JSON.stringify({ result, marks })).not.toContain('hunter2')
+  })
+
+  it('refuses a flow naming a secret it was not given, before anything reaches the device', async () => {
+    const driver = fakeDriver([[]])
+    const result = await runFlow(flowOf('steps:\n  - tapOn: [0.4, 0.6]\n  - inputText: { secret: PASSWORD }\n'), driver,
+      { ...OPTS, secrets: { OTHER: 'x' } })
+    expect(driver.calls).toEqual([])
+    expect(result.failureKind).toBe('environment')
+    expect(result.failedBeforeRun).toBe(true)
+    expect(result.steps.map((s) => s.status)).toEqual(['skipped', 'failed'])
+    expect(result.failureMessage).toMatch(/secret PASSWORD was not given to this run.*--secret PASSWORD/)
+  })
+
+  it('keeps the value out of a failure whose driver quoted it, and keeps the failure\'s kind', async () => {
+    const driver = fakeDriver([[]])
+    vi.mocked(driver.inputText).mockRejectedValueOnce(markEnvironmentFailure(new Error('Command failed: adb shell input text hunter2')))
+    const result = await runFlow(flowOf('steps:\n  - inputText: { secret: PASSWORD }\n'), driver, { ...OPTS, secrets: { PASSWORD: 'hunter2' } })
+    expect(result.failureKind).toBe('environment')
+    expect(result.failureMessage).toBe('inputText(secret PASSWORD): typing the secret PASSWORD failed')
+    expect(JSON.stringify(result)).not.toContain('hunter2')
+  })
+
+  it('names no input\'s or secure element\'s label among the candidates of an ambiguous match', async () => {
+    const driver = fakeDriver([[el({ role: 'input', label: 'hunter2', identifier: 'pw' }), el({ role: 'other', label: '••••', secure: true, identifier: 'pw' })]])
+    const result = await runFlow(flowOf('steps:\n  - tapOn: { id: pw }\n'), driver, OPTS)
+    expect(result.failureMessage).toMatch(/candidates/)
+    expect(result.failureMessage).not.toMatch(/hunter2|••••/)
+  })
+
+  it('reads only the secrets it was given, not what every object inherits', async () => {
+    const driver = fakeDriver([[]])
+    const result = await runFlow(flowOf('steps:\n  - inputText: { secret: constructor }\n'), driver, { ...OPTS, secrets: { PASSWORD: 'x' } })
+    expect(driver.calls).toEqual([])
+    expect(result.failedBeforeRun).toBe(true)
+  })
+
+  it.each([['undefined', undefined], ['empty', '']])('refuses a secret given as %s before the first step', async (_, value) => {
+    // A JS caller passing `process.env.PASSWORD` with the variable unset.
+    const driver = fakeDriver([[]])
+    const result = await runFlow(flowOf('steps:\n  - tapOn: [0.5, 0.5]\n  - inputText: { secret: PASSWORD }\n'), driver,
+      { ...OPTS, secrets: { PASSWORD: value as unknown as string } })
+    expect(driver.calls).toEqual([])
+    expect(result.failedBeforeRun).toBe(true)
+  })
+
+  it('keeps what the relay said about the session when typing a secret failed', async () => {
+    const driver = fakeDriver([[]])
+    vi.mocked(driver.inputText).mockRejectedValueOnce(new SessionEndedError('session s1 ended: the device was shut down', 'unknown'))
+    const result = await runFlow(flowOf('steps:\n  - inputText: { secret: PASSWORD }\n'), driver, { ...OPTS, secrets: { PASSWORD: 'hunter2' } })
+    expect(result.failureMessage).toBe('inputText(secret PASSWORD): typing the secret PASSWORD failed: session s1 ended: the device was shut down')
+  })
+
+  it('refuses it with no secrets at all, as run_flow runs', async () => {
+    const driver = fakeDriver([[]])
+    const result = await runFlow(flowOf('steps:\n  - inputText: { secret: TAPFLOW_TOKEN }\n'), driver, OPTS)
+    expect(driver.calls).toEqual([])
+    expect(result.failedBeforeRun).toBe(true)
   })
 })

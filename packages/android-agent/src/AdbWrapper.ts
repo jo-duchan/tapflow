@@ -652,7 +652,14 @@ export class AdbWrapper {
     if (/[^\x20-\x7e]/.test(text)) {
       throw new PlatformError('Android input text supports ASCII only — non-ASCII characters require a custom IME (not supported)')
     }
-    await this.runner.exec('-s', serial, 'shell', 'input', 'text', encodeAdbInputText(text))
+    try {
+      await this.runner.exec('-s', serial, 'shell', 'input', 'text', encodeAdbInputText(text))
+    } catch (e) {
+      // The text is in argv, and a failed exec's message is the whole command line: it would reach the agent's log
+      // and the client's step failure, and the text can be a flow's secret. Said without it, and without the cause.
+      const code = (e as { code?: unknown }).code
+      throw new PlatformError(`adb input text failed${code !== undefined ? ` (exit ${String(code)})` : ''}`)
+    }
   }
 
   async sendKeyEvent(serial: string, keyCode: string): Promise<void> {

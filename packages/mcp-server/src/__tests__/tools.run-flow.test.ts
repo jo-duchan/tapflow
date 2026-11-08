@@ -102,6 +102,14 @@ describe('run_flow — tells watchers each step', () => {
 describe('run_flow — install before replay', () => {
   const runFlowHandler = (client: TapflowClient) => captureTools(client).get('run_flow') as Handler
 
+  // A server's environment holds its relay token: run_flow is given no secrets, and says so before installing anything.
+  it('refuses a flow that types a secret before installing the build', async () => {
+    const client = fakeClient([])
+    const res = await runFlowHandler(client)({ sessionId: 's1', flow: 'steps:\n  - launchApp\n  - inputText: { secret: TAPFLOW_TOKEN }\n', buildId: 5 })
+    expect(JSON.parse((res.content[0] as { text: string }).text)).toMatchObject({ status: 'failed', failureKind: 'environment', failureMessage: expect.stringMatching(/secret TAPFLOW_TOKEN was not given/) })
+    expect(client.installApp).not.toHaveBeenCalled()
+  })
+
   it('installs buildId before running the flow (default)', async () => {
     const calls: string[] = []
     const client = fakeClient(calls)

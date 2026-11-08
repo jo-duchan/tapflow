@@ -206,6 +206,45 @@ describe('the budget', () => {
     expect(s.takeSnapshot('s', '1')!.thinned).toBe(true)
   })
 
+  it('keeps each gesture\'s last move, which is where the finger lifted', () => {
+    // The dashboard's end carries no point. Thinned by alternation across the whole capture, a two-move flick lost
+    // its last move about half the time and read as a tap.
+    const { s } = store({ maxEntries: 40 })
+    for (let i = 0; i < 15; i++) {
+      s.recordInput('s', ALICE, tap(`r${i}`)[0]!)
+      s.recordInput('s', ALICE, move(0.4))
+      s.recordInput('s', ALICE, move(0.2 + i / 100))
+      s.recordInput('s', ALICE, tap(`r${i}`)[1]!)
+    }
+    const entries = s.takeSnapshot('s', '1')!.entries
+    expect(entries.length).toBeLessThanOrEqual(40)
+    const lifts = entries.flatMap((e, i) => {
+      if (e.kind !== 'input' || e.msg.type !== 'input:touch:end') return []
+      const before = entries[i - 1]
+      return before?.kind === 'input' && before.msg.type === 'input:touch:move' ? [before.msg.payload.y] : []
+    })
+    // Every gesture the cut kept still ends on its own last move.
+    const ends = entries.filter((e) => e.kind === 'input' && e.msg.type === 'input:touch:end').length
+    expect(ends).toBeGreaterThan(0)
+    expect(lifts).toHaveLength(ends)
+    expect(lifts.at(-1)).toBeCloseTo(0.34)
+  })
+
+  it('keeps each gesture\'s first move, whose time tells a swipe from a drag after a hold', () => {
+    const { s } = store({ maxEntries: 40 })
+    for (let i = 0; i < 6; i++) {
+      s.recordInput('s', ALICE, tap(`r${i}`)[0]!)
+      for (let k = 0; k < 8; k++) s.recordInput('s', ALICE, move(0.6 - k / 100 - i / 1000))
+      s.recordInput('s', ALICE, tap(`r${i}`)[1]!)
+    }
+    const entries = s.takeSnapshot('s', '1')!.entries
+    expect(s.takeSnapshot('s', '1')!.thinned).toBe(true)
+    // Every start the cut kept is still followed by that gesture's first move.
+    const firsts = entries.flatMap((e, i) => e.kind === 'input' && e.msg.type === 'input:touch:start' ? [entries[i + 1]] : [])
+    expect(firsts.length).toBeGreaterThan(0)
+    for (const f of firsts) expect(f?.kind === 'input' && f.msg.type === 'input:touch:move' && f.msg.payload.y).toBeGreaterThan(0.59)
+  })
+
   it('then cuts whole gestures off the head and never drops a launch', () => {
     const { s } = store({ maxEntries: 20 })
     s.recordInput('s', ALICE, launch)
