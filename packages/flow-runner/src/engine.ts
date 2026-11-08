@@ -620,8 +620,7 @@ async function executeStep(
     case 'tapPoint': return driver.tap(step.at[0], step.at[1])
     case 'inputText': return driver.inputText(step.text)
     case 'inputSecret': {
-      // Own properties only: a name like `constructor` would otherwise read Object's and type that.
-      const value = secrets && Object.hasOwn(secrets, step.name) ? secrets[step.name] : undefined
+      const value = secretValue(secrets, step.name)
       // Checked before the run; this is for a caller that ran a flow without going through `runFlow`'s check.
       if (value === undefined) throw new EnvironmentStepError(`the secret ${step.name} was not given to this run`)
       try {
@@ -672,8 +671,16 @@ async function executeStep(
 /** The first `inputText: { secret }` step naming a secret `secrets` does not hold, or `null`. A caller checks it before
  *  choosing or preparing a device, so a run that cannot type one costs no boot; the engine checks it again. */
 export function missingSecret(flow: Flow, secrets: Readonly<Record<string, string>> | undefined): { index: number; name: string } | null {
-  const index = flow.steps.findIndex((s) => s.type === 'inputSecret' && !(secrets && Object.hasOwn(secrets, s.name)))
+  const index = flow.steps.findIndex((s) => s.type === 'inputSecret' && secretValue(secrets, s.name) === undefined)
   return index < 0 ? null : { index, name: (flow.steps[index] as Extract<Step, { type: 'inputSecret' }>).name }
+}
+
+/** A secret's value, or `undefined` when it was not given. Own properties only: a name like `constructor` would
+ *  otherwise read Object's. And only a non-empty string: a JS caller can pass `{ PASSWORD: process.env.PASSWORD }`
+ *  with the variable unset, and typing nothing would fail later as the app's fault — the CLI's rule for its own map. */
+function secretValue(secrets: Readonly<Record<string, string>> | undefined, name: string): string | undefined {
+  const value: unknown = secrets && Object.hasOwn(secrets, name) ? secrets[name] : undefined
+  return typeof value === 'string' && value !== '' ? value : undefined
 }
 
 export function missingSecretMessage(name: string): string {

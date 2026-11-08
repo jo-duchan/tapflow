@@ -1210,6 +1210,15 @@ describe('points and secrets', () => {
     expect(result.failedBeforeRun).toBe(true)
   })
 
+  it.each([['undefined', undefined], ['empty', '']])('refuses a secret given as %s before the first step', async (_, value) => {
+    // A JS caller passing `process.env.PASSWORD` with the variable unset.
+    const driver = fakeDriver([[]])
+    const result = await runFlow(flowOf('steps:\n  - tapOn: [0.5, 0.5]\n  - inputText: { secret: PASSWORD }\n'), driver,
+      { ...OPTS, secrets: { PASSWORD: value as unknown as string } })
+    expect(driver.calls).toEqual([])
+    expect(result.failedBeforeRun).toBe(true)
+  })
+
   it('keeps what the relay said about the session when typing a secret failed', async () => {
     const driver = fakeDriver([[]])
     vi.mocked(driver.inputText).mockRejectedValueOnce(new SessionEndedError('session s1 ended: the device was shut down', 'unknown'))
