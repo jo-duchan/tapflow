@@ -38,7 +38,7 @@ const RUN_RESET_PASTEBOARD_TIMEOUT_MS = 10_000
 // actually took is per device and per app, and `network:state.available` carries that — the split the
 // protocol documents. Added last, after the handler and the boot-time arming, because the string on
 // its own is what puts a control on screen.
-const AGENT_CAPABILITIES: AgentCapability[] = ['clipboard', 'full-reset', 'network-control', 'build-download', 'launch-options', 'launch-env', 'touch-cancel']
+const AGENT_CAPABILITIES: AgentCapability[] = ['clipboard', 'full-reset', 'network-control', 'build-download', 'launch-options', 'launch-env', 'touch-cancel', 'field-value', 'keyboard-reset']
 
 // Human prose for each reason. Not in `@tapflowio/protocol`: that package's main entry must stay
 // runtime-free so it erases under `import type` and never reaches the dashboard bundle — a lookup
@@ -348,6 +348,10 @@ export class IOSAgent implements DeviceAgent, NetworkControlCapability, Posturab
   // queries by bundleId; kept outside DeviceState so it survives a relay reconnect
   // (which clears deviceStates) while the app keeps running in the simulator.
   private lastBundleIds = new Map<string, string>()
+  /** Each device's keyboard sync from its last boot, so a reset waits for the keyboards it reads (#1134). */
+  private keyboardSyncs = new Map<string, Promise<void>>()
+  /** Sessions whose keyboard reset arrived before their device was up; the boot does it once the sync is done. */
+  private keyboardResetsPending = new Set<string>()
   // **A multi-panel device (iPhone Duo) is known per device id, from the connect, not from a boot.** A
   // reconnect re-seeds sessions with no `device:boot`, and `ensureTouchHelper` then builds the channel with
   // nothing else to go on — so the answer must already be here, or an agent restart would hand the Duo an
@@ -1063,7 +1067,7 @@ export class IOSAgent implements DeviceAgent, NetworkControlCapability, Posturab
   // `requestId` is a parameter, never a field on `state`: `bootSeq` exists because two boots overlap,
   // and a correlator hoisted onto shared state would answer the first request with the second's id.
   // Optional because the relay's idle timer boots nothing — but every *browser* boot carries one.
-  private async handleDeviceBoot(sessionId: string, deviceId: string, fullErase = false, acceptH264 = false, tier?: { secureContext: boolean; external: boolean }, requestId?: string, automation = false, serviceTier?: ServiceTier, runReset?: RunResetRequest): Promise<void> {
+  private async handleDeviceBoot(sessionId: string, deviceId: string, fullErase = false, acceptH264 = false, tier?: { secureContext: boolean; external: boolean }, requestId?: string, warmTree = false, serviceTier?: ServiceTier, runReset?: RunResetRequest): Promise<void> {
     const state = this.deviceStates.get(sessionId)
     // Split, because the two halves are not the same kind of nothing. No open control channel means the
     // answer itself has nowhere to go, so this is the one abandonment that stays silent — and the caller
@@ -1297,15 +1301,18 @@ export class IOSAgent implements DeviceAgent, NetworkControlCapability, Posturab
       // a boot that armed nothing still has to say so rather than leaving the control blank.
       void this.reportNetworkState(sessionId)
       if (this.multiPanelDevices.has(deviceId)) void this.sendPostures(state)
-      // An automation client's first selector step would otherwise spend the runner's cold start inside its timeout.
-      if (automation) this.uiTreeReader.warm(deviceId)
+      // An automation client's first selector step would otherwise spend the runner's cold start inside its timeout, and
+      // a person Flow Capture records would have their first field read only after it (~12 s measured, #1135).
+      if (warmTree) this.uiTreeReader.warm(deviceId)
 
       // Sync AppleKeyboards after ready — fire-and-forget so streaming isn't delayed.
       // hw=Automatic lets the hardware layout follow the active input source on LANG1/CapsLock.
       // By the time the user navigates to a text field the sync has already completed.
-      this.simctl.syncKeyboardsFromLanguages(deviceId).catch((e) => {
+      const sync = this.simctl.syncKeyboardsFromLanguages(deviceId).catch((e) => {
         logger.error('syncKeyboardsFromLanguages failed:', e)
       })
+      this.keyboardSyncs.set(deviceId, sync)
+      if (this.keyboardResetsPending.delete(sessionId)) void this.resetKeyboard(deviceId)
 
     } catch (e) {
       if (seq !== state.bootSeq) { this.abandonBoot(state, seq, sessionId, requestId); return }
@@ -1428,6 +1435,7 @@ export class IOSAgent implements DeviceAgent, NetworkControlCapability, Posturab
     state.streamWs?.close()
     state.streamWs = null
     this.lastBundleIds.delete(deviceId)
+    this.keyboardSyncs.delete(deviceId)
     // Each device has its own tree runner; stop this one's, never another device's.
     this.uiTreeReader.stopIfDevice(deviceId)
 
@@ -2026,9 +2034,9 @@ export class IOSAgent implements DeviceAgent, NetworkControlCapability, Posturab
     switch (msg.type) {
       case 'device:boot': {
         // `external` and `automation` are added by the relay, never by the browser (see `DeviceBoot`).
-        const { deviceId, resetMode, acceptH264, secureContext, external, automation, serviceTier, runReset } = msg.payload as { deviceId: string; resetMode?: string; acceptH264?: boolean; secureContext?: boolean; external?: boolean; automation?: boolean; serviceTier?: ServiceTier; runReset?: RunResetRequest }
+        const { deviceId, resetMode, acceptH264, secureContext, external, automation, recorded, serviceTier, runReset } = msg.payload as { deviceId: string; resetMode?: string; acceptH264?: boolean; secureContext?: boolean; external?: boolean; automation?: boolean; recorded?: boolean; serviceTier?: ServiceTier; runReset?: RunResetRequest }
         const sessionId = msg.sessionId
-        this.handleDeviceBoot(sessionId, deviceId, resetMode === 'full-erase', acceptH264 === true, { secureContext: !!secureContext, external: !!external }, msg.requestId, automation === true, serviceTier, runReset)
+        this.handleDeviceBoot(sessionId, deviceId, resetMode === 'full-erase', acceptH264 === true, { secureContext: !!secureContext, external: !!external }, msg.requestId, automation === true || recorded === true, serviceTier, runReset)
           .catch((e) => logger.error('handleDeviceBoot failed:', e))
         break
       }
@@ -2059,7 +2067,12 @@ export class IOSAgent implements DeviceAgent, NetworkControlCapability, Posturab
           break
         }
         this.installBuild(installState.deviceId, filePath, bundleId, { buildTicket, buildName, buildBytes })
-          .then(() => respond({ type: 'app:install-done' }))
+          .then(() => {
+            // A person may open the app from its home-screen icon rather than with Launch (measured, flow-runner
+            // AGENTS.md): without this, every tree and field read on it would answer that no app was launched.
+            if (bundleId) this.lastBundleIds.set(installState.deviceId, bundleId)
+            respond({ type: 'app:install-done' })
+          })
           .catch((e: unknown) => {
             const message = e instanceof Error ? e.message : String(e)
             respond({ type: 'app:install-error', message })
@@ -2688,6 +2701,24 @@ export class IOSAgent implements DeviceAgent, NetworkControlCapability, Posturab
           })
         break
       }
+      case 'ui:field:request': {
+        const { requestId, sessionId } = msg
+        if (!sessionId || !requestId) break
+        const state = this.deviceStates.get(sessionId)
+        if (!state) { this.sendMsg({ type: 'ui:field:response', sessionId, requestId, field: null, reason: 'failed' }); break }
+        // The answer is the field's whole contents, typed or filled in: sent to the relay and nowhere else, never logged.
+        this.uiTreeReader.readField(state.deviceId, this.lastBundleIds.get(state.deviceId) ?? '')
+          .then((read) => this.sendMsg({ type: 'ui:field:response', sessionId, requestId, ...read }))
+          .catch(() => this.sendMsg({ type: 'ui:field:response', sessionId, requestId, field: null, reason: 'failed' }))
+        break
+      }
+      case 'device:keyboard-reset': {
+        if (!msg.sessionId) break
+        const state = this.deviceStates.get(msg.sessionId)
+        if (!state?.booted) { this.keyboardResetsPending.add(msg.sessionId); break }
+        void this.resetKeyboard(state.deviceId)
+        break
+      }
       case 'ui:tree:request': {
         const raw = msg as unknown as { requestId: string; sessionId?: string }
         const { requestId } = raw
@@ -2708,6 +2739,13 @@ export class IOSAgent implements DeviceAgent, NetworkControlCapability, Posturab
         break
       }
     }
+  }
+
+  /** Put the device's keyboard back to its first language, after the boot's keyboard sync has written the list it
+   *  reads from. A running app keeps its language until it is launched again (measured). */
+  private async resetKeyboard(deviceId: string): Promise<void> {
+    await this.keyboardSyncs.get(deviceId)
+    await this.simctl.resetKeyboardLanguage(deviceId).catch((e) => logger.error('resetKeyboardLanguage failed:', e))
   }
 
   // The XCUITest backend queries a specific app by bundleId (the last one launched

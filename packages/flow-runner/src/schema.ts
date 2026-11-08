@@ -35,9 +35,12 @@ export type Step =
   /** `tapOn: [x, y]` — a point, for a screen whose tree names nothing there. The last resort: it waits for nothing and
    *  lands wherever the layout puts that point. Its own type so every reader of `selector` stays one. */
   | { type: 'tapPoint'; at: [number, number] }
-  | { type: 'inputText'; text: string }
+  /** `replace`: what the field holds is replaced, not added to — the field is selected first. What Flow Capture writes
+   *  when it read the field's value (#1135); iOS only, since Android has no select-all (refused before the run). */
+  | { type: 'inputText'; text: string; replace?: true }
   /** `inputText: { secret: NAME }` — the value is given to the run, never written in the flow, and never logged. */
-  | { type: 'inputSecret'; name: string }
+  /** `replace`, as on `inputText`: a secret Flow Capture read as a field's whole value replaces what it holds. */
+  | { type: 'inputSecret'; name: string; replace?: true }
   | { type: 'pressKey'; code: string; modifiers?: KeyModifier[] }
   | { type: 'swipe'; from: [number, number]; to: [number, number]; durationMs: number }
   /** With `until`, scrolls until that element is on screen rather than once — what a swipe was for, not how far it went. */
@@ -188,16 +191,25 @@ function parseStep(raw: unknown, ctx: string): Step {
     case 'assertVisible': return { type: 'assertVisible', selector: parseSelector(value, ctx) }
     case 'assertNotVisible': return { type: 'assertNotVisible', selector: parseSelector(value, ctx) }
     case 'inputText': {
-      if (isRecord(value)) {
-        const { secret, ...rest } = value
+      if (isRecord(value) && !('secret' in value)) {
+        const { text, replace, ...rest } = value
         const unknownKeys = Object.keys(rest)
-        if (unknownKeys.length > 0) throw new ValidationError(`${ctx}: unknown inputText keys: ${unknownKeys.join(', ')} (expected secret)`)
+        if (unknownKeys.length > 0) throw new ValidationError(`${ctx}: unknown inputText keys: ${unknownKeys.join(', ')} (expected text and replace, or secret)`)
+        if (typeof text !== 'string') throw new ValidationError(`${ctx}: "inputText.text" must be a string`)
+        if (replace !== undefined && typeof replace !== 'boolean') throw new ValidationError(`${ctx}: "inputText.replace" must be true or false`)
+        return replace === true ? { type: 'inputText', text, replace: true } : { type: 'inputText', text }
+      }
+      if (isRecord(value)) {
+        const { secret, replace, ...rest } = value
+        const unknownKeys = Object.keys(rest)
+        if (unknownKeys.length > 0) throw new ValidationError(`${ctx}: unknown inputText keys: ${unknownKeys.join(', ')} (expected secret and replace)`)
         if (typeof secret !== 'string' || !SECRET_NAME.test(secret)) {
           throw new ValidationError(`${ctx}: "secret" must be a name like PASSWORD (letters, digits and _, not starting with a digit)`)
         }
-        return { type: 'inputSecret', name: secret }
+        if (replace !== undefined && typeof replace !== 'boolean') throw new ValidationError(`${ctx}: "inputText.replace" must be true or false`)
+        return replace === true ? { type: 'inputSecret', name: secret, replace: true } : { type: 'inputSecret', name: secret }
       }
-      if (typeof value !== 'string') throw new ValidationError(`${ctx}: "inputText" must be a string or { secret: NAME }`)
+      if (typeof value !== 'string') throw new ValidationError(`${ctx}: "inputText" must be a string, { text, replace } or { secret: NAME }`)
       return { type: 'inputText', text: value }
     }
     case 'pressKey': {

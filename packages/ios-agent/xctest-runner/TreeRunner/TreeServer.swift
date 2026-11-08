@@ -10,6 +10,7 @@ import XCTest
 //   GET /health                     → the token the host passed, or "ok" without one (readiness probe)
 //   GET /tree?bundleId=<id>         → `TAPFLOW_INTERFACE_ORIENTATION <UIInterfaceOrientation or 0>`, then the app's
 //                                     XCUIApplication.debugDescription (text)
+//   GET /field?bundleId=<id>        → the keyboard-focused text field as JSON, or `{"reason": …}` (Flow Capture, #1135)
 final class TreeServer {
     private let listener: NWListener
     private let queue = DispatchQueue(label: "dev.tapflow.treeserver")
@@ -107,7 +108,48 @@ final class TreeServer {
             let orientation = up && tree.contains("Element subtree:") && before == Self.interfaceOrientation(app) ? before : 0
             return ("200 OK", "TAPFLOW_INTERFACE_ORIENTATION \(orientation)\n" + tree)
         }
+        if path.hasPrefix("/field") {
+            guard let bundleId = query(path, "bundleId"), !bundleId.isEmpty else {
+                return ("400 Bad Request", "missing bundleId")
+            }
+            return ("200 OK", Self.field(XCUIApplication(bundleIdentifier: bundleId)))
+        }
         return ("404 Not Found", "unknown route")
+    }
+
+    private static let textInputTypes: [XCUIElement.ElementType] = [.textField, .secureTextField, .searchField, .textView]
+
+    /// The text field that has keyboard focus, as JSON — what Flow Capture records as the text a person really typed
+    /// (#1135). Not the tree's `value:`, which debugDescription prints unquoted and cuts at 18 characters (measured).
+    /// A secure field's value never leaves this process: it reads `•••` anyway, and its length is a secret too.
+    private static func field(_ app: XCUIApplication) -> String {
+        guard app.state == .runningForeground else { return json(["reason": "no-app"]) }
+        let inputs = app.descendants(matching: .any)
+            .matching(NSPredicate(format: "elementType IN %@", textInputTypes.map { $0.rawValue }))
+            .matching(NSPredicate(format: "hasKeyboardFocus == YES"))
+        let found = inputs.allElementsBoundByIndex
+        // Exactly one, or nothing is claimed: a second focused input means the read cannot say which one was typed in.
+        guard found.count == 1, let snapshot = try? found[0].snapshot() else {
+            return json(["reason": found.isEmpty ? "no-focus" : "ambiguous"])
+        }
+        let frame = snapshot.frame
+        var out: [String: Any] = [
+            "identifier": snapshot.identifier,
+            "placeholder": snapshot.placeholderValue ?? "",
+            "frame": ["x": frame.origin.x, "y": frame.origin.y, "width": frame.size.width, "height": frame.size.height],
+            "type": snapshot.elementType == .secureTextField ? "secure" : "text",
+        ]
+        if snapshot.elementType == .secureTextField { out["reason"] = "secure"; return json(out) }
+        let value = (snapshot.value as? String) ?? ""
+        // UIKit puts the placeholder in an empty field's value (measured; SwiftUI does not). A field whose typed text
+        // equals its placeholder reads as empty here — the one case this cannot tell apart.
+        out["value"] = !value.isEmpty && value == snapshot.placeholderValue ? "" : value
+        return json(out)
+    }
+
+    private static func json(_ object: [String: Any]) -> String {
+        guard let data = try? JSONSerialization.data(withJSONObject: object), let text = String(data: data, encoding: .utf8) else { return "{}" }
+        return text
     }
 
     /// UIInterfaceOrientation (1 portrait, 2 upside down, 3 landscape right, 4 landscape left), or 0 when the

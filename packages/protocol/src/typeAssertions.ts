@@ -20,7 +20,7 @@ import type {
   ScreenshotError, ScreenshotRequest, SessionAgentAway, SessionChrome, SessionDeviceInfo, SessionEnd,
   SessionJoined, SessionLeave, SessionRebound, SessionStart, SessionTerminated, StreamRegister,
   AgentControlOutbound, StreamToRelay,
-  StreamRegistered, StreamRequestIdr, UiTreeError, UiTreeRequest, UiTreeResponse,
+  StreamRegistered, StreamRequestIdr, UiTreeError, UiTreeRequest, UiTreeResponse, UiFieldRequest, UiFieldResponse, DeviceKeyboardReset,
   NetworkRequestState,
   InputPosture, DevicePostures,
   WatchStart, WatchStop, WatchStarted, WatchRefused, WatchHolderLeft, WatchEnded, WatchAction, SessionActivity,
@@ -214,6 +214,8 @@ export const _StreamRegistered: StreamRegistered['type'] = 'stream:registered'
 export const _StreamRequestIdr: StreamRequestIdr['type'] = 'stream:request-idr'
 export const _NetworkRequestState: NetworkRequestState['type'] = 'network:request-state'
 export const _UiTreeRequest: UiTreeRequest['type'] = 'ui:tree:request'
+export const _UiFieldRequest: UiFieldRequest['type'] = 'ui:field:request'
+export const _DeviceKeyboardReset: DeviceKeyboardReset['type'] = 'device:keyboard-reset'
 export const _AgentRegister: AgentRegister['type'] = 'agent:register'
 export const _AgentDevices: AgentDevices['type'] = 'agent:devices'
 export const _AgentResourceReport: AgentResourceReport['type'] = 'agent:resources'
@@ -222,6 +224,7 @@ export const _ScreenshotError: ScreenshotError['type'] = 'screenshot:error'
 export const _StreamRegister: StreamRegister['type'] = 'stream:register'
 export const _UiTreeResponse: UiTreeResponse['type'] = 'ui:tree:response'
 export const _UiTreeError: UiTreeError['type'] = 'ui:tree:error'
+export const _UiFieldResponse: UiFieldResponse['type'] = 'ui:field:response'
 export const _WatchStart: WatchStart['type'] = 'watch:start'
 export const _WatchStop: WatchStop['type'] = 'watch:stop'
 export const _WatchStarted: WatchStarted['type'] = 'watch:started'

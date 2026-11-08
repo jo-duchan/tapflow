@@ -1,4 +1,4 @@
-import type { BrowserToRelay } from '../index.js'
+import type { BrowserToRelay, FieldReadReason, FocusedField } from '../index.js'
 
 /**
  * Flow Capture's record (#1125), as the relay keeps it and returns it from `/api/v1/sessions/:id/capture/snapshot`.
@@ -23,6 +23,14 @@ export type CaptureEntry =
   /** The device's chrome changed (a turn, a fold), images emptied. `unknown`: agent chrome is not validated by the
    *  relay, so a reader narrows it. It lags a turn by 0.6–3.6 s, so it describes the steps, it does not place them. */
   | { at: number; kind: 'chrome'; chrome: unknown }
+  /**
+   * The keyboard-focused text field, read by the relay while the person was typing (#1135): what the keys really typed,
+   * which the keys alone cannot say (the device's IME, its language, Caps Lock). `focus` is read at a run's first
+   * character and says which field it went into; `value` is read once the person has paused and says what it holds.
+   * `requestedAt` is when the relay asked and `at` when the answer came, so a reader can tell a read that saw the
+   * field after the last key and before the next input from one that raced either.
+   */
+  | { at: number; kind: 'field'; phase: 'focus' | 'value'; requestedAt: number; field: FocusedField | null; reason?: FieldReadReason }
 
 export interface CaptureSnapshot {
   id: string

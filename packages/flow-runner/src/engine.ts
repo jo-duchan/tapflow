@@ -14,7 +14,7 @@ const SESSION_FAILURES = [
   SessionEndedError, SessionLeftError, SessionUnavailableError, RelayClosedError, RelayUnavailableError, RequestTimeoutError,
 ]
 import { buttonAvailability } from '@tapflowio/protocol/buttons'
-import { unavailableButton, unavailableButtonMessage } from './platformCheck.js'
+import { SELECT_ALL, unavailableButton, unavailableButtonMessage, unavailableReplace, unavailableReplaceMessage } from './platformCheck.js'
 
 /** Two fingers, each `[x, y]` normalized 0-1. */
 export type PinchFingers = [[number, number], [number, number]]
@@ -205,8 +205,8 @@ function describeStep(step: Step): string {
     case 'launchApp': return describeLaunch(step.options, undefined)
     case 'tapOn': return `tapOn(${describeSelector(step.selector)})`
     case 'tapPoint': return `tapOn([${step.at.join(',')}])`
-    case 'inputText': return `inputText("${step.text}")`
-    case 'inputSecret': return `inputText(secret ${step.name})`
+    case 'inputText': return `inputText("${step.text}"${step.replace ? ', replace' : ''})`
+    case 'inputSecret': return `inputText(secret ${step.name}${step.replace ? ', replace' : ''})`
     case 'pressKey': return `pressKey(${withModifiers(step.modifiers, step.code)})`
     case 'swipe': return `swipe(${step.from} → ${step.to})`
     case 'scroll': return step.until ? `scroll(${step.direction} until ${describeSelector(step.until)})` : `scroll(${step.direction})`
@@ -641,12 +641,17 @@ async function executeStep(
       return driver.tap(round4(el.frame.x + el.frame.width / 2), round4(el.frame.y + el.frame.height / 2))
     }
     case 'tapPoint': return driver.tap(step.at[0], step.at[1])
-    case 'inputText': return driver.inputText(step.text)
+    case 'inputText':
+      // Selected first, so the text takes the field's place: pasting over a selection replaces it, and a Backspace is
+      // not needed — one in an empty chip or code field deletes a chip or moves focus back (#1135).
+      if (step.replace) await driver.pressKey(SELECT_ALL.code, [...SELECT_ALL.modifiers])
+      return driver.inputText(step.text)
     case 'inputSecret': {
       const value = secretValue(secrets, step.name)
       // Checked before the run; this is for a caller that ran a flow without going through `runFlow`'s check.
       if (value === undefined) throw new EnvironmentStepError(`the secret ${step.name} was not given to this run`)
       try {
+        if (step.replace) await driver.pressKey(SELECT_ALL.code, [...SELECT_ALL.modifiers])
         return await driver.inputText(value)
       } catch (e) {
         // A driver's failure may quote what it typed (adb's did, in argv): said again here with the name only, and
@@ -732,6 +737,8 @@ export function refusedFlow(flow: Flow, index: number, message: string, options:
 
 /** The refusal for a button this device lacks, or `null` to run. See `unavailableButton`. */
 async function refuseButtons(flow: Flow, driver: FlowDriver, platform: string, timeoutMs: number): Promise<FlowResult | null> {
+  const replaceAt = unavailableReplace(flow, platform)
+  if (replaceAt !== null) return refusedFlow(flow, replaceAt, unavailableReplaceMessage(platform), { beforeRun: true })
   let verdict = unavailableButton(flow, platform)
   if (verdict === 'needs-chrome') {
     if (!driver.chrome) return null

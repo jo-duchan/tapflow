@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto'
-import type { ClientKind } from '@tapflowio/protocol'
+import type { ClientKind, FieldReadReason, FocusedField } from '@tapflowio/protocol'
 import type { CapturedMessage, CaptureEntry, CaptureSnapshot } from '@tapflowio/protocol/capture'
 
 /**
@@ -34,6 +34,17 @@ export interface Holder {
   user: string | null
 }
 
+/** An agent's answer about the keyboard-focused text field (`ui:field:response`). */
+export interface FieldRead { field: FocusedField | null; reason?: FieldReadReason }
+
+/** How long typing has to pause before the relay reads the field. Short, because a read is only kept when it
+ *  answered before the next input; measured, reading every 0.5 s did not slow typing (a read takes 40–90 ms). */
+export const FIELD_IDLE_MS = 600
+/** How long a snapshot waits for a read still in flight, so the last field typed before Capture flow is not lost. */
+export const SNAPSHOT_READ_WAIT_MS = 1_000
+/** How long the relay waits for an agent's field read before it counts as not read. */
+export const FIELD_READ_TIMEOUT_MS = 5_000
+
 export interface CaptureStoreOptions {
   /** The person's own setting (`users.flow_capture`), read from memory on every input. */
   isEnabled: (user: string) => boolean
@@ -48,6 +59,26 @@ export interface CaptureStoreOptions {
    *  Across every capture on this relay: N held sessions × the per-session cap would otherwise be the bound. */
   maxTotalBytes?: number
   pauseTtlMs?: number
+  /** Ask the session's agent for its focused text field (#1135), or `null` when it cannot answer. */
+  readField?: (sessionId: string) => Promise<FieldRead> | null
+}
+
+/** Keys that move focus or submit, and chords: a run of typing ends at them, as flow-runner's grouping does, so the
+ *  next key asks again which field it is in — Tab is how a form is filled in. */
+const ENDS_TYPING = new Set(['Tab', 'Enter', 'NumpadEnter', 'Escape'])
+const CHORD = 0x01 | 0x04 | 0x08
+
+/** An input that types into the focused field: a character, an edit key, or `input:type`. */
+function typesIntoField(msg: CapturedMessage): boolean {
+  if (msg.type === 'input:type') return true
+  if (msg.type !== 'input:key') return false
+  return !ENDS_TYPING.has(msg.payload.code) && ((msg.payload.modifiers ?? 0) & CHORD) === 0
+}
+
+/** A run of typing the relay is reading the field for: what it typed into, and the pause timer after its last input. */
+interface Typing {
+  holder: Holder
+  timer: ReturnType<typeof setTimeout> | null
 }
 
 /** Messages that open a gesture; a head cut may stop just before one, never inside the gesture it opens. */
@@ -105,6 +136,8 @@ export class CaptureStore {
   private readonly captures = new Map<string, Capture>()
   /** A replay or verification is running in the owner's dialog: what reaches the device now is not the person. */
   private readonly paused = new Map<string, { user: string; until: number }>()
+  private readonly typing = new Map<string, Typing>()
+  private readonly reads = new Map<string, Set<Promise<void>>>()
   private totalBytes = 0
   private readonly now: () => number
   private readonly maxEntries: number
@@ -130,8 +163,51 @@ export class CaptureStore {
       // A copy only reads the device; a cut changes it.
       if (msg.type === 'clipboard:read' && msg.payload?.press !== 'cut') return
       const capture = this.captureFor(sessionId, holder)
-      if (capture) this.append(capture, { at: this.now(), kind: 'input', msg })
+      if (!capture) return
+      // One time for the input and the read it starts, so a one-key run's focus read is never a millisecond past it.
+      const at = this.now()
+      this.append(capture, { at, kind: 'input', msg })
+      this.noteTyping(sessionId, holder, msg, at)
     } catch { /* see above */ }
+  }
+
+  /**
+   * Read the focused field around a run of typing (#1135): which field at its first key, and what it holds once the
+   * person pauses. A key types by the device's IME and language, which the key code cannot say — the field can. Any
+   * key extends the run, Backspace and arrows too, so a pause read after an edit sees the edit. Anything else ends it.
+   * Reads never hold an input back: the reader decides afterwards which ones saw the field undisturbed.
+   */
+  private noteTyping(sessionId: string, holder: Holder, msg: CapturedMessage, at: number): void {
+    if (!this.opts.readField) return
+    const typing = this.typing.get(sessionId)
+    if (!typesIntoField(msg)) {
+      if (typing?.timer) clearTimeout(typing.timer)
+      this.typing.delete(sessionId)
+      return
+    }
+    if (!typing) this.read(sessionId, holder, 'focus', at)
+    if (typing?.timer) clearTimeout(typing.timer)
+    const next: Typing = { holder, timer: null }
+    next.timer = setTimeout(() => {
+      next.timer = null
+      this.read(sessionId, next.holder, 'value')
+    }, FIELD_IDLE_MS)
+    this.typing.set(sessionId, next)
+  }
+
+  private read(sessionId: string, holder: Holder, phase: 'focus' | 'value', requestedAt = this.now()): void {
+    const answer = this.opts.readField?.(sessionId)
+    if (!answer) return
+    const done = answer.then((read) => {
+      const capture = this.captures.get(sessionId)
+      // The person may have stopped being recorded while the agent answered: a pause, a seal, a setting turned off.
+      if (!capture || !this.recording(sessionId, holder, capture)) return
+      this.append(capture, { at: this.now(), kind: 'field', phase, requestedAt, field: read.field, ...(read.reason ? { reason: read.reason } : {}) })
+    }).catch(() => { /* a read that failed is a read that is not there */ })
+    let pending = this.reads.get(sessionId)
+    if (!pending) this.reads.set(sessionId, pending = new Set())
+    pending.add(done)
+    void done.finally(() => pending.delete(done))
   }
 
   recordAck(sessionId: string, holder: Holder, requestId: string, ok: boolean): void {
@@ -161,6 +237,9 @@ export class CaptureStore {
 
   /** The device is no longer the one the steps were taken on: shut down, booted cold, or the session gone. */
   seal(sessionId: string): void {
+    const typing = this.typing.get(sessionId)
+    if (typing?.timer) clearTimeout(typing.timer)
+    this.typing.delete(sessionId)
     const capture = this.captures.get(sessionId)
     if (capture) this.totalBytes -= capture.bytes
     this.captures.delete(sessionId)
@@ -170,6 +249,26 @@ export class CaptureStore {
   /** The person turned capturing off: everything recorded for them goes now. */
   sealUser(user: string): void {
     for (const [sessionId, capture] of this.captures) if (capture.ownerUser === user) this.seal(sessionId)
+  }
+
+  /**
+   * Let the field reads finish before a snapshot (#1135): a field still being typed in is read now, and a read in
+   * flight is waited for, up to `SNAPSHOT_READ_WAIT_MS`. The person may open the dialog right after their last key,
+   * and that field's value would otherwise never be read.
+   */
+  async settleReads(sessionId: string, user: string): Promise<void> {
+    if (!this.owned(sessionId, user)) return
+    const typing = this.typing.get(sessionId)
+    if (typing?.timer) {
+      clearTimeout(typing.timer)
+      typing.timer = null
+      this.read(sessionId, typing.holder, 'value')
+    }
+    const pending = [...(this.reads.get(sessionId) ?? [])]
+    if (pending.length === 0) return
+    let timer: ReturnType<typeof setTimeout> | undefined
+    await Promise.race([Promise.all(pending), new Promise((r) => { timer = setTimeout(r, SNAPSHOT_READ_WAIT_MS) })])
+    clearTimeout(timer)
   }
 
   /** Freeze what is recorded so far for the dialog, which reads only this; recording goes on beside it. */

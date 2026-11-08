@@ -1061,6 +1061,34 @@ describe('runFlow — hardware buttons, long press and pinch', () => {
 describe('runFlow — a button the device lacks', () => {
   const backFlow = 'steps:\n  - tapOn: ok\n  - pressButton: back\n  - assertVisible: Home\n'
 
+  describe('inputText { replace } (#1135)', () => {
+    const replaceFlow = 'steps:\n  - inputText: { text: "안녕", replace: true }\n'
+
+    it('selects what the field holds, then types over it', async () => {
+      const driver = fakeDriver([[]])
+      expect((await runFlow(flowOf(replaceFlow), driver, { ...OPTS, platform: 'ios' })).status).toBe('passed')
+      expect(driver.calls).toEqual([['pressKey', 'KeyA'], ['inputText', '안녕']])
+      expect(driver.pressKey).toHaveBeenCalledWith('KeyA', ['meta'])
+    })
+
+    it('selects before a secret that replaces, so a field read whole is not typed after what it holds', async () => {
+      const driver = fakeDriver([[]])
+      const flow = flowOf('steps:\n  - inputText: { secret: PASSWORD, replace: true }\n')
+      expect((await runFlow(flow, driver, { ...OPTS, platform: 'ios', secrets: { PASSWORD: 'pw' } })).status).toBe('passed')
+      expect(driver.calls).toEqual([['pressKey', 'KeyA'], ['inputText', 'pw']])
+      const android = await runFlow(flow, fakeDriver([[]]), { ...OPTS, platform: 'android', secrets: { PASSWORD: 'pw' } })
+      expect(android.failureMessage).toMatch(/Android cannot select what a field holds/)
+    })
+
+    it('refuses it on Android, which cannot select a field, before anything reaches the device', async () => {
+      const driver = fakeDriver([[]])
+      const result = await runFlow(flowOf(replaceFlow), driver, { ...OPTS, platform: 'android' })
+      expect(result).toMatchObject({ status: 'failed', failureKind: 'environment', failedBeforeRun: true })
+      expect(result.failureMessage).toMatch(/Android cannot select what a field holds/)
+      expect(driver.calls).toEqual([])
+    })
+  })
+
   it('refuses a platform\'s missing button before anything reaches the device', async () => {
     const driver = fakeDriver([[el({ label: 'ok' })]])
     const result = await runFlow(flowOf(backFlow), driver, { ...OPTS, platform: 'ios' })

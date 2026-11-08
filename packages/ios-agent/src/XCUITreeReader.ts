@@ -4,6 +4,7 @@ import { createHash, randomUUID } from 'crypto'
 import { readdirSync, readFileSync, writeFileSync } from 'fs'
 import { join, relative } from 'path'
 import type { UIElement } from '@tapflowio/agent-core'
+import type { FieldReadReason, FocusedField } from '@tapflowio/protocol'
 import { createLogger, PlatformError } from '@tapflowio/agent-core'
 import { parseTreeText, splitInterfaceTurn } from './xcuiTree.js'
 
@@ -362,6 +363,26 @@ export class XCUITreeReader {
     return interfaceTurn === undefined ? { elements } : { elements, interfaceTurn }
   }
 
+  /**
+   * The keyboard-focused text field (#1135), from the runner's `/field`: the value as the app holds it, unquoted and
+   * whole, where the tree's `value:` is cut at 18 characters (measured). A secure field comes back without one. The
+   * body is a field's contents, typed or filled in: it is parsed and returned, never logged.
+   */
+  async readField(udid: string, bundleId: string): Promise<{ field: FocusedField | null; reason?: FieldReadReason }> {
+    if (!bundleId) return { field: null, reason: 'no-app' }
+    const handle = await this.ensureRunner(udid)
+    let body: unknown
+    try {
+      const r = await fetch(`http://localhost:${handle.port}/field?bundleId=${encodeURIComponent(bundleId)}`, { signal: AbortSignal.timeout(5_000) })
+      if (!r.ok) return { field: null, reason: 'failed' }
+      body = await r.json()
+    } catch (e) {
+      if (refused(e)) this.dropRunner(udid, handle)
+      return { field: null, reason: 'failed' }
+    }
+    return toFocusedField(body)
+  }
+
   // Drop one device's runner, if `handle` is still the one it holds. Every fault path goes through here rather than
   // stop(): one device's dead runner must not take the others down with it.
   private dropRunner(udid: string, handle: RunnerHandle): void {
@@ -410,4 +431,29 @@ export class XCUITreeReader {
     }, 3000)
     timer.unref?.()
   }
+}
+
+const READ_REASONS = new Set<string>(['no-app', 'no-focus', 'ambiguous', 'secure'])
+
+/** The runner's `/field` answer as protocol's `FocusedField`. Anything it does not recognise is a failed read, never a
+ *  field: a value is what a recording will export, so a shape this cannot vouch for must not become one. */
+export function toFocusedField(body: unknown): { field: FocusedField | null; reason?: FieldReadReason } {
+  if (typeof body !== 'object' || body === null) return { field: null, reason: 'failed' }
+  const b = body as Record<string, unknown>
+  const f = b['frame'] as Record<string, unknown> | undefined
+  const frameOk = !!f && ['x', 'y', 'width', 'height'].every((k) => typeof f[k] === 'number')
+  if (typeof b['identifier'] !== 'string' || !frameOk) {
+    const reason = typeof b['reason'] === 'string' && READ_REASONS.has(b['reason']) ? b['reason'] as FieldReadReason : 'failed'
+    return { field: null, reason }
+  }
+  const secure = b['type'] === 'secure'
+  const field: FocusedField = {
+    identifier: b['identifier'],
+    placeholder: typeof b['placeholder'] === 'string' ? b['placeholder'] : '',
+    frame: { x: f!['x'] as number, y: f!['y'] as number, width: f!['width'] as number, height: f!['height'] as number },
+    secure,
+  }
+  // A secure field's value is dropped here too, whatever the runner sent.
+  if (!secure && typeof b['value'] === 'string') field.value = b['value']
+  return secure ? { field, reason: 'secure' } : { field }
 }

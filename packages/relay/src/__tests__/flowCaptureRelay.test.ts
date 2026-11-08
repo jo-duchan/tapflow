@@ -104,6 +104,125 @@ describe('Flow Capture through the relay', () => {
     await server.stop()
   })
 
+  describe('the field typed into (#1135) and the keyboard language (#1134)', () => {
+    /** An agent that answers field reads and takes keyboard resets; the session under test becomes its device. */
+    async function capableAgent(): Promise<WebSocket> {
+      const ws = new WebSocket(`ws://localhost:${relayPort}`)
+      open.push(ws)
+      await waitForOpen(ws)
+      ws.send(JSON.stringify({
+        type: 'agent:register', platform: 'ios', agentName: `field-agent-${seq}`, capabilities: ['field-value', 'keyboard-reset'],
+        devices: [{ id: 'dev-2', name: 'iPhone 17', platform: 'ios', status: 'booted' }],
+      }))
+      sessionId = (await waitForType<AgentRegistered>(ws, 'agent:registered')).registeredSessions[0]!.sessionId
+      return ws
+    }
+    const field = { identifier: 'form.email', placeholder: 'Email', frame: { x: 0, y: 0, width: 1, height: 1 }, secure: false, value: '안녕' }
+
+    it('asks the session\'s agent which field a person typed into, and keeps only its own agent\'s answer', async () => {
+      const fieldAgent = await capableAgent()
+      const alice = await browser(1)
+      await join(alice)
+      alice.send(JSON.stringify({ type: 'input:key', sessionId, requestId: 'k1', payload: { code: 'KeyD', modifiers: 0 } }))
+      const ask = await waitForType<{ type: string; requestId: string }>(fieldAgent, 'ui:field:request')
+      // Another agent naming the same request must not write into a person's capture.
+      agent.send(JSON.stringify({ type: 'ui:field:response', sessionId, requestId: ask.requestId, field: { ...field, value: 'forged' } }))
+      fieldAgent.send(JSON.stringify({ type: 'ui:field:response', sessionId, requestId: ask.requestId, field }))
+      // Taking the snapshot reads the field still being typed in, and waits for the answer.
+      const taken = snapshot(1)
+      const last = await waitForType<{ type: string; requestId: string }>(fieldAgent, 'ui:field:request')
+      fieldAgent.send(JSON.stringify({ type: 'ui:field:response', sessionId, requestId: last.requestId, field }))
+      const reads = (await taken)!.entries.flatMap((e) => (e.kind === 'field' ? [e] : []))
+      expect(reads.map((r) => [r.phase, r.field?.value])).toEqual([['focus', '안녕'], ['value', '안녕']])
+    })
+
+    it('tells the agent to warm its tree runner when a recorded person boots, on an agent that reads fields only', async () => {
+      const fieldAgent = await capableAgent()
+      const alice = await browser(1)
+      await join(alice)
+      alice.send(JSON.stringify({ type: 'device:boot', sessionId, requestId: 'b1', payload: { deviceId: 'dev-2' } }))
+      const boot = await waitForType<{ type: string; payload: { recorded?: boolean } }>(fieldAgent, 'device:boot')
+      expect(boot.payload.recorded).toBe(true)
+    })
+
+    it('does not warm it for a person who turned capturing off', async () => {
+      getDb().prepare('UPDATE users SET flow_capture = 0 WHERE id = 1').run()
+      const fieldAgent = await capableAgent()
+      const alice = await browser(1)
+      await join(alice)
+      alice.send(JSON.stringify({ type: 'device:boot', sessionId, requestId: 'b1', payload: { deviceId: 'dev-2' } }))
+      const boot = await waitForType<{ type: string; payload: { recorded?: boolean } }>(fieldAgent, 'device:boot')
+      expect(boot.payload.recorded).toBe(false)
+    })
+
+    it('does not warm it on an agent that cannot read fields: the runner would cost memory for nothing', async () => {
+      const alice = await browser(1)
+      await join(alice)
+      alice.send(JSON.stringify({ type: 'device:boot', sessionId, requestId: 'b1', payload: { deviceId: 'dev-1' } }))
+      const boot = await waitForType<{ type: string; payload: { recorded?: boolean } }>(agent, 'device:boot')
+      expect(boot.payload.recorded).toBe(false)
+    })
+
+    it('asks nothing of an agent that cannot answer', async () => {
+      const alice = await browser(1)
+      await join(alice)
+      let asked = false
+      agent.on('message', (d) => { if (String(d).includes('ui:field:request')) asked = true })
+      alice.send(JSON.stringify({ type: 'input:key', sessionId, requestId: 'k1', payload: { code: 'KeyD', modifiers: 0 } }))
+      await new Promise((r) => setTimeout(r, 800))
+      expect(asked).toBe(false)
+    })
+
+    it('resets the keyboard with the boot of a different person, not when the same one comes back', async () => {
+      const fieldAgent = await capableAgent()
+      const seen: string[] = []
+      fieldAgent.on('message', (d) => { const m = JSON.parse(String(d)) as { type: string }; if (m.type === 'device:keyboard-reset' || m.type === 'device:boot') seen.push(m.type) })
+      const take = async (userId: number, tab: string) => {
+        const ws = await browser(userId, tab)
+        await join(ws)
+        ws.send(JSON.stringify({ type: 'device:boot', sessionId, requestId: `b-${tab}`, payload: { deviceId: 'dev-2' } }))
+        await waitForType(fieldAgent, 'device:boot')
+        ws.terminate()
+      }
+      await take(1, 'a')
+      await take(1, 'b')
+      expect(seen).toEqual(['device:boot', 'device:boot'])
+      // Owed from the join, sent ahead of the boot: an agent away at the join still hears it with the boot.
+      await take(2, 'c')
+      expect(seen.slice(2)).toEqual(['device:keyboard-reset', 'device:boot'])
+      await take(2, 'd')
+      expect(seen.slice(4)).toEqual(['device:boot'])
+    })
+
+    it('keeps no value of a secure field, whatever the agent sent', async () => {
+      const fieldAgent = await capableAgent()
+      const alice = await browser(1)
+      await join(alice)
+      alice.send(JSON.stringify({ type: 'input:key', sessionId, requestId: 'k1', payload: { code: 'KeyD', modifiers: 0 } }))
+      const ask = await waitForType<{ type: string; requestId: string }>(fieldAgent, 'ui:field:request')
+      fieldAgent.send(JSON.stringify({ type: 'ui:field:response', sessionId, requestId: ask.requestId, field: { ...field, secure: true, value: 'hunter2' }, reason: 'secure' }))
+      await new Promise((r) => setTimeout(r, 100))
+      const reads = (await snapshot(1))!.entries.flatMap((e) => (e.kind === 'field' ? [e] : []))
+      expect(reads[0]!.field).toMatchObject({ secure: true })
+      expect(reads[0]!.field).not.toHaveProperty('value')
+    })
+
+    it('reads no field and warms no runner on a Mac over its memory line', async () => {
+      const fieldAgent = await capableAgent()
+      const alice = await browser(1)
+      await join(alice)
+      let asked = 0
+      fieldAgent.on('message', (d) => { if (String(d).includes('ui:field:request')) asked++ })
+      fieldAgent.send(JSON.stringify({ type: 'agent:resources', resources: { cpuPercent: 0, memUsedMB: 99, memTotalMB: 100, slotsAvailable: 1, slotsTotal: 1, reportedAt: Date.now() } }))
+      await new Promise((r) => setTimeout(r, 100))
+      alice.send(JSON.stringify({ type: 'device:boot', sessionId, requestId: 'b1', payload: { deviceId: 'dev-2' } }))
+      expect((await waitForType<{ type: string; payload: { recorded?: boolean } }>(fieldAgent, 'device:boot')).payload.recorded).toBe(false)
+      alice.send(JSON.stringify({ type: 'input:key', sessionId, requestId: 'k1', payload: { code: 'KeyD', modifiers: 0 } }))
+      await new Promise((r) => setTimeout(r, 900))
+      expect(asked).toBe(0)
+    })
+  })
+
   it('records a dashboard holder\'s inputs and the agent\'s answers', async () => {
     const alice = await browser(1)
     await join(alice)

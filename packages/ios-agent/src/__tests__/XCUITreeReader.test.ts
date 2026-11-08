@@ -3,7 +3,7 @@ import { EventEmitter } from 'events'
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'fs'
 import { tmpdir } from 'os'
 import { join } from 'path'
-import { XCUITreeReader, computeRunnerStamp, type RunnerNative } from '../XCUITreeReader'
+import { XCUITreeReader, computeRunnerStamp, toFocusedField, type RunnerNative } from '../XCUITreeReader'
 
 type FakeProc = EventEmitter & {
   pid?: number
@@ -592,5 +592,28 @@ describe('computeRunnerStamp', () => {
     write('build/Build/Products/x.xctestrun', 'rebuilt')
     write('project.yml', 'spec 2')
     expect(computeRunnerStamp(dir, 'Xcode 26.5')).toBe(before)
+  })
+})
+
+describe('toFocusedField', () => {
+  const frame = { x: 20, y: 122, width: 362, height: 34 }
+
+  it('takes the runner\'s field whole, commas and Hangul still composing included', () => {
+    // Measured on iOS 26.4: the tree prints this value cut to 18 characters, unquoted; /field gives all of it.
+    expect(toFocusedField({ identifier: 'form.email', placeholder: 'Email', frame, type: 'text', value: 'Ab, cdefghijklmnopqrs안' }))
+      .toEqual({ field: { identifier: 'form.email', placeholder: 'Email', frame, secure: false, value: 'Ab, cdefghijklmnopqrs안' } })
+  })
+
+  it('keeps no value for a secure field, even one the runner sent', () => {
+    expect(toFocusedField({ identifier: 'form.password', placeholder: 'Password', frame, type: 'secure', value: '•••', reason: 'secure' }))
+      .toEqual({ field: { identifier: 'form.password', placeholder: 'Password', frame, secure: true }, reason: 'secure' })
+  })
+
+  it('says why there is no field, and calls anything it cannot vouch for a failed read', () => {
+    expect(toFocusedField({ reason: 'no-focus' })).toEqual({ field: null, reason: 'no-focus' })
+    expect(toFocusedField({ reason: 'ambiguous' })).toEqual({ field: null, reason: 'ambiguous' })
+    expect(toFocusedField({ reason: 'something-new' })).toEqual({ field: null, reason: 'failed' })
+    expect(toFocusedField({ identifier: 'x', frame: { x: 1 } })).toEqual({ field: null, reason: 'failed' })
+    expect(toFocusedField('not json')).toEqual({ field: null, reason: 'failed' })
   })
 })

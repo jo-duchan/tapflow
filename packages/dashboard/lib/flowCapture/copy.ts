@@ -57,7 +57,7 @@ export const copy = {
     'no-selector': 'The element here cannot be named alone, so the flow taps the point itself.',
     'not-centre': 'Tapping the element’s centre would land somewhere else, so the flow taps the point itself.',
     swipe: 'A swipe replays its two ends at the speed it was made, not what it brought on screen.',
-    'caps-lock': 'Typed after Caps Lock, which can switch the keyboard’s language or case, so this text may not be what the device typed.',
+    'field-unread': 'The field could not be read after typing, so this is the keys as typed on a US keyboard. Check the text.',
   } satisfies Record<FragileReason, string>,
   skipReasons: {
     refused: 'The device refused this input.',

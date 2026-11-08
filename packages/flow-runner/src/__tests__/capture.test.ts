@@ -131,19 +131,89 @@ describe('segment: a recording as the actions a person took', () => {
     expect(steps.map((s) => s.kind === 'text' ? s.text : s.kind === 'key' ? s.code : s.kind)).toEqual(['aBc', 'Tab', 'CapsLock', 'Enter'])
   })
 
-  const caps = (r: Rec) => r.steps().flatMap((s) => s.kind === 'text' ? [`${s.text}${s.capsLock ? '!' : ''}`] : [])
+  describe('typing into one field, as the relay read it (#1135)', () => {
+    const email = { identifier: 'form.email', placeholder: 'Email', frame: { x: 0, y: 0, width: 1, height: 1 }, secure: false }
+    /** The relay's reads: which field just after the first key, and what it holds `pauseMs` after the last. */
+    const read = (r: Rec, phase: 'focus' | 'value', field: typeof email & { value?: string } | null, answerMs = 40, reason?: 'secure') => {
+      const requestedAt = r.t
+      r.entries.push({ at: requestedAt + answerMs, kind: 'field', phase, requestedAt, field, ...(reason ? { reason } : {}) })
+      return r
+    }
+    const texts = (r: Rec) => r.steps().filter((s) => s.kind === 'text' || s.kind === 'key')
+      .map((s) => s.kind === 'text' ? `${s.replace ? '=' : ''}${s.text}${s.fieldRead ? `?${s.fieldRead}` : ''}` : s.kind === 'key' ? s.code : '')
 
-  it('marks a run whose text is a guess: a letter typed after an odd count of Caps Lock', () => {
-    expect(caps(new Rec().key('CapsLock').key('KeyA').key('KeyB'))).toEqual(['ab!'])
-    // On and off before the letters, as the iOS fixture's person did: nothing is in force.
-    expect(caps(new Rec().key('CapsLock').key('CapsLock').key('KeyA'))).toEqual(['a'])
-    // Pressed after the letters: they were typed before it.
-    expect(caps(new Rec().key('KeyA').key('CapsLock').key('Tab'))).toEqual(['a'])
-    // The state outlives the run it was pressed in.
-    expect(caps(new Rec().key('CapsLock').key('Tab').key('KeyA'))).toEqual(['a!'])
-    expect(caps(new Rec().key('CapsLock').key('Tab').key('CapsLock').key('Tab').key('KeyA'))).toEqual(['a'])
-    // A press the device refused turned nothing on.
-    expect(caps(new Rec().key('CapsLock', 0, false).key('KeyA'))).toEqual(['a'])
+    it('makes the runs and edit keys typed into one field one step with the value the field held', () => {
+      // `ab`, Backspace, Hangul typed as keys: the field holds what the device's IME made of them, which the keys cannot say.
+      const r = new Rec().key('KeyA')
+      read(r, 'focus', { ...email, value: 'a' }).key('KeyB').key('Backspace').key('KeyD').key('KeyK').key('KeyS').wait(700)
+      read(r, 'value', { ...email, value: 'a안' })
+      r.wait(500).key('Tab')
+      const steps = r.steps()
+      expect(texts(r)).toEqual(['=a안', 'Tab'])
+      expect(steps[0]!.messages).toHaveLength(6)
+    })
+
+    it('keeps no read that raced an input: one answered after the next input, or asked before the last', () => {
+      const late = new Rec().key('KeyA')
+      read(late, 'focus', email).wait(700)
+      read(late, 'value', { ...email, value: 'a' }, 400)
+      late.wait(100).key('Tab')
+      expect(texts(late)).toEqual(['a?unread', 'Tab'])
+
+      const early = new Rec().key('KeyA')
+      read(early, 'focus', email).wait(700)
+      read(early, 'value', { ...email, value: 'a' })
+      early.wait(100).key('KeyB').wait(700)
+      read(early, 'value', { ...email, value: 'ab' })
+      expect(texts(early)).toEqual(['=ab'])
+
+      // Asked just before the last key, answered after it: it may not have seen that key.
+      const straddled = new Rec().key('KeyA')
+      read(straddled, 'focus', email).wait(700)
+      read(straddled, 'value', { ...email, value: 'a' }, 300)
+      straddled.wait(100).key('KeyB')
+      expect(texts(straddled)).toEqual(['ab?unread'])
+    })
+
+    it('takes no value from a field other than the one typed into, or an empty one', () => {
+      const moved = new Rec().key('KeyA')
+      read(moved, 'focus', email).key('KeyB').wait(700)
+      // A one-time-code field moved focus on by itself: the read is of the next box.
+      read(moved, 'value', { ...email, identifier: 'otp.2', value: '3' })
+      expect(texts(moved)).toEqual(['ab?unread'])
+
+      const emptied = new Rec().key('KeyA')
+      read(emptied, 'focus', email).wait(700)
+      read(emptied, 'value', { ...email, value: '' })
+      expect(texts(emptied)).toEqual(['a?unread'])
+    })
+
+    it('ends a field at a key that is not an edit, so a read after it says nothing about the typing before', () => {
+      const r = new Rec().key('KeyA')
+      read(r, 'focus', email).key('Escape').key('KeyB')
+      // No focus read for the second run (the relay asks again after Escape, Tab, Enter and chords, so this is a read
+      // that failed): its field is unknown, so it is unread, not a silent guess.
+      r.wait(700)
+      read(r, 'value', { ...email, value: 'ab' })
+      expect(texts(r)).toEqual(['a?unread', 'Escape', 'b?unread'])
+    })
+
+    it('ends a field at Enter and Tab, which move or submit it', () => {
+      const r = new Rec().key('KeyA')
+      read(r, 'focus', email).wait(700)
+      read(r, 'value', { ...email, value: 'a' })
+      r.wait(100).key('Enter').key('KeyB')
+      read(r, 'focus', null).wait(700)
+      expect(texts(r)).toEqual(['=a', 'Enter', 'b?unread'])
+    })
+
+    it('says a secure field was not read rather than unread, and leaves typing alone where nothing reads fields', () => {
+      const secret = new Rec().key('KeyA')
+      read(secret, 'focus', { ...email, secure: true }, 40, 'secure').wait(700)
+      expect(texts(secret)).toEqual(['a?secure'])
+      // Android: its agent names no field-value capability, so the relay reads nothing and the keys are the text.
+      expect(texts(new Rec().key('KeyA').key('Backspace').key('KeyB'))).toEqual(['a', 'Backspace', 'b'])
+    })
   })
 
   it('leaves a key the device refused out of the text and out of the replay', () => {
@@ -259,11 +329,15 @@ describe('matchStep', () => {
       expect(m.secret).toEqual({ value: 'hunter', known })
     })
 
-    it('marks text typed with Caps Lock in force as a guess, a secret\'s value too', () => {
-      const [guess] = new Rec().key('CapsLock').type('hunter').steps().filter((s) => s.kind === 'text')
-      expect(matchStep(guess!, ctxOf([field({ focused: true, secure: false })]))).toMatchObject({ step: { type: 'inputText', text: 'hunter' }, fragile: 'caps-lock' })
-      expect(matchStep(guess!, ctxOf([field({ focused: true, secure: true })]))).toMatchObject({ step: null, secret: { value: 'hunter' }, fragile: 'caps-lock' })
-      expect(matchStep(text!, ctxOf([field({ focused: true, secure: false })])).fragile).toBeUndefined()
+    it('writes a field\'s read value as replacing it, and marks a guess where a read was tried and failed', () => {
+      const typed = (over: Partial<Extract<RawStep, { kind: 'text' }>>) => ({ ...text!, ...over }) as RawStep
+      const plain = ctxOf([field({ focused: true, secure: false })])
+      expect(matchStep(typed({ text: '안녕', replace: true }), plain)).toEqual({ raw: expect.anything(), step: { type: 'inputText', text: '안녕', replace: true } })
+      expect(matchStep(typed({ fieldRead: 'unread' }), plain)).toMatchObject({ step: { type: 'inputText', text: 'hunter' }, fragile: 'field-unread' })
+      // A secret's value is the same guess, so it is marked too; a secure field was never going to be read.
+      expect(matchStep(typed({ fieldRead: 'unread' }), ctxOf([field({ focused: true, secure: true })]))).toMatchObject({ step: null, fragile: 'field-unread' })
+      expect(matchStep(typed({ fieldRead: 'secure' }), ctxOf([field({ focused: true, secure: true })])).fragile).toBeUndefined()
+      expect(matchStep(text!, plain).fragile).toBeUndefined()
     })
 
     it('keeps it out when no field has focus', () => {
@@ -359,6 +433,13 @@ describe('toFlowSteps', () => {
     expect(flowSteps(withLaunch).map((s) => s.type)).toEqual(['clearState', 'launchApp', 'tapPoint'])
   })
 
+  it('keeps a secret that replaces a field read whole as replacing it', () => {
+    const [typed] = new Rec().type('pw').steps()
+    const raw = { ...typed!, kind: 'text', text: 'pw', replace: true } as RawStep
+    const flow = toFlowSteps([{ raw, step: null, secret: { value: 'pw', known: true } }])
+    expect(flow.steps[0]!.step).toEqual({ type: 'inputSecret', name: 'PASSWORD', replace: true })
+  })
+
   it('names each secret, and hands its value to the dialog only', () => {
     const field = (secure?: boolean) => el({ role: 'input', focused: true, ...(secure === undefined ? {} : { secure }), frame: { x: 0, y: 0.3, width: 1, height: 0.1 } })
     const [a, , b, , c] = new Rec().type('one').key('Tab').type('two').key('Tab').type('three').steps()
@@ -440,8 +521,8 @@ describe('recorded in the dashboard', () => {
     for (const file of ['capture-ios-uikit.json', 'capture-android-compose.json']) {
       const runs = segment(load(file)).flatMap((s) => s.kind === 'text' ? [s] : [])
       expect(runs.slice(-2).map((s) => s.text)).toEqual(['a@b.co', 'hunter2'])
-      // Turned on and off before a letter: nothing in force, so the email is not a guess.
-      expect(runs.some((s) => s.capsLock)).toBe(false)
+      // Recorded before the relay read fields: no read tried, so neither is marked.
+      expect(runs.some((s) => s.fieldRead !== undefined || s.replace)).toBe(false)
     }
   })
 })

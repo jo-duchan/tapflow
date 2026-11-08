@@ -1,5 +1,6 @@
 import type { ReplayInput, SessionChannel } from '../sessionChannel.js'
 import { InputRefusedError } from '../sessionErrors.js'
+import { SELECT_ALL } from '../platformCheck.js'
 import type { ChromePayload } from '@tapflowio/protocol'
 import { chromeOrientation } from '@tapflowio/protocol/screen'
 import type { RawStep } from './segment.js'
@@ -7,7 +8,7 @@ import type { StepRange } from './range.js'
 
 /** The part of a session channel the replayer drives. */
 export type ReplayChannel = Pick<SessionChannel,
-  'replayInputs' | 'pasteText' | 'typeText' | 'launchApp' | 'installApp' | 'clearState' | 'openUrl'>
+  'replayInputs' | 'pasteText' | 'typeText' | 'pressKey' | 'launchApp' | 'installApp' | 'clearState' | 'openUrl'>
 
 /** `replayed`, or why the step was not sent: the device refused it the first time, or it is not replayed at all. */
 export type ReplayOutcome = 'replayed' | 'refused-before' | 'not-replayed'
@@ -43,17 +44,15 @@ export async function replayStep(channel: ReplayChannel, sessionId: string, raw:
   signal?.throwIfAborted()
   if (raw.outcome === 'refused') return 'refused-before'
   switch (raw.kind) {
-    // Typed as the flow types it, not as keys: a key code becomes a character by the device's keyboard layout, and an
-    // iOS simulator takes that from the Mac's input source at the moment it arrives (Simulator's "Use the Same Keyboard
-    // Language as macOS", on by default). Measured: `a@b.com` typed while the Mac was set to English replayed as
-    // `ㅁ@ㅠ.채ㅡ` once it was set to Korean, and every step after it was matched on a screen the flow never makes. A
-    // device that refuses the text gets the keys, as recorded.
+    // Typed as the flow types it, not as keys: a key becomes a character by the device's IME and the keyboard language
+    // the device was left in, which nothing resets between replays. Measured: two Matches of one recording, replayed
+    // as keys, typed `a ㅁ a ㅁ` and then `ㅁ A ㅁ a` (#1134). A device that refuses the text gets the keys, as recorded.
     //
-    // A run typed with Caps Lock in force is typed as text too, though its text is a guess (`capsLock`). Its keys would
-    // type by the language the device is left in, which nothing resets between replays: measured, two Matches of one
-    // recording typed `aㅁaㅁ` and `ㅁAㅁa`. A wrong guess the same every time beats a right one by chance.
+    // A field's value read by the relay replaces what the field holds, as the exported step does (`replace`): the
+    // selection is pasted over, so Match and Verify type the same thing.
     case 'text':
       try {
+        if (raw.replace) await channel.pressKey(sessionId, SELECT_ALL.code, [...SELECT_ALL.modifiers])
         await untilAborted(channel.typeText(sessionId, raw.text), signal)
       } catch (e) {
         if (!(e instanceof InputRefusedError)) throw e

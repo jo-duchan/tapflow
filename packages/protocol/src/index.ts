@@ -655,6 +655,29 @@ export interface UiTreeRequest {
   requestId: string
 }
 
+/**
+ * The keyboard-focused text field's value, for Flow Capture (#1135). The relay asks while a person it is recording has
+ * stopped typing, and keeps the answer in the capture; nothing else reads it. **Never forwarded**: the answer is the
+ * field's whole contents — what the person typed, and any text the app or AutoFill put there — so it goes no further
+ * than the capture the relay already keeps typed text in. Sent only to an agent
+ * whose capabilities include `field-value`.
+ */
+export interface UiFieldRequest {
+  type: 'ui:field:request'
+  sessionId: string
+  requestId: string
+}
+
+/**
+ * Put the device's keyboard back to its first language, because another person has taken it (#1134). A device keeps
+ * the language a tester switched to (Caps Lock on a device with two keyboards), and the next tester's keys would type
+ * in it. Takes effect from the next app launch. Sent only to an agent whose capabilities include `keyboard-reset`.
+ */
+export interface DeviceKeyboardReset {
+  type: 'device:keyboard-reset'
+  sessionId: string
+}
+
 export type RelayToAgent =
   | AgentRegistered
   | AgentDevicesApplied
@@ -665,6 +688,8 @@ export type RelayToAgent =
   | AppLaunchToAgent
   | ScreenshotRequest
   | UiTreeRequest
+  | UiFieldRequest
+  | DeviceKeyboardReset
 
 export type SessionTerminatedReason = 'agent-disconnected'
 
@@ -1796,6 +1821,29 @@ export interface UiTreeError {
   message: string
 }
 
+/** The keyboard-focused text field, as `ui:field:response` carries it. */
+export interface FocusedField {
+  identifier: string
+  placeholder: string
+  /** In points, in the app as drawn — used to tell one field from another, never to place a touch. */
+  frame: UIElementFrame
+  /** What the field holds. **Absent on a secure field**, whose `•••` would still give its length away. */
+  value?: string
+  secure: boolean
+}
+
+/** Why a field read gave no value. Open to what an agent adds: a reader treats one it does not know as `failed`. */
+export type FieldReadReason = 'no-app' | 'no-focus' | 'ambiguous' | 'secure' | 'failed'
+
+export interface UiFieldResponse {
+  type: 'ui:field:response'
+  sessionId: string
+  requestId: string
+  /** `null` when no single text field has keyboard focus, or the read failed: `reason` says which. */
+  field: FocusedField | null
+  reason?: FieldReadReason
+}
+
 export type AgentToRelay =
   | AgentRegister
   | AgentDevices
@@ -1804,6 +1852,7 @@ export type AgentToRelay =
   | ScreenshotError
   | UiTreeResponse
   | UiTreeError
+  | UiFieldResponse
 
 // ── stream socket → relay ────────────────────────────────────────────────────
 
@@ -2028,8 +2077,9 @@ export interface SessionLeave {
   sessionId: string
 }
 
-// `external` and `automation` are added by the relay on the way through — the browser never sets them.
-// Undeclared on purpose: the parser strips both from what a browser sends, and the relay sets them after it.
+// `external`, `automation` and `recorded` are added by the relay on the way through — the browser never sets them.
+// Undeclared on purpose: the parser strips them from what a browser sends, and the relay sets them after it.
+// `recorded`: the booting person is one Flow Capture records, on an agent that reads fields (#1135).
 export interface DeviceBoot {
   type: 'device:boot'
   sessionId: string

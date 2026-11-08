@@ -206,6 +206,7 @@ function mockSimctl(booted: boolean | 'unknown' = false): SimctlWrapper {
     launchApp: vi.fn().mockResolvedValue(undefined),
     screenshot: vi.fn().mockResolvedValue(Buffer.from('png')),
     syncKeyboardsFromLanguages: vi.fn().mockResolvedValue(undefined),
+    resetKeyboardLanguage: vi.fn().mockResolvedValue(undefined),
     showSoftwareKeyboard: vi.fn().mockResolvedValue(undefined),
     hideSoftwareKeyboard: vi.fn().mockResolvedValue(undefined),
     // Stateful pasteboard: the agent confirms a write by reading it back, so a mock that
@@ -811,6 +812,104 @@ describe('IOSAgent', () => {
       expect(reply.interfaceTurn).toBe(expected)
       if (expected === undefined) expect(reply).not.toHaveProperty('interfaceTurn')
 
+      agent.disconnect()
+      browser.close()
+    })
+  })
+
+  // Flow Capture (#1135) and the keyboard reset (#1134), driven at the agent's dispatcher as the relay sends them.
+  describe('the focused field and the keyboard language', () => {
+    afterEach(() => { vi.restoreAllMocks() })
+
+    type Internals = {
+      lastBundleIds: Map<string, string>
+      handleRelayMessage(msg: { type: string; sessionId: string; requestId?: string }): void
+      sendMsg(msg: { type: string }): void
+    }
+    async function bootedAgent(simctl: SimctlWrapper = mockSimctl(true), boot = true) {
+      vi.spyOn(XCUITreeReader.prototype, 'warm').mockImplementation(() => {})
+      const browser = new WebSocket(`ws://localhost:${port}`)
+      await waitForOpen(browser)
+      const agent = new IOSAgent({ intervalMs: 50 }, simctl)
+      await agent.connect(`ws://localhost:${port}`)
+      browser.send(JSON.stringify({ type: 'session:start', sessionId: agent.sessionId, clientKind: 'dashboard' }))
+      await waitForType(browser, 'session:joined')
+      const internals = agent as unknown as Internals
+      const sent: Array<{ type: string; [k: string]: unknown }> = []
+      const real = internals.sendMsg.bind(agent)
+      internals.sendMsg = (msg) => { sent.push(msg as never); real(msg as never) }
+      const doBoot = async () => {
+        browser.send(JSON.stringify({ type: 'device:boot', requestId: 'rq-k', sessionId: agent.sessionId, payload: { deviceId: 'dev-1' } }))
+        await waitForType(browser, 'device:ready')
+      }
+      if (boot) await doBoot()
+      return { agent, browser, internals, sent, doBoot }
+    }
+
+    it('answers a field read with the runner\'s field, for the app last installed or launched', async () => {
+      const readField = vi.spyOn(XCUITreeReader.prototype, 'readField').mockResolvedValue({ field: { identifier: 'form.email', placeholder: 'Email', frame: { x: 0, y: 0, width: 1, height: 1 }, secure: false, value: '안녕' } })
+      const { agent, browser, internals, sent } = await bootedAgent()
+      internals.lastBundleIds.set('dev-1', 'com.app')
+      internals.handleRelayMessage({ type: 'ui:field:request', sessionId: agent.sessionId!, requestId: 'rq-f' })
+      await vi.waitFor(() => expect(sent.some((m) => m.type === 'ui:field:response')).toBe(true), { timeout: 2000 })
+      expect(readField).toHaveBeenCalledWith('dev-1', 'com.app')
+      expect(sent.find((m) => m.type === 'ui:field:response')).toMatchObject({ requestId: 'rq-f', field: { value: '안녕' } })
+      agent.disconnect()
+      browser.close()
+    })
+
+    it('answers a failed read rather than going silent', async () => {
+      vi.spyOn(XCUITreeReader.prototype, 'readField').mockRejectedValue(new Error('runner gone'))
+      const { agent, browser, internals, sent } = await bootedAgent()
+      internals.handleRelayMessage({ type: 'ui:field:request', sessionId: agent.sessionId!, requestId: 'rq-f' })
+      await vi.waitFor(() => expect(sent.find((m) => m.type === 'ui:field:response')).toMatchObject({ field: null, reason: 'failed' }), { timeout: 2000 })
+      agent.disconnect()
+      browser.close()
+    })
+
+    it('reads the app an install put on the device, which a person may open from its icon rather than with Launch', async () => {
+      const readField = vi.spyOn(XCUITreeReader.prototype, 'readField').mockResolvedValue({ field: null, reason: 'no-focus' })
+      const { agent, browser, internals, sent } = await bootedAgent()
+      ;(agent as unknown as { installBuild: () => Promise<void> }).installBuild = async () => {}
+      internals.handleRelayMessage({ type: 'app:install', sessionId: agent.sessionId!, requestId: 'rq-i', payload: { filePath: '/b.zip', bundleId: 'com.installed' } } as never)
+      await vi.waitFor(() => expect(sent.some((m) => m.type === 'app:install-done')).toBe(true), { timeout: 2000 })
+      internals.handleRelayMessage({ type: 'ui:field:request', sessionId: agent.sessionId!, requestId: 'rq-f' })
+      await vi.waitFor(() => expect(readField).toHaveBeenCalledWith('dev-1', 'com.installed'), { timeout: 2000 })
+      agent.disconnect()
+      browser.close()
+    })
+
+    it('warms the tree runner on a boot for a person Flow Capture records, as it does for an automation client', async () => {
+      const { agent, browser, internals } = await bootedAgent(mockSimctl(true), false)
+      const warm = vi.mocked(XCUITreeReader.prototype.warm)
+      warm.mockClear()
+      internals.handleRelayMessage({ type: 'device:boot', sessionId: agent.sessionId!, requestId: 'rq-r', payload: { deviceId: 'dev-1', recorded: true } } as never)
+      await vi.waitFor(() => expect(warm).toHaveBeenCalledWith('dev-1'), { timeout: 3000 })
+      agent.disconnect()
+      browser.close()
+    })
+
+    it('resets the keyboard of a booted device once its boot\'s keyboard sync is done', async () => {
+      const simctl = mockSimctl(true)
+      let finishSync!: () => void
+      ;(simctl.syncKeyboardsFromLanguages as ReturnType<typeof vi.fn>).mockReturnValue(new Promise<void>((r) => { finishSync = r }))
+      const { agent, browser, internals } = await bootedAgent(simctl)
+      internals.handleRelayMessage({ type: 'device:keyboard-reset', sessionId: agent.sessionId! })
+      await new Promise((r) => setTimeout(r, 50))
+      expect(simctl.resetKeyboardLanguage).not.toHaveBeenCalled()
+      finishSync()
+      await vi.waitFor(() => expect(simctl.resetKeyboardLanguage).toHaveBeenCalledWith('dev-1'), { timeout: 2000 })
+      agent.disconnect()
+      browser.close()
+    })
+
+    it('holds a reset that arrives before the boot, and does it once the device is up', async () => {
+      const simctl = mockSimctl(true)
+      const { agent, browser, internals, doBoot } = await bootedAgent(simctl, false)
+      internals.handleRelayMessage({ type: 'device:keyboard-reset', sessionId: agent.sessionId! })
+      expect(simctl.resetKeyboardLanguage).not.toHaveBeenCalled()
+      await doBoot()
+      await vi.waitFor(() => expect(simctl.resetKeyboardLanguage).toHaveBeenCalledTimes(1), { timeout: 2000 })
       agent.disconnect()
       browser.close()
     })

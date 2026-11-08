@@ -1,5 +1,6 @@
 import type { PointSpace } from '@tapflowio/protocol'
 import type { CaptureEntry, CapturedMessage } from '@tapflowio/protocol/capture'
+import type { FocusedField } from '@tapflowio/protocol'
 import { keyChar } from './keys.js'
 
 export type Point = [number, number]
@@ -34,12 +35,17 @@ export type RawStep = StepBase & (
   /** Held, then moved: a drag after a long press. No flow step says it. */
   | { kind: 'holdDrag'; from: Point; to: Point; space?: PointSpace; durationMs: number }
   | { kind: 'pinch'; start: Fingers; end: Fingers; space?: PointSpace; durationMs: number }
-  /** Keys that each typed a character, in a row. `text` is what they typed on a US layout.
-   *  `capsLock`: a letter was typed after an odd number of Caps Lock presses. What
-   *  Caps Lock does is the device's setting, not the recording's: measured on iOS 26.5, a simulator with Korean and
-   *  English keyboards switched language on it (`KeyA CapsLock KeyB CapsLock KeyC` typed `aㅠc`), where one with a
-   *  single language turns letters upper case. So `text` is a guess, marked in the dialog until the field's value is recorded (#1135). */
-  | { kind: 'text'; text: string; capsLock?: true }
+  /**
+   * Keys that each typed a character, in a row, and what they typed. Two ways to know it:
+   * - `replace`: the relay read the field once the person paused (#1135), so `text` is what the field held, and the
+   *   step is every run and edit key typed into that one field. Whatever the device's IME, language or Caps Lock made
+   *   of the keys is in it.
+   * - otherwise, `text` is the keys read on a US layout — right on Android, whose agent types them from that table, and
+   *   a guess on iOS, where the device's IME decides. `fieldRead` says whether a read was tried: `unread` when the
+   *   agent reads fields but none was usable (the warning is the reader's), `secure` for a field that never shows its
+   *   value. Absent: no read was tried, as on Android.
+   */
+  | { kind: 'text'; text: string; replace?: true; fieldRead?: 'unread' | 'secure' }
   /** A key that types no character — Enter, Tab, Backspace, an arrow — or a chord. */
   | { kind: 'key'; code: string; modifiers: number }
   | { kind: 'paste'; text: string }
@@ -91,12 +97,8 @@ export function segment(entries: readonly CaptureEntry[]): RawStep[] {
   let chrome: unknown
   let touch: TimedMessage[] | null = null
   let pinch: TimedMessage[] | null = null
-  let run: { steps: TimedMessage[]; text: string; capsLock: boolean } | null = null
+  let run: { steps: TimedMessage[]; text: string } | null = null
   const buttonsDown = new Map<string, TimedMessage>()
-  // Caps Lock is a state the device keeps, across steps: whether it has been pressed an odd number of times. What it
-  // changes the letters to is not known here (see `capsLock` on the text step). A press the device refused does not count.
-  let capsOdd = false
-
   const push = (step: RawStep): void => {
     out.push(chrome === undefined ? step : { ...step, chrome })
   }
@@ -104,7 +106,7 @@ export function segment(entries: readonly CaptureEntry[]): RawStep[] {
     at: messages[0]!.at, endAt: messages[messages.length - 1]!.at, outcome, messages,
   })
   const endRun = (): void => {
-    if (run && run.text.length > 0) push({ ...base(run.steps, 'landed'), kind: 'text', text: run.text, ...(run.capsLock ? { capsLock: true as const } : {}) })
+    if (run && run.text.length > 0) push({ ...base(run.steps, 'landed'), kind: 'text', text: run.text })
     // Caps Lock with nothing typed after it still changed the device, so it is a step of its own.
     else if (run) for (const t of run.steps) push({ ...base([t], outcomeOf((t.msg as Msg<'input:key'>).requestId)), kind: 'key', code: (t.msg as Msg<'input:key'>).payload.code, modifiers: 0 })
     run = null
@@ -123,8 +125,7 @@ export function segment(entries: readonly CaptureEntry[]): RawStep[] {
         // Refused, it toggled nothing; and it is not replayed, since a refusal can be transient (the input channel
         // still starting) and would land on replay, changing what every letter after it types.
         if (refused) continue
-        capsOdd = !capsOdd
-        run ??= { steps: [], text: '', capsLock: false }
+        run ??= { steps: [], text: '' }
         run.steps.push(timed)
         continue
       }
@@ -134,10 +135,9 @@ export function segment(entries: readonly CaptureEntry[]): RawStep[] {
         if (run && last && e.at - last.at > KEY_RUN_GAP_MS) endRun()
         // A key the device refused typed nothing: neither written down nor sent again, for the reason above.
         if (refused) continue
-        run ??= { steps: [], text: '', capsLock: false }
+        run ??= { steps: [], text: '' }
         run.steps.push(timed)
         run.text += char
-        if (capsOdd) run.capsLock = true
         continue
       }
       endRun()
@@ -229,6 +229,60 @@ export function segment(entries: readonly CaptureEntry[]): RawStep[] {
     }
   }
   endRun()
+  return withFieldValues(out, entries)
+}
+
+/** Keys that edit what a field holds without typing a character: a run of typing goes on through them. */
+const EDIT_KEYS = new Set(['Backspace', 'Delete', 'ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'Home', 'End'])
+const isEdit = (s: RawStep): boolean => s.kind === 'key' && EDIT_KEYS.has(s.code) && (s.modifiers & ~0x02) === 0
+
+const sameField = (a: FocusedField, b: FocusedField): boolean =>
+  a.identifier === b.identifier && a.placeholder === b.placeholder
+  // A field with no identifier is told apart by where it is: the keyboard is already up by the first read.
+  && (a.identifier !== '' || (a.frame.x === b.frame.x && a.frame.y === b.frame.y))
+
+/**
+ * Typing into one field as one step with the value the relay read (#1135). A group is the text runs and edit keys
+ * between two other inputs. Its value read counts only when it was asked after the group's last input, answered
+ * before the next one, and is of the field the group's first key went into — a read that raced an input, or an app
+ * that moved focus by itself (a one-time-code field), says nothing about this field. Two fields that move focus on
+ * the first character are the one case the identity check cannot catch.
+ */
+function withFieldValues(steps: RawStep[], entries: readonly CaptureEntry[]): RawStep[] {
+  const reads = entries.flatMap((e) => (e.kind === 'field' ? [e] : []))
+  if (reads.length === 0) return steps
+  const inputs = entries.flatMap((e) => (e.kind === 'input' ? [e.at] : []))
+  const out: RawStep[] = []
+  for (let i = 0; i < steps.length;) {
+    let j = i
+    while (j < steps.length && (steps[j]!.kind === 'text' || isEdit(steps[j]!))) j++
+    const group = steps.slice(i, j)
+    if (!group.some((s) => s.kind === 'text')) { out.push(...steps.slice(i, Math.max(j, i + 1))); i = Math.max(j, i + 1); continue }
+    i = j
+    const first = group[0]!
+    const last = group[group.length - 1]!
+    const nextInput = inputs.find((at) => at > last.endAt)
+    const focus = reads.find((r) => r.phase === 'focus' && r.requestedAt >= first.at && r.requestedAt <= last.endAt)
+    // The agent reads fields (there are reads), but none says which field this went into — typing that went on past
+    // a key the relay does not end a run at, like Escape. Not read, so the reader warns.
+    if (!focus) { out.push(...group.map((s) => (s.kind === 'text' ? { ...s, fieldRead: 'unread' } as RawStep : s))); continue }
+    // `phase` is also implied by the times — a focus read is asked at a key, so never between this group's last input
+    // and the next — and no test can tell the two apart; it stays so the rule does not rest on the relay's timing alone.
+    const value = focus.field && !focus.field.secure ? reads.filter((r) => r.phase === 'value'
+      && r.requestedAt > last.endAt && (nextInput === undefined || r.at < nextInput)
+      && r.field !== null && !r.field.secure && sameField(r.field, focus.field!)
+      && typeof r.field.value === 'string' && r.field.value !== '').at(-1) : undefined
+    if (value?.field?.value !== undefined) {
+      out.push({
+        at: first.at, endAt: last.endAt, outcome: 'landed', messages: group.flatMap((s) => s.messages),
+        ...(first.chrome === undefined ? {} : { chrome: first.chrome }),
+        kind: 'text', text: value.field.value, replace: true,
+      })
+      continue
+    }
+    const fieldRead = focus.reason === 'secure' || focus.field?.secure ? 'secure' : 'unread'
+    out.push(...group.map((s) => (s.kind === 'text' ? { ...s, fieldRead } as RawStep : s)))
+  }
   return out
 }
 
