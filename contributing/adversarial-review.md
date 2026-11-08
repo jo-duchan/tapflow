@@ -142,6 +142,39 @@ not a fence.
 gate because the gate's current shape is what produced the measurement, and replacing a rule that has
 its own measurement behind it needs more than three data points.
 
+## On trial: four prompt rules from the Elephant-Goldfish Model
+
+[Elephant-Goldfish](https://github.com/google/elephant-goldfish-model) reviews design documents with
+fresh-context agents, which is this file's idea applied one stage earlier. We found no measured
+results in its repository, and its own FAQ tells you to measure on your own tasks, so these are here
+to try rather than because they were proven. Keep the ones the next few reviews actually use.
+
+- **In a design pass, the reviewer paraphrases before it finds anything.** Two to five sentences on
+  what the design proposes and how the existing system works, as the document describes it. Compare
+  that with your intent; a wrong paraphrase is a finding. A list of undefined terms cannot catch a
+  plan whose terms are all defined and whose parts do not connect. Paraphrase with no premises from
+  the author, or it only reads your summary back to you.
+- **Premises are mechanical facts, never conclusions.** Counts, error output and config contents
+  keep a review cheap. A cause, an intent or a reason something is safe hands the reviewer the
+  assumption it exists to refute, and telling it not to re-check turns that assumption into a given.
+- **A rejection has to be checkable, and has to check the conclusion.** Cite something the reviewer
+  could have read: a file and symbol, or a recorded decision. If the only evidence sits outside every
+  file it could read, such as a verbal decision or an unwritten convention, neither reject nor fix:
+  hand it to the user. Showing the reviewer's *reason* is wrong is not enough either. On #814 the
+  stated reason was false and the conclusion was true, because two fallbacks masked each other and
+  mutating either one failed no test. You wrote the change, so wanting to reject a finding is not
+  evidence against it.
+- **A channel that did not finish did not review.** Timed out, failed, or returned no report: retry
+  it once, then write it down as `not run`. Never record it as a channel with no findings. This is
+  the shape of #827, where a timeout passed with the same ✔️ as a clean run. A text search of the
+  review records found no instance here, so it is insurance rather than a fix.
+
+Three things it does are deliberately not taken. **Severity stays yours to re-grade**, which it
+forbids, because the unused-export `blocker` above needed exactly that. **Reviewers keep their tools**:
+its personas are read-only, and ours find defects by planting mutations and running commands.
+**Reviewers keep the project's instructions**: it verifies that a reviewer sees no `CLAUDE.md`, and
+ours have to know the repo's rules to judge a diff against them.
+
 ## The cleared list ages with the diff
 
 A reviewer's "checked and cleared" list describes the code **as the reviewer read it**. Fixing the
@@ -253,7 +286,8 @@ What made the 4m30s pair cheap was structural, not stylistic. Each prompt carrie
 1. **One lens, named.** "Your lens is whether the uncommitted diff changes runtime behaviour" — not
    a list of five concerns.
 2. **The measurements, as premises.** File counts, error counts, config contents, wired-up scripts —
-   whatever you already ran. Followed by: do not re-run these.
+   whatever you already ran. Followed by: do not re-run these. Facts only: a cause or a reason
+   something is safe is not a premise.
 3. **The files to read, listed.** Otherwise the reviewer greps the tree to find them. **When one of
    the lenses is whether the prose is still true, that list has to name `contributing/` too.** A
    review of the tunnel-port change listed `docs/`, the AGENTS files and the CHANGELOG, and its
