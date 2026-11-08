@@ -65,6 +65,11 @@ const SCROLL_DIRECTIONS = new Set<string>(['up', 'down', 'left', 'right'])
 const KEY_MODIFIERS = new Set<string>(['shift', 'ctrl', 'alt', 'meta'])
 // The shape of an environment variable's name, since that is where the CLI reads the value from.
 const SECRET_NAME = /^[A-Za-z_][A-Za-z0-9_]*$/
+
+/** Whether `inputText: { secret }` accepts this name — the dashboard checks a secret it lets a person rename. */
+export function isSecretName(name: string): boolean {
+  return SECRET_NAME.test(name)
+}
 const DEFAULT_SWIPE_DURATION_MS = 300
 // Both platforms recognise a long press at about half a second; twice that leaves room for a busy Mac's timing
 // (#1037). Holding past the threshold changes nothing for an ordinary long press, so the margin costs only time.

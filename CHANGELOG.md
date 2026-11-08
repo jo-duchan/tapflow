@@ -18,6 +18,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **`@tapflowio/flow-runner`: `FlowResult.failureScreenshot` and `lastScreenshot` are typed `Uint8Array`, and so is `FlowDriver.screenshot`'s result.** A `Buffer` is still what a Node driver returns and what a run carries at runtime, so code that only writes or forwards the bytes is unchanged; code that calls a `Buffer` method on them, such as `.toString('base64')`, needs `Buffer.from(…)` first. `RelayClient.screenshot` still returns a `Buffer`. The change lets a flow run in a browser, for Flow Capture.
 - **The warning for a token with no expiry is a notice box.** Choosing **No expiration** under Settings → Tokens used to add one line of amber text; it now shows a boxed notice with a title, in a warning colour that follows light and dark mode.
 
 ### Fixed

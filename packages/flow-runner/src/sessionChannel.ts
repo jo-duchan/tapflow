@@ -4,12 +4,13 @@ import type {
 import { PlatformError } from '@tapflowio/agent-core/errors'
 import { chromeOrientation } from '@tapflowio/protocol/screen'
 import type { PinchFingers } from './engine.js'
-import { DeviceLacksError, markEnvironmentFailure } from './errors.js'
+import { DeviceLacksError, markEnvironmentFailure, TransientQueryError } from './errors.js'
 import { keyModifierBits, type KeyModifier } from './schema.js'
 import {
-  InputRefusedError, InputUnconfirmedError, RelayClosedError, RequestTimeoutError, SessionEndedError, SessionLeftError,
-  SessionUnavailableError,
+  InputRefusedError, InputUnconfirmedError, RelayClosedError, RelayHttpError, RequestTimeoutError, SessionEndedError,
+  SessionLeftError, SessionUnavailableError,
 } from './sessionErrors.js'
+import { PERMANENT_QUERY_STATUSES } from './uiTreeRead.js'
 
 // An input ack is a local round trip — the agent answers from its own dispatch, not from the device, which
 // HID is fire-and-forget about. Generous next to `typeText`'s 15s because that one drives a paste handshake
@@ -433,6 +434,44 @@ export abstract class SessionChannel {
       `${w.what} failed: this client left session ${sessionId} while the request was in flight. Whether it ` +
       'reached the device is unknown, so do not repeat it blindly — re-join the session if you still want it',
     ))
+  }
+
+  /**
+   * Fill in what the relay sends once, at the join and the boot, for a channel that starts listening later — the
+   * dashboard's Flow Capture dialog opens on a session its viewer joined long before (#1125). Without it a turn waits out
+   * its deadline for a chrome that will not come again, and a posture has no list to pick from.
+   */
+  protected seed(sessionId: string, chrome: ChromePayload | null | undefined, postures: PosturesPayload | null | undefined): void {
+    if (chrome && !this.chromes.has(sessionId)) this.chromes.set(sessionId, chrome)
+    if (postures && !this.postures.has(sessionId)) this.postures.set(sessionId, postures)
+  }
+
+  /**
+   * What a failed ui-tree read means, for a host that read it over its own transport. **Judged by what this client
+   * knows about the session before the HTTP status**: a `terminated` session can never answer again and a rebound one
+   * cannot answer *this run* — nothing in a flow boots — so those fail now and name the cause, while a retryable status
+   * becomes a `TransientQueryError` the runner polls past. Permanent failures keep their type.
+   */
+  protected treeQueryFailure(sessionId: string, e: unknown): unknown {
+    const s = this.lifecycle.get(sessionId)
+    if (s && (s.terminated || s.needsReboot)) {
+      // **The note is built from the field this branched on, not from `sessionNote`.** The two disagree on
+      // one state and it is reachable: a flapping agent — away, back, away again — carries `needsReboot`
+      // *and* `away` at once, because only a boot clears the first and nothing in a flow boots.
+      // `sessionNote` ranks `away` above `needsReboot`, deliberately, since for a caller that can still
+      // act the away-ness is what is current. Here the caller cannot act — the step is being failed — so
+      // taking that precedence would report a permanent failure in the sentence for a transient one, and
+      // never mention the binding. That is #573's mis-blame, one layer up.
+      const why = s.terminated
+        ? `the relay ended this session (${s.terminated})`
+        : 'the agent reconnected and cleared its device binding, so this session needs booting again ' +
+          'and nothing in a flow can (the app itself is still running)'
+      return new SessionUnavailableError(`ui-tree query failed — ${why}`, { cause: e })
+    }
+    if (e instanceof RelayHttpError && !e.permanent && !PERMANENT_QUERY_STATUSES.has(e.status)) {
+      return new TransientQueryError(e.message, { cause: e })
+    }
+    return e
   }
 
   /** Close the gesture this client left open on the session, unanswered — see `leaveSession`. A held button is let go. */

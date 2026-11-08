@@ -286,8 +286,22 @@ export function toFlowSteps(matched: readonly CapturedStep[]): CapturedFlow {
   return { steps, secrets, launchAdded: lead?.type !== 'launchApp' }
 }
 
-/** The flow's steps, in order: the added launch, then every step a flow can say. */
-export function flowSteps(captured: CapturedFlow): Step[] {
+/**
+ * The flow's steps, in order: a clear-state when the app is known, the added launch, then every step a flow can say. The
+ * clear-state is what makes the file start where the replay did whichever way it is run — `run_flow` does not reset the
+ * app, nor does `flow run --no-reset` — at the cost of pinning the flow to that bundle id (the flow's `appId`, so a
+ * build with another one skips it rather than clearing the wrong app). Without a bundle id there is none to clear.
+ */
+export function flowSteps(captured: CapturedFlow, opts: { appId?: string } = {}): Step[] {
   const said = captured.steps.flatMap((s) => (s.step ? [s.step] : []))
-  return captured.launchAdded ? [{ type: 'launchApp' }, ...said] : said
+  // A clear-state the range began with stays first, and the launch goes after it, never before. It stands in for the
+  // added one only when it clears this app: one naming another app (a companion it also resets) is kept and this app is
+  // still cleared, so the flow does not start on whatever data the app under test had.
+  const first = said[0]
+  const leads = first?.type === 'clearState'
+  const clearsThis = leads && (first.appId === undefined || first.appId === opts.appId)
+  const added: Step[] = opts.appId !== undefined && !clearsThis ? [{ type: 'clearState' }] : []
+  const lead = leads ? [first, ...added] : added
+  const rest = leads ? said.slice(1) : said
+  return [...lead, ...(captured.launchAdded ? [{ type: 'launchApp' } as Step] : []), ...rest]
 }
