@@ -127,6 +127,12 @@ describe('flowSteps', () => {
     expect(flowSteps(captured([tap], true)).map((s) => s.type)).toEqual(['launchApp', 'tapPoint'])
     expect(flowSteps(captured([clear, tap], true), { appId: 'com.x' }).map((s) => s.type)).toEqual(['clearState', 'launchApp', 'tapPoint'])
   })
+
+  it('still clears this app when the captured clear-state names another one', () => {
+    // A companion app the range reset is kept; it does not stand in for the app under test.
+    expect(flowSteps(captured([clear, tap], true), { appId: 'com.example.app' }))
+      .toEqual([{ type: 'clearState', appId: 'com.x' }, { type: 'clearState' }, { type: 'launchApp' }, tap.step])
+  })
 })
 
 describe('a screenshot as Uint8Array', () => {

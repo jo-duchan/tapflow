@@ -294,8 +294,14 @@ export function toFlowSteps(matched: readonly CapturedStep[]): CapturedFlow {
  */
 export function flowSteps(captured: CapturedFlow, opts: { appId?: string } = {}): Step[] {
   const said = captured.steps.flatMap((s) => (s.step ? [s.step] : []))
-  // A clear-state the range began with stays first: the launch goes after it, never before.
-  const lead = said[0]?.type === 'clearState' ? [said[0]] : opts.appId !== undefined ? [{ type: 'clearState' } as Step] : []
-  const rest = said[0]?.type === 'clearState' ? said.slice(1) : said
+  // A clear-state the range began with stays first, and the launch goes after it, never before. It stands in for the
+  // added one only when it clears this app: one naming another app (a companion it also resets) is kept and this app is
+  // still cleared, so the flow does not start on whatever data the app under test had.
+  const first = said[0]
+  const leads = first?.type === 'clearState'
+  const clearsThis = leads && (first.appId === undefined || first.appId === opts.appId)
+  const added: Step[] = opts.appId !== undefined && !clearsThis ? [{ type: 'clearState' }] : []
+  const lead = leads ? [first, ...added] : added
+  const rest = leads ? said.slice(1) : said
   return [...lead, ...(captured.launchAdded ? [{ type: 'launchApp' } as Step] : []), ...rest]
 }
