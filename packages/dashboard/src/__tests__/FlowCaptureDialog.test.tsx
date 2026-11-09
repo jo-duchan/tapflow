@@ -1,9 +1,12 @@
+import { StrictMode } from 'react'
 import { describe, it, expect, vi, afterEach } from 'vitest'
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import type { CaptureEntry, CaptureSnapshot } from '@tapflowio/protocol/capture'
+import type { CapturedStep } from '@tapflowio/flow-runner/browser'
 import FlowCaptureDialog from '@/components/flow-capture/FlowCaptureDialog'
-import { ExportScreen } from '@/components/flow-capture/screens'
+import { EditScreen, ExportScreen } from '@/components/flow-capture/screens'
+import { initialState } from '@/lib/flowCapture/machine'
 import type { CaptureTap } from '@/lib/flowCapture/tap'
 import { withQuery } from './withQuery'
 
@@ -78,6 +81,27 @@ describe('FlowCaptureDialog', () => {
     expect(onClose).not.toHaveBeenCalled()
   })
 
+  // StrictMode runs an effect's cleanup once at mount. Ending the dialog there gave the relay back its recording and
+  // dropped the snapshot while the dialog was still open, and every later step answered nothing.
+  it('stays open under StrictMode, and still cleans up once when taken away', async () => {
+    const fetch = relay()
+    const returnFocusRef = { current: null as HTMLButtonElement | null }
+    const { unmount } = render(<StrictMode>{withQuery(<FlowCaptureDialog tap={tap} returnFocusRef={returnFocusRef} onClose={vi.fn()} />)}</StrictMode>)
+    const dialog = await screen.findByRole('dialog', { name: 'Capture flow' })
+    expect(await within(dialog).findByText('2 steps · #2 – #3')).toBeInTheDocument()
+    await new Promise((r) => setTimeout(r, 10))
+    const drops = () => fetch.mock.calls.filter(([u, i]) => String(u).endsWith('/capture/snapshot') && i?.method === 'DELETE')
+    expect(drops()).toHaveLength(0)
+    unmount()
+    await waitFor(() => expect(drops()).toHaveLength(1))
+  })
+
+  it('says nothing was captured when the capture holds no step, only a turn of the device', async () => {
+    relay({ snapshot: { id: 'snap', takenAt: 0, thinned: false, entries: [{ at: 0, kind: 'chrome', chrome: { bodyRotation: 90 } }] } })
+    open()
+    expect(await screen.findByText(/No steps have been captured/)).toHaveAttribute('role', 'status')
+  })
+
   it('says so when nothing was captured', async () => {
     relay({ snapshot: null })
     open()
@@ -146,6 +170,25 @@ describe('FlowCaptureDialog', () => {
       expect(calls).toContain('DELETE /api/v1/sessions/s1/capture/pause')
       expect(calls).toContain('DELETE /api/v1/sessions/s1/capture/snapshot')
     })
+  })
+})
+
+describe('EditScreen', () => {
+  const step = (over: Partial<CapturedStep>): CapturedStep => ({
+    raw: { at: 0, endAt: 0, outcome: 'landed', messages: [], kind: 'network', offline: true }, step: null, skipped: 'network', ...over,
+  })
+  const edit = (steps: CapturedStep[], removed: number[] = []) => render(
+    <EditScreen state={{ ...initialState, phase: 'edit', captured: { steps, launchAdded: false, secrets: {} }, removed }}
+      dispatch={vi.fn()} flow={null} renameError={() => null} onVerify={vi.fn()} onBackToRange={vi.fn()} verifyRef={{ current: null }} />,
+  )
+
+  it('cannot verify a flow left with no step a flow can say', () => {
+    const tapStep = step({ raw: { at: 0, endAt: 0, outcome: 'landed', messages: [], kind: 'tap', point: [0.4, 0.6] }, step: { type: 'tapPoint', at: [0.4, 0.6] }, skipped: undefined })
+    edit([step({}), tapStep])
+    expect(screen.getByRole('button', { name: 'Verify and export' })).toBeEnabled()
+    cleanup()
+    edit([step({}), tapStep], [1])
+    expect(screen.getByRole('button', { name: 'Verify and export' })).toBeDisabled()
   })
 })
 

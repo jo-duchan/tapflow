@@ -387,7 +387,8 @@ export function EditScreen({ state, dispatch, flow, renameError, onVerify, onBac
           {showYaml ? copy.hideYaml : copy.showYaml}
         </Button>
         <Button variant="outline" onClick={onBackToRange}>{copy.backToRange}</Button>
-        <Button ref={verifyRef} disabled={kept.length === 0} onClick={onVerify}>{copy.verifyAndExport}</Button>
+        {/* Not with only left-out rows kept: the flow would have no step, which no YAML can say. */}
+        <Button ref={verifyRef} disabled={kept.every(({ s }) => s.step === null)} onClick={onVerify}>{copy.verifyAndExport}</Button>
       </Footer>
     </div>
   )
@@ -530,7 +531,7 @@ export function ExportScreen({ flow, bundleId, onDone, doneRef }: {
   doneRef: RefObject<HTMLButtonElement | null>
 }) {
   const fileId = useId()
-  const yaml = yamlOf(flow)
+  const yaml = safeYaml(flow)
   const fileName = fileNameOf(flow.name)
   const [copied, setCopied] = useState<boolean | null>(null)
   const secrets = [...new Set(flow.steps.flatMap((s) => (s.type === 'inputSecret' ? [s.name] : [])))]

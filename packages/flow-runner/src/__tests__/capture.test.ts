@@ -188,6 +188,11 @@ describe('defaultRange', () => {
     expect(rangeWarnings(steps, defaultRange(steps))).toEqual(['no-clean-start'])
   })
 
+  it('never ends empty when the capture ends with the install', () => {
+    expect(defaultRange(new Rec().launch().touch([[0.1, 0.1]]).install().steps())).toEqual({ start: 0, end: 3 })
+    expect(defaultRange(new Rec().touch([[0.1, 0.1]]).install().steps())).toEqual({ start: 0, end: 2 })
+  })
+
   it('starts at the beginning without a launch, and says so', () => {
     const steps = new Rec().touch([[0.1, 0.1]]).steps()
     expect(defaultRange(steps)).toEqual({ start: 0, end: 1 })

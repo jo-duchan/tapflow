@@ -26,7 +26,10 @@ export function defaultRange(steps: readonly RawStep[]): StepRange {
   let clean = -1
   for (let i = 0; i < steps.length; i++) if ((steps[i]!.kind === 'clearState' || steps[i]!.kind === 'install') && counts(steps[i]!)) clean = i
   let start = clean < 0 ? -1 : steps.findIndex((s, i) => i > clean && s.kind === 'launch' && counts(s))
-  if (start < 0 && clean >= 0) start = Math.min(clean + 1, steps.length)
+  if (start < 0 && clean >= 0) start = clean + 1
+  // Nothing after the clean start (the last step was the install or clear): the range would be empty, with no step at
+  // either handle. The rest of the rule picks one instead.
+  if (start >= steps.length) start = -1
   if (start < 0) {
     start = 0
     for (let i = 0; i < steps.length; i++) if (steps[i]!.kind === 'launch' && counts(steps[i]!)) start = i

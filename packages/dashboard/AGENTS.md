@@ -340,9 +340,11 @@ flow-runner's own `SessionChannel` (`lib/flowCapture/channel.ts`), so a flow ver
 - **The replay is of the flow that will be exported, not of everything the person did.** An install in the range is
   matched (as skipped) but not sent: the flow has none, and replaying one uninstalled the app the replay had just
   launched, leaving every later step to be matched on the home screen.
-- **`vite` reads flow-runner's `dist`, the tests read its source.** After changing flow-runner, rebuild it
-  (`pnpm --filter @tapflowio/flow-runner build`) before checking the dialog in `pnpm dev` or a dashboard build. CI
-  builds it before the dashboard for the same reason.
+- **`vite build` reads flow-runner's `dist`; `pnpm dev` and the tests read its source.** The dev server prepends the
+  `source` export condition (`vite.config.ts`, serve only), so a fresh checkout opens the dialog with no flow-runner
+  build and an edit there shows without one. A dashboard build still needs flow-runner built first
+  (`pnpm --filter @tapflowio/flow-runner build`), which is why CI, both Dockerfiles and the playground's
+  `pre-release` build it before the dashboard.
 
 ## Testing
 

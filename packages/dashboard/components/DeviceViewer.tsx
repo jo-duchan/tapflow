@@ -289,6 +289,8 @@ export function DeviceViewer({ sessionId, deviceId, formFactor, platform = 'ios'
       // thing #426 was opened about.
       setAgentAway(true);
       setChrome(null);
+      // Flow Capture's dialog goes with the viewer it sits in; left set, it opened again by itself when the frame came back.
+      setCaptureTap(null);
       setDeviceReady(false);
       return;
     }
@@ -308,6 +310,8 @@ export function DeviceViewer({ sessionId, deviceId, formFactor, platform = 'ios'
       // spinning on an `app:launch-done` that died with the old agent.
       setDeviceReady(false);
       setChrome(null);
+      // Flow Capture's dialog goes with the viewer it sits in; left set, it opened again by itself when the frame came back.
+      setCaptureTap(null);
       setInstalling(false);
       setInstallError(null);
       setBootError(null);
@@ -458,6 +462,8 @@ export function DeviceViewer({ sessionId, deviceId, formFactor, platform = 'ios'
       // still runs, so the spinner clears and the device looks healthy while the app is never installed.
       // Pinned by the "agent's real boot sequence" case in DeviceViewer.lifecycleCorrelation.test.tsx.
       setChrome(null); // causes active viewer to unmount → cleanup
+      // Flow Capture's dialog goes with the viewer it sits in; left set, it opened again by itself when the frame came back.
+      setCaptureTap(null);
     }
     if (msg.type === 'device:ready') {
       // **Before the correlator, deliberately.** The relay replays this message from cache to a

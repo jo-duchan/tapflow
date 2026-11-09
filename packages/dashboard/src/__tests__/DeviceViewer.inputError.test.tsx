@@ -37,7 +37,7 @@ vi.mock('sonner', () => ({
 const quiet = () => [toastDismiss, toastInfo, toastSuccess].forEach((f) => expect(f).not.toHaveBeenCalled())
 
 // The dialog itself is not what is tested here, only that the viewer knows it is open.
-vi.mock('@/components/flow-capture/FlowCaptureDialog', () => ({ default: () => null }))
+vi.mock('@/components/flow-capture/FlowCaptureDialog', () => ({ default: () => <div role="dialog" aria-label="Capture flow" /> }))
 
 const { DeviceViewer } = await import('@/components/DeviceViewer')
 
@@ -307,6 +307,21 @@ describe('DeviceViewer — input:error while Flow Capture is open', () => {
     capturing()
     inputError('channel-unavailable')
     expect(toastError).toHaveBeenCalledTimes(1)
+  })
+
+  // The dialog goes when the device picture does. Left open in state, it came back by itself with the next frame.
+  it.each<[string, BrowserInbound]>([
+    ['the agent goes away', { type: 'session:agent-away', sessionId: 's1' }],
+    ['the agent restarts', { type: 'session:rebound', sessionId: 's1', capabilities: [] }],
+    ['the device boots again', { type: 'device:booting', sessionId: 's1' }],
+  ])('closes the dialog when %s, and it does not open again by itself', async (_, msg) => {
+    capturing()
+    fireEvent.click(screen.getByRole('button', { name: 'Capture flow' }))
+    expect(await screen.findByRole('dialog', { name: 'Capture flow' })).toBeInTheDocument()
+    act(() => { deliver!(msg) })
+    act(() => { deliver!({ type: 'device:ready', sessionId: 's1', payload: { deviceId: 'dev-1' } }) })
+    act(() => { deliver!({ type: 'session:chrome', sessionId: 's1', payload: CHROME } as unknown as BrowserInbound) })
+    expect(screen.queryByRole('dialog', { name: 'Capture flow' })).not.toBeInTheDocument()
   })
 
   it('does not toast while the dialog is open', () => {

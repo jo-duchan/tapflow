@@ -56,8 +56,14 @@ export default function FlowCaptureDialog({ tap, returnFocusRef, onClose }: {
   }
   // And when the dialog is taken away without closing: the session ended under it, and the viewer unmounted. Left, the
   // lease went on renewing the pause every 10 s from this tab, and a second tab of the same person on the same session
-  // recorded nothing (review of #1125).
-  useEffect(() => () => endDialog(run, lease, channel, tap), [run, lease, channel, tap])
+  // recorded nothing (review of #1125). A tick later, and called off by a setup that follows: StrictMode runs this
+  // cleanup once at mount in development, and ending then closed the channel the dialog goes on to use.
+  const pendingEnd = useRef<ReturnType<typeof setTimeout> | null>(null)
+  useEffect(() => {
+    if (pendingEnd.current) clearTimeout(pendingEnd.current)
+    pendingEnd.current = null
+    return () => { pendingEnd.current = setTimeout(() => endDialog(run, lease, channel, tap), 0) }
+  }, [run, lease, channel, tap])
 
   return (
     <Dialog open onOpenChange={(open) => { if (!open) close() }}>
@@ -76,7 +82,9 @@ export default function FlowCaptureDialog({ tap, returnFocusRef, onClose }: {
           <p role="status" className="text-sm text-muted-foreground">{copy.loading}</p>
         ) : snapshot.isError ? (
           <p role="status" className="text-sm">{snapshot.error.message}</p>
-        ) : snapshot.data === null ? (
+        // No steps at all (a capture of the frame only, before any input) is nothing captured too: the strip had no step
+        // to put its handles on.
+        ) : snapshot.data === null || stepsOf(snapshot.data).steps.length === 0 ? (
           <p role="status" className="text-sm">{copy.nothingCaptured}</p>
         ) : (
           <CaptureSession

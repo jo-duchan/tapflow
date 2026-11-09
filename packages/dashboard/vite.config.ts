@@ -1,9 +1,9 @@
-import { defineConfig } from 'vite'
+import { defineConfig, defaultClientConditions } from 'vite'
 import { reactWithCompiler } from './reactPlugin'
 import { compression } from 'vite-plugin-compression2'
 import path from 'path'
 
-export default defineConfig({
+export default defineConfig(({ command }) => ({
   plugins: [
     // **The React Compiler memoises for us, so the hand-written memoisation can stop growing.**
     // This package has 62 `useCallback` and 3 `useMemo` against **zero** `memo()` components —
@@ -28,6 +28,11 @@ export default defineConfig({
   ],
   resolve: {
     alias: { '@': path.resolve(__dirname, '.') },
+    // `pnpm dev` loads sibling packages from source, so the Flow Capture dialog works on a fresh
+    // checkout and picks up a flow-runner edit without a rebuild. A build keeps reading `dist`,
+    // which CI and both Dockerfiles build first. `source` is prepended to vite's own conditions,
+    // never replacing them — the same rule as `vitest.shared.ts`.
+    ...(command === 'serve' ? { conditions: ['source', ...defaultClientConditions] } : {}),
   },
   build: {
     outDir: 'dist',
@@ -67,4 +72,4 @@ export default defineConfig({
       '/uploads': 'http://localhost:4000',
     },
   },
-})
+}))
