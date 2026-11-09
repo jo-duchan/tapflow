@@ -40,10 +40,20 @@ export class PauseLease {
   private lastOk = 0
   private ttlMs = 30_000
   private held = false
+  /** Stopped for good: the dialog ended. Nothing renews after it, so a late timer cannot pause recording again. */
+  private stopped = false
+  private readonly inflight = new Set<Promise<boolean>>()
 
   constructor(private readonly tap: CaptureTap) {}
 
-  private async renew(): Promise<boolean> {
+  private renew(): Promise<boolean> {
+    if (this.stopped) return Promise.resolve(false)
+    const p = this.put().finally(() => this.inflight.delete(p))
+    this.inflight.add(p)
+    return p
+  }
+
+  private async put(): Promise<boolean> {
     const res = await fetch(`${base(this.tap)}/pause`, { method: 'PUT', credentials: 'include' }).catch(() => null)
     if (!res?.ok) return false
     const body = await res.json().catch(() => ({})) as { ttlMs?: number }
@@ -53,24 +63,33 @@ export class PauseLease {
   }
 
   async start(): Promise<void> {
+    if (this.stopped) throw new CaptureGone(copy.errors.captureEnded)
     this.held = true
-    if (!(await this.renew())) throw new CaptureGone(copy.errors.captureEnded)
+    const ok = await this.renew()
+    // Stopped while the first renewal was out: no timer, or it would pause recording for a dialog that is gone.
+    if (!ok || this.stopped) throw new CaptureGone(copy.errors.captureEnded)
     this.timer ??= setInterval(() => { void this.renew() }, RENEW_EVERY_MS)
   }
 
   /** Before each step: renewed now, and refused if the last renewal is older than the lease. */
   async ensure(): Promise<void> {
     const ok = await this.renew()
+    if (this.stopped) throw new CaptureGone(copy.errors.captureEnded)
     if (!ok && Date.now() - this.lastOk > this.ttlMs) throw new CaptureGone(copy.errors.pauseLost)
   }
 
   /** Renewed without waiting, for a run that has no step to wait in (verification's start marks). */
   touch(): void { void this.renew() }
 
-  /** Gives the pause back only if this lease asked for it: another tab of the same person may hold it. */
+  /**
+   * For good. Gives the pause back only if this lease asked for it (another tab of the same person may hold it), and
+   * only after every renewal already sent has landed, so none of them pauses recording again after the release.
+   */
   async stop(): Promise<void> {
+    this.stopped = true
     if (this.timer) clearInterval(this.timer)
     this.timer = null
+    await Promise.all(this.inflight)
     if (!this.held) return
     this.held = false
     await fetch(`${base(this.tap)}/pause`, { method: 'DELETE', credentials: 'include' }).catch(() => {})

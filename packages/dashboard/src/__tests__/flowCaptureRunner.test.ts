@@ -113,3 +113,31 @@ describe('PauseLease.ensure', () => {
     await lease.stop()
   })
 })
+
+describe('PauseLease.stop', () => {
+  // Review of #1141: closed while the first renewal was out, the lease still set its timer and paused recording
+  // again for a dialog that was gone.
+  it('stops for good when it lands while the first renewal is out, and gives the pause back after it', async () => {
+    vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] })
+    const order: string[] = []
+    let answer: (r: Response) => void = () => {}
+    vi.stubGlobal('fetch', vi.fn((url: string, init?: RequestInit) => {
+      order.push(`${init?.method} ${url.split('/').pop()}`)
+      if (init?.method === 'PUT') return new Promise<Response>((r) => { answer = (res) => { order.push('PUT answered'); r(res) } })
+      return Promise.resolve(new Response(''))
+    }))
+    const lease = new PauseLease(tap)
+    const started = lease.start()
+    const stopped = lease.stop()
+    await Promise.resolve()
+    answer(new Response(JSON.stringify({ ttlMs: 30_000 })))
+    await expect(started).rejects.toThrow()
+    await stopped
+    // The release goes after the renewal it would otherwise race: the relay takes them in the order they arrive.
+    expect(order).toEqual(['PUT pause', 'PUT answered', 'DELETE pause'])
+    vi.advanceTimersByTime(60_000)
+    lease.touch()
+    await expect(lease.ensure()).rejects.toThrow()
+    expect(order).toEqual(['PUT pause', 'PUT answered', 'DELETE pause'])
+  })
+})
