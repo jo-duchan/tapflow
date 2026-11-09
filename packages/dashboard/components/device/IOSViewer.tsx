@@ -434,8 +434,9 @@ export function IOSViewer({
       if (isPinchMode.current) { isPinchMode.current = false; setPinchActive(false); send({ type: 'input:pinch:end', sessionId, requestId: newRequestId() }) }
       isOptionHeld.current = false; setPinchHint(null)
     }
-    const onKeyUp = (e: KeyboardEvent) => { if (e.code === 'AltLeft' || e.code === 'AltRight') endPinch() }
-    const onBlur = () => { if (isOptionHeld.current) endPinch() }
+    // Quiet while Flow Capture's dialog replays, as onKeyDown is: ending a pinch sends one.
+    const onKeyUp = (e: KeyboardEvent) => { if (!captureOpen && (e.code === 'AltLeft' || e.code === 'AltRight')) endPinch() }
+    const onBlur = () => { if (!captureOpen && isOptionHeld.current) endPinch() }
     window.addEventListener('keydown', onKeyDown); window.addEventListener('keyup', onKeyUp); window.addEventListener('blur', onBlur)
     return () => { window.removeEventListener('keydown', onKeyDown); window.removeEventListener('keyup', onKeyUp); window.removeEventListener('blur', onBlur) }
   }, [captureOpen, keyboardActive, clipboardSupported, send, sessionId, handleScreenshot, handleRecordToggle, handleRotate, onKbdToggle, swKeyboardPending])

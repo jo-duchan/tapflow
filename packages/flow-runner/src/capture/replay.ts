@@ -23,6 +23,21 @@ export type ReplayOutcome = 'replayed' | 'refused-before' | 'not-replayed'
  * toggle. A turn is replayed as recorded and may be relative (`direction`), so the host first puts the device in
  * `rangeStartOrientation` — from another orientation every point after the turn would land somewhere else.
  */
+/**
+ * `work`, given up on when `signal` aborts. Typing has no signal of its own (it waits up to 15 s for the agent's answer),
+ * so Stop during a text step sat until the agent answered (review of #1125). What was sent is not taken back: the
+ * device may still type it; only the wait ends.
+ */
+function untilAborted<T>(work: Promise<T>, signal: AbortSignal | undefined): Promise<T> {
+  if (!signal) return work
+  signal.throwIfAborted()
+  return new Promise<T>((resolve, reject) => {
+    const onAbort = () => reject(signal.reason)
+    signal.addEventListener('abort', onAbort, { once: true })
+    work.then(resolve, reject).finally(() => signal.removeEventListener('abort', onAbort))
+  })
+}
+
 export async function replayStep(channel: ReplayChannel, sessionId: string, raw: RawStep, signal?: AbortSignal): Promise<ReplayOutcome> {
   // Checked first: a launch, an install or a clear-state after a cancel would wipe the app the person left.
   signal?.throwIfAborted()
@@ -39,7 +54,7 @@ export async function replayStep(channel: ReplayChannel, sessionId: string, raw:
     // recording typed `aㅁaㅁ` and `ㅁAㅁa`. A wrong guess the same every time beats a right one by chance.
     case 'text':
       try {
-        await channel.typeText(sessionId, raw.text)
+        await untilAborted(channel.typeText(sessionId, raw.text), signal)
       } catch (e) {
         if (!(e instanceof InputRefusedError)) throw e
         await channel.replayInputs(sessionId, raw.messages as Array<{ at: number; msg: ReplayInput }>, signal)
@@ -49,8 +64,8 @@ export async function replayStep(channel: ReplayChannel, sessionId: string, raw:
     case 'rotate': case 'posture':
       await channel.replayInputs(sessionId, raw.messages as Array<{ at: number; msg: ReplayInput }>, signal)
       return 'replayed'
-    case 'paste': await channel.pasteText(sessionId, raw.text); return 'replayed'
-    case 'type': await channel.typeText(sessionId, raw.text); return 'replayed'
+    case 'paste': await untilAborted(channel.pasteText(sessionId, raw.text), signal); return 'replayed'
+    case 'type': await untilAborted(channel.typeText(sessionId, raw.text), signal); return 'replayed'
     case 'launch': {
       const msg = raw.messages[0]!.msg
       const options = msg.type === 'app:launch' && (msg.arguments || msg.env)

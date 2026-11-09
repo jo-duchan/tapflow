@@ -391,8 +391,9 @@ export function AndroidViewer({
       }
       isOptionHeld.current = false; setPinchHint(null)
     }
-    const onKeyUp = (e: KeyboardEvent) => { if (e.code === 'AltLeft' || e.code === 'AltRight') endPinch() }
-    const onBlur = () => { if (isOptionHeld.current) endPinch() }
+    // Quiet while Flow Capture's dialog replays, as onKeyDown is: ending a pinch sends one.
+    const onKeyUp = (e: KeyboardEvent) => { if (!captureOpen && (e.code === 'AltLeft' || e.code === 'AltRight')) endPinch() }
+    const onBlur = () => { if (!captureOpen && isOptionHeld.current) endPinch() }
     window.addEventListener('keydown', onKeyDown)
     window.addEventListener('keyup', onKeyUp)
     window.addEventListener('blur', onBlur)

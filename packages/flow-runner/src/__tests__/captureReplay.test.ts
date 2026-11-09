@@ -35,6 +35,18 @@ const recorded = (entries: Array<[number, Record<string, unknown>]>): CaptureEnt
 afterEach(() => { vi.useRealTimers() })
 
 describe('replayStep', () => {
+  // Review of #1125: typing waits up to 15 s for the agent; Stop during a text step sat out that wait.
+  it('gives up waiting on typed text when the replay is stopped', async () => {
+    const [text] = segment(recorded([[1000, { type: 'input:key', requestId: 'k', payload: { code: 'KeyA', modifiers: 0 } }]]))
+    const ch = new MemoryChannel()
+    ch.typeAck = null
+    const stop = new AbortController()
+    const done = replayStep(ch, 'now', text!, stop.signal)
+    const outcome = expect(done).rejects.toBeDefined()
+    stop.abort()
+    await outcome
+  })
+
   it('sends a swipe as recorded, at its pace, on this session with new correlators', async () => {
     vi.useFakeTimers()
     const [swipe] = segment(recorded([

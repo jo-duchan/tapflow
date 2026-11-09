@@ -49,7 +49,7 @@ The steps of the flow are listed. Selecting one shows the screen just before it 
 
 | Badge | Meaning |
 |---|---|
-| **fragile** | A tap that taps a point on the screen because nothing there can be named, or a swipe that replays its two ends at the speed it was made. A different screen size or layout can make it land elsewhere. |
+| **fragile** | A tap that taps a point on the screen because nothing there can be named, or a swipe that replays its two ends at the speed it was made. A different screen size or layout can make it land elsewhere. Text typed with Caps Lock on is marked too: depending on the device, Caps Lock switches the keyboard's language rather than its case, so what the device typed may differ. |
 | **auto** | A swipe turned into "scroll until the element the next step taps is on screen" (`scroll: { until }`). How far one swipe goes differs from run to run, and this way the result does not. |
 | **not in the flow** | Something a flow cannot express, left out: switching the network, cut, putting the on-screen keyboard up or down, a long press of more than 60 seconds, and so on. The card says why. |
 
@@ -71,7 +71,7 @@ The file name (`flows/<name>.yaml`) and the YAML are shown.
 - **Download** saves the file, and **Copy YAML** copies it. Copying works only on a dashboard opened over HTTPS or on localhost. Over any other HTTP address, select the YAML and copy it yourself.
 - Put the file in your app repository and CI runs it with `tapflow flow run`. The CI examples keep flow files under `.tapflow/flows/`. See [Flows](/automation/flows).
 - If the flow has secrets, the `--secret` options to pass when it runs are shown.
-- The exported flow starts by clearing the app's data (`clearState`) and launching it (`launchApp`), and runs only against builds of this app (its bundle id or package name).
+- The exported flow starts by clearing the app's data (`clearState`) and launching it (`launchApp`), and runs only against builds of this app (its bundle id or package name). If the build's bundle id could not be read, Range says so, and the flow neither clears the app's data nor is tied to one app.
 
 **Done** closes the dialog. What you did not export is gone with it, and your capture stays until the session ends, so you can open the dialog again.
 

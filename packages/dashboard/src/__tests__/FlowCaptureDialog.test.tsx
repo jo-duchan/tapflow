@@ -64,6 +64,20 @@ describe('FlowCaptureDialog', () => {
     expect(within(dialog).getByRole('button', { name: 'Continue' })).toBeEnabled()
   })
 
+  // Review of #1125: the session ended under an open dialog and the viewer unmounted it; nothing gave the relay back
+  // its recording, and the pause lease went on renewing from this tab.
+  it('cleans up once when it is taken away without being closed, as when it is closed', async () => {
+    const fetch = relay()
+    const returnFocusRef = { current: null as HTMLButtonElement | null }
+    const onClose = vi.fn()
+    const { unmount } = render(withQuery(<FlowCaptureDialog tap={tap} returnFocusRef={returnFocusRef} onClose={onClose} />))
+    await screen.findByRole('dialog', { name: 'Capture flow' })
+    unmount()
+    const drops = () => fetch.mock.calls.filter(([u, i]) => String(u).endsWith('/capture/snapshot') && i?.method === 'DELETE')
+    await waitFor(() => expect(drops()).toHaveLength(1))
+    expect(onClose).not.toHaveBeenCalled()
+  })
+
   it('says so when nothing was captured', async () => {
     relay({ snapshot: null })
     open()

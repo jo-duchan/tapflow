@@ -179,6 +179,14 @@ export async function verifyFlow(
 export class DialogRun {
   private controller: AbortController | null = null
   private readonly urls = new Set<string>()
+  private ended = false
+
+  /** True the first time only: the dialog's cleanup runs once, whether it was closed or taken away. */
+  end(): boolean {
+    if (this.ended) return false
+    this.ended = true
+    return true
+  }
 
   /** A new run, stopping any before it. */
   begin(): AbortSignal {

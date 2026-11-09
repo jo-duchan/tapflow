@@ -1,4 +1,4 @@
-import { useReducer, useRef, useState, type MutableRefObject } from 'react'
+import { useEffect, useReducer, useRef, useState, type MutableRefObject } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { isSecretName, toFlowSteps } from '@tapflowio/flow-runner/browser'
 import type { CaptureSnapshot } from '@tapflowio/protocol/capture'
@@ -19,6 +19,16 @@ import { EditScreen, ExportScreen, MatchScreen, RangeScreen, VerifyScreen } from
  * handed back as a flow file. Opened by state from the toolbar's Capture flow button, which is also where focus goes
  * back. Its own chunk — it brings flow-runner's engine.
  */
+/** Stop the run, give the relay back its recording, drop the copy of the steps, and free what the dialog made. Once. */
+function endDialog(run: DialogRun, lease: PauseLease, channel: DashboardSessionChannel, tap: CaptureTap): void {
+  if (!run.end()) return
+  run.abort()
+  void lease.stop()
+  void dropSnapshot(tap)
+  channel.close()
+  run.release()
+}
+
 export default function FlowCaptureDialog({ tap, returnFocusRef, onClose }: {
   tap: CaptureTap
   returnFocusRef: MutableRefObject<HTMLButtonElement | null>
@@ -41,13 +51,13 @@ export default function FlowCaptureDialog({ tap, returnFocusRef, onClose }: {
   // Every way out runs the same cleanup: Escape, the ✕, Cancel, Done. Stopping a run first, then giving the relay
   // back its recording and dropping the copy, which holds what was typed.
   const close = () => {
-    run.abort()
-    void lease.stop()
-    void dropSnapshot(tap)
-    channel.close()
-    run.release()
+    endDialog(run, lease, channel, tap)
     onClose()
   }
+  // And when the dialog is taken away without closing: the session ended under it, and the viewer unmounted. Left, the
+  // lease went on renewing the pause every 10 s from this tab, and a second tab of the same person on the same session
+  // recorded nothing (review of #1125).
+  useEffect(() => () => endDialog(run, lease, channel, tap), [run, lease, channel, tap])
 
   return (
     <Dialog open onOpenChange={(open) => { if (!open) close() }}>
