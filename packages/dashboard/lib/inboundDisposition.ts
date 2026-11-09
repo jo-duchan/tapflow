@@ -111,22 +111,22 @@ export const INBOUND_DISPOSITION = {
       + 'dashboard/AGENTS.md has the three reasons in full.',
   },
   'input:type-done': {
-    ignored: 'Nothing here sends `input:type` — it is an MCP and flow-runner path. If a reply arrives '
-      + 'anyway (the relay routes to whoever holds the session), there is no pending typed text to '
-      + 'settle, so there is nothing to do with a success.',
+    ignored: 'The viewer sends no `input:type`. Flow Capture\'s dialog does, through flow-runner\'s session '
+      + 'channel (`lib/flowCapture/channel.ts`), which reads the reply by its requestId; the viewer has no '
+      + 'typed text pending, so there is nothing for it to settle.',
   },
   'input:type-error': {
-    ignored: 'Same path as `input:type-done`: no `input:type` is sent from here, so a failure belongs to '
-      + 'a caller that is not this tab. Reporting it would attribute someone else\'s failed keystrokes '
-      + 'to the tester looking at the screen.',
+    ignored: 'Same path as `input:type-done`: the dialog\'s channel turns the failure into the step\'s, '
+      + 'where it is shown. Reported here too, it would be said twice, once outside the dialog where a '
+      + 'screen reader does not hear it.',
   },
   'app:clear-state-done': {
-    ignored: 'The dashboard offers no clear-state action — resets go through `device:boot` with '
-      + '`resetMode`. Nothing is waiting on this.',
+    ignored: 'The viewer offers no clear-state action; resets go through `device:boot` with `resetMode`. '
+      + 'Flow Capture\'s dialog clears the app before it replays, through its channel, which reads this.',
   },
   'app:clear-state-error': {
-    ignored: 'Same as `app:clear-state-done`. A failure for a request this tab did not make has no place '
-      + 'to be shown.',
+    ignored: 'Same as `app:clear-state-done`: the dialog\'s channel reports it as the replay\'s failure, '
+      + 'in the dialog.',
   },
   'session:deviceInfo': {
     ignored: 'No consumer here: the viewer takes device name and OS from `agents:listed` instead. The only '

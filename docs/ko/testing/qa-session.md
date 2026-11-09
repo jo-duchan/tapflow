@@ -101,6 +101,7 @@ tapflow 밖에서 기기를 껐다 켰다면(Simulator.app 종료 등) 돌아갈
 | [스크린샷](/ko/testing/screenshots-and-recordings#screenshots) | 기기 화면을 PNG로 내려받습니다. |
 | [녹화](/ko/testing/screenshots-and-recordings#recordings) | 기기 화면을 영상으로 녹화해 팀과 공유합니다. |
 | [댓글](/ko/testing/comments) | 빌드에 글과 이미지를 남깁니다. |
+| [Flow Capture](/ko/testing/flow-capture) | 세션에서 한 탭, 스와이프, 입력을 플로우 YAML로 저장합니다. |
 | [키보드 단축키](#keyboard-shortcuts) | 자주 쓰는 기능을 단축키로 실행합니다. |
 
 기능 버튼은 기기 오른쪽 툴바에 Navigation(이동), Device(기기 상태), Capture(캡처), Environment(환경) 네 묶음으로 놓여 있습니다. Mac이 지원하지 않는 기능의 버튼은 보이지 않습니다.
@@ -111,6 +112,7 @@ tapflow 밖에서 기기를 껐다 켰다면(Simulator.app 종료 등) 돌아갈
 
 - **Focus**: 키 입력이 기기로 가는 동안 초록색으로 바뀝니다.
 - **fps**: 초당 받는 화면 수입니다. 15를 넘으면 **Active**, 그 이하이면 **Idle**로 표시됩니다. 화면이 멈춰 있으면 수치가 낮은 것이 정상입니다.
+- **Capturing steps** / **Not capturing steps**: [Flow Capture](/ko/testing/flow-capture)가 내 동작을 기록하고 있는지 보여 줍니다.
 - **Smooth** / **Standard**: 이 브라우저가 받는 스트림 프로파일입니다. **Standard**를 누르면 Smooth로 바꾸는 조건을 안내하는 창이 열립니다. 프로파일은 [스트림 품질](/ko/operate/streaming-quality)을 참고하세요.
 
 카드 아래쪽 탭에서 [댓글](/ko/testing/comments)(**Comments**)과 [녹화](/ko/testing/screenshots-and-recordings#recordings)(**Recordings**)를 봅니다.

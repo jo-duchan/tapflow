@@ -101,6 +101,7 @@ If the device was shut down and started again outside tapflow (by quitting Simul
 | [Screenshots](/testing/screenshots-and-recordings#screenshots) | Download the device screen as a PNG. |
 | [Recordings](/testing/screenshots-and-recordings#recordings) | Record the device screen as a video and share it with the team. |
 | [Comments](/testing/comments) | Leave notes and images on the build. |
+| [Flow Capture](/testing/flow-capture) | Save the taps, swipes and typing you did in the session as a flow YAML. |
 | [Keyboard shortcuts](#keyboard-shortcuts) | Run common actions with one key combination. |
 
 The buttons sit in the toolbar to the right of the device, in four groups: Navigation, Device, Capture and Environment. A button for a feature the Mac does not support is not shown.
@@ -111,6 +112,7 @@ The info card to the right of the device shows the session's state.
 
 - **Focus**: turns green while your keystrokes go to the device.
 - **fps**: frames per second arriving. Above 15 it reads **Active**, otherwise **Idle**. A low number is normal while the screen is still.
+- **Capturing steps** / **Not capturing steps**: whether [Flow Capture](/testing/flow-capture) is recording your steps.
 - **Smooth** / **Standard**: the stream profile this browser gets. Click **Standard** for a dialog on what it takes to switch to Smooth. See [Stream quality](/operate/streaming-quality) for the profiles.
 
 The tabs under the card hold [Comments](/testing/comments) (**Comments**) and [Recordings](/testing/screenshots-and-recordings#recordings) (**Recordings**).
