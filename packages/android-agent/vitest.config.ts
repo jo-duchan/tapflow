@@ -12,6 +12,11 @@ export default mergeConfig(sourceFirst, defineConfig({
       // 100, so this turns that refusal off here, where nothing tests it; the relay's and flow-runner's suites test it
       // with reports they make up. Still read from the real Mac: the kernel's memory pressure, which holds a cold boot
       // only at `critical` (`host-memory-critical`), and is never reported off macOS.
+      //
+      // **Not for a test of the refusal itself.** One asserting a join is refused would fail here, and one asserting it
+      // is let in would pass whatever the relay did. The relay reads this once at import, so `vi.stubEnv` cannot bring
+      // it back for one test either. Such a test needs the agent to take a resource sampler it can stub (it builds its
+      // own today).
       TAPFLOW_RESOURCE_THRESHOLD_PERCENT: '100',
     },
   },
