@@ -67,33 +67,51 @@ describe('FlowCaptureDialog', () => {
     expect(within(dialog).getByRole('button', { name: 'Continue' })).toBeEnabled()
   })
 
+  const calls = (fetch: ReturnType<typeof relay>, method: string, path: string) =>
+    fetch.mock.calls.filter(([u, i]) => String(u).endsWith(path) && (i?.method ?? 'GET') === method)
+
   // Review of #1125: the session ended under an open dialog and the viewer unmounted it; nothing gave the relay back
   // its recording, and the pause lease went on renewing from this tab.
-  it('cleans up once when it is taken away without being closed, as when it is closed', async () => {
+  it('gives the relay back its recording once when it is taken away mid-replay', async () => {
     const fetch = relay()
     const returnFocusRef = { current: null as HTMLButtonElement | null }
-    const onClose = vi.fn()
-    const { unmount } = render(withQuery(<FlowCaptureDialog tap={tap} returnFocusRef={returnFocusRef} onClose={onClose} />))
-    await screen.findByRole('dialog', { name: 'Capture flow' })
+    const { unmount } = render(withQuery(<FlowCaptureDialog tap={tap} returnFocusRef={returnFocusRef} onClose={vi.fn()} />))
+    await userEvent.click(await screen.findByRole('button', { name: 'Continue' }))
+    await waitFor(() => expect(calls(fetch, 'PUT', '/capture/pause')).toHaveLength(1))
     unmount()
-    const drops = () => fetch.mock.calls.filter(([u, i]) => String(u).endsWith('/capture/snapshot') && i?.method === 'DELETE')
-    await waitFor(() => expect(drops()).toHaveLength(1))
-    expect(onClose).not.toHaveBeenCalled()
+    await waitFor(() => expect(calls(fetch, 'DELETE', '/capture/pause')).toHaveLength(1))
   })
 
-  // StrictMode runs an effect's cleanup once at mount. Ending the dialog there gave the relay back its recording and
-  // dropped the snapshot while the dialog was still open, and every later step answered nothing.
-  it('stays open under StrictMode, and still cleans up once when taken away', async () => {
+  // Another tab of the same person may hold the pause; a dialog that never asked for it does not give it back.
+  it('gives nothing back when it never replayed', async () => {
     const fetch = relay()
     const returnFocusRef = { current: null as HTMLButtonElement | null }
-    const { unmount } = render(<StrictMode>{withQuery(<FlowCaptureDialog tap={tap} returnFocusRef={returnFocusRef} onClose={vi.fn()} />)}</StrictMode>)
-    const dialog = await screen.findByRole('dialog', { name: 'Capture flow' })
-    expect(await within(dialog).findByText('2 steps · #2 – #3')).toBeInTheDocument()
-    await new Promise((r) => setTimeout(r, 10))
-    const drops = () => fetch.mock.calls.filter(([u, i]) => String(u).endsWith('/capture/snapshot') && i?.method === 'DELETE')
-    expect(drops()).toHaveLength(0)
+    const { unmount } = render(withQuery(<FlowCaptureDialog tap={tap} returnFocusRef={returnFocusRef} onClose={vi.fn()} />))
+    await screen.findByRole('button', { name: 'Continue' })
     unmount()
-    await waitFor(() => expect(drops()).toHaveLength(1))
+    await new Promise((r) => setTimeout(r, 10))
+    expect(calls(fetch, 'DELETE', '/capture/pause')).toHaveLength(0)
+  })
+
+  // StrictMode runs an effect's cleanup once at mount. Made during render and ended in that cleanup, the dialog's
+  // channel was closed before the person pressed anything, and the replay failed on it.
+  it('replays under StrictMode, and gives the relay back its recording once when taken away', async () => {
+    const fetch = relay()
+    // Listening to the viewer is what a closed channel stops doing: every answer the replay waits for comes this way.
+    const listeners = new Set<unknown>()
+    const listened: CaptureTap = { ...tap, subscribe: (h) => { listeners.add(h); return () => listeners.delete(h) } }
+    const returnFocusRef = { current: null as HTMLButtonElement | null }
+    const { unmount } = render(<StrictMode>{withQuery(<FlowCaptureDialog tap={listened} returnFocusRef={returnFocusRef} onClose={vi.fn()} />)}</StrictMode>)
+    await userEvent.click(await screen.findByRole('button', { name: 'Continue' }))
+    expect(await screen.findByRole('button', { name: 'Stop' })).toBeInTheDocument()
+    await waitFor(() => expect(calls(fetch, 'PUT', '/capture/pause')).toHaveLength(1))
+    await new Promise((r) => setTimeout(r, 10))
+    expect(screen.queryByText(/closed/)).toBeNull()
+    expect(calls(fetch, 'DELETE', '/capture/pause')).toHaveLength(0)
+    expect(listeners.size).toBe(1)
+    unmount()
+    await waitFor(() => expect(calls(fetch, 'DELETE', '/capture/pause')).toHaveLength(1))
+    expect(listeners.size).toBe(0)
   })
 
   it('says nothing was captured when the capture holds no step, only a turn of the device', async () => {
@@ -160,16 +178,13 @@ describe('FlowCaptureDialog', () => {
     expect(screen.getByText('3 steps · #1 – #3')).toBeInTheDocument()
   })
 
-  it('gives the relay back its recording and drops the copy on Cancel', async () => {
-    const fetchMock = relay()
+  // The dialog only asks to be closed; what it opened ends when the viewer takes it away (above), and the copy of the
+  // steps is the viewer's to drop (DeviceViewer.inputError.test.tsx).
+  it('asks to be closed on Cancel', async () => {
+    relay()
     const onClose = open()
     await userEvent.click(await screen.findByRole('button', { name: 'Cancel' }))
     expect(onClose).toHaveBeenCalledTimes(1)
-    await waitFor(() => {
-      const calls = fetchMock.mock.calls.map(([u, i]) => `${i?.method ?? 'GET'} ${String(u)}`)
-      expect(calls).toContain('DELETE /api/v1/sessions/s1/capture/pause')
-      expect(calls).toContain('DELETE /api/v1/sessions/s1/capture/snapshot')
-    })
   })
 })
 

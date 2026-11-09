@@ -1,4 +1,4 @@
-import { useEffect, useReducer, useRef, useState, type MutableRefObject } from 'react'
+import { useEffect, useReducer, useRef, useState, type MutableRefObject, type RefObject } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { isSecretName, toFlowSteps } from '@tapflowio/flow-runner/browser'
 import type { CaptureSnapshot } from '@tapflowio/protocol/capture'
@@ -10,7 +10,7 @@ import { DashboardSessionChannel } from '@/lib/flowCapture/channel'
 import { copy } from '@/lib/flowCapture/copy'
 import { editedCapture, flowOf } from '@/lib/flowCapture/flow'
 import { canGoTo, initialState, reachedStep, reduce, stepIndex, type CaptureState } from '@/lib/flowCapture/machine'
-import { DialogRun, dropSnapshot, loadSnapshot, matchRange, PauseLease, stepsOf, verifyFlow } from '@/lib/flowCapture/runner'
+import { DialogRun, loadSnapshot, matchRange, PauseLease, stepsOf, verifyFlow } from '@/lib/flowCapture/runner'
 import type { CaptureTap } from '@/lib/flowCapture/tap'
 import { EditScreen, ExportScreen, MatchScreen, RangeScreen, VerifyScreen } from './screens'
 
@@ -19,12 +19,21 @@ import { EditScreen, ExportScreen, MatchScreen, RangeScreen, VerifyScreen } from
  * handed back as a flow file. Opened by state from the toolbar's Capture flow button, which is also where focus goes
  * back. Its own chunk — it brings flow-runner's engine.
  */
-/** Stop the run, give the relay back its recording, drop the copy of the steps, and free what the dialog made. Once. */
-function endDialog(run: DialogRun, lease: PauseLease, channel: DashboardSessionChannel, tap: CaptureTap): void {
-  if (!run.end()) return
+/** What the dialog opens on the viewer's socket and the relay: made by an effect and ended by its cleanup. */
+interface DialogSession {
+  channel: DashboardSessionChannel
+  lease: PauseLease
+  run: DialogRun
+}
+
+function openSession(tap: CaptureTap): DialogSession {
+  return { channel: new DashboardSessionChannel(tap), lease: new PauseLease(tap), run: new DialogRun() }
+}
+
+/** Stop the run, give the relay back its recording if this session asked for the pause, and free what it made. */
+function endSession({ channel, lease, run }: DialogSession): void {
   run.abort()
   void lease.stop()
-  void dropSnapshot(tap)
   channel.close()
   run.release()
 }
@@ -35,9 +44,6 @@ export default function FlowCaptureDialog({ tap, returnFocusRef, onClose }: {
   onClose: () => void
 }) {
   const [openedAt] = useState(() => Date.now())
-  const [channel] = useState(() => new DashboardSessionChannel(tap))
-  const [lease] = useState(() => new PauseLease(tap))
-  const [run] = useState(() => new DialogRun())
   const [busy, setBusy] = useState(false)
 
   const build = useQuery({ queryKey: queryKeys.build(tap.buildId), queryFn: () => getBuild(tap.buildId) })
@@ -48,25 +54,23 @@ export default function FlowCaptureDialog({ tap, returnFocusRef, onClose }: {
     staleTime: Infinity, gcTime: 0, refetchOnWindowFocus: false,
   })
 
-  // Every way out runs the same cleanup: Escape, the ✕, Cancel, Done. Stopping a run first, then giving the relay
-  // back its recording and dropping the copy, which holds what was typed.
-  const close = () => {
-    endDialog(run, lease, channel, tap)
-    onClose()
-  }
-  // And when the dialog is taken away without closing: the session ended under it, and the viewer unmounted. Left, the
-  // lease went on renewing the pause every 10 s from this tab, and a second tab of the same person on the same session
-  // recorded nothing (review of #1125). A tick later, and called off by a setup that follows: StrictMode runs this
-  // cleanup once at mount in development, and ending then closed the channel the dialog goes on to use.
-  const pendingEnd = useRef<ReturnType<typeof setTimeout> | null>(null)
+  // Made in the effect and ended in its cleanup, so they pair. Built during render instead, StrictMode's mount-time
+  // cleanup ended a session the dialog went on using, and the channel subscribed to the viewer from render. Every way
+  // out goes through the cleanup: Escape, the ✕, Cancel and Done close the dialog, and the viewer unmounts it, as it
+  // does when the session ends under it (review of #1125: left, the lease renewed the pause from this tab). The copy
+  // of the steps is the opening's, not this component's: the viewer drops it.
+  const session = useRef<DialogSession | null>(null)
   useEffect(() => {
-    if (pendingEnd.current) clearTimeout(pendingEnd.current)
-    pendingEnd.current = null
-    return () => { pendingEnd.current = setTimeout(() => endDialog(run, lease, channel, tap), 0) }
-  }, [run, lease, channel, tap])
+    const opened = openSession(tap)
+    session.current = opened
+    return () => {
+      endSession(opened)
+      if (session.current === opened) session.current = null
+    }
+  }, [tap])
 
   return (
-    <Dialog open onOpenChange={(open) => { if (!open) close() }}>
+    <Dialog open onOpenChange={(open) => { if (!open) onClose() }}>
       <DialogContent
         size="xl"
         className="max-h-[calc(100dvh-4rem)] grid-rows-[auto_auto_minmax(0,1fr)] overflow-hidden"
@@ -88,8 +92,8 @@ export default function FlowCaptureDialog({ tap, returnFocusRef, onClose }: {
           <p role="status" className="text-sm">{copy.nothingCaptured}</p>
         ) : (
           <CaptureSession
-            tap={tap} channel={channel} lease={lease} snapshot={snapshot.data}
-            bundleId={build.data?.bundle_id ?? null} run={run} setBusy={setBusy} close={close}
+            tap={tap} session={session} snapshot={snapshot.data}
+            bundleId={build.data?.bundle_id ?? null} setBusy={setBusy} close={onClose}
           />
         )}
       </DialogContent>
@@ -102,13 +106,12 @@ function initFrom(snapshot: CaptureSnapshot): CaptureState {
   return reduce(initialState, { type: 'loaded', steps, range, name: '' })
 }
 
-function CaptureSession({ tap, channel, lease, snapshot, bundleId, run, setBusy, close }: {
+function CaptureSession({ tap, session, snapshot, bundleId, setBusy, close }: {
   tap: CaptureTap
-  channel: DashboardSessionChannel
-  lease: PauseLease
+  /** Read in handlers only: it is set by the dialog's effect, after the first render. */
+  session: RefObject<DialogSession | null>
   snapshot: CaptureSnapshot
   bundleId: string | null
-  run: DialogRun
   setBusy: (busy: boolean) => void
   close: () => void
 }) {
@@ -117,6 +120,9 @@ function CaptureSession({ tap, channel, lease, snapshot, bundleId, run, setBusy,
   const swapFocus = useFocusAfterSwap<HTMLDivElement>(state.phase, fallback)
 
   const startMatch = () => {
+    const opened = session.current
+    if (!opened) return
+    const { channel, lease, run } = opened
     const signal = run.begin()
     dispatch({ type: 'match-started', total: state.range.end - state.range.start })
     setBusy(true)
@@ -137,7 +143,9 @@ function CaptureSession({ tap, channel, lease, snapshot, bundleId, run, setBusy,
   const flow = flowOf(state, bundleId)
   const startVerify = () => {
     const edited = editedCapture(state)
-    if (!flow || !edited) return
+    const opened = session.current
+    if (!flow || !edited || !opened) return
+    const { channel, lease } = opened
     dispatch({ type: 'verify-started' })
     setBusy(true)
     verifyFlow(tap, channel, lease, flow, edited.secrets, (done) => dispatch({ type: 'verify-step', done }))
@@ -171,7 +179,7 @@ function CaptureSession({ tap, channel, lease, snapshot, bundleId, run, setBusy,
         {state.phase === 'matching' && (
           <MatchScreen
             state={state} tap={tap}
-            onStop={() => run.abort()} onRestart={startMatch} onTakeWhatMatched={takeWhatMatched} stopRef={fallback}
+            onStop={() => session.current?.run.abort()} onRestart={startMatch} onTakeWhatMatched={takeWhatMatched} stopRef={fallback}
           />
         )}
         {state.phase === 'edit' && (

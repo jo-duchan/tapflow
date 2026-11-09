@@ -337,6 +337,12 @@ flow-runner's own `SessionChannel` (`lib/flowCapture/channel.ts`), so a flow ver
 - **The dialog holds the relay's pause on recording while it replays or verifies** (`PauseLease`, a 30 s lease
   renewed every 10 s and before each step). Otherwise its own inputs would be recorded into the capture they come
   from. A tab that dies lets the lease lapse, so the person is not left unrecorded.
+- **What the dialog opens (channel, lease, run) is made by an effect and ended by its cleanup, and the copy of the
+  steps is dropped by the viewer.** Made during render and ended in a cleanup, StrictMode's mount-time cleanup closed
+  a channel the dialog went on using; a deferred cleanup was tried and dropped, since it guessed which unmount was
+  real. The copy outlives the dialog's double mount, so it belongs to the opening — `DeviceViewer` drops it when
+  `captureTap` goes, however the dialog went. The lease gives the pause back only if it asked for it: another tab of
+  the same person may hold it.
 - **The replay is of the flow that will be exported, not of everything the person did.** An install in the range is
   matched (as skipped) but not sent: the flow has none, and replaying one uninstalled the app the replay had just
   launched, leaving every later step to be matched on the home screen.

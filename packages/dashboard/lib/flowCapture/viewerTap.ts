@@ -42,3 +42,8 @@ export function viewerCaptureTap(refs: {
     surface: () => refs.surface.current?.() ?? null,
   }
 }
+
+/** Let the copy of the steps the dialog took go: the relay keeps it until asked, and it holds what was typed. */
+export function dropCaptureSnapshot(sessionId: string): void {
+  void fetch(`/api/v1/sessions/${sessionId}/capture/snapshot`, { method: 'DELETE', credentials: 'include' }).catch(() => {})
+}

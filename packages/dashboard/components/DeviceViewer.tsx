@@ -23,7 +23,7 @@ import { newRequestId } from '@/lib/requestId';
 import { StatsOverlay } from './perf/StatsOverlay';
 import { MetricsPanel } from './perf/MetricsPanel';
 import { toast } from 'sonner';
-import { viewerCaptureTap, type ViewerCaptureState } from '@/lib/flowCapture/viewerTap';
+import { dropCaptureSnapshot, viewerCaptureTap, type ViewerCaptureState } from '@/lib/flowCapture/viewerTap';
 import type { CaptureTap } from '@/lib/flowCapture/tap';
 
 // Its own chunk: the dialog brings flow-runner's engine and `yaml` with it, which a QA session that never captures does
@@ -63,6 +63,13 @@ export function DeviceViewer({ sessionId, deviceId, formFactor, platform = 'ios'
   // what the React Compiler refuses); open exactly while it exists.
   const [captureTap, setCaptureTap] = useState<CaptureTap | null>(null);
   const captureOpen = captureTap !== null;
+  // The copy of the steps a Capture flow dialog takes belongs to this opening, so it goes when the opening ends, however
+  // it ends: closed, taken down with the device, or with this viewer. Not in the dialog: StrictMode mounts that twice,
+  // and the copy outlives that. A cleanup that deletes, not a read, so not a query.
+  useEffect(() => {
+    if (!captureTap) return;
+    return () => dropCaptureSnapshot(captureTap.sessionId);
+  }, [captureTap]);
   const captureListenersRef = useRef(new Set<(msg: BrowserInbound) => void>());
   const captureCloseListenersRef = useRef(new Set<() => void>());
   const captureButtonRef = useRef<HTMLButtonElement | null>(null);

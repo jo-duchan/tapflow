@@ -39,6 +39,7 @@ export class PauseLease {
   private timer: ReturnType<typeof setInterval> | null = null
   private lastOk = 0
   private ttlMs = 30_000
+  private held = false
 
   constructor(private readonly tap: CaptureTap) {}
 
@@ -52,6 +53,7 @@ export class PauseLease {
   }
 
   async start(): Promise<void> {
+    this.held = true
     if (!(await this.renew())) throw new CaptureGone(copy.errors.captureEnded)
     this.timer ??= setInterval(() => { void this.renew() }, RENEW_EVERY_MS)
   }
@@ -65,16 +67,14 @@ export class PauseLease {
   /** Renewed without waiting, for a run that has no step to wait in (verification's start marks). */
   touch(): void { void this.renew() }
 
+  /** Gives the pause back only if this lease asked for it: another tab of the same person may hold it. */
   async stop(): Promise<void> {
     if (this.timer) clearInterval(this.timer)
     this.timer = null
+    if (!this.held) return
+    this.held = false
     await fetch(`${base(this.tap)}/pause`, { method: 'DELETE', credentials: 'include' }).catch(() => {})
   }
-}
-
-/** Let the dialog's snapshot go: the relay keeps it until asked, and it holds what was typed. */
-export async function dropSnapshot(tap: CaptureTap): Promise<void> {
-  await fetch(`${base(tap)}/snapshot`, { method: 'DELETE', credentials: 'include' }).catch(() => {})
 }
 
 /** The chrome the channel holds now: it follows the relay, unlike the viewer's snapshot. */
@@ -179,14 +179,6 @@ export async function verifyFlow(
 export class DialogRun {
   private controller: AbortController | null = null
   private readonly urls = new Set<string>()
-  private ended = false
-
-  /** True the first time only: the dialog's cleanup runs once, whether it was closed or taken away. */
-  end(): boolean {
-    if (this.ended) return false
-    this.ended = true
-    return true
-  }
 
   /** A new run, stopping any before it. */
   begin(): AbortSignal {
