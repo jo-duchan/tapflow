@@ -2742,10 +2742,12 @@ export class IOSAgent implements DeviceAgent, NetworkControlCapability, Posturab
         if (requestId === null) break
         const sessionId = msg.sessionId
         const respond = (body: DeviceKeyboardSetReplyBody) => this.sendMsg({ ...body, sessionId, requestId })
-        const state = this.deviceStates.get(sessionId)
-        if (!state?.booted) { respond({ type: 'device:keyboard-set-error', reason: 'failed', message: 'No booted device' }); break }
         const keyboard = (msg.payload as { keyboard?: unknown } | undefined)?.keyboard
-        void this.setKeyboard(state.deviceId, typeof keyboard === 'string' ? keyboard : undefined).then(respond)
+        // `deviceFor`, not the `booted` flag: a relay reconnect clears the flag while the simulator runs on, and a
+        // replay would then start without the recorded keyboard.
+        void this.deviceFor(sessionId).then((deviceId): Promise<DeviceKeyboardSetReplyBody> | DeviceKeyboardSetReplyBody => (deviceId === undefined
+          ? { type: 'device:keyboard-set-error', reason: 'failed', message: 'No booted device' }
+          : this.setKeyboard(deviceId, typeof keyboard === 'string' ? keyboard : undefined))).then(respond)
         break
       }
       case 'device:keyboard-reset': {
@@ -2791,7 +2793,8 @@ export class IOSAgent implements DeviceAgent, NetworkControlCapability, Posturab
         message: keyboard === undefined ? 'The device lists no keyboard' : `The device has no keyboard ${keyboard}`,
       }
     } catch (e) {
-      return { type: 'device:keyboard-set-error', reason: 'failed', message: e instanceof Error ? e.message : String(e) }
+      // `firstLine`: a failed `simctl spawn` echoes the udid and its whole argv, and this reaches the dashboard.
+      return { type: 'device:keyboard-set-error', reason: 'failed', message: firstLine(e) }
     }
   }
 

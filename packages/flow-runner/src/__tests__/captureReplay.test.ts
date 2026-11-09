@@ -59,6 +59,17 @@ describe('replayStep', () => {
     await outcome
   })
 
+  // Review of #1145: the one input left waiting out its ack on Stop.
+  it('gives up waiting on a field\'s action key when the replay is stopped', async () => {
+    const ch = new MemoryChannel()
+    ch.ack = null
+    const stop = new AbortController()
+    const done = replayStep(ch, 'now', { at: 0, endAt: 0, outcome: 'landed', messages: [], kind: 'imeAction' } as unknown as RawStep, stop.signal)
+    const outcome = expect(done).rejects.toBeDefined()
+    stop.abort()
+    await outcome
+  })
+
   it('sends a swipe as recorded, at its pace, on this session with new correlators', async () => {
     vi.useFakeTimers()
     const [swipe] = segment(recorded([

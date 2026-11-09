@@ -950,6 +950,29 @@ describe('IOSAgent', () => {
       browser.close()
     })
 
+    // Review of #1145: a relay reconnect clears `booted` while the simulator runs on, and the flag alone answered
+    // `No booted device`, so the replay started without the recorded keyboard.
+    it('sets the keyboard for a device that stayed up across a reconnect', async () => {
+      const simctl = mockSimctl(true)
+      const { agent, browser, internals, sent } = await bootedAgent(simctl)
+      for (const state of (agent as unknown as { deviceStates: Map<string, { booted: boolean }> }).deviceStates.values()) state.booted = false
+      internals.handleRelayMessage({ type: 'device:keyboard-set', sessionId: agent.sessionId!, requestId: 'rq-ks3', payload: { keyboard: 'en_US@sw=QWERTY;hw=Automatic' } } as never)
+      await vi.waitFor(() => expect(sent.find((m) => m.requestId === 'rq-ks3')).toMatchObject({ type: 'device:keyboard-set-done' }), { timeout: 2000 })
+      agent.disconnect()
+      browser.close()
+    })
+
+    // The failed command's first line only: node's message goes on with the udid and the whole argv.
+    it('answers a failed set with the first line of the error', async () => {
+      const simctl = mockSimctl(true)
+      ;(simctl.setKeyboardLanguage as ReturnType<typeof vi.fn>).mockRejectedValue(new Error('spawn failed\nCommand failed: xcrun simctl spawn dev-1 defaults read -g AppleKeyboards'))
+      const { agent, browser, internals, sent } = await bootedAgent(simctl)
+      internals.handleRelayMessage({ type: 'device:keyboard-set', sessionId: agent.sessionId!, requestId: 'rq-ks4', payload: {} } as never)
+      await vi.waitFor(() => expect(sent.find((m) => m.requestId === 'rq-ks4')).toMatchObject({ type: 'device:keyboard-set-error', message: 'spawn failed' }), { timeout: 2000 })
+      agent.disconnect()
+      browser.close()
+    })
+
     it('answers an error for a keyboard the device does not have', async () => {
       const simctl = mockSimctl(true)
       ;(simctl.setKeyboardLanguage as ReturnType<typeof vi.fn>).mockResolvedValue(false)

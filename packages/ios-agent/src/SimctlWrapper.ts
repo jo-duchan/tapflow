@@ -511,8 +511,10 @@ export class SimctlWrapper {
    * `false` when the device has no such keyboard, and nothing is written.
    */
   async setKeyboardLanguage(udid: string, keyboard?: string, timeoutMs?: number): Promise<boolean> {
-    // Each call bounded by `timeoutMs` when given (a run's reset budget); unbounded otherwise, as these always were.
-    const exec = (...args: string[]) => (timeoutMs === undefined ? this.runner.exec(...args) : this.runner.execWithOpts({ timeoutMs }, ...args))
+    // Bounded as a whole by `timeoutMs` when given (a run's reset budget): each call gets what is left of it, so up to
+    // five calls cannot take five budgets. Unbounded otherwise, as these always were.
+    const deadline = timeoutMs === undefined ? undefined : Date.now() + timeoutMs
+    const exec = (...args: string[]) => this.execBy(deadline, ...args)
     const out = await exec('spawn', udid, 'defaults', 'read', '-g', 'AppleKeyboards')
     const keyboards = [...out.matchAll(/"([^"]+)"/g)].map((m) => m[1]!)
     const target = keyboard ?? keyboards[0]
@@ -520,7 +522,7 @@ export class SimctlWrapper {
     const next = keyboards.find((k) => k !== target && !k.startsWith('emoji')) ?? target
     await exec('spawn', udid, 'defaults', 'write', 'com.apple.keyboard.preferences', 'KeyboardLastUsed', target)
     await exec('spawn', udid, 'defaults', 'write', 'com.apple.keyboard.preferences', 'KeyboardsCurrentAndNext', '-array', target, target, next)
-    await this.restartKeyboardDaemon(udid, timeoutMs)
+    await this.restartKeyboardDaemon(udid, deadline)
     return true
   }
 
@@ -536,14 +538,19 @@ export class SimctlWrapper {
   // domain on iOS 26.4 (measured), where `system/com.apple.kbd`, used until #1134, does not exist and failed in silence.
   // The old name is still tried when the new one fails, for an older runtime nobody has measured. Errors are ignored —
   // changes take effect on the next text field focus if the daemon isn't running yet.
-  private async restartKeyboardDaemon(udid: string, timeoutMs?: number): Promise<void> {
+  private async restartKeyboardDaemon(udid: string, deadline?: number): Promise<void> {
     for (const service of ['user/foreground/com.apple.TextInput.kbd', 'system/com.apple.kbd']) {
       try {
-        const args = ['spawn', udid, 'launchctl', 'kickstart', '-k', service]
-        await (timeoutMs === undefined ? this.runner.exec(...args) : this.runner.execWithOpts({ timeoutMs }, ...args))
+        await this.execBy(deadline, 'spawn', udid, 'launchctl', 'kickstart', '-k', service)
         return
       } catch { /* try the next name */ }
     }
+  }
+
+  /** A simctl call that ends by `deadline` (epoch ms), or unbounded without one. */
+  private execBy(deadline: number | undefined, ...args: string[]): Promise<string> {
+    if (deadline === undefined) return this.runner.exec(...args)
+    return this.runner.execWithOpts({ timeoutMs: Math.max(1, deadline - Date.now()) }, ...args)
   }
 
   async rotate(udid: string, orientation: 'portrait' | 'landscapeLeft' | 'landscapeRight' | 'portraitUpsideDown'): Promise<void> {

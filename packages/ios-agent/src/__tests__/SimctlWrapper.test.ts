@@ -593,15 +593,23 @@ describe('SimctlWrapper', () => {
       ])
     })
 
-    it('bounds every call when given a timeout', async () => {
+    // Review of #1145: the budget is for the whole reset, so each call gets what the ones before it left. With the same
+    // timeout for each, five calls could take five budgets while `device:ready` waited on them.
+    it('bounds the calls together when given a timeout, each by what is left', async () => {
+      vi.useFakeTimers({ toFake: ['Date'] })
+      vi.setSystemTime(0)
+      // Each call takes a second.
+      const after = (out: string) => async () => { vi.setSystemTime(Date.now() + 1_000); return out }
       const runner = {
         exec: vi.fn().mockResolvedValue(''),
         execBinary: vi.fn().mockResolvedValue(Buffer.alloc(0)),
-        execWithOpts: vi.fn().mockResolvedValueOnce(LIST).mockResolvedValue(''),
+        execWithOpts: vi.fn().mockImplementationOnce(after(LIST)).mockImplementation(after('')),
       } satisfies SimctlRunner
-      expect(await new SimctlWrapper(runner).setKeyboardLanguage('device-1', undefined, 5_000)).toBe(true)
+      try {
+        expect(await new SimctlWrapper(runner).setKeyboardLanguage('device-1', undefined, 5_000)).toBe(true)
+      } finally { vi.useRealTimers() }
       expect(runner.exec).not.toHaveBeenCalled()
-      expect(runner.execWithOpts.mock.calls.map(([opts]) => opts)).toEqual([{ timeoutMs: 5_000 }, { timeoutMs: 5_000 }, { timeoutMs: 5_000 }, { timeoutMs: 5_000 }])
+      expect(runner.execWithOpts.mock.calls.map(([opts]) => opts)).toEqual([{ timeoutMs: 5_000 }, { timeoutMs: 4_000 }, { timeoutMs: 3_000 }, { timeoutMs: 2_000 }])
     })
 
     it('writes nothing for a keyboard the device does not have', async () => {

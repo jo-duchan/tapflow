@@ -133,7 +133,9 @@ function CaptureSession({ tap, session, snapshot, bundleId, setBusy, close }: {
     const chrome = tap.chrome()
     const o = chrome ? chromeOrientation(chrome) : undefined
     if (o !== undefined && o !== 'portrait') return
-    setMarks((m) => addMark(m, ++markId.current, mark))
+    // The id is taken here, not in the updater, which React may run twice.
+    const id = ++markId.current
+    setMarks((m) => addMark(m, id, mark))
   }
 
   // The keyboard language the range was recorded in, which both replays start from (#1135).

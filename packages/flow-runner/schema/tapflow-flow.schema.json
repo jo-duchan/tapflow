@@ -106,7 +106,7 @@
               "oneOf": [{ "$ref": "#/definitions/selector" }, { "$ref": "#/definitions/point" }]
             },
             "inputText": {
-              "description": "Type into the focused input; { text, replace: true } to replace what the field holds instead (iOS only); or { secret: NAME } to type a value given to the run (tapflow flow run --secret NAME) that is never written in the flow.",
+              "description": "Type into the focused input; { text, replace: true } to replace what the field holds instead (on Android, 13 or later); or { secret: NAME } to type a value given to the run (tapflow flow run --secret NAME) that is never written in the flow.",
               "oneOf": [
                 { "type": "string" },
                 {

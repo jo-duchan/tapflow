@@ -74,7 +74,7 @@ export async function replayStep(channel: ReplayChannel, sessionId: string, raw:
       await channel.replayInputs(sessionId, raw.messages as Array<{ at: number; msg: ReplayInput }>, signal)
       return 'replayed'
     case 'paste': await untilAborted(channel.pasteText(sessionId, raw.text), signal); return 'replayed'
-    case 'imeAction': await channel.pressKey(sessionId, IME_ACTION); return 'replayed'
+    case 'imeAction': await untilAborted(channel.pressKey(sessionId, IME_ACTION), signal); return 'replayed'
     case 'type': await untilAborted(channel.typeText(sessionId, raw.text), signal); return 'replayed'
     case 'launch': {
       const msg = raw.messages[0]!.msg

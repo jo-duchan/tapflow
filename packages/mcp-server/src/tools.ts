@@ -502,7 +502,7 @@ export function registerTools(server: McpServer, client: TapflowClient): void {
         'Replay a tapflow flow (YAML) deterministically — no LLM in the loop. Use this for verified scenarios instead of ' +
         'tapping step by step: author the flow once, then replay it idempotently. Pass the YAML inline via "flow", or a ' +
         'file path via "path" (resolved from the MCP server process cwd). Steps: clearState / launchApp / tapOn / ' +
-        'inputText / pressKey / swipe / scroll / openUrl / assertVisible / assertNotVisible / pressButton / ' +
+        'inputText / pressKey / imeAction / swipe / scroll / openUrl / assertVisible / assertNotVisible / pressButton / ' +
         'longPressOn / pinch / setOrientation / setPosture; scroll: { until: <selector> } scrolls to an element. launchApp launches the ' +
         'buildId argument. When buildId is set, the build is installed before replaying (like `tapflow flow run --build`) ' +
         'so clearState/launchApp have the app present — pass install:false to skip. A flow whose appId differs from ' +

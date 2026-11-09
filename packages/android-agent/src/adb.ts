@@ -49,6 +49,9 @@ export const defaultRunner: AdbRunner = {
         if (err) reject(Object.assign(err, { stdout }))
         else resolve(stdout)
       })
+      // adb can exit before it reads stdin, and the EPIPE that follows, with no listener, would end the whole agent.
+      // The callback above still settles the promise, so the stream's error says nothing it does not.
+      child.stdin?.on('error', () => {})
       child.stdin?.end(input)
     })
   },
