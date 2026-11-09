@@ -11,6 +11,7 @@
 
 import { describe, it, expect } from 'vitest'
 import { render, screen } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
 import type { ComponentProps } from 'react'
 import { SimulatorInfoCard } from '@/components/device/shared/SimulatorInfoCard'
 
@@ -114,18 +115,26 @@ describe('SimulatorInfoCard — whether keys go to the device (#747)', () => {
 })
 
 describe('SimulatorInfoCard — whether steps are being captured (#1125)', () => {
-  // The chip is a state, not a control: the setting lives in the account menu, so the card offers nothing to press.
-  it('says so either way, in words', () => {
+  // The chip is a state, not a control: the setting lives in Settings › Default, so the card offers nothing to press,
+  // only a name that says where to change it. Short, so it fits its half of the card.
+  it('says so either way, in words, and where to change it', () => {
     const { rerender } = render(<SimulatorInfoCard {...healthy({ capturingSteps: true })} />)
-    expect(screen.getByText('Capturing steps')).toBeInTheDocument()
+    expect(screen.getByRole('img', { name: 'Capturing steps. Change it in Settings › Default.' })).toHaveTextContent('Steps·On')
     rerender(<SimulatorInfoCard {...healthy({ capturingSteps: false })} />)
-    expect(screen.getByText('Not capturing steps')).toBeInTheDocument()
+    expect(screen.getByRole('img', { name: 'Not capturing steps. Change it in Settings › Default.' })).toHaveTextContent('Steps·Off')
     expect(screen.queryByRole('button', { name: /capturing/i })).toBeNull()
+  })
+
+  it('opens its tooltip from the keyboard', async () => {
+    render(<SimulatorInfoCard {...healthy({ capturingSteps: false })} />)
+    await userEvent.tab()
+    expect(screen.getByRole('img', { name: /Not capturing steps/ })).toHaveFocus()
+    expect(await screen.findByRole('tooltip')).toHaveTextContent('Change it in Settings › Default.')
   })
 
   // A relay that predates the setting sends no `flowCapture`; claiming either state there would be a guess.
   it('shows nothing when the relay does not say', () => {
     render(<SimulatorInfoCard {...healthy()} />)
-    expect(screen.queryByText(/capturing steps/i)).toBeNull()
+    expect(screen.queryByRole('img', { name: /capturing steps/i })).toBeNull()
   })
 })

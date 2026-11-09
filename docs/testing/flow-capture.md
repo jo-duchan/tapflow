@@ -13,7 +13,7 @@ Save the taps, swipes and typing you did in a [QA Session](/testing/qa-session) 
 
 ### 1. Turn on step capturing {#turn-on}
 
-Click your name at the bottom of the sidebar and check that **Capture my steps** is ticked. While it is, your taps, swipes and key presses in a QA Session are kept in the memory of the relay (the server that connects the dashboard and the agents). The session's info card shows **Capturing steps** while it records and **Not capturing steps** when it is off.
+Click your name at the bottom of the sidebar, choose **Settings**, and check that **Capture my steps** is on in the **Flow Capture** card. While it is, your taps, swipes and key presses in a QA Session are kept in the memory of the relay (the server that connects the dashboard and the agents). The session's info card shows **Steps · On** while it records and **Steps · Off** when it is off.
 
 Test as usual. A run you want to keep as a flow is easier to pick out later if you start it with the toolbar's **Launch app** button.
 
@@ -94,7 +94,7 @@ The file name (`flows/<name>.yaml`) and the YAML are shown.
 
 | Symptom | Cause and fix |
 |---|---|
-| There is no **Capture flow** button in the toolbar. | **Capture my steps** is off, or the session was opened without a build. If the info card shows **Not capturing steps**, turn it on in the menu. |
+| There is no **Capture flow** button in the toolbar. | **Capture my steps** is off, or the session was opened without a build. If the info card shows **Steps · Off**, turn it on in the **Flow Capture** card in **Settings → Default**. |
 | **No steps have been captured on this device yet.** | No steps were recorded on this device. Turn on **Capture my steps** and test. |
 | **Your captured steps are gone: the device was released or restarted.** | The device was shut down or restarted, which cleared the capture. Test again to record it. |
 | **The connection to the relay was lost. Start again once it is back.** | The connection to the relay dropped. Click **Start again** once it is back. |

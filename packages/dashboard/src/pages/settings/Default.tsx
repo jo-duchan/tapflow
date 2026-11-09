@@ -20,6 +20,7 @@ import { avatarColors } from '@/lib/avatar'
 import { useAuth } from '@/hooks/useAuth'
 import { VideoStorageCard } from '@/components/settings/VideoStorageCard'
 import { AppsCard } from '@/components/settings/AppsCard'
+import { FlowCaptureCard } from '@/components/settings/FlowCaptureCard'
 
 
 const workspaceSchema = z.object({
@@ -262,6 +263,9 @@ export function DefaultSettings() {
           </form>
         </CardContent>
       </Card>
+
+      {/* Flow Capture — everyone; absent from a relay that predates it (#1125), which has nothing to turn off */}
+      {user?.flowCapture !== undefined && <FlowCaptureCard flowCapture={user.flowCapture} />}
 
       {/* Password — everyone */}
       <Card>

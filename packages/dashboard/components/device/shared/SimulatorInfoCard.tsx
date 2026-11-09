@@ -3,6 +3,7 @@
 import { useMemo, useState } from 'react';
 import { ScanLine } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { performanceMode } from '@/lib/decoders/pickDecoder';
 import { PerformanceModeNotice } from '@/components/perf/PerformanceModeNotice';
 import { shouldAutoShowPerfNotice, PERF_NOTICE_KEY } from '@/lib/perfNotice';
@@ -40,11 +41,12 @@ interface SimulatorInfoCardProps {
    *  it is not a transition, and announcing it would only repeat what is on screen. */
   note?: string;
   /** Flow Capture (#1125): whether the relay is keeping this person's steps, by their own setting. A state only —
-   *  the setting is changed in the account menu. Absent shows no chip, for a relay that predates it. */
+   *  the setting is changed in Settings › Default. Absent shows no chip, for a relay that predates it. */
   capturingSteps?: boolean;
 }
 
 /** One cell of the card's grid. Figma `tapflow-product` 284:2 (287:611). */
+const STEPS_SETTING = 'Change it in Settings › Default.';
 const CHIP = 'flex min-w-0 items-center gap-1.5 rounded bg-muted px-2.5 py-[5px] text-[11px] leading-[18px] text-muted-foreground';
 
 function getStatusText(props: SimulatorInfoCardProps): string | null {
@@ -110,14 +112,32 @@ export function SimulatorInfoCard(props: SimulatorInfoCardProps) {
           <span className={keyboardActive ? 'text-emerald-500' : 'text-muted-foreground/60'}>{keyboardActive ? 'On' : 'Off'}</span>
         </div>
         {props.capturingSteps !== undefined && (
-          // A different look from the screen recording's red dot on purpose: this records steps, not video.
-          <div className={CHIP}>
-            <span
-              aria-hidden="true"
-              className={cn('h-2 w-2 shrink-0 rounded-full', props.capturingSteps ? 'bg-amber-400' : 'bg-muted-foreground/40')}
-            />
-            <span>{props.capturingSteps ? 'Capturing steps' : 'Not capturing steps'}</span>
-          </div>
+          // A different look from the screen recording's red dot on purpose: this records steps, not video. Worded like
+          // Focus beside it, short enough for its half of the card: "Not capturing steps" wrapped and broke the grid.
+          // A state, not a control: the setting is personal and lives in Settings › Default, which the tooltip names.
+          // Focusable so the tooltip opens for a keyboard too; a focused element needs a role and a name, so it is an
+          // image named with the same words (as BuildRow's Edited badge).
+          <TooltipProvider delayDuration={400}>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <div
+                  className={CHIP}
+                  tabIndex={0}
+                  role="img"
+                  aria-label={`${props.capturingSteps ? 'Capturing steps' : 'Not capturing steps'}. ${STEPS_SETTING}`}
+                >
+                  <span
+                    aria-hidden="true"
+                    className={cn('h-2 w-2 shrink-0 rounded-full', props.capturingSteps ? 'bg-amber-400' : 'bg-muted-foreground/40')}
+                  />
+                  <span>Steps</span>
+                  <span aria-hidden="true" className="text-muted-foreground/60">·</span>
+                  <span className={props.capturingSteps ? 'text-foreground/75' : 'text-muted-foreground/60'}>{props.capturingSteps ? 'On' : 'Off'}</span>
+                </div>
+              </TooltipTrigger>
+              <TooltipContent>{props.capturingSteps ? 'Capturing steps' : 'Not capturing steps'}. {STEPS_SETTING}</TooltipContent>
+            </Tooltip>
+          </TooltipProvider>
         )}
 
         {joined && (
