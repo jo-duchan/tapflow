@@ -340,6 +340,16 @@ describe('matchStep', () => {
       expect(matchStep(text!, plain).fragile).toBeUndefined()
     })
 
+    // Review of #1143: with no field read in the whole capture (an agent without `field-value`, a Mac over its memory
+    // line), the segmenter marks nothing, and iOS's guess went out unmarked.
+    it('marks an iOS run the relay never read as a guess, and leaves Android\'s alone', () => {
+      const field0 = [field({ focused: true, secure: false })]
+      expect(matchStep(text!, ctxOf(field0, { platform: 'ios' })).fragile).toBe('field-unread')
+      expect(matchStep(text!, ctxOf(field0, { platform: 'android' })).fragile).toBeUndefined()
+      expect(matchStep({ ...text!, text: '안녕', replace: true } as RawStep, ctxOf(field0, { platform: 'ios' })).fragile).toBeUndefined()
+      expect(matchStep({ ...text!, fieldRead: 'secure' } as RawStep, ctxOf([field({ focused: true, secure: true })], { platform: 'ios' })).fragile).toBeUndefined()
+    })
+
     it('keeps it out when no field has focus', () => {
       expect(matchStep(text!, ctxOf([field({ secure: false })])).secret).toBeDefined()
     })

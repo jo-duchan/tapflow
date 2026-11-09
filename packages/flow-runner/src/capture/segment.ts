@@ -43,7 +43,8 @@ export type RawStep = StepBase & (
    * - otherwise, `text` is the keys read on a US layout — right on Android, whose agent types them from that table, and
    *   a guess on iOS, where the device's IME decides. `fieldRead` says whether a read was tried: `unread` when the
    *   agent reads fields but none was usable (the warning is the reader's), `secure` for a field that never shows its
-   *   value. Absent: no read was tried, as on Android.
+   *   value. Absent: no read was tried, as on Android, or as on iOS when the relay read no field at all (the matcher
+   *   warns there, by platform).
    */
   | { kind: 'text'; text: string; replace?: true; fieldRead?: 'unread' | 'secure' }
   /** A key that types no character — Enter, Tab, Backspace, an arrow — or a chord. */
