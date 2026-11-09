@@ -42,6 +42,9 @@ function relayUrl(): string {
 export function useRelay(
   onMessage: (msg: BrowserInbound) => void,
   onBinaryFrame?: (data: ArrayBuffer) => void,
+  /** Called the moment the socket closes, before `connected` re-renders: Flow Capture's channel fails its waiters
+   *  then, rather than one render later (#1125). */
+  onClose?: () => void,
 ) {
   const ws = useRef<WebSocket | null>(null)
   const [connected, setConnected] = useState(false)
@@ -52,10 +55,12 @@ export function useRelay(
   // task can interleave.
   const onMessageRef = useRef(onMessage)
   const onBinaryFrameRef = useRef(onBinaryFrame)
+  const onCloseRef = useRef(onClose)
   useLayoutEffect(() => {
     onMessageRef.current = onMessage
     onBinaryFrameRef.current = onBinaryFrame
-  }, [onMessage, onBinaryFrame])
+    onCloseRef.current = onClose
+  }, [onMessage, onBinaryFrame, onClose])
 
   useEffect(() => {
     let cancelled = false
@@ -70,6 +75,7 @@ export function useRelay(
       socket.onopen = () => setConnected(true)
 
       socket.onclose = () => {
+        onCloseRef.current?.()
         setConnected(false)
         if (!cancelled) setTimeout(connect, RECONNECT_DELAY)
       }
@@ -93,10 +99,11 @@ export function useRelay(
     }
   }, [])
 
-  const send = useCallback((msg: BrowserToRelay) => {
-    if (ws.current?.readyState === WebSocket.OPEN) {
-      ws.current.send(JSON.stringify(msg))
-    }
+  /** Whether the message went out: `false` while the socket is not open, when it is dropped rather than queued. */
+  const send = useCallback((msg: BrowserToRelay): boolean => {
+    if (ws.current?.readyState !== WebSocket.OPEN) return false
+    ws.current.send(JSON.stringify(msg))
+    return true
   }, [])
 
   return { send, connected }

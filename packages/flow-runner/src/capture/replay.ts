@@ -1,4 +1,5 @@
 import type { ReplayInput, SessionChannel } from '../sessionChannel.js'
+import { InputRefusedError } from '../sessionErrors.js'
 import type { ChromePayload } from '@tapflowio/protocol'
 import { chromeOrientation } from '@tapflowio/protocol/screen'
 import type { RawStep } from './segment.js'
@@ -13,7 +14,7 @@ export type ReplayOutcome = 'replayed' | 'refused-before' | 'not-replayed'
 
 /**
  * Send one recorded action again, on `sessionId`. Gestures, keys, held buttons, turns and folds go as they were
- * recorded, at their recorded pace (`replayInputs`); the rest through the channel's own requests, so their meaning is
+ * recorded, at their recorded pace (`replayInputs`); typed text as the flow's `inputText` types it (below); the rest through the channel's own requests, so their meaning is
  * the request's and not the recording's — an install installs fresh even when the viewer had asked to keep the app,
  * as a dashboard coming back to a device does, because a flow starts from a clean app.
  *
@@ -22,17 +23,49 @@ export type ReplayOutcome = 'replayed' | 'refused-before' | 'not-replayed'
  * toggle. A turn is replayed as recorded and may be relative (`direction`), so the host first puts the device in
  * `rangeStartOrientation` — from another orientation every point after the turn would land somewhere else.
  */
+/**
+ * `work`, given up on when `signal` aborts. Typing has no signal of its own (it waits up to 15 s for the agent's answer),
+ * so Stop during a text step sat until the agent answered (review of #1125). What was sent is not taken back: the
+ * device may still type it; only the wait ends.
+ */
+function untilAborted<T>(work: Promise<T>, signal: AbortSignal | undefined): Promise<T> {
+  if (!signal) return work
+  signal.throwIfAborted()
+  return new Promise<T>((resolve, reject) => {
+    const onAbort = () => reject(signal.reason)
+    signal.addEventListener('abort', onAbort, { once: true })
+    work.then(resolve, reject).finally(() => signal.removeEventListener('abort', onAbort))
+  })
+}
+
 export async function replayStep(channel: ReplayChannel, sessionId: string, raw: RawStep, signal?: AbortSignal): Promise<ReplayOutcome> {
   // Checked first: a launch, an install or a clear-state after a cancel would wipe the app the person left.
   signal?.throwIfAborted()
   if (raw.outcome === 'refused') return 'refused-before'
   switch (raw.kind) {
-    case 'tap': case 'longPress': case 'swipe': case 'holdDrag': case 'pinch': case 'text': case 'key': case 'button':
+    // Typed as the flow types it, not as keys: a key code becomes a character by the device's keyboard layout, and an
+    // iOS simulator takes that from the Mac's input source at the moment it arrives (Simulator's "Use the Same Keyboard
+    // Language as macOS", on by default). Measured: `a@b.com` typed while the Mac was set to English replayed as
+    // `ㅁ@ㅠ.채ㅡ` once it was set to Korean, and every step after it was matched on a screen the flow never makes. A
+    // device that refuses the text gets the keys, as recorded.
+    //
+    // A run typed with Caps Lock in force is typed as text too, though its text is a guess (`capsLock`). Its keys would
+    // type by the language the device is left in, which nothing resets between replays: measured, two Matches of one
+    // recording typed `aㅁaㅁ` and `ㅁAㅁa`. A wrong guess the same every time beats a right one by chance.
+    case 'text':
+      try {
+        await untilAborted(channel.typeText(sessionId, raw.text), signal)
+      } catch (e) {
+        if (!(e instanceof InputRefusedError)) throw e
+        await channel.replayInputs(sessionId, raw.messages as Array<{ at: number; msg: ReplayInput }>, signal)
+      }
+      return 'replayed'
+    case 'tap': case 'longPress': case 'swipe': case 'holdDrag': case 'pinch': case 'key': case 'button':
     case 'rotate': case 'posture':
       await channel.replayInputs(sessionId, raw.messages as Array<{ at: number; msg: ReplayInput }>, signal)
       return 'replayed'
-    case 'paste': await channel.pasteText(sessionId, raw.text); return 'replayed'
-    case 'type': await channel.typeText(sessionId, raw.text); return 'replayed'
+    case 'paste': await untilAborted(channel.pasteText(sessionId, raw.text), signal); return 'replayed'
+    case 'type': await untilAborted(channel.typeText(sessionId, raw.text), signal); return 'replayed'
     case 'launch': {
       const msg = raw.messages[0]!.msg
       const options = msg.type === 'app:launch' && (msg.arguments || msg.env)

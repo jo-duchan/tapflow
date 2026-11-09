@@ -51,8 +51,9 @@ at desktop width, where the header is left-aligned and the corners are 8px.
 | `sm` | 384px (`max-w-sm`) | 1 | A short form of one to three fields with no description: Add App |
 | `md` | 448px (`max-w-md`) | 5 | A new item's form, a notice, or a result to copy, with or without a description: Invite member, Password reset link, Create token, Upload build, Streaming in Standard mode |
 | `lg` | 512px (`max-w-lg`) | 4 | The default. A form that edits an existing item, with a description or hints under its fields: Edit app, Split, Rename device, Edit build. AlertDialog is always this width |
+| `xl` | 1024px (`max-w-5xl`) | 1 | A multi-step task whose body holds a device screen or a two-column list: Capture flow |
 
-Three sizes rather than a width per dialog (#1084 review). Pick by what the body holds, not by what looks right
+Four sizes rather than a width per dialog (#1084 review; `xl` added for Capture flow, #1125). Pick by what the body holds, not by what looks right
 for one dialog: a new dialog takes the size of the row above whose "For" it matches, and a fourth size is a
 change to this table first. The deeplink bar is outside the scale: it is a command bar, not a panel.
 
@@ -91,6 +92,7 @@ Inside the deeplink bar: a borderless, unfilled field (16px search icon in `--mu
 `text-sm`, placeholder `myapp://home...`) in a 32px row, then 12px, then the `Open` button at `size="sm"`
 overridden to 32px high, 16px side padding and `rounded-xl` (12px).
 | Form and result bodies | `pt-2` | Adds 8px, so the body starts 24px under the title |
+| Capture flow | `max-h-[calc(100dvh-4rem)]` and a body that scrolls inside (the step list, the YAML), never the panel; while a replay or a verification runs, a click on the overlay does nothing and Escape closes it as Stop does | Taller than the viewport with fifty steps; an overlay click mid-replay would end the run by accident |
 
 The deeplink bar is the one dialog that does not look like a dialog. Draw it from the overrides above, not from
 the panel.

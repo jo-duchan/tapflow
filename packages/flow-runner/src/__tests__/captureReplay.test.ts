@@ -8,12 +8,17 @@ import { segment, replayStep, replaySteps, rangeStartOrientation } from '../capt
 class MemoryChannel extends SessionChannel {
   readonly sent: Array<{ t: number; msg: BrowserToRelay }> = []
   ack: 'done' | 'error' | null = 'done'
+  typeAck: 'done' | 'error' | null = 'done'
+  drop(): void { this.connectionLost('the test dropped it') }
   protected send(msg: BrowserToRelay): void {
     this.sent.push({ t: Date.now(), msg })
     const id = 'requestId' in msg ? msg.requestId : undefined
     if (!id || !('sessionId' in msg)) return
     const sessionId = msg.sessionId
-    const reply: RelayMsg | null = msg.type.startsWith('input:')
+    const reply: RelayMsg | null = msg.type === 'input:type'
+      ? (this.typeAck === 'done' ? { type: 'input:type-done', sessionId, requestId: id }
+        : this.typeAck === 'error' ? { type: 'input:type-error', sessionId, requestId: id, reason: 'failed', message: 'not ASCII' } : null)
+      : msg.type.startsWith('input:')
       ? (this.ack === 'done' ? { type: 'input:done', sessionId, requestId: id }
         : this.ack === 'error' ? { type: 'input:error', sessionId, requestId: id, reason: 'failed', message: 'no' } : null)
       : msg.type === 'clipboard:write' ? { type: 'clipboard:write-done', sessionId, requestId: id }
@@ -30,6 +35,18 @@ const recorded = (entries: Array<[number, Record<string, unknown>]>): CaptureEnt
 afterEach(() => { vi.useRealTimers() })
 
 describe('replayStep', () => {
+  // Review of #1125: typing waits up to 15 s for the agent; Stop during a text step sat out that wait.
+  it('gives up waiting on typed text when the replay is stopped', async () => {
+    const [text] = segment(recorded([[1000, { type: 'input:key', requestId: 'k', payload: { code: 'KeyA', modifiers: 0 } }]]))
+    const ch = new MemoryChannel()
+    ch.typeAck = null
+    const stop = new AbortController()
+    const done = replayStep(ch, 'now', text!, stop.signal)
+    const outcome = expect(done).rejects.toBeDefined()
+    stop.abort()
+    await outcome
+  })
+
   it('sends a swipe as recorded, at its pace, on this session with new correlators', async () => {
     vi.useFakeTimers()
     const [swipe] = segment(recorded([
@@ -129,6 +146,49 @@ describe('replayStep', () => {
     const ch = new MemoryChannel()
     await replayStep(ch, 's', install!)
     expect(ch.sent.map((s) => s.msg)).toEqual([{ type: 'app:install', sessionId: 's', requestId: expect.any(String), buildId: 7 }])
+  })
+
+  // The keys' characters depend on the device's layout, which an iOS simulator takes from the Mac's input source.
+  const typed = () => segment(recorded([
+    [0, { type: 'input:key', requestId: 'a', payload: { code: 'KeyA', modifiers: 0 } }],
+    [80, { type: 'input:key', requestId: 'b', payload: { code: 'KeyB', modifiers: 0 } }],
+  ]))
+
+  it('types recorded text as the flow types it, whatever the keyboard layout', async () => {
+    const [text] = typed()
+    expect(text).toMatchObject({ kind: 'text', text: 'ab' })
+    const ch = new MemoryChannel()
+    await expect(replayStep(ch, 's', text!)).resolves.toBe('replayed')
+    expect(ch.sent.map((s) => s.msg)).toEqual([{ type: 'input:type', sessionId: 's', requestId: expect.any(String), payload: { text: 'ab' } }])
+  })
+
+  it('sends the keys as recorded when the device refuses the text', async () => {
+    const [text] = typed()
+    const ch = new MemoryChannel()
+    ch.typeAck = 'error'
+    await expect(replayStep(ch, 's', text!)).resolves.toBe('replayed')
+    expect(ch.sent.map((s) => s.msg.type)).toEqual(['input:type', 'input:key', 'input:key'])
+  })
+
+  it('does not fall back to keys when the text was not refused but lost, so the failure is the connection\'s', async () => {
+    const [text] = typed()
+    const ch = new MemoryChannel()
+    ch.typeAck = null
+    const done = replayStep(ch, 's', text!)
+    ch.drop()
+    await expect(done).rejects.toThrow()
+    expect(ch.sent.map((s) => s.msg.type)).toEqual(['input:type'])
+  })
+
+  it('types a run typed with Caps Lock in force as text too, since its keys type by whatever language the device is left in', async () => {
+    const [text] = segment(recorded([
+      [0, { type: 'input:key', requestId: 'c', payload: { code: 'CapsLock', modifiers: 0 } }],
+      [80, { type: 'input:key', requestId: 'a', payload: { code: 'KeyA', modifiers: 0 } }],
+    ]))
+    expect(text).toMatchObject({ kind: 'text', text: 'a', capsLock: true })
+    const ch = new MemoryChannel()
+    await expect(replayStep(ch, 's', text!)).resolves.toBe('replayed')
+    expect(ch.sent.map((s) => s.msg.type)).toEqual(['input:type'])
   })
 
   it('pastes through the clipboard, as the person did', async () => {

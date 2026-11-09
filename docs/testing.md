@@ -28,6 +28,7 @@ The dashboard is tapflow's web interface. The devices (iOS simulators and Androi
   - [Audio](/testing/audio): hear the device in your browser.
   - [Screenshots & recordings](/testing/screenshots-and-recordings): save the screen as an image or record it as a video.
   - [Comments](/testing/comments): leave notes and images on a build for the team.
+  - [Flow Capture](/testing/flow-capture): save the steps you took in a session as a flow YAML.
 
 ## Moved sections {#moved-sections}
 

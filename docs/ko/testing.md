@@ -28,6 +28,7 @@ description: 팀원이 브라우저로 빌드를 테스트하는 방법입니다
   - [오디오](/ko/testing/audio): 기기 소리를 브라우저에서 듣습니다.
   - [스크린샷과 녹화](/ko/testing/screenshots-and-recordings): 화면을 이미지로 저장하거나 영상으로 녹화합니다.
   - [댓글](/ko/testing/comments): 빌드에 글과 이미지를 남겨 팀과 공유합니다.
+  - [Flow Capture](/ko/testing/flow-capture): 세션에서 한 동작을 플로우 YAML로 저장합니다.
 
 ## 옮겨진 섹션 {#moved-sections}
 

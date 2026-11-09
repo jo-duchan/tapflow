@@ -21,6 +21,10 @@ export const queryKeys = {
   comments: (buildId: number) => ['comments', buildId] as const,
   allRecordings: ['recordings'] as const,
   recordings: (buildId: number) => ['recordings', buildId] as const,
+  /** One build, for what Flow Capture needs of it: the bundle id a captured flow clears and runs (#1125). */
+  build: (id: number) => ['builds', 'detail', id] as const,
+  /** Flow Capture's frozen copy of the steps, one per opening of the dialog: each opening takes a new one. */
+  captureSnapshot: (sessionId: string, openedAt: number) => ['capture', 'snapshot', sessionId, openedAt] as const,
   agents: ['agents'] as const,
   resourceHistory: (agent: string, range: string) => ['agents', agent, 'resources', range] as const,
   /** Every filter is in the key, so changing one never shows another filter's rows as this one's. */

@@ -198,8 +198,9 @@ describe('every form with field errors carries a count', () => {
   const withFieldErrors = files.filter((f) => /<FieldError id=/.test(fs.readFileSync(path.join(root, f), 'utf8')))
 
   it('finds the forms it is about', () => {
-    // Anti-vacuity: the nine forms of #824 live in these seven files.
-    expect(withFieldErrors.length).toBe(7)
+    // Anti-vacuity: the nine forms of #824 live in seven of these files. The eighth is Flow Capture's secret name
+    // (#1125), a field checked as it is typed, with no form to count for.
+    expect(withFieldErrors.length).toBe(8)
   })
 
   it.each(withFieldErrors)('%s', (file) => {

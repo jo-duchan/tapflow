@@ -34,6 +34,7 @@
 - [Audio](https://www.tapflow.dev/testing/audio): Device audio in the browser — on by default on both platforms, the one-time permission, per-agent opt-out with TAPFLOW_AUDIO=off, volume, and why the agent Mac itself stays silent.
 - [Screenshots & recordings](https://www.tapflow.dev/testing/screenshots-and-recordings): ⌘S downloads a PNG locally and never uploads it; ⌘⇧Y records an mp4/webm that is saved to the relay, listed in the build's Recordings tab, and kept for 72 hours.
 - [Comments](https://www.tapflow.dev/testing/comments): A flat, per-build list of notes with png/jpg/webp images up to 5 MB, links to a single comment (need HTTPS to copy), and posting from CI.
+- [Flow Capture](https://www.tapflow.dev/testing/flow-capture): Save the taps, swipes and typing you did in a QA Session as a flow YAML: Capture my steps (on by default), the Capture flow dialog's Range, Match (replays from a clean start), Edit (fragile/auto/not in the flow, secret names), Verify (selectors only, as tapflow flow run) and Export.
 
 ## Operate
 

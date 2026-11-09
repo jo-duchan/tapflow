@@ -17,14 +17,13 @@ const PUNCTUATION: Record<string, [string, string]> = {
  * The character a key press types on a US layout, or `null` when it types none: an editing key, a chord, a key with no
  * character. The table Android's agent types through (`AndroidAgent` `input:key`), so a captured run of these replays
  * as `inputText` with the same characters there. iOS sends the key's HID usage and the simulator's keyboard settles
- * the character, which is the same on a US layout. `capsLock` is the device's Caps Lock as the keys before this one
- * left it.
+ * the character, which is the same on a US layout. Caps Lock is not taken into account: what it does is the device's
+ * to say (see `segment`).
  */
-export function keyChar(code: string, modifiers: number, capsLock = false): string | null {
+export function keyChar(code: string, modifiers: number): string | null {
   if (modifiers & (KEY_CTRL | KEY_ALT | KEY_META)) return null
   const shift = (modifiers & KEY_SHIFT) !== 0
-  // Caps Lock turns letters only, and shift turns them back.
-  if (/^Key[A-Z]$/.test(code)) return shift !== capsLock ? code.slice(3) : code.slice(3).toLowerCase()
+  if (/^Key[A-Z]$/.test(code)) return shift ? code.slice(3) : code.slice(3).toLowerCase()
   if (/^Digit[0-9]$/.test(code)) return shift ? SHIFTED_DIGITS[code.slice(5)]! : code.slice(5)
   const p = Object.hasOwn(PUNCTUATION, code) ? PUNCTUATION[code]! : undefined
   return p ? p[shift ? 1 : 0] : null

@@ -64,6 +64,14 @@ interface AndroidViewerProps {
   /** Flow Capture (#1125): whether the relay is keeping this person's steps — their own setting. Absent shows no
    *  chip (a relay that predates the setting). */
   capturingSteps?: boolean;
+  /** Flow Capture's dialog is open (#1125): nothing typed or pressed here reaches the device while it replays the
+   *  person's steps — a modal dialog stops pointer input, but these shortcuts listen on the window. */
+  captureOpen?: boolean;
+  /** Opens Flow Capture's dialog; absent hides the button (capturing off, or no build to capture against). */
+  onCaptureFlow?: () => void;
+  captureButtonRef?: MutableRefObject<HTMLButtonElement | null>;
+  /** Where Flow Capture's dialog reads the picture it shows the replay on. */
+  captureSurfaceRef?: MutableRefObject<(() => CanvasImageSource | null) | null>;
   screenWidth?: number;
   screenHeight?: number;
   /** Foldable postures from `device:postures`, already in most-closed→most-open order. */
@@ -85,7 +93,7 @@ export function AndroidViewer({
   deviceReady, installing, installed, installError, bootError, bootWaiting, servicesOff,
   launching, androidButtons,
   binaryFrameHandlerRef, clipboardHandlerRef, clipboardSupported, networkHandlerRef, networkSupported, onRecordingUploaded,
-  rebootPending, onReboot, restartButtonRef, capturingSteps,
+  rebootPending, onReboot, restartButtonRef, capturingSteps, captureOpen = false, onCaptureFlow, captureButtonRef, captureSurfaceRef,
   screenWidth, screenHeight, cornerRadius, postures, streamRotation = 0, bodyRotation,
   perfHookRef,
 }: AndroidViewerProps) {
@@ -134,6 +142,11 @@ export function AndroidViewer({
     screenWidth, screenHeight, streamRotation, cornerRadius, userWantsLandscape, rotatePending, bodyRotation, turnsAsked,
   })
   const { surfaceHostRef, containerRef, decoderRef, videoSizeRef, needsCSSRotationRef, screenTurnRef, screenTurn, decoderUnsupported, totalTurn, spinning } = screen
+  useLayoutEffect(() => {
+    if (!captureSurfaceRef) return
+    captureSurfaceRef.current = () => decoderRef.current?.surface ?? null
+    return () => { captureSurfaceRef.current = null }
+  }, [captureSurfaceRef, decoderRef])
   // Read by the pointer handlers, which run between renders.
   const spinningRef = useRef(false)
   useLayoutEffect(() => { spinningRef.current = spinning }, [spinning])
@@ -337,7 +350,7 @@ export function AndroidViewer({
     send({ type: 'input:key', sessionId, requestId: newRequestId(), payload: { code, modifiers } })
   }, [send, sessionId])
   useClipboardBridge({
-    sessionId, send, active: keyboardActive, supported: clipboardSupported,
+    sessionId, send, active: keyboardActive && !captureOpen, supported: clipboardSupported,
     handlerRef: clipboardHandlerRef, sendChord, onError: (m) => toast.error(m),
   })
 
@@ -350,6 +363,7 @@ export function AndroidViewer({
   useEffect(() => {
     const MODIFIER_CODES = new Set(['ShiftLeft', 'ShiftRight', 'ControlLeft', 'ControlRight', 'MetaLeft', 'MetaRight'])
     const onKeyDown = (e: KeyboardEvent) => {
+      if (captureOpen) return
       if (e.code === 'AltLeft' || e.code === 'AltRight') { isOptionHeld.current = true; return }
       if (e.metaKey) {
         const el = document.activeElement
@@ -377,8 +391,9 @@ export function AndroidViewer({
       }
       isOptionHeld.current = false; setPinchHint(null)
     }
-    const onKeyUp = (e: KeyboardEvent) => { if (e.code === 'AltLeft' || e.code === 'AltRight') endPinch() }
-    const onBlur = () => { if (isOptionHeld.current) endPinch() }
+    // Quiet while Flow Capture's dialog replays, as onKeyDown is: ending a pinch sends one.
+    const onKeyUp = (e: KeyboardEvent) => { if (!captureOpen && (e.code === 'AltLeft' || e.code === 'AltRight')) endPinch() }
+    const onBlur = () => { if (!captureOpen && isOptionHeld.current) endPinch() }
     window.addEventListener('keydown', onKeyDown)
     window.addEventListener('keyup', onKeyUp)
     window.addEventListener('blur', onBlur)
@@ -387,7 +402,7 @@ export function AndroidViewer({
       window.removeEventListener('keyup', onKeyUp)
       window.removeEventListener('blur', onBlur)
     }
-  }, [keyboardActive, clipboardSupported, send, sessionId, handleScreenshot, handleRecordToggle, handleRotate])
+  }, [captureOpen, keyboardActive, clipboardSupported, send, sessionId, handleScreenshot, handleRecordToggle, handleRotate])
 
   useEffect(() => {
     if (!keyboardActive) return
@@ -643,6 +658,8 @@ export function AndroidViewer({
         launchSlot={launchSlot}
         network={networkSupported ? { position: network.position, steerable: network.steerable, reason: network.reason, pending: network.pending, onToggle: network.toggle } : undefined}
         reboot={{ pending: rebootPending, onReboot, buttonRef: restartButtonRef }}
+        onCaptureFlow={onCaptureFlow}
+        captureButtonRef={captureButtonRef}
       />
 
       <div className="flex items-start gap-8">
