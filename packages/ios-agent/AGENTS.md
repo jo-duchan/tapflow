@@ -99,6 +99,24 @@ heavy layout) would paste the restored contents and the input would still answer
 guard, so a write that fails after the device took it is put back too, and a sentinel a `clipboard:read` gave up
 restoring is not put back.
 
+### The keyboard language a device was left in (#1134)
+
+A device keeps the keyboard language a tester switched to — Caps Lock switches it on a device with two keyboards —
+and the next tester's keys type in it. **It is stored in `com.apple.keyboard.preferences`** (`KeyboardLastUsed`,
+`KeyboardsCurrentAndNext`), found by diffing the simulator's preferences across a Caps Lock press on iOS 26.4 — not
+in `AppleKeyboards`, whose order does not reset it, and not in `com.apple.Preferences`. `resetKeyboardLanguage` writes
+the first keyboard there and restarts the keyboard daemon; **a running app keeps its language until it is launched
+again** (measured both ways). The relay sends `device:keyboard-reset` when a different person takes the device; one
+that arrives before the device is up waits for the boot, and every reset waits for that boot's
+`syncKeyboardsFromLanguages`, which rewrites the list it reads.
+
+The daemon is `user/foreground/com.apple.TextInput.kbd`. `system/com.apple.kbd`, which the boot's sync kickstarted until
+then, does not exist on iOS 26.4 and failed in silence.
+
+The host Mac's input source was measured **not** to reach the device with Simulator.app closed (tapflow's usual
+state): with the Mac on Korean and then on ABC, the same keys typed the same Hangul. With Simulator.app open,
+`EnableKeyboardSync` may add a Mac-wide way in; that is not measured.
+
 ### Input acks carry a reason
 
 `ackInput` answers `'delivered'` or an `InputErrorReason` from `@tapflowio/protocol` (the contract and
@@ -336,12 +354,12 @@ The iOS UI tree comes from a resident **XCUITest runner** that runs *inside* the
 - Source: `xctest-runner/` — xcodegen `project.yml` → **committed `.xcodeproj`** (no xcodegen at runtime).
   - `TreeHost` — minimal host app the UI-test target attaches to.
   - `TreeRunner` — the UI-test target: `TreeServer.swift` opens an `NWListener` HTTP server; `TreeServerTest.swift` starts it and blocks so the process stays resident.
-- Protocol: `GET /health` → the token the host passed (readiness, and proof the runner is ours); `GET /tree?bundleId=<id>` → the app's `XCUIApplication.debugDescription` (text). The simulator shares `localhost` with the host (WDA pattern), so the host reaches the in-simulator server directly.
+- Protocol: `GET /health` → the token the host passed (readiness, and proof the runner is ours); `GET /tree?bundleId=<id>` → the app's `XCUIApplication.debugDescription` (text); `GET /field?bundleId=<id>` → the keyboard-focused text field as JSON (Flow Capture, #1135), or `{reason}` when there is none, more than one, or no app. **The tree's `value:` is not a field's value**: debugDescription prints it unquoted and cuts it at 18 characters (measured), so `/field` reads `XCUIElement.value` itself — whole, commas and Hangul still composing included, 40–90 ms against the tree's 0.2–0.5 s. A secure field's value never leaves the runner (it reads `•••`, and its length is a secret too), and an empty UIKit field, which echoes its placeholder as its value, comes back empty. `XCUITreeReader.readField` parses it and never logs the body. The simulator shares `localhost` with the host (WDA pattern), so the host reaches the in-simulator server directly.
 - **One runner per simulator, on a port the runner picks.** The host passes `TEST_RUNNER_TAPFLOW_TREE_PORT=0` and `TEST_RUNNER_TAPFLOW_TREE_TOKEN` (xcodebuild strips the prefix; without it nothing arrives). The runner prints `TAPFLOW_TREE_READY port=<n>` once it is listening, and the host reads that line from xcodebuild's stdout (so no `-quiet`, and the pipe is drained for the runner's life), then requires `/health` to answer with its token. A fixed port let a runner that lost its port still look ready, while another simulator's runner answered every request: measured, not theoretical.
 - `XCUITreeReader.ts` builds the runner (`build-for-testing`, cached under `xctest-runner/build/`, gitignored) and rebuilds when `build/tapflow-runner.stamp` no longer matches the runner sources, the checked-in project and `xcodebuild -version`. It launches one runner per device (`test-without-building`, resident), then fetches `/tree` from that device's port. Faults on one device (a refused read, a start that never answered) drop only that device's runner. `xcuiTree.ts` parses the debugDescription text into the unified schema — kept a **pure function** so it stays unit-testable against the `xcuiTree.test.ts` fixture (Open Q9: a future Xcode format change fails there).
-- Queries by bundleId: the reader needs the foreground app's bundleId, tracked in `IOSAgent.lastBundleIds` on `app:launch` — deliberately outside `DeviceState`, so it survives a relay reconnect that rebuilds that map. `readUITree` throws an actionable `PlatformError` if no app has been launched — never a silent empty tree.
+- Queries by bundleId: the reader needs the foreground app's bundleId, tracked in `IOSAgent.lastBundleIds` on `app:launch` and on a successful `app:install` (a person may open the app from its home-screen icon rather than with Launch) — deliberately outside `DeviceState`, so it survives a relay reconnect that rebuilds that map. `readUITree` throws an actionable `PlatformError` if no app has been launched — never a silent empty tree.
 - Frames: debugDescription frames are points; the parser normalizes them 0-1 against the `Window` frame (same coordinate space as the touch path).
-- Lifecycle: started when an automation client (flow runner, MCP) boots the device, otherwise on the first UI-tree query, so the manual QA / streaming path never pays for it (about 650 MB per device). Killed on that device's shutdown, before an erase boot, and for every device on disconnect.
+- Lifecycle: started when an automation client (flow runner, MCP) boots the device, or a person Flow Capture records boots it on a relay that knows this agent reads fields (`recorded` on `device:boot`, #1135), otherwise on the first UI-tree query. A manual QA session with capturing off never pays for it. The cost was written here as about 650 MB per device; measured 2026-11-08 on iOS 26.4–26.5 it was 66–269 MB for the runner plus 46–92 MB for its xcodebuild (RSS). Warming for a recorded person is what lets the first field they type into be read: started on that first key, the runner's cold start (~12.5 s measured) outlasts the typing, and the read counts as not read. Keys are not slowed by it — measured, 20 keys typed during a cold start acked in 1 ms each and all landed, focus kept. Killed on that device's shutdown, before an erase boot, and for every device on disconnect.
 - `enabled`: debugDescription does not expose it, so elements default to `enabled: true`. If fidelity needs it, switch to the private snapshot API (plan Open Q9).
 - `secure` / `focused` (Flow Capture, #1125): `secure` is `type === 'SecureTextField'`, stated `true` or `false` on **every** input so that an input without it means "unknown" to a consumer deciding whether typed text may be written down. `focused` comes from `Keyboard Focused` in the line's **trailing flags only** — the whole line would match a quoted label containing those words — and only on an input: a tab prints `Selected, Focused` and is not where typing goes. Measured on iOS 26.5 / Xcode 26.6 and iOS 27.0 / Xcode 27.1, UIKit and SwiftUI alike: `SecureTextField, …, placeholderValue: 'Password', value: •••, Keyboard Focused`.
 

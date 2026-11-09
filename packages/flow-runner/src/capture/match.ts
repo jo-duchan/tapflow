@@ -44,8 +44,9 @@ export type FragileReason =
   | 'not-centre'
   /** A swipe replays its two ends at the speed it was made, not what it brought on screen. */
   | 'swipe'
-  /** Typed with Caps Lock in force (`capsLock` on the text step): the text is a US-layout guess at what the device typed. */
-  | 'caps-lock'
+  /** Typed on a device whose agent reads fields, but no read of this one was usable — typed too fast before the next
+   *  input, or the field changed under it — so the text is the keys read on a US layout, a guess on iOS (#1135). */
+  | 'field-unread'
 
 export interface CapturedStep {
   raw: RawStep
@@ -129,10 +130,19 @@ function typedSecretly(ctx: MatchContext): boolean {
 const knownSecret = (ctx: MatchContext): boolean => focusedIn(ctx.tree)?.secure === true
 
 function typed(raw: RawStep, text: string, ctx: MatchContext): CapturedStep {
-  // A secret's value is the same guess, so it is marked too.
-  const guess = raw.kind === 'text' && raw.capsLock ? { fragile: 'caps-lock' as const } : {}
-  if (typedSecretly(ctx)) return { raw, step: null, secret: { value: text, known: knownSecret(ctx) }, ...guess }
-  return { raw, step: { type: 'inputText', text }, ...guess }
+  // A secret's value is the same guess, so it is marked too. On iOS a run with neither a value nor a tried read is one
+  // the relay never read — an agent without `field-value`, or a Mac over its memory line — and the same guess.
+  const unread = raw.kind === 'text'
+    && (raw.fieldRead === 'unread' || (ctx.platform === 'ios' && raw.fieldRead === undefined && raw.replace !== true))
+  const guess = unread ? { fragile: 'field-unread' as const } : {}
+  // Read as a password field when it was typed: still a secret whatever field Match finds focused, which can be
+  // another one, or the guess would go into the file as text.
+  const recordedSecure = raw.kind === 'text' && raw.fieldRead === 'secure'
+  if (recordedSecure || typedSecretly(ctx)) {
+    return { raw, step: null, secret: { value: text, known: recordedSecure || knownSecret(ctx) }, ...guess }
+  }
+  const replace = raw.kind === 'text' && raw.replace === true
+  return { raw, step: replace ? { type: 'inputText', text, replace: true } : { type: 'inputText', text }, ...guess }
 }
 
 /**
@@ -283,7 +293,8 @@ export function toFlowSteps(matched: readonly CapturedStep[]): CapturedFlow {
     used.set(base, n)
     const name = n === 1 ? base : `${base}_${n}`
     secrets[name] = s.secret.value
-    steps[i] = { ...s, step: { type: 'inputSecret', name } }
+    // A field's whole value replaces what it holds, as a written one does; typed after it, it would double up (#1135).
+    steps[i] = { ...s, step: s.raw.kind === 'text' && s.raw.replace ? { type: 'inputSecret', name, replace: true } : { type: 'inputSecret', name } }
   }
   // A clear-state may come before the launch; anything else means the flow already started without one.
   const lead = steps.flatMap((s) => (s.step ? [s.step] : [])).find((s) => s.type !== 'clearState')

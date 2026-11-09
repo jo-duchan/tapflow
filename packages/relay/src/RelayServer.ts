@@ -118,7 +118,7 @@ import { handleEndVideo, handleOpenVideo, handleVideoChunk, handleVideoData, han
 import { abandonRunsOf, handleCreateRun, handleFinishRun, handleReportDevice, handleStartFlow, handleGetFlowScreenshot, handleGetRun, handleListRuns, handleReportFlow, handleUploadFlowScreenshot, purgeExpiredRuns, runScreenshotsDirFor, type RunHolders } from './api/runs.js'
 import { handleListAgents, handleGetAgentResources } from './api/agents.js'
 import { handleDropSnapshot, handleGetSnapshot, handlePause, handleTakeSnapshot, handleUpdatePreferences } from './api/captures.js'
-import { CaptureStore, type Holder } from './capture/CaptureStore.js'
+import { CaptureStore, FIELD_READ_TIMEOUT_MS, type FieldRead, type Holder } from './capture/CaptureStore.js'
 import { FlowCapturePreference } from './capture/preference.js'
 
 const MIME_TYPES: Record<string, string> = {
@@ -424,7 +424,10 @@ export class RelayServer {
   private readonly captures = new CaptureStore({
     isEnabled: (user) => this.flowCapturePref.isEnabled(user),
     chromeOf: (sessionId) => this.sessions.get(sessionId)?.chromeData,
+    readField: (sessionId) => this.readField(sessionId),
   })
+  /** Flow Capture's reads of a focused field (#1135), by request id. Answered only by the session's own agent. */
+  private pendingFieldReads = new Map<string, { agentSocket: WebSocket; resolve: (read: FieldRead) => void }>()
   private pendingScreenshots = new Map<string, {
     sessionId: string
     resolve: (buf: Buffer, format: 'png' | 'jpeg') => void
@@ -1655,6 +1658,7 @@ export class RelayServer {
       case 'screenshot:error':   this.handleScreenshotError(msg); break
       case 'ui:tree:response':   this.handleUITreeResponse(msg); break
       case 'ui:tree:error':      this.handleUITreeError(msg); break
+      case 'ui:field:response':  this.handleUIFieldResponse(ws, msg); break
       case 'agents:list': {
         this.sendTo(ws, {
           type: 'agents:listed',
@@ -2765,8 +2769,21 @@ export class RelayServer {
     (msg.payload as Record<string, unknown>)['external'] = this.wsExternal.get(ws) ?? false
     // Whether an automation client (flow runner, MCP) is booting, so the iOS agent can start its UI-tree runner
     // now instead of inside the first selector step's timeout. Only the holder can boot (`dispatchTarget`), so the
-    // holder's kind is the booter's. A dashboard boot is never warmed: the runner costs about 520 MB per device.
+    // holder's kind is the booter's. A dashboard boot is warmed only for a person Flow Capture records (below): the
+    // runner costs about 520 MB per device.
     ;(msg.payload as Record<string, unknown>)['automation'] = isAiClientKind(boot.session.holderKind)
+    // A person Flow Capture records gets the runner warmed too (#1135): it is what reads the field they type into, and
+    // started on their first key its ~12 s cold start (measured) would miss the first field — a login, usually.
+    ;(msg.payload as Record<string, unknown>)['recorded'] = this.captures.isRecording(boot.session.id, captureHolder(boot.session))
+      && hasCapability(boot.session.agentCapabilities, 'field-value')
+      // A person's join is let past the memory check because their device is up; the runner is not, and costs
+      // 110–360 MB (measured). On a Mac over its memory line the field is not read: the steps say so instead.
+      && !this.resourceLoad(boot.session)?.memOver
+    if (boot.session.keyboardResetOwed && hasCapability(boot.session.agentCapabilities, 'keyboard-reset')) {
+      // Ahead of the boot, which the agent then finishes before it resets (it waits for the boot's keyboard sync).
+      this.sendTo(boot.session.agentSocket, { type: 'device:keyboard-reset', sessionId: boot.session.id })
+      boot.session.keyboardResetOwed = false
+    }
     const cost = classifyBoot(boot.session.deviceStatus, msg.payload, boot.session.deviceServiceTier)
     const booterClass: BooterClass = isAiClientKind(boot.session.holderKind) ? 'automated' : 'interactive'
     // The automation cap is decided before the gate and acted on after it: an idle device is shut down to make
@@ -2992,6 +3009,9 @@ export class RelayServer {
         return
       }
       this.captures.noteJoin(msg.sessionId, captureHolder(session))
+      // Another person's keyboard language would type this person's keys (#1134). Owed until their boot reaches the
+      // agent: sent here, an agent away for the moment would never hear it, and the next join is the same person.
+      if (joined.personChanged) session.keyboardResetOwed = true
     } catch (e) {
       // Only a bug reaches here now — the two expected failures return above instead of throwing, which is
       // what stops this arm from having to guess. It still answers rather than dropping: both clients await
@@ -3934,6 +3954,38 @@ export class RelayServer {
 
       this.sendTo(session.agentSocket, { type: 'ui:tree:request', sessionId, requestId })
     })
+  }
+
+  /**
+   * Ask the session's agent for its keyboard-focused text field, for Flow Capture. `null` when the agent cannot answer
+   * (no `field-value`, not connected): the capture then holds no read, which reads as "not read", never as a value.
+   * The answer is the field's whole contents (an app's or AutoFill's text included), and goes into the capture only —
+   * never forwarded, never logged.
+   */
+  private readField(sessionId: string): Promise<FieldRead> | null {
+    const session = this.sessions.get(sessionId)
+    if (!session || !hasCapability(session.agentCapabilities, 'field-value') || session.agentSocket.readyState !== WebSocket.OPEN) return null
+    // Over the memory line a read would start the runner the boot left cold (see `recorded`): the step is left unread.
+    if (this.resourceLoad(session)?.memOver) return null
+    const agentSocket = session.agentSocket
+    const requestId = randomUUID()
+    return new Promise((resolve) => {
+      const timer = setTimeout(() => { this.pendingFieldReads.delete(requestId); resolve({ field: null, reason: 'failed' }) }, FIELD_READ_TIMEOUT_MS)
+      this.pendingFieldReads.set(requestId, {
+        agentSocket,
+        resolve: (read) => { clearTimeout(timer); this.pendingFieldReads.delete(requestId); resolve(read) },
+      })
+      this.sendTo(agentSocket, { type: 'ui:field:request', sessionId, requestId })
+    })
+  }
+
+  private handleUIFieldResponse(ws: WebSocket, msg: Inbound<'ui:field:response'>): void {
+    const pending = this.pendingFieldReads.get(msg.requestId)
+    // The session's own agent only: another agent naming this id must not write into a person's capture.
+    if (!pending || pending.agentSocket !== ws) return
+    // A secure field's value is dropped here too, whatever an agent sent: the protocol promises it is never kept.
+    const field = msg.field?.secure ? (({ value: _v, ...rest }) => rest)(msg.field) : msg.field
+    pending.resolve(msg.reason === undefined ? { field } : { field, reason: msg.reason })
   }
 
   private handleUITreeResponse(msg: Inbound<'ui:tree:response'>): void {

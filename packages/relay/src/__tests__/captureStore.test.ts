@@ -1,5 +1,5 @@
-import { describe, it, expect } from 'vitest'
-import { CaptureStore, type CapturedMessage, type Holder } from '../capture/CaptureStore'
+import { describe, it, expect, vi, afterEach } from 'vitest'
+import { CaptureStore, FIELD_IDLE_MS, SNAPSHOT_READ_WAIT_MS, type CapturedMessage, type FieldRead, type Holder } from '../capture/CaptureStore'
 import { chromeOrientation } from '@tapflowio/protocol/screen'
 import type { ChromePayload } from '@tapflowio/protocol'
 
@@ -282,5 +282,135 @@ describe('the budget', () => {
     const a = s.takeSnapshot('a', '1')!.entries.length
     const b = s.takeSnapshot('b', '2')!.entries.length
     expect(a + b).toBeLessThan(80)
+  })
+})
+
+describe('reading the field a person typed into (#1135)', () => {
+  afterEach(() => { vi.useRealTimers() })
+
+  const key = (code: string, requestId = code): CapturedMessage => ({ type: 'input:key', sessionId: 's', requestId, payload: { code, modifiers: 0 } })
+  const field = { identifier: 'form.email', placeholder: 'Email', frame: { x: 0, y: 0, width: 10, height: 10 }, secure: false }
+
+  // A clock and timers that move together; each read answers `answer` after `lagMs`.
+  function typingStore(answer: () => FieldRead = () => ({ field: { ...field, value: 'ab' } }), lagMs = 50) {
+    vi.useFakeTimers()
+    const asked: number[] = []
+    const { s, tick } = store({
+      now: () => Date.now(),
+      readField: () => { asked.push(Date.now()); return new Promise((r) => setTimeout(() => r(answer()), lagMs)) },
+    })
+    const wait = async (ms: number) => { tick(ms); await vi.advanceTimersByTimeAsync(ms) }
+    return { s, asked, wait }
+  }
+  const reads = (s: CaptureStore) => entries(s).flatMap((e) => (e.kind === 'field' ? [e] : []))
+
+  it('reads which field at the first key, and what it holds once typing pauses', async () => {
+    const { s, wait } = typingStore()
+    s.recordInput('s', ALICE, key('KeyA'))
+    await wait(100)
+    s.recordInput('s', ALICE, key('KeyB'))
+    await wait(FIELD_IDLE_MS + 100)
+    expect(reads(s).map((r) => r.phase)).toEqual(['focus', 'value'])
+    const [, value] = reads(s)
+    // Asked after the last key, answered after it was asked: what lets a reader judge the read.
+    expect(value!.requestedAt).toBeGreaterThan(entries(s).filter((e) => e.kind === 'input').at(-1)!.at)
+    expect(value!.at).toBeGreaterThan(value!.requestedAt)
+    expect(value!.field?.value).toBe('ab')
+  })
+
+  it('reads the value once per pause, and an edit key restarts the pause', async () => {
+    const { s, asked, wait } = typingStore()
+    s.recordInput('s', ALICE, key('KeyA'))
+    await wait(FIELD_IDLE_MS - 100)
+    s.recordInput('s', ALICE, key('Backspace'))
+    await wait(FIELD_IDLE_MS - 100)
+    expect(asked).toHaveLength(1)
+    await wait(200)
+    expect(asked).toHaveLength(2)
+  })
+
+  it('ends the run at any other input: no read after it, and the next key asks which field again', async () => {
+    const { s, wait } = typingStore()
+    s.recordInput('s', ALICE, key('KeyA'))
+    await wait(100)
+    for (const m of tap()) s.recordInput('s', ALICE, m)
+    await wait(FIELD_IDLE_MS + 100)
+    expect(reads(s).map((r) => r.phase)).toEqual(['focus'])
+    s.recordInput('s', ALICE, key('KeyC'))
+    await wait(FIELD_IDLE_MS + 100)
+    expect(reads(s).map((r) => r.phase)).toEqual(['focus', 'focus', 'value'])
+  })
+
+  it('asks again which field at the key after Tab, Enter or a chord, which move focus or act on the app', async () => {
+    const { s, wait } = typingStore()
+    for (const end of ['Tab', 'Enter', 'Escape']) {
+      s.recordInput('s', ALICE, key('KeyA', `a-${end}`))
+      await wait(100)
+      s.recordInput('s', ALICE, key(end))
+      await wait(100)
+    }
+    s.recordInput('s', ALICE, key('KeyA', 'a-chord'))
+    await wait(100)
+    s.recordInput('s', ALICE, { type: 'input:key', sessionId: 's', requestId: 'chord', payload: { code: 'KeyV', modifiers: 0x08 } })
+    await wait(100)
+    s.recordInput('s', ALICE, key('KeyB'))
+    await wait(100)
+    expect(reads(s).filter((r) => r.phase === 'focus')).toHaveLength(5)
+  })
+
+  it('asks which field at the very time of the first key, so a one-key run still owns its read', async () => {
+    vi.useFakeTimers()
+    // A clock that moves on every reading, as one does across the work between recording a key and asking.
+    let t = 1_000
+    const { s } = store({ now: () => t++, readField: () => Promise.resolve({ field: null }) })
+    s.recordInput('s', ALICE, key('KeyA'))
+    await vi.advanceTimersByTimeAsync(10)
+    const [input] = entries(s).filter((e) => e.kind === 'input')
+    expect(reads(s)[0]!.requestedAt).toBe(input!.at)
+  })
+
+  it('keeps no read that answers after the person stopped being recorded', async () => {
+    const { s, wait } = typingStore(undefined, 300)
+    s.recordInput('s', ALICE, key('KeyA'))
+    s.pause('s', '1')
+    await wait(FIELD_IDLE_MS + 400)
+    s.resume('s', '1')
+    expect(reads(s)).toEqual([])
+  })
+
+  it('asks nothing when the agent cannot answer, and nothing for a person not recorded', async () => {
+    vi.useFakeTimers()
+    const readField = vi.fn(() => null)
+    const { s } = store({ readField })
+    s.recordInput('s', ALICE, key('KeyA'))
+    await vi.advanceTimersByTimeAsync(FIELD_IDLE_MS + 100)
+    expect(reads(s)).toEqual([])
+    const asked = vi.fn(() => Promise.resolve({ field: null }))
+    const other = store({ readField: asked }, new Set())
+    other.s.recordInput('s', ALICE, key('KeyA'))
+    await vi.advanceTimersByTimeAsync(FIELD_IDLE_MS + 100)
+    expect(asked).not.toHaveBeenCalled()
+  })
+
+  it('before a snapshot, reads a field still being typed in and waits for the answer', async () => {
+    const { s, wait } = typingStore()
+    s.recordInput('s', ALICE, key('KeyA'))
+    await wait(100)
+    const settled = s.settleReads('s', '1')
+    await wait(60)
+    await settled
+    expect(reads(s).map((r) => r.phase)).toEqual(['focus', 'value'])
+  })
+
+  it('does not wait past its bound for a read that never answers', async () => {
+    vi.useFakeTimers()
+    const { s } = store({ readField: () => new Promise(() => {}) })
+    s.recordInput('s', ALICE, key('KeyA'))
+    let done = false
+    void s.settleReads('s', '1').then(() => { done = true })
+    await vi.advanceTimersByTimeAsync(SNAPSHOT_READ_WAIT_MS - 10)
+    expect(done).toBe(false)
+    await vi.advanceTimersByTimeAsync(20)
+    expect(done).toBe(true)
   })
 })

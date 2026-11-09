@@ -13,9 +13,10 @@ type Params = Record<string, string>
 
 /** `POST /api/v1/sessions/:sessionId/capture/snapshot` — freeze the steps recorded so far for the Capture flow
  *  dialog, which reads only this. Taking another replaces it. */
-export function handleTakeSnapshot(req: http.IncomingMessage, res: http.ServerResponse, params: Params, store: CaptureStore): void {
+export async function handleTakeSnapshot(req: http.IncomingMessage, res: http.ServerResponse, params: Params, store: CaptureStore): Promise<void> {
   const auth = requireAuth(req, res)
   if (!auth) return
+  await store.settleReads(params['sessionId']!, String(auth.userId))
   const snapshot = store.takeSnapshot(params['sessionId']!, String(auth.userId))
   if (!snapshot) return json(res, 404, { error: 'No captured steps for this session' })
   json(res, 200, snapshot)

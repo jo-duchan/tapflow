@@ -196,6 +196,29 @@ describe('SessionManager', () => {
   })
 
   describe('join()', () => {
+    // #1134: a device keeps the keyboard language the last person switched to, so the relay resets it for someone new.
+    it('says when a different signed-in person takes the device, and only then', () => {
+      const sm = new SessionManager()
+      const [id] = sm.create(mockSocket(), [{ id: 'd1', name: 'X', platform: 'ios', status: 'booted' }])
+      const take = (key: string, kind?: 'dashboard' | 'mcp' | 'flow-runner') => {
+        const ws = mockSocket()
+        const joined = sm.join(id, ws, asClient(key), () => true, { kind, label: key })
+        sm.clearBrowser(id)
+        return joined.ok && joined.personChanged
+      }
+      // The first person after a relay start: nobody to compare with, so nothing is reset.
+      expect(take('1:a', 'dashboard')).toBe(false)
+      expect(take('1:b', 'dashboard')).toBe(false)
+      // An AI client or a loopback `anon` borrowing it is not someone new, and does not become the one compared with.
+      expect(take('1:c', 'mcp')).toBe(false)
+      expect(take('2:c', 'flow-runner')).toBe(false)
+      expect(take('anon:x', 'dashboard')).toBe(false)
+      expect(take('1:d', 'dashboard')).toBe(false)
+      expect(take('2:e', 'dashboard')).toBe(true)
+      expect(take('2:f')).toBe(false)
+      expect(take('1:g')).toBe(true)
+    })
+
     it('sets browserSocket on the session', () => {
       const sm = new SessionManager()
       const [id] = sm.create(mockSocket(), [{ id: 'd1', name: 'X', platform: 'ios', status: 'shutdown' }])
@@ -228,7 +251,7 @@ describe('SessionManager', () => {
       const [id] = sm.create(mockSocket(), [{ id: 'd1', name: 'X', platform: 'ios', status: 'shutdown' }])
       const owner = { readyState: OPEN } as WebSocket
       sm.join(id, owner, ownerOf(owner), () => true)
-      expect(sm.join(id, owner, ownerOf(owner), () => true)).toEqual({ ok: true })
+      expect(sm.join(id, owner, ownerOf(owner), () => true)).toEqual({ ok: true, personChanged: false })
       expect(sm.get(id)?.browserSocket).toBe(owner)
       // And the socket still holds it exactly once. `unindexBrowser` reads `session.browserSocket`, so a
       // re-join that ran it would drop the entry this join is re-establishing — leaving the session bound

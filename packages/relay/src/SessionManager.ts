@@ -74,6 +74,12 @@ export interface Session {
    *  running for a person is theirs to come back to, and a lease must not take it and wipe it. `lastBoot` cannot
    *  say so — it names whoever cold-booted the device, and a person picks up automation's devices warm. */
   lastHolderWasAi?: boolean
+  /** The last signed-in person to hold the device. Not cleared when they leave: the next person is compared with it.
+   *  AI clients, `anon` and `unidentified:*` never set it or change it — a loopback MCP or flow run is `anon`, and the
+   *  person coming back from one is not someone new. Unknown after a relay restart, which counts as no change. */
+  lastPersonUser?: string
+  /** A different person took the device and its keyboard has not been reset yet: sent with their next boot. */
+  keyboardResetOwed?: boolean
   /** Who cold-booted the device this session drives, and when — kept after the holder leaves, since that is when
    *  it matters: it is what the per-Mac automation cap counts and shuts down (`admission/capacity.ts`). Set when
    *  the relay forwards a cold boot, undone if that boot fails or turns out warm, cleared on `shutdown-done`.
@@ -136,7 +142,9 @@ export type InstalledBuild = { buildId: number; filePath: string }
  * exceptions for that reason — see `join()`. Anything else that goes wrong in there is a bug and still
  * throws, which keeps the two apart at the call site instead of at a `catch`.
  */
-export type JoinResult = { ok: true } | { ok: false; failure: 'not-found' | 'held-by-another' }
+/** `personChanged`: a signed-in person took the device after a different one had it — the device's keyboard language
+ *  is the last person's, and the relay puts it back (#1134). */
+export type JoinResult = { ok: true; personChanged: boolean } | { ok: false; failure: 'not-found' | 'held-by-another' }
 
 type AgentField = 'agentId' | 'agentName' | 'agentPlatform' | 'agentCapabilities'
 type DeviceField = 'deviceName' | 'devicePlatform' | 'deviceStatus' | 'deviceOsVersion' | 'deviceFormFactor' | 'deviceServiceTier'
@@ -434,13 +442,18 @@ export class SessionManager {
       if (session.endedBy?.ownerUser === owner.user) session.endedBy = undefined
       session.waitingOwner = undefined
     }
+    let personChanged = false
+    if (!isAiClientKind(holder.kind) && /^\d+$/.test(owner.user)) {
+      personChanged = session.lastPersonUser !== undefined && session.lastPersonUser !== owner.user
+      session.lastPersonUser = owner.user
+    }
     // Also when the same client re-joins as something that is not an AI client: a watch is admitted to an
     // AI client's session, and only that kind may be watched.
     this.evictWatchers(sessionId, 'holder-changed', (admitted) => admitted !== owner.key || !isAiClientKind(holder.kind))
     let held = this.browserSocketIndex.get(browserSocket)
     if (!held) { held = new Set(); this.browserSocketIndex.set(browserSocket, held) }
     held.add(session)
-    return { ok: true }
+    return { ok: true, personChanged }
   }
 
   remove(sessionId: string): void {

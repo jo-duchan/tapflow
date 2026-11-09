@@ -19,8 +19,8 @@ function stepValue(step: Step): unknown {
     case 'launchApp': return step.options ? { launchApp: step.options } : 'launchApp'
     case 'tapOn': return { tapOn: selectorValue(step.selector) }
     case 'tapPoint': return { tapOn: step.at }
-    case 'inputText': return { inputText: step.text }
-    case 'inputSecret': return { inputText: { secret: step.name } }
+    case 'inputText': return { inputText: step.replace ? { text: step.text, replace: true } : step.text }
+    case 'inputSecret': return { inputText: step.replace ? { secret: step.name, replace: true } : { secret: step.name } }
     case 'pressKey': return { pressKey: step.modifiers ? { code: step.code, modifiers: step.modifiers } : step.code }
     case 'swipe': return { swipe: { from: step.from, to: step.to, durationMs: step.durationMs } }
     case 'scroll': return { scroll: step.until ? { direction: step.direction, until: selectorValue(step.until) } : step.direction }

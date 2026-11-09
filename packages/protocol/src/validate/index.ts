@@ -26,7 +26,7 @@
  *   yields `EnvelopeOf<I>`, so the relay **cannot** read a payload it did not check. Used where the
  *   relay only forwards.
  *
- * ## Why the whole agent direction is Envelope except the six it consumes
+ * ## Why the whole agent direction is Envelope except the eight it consumes
  *
  * Not laziness, and not a deferral: agent-payload conformance is a property the protocol deliberately
  * does not have. `AgentRegister.platform` is `string` — open, because a third-party platform registers
@@ -37,8 +37,8 @@
  * skips `setChromeData` and therefore empties the re-join replay too, and there is no
  * `session:chrome-error` for anyone to be told through.
  *
- * The six the relay consumes (`agent:register`, `agent:resources`, the two screenshot replies and the
- * two ui-tree replies) forward nowhere, so rejecting them breaks no forward path — and their schemas
+ * The eight the relay consumes (`agent:register`, `agent:devices`, `agent:resources`, the two screenshot
+ * replies, the two ui-tree replies and the field read's reply) forward nowhere, so rejecting them breaks no forward path — and their schemas
  * carry a `.default()` for every field the relay currently reads through a `??`, which keeps today's
  * tolerance for an older agent exactly as it is. `UIElement` is safe to validate where `ChromePayload`
  * is not, for a reason worth stating: it is not a per-platform union but the normalized shape every
@@ -62,7 +62,7 @@ import type {
   InputPinchEnd, InputPinchMove, InputPinchStart, InputPosture, InputRotate, InputTouchCancel, InputTouchEnd, InputTouchMove,
   InputTouchStart, InputType, InputTypeDone, InputTypeError, KeyboardToggled, OpenUrl, OpenUrlDone,
   OpenUrlError, ScreenshotDone, ScreenshotError, SessionChrome, SessionDeviceInfo, SessionEnd,
-  SessionActivity, SessionLeave, SessionStart, StreamRegister, UiTreeError, UiTreeResponse, WatchStart, WatchStop,
+  SessionActivity, SessionLeave, SessionStart, StreamRegister, UiTreeError, UiTreeResponse, UiFieldResponse, WatchStart, WatchStop,
 } from '../index.js'
 import type { Assert, EnvelopeOf, IsEmpty, SchemaExact } from './assert.js'
 
@@ -260,7 +260,7 @@ const BROWSER_INBOUND = {
 
 // ── agent → relay ────────────────────────────────────────────────────────────
 
-/** The six the relay consumes. Every `.default()` below mirrors a `??` that is in `RelayServer` today,
+/** The eight the relay consumes. Every `.default()` below mirrors a `??` that is in `RelayServer` today,
  *  so an agent older than a field keeps working exactly as it does now — the default lands in the
  *  schema, where it is visible, instead of at the read site, where it read as defensive noise.
  *
@@ -350,6 +350,18 @@ const AGENT_CONSUMED = {
   }),
   'ui:tree:error': z.object({
     type: z.literal('ui:tree:error'), sessionId, requestId, message: z.string().default(''),
+  }),
+  'ui:field:response': z.object({
+    type: z.literal('ui:field:response'), sessionId, requestId,
+    // A field the relay cannot read is no field, not a dropped frame: the capture then says the value was not read.
+    field: z.object({
+      identifier: z.string(),
+      placeholder: z.string(),
+      frame: z.object({ x: z.number(), y: z.number(), width: z.number(), height: z.number() }),
+      value: z.string().optional(),
+      secure: z.boolean(),
+    }).nullable().catch(null),
+    reason: z.enum(['no-app', 'no-focus', 'ambiguous', 'secure', 'failed']).optional().catch('failed'),
   }),
 } as const
 
@@ -639,6 +651,7 @@ type _ScreenshotDone = Assert<V<'screenshot:done', ScreenshotDone>>
 type _ScreenshotError = Assert<V<'screenshot:error', ScreenshotError>>
 type _UiTreeResponse = Assert<V<'ui:tree:response', UiTreeResponse>>
 type _UiTreeError = Assert<V<'ui:tree:error', UiTreeError>>
+type _UiFieldResponse = Assert<V<'ui:field:response', UiFieldResponse>>
 
 type _StreamRegister = Assert<V<'stream:register', StreamRegister>>
 

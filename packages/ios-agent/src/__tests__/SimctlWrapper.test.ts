@@ -560,6 +560,57 @@ describe('SimctlWrapper', () => {
       const wrapper = new SimctlWrapper(runner)
       await expect(wrapper.syncKeyboardsFromLanguages('device-1')).resolves.toBeUndefined()
     })
+
+    it('restarts the keyboard daemon by the name iOS 26 gives it', async () => {
+      // `system/com.apple.kbd` does not exist on iOS 26.4: the kickstart failed in silence (#1134).
+      const runner: SimctlRunner = {
+        exec: vi.fn().mockResolvedValueOnce('(\n    "en-US"\n)').mockResolvedValue(''),
+        execBinary: vi.fn().mockResolvedValue(Buffer.alloc(0)),
+        execWithOpts: vi.fn().mockResolvedValue(''),
+      }
+      await new SimctlWrapper(runner).syncKeyboardsFromLanguages('device-1')
+      expect(runner.exec).toHaveBeenLastCalledWith('spawn', 'device-1', 'launchctl', 'kickstart', '-k', 'user/foreground/com.apple.TextInput.kbd')
+    })
+  })
+
+  describe('resetKeyboardLanguage', () => {
+    const runnerReading = (keyboards: string) => ({
+      exec: vi.fn().mockResolvedValueOnce(keyboards).mockResolvedValue(''),
+      execBinary: vi.fn().mockResolvedValue(Buffer.alloc(0)),
+      execWithOpts: vi.fn().mockResolvedValue(''),
+    }) satisfies SimctlRunner
+
+    it('makes the first keyboard the one in use, then restarts the keyboard daemon', async () => {
+      // Where a Caps Lock press stores the language (measured, iOS 26.4), not AppleKeyboards' order.
+      const runner = runnerReading('(\n    "ko_KR@sw=Korean;hw=Automatic",\n    "en_US@sw=QWERTY;hw=Automatic",\n    "emoji@sw=Emoji"\n)')
+      await new SimctlWrapper(runner).resetKeyboardLanguage('device-1')
+      expect(runner.exec.mock.calls.slice(1)).toEqual([
+        ['spawn', 'device-1', 'defaults', 'write', 'com.apple.keyboard.preferences', 'KeyboardLastUsed', 'ko_KR@sw=Korean;hw=Automatic'],
+        ['spawn', 'device-1', 'defaults', 'write', 'com.apple.keyboard.preferences', 'KeyboardsCurrentAndNext', '-array',
+          'ko_KR@sw=Korean;hw=Automatic', 'ko_KR@sw=Korean;hw=Automatic', 'en_US@sw=QWERTY;hw=Automatic'],
+        ['spawn', 'device-1', 'launchctl', 'kickstart', '-k', 'user/foreground/com.apple.TextInput.kbd'],
+      ])
+    })
+
+    it('tries the daemon\'s old name when the new one fails, for a runtime nobody has measured', async () => {
+      const runner = {
+        exec: vi.fn()
+          .mockResolvedValueOnce('(\n    "en_US@sw=QWERTY;hw=Automatic"\n)')
+          .mockResolvedValueOnce('').mockResolvedValueOnce('')
+          .mockRejectedValueOnce(new Error('Could not find service'))
+          .mockResolvedValue(''),
+        execBinary: vi.fn().mockResolvedValue(Buffer.alloc(0)),
+        execWithOpts: vi.fn().mockResolvedValue(''),
+      } satisfies SimctlRunner
+      await new SimctlWrapper(runner).resetKeyboardLanguage('device-1')
+      expect(runner.exec).toHaveBeenLastCalledWith('spawn', 'device-1', 'launchctl', 'kickstart', '-k', 'system/com.apple.kbd')
+    })
+
+    it('writes nothing when the device has no keyboards listed', async () => {
+      const runner = runnerReading('(\n)')
+      await new SimctlWrapper(runner).resetKeyboardLanguage('device-1')
+      expect(runner.exec).toHaveBeenCalledTimes(1)
+    })
   })
 
   describe('screenshot', () => {

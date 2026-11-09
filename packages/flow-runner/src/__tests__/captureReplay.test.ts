@@ -3,7 +3,7 @@ import type { BrowserToRelay } from '@tapflowio/protocol'
 import type { CaptureEntry } from '@tapflowio/protocol/capture'
 import { SessionChannel, type RelayMsg } from '../sessionChannel.js'
 import { SessionLeftError, InputRefusedError } from '../sessionErrors.js'
-import { segment, replayStep, replaySteps, rangeStartOrientation } from '../capture/index.js'
+import { segment, replayStep, replaySteps, rangeStartOrientation, type RawStep } from '../capture/index.js'
 
 class MemoryChannel extends SessionChannel {
   readonly sent: Array<{ t: number; msg: BrowserToRelay }> = []
@@ -42,6 +42,17 @@ describe('replayStep', () => {
     ch.typeAck = null
     const stop = new AbortController()
     const done = replayStep(ch, 'now', text!, stop.signal)
+    const outcome = expect(done).rejects.toBeDefined()
+    stop.abort()
+    await outcome
+  })
+
+  it('gives up waiting on the select-all before replaced text when the replay is stopped', async () => {
+    const [text] = segment(recorded([[1000, { type: 'input:key', requestId: 'k', payload: { code: 'KeyA', modifiers: 0 } }]]))
+    const ch = new MemoryChannel()
+    ch.ack = null
+    const stop = new AbortController()
+    const done = replayStep(ch, 'now', { ...text!, replace: true } as RawStep, stop.signal)
     const outcome = expect(done).rejects.toBeDefined()
     stop.abort()
     await outcome
@@ -180,15 +191,15 @@ describe('replayStep', () => {
     expect(ch.sent.map((s) => s.msg.type)).toEqual(['input:type'])
   })
 
-  it('types a run typed with Caps Lock in force as text too, since its keys type by whatever language the device is left in', async () => {
-    const [text] = segment(recorded([
-      [0, { type: 'input:key', requestId: 'c', payload: { code: 'CapsLock', modifiers: 0 } }],
-      [80, { type: 'input:key', requestId: 'a', payload: { code: 'KeyA', modifiers: 0 } }],
-    ]))
-    expect(text).toMatchObject({ kind: 'text', text: 'a', capsLock: true })
+  it('replaces what a field holds with the value the relay read, selecting it first as the exported step does', async () => {
+    const [typed] = segment(recorded([[0, { type: 'input:key', requestId: 'a', payload: { code: 'KeyA', modifiers: 0 } }]]))
+    const read = { ...typed!, kind: 'text', text: '안녕', replace: true } as RawStep
     const ch = new MemoryChannel()
-    await expect(replayStep(ch, 's', text!)).resolves.toBe('replayed')
-    expect(ch.sent.map((s) => s.msg.type)).toEqual(['input:type'])
+    await expect(replayStep(ch, 's', read)).resolves.toBe('replayed')
+    expect(ch.sent.map((s) => s.msg)).toEqual([
+      { type: 'input:key', sessionId: 's', requestId: expect.any(String), payload: { code: 'KeyA', modifiers: 0x08 } },
+      { type: 'input:type', sessionId: 's', requestId: expect.any(String), payload: { text: '안녕' } },
+    ])
   })
 
   it('pastes through the clipboard, as the person did', async () => {

@@ -491,11 +491,38 @@ export class SimctlWrapper {
 
     await this.runner.exec('spawn', udid, 'defaults', 'write', '-g', 'AppleKeyboards', '-array', ...keyboards)
 
-    // Restart the keyboard daemon so it picks up the new settings immediately.
-    // Errors are silently ignored — changes will take effect on next text field focus if the daemon isn't running yet.
-    try {
-      await this.runner.exec('spawn', udid, 'launchctl', 'kickstart', '-k', 'system/com.apple.kbd')
-    } catch { /* expected on some iOS versions */ }
+    await this.restartKeyboardDaemon(udid)
+  }
+
+  /**
+   * Put the device's keyboard language back to its first keyboard (#1134). The language a person switched to — Caps
+   * Lock on a device with two keyboards — is stored as `KeyboardLastUsed` and `KeyboardsCurrentAndNext` in
+   * `com.apple.keyboard.preferences` (found by diffing the simulator's preferences across a Caps Lock press, iOS 26.4),
+   * not in `AppleKeyboards`, whose order does not reset it. Written, then the keyboard daemon restarted; a running app
+   * keeps its language until it is launched again (measured both ways).
+   */
+  async resetKeyboardLanguage(udid: string): Promise<void> {
+    const out = await this.runner.exec('spawn', udid, 'defaults', 'read', '-g', 'AppleKeyboards')
+    const keyboards = [...out.matchAll(/"([^"]+)"/g)].map((m) => m[1]!)
+    const first = keyboards[0]
+    if (!first) return
+    const next = keyboards.find((k) => k !== first && !k.startsWith('emoji')) ?? first
+    await this.runner.exec('spawn', udid, 'defaults', 'write', 'com.apple.keyboard.preferences', 'KeyboardLastUsed', first)
+    await this.runner.exec('spawn', udid, 'defaults', 'write', 'com.apple.keyboard.preferences', 'KeyboardsCurrentAndNext', '-array', first, first, next)
+    await this.restartKeyboardDaemon(udid)
+  }
+
+  // Restart the keyboard daemon so it picks up the new settings. `com.apple.TextInput.kbd` in the foreground user
+  // domain on iOS 26.4 (measured), where `system/com.apple.kbd`, used until #1134, does not exist and failed in silence.
+  // The old name is still tried when the new one fails, for an older runtime nobody has measured. Errors are ignored —
+  // changes take effect on the next text field focus if the daemon isn't running yet.
+  private async restartKeyboardDaemon(udid: string): Promise<void> {
+    for (const service of ['user/foreground/com.apple.TextInput.kbd', 'system/com.apple.kbd']) {
+      try {
+        await this.runner.exec('spawn', udid, 'launchctl', 'kickstart', '-k', service)
+        return
+      } catch { /* try the next name */ }
+    }
   }
 
   async rotate(udid: string, orientation: 'portrait' | 'landscapeLeft' | 'landscapeRight' | 'portraitUpsideDown'): Promise<void> {

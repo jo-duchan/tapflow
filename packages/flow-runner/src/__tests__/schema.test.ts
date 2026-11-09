@@ -411,12 +411,31 @@ describe('points and secrets', () => {
     expect(step('inputText: "PASSWORD"')).toEqual({ type: 'inputText', text: 'PASSWORD' })
   })
 
+  it('keeps the JSON schema\'s inputText forms the ones the parser takes', () => {
+    const schema = JSON.parse(readFileSync(join(dirname(fileURLToPath(import.meta.url)), '..', '..', 'schema', 'tapflow-flow.schema.json'), 'utf8'))
+    const forms = (schema as { definitions: Record<string, unknown> }) && JSON.stringify(schema).match(/"inputText":\{[^]*?"oneOf":(\[[^]*?\])\s*\}\s*,\s*"pressKey"/)
+    expect(forms).not.toBeNull()
+    const oneOf = JSON.parse(forms![1]!) as Array<{ type: string; required?: string[]; properties?: Record<string, unknown> }>
+    expect(oneOf.map((f) => f.type === 'object' ? `${f.required!.join()}:${Object.keys(f.properties!).sort().join()}` : f.type))
+      .toEqual(['string', 'text:replace,text', 'secret:replace,secret'])
+    expect(step('inputText: { secret: PASSWORD, replace: true }')).toEqual({ type: 'inputSecret', name: 'PASSWORD', replace: true })
+  })
+
+  it('reads inputText { text, replace } as replacing what the field holds (#1135)', () => {
+    expect(step('inputText: { text: "a@b.com", replace: true }')).toEqual({ type: 'inputText', text: 'a@b.com', replace: true })
+    expect(step('inputText: { text: "안녕", replace: false }')).toEqual({ type: 'inputText', text: '안녕' })
+    expect(step('inputText: { text: "x" }')).toEqual({ type: 'inputText', text: 'x' })
+  })
+
   it.each([
     ['inputText: { secret: 2FA }', /"secret" must be a name/],
     ['inputText: { secret: "MY-PASS" }', /"secret" must be a name/],
     ['inputText: { secret: "" }', /"secret" must be a name/],
     ['inputText: { env: PASSWORD }', /unknown inputText keys: env/],
     ['inputText: { secret: A, text: b }', /unknown inputText keys: text/],
+    ['inputText: { text: 1 }', /"inputText.text" must be a string/],
+    ['inputText: { text: a, replace: "yes" }', /"inputText.replace" must be true or false/],
+    ['inputText: { text: a, append: true }', /unknown inputText keys: append/],
   ])('refuses %s', (yaml, error) => {
     expect(() => step(yaml)).toThrow(error)
   })

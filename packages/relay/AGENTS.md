@@ -86,7 +86,7 @@ iOS build format: `.app.zip` **or** `.tar.gz`/`.tgz` (EAS `eas build` simulator 
   `ANSWERABLE` in the protocol and the replies in `refuseMalformed` are held to one derived set by
   `scripts/__tests__/correlatedRequestsGated.test.mjs`.
 
-  Agent payloads are **deliberately not validated**, and the reason is not a deferral. `AgentRegister.platform` is `string`, open so a third-party platform can register through `AgentRegistry.register()` (OCP), while `ChromePayload` is a closed two-member union — so a platform this repo promises to support has no valid `session:chrome` variant, and refusing one would cost it bezel and buttons for the life of the session. The six messages the relay *consumes* (`agent:register`, `agent:resources`, the screenshot and ui-tree replies) are validated, with a `.default()` for every field the relay used to read through a `??`.
+  Agent payloads are **deliberately not validated**, and the reason is not a deferral. `AgentRegister.platform` is `string`, open so a third-party platform can register through `AgentRegistry.register()` (OCP), while `ChromePayload` is a closed two-member union — so a platform this repo promises to support has no valid `session:chrome` variant, and refusing one would cost it bezel and buttons for the life of the session. The eight messages the relay *consumes* (`agent:register`, `agent:devices`, `agent:resources`, the screenshot and ui-tree replies, `ui:field:response`) are validated, with a `.default()` for every field the relay used to read through a `??`.
 - **Clipboard bridge** (`clipboard:*`): browser→agent `clipboard:read` (`payload.press`: `'copy' | 'cut'` presses that chord on the device first) and `clipboard:write` (`payload.text`, `payload.pasteAfter`); agent→browser `clipboard:data` / `clipboard:write-done` / `clipboard:error`, correlated by `requestId`. Unlike the other agent→browser replies these are **bound to the session's own `agentSocket`** — their payload lands on the viewer's host OS clipboard, so a second agent must not be able to address someone else's session. An undeliverable request answers `clipboard:error` immediately rather than letting the caller's deadline expire. Agents advertise `capabilities: ['clipboard']` in `agent:register`; the relay echoes them on `session:joined` so a viewer can tell a capable agent from one that predates the feature instead of inferring it from silence.
 - **An input the relay cannot dispatch is answered here, with a reason.** The four terminal frames get an
   `input:error` and `input:type` gets an `input:type-error`, so an MCP or browser caller fails now instead of
@@ -286,6 +286,25 @@ keeps: watchers get a character count. Most of what follows exists because of th
   starts with the chrome the relay holds). Trimmed to three quarters, so the next input does not trim again. Sizes are
   JSON characters, an estimate; a dialog's snapshot shares entries and is not counted, so a capture can hold up to twice
   its budget while one is open.
+- **The field typed into is read around each run of typing** (#1135), because the keys alone cannot say what the
+  device's IME made of them. At a run's first `input:key`/`input:type` the relay asks the session's agent for the
+  focused field (`ui:field:request`), and again `FIELD_IDLE_MS` (600 ms) after the run's last key — any key extends the
+  run, any other input ends it. **Nothing waits for a read**: an input is sent as before, and `requestedAt` and `at` on
+  the recorded entry let the reader drop a read that raced one. Only an agent naming `field-value` is asked (iOS), only
+  for a recorded holder, and the answer is kept only if the person is still recorded when it comes. A snapshot first
+  reads a field still being typed in and waits up to `SNAPSHOT_READ_WAIT_MS` for reads in flight (`settleReads`).
+  `ui:field:response` is consumed here and **never forwarded**: it is the field's whole contents — what the person
+  typed, and any text the app or AutoFill put there — which only the capture keeps. It is accepted only from the
+  session's own agent socket, and a secure field's `value` is dropped here whatever the agent sent. On a Mac over its
+  memory line no field is read and a recorded boot warms nothing: a person's join is let past the memory check because
+  their device is up, and the runner a read needs is not (`recorded` on `device:boot`).
+- **Another person taking a device resets its keyboard language** (#1134). A device keeps the language a tester
+  switched to, so the next person's keys would type in it. `SessionManager` keeps `lastPersonUser` — a signed-in
+  person, never an AI client, `anon` or `unidentified:*`, so coming back from one's own MCP or flow run is not someone
+  new — and `join` reports `personChanged`; the relay then owes the session a `device:keyboard-reset` and sends it ahead of
+  that person's next `device:boot` to an agent naming `keyboard-reset` — at the join, an agent away for the moment
+  would never hear it, and the next join would be the same person. A relay restart forgets the last person, which counts as no change. Same person re-joining (a
+  reload, a dropped Wi-Fi) resets nothing.
 - **Never on disk and never in a log line.** Not in the database, not in `logger`; a capture lives as long as the device
   stays the person's.
 

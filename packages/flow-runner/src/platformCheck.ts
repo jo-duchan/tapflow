@@ -36,3 +36,21 @@ export function unavailableButtonMessage(problem: UnavailableButton, platform: s
     ? `this device has no "${problem.name}" button it can press — run the flow on a device that has one, or tag it and leave this one out`
     : `${where} has no "${problem.name}" button, so this flow cannot run on ${where} — press the app's own control with a selector instead, or tag the flow and run it only where the button exists`
 }
+
+/** Select-all, which `inputText { replace: true }` presses before it types. iOS takes it as a hardware chord. */
+export const SELECT_ALL = { code: 'KeyA', modifiers: ['meta'] } as const
+
+/**
+ * The first `inputText { replace: true }` on a platform that cannot select a field's text, or `null`. Android's agent
+ * presses no select-all (it refuses the chord as unsupported), so the step would type after what the field holds.
+ */
+export function unavailableReplace(flow: Pick<Flow, 'steps'>, platform: string): number | null {
+  if (platform !== 'android') return null
+  const index = flow.steps.findIndex((s) => (s.type === 'inputText' || s.type === 'inputSecret') && s.replace === true)
+  return index < 0 ? null : index
+}
+
+export function unavailableReplaceMessage(platform: string): string {
+  const where = PLATFORM_NAMES[platform] ?? platform
+  return `${where} cannot select what a field holds, so "inputText" with "replace" cannot run there — type into an empty field without "replace", or tag the flow and run it only on iOS`
+}

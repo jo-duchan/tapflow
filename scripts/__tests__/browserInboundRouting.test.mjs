@@ -387,6 +387,10 @@ describe('browser-inbound routing matches the protocol union', () => {
       'app:launch': 'payload requestId sessionId',
       'screenshot:request': 'format requestId sessionId',
       'ui:tree:request': 'requestId sessionId',
+      // #1135: Flow Capture's read of the focused field; relay-made, answered to the relay only, never forwarded.
+      'ui:field:request': 'requestId sessionId',
+      // #1134: another person took the device; sent only to an agent naming `keyboard-reset`.
+      'device:keyboard-reset': 'sessionId',
     },
     RelayToBrowser: {
       'agents:listed': 'features? sessions',

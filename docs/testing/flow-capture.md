@@ -53,7 +53,7 @@ The steps of the flow are listed. Selecting one shows the screen just before it 
 | **auto** | A swipe turned into "scroll until the element the next step taps is on screen" (`scroll: { until }`). How far one swipe goes differs from run to run, and this way the result does not. |
 | **not in the flow** | Something a flow cannot express, left out: switching the network, cut, putting the on-screen keyboard up or down, a long press of more than 60 seconds, and so on. The card says why. |
 
-Text typed into a password field is not written to the flow file. The step keeps only a name, as in `inputText: { secret: PASSWORD }`. Open the card with its expand button to rename it; a name uses letters, digits and `_` and does not start with a digit. To pass the value when the flow runs, see [Secrets](/automation/flows#secrets).
+Text typed into a field the app marks as a password is not written to the flow file. The step keeps only a name, as in `inputText: { secret: PASSWORD }`. A password shown as plain text, as after tapping a show-password button, is an ordinary field and goes into the file as text, so keep it hidden while you record or remove that step. Before you commit the file, check that the YAML holds no password. Open the card with its expand button to rename it; a name uses letters, digits and `_` and does not start with a digit. To pass the value when the flow runs, see [Secrets](/automation/flows#secrets).
 
 **Show YAML** previews the flow. **Verify and export** moves on.
 

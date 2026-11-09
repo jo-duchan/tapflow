@@ -180,7 +180,9 @@ describe('protocol message interfaces', () => {
     // runner asking the relay to choose a device, and its two answers. 86 is the device list re-read (#1085):
     // `AgentDevices`, an agent's list after it changed, and `AgentDevicesApplied`, the sessions the relay made and removed.
     // 87 is `InputTouchCancel` (#1115): a client leaving mid-gesture had only an end, which completes the touch.
-    expect(messages.size).toBe(87)
+    // 90 is Flow Capture's field read and the keyboard reset (#1135, #1134): `UiFieldRequest` and `UiFieldResponse`,
+    // the relay asking an agent what the focused field holds, and `DeviceKeyboardReset`.
+    expect(messages.size).toBe(90)
     // `InputKey` predates L1 and has always been named; it must be in here too.
     expect(messages.has('InputKey')).toBe(true)
   })
