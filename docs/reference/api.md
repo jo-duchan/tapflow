@@ -762,7 +762,7 @@ Body (JSON):
   flowCapture  boolean  required
 ```
 
-When `flowCapture` is `true`, the relay remembers the taps, swipes and typing this user does in the dashboard, in memory, for the length of the session. On iOS it also reads the text field being typed into, its whole contents, so the steps say what was typed, and it starts the agent's UI-tree runner when that user boots a device (about 110–360 MB per device, measured). On a Mac over its memory limit it does neither. A password field's value is never read. Typing into a field it could not read is recorded as the keys pressed on a US keyboard, which may differ from what the device typed, and Capture flow marks the step **fragile**. It is `true` by default. Setting it to `false` also discards what was already remembered.
+When `flowCapture` is `true`, the relay remembers the taps, swipes and typing this user does in the dashboard, in memory, for the length of the session. On iOS it also reads the text field being typed into, its whole contents, so the steps say what was typed, and it starts the agent's UI-tree runner when that user boots a device (about 110–360 MB per device, measured). On a Mac over its memory limit it does neither. A password field's value is never read. Typing into any other field it could not read is recorded as the keys pressed on a US keyboard, which may differ from what the device typed, and Capture flow marks the step **fragile**. It is `true` by default. Setting it to `false` also discards what was already remembered.
 
 **Response `200`**
 
