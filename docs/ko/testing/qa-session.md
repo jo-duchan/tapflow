@@ -112,7 +112,7 @@ tapflow 밖에서 기기를 껐다 켰다면(Simulator.app 종료 등) 돌아갈
 
 - **Focus**: 키 입력이 기기로 가는 동안 초록색으로 바뀝니다.
 - **fps**: 초당 받는 화면 수입니다. 15를 넘으면 **Active**, 그 이하이면 **Idle**로 표시됩니다. 화면이 멈춰 있으면 수치가 낮은 것이 정상입니다.
-- **Capturing steps** / **Not capturing steps**: [Flow Capture](/ko/testing/flow-capture)가 내 동작을 기록하고 있는지 보여 줍니다.
+- **Steps**: [Flow Capture](/ko/testing/flow-capture)가 내 동작을 기록하고 있으면 **On**, 아니면 **Off**입니다. 바꾸는 곳은 **Settings**의 **Flow Capture** 카드입니다.
 - **Smooth** / **Standard**: 이 브라우저가 받는 스트림 프로파일입니다. **Standard**를 누르면 Smooth로 바꾸는 조건을 안내하는 창이 열립니다. 프로파일은 [스트림 품질](/ko/operate/streaming-quality)을 참고하세요.
 
 카드 아래쪽 탭에서 [댓글](/ko/testing/comments)(**Comments**)과 [녹화](/ko/testing/screenshots-and-recordings#recordings)(**Recordings**)를 봅니다.
