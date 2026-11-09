@@ -398,14 +398,12 @@ export function MatchScreen({ state, tap, marks, onStop, onRestart, onTakeWhatMa
         </div>
       </div>
       <Footer>
-        {stopped ? (
-          <>
-            {state.matched.length > 0 && <Button variant="outline" onClick={onTakeWhatMatched}>{copy.editWhatMatched}</Button>}
-            <Button ref={stopRef} onClick={onRestart}>{copy.restart}</Button>
-          </>
-        ) : (
-          <Button ref={stopRef} variant="outline" className="w-24" onClick={onStop}>{copy.stop}</Button>
-        )}
+        {stopped && state.matched.length > 0 && <Button variant="outline" onClick={onTakeWhatMatched}>{copy.editWhatMatched}</Button>}
+        {/* One button that turns from Stop into Start again and back, not two: swapping elements dropped the focus of the
+            one pressed to the page (review of #1125). */}
+        <Button ref={stopRef} variant={stopped ? 'default' : 'outline'} className={stopped ? undefined : 'w-24'} onClick={stopped ? onRestart : onStop}>
+          {stopped ? copy.restart : copy.stop}
+        </Button>
       </Footer>
     </div>
   )
@@ -633,9 +631,15 @@ export function VerifyScreen({ state, tap, marks, total, onExport, onBack, prima
       {/* The same footer as every step, at the bottom of the dialog: buttons that move between steps do not move. */}
       <Footer>
         {(result || state.error) && <Button variant="outline" onClick={onBack}>{copy.backToEdit}</Button>}
-        {result && (
-          <Button ref={primaryRef} onClick={onExport}>{failed ? copy.exportAnyway : copy.continue}</Button>
-        )}
+        {/* There while it runs, busy (`aria-disabled`, not `disabled`, which drops focus): with nothing to hold, focus
+            fell to the page when Verify began and stayed there after it finished (review of #1125). */}
+        <Button
+          ref={primaryRef} aria-disabled={!result || undefined}
+          className="aria-disabled:pointer-events-none aria-disabled:opacity-50"
+          onClick={() => { if (result) onExport() }}
+        >
+          {failed ? copy.exportAnyway : copy.continue}
+        </Button>
       </Footer>
     </div>
   )

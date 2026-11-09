@@ -6,6 +6,8 @@ import type { FragileReason, RangeWarning, SkipReason } from '@tapflowio/flow-ru
  */
 export const copy = {
   title: 'Capture flow',
+  // The dialog's description for every step: Match's own help was read out on Range, Edit and Export too.
+  description: 'Turn the steps you took on this device into a flow file, replayed and checked on the device first.',
   progressLabel: 'Progress',
   steps: ['Range', 'Match', 'Edit', 'Verify', 'Export'],
   cancel: 'Cancel',

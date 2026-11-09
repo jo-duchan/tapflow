@@ -86,7 +86,7 @@ export default function FlowCaptureDialog({ tap, returnFocusRef, onClose }: {
       >
         <DialogHeader>
           <DialogTitle>{copy.title}</DialogTitle>
-          <DialogDescription className="sr-only">{copy.matchingHelp}</DialogDescription>
+          <DialogDescription className="sr-only">{copy.description}</DialogDescription>
         </DialogHeader>
         {snapshot.isPending ? (
           <p role="status" className="text-sm text-muted-foreground">{copy.loading}</p>

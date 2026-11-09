@@ -5,7 +5,7 @@ import userEvent from '@testing-library/user-event'
 import type { CaptureEntry, CaptureSnapshot } from '@tapflowio/protocol/capture'
 import type { CapturedStep } from '@tapflowio/flow-runner/browser'
 import FlowCaptureDialog from '@/components/flow-capture/FlowCaptureDialog'
-import { EditScreen, ExportScreen, RangeScreen, VerifyScreen } from '@/components/flow-capture/screens'
+import { EditScreen, ExportScreen, MatchScreen, RangeScreen, VerifyScreen } from '@/components/flow-capture/screens'
 import { initialState, reduce } from '@/lib/flowCapture/machine'
 import type { CaptureTap } from '@/lib/flowCapture/tap'
 import { withQuery } from './withQuery'
@@ -329,6 +329,29 @@ describe('VerifyScreen', () => {
     expect(why).toHaveAttribute('aria-expanded', 'true')
     expect(screen.getByText('tapOn: "Row 22"')).toBeInTheDocument()
     expect(screen.getByText(/, not run/)).toBeInTheDocument()
+  })
+})
+
+describe('focus through a run', () => {
+  const marks = { cursor: null, trails: [] }
+  const tapStub = { surface: () => null } as never
+
+  // Review of #1125: Stop's button was swapped for Start again's, and the focus of the one pressed fell to the page.
+  it('keeps focus on the button pressed when Stop becomes Start again', () => {
+    const running = { ...initialState, phase: 'matching' as const, progress: { done: 1, total: 3 } }
+    const props = { tap: tapStub, marks, onStop: vi.fn(), onRestart: vi.fn(), onTakeWhatMatched: vi.fn(), stopRef: { current: null } }
+    const { rerender } = render(<MatchScreen state={running} {...props} />)
+    const stop = screen.getByRole('button', { name: 'Stop' })
+    stop.focus()
+    rerender(<MatchScreen state={{ ...running, error: 'The replay stopped.' }} {...props} />)
+    expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Start again' }))
+  })
+
+  // With nothing to hold, focus fell to the page when Verify began and stayed there after it finished.
+  it('has its primary button there, busy, while Verify runs', () => {
+    const running = { ...initialState, phase: 'verifying' as const, verify: { status: 'running' as const, done: 0, live: [] } }
+    render(<VerifyScreen state={running} tap={tapStub} marks={marks} total={3} onExport={vi.fn()} onBack={vi.fn()} primaryRef={{ current: null }} />)
+    expect(screen.getByRole('button', { name: 'Continue' })).toHaveAttribute('aria-disabled', 'true')
   })
 })
 
