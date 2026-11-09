@@ -94,7 +94,7 @@ tapflow가 같은 기기에서 앱 데이터를 지우고 구간이 시작할 �
 
 | 증상 | 원인과 조치 |
 |---|---|
-| 툴바에 **Capture flow** 버튼이 없습니다. | **Capture my steps**가 꺼져 있거나 빌드 없이 연 세션입니다. 정보 카드에 **Steps · Off**가 보이면 **Settings**의 **Flow Capture** 카드에서 켭니다. |
+| 툴바에 **Capture flow** 버튼이 없습니다. | **Capture my steps**가 꺼져 있거나 빌드 없이 연 세션입니다. 정보 카드에 **Steps · Off**가 보이면 **Settings → Default**의 **Flow Capture** 카드에서 켭니다. |
 | **No steps have been captured on this device yet.** | 이 기기에서 기록된 동작이 없습니다. **Capture my steps**를 켠 뒤 테스트합니다. |
 | **Your captured steps are gone: the device was released or restarted.** | 기기가 종료되거나 재시작되어 기록이 지워졌습니다. 다시 테스트해 기록합니다. |
 | **`The connection to the relay was lost. Start again once it is back.`** | 릴레이와 연결이 끊겼습니다. 다시 연결된 뒤 **Start again**을 누릅니다. |

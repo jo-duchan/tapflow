@@ -94,7 +94,7 @@ The file name (`flows/<name>.yaml`) and the YAML are shown.
 
 | Symptom | Cause and fix |
 |---|---|
-| There is no **Capture flow** button in the toolbar. | **Capture my steps** is off, or the session was opened without a build. If the info card shows **Steps · Off**, turn it on in the **Flow Capture** card in **Settings**. |
+| There is no **Capture flow** button in the toolbar. | **Capture my steps** is off, or the session was opened without a build. If the info card shows **Steps · Off**, turn it on in the **Flow Capture** card in **Settings → Default**. |
 | **No steps have been captured on this device yet.** | No steps were recorded on this device. Turn on **Capture my steps** and test. |
 | **Your captured steps are gone: the device was released or restarted.** | The device was shut down or restarted, which cleared the capture. Test again to record it. |
 | **The connection to the relay was lost. Start again once it is back.** | The connection to the relay dropped. Click **Start again** once it is back. |

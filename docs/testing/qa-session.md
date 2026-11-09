@@ -112,7 +112,7 @@ The info card to the right of the device shows the session's state.
 
 - **Focus**: turns green while your keystrokes go to the device.
 - **fps**: frames per second arriving. Above 15 it reads **Active**, otherwise **Idle**. A low number is normal while the screen is still.
-- **Steps**: **On** while [Flow Capture](/testing/flow-capture) is recording your steps, **Off** when it is not. Change it in the **Flow Capture** card in **Settings**.
+- **Steps**: **On** while [Flow Capture](/testing/flow-capture) is recording your steps, **Off** when it is not. Change it in the **Flow Capture** card in **Settings → Default**.
 - **Smooth** / **Standard**: the stream profile this browser gets. Click **Standard** for a dialog on what it takes to switch to Smooth. See [Stream quality](/operate/streaming-quality) for the profiles.
 
 The tabs under the card hold [Comments](/testing/comments) (**Comments**) and [Recordings](/testing/screenshots-and-recordings#recordings) (**Recordings**).
