@@ -135,7 +135,12 @@ function typed(raw: RawStep, text: string, ctx: MatchContext): CapturedStep {
   const unread = raw.kind === 'text'
     && (raw.fieldRead === 'unread' || (ctx.platform === 'ios' && raw.fieldRead === undefined && raw.replace !== true))
   const guess = unread ? { fragile: 'field-unread' as const } : {}
-  if (typedSecretly(ctx)) return { raw, step: null, secret: { value: text, known: knownSecret(ctx) }, ...guess }
+  // Read as a password field when it was typed: still a secret whatever field Match finds focused, which can be
+  // another one, or the guess would go into the file as text.
+  const recordedSecure = raw.kind === 'text' && raw.fieldRead === 'secure'
+  if (recordedSecure || typedSecretly(ctx)) {
+    return { raw, step: null, secret: { value: text, known: recordedSecure || knownSecret(ctx) }, ...guess }
+  }
   const replace = raw.kind === 'text' && raw.replace === true
   return { raw, step: replace ? { type: 'inputText', text, replace: true } : { type: 'inputText', text }, ...guess }
 }

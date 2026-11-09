@@ -350,6 +350,13 @@ describe('matchStep', () => {
       expect(matchStep({ ...text!, fieldRead: 'secure' } as RawStep, ctxOf([field({ focused: true, secure: true })], { platform: 'ios' })).fragile).toBeUndefined()
     })
 
+    // Review of #1143: Match can find another field focused than the one typed into, and a plain one wrote the guess
+    // into the file.
+    it('keeps a run read as a password field a secret, whatever field Match finds focused', () => {
+      const plain = ctxOf([field({ focused: true, secure: false })])
+      expect(matchStep({ ...text!, fieldRead: 'secure' } as RawStep, plain)).toMatchObject({ step: null, secret: { value: 'hunter', known: true } })
+    })
+
     it('keeps it out when no field has focus', () => {
       expect(matchStep(text!, ctxOf([field({ secure: false })])).secret).toBeDefined()
     })
