@@ -501,25 +501,46 @@ export class SimctlWrapper {
    * not in `AppleKeyboards`, whose order does not reset it. Written, then the keyboard daemon restarted; a running app
    * keeps its language until it is launched again (measured both ways).
    */
-  async resetKeyboardLanguage(udid: string): Promise<void> {
-    const out = await this.runner.exec('spawn', udid, 'defaults', 'read', '-g', 'AppleKeyboards')
+  async resetKeyboardLanguage(udid: string, timeoutMs?: number): Promise<void> {
+    await this.setKeyboardLanguage(udid, undefined, timeoutMs)
+  }
+
+  /**
+   * Put the device's keyboard in `keyboard` — an `AppleKeyboards` entry, as `keyboardLanguage` reads it — or in its
+   * first when absent, the way `resetKeyboardLanguage` does (#1135: a replay starts from the recording's keyboard).
+   * `false` when the device has no such keyboard, and nothing is written.
+   */
+  async setKeyboardLanguage(udid: string, keyboard?: string, timeoutMs?: number): Promise<boolean> {
+    // Each call bounded by `timeoutMs` when given (a run's reset budget); unbounded otherwise, as these always were.
+    const exec = (...args: string[]) => (timeoutMs === undefined ? this.runner.exec(...args) : this.runner.execWithOpts({ timeoutMs }, ...args))
+    const out = await exec('spawn', udid, 'defaults', 'read', '-g', 'AppleKeyboards')
     const keyboards = [...out.matchAll(/"([^"]+)"/g)].map((m) => m[1]!)
-    const first = keyboards[0]
-    if (!first) return
-    const next = keyboards.find((k) => k !== first && !k.startsWith('emoji')) ?? first
-    await this.runner.exec('spawn', udid, 'defaults', 'write', 'com.apple.keyboard.preferences', 'KeyboardLastUsed', first)
-    await this.runner.exec('spawn', udid, 'defaults', 'write', 'com.apple.keyboard.preferences', 'KeyboardsCurrentAndNext', '-array', first, first, next)
-    await this.restartKeyboardDaemon(udid)
+    const target = keyboard ?? keyboards[0]
+    if (!target || !keyboards.includes(target)) return false
+    const next = keyboards.find((k) => k !== target && !k.startsWith('emoji')) ?? target
+    await exec('spawn', udid, 'defaults', 'write', 'com.apple.keyboard.preferences', 'KeyboardLastUsed', target)
+    await exec('spawn', udid, 'defaults', 'write', 'com.apple.keyboard.preferences', 'KeyboardsCurrentAndNext', '-array', target, target, next)
+    await this.restartKeyboardDaemon(udid, timeoutMs)
+    return true
+  }
+
+  /** The keyboard the device types with now (`KeyboardLastUsed`, an `AppleKeyboards` entry), or `undefined` before any
+   *  was used or when it cannot be read. */
+  async keyboardLanguage(udid: string): Promise<string | undefined> {
+    const out = await this.runner.exec('spawn', udid, 'defaults', 'read', 'com.apple.keyboard.preferences', 'KeyboardLastUsed').catch(() => '')
+    const value = out.trim()
+    return value === '' ? undefined : value
   }
 
   // Restart the keyboard daemon so it picks up the new settings. `com.apple.TextInput.kbd` in the foreground user
   // domain on iOS 26.4 (measured), where `system/com.apple.kbd`, used until #1134, does not exist and failed in silence.
   // The old name is still tried when the new one fails, for an older runtime nobody has measured. Errors are ignored —
   // changes take effect on the next text field focus if the daemon isn't running yet.
-  private async restartKeyboardDaemon(udid: string): Promise<void> {
+  private async restartKeyboardDaemon(udid: string, timeoutMs?: number): Promise<void> {
     for (const service of ['user/foreground/com.apple.TextInput.kbd', 'system/com.apple.kbd']) {
       try {
-        await this.runner.exec('spawn', udid, 'launchctl', 'kickstart', '-k', service)
+        const args = ['spawn', udid, 'launchctl', 'kickstart', '-k', service]
+        await (timeoutMs === undefined ? this.runner.exec(...args) : this.runner.execWithOpts({ timeoutMs }, ...args))
         return
       } catch { /* try the next name */ }
     }

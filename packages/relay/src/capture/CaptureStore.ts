@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto'
-import type { ClientKind, FieldReadReason, FocusedField } from '@tapflowio/protocol'
+import type { ClientKind, FieldReadReason, FocusedField, KeyboardState } from '@tapflowio/protocol'
 import type { CapturedMessage, CaptureEntry, CaptureSnapshot } from '@tapflowio/protocol/capture'
 
 /**
@@ -35,15 +35,22 @@ export interface Holder {
 }
 
 /** An agent's answer about the keyboard-focused text field (`ui:field:response`). */
-export interface FieldRead { field: FocusedField | null; reason?: FieldReadReason }
+export interface FieldRead { field: FocusedField | null; reason?: FieldReadReason; keyboard?: KeyboardState; language?: string }
 
 /** How long typing has to pause before the relay reads the field. Short, because a read is only kept when it
- *  answered before the next input; measured, reading every 0.5 s did not slow typing (a read takes 40–90 ms). */
-export const FIELD_IDLE_MS = 600
+ *  answered before the next input; measured, reading every 0.5 s did not slow typing (a read takes 40–90 ms). 600 ms
+ *  lost the value of soft-keyboard typing on iOS, where a read took 0.45 s and the person tapped the next field 0.87 s
+ *  after the last key (E2E of #1135); a key typed within this window puts the read off, so fast typing asks no more. */
+export const FIELD_IDLE_MS = 250
 /** How long a snapshot waits for a read still in flight, so the last field typed before Capture flow is not lost. */
 export const SNAPSHOT_READ_WAIT_MS = 1_000
 /** How long the relay waits for an agent's field read before it counts as not read. */
 export const FIELD_READ_TIMEOUT_MS = 5_000
+/** How long after a person's last input the keyboard is read again, to see it where it came to rest: iOS slides it in
+ *  and out over ~250 ms. A read matching the one before it is `settled`. */
+export const KEYBOARD_SETTLE_MS = 300
+/** Reads after the last input before the keyboard is taken as never settling (a keyboard animating for good). */
+const KEYBOARD_SETTLE_TRIES = 3
 
 export interface CaptureStoreOptions {
   /** The person's own setting (`users.flow_capture`), read from memory on every input. */
@@ -61,6 +68,8 @@ export interface CaptureStoreOptions {
   pauseTtlMs?: number
   /** Ask the session's agent for its focused text field (#1135), or `null` when it cannot answer. */
   readField?: (sessionId: string) => Promise<FieldRead> | null
+  /** Ask the session's agent where the soft keyboard is (#1135), or `null` when it cannot answer. */
+  readKeyboard?: (sessionId: string) => Promise<KeyboardState> | null
 }
 
 /** Keys that move focus or submit, and chords: a run of typing ends at them, as flow-runner's grouping does, so the
@@ -79,6 +88,38 @@ function typesIntoField(msg: CapturedMessage): boolean {
 interface Typing {
   holder: Holder
   timer: ReturnType<typeof setTimeout> | null
+}
+
+/**
+ * The keyboard reads of one session (#1135). One at a time: an input while one is out asks for another when it
+ * returns, rather than a second beside it. `last` is the newest answer, and `tap` the keyboard as it was when the
+ * gesture in progress began — what decides, at its end, whether it was a key on the keyboard.
+ */
+interface KeyboardProbe {
+  holder: Holder
+  inFlight: boolean
+  again: boolean
+  settleTimer: ReturnType<typeof setTimeout> | null
+  settleTries: number
+  last?: KeyboardState
+  tap?: { x: number; y: number; frame: boolean; keyboard: KeyboardState | undefined }
+}
+
+/** Opening and moving frames: a keyboard read waits for the gesture's end, which is what can change it. */
+const MID_GESTURE = new Set(['input:touch:start', 'input:touch:move', 'input:pinch:start', 'input:pinch:move'])
+
+const near = (a: number, b: number): boolean => Math.abs(a - b) < 0.005
+function sameKeyboard(a: KeyboardState | undefined, b: KeyboardState): boolean {
+  if (!a || a.shown !== b.shown) return false
+  if (!a.rect || !b.rect) return !a.rect && !b.rect
+  return near(a.rect.x, b.rect.x) && near(a.rect.y, b.rect.y) && near(a.rect.width, b.rect.width) && near(a.rect.height, b.rect.height)
+}
+
+/** Whether a point is on the keyboard as it was read, in the space the point was sent in. */
+function onKeyboard(tap: NonNullable<KeyboardProbe['tap']>): boolean {
+  const rect = tap.frame ? tap.keyboard?.frameRect ?? tap.keyboard?.rect : tap.keyboard?.rect
+  if (tap.keyboard?.shown !== true || !rect) return false
+  return tap.x >= rect.x && tap.x <= rect.x + rect.width && tap.y >= rect.y && tap.y <= rect.y + rect.height
 }
 
 /** Messages that open a gesture; a head cut may stop just before one, never inside the gesture it opens. */
@@ -137,7 +178,10 @@ export class CaptureStore {
   /** A replay or verification is running in the owner's dialog: what reaches the device now is not the person. */
   private readonly paused = new Map<string, { user: string; until: number }>()
   private readonly typing = new Map<string, Typing>()
+  /** A session's value read in flight, and whether another was asked for meanwhile (single-flight, as keyboard probes). */
+  private readonly valueReads = new Map<string, { again: Holder | null }>()
   private readonly reads = new Map<string, Set<Promise<void>>>()
+  private readonly keyboards = new Map<string, KeyboardProbe>()
   private totalBytes = 0
   private readonly now: () => number
   private readonly maxEntries: number
@@ -167,8 +211,59 @@ export class CaptureStore {
       // One time for the input and the read it starts, so a one-key run's focus read is never a millisecond past it.
       const at = this.now()
       this.append(capture, { at, kind: 'input', msg })
+      this.noteKeyboard(sessionId, holder, msg)
       this.noteTyping(sessionId, holder, msg, at)
     } catch { /* see above */ }
+  }
+
+  /**
+   * Read the soft keyboard after each input that can change it (#1135): what tells a tap on the keyboard from a tap on
+   * the app, judged by flow-runner from the reads on either side of it. A gesture's start is remembered with the
+   * keyboard as last read, so its end can say whether it was a key.
+   */
+  private noteKeyboard(sessionId: string, holder: Holder, msg: CapturedMessage): void {
+    if (!this.opts.readKeyboard) return
+    let probe = this.keyboards.get(sessionId)
+    if (!probe) this.keyboards.set(sessionId, probe = { holder, inFlight: false, again: false, settleTimer: null, settleTries: 0 })
+    probe.holder = holder
+    if (msg.type === 'input:touch:start') {
+      probe.tap = { x: msg.payload.x, y: msg.payload.y, frame: msg.payload.space === 'frame', keyboard: probe.last }
+    }
+    if (MID_GESTURE.has(msg.type)) return
+    if (probe.settleTimer) clearTimeout(probe.settleTimer)
+    probe.settleTimer = null
+    probe.settleTries = 0
+    if (probe.inFlight) probe.again = true
+    else this.probeKeyboard(sessionId, probe, false)
+  }
+
+  private probeKeyboard(sessionId: string, probe: KeyboardProbe, settling: boolean): void {
+    const answer = this.opts.readKeyboard?.(sessionId)
+    if (!answer) return
+    const requestedAt = this.now()
+    probe.inFlight = true
+    const done = answer.then((keyboard) => {
+      probe.inFlight = false
+      if (this.keyboards.get(sessionId) !== probe) return
+      const capture = this.captures.get(sessionId)
+      if (!capture || !this.recording(sessionId, probe.holder, capture)) return
+      // Settled only on a read taken after a quiet spell, matching the one before it: an input in between asked again.
+      const settled = settling && !probe.again && sameKeyboard(probe.last, keyboard)
+      this.append(capture, { at: this.now(), kind: 'keyboard', requestedAt, keyboard, settled })
+      probe.last = keyboard
+      if (probe.again) {
+        probe.again = false
+        this.probeKeyboard(sessionId, probe, false)
+        return
+      }
+      if (settled || keyboard.shown === null || probe.settleTries >= KEYBOARD_SETTLE_TRIES) return
+      probe.settleTries++
+      probe.settleTimer = setTimeout(() => {
+        probe.settleTimer = null
+        this.probeKeyboard(sessionId, probe, true)
+      }, KEYBOARD_SETTLE_MS)
+    }).catch(() => { probe.inFlight = false })
+    this.track(sessionId, done)
   }
 
   /**
@@ -180,30 +275,64 @@ export class CaptureStore {
   private noteTyping(sessionId: string, holder: Holder, msg: CapturedMessage, at: number): void {
     if (!this.opts.readField) return
     const typing = this.typing.get(sessionId)
-    if (!typesIntoField(msg)) {
+    // A gesture is judged at its end: one that ends on the soft keyboard typed (its start was there), any other did not.
+    if (msg.type === 'input:touch:start' || msg.type === 'input:touch:move') return
+    const tap = msg.type === 'input:touch:end' ? this.keyboards.get(sessionId)?.tap : undefined
+    const onKeys = tap !== undefined && onKeyboard(tap)
+    if (!typesIntoField(msg) && !onKeys) {
       if (typing?.timer) clearTimeout(typing.timer)
       this.typing.delete(sessionId)
       return
     }
-    if (!typing) this.read(sessionId, holder, 'focus', at)
+    if (!typing) void this.read(sessionId, holder, 'focus', at)
     if (typing?.timer) clearTimeout(typing.timer)
     const next: Typing = { holder, timer: null }
     next.timer = setTimeout(() => {
       next.timer = null
-      this.read(sessionId, next.holder, 'value')
+      this.readValue(sessionId, next.holder)
     }, FIELD_IDLE_MS)
     this.typing.set(sessionId, next)
   }
 
-  private read(sessionId: string, holder: Holder, phase: 'focus' | 'value', requestedAt = this.now()): void {
+  /**
+   * One value read at a time per session. A field read can take 0.45 s on iOS, where the runner answers one query at a
+   * time, and a pause of 250 ms between keys asked for one per key: they queued, and the last one answered after the
+   * person's next input and was not kept. Asked while one is in flight, the read is made once that one answers — still
+   * after the last key, which is all a value read needs.
+   */
+  private readValue(sessionId: string, holder: Holder): void {
+    const inFlight = this.valueReads.get(sessionId)
+    if (inFlight) { inFlight.again = holder; return }
+    const slot = { again: null as Holder | null }
+    this.valueReads.set(sessionId, slot)
+    const done = this.read(sessionId, holder, 'value')
+    void (done ?? Promise.resolve()).finally(() => {
+      if (this.valueReads.get(sessionId) !== slot) return
+      this.valueReads.delete(sessionId)
+      if (slot.again) this.readValue(sessionId, slot.again)
+    })
+  }
+
+  private read(sessionId: string, holder: Holder, phase: 'focus' | 'value', requestedAt = this.now()): Promise<void> | undefined {
     const answer = this.opts.readField?.(sessionId)
-    if (!answer) return
+    if (!answer) return undefined
     const done = answer.then((read) => {
       const capture = this.captures.get(sessionId)
       // The person may have stopped being recorded while the agent answered: a pause, a seal, a setting turned off.
       if (!capture || !this.recording(sessionId, holder, capture)) return
-      this.append(capture, { at: this.now(), kind: 'field', phase, requestedAt, field: read.field, ...(read.reason ? { reason: read.reason } : {}) })
+      this.append(capture, {
+        at: this.now(), kind: 'field', phase, requestedAt, field: read.field,
+        ...(read.reason ? { reason: read.reason } : {}),
+        ...(read.keyboard ? { keyboard: read.keyboard } : {}),
+        ...(read.language ? { language: read.language } : {}),
+      })
     }).catch(() => { /* a read that failed is a read that is not there */ })
+    this.track(sessionId, done)
+    return done
+  }
+
+  /** A read a snapshot waits for (`settleReads`). */
+  private track(sessionId: string, done: Promise<void>): void {
     let pending = this.reads.get(sessionId)
     if (!pending) this.reads.set(sessionId, pending = new Set())
     pending.add(done)
@@ -240,6 +369,10 @@ export class CaptureStore {
     const typing = this.typing.get(sessionId)
     if (typing?.timer) clearTimeout(typing.timer)
     this.typing.delete(sessionId)
+    const probe = this.keyboards.get(sessionId)
+    if (probe?.settleTimer) clearTimeout(probe.settleTimer)
+    this.keyboards.delete(sessionId)
+    this.valueReads.delete(sessionId)
     const capture = this.captures.get(sessionId)
     if (capture) this.totalBytes -= capture.bytes
     this.captures.delete(sessionId)
@@ -262,7 +395,16 @@ export class CaptureStore {
     if (typing?.timer) {
       clearTimeout(typing.timer)
       typing.timer = null
-      this.read(sessionId, typing.holder, 'value')
+      // Straight away, not behind one in flight: the snapshot waits only for reads already asked.
+      void this.read(sessionId, typing.holder, 'value')
+    }
+    // The keyboard's settling read too, now: a Done tapped just before the dialog opened closes the keyboard after the
+    // first read, and only the settling read sees it closed — without it the tap reads as a key, not `imeAction`.
+    const probe = this.keyboards.get(sessionId)
+    if (probe?.settleTimer) {
+      clearTimeout(probe.settleTimer)
+      probe.settleTimer = null
+      this.probeKeyboard(sessionId, probe, true)
     }
     const pending = [...(this.reads.get(sessionId) ?? [])]
     if (pending.length === 0) return

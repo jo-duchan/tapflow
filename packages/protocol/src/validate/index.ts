@@ -62,7 +62,8 @@ import type {
   InputPinchEnd, InputPinchMove, InputPinchStart, InputPosture, InputRotate, InputTouchCancel, InputTouchEnd, InputTouchMove,
   InputTouchStart, InputType, InputTypeDone, InputTypeError, KeyboardToggled, OpenUrl, OpenUrlDone,
   OpenUrlError, ScreenshotDone, ScreenshotError, SessionChrome, SessionDeviceInfo, SessionEnd,
-  SessionActivity, SessionLeave, SessionStart, StreamRegister, UiTreeError, UiTreeResponse, UiFieldResponse, WatchStart, WatchStop,
+  SessionActivity, SessionLeave, SessionStart, StreamRegister, UiTreeError, UiTreeResponse, UiFieldResponse, UiKeyboardResponse, DeviceKeyboardSet, DeviceKeyboardSetDone, DeviceKeyboardSetError,
+  WatchStart, WatchStop,
 } from '../index.js'
 import type { Assert, EnvelopeOf, IsEmpty, SchemaExact } from './assert.js'
 
@@ -97,6 +98,13 @@ const requestId = z.string().min(1)
 const point = z.object({ x: z.number(), y: z.number() })
 const space = z.literal('frame').optional()
 const touchPoint = z.object({ x: z.number(), y: z.number(), space })
+const normalizedRect = z.object({ x: z.number(), y: z.number(), width: z.number(), height: z.number() })
+// A rect the relay cannot read is dropped, not the state: whether the keyboard is up still decides the taps around it.
+const keyboardState = z.object({
+  shown: z.boolean().nullable(),
+  rect: normalizedRect.optional().catch(undefined),
+  frameRect: normalizedRect.optional().catch(undefined),
+})
 
 // ── envelope-tier builders ───────────────────────────────────────────────────
 //
@@ -196,6 +204,10 @@ const BROWSER_INBOUND = {
   'app:clear-state': z.object({
     type: z.literal('app:clear-state'), sessionId, requestId,
     payload: z.object({ bundleId: z.string() }),
+  }),
+  'device:keyboard-set': z.object({
+    type: z.literal('device:keyboard-set'), sessionId, requestId,
+    payload: z.object({ keyboard: z.string().optional() }),
   }),
   'open-url': z.object({
     type: z.literal('open-url'), sessionId, requestId, payload: z.object({ url: z.string() }),
@@ -362,10 +374,17 @@ const AGENT_CONSUMED = {
       secure: z.boolean(),
     }).nullable().catch(null),
     reason: z.enum(['no-app', 'no-focus', 'ambiguous', 'secure', 'failed']).optional().catch('failed'),
+    keyboard: keyboardState.optional().catch(undefined),
+    language: z.string().optional().catch(undefined),
+  }),
+  // Unknown, not hidden, when the agent's answer cannot be read: a capture then judges the taps around it as unknown.
+  'ui:keyboard:response': z.object({
+    type: z.literal('ui:keyboard:response'), sessionId, requestId,
+    keyboard: keyboardState.catch({ shown: null }),
   }),
 } as const
 
-/** The 26 the relay only forwards. Envelope tier — see the header for why there is no exception. */
+/** The 28 the relay only forwards. Envelope tier — see the header for why there is no exception. */
 const AGENT_FORWARDED = {
   'session:chrome': env('session:chrome'),
   'session:deviceInfo': env('session:deviceInfo'),
@@ -388,6 +407,8 @@ const AGENT_FORWARDED = {
   'app:launch-error': envC('app:launch-error'),
   'app:clear-state-done': envC('app:clear-state-done'),
   'app:clear-state-error': envC('app:clear-state-error'),
+  'device:keyboard-set-done': envC('device:keyboard-set-done'),
+  'device:keyboard-set-error': envC('device:keyboard-set-error'),
   'open-url:done': envC('open-url:done'),
   'open-url:error': envC('open-url:error'),
   'input:done': envC('input:done'),
@@ -441,6 +462,7 @@ const ANSWERABLE = {
   'app:install': envC('app:install'),
   'app:launch': envC('app:launch'),
   'app:clear-state': envC('app:clear-state'),
+  'device:keyboard-set': envC('device:keyboard-set'),
   'open-url': envC('open-url'),
   'input:touch:end': envC('input:touch:end'),
   'input:pinch:end': envC('input:pinch:end'),
@@ -623,6 +645,7 @@ type _DeviceShutdown = Assert<V<'device:shutdown', DeviceShutdown>>
 type _AppInstall = Assert<V<'app:install', AppInstallToRelay>>
 type _AppLaunch = Assert<V<'app:launch', AppLaunchToRelay>>
 type _AppClearState = Assert<V<'app:clear-state', AppClearState>>
+type _DeviceKeyboardSet = Assert<V<'device:keyboard-set', DeviceKeyboardSet>>
 type _OpenUrl = Assert<V<'open-url', OpenUrl>>
 type _InputTouchStart = Assert<V<'input:touch:start', InputTouchStart>>
 type _InputTouchMove = Assert<V<'input:touch:move', InputTouchMove>>
@@ -652,6 +675,7 @@ type _ScreenshotError = Assert<V<'screenshot:error', ScreenshotError>>
 type _UiTreeResponse = Assert<V<'ui:tree:response', UiTreeResponse>>
 type _UiTreeError = Assert<V<'ui:tree:error', UiTreeError>>
 type _UiFieldResponse = Assert<V<'ui:field:response', UiFieldResponse>>
+type _UiKeyboardResponse = Assert<V<'ui:keyboard:response', UiKeyboardResponse>>
 
 type _StreamRegister = Assert<V<'stream:register', StreamRegister>>
 
@@ -668,6 +692,8 @@ type _AppLaunchDone = Assert<E<'app:launch-done', AppLaunchDone>>
 type _AppLaunchError = Assert<E<'app:launch-error', AppLaunchError>>
 type _AppClearStateDone = Assert<E<'app:clear-state-done', AppClearStateDone>>
 type _AppClearStateError = Assert<E<'app:clear-state-error', AppClearStateError>>
+type _DeviceKeyboardSetDone = Assert<E<'device:keyboard-set-done', DeviceKeyboardSetDone>>
+type _DeviceKeyboardSetError = Assert<E<'device:keyboard-set-error', DeviceKeyboardSetError>>
 type _OpenUrlDone = Assert<E<'open-url:done', OpenUrlDone>>
 type _OpenUrlError = Assert<E<'open-url:error', OpenUrlError>>
 type _InputDone = Assert<E<'input:done', InputDone>>

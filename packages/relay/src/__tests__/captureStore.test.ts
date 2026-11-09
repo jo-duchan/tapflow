@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, afterEach } from 'vitest'
-import { CaptureStore, FIELD_IDLE_MS, SNAPSHOT_READ_WAIT_MS, type CapturedMessage, type FieldRead, type Holder } from '../capture/CaptureStore'
+import { CaptureStore, FIELD_IDLE_MS, KEYBOARD_SETTLE_MS, SNAPSHOT_READ_WAIT_MS, type CapturedMessage, type FieldRead, type Holder } from '../capture/CaptureStore'
+import type { KeyboardState } from '@tapflowio/protocol'
 import { chromeOrientation } from '@tapflowio/protocol/screen'
 import type { ChromePayload } from '@tapflowio/protocol'
 
@@ -329,6 +330,24 @@ describe('reading the field a person typed into (#1135)', () => {
     expect(asked).toHaveLength(2)
   })
 
+  // Review: one value read per key at a 250 ms pause queued on the iOS runner (0.45 s a read), and the last answered
+  // after the next input. One at a time; one asked meanwhile is made when it answers, still after the last key.
+  it('reads the value one at a time, and once more after the last key if keys came while one was out', async () => {
+    const { s, asked, wait } = typingStore(undefined, 450)
+    s.recordInput('s', ALICE, key('KeyA'))
+    await wait(FIELD_IDLE_MS + 10)                      // focus read + value read 1 out
+    s.recordInput('s', ALICE, key('KeyB'))
+    await wait(FIELD_IDLE_MS + 10)                      // value read 2 asked while 1 is out: held
+    expect(asked).toHaveLength(2)
+    await wait(500)                                     // 1 answers, the held one goes
+    expect(asked).toHaveLength(3)
+    const last = reads(s).filter((r) => r.phase === 'value').at(-1)
+    await wait(500)
+    expect(reads(s).filter((r) => r.phase === 'value').at(-1)!.requestedAt)
+      .toBeGreaterThan(entries(s).filter((e) => e.kind === 'input').at(-1)!.at)
+    expect(last).toBeDefined()
+  })
+
   it('ends the run at any other input: no read after it, and the next key asks which field again', async () => {
     const { s, wait } = typingStore()
     s.recordInput('s', ALICE, key('KeyA'))
@@ -412,5 +431,164 @@ describe('reading the field a person typed into (#1135)', () => {
     expect(done).toBe(false)
     await vi.advanceTimersByTimeAsync(20)
     expect(done).toBe(true)
+  })
+})
+
+describe('reading the soft keyboard around a person\'s inputs (#1135)', () => {
+  afterEach(() => { vi.useRealTimers() })
+
+  const SHOWN: KeyboardState = { shown: true, rect: { x: 0, y: 0.6, width: 1, height: 0.4 }, frameRect: { x: 0.6, y: 0, width: 0.4, height: 1 } }
+  const at = (x: number, y: number, requestId = 'k', space?: 'frame'): CapturedMessage[] => [
+    { type: 'input:touch:start', sessionId: 's', payload: { x, y, ...(space ? { space } : {}) } },
+    { type: 'input:touch:end', sessionId: 's', requestId, payload: { x, y } },
+  ]
+
+  // Keyboard reads answer `state()` after `lagMs`; field reads answer at once.
+  function keyboardStore(state: () => KeyboardState = () => SHOWN, lagMs = 20) {
+    vi.useFakeTimers()
+    const asked: number[] = []
+    const fieldAsked: string[] = []
+    const { s, tick } = store({
+      now: () => Date.now(),
+      readKeyboard: () => { asked.push(Date.now()); return new Promise((r) => setTimeout(() => r(state()), lagMs)) },
+      readField: () => { fieldAsked.push('read'); return Promise.resolve({ field: null, reason: 'no-focus' }) },
+    })
+    const wait = async (ms: number) => { tick(ms); await vi.advanceTimersByTimeAsync(ms) }
+    return { s, asked, fieldAsked, wait }
+  }
+  const kbReads = (s: CaptureStore) => entries(s).flatMap((e) => (e.kind === 'keyboard' ? [e] : []))
+  const fieldReads = (s: CaptureStore) => entries(s).flatMap((e) => (e.kind === 'field' ? [e] : []))
+
+  it('reads the keyboard after a gesture ends, not at its start or moves', async () => {
+    const { s, asked, wait } = keyboardStore()
+    s.recordInput('s', ALICE, { type: 'input:touch:start', sessionId: 's', payload: { x: 0.5, y: 0.5 } })
+    s.recordInput('s', ALICE, move(0.4))
+    await wait(50)
+    expect(asked).toHaveLength(0)
+    s.recordInput('s', ALICE, { type: 'input:touch:end', sessionId: 's', requestId: 'e', payload: { x: 0.5, y: 0.4 } })
+    await wait(30)
+    expect(asked).toHaveLength(1)
+    const [read] = kbReads(s)
+    expect(read!.requestedAt).toBeGreaterThanOrEqual(entries(s).filter((e) => e.kind === 'input').at(-1)!.at)
+    expect(read).toMatchObject({ keyboard: SHOWN, settled: false })
+  })
+
+  it('reads one at a time: inputs while one is out ask for one more, not one each', async () => {
+    const { s, asked, wait } = keyboardStore(undefined, 100)
+    s.recordInput('s', ALICE, launch)
+    await wait(10)
+    for (const k of ['KeyA', 'KeyB', 'KeyC']) s.recordInput('s', ALICE, { type: 'input:key', sessionId: 's', requestId: k, payload: { code: k } })
+    await wait(95)
+    expect(asked).toHaveLength(2)
+    await wait(100)
+    expect(asked).toHaveLength(2)
+  })
+
+  it('reads again once the person stops, and marks the read that matches the one before it settled', async () => {
+    const { s, asked, wait } = keyboardStore()
+    s.recordInput('s', ALICE, launch)
+    await wait(30 + KEYBOARD_SETTLE_MS + 30)
+    expect(asked).toHaveLength(2)
+    expect(kbReads(s).map((r) => r.settled)).toEqual([false, true])
+    await wait(KEYBOARD_SETTLE_MS * 3)
+    expect(asked).toHaveLength(2)
+  })
+
+  it('stops reading a keyboard that never comes to rest', async () => {
+    let y = 0.6
+    const { s, asked, wait } = keyboardStore(() => ({ shown: true, rect: { x: 0, y: (y -= 0.05), width: 1, height: 0.4 } }))
+    s.recordInput('s', ALICE, launch)
+    await wait(10 * (KEYBOARD_SETTLE_MS + 30))
+    expect(asked).toHaveLength(4)
+    expect(kbReads(s).every((r) => !r.settled)).toBe(true)
+  })
+
+  it('takes a tap that starts on the keyboard as typing: one focus read, and the value read after the pause', async () => {
+    const { s, wait } = keyboardStore()
+    s.recordInput('s', ALICE, launch)
+    await wait(30)
+    for (const [i, m] of [...at(0.2, 0.8, 'a'), ...at(0.5, 0.8, 'b'), ...at(0.7, 0.9, 'c')].entries()) {
+      s.recordInput('s', ALICE, m)
+      if (i % 2) await wait(120)
+    }
+    await wait(FIELD_IDLE_MS + 50)
+    expect(fieldReads(s).map((r) => r.phase)).toEqual(['focus', 'value'])
+  })
+
+  it('judges a point sent in the frame\'s space by the keyboard in that space', async () => {
+    const { s, wait } = keyboardStore()
+    s.recordInput('s', ALICE, launch)
+    await wait(30)
+    // On the screen's keyboard (y 0.6–1) but not on the frame's (x 0.6–1): a frame point, so not a key.
+    for (const m of at(0.2, 0.8, 'f', 'frame')) s.recordInput('s', ALICE, m)
+    await wait(FIELD_IDLE_MS + 50)
+    expect(fieldReads(s)).toEqual([])
+    for (const m of at(0.8, 0.2, 'g', 'frame')) s.recordInput('s', ALICE, m)
+    await wait(FIELD_IDLE_MS + 50)
+    expect(fieldReads(s).map((r) => r.phase)).toEqual(['focus', 'value'])
+  })
+
+  it('ends the run at a tap off the keyboard, and at any tap while the keyboard is hidden or unknown', async () => {
+    // A hidden keyboard is not typed on, whatever rect it last had.
+    for (const state of [SHOWN, { shown: false }, { shown: null }, { shown: false, rect: SHOWN.rect }] as KeyboardState[]) {
+      const { s, wait } = keyboardStore(() => state)
+      s.recordInput('s', ALICE, launch)
+      await wait(30)
+      s.recordInput('s', ALICE, { type: 'input:key', sessionId: 's', requestId: 'a', payload: { code: 'KeyA' } })
+      await wait(100)
+      for (const m of at(0.5, state === SHOWN ? 0.3 : 0.8, 't')) s.recordInput('s', ALICE, m)
+      await wait(FIELD_IDLE_MS + 50)
+      expect(fieldReads(s).map((r) => r.phase)).toEqual(['focus'])
+      vi.useRealTimers()
+    }
+  })
+
+  it('reads nothing while a replay holds the pause, nor for an agent that cannot answer', async () => {
+    const { s, asked, wait } = keyboardStore()
+    s.recordInput('s', ALICE, launch)
+    await wait(30 + KEYBOARD_SETTLE_MS + 30)
+    const before = asked.length
+    s.pause('s', '1')
+    for (const m of at(0.5, 0.8)) s.recordInput('s', ALICE, m)
+    await wait(KEYBOARD_SETTLE_MS * 2)
+    expect(asked).toHaveLength(before)
+    vi.useRealTimers()
+    vi.useFakeTimers()
+    const readKeyboard = vi.fn(() => null)
+    const quiet = store({ readKeyboard })
+    for (const m of at(0.5, 0.8)) quiet.s.recordInput('s', ALICE, m)
+    await vi.advanceTimersByTimeAsync(KEYBOARD_SETTLE_MS * 2)
+    expect(kbReads(quiet.s)).toEqual([])
+  })
+
+  it('before a snapshot, takes the settling read at once and waits for it', async () => {
+    let n = 0
+    const { s, wait } = keyboardStore(() => (n++ === 0 ? SHOWN : { shown: false }))
+    s.recordInput('s', ALICE, launch)
+    await wait(30)
+    const settled = s.settleReads('s', '1')
+    await wait(30)
+    await settled
+    expect(kbReads(s).map((r) => [r.keyboard.shown, r.settled])).toEqual([[true, false], [false, false]])
+  })
+
+  it('keeps no keyboard read that answers after a replay took the pause', async () => {
+    const { s, wait } = keyboardStore(undefined, 100)
+    s.recordInput('s', ALICE, launch)
+    await wait(10)
+    s.pause('s', '1')
+    await wait(KEYBOARD_SETTLE_MS * 2)
+    s.resume('s', '1')
+    expect(kbReads(s)).toEqual([])
+  })
+
+  it('keeps the keyboard and its language beside a field read', async () => {
+    vi.useFakeTimers()
+    const { s } = store({
+      readField: () => Promise.resolve({ field: null, reason: 'no-focus', keyboard: SHOWN, language: '한국어 (두벌식)' }),
+    })
+    s.recordInput('s', ALICE, { type: 'input:key', sessionId: 's', requestId: 'a', payload: { code: 'KeyA' } })
+    await vi.advanceTimersByTimeAsync(10)
+    expect(fieldReads(s)[0]).toMatchObject({ keyboard: SHOWN, language: '한국어 (두벌식)' })
   })
 })

@@ -181,8 +181,9 @@ describe('protocol message interfaces', () => {
     // `AgentDevices`, an agent's list after it changed, and `AgentDevicesApplied`, the sessions the relay made and removed.
     // 87 is `InputTouchCancel` (#1115): a client leaving mid-gesture had only an end, which completes the touch.
     // 90 is Flow Capture's field read and the keyboard reset (#1135, #1134): `UiFieldRequest` and `UiFieldResponse`,
-    // the relay asking an agent what the focused field holds, and `DeviceKeyboardReset`.
-    expect(messages.size).toBe(90)
+    // the relay asking an agent what the focused field holds, and `DeviceKeyboardReset`. 95 is the keyboard's state and
+    // language (#1135): `UiKeyboardRequest` and `UiKeyboardResponse`, and `DeviceKeyboardSet` with its done and error.
+    expect(messages.size).toBe(95)
     // `InputKey` predates L1 and has always been named; it must be in here too.
     expect(messages.has('InputKey')).toBe(true)
   })
@@ -294,7 +295,8 @@ describe('protocol message interfaces', () => {
     }
     expect(offenders).toEqual([])
     // 12 with `watch:refused`. The other three `watch:*` replies are not failures and carry `sessionId` directly.
-    expect([...messages].filter(([, m]) => m.extends === 'SessionScoped')).toHaveLength(12)
+    // 13 with `device:keyboard-set-error` (#1135).
+    expect([...messages].filter(([, m]) => m.extends === 'SessionScoped')).toHaveLength(13)
     // `error` is the ninth, as of L5d. Pinned by name rather than only by the count, because the count alone
     // would be satisfied by any new member and this is the one whose membership was argued.
     expect(messages.get('GenericError')).toMatchObject({ literal: 'error', extends: 'SessionScoped' })

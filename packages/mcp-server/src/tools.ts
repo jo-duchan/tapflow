@@ -687,7 +687,7 @@ export function registerTools(server: McpServer, client: TapflowClient): void {
     {
       description:
         'Type text into the currently focused input field (tap the field first). ' +
-        'iOS supports arbitrary Unicode (pasted); Android supports ASCII only.',
+        'Any text; on Android, text other than ASCII needs a focused field.',
       inputSchema: {
         sessionId: z.string().describe('Session ID from list_devices'),
         text: z.string().describe('Text to type into the focused field'),

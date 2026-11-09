@@ -53,8 +53,9 @@ steps:
 | `clearState` | 키워드 또는 `clearState: <bundleId>` | 앱 데이터를 초기화합니다. 키워드 형태는 최상위 `appId`를 씁니다. |
 | `launchApp` | 키워드 또는 `launchApp: { arguments, env }` | 테스트 대상 빌드를 실행한 다음 앱 화면이 자리 잡을 때까지 기다립니다. UI 트리 요소의 역할·라벨·id가 1초 동안 그대로이면 화면이 뜬 것으로 보므로 스플래시를 첫 화면으로 착각하지 않습니다. 게임처럼 UI 트리 요소가 없는 화면도 1초 뒤에 넘어갑니다. 라벨이 계속 바뀌는 화면은 처음 읽힌 뒤 3초가 지나면 넘어가고 화면을 전혀 읽지 못하면 셀렉터 기본 대기 시간이 지나야 넘어갑니다. 이 대기 때문에 스텝이 실패하지는 않습니다. 1초 넘게 그대로 있는 스플래시는 첫 화면으로 잘못 볼 수 있습니다. 실행 인자를 넘기는 방법은 [실행 인자](#launch-arguments)에 있습니다. |
 | `tapOn` | 셀렉터 또는 `[x, y]` | 매칭된 요소의 중심을 탭합니다. 좌표를 주면 그 지점을 탭합니다. [좌표 탭](#tapping-a-point)을 참고하세요. |
-| `inputText` | 문자열, `{ text, replace: true }` 또는 `{ secret: NAME }` | 포커스된 입력 필드에 텍스트를 입력합니다. `replace: true`이면 필드에 있던 내용 뒤에 덧붙이지 않고 그 내용을 바꿉니다. iOS 전용이고 Android에서는 실행 전에 플로우를 거절합니다. 비밀번호처럼 플로우 파일에 적으면 안 되는 값은 [비밀 값](#secrets)을 참고하세요. |
-| `pressKey` | 키 이름 또는 `{ code, modifiers }` | 키보드 키를 누릅니다(`Enter`, `Backspace`, `Escape` 등). 조합 키는 `{ code: ArrowLeft, modifiers: [shift] }`처럼 함께 누를 키를 `shift`, `ctrl`, `alt`, `meta` 중에서 적습니다. Android에서 `ctrl`이나 `meta`와 함께 누를 수 있는 문자 키는 C, V, X뿐이고 문자 키에는 `alt`가 적용되지 않습니다. |
+| `inputText` | 문자열, `{ text, replace: true }` 또는 `{ secret: NAME }` | 포커스된 입력 필드에 텍스트를 입력합니다. `replace: true`이면 필드에 있던 내용 뒤에 덧붙이지 않고 그 내용을 바꿉니다. Android에서는 Android 13 이상이 필요하고 그보다 낮은 기기에서는 그 단계가 실패합니다. 비밀번호처럼 플로우 파일에 적으면 안 되는 값은 [비밀 값](#secrets)을 참고하세요. |
+| `pressKey` | 키 이름 또는 `{ code, modifiers }` | 키보드 키를 누릅니다(`Enter`, `Backspace`, `Escape` 등). 조합 키는 `{ code: ArrowLeft, modifiers: [shift] }`처럼 함께 누를 키를 `shift`, `ctrl`, `alt`, `meta` 중에서 적습니다. Android에서 `ctrl`이나 `meta`와 함께 누를 수 있는 문자 키는 A, C, V, X뿐이고(A는 Android 13 이상) 문자 키에는 `alt`가 적용되지 않습니다. |
+| `imeAction` | 키워드 | 포커스된 필드의 동작 키를 누릅니다. 화면 키보드 모서리의 완료, 다음, 검색, 이동 키입니다. 앱이 그 키에 반응한다면 `pressKey: Enter` 대신 이 단계를 쓰세요. 어떤 동작 키가 눌렸는지 확인하는 Android 앱은 Enter를 무시합니다. Android 11 이상에서 동작합니다. |
 | `swipe` | `{ from, to, durationMs? }` | 두 지점 사이를 스와이프합니다. 좌표는 0~1. `durationMs`는 밀리초 단위 숫자이며 기본값 300, 최대 2147483647입니다. 소수(예: 250.5)도 허용됩니다. |
 | `scroll` | 키워드, `scroll: <방향>` 또는 `{ direction, until }` | 화면을 스크롤합니다. 인자 없는 형태는 아래로 스크롤합니다. `until`을 주면 그 요소가 화면에 나올 때까지 스크롤합니다. [요소까지 스크롤](#scrolling-to-an-element)을 참고하세요. |
 | `openUrl` | URL 문자열 | 딥 링크나 URL을 엽니다. |

@@ -112,13 +112,13 @@ describe('both clients declare what they do with every browser-inbound message',
       const table = entries(readFileSync(join(root, dir, 'inboundDisposition.ts'), 'utf8'))
       const src = scanned(dir).map(code).join('\n')
 
-      it('parsed every entry — 40, the browser-inbound surface', () => {
+      it('parsed every entry — 42, the browser-inbound surface', () => {
         // The compiler already refuses a missing key, so this is the parser's honesty check rather than
         // the coverage one. Pinned from the measurement: 29 as of #542, which added `device:shutdown-error`;
         // 32 by the next count, 36 once the four `watch:*` replies arrived, 37 with `watch:action` (A2), and 38 with
         // `device:boot-waiting` (L2, the relay holding a person's boot behind another on the same Mac). 40 with the lease
-        // pair (S5).
-        expect(table.size).toBe(40)
+        // pair (S5). 42 with the keyboard-set pair (#1135).
+        expect(table.size).toBe(42)
       })
 
       it('every entry is exactly one of settles / does / ignored', () => {
@@ -178,12 +178,14 @@ describe('both clients declare what they do with every browser-inbound message',
     // the day they *do* converge is the day this decision should be revisited. The lease pair differs too: only the
     // flow runner leases, an MCP agent picks its device. `session:chrome` left this list when both began keeping it
     // for the buttons a flow's `pressButton` is checked against before it runs. The paste pair differs since Flow
-    // Capture: its replay pastes what the person pasted (`pasteText`), and nothing in `mcp-server` pastes.
+    // Capture: its replay pastes what the person pasted (`pasteText`), and nothing in `mcp-server` pastes. So does the
+    // keyboard-set pair (#1135): the dashboard's replay asks for it through this package's channel, `run_flow` resets nothing.
     const [mcp, flow] = PACKAGES.map(({ dir }) =>
       entries(readFileSync(join(root, dir, 'inboundDisposition.ts'), 'utf8')))
     const differing = [...mcp].filter(([t, v]) => HANDLED.test(v) !== HANDLED.test(flow.get(t) ?? ''))
     expect(differing.map(([t]) => t).sort()).toEqual([
-      'clipboard:error', 'clipboard:write-done', 'device:lease-refused', 'device:leased', 'device:shutdown-done',
+      'clipboard:error', 'clipboard:write-done', 'device:keyboard-set-done', 'device:keyboard-set-error',
+      'device:lease-refused', 'device:leased', 'device:shutdown-done',
       'device:shutdown-error', 'session:deviceInfo',
     ])
   })

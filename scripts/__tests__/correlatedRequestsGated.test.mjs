@@ -218,6 +218,7 @@ const EXPECTED_REPLY = {
   'app:install': 'app:install-error',
   'app:launch': 'app:launch-error',
   'app:clear-state': 'app:clear-state-error',
+  'device:keyboard-set': 'device:keyboard-set-error',
   'open-url': 'open-url:error',
   'input:type': 'input:type-error',
   'clipboard:read': 'clipboard:error',

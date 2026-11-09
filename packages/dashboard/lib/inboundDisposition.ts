@@ -128,6 +128,14 @@ export const INBOUND_DISPOSITION = {
     ignored: 'Same as `app:clear-state-done`: the dialog\'s channel reports it as the replay\'s failure, '
       + 'in the dialog.',
   },
+  'device:keyboard-set-done': {
+    ignored: 'Asked for only by Flow Capture\'s dialog, through flow-runner\'s `SessionChannel` '
+      + '(`lib/flowCapture/channel.ts`), which settles its own waiter on it. No handler of this package\'s reads it.',
+  },
+  'device:keyboard-set-error': {
+    ignored: 'Same as `device:keyboard-set-done`: the dialog\'s channel reads it, and a replay goes on without the '
+      + 'language rather than stopping.',
+  },
   'session:deviceInfo': {
     ignored: 'No consumer here: the viewer takes device name and OS from `agents:listed` instead. The only '
       + 'reader in the repo is flow-runner, which copies it into a run\'s video (A4); displaying it is a '

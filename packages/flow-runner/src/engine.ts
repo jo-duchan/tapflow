@@ -14,7 +14,7 @@ const SESSION_FAILURES = [
   SessionEndedError, SessionLeftError, SessionUnavailableError, RelayClosedError, RelayUnavailableError, RequestTimeoutError,
 ]
 import { buttonAvailability } from '@tapflowio/protocol/buttons'
-import { SELECT_ALL, unavailableButton, unavailableButtonMessage, unavailableReplace, unavailableReplaceMessage } from './platformCheck.js'
+import { IME_ACTION, SELECT_ALL, SELECT_ALL_REFUSED, unavailableButton, unavailableButtonMessage } from './platformCheck.js'
 
 /** Two fingers, each `[x, y]` normalized 0-1. */
 export type PinchFingers = [[number, number], [number, number]]
@@ -208,6 +208,7 @@ function describeStep(step: Step): string {
     case 'inputText': return `inputText("${step.text}"${step.replace ? ', replace' : ''})`
     case 'inputSecret': return `inputText(secret ${step.name}${step.replace ? ', replace' : ''})`
     case 'pressKey': return `pressKey(${withModifiers(step.modifiers, step.code)})`
+    case 'imeAction': return 'imeAction'
     case 'swipe': return `swipe(${step.from} → ${step.to})`
     case 'scroll': return step.until ? `scroll(${step.direction} until ${describeSelector(step.until)})` : `scroll(${step.direction})`
     case 'openUrl': return `openUrl(${step.url})`
@@ -516,6 +517,29 @@ const SPANS_SCROLL_AXIS: Record<ScrollDirection, (f: UIElement['frame']) => bool
   left: (f) => f.x <= 0 && f.x + f.width >= 1,
 }
 
+/** How long `scrollUntil` waits for the list it flung to stop under the element it found. */
+const SETTLE_MATCH_MS = 2_000
+
+/**
+ * The element `scrollUntil` found, read again until it is where it was the read before: the last swipe's fling is
+ * still carrying the list when it comes into view. A tap read off a moving list lands a row further on, and on iOS a
+ * tap on a scrolling list only stops it — the step after passed with nothing tapped (iOS E2E, `tapOn("Row 17")`).
+ * Bounded; past the bound, or on a failed read, the step goes on as before.
+ */
+async function settleMatch(driver: FlowDriver, sel: Selector, tree: UIElement[], deadline: number, pollIntervalMs: number): Promise<void> {
+  const at = (t: UIElement[]) => JSON.stringify(matchSelector(t, sel).map((m) => [Math.round(m.frame.x * 1000), Math.round(m.frame.y * 1000)]))
+  const until = Math.min(deadline, Date.now() + SETTLE_MATCH_MS)
+  let last = at(tree)
+  while (Date.now() < until) {
+    await new Promise((r) => setTimeout(r, Math.min(pollIntervalMs, Math.max(0, until - Date.now()))))
+    const q = await queryOrRetry(driver, until).catch(() => undefined)
+    if (!q || !('tree' in q)) return
+    const now = at(q.tree)
+    if (now === last) return
+    last = now
+  }
+}
+
 /** What the end-of-list check compares: the structure and where it is, since one long text scrolls by moving alone. */
 function scrolledShape(tree: UIElement[]): string {
   return JSON.stringify(tree.map((e) => [e.role, e.label, e.identifier ?? '', Math.round(e.frame.x * 100), Math.round(e.frame.y * 100)]))
@@ -547,6 +571,7 @@ async function scrollUntil(driver: FlowDriver, direction: ScrollDirection, sel: 
   // keeps changing (a clock, a spinner) and so keeps the screen from ever reading unchanged.
   let matchShape: string | undefined
   let matchStill = 0
+  let swiped = false
   for (;;) {
     const q = await queryOrRetry(driver, deadline)
     // Swipe only after a screen was read and the element was not on it: a failed read says nothing about where the
@@ -557,7 +582,7 @@ async function scrollUntil(driver: FlowDriver, direction: ScrollDirection, sel: 
       read = true
       lastError = undefined
       const matches = matchSelector(q.tree, sel)
-      if (matches.some((m) => clear(m.frame))) return
+      if (matches.some((m) => clear(m.frame))) return swiped ? settleMatch(driver, sel, q.tree, deadline, pollIntervalMs) : undefined
       const pinned = matches.filter((m) => !spans(m.frame))
       const at = pinned.length > 0 ? scrolledShape(pinned) : undefined
       matchStill = at !== undefined && at === matchShape ? matchStill + 1 : 0
@@ -575,7 +600,7 @@ async function scrollUntil(driver: FlowDriver, direction: ScrollDirection, sel: 
     }
     const base = `no element matched ${describeSelector(sel)} on screen after scrolling ${direction} for ${waitMs / 1000}s`
     if (Date.now() >= deadline) throw deadlineError(base, lastError, sawTree)
-    if (read) await driver.swipe(gesture.from, gesture.to, 300)
+    if (read) { await driver.swipe(gesture.from, gesture.to, 300); swiped = true }
     await waitForNextPoll(deadline, pollIntervalMs, base, lastError, sawTree)
   }
 }
@@ -644,14 +669,15 @@ async function executeStep(
     case 'inputText':
       // Selected first, so the text takes the field's place: pasting over a selection replaces it, and a Backspace is
       // not needed — one in an empty chip or code field deletes a chip or moves focus back (#1135).
-      if (step.replace) await driver.pressKey(SELECT_ALL.code, [...SELECT_ALL.modifiers])
+      if (step.replace) await selectAll(driver)
       return driver.inputText(step.text)
     case 'inputSecret': {
       const value = secretValue(secrets, step.name)
       // Checked before the run; this is for a caller that ran a flow without going through `runFlow`'s check.
       if (value === undefined) throw new EnvironmentStepError(`the secret ${step.name} was not given to this run`)
+      // Outside the guard below: the select-all names no text, and its refusal says what the device lacks.
+      if (step.replace) await selectAll(driver)
       try {
-        if (step.replace) await driver.pressKey(SELECT_ALL.code, [...SELECT_ALL.modifiers])
         return await driver.inputText(value)
       } catch (e) {
         // A driver's failure may quote what it typed (adb's did, in argv): said again here with the name only, and
@@ -665,6 +691,8 @@ async function executeStep(
     }
     // A plain press passes no second argument, so a driver written before modifiers sees the call it always did.
     case 'pressKey': return step.modifiers ? driver.pressKey(step.code, step.modifiers) : driver.pressKey(step.code)
+    // A key code tapflow names, not a key (protocol `InputKey`): each agent presses the field's action its own way.
+    case 'imeAction': return driver.pressKey(IME_ACTION)
     case 'swipe': return driver.swipe(step.from, step.to, step.durationMs)
     case 'scroll': {
       if (step.until) return scrollUntil(driver, step.direction, step.until, timeoutMs, pollIntervalMs)
@@ -735,10 +763,18 @@ export function refusedFlow(flow: Flow, index: number, message: string, options:
   }
 }
 
+/** Select what the focused field holds, so the text typed next replaces it (`SELECT_ALL`). */
+async function selectAll(driver: FlowDriver): Promise<void> {
+  try {
+    await driver.pressKey(SELECT_ALL.code, [...SELECT_ALL.modifiers])
+  } catch (e) {
+    if (e instanceof InputRefusedError && e.reason === 'unsupported') throw markEnvironmentFailure(new Error(SELECT_ALL_REFUSED))
+    throw e
+  }
+}
+
 /** The refusal for a button this device lacks, or `null` to run. See `unavailableButton`. */
 async function refuseButtons(flow: Flow, driver: FlowDriver, platform: string, timeoutMs: number): Promise<FlowResult | null> {
-  const replaceAt = unavailableReplace(flow, platform)
-  if (replaceAt !== null) return refusedFlow(flow, replaceAt, unavailableReplaceMessage(platform), { beforeRun: true })
   let verdict = unavailableButton(flow, platform)
   if (verdict === 'needs-chrome') {
     if (!driver.chrome) return null

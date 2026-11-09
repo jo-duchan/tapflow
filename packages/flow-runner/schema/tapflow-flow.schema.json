@@ -60,6 +60,7 @@
         { "const": "clearState", "description": "Reset the app data of the flow-level appId." },
         { "const": "launchApp", "description": "Launch the build under test (tapflow flow run --build)." },
         { "const": "scroll", "description": "Scroll down one screen." },
+        { "const": "imeAction", "description": "Press the focused field's own action (Done, Next, Search, Go), as its keyboard's action key does. Android 11 or later." },
         {
           "type": "object",
           "additionalProperties": false,

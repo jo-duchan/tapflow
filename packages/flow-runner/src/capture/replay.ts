@@ -1,7 +1,7 @@
 import type { ReplayInput, SessionChannel } from '../sessionChannel.js'
 import { InputRefusedError } from '../sessionErrors.js'
-import { SELECT_ALL } from '../platformCheck.js'
-import type { ChromePayload } from '@tapflowio/protocol'
+import { IME_ACTION, SELECT_ALL, SELECT_ALL_REFUSED } from '../platformCheck.js'
+import type { ChromePayload, UIElement } from '@tapflowio/protocol'
 import { chromeOrientation } from '@tapflowio/protocol/screen'
 import type { RawStep } from './segment.js'
 import type { StepRange } from './range.js'
@@ -50,12 +50,22 @@ export async function replayStep(channel: ReplayChannel, sessionId: string, raw:
     //
     // A field's value read by the relay replaces what the field holds, as the exported step does (`replace`): the
     // selection is pasted over, so Match and Verify type the same thing.
+    //
+    // A refused select-all stops the replay, as it fails the flow's step: typed anyway, the text would land after what
+    // the field holds. Only keys are sent again in place of the text: a run typed on the soft keyboard has none, and its
+    // touches would type by whatever state the keyboard is in now.
     case 'text':
+      if (raw.replace) {
+        try {
+          await untilAborted(channel.pressKey(sessionId, SELECT_ALL.code, [...SELECT_ALL.modifiers]), signal)
+        } catch (e) {
+          throw e instanceof InputRefusedError && e.reason === 'unsupported' ? new Error(SELECT_ALL_REFUSED, { cause: e }) : e
+        }
+      }
       try {
-        if (raw.replace) await untilAborted(channel.pressKey(sessionId, SELECT_ALL.code, [...SELECT_ALL.modifiers]), signal)
         await untilAborted(channel.typeText(sessionId, raw.text), signal)
       } catch (e) {
-        if (!(e instanceof InputRefusedError)) throw e
+        if (!(e instanceof InputRefusedError) || raw.messages.some((m) => m.msg.type !== 'input:key')) throw e
         await channel.replayInputs(sessionId, raw.messages as Array<{ at: number; msg: ReplayInput }>, signal)
       }
       return 'replayed'
@@ -64,6 +74,7 @@ export async function replayStep(channel: ReplayChannel, sessionId: string, raw:
       await channel.replayInputs(sessionId, raw.messages as Array<{ at: number; msg: ReplayInput }>, signal)
       return 'replayed'
     case 'paste': await untilAborted(channel.pasteText(sessionId, raw.text), signal); return 'replayed'
+    case 'imeAction': await channel.pressKey(sessionId, IME_ACTION); return 'replayed'
     case 'type': await untilAborted(channel.typeText(sessionId, raw.text), signal); return 'replayed'
     case 'launch': {
       const msg = raw.messages[0]!.msg
@@ -78,7 +89,10 @@ export async function replayStep(channel: ReplayChannel, sessionId: string, raw:
     case 'openUrl': await channel.openUrl(sessionId, raw.url); return 'replayed'
     // The keyboard toggle is relative, and a flow cannot say it: replayed from another state it would hide a keyboard
     // the person had shown.
-    case 'network': case 'cut': case 'keyboardToggle': return 'not-replayed'
+    //
+    // A key on the soft keyboard types by the keyboard's state, which the replay does not share; what it typed comes
+    // back as the field's value, in the `text` step it was folded into.
+    case 'network': case 'cut': case 'keyboardToggle': case 'keyboardKey': return 'not-replayed'
   }
 }
 
@@ -92,6 +106,33 @@ export interface ReplayHooks {
 }
 
 /** Replay `steps` in order, one at a time, with the host's reads around each. */
+/**
+ * A tap on the field a typing step went into, when it does not have text focus now (#1135): the person focused it
+ * before the range began, so the range has no tap on it, and a replay from a fresh launch would type into nothing, or
+ * into the field the app focuses first. Matched like any tap, it puts `tapOn` on that field into the flow. `undefined`
+ * when that field, or one that may be it, is focused, or it is not on the screen or not alone on it.
+ */
+export function focusTap(raw: RawStep, tree: readonly UIElement[]): RawStep | undefined {
+  if (raw.kind !== 'text' || !raw.field) return undefined
+  // Another field focused (an app that focuses its first field at launch) is no reason to type there; one with no
+  // identifier may be this one, and is left.
+  const focused = tree.find((e) => e.focused)
+  if (focused && (!focused.identifier || focused.identifier === raw.field)) return undefined
+  const fields = tree.filter((e) => e.identifier === raw.field && e.frame.width > 0 && e.frame.height > 0)
+  if (fields.length !== 1) return undefined
+  const { x, y, width, height } = fields[0]!.frame
+  const point: [number, number] = [x + width / 2, y + height / 2]
+  if (point[0] < 0 || point[0] > 1 || point[1] < 0 || point[1] > 1) return undefined
+  const at = raw.at
+  return {
+    kind: 'tap', point, at, endAt: at + 80, outcome: 'landed',
+    messages: [
+      { at, msg: { type: 'input:touch:start', sessionId: '', payload: { x: point[0], y: point[1] } } },
+      { at: at + 80, msg: { type: 'input:touch:end', sessionId: '', requestId: '' } },
+    ],
+  }
+}
+
 export async function replaySteps(channel: ReplayChannel, sessionId: string, steps: readonly RawStep[], hooks: ReplayHooks = {}): Promise<void> {
   for (const [i, raw] of steps.entries()) {
     await hooks.beforeStep?.(i, raw)

@@ -17,7 +17,8 @@ export function rawStepLabel(raw: RawStep): string {
     case 'swipe': return `swipe ${pct(raw.from)} → ${pct(raw.to)}`
     case 'holdDrag': return `longPressOn ${pct(raw.from)}, then drag`
     case 'pinch': return 'pinch'
-    case 'text': return `inputText (${chars(raw.text)})`
+    // Its text is only what the computer's keyboard typed; the person gives the rest (#1140).
+    case 'text': return raw.askValue ? 'inputText (password)' : `inputText (${chars(raw.text)})`
     case 'type': return `inputText (${chars(raw.text)})`
     case 'paste': return `inputText (${chars(raw.text)}, pasted)`
     case 'key': {
@@ -30,6 +31,8 @@ export function rawStepLabel(raw: RawStep): string {
     case 'rotate': return raw.to && 'orientation' in raw.to ? `setOrientation ${raw.to.orientation}` : 'setOrientation'
     case 'posture': return 'setPosture'
     case 'keyboardToggle': return 'keyboard'
+    case 'keyboardKey': return 'keyboard key'
+    case 'imeAction': return 'imeAction'
     case 'launch': return 'launchApp'
     case 'install': return 'install'
     case 'clearState': return 'clearState'

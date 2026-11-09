@@ -65,11 +65,18 @@ export interface Device {
 // the cancel itself is a tap, which the watcher then misses.
 //
 // `field-value`: the agent answers `ui:field:request` with the keyboard-focused text field's value (#1135). The relay
-// reads it to decide whether a Flow Capture recording asks for the value at all. iOS only: Android's agent types every
-// character from its own US table, so the keys a recording holds already say what the device received.
+// reads it to decide whether a Flow Capture recording asks for the value at all. Both platforms: a key reaches the app
+// through the device's keyboard on each, which composes it in its own language, so the keys alone do not say what was
+// typed.
 //
 // `keyboard-reset`: the agent takes `device:keyboard-reset`, putting the device's keyboard back to its first language
 // when another person takes it (#1134). The relay sends it only to an agent that names this.
+//
+// `keyboard-state`: the agent answers `ui:keyboard:request` with where the soft keyboard is. Flow Capture reads it
+// around a person's inputs to tell a tap on the keyboard from a tap on the app (#1135).
+//
+// `keyboard-set`: the agent takes `device:keyboard-set` and answers it, putting the keyboard in the language a replay
+// starts from (#1135).
 //
 // **The vocabulary, not a declaration (#700).** This is every capability any agent can name. What one
 // agent *implements* is its own list, typed against this — an agent that announced the whole set
@@ -79,7 +86,7 @@ export interface Device {
 // A runtime value rather than only a union so the relay, which can import from here, checks its
 // gates through `hasCapability` and a rename fails to compile there. The dashboard still cannot, and
 // `scripts/__tests__/agentCapabilityConsumers.test.mjs` holds its literals against this array.
-export const KNOWN_AGENT_CAPABILITIES = ['clipboard', 'full-reset', 'network-control', 'build-download', 'launch-options', 'launch-env', 'touch-cancel', 'field-value', 'keyboard-reset'] as const
+export const KNOWN_AGENT_CAPABILITIES = ['clipboard', 'full-reset', 'network-control', 'build-download', 'launch-options', 'launch-env', 'touch-cancel', 'field-value', 'keyboard-reset', 'keyboard-state', 'keyboard-set'] as const
 export type AgentCapability = (typeof KNOWN_AGENT_CAPABILITIES)[number]
 
 export function isAgentCapability(s: string): s is AgentCapability {

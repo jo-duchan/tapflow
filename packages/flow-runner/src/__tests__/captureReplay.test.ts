@@ -3,11 +3,12 @@ import type { BrowserToRelay } from '@tapflowio/protocol'
 import type { CaptureEntry } from '@tapflowio/protocol/capture'
 import { SessionChannel, type RelayMsg } from '../sessionChannel.js'
 import { SessionLeftError, InputRefusedError } from '../sessionErrors.js'
-import { segment, replayStep, replaySteps, rangeStartOrientation, type RawStep } from '../capture/index.js'
+import { segment, replayStep, replaySteps, rangeStartOrientation, focusTap, type RawStep } from '../capture/index.js'
 
 class MemoryChannel extends SessionChannel {
   readonly sent: Array<{ t: number; msg: BrowserToRelay }> = []
   ack: 'done' | 'error' | null = 'done'
+  ackReason: 'failed' | 'unsupported' = 'failed'
   typeAck: 'done' | 'error' | null = 'done'
   drop(): void { this.connectionLost('the test dropped it') }
   protected send(msg: BrowserToRelay): void {
@@ -20,7 +21,7 @@ class MemoryChannel extends SessionChannel {
         : this.typeAck === 'error' ? { type: 'input:type-error', sessionId, requestId: id, reason: 'failed', message: 'not ASCII' } : null)
       : msg.type.startsWith('input:')
       ? (this.ack === 'done' ? { type: 'input:done', sessionId, requestId: id }
-        : this.ack === 'error' ? { type: 'input:error', sessionId, requestId: id, reason: 'failed', message: 'no' } : null)
+        : this.ack === 'error' ? { type: 'input:error', sessionId, requestId: id, reason: this.ackReason, message: 'no' } : null)
       : msg.type === 'clipboard:write' ? { type: 'clipboard:write-done', sessionId, requestId: id }
         : msg.type === 'app:install' ? { type: 'app:install-done', sessionId, requestId: id }
           : msg.type === 'app:launch' ? { type: 'app:launch-done', sessionId, requestId: id }
@@ -191,6 +192,38 @@ describe('replayStep', () => {
     expect(ch.sent.map((s) => s.msg.type)).toEqual(['input:type'])
   })
 
+  // #1135: a device that cannot select would take the text after what the field holds; the flow's step fails there too.
+  it('stops at a select-all the device cannot press, typing nothing', async () => {
+    const [typed] = segment(recorded([[0, { type: 'input:key', requestId: 'a', payload: { code: 'KeyA', modifiers: 0 } }]]))
+    const read = { ...typed!, kind: 'text', text: '안녕', replace: true } as RawStep
+    const ch = new MemoryChannel()
+    ch.ack = 'error'
+    ch.ackReason = 'unsupported'
+    await expect(replayStep(ch, 's', read)).rejects.toThrow(/cannot select what a field holds/)
+    expect(ch.sent.map((s) => s.msg.type)).toEqual(['input:key'])
+  })
+
+  it('sends no touches in place of text typed on the soft keyboard when the device refuses the text', async () => {
+    const soft = {
+      at: 0, endAt: 100, outcome: 'landed', kind: 'text', text: '안녕', messages: [
+        { at: 0, msg: { type: 'input:touch:start', sessionId: 'old', payload: { x: 0.2, y: 0.8 } } },
+        { at: 60, msg: { type: 'input:touch:end', sessionId: 'old', requestId: 't' } },
+      ],
+    } as RawStep
+    const ch = new MemoryChannel()
+    ch.typeAck = 'error'
+    await expect(replayStep(ch, 's', soft)).rejects.toBeInstanceOf(InputRefusedError)
+    expect(ch.sent.map((s) => s.msg.type)).toEqual(['input:type'])
+  })
+
+  it('presses the field\'s action for imeAction, and sends nothing for a key on the soft keyboard', async () => {
+    const ch = new MemoryChannel()
+    const base = { at: 0, endAt: 60, outcome: 'landed' as const, messages: [] }
+    await expect(replayStep(ch, 's', { ...base, kind: 'imeAction' })).resolves.toBe('replayed')
+    await expect(replayStep(ch, 's', { ...base, kind: 'keyboardKey', point: [0.5, 0.8] })).resolves.toBe('not-replayed')
+    expect(ch.sent.map((s) => s.msg)).toEqual([{ type: 'input:key', sessionId: 's', requestId: expect.any(String), payload: { code: 'ImeAction', modifiers: 0 } }])
+  })
+
   it('replaces what a field holds with the value the relay read, selecting it first as the exported step does', async () => {
     const [typed] = segment(recorded([[0, { type: 'input:key', requestId: 'a', payload: { code: 'KeyA', modifiers: 0 } }]]))
     const read = { ...typed!, kind: 'text', text: '안녕', replace: true } as RawStep
@@ -235,6 +268,33 @@ describe('rangeStartOrientation', () => {
     const steps = segment(entries)
     expect(rangeStartOrientation(steps, { start: 0, end: 2 })).toBe('landscape')
     expect(rangeStartOrientation(steps, { start: 1, end: 2 })).toBeUndefined()
+  })
+})
+
+// Android E2E of #1135: typing into a field focused before the range began, replayed after a fresh launch.
+describe('focusTap', () => {
+  const text = { kind: 'text', text: 'a', replace: true, field: 'form.email', at: 5, endAt: 9, outcome: 'landed', messages: [] } as RawStep
+  const email = { identifier: 'form.email', role: 'input', frame: { x: 0.1, y: 0.2, width: 0.8, height: 0.1 } }
+
+  it('taps the middle of the field when nothing has focus', () => {
+    const tap = focusTap(text, [email] as never)
+    expect(tap).toMatchObject({ kind: 'tap', point: [0.5, 0.25], at: 5 })
+    expect(tap!.messages.map((m) => m.msg.type)).toEqual(['input:touch:start', 'input:touch:end'])
+  })
+
+  it('taps nothing when a field has focus, the field is not there, there are two, or no field was read', () => {
+    expect(focusTap(text, [{ ...email, focused: true }] as never)).toBeUndefined()
+    expect(focusTap(text, [{ ...email, identifier: 'other' }] as never)).toBeUndefined()
+    expect(focusTap(text, [email, email] as never)).toBeUndefined()
+    expect(focusTap({ ...text, field: undefined } as RawStep, [email] as never)).toBeUndefined()
+    expect(focusTap(text, [{ ...email, frame: { x: 0.1, y: 1.2, width: 0.8, height: 0.1 } }] as never)).toBeUndefined()
+  })
+
+  // Review: an app that focuses its first field at launch; the typing was into another.
+  it('taps the field when another one has focus', () => {
+    const other = { identifier: 'form.email', role: 'input', focused: true, frame: { x: 0.1, y: 0.1, width: 0.8, height: 0.05 } }
+    expect(focusTap({ ...text, field: 'form.password' } as RawStep, [other, { ...email, identifier: 'form.password' }] as never))
+      .toMatchObject({ kind: 'tap', point: [0.5, 0.25] })
   })
 })
 

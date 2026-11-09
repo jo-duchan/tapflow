@@ -4,7 +4,8 @@ import { createHash, randomUUID } from 'crypto'
 import { readdirSync, readFileSync, writeFileSync } from 'fs'
 import { join, relative } from 'path'
 import type { UIElement } from '@tapflowio/agent-core'
-import type { FieldReadReason, FocusedField } from '@tapflowio/protocol'
+import type { FieldReadReason, FocusedField, KeyboardState } from '@tapflowio/protocol'
+import { toFramePoint } from '@tapflowio/protocol/screen'
 import { createLogger, PlatformError } from '@tapflowio/agent-core'
 import { parseTreeText, splitInterfaceTurn } from './xcuiTree.js'
 
@@ -368,7 +369,7 @@ export class XCUITreeReader {
    * whole, where the tree's `value:` is cut at 18 characters (measured). A secure field comes back without one. The
    * body is a field's contents, typed or filled in: it is parsed and returned, never logged.
    */
-  async readField(udid: string, bundleId: string): Promise<{ field: FocusedField | null; reason?: FieldReadReason }> {
+  async readField(udid: string, bundleId: string): Promise<{ field: FocusedField | null; reason?: FieldReadReason; keyboard?: KeyboardState }> {
     if (!bundleId) return { field: null, reason: 'no-app' }
     const handle = await this.ensureRunner(udid)
     let body: unknown
@@ -380,7 +381,25 @@ export class XCUITreeReader {
       if (refused(e)) this.dropRunner(udid, handle)
       return { field: null, reason: 'failed' }
     }
-    return toFocusedField(body)
+    const keyboard = toKeyboardState((body as { keyboard?: unknown } | null)?.keyboard)
+    return { ...toFocusedField(body), ...(keyboard.shown !== null ? { keyboard } : {}) }
+  }
+
+  /**
+   * The soft keyboard (#1135), from the runner's `/keyboard`: one query, about the cost of a field read. Unknown, never
+   * hidden, when it cannot be asked.
+   */
+  async readKeyboard(udid: string, bundleId: string): Promise<KeyboardState> {
+    if (!bundleId) return { shown: null }
+    const handle = await this.ensureRunner(udid)
+    try {
+      const r = await fetch(`http://localhost:${handle.port}/keyboard?bundleId=${encodeURIComponent(bundleId)}`, { signal: AbortSignal.timeout(5_000) })
+      if (!r.ok) return { shown: null }
+      return toKeyboardState(await r.json())
+    } catch (e) {
+      if (refused(e)) this.dropRunner(udid, handle)
+      return { shown: null }
+    }
   }
 
   // Drop one device's runner, if `handle` is still the one it holds. Every fault path goes through here rather than
@@ -434,6 +453,30 @@ export class XCUITreeReader {
 }
 
 const READ_REASONS = new Set<string>(['no-app', 'no-focus', 'ambiguous', 'secure'])
+
+const ORIENTATION_TURN = { 1: 0, 2: 180, 3: 270, 4: 90 } as const
+
+/**
+ * The runner's keyboard as protocol's `KeyboardState`, with the rect carried from the app's interface into the
+ * framebuffer a touch lands in — the space a recorded tap is in — by the turn `/tree` reports the same way. An
+ * orientation the runner could not read (0) leaves the rect as it is, which is right for the portrait app it almost
+ * always is.
+ */
+export function toKeyboardState(body: unknown): KeyboardState {
+  if (typeof body !== 'object' || body === null) return { shown: null }
+  const b = body as Record<string, unknown>
+  if (b['shown'] !== true) return { shown: b['shown'] === false ? false : null }
+  const r = b['rect'] as Record<string, unknown> | undefined
+  if (!r || !['x', 'y', 'width', 'height'].every((k) => typeof r[k] === 'number')) return { shown: true }
+  const turn = ORIENTATION_TURN[b['orientation'] as 1 | 2 | 3 | 4]
+  const [x, y, w, h] = [r['x'], r['y'], r['width'], r['height']] as [number, number, number, number]
+  const a = toFramePoint(turn, [x, y])
+  const c = toFramePoint(turn, [x + w, y + h])
+  return {
+    shown: true,
+    rect: { x: Math.min(a[0], c[0]), y: Math.min(a[1], c[1]), width: Math.abs(a[0] - c[0]), height: Math.abs(a[1] - c[1]) },
+  }
+}
 
 /** The runner's `/field` answer as protocol's `FocusedField`. Anything it does not recognise is a failed read, never a
  *  field: a value is what a recording will export, so a shape this cannot vouch for must not become one. */

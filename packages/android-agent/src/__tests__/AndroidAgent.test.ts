@@ -3098,12 +3098,200 @@ describe('AndroidAgent', () => {
       })
 
       it('acks input:type-error when the text is rejected', async () => {
+        vi.spyOn(adb, 'setFocusedText').mockResolvedValue('no-focus')
         vi.spyOn(adb, 'inputText').mockRejectedValue(new Error('ASCII only'))
         const ack = waitForType(browser, 'input:type-error')
-        inject({ type: 'input:type', requestId: 'rq-in4', payload: { text: '안녕' } })
+        inject({ type: 'input:type', requestId: 'rq-in4', payload: { text: 'hi' } })
         const err = await ack
         expect(err.message).toBe('ASCII only')
         expect(err.requestId).toBe('rq-in4')
+      })
+    })
+
+    // #1135: the text is set at the focused field's caret, so it lands as written whatever Gboard's language is.
+    describe('input — type, set into the focused field', () => {
+      it('sets the text and does not type it through the keyboard', async () => {
+        const set = vi.spyOn(adb, 'setFocusedText').mockResolvedValue('ok')
+        const inputText = vi.spyOn(adb, 'inputText')
+        const ack = waitForType(browser, 'input:type-done')
+        inject({ type: 'input:type', requestId: 'rq-st1', payload: { text: '안녕a' } })
+        expect((await ack).requestId).toBe('rq-st1')
+        expect(set).toHaveBeenCalledWith('emulator-5554', '안녕a')
+        expect(inputText).not.toHaveBeenCalled()
+      })
+
+      it('passes a field that changed the text as it took it', async () => {
+        vi.spyOn(adb, 'setFocusedText').mockResolvedValue('transformed')
+        const inputText = vi.spyOn(adb, 'inputText')
+        inject({ type: 'input:type', requestId: 'rq-st2', payload: { text: '12345' } })
+        expect((await waitForType(browser, 'input:type-done')).requestId).toBe('rq-st2')
+        expect(inputText).not.toHaveBeenCalled()
+      })
+
+      it.each(['refused', 'rejected'] as const)('fails a field that %s the text, without naming it', async (result) => {
+        vi.spyOn(adb, 'setFocusedText').mockResolvedValue(result)
+        const inputText = vi.spyOn(adb, 'inputText')
+        inject({ type: 'input:type', requestId: 'rq-st3', payload: { text: 'hunter2' } })
+        const err = await waitForType(browser, 'input:type-error')
+        expect(err.message).toMatch(/did not take the text/)
+        expect(err.message).not.toContain('hunter2')
+        expect(inputText).not.toHaveBeenCalled()
+      })
+
+      it.each(['no-focus', 'unavailable'] as const)(
+        'types ASCII with adb input text when the set gave %s',
+        async (result) => {
+          vi.spyOn(adb, 'setFocusedText').mockResolvedValue(result)
+          const inputText = vi.spyOn(adb, 'inputText').mockResolvedValue(undefined)
+          inject({ type: 'input:type', requestId: 'rq-st4', payload: { text: 'abc' } })
+          expect((await waitForType(browser, 'input:type-done')).requestId).toBe('rq-st4')
+          expect(inputText).toHaveBeenCalledWith('emulator-5554', 'abc')
+        },
+      )
+
+      // A password the jar would not append to never reaches argv, and a jar that errored is not guessed around.
+      it.each(['cannot-append-secure', 'failed'] as const)('fails on %s rather than typing it with adb input text', async (result) => {
+        vi.spyOn(adb, 'setFocusedText').mockResolvedValue(result)
+        const inputText = vi.spyOn(adb, 'inputText')
+        inject({ type: 'input:type', requestId: 'rq-st6', payload: { text: 'hunter2' } })
+        const err = await waitForType(browser, 'input:type-error')
+        expect(err.message).not.toContain('hunter2')
+        expect(inputText).not.toHaveBeenCalled()
+      })
+
+      it('fails text other than ASCII with no field to set it in, without naming it', async () => {
+        vi.spyOn(adb, 'setFocusedText').mockResolvedValue('no-focus')
+        const inputText = vi.spyOn(adb, 'inputText')
+        inject({ type: 'input:type', requestId: 'rq-st5', payload: { text: '비밀' } })
+        const err = await waitForType(browser, 'input:type-error')
+        expect(err.message).toMatch(/No text field has focus/)
+        expect(err.message).not.toContain('비밀')
+        expect(inputText).not.toHaveBeenCalled()
+      })
+    })
+
+    // #1135: Flow Capture's reads. Answered to the relay, which keeps them; never forwarded to a browser.
+    describe('field and keyboard reads', () => {
+      // The calls as they arrive: a `find` over this sees a reply sent after it was made.
+      function sent(): { find(p: (m: Record<string, unknown>) => boolean): Record<string, unknown> | undefined } {
+        const spy = vi.spyOn(agent as unknown as { sendMsg(m: unknown): void }, 'sendMsg')
+        return { find: (p) => spy.mock.calls.map(([m]) => m as Record<string, unknown>).find(p) }
+      }
+      const screen = { natural: { width: 1080, height: 2400 }, current: { width: 1080, height: 2400 }, rotation: 0 as const }
+
+      it('answers ui:field:request with the focused field, its keyboard and language, normalised', async () => {
+        vi.spyOn(adb, 'readFocused').mockResolvedValue({
+          identifier: 'form.email', frame: { x: 108, y: 240, width: 540, height: 120 }, secure: false, value: '안녕',
+          keyboard: { x: 0, y: 1500, width: 1080, height: 900 }, language: '한국어 (두벌식)',
+        })
+        vi.spyOn(adb, 'getDisplayMetrics').mockResolvedValue(screen)
+        const out = sent()
+        inject({ type: 'ui:field:request', requestId: 'rq-f1' })
+        await vi.waitFor(() => expect(out.find((m) => m['type'] === 'ui:field:response')).toBeDefined())
+        expect(out.find((m) => m['type'] === 'ui:field:response')).toEqual({
+          type: 'ui:field:response', sessionId: agent.sessionId, requestId: 'rq-f1',
+          field: { identifier: 'form.email', placeholder: '', frame: { x: 0.1, y: 0.1, width: 0.5, height: 0.05 }, secure: false, value: '안녕' },
+          keyboard: {
+            shown: true,
+            rect: { x: 0, y: 0.625, width: 1, height: 0.375 },
+            frameRect: { x: 0, y: 0.625, width: 1, height: 0.375 },
+          },
+          language: '한국어 (두벌식)',
+        })
+      })
+
+      it('answers ui:field:request with no value for a password', async () => {
+        vi.spyOn(adb, 'readFocused').mockResolvedValue({
+          identifier: 'form.password', frame: { x: 0, y: 0, width: 10, height: 10 }, secure: true, value: 'leaked', reason: 'secure',
+        })
+        vi.spyOn(adb, 'getDisplayMetrics').mockResolvedValue(screen)
+        const out = sent()
+        inject({ type: 'ui:field:request', requestId: 'rq-f2' })
+        await vi.waitFor(() => expect(out.find((m) => m['type'] === 'ui:field:response')).toBeDefined())
+        const reply = out.find((m) => m['type'] === 'ui:field:response')!
+        expect(reply['reason']).toBe('secure')
+        expect(JSON.stringify(reply)).not.toContain('leaked')
+      })
+
+      it('answers ui:field:request as failed when the jar cannot run', async () => {
+        vi.spyOn(adb, 'readFocused').mockResolvedValue(null)
+        vi.spyOn(adb, 'getDisplayMetrics').mockResolvedValue(screen)
+        const out = sent()
+        inject({ type: 'ui:field:request', requestId: 'rq-f3' })
+        await vi.waitFor(() => expect(out.find((m) => m['type'] === 'ui:field:response')).toBeDefined())
+        expect(out.find((m) => m['type'] === 'ui:field:response')).toMatchObject({ field: null, reason: 'failed', requestId: 'rq-f3' })
+      })
+
+      it.each([
+        [{ shown: false }, { shown: false }],
+        [{ shown: true, rect: { x: 0, y: 1200, width: 1080, height: 1200 } }, { shown: true, rect: { x: 0, y: 0.5, width: 1, height: 0.5 } }],
+        [null, { shown: null }],
+      ])('answers ui:keyboard:request from the input method window (%j)', async (ime, keyboard) => {
+        vi.spyOn(adb, 'imeWindow').mockResolvedValue(ime)
+        vi.spyOn(adb, 'getDisplayMetrics').mockResolvedValue(screen)
+        const out = sent()
+        inject({ type: 'ui:keyboard:request', requestId: 'rq-k1' })
+        await vi.waitFor(() => expect(out.find((m) => m['type'] === 'ui:keyboard:response')).toBeDefined())
+        expect(out.find((m) => m['type'] === 'ui:keyboard:response')).toMatchObject({ requestId: 'rq-k1', keyboard })
+      })
+    })
+
+    // #1135: a replay starts from the keyboard language the recording did.
+    describe('device:keyboard-set', () => {
+      function languages(...titles: string[]) {
+        let at = 0
+        vi.spyOn(adb, 'readFocused').mockImplementation(async () => ({ reason: 'no-focus', keyboard: { x: 0, y: 0, width: 1, height: 1 }, language: titles[at] }))
+        return vi.spyOn(adb, 'sendKeyCombination').mockImplementation(async () => { at = (at + 1) % titles.length; return true })
+      }
+
+      it('is done at once when the keyboard is already in that language', async () => {
+        vi.spyOn(adb, 'imeWindow').mockResolvedValue({ shown: true })
+        const combo = languages('English (US) (QWERTY)', '한국어 (두벌식)')
+        inject({ type: 'device:keyboard-set', requestId: 'rq-ks1', payload: { keyboard: 'English (US) (QWERTY)' } })
+        expect((await waitForType(browser, 'device:keyboard-set-done')).requestId).toBe('rq-ks1')
+        expect(combo).not.toHaveBeenCalled()
+      })
+
+      it('turns the language with Shift+Space until it matches', async () => {
+        vi.spyOn(adb, 'imeWindow').mockResolvedValue({ shown: true })
+        const combo = languages('English (US) (QWERTY)', 'Español', '한국어 (두벌식)')
+        inject({ type: 'device:keyboard-set', requestId: 'rq-ks2', payload: { keyboard: '한국어 (두벌식)' } })
+        expect((await waitForType(browser, 'device:keyboard-set-done')).requestId).toBe('rq-ks2')
+        expect(combo).toHaveBeenCalledTimes(2)
+        expect(combo).toHaveBeenCalledWith('emulator-5554', ['59', '62'])
+      })
+
+      it('fails once the languages come round without the one asked for', async () => {
+        vi.spyOn(adb, 'imeWindow').mockResolvedValue({ shown: true })
+        const combo = languages('English (US) (QWERTY)', '한국어 (두벌식)')
+        inject({ type: 'device:keyboard-set', requestId: 'rq-ks3', payload: { keyboard: 'Français' } })
+        const err = await waitForType(browser, 'device:keyboard-set-error')
+        expect(err).toMatchObject({ requestId: 'rq-ks3', reason: 'failed' })
+        expect(err.message).toContain('Français')
+        expect(combo).toHaveBeenCalledTimes(2)
+      })
+
+      it('answers keyboard-hidden while the keyboard is down, and presses nothing', async () => {
+        vi.spyOn(adb, 'imeWindow').mockResolvedValue({ shown: false })
+        const combo = vi.spyOn(adb, 'sendKeyCombination')
+        inject({ type: 'device:keyboard-set', requestId: 'rq-ks4', payload: { keyboard: '한국어 (두벌식)' } })
+        expect(await waitForType(browser, 'device:keyboard-set-error')).toMatchObject({ requestId: 'rq-ks4', reason: 'keyboard-hidden' })
+        expect(combo).not.toHaveBeenCalled()
+      })
+
+      it('answers unsupported for no named language: which one Gboard lists first cannot be read', async () => {
+        const combo = vi.spyOn(adb, 'sendKeyCombination')
+        inject({ type: 'device:keyboard-set', requestId: 'rq-ks5', payload: {} })
+        expect(await waitForType(browser, 'device:keyboard-set-error')).toMatchObject({ requestId: 'rq-ks5', reason: 'unsupported' })
+        expect(combo).not.toHaveBeenCalled()
+      })
+
+      it('answers unsupported below Android 13', async () => {
+        vi.spyOn(adb, 'imeWindow').mockResolvedValue({ shown: true })
+        languages('English (US) (QWERTY)', '한국어 (두벌식)')
+        vi.spyOn(adb, 'sendKeyCombination').mockResolvedValue(false)
+        inject({ type: 'device:keyboard-set', requestId: 'rq-ks6', payload: { keyboard: '한국어 (두벌식)' } })
+        expect(await waitForType(browser, 'device:keyboard-set-error')).toMatchObject({ requestId: 'rq-ks6', reason: 'unsupported' })
       })
     })
 
@@ -3594,7 +3782,7 @@ describe('AndroidAgent', () => {
       it('answers unsupported for a chord it deliberately does not send', async () => {
         const sendKeyEvent = vi.spyOn(adb, 'sendKeyEvent')
         const errored = waitForType(browser, 'input:error')
-        inject({ type: 'input:key', requestId: 'rq-in23', payload: { code: 'KeyA', modifiers: 0x08 } }) // Cmd+A
+        inject({ type: 'input:key', requestId: 'rq-in23', payload: { code: 'KeyS', modifiers: 0x08 } }) // Cmd+S
         expect((await errored)['message']).toContain('not supported')
         expect(sendKeyEvent).not.toHaveBeenCalled()
       })
@@ -3609,8 +3797,62 @@ describe('AndroidAgent', () => {
 
       it('answers unsupported for a code with no character mapping', async () => {
         const errored = waitForType(browser, 'input:error')
-        inject({ type: 'input:key', requestId: 'rq-in25', payload: { code: 'CapsLock', modifiers: 0 } })
+        inject({ type: 'input:key', requestId: 'rq-in25', payload: { code: 'IntlBackslash', modifiers: 0 } })
         expect((await errored)['message']).toContain('not supported')
+      })
+
+      // #1135: select-all, which `inputText` with `replace` presses first, is Ctrl+A on Android 13+.
+      it.each([0x01, 0x08])('holds Ctrl+A for a select-all chord (modifiers %i)', async (modifiers) => {
+        const combo = vi.spyOn(adb, 'sendKeyCombination').mockResolvedValue(true)
+        inject({ type: 'input:key', requestId: 'rq-sa1', payload: { code: 'KeyA', modifiers } })
+        expect((await waitForType(browser, 'input:done')).requestId).toBe('rq-sa1')
+        expect(combo).toHaveBeenCalledWith('emulator-5554', ['113', '29'])
+      })
+
+      it('answers unsupported for select-all below Android 13, and types no "a"', async () => {
+        vi.spyOn(adb, 'sendKeyCombination').mockResolvedValue(false)
+        const sendInput = vi.spyOn(adb, 'sendInput')
+        inject({ type: 'input:key', requestId: 'rq-sa2', payload: { code: 'KeyA', modifiers: 0x08 } })
+        expect((await waitForType(browser, 'input:error'))['message']).toContain('not supported')
+        expect(sendInput).not.toHaveBeenCalled()
+      })
+
+      // #1135: Caps Lock switches Gboard's language, as it does on a Mac and on iOS.
+      it('switches the keyboard language with Shift+Space for Caps Lock', async () => {
+        const combo = vi.spyOn(adb, 'sendKeyCombination').mockResolvedValue(true)
+        inject({ type: 'input:key', requestId: 'rq-cl1', payload: { code: 'CapsLock', modifiers: 0 } })
+        expect((await waitForType(browser, 'input:done')).requestId).toBe('rq-cl1')
+        expect(combo).toHaveBeenCalledWith('emulator-5554', ['59', '62'])
+      })
+
+      it('answers unsupported for Caps Lock below Android 13', async () => {
+        vi.spyOn(adb, 'sendKeyCombination').mockResolvedValue(false)
+        inject({ type: 'input:key', requestId: 'rq-cl2', payload: { code: 'CapsLock', modifiers: 0 } })
+        expect((await waitForType(browser, 'input:error'))['message']).toContain('not supported')
+      })
+
+      it('answers failed when the Caps Lock combination errors', async () => {
+        vi.spyOn(adb, 'sendKeyCombination').mockRejectedValue(new Error('offline'))
+        inject({ type: 'input:key', requestId: 'rq-cl3', payload: { code: 'CapsLock', modifiers: 0 } })
+        expect((await waitForType(browser, 'input:error'))['reason']).toBe('dispatch-failed')
+      })
+
+      // #1135: a flow's `imeAction` step, the field's own action rather than an Enter key event.
+      it.each([
+        ['ok', 'input:done'],
+        ['unsupported', 'input:error'],
+        ['no-focus', 'input:error'],
+        ['rejected', 'input:error'],
+      ] as const)('presses the IME action (%s → %s)', async (result, answer) => {
+        const ime = vi.spyOn(adb, 'imeAction').mockResolvedValue(result)
+        const sendKeyEvent = vi.spyOn(adb, 'sendKeyEvent')
+        inject({ type: 'input:key', requestId: 'rq-ime', payload: { code: 'ImeAction', modifiers: 0 } })
+        const reply = await waitForType(browser, answer)
+        expect(reply.requestId).toBe('rq-ime')
+        if (result === 'unsupported') expect(reply['reason']).toBe('unsupported')
+        if (result === 'no-focus' || result === 'rejected') expect(reply['reason']).toBe('dispatch-failed')
+        expect(ime).toHaveBeenCalledWith('emulator-5554')
+        expect(sendKeyEvent).not.toHaveBeenCalled()
       })
 
       it('answers failed when the key dispatch rejects', async () => {

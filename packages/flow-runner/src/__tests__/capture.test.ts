@@ -5,7 +5,7 @@ import { fileURLToPath } from 'node:url'
 import type { UIElement } from '@tapflowio/agent-core'
 import type { CaptureEntry, CapturedMessage } from '@tapflowio/protocol/capture'
 import {
-  segment, defaultRange, rangeWarnings, matchStep, toFlowSteps, flowSteps, flowToYaml, rawStepLabel, capturedStepLabel,
+  askedValues, segment, defaultRange, rangeWarnings, matchStep, toFlowSteps, flowSteps, flowToYaml, rawStepLabel, capturedStepLabel,
   type MatchContext, type RawStep,
 } from '../capture/index.js'
 import { parseFlow } from '../schema.js'
@@ -153,6 +153,135 @@ describe('segment: a recording as the actions a person took', () => {
       expect(steps[0]!.messages).toHaveLength(6)
     })
 
+    it('goes on through Caps Lock, which switches the keyboard\'s language and types nothing', () => {
+      // A text run takes Caps Lock in, so one read after the run covers both languages.
+      const r = new Rec().key('KeyD')
+      read(r, 'focus', email).key('KeyK').key('KeyS').key('CapsLock').key('KeyH').key('KeyI').wait(700)
+      read(r, 'value', { ...email, value: '안hi' })
+      r.wait(500).key('Tab')
+      expect(texts(r)).toEqual(['=안hi', 'Tab'])
+    })
+
+    it('says which field the typing went into, for a replay that has to focus it', () => {
+      const r = new Rec().key('KeyA')
+      read(r, 'focus', email).wait(700)
+      read(r, 'value', { ...email, value: 'a' })
+      r.wait(500).key('Tab')
+      expect(r.steps()[0]).toMatchObject({ kind: 'text', text: 'a', field: 'form.email' })
+    })
+
+    // #1140: a password on the soft keyboard was dropped as keys, and the flow had no password step.
+    it('makes a password typed on the soft keyboard one secret step whose value is asked, with nothing to start from after a soft key', () => {
+      const pw = { ...email, identifier: 'form.password', secure: true }
+      const r = new Rec().launch()
+      r.entries.push({ at: r.t + 20, kind: 'keyboard', requestedAt: r.t, keyboard: { shown: true, rect: { x: 0, y: 0.6, width: 1, height: 0.4 } }, settled: true })
+      r.wait(100).key('KeyA')
+      read(r, 'focus', pw, 40, 'secure')
+      r.wait(100).touch([[0.3, 0.8]])
+      r.entries.push({ at: r.t + 20, kind: 'keyboard', requestedAt: r.t, keyboard: { shown: true, rect: { x: 0, y: 0.6, width: 1, height: 0.4 } }, settled: true })
+      r.wait(700)
+      read(r, 'value', pw, 40, 'secure')
+      r.wait(500).key('Tab')
+      const steps = r.steps()
+      expect(steps.map((s) => s.kind)).toEqual(['launch', 'text', 'key'])
+      expect(steps[1]).toMatchObject({ kind: 'text', text: '', askValue: true, fieldRead: 'secure', field: 'form.password' })
+      expect(askedValues(steps, { start: 0, end: 3 })).toEqual([1])
+      expect(askedValues(steps, { start: 2, end: 3 })).toEqual([])
+    })
+
+    // iOS E2E: typed on the soft keyboard, deleted, tapped the field, typed again on the computer's keyboard. Replayed
+    // as two steps, the asked value and the later keys were typed one after the other.
+    it('makes a password field typed into again one asked secret where the typing ended, starting from the later keys', () => {
+      const pw = { ...email, identifier: 'form.password', secure: true }
+      const up = { shown: true as const, rect: { x: 0, y: 0.6, width: 1, height: 0.4 } }
+      const r = new Rec().launch()
+      r.entries.push({ at: r.t + 20, kind: 'keyboard', requestedAt: r.t, keyboard: up, settled: true })
+      r.wait(100).touch([[0.3, 0.8]])
+      r.entries.push({ at: r.t + 20, kind: 'keyboard', requestedAt: r.t, keyboard: up, settled: true })
+      read(r, 'focus', pw, 40, 'secure').wait(700)
+      read(r, 'value', pw, 40, 'secure')
+      r.wait(500).touch([[0.5, 0.2]])
+      r.entries.push({ at: r.t + 20, kind: 'keyboard', requestedAt: r.t, keyboard: { shown: false }, settled: true })
+      r.wait(300).key('KeyE')
+      read(r, 'focus', pw, 40, 'secure').key('Backspace').key('KeyA').key('KeyB').wait(700)
+      read(r, 'value', pw, 40, 'secure')
+      r.wait(500).key('Tab')
+      const steps = r.steps()
+      expect(steps.map((s) => s.kind)).toEqual(['launch', 'tap', 'text', 'key'])
+      expect(steps[2]).toMatchObject({ kind: 'text', text: 'ab', askValue: true, replace: true, field: 'form.password' })
+    })
+
+    // Review: helpers for a password typed on the soft keyboard (a tap on a key) and on the computer's.
+    const UP = { shown: true as const, rect: { x: 0, y: 0.6, width: 1, height: 0.4 } }
+    const softKey = (r: Rec) => {
+      r.entries.push({ at: r.t + 20, kind: 'keyboard', requestedAt: r.t, keyboard: UP, settled: true })
+      r.wait(100).touch([[0.3, 0.8]])
+      r.entries.push({ at: r.t + 20, kind: 'keyboard', requestedAt: r.t, keyboard: UP, settled: true })
+      return r
+    }
+    const pw = (placeholder = 'Password') => ({ ...email, identifier: 'form.password', placeholder, secure: true })
+
+    it('keeps a tap that is not a way back into the field where it was, outside the merged password', () => {
+      const r = new Rec().launch()
+      softKey(r)
+      read(r, 'focus', pw(), 40, 'secure').wait(700)
+      read(r, 'value', pw(), 40, 'secure')
+      r.wait(500).touch([[0.5, 0.5]])          // Sign in
+      r.entries.push({ at: r.t + 20, kind: 'keyboard', requestedAt: r.t, keyboard: { shown: false }, settled: true })
+      r.wait(500).touch([[0.5, 0.2]])          // back into the field
+      r.entries.push({ at: r.t + 20, kind: 'keyboard', requestedAt: r.t, keyboard: UP, settled: true })
+      softKey(r)
+      read(r, 'focus', pw(), 40, 'secure').wait(700)
+      read(r, 'value', pw(), 40, 'secure')
+      r.wait(500).key('Tab')
+      expect(r.steps().map((s) => s.kind)).toEqual(['launch', 'text', 'tap', 'tap', 'text', 'key'])
+    })
+
+    it('keeps a password and its confirmation apart though they share an identifier', () => {
+      const r = new Rec().launch()
+      softKey(r)
+      read(r, 'focus', pw('Password'), 40, 'secure').wait(700)
+      read(r, 'value', pw('Password'), 40, 'secure')
+      r.wait(500).touch([[0.5, 0.3]])
+      r.entries.push({ at: r.t + 20, kind: 'keyboard', requestedAt: r.t, keyboard: UP, settled: true })
+      softKey(r)
+      read(r, 'focus', pw('Confirm'), 40, 'secure').wait(700)
+      read(r, 'value', pw('Confirm'), 40, 'secure')
+      r.wait(500).key('Tab')
+      expect(r.steps().filter((s) => s.kind === 'text' && s.askValue)).toHaveLength(2)
+    })
+
+    it('starts the asked value from the computer\'s keys after the last soft key, Backspace applied', () => {
+      const r = new Rec().launch()
+      softKey(r)
+      read(r, 'focus', pw(), 40, 'secure')
+      r.key('KeyA').key('KeyB').key('KeyX').key('Backspace').key('KeyC').wait(700)
+      read(r, 'value', pw(), 40, 'secure')
+      r.wait(500).key('Tab')
+      expect(r.steps().find((s) => s.kind === 'text')).toMatchObject({ text: 'abc', askValue: true })
+    })
+
+    it('leaves a password typed twice on the computer\'s keyboard as it was typed', () => {
+      const r = new Rec().key('KeyA')
+      read(r, 'focus', pw(), 40, 'secure').wait(700)
+      read(r, 'value', pw(), 40, 'secure')
+      r.wait(500).touch([[0.5, 0.2]])
+      r.wait(300).key('KeyB')
+      read(r, 'focus', pw(), 40, 'secure').wait(700)
+      read(r, 'value', pw(), 40, 'secure')
+      r.wait(500).key('Tab')
+      expect(r.steps().filter((s) => s.kind === 'text').map((s) => s.kind === 'text' && s.text)).toEqual(['a', 'b'])
+    })
+
+    it('asks nothing for a password typed only on the computer\'s keyboard', () => {
+      const pw = { ...email, identifier: 'form.password', secure: true }
+      const r = new Rec().key('KeyA')
+      read(r, 'focus', pw, 40, 'secure').key('KeyB').wait(700)
+      read(r, 'value', pw, 40, 'secure')
+      r.wait(500).key('Tab')
+      expect(r.steps().some((s) => s.kind === 'text' && s.askValue)).toBe(false)
+    })
+
     it('keeps no read that raced an input: one answered after the next input, or asked before the last', () => {
       const late = new Rec().key('KeyA')
       read(late, 'focus', email).wait(700)
@@ -235,6 +364,216 @@ describe('segment: a recording as the actions a person took', () => {
   it('carries a chrome entry to the steps after it, for showing them', () => {
     const steps = new Rec().chrome({ bodyRotation: 90 }).touch([[0.5, 0.5]]).steps()
     expect(steps[0]!.chrome).toEqual({ bodyRotation: 90 })
+  })
+})
+
+// #1135: the soft keyboard, judged by the relay's reads on either side of a touch.
+describe('segment: touches on the soft keyboard', () => {
+  const SHOWN = { shown: true as const, rect: { x: 0, y: 0.6, width: 1, height: 0.4 } }
+  const HIDDEN = { shown: false as const }
+  /** A keyboard read asked now and answered `answerMs` later. */
+  const kb = (r: Rec, keyboard: { shown: boolean | null; rect?: typeof SHOWN.rect }, opts: { answerMs?: number; settled?: boolean } = {}) => {
+    r.entries.push({ at: r.t + (opts.answerMs ?? 20), kind: 'keyboard', requestedAt: r.t, keyboard, settled: opts.settled ?? false })
+    return r
+  }
+  const kinds = (r: Rec) => r.steps().map((s) => ('keyboard' in s && s.keyboard ? `${s.kind}?` : s.kind))
+
+  it('takes a touch on the keyboard, up before and after it, as a key', () => {
+    const r = new Rec().launch()
+    kb(r, SHOWN).wait(100).touch([[0.3, 0.8]])
+    kb(r, SHOWN)
+    expect(kinds(r)).toEqual(['launch', 'keyboardKey'])
+  })
+
+  it('still takes it as a key when fast typing left only an older read before it', () => {
+    const r = new Rec().launch()
+    kb(r, SHOWN).wait(100).touch([[0.3, 0.8]]).wait(30).touch([[0.5, 0.8]])
+    kb(r, SHOWN)
+    expect(kinds(r)).toEqual(['launch', 'keyboardKey', 'keyboardKey'])
+  })
+
+  it('takes a tap on the action key that closed the keyboard as imeAction', () => {
+    const r = new Rec().launch()
+    kb(r, SHOWN).wait(100).touch([[0.9, 0.95]])
+    kb(r, HIDDEN, { settled: true })
+    expect(kinds(r)).toEqual(['launch', 'imeAction'])
+  })
+
+  // E2E of #1135 (iOS): after Return the keyboard read as shown, below the screen; the tap was replayed onto a tab.
+  it('takes the action key as closing a keyboard that is left shown below the screen', () => {
+    const r = new Rec().launch()
+    kb(r, SHOWN).wait(100).touch([[0.9, 0.95]])
+    kb(r, { shown: true, rect: { x: 0, y: 1, width: 1, height: 0.05 } }, { settled: true })
+    expect(kinds(r)).toEqual(['launch', 'imeAction'])
+  })
+
+  it('does not know a tap that closed the keyboard from anywhere else on it', () => {
+    const r = new Rec().launch()
+    kb(r, SHOWN).wait(100).touch([[0.1, 0.65]])
+    kb(r, HIDDEN)
+    expect(kinds(r)).toEqual(['launch', 'tap?'])
+  })
+
+  it('does not take the action key from a read that came before another input', () => {
+    const r = new Rec().launch()
+    kb(r, SHOWN).wait(100).key('Enter').wait(50).touch([[0.9, 0.95]])
+    kb(r, HIDDEN)
+    expect(kinds(r)).toEqual(['launch', 'key', 'tap?'])
+  })
+
+  it('takes a tap while the keyboard was down as the app\'s, even where the keyboard then came up', () => {
+    // A field at the bottom of the screen: the keyboard rises over the point the person tapped.
+    const r = new Rec().launch()
+    kb(r, HIDDEN).wait(100).touch([[0.5, 0.9]])
+    kb(r, SHOWN)
+    expect(kinds(r)).toEqual(['launch', 'tap'])
+  })
+
+  // E2E of #1135 (iOS): after a soft-keyboard toggle both reads had the keyboard below the screen; the person tapped a
+  // key 2 s later, and only the read after it had the keyboard there.
+  it('does not take a tap as the app\'s when the keyboard was up elsewhere and settled over it after', () => {
+    const below = { shown: true as const, rect: { x: 0, y: 1, width: 1, height: 0.09 } }
+    const r = new Rec().launch()
+    kb(r, below, { settled: true }).wait(100).touch([[0.1, 0.75]])
+    kb(r, SHOWN, { settled: true })
+    expect(kinds(r)).toEqual(['launch', 'tap?'])
+  })
+
+  it('passes over a read that could not tell, and judges by the ones that could', () => {
+    const r = new Rec().launch()
+    kb(r, { shown: null }).wait(100).touch([[0.3, 0.8]])
+    kb(r, HIDDEN, { settled: true })
+    expect(kinds(r)).toEqual(['launch', 'tap'])
+  })
+
+  // E2E of #1135 (iOS): after a soft-keyboard toggle the reads had the keyboard below the screen until the next input,
+  // and the first key after it was left unknown.
+  it('judges the touch right after a keyboard toggle by where the keyboard came to rest', () => {
+    const below = { shown: true as const, rect: { x: 0, y: 1, width: 1, height: 0.09 } }
+    const r = new Rec().launch()
+    r.wait(100).msg({ type: 'input:keyboard:toggle', sessionId: 's' })
+    kb(r, below, { settled: true }).wait(2000).touch([[0.1, 0.9]])
+    kb(r, SHOWN, { settled: true })
+    r.wait(500).msg({ type: 'input:keyboard:toggle', sessionId: 's' })
+    kb(r, below, { settled: true }).wait(2000).touch([[0.5, 0.3]])
+    kb(r, SHOWN, { settled: true })
+    expect(kinds(r)).toEqual(['launch', 'keyboardToggle', 'keyboardKey', 'keyboardToggle', 'tap'])
+  })
+
+  // Review: Return as the first touch after a toggle put the keyboard away; taken as the app's, it was replayed onto
+  // whatever was under it.
+  it('does not take the touch after a toggle that put the keyboard away as the app\'s', () => {
+    const r = new Rec().launch()
+    kb(r, HIDDEN, { settled: true })
+    r.wait(100).msg({ type: 'input:keyboard:toggle', sessionId: 's' })
+    kb(r, HIDDEN, { settled: true }).wait(1000).touch([[0.9, 0.95]])
+    kb(r, HIDDEN, { settled: true })
+    expect(kinds(r)).toEqual(['launch', 'keyboardToggle', 'tap?'])
+  })
+
+  it('takes a tap off the keyboard as the app\'s', () => {
+    const r = new Rec().launch()
+    kb(r, SHOWN).wait(100).touch([[0.5, 0.3]])
+    kb(r, HIDDEN)
+    expect(kinds(r)).toEqual(['launch', 'tap'])
+  })
+
+  it('marks a tap it cannot judge: a stale read with the keyboard down, or an unknown one', () => {
+    const stale = new Rec().launch()
+    kb(stale, HIDDEN).wait(100).key('Enter').wait(50).touch([[0.5, 0.3]])
+    expect(kinds(stale)).toEqual(['launch', 'key', 'tap?'])
+    const unknown = new Rec().launch()
+    kb(unknown, { shown: null }).wait(100).touch([[0.5, 0.3]])
+    expect(kinds(unknown)).toEqual(['launch', 'tap?'])
+  })
+
+  it('judges a capture\'s first touch by the read after it', () => {
+    const app = new Rec().touch([[0.5, 0.3]])
+    kb(app, HIDDEN)
+    expect(kinds(app)).toEqual(['tap'])
+    const onKeys = new Rec().touch([[0.5, 0.9]])
+    kb(onKeys, SHOWN)
+    expect(kinds(onKeys)).toEqual(['tap?'])
+  })
+
+  it('uses the settled read after a touch over an earlier one that caught the keyboard moving', () => {
+    const r = new Rec().launch()
+    kb(r, SHOWN).wait(100).touch([[0.9, 0.95]])
+    kb(r, SHOWN).wait(300)
+    kb(r, HIDDEN, { settled: true })
+    expect(kinds(r)).toEqual(['launch', 'imeAction'])
+  })
+
+  it('takes a swipe that starts on the keyboard as a key (gesture typing), and leaves the app\'s alone', () => {
+    const r = new Rec().launch()
+    kb(r, SHOWN).wait(100).touch([[0.2, 0.8], [0.5, 0.75], [0.8, 0.8]])
+    kb(r, SHOWN).wait(100).touch([[0.5, 0.3], [0.5, 0.2], [0.5, 0.1]])
+    kb(r, SHOWN)
+    expect(kinds(r)).toEqual(['launch', 'keyboardKey', 'swipe'])
+  })
+
+  it('judges a point in the frame\'s space by the keyboard in that space', () => {
+    const turned = { shown: true as const, rect: SHOWN.rect, frameRect: { x: 0.6, y: 0, width: 0.4, height: 1 } }
+    const r = new Rec().launch()
+    kb(r, turned).wait(100).touch([[0.8, 0.2]], { space: 'frame' })
+    kb(r, turned).wait(100).touch([[0.2, 0.8]], { space: 'frame' })
+    kb(r, turned)
+    expect(kinds(r)).toEqual(['launch', 'keyboardKey', 'tap'])
+  })
+
+  it('takes no touch as a key on a keyboard that is down, whatever rect it reported', () => {
+    const down = { shown: false as const, rect: SHOWN.rect }
+    const r = new Rec().launch()
+    kb(r, down).wait(100).touch([[0.3, 0.8]])
+    kb(r, down)
+    expect(kinds(r)).toEqual(['launch', 'tap'])
+  })
+
+  it('judges a touch by the reads before the next input, not by what a later input did', () => {
+    // A key on the keyboard that stayed up, then an Enter that closed it: the key is not the action key.
+    const r = new Rec().launch()
+    kb(r, SHOWN).wait(100).touch([[0.9, 0.95]])
+    kb(r, SHOWN, { settled: true }).wait(200).key('Enter')
+    kb(r, HIDDEN, { settled: true })
+    expect(kinds(r)).toEqual(['launch', 'keyboardKey', 'key'])
+  })
+
+  it('leaves touches as they were when the agent reads no keyboard', () => {
+    expect(kinds(new Rec().launch().touch([[0.5, 0.9]]))).toEqual(['launch', 'tap'])
+  })
+
+  describe('typed on the keyboard, read from the field', () => {
+    const email = { identifier: 'form.email', placeholder: 'Email', frame: { x: 0, y: 0, width: 1, height: 0.1 }, secure: false }
+    const read = (r: Rec, phase: 'focus' | 'value', field: typeof email & { value?: string }, reason?: 'secure') => {
+      r.entries.push({ at: r.t + 30, kind: 'field', phase, requestedAt: r.t, field, ...(reason ? { reason } : {}) })
+      return r
+    }
+    const typedOnKeys = (r: Rec) => {
+      kb(r, SHOWN).wait(100).touch([[0.2, 0.8]])
+      read(r, 'focus', { ...email, value: '' })
+      kb(r, SHOWN).wait(150).touch([[0.4, 0.8]])
+      kb(r, SHOWN).wait(150).touch([[0.6, 0.7]])
+      kb(r, SHOWN, { settled: true }).wait(700)
+      return r
+    }
+
+    it('makes the keys one text step with the value read, carrying every touch', () => {
+      const r = typedOnKeys(new Rec().launch())
+      read(r, 'value', { ...email, value: '안녕' })
+      r.wait(200).touch([[0.5, 0.3]])
+      kb(r, HIDDEN)
+      const steps = r.steps()
+      expect(steps.map((s) => (s.kind === 'text' ? `${s.kind}=${s.text}` : s.kind))).toEqual(['launch', 'text=안녕', 'tap'])
+      expect(steps[1]).toMatchObject({ replace: true })
+      expect(steps[1]!.messages.filter((m) => m.msg.type === 'input:touch:start')).toHaveLength(3)
+    })
+
+    it('keeps the keys as keys, out of the flow, when no read caught what they typed', () => {
+      const r = typedOnKeys(new Rec().launch())
+      r.wait(200).touch([[0.5, 0.3]])
+      kb(r, HIDDEN)
+      expect(kinds(r)).toEqual(['launch', 'keyboardKey', 'keyboardKey', 'keyboardKey', 'tap'])
+    })
   })
 })
 
@@ -366,14 +705,13 @@ describe('matchStep', () => {
       expect(matchStep(text!, ctxOf([field({ focused: true, secure: false })], { treeAfter: after })).secret).toBeDefined()
     })
 
-    it('refuses a paste Android cannot type, and takes one it can', () => {
+    // Android sets a field's text since #1135, so a paste of any text replays as typed, as on iOS.
+    it('takes a paste of any text on both platforms', () => {
       const r = new Rec()
       r.msg({ type: 'clipboard:write', sessionId: 's', requestId: 'c', payload: { text: '김철수', pasteAfter: true } }, true)
-      r.msg({ type: 'clipboard:write', sessionId: 's', requestId: 'd', payload: { text: 'Kim', pasteAfter: true } }, true)
-      const [korean, latin] = r.steps()
+      const [korean] = r.steps()
       const ctx = ctxOf([field({ focused: true, secure: false })], { platform: 'android' })
-      expect(matchStep(korean!, ctx).skipped).toBe('paste-not-typeable')
-      expect(matchStep(latin!, ctx).step).toEqual({ type: 'inputText', text: 'Kim' })
+      expect(matchStep(korean!, ctx).step).toEqual({ type: 'inputText', text: '김철수' })
       expect(matchStep(korean!, { ...ctx, platform: 'ios' }).step).toEqual({ type: 'inputText', text: '김철수' })
     })
   })
@@ -409,6 +747,46 @@ describe('matchStep', () => {
   })
 })
 
+describe('matchStep: the soft keyboard (#1135)', () => {
+  const step = (over: Partial<RawStep> & Pick<RawStep, 'kind'>): RawStep =>
+    ({ at: 0, endAt: 1, outcome: 'landed', messages: [], ...over } as RawStep)
+
+  it('keeps a key on the keyboard out of the flow, with the reason', () => {
+    expect(matchStep(step({ kind: 'keyboardKey', point: [0.5, 0.8] }), ctxOf([]))).toMatchObject({ step: null, skipped: 'keyboard-key' })
+  })
+
+  // Review: a "show password" left on reads the field as plain text at replay; the asked value must stay out of YAML.
+  it('keeps a password the person gave a secret though the replayed field reads as plain text', () => {
+    const plain = el({ role: 'input', secure: false, focused: true, identifier: 'form.password' })
+    const asked = step({ kind: 'text', text: 's3cret', replace: true, fieldRead: 'secure', askValue: true })
+    expect(matchStep(asked, ctxOf([plain], { treeAfter: [SCREEN, plain] }))).toMatchObject({ step: null, secret: { value: 's3cret', known: true } })
+  })
+
+  it('says the action key as imeAction', () => {
+    expect(matchStep(step({ kind: 'imeAction' }), ctxOf([])).step).toEqual({ type: 'imeAction' })
+  })
+
+  it('marks a touch the reads could not judge, above the reason it would have had', () => {
+    const tap = step({ kind: 'tap', point: [0.5, 0.5], keyboard: 'unknown' })
+    expect(matchStep(tap, ctxOf([el({ label: 'OK', frame: { x: 0.4, y: 0.4, width: 0.2, height: 0.2 } })]))).toMatchObject({
+      step: { type: 'tapOn' }, fragile: 'keyboard-unknown',
+    })
+    expect(matchStep(tap, ctxOf([])).fragile).toBe('keyboard-unknown')
+  })
+
+  it('labels them without what was typed', () => {
+    expect(rawStepLabel(step({ kind: 'keyboardKey', point: [0.5, 0.8] }))).toBe('keyboard key')
+    expect(rawStepLabel(step({ kind: 'imeAction' }))).toBe('imeAction')
+  })
+
+  it('writes imeAction as the bare keyword, and reads it back', () => {
+    const steps = [{ type: 'pressKey' as const, code: 'KeyA' }, { type: 'imeAction' as const }]
+    const yaml = flowToYaml({ name: 'f', steps })
+    expect(yaml).toContain('- imeAction\n')
+    expect(parseFlow(yaml, 'f.yaml').steps).toEqual(steps)
+  })
+})
+
 describe('toFlowSteps', () => {
   const list = (n: number) => Array.from({ length: n }, (_, i) => el({ role: 'cell', label: `Item ${i}`, frame: { x: 0, y: i * 0.1, width: 1, height: 0.1 } }))
   const item30 = el({ role: 'cell', label: 'Item 30', frame: { x: 0, y: 0.5, width: 1, height: 0.1 } })
@@ -428,6 +806,13 @@ describe('toFlowSteps', () => {
     const [swipe, tap] = new Rec().touch([[0.8, 0.5], [0.2, 0.5]]).touch([[0.5, 0.89]]).steps()
     const flow = toFlowSteps([matchStep(swipe!, ctxOf([cont])), matchStep(tap!, ctxOf([cont]))])
     expect(flow.steps.map((s) => s.step?.type)).toEqual(['swipe', 'tapOn'])
+  })
+
+  // iOS E2E: a scroll made with a mouse leans; at 4:1 it stayed a swipe and the tap after it failed in Verify.
+  it('takes a swipe that leans, as one made with a mouse does, as the scroll it was', () => {
+    const [swipe, tap] = new Rec().touch([[0.225, 0.724], [0.41, 0.286]]).touch([[0.5, 0.55]]).steps()
+    const flow = toFlowSteps([matchStep(swipe!, ctxOf(list(8))), matchStep(tap!, ctxOf([item30]))])
+    expect(flow.steps[0]!.step).toEqual({ type: 'scroll', direction: 'down', until: { text: 'Item 30' } })
   })
 
   it('keeps a diagonal swipe a swipe', () => {

@@ -9,7 +9,7 @@ import { SessionManager, isAiClientKind } from './SessionManager.js'
 import type { AgentIdentity, InstalledBuild, Session } from './SessionManager.js'
 import type { AgentResources } from './types.js'
 import type { DeviceDetails, UIElement } from './types.js'
-import type { AdmissionRefusal, BootRefusalReason, ChromePayload, LeaseRefusalReason, InputErrorReason, MacAdmission, RelayOutbound, PosturesPayload, WatchActionKind, WatchRefusal } from '@tapflowio/protocol'
+import type { AdmissionRefusal, BootRefusalReason, ChromePayload, LeaseRefusalReason, InputErrorReason, KeyboardState, MacAdmission, RelayOutbound, PosturesPayload, WatchActionKind, WatchRefusal } from '@tapflowio/protocol'
 import { gestureAction, keyForWatchers } from './lib/watchActions.js'
 import { HostBootGate, GATE_DEFAULTS, type BooterClass, type Effect, type GateEvent, type GateTiming } from './admission/HostBootGate.js'
 import { defaultCap, idleToFree, planCapacity, type CapacityDevice, type CapacityPlan } from './admission/capacity.js'
@@ -425,9 +425,11 @@ export class RelayServer {
     isEnabled: (user) => this.flowCapturePref.isEnabled(user),
     chromeOf: (sessionId) => this.sessions.get(sessionId)?.chromeData,
     readField: (sessionId) => this.readField(sessionId),
+    readKeyboard: (sessionId) => this.readKeyboard(sessionId),
   })
   /** Flow Capture's reads of a focused field (#1135), by request id. Answered only by the session's own agent. */
   private pendingFieldReads = new Map<string, { agentSocket: WebSocket; resolve: (read: FieldRead) => void }>()
+  private pendingKeyboardReads = new Map<string, { agentSocket: WebSocket; resolve: (keyboard: KeyboardState) => void }>()
   private pendingScreenshots = new Map<string, {
     sessionId: string
     resolve: (buf: Buffer, format: 'png' | 'jpeg') => void
@@ -1659,6 +1661,7 @@ export class RelayServer {
       case 'ui:tree:response':   this.handleUITreeResponse(msg); break
       case 'ui:tree:error':      this.handleUITreeError(msg); break
       case 'ui:field:response':  this.handleUIFieldResponse(ws, msg); break
+      case 'ui:keyboard:response': this.handleUIKeyboardResponse(ws, msg); break
       case 'agents:list': {
         this.sendTo(ws, {
           type: 'agents:listed',
@@ -1900,6 +1903,8 @@ export class RelayServer {
       case 'open-url:error':
       case 'app:clear-state-done':
       case 'app:clear-state-error':
+      case 'device:keyboard-set-done':
+      case 'device:keyboard-set-error':
       case 'input:type-done':
       case 'input:type-error':
       case 'input:done':
@@ -2083,6 +2088,23 @@ export class RelayServer {
             sessionId: msg.sessionId,
             requestId: msg.requestId,
             message: target.message,
+          })
+        }
+        break
+      }
+      case 'device:keyboard-set': {
+        // Forwarded like `app:clear-state`. Not a person's input, so neither the capture nor a watcher hears of it: a
+        // replay sets it before it starts, and a watcher sees the app launch that follows.
+        const target = this.dispatchTarget(ws, msg.sessionId)
+        if (target.ok && hasCapability(target.session.agentCapabilities, 'keyboard-set')) {
+          target.session.agentSocket.send(JSON.stringify(msg))
+        } else {
+          this.sendTo(ws, {
+            type: 'device:keyboard-set-error',
+            sessionId: msg.sessionId,
+            requestId: msg.requestId,
+            message: target.ok ? 'This device\'s agent cannot set its keyboard language' : target.message,
+            ...(target.ok ? { reason: 'unsupported' as const } : {}),
           })
         }
         break
@@ -3586,6 +3608,7 @@ export class RelayServer {
       case 'app:install':     this.sendTo(ws, { type: 'app:install-error', sessionId, requestId, message }); break
       case 'app:launch':      this.sendTo(ws, { type: 'app:launch-error', sessionId, requestId, message }); break
       case 'app:clear-state': this.sendTo(ws, { type: 'app:clear-state-error', sessionId, requestId, message }); break
+      case 'device:keyboard-set': this.sendTo(ws, { type: 'device:keyboard-set-error', sessionId, requestId, message }); break
       case 'open-url':        this.sendTo(ws, { type: 'open-url:error', sessionId, requestId, message }); break
       // Its waiters key on the `input:type-*` pair and ignore an `input:error` entirely — the same
       // reason `refuseInput` below splits these two.
@@ -3985,7 +4008,39 @@ export class RelayServer {
     if (!pending || pending.agentSocket !== ws) return
     // A secure field's value is dropped here too, whatever an agent sent: the protocol promises it is never kept.
     const field = msg.field?.secure ? (({ value: _v, ...rest }) => rest)(msg.field) : msg.field
-    pending.resolve(msg.reason === undefined ? { field } : { field, reason: msg.reason })
+    pending.resolve({
+      field,
+      ...(msg.reason !== undefined ? { reason: msg.reason } : {}),
+      ...(msg.keyboard !== undefined ? { keyboard: msg.keyboard } : {}),
+      ...(msg.language !== undefined ? { language: msg.language } : {}),
+    })
+  }
+
+  /**
+   * Ask the session's agent where the soft keyboard is, for Flow Capture to tell a tap on it from a tap on the app.
+   * `null` when the agent cannot answer; `{ shown: null }` (unknown) when it does not in time.
+   */
+  private readKeyboard(sessionId: string): Promise<KeyboardState> | null {
+    const session = this.sessions.get(sessionId)
+    if (!session || !hasCapability(session.agentCapabilities, 'keyboard-state') || session.agentSocket.readyState !== WebSocket.OPEN) return null
+    // The iOS read goes through the tree runner, which a Mac over its memory line does not start (see `readField`).
+    if (this.resourceLoad(session)?.memOver) return null
+    const agentSocket = session.agentSocket
+    const requestId = randomUUID()
+    return new Promise((resolve) => {
+      const timer = setTimeout(() => { this.pendingKeyboardReads.delete(requestId); resolve({ shown: null }) }, FIELD_READ_TIMEOUT_MS)
+      this.pendingKeyboardReads.set(requestId, {
+        agentSocket,
+        resolve: (keyboard) => { clearTimeout(timer); this.pendingKeyboardReads.delete(requestId); resolve(keyboard) },
+      })
+      this.sendTo(agentSocket, { type: 'ui:keyboard:request', sessionId, requestId })
+    })
+  }
+
+  private handleUIKeyboardResponse(ws: WebSocket, msg: Inbound<'ui:keyboard:response'>): void {
+    const pending = this.pendingKeyboardReads.get(msg.requestId)
+    if (!pending || pending.agentSocket !== ws) return
+    pending.resolve(msg.keyboard)
   }
 
   private handleUITreeResponse(msg: Inbound<'ui:tree:response'>): void {

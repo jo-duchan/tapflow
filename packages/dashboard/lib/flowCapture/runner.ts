@@ -1,11 +1,14 @@
 import {
-  defaultRange, matchStep, rangeStartOrientation, replayStep, runFlow, segment, SocketFlowDriver, toFlowSteps,
-  waitForStableScreen, type CapturedStep, type Flow, type FlowResult, type MatchContext, type RawStep, type StepRange,
+  defaultRange, focusTap, matchStep, rangeStartKeyboard, rangeStartOrientation, replayStep, runFlow, segment, SocketFlowDriver,
+  toFlowSteps, waitForStableScreen, type CapturedStep, type Flow, type FlowResult, type KeyModifier, type MatchContext,
+  type RawStep, type StepRange,
 } from '@tapflowio/flow-runner/browser'
 import { chromeOrientation } from '@tapflowio/protocol/screen'
 import type { AndroidChrome, ChromePayload } from '@tapflowio/protocol'
 import type { CaptureSnapshot } from '@tapflowio/protocol/capture'
 import { copy } from './copy'
+import { markOf, type StepMark } from './marks'
+import type { StepMark as FlowStepMark } from './machine'
 import type { DashboardSessionChannel } from './channel'
 import type { CaptureTap } from './tap'
 
@@ -28,6 +31,37 @@ export function stepsOf(snapshot: CaptureSnapshot): { steps: RawStep[]; range: S
   const steps = segment(snapshot.entries)
   return { steps, range: defaultRange(steps) }
 }
+
+/** The keyboard language the range was recorded from, for the replay to start in (#1135). */
+export function keyboardOf(snapshot: CaptureSnapshot, steps: readonly RawStep[], range: StepRange): string | undefined {
+  const first = steps[range.start]
+  return first ? rangeStartKeyboard(snapshot.entries, first.at) : undefined
+}
+
+/** Whether the person typed on the on-screen keyboard in the range, for the dialog's advice to type on their own. */
+export function typedOnScreenKeyboard(steps: readonly RawStep[], range: StepRange): boolean {
+  return steps.slice(range.start, range.end).some((s) => s.kind === 'keyboardKey' || ('keyboard' in s && s.keyboard === 'unknown'))
+}
+
+/**
+ * Put the device's keyboard in the replay's starting language, now or once it can be (#1135). iOS sets it at once, and
+ * takes it at the app's next launch, which the replay does after this. Android can switch only a keyboard that is up,
+ * so it is set before the first step that types — the field tapped before it brought the keyboard up.
+ */
+class KeyboardAlignment {
+  private pending = true
+
+  constructor(private readonly channel: DashboardSessionChannel, private readonly sessionId: string, private readonly keyboard: string | undefined) {}
+
+  /** Asks again only while the answer was that the keyboard is down; any other answer is final. */
+  async align(): Promise<void> {
+    if (!this.pending) return
+    this.pending = (await this.channel.setKeyboard(this.sessionId, this.keyboard)) === 'keyboard-hidden'
+  }
+}
+
+/** The steps a keyboard's language changes: what types, and the keys on it. */
+const TYPES_ON_KEYBOARD = new Set<RawStep['kind']>(['text', 'type', 'paste', 'key', 'keyboardKey', 'imeAction'])
 
 /**
  * The relay's pause on recording, held while the dialog replays or verifies: what reaches the device then is not the
@@ -108,9 +142,15 @@ function frameTurnOf(chrome: ChromePayload | null): 0 | 90 | 180 | 270 | undefin
 }
 
 const TYPING = new Set<RawStep['kind']>(['text', 'type', 'paste', 'key'])
+/** Steps whose picture is the screen they left: what typing or a keyboard's action did is the point of looking, and the
+ *  screen before it shows a field still empty. A tap keeps the screen before, which shows what it is about to touch. */
+const SHOWN_AFTER = new Set<RawStep['kind']>([...TYPING, 'imeAction'])
 
 export interface MatchHooks {
-  onStep: (step: CapturedStep, screenshot?: string) => void
+  /** `inserted`: a step the replay added (a tap on the field typed into), not one of the range's, so not counted. */
+  onStep: (step: CapturedStep, screenshot?: string, inserted?: boolean) => void
+  /** Where a step is about to touch, for drawing on the device as it does (the MCP watch view's marks). */
+  onTouch?: (mark: StepMark) => void
   signal: AbortSignal
 }
 
@@ -122,12 +162,14 @@ export interface MatchHooks {
  */
 export async function matchRange(
   tap: CaptureTap, channel: DashboardSessionChannel, lease: PauseLease,
-  steps: RawStep[], range: StepRange, bundleId: string | null, hooks: MatchHooks,
+  steps: RawStep[], range: StepRange, bundleId: string | null, hooks: MatchHooks, keyboard?: string,
 ): Promise<CapturedStep[]> {
   const sessionId = tap.sessionId
   const slice = steps.slice(range.start, range.end)
   await lease.start()
   if (bundleId) await channel.clearState(sessionId, bundleId)
+  const alignment = new KeyboardAlignment(channel, sessionId, keyboard)
+  await alignment.align()
   const orientation = rangeStartOrientation(steps, range)
   if (orientation) await channel.setOrientation(sessionId, orientation, 10_000)
   if (slice[0]?.kind !== 'launch') await channel.launchApp(sessionId, tap.buildId)
@@ -145,10 +187,34 @@ export async function matchRange(
       continue
     }
     await lease.ensure()
-    const before = await waitForStableScreen(read, { timeoutMs: SETTLE_TIMEOUT_MS })
-    const shot = await channel.screenshot(sessionId, hooks.signal).catch(() => null)
+    let before = await waitForStableScreen(read, { timeoutMs: SETTLE_TIMEOUT_MS })
+    // Typing into a field the person focused before the range began: tapped first, and the tap goes into the flow.
+    // The tree's frames are the app as drawn, which an iOS tap is not when the app is turned: then it is left as it was.
+    const focus = before && !before.interfaceTurn ? focusTap(raw, before.elements) : undefined
+    if (focus) {
+      const focusShot = await channel.screenshot(sessionId, hooks.signal).catch(() => null)
+      const focusMark = markOf(focus)
+      if (focusMark) hooks.onTouch?.(focusMark)
+      await replayStep(channel, sessionId, focus, hooks.signal)
+      const tapped = matchStep(focus, { tree: before!.elements, postures: tap.postures().postures, platform: tap.platform })
+      matched.push(tapped)
+      hooks.onStep(tapped, focusShot ? URL.createObjectURL(new Blob([focusShot as BlobPart], { type: 'image/jpeg' })) : undefined, true)
+      before = await waitForStableScreen(read, { timeoutMs: SETTLE_TIMEOUT_MS })
+    }
+    const shoot = () => channel.screenshot(sessionId, hooks.signal).catch(() => null)
+    // A password is pictured before it is typed: after, Android shows its last character for a moment.
+    const after = SHOWN_AFTER.has(raw.kind) && !(raw.kind === 'text' && (raw.fieldRead === 'secure' || raw.askValue))
+    let shot = after ? null : await shoot()
     const chrome = await chromeNow(channel, tap)
-    await replayStep(channel, sessionId, raw, hooks.signal)
+    // A touch the reads could not place may be a key, typed by the keyboard's language like the others.
+    if (TYPES_ON_KEYBOARD.has(raw.kind) || ('keyboard' in raw && raw.keyboard === 'unknown')) await alignment.align()
+    // Nothing to type into, and no field to tap: say what to do about it rather than what the device refused.
+    const unfocused = raw.kind === 'text' && !focus && !!before && !before.elements.some((e) => e.focused)
+    const mark = markOf(raw)
+    if (mark) hooks.onTouch?.(mark)
+    await replayStep(channel, sessionId, raw, hooks.signal).catch((e: unknown) => {
+      throw unfocused ? new Error(copy.typedBeforeRange, { cause: e }) : e
+    })
     const ctx: MatchContext = {
       tree: before?.elements ?? [],
       ...(before?.interfaceTurn !== undefined ? { interfaceTurn: before.interfaceTurn } : {}),
@@ -156,9 +222,10 @@ export async function matchRange(
       postures: tap.postures().postures,
       platform: tap.platform,
     }
-    if (TYPING.has(raw.kind)) {
-      const after = await waitForStableScreen(read, { timeoutMs: SETTLE_TIMEOUT_MS })
-      if (after) ctx.treeAfter = after.elements
+    if (SHOWN_AFTER.has(raw.kind)) {
+      const settled = await waitForStableScreen(read, { timeoutMs: SETTLE_TIMEOUT_MS })
+      if (settled && TYPING.has(raw.kind)) ctx.treeAfter = settled.elements
+      if (after) shot = await shoot()
     }
     if (raw.kind === 'rotate') {
       const turned = await chromeNow(channel, tap)
@@ -177,18 +244,56 @@ export { toFlowSteps }
 /** Run the edited flow on the device with the engine `tapflow flow run` uses. No run record: a check, not a run. */
 export async function verifyFlow(
   tap: CaptureTap, channel: DashboardSessionChannel, lease: PauseLease, flow: Omit<Flow, 'file'>,
-  secrets: Record<string, string>, onStep: (done: number) => void,
+  secrets: Record<string, string>, onStep: (mark: FlowStepMark) => void, keyboard?: string, onTouch?: (mark: StepMark) => void,
 ): Promise<FlowResult> {
   await lease.start()
-  const driver = new SocketFlowDriver(channel, tap.sessionId, tap.buildId)
+  const alignment = new KeyboardAlignment(channel, tap.sessionId, keyboard)
+  await alignment.align()
+  const driver = new AligningDriver(channel, tap.sessionId, tap.buildId, alignment, onTouch)
   return runFlow(flow, driver, {
     secrets,
     platform: tap.platform,
     onStep: (mark) => {
       if (mark.phase === 'start') lease.touch()
-      else onStep(mark.index + 1)
+      onStep({ index: mark.index, name: mark.name, phase: mark.phase, ...(mark.status ? { status: mark.status } : {}) })
     },
   })
+}
+
+/** The engine's driver with the keyboard aligned before the first step that types, as `matchRange` does. */
+class AligningDriver extends SocketFlowDriver {
+  constructor(
+    channel: DashboardSessionChannel, sessionId: string, buildId: number, private readonly alignment: KeyboardAlignment,
+    private readonly onTouch?: (mark: StepMark) => void,
+  ) {
+    super(channel, sessionId, buildId)
+  }
+
+  // The flow's own points, before the driver turns them for the device: the mirror shows the device upright.
+  override tap(x: number, y: number): Promise<void> {
+    this.onTouch?.({ kind: 'tap', x, y })
+    return super.tap(x, y)
+  }
+
+  override longPress(x: number, y: number, durationMs: number): Promise<void> {
+    this.onTouch?.({ kind: 'tap', x, y })
+    return super.longPress(x, y, durationMs)
+  }
+
+  override swipe(from: [number, number], to: [number, number], durationMs: number) {
+    this.onTouch?.({ kind: 'swipe', from, to })
+    return super.swipe(from, to, durationMs)
+  }
+
+  override async inputText(text: string): Promise<void> {
+    await this.alignment.align()
+    return super.inputText(text)
+  }
+
+  override async pressKey(code: string, modifiers?: KeyModifier[]): Promise<void> {
+    await this.alignment.align()
+    return modifiers ? super.pressKey(code, modifiers) : super.pressKey(code)
+  }
 }
 
 /**

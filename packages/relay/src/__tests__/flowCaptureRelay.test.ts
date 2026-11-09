@@ -111,7 +111,8 @@ describe('Flow Capture through the relay', () => {
       open.push(ws)
       await waitForOpen(ws)
       ws.send(JSON.stringify({
-        type: 'agent:register', platform: 'ios', agentName: `field-agent-${seq}`, capabilities: ['field-value', 'keyboard-reset'],
+        type: 'agent:register', platform: 'ios', agentName: `field-agent-${seq}`,
+        capabilities: ['field-value', 'keyboard-reset', 'keyboard-state', 'keyboard-set'],
         devices: [{ id: 'dev-2', name: 'iPhone 17', platform: 'ios', status: 'booted' }],
       }))
       sessionId = (await waitForType<AgentRegistered>(ws, 'agent:registered')).registeredSessions[0]!.sessionId
@@ -192,6 +193,44 @@ describe('Flow Capture through the relay', () => {
       expect(seen.slice(2)).toEqual(['device:keyboard-reset', 'device:boot'])
       await take(2, 'd')
       expect(seen.slice(4)).toEqual(['device:boot'])
+    })
+
+    it('reads the keyboard after a person\'s tap and keeps only its own agent\'s answer', async () => {
+      const fieldAgent = await capableAgent()
+      const alice = await browser(1)
+      await join(alice)
+      alice.send(JSON.stringify({ type: 'input:touch:start', sessionId, payload: { x: 0.5, y: 0.8 } }))
+      alice.send(JSON.stringify({ type: 'input:touch:end', sessionId, requestId: 't1', payload: { x: 0.5, y: 0.8 } }))
+      const ask = await waitForType<{ type: string; requestId: string }>(fieldAgent, 'ui:keyboard:request')
+      const keyboard = { shown: true, rect: { x: 0, y: 0.6, width: 1, height: 0.4 } }
+      agent.send(JSON.stringify({ type: 'ui:keyboard:response', sessionId, requestId: ask.requestId, keyboard: { shown: false } }))
+      fieldAgent.send(JSON.stringify({ type: 'ui:keyboard:response', sessionId, requestId: ask.requestId, keyboard }))
+      await new Promise((r) => setTimeout(r, 50))
+      const reads = (await snapshot(1))!.entries.flatMap((e) => (e.kind === 'keyboard' ? [e] : []))
+      expect(reads.map((r) => r.keyboard)).toEqual([keyboard])
+    })
+
+    it('forwards a replay\'s keyboard language to the agent and its answer back', async () => {
+      const fieldAgent = await capableAgent()
+      const alice = await browser(1)
+      await join(alice)
+      alice.send(JSON.stringify({ type: 'device:keyboard-set', sessionId, requestId: 'ks1', payload: { keyboard: 'ko_KR@sw=Korean;hw=Automatic' } }))
+      const set = await waitForType<{ type: string; requestId: string; payload: { keyboard?: string } }>(fieldAgent, 'device:keyboard-set')
+      expect(set).toMatchObject({ requestId: 'ks1', payload: { keyboard: 'ko_KR@sw=Korean;hw=Automatic' } })
+      fieldAgent.send(JSON.stringify({ type: 'device:keyboard-set-done', sessionId, requestId: 'ks1' }))
+      expect(await waitForType(alice, 'device:keyboard-set-done')).toMatchObject({ requestId: 'ks1' })
+      // Not a person's input: the capture keeps none of it.
+      expect(kinds((await snapshot(1))?.entries ?? [])).not.toContain('device:keyboard-set')
+    })
+
+    it('answers unsupported itself for an agent that cannot set the keyboard', async () => {
+      const alice = await browser(1)
+      await join(alice)
+      let forwarded = false
+      agent.on('message', (d) => { if (String(d).includes('device:keyboard-set')) forwarded = true })
+      alice.send(JSON.stringify({ type: 'device:keyboard-set', sessionId, requestId: 'ks2', payload: {} }))
+      expect(await waitForType(alice, 'device:keyboard-set-error')).toMatchObject({ requestId: 'ks2', reason: 'unsupported' })
+      expect(forwarded).toBe(false)
     })
 
     it('keeps no value of a secure field, whatever the agent sent', async () => {

@@ -10,7 +10,9 @@ import XCTest
 //   GET /health                     → the token the host passed, or "ok" without one (readiness probe)
 //   GET /tree?bundleId=<id>         → `TAPFLOW_INTERFACE_ORIENTATION <UIInterfaceOrientation or 0>`, then the app's
 //                                     XCUIApplication.debugDescription (text)
-//   GET /field?bundleId=<id>        → the keyboard-focused text field as JSON, or `{"reason": …}` (Flow Capture, #1135)
+//   GET /field?bundleId=<id>        → the keyboard-focused text field as JSON, or `{"reason": …}` (Flow Capture, #1135),
+//                                     with the soft keyboard beside it
+//   GET /keyboard?bundleId=<id>     → the soft keyboard as JSON: `{"shown", "rect"?, "orientation"}` (#1135)
 final class TreeServer {
     private let listener: NWListener
     private let queue = DispatchQueue(label: "dev.tapflow.treeserver")
@@ -114,6 +116,12 @@ final class TreeServer {
             }
             return ("200 OK", Self.field(XCUIApplication(bundleIdentifier: bundleId)))
         }
+        if path.hasPrefix("/keyboard") {
+            guard let bundleId = query(path, "bundleId"), !bundleId.isEmpty else {
+                return ("400 Bad Request", "missing bundleId")
+            }
+            return ("200 OK", json(Self.keyboard(XCUIApplication(bundleIdentifier: bundleId))))
+        }
         return ("404 Not Found", "unknown route")
     }
 
@@ -124,13 +132,14 @@ final class TreeServer {
     /// A secure field's value never leaves this process: it reads `•••` anyway, and its length is a secret too.
     private static func field(_ app: XCUIApplication) -> String {
         guard app.state == .runningForeground else { return json(["reason": "no-app"]) }
+        let keyboard = Self.keyboard(app)
         let inputs = app.descendants(matching: .any)
             .matching(NSPredicate(format: "elementType IN %@", textInputTypes.map { $0.rawValue }))
             .matching(NSPredicate(format: "hasKeyboardFocus == YES"))
         let found = inputs.allElementsBoundByIndex
         // Exactly one, or nothing is claimed: a second focused input means the read cannot say which one was typed in.
         guard found.count == 1, let snapshot = try? found[0].snapshot() else {
-            return json(["reason": found.isEmpty ? "no-focus" : "ambiguous"])
+            return json(["reason": found.isEmpty ? "no-focus" : "ambiguous", "keyboard": keyboard])
         }
         let frame = snapshot.frame
         var out: [String: Any] = [
@@ -138,6 +147,7 @@ final class TreeServer {
             "placeholder": snapshot.placeholderValue ?? "",
             "frame": ["x": frame.origin.x, "y": frame.origin.y, "width": frame.size.width, "height": frame.size.height],
             "type": snapshot.elementType == .secureTextField ? "secure" : "text",
+            "keyboard": keyboard,
         ]
         if snapshot.elementType == .secureTextField { out["reason"] = "secure"; return json(out) }
         let value = (snapshot.value as? String) ?? ""
@@ -145,6 +155,28 @@ final class TreeServer {
         // equals its placeholder reads as empty here — the one case this cannot tell apart.
         out["value"] = !value.isEmpty && value == snapshot.placeholderValue ? "" : value
         return json(out)
+    }
+
+    /// The soft keyboard, as fractions of the app's window in its interface orientation (the tree's space), with that
+    /// orientation so the host can turn it into the framebuffer a touch lands in. Its bottom row (globe, dictation) sits
+    /// below the `Keyboard` element (measured), so the rect runs to the window's bottom edge. Not shown with a hardware
+    /// keyboard connected, where there is no soft one.
+    private static func keyboard(_ app: XCUIApplication) -> [String: Any] {
+        let orientation = Self.interfaceOrientation(app)
+        guard app.state == .runningForeground else { return ["shown": NSNull(), "orientation": orientation] }
+        let element = app.keyboards.firstMatch
+        guard element.exists else { return ["shown": false, "orientation": orientation] }
+        let window = app.frame
+        let frame = element.frame
+        guard window.width > 0, window.height > 0, !frame.isEmpty else { return ["shown": true, "orientation": orientation] }
+        let top = max(frame.minY, window.minY)
+        let rect: [String: Double] = [
+            "x": Double((frame.minX - window.minX) / window.width),
+            "y": Double((top - window.minY) / window.height),
+            "width": Double(frame.width / window.width),
+            "height": Double((window.maxY - top) / window.height),
+        ]
+        return ["shown": true, "rect": rect, "orientation": orientation]
     }
 
     private static func json(_ object: [String: Any]) -> String {

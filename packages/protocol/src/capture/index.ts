@@ -1,4 +1,4 @@
-import type { BrowserToRelay, FieldReadReason, FocusedField } from '../index.js'
+import type { BrowserToRelay, FieldReadReason, FocusedField, KeyboardState } from '../index.js'
 
 /**
  * Flow Capture's record (#1125), as the relay keeps it and returns it from `/api/v1/sessions/:id/capture/snapshot`.
@@ -30,7 +30,12 @@ export type CaptureEntry =
    * `requestedAt` is when the relay asked and `at` when the answer came, so a reader can tell a read that saw the
    * field after the last key and before the next input from one that raced either.
    */
-  | { at: number; kind: 'field'; phase: 'focus' | 'value'; requestedAt: number; field: FocusedField | null; reason?: FieldReadReason }
+  | { at: number; kind: 'field'; phase: 'focus' | 'value'; requestedAt: number; field: FocusedField | null; reason?: FieldReadReason; keyboard?: KeyboardState; language?: string }
+  /**
+   * The soft keyboard, read by the relay around a person's inputs (#1135): what tells a tap on the keyboard from a tap
+   * on the app. `settled` is a read that matched the one before it, taken once the keyboard stopped moving.
+   */
+  | { at: number; kind: 'keyboard'; requestedAt: number; keyboard: KeyboardState; settled: boolean }
 
 export interface CaptureSnapshot {
   id: string
