@@ -52,7 +52,7 @@ export async function replayStep(channel: ReplayChannel, sessionId: string, raw:
     // selection is pasted over, so Match and Verify type the same thing.
     case 'text':
       try {
-        if (raw.replace) await channel.pressKey(sessionId, SELECT_ALL.code, [...SELECT_ALL.modifiers])
+        if (raw.replace) await untilAborted(channel.pressKey(sessionId, SELECT_ALL.code, [...SELECT_ALL.modifiers]), signal)
         await untilAborted(channel.typeText(sessionId, raw.text), signal)
       } catch (e) {
         if (!(e instanceof InputRefusedError)) throw e

@@ -47,6 +47,17 @@ describe('replayStep', () => {
     await outcome
   })
 
+  it('gives up waiting on the select-all before replaced text when the replay is stopped', async () => {
+    const [text] = segment(recorded([[1000, { type: 'input:key', requestId: 'k', payload: { code: 'KeyA', modifiers: 0 } }]]))
+    const ch = new MemoryChannel()
+    ch.ack = null
+    const stop = new AbortController()
+    const done = replayStep(ch, 'now', { ...text!, replace: true } as RawStep, stop.signal)
+    const outcome = expect(done).rejects.toBeDefined()
+    stop.abort()
+    await outcome
+  })
+
   it('sends a swipe as recorded, at its pace, on this session with new correlators', async () => {
     vi.useFakeTimers()
     const [swipe] = segment(recorded([
