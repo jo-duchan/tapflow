@@ -1,3 +1,4 @@
+import { useRef } from 'react'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
@@ -33,6 +34,16 @@ export function FlowCaptureCard({ flowCapture }: { flowCapture: boolean }) {
     },
   })
 
+  // One change at a time. Two in flight can land at the relay in either order, and the cache keeps the last answer to
+  // arrive, so the switch could show off while the relay goes on capturing. Held by a ref, not `isPending`, which a
+  // second click in the same tick does not see yet. The switch stays focusable (`aria-disabled`, never `disabled`).
+  const inFlight = useRef(false)
+  const change = (on: boolean) => {
+    if (inFlight.current) return
+    inFlight.current = true
+    mutation.mutate(on, { onSettled: () => { inFlight.current = false } })
+  }
+
   return (
     <Card>
       <CardHeader><CardTitle>Flow Capture</CardTitle></CardHeader>
@@ -48,7 +59,9 @@ export function FlowCaptureCard({ flowCapture }: { flowCapture: boolean }) {
             id="flow-capture"
             aria-describedby="flow-capture-hint"
             checked={flowCapture}
-            onCheckedChange={(on) => mutation.mutate(on)}
+            onCheckedChange={change}
+            aria-disabled={mutation.isPending}
+            className="aria-disabled:cursor-not-allowed aria-disabled:opacity-50"
           />
         </div>
       </CardContent>

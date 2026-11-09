@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, afterEach } from 'vitest'
-import { render, screen, waitFor } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { MemoryRouter } from 'react-router-dom'
 import { DefaultSettings } from '@/src/pages/settings/Default'
@@ -49,6 +49,33 @@ describe('Capture my steps in Settings › Default', () => {
     renderSettings()
     await userEvent.click(await screen.findByRole('switch', { name: 'Capture my steps' }))
     await waitFor(() => expect(screen.getByRole('switch', { name: 'Capture my steps' })).toHaveAttribute('aria-checked', 'true'))
+  })
+
+  // Review of #1144: two changes in flight could land at the relay in either order, and the switch keep the last answer.
+  it('sends one change at a time, and takes the next once it is answered', async () => {
+    let answer: () => void = () => {}
+    const calls: unknown[] = []
+    vi.stubGlobal('fetch', vi.fn((url: string, init?: RequestInit) => {
+      if (url.endsWith('/api/v1/auth/me')) return Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve(user()) })
+      if (url.endsWith('/api/v1/me/preferences')) {
+        const body = JSON.parse(String(init?.body))
+        calls.push(body)
+        return new Promise((resolve) => { answer = () => resolve({ ok: true, status: 200, json: () => Promise.resolve(body) }) })
+      }
+      if (url.endsWith('/api/v1/apps')) return Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve({ items: [] }) })
+      return Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve({}) })
+    }))
+    renderSettings()
+    const toggle = await screen.findByRole('switch', { name: 'Capture my steps' })
+    // Two clicks in one tick: the second comes before `isPending` is rendered, which is why a ref holds the guard.
+    act(() => { fireEvent.click(toggle); fireEvent.click(toggle) })
+    await waitFor(() => expect(calls).toEqual([{ flowCapture: false }]))
+    expect(toggle).toHaveAttribute('aria-disabled', 'true')
+    expect(toggle).toHaveAttribute('aria-checked', 'false')
+    answer()
+    await waitFor(() => expect(toggle).not.toHaveAttribute('aria-disabled', 'true'))
+    await userEvent.click(toggle)
+    await waitFor(() => expect(calls).toEqual([{ flowCapture: false }, { flowCapture: true }]))
   })
 
   it('is not offered by a relay that predates it', async () => {
