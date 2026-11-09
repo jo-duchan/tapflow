@@ -38,7 +38,9 @@ interface AndroidViewerProps {
   /** Mints and records the correlation id, then sends — the viewer above consumes the reply. */
   launchApp: () => void;
   connected: boolean;
-  joined: boolean;
+  joined: boolean
+  appLogText: string
+  appLogsSupported: boolean
   deviceReady: boolean;
   installing: boolean;
   installed: boolean;
@@ -82,6 +84,7 @@ interface AndroidViewerProps {
 
 export function AndroidViewer({
   sessionId, buildId, send, openUrl, launchApp, connected, joined,
+  appLogText, appLogsSupported,
   deviceReady, installing, installed, installError, bootError, bootWaiting, servicesOff,
   launching, androidButtons,
   binaryFrameHandlerRef, clipboardHandlerRef, clipboardSupported, networkHandlerRef, networkSupported, onRecordingUploaded,
@@ -564,12 +567,19 @@ export function AndroidViewer({
   const DEVICE_BUTTONS = ['volume_up', 'volume_down', 'power'] as const;
 
   const buttonIcon = (name: string) =>
-    name === 'back' ? <ArrowLeft className="h-4 w-4" />
-      : name === 'recent_apps' ? <LayoutGrid className="h-4 w-4" />
-      : name === 'volume_up' ? <Volume2 className="h-4 w-4" />
-      : name === 'volume_down' ? <Volume1 className="h-4 w-4" />
-      : name === 'power' ? <Power className="h-4 w-4" />
-      : <Home className="h-4 w-4" />;
+    name === 'back' ? (
+      <ArrowLeft className="h-4 w-4" />
+    ) : name === 'recent_apps' ? (
+      <LayoutGrid className="h-4 w-4" />
+    ) : name === 'volume_up' ? (
+      <Volume2 className="h-4 w-4" />
+    ) : name === 'volume_down' ? (
+      <Volume1 className="h-4 w-4" />
+    ) : name === 'power' ? (
+      <Power className="h-4 w-4" />
+    ) : (
+      <Home className="h-4 w-4" />
+    )
 
   const buttonsIn = (order: readonly string[]) => (
     <>
@@ -687,7 +697,10 @@ export function AndroidViewer({
         />
 
         <SimulatorInfoCard
-          joined={joined} fps={fps} connected={connected}
+          joined={joined} fps={fps}
+          appLogText={appLogText}
+          appLogsSupported={appLogsSupported}
+          connected={connected}
           deviceReady={deviceReady} bootError={bootError} bootWaiting={bootWaiting} servicesOff={servicesOff}
           installing={installing} installError={installError}
           decoderUnsupported={decoderUnsupported}

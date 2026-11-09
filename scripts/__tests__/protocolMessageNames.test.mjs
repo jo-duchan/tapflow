@@ -179,8 +179,8 @@ describe('protocol message interfaces', () => {
     // a person their boot is held behind another on the same Mac. 84 is the lease trio (S5): `DeviceLease`, a flow
     // runner asking the relay to choose a device, and its two answers. 86 is the device list re-read (#1085):
     // `AgentDevices`, an agent's list after it changed, and `AgentDevicesApplied`, the sessions the relay made and removed.
-    // 87 is `InputTouchCancel` (#1115): a client leaving mid-gesture had only an end, which completes the touch.
-    expect(messages.size).toBe(87)
+    // 87 was `InputTouchCancel` (#1115); 88 adds `AppLog`, the holder-only QA app log stream.
+    expect(messages.size).toBe(88)
     // `InputKey` predates L1 and has always been named; it must be in here too.
     expect(messages.has('InputKey')).toBe(true)
   })
@@ -291,8 +291,8 @@ describe('protocol message interfaces', () => {
       if (base !== 'SessionScoped') offenders.push(`${name} ('${literal}')`)
     }
     expect(offenders).toEqual([])
-    // 12 with `watch:refused`. The other three `watch:*` replies are not failures and carry `sessionId` directly.
-    expect([...messages].filter(([, m]) => m.extends === 'SessionScoped')).toHaveLength(12)
+    // 12 with `watch:refused`; `AppLog` is the thirteenth session-scoped message that is not a failure.
+    expect([...messages].filter(([, m]) => m.extends === 'SessionScoped')).toHaveLength(13)
     // `error` is the ninth, as of L5d. Pinned by name rather than only by the count, because the count alone
     // would be satisfied by any new member and this is the one whose membership was argued.
     expect(messages.get('GenericError')).toMatchObject({ literal: 'error', extends: 'SessionScoped' })
@@ -305,7 +305,8 @@ describe('protocol message interfaces', () => {
     // longer implied by the shared pair — the `extends` is the only thing left saying these ten are one
     // kind. That makes this assertion load-bearing in a way it was not when the base carried two fields.
     for (const [name, { body, extends: base }] of messages) {
-      if (base !== 'SessionScoped' || name === 'InputError') continue
+      // AppLog is session-scoped telemetry, not a failure that carries a user-facing message.
+      if (base !== 'SessionScoped' || name === 'InputError' || name === 'AppLog') continue
       expect(/^ {2}message: string$/m.test(body), `${name} lost its message declaration`).toBe(true)
     }
     expect(REQUEST_SCOPED.size).toBe(2)

@@ -270,6 +270,92 @@ describe('AdbWrapper', () => {
     })
   })
 
+  describe('getAppUid', () => {
+    it('reads the exact package UID and ignores similarly named packages', async () => {
+      const runner = mockRunner()
+      ;(runner.exec as ReturnType<typeof vi.fn>).mockResolvedValueOnce(
+        'package:com.example.application uid:10002\npackage:com.example.app uid:10123\n'
+      )
+      const wrapper = new AdbWrapper(runner)
+      await expect(wrapper.getAppUid('emulator-5554', 'com.example.app')).resolves.toBe(10123)
+      expect(runner.exec).toHaveBeenCalledWith(
+        '-s', 'emulator-5554', 'shell', 'cmd', 'package', 'list', 'packages', '-U', 'com.example.app'
+      )
+
+      ;(runner.exec as ReturnType<typeof vi.fn>).mockResolvedValueOnce('package:com.example.application uid:10002\n')
+      await expect(wrapper.getAppUid('emulator-5554', 'com.example.app')).resolves.toBeNull()
+    })
+
+    it('bounds the package UID lookup when the runner supports a command timeout', async () => {
+      const runner = mockRunner()
+      runner.execBounded = vi.fn().mockResolvedValue('package:com.example.app uid:10123\n')
+      const wrapper = new AdbWrapper(runner)
+
+      await expect(wrapper.getAppUid('emulator-5554', 'com.example.app', 900)).resolves.toBe(10123)
+      expect(runner.execBounded).toHaveBeenCalledWith(
+        900,
+        '-s', 'emulator-5554', 'shell', 'cmd', 'package', 'list', 'packages', '-U', 'com.example.app'
+      )
+    })
+  })
+
+  describe('getPackagesForUid', () => {
+    it('returns the package names assigned to the UID', async () => {
+      const runner = mockRunner()
+      ;(runner.exec as ReturnType<typeof vi.fn>).mockResolvedValueOnce(
+        'package:com.example.app\npackage:com.example.helper\n'
+      )
+      const wrapper = new AdbWrapper(runner)
+
+      await expect(wrapper.getPackagesForUid('emulator-5554', 10123)).resolves.toEqual([
+        'com.example.app', 'com.example.helper'
+      ])
+      expect(runner.exec).toHaveBeenCalledWith(
+        '-s', 'emulator-5554', 'shell', 'cmd', 'package', 'list', 'packages', '--uid', '10123'
+      )
+    })
+
+    it('bounds the package lookup when the runner supports a command timeout', async () => {
+      const runner = mockRunner()
+      runner.execBounded = vi.fn().mockResolvedValue('package:com.example.app\n')
+      const wrapper = new AdbWrapper(runner)
+
+      await expect(wrapper.getPackagesForUid('emulator-5554', 10123, 900)).resolves.toEqual(['com.example.app'])
+      expect(runner.execBounded).toHaveBeenCalledWith(
+        900,
+        '-s', 'emulator-5554', 'shell', 'cmd', 'package', 'list', 'packages', '--uid', '10123'
+      )
+    })
+  })
+
+  describe('hasAppProcessForUid', () => {
+    it('detects any process using the app UID and rejects a header-only result', async () => {
+      const runner = mockRunner()
+      ;(runner.exec as ReturnType<typeof vi.fn>).mockResolvedValueOnce('PID\n123\n456\n')
+      const wrapper = new AdbWrapper(runner)
+
+      await expect(wrapper.hasAppProcessForUid('emulator-5554', 10123)).resolves.toBe(true)
+      expect(runner.exec).toHaveBeenCalledWith(
+        '-s', 'emulator-5554', 'shell', 'ps', '-A', '-o', 'PID', '-u', '10123'
+      )
+
+      ;(runner.exec as ReturnType<typeof vi.fn>).mockResolvedValueOnce('PID\n')
+      await expect(wrapper.hasAppProcessForUid('emulator-5554', 10123)).resolves.toBe(false)
+    })
+
+    it('bounds the process lookup when the runner supports a command timeout', async () => {
+      const runner = mockRunner()
+      runner.execBounded = vi.fn().mockResolvedValue('PID\n123\n')
+      const wrapper = new AdbWrapper(runner)
+
+      await expect(wrapper.hasAppProcessForUid('emulator-5554', 10123, 900)).resolves.toBe(true)
+      expect(runner.execBounded).toHaveBeenCalledWith(
+        900,
+        '-s', 'emulator-5554', 'shell', 'ps', '-A', '-o', 'PID', '-u', '10123'
+      )
+    })
+  })
+
   describe('launchApp', () => {
     const PKG = 'com.example.app'
     const START_FIELDS = ['-a', 'android.intent.action.MAIN', '-c', 'android.intent.category.LAUNCHER', '-f', '0x10200000']

@@ -216,6 +216,15 @@ config is read once per connection (`avdInfo`): its form factor, and its version
 (`osVersionFromConfig`), so an emulator that is not running is grouped by version too. A running emulator's
 `getprop` answer wins.
 
+App logs use `adb logcat --uid=... -v raw` after a successful app launch, so a process that reuses the launched PID
+cannot leak another app's logs. Capture is skipped when another installed package shares that UID. The launch reply is
+sent before UID and process discovery; those lookups use bounded ADB calls and stop after five seconds. Once capture
+starts, the stream checks that the UID remains unique to the package and has a live process once a second, then stops
+if either condition fails. The `DeviceState` owns the stream; install, shutdown and disconnect stop it, while a
+generation check prevents stale discovery from reviving a retired stream. Each chunk carries its launch request ID so
+the viewer drops delayed output from an older launch. The agent starts capture only when the relay advertises
+`'app-logs'`.
+
 ## HOW NOT
 
 - Do not hardcode the ADB or emulator path, or read `ANDROID_HOME` directly — call `getAdbPath()` / `getEmulatorPath()` from `sdk.ts`.

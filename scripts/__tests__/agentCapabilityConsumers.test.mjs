@@ -64,7 +64,7 @@ describe('dashboard capability consumers', () => {
 
     // An empty list proves no consumer was scanned, not that consumers agree. The cardinality also
     // catches a narrower matcher that loses one of the current selector/viewer forms.
-    expect(consumers).toHaveLength(3)
+    expect(consumers).toHaveLength(4)
 
     const unknown = consumers.filter(({ capability }) => !declared.has(capability))
     expect(unknown).toEqual([])

@@ -3,7 +3,7 @@ import { execFile } from 'child_process'
 import { promisify } from 'util'
 import { promises as fs } from 'fs'
 import { tmpdir } from 'os'
-import { join } from 'path'
+import { join, posix } from 'path'
 import { PlatformError, MAX_CLIPBOARD_BYTES } from '@tapflowio/agent-core'
 import type { LaunchOptions } from '@tapflowio/protocol'
 import { hasLaunchOptions } from '@tapflowio/protocol/launch'
@@ -403,6 +403,24 @@ export class SimctlWrapper {
 
   async installApp(udid: string, appPath: string): Promise<void> {
     await this.runner.exec('install', udid, appPath)
+  }
+
+  /** The installed app's executable path, used with its pid to keep a log stream scoped to that app image. */
+  async getAppExecutablePath(udid: string, bundleId: string): Promise<string> {
+    const container = (await this.runner.exec('get_app_container', udid, bundleId, 'app')).trim()
+    if (!container.startsWith('/')) {
+      throw new PlatformError(`cannot resolve app container for ${bundleId}: ${container || 'empty simctl output'}`)
+    }
+
+    const plist = await this.readPlist(posix.join(container, 'Info.plist'))
+    if (!plist || typeof plist !== 'object' || !('CFBundleExecutable' in plist)) {
+      throw new PlatformError(`cannot resolve executable for ${bundleId}`)
+    }
+    const executable = (plist as { CFBundleExecutable?: unknown }).CFBundleExecutable
+    if (typeof executable !== 'string' || executable.length === 0 || posix.basename(executable) !== executable) {
+      throw new PlatformError(`cannot resolve executable for ${bundleId}`)
+    }
+    return posix.join(container, executable)
   }
 
   // Returns the launched app's host PID (`simctl launch` prints "<bundleId>: <pid>"), or null if it

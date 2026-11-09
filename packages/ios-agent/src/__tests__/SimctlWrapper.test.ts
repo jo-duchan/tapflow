@@ -678,6 +678,26 @@ describe('SimctlWrapper', () => {
     })
   })
 
+  describe('getAppExecutablePath', () => {
+    it('resolves the installed app executable from its app container plist', async () => {
+      const runner = mockRunner({ get_app_container: '/sim/Containers/Example.app\n' })
+      const readPlist = vi.fn().mockResolvedValue({ CFBundleExecutable: 'Example' })
+      const wrapper = new SimctlWrapper(runner, readPlist)
+
+      await expect(wrapper.getAppExecutablePath('dev-1', 'com.example.app')).resolves.toBe('/sim/Containers/Example.app/Example')
+      expect(runner.exec).toHaveBeenCalledWith('get_app_container', 'dev-1', 'com.example.app', 'app')
+      expect(readPlist).toHaveBeenCalledWith('/sim/Containers/Example.app/Info.plist')
+    })
+
+    it('rejects when the installed app container or executable name is unavailable', async () => {
+      const noContainer = new SimctlWrapper(mockRunner({ get_app_container: 'No such app\n' }))
+      await expect(noContainer.getAppExecutablePath('dev-1', 'com.missing.app')).rejects.toThrow(/cannot resolve app container/)
+
+      const noExecutable = new SimctlWrapper(mockRunner({ get_app_container: '/sim/Containers/Example.app\n' }), vi.fn().mockResolvedValue({}))
+      await expect(noExecutable.getAppExecutablePath('dev-1', 'com.example.app')).rejects.toThrow(/cannot resolve executable/)
+    })
+  })
+
   // Routed through the runner (rather than spawning directly) so the clipboard gets the same
   // CoreSimulatorService recovery as every other simctl call — and so it is testable at all.
   describe('pasteboard', () => {

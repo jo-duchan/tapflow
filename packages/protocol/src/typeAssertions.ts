@@ -9,7 +9,8 @@
 import type {
   AgentDevices, AgentDevicesApplied, AgentRegister, AgentRegistered, AgentResourceReport, AgentToBrowser, AgentsList, AgentsListed,
   AppClearState, AppClearStateDone, AppClearStateError, AppInstallDone, AppInstallError, AppInstallToAgent,
-  AppInstallToRelay, AppLaunchDone, AppLaunchError, AppLaunchToAgent, AppLaunchToRelay, BrowserInbound,
+  AppInstallToRelay, AppLaunchDone, AppLaunchError, AppLaunchToAgent, AppLaunchToRelay,
+  AppLog, BrowserInbound,
   BrowserToRelay, ClipboardData, ClipboardError, ClipboardRead, ClipboardWrite, ClipboardWriteDone,
   NetworkError, NetworkSet, NetworkState, NetworkStatePayload,
   DeviceBoot, DeviceBootError, DeviceBootWaiting, DeviceBooting, DeviceLease, DeviceLeased, DeviceLeaseRefused, DeviceReady, DeviceShutdown, DeviceShutdownDone,
@@ -140,6 +141,7 @@ export const _AppLaunchDone: AppLaunchDone['type'] = 'app:launch-done'
 export const _AppLaunchError: AppLaunchError['type'] = 'app:launch-error'
 export const _AppLaunchToAgent: AppLaunchToAgent['type'] = 'app:launch'
 export const _AppLaunchToRelay: AppLaunchToRelay['type'] = 'app:launch'
+export const _AppLog: AppLog['type'] = 'app:log'
 export const _ClipboardData: ClipboardData['type'] = 'clipboard:data'
 export const _ClipboardError: ClipboardError['type'] = 'clipboard:error'
 export const _NetworkSet: NetworkSet['type'] = 'network:set'

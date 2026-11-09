@@ -384,9 +384,41 @@ export class AdbWrapper {
       }
     }
     const component = resolved ? resolved.component : await this.launcherComponent(serial, packageName)
-    if (component && await this.startAndWait(serial, component)) return undefined
+    if (component && (await this.startAndWait(serial, component))) return undefined
     await this.launchWithMonkey(serial, packageName)
     return undefined
+  }
+
+  async getAppUid(serial: string, packageName: string, timeoutMs = 2_000): Promise<number | null> {
+    const args = ['-s', serial, 'shell', 'cmd', 'package', 'list', 'packages', '-U', packageName]
+    const output = this.runner.execBounded
+      ? await this.runner.execBounded(timeoutMs, ...args)
+      : await this.runner.exec(...args)
+    const packageLine = output.split(/\r?\n/).map((line) => line.trim()).find((line) =>
+      line.startsWith(`package:${packageName} `) || line === `package:${packageName}`
+    )
+    const uidText = packageLine?.match(/(?:^|\s)uid:(\d+)(?:\s|$)/)?.[1]
+    const uid = Number(uidText)
+    return uidText && Number.isSafeInteger(uid) && uid >= 0 ? uid : null
+  }
+
+  async getPackagesForUid(serial: string, uid: number, timeoutMs = 2_000): Promise<string[]> {
+    const args = ['-s', serial, 'shell', 'cmd', 'package', 'list', 'packages', '--uid', String(uid)]
+    const output = this.runner.execBounded
+      ? await this.runner.execBounded(timeoutMs, ...args)
+      : await this.runner.exec(...args)
+    const packages = output.split(/\r?\n/).map((line) =>
+      /^package:([^\s]+)(?:\s|$)/.exec(line.trim())?.[1]
+    ).filter((name): name is string => name !== undefined)
+    return [...new Set(packages)]
+  }
+
+  async hasAppProcessForUid(serial: string, uid: number, timeoutMs = 2_000): Promise<boolean> {
+    const args = ['-s', serial, 'shell', 'ps', '-A', '-o', 'PID', '-u', String(uid)]
+    const output = this.runner.execBounded
+      ? await this.runner.execBounded(timeoutMs, ...args)
+      : await this.runner.exec(...args)
+    return output.split(/\r?\n/).some((line) => /^\d+$/.test(line.trim()))
   }
 
   /**
@@ -399,9 +431,11 @@ export class AdbWrapper {
    */
   private async launchFresh(serial: string, packageName: string, options: LaunchOptions, resolved?: string): Promise<void> {
     if (Object.keys(options.env ?? {}).length > 0) {
-      throw new ValidationError('env is iOS-only: Android has no way to set an app\'s environment. Pass it in arguments instead, read from the intent extras')
+      throw new ValidationError(
+        "env is iOS-only: Android has no way to set an app's environment. Pass it in arguments instead, read from the intent extras"
+      )
     }
-    const component = resolved ?? await this.launcherComponent(serial, packageName)
+    const component = resolved ?? (await this.launcherComponent(serial, packageName))
     if (!component) {
       throw new ValidationError(`Could not find a single launcher activity for ${packageName}, so the launch arguments cannot be delivered`)
     }
@@ -557,7 +591,10 @@ export class AdbWrapper {
     if (!pushed) {
       pushed = (async () => {
         try {
-          this.uidumpDevicePath ??= `/data/local/tmp/tapflow-uidump-${createHash('sha256').update(readFileSync(UIDUMP_JAR)).digest('hex').slice(0, 12)}.jar`
+          this.uidumpDevicePath ??= `/data/local/tmp/tapflow-uidump-${createHash('sha256')
+            .update(readFileSync(UIDUMP_JAR))
+            .digest('hex')
+            .slice(0, 12)}.jar`
           await this.runner.exec('-s', serial, 'push', UIDUMP_JAR, this.uidumpDevicePath)
           return this.uidumpDevicePath
         } catch (e) {

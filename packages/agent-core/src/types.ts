@@ -72,7 +72,7 @@ export interface Device {
 // A runtime value rather than only a union so the relay, which can import from here, checks its
 // gates through `hasCapability` and a rename fails to compile there. The dashboard still cannot, and
 // `scripts/__tests__/agentCapabilityConsumers.test.mjs` holds its literals against this array.
-export const KNOWN_AGENT_CAPABILITIES = ['clipboard', 'full-reset', 'network-control', 'build-download', 'launch-options', 'launch-env', 'touch-cancel'] as const
+export const KNOWN_AGENT_CAPABILITIES = ['clipboard', 'full-reset', 'network-control', 'build-download', 'launch-options', 'launch-env', 'touch-cancel', 'app-logs'] as const
 export type AgentCapability = (typeof KNOWN_AGENT_CAPABILITIES)[number]
 
 export function isAgentCapability(s: string): s is AgentCapability {
