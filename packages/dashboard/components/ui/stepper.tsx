@@ -21,6 +21,7 @@ export function Stepper({
   label,
   canGoTo,
   onGoTo,
+  fill = false,
   className,
 }: {
   steps: StepperStep[]
@@ -32,6 +33,8 @@ export function Stepper({
   label: string
   canGoTo?: (index: number) => boolean
   onGoTo?: (index: number) => void
+  /** Spread across the width it is given: the lines between steps grow, the steps keep their size. */
+  fill?: boolean
   className?: string
 }) {
   return (
@@ -64,7 +67,10 @@ export function Stepper({
         )
         const goable = state === "completed" && canGoTo?.(i) === true && onGoTo !== undefined
         return (
-          <li key={step.title} data-slot="stepper-item" data-state={state} aria-current={state === "active" ? "step" : undefined} className="flex items-center gap-2">
+          <li
+            key={step.title} data-slot="stepper-item" data-state={state} aria-current={state === "active" ? "step" : undefined}
+            className={cn("flex items-center gap-2", fill && i < steps.length - 1 && "flex-1")}
+          >
             {goable ? (
               <button
                 type="button"
@@ -78,7 +84,7 @@ export function Stepper({
             )}
             {i < steps.length - 1 && (
               // The line to the next step fills from the left once this one is done (500 ms, as in the reference).
-              <span data-slot="stepper-separator" aria-hidden className="relative h-0.5 w-12 shrink overflow-hidden rounded-full bg-border">
+              <span data-slot="stepper-separator" aria-hidden className={cn("relative h-0.5 shrink overflow-hidden rounded-full bg-border", fill ? "min-w-4 flex-1" : "w-12")}>
                 <span
                   className={cn(
                     "absolute inset-0 origin-left bg-primary transition-transform duration-500 ease-out motion-reduce:transition-none",

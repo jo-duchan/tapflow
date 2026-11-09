@@ -57,6 +57,8 @@ there to return to.
   Capture flow offers any step it reached, back or forward, while the range is the one replayed, and none while
   something runs on the device; never Match, whose only action is to replay, which Range's Continue already is.
 - Put the status of the whole task (Capture flow's "Capture paused") beside the list, not inside it.
+- **`fill`** spreads the list across the width it is given: the lines between steps grow, the steps keep their size.
+  Capture flow fills the dialog's width; without it the lines are 48px.
 
 ## Figma
 

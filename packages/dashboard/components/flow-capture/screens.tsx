@@ -495,25 +495,28 @@ function EditRow({ index, step, selected, onSelect, onRemove, renamedTo, onRenam
   const secretName = step.step?.type === 'inputSecret' ? step.step.name : null
   const reason = step.skipped ? copy.skipReasons[step.skipped] : step.fragile ? copy.fragileReasons[step.fragile] : step.auto ? copy.autoReason : null
   return (
-    <li className={cn('rounded-md border p-2', selected ? 'border-primary' : 'border-border', step.step === null && 'opacity-60')}>
-      <div className="flex items-start gap-2">
-        <button type="button" onClick={onSelect} aria-current={selected ? 'true' : undefined}
-          className="min-w-0 flex-1 rounded-sm text-left text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
+    // Figma 394:1041 (List Item): 12 px in on the left, 8 px elsewhere; the head row centred on the 28 px buttons; the
+    // reason 8 px under it with 4 px below.
+    <li className={cn('rounded-md border py-2 pl-3 pr-2', selected ? 'border-primary' : 'border-border', step.step === null && 'opacity-60')}>
+      <div className="flex items-center gap-2">
+        {/* One line, as drawn; the whole label is the tooltip when it does not fit. */}
+        <button type="button" onClick={onSelect} aria-current={selected ? 'true' : undefined} title={label}
+          className="min-w-0 flex-1 truncate rounded-sm text-left text-sm leading-5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
           <span className="text-muted-foreground">#{index + 1} </span>{label}
         </button>
-        {step.fragile && <Badge variant="outline">{copy.fragile}</Badge>}
-        {step.auto && <Badge variant="outline">{copy.auto}</Badge>}
-        {step.skipped && <Badge variant="outline">{copy.skipped}</Badge>}
+        {step.fragile && <Badge variant="outline" className="shrink-0">{copy.fragile}</Badge>}
+        {step.auto && <Badge variant="outline" className="shrink-0">{copy.auto}</Badge>}
+        {step.skipped && <Badge variant="outline" className="shrink-0">{copy.skipped}</Badge>}
         {secretName && (
-          <Button variant="ghost" size="icon" className="h-7 w-7" aria-label={copy.stepDetails(label)} aria-expanded={open} aria-controls={detailsId} onClick={() => setOpen((v) => !v)}>
+          <Button variant="ghost" size="icon" className="size-7 shrink-0" aria-label={copy.stepDetails(label)} aria-expanded={open} aria-controls={detailsId} onClick={() => setOpen((v) => !v)}>
             <ChevronRight aria-hidden className={cn('h-4 w-4 transition-transform', open && 'rotate-90')} />
           </Button>
         )}
-        <Button data-remove variant="ghost" size="icon" className="h-7 w-7" aria-label={copy.removeStep(label)} onClick={onRemove}>
+        <Button data-remove variant="ghost" size="icon" className="size-7 shrink-0" aria-label={copy.removeStep(label)} onClick={onRemove}>
           <Trash2 aria-hidden className="h-4 w-4" />
         </Button>
       </div>
-      {reason && <p className="mt-1 text-xs text-muted-foreground">{reason}</p>}
+      {reason && <p className="pb-1 pt-2 text-xs text-muted-foreground">{reason}</p>}
       {secretName && open && (
         <div id={detailsId} className="mt-2">
           <SecretName from={secretName} current={renamedTo ?? secretName} onRename={onRename} renameError={renameError} />
@@ -730,27 +733,26 @@ export function ExportScreen({ flow, bundleId, onDone, doneRef }: {
   }
   return (
     <div className="grid h-full min-h-0 grid-rows-[minmax(0,1fr)_auto] gap-4">
-      {/* Flex, not grid: a grid row holding something that scrolls on its own (the strip) shrinks to nothing when the
-          step is taller than the dialog, and the strip then scrolls inside itself. Nothing in here shrinks; the body scrolls.
-          The 4 px padding, given back by the margin, is room for a focused field's ring, which the scroll would clip. */}
-      <div className="-m-1 flex min-h-0 flex-col gap-4 overflow-y-auto p-1 *:shrink-0">
-      <div>
-        <h3 className="text-sm font-medium">{copy.exportHeading}</h3>
-        <p className="text-sm text-muted-foreground">{copy.exportHelp}</p>
-      </div>
-      <div className="grid min-h-0 gap-4 sm:grid-cols-[minmax(0,2fr)_minmax(0,1fr)]">
-        <div className="grid min-h-0 gap-2">
+      {/* The YAML takes the height the rest leaves, and scrolls inside itself; the notes on using it sit under it. The
+          4 px padding, given back by the margin, is room for the file field's focus ring. */}
+      <div className="-m-1 flex min-h-0 flex-col gap-4 p-1">
+        <div className="shrink-0">
+          <h3 className="text-sm font-medium">{copy.exportHeading}</h3>
+          <p className="text-sm text-muted-foreground">{copy.exportHelp}</p>
+        </div>
+        <div className="grid shrink-0 gap-2">
           <Label htmlFor={fileId}>{copy.fileLabel}</Label>
           <Input id={fileId} readOnly value={fileName} className="font-mono" onFocus={(e) => e.currentTarget.select()} />
-          <YamlField yaml={yaml} contentRef={yamlRef} />
         </div>
-        <div className="space-y-3 text-sm">
-          <p>{copy.howToUse}</p>
-          {secrets.length > 0 && <p className="text-muted-foreground">{copy.secretsToSet(secrets)}</p>}
-          {bundleId && <p className="text-muted-foreground">{copy.appPinned(bundleId)}</p>}
+        <div className="flex min-h-40 flex-1 flex-col">
+          <YamlField yaml={yaml} contentRef={yamlRef} fill />
         </div>
-      </div>
-      <p role="status" className="text-sm text-muted-foreground">{copied === true ? copy.copied : copied === false ? copy.copyByHand : ''}</p>
+        <ul className="shrink-0 list-disc space-y-1 pl-5 text-xs text-muted-foreground">
+          <li className="text-foreground">{copy.howToUse}</li>
+          {secrets.length > 0 && <li>{copy.secretsToSet(secrets)}</li>}
+          {bundleId && <li>{copy.appPinned(bundleId)}</li>}
+        </ul>
+        <p role="status" className="min-h-5 shrink-0 text-sm text-muted-foreground">{copied === true ? copy.copied : copied === false ? copy.copyByHand : ''}</p>
       </div>
       <Footer>
         <Button variant="outline" onClick={copyYaml}>{copy.copyYaml}</Button>

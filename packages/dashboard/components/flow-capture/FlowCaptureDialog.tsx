@@ -193,6 +193,7 @@ function CaptureSession({ tap, session, snapshot, bundleId, setBusy, close }: {
         reached={reachedStep(state)}
         canGoTo={(i) => canGoTo(state, i)}
         onGoTo={(step) => dispatch({ type: 'go-to', step })}
+        fill
         className="border-b pb-3"
       />
       <div {...swapFocus} className="h-full min-h-0">
