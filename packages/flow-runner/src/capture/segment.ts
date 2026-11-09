@@ -53,11 +53,10 @@ export type RawStep = StepBase & (
    * - `replace`: the relay read the field once the person paused (#1135), so `text` is what the field held, and the
    *   step is every run and edit key typed into that one field. Whatever the device's IME, language or Caps Lock made
    *   of the keys is in it.
-   * - otherwise, `text` is the keys read on a US layout — right on Android, whose agent types them from that table, and
-   *   a guess on iOS, where the device's IME decides. `fieldRead` says whether a read was tried: `unread` when the
-   *   agent reads fields but none was usable (the warning is the reader's), `secure` for a field that never shows its
-   *   value. Absent: no read was tried, as on Android, or as on iOS when the relay read no field at all (the matcher
-   *   warns there, by platform).
+   * - otherwise, `text` is the keys read on a US layout, a guess on both platforms: the device's IME decides what
+   *   they type (Gboard on Android). `fieldRead` says whether a read was tried: `unread` when the agent reads fields
+   *   but none was usable (the warning is the reader's), `secure` for a field that never shows its value. Absent: the
+   *   relay read no field at all (an agent without `field-value`, a Mac over its memory line), and the matcher warns.
    * - `field`: the identifier of the field the relay read it went into. A field focused before the range began has no
    *   tap in it, so a replay from a fresh launch taps this one first (`focusTap`).
    * - `askValue`: typed on the soft keyboard into a field that hides its text (#1140), so neither the keys nor a read

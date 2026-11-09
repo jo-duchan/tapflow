@@ -306,6 +306,24 @@ describe('VerifyScreen', () => {
     expect(status.querySelector('[aria-hidden="true"].invisible')).toHaveTextContent('Running step 15 of 15')
   })
 
+  // A Verify that threw (the device went away) has no result: its button, which held focus while it ran, goes back to
+  // Edit rather than staying an unavailable "Export anyway".
+  it('turns its button into Back to Edit, in place, when the run threw', async () => {
+    const running = { ...initialState, phase: 'verifying' as const, verify: { status: 'running' as const, done: 1, live: [] } }
+    const onBack = vi.fn()
+    const props = { tap: { surface: () => null } as never, marks: { cursor: null, trails: [] }, total: 3, onExport: vi.fn(), onBack, primaryRef: { current: null } }
+    const { rerender } = render(<VerifyScreen state={running} {...props} />)
+    const button = screen.getByRole('button', { name: 'Continue' })
+    button.focus()
+    rerender(<VerifyScreen state={{ ...running, error: 'the connection to the relay closed' }} {...props} />)
+    expect(screen.getAllByRole('button', { name: 'Back to Edit' })).toHaveLength(1)
+    expect(screen.queryByRole('button', { name: 'Export anyway' })).toBeNull()
+    expect(button).toHaveFocus()
+    expect(button).not.toHaveAttribute('aria-disabled')
+    await userEvent.click(button)
+    expect(onBack).toHaveBeenCalled()
+  })
+
   // Drawn as MCP's Agent activity draws a run: the steps as they go, then the one that failed opened onto why.
   it('shows the steps as they run, and opens the failed one onto its reason and what to select instead', () => {
     const live = { ...initialState, phase: 'verifying' as const, verify: { status: 'running' as const, done: 1, live: [

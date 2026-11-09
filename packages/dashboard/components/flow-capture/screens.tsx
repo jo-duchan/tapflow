@@ -612,6 +612,7 @@ export function VerifyScreen({ state, tap, marks, total, onExport, onBack, prima
   const verify = state.verify
   const result = verify?.result
   const failed = result?.status === 'failed' || state.error !== null
+  const stuck = state.error !== null && !result
   return (
     <div className="grid h-full min-h-0 grid-rows-[minmax(0,1fr)_auto] gap-4">
     <div className="grid min-h-0 gap-4 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
@@ -630,15 +631,17 @@ export function VerifyScreen({ state, tap, marks, total, onExport, onBack, prima
     </div>
       {/* The same footer as every step, at the bottom of the dialog: buttons that move between steps do not move. */}
       <Footer>
-        {(result || state.error) && <Button variant="outline" onClick={onBack}>{copy.backToEdit}</Button>}
+        {result && <Button variant="outline" onClick={onBack}>{copy.backToEdit}</Button>}
         {/* There while it runs, busy (`aria-disabled`, not `disabled`, which drops focus): with nothing to hold, focus
-            fell to the page when Verify began and stayed there after it finished (review of #1125). */}
+            fell to the page when Verify began and stayed there after it finished (review of #1125). A run that threw
+            has no result to export, so the same button, still holding focus, goes back to Edit instead of staying
+            unavailable for good. */}
         <Button
-          ref={primaryRef} aria-disabled={!result || undefined}
+          ref={primaryRef} aria-disabled={(!result && !stuck) || undefined}
           className="aria-disabled:pointer-events-none aria-disabled:opacity-50"
-          onClick={() => { if (result) onExport() }}
+          onClick={() => { if (result) onExport(); else if (stuck) onBack() }}
         >
-          {failed ? copy.exportAnyway : copy.continue}
+          {stuck ? copy.backToEdit : failed ? copy.exportAnyway : copy.continue}
         </Button>
       </Footer>
     </div>
@@ -739,7 +742,7 @@ export function ExportScreen({ flow, bundleId, onDone, doneRef }: {
     <div className="grid h-full min-h-0 grid-rows-[minmax(0,1fr)_auto] gap-4">
       {/* The YAML takes the height the rest leaves, and scrolls inside itself; the notes on using it sit under it. The
           4 px padding, given back by the margin, is room for the file field's focus ring. */}
-      <div className="-m-1 flex min-h-0 flex-col gap-4 p-1">
+      <div className="-m-1 flex min-h-0 flex-col gap-4 overflow-y-auto p-1">
         <div className="shrink-0">
           <h3 className="text-sm font-medium">{copy.exportHeading}</h3>
           <p className="text-sm text-muted-foreground">{copy.exportHelp}</p>

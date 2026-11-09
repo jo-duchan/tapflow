@@ -676,15 +676,15 @@ describe('matchStep', () => {
       // A secret's value is the same guess, so it is marked too; a secure field was never going to be read.
       expect(matchStep(typed({ fieldRead: 'unread' }), ctxOf([field({ focused: true, secure: true })]))).toMatchObject({ step: null, fragile: 'field-unread' })
       expect(matchStep(typed({ fieldRead: 'secure' }), ctxOf([field({ focused: true, secure: true })])).fragile).toBeUndefined()
-      expect(matchStep(text!, plain).fragile).toBeUndefined()
     })
 
     // Review of #1143: with no field read in the whole capture (an agent without `field-value`, a Mac over its memory
-    // line), the segmenter marks nothing, and iOS's guess went out unmarked.
-    it('marks an iOS run the relay never read as a guess, and leaves Android\'s alone', () => {
+    // line), the segmenter marks nothing, and the guess went out unmarked. Android's keys go through Gboard, which
+    // composes them in its own language as iOS's IME does, so it is the same guess there.
+    it('marks a run the relay never read as a guess, on either platform', () => {
       const field0 = [field({ focused: true, secure: false })]
       expect(matchStep(text!, ctxOf(field0, { platform: 'ios' })).fragile).toBe('field-unread')
-      expect(matchStep(text!, ctxOf(field0, { platform: 'android' })).fragile).toBeUndefined()
+      expect(matchStep(text!, ctxOf(field0, { platform: 'android' })).fragile).toBe('field-unread')
       expect(matchStep({ ...text!, text: '안녕', replace: true } as RawStep, ctxOf(field0, { platform: 'ios' })).fragile).toBeUndefined()
       expect(matchStep({ ...text!, fieldRead: 'secure' } as RawStep, ctxOf([field({ focused: true, secure: true })], { platform: 'ios' })).fragile).toBeUndefined()
     })

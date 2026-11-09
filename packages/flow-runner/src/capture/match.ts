@@ -133,10 +133,11 @@ function typedSecretly(ctx: MatchContext): boolean {
 const knownSecret = (ctx: MatchContext): boolean => focusedIn(ctx.tree)?.secure === true
 
 function typed(raw: RawStep, text: string, ctx: MatchContext): CapturedStep {
-  // A secret's value is the same guess, so it is marked too. On iOS a run with neither a value nor a tried read is one
-  // the relay never read — an agent without `field-value`, or a Mac over its memory line — and the same guess.
+  // A secret's value is the same guess, so it is marked too. A run with neither a value nor a tried read is one the
+  // relay never read — an agent without `field-value`, or a Mac over its memory line — and the same guess on both
+  // platforms: the keys went through the device's IME, Gboard on Android, which composes them in its own language.
   const unread = raw.kind === 'text'
-    && (raw.fieldRead === 'unread' || (ctx.platform === 'ios' && raw.fieldRead === undefined && raw.replace !== true))
+    && (raw.fieldRead === 'unread' || (raw.fieldRead === undefined && raw.replace !== true))
   const guess = unread ? { fragile: 'field-unread' as const } : {}
   // Read as a password field when it was typed, or a value the person gave for one: still a secret whatever field
   // Match finds focused, which can be another one, or a "show password" left on that reads it as plain text — the
