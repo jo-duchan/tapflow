@@ -46,7 +46,7 @@ A typing step replaces what the field holds with the value the field really held
 
 ### 5. Edit: tidy up the steps {#edit}
 
-The steps of the flow are listed. Selecting one shows its screenshot on the left, with where it touched: after the typing for a typing step, just before the step for the rest.
+The steps of the flow are listed. Selecting one shows its screenshot on the left, with where it touched: after the typing for a typing step, before it for a password, and just before the step for the rest.
 
 - Remove a step you do not want (a mistaken tap, for example) with its trash button.
 - A badge tells you about a step.

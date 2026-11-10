@@ -628,19 +628,21 @@ describe('SimctlWrapper', () => {
   describe('keyboardLanguage', () => {
     it('reads the keyboard in use', async () => {
       const runner = {
-        exec: vi.fn().mockResolvedValue('ko_KR@sw=Korean;hw=Automatic\n'),
+        exec: vi.fn().mockResolvedValue(''),
         execBinary: vi.fn().mockResolvedValue(Buffer.alloc(0)),
-        execWithOpts: vi.fn().mockResolvedValue(''),
+        execWithOpts: vi.fn().mockResolvedValue('ko_KR@sw=Korean;hw=Automatic\n'),
       } satisfies SimctlRunner
       expect(await new SimctlWrapper(runner).keyboardLanguage('device-1')).toBe('ko_KR@sw=Korean;hw=Automatic')
-      expect(runner.exec).toHaveBeenCalledWith('spawn', 'device-1', 'defaults', 'read', 'com.apple.keyboard.preferences', 'KeyboardLastUsed')
+      expect(runner.execWithOpts).toHaveBeenCalledWith(
+        { timeoutMs: 5000 }, 'spawn', 'device-1', 'defaults', 'read', 'com.apple.keyboard.preferences', 'KeyboardLastUsed',
+      )
     })
 
     it('is undefined before any keyboard was used', async () => {
       const runner = {
-        exec: vi.fn().mockRejectedValue(new Error('The domain/default pair does not exist')),
+        exec: vi.fn().mockResolvedValue(''),
         execBinary: vi.fn().mockResolvedValue(Buffer.alloc(0)),
-        execWithOpts: vi.fn().mockResolvedValue(''),
+        execWithOpts: vi.fn().mockRejectedValue(new Error('The domain/default pair does not exist')),
       } satisfies SimctlRunner
       expect(await new SimctlWrapper(runner).keyboardLanguage('device-1')).toBeUndefined()
     })

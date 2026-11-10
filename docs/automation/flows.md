@@ -46,7 +46,7 @@ Coordinates are normalized 0–1 everywhere. Selectors point at screen elements 
 
 ## Steps
 
-The vocabulary is deliberately small. These fifteen cover most scenarios.
+The vocabulary is deliberately small. These steps cover most scenarios.
 
 | Step | Form | Behavior |
 |------|------|----------|

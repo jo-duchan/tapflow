@@ -39,6 +39,8 @@ function langToKeyboard(lang: string): string {
 // A hung pasteboard call must not strand the caller: the read path holds a sentinel on the
 // device until it finishes, so "never returns" would leave the device clipboard destroyed.
 const CLIPBOARD_CMD_TIMEOUT_MS = 5_000
+// A field read waits on this beside the runner's own 5 s fetch, so a wedged `simctl spawn` must not outlast it.
+const KEYBOARD_READ_TIMEOUT_MS = 5_000
 // A run reset's device-wide commands take about a second each (measured: keychain 1.0 s, privacy 0.5 s, location 0.5 s).
 // A command this bound kills does not land later, which is why iOS needs nothing like Android's pending `pm clear` wait:
 // measured on iOS 26.5 by killing `simctl uninstall` and `simctl keychain reset` mid-flight, each either finished before
@@ -529,7 +531,9 @@ export class SimctlWrapper {
   /** The keyboard the device types with now (`KeyboardLastUsed`, an `AppleKeyboards` entry), or `undefined` before any
    *  was used or when it cannot be read. */
   async keyboardLanguage(udid: string): Promise<string | undefined> {
-    const out = await this.runner.exec('spawn', udid, 'defaults', 'read', 'com.apple.keyboard.preferences', 'KeyboardLastUsed').catch(() => '')
+    const out = await this.runner
+      .execWithOpts({ timeoutMs: KEYBOARD_READ_TIMEOUT_MS }, 'spawn', udid, 'defaults', 'read', 'com.apple.keyboard.preferences', 'KeyboardLastUsed')
+      .catch(() => '')
     const value = out.trim()
     return value === '' ? undefined : value
   }
