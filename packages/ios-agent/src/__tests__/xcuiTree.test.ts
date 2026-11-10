@@ -132,6 +132,19 @@ describe('parseTreeText field-boundary edge cases', () => {
     expect(els.map((e) => [e.identifier, e.label])).toEqual([['tab.form', 'Form'], ['tab.web', 'Web']])
   })
 
+  // #1125: what a tap on a switch or a tab changed, where nothing else in the tree does — its expected effect.
+  it('reads a switch that is on and a tab that is selected, and nothing for the rest', () => {
+    const els = sample(
+      "      Switch, 0x3, {{20.0, 250.0}, {362.0, 31.0}}, identifier: 'form.notify', label: 'Notifications', value: 1",
+      "      Switch, 0x4, {{20.0, 300.0}, {362.0, 31.0}}, identifier: 'form.other', label: 'Other', value: 0",
+      "      Button, 0x5, {{279.0, 795.0}, {98.0, 54.0}}, label: 'Web', Selected",
+      "      TextField, 0x6, {{20.0, 120.0}, {362.0, 34.0}}, identifier: 'email', placeholderValue: 'Email', value: 1",
+    )
+    expect(els.map((e) => [e.identifier ?? e.label, e.checked ?? false, e.selected ?? false])).toEqual([
+      ['form.notify', true, false], ['form.other', false, false], ['Web', false, true], ['email', false, false],
+    ])
+  })
+
   it('reads an identifier followed only by state flags', () => {
     const els = sample("      Button, 0x3, {{25.0, 795.0}, {98.0, 54.0}}, identifier: 'tab.web', Selected, Focused")
     expect(els[0]?.identifier).toBe('tab.web')

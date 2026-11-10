@@ -13,8 +13,10 @@ import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.calculateZoom
 import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -22,18 +24,23 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.List
+import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.Button
+import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -52,13 +59,14 @@ import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.onFocusChanged
-import androidx.compose.ui.platform.LocalConfiguration
-import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.testTagsAsResourceId
@@ -68,6 +76,7 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
+import androidx.compose.ui.zIndex
 
 // The Android half of the tree measurement sample: the same screens and element ids as the iOS targets.
 // Every element that can be used sets the status label to `tapped:<id>`, so the measurement script proves
@@ -100,6 +109,7 @@ private val TABS = listOf(
     Tab("tab.hard", "Hard", Icons.Filled.Warning),
     Tab("tab.web", "Web", Icons.Filled.Info),
     Tab("tab.gestures", "Gestures", Icons.Filled.Star),
+    Tab("tab.views", "Views", Icons.Filled.Menu),
 )
 
 @OptIn(ExperimentalComposeUiApi::class)
@@ -141,6 +151,7 @@ private fun Root(statusState: MutableState<String>) {
                 "tab.list" -> ListScreen(tapped)
                 "tab.hard" -> HardScreen(tapped)
                 "tab.gestures" -> GesturesScreen(tapped)
+                "tab.views" -> ViewsScreen(tapped)
                 else -> WebScreen(tapped)
             }
         }
@@ -194,16 +205,60 @@ private fun FormScreen(tapped: (String) -> Unit) {
     }
 }
 
+@OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
 @Composable
 private fun ListScreen(tapped: (String) -> Unit) {
+    var scrim by remember { mutableStateOf(false) }
     // Fifty rows so the list runs past the screen: LazyColumn composes only what is on screen, and the
     // measurement records whether the tree reports the rest anyway.
-    LazyColumn(Modifier.fillMaxSize().testTag("list.table")) {
-        items(50) { row ->
-            Text(
-                "Row $row",
-                Modifier.fillMaxWidth().clickable { tapped("list.row.$row") }.padding(16.dp).testTag("list.row.$row"),
+    //
+    // Three layers over the rows, as the iOS targets have them: a label that takes no touches over Row 5, a floating
+    // button at the bottom right, and the scrim it opens over every row until Close. Siblings drawn after the list, so
+    // the tree's drawing order is what says they are on top.
+    BoxWithConstraints(Modifier.fillMaxSize()) {
+        // Declared before the list, drawn over it by its zIndex: child order says the list is on top, z says this is.
+        Text(
+            "Z",
+            Modifier.zIndex(1f).align(Alignment.TopEnd).offset(x = (-24).dp, y = 160.dp)
+                .background(Color(0xFF7E57C2), RoundedCornerShape(50)).clickable { tapped("list.zbadge") }
+                .padding(horizontal = 16.dp, vertical = 8.dp).testTag("list.zbadge"),
+        )
+        LazyColumn(Modifier.fillMaxSize().testTag("list.table")) {
+            // Stays at the top while rows scroll under it: a row partly under it is covered by a sibling of its own list.
+            stickyHeader {
+                Text(
+                    "Header",
+                    Modifier.fillMaxWidth().background(Color(0xFFE0E0E0)).clickable { tapped("list.header") }
+                        .padding(16.dp).testTag("list.header"),
+                )
+            }
+            items(50) { row ->
+                Text(
+                    "Row $row",
+                    Modifier.fillMaxWidth().clickable { tapped("list.row.$row") }.padding(16.dp).testTag("list.row.$row"),
+                )
+            }
+        }
+        Text(
+            "Decor",
+            Modifier.align(Alignment.TopCenter).offset(y = maxHeight * 0.4f - 22.dp)
+                .background(Color(0x80FFEB3B), RoundedCornerShape(50)).padding(horizontal = 24.dp, vertical = 12.dp)
+                .testTag("list.decor"),
+        )
+        FloatingActionButton(
+            onClick = { tapped("list.fab"); scrim = true },
+            Modifier.align(Alignment.BottomEnd).padding(16.dp).testTag("list.fab"),
+        ) { Icon(Icons.Filled.Add, contentDescription = "Add") }
+        if (scrim) {
+            Box(
+                Modifier.fillMaxSize().background(Color(0x4D000000))
+                    .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null) { tapped("list.scrim") }
+                    .testTag("list.scrim"),
             )
+            Button(
+                onClick = { tapped("list.scrim.close"); scrim = false },
+                Modifier.align(Alignment.Center).testTag("list.scrim.close"),
+            ) { Text("Close") }
         }
     }
 }
@@ -320,3 +375,77 @@ private fun WebScreen(tapped: (String) -> Unit) {
         },
     )
 }
+
+/**
+ * The List screen's layers again, in classic Views rather than Compose: a View-based app's accessibility tree orders
+ * siblings by where they are on screen, not by how they are drawn, and reports a real drawing order where Compose
+ * reports 0 for every sibling. Programmatic Views have no resource name, so each is found by its content description.
+ *
+ * - `views.badge`: added first, drawn last by its elevation, over Row 2 — the index says the list is on top, the drawing
+ *   order says the badge is.
+ * - `views.decor`: takes no touches, over Row 4.
+ * - `views.fab`: clickable, bottom right; opens the scrim.
+ * - `views.scrim`: consumes every touch through an OnTouchListener without being clickable — what an accessibility tree
+ *   cannot show takes the touch. `views.scrim.close` closes it.
+ */
+@Composable
+private fun ViewsScreen(tapped: (String) -> Unit) {
+    AndroidView(modifier = Modifier.fillMaxSize(), factory = { context ->
+        val dp = context.resources.displayMetrics.density
+        fun px(v: Int) = (v * dp).toInt()
+        android.widget.FrameLayout(context).apply {
+            val badge = android.widget.TextView(context).apply {
+                text = "Badge"
+                contentDescription = "views.badge"
+                setBackgroundColor(0xFFFF7043.toInt())
+                setPadding(px(16), px(8), px(16), px(8))
+                elevation = px(8).toFloat()
+                setOnClickListener { tapped("views.badge") }
+            }
+            val rows = android.widget.LinearLayout(context).apply { orientation = android.widget.LinearLayout.VERTICAL }
+            for (row in 0 until 30) {
+                rows.addView(android.widget.TextView(context).apply {
+                    text = "Row $row"
+                    contentDescription = "views.row.$row"
+                    textSize = 16f
+                    setPadding(px(16), px(16), px(16), px(16))
+                    setOnClickListener { tapped("views.row.$row") }
+                })
+            }
+            val list = android.widget.ScrollView(context).apply { addView(rows) }
+            val decor = android.widget.TextView(context).apply {
+                text = "Decor"
+                contentDescription = "views.decor"
+                setBackgroundColor(0x80FFEB3B.toInt())
+                setPadding(px(24), px(12), px(24), px(12))
+            }
+            val scrim = android.widget.FrameLayout(context).apply {
+                setBackgroundColor(0x4D000000)
+                contentDescription = "views.scrim"
+                visibility = android.view.View.GONE
+                elevation = px(12).toFloat()
+                @SuppressLint("ClickableViewAccessibility")
+                setOnTouchListener { _, e -> if (e.action == android.view.MotionEvent.ACTION_UP) tapped("views.scrim"); true }
+            }
+            val close = android.widget.Button(context).apply {
+                text = "Close"
+                contentDescription = "views.scrim.close"
+                setOnClickListener { tapped("views.scrim.close"); scrim.visibility = android.view.View.GONE }
+            }
+            scrim.addView(close, android.widget.FrameLayout.LayoutParams(px(120), px(56), android.view.Gravity.CENTER))
+            val fab = android.widget.ImageButton(context).apply {
+                setImageResource(android.R.drawable.ic_input_add)
+                contentDescription = "views.fab"
+                elevation = px(6).toFloat()
+                setOnClickListener { tapped("views.fab"); scrim.visibility = android.view.View.VISIBLE }
+            }
+            // The badge goes in before the list on purpose: only its elevation puts it on top.
+            addView(badge, android.widget.FrameLayout.LayoutParams(-2, -2, android.view.Gravity.TOP or android.view.Gravity.CENTER_HORIZONTAL).apply { topMargin = px(2 * 52 + 8) })
+            addView(list, android.widget.FrameLayout.LayoutParams(-1, -1))
+            addView(decor, android.widget.FrameLayout.LayoutParams(-2, -2, android.view.Gravity.TOP or android.view.Gravity.CENTER_HORIZONTAL).apply { topMargin = px(4 * 52 + 4) })
+            addView(fab, android.widget.FrameLayout.LayoutParams(px(56), px(56), android.view.Gravity.BOTTOM or android.view.Gravity.END).apply { setMargins(0, 0, px(16), px(16)) })
+            addView(scrim, android.widget.FrameLayout.LayoutParams(-1, -1))
+        }
+    })
+}
+

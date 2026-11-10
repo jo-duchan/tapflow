@@ -3,8 +3,8 @@ import fs from 'fs'
 import os from 'os'
 import path from 'path'
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
-import { toFramePoint, type InterfaceTurn } from '@tapflowio/protocol/screen'
-import { EnvironmentStepError, isEligible, missingSecret, missingSecretMessage, parseFlow, refusedFlow, runFlow, unavailableButton, unavailableButtonMessage, type FlowDriver, type FlowResult } from '@tapflowio/flow-runner'
+import { fromFramePoint, toFramePoint, type InterfaceTurn } from '@tapflowio/protocol/screen'
+import { EnvironmentStepError, isEligible, missingSecret, missingSecretMessage, parseFlow, reachTargetOf, refusedFlow, runFlow, unavailableButton, unavailableButtonMessage, type FlowDriver, type FlowResult } from '@tapflowio/flow-runner'
 import { SessionEndedError, SessionLeftError, type TapflowClient } from './client.js'
 import { TESTING_GUIDE } from './guide.js'
 import { compactLaunchOptions, launchOptionsProblem, type LaunchApplied } from '@tapflowio/protocol/launch'
@@ -91,6 +91,11 @@ export function makeFlowDriver(client: TapflowClient, sessionId: string, buildId
       return read.elements
     },
     tap: async (x, y) => { const [fx, fy] = at(x, y); return guard(() => client.tap(sessionId, fx, fy)) },
+    // Points come back in the app's interface, as a selector's centre is, so `tap` turns them as it turns any point.
+    reach: async (targets, signal) => {
+      const results = await guard(() => client.reach(sessionId, targets.map(reachTargetOf), signal))
+      return results.map((r) => (r.state === 'reachable' ? { ...r, point: fromFramePoint(turn, r.point) } : r))
+    },
     swipe: (from, to, durationMs) => {
       const [fx, fy] = at(...from), [tx, ty] = at(...to)
       return guard(() => client.swipe(sessionId, fx, fy, tx, ty, durationMs))

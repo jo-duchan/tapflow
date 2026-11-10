@@ -1,10 +1,11 @@
 import {
-  defaultRange, focusTap, matchStep, rangeStartKeyboard, rangeStartOrientation, replayStep, runFlow, segment, SocketFlowDriver,
+  defaultRange, EffectWatch, focusTap, matchStep, rangeStartKeyboard, rangeStartOrientation, reachQuestions, reachTargetOf, replayStep, runFlow,
+  segment, SocketFlowDriver,
   toFlowSteps, waitForStableScreen, type CapturedStep, type Flow, type FlowResult, type KeyModifier, type MatchContext,
-  type RawStep, type StepRange,
+  type RawStep, type StepExpect, type StepRange,
 } from '@tapflowio/flow-runner/browser'
 import { chromeOrientation } from '@tapflowio/protocol/screen'
-import type { AndroidChrome, ChromePayload } from '@tapflowio/protocol'
+import type { AndroidChrome, ChromePayload, UIElement } from '@tapflowio/protocol'
 import type { CaptureSnapshot } from '@tapflowio/protocol/capture'
 import { copy } from './copy'
 import { markOf, type StepMark } from './marks'
@@ -195,6 +196,17 @@ export async function matchRange(
 
   const read = (signal: AbortSignal) => channel.queryUITreeWithTurn(sessionId, signal)
   const matched: CapturedStep[] = []
+  // What each touch did, seen from the screen before it to the screen the next step is read on (#1125). Kept beside the
+  // steps rather than on them, since those went to the dialog already; Export writes only what Verify sees too.
+  const effects = new EffectWatch()
+  const observed = new Map<CapturedStep, StepExpect | null>()
+  let watching: { step: CapturedStep; before: UIElement[]; touched?: UIElement } | undefined
+  const closeWatch = (after: UIElement[] | undefined) => {
+    if (watching && after) {
+      observed.set(watching.step, effects.observe(watching.before, after, after, watching.touched ? { touched: watching.touched } : {}))
+    }
+    watching = undefined
+  }
   // The turn goes into the flow too: the reset, Verify and a run all start upright, so a range held sideways would
   // replay its first steps on a screen laid out the other way (design review of #1139). After the clear and launch the
   // range may open with, so the flow does not read as starting without a launch and get a second one.
@@ -218,6 +230,7 @@ export async function matchRange(
     }
     await lease.ensure()
     let before = await waitForStableScreen(read, { timeoutMs: SETTLE_TIMEOUT_MS })
+    closeWatch(before?.elements)
     // Typing into a field the person focused before the range began: tapped first, and the tap goes into the flow.
     // The tree's frames are the app as drawn, which an iOS tap is not when the app is turned: then it is left as it was.
     const focus = before && !before.interfaceTurn ? focusTap(raw, before.elements) : undefined
@@ -236,6 +249,16 @@ export async function matchRange(
     const after = SHOWN_AFTER.has(raw.kind) && !(raw.kind === 'text' && (raw.fieldRead === 'secure' || raw.askValue))
     let shot = after ? null : await shoot()
     const chrome = await chromeNow(channel, tap)
+    const turns = {
+      ...(before?.interfaceTurn !== undefined ? { interfaceTurn: before.interfaceTurn } : {}),
+      ...(frameTurnOf(chrome) !== undefined ? { frameTurn: frameTurnOf(chrome) } : {}),
+    }
+    // Asked of the screen the step is about to act on, which is the one it is matched against (#1125). A device that
+    // cannot answer leaves the step to the tree's frames, as before reach; the next read reports a session that ended.
+    const questions = reachQuestions(raw, { tree: before?.elements ?? [], ...turns })
+    const reach = questions.length > 0
+      ? await channel.reach(sessionId, questions.map(reachTargetOf), hooks.signal).catch(() => undefined)
+      : undefined
     // A touch the reads could not place may be a key, typed by the keyboard's language like the others.
     if (TYPES_ON_KEYBOARD.has(raw.kind) || ('keyboard' in raw && raw.keyboard === 'unknown')) await alignment.align()
     // Nothing to type into, and no field to tap: say what to do about it rather than what the device refused.
@@ -247,8 +270,8 @@ export async function matchRange(
     })
     const ctx: MatchContext = {
       tree: before?.elements ?? [],
-      ...(before?.interfaceTurn !== undefined ? { interfaceTurn: before.interfaceTurn } : {}),
-      ...(frameTurnOf(chrome) !== undefined ? { frameTurn: frameTurnOf(chrome) } : {}),
+      ...turns,
+      ...(reach ? { reach } : {}),
       postures: tap.postures().postures,
       platform: tap.platform,
     }
@@ -264,9 +287,14 @@ export async function matchRange(
     }
     const step = matchStep(raw, ctx)
     matched.push(step)
+    if ((raw.kind === 'tap' || raw.kind === 'longPress') && before) {
+      watching = { step, before: before.elements, ...(questions[0] ? { touched: questions[0] } : {}) }
+    }
     hooks.onStep(step, shot ? URL.createObjectURL(new Blob([shot as BlobPart], { type: 'image/jpeg' })) : undefined)
   }
-  return matched
+  // The last touch has no next step to read after it.
+  if (watching) closeWatch((await waitForStableScreen(read, { timeoutMs: SETTLE_TIMEOUT_MS }))?.elements)
+  return matched.map((m) => (observed.has(m) ? { ...m, observed: observed.get(m)! } : m))
 }
 
 export { toFlowSteps }
@@ -287,6 +315,8 @@ export async function verifyFlow(
   return runFlow(flow, driver, {
     secrets,
     platform: tap.platform,
+    // What each touch does, for Export to write beside it (#1125): a run then fails when the touch stops doing it.
+    observeEffects: true,
     onStep: (mark) => {
       if (mark.phase === 'start') lease.touch()
       onStep({ index: mark.index, name: mark.name, phase: mark.phase, ...(mark.status ? { status: mark.status } : {}) })

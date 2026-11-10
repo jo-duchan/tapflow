@@ -12,8 +12,13 @@ function selectorValue(s: Selector): unknown {
   }
 }
 
-/** A step as the YAML that `parseFlow` reads back into it. */
+/** A step as the YAML that `parseFlow` reads back into it: its action, and beside it what its touch brings (#1125). */
 function stepValue(step: Step): unknown {
+  const action = actionValue(step)
+  return 'expect' in step && step.expect ? { ...(action as Record<string, unknown>), expect: step.expect } : action
+}
+
+function actionValue(step: Step): unknown {
   switch (step.type) {
     case 'clearState': return step.appId !== undefined ? { clearState: step.appId } : 'clearState'
     case 'launchApp': return step.options ? { launchApp: step.options } : 'launchApp'
@@ -54,6 +59,7 @@ export function flowToYaml(flow: Omit<Flow, 'file'>): string {
     name: flow.name,
     ...(flow.appId !== undefined ? { appId: flow.appId } : {}),
     ...(flow.tags?.length ? { tags: flow.tags } : {}),
+    ...(flow.viewport ? { viewport: flow.viewport } : {}),
     steps: flow.steps.map(stepValue),
   })
   visit(doc, {
@@ -63,7 +69,7 @@ export function flowToYaml(flow: Omit<Flow, 'file'>): string {
   })
   const text = doc.toString({ lineWidth: 0 })
   const back = parseFlow(text, 'captured.yaml')
-  if (canonical(back.steps) !== canonical(flow.steps)) {
+  if (canonical(back.steps) !== canonical(flow.steps) || canonical(back.viewport) !== canonical(flow.viewport)) {
     throw new Error('the captured flow does not read back as the same steps — this is a bug in Flow Capture')
   }
   return text

@@ -184,7 +184,9 @@ describe('protocol message interfaces', () => {
     // the relay asking an agent what the focused field holds, and `DeviceKeyboardReset`. 95 is the keyboard's state and
     // language (#1135): `UiKeyboardRequest` and `UiKeyboardResponse`, and `DeviceKeyboardSet` with its done and error.
     // 98 with `device:run-reset` and its two replies (#1139).
-    expect(messages.size).toBe(98)
+    // 100 is where a touch lands (#1125): `UiReachRequest` and `UiReachResponse`, the relay asking an agent where a
+    // touch meant for each element would land.
+    expect(messages.size).toBe(100)
     // `InputKey` predates L1 and has always been named; it must be in here too.
     expect(messages.has('InputKey')).toBe(true)
   })

@@ -1,4 +1,5 @@
 import type { UIElement } from '@tapflowio/agent-core'
+import type { ReachResult, ReachTarget } from '@tapflowio/protocol'
 import { interfaceTurnOf, type InterfaceTurn } from '@tapflowio/protocol/screen'
 import { RelayHttpError } from './sessionErrors.js'
 
@@ -39,4 +40,40 @@ export function parseUITreeResponse(body: unknown): { elements: UIElement[]; int
   }
   const interfaceTurn = interfaceTurnOf((body as { interfaceTurn?: unknown }).interfaceTurn)
   return interfaceTurn === undefined ? { elements: body.elements as UIElement[] } : { elements: body.elements as UIElement[], interfaceTurn }
+}
+
+/**
+ * The relay's `POST /api/v1/sessions/:id/reach` body (#1125), one result per target in order. A result this client
+ * cannot read, or an answer for another number of targets, is `unknown`: the engine then taps the frame's centre and
+ * says the tap was not checked, never treats it as reached.
+ */
+/**
+ * The request for `POST /sessions/:id/reach`, built here for all three clients (`RelayClient`, mcp-server's and the
+ * dashboard's channel): each holds one serialization, its socket send, and `clientOutboundTyped` keeps it so.
+ */
+export function reachRequest(targets: ReachTarget[], signal?: AbortSignal): { method: 'POST'; headers: Record<string, string>; body: string; signal?: AbortSignal } {
+  return { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ targets }), ...(signal ? { signal } : {}) }
+}
+
+export function readReachResults(body: unknown, count: number): ReachResult[] {
+  const results = (body as { results?: unknown } | null)?.results
+  const unknown = (reason: string): ReachResult => ({ state: 'unknown', reason })
+  if (!Array.isArray(results) || results.length !== count) return Array.from({ length: count }, () => unknown('unreadable reach answer'))
+  return results.map((r): ReachResult => {
+    const o = (r ?? {}) as Record<string, unknown>
+    const num = (v: unknown) => typeof v === 'number' && Number.isFinite(v)
+    const f = (o['frame'] ?? {}) as Record<string, unknown>
+    switch (o['state']) {
+      case 'reachable': {
+        const p = o['point']
+        if (!Array.isArray(p) || p.length !== 2 || !p.every(num) || typeof o['atCentre'] !== 'boolean' || ![f['x'], f['y'], f['width'], f['height']].every(num)) return unknown('unreadable reach answer')
+        return { state: 'reachable', point: [p[0] as number, p[1] as number], atCentre: o['atCentre'] as boolean, frame: { x: f['x'] as number, y: f['y'] as number, width: f['width'] as number, height: f['height'] as number } }
+      }
+      case 'occluded': return typeof o['by'] === 'string' ? { state: 'occluded', by: o['by'] } : { state: 'occluded' }
+      case 'offscreen': return { state: 'offscreen' }
+      case 'missing': return { state: 'missing', candidates: num(o['candidates']) ? o['candidates'] as number : 0 }
+      case 'unknown': return unknown(typeof o['reason'] === 'string' ? o['reason'] : 'unknown')
+      default: return unknown('unreadable reach answer')
+    }
+  })
 }

@@ -113,6 +113,13 @@ export const copy = {
   failed: 'The flow failed on this device.',
   stepStatus: { running: 'running', passed: 'passed', failed: 'failed', skipped: 'not run' },
   suggestionsHeading: 'On that screen, one of these would select it:',
+  /** A touch Verify saw change nothing (#1125): an overlay the tree does not show may have taken it. */
+  touchChangedNothing: 'Nothing on the screen changed after this touch, so a run cannot check that it lands. If it should have changed something, something may be covering what it touches.',
+  /** What a run looks for after this touch, written into the flow (#1125). */
+  touchEffect: (line: string) => `A run checks that ${line} after this touch.`,
+  /** A touch the device could not judge (#1125): it went to the element's centre, which something may cover. */
+  uncheckedTouch: (note: string | undefined) =>
+    `Not checked to land on its element${note ? ` (${note})` : ''}, so it touched the centre, which something on screen may cover.`,
   exportAnyway: 'Export anyway',
   backToEdit: 'Back to Edit',
 

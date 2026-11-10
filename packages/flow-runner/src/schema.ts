@@ -2,6 +2,7 @@ import { parse as parseYaml } from 'yaml'
 import { ValidationError } from '@tapflowio/agent-core/errors'
 import type { LaunchOptions } from '@tapflowio/protocol'
 import { compactLaunchOptions, launchOptionsProblem } from '@tapflowio/protocol/launch'
+import type { EffectAnchor, StepExpect } from './effect.js'
 
 export interface Selector {
   // Bare-string selector: resolved as exact identifier → exact label → partial label.
@@ -31,10 +32,12 @@ export function keyModifierBits(modifiers: readonly KeyModifier[] = []): number 
 export type Step =
   | { type: 'clearState'; appId?: string }
   | { type: 'launchApp'; options?: LaunchOptions }
-  | { type: 'tapOn'; selector: Selector }
+  /** `expect`, on the four touch steps: what the touch brings on screen and takes off it, which a run looks for after
+   *  it (#1125). Flow Capture writes it from what Verify saw; a flow without it is checked for nothing more. */
+  | { type: 'tapOn'; selector: Selector; expect?: StepExpect }
   /** `tapOn: [x, y]` — a point, for a screen whose tree names nothing there. The last resort: it waits for nothing and
    *  lands wherever the layout puts that point. Its own type so every reader of `selector` stays one. */
-  | { type: 'tapPoint'; at: [number, number] }
+  | { type: 'tapPoint'; at: [number, number]; expect?: StepExpect }
   /** `replace`: what the field holds is replaced, not added to — the field is selected first. What Flow Capture writes
    *  when it read the field's value (#1135). Android selects with Ctrl+A, which it takes from Android 13. */
   | { type: 'inputText'; text: string; replace?: true }
@@ -52,17 +55,27 @@ export type Step =
   | { type: 'assertVisible'; selector: Selector }
   | { type: 'assertNotVisible'; selector: Selector }
   | { type: 'pressButton'; name: string }
-  | { type: 'longPressOn'; selector: Selector; durationMs: number }
+  | { type: 'longPressOn'; selector: Selector; durationMs: number; expect?: StepExpect }
   /** `longPressOn: [x, y]` or `{ on: [x, y], durationMs }` — a point, as `tapPoint`. */
-  | { type: 'longPressPoint'; at: [number, number]; durationMs: number }
+  | { type: 'longPressPoint'; at: [number, number]; durationMs: number; expect?: StepExpect }
   | { type: 'pinch'; on: Selector | [number, number]; scale: number; durationMs: number }
   | { type: 'setOrientation'; orientation: 'portrait' | 'landscape' }
   | { type: 'setPosture'; posture: 'folded' | 'unfolded' }
+
+/** A screen's size in the device's own units (iOS points, Android pixels), the shorter side first. */
+export interface Viewport {
+  width: number
+  height: number
+}
 
 export interface Flow {
   name: string
   appId?: string
   tags?: string[]
+  /** The screen a flow's points were made on (#1125). A point is a fraction of the screen, and on a screen of another
+   *  size the layout under it differs, so a run on one is refused before its first step. Flow Capture writes it when the
+   *  flow touches a point. */
+  viewport?: Viewport
   steps: Step[]
   file?: string
 }
@@ -156,7 +169,60 @@ function parseGestureMs(v: unknown, ctx: string, fallback: number): number {
   return v
 }
 
+/** The steps a touch's expected effect may ride on. */
+export const EXPECTING_STEPS = new Set<Step['type']>(['tapOn', 'tapPoint', 'longPressOn', 'longPressPoint'])
+
+const ANCHOR_KEYS = new Set(['id', 'text', 'role', 'checked', 'selected'])
+
+function parseAnchors(v: unknown, ctx: string, key: string): EffectAnchor[] {
+  if (!Array.isArray(v) || v.length === 0) throw new ValidationError(`${ctx}: "expect.${key}" must be a non-empty list`)
+  return v.map((a, i) => {
+    const at = `${ctx}: expect.${key}[${i}]`
+    if (!isRecord(a)) throw new ValidationError(`${at}: must be a mapping of id, text, role, checked, selected`)
+    const unknownKeys = Object.keys(a).filter((k) => !ANCHOR_KEYS.has(k))
+    if (unknownKeys.length > 0) throw new ValidationError(`${at}: unknown keys: ${unknownKeys.join(', ')} (expected id, text, role, checked, selected)`)
+    for (const k of ['id', 'text', 'role'] as const) {
+      if (a[k] !== undefined && (typeof a[k] !== 'string' || a[k] === '')) throw new ValidationError(`${at}: "${k}" must be a non-empty string`)
+    }
+    for (const k of ['checked', 'selected'] as const) {
+      if (a[k] !== undefined && typeof a[k] !== 'boolean') throw new ValidationError(`${at}: "${k}" must be true or false`)
+    }
+    // An anchor naming nothing would match every element, so a "gone" one could never pass and an "appear" one always would.
+    if (a.id === undefined && a.text === undefined) throw new ValidationError(`${at}: needs an id or a text`)
+    return a as EffectAnchor
+  })
+}
+
+function parseExpect(v: unknown, ctx: string): StepExpect {
+  if (!isRecord(v)) throw new ValidationError(`${ctx}: "expect" must be { appear, gone }`)
+  const { appear, gone, ...rest } = v
+  const unknownKeys = Object.keys(rest)
+  if (unknownKeys.length > 0) throw new ValidationError(`${ctx}: unknown expect keys: ${unknownKeys.join(', ')} (expected appear, gone)`)
+  if (appear === undefined && gone === undefined) throw new ValidationError(`${ctx}: "expect" needs appear or gone`)
+  return {
+    ...(appear !== undefined ? { appear: parseAnchors(appear, ctx, 'appear') } : {}),
+    ...(gone !== undefined ? { gone: parseAnchors(gone, ctx, 'gone') } : {}),
+  }
+}
+
+/**
+ * A step, with what its touch is expected to bring beside the action: `- tapOn: "Save"` / `  expect: { appear: [...] }`
+ * (#1125). One more key than a step had before, so a CLI older than it refuses the file — accepted: flows are
+ * experimental, and a second file per flow would be the cost on every flow from then on.
+ */
 function parseStep(raw: unknown, ctx: string): Step {
+  if (isRecord(raw) && Object.hasOwn(raw, 'expect')) {
+    const { expect, ...action } = raw
+    const step = parseAction(action, ctx)
+    if (!EXPECTING_STEPS.has(step.type)) {
+      throw new ValidationError(`${ctx}: "expect" goes only on a touch step (tapOn, longPressOn), not on ${Object.keys(action)[0] ?? 'nothing'}`)
+    }
+    return { ...step, expect: parseExpect(expect, ctx) } as Step
+  }
+  return parseAction(raw, ctx)
+}
+
+function parseAction(raw: unknown, ctx: string): Step {
   if (typeof raw === 'string') {
     if (raw === 'clearState') return { type: 'clearState' }
     if (raw === 'launchApp') return { type: 'launchApp' }
@@ -332,6 +398,17 @@ function baseName(file: string): string {
   return file.slice(Math.max(file.lastIndexOf('/'), file.lastIndexOf('\\')) + 1)
 }
 
+function parseViewport(v: unknown, file: string): Viewport {
+  if (!isRecord(v)) throw new ValidationError(`${file}: "viewport" must be { width, height }`)
+  const { width, height, ...rest } = v
+  const unknownKeys = Object.keys(rest)
+  if (unknownKeys.length > 0) throw new ValidationError(`${file}: unknown viewport keys: ${unknownKeys.join(', ')} (expected width, height)`)
+  for (const [k, n] of [['width', width], ['height', height]] as const) {
+    if (typeof n !== 'number' || !Number.isFinite(n) || n <= 0) throw new ValidationError(`${file}: "viewport.${k}" must be a positive number`)
+  }
+  return { width: width as number, height: height as number }
+}
+
 export function parseFlow(yamlText: string, file: string): Flow {
   let doc: unknown
   try {
@@ -341,7 +418,7 @@ export function parseFlow(yamlText: string, file: string): Flow {
   }
   if (!isRecord(doc)) throw new ValidationError(`${file}: flow must be a YAML mapping with a "steps" list`)
 
-  const { name, appId, tags, steps, ...rest } = doc as { name?: unknown; appId?: unknown; tags?: unknown; steps?: unknown }
+  const { name, appId, tags, viewport, steps, ...rest } = doc as { name?: unknown; appId?: unknown; tags?: unknown; viewport?: unknown; steps?: unknown }
   const unknownKeys = Object.keys(rest)
   if (unknownKeys.length > 0) throw new ValidationError(`${file}: unknown top-level keys: ${unknownKeys.join(', ')}`)
   if (name !== undefined && typeof name !== 'string') throw new ValidationError(`${file}: "name" must be a string`)
@@ -353,6 +430,7 @@ export function parseFlow(yamlText: string, file: string): Flow {
   }
 
   const parsedSteps = steps.map((raw, i) => parseStep(raw, `${file}: steps[${i}]`))
+  const size = viewport === undefined ? undefined : parseViewport(viewport, file)
 
   for (const [i, step] of parsedSteps.entries()) {
     if (step.type === 'clearState' && !step.appId && !appId) {
@@ -364,6 +442,7 @@ export function parseFlow(yamlText: string, file: string): Flow {
     name: (name as string | undefined) ?? baseName(file).replace(/\.ya?ml$/i, ''),
     ...(appId !== undefined ? { appId: appId as string } : {}),
     ...(tags !== undefined ? { tags: (tags as string[]).map((t) => t.trim()) } : {}),
+    ...(size ? { viewport: size } : {}),
     steps: parsedSteps,
     file,
   }

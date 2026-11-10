@@ -101,16 +101,48 @@ struct FormScreen: View {
 
 struct ListScreen: View {
     @EnvironmentObject private var status: Status
+    @State private var scrim = false
 
     // Fifty rows so the list runs past the screen. SwiftUI's List is lazy, so the rows that are not on
     // screen are not built, and the measurement records whether the tree reports them anyway.
+    //
+    // Three layers over the rows, for whether a tap on a row is judged by what the touch would reach: a label that
+    // takes no touches over Row 5 (a tap on Row 5 still lands), a floating button at the bottom right that covers the
+    // rows' trailing edge, and the scrim that button opens, which covers every row until Close.
     var body: some View {
-        List(0..<50, id: \.self) { row in
-            Button("Row \(row)") { status.tapped("list.row.\(row)") }
-                .accessibilityIdentifier("list.row.\(row)")
+        ZStack(alignment: .bottomTrailing) {
+            List(0..<50, id: \.self) { row in
+                Button("Row \(row)") { status.tapped("list.row.\(row)") }
+                    .accessibilityIdentifier("list.row.\(row)")
+            }
+            .listStyle(.plain)
+            .accessibilityIdentifier("list.table")
+            GeometryReader { geo in
+                Text("Decor")
+                    .padding(.horizontal, 24).padding(.vertical, 12)
+                    .background(Color.yellow.opacity(0.5), in: Capsule())
+                    .accessibilityIdentifier("list.decor")
+                    .allowsHitTesting(false)
+                    .position(x: geo.size.width / 2, y: geo.size.height * 0.4)
+            }
+            Button { status.tapped("list.fab"); scrim = true } label: {
+                Image(systemName: "plus").font(.title2).foregroundStyle(.white).frame(width: 56, height: 56)
+                    .background(Color.accentColor, in: Circle())
+            }
+            .accessibilityLabel("Add")
+            .accessibilityIdentifier("list.fab")
+            .padding(16)
+            if scrim {
+                Color.black.opacity(0.3)
+                    .contentShape(Rectangle())
+                    .onTapGesture { status.tapped("list.scrim") }
+                    .accessibilityIdentifier("list.scrim")
+                Button("Close") { status.tapped("list.scrim.close"); scrim = false }
+                    .buttonStyle(.borderedProminent)
+                    .accessibilityIdentifier("list.scrim.close")
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            }
         }
-        .listStyle(.plain)
-        .accessibilityIdentifier("list.table")
     }
 }
 

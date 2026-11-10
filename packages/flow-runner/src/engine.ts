@@ -1,6 +1,7 @@
 import type { UIElement } from '@tapflowio/agent-core'
-import type { ChromePayload, LaunchApplied, LaunchOptions } from '@tapflowio/protocol'
-import type { Flow, KeyModifier, Selector, Step, ScrollDirection } from './schema.js'
+import type { ChromePayload, LaunchApplied, LaunchOptions, ReachResult } from '@tapflowio/protocol'
+import { EXPECTING_STEPS, type Flow, type KeyModifier, type Selector, type Step, type ScrollDirection, type Viewport } from './schema.js'
+import { describeAnchor, effectPending, EffectWatch, judgeEffect, type StepExpect } from './effect.js'
 import { matchSelector } from './selector.js'
 import { suggestSelectors, type SelectorSuggestion } from './suggest.js'
 import { DeviceLacksError, EnvironmentStepError, isEnvironmentStepFailure, markEnvironmentFailure, TransientQueryError } from './errors.js'
@@ -59,6 +60,12 @@ export interface FlowDriver {
    * there. Rejects with a `DeviceLacksError` when the device has no postures.
    */
   setPosture(posture: 'folded' | 'unfolded', timeoutMs: number): Promise<void>
+  /**
+   * Where touches meant for elements land, judged by the device rather than by a frame's centre (#1125). Points are in
+   * the app's interface, as a selector's centre is. Optional: a driver without it taps the centre, and the step says
+   * the tap was not checked.
+   */
+  reach?(targets: UIElement[], signal?: AbortSignal): Promise<ReachResult[]>
 }
 
 export interface EngineOptions {
@@ -85,6 +92,12 @@ export interface EngineOptions {
    * refused before its first step. A value is read only when its step runs and appears in no name, label or log.
    */
   secrets?: Readonly<Record<string, string>>
+  /**
+   * Watch what each touch does (`StepResult.observed`), for Flow Capture's Verify to write into the flow as its `expect`
+   * (#1125). Costs a settled read and a confirming read after every touch, so it is for a check a person waits on, not a
+   * run.
+   */
+  observeEffects?: boolean
 }
 
 export interface StepResult {
@@ -96,6 +109,32 @@ export interface StepResult {
   /** A `tapOn` that matched nothing or several: lines to try instead, from the screen it failed on (B2). Each taps
    *  exactly the element it names on that screen. Absent when nothing on it was close. */
   suggestions?: SelectorSuggestion[]
+  /**
+   * Whether a touch this step made was checked to reach what it meant to (#1125), on the steps that touch:
+   * `verified`, the device said the point reaches the element; `delivered`, a point the flow wrote, which nothing can
+   * check; `unchecked`, the device could not judge (`reachNote` says why) and the step touched the element's centre,
+   * which something may cover. Absent on a step that touches nothing.
+   */
+  reach?: 'verified' | 'delivered' | 'unchecked'
+  reachNote?: string
+  /** On a step with an `expect`: `confirmed`, the screen changed as it did when the flow was made; `failed`, it did not,
+   *  and the step failed on it. */
+  effect?: 'confirmed' | 'failed'
+  /** With `observeEffects`, on a touch step: what the touch was seen to do, `null` when nothing that may be an anchor
+   *  changed. Absent when the screen could not be read around it. */
+  observed?: StepExpect | null
+}
+
+/** What a step that touches learned about its touch, for its `StepResult`. */
+interface StepReport {
+  reach?: StepResult['reach']
+  reachNote?: string
+  /** The screen read just before the touch: what its effect is judged against. */
+  screen?: UIElement[]
+  /** The element a selector touch went to: what tells a dialog it closed from a toast that went on its own. */
+  touched?: UIElement
+  effect?: StepResult['effect']
+  observed?: StepExpect | null
 }
 
 export type { SelectorSuggestion }
@@ -110,6 +149,8 @@ export interface FlowResult {
   failureScreenshot?: Uint8Array
   /** The screen a passed flow ended on, when `captureLastScreen` asked for it and it could be taken. */
   lastScreenshot?: Uint8Array
+  /** With `observeEffects`, on a flow that touches points: the screen it ran on, for Flow Capture to pin them to. */
+  viewport?: Viewport
   /**
    * Which side failed: 'environment' for relay/agent/session-level causes (the CLI
    * exits 2), 'product' for selector, assertion and other failures (exit 1). Present
@@ -326,11 +367,151 @@ async function waitForNextPoll(deadline: number, pollIntervalMs: number, base: s
   if (Date.now() >= deadline) throw deadlineError(base, lastError, sawTree)
 }
 
+/**
+ * Where to touch the element `sel` names (#1125): the point the device says reaches it, not its frame's centre, which a
+ * tab bar, a floating button or a scrim can cover — measured, a row's centre under a tab bar was the next tab's button,
+ * and the tap passed. A reach must agree twice running before it is used: a list still settling from a swipe moves the
+ * point between reads. Covered, off screen or not the element read: the selector is resolved again until its timeout,
+ * then the step fails saying which. A device that cannot judge gets the centre, and the step says so.
+ */
+async function touchPoint(
+  driver: FlowDriver, sel: Selector, timeoutMs: number, pollIntervalMs: number, report: StepReport,
+): Promise<[number, number]> {
+  const deadline = Date.now() + normalizeTimeoutMs(sel.timeoutMs ?? timeoutMs, 'selector timeout')
+  const centre = (e: UIElement): [number, number] => [round4(e.frame.x + e.frame.width / 2), round4(e.frame.y + e.frame.height / 2)]
+  // The read the element was found in is the screen before the touch, which its effect is judged against.
+  const seen = (tree: UIElement[]) => { report.screen = tree }
+  const blocked = (r: ReachResult): string => r.state === 'reachable' ? `${describeSelector(sel)} kept moving, so no touch could be placed on it`
+    : r.state === 'occluded' ? `${describeSelector(sel)} is covered${r.by ? ` by ${r.by}` : ''}: a touch on it would land on that instead`
+    : r.state === 'offscreen' ? `${describeSelector(sel)} is not on the screen`
+    : `${describeSelector(sel)} was not where the screen was read (${r.state === 'missing' ? r.candidates : 0} near it)`
+  let el = await resolveOne(driver, sel, timeoutMs, pollIntervalMs, seen)
+  if (!driver.reach) {
+    report.reach = 'unchecked'
+    report.reachNote = 'this driver cannot ask where a touch lands'
+    report.touched = el
+    return centre(el)
+  }
+  let last: [number, number] | undefined
+  for (;;) {
+    let r: ReachResult | undefined
+    try {
+      [r] = await driver.reach([el])
+    } catch (e) {
+      // A blip between here and the agent (a 502 while it reconnects, a 504) is polled past, as a tree read's is; one
+      // that lasts to the deadline leaves the device unable to judge, and the touch goes where it went before reach.
+      if (!(e instanceof TransientQueryError)) throw e
+      if (Date.now() >= deadline) {
+        report.reach = 'unchecked'
+        report.reachNote = `the device did not say where a touch lands: ${e.message}`
+        report.touched = el
+        return centre(el)
+      }
+      await delay(Math.min(pollIntervalMs, Math.max(0, deadline - Date.now())))
+      continue
+    }
+    if (!r || r.state === 'unknown') {
+      report.reach = 'unchecked'
+      report.reachNote = r?.reason ?? 'no answer'
+      report.touched = el
+      return centre(el)
+    }
+    if (r.state === 'reachable') {
+      if (last && Math.abs(last[0] - r.point[0]) < REACH_AGREE && Math.abs(last[1] - r.point[1]) < REACH_AGREE) {
+        report.reach = 'verified'
+        report.touched = el
+        return [round4(r.point[0]), round4(r.point[1])]
+      }
+      last = r.point
+    } else {
+      last = undefined
+    }
+    if (Date.now() >= deadline) throw new StepFailure(blocked(r))
+    await delay(Math.min(pollIntervalMs, Math.max(0, deadline - Date.now())))
+    try {
+      el = await resolveOne(driver, { ...sel, timeoutMs: Math.max(1, deadline - Date.now()) }, timeoutMs, pollIntervalMs, seen)
+    } catch (e) {
+      // The read again can run out of what the waiting left it (iOS E2E: a row under a scrim failed as "no element
+      // matched … within 0.149s", and as the environment's, since that read saw no tree of its own). The element still
+      // on the last screen read is not missing: what stood in the way is, and that is the product's.
+      const ranOut = e instanceof StepFailure || (e instanceof EnvironmentStepError && e.cause instanceof TransientQueryError)
+      if (ranOut && report.screen && matchSelector(report.screen, sel).length === 1) throw new StepFailure(blocked(r))
+      throw e
+    }
+  }
+}
+
+/** One read of the screen within `timeoutMs`, or `undefined`: the effect of a touch is then judged without it. */
+async function readScreen(driver: FlowDriver, timeoutMs: number): Promise<UIElement[] | undefined> {
+  const deadline = Date.now() + timeoutMs
+  for (;;) {
+    const q = await queryOrRetry(driver, deadline)
+    if ('tree' in q) return q.tree
+    if (Date.now() >= deadline) return undefined
+    await delay(Math.min(DEFAULT_POLL_INTERVAL_MS, Math.max(0, deadline - Date.now())))
+  }
+}
+
+/**
+ * After a touch whose flow says what it brings (#1125): read until the screen shows it, then pass; fail at the timeout
+ * naming what is missing. The screen before the touch must have left it something to do — otherwise what the flow
+ * expects was there already, and seeing it again proves nothing about the touch.
+ */
+async function confirmEffect(driver: FlowDriver, expect: StepExpect, report: StepReport, timeoutMs: number, pollIntervalMs: number): Promise<void> {
+  report.effect = 'failed'
+  if (report.screen && !effectPending(expect, report.screen)) {
+    const already = [
+      ...(expect.appear ?? []).map((a) => `${describeAnchor(a)} was showing`),
+      ...(expect.gone ?? []).map((a) => `${describeAnchor(a)} was gone`),
+    ]
+    throw new StepFailure(`the screen already looked as this touch leaves it (${already.join(', ')}), so nothing shows the touch did anything — the screen before it is not the one the flow was made on`)
+  }
+  const deadline = Date.now() + timeoutMs
+  let verdict = judgeEffect(expect, [])
+  for (;;) {
+    const q = await queryOrRetry(driver, deadline)
+    if ('tree' in q) {
+      verdict = judgeEffect(expect, q.tree)
+      if (verdict.met) {
+        report.effect = 'confirmed'
+        return
+      }
+    }
+    if (Date.now() >= deadline) break
+    await delay(Math.min(pollIntervalMs, Math.max(0, deadline - Date.now())))
+  }
+  if (verdict.met) return
+  throw new StepFailure(`the touch was sent, but ${describeAnchor(verdict.missing)} ${verdict.kind === 'appear' ? 'did not appear' : 'did not go away'} within ${timeoutMs / 1000}s, as it did when the flow was made`)
+}
+
+/** How long after the screen settles a touch's effect is read again: what is gone by then was not its effect. */
+const OBSERVE_CONFIRM_MS = 1_500
+
+async function observeTouch(
+  driver: FlowDriver, before: UIElement[] | undefined, timeoutMs: number, pollIntervalMs: number,
+  watch: EffectWatch, opts: { hidden: string[]; touched?: UIElement },
+): Promise<StepExpect | null | undefined> {
+  if (!before) return undefined
+  try {
+    const read = (signal: AbortSignal) => driver.queryUITree(signal).then((elements) => ({ elements }))
+    const after = await waitForStableScreen(read, { timeoutMs, pollIntervalMs })
+    if (!after) return undefined
+    await delay(OBSERVE_CONFIRM_MS)
+    const confirm = await readScreen(driver, timeoutMs)
+    if (!confirm) return undefined
+    return watch.observe(before, after.elements, confirm, opts)
+  } catch {
+    // Watching is for the person verifying; a read that fails here says nothing about the step, which the next one reads.
+    return undefined
+  }
+}
+
 async function resolveOne(
   driver: FlowDriver,
   sel: Selector,
   timeoutMs: number,
   pollIntervalMs: number,
+  seen?: (tree: UIElement[]) => void,
 ): Promise<UIElement> {
   const waitMs = normalizeTimeoutMs(sel.timeoutMs ?? timeoutMs, 'selector timeout')
   const deadline = Date.now() + waitMs
@@ -345,6 +526,7 @@ async function resolveOne(
       if ('tree' in q) {
         sawTree = true
         lastTree = q.tree
+        seen?.(q.tree)
         lastError = undefined // a successful query clears any earlier transient error
         const matches = matchSelector(q.tree, sel)
         if (matches.length === 1) return matches[0]
@@ -519,6 +701,8 @@ const SPANS_SCROLL_AXIS: Record<ScrollDirection, (f: UIElement['frame']) => bool
 
 /** How long `scrollUntil` waits for the list it flung to stop under the element it found. */
 const SETTLE_MATCH_MS = 2_000
+/** How near two reach answers must be to count as the same point: under one thousandth of the screen. */
+const REACH_AGREE = 0.001
 
 /**
  * The element `scrollUntil` found, read again until it is where it was the read before: the last swipe's fling is
@@ -538,6 +722,23 @@ async function settleMatch(driver: FlowDriver, sel: Selector, tree: UIElement[],
     if (now === last) return
     last = now
   }
+}
+
+/**
+ * Whether one of `matches` is fully in view: the device reaches it at its centre. `true` where the device cannot judge,
+ * since a frame in from the screen's edge is then all there is to go on — which is how it stopped before reach.
+ */
+async function inView(driver: FlowDriver, matches: UIElement[]): Promise<boolean> {
+  if (!driver.reach) return true
+  let results: ReachResult[]
+  try {
+    results = await driver.reach(matches)
+  } catch (e) {
+    // A blip on the way to the agent is a device that cannot judge this time: stop on the frame, as before reach.
+    if (e instanceof TransientQueryError) return true
+    throw e
+  }
+  return results.some((r) => r.state === 'unknown' || (r.state === 'reachable' && r.atCentre))
 }
 
 /** What the end-of-list check compares: the structure and where it is, since one long text scrolls by moving alone. */
@@ -582,7 +783,11 @@ async function scrollUntil(driver: FlowDriver, direction: ScrollDirection, sel: 
       read = true
       lastError = undefined
       const matches = matchSelector(q.tree, sel)
-      if (matches.some((m) => clear(m.frame))) return swiped ? settleMatch(driver, sel, q.tree, deadline, pollIntervalMs) : undefined
+      // In from the edge is not in view when a bar covers it there: a row under a tab bar is inside the screen and its
+      // centre is the tab (#1125). So where the device can judge, it must reach the element at its centre.
+      if (matches.some((m) => clear(m.frame)) && await inView(driver, matches.filter((m) => clear(m.frame)))) {
+        return swiped ? settleMatch(driver, sel, q.tree, deadline, pollIntervalMs) : undefined
+      }
       const pinned = matches.filter((m) => !spans(m.frame))
       const at = pinned.length > 0 ? scrolledShape(pinned) : undefined
       matchStill = at !== undefined && at === matchShape ? matchStill + 1 : 0
@@ -642,7 +847,7 @@ function pinchFingers(center: [number, number], scale: number): { start: PinchFi
 // Resolves to what a launch applied; every other step to nothing.
 async function executeStep(
   step: Step, flow: Flow, driver: FlowDriver, timeoutMs: number, pollIntervalMs: number,
-  secrets: EngineOptions['secrets'],
+  secrets: EngineOptions['secrets'], report: StepReport,
 ): Promise<LaunchApplied | void> {
   switch (step.type) {
     case 'clearState': {
@@ -662,10 +867,10 @@ async function executeStep(
       return applied
     }
     case 'tapOn': {
-      const el = await resolveOne(driver, step.selector, timeoutMs, pollIntervalMs)
-      return driver.tap(round4(el.frame.x + el.frame.width / 2), round4(el.frame.y + el.frame.height / 2))
+      const [x, y] = await touchPoint(driver, step.selector, timeoutMs, pollIntervalMs, report)
+      return driver.tap(x, y)
     }
-    case 'tapPoint': return driver.tap(step.at[0], step.at[1])
+    case 'tapPoint': report.reach = 'delivered'; return driver.tap(step.at[0], step.at[1])
     case 'inputText':
       // Selected first, so the text takes the field's place: pasting over a selection replaces it, and a Backspace is
       // not needed — one in an empty chip or code field deletes a chip or moves focus back (#1135).
@@ -704,16 +909,17 @@ async function executeStep(
     case 'assertNotVisible': return waitNotVisible(driver, step.selector, timeoutMs, pollIntervalMs)
     case 'pressButton': return driver.pressButton(step.name)
     case 'longPressOn': {
-      const el = await resolveOne(driver, step.selector, timeoutMs, pollIntervalMs)
-      return driver.longPress(round4(el.frame.x + el.frame.width / 2), round4(el.frame.y + el.frame.height / 2), step.durationMs)
+      const [x, y] = await touchPoint(driver, step.selector, timeoutMs, pollIntervalMs, report)
+      return driver.longPress(x, y, step.durationMs)
     }
-    case 'longPressPoint': return driver.longPress(step.at[0], step.at[1], step.durationMs)
+    case 'longPressPoint': report.reach = 'delivered'; return driver.longPress(step.at[0], step.at[1], step.durationMs)
     case 'pinch': {
       let center: [number, number]
-      if (Array.isArray(step.on)) center = step.on
-      else {
-        const el = await resolveOne(driver, step.on, timeoutMs, pollIntervalMs)
-        center = [round4(el.frame.x + el.frame.width / 2), round4(el.frame.y + el.frame.height / 2)]
+      if (Array.isArray(step.on)) {
+        center = step.on
+        report.reach = 'delivered'
+      } else {
+        center = await touchPoint(driver, step.on, timeoutMs, pollIntervalMs, report)
       }
       const path = pinchFingers(center, step.scale)
       if (!path) throw new StepFailure(`the pinch center [${center.join(', ')}] is too close to the edge of the screen to fit two fingers changing their spacing ×${step.scale} — pinch on a point further in`)
@@ -798,6 +1004,23 @@ async function refuseButtons(flow: Flow, driver: FlowDriver, platform: string, t
   return refusedFlow(flow, verdict.index, unavailableButtonMessage(verdict, platform), { beforeRun: true })
 }
 
+/** The screen a chrome describes, the shorter side first so a turn does not change it: iOS in points, Android in pixels. */
+export function viewportOf(chrome: ChromePayload | null | undefined): Viewport | undefined {
+  if (!chrome) return undefined
+  const [w, h] = 'framePng' in chrome ? [chrome.logicalWidth, chrome.logicalHeight] : [chrome.screenWidth, chrome.screenHeight]
+  if (!w || !h || w <= 0 || h <= 0) return undefined
+  return { width: Math.min(w, h), height: Math.max(w, h) }
+}
+
+const sameViewport = (a: Viewport, b: Viewport): boolean =>
+  Math.abs(Math.min(a.width, a.height) - b.width) < 0.5 && Math.abs(Math.max(a.width, a.height) - b.height) < 0.5
+
+/** The first step that touches a point the flow wrote, which lands where that fraction of the screen is, or -1. */
+function firstPointStep(flow: Flow): number {
+  return flow.steps.findIndex((s) => s.type === 'tapPoint' || s.type === 'longPressPoint' || s.type === 'swipe'
+    || (s.type === 'pinch' && Array.isArray(s.on)))
+}
+
 export async function runFlow(flow: Flow, driver: FlowDriver, options: EngineOptions = {}): Promise<FlowResult> {
   const timeoutMs = normalizeTimeoutMs(options.defaultTimeoutMs ?? DEFAULT_TIMEOUT_MS, 'default timeout')
   const pollIntervalMs = options.pollIntervalMs ?? DEFAULT_POLL_INTERVAL_MS
@@ -807,12 +1030,25 @@ export async function runFlow(flow: Flow, driver: FlowDriver, options: EngineOpt
     const refused = await refuseButtons(flow, driver, options.platform, timeoutMs)
     if (refused) return refused
   }
+  // A flow whose points were made on another screen is refused before it touches anything (#1125): the point would land
+  // on whatever that screen's layout puts there. A device that cannot say its size is not refused — nothing to compare.
+  const pointAt = firstPointStep(flow)
+  let viewport: Viewport | undefined
+  if (pointAt >= 0 && driver.chrome && (flow.viewport !== undefined || options.observeEffects === true)) {
+    viewport = viewportOf(await driver.chrome(timeoutMs).catch(() => null))
+    if (flow.viewport && viewport && !sameViewport(flow.viewport, viewport)) {
+      const size = (v: Viewport) => `${v.width}×${v.height}`
+      return refusedFlow(flow, pointAt, `this flow touches points made on a ${size(flow.viewport)} screen, and this device's is ${size(viewport)}: a point lands on whatever this screen shows there, so it is not run here`, { beforeRun: true })
+    }
+  }
   const started = Date.now()
   const steps: StepResult[] = []
   let failureMessage: string | undefined
   let failureKind: 'environment' | 'product' | undefined
   let deviceLacks = false
   let failureScreenshot: Uint8Array | undefined
+  // What earlier touches brought, kept across steps that changed nothing — a toast outlives a step or two (review of #1125).
+  const effects = new EffectWatch()
 
   for (const [index, step] of flow.steps.entries()) {
     const started = describeStep(step)
@@ -822,11 +1058,27 @@ export async function runFlow(flow: Flow, driver: FlowDriver, options: EngineOpt
     }
     const stepStart = Date.now()
     options.onStep?.({ index, name: started, phase: 'start', label: activityLabel(step) })
+    const report: StepReport = {}
+    const touched = () => ({
+      ...(report.reach ? { reach: report.reach } : {}), ...(report.reachNote ? { reachNote: report.reachNote } : {}),
+      ...(report.effect ? { effect: report.effect } : {}), ...(report.observed !== undefined ? { observed: report.observed } : {}),
+    })
+    const expect = EXPECTING_STEPS.has(step.type) ? (step as { expect?: StepExpect }).expect : undefined
+    const watch = EXPECTING_STEPS.has(step.type) && (expect !== undefined || options.observeEffects === true)
     try {
-      const applied = await executeStep(step, flow, driver, timeoutMs, pollIntervalMs, options.secrets)
+      // A point is touched without reading the screen, so its effect needs a read of its own first.
+      if (watch && (step.type === 'tapPoint' || step.type === 'longPressPoint')) report.screen = await readScreen(driver, timeoutMs)
+      const applied = await executeStep(step, flow, driver, timeoutMs, pollIntervalMs, options.secrets, report)
+      if (expect) await confirmEffect(driver, expect, report, timeoutMs, pollIntervalMs)
+      if (watch && options.observeEffects) {
+        report.observed = await observeTouch(driver, report.screen, timeoutMs, pollIntervalMs, effects, {
+          hidden: Object.values(options.secrets ?? {}),
+          ...(report.touched ? { touched: report.touched } : {}),
+        })
+      }
       // Known only once the launch answers, so the start mark carries the name without the relay's defaults.
       const name = step.type === 'launchApp' && applied ? describeLaunch(step.options, applied) : started
-      steps.push({ index, name, status: 'passed', durationMs: Date.now() - stepStart })
+      steps.push({ index, name, status: 'passed', durationMs: Date.now() - stepStart, ...touched() })
       options.onStep?.({ index, name, phase: 'end', status: 'passed' })
     } catch (e) {
       const name = started
@@ -835,7 +1087,7 @@ export async function runFlow(flow: Flow, driver: FlowDriver, options: EngineOpt
       if (failureKind === undefined) failureKind = isEnvironmentStepFailure(e) ? 'environment' : 'product'
       if (e instanceof DeviceLacksError) deviceLacks = true
       const suggestions = e instanceof StepFailure ? e.suggestions : undefined
-      steps.push({ index, name, status: 'failed', durationMs: Date.now() - stepStart, message, ...(suggestions ? { suggestions } : {}) })
+      steps.push({ index, name, status: 'failed', durationMs: Date.now() - stepStart, message, ...(suggestions ? { suggestions } : {}), ...touched() })
       options.onStep?.({ index, name, phase: 'end', status: 'failed' })
       failureScreenshot = await captureScreenshot(driver, FAILURE_SCREENSHOT_TIMEOUT_MS)
     }
@@ -853,6 +1105,7 @@ export async function runFlow(flow: Flow, driver: FlowDriver, options: EngineOpt
     if (shot !== undefined) result.lastScreenshot = shot
   }
   if (flow.file !== undefined) result.file = flow.file
+  if (options.observeEffects && viewport) result.viewport = viewport
   if (failureMessage !== undefined) result.failureMessage = failureMessage
   if (failureKind !== undefined) result.failureKind = failureKind
   if (deviceLacks) result.deviceLacks = true

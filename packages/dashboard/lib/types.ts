@@ -177,6 +177,11 @@ export interface RunStep {
   status: 'passed' | 'failed' | 'skipped'
   durationMs: number
   message?: string
+  /** Whether a touch was checked to land on its element (#1125); `unchecked` touched its centre, `reachNote` says why. */
+  reach?: 'verified' | 'delivered' | 'unchecked'
+  reachNote?: string
+  /** Whether the touch did what the flow says it brings (#1125). */
+  effect?: 'confirmed' | 'failed'
   /** A failed `tapOn`'s lines to try instead, each tapping one element on the screen it failed on (B2). */
   suggestions?: { yaml: string; element: { role: string; label: string; identifier?: string } }[]
 }

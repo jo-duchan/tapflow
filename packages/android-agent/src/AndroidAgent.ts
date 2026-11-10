@@ -8,7 +8,7 @@ import type {
 import { avdRotationLockMemory, formFactorOf, osVersionOf, type RotationLockMemory } from './avdConfig.js'
 import type {
   AgentControlOutbound, AgentDevicesApplied, DeviceReport, ClipboardReplyBody, OpenUrlReplyBody,
-  AppInstallReplyBody, AppLaunchReplyBody, AppLaunchToAgent, LaunchOptions, AppClearStateReplyBody, DeviceKeyboardSetReplyBody, DeviceRunResetReplyBody, DevicePosture, FormFactor, RunResetReport, RunResetRequest,
+  AppInstallReplyBody, AppLaunchReplyBody, AppLaunchToAgent, LaunchOptions, AppClearStateReplyBody, DeviceKeyboardSetReplyBody, DeviceRunResetReplyBody, DevicePosture, ReachResult, ReachTarget, FormFactor, RunResetReport, RunResetRequest,
   InputPinchStart, InputTouchStart, PointSpace,
 } from '@tapflowio/protocol'
 import { appliedKeys, compactLaunchOptions, launchOptionsProblem } from '@tapflowio/protocol/launch'
@@ -80,7 +80,7 @@ const logger = createLogger('android-agent')
 // string on its own is what puts a control on screen.
 const AGENT_CAPABILITIES: AgentCapability[] = [
   'clipboard', 'full-reset', 'network-control', 'build-download', 'launch-options', 'touch-cancel',
-  'field-value', 'keyboard-state', 'keyboard-set', 'run-reset',
+  'field-value', 'keyboard-state', 'keyboard-set', 'run-reset', 'reach',
 ]
 
 // Parse H.264 SPS NAL unit to extract frame dimensions.
@@ -3677,6 +3677,21 @@ export class AndroidAgent implements DeviceAgent, NetworkControlCapability {
         const apps = (msg.payload as { apps?: unknown } | undefined)?.apps
         void this.runResetHeld(sessionId, Array.isArray(apps) ? apps.filter((a): a is string => typeof a === 'string') : [])
           .then((body) => this.sendMsg({ ...body, sessionId, requestId }))
+        break
+      }
+      case 'ui:reach:request': {
+        const { requestId, sessionId } = msg
+        const targets = (msg as unknown as { targets?: ReachTarget[] }).targets ?? []
+        const state = this.deviceStates.get(sessionId)
+        const serial = state ? this.adb.getSerial(state.deviceId) : undefined
+        const answer = (results: ReachResult[]) => this.sendMsg({ type: 'ui:reach:response', sessionId, requestId: requestId!, results })
+        const unknown = (reason: string) => answer(targets.map(() => ({ state: 'unknown', reason })))
+        if (!requestId) break
+        if (!serial) { unknown('no booted device'); break }
+        // A device whose jar cannot run (it fell back to `uiautomator dump`) cannot judge either: said, not guessed.
+        void this.adb.reach(serial, targets)
+          .then((results) => (results && results.length === targets.length ? answer(results) : unknown('this device cannot read where a touch lands')))
+          .catch((e: unknown) => unknown((e as Error).message))
         break
       }
       case 'device:keyboard-set': {

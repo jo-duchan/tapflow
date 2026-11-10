@@ -397,6 +397,7 @@ describe('browser-inbound routing matches the protocol union', () => {
       'ui:tree:request': 'requestId sessionId',
       // #1135: Flow Capture's read of the focused field; relay-made, answered to the relay only, never forwarded.
       'ui:field:request': 'requestId sessionId',
+      'ui:reach:request': 'requestId sessionId targets',
       // #1134: another person took the device; sent only to an agent naming `keyboard-reset`.
       'device:keyboard-reset': 'sessionId',
       // #1135: where the soft keyboard is, read around a person's inputs; relay-made, never forwarded.

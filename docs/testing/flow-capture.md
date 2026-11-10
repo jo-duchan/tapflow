@@ -67,6 +67,10 @@ Text typed into a field the app marks as a password, on either keyboard, is not 
 
 The edited flow runs from the start on the same device, after the same reset, this time with selectors only and not the recorded points, on the same engine as `tapflow flow run` in CI. The steps appear as they run, each marked passed or failed with how long it took.
 
+Match and Verify also watch how the screen changes after each touch. Export writes what both saw (what Verify saw, for a touch Match did not watch) beside each step as its `expect`, so a later run fails when the touch no longer makes the same change ([Expected effects](/automation/flows#expected-effects)). Open a step to see what a run will check.
+
+- A touch after which nothing on the screen changed stays open with **Nothing on the screen changed after this touch**. If the touch should have changed something, an overlay you cannot see may be covering the element.
+- A step whose touch the device could not judge also opens with the reason ([Where a touch lands](/automation/flows#where-a-touch-lands)).
 - If it passes, **Continue** moves on.
 - If it fails, the failed step opens to show why. When a tap found nothing, it also offers selectors that would have found the element on that screen. **Back to Edit** goes back to fix it, and **Export anyway** exports it as it is.
 
@@ -77,6 +81,7 @@ The file name (`flows/<name>.yaml`) and the YAML are shown.
 - **Download** saves the file, and **Copy YAML** copies it. Copying works only on a dashboard opened over HTTPS or on localhost. Over any other HTTP address, the button selects the YAML for you to copy with the keyboard.
 - Put the file in your app repository and CI runs it with `tapflow flow run`. The CI examples keep flow files under `.tapflow/flows/`. See [Flows](/automation/flows).
 - If the flow has secrets, the `--secret` options to pass when it runs are shown.
+- After a Verify, each touch carries an `expect`, and a flow with point steps carries the size of the device Verify ran on as `viewport`. Editing a step drops the Verify result, so verify again to have them written.
 - The exported flow starts by clearing the app's data (`clearState`) and launching it (`launchApp`), and runs only against builds of this app (its bundle id or package name). If the part began with the device turned sideways, the flow turns it with `setOrientation: landscape` after the launch. If the build's bundle id could not be read, Range says so, and the flow neither clears the app's data nor is tied to one app.
 
 **Done** closes the dialog. What you did not export is gone with it, and your capture stays until the session ends, so you can open the dialog again.
@@ -96,6 +101,7 @@ The file name (`flows/<name>.yaml`) and the YAML are shown.
 - Match and Verify reset the device before they replay. On iOS that resets the keychain, privacy permissions, clipboard and location of every app on the device, so do not use one whose other apps must stay signed in.
 - On iOS, reading a field needs the agent's UI-tree runner, which starts when someone with **Capture my steps** on boots a device: about 110–360 MB more per device (measured), and not on a Mac over its memory limit.
 - Replaying a typing step by replacing the field's contents needs Android 13 or later, and `imeAction` Android 11 or later. See [Flows](/automation/flows).
+- An element covered by an overlay with no accessibility information is invisible when the device judges where a touch lands. Suspect one when Verify says a touch changed nothing. See [Where a touch lands](/automation/flows#where-a-touch-lands).
 - Every role can use it, Viewer included.
 
 ## Troubleshooting {#troubleshooting}

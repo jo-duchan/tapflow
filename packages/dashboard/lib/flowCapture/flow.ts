@@ -1,4 +1,4 @@
-import { flowSteps, flowToYaml, type CapturedFlow, type Flow } from '@tapflowio/flow-runner/browser'
+import { agreedEffect, flowSteps, flowToYaml, type CapturedFlow, type CapturedStep, type Flow, type FlowResult, type Step, type StepExpect } from '@tapflowio/flow-runner/browser'
 import type { CaptureState } from './machine'
 
 /** The captured flow as Edit left it: removed steps gone, renamed secrets renamed, values of unused secrets dropped. */
@@ -30,6 +30,40 @@ export function flowOf(state: Pick<CaptureState, 'captured' | 'removed' | 'renam
     ...(tags.length ? { tags } : {}),
     steps: flowSteps(edited, appId ? { appId } : {}),
   }
+}
+
+/**
+ * The flow with what Verify saw (#1125): each touch's effect beside it as its `expect`, so a run fails when a touch stops
+ * doing it — a tap on a row an overlay covers sends fine and changes nothing — and the screen it ran on as `viewport`
+ * when the flow touches points, so a run on another size is refused. Only from a Verify of this very flow (Edit drops
+ * the result, so the steps line up), and only what it saw: a touch that changed nothing gets no `expect`.
+ *
+ * Where Match's replay watched the same touch (`matched`, the captured steps the flow was made from), only what both saw
+ * is written (`agreedEffect`): two looks minutes apart are what tells a number that changes by itself from the touch's
+ * effect, which no pattern can. A touch Match could not watch keeps what Verify saw.
+ */
+export function withEffects(flow: Omit<Flow, 'file'>, verified: FlowResult | undefined, matched: readonly CapturedStep[] = []): Omit<Flow, 'file'> {
+  if (!verified || verified.steps.length !== flow.steps.length) return flow
+  const byMatch = new Map<Step, StepExpect | null>()
+  for (const m of matched) if (m.step && m.observed !== undefined) byMatch.set(m.step, m.observed)
+  return {
+    ...flow,
+    ...(verified.viewport ? { viewport: verified.viewport } : {}),
+    steps: flow.steps.map((step, i): Step => {
+      const verifySaw = verified.steps[i]?.observed ?? null
+      const seen = byMatch.has(step) ? agreedEffect(verifySaw, byMatch.get(step)!) : verifySaw
+      if (!seen) return step
+      return step.type === 'tapOn' || step.type === 'tapPoint' || step.type === 'longPressOn' || step.type === 'longPressPoint'
+        ? { ...step, expect: seen }
+        : step
+    }),
+  }
+}
+
+/** The flow Export shows and writes: Edit's flow with what Verify and Match both saw beside each touch. */
+export function exportedFlow(state: Pick<CaptureState, 'captured' | 'removed' | 'renamed' | 'name' | 'tags' | 'verify'>, appId: string | null): Omit<Flow, 'file'> | null {
+  const flow = flowOf(state, appId)
+  return flow ? withEffects(flow, state.verify?.result, state.captured?.steps) : null
 }
 
 export function yamlOf(flow: Omit<Flow, 'file'>): string {

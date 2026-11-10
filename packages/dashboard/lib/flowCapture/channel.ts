@@ -1,7 +1,7 @@
-import type { BrowserToRelay, RunResetItem, RunResetReport, UIElement } from '@tapflowio/protocol'
+import type { BrowserToRelay, ReachResult, ReachTarget, RunResetItem, RunResetReport, UIElement } from '@tapflowio/protocol'
 import type { InterfaceTurn } from '@tapflowio/protocol/screen'
 import {
-  newRequestId, parseUITreeResponse, RelayClosedError, RelayHttpError, SessionChannel, type RelayMsg, type SessionDevice,
+  newRequestId, parseUITreeResponse, reachRequest, readReachResults, RelayClosedError, RelayHttpError, SessionChannel, type RelayMsg, type SessionDevice,
 } from '@tapflowio/flow-runner/browser'
 import type { CaptureTap } from './tap'
 
@@ -93,6 +93,21 @@ export class DashboardSessionChannel extends SessionChannel {
 
   async queryUITree(sessionId: string, signal?: AbortSignal): Promise<UIElement[]> {
     return (await this.queryUITreeWithTurn(sessionId, signal)).elements
+  }
+
+  /**
+   * Where touches meant for `targets` land, as the device's agent judges them (#1125), so Verify taps where CI will.
+   * The relay this dialog ships in has the route; an answer it cannot use is every target `unknown`.
+   */
+  async reach(sessionId: string, targets: ReachTarget[], signal?: AbortSignal): Promise<ReachResult[]> {
+    let res: Response
+    try {
+      res = await fetch(`/api/v1/sessions/${sessionId}/reach`, { ...reachRequest(targets, signal), credentials: 'include' })
+    } catch (e) {
+      throw this.treeQueryFailure(sessionId, new RelayHttpError(`reach query failed: ${(e as Error).message}`, 0, { cause: e }))
+    }
+    if (!res.ok) throw this.treeQueryFailure(sessionId, new RelayHttpError(`reach query failed: ${res.status}`, res.status))
+    return readReachResults(await res.json().catch(() => null), targets.length)
   }
 
   /** A JPEG: the relay's default is a full-size PNG, one to three megabytes a step. */

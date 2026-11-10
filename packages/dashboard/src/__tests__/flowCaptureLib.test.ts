@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import { parseFlow, type CapturedFlow, type CapturedStep, type FlowResult, type RawStep } from '@tapflowio/flow-runner/browser'
 import { askedReady, canGoTo, initialState, reduce, stepIndex, withAsked, type CaptureState } from '@/lib/flowCapture/machine'
-import { editedCapture, fileNameOf, flowOf, moveEdge, yamlOf } from '@/lib/flowCapture/flow'
+import { editedCapture, exportedFlow, fileNameOf, flowOf, moveEdge, withEffects, yamlOf } from '@/lib/flowCapture/flow'
 import { addMark, markOf } from '@/lib/flowCapture/marks'
 import { NO_MARKS } from '@/lib/watchActions'
 
@@ -184,6 +184,53 @@ describe('what Edit makes of the flow', () => {
 })
 
 // What the dialog draws over a step's picture and the device, as the MCP watch view draws an agent's touches.
+// #1125: what Verify saw each touch do goes into the file beside it, so a run fails when the touch stops doing it.
+describe('what Verify saw, in the exported flow', () => {
+  const flow = { name: 'f', steps: [{ type: 'launchApp' }, { type: 'tapOn', selector: { text: 'Save' } }, { type: 'tapOn', selector: { text: 'Back' } }] } as const
+  const seen = { appear: [{ text: 'Saved', role: 'text' }] }
+  const verified = (observed: unknown[]) => ({
+    name: 'f', status: 'passed', durationMs: 1,
+    steps: observed.map((o, index) => ({ index, name: `s${index}`, status: 'passed', durationMs: 1, ...(o === undefined ? {} : { observed: o }) })),
+  }) as unknown as FlowResult
+
+  it('writes a touch\'s effect beside it, and nothing beside one that changed nothing', () => {
+    const out = withEffects(flow as never, verified([undefined, seen, null]))
+    expect(out.steps).toEqual([flow.steps[0], { ...flow.steps[1], expect: seen }, flow.steps[2]])
+    expect(parseFlow(yamlOf(out), 'f.yaml').steps[1]).toEqual({ ...flow.steps[1], expect: seen })
+  })
+
+  it('pins the flow to the screen Verify ran on, when it said one', () => {
+    const result = { ...verified([undefined, seen, null]), viewport: { width: 402, height: 874 } } as FlowResult
+    expect(withEffects(flow as never, result).viewport).toEqual({ width: 402, height: 874 })
+    expect(withEffects(flow as never, verified([undefined, seen, null]))).not.toHaveProperty('viewport')
+  })
+
+  // Research for #1125: two looks minutes apart tell a number that changes by itself from the touch's effect.
+  it('writes only what Match saw too, where Match watched the touch', () => {
+    const saved = { appear: [{ text: 'Saved', role: 'text' }] }
+    const both = { appear: [{ text: 'Saved', role: 'text' }, { id: 'presence', text: '3 online' }] }
+    const matched = [
+      { raw: {}, step: flow.steps[1], observed: { appear: [{ text: 'Saved', role: 'text' }, { id: 'presence', text: '5 online' }] } },
+      { raw: {}, step: flow.steps[2], observed: null },
+    ] as unknown as CapturedStep[]
+    const out = withEffects(flow as never, verified([undefined, both, saved]), matched)
+    expect(out.steps).toEqual([flow.steps[0], { ...flow.steps[1], expect: saved }, flow.steps[2]])
+  })
+
+  it('is what Export gets: the edited flow, with what Verify and Match both saw', () => {
+    const tapSave = { type: 'tapOn', selector: { text: 'Save' } } as const
+    const captured = { steps: [{ raw: {}, step: tapSave, observed: { appear: [{ text: 'Saved', role: 'text' }] } }], launchAdded: false, secrets: {} }
+    const result = { name: 'f', status: 'passed', durationMs: 1, steps: [{ index: 0, name: 's', status: 'passed', durationMs: 1, observed: { appear: [{ text: 'Saved', role: 'text' }, { text: 'Extra', role: 'text' }] } }] }
+    const state = { ...initialState, captured, name: 'f', verify: { status: 'passed', done: 1, live: [], result } } as unknown as CaptureState
+    expect(exportedFlow(state, null)?.steps).toEqual([{ ...tapSave, expect: { appear: [{ text: 'Saved', role: 'text' }] } }])
+  })
+
+  it('writes nothing from a Verify of other steps, or with no Verify', () => {
+    expect(withEffects(flow as never, verified([undefined, seen]))).toBe(flow)
+    expect(withEffects(flow as never, undefined)).toBe(flow)
+  })
+})
+
 describe('the touches drawn', () => {
   const base = { at: 0, endAt: 0, outcome: 'landed', messages: [] }
 

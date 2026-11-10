@@ -13,6 +13,8 @@ import XCTest
 //   GET /field?bundleId=<id>        → the keyboard-focused text field as JSON, or `{"reason": …}` (Flow Capture, #1135),
 //                                     with the soft keyboard beside it
 //   GET /keyboard?bundleId=<id>     → the soft keyboard as JSON: `{"shown", "rect"?, "orientation"}` (#1135)
+//   GET /reach?bundleId=<id>&targets=<base64 JSON>
+//                                   → `{"results": [ReachResult]}`: where a touch meant for each element lands (#1125)
 final class TreeServer {
     private let listener: NWListener
     private let queue = DispatchQueue(label: "dev.tapflow.treeserver")
@@ -122,7 +124,85 @@ final class TreeServer {
             }
             return ("200 OK", json(Self.keyboard(XCUIApplication(bundleIdentifier: bundleId))))
         }
+        if path.hasPrefix("/reach") {
+            guard let bundleId = query(path, "bundleId"), !bundleId.isEmpty else { return ("400 Bad Request", "missing bundleId") }
+            guard let raw = query(path, "targets"), let data = Data(base64Encoded: raw),
+                  let targets = (try? JSONSerialization.jsonObject(with: data)) as? [[String: Any]] else {
+                return ("400 Bad Request", "targets must be base64 JSON")
+            }
+            let app = XCUIApplication(bundleIdentifier: bundleId)
+            guard app.state == .runningForeground else {
+                return ("200 OK", json(["results": targets.map { _ in ["state": "unknown", "reason": "the app is not in front"] }]))
+            }
+            return ("200 OK", json(["results": targets.map { Self.reach(app, $0) }]))
+        }
         return ("404 Not Found", "unknown route")
+    }
+
+    /**
+     * Where a touch meant for `target` lands (#1125), judged by XCTest, not by the frame's centre, which a tab bar or a
+     * scrim can cover: measured, a SwiftUI row under the tab bar is hittable at (0.10, 0.885) while its centre is the
+     * Hard tab's button. The element is found again by identifier, else label, and the candidate whose frame — clipped
+     * to the window and normalized as the tree's are (`xcuiTree.ts`) — is nearest the one the client read.
+     *
+     * The point is `hitPointCoordinate.screenPoint` over the portrait screen: measured on a landscape app, that point is
+     * in the portrait screen's space, not the window's, which is the space a touch is sent in — so a client never turns
+     * it. `hitPointCoordinate` is private (WebDriverAgent reads it too); without it the answer is `unknown`, never the
+     * centre, which is the false pass this exists to end.
+     */
+    private static func reach(_ app: XCUIApplication, _ target: [String: Any]) -> [String: Any] {
+        let window = app.windows.firstMatch.frame
+        guard window.width > 0, window.height > 0 else { return ["state": "unknown", "reason": "no window"] }
+        let f = target["frame"] as? [String: Double] ?? [:]
+        let want = CGRect(x: f["x"] ?? 0, y: f["y"] ?? 0, width: f["width"] ?? 0, height: f["height"] ?? 0)
+        let all = app.descendants(matching: .any)
+        let query: XCUIElementQuery
+        if let id = target["identifier"] as? String, !id.isEmpty {
+            query = all.matching(identifier: id)
+        } else {
+            query = all.matching(NSPredicate(format: "label == %@", target["label"] as? String ?? ""))
+        }
+        let count = query.count
+        var best: (element: XCUIElement, frame: CGRect, distance: Double)?
+        var runnerUp = Double.infinity
+        var onScreen = 0
+        for i in 0..<min(count, 24) {
+            let element = query.element(boundBy: i)
+            guard let frame = clipped(element.frame, to: window) else { continue }
+            onScreen += 1
+            // Double, not CGFloat: Xcode 26.6 refused a CGFloat for the tuple's Double below and the runner failed to build.
+            let d = Double(abs(frame.minX - want.minX) + abs(frame.minY - want.minY) + abs(frame.width - want.width) + abs(frame.height - want.height))
+            if let b = best, d >= b.distance { runnerUp = min(runnerUp, d); continue }
+            if let b = best { runnerUp = b.distance }
+            best = (element, frame, d)
+        }
+        if count > 0 && onScreen == 0 { return ["state": "offscreen"] }
+        // Not the element the client read: gone, moved past rounding, or two equally near. Read again, never guess.
+        guard let found = best, found.distance < 0.02, runnerUp - found.distance > 0.002 else {
+            return ["state": "missing", "candidates": onScreen]
+        }
+        guard found.element.isHittable else { return ["state": "occluded"] }
+        guard found.element.responds(to: NSSelectorFromString("hitPointCoordinate")),
+              let hit = found.element.value(forKey: "hitPointCoordinate") as? XCUICoordinate else {
+            return ["state": "unknown", "reason": "this Xcode gives no hit point"]
+        }
+        let portrait = CGSize(width: min(window.width, window.height), height: max(window.width, window.height))
+        let centre = found.element.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).screenPoint
+        let p = hit.screenPoint
+        return [
+            "state": "reachable",
+            "point": [p.x / portrait.width, p.y / portrait.height],
+            "atCentre": hypot(p.x - centre.x, p.y - centre.y) < 1.5,
+            "frame": ["x": found.frame.minX, "y": found.frame.minY, "width": found.frame.width, "height": found.frame.height],
+        ]
+    }
+
+    /// `frame` clipped to `window` and normalized by it, as `xcuiTree.ts` does; nil when no part is on screen.
+    private static func clipped(_ frame: CGRect, to window: CGRect) -> CGRect? {
+        let x1 = max(0, (frame.minX - window.minX) / window.width), y1 = max(0, (frame.minY - window.minY) / window.height)
+        let x2 = min(1, (frame.maxX - window.minX) / window.width), y2 = min(1, (frame.maxY - window.minY) / window.height)
+        guard x2 > x1, y2 > y1 else { return nil }
+        return CGRect(x: x1, y: y1, width: x2 - x1, height: y2 - y1)
     }
 
     private static let textInputTypes: [XCUIElement.ElementType] = [.textField, .secureTextField, .searchField, .textView]

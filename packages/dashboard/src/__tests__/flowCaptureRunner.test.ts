@@ -9,6 +9,10 @@ const log: string[] = []
 const screen: { elements: unknown[] } = { elements: [] }
 // One test has the device refuse what is replayed.
 const replay = { refuse: false }
+// What each step was matched with: one test reads the device's reach answers off it.
+const matchedWith: unknown[] = []
+// The options the engine was last run with.
+const ran: { options?: { observeEffects?: boolean } } = {}
 vi.mock('@tapflowio/flow-runner/browser', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@tapflowio/flow-runner/browser')>()),
   rangeStartOrientation: () => 'landscape',
@@ -17,9 +21,10 @@ vi.mock('@tapflowio/flow-runner/browser', async (importOriginal) => ({
     if (replay.refuse) throw new Error('channel-unavailable')
     log.push(`replay ${raw.kind}`)
   },
-  matchStep: (raw: RawStep) => ({ raw, step: null }),
+  matchStep: (raw: RawStep, ctx: unknown) => { matchedWith.push(ctx); return { raw, step: null } },
   // The engine as far as the keyboard is concerned: a tap, then typing and a key, through the driver it was given.
-  runFlow: async (_flow: unknown, driver: { tap: (x: number, y: number) => Promise<void>; inputText: (t: string) => Promise<void>; pressKey: (c: string) => Promise<void> }) => {
+  runFlow: async (_flow: unknown, driver: { tap: (x: number, y: number) => Promise<void>; inputText: (t: string) => Promise<void>; pressKey: (c: string) => Promise<void> }, options?: { observeEffects?: boolean }) => {
+    ran.options = options
     await driver.tap(0.5, 0.5)
     await driver.inputText('안녕')
     await driver.pressKey('ImeAction')
@@ -54,10 +59,16 @@ const channel = {
   pressKey: async (_s: string, code: string) => { log.push(`key ${code}`) },
   screenshot: async () => { throw new Error('no screenshot here') },
   chrome: async () => null,
+  reach: async (_s: string, targets: { label: string }[]) => {
+    log.push(`reach ${targets.map((t) => t.label).join(',')}`)
+    if (reachAnswer === 'fail') throw new Error('relay 502')
+    return targets.map(() => ({ state: 'occluded', by: 'Tab Bar' }))
+  },
 } as unknown as Channel
+let reachAnswer: 'occluded' | 'fail' = 'occluded'
 
 const base = { at: 0, endAt: 0, outcome: 'done' }
-const tapStep = { ...base, kind: 'tap', point: { x: 0.5, y: 0.5 } } as unknown as RawStep
+const tapStep = { ...base, kind: 'tap', point: [0.5, 0.5] } as unknown as RawStep
 const launchStep = { ...base, kind: 'launch', buildId: 7 } as unknown as RawStep
 const installStep = { ...base, kind: 'install', buildId: 7 } as unknown as RawStep
 const textStep = { ...base, kind: 'text', text: '안녕', replace: true } as unknown as RawStep
@@ -70,6 +81,8 @@ beforeEach(() => {
   pauseOk = true
   keyboardAnswers = ['done']
   resetAnswer = { done: ['keychain'], failed: [] }
+  matchedWith.length = 0
+  reachAnswer = 'occluded'
   vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
     if (url.endsWith('/pause') && init?.method === 'PUT') {
       log.push('pause')
@@ -155,6 +168,66 @@ describe('matchRange', () => {
     await matchRange(tap, channel, lease, [at, textStep], { start: 0, end: 2 }, null, { ...hooks(), onTouch })
     await lease.stop()
     expect(onTouch.mock.calls).toEqual([[{ kind: 'tap', x: 0.25, y: 0.75 }]])
+  })
+
+  // #1125: the tree cannot say what covers an element on the device, so the device is asked about the screen the step is
+  // about to act on — before it is replayed, which changes that screen.
+  it('asks the device where a touch on the tapped element lands, before replaying it, and matches with the answer', async () => {
+    screen.elements = [{ role: 'cell', label: 'Row 13', enabled: true, frame: { x: 0, y: 0.86, width: 1, height: 0.06 } }]
+    const at = { ...base, kind: 'tap', point: [0.5, 0.88] } as unknown as RawStep
+    const lease = new PauseLease(tap)
+    await matchRange(tap, channel, lease, [launchStep, at], { start: 0, end: 2 }, null, hooks())
+    await lease.stop()
+    expect(log.filter((l) => l.startsWith('reach') || l.startsWith('replay'))).toEqual(['replay launch', 'reach Row 13', 'replay tap'])
+    expect(matchedWith.at(-1)).toMatchObject({ reach: [{ state: 'occluded', by: 'Tab Bar' }] })
+  })
+
+  // Research for #1125: Match watches each touch too, from the screen before it to the next read, for Export to keep
+  // only what Verify saw as well.
+  it('says what each touch did, from the screen before it to the one read after', async () => {
+    const row = { role: 'cell', label: 'Row 13', enabled: true, frame: { x: 0, y: 0.5, width: 1, height: 0.06 } }
+    const saved = { role: 'text', label: 'Saved', enabled: true, frame: { x: 0, y: 0.1, width: 1, height: 0.04 } }
+    screen.elements = [row]
+    const at = { ...base, kind: 'tap', point: [0.5, 0.52] } as unknown as RawStep
+    const lease = new PauseLease(tap)
+    const matched = await matchRange(tap, channel, lease, [launchStep, at], { start: 0, end: 2 }, null, {
+      ...hooks(),
+      onStep: (step: { raw: RawStep }) => { if (step.raw === at) screen.elements = [row, saved] },
+    })
+    await lease.stop()
+    expect(matched.at(-1)).toMatchObject({ observed: { appear: [{ text: 'Saved', role: 'text' }] } })
+    expect(matched[0]).not.toHaveProperty('observed')
+  })
+
+  it('closes one touch\'s watch on the screen read before the next step', async () => {
+    const row = { role: 'cell', label: 'Row 13', enabled: true, frame: { x: 0, y: 0.5, width: 1, height: 0.06 } }
+    const saved = { role: 'text', label: 'Saved', enabled: true, frame: { x: 0, y: 0.1, width: 1, height: 0.04 } }
+    screen.elements = [row]
+    const first = { ...base, kind: 'tap', point: [0.5, 0.52] } as unknown as RawStep
+    const second = { ...base, kind: 'tap', point: [0.5, 0.53] } as unknown as RawStep
+    const shared = { role: 'text', label: 'Shared', enabled: true, frame: { x: 0, y: 0.2, width: 1, height: 0.04 } }
+    const lease = new PauseLease(tap)
+    const matched = await matchRange(tap, channel, lease, [launchStep, first, second], { start: 0, end: 3 }, null, {
+      ...hooks(),
+      // The first tap brings "Saved", the second "Shared".
+      onStep: (step: { raw: RawStep }) => { screen.elements = step.raw === first ? [row, saved] : step.raw === second ? [row, saved, shared] : screen.elements },
+    })
+    await lease.stop()
+    const observedOf = (raw: RawStep) => matched.find((m) => m.raw === raw)?.observed
+    expect(observedOf(first)).toEqual({ appear: [{ text: 'Saved', role: 'text' }] })
+    expect(observedOf(second)).toEqual({ appear: [{ text: 'Shared', role: 'text' }] })
+  })
+
+  it('matches by the tree alone when the device cannot answer', async () => {
+    reachAnswer = 'fail'
+    screen.elements = [{ role: 'cell', label: 'Row 13', enabled: true, frame: { x: 0, y: 0.86, width: 1, height: 0.06 } }]
+    const at = { ...base, kind: 'tap', point: [0.5, 0.88] } as unknown as RawStep
+    const lease = new PauseLease(tap)
+    await matchRange(tap, channel, lease, [launchStep, at], { start: 0, end: 2 }, null, hooks())
+    await lease.stop()
+    expect(log).toContain('replay tap')
+    expect(matchedWith.at(-1)).toMatchObject({ tree: [{ label: 'Row 13' }] })
+    expect(matchedWith.at(-1)).not.toHaveProperty('reach')
   })
 
   it('taps nothing first when a field already has focus', async () => {
@@ -308,6 +381,14 @@ describe('verifyFlow', () => {
     await lease.stop()
     expect(log.filter((l) => l !== 'pause')[0]).toBe('reset com.example')
     expect(onReset).toHaveBeenCalledWith({ done: ['keychain'], failed: [] })
+  })
+
+  // #1125: Export writes what each touch did beside it, so Verify has to watch.
+  it('watches what each touch does', async () => {
+    const lease = new PauseLease(tap)
+    await verifyFlow(tap, channel, lease, { name: 'f', steps: [] }, {}, () => {})
+    await lease.stop()
+    expect(ran.options).toMatchObject({ observeEffects: true })
   })
 
   it('says where the flow touches, for drawing on the device', async () => {

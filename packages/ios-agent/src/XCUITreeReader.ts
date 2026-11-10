@@ -4,7 +4,7 @@ import { createHash, randomUUID } from 'crypto'
 import { readdirSync, readFileSync, writeFileSync } from 'fs'
 import { join, relative } from 'path'
 import type { UIElement } from '@tapflowio/agent-core'
-import type { FieldReadReason, FocusedField, KeyboardState } from '@tapflowio/protocol'
+import type { FieldReadReason, FocusedField, KeyboardState, ReachResult, ReachTarget } from '@tapflowio/protocol'
 import { toFramePoint } from '@tapflowio/protocol/screen'
 import { createLogger, PlatformError } from '@tapflowio/agent-core'
 import { parseTreeText, splitInterfaceTurn } from './xcuiTree.js'
@@ -399,6 +399,28 @@ export class XCUITreeReader {
     } catch (e) {
       if (refused(e)) this.dropRunner(udid, handle)
       return { shown: null }
+    }
+  }
+
+  /**
+   * Where touches meant for `targets` land, as the runner's XCTest judges them (`/reach`, #1125). Every target `unknown`
+   * when the runner cannot answer: the client taps then knowing the tap was not checked. ~130 ms a target (measured).
+   */
+  async reach(udid: string, bundleId: string, targets: ReachTarget[]): Promise<ReachResult[]> {
+    const unknown = (reason: string): ReachResult[] => targets.map(() => ({ state: 'unknown', reason }))
+    if (!bundleId) return unknown('no app has been launched or installed')
+    const handle = await this.ensureRunner(udid)
+    const q = encodeURIComponent(Buffer.from(JSON.stringify(targets)).toString('base64'))
+    try {
+      const r = await fetch(`http://localhost:${handle.port}/reach?bundleId=${encodeURIComponent(bundleId)}&targets=${q}`, {
+        signal: AbortSignal.timeout(5_000 + 300 * targets.length),
+      })
+      if (!r.ok) return unknown(`the tree runner answered ${r.status}`)
+      const results = ((await r.json()) as { results?: unknown }).results
+      return Array.isArray(results) && results.length === targets.length ? results as ReachResult[] : unknown('the tree runner answered for other elements')
+    } catch (e) {
+      if (refused(e)) this.dropRunner(udid, handle)
+      return unknown('the tree runner did not answer')
     }
   }
 

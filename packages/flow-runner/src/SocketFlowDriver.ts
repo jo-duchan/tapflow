@@ -1,5 +1,5 @@
-import type { ChromePayload, LaunchApplied, LaunchOptions } from '@tapflowio/protocol'
-import { toFramePoint, type InterfaceTurn } from '@tapflowio/protocol/screen'
+import type { ChromePayload, LaunchApplied, LaunchOptions, ReachResult, ReachTarget } from '@tapflowio/protocol'
+import { fromFramePoint, toFramePoint, type InterfaceTurn } from '@tapflowio/protocol/screen'
 import type { UIElement } from '@tapflowio/agent-core'
 import type { FlowDriver, PinchFingers } from './engine.js'
 import type { KeyModifier } from './schema.js'
@@ -18,6 +18,14 @@ import {
 } from './sessionErrors.js'
 
 const TURN_SETTLE_MS = 2_000
+
+/** What the agent needs to find a tree element again: who it is and where the tree read it. */
+export function reachTargetOf(e: UIElement): ReachTarget {
+  return {
+    role: e.role, label: e.label, frame: e.frame,
+    ...(e.identifier !== undefined ? { identifier: e.identifier } : {}), ...(e.rawRole !== undefined ? { rawRole: e.rawRole } : {}),
+  }
+}
 const TURN_SETTLE_POLL_MS = 200
 
 /**
@@ -30,6 +38,9 @@ export type SessionDevice = Pick<SessionChannel,
 > & {
   queryUITreeWithTurn(sessionId: string, signal?: AbortSignal): Promise<{ elements: UIElement[]; interfaceTurn?: InterfaceTurn }>
   screenshot(sessionId: string, signal?: AbortSignal): Promise<Uint8Array>
+  /** Where touches meant for `targets` land (#1125). Optional, so a device written before it still runs a flow: every
+   *  touch is then unchecked, as on an agent that cannot judge. */
+  reach?(sessionId: string, targets: ReachTarget[], signal?: AbortSignal): Promise<ReachResult[]>
 }
 import { EnvironmentStepError, markEnvironmentFailure } from './errors.js'
 
@@ -101,6 +112,17 @@ export class SocketFlowDriver implements FlowDriver {
     const { elements, interfaceTurn } = await this.guard(() => this.client.queryUITreeWithTurn(this.sessionId, signal))
     this.turn = interfaceTurn
     return elements
+  }
+
+  /**
+   * Where touches meant for `targets` land (#1125). The agent answers in the framebuffer a touch is sent in; the point
+   * comes back here in the app's interface, as a selector's centre is, so `tap` turns it the way it turns any point.
+   */
+  async reach(targets: UIElement[], signal?: AbortSignal): Promise<ReachResult[]> {
+    const ask = this.client.reach?.bind(this.client)
+    if (!ask) return targets.map((): ReachResult => ({ state: 'unknown', reason: 'this channel cannot ask where a touch lands' }))
+    const results = await this.guard(() => ask(this.sessionId, targets.map(reachTargetOf), signal))
+    return results.map((r) => (r.state === 'reachable' ? { ...r, point: fromFramePoint(this.turn, r.point) } : r))
   }
 
   tap(x: number, y: number): Promise<void> {

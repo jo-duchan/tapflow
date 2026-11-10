@@ -348,6 +348,36 @@ describe('VerifyScreen', () => {
     expect(screen.getByText('tapOn: "Row 22"')).toBeInTheDocument()
     expect(screen.getByText(/, not run/)).toBeInTheDocument()
   })
+
+  // #1125: a passed step whose touch the device could not judge opens onto why, since a covered row passed that way.
+  it('opens a passed step onto a touch that was not checked to land on its element', () => {
+    const props = { tap: { surface: () => null } as never, marks: { cursor: null, trails: [] }, total: 1, onExport: vi.fn(), onBack: vi.fn(), primaryRef: { current: null } }
+    const passed = { ...initialState, phase: 'verifying' as const, verify: { status: 'passed' as const, done: 1, live: [], result: { status: 'passed', steps: [
+      { index: 0, name: 'tapOn("Row 13")', status: 'passed', durationMs: 900, reach: 'unchecked', reachNote: 'old agent' },
+      { index: 1, name: 'tapOn("Save")', status: 'passed', durationMs: 900, reach: 'verified' },
+    ] } as never } }
+    render(<VerifyScreen state={passed} {...props} />)
+    expect(screen.getByRole('button', { name: /tapOn\("Row 13"\)/ })).toHaveAttribute('aria-expanded', 'true')
+    expect(screen.getByText(/Not checked to land on its element \(old agent\)/)).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /tapOn\("Save"\)/ })).toBeNull()
+  })
+
+  // #1125: an overlay the tree does not show takes a touch and the step still passes, so a touch that changed nothing
+  // says so, and one that changed something says what a run will look for.
+  it('says a touch changed nothing, open, and what a run checks after one that did, closed', () => {
+    const props = { tap: { surface: () => null } as never, marks: { cursor: null, trails: [] }, total: 1, onExport: vi.fn(), onBack: vi.fn(), primaryRef: { current: null } }
+    const passed = { ...initialState, phase: 'verifying' as const, verify: { status: 'passed' as const, done: 2, live: [], result: { status: 'passed', steps: [
+      { index: 0, name: 'tapOn("Row 13")', status: 'passed', durationMs: 900, reach: 'verified', observed: null },
+      { index: 1, name: 'tapOn("Save")', status: 'passed', durationMs: 900, reach: 'verified', observed: { appear: [{ text: 'Saved', role: 'text' }], gone: [{ id: 'save' }] } },
+    ] } as never } }
+    render(<VerifyScreen state={passed} {...props} />)
+    expect(screen.getByRole('button', { name: /tapOn\("Row 13"\)/ })).toHaveAttribute('aria-expanded', 'true')
+    expect(screen.getByText(/Nothing on the screen changed after this touch/)).toBeInTheDocument()
+    const save = screen.getByRole('button', { name: /tapOn\("Save"\)/ })
+    expect(save).toHaveAttribute('aria-expanded', 'false')
+    fireEvent.click(save)
+    expect(screen.getByText('A run checks that "Saved" appears, save goes after this touch.')).toBeInTheDocument()
+  })
 })
 
 // #1139: Match and Verify start from a run's reset, and say what it did.

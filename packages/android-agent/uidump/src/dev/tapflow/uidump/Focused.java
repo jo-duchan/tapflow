@@ -19,6 +19,8 @@ import java.lang.reflect.InvocationTargetException;
  *   ... dev.tapflow.uidump.Focused read            → the focused field, the keyboard's touchable rect and language
  *   ... dev.tapflow.uidump.Focused set             → stdin's first line (base64 UTF-8) typed at the field's caret, read back
  *   ... dev.tapflow.uidump.Focused ime             → the field's IME action (Done, Next, Search, …), API 30+
+ *   ... dev.tapflow.uidump.Focused reach           → stdin's first line (base64 JSON targets): where a touch meant for
+ *                                                     each lands (#1125), see Reach
  *
  * No idle wait, unlike TreeDump: the field is read as it is the moment it is asked (measured: the read itself takes
  * 2-16 ms; the rest of the ~1 s is starting app_process). The text to set comes on stdin, never in argv, where `ps`
@@ -31,7 +33,8 @@ public final class Focused {
   public static void main(String[] args) throws Exception {
     String mode = args.length > 0 ? args[0] : "read";
     // The text to set is read before connecting, as it always was: stdin is the agent's, not the device's.
-    String line = "set".equals(mode) ? new BufferedReader(new InputStreamReader(System.in, "UTF-8")).readLine() : null;
+    String line = "set".equals(mode) || "reach".equals(mode)
+        ? new BufferedReader(new InputStreamReader(System.in, "UTF-8")).readLine() : null;
     out(handle(mode, line));
     // A wrapper that failed to connect leaves its handler thread running, and app_process waits for it: the one-shot
     // run would then end only at its `timeout`.
@@ -77,6 +80,7 @@ public final class Focused {
       if ("set".equals(mode)) return set(field, textLine);
       if ("ime".equals(mode)) return ime(field);
       if ("read".equals(mode)) return read(automation, field);
+      if ("reach".equals(mode)) return Reach.answer(automation, textLine);
       return "{\"error\":\"unknown request\"}";
     } catch (Exception e) {
       return "{\"error\":" + str(String.valueOf(e)) + "}";

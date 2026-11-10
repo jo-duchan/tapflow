@@ -41,6 +41,14 @@ export function toFramePoint(turn: InterfaceTurn | undefined, [u, v]: [number, n
   }
 }
 
+/**
+ * `toFramePoint`'s inverse: a point in the portrait framebuffer, as the app's upright interface sees it. A reach answer's
+ * point is in the framebuffer (`ReachResult`), and a driver that turns every point it taps takes it back this way first.
+ */
+export function fromFramePoint(turn: InterfaceTurn | undefined, point: [number, number]): [number, number] {
+  return turn === 90 || turn === 270 ? toFramePoint(turn === 90 ? 270 : 90, point) : toFramePoint(turn, point)
+}
+
 /** `interfaceTurn` off a ui-tree body a client parsed itself: anything but 0, 90, 180 or 270 is no information. */
 export function interfaceTurnOf(value: unknown): InterfaceTurn | undefined {
   return value === 0 || value === 90 || value === 180 || value === 270 ? value : undefined

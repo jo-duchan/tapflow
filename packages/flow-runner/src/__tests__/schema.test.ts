@@ -387,6 +387,50 @@ steps:
 })
 
 // Flow Capture (#1125): a tap whose point the tree names nothing at, and a typed password, need a way into a flow.
+// #1125: what a touch is expected to bring, beside the action in the step's own mapping.
+describe('expect', () => {
+  const parse = (step: string) => parseFlow(`steps:\n${step}`, 'f.yaml')
+
+  it('rides beside a touch step', () => {
+    const flow = parse('  - tapOn: "Save"\n    expect:\n      appear: [{ text: Saved }]\n      gone: [{ id: save, checked: true }]\n')
+    expect(flow.steps[0]).toEqual({ type: 'tapOn', selector: { text: 'Save' }, expect: { appear: [{ text: 'Saved' }], gone: [{ id: 'save', checked: true }] } })
+    expect(parse('  - longPressOn: [0.2, 0.3]\n    expect: { appear: [{ id: menu }] }\n').steps[0]).toMatchObject({ type: 'longPressPoint', expect: { appear: [{ id: 'menu' }] } })
+  })
+
+  it('goes on no other step', () => {
+    expect(() => parse('  - swipe: { from: [0.5, 0.8], to: [0.5, 0.2] }\n    expect: { appear: [{ id: x }] }\n')).toThrow(/"expect" goes only on a touch step/)
+  })
+
+  it('refuses an anchor that names nothing, a key it does not know, and an empty list', () => {
+    expect(() => parse('  - tapOn: "Save"\n    expect: { appear: [{ role: button }] }\n')).toThrow(/needs an id or a text/)
+    expect(() => parse('  - tapOn: "Save"\n    expect: { appear: [{ text: Saved, frame: 1 }] }\n')).toThrow(/unknown keys: frame/)
+    expect(() => parse('  - tapOn: "Save"\n    expect: { appear: [] }\n')).toThrow(/non-empty list/)
+    expect(() => parse('  - tapOn: "Save"\n    expect: {}\n')).toThrow(/needs appear or gone/)
+  })
+
+  it('is described to editors with the keys the loader takes', () => {
+    const schema = JSON.parse(readFileSync(join(dirname(fileURLToPath(import.meta.url)), '..', '..', 'schema', 'tapflow-flow.schema.json'), 'utf8'))
+    expect(Object.keys(schema.definitions.expectAnchor.properties).sort()).toEqual(['checked', 'id', 'role', 'selected', 'text'])
+    expect(Object.keys(schema.definitions.expect.properties).sort()).toEqual(['appear', 'gone'])
+    const step = schema.definitions.step.oneOf.find((s: { properties?: Record<string, unknown> }) => s.properties?.tapOn)
+    expect(step.properties.expect).toEqual({ $ref: '#/definitions/expect' })
+    expect(step.then.anyOf).toEqual([{ required: ['tapOn'] }, { required: ['longPressOn'] }])
+  })
+
+  it('leaves a step with two actions refused as before', () => {
+    expect(() => parse('  - tapOn: "Save"\n    swipe: up\n')).toThrow(/exactly one key/)
+  })
+})
+
+// #1125: the screen a flow's points were made on.
+describe('viewport', () => {
+  it('is read as given, and refused when it is not a size', () => {
+    expect(parseFlow('viewport: { width: 402, height: 874 }\nsteps: [launchApp]\n', 'f.yaml').viewport).toEqual({ width: 402, height: 874 })
+    expect(() => parseFlow('viewport: { width: 0, height: 874 }\nsteps: [launchApp]\n', 'f.yaml')).toThrow(/viewport.width" must be a positive number/)
+    expect(() => parseFlow('viewport: { width: 1, height: 2, scale: 3 }\nsteps: [launchApp]\n', 'f.yaml')).toThrow(/unknown viewport keys: scale/)
+  })
+})
+
 describe('points and secrets', () => {
   const step = (yaml: string) => parseFlow(`steps:\n  - ${yaml}\n`, 'x.yaml').steps[0]
 

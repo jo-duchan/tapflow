@@ -8,7 +8,7 @@ import { getBuild, queryKeys } from '@/lib/queries'
 import { useFocusAfterSwap } from '@/hooks/useFocusAfterSwap'
 import { DashboardSessionChannel } from '@/lib/flowCapture/channel'
 import { copy } from '@/lib/flowCapture/copy'
-import { editedCapture, flowOf } from '@/lib/flowCapture/flow'
+import { editedCapture, exportedFlow, flowOf } from '@/lib/flowCapture/flow'
 import { canGoTo, initialState, reachedStep, reduce, stepIndex, withAsked, type CaptureState } from '@/lib/flowCapture/machine'
 import { DialogRun, keyboardOf, loadSnapshot, matchRange, PauseLease, stepsOf, verifyFlow } from '@/lib/flowCapture/runner'
 import type { CaptureTap } from '@/lib/flowCapture/tap'
@@ -221,7 +221,7 @@ function CaptureSession({ tap, session, snapshot, bundleId, setBusy, close }: {
         {state.phase === 'verifying' && (
           <VerifyScreen state={state} tap={tap} marks={marks} total={flow?.steps.length ?? 0} onExport={() => dispatch({ type: 'to-export' })} onBack={() => dispatch({ type: 'go-to', step: 2 })} primaryRef={fallback} />
         )}
-        {state.phase === 'export' && flow && <ExportScreen flow={flow} bundleId={bundleId} onDone={close} doneRef={fallback} />}
+        {state.phase === 'export' && flow && <ExportScreen flow={exportedFlow(state, bundleId) ?? flow} bundleId={bundleId} onDone={close} doneRef={fallback} />}
       </div>
     </div>
   )

@@ -277,7 +277,46 @@ export interface UIElement {
   /** The element has text-input focus — where typing goes now. Not view or button focus: iOS also marks a
    *  focused button and Android a focused host view, and neither receives the text. Present only when true. */
   focused?: boolean
+  /** A switch or checkbox that is on (iOS a switch's `value: 1`, Android `checked`). Present only when true, and only
+   *  from an agent that reads it, so an absent one is off or unknown. What a tap on it changed, where nothing else in
+   *  the tree does (#1125, a tap's expected effect). */
+  checked?: boolean
+  /** Selected: a tab, a segment, a row (iOS `Selected`, Android `selected`). Present only when true, as `checked`. */
+  selected?: boolean
 }
+
+/**
+ * An element to reach, as a tree read reported it: the agent finds it again in its own read and answers where a touch
+ * meant for it lands (#1125). `frame` is in the tree's space, and picks the nearest when more than one has the role,
+ * identifier and label.
+ */
+export interface ReachTarget {
+  role: UIElementRole
+  rawRole?: string
+  label: string
+  identifier?: string
+  frame: UIElementFrame
+}
+
+/**
+ * Where a touch meant for an element lands, judged by the platform (iOS XCTest's hit point, Android the topmost node
+ * that takes the touch), not by its frame's centre, which another element can cover — a row under a tab bar.
+ *
+ * - `reachable`: `point` takes the touch to the element, in the **touch space** (the portrait framebuffer, as an
+ *   `input:touch:*` point; never turned by `interfaceTurn`). `atCentre`: the frame's centre does too, so nothing covers
+ *   it there — what "fully on screen" means for a scroll to it. `frame`: the element as the agent judged it.
+ * - `occluded`: a touch anywhere on it lands on something else; `by` names that, when the platform says.
+ * - `offscreen`: no part of it is on screen.
+ * - `missing`: the agent's read has no such element, or more than one equally near (`candidates`): read again.
+ * - `unknown`: the agent cannot judge — one without `reach`, a device whose reader cannot, a private API gone.
+ *   Never a reach: a client that taps anyway says the tap was not checked.
+ */
+export type ReachResult =
+  | { state: 'reachable'; point: [number, number]; atCentre: boolean; frame: UIElementFrame }
+  | { state: 'occluded'; by?: string }
+  | { state: 'offscreen' }
+  | { state: 'missing'; candidates: number }
+  | { state: 'unknown'; reason: string }
 
 /** `agents:listed` groups devices by agent machine. */
 export interface SessionInfo {
@@ -662,6 +701,14 @@ export interface UiTreeRequest {
   requestId: string
 }
 
+/** Relay → agent: where touches meant for `targets` land (`ReachResult`). Sent only to an agent naming `reach`. */
+export interface UiReachRequest {
+  type: 'ui:reach:request'
+  sessionId: string
+  requestId: string
+  targets: ReachTarget[]
+}
+
 /**
  * The keyboard-focused text field's value, for Flow Capture (#1135). The relay asks while a person it is recording has
  * stopped typing, and keeps the answer in the capture; nothing else reads it. **Never forwarded**: the answer is the
@@ -759,6 +806,7 @@ export type RelayToAgent =
   | AppLaunchToAgent
   | ScreenshotRequest
   | UiTreeRequest
+  | UiReachRequest
   | UiFieldRequest
   | DeviceKeyboardReset
   | UiKeyboardRequest
@@ -1871,6 +1919,14 @@ export interface ScreenshotError {
   message: string
 }
 
+/** Agent → relay: one `ReachResult` per target of the `ui:reach:request`, in its order. Consumed by the relay. */
+export interface UiReachResponse {
+  type: 'ui:reach:response'
+  sessionId: string
+  requestId: string
+  results: ReachResult[]
+}
+
 export interface UiTreeResponse {
   type: 'ui:tree:response'
   sessionId: string
@@ -1961,6 +2017,7 @@ export type AgentToRelay =
   | ScreenshotDone
   | ScreenshotError
   | UiTreeResponse
+  | UiReachResponse
   | UiTreeError
   | UiFieldResponse
   | UiKeyboardResponse
