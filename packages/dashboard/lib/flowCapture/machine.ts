@@ -1,4 +1,5 @@
 import { askedValues, type CapturedFlow, type CapturedStep, type FlowResult, type RawStep, type StepRange } from '@tapflowio/flow-runner/browser'
+import type { HeldResetReport } from './channel'
 
 /**
  * Flow Capture's dialog as states and the events between them (#1125). Pure: the screens draw a state, the runner
@@ -55,6 +56,9 @@ export interface CaptureState {
   /** What the person said a password typed on the soft keyboard was (#1140), by index into `steps`: Match types it.
    *  Only ever in this state, never written down; gone with the dialog. */
   asked: Record<number, string>
+  /** What the device reset did before the replay running or last run (#1139): `null` when its agent could not reset
+   *  it, absent until it has answered. */
+  reset?: HeldResetReport | null
 }
 
 export type CaptureEvent =
@@ -73,6 +77,7 @@ export type CaptureEvent =
   /** The stepper: go to a step already reached (`canGoTo`). */
   | { type: 'go-to'; step: number }
   | { type: 'verify-started' }
+  | { type: 'device-reset'; report: HeldResetReport | null }
   /** `at`: when the dialog heard it, which times the step. */
   | { type: 'verify-step'; mark: StepMark; at: number }
   | { type: 'verify-finished'; result: FlowResult }
@@ -88,7 +93,7 @@ export const initialState: CaptureState = {
  * What a new replay throws away: what the last one produced, and the removals made on it, whose indices may not mean
  * the same steps in the next. Renamed secrets carry over: they are keyed by the name the capture gave the secret.
  */
-const replayed = { matched: [], screenshots: [], captured: null, removed: [], verify: null, error: null, matchedRange: null, reached: 1 }
+const replayed = { matched: [], screenshots: [], captured: null, removed: [], verify: null, error: null, matchedRange: null, reached: 1, reset: undefined }
 
 const PHASE_AT: Record<number, Phase> = { 0: 'range', 2: 'edit', 3: 'verifying', 4: 'export' }
 
@@ -120,7 +125,8 @@ export function reduce(state: CaptureState, event: CaptureEvent): CaptureState {
       const phase = PHASE_AT[event.step]
       return phase && canGoTo(state, event.step) ? { ...state, phase, error: null } : state
     }
-    case 'verify-started': return { ...state, phase: 'verifying', verify: { status: 'running', done: 0, live: [] }, reached: 3 }
+    case 'verify-started': return { ...state, phase: 'verifying', verify: { status: 'running', done: 0, live: [] }, reached: 3, reset: undefined }
+    case 'device-reset': return { ...state, reset: event.report }
     case 'verify-step': return state.verify ? { ...state, verify: liveStep(state.verify, event.mark, event.at) } : state
     case 'verify-finished': return state.verify
       ? { ...state, verify: { ...state.verify, status: event.result.status, done: event.result.steps.length, result: event.result } }

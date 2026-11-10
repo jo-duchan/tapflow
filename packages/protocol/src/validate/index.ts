@@ -63,6 +63,7 @@ import type {
   InputTouchStart, InputType, InputTypeDone, InputTypeError, KeyboardToggled, OpenUrl, OpenUrlDone,
   OpenUrlError, ScreenshotDone, ScreenshotError, SessionChrome, SessionDeviceInfo, SessionEnd,
   SessionActivity, SessionLeave, SessionStart, StreamRegister, UiTreeError, UiTreeResponse, UiFieldResponse, UiKeyboardResponse, DeviceKeyboardSet, DeviceKeyboardSetDone, DeviceKeyboardSetError,
+  DeviceRunReset, DeviceRunResetDone, DeviceRunResetError,
   WatchStart, WatchStop,
 } from '../index.js'
 import type { Assert, EnvelopeOf, IsEmpty, SchemaExact } from './assert.js'
@@ -85,7 +86,9 @@ const serviceTier = z.object({ name: z.enum(['stock', 'lean', 'slim']), keep: z.
 /** A tier as an agent reports it. Anything this relay does not know reads as absent rather than refusing the frame. */
 const reportedTier = z.union([serviceTier, z.literal('unsupported')]).optional().catch(undefined)
 
-const RUN_RESET_ITEMS = ['app-uninstall', 'app-files', 'app-data', 'keychain', 'privacy-services', 'pasteboard', 'location'] as const
+const RUN_RESET_ITEMS = [
+  'app-uninstall', 'app-files', 'app-data', 'app-reinstall', 'keychain', 'privacy-services', 'pasteboard', 'location', 'network', 'orientation',
+] as const
 const appIds = z.array(z.string().min(1).max(255)).max(32)
 const runResetRequest = z.object({ uninstall: appIds, clear: appIds })
 /** An item this reader does not know is dropped rather than failing the report: a newer agent may reset more. */
@@ -208,6 +211,10 @@ const BROWSER_INBOUND = {
   'device:keyboard-set': z.object({
     type: z.literal('device:keyboard-set'), sessionId, requestId,
     payload: z.object({ keyboard: z.string().optional() }),
+  }),
+  'device:run-reset': z.object({
+    type: z.literal('device:run-reset'), sessionId, requestId,
+    payload: z.object({ apps: appIds }),
   }),
   'open-url': z.object({
     type: z.literal('open-url'), sessionId, requestId, payload: z.object({ url: z.string() }),
@@ -384,7 +391,7 @@ const AGENT_CONSUMED = {
   }),
 } as const
 
-/** The 28 the relay only forwards. Envelope tier — see the header for why there is no exception. */
+/** The 30 the relay only forwards. Envelope tier — see the header for why there is no exception. */
 const AGENT_FORWARDED = {
   'session:chrome': env('session:chrome'),
   'session:deviceInfo': env('session:deviceInfo'),
@@ -409,6 +416,8 @@ const AGENT_FORWARDED = {
   'app:clear-state-error': envC('app:clear-state-error'),
   'device:keyboard-set-done': envC('device:keyboard-set-done'),
   'device:keyboard-set-error': envC('device:keyboard-set-error'),
+  'device:run-reset-done': envC('device:run-reset-done'),
+  'device:run-reset-error': envC('device:run-reset-error'),
   'open-url:done': envC('open-url:done'),
   'open-url:error': envC('open-url:error'),
   'input:done': envC('input:done'),
@@ -463,6 +472,7 @@ const ANSWERABLE = {
   'app:launch': envC('app:launch'),
   'app:clear-state': envC('app:clear-state'),
   'device:keyboard-set': envC('device:keyboard-set'),
+  'device:run-reset': envC('device:run-reset'),
   'open-url': envC('open-url'),
   'input:touch:end': envC('input:touch:end'),
   'input:pinch:end': envC('input:pinch:end'),
@@ -646,6 +656,7 @@ type _AppInstall = Assert<V<'app:install', AppInstallToRelay>>
 type _AppLaunch = Assert<V<'app:launch', AppLaunchToRelay>>
 type _AppClearState = Assert<V<'app:clear-state', AppClearState>>
 type _DeviceKeyboardSet = Assert<V<'device:keyboard-set', DeviceKeyboardSet>>
+type _DeviceRunReset = Assert<V<'device:run-reset', DeviceRunReset>>
 type _OpenUrl = Assert<V<'open-url', OpenUrl>>
 type _InputTouchStart = Assert<V<'input:touch:start', InputTouchStart>>
 type _InputTouchMove = Assert<V<'input:touch:move', InputTouchMove>>
@@ -694,6 +705,8 @@ type _AppClearStateDone = Assert<E<'app:clear-state-done', AppClearStateDone>>
 type _AppClearStateError = Assert<E<'app:clear-state-error', AppClearStateError>>
 type _DeviceKeyboardSetDone = Assert<E<'device:keyboard-set-done', DeviceKeyboardSetDone>>
 type _DeviceKeyboardSetError = Assert<E<'device:keyboard-set-error', DeviceKeyboardSetError>>
+type _DeviceRunResetDone = Assert<E<'device:run-reset-done', DeviceRunResetDone>>
+type _DeviceRunResetError = Assert<E<'device:run-reset-error', DeviceRunResetError>>
 type _OpenUrlDone = Assert<E<'open-url:done', OpenUrlDone>>
 type _OpenUrlError = Assert<E<'open-url:error', OpenUrlError>>
 type _InputDone = Assert<E<'input:done', InputDone>>

@@ -78,6 +78,13 @@ export const INBOUND_DISPOSITION = {
   'device:keyboard-set-error': {
     ignored: 'Never requested, for the reason its `-done` is not read.',
   },
+  'device:run-reset-done': {
+    ignored: 'Never requested: an agent drives the device as it finds it. Flow Capture\'s dialog asks for it before a '
+      + 'replay (#1139), and a `flow run` boot carries its own.',
+  },
+  'device:run-reset-error': {
+    ignored: 'Never requested, for the reason its `-done` is not read.',
+  },
 
   'device:booting': {
     ignored: 'Not "no consumer" — it is the only signal separating "the agent picked the boot up" from '

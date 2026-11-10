@@ -258,6 +258,8 @@ const SHUTDOWN_REQUESTER_TTL_MS = 35_000
  * boot may take, which is #588's question, not this one's.
  */
 const PENDING_BOOT_TTL_MS = 180_000
+/** The requests a rebind strands and the relay answers (#885, #1139): each with the reply its waiter reads. */
+type PendingErrorType = 'device:boot-error' | 'device:keyboard-set-error' | 'device:run-reset-error'
 /** Said when a session ends with a shutdown unanswered — which is not the same as the shutdown failing. */
 const SHUTDOWN_OUTCOME_LOST =
   'The session ended before its agent confirmed the shutdown, so whether the device shut down is unknown.'
@@ -486,6 +488,9 @@ export class RelayServer {
     requestId: string
     agentSocket: WebSocket
     timer: ReturnType<typeof setTimeout>
+    /** What answers it at a rebind. Not only boots (#1139): a replay's `device:keyboard-set` and `device:run-reset`
+     *  are stranded the same way, and the run reset's waiter is minutes long. */
+    errorType: PendingErrorType
   }>()
 
   constructor(private readonly options: { port: number; publicDir?: string; uploadsDir?: string; idleTimeoutMs?: number; wsBackpressureBytes?: number; screenshotTimeoutMs?: number; uiTreeTimeoutMs?: number; trustedProxies?: string[]; corsOrigins?: string[]; tls?: { cert: string; key: string }; agentGraceMs?: number; pendingBootTtlMs?: number; bootGate?: Partial<GateTiming>; evictionGraceMs?: number; tunnel?: TunnelRuntime; tunnelPort?: number; launchDefaults?: LaunchDefaults }) {
@@ -1905,6 +1910,8 @@ export class RelayServer {
       case 'app:clear-state-error':
       case 'device:keyboard-set-done':
       case 'device:keyboard-set-error':
+      case 'device:run-reset-done':
+      case 'device:run-reset-error':
       case 'input:type-done':
       case 'input:type-error':
       case 'input:done':
@@ -1917,6 +1924,10 @@ export class RelayServer {
         if (session && (msg.type === 'app:install-done' || msg.type === 'app:install-error')) {
           const reason = typeof raw['message'] === 'string' ? raw['message'] : undefined
           this.settleInstall(session, msg.requestId, msg.type === 'app:install-done', reason)
+        }
+        // Answered, so a rebind has nothing left to answer for it.
+        if (msg.type === 'device:keyboard-set-done' || msg.type === 'device:keyboard-set-error' || msg.type === 'device:run-reset-done' || msg.type === 'device:run-reset-error') {
+          this.settleBoot(msg.sessionId, msg.requestId)
         }
         if (session?.browserSocket?.readyState === WebSocket.OPEN) {
           session.browserSocket.send(JSON.stringify(raw))
@@ -2097,6 +2108,7 @@ export class RelayServer {
         // replay sets it before it starts, and a watcher sees the app launch that follows.
         const target = this.dispatchTarget(ws, msg.sessionId)
         if (target.ok && hasCapability(target.session.agentCapabilities, 'keyboard-set')) {
+          this.rememberBoot(msg.sessionId, msg.requestId, target.session.agentSocket, 'device:keyboard-set-error')
           target.session.agentSocket.send(JSON.stringify(msg))
         } else {
           this.sendTo(ws, {
@@ -2104,6 +2116,29 @@ export class RelayServer {
             sessionId: msg.sessionId,
             requestId: msg.requestId,
             message: target.ok ? 'This device\'s agent cannot set its keyboard language' : target.message,
+            ...(target.ok ? { reason: 'unsupported' as const } : {}),
+          })
+        }
+        break
+      }
+      case 'device:run-reset': {
+        // Forwarded like `device:keyboard-set` (#1139). Only the holder: it wipes device-wide state — the keychain and
+        // every app's privacy grants — which `dispatchTarget`'s ownership check already limits to them. Not recorded in
+        // the capture (a replay holds it paused), and shown to watchers as the app being cleared when it names one.
+        const target = this.dispatchTarget(ws, msg.sessionId)
+        if (target.ok && hasCapability(target.session.agentCapabilities, 'run-reset')) {
+          this.rememberBoot(msg.sessionId, msg.requestId, target.session.agentSocket, 'device:run-reset-error')
+          // iOS uninstalls the apps and installs them again, and an install that fails leaves none: the record must
+          // not answer the next install as already done, as a run reset's boot does not (pre-PR review of #1139).
+          if (msg.payload.apps.length > 0) this.forgetInstall(target.session, 'The device is being reset')
+          target.session.agentSocket.send(JSON.stringify(msg))
+          if (msg.payload.apps.length > 0) this.tellWatchersAction(msg.sessionId, { kind: 'clear-state' })
+        } else {
+          this.sendTo(ws, {
+            type: 'device:run-reset-error',
+            sessionId: msg.sessionId,
+            requestId: msg.requestId,
+            message: target.ok ? 'This device\'s agent cannot reset it the way a run does' : target.message,
             ...(target.ok ? { reason: 'unsupported' as const } : {}),
           })
         }
@@ -2412,14 +2447,15 @@ export class RelayServer {
     return `${sessionId} ${requestId}`
   }
 
-  /** Record a boot against the agent socket it was dispatched to. The door guarantees both ids. */
-  private rememberBoot(sessionId: string, requestId: string, agentSocket: WebSocket): void {
+  /** Record a boot, or another request a rebind strands, against the agent socket it was dispatched to. The door
+   *  guarantees both ids. */
+  private rememberBoot(sessionId: string, requestId: string, agentSocket: WebSocket, errorType: PendingErrorType = 'device:boot-error'): void {
     const key = this.bootKey(sessionId, requestId)
     // Replacing, not doubling: a client never reuses a correlator, but forgetting the old timer
     // here is what keeps a replaced entry from firing after its successor was settled.
     this.forgetBoot(key)
     const timer = setTimeout(() => this.forgetBoot(key), this.pendingBootTtlMs)
-    this.pendingBoots.set(key, { sessionId, requestId, agentSocket, timer })
+    this.pendingBoots.set(key, { sessionId, requestId, agentSocket, timer, errorType })
   }
 
   /** The one way an entry leaves: every removal path funnels through here so no timer survives it. */
@@ -2452,17 +2488,18 @@ export class RelayServer {
       if (!oldSockets.has(pending.agentSocket)) continue
       this.forgetBoot(key)
       const session = this.sessions.get(pending.sessionId)
+      const boot = pending.errorType === 'device:boot-error'
       // The agent that would have answered is gone, so nothing else will settle the record this boot made.
-      if (session) this.undoLastBoot(session, pending.requestId)
+      if (session && boot) this.undoLastBoot(session, pending.requestId)
       // `sendTo` skips a socket that is not OPEN, and a session nobody has joined has no
       // `browserSocket` at all — either way the entry is still gone, so nothing later answers
       // a request nobody holds.
       if (!session?.browserSocket) continue
       this.sendTo(session.browserSocket, {
-        type: 'device:boot-error',
+        type: pending.errorType,
         sessionId: pending.sessionId,
         requestId: pending.requestId,
-        message: `session ${pending.sessionId} rebounded to a new agent while this boot was in flight, ` +
+        message: `session ${pending.sessionId} rebounded to a new agent while this ${boot ? 'boot' : 'request'} was in flight, ` +
           'and that agent never saw this request',
       })
     }
@@ -3609,6 +3646,7 @@ export class RelayServer {
       case 'app:launch':      this.sendTo(ws, { type: 'app:launch-error', sessionId, requestId, message }); break
       case 'app:clear-state': this.sendTo(ws, { type: 'app:clear-state-error', sessionId, requestId, message }); break
       case 'device:keyboard-set': this.sendTo(ws, { type: 'device:keyboard-set-error', sessionId, requestId, message }); break
+      case 'device:run-reset': this.sendTo(ws, { type: 'device:run-reset-error', sessionId, requestId, message }); break
       case 'open-url':        this.sendTo(ws, { type: 'open-url:error', sessionId, requestId, message }); break
       // Its waiters key on the `input:type-*` pair and ignore an `input:error` entirely — the same
       // reason `refuseInput` below splits these two.

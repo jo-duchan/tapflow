@@ -108,10 +108,17 @@ export interface RunResetRequest {
  * - `privacy-services`: iOS `simctl privacy reset all` — only the services simctl names; notifications are not one.
  * - `pasteboard`: set to an empty string, which is not the same as nothing ever copied.
  * - `location`: iOS simulated location cleared.
+ * - `app-reinstall`: `device:run-reset` on iOS — the installed app copied aside, uninstalled and installed again, so it
+ *   starts as a run's freshly installed build does: clearing its files leaves notification permission and App Group
+ *   containers, which nothing but an uninstall drops (#1139).
+ * - `network`: `device:run-reset` only — the device back online with no condition, as every boot leaves it.
+ * - `orientation`: `device:run-reset` only — the device turned upright, as a run's boot leaves it.
  *
  * Device-wide except the app items. An item a platform does not do is never reported, so absence means not reset.
  */
-export type RunResetItem = 'app-uninstall' | 'app-files' | 'app-data' | 'keychain' | 'privacy-services' | 'pasteboard' | 'location'
+export type RunResetItem =
+  | 'app-uninstall' | 'app-files' | 'app-data' | 'app-reinstall' | 'keychain' | 'privacy-services' | 'pasteboard' | 'location'
+  | 'network' | 'orientation'
 
 /** What the agent actually reset. The only evidence a reset happened: a relay or agent that predates it drops the
  *  request without a word. */
@@ -709,6 +716,39 @@ export interface DeviceKeyboardReset {
   sessionId: string
 }
 
+/**
+ * Reset the session's booted device the way `tapflow flow run` resets one before a run (#1139), so Flow Capture's
+ * Match and Verify start where the exported flow will in CI: `apps` reset (iOS reinstalls each in place, Android
+ * `pm clear`s it), then the device-wide items, the network back online and the device upright. The agent's report says
+ * what was done; an item it does not do is absent. Browser → relay → agent, unchanged; sent only to an agent naming
+ * `run-reset`. It wipes device-wide state (the keychain, every app's privacy grants), so only the session's holder may.
+ */
+export interface DeviceRunReset {
+  type: 'device:run-reset'
+  sessionId: string
+  requestId: string
+  payload: { apps: string[] }
+}
+
+export interface DeviceRunResetDone {
+  type: 'device:run-reset-done'
+  sessionId: string
+  requestId: string
+  report: RunResetReport
+}
+
+/** `unsupported`: the agent does not take the request. Any other error: the device went (shut down, restarted) or no
+ *  reset could start; a report is never partial behind a `-done`. */
+export interface DeviceRunResetError extends SessionScoped {
+  type: 'device:run-reset-error'
+  message: string
+  requestId: string
+  reason?: 'unsupported'
+}
+
+export type DeviceRunResetReply = DeviceRunResetDone | DeviceRunResetError
+export type DeviceRunResetReplyBody<T = DeviceRunResetReply> = T extends unknown ? Omit<T, 'sessionId' | 'requestId'> : never
+
 export type RelayToAgent =
   | AgentRegistered
   | AgentDevicesApplied
@@ -723,6 +763,7 @@ export type RelayToAgent =
   | DeviceKeyboardReset
   | UiKeyboardRequest
   | DeviceKeyboardSet
+  | DeviceRunReset
 
 export type SessionTerminatedReason = 'agent-disconnected'
 
@@ -1291,6 +1332,7 @@ export type RelayOrAgentToBrowser =
   | OpenUrlError
   | AppClearStateError
   | DeviceKeyboardSetError
+  | DeviceRunResetError
   | InputError
   // Moved out of `AgentToBrowser` in L5c: the relay originates this one now. An `input:type` whose session
   // the sender does not hold is refused here, and it has to be refused in *this* shape — the waiters in
@@ -1725,6 +1767,7 @@ export type AgentToBrowser =
   | AppLaunchDone
   | AppClearStateDone
   | DeviceKeyboardSetDone
+  | DeviceRunResetDone
   | OpenUrlDone
   | InputDone
   | InputTypeDone
@@ -2452,6 +2495,7 @@ export type BrowserToRelay =
   | AppLaunchToRelay
   | AppClearState
   | DeviceKeyboardSet
+  | DeviceRunReset
   | OpenUrl
   | InputTouchStart
   | InputTouchMove

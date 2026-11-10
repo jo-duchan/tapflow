@@ -8,7 +8,7 @@ import type {
 import { avdRotationLockMemory, formFactorOf, osVersionOf, type RotationLockMemory } from './avdConfig.js'
 import type {
   AgentControlOutbound, AgentDevicesApplied, DeviceReport, ClipboardReplyBody, OpenUrlReplyBody,
-  AppInstallReplyBody, AppLaunchReplyBody, AppLaunchToAgent, LaunchOptions, AppClearStateReplyBody, DeviceKeyboardSetReplyBody, DevicePosture, FormFactor, RunResetReport, RunResetRequest,
+  AppInstallReplyBody, AppLaunchReplyBody, AppLaunchToAgent, LaunchOptions, AppClearStateReplyBody, DeviceKeyboardSetReplyBody, DeviceRunResetReplyBody, DevicePosture, FormFactor, RunResetReport, RunResetRequest,
   InputPinchStart, InputTouchStart, PointSpace,
 } from '@tapflowio/protocol'
 import { appliedKeys, compactLaunchOptions, launchOptionsProblem } from '@tapflowio/protocol/launch'
@@ -80,7 +80,7 @@ const logger = createLogger('android-agent')
 // string on its own is what puts a control on screen.
 const AGENT_CAPABILITIES: AgentCapability[] = [
   'clipboard', 'full-reset', 'network-control', 'build-download', 'launch-options', 'touch-cancel',
-  'field-value', 'keyboard-state', 'keyboard-set',
+  'field-value', 'keyboard-state', 'keyboard-set', 'run-reset',
 ]
 
 // Parse H.264 SPS NAL unit to extract frame dimensions.
@@ -2074,8 +2074,13 @@ export class AndroidAgent implements DeviceAgent, NetworkControlCapability {
    * What `flow run` asks reset before a run. `pm clear` takes the app's files, its runtime permissions and its process
    * together, and an install after it keeps the now-empty data — so both lists get it. The keychain, privacy and
    * location items have no Android counterpart here and are never reported.
+   *
+   * `held`: the same reset on a device a session already holds (`device:run-reset`, #1139). It also takes the device off
+   * airplane mode and turns an emulator's body upright, which every boot and a run's boot do outside this.
    */
-  private async resetForRun(state: DeviceState, request: RunResetRequest, isStale: () => boolean): Promise<RunResetReport> {
+  private async resetForRun(
+    state: DeviceState, request: RunResetRequest, isStale: () => boolean, held?: { sessionId: string },
+  ): Promise<RunResetReport> {
     const deadline = Date.now() + RUN_RESET_BUDGET_MS
     const stop = () => isStale() || Date.now() >= deadline
     const serial = this.adb.getSerial(state.deviceId)
@@ -2111,7 +2116,42 @@ export class AndroidAgent implements DeviceAgent, NetworkControlCapability {
       })
       steps.push({ item: 'pasteboard', run: () => bounded(queued(), ms, 'clipboard clear').catch((e: unknown) => { abandoned = true; throw e }) })
     }
+    if (held && serial) {
+      steps.push({
+        item: 'network',
+        run: async () => {
+          // Read first, as a boot does: an online device is left alone and no setting is written.
+          let offline = await bounded(this.adb.airplaneMode(serial), ms, 'airplane mode read')
+          if (offline) offline = (await bounded(this.adb.setAirplaneMode(serial, false), ms, 'airplane mode off')).offline
+          await this.reportNetworkState(held.sessionId, 'device-ready', offline)
+          if (offline) throw new PlatformError('the device stayed in airplane mode')
+        },
+      })
+      // An emulator's body, as a run's boot stands it up (`prepareBody`); a device with no body to turn has no item.
+      if (client) steps.push({ item: 'orientation', run: () => this.standUpHeld(state, serial, stop) })
+    }
     return runResetSteps(steps, isStale, (item, e) => logger.warn(`run reset: ${item} failed: ${(e as Error).message}`), deadline)
+  }
+
+  /**
+   * `device:run-reset` (#1139): `resetForRun` on the device the session holds, its apps `pm clear`ed as a run's are. Stale
+   * is the boot's own test, and a stale reset is an error rather than a `-done` with what ran before it. A `pm clear`
+   * that outran its step is waited for before the answer, as a boot waits before its ready: the replay launches the app
+   * next, and a clear landing after the launch would wipe what the replay does.
+   */
+  private async runResetHeld(sessionId: string, apps: string[]): Promise<DeviceRunResetReplyBody> {
+    const state = this.deviceStates.get(sessionId)
+    if (!state || !this.adb.getSerial(state.deviceId)) return { type: 'device:run-reset-error', message: 'No booted device' }
+    const seq = state.bootSeq
+    const isStale = () => seq !== state.bootSeq || this.deviceStates.get(sessionId) !== state
+    try {
+      const report = await this.resetForRun(state, { uninstall: [], clear: apps }, isStale, { sessionId })
+      await this.awaitPendingClears(state.deviceId)
+      if (isStale()) return { type: 'device:run-reset-error', message: 'The device was shut down or restarted during the reset' }
+      return { type: 'device:run-reset-done', report }
+    } catch (e) {
+      return { type: 'device:run-reset-error', message: (e as Error).message }
+    }
   }
 
   /**
@@ -2822,6 +2862,30 @@ export class AndroidAgent implements DeviceAgent, NetworkControlCapability {
    * auto-rotating AVD would take auto-rotate away from it outside tapflow too (see `normaliseOnBoot`).
    * Replacing one lock with another takes nothing away. An unreadable lock is left alone.
    */
+  /**
+   * An emulator's body turned upright for `device:run-reset`, as a run's boot leaves it, and the viewer told as a turn
+   * from `input:rotate` is. Queued with the rotations, and failing the step when the turn fails or the body cannot be
+   * read, which the queue alone would only log.
+   */
+  private async standUpHeld(state: DeviceState, serial: string, stop: () => boolean): Promise<void> {
+    let failure: unknown
+    await this.enqueueRotation(state.deviceId, async () => {
+      if (stop()) return
+      try {
+        if ((await this.turnBodyTo(state, serial, 0)) !== 0) throw new PlatformError('the body could not be read or did not turn upright')
+      } catch (e) {
+        failure = e
+        return
+      }
+      const client = state.grpcClient
+      if (!client) return
+      void this.reconcileSerial(state, serial, state.videoWidth, state.videoHeight, state.skin, () => state.grpcClient === client)
+        .then((changed) => { if (changed && state.booted) this.sendChrome(state) })
+        .catch((e: unknown) => { logger.warn(`run reset: could not re-read the screen: ${(e as Error).message}`) })
+    })
+    if (failure !== undefined) throw failure
+  }
+
   /**
    * An emulator's boot: free the rotation lock the first time tapflow sees the AVD (earlier versions wrote one;
    * a person's later lock is theirs — `RotationLockMemory`), stand the body up when `upright`, and read where it
@@ -3604,6 +3668,15 @@ export class AndroidAgent implements DeviceAgent, NetworkControlCapability {
             type: 'ui:keyboard:response', sessionId, requestId, keyboard: keyboardStateOf(ime, screen, this.frameTurn(state)),
           }))
           .catch(() => this.sendMsg({ type: 'ui:keyboard:response', sessionId, requestId, keyboard: { shown: null } }))
+        break
+      }
+      case 'device:run-reset': {
+        const requestId = this.correlatorOf(msg)
+        if (requestId === null) break
+        const { sessionId } = msg
+        const apps = (msg.payload as { apps?: unknown } | undefined)?.apps
+        void this.runResetHeld(sessionId, Array.isArray(apps) ? apps.filter((a): a is string => typeof a === 'string') : [])
+          .then((body) => this.sendMsg({ ...body, sessionId, requestId }))
         break
       }
       case 'device:keyboard-set': {

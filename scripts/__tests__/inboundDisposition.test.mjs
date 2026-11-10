@@ -68,8 +68,8 @@ describe('inbound disposition', () => {
     // 29 as of #542: `device:shutdown-error` gave the shutdown pair the failure member it lacked.
     // 32 by the next count, 36 with the four `watch:*` replies, 37 with `watch:action` (A2), and 38 with
     // `device:boot-waiting` (L2). 40 with the lease pair (S5), which the dashboard never asks for. 42 with the
-    // keyboard-set pair (#1135).
-    expect(table_entries.size).toBe(42)
+    // keyboard-set pair (#1135), 44 with the run-reset pair (#1139).
+    expect(table_entries.size).toBe(44)
   })
 
   it('every entry is exactly one of at / ignored', () => {
@@ -159,6 +159,9 @@ describe('inbound disposition', () => {
       'device:keyboard-set-error',
       'device:lease-refused',
       'device:leased',
+      // Flow Capture's dialog asks, and its own channel reads the answer (#1139).
+      'device:run-reset-done',
+      'device:run-reset-error',
       'input:done',
       'input:type-done',
       'input:type-error',

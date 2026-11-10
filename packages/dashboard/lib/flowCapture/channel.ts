@@ -1,7 +1,7 @@
-import type { BrowserToRelay, UIElement } from '@tapflowio/protocol'
+import type { BrowserToRelay, RunResetItem, RunResetReport, UIElement } from '@tapflowio/protocol'
 import type { InterfaceTurn } from '@tapflowio/protocol/screen'
 import {
-  parseUITreeResponse, RelayClosedError, RelayHttpError, SessionChannel, type RelayMsg, type SessionDevice,
+  newRequestId, parseUITreeResponse, RelayClosedError, RelayHttpError, SessionChannel, type RelayMsg, type SessionDevice,
 } from '@tapflowio/flow-runner/browser'
 import type { CaptureTap } from './tap'
 
@@ -17,6 +17,18 @@ async function get(path: string, what: string, signal?: AbortSignal): Promise<Re
     throw new RelayHttpError(`${what} failed: ${(e as Error).message}`, 0, { cause: e })
   }
 }
+
+/**
+ * How long the dialog waits for a run reset (#1139): the agent's budget (`RUN_RESET_BUDGET_MS`, 60 s), the longest step
+ * that can still be running when it ends — an iOS reinstall, 10 s to find the bundle, 10 s to uninstall, 30 s to install
+ * — one more step's 10 s (a pasteboard clear, Android's late `pm clear`), and room. Held to those by
+ * `scripts/__tests__/bootDeadlineOutlivesAgent.test.mjs`, since a waiter that gives up first replaces the agent's report
+ * with a bare timeout. Under the relay's 180 s for a request a rebind strands.
+ */
+const RUN_RESET_WAIT_MS = 150_000
+
+/** What a run reset did. The protocol's report, with any item this dialog does not name kept as the agent said it. */
+export type HeldResetReport = RunResetReport
 
 /**
  * flow-runner's session semantics over the dashboard's own socket (#1125): the same waiters, gestures and acks
@@ -39,6 +51,27 @@ export class DashboardSessionChannel extends SessionChannel {
     // The socket drops what it cannot send; the channel's contract is to throw, so a request fails now instead of
     // waiting out its deadline for an answer to a message that never left.
     if (!this.viewer.send(msg)) throw new RelayClosedError('the connection to the relay is not open')
+  }
+
+  /**
+   * Reset the session's device the way `tapflow flow run` resets one before a run (#1139): `apps` as freshly installed,
+   * then the device-wide items, the network and the turn. The report says what was done; `undefined` when the agent
+   * does not take the request, so the replay goes on from the app's data alone and says the device was not reset.
+   * Here rather than on flow-runner's channel: only this dialog asks, and it ships inside the relay that forwards it,
+   * where an older relay would drop the request without a word.
+   */
+  async runReset(sessionId: string, apps: string[]): Promise<HeldResetReport | undefined> {
+    const requestId = newRequestId()
+    this.send({ type: 'device:run-reset', sessionId, requestId, payload: { apps } })
+    const msg = await this.waitFor(
+      (m) => (m['type'] === 'device:run-reset-done' || m['type'] === 'device:run-reset-error') && m['requestId'] === requestId,
+      RUN_RESET_WAIT_MS,
+      'reset the device',
+      sessionId,
+    )
+    if (msg['type'] === 'device:run-reset-done') return readReport(msg['report'])
+    if (msg['reason'] === 'unsupported') return undefined
+    throw this.failed(sessionId, typeof msg['message'] === 'string' ? msg['message'] : 'the device could not be reset')
   }
 
   /** Stop listening. Waiters still pending are failed as on a lost connection. */
@@ -73,4 +106,11 @@ export class DashboardSessionChannel extends SessionChannel {
 /** The channel is the device: it has the reads `SocketFlowDriver` needs beside the inputs. */
 export function sessionDevice(channel: DashboardSessionChannel): SessionDevice {
   return channel
+}
+
+/** An agent's report, read item by item: a malformed one counts as nothing done rather than a reset device. */
+function readReport(value: unknown): HeldResetReport {
+  const items = (v: unknown) => (Array.isArray(v) ? v.filter((i): i is RunResetItem => typeof i === 'string') : [])
+  const r = typeof value === 'object' && value !== null ? value as Record<string, unknown> : {}
+  return { done: items(r['done']), failed: items(r['failed']) }
 }
