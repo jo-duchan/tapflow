@@ -984,6 +984,147 @@ describe('IOSAgent', () => {
       browser.close()
     })
 
+    // #1139: Match and Verify start from a run's reset on the device the session holds.
+    describe('device:run-reset', () => {
+      function heldResetSimctl() {
+        const calls: string[] = []
+        const simctl = mockSimctl(true)
+        const record = (name: string) => vi.fn(async (_udid: string, id?: unknown) => { calls.push(typeof id === 'string' ? `${name}:${id}` : name) })
+        Object.assign(simctl, {
+          reinstallAppInPlace: record('reinstall'),
+          waitForBootStatus: record('bootstatus'),
+          resetKeychain: record('keychain'),
+          resetPrivacy: record('privacy'),
+          clearLocation: record('location'),
+          resetKeyboardLanguage: vi.fn(async () => { calls.push('keyboard') }),
+        })
+        return { simctl, calls }
+      }
+
+      it('reinstalls the app in place, resets the device, stands it up, and reports each item', async () => {
+        const { simctl, calls } = heldResetSimctl()
+        const { agent, browser, internals, sent } = await bootedAgent(simctl)
+        // Left turned by the person: the reset turns it back.
+        ;(agent as unknown as { physical: { note: (id: string, o: string) => void } }).physical.note('dev-1', 'landscapeLeft')
+        vi.mocked(simctl.rotate).mockClear()
+        internals.handleRelayMessage({ type: 'device:run-reset', sessionId: agent.sessionId!, requestId: 'rq-rr', payload: { apps: ['com.app'] } } as never)
+        await vi.waitFor(() => expect(sent.find((m) => m.requestId === 'rq-rr')).toBeDefined(), { timeout: 3000 })
+        expect(sent.find((m) => m.requestId === 'rq-rr')).toEqual({
+          type: 'device:run-reset-done', sessionId: agent.sessionId, requestId: 'rq-rr',
+          report: { done: ['app-reinstall', 'keychain', 'privacy-services', 'pasteboard', 'location', 'network', 'orientation'], failed: [] },
+        })
+        expect(calls).toEqual(['bootstatus', 'reinstall:com.app', 'keychain', 'privacy', 'location', 'keyboard'])
+        expect(simctl.rotate).toHaveBeenCalledWith('dev-1', 'portrait')
+        agent.disconnect()
+        browser.close()
+      })
+
+      // Going online runs the filter's host, which a Mac without it answers `filter-unavailable`: an online device is
+      // left alone, and one taken offline is brought back and the viewer told.
+      it('brings back only a device taken offline, and tells the session', async () => {
+        const { simctl } = heldResetSimctl()
+        const { agent, browser, internals, sent } = await bootedAgent(simctl)
+        const network = (agent as unknown as { network: { state(id: string): { offline?: boolean }; setOffline(id: string, o: boolean): Promise<unknown> } }).network
+        const setOffline = vi.spyOn(network, 'setOffline').mockResolvedValue({ offline: false, available: true })
+        internals.handleRelayMessage({ type: 'device:run-reset', sessionId: agent.sessionId!, requestId: 'rq-net1', payload: { apps: [] } } as never)
+        await vi.waitFor(() => expect(sent.find((m) => m.requestId === 'rq-net1')).toBeDefined(), { timeout: 3000 })
+        expect(setOffline).not.toHaveBeenCalled()
+        vi.spyOn(network, 'state').mockReturnValue({ offline: true })
+        internals.handleRelayMessage({ type: 'device:run-reset', sessionId: agent.sessionId!, requestId: 'rq-net2', payload: { apps: [] } } as never)
+        await vi.waitFor(() => expect(sent.find((m) => m.requestId === 'rq-net2')).toBeDefined(), { timeout: 3000 })
+        expect(setOffline).toHaveBeenCalledWith('dev-1', false)
+        expect(sent.some((m) => m.type === 'network:state' && !('requestId' in m))).toBe(true)
+        expect(sent.find((m) => m.requestId === 'rq-net2')).toMatchObject({ report: { failed: [] } })
+        agent.disconnect()
+        browser.close()
+      })
+
+      it('reports a turn that fails as failed, and goes on', async () => {
+        const { simctl } = heldResetSimctl()
+        const { agent, browser, internals, sent } = await bootedAgent(simctl)
+        ;(agent as unknown as { physical: { note: (id: string, o: string) => void } }).physical.note('dev-1', 'landscapeLeft')
+        vi.mocked(simctl.rotate).mockRejectedValue(new Error('purple gone'))
+        vi.spyOn(console, 'error').mockImplementation(() => {})
+        vi.spyOn(console, 'warn').mockImplementation(() => {})
+        internals.handleRelayMessage({ type: 'device:run-reset', sessionId: agent.sessionId!, requestId: 'rq-rr2', payload: { apps: [] } } as never)
+        await vi.waitFor(() => expect(sent.find((m) => m.requestId === 'rq-rr2')).toBeDefined(), { timeout: 3000 })
+        expect(sent.find((m) => m.requestId === 'rq-rr2')).toMatchObject({ type: 'device:run-reset-done', report: { failed: ['orientation'] } })
+        agent.disconnect()
+        browser.close()
+      })
+
+      // Both turns only log a turn that did not take; the report must not call that device upright (pre-PR review).
+      it('reports the turn failed when the device is still on its side afterwards', async () => {
+        const { simctl } = heldResetSimctl()
+        const { agent, browser, internals, sent } = await bootedAgent(simctl)
+        const physical = (agent as unknown as { physical: { note: (id: string, o: string) => void } }).physical
+        physical.note('dev-1', 'landscapeLeft')
+        vi.spyOn(agent as unknown as { turnSingle(): Promise<void> }, 'turnSingle').mockResolvedValue()
+        vi.spyOn(console, 'warn').mockImplementation(() => {})
+        internals.handleRelayMessage({ type: 'device:run-reset', sessionId: agent.sessionId!, requestId: 'rq-rr6', payload: { apps: [] } } as never)
+        await vi.waitFor(() => expect(sent.find((m) => m.requestId === 'rq-rr6')).toBeDefined(), { timeout: 3000 })
+        expect(sent.find((m) => m.requestId === 'rq-rr6')).toMatchObject({ report: { failed: ['orientation'] } })
+        agent.disconnect()
+        browser.close()
+      })
+
+      it('refuses while a boot of the device is in flight', async () => {
+        const { simctl } = heldResetSimctl()
+        const { agent, browser, internals, sent } = await bootedAgent(simctl)
+        for (const state of (agent as unknown as { deviceStates: Map<string, { bootsInFlight: Set<number> }> }).deviceStates.values()) state.bootsInFlight.add(99)
+        internals.handleRelayMessage({ type: 'device:run-reset', sessionId: agent.sessionId!, requestId: 'rq-rr7', payload: { apps: [] } } as never)
+        await vi.waitFor(() => expect(sent.find((m) => m.requestId === 'rq-rr7')).toBeDefined(), { timeout: 3000 })
+        expect(sent.find((m) => m.requestId === 'rq-rr7')).toMatchObject({ type: 'device:run-reset-error', message: 'The device is still booting' })
+        expect(simctl.resetKeychain).not.toHaveBeenCalled()
+        agent.disconnect()
+        browser.close()
+      })
+
+      // A partial report behind a `-done` would read as a reset device (design review of #1139).
+      it('answers an error, not a partial report, when the device is shut down mid-reset', async () => {
+        const { simctl } = heldResetSimctl()
+        const { agent, browser, internals, sent } = await bootedAgent(simctl)
+        vi.mocked(simctl.resetKeychain).mockImplementation(async () => {
+          for (const state of (agent as unknown as { deviceStates: Map<string, { bootSeq: number }> }).deviceStates.values()) state.bootSeq++
+        })
+        internals.handleRelayMessage({ type: 'device:run-reset', sessionId: agent.sessionId!, requestId: 'rq-rr3', payload: { apps: ['com.app'] } } as never)
+        await vi.waitFor(() => expect(sent.find((m) => m.requestId === 'rq-rr3')).toBeDefined(), { timeout: 3000 })
+        expect(sent.find((m) => m.requestId === 'rq-rr3')).toMatchObject({ type: 'device:run-reset-error' })
+        agent.disconnect()
+        browser.close()
+      })
+
+      it('answers an error for a session with no booted device', async () => {
+        const { simctl } = heldResetSimctl()
+        const { agent, browser, internals, sent } = await bootedAgent(simctl, false)
+        vi.mocked(simctl.listDevices).mockResolvedValue([{ id: 'dev-1', name: 'iPhone 15', platform: 'ios', status: 'shutdown', osVersion: 'iOS 18.3' }] as never)
+        internals.handleRelayMessage({ type: 'device:run-reset', sessionId: agent.sessionId!, requestId: 'rq-rr4', payload: { apps: [] } } as never)
+        await vi.waitFor(() => expect(sent.find((m) => m.requestId === 'rq-rr4')).toBeDefined(), { timeout: 3000 })
+        expect(sent.find((m) => m.requestId === 'rq-rr4')).toMatchObject({ type: 'device:run-reset-error', message: 'No booted device' })
+        agent.disconnect()
+        browser.close()
+      })
+
+      // Design review of #1139: a reset a Stop left running ends with a keyboard reset, which would undo the next
+      // replay's keyboard set if that one did not wait for it.
+      it('sets the keyboard only after a reset in flight on the device has finished', async () => {
+        const { simctl } = heldResetSimctl()
+        let release!: () => void
+        vi.mocked(simctl.resetPrivacy).mockReturnValue(new Promise<void>((r) => { release = r }))
+        const { agent, browser, internals, sent } = await bootedAgent(simctl)
+        internals.handleRelayMessage({ type: 'device:run-reset', sessionId: agent.sessionId!, requestId: 'rq-rr5', payload: { apps: [] } } as never)
+        await vi.waitFor(() => expect(simctl.resetPrivacy).toHaveBeenCalled(), { timeout: 3000 })
+        internals.handleRelayMessage({ type: 'device:keyboard-set', sessionId: agent.sessionId!, requestId: 'rq-ks5', payload: {} } as never)
+        await new Promise((r) => setTimeout(r, 100))
+        expect(simctl.setKeyboardLanguage).not.toHaveBeenCalled()
+        release()
+        await vi.waitFor(() => expect(sent.find((m) => m.requestId === 'rq-ks5')).toMatchObject({ type: 'device:keyboard-set-done' }), { timeout: 3000 })
+        expect(vi.mocked(simctl.resetKeyboardLanguage).mock.invocationCallOrder[0]).toBeLessThan(vi.mocked(simctl.setKeyboardLanguage).mock.invocationCallOrder[0]!)
+        agent.disconnect()
+        browser.close()
+      })
+    })
+
     it('holds a reset that arrives before the boot, and does it once the device is up', async () => {
       const simctl = mockSimctl(true)
       const { agent, browser, internals, doBoot } = await bootedAgent(simctl, false)

@@ -136,6 +136,14 @@ export const INBOUND_DISPOSITION = {
     ignored: 'Same as `device:keyboard-set-done`: the dialog\'s channel reads it, and a replay goes on without the '
       + 'language rather than stopping.',
   },
+  'device:run-reset-done': {
+    ignored: 'Asked for only by Flow Capture\'s dialog (#1139), whose own channel (`lib/flowCapture/channel.ts`) settles '
+      + 'its waiter on it. No handler of the viewer reads it.',
+  },
+  'device:run-reset-error': {
+    ignored: 'Same as `device:run-reset-done`: the dialog\'s channel reads it, and an agent that cannot reset makes the '
+      + 'replay go on from the app\'s data alone, saying so.',
+  },
   'session:deviceInfo': {
     ignored: 'No consumer here: the viewer takes device name and OS from `agents:listed` instead. The only '
       + 'reader in the repo is flow-runner, which copies it into a run\'s video (A4); displaying it is a '

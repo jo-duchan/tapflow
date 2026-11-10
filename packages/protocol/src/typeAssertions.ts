@@ -22,6 +22,7 @@ import type {
   AgentControlOutbound, StreamToRelay,
   StreamRegistered, StreamRequestIdr, UiTreeError, UiTreeRequest, UiTreeResponse, UiFieldRequest, UiFieldResponse, DeviceKeyboardReset,
   UiKeyboardRequest, UiKeyboardResponse, DeviceKeyboardSet, DeviceKeyboardSetDone, DeviceKeyboardSetError,
+  DeviceRunReset, DeviceRunResetDone, DeviceRunResetError,
   NetworkRequestState,
   InputPosture, DevicePostures,
   WatchStart, WatchStop, WatchStarted, WatchRefused, WatchHolderLeft, WatchEnded, WatchAction, SessionActivity,
@@ -222,6 +223,9 @@ export const _UiKeyboardResponse: UiKeyboardResponse['type'] = 'ui:keyboard:resp
 export const _DeviceKeyboardSet: DeviceKeyboardSet['type'] = 'device:keyboard-set'
 export const _DeviceKeyboardSetDone: DeviceKeyboardSetDone['type'] = 'device:keyboard-set-done'
 export const _DeviceKeyboardSetError: DeviceKeyboardSetError['type'] = 'device:keyboard-set-error'
+export const _DeviceRunReset: DeviceRunReset['type'] = 'device:run-reset'
+export const _DeviceRunResetDone: DeviceRunResetDone['type'] = 'device:run-reset-done'
+export const _DeviceRunResetError: DeviceRunResetError['type'] = 'device:run-reset-error'
 export const _AgentRegister: AgentRegister['type'] = 'agent:register'
 export const _AgentDevices: AgentDevices['type'] = 'agent:devices'
 export const _AgentResourceReport: AgentResourceReport['type'] = 'agent:resources'

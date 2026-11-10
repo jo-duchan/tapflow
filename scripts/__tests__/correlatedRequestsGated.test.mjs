@@ -219,6 +219,7 @@ const EXPECTED_REPLY = {
   'app:launch': 'app:launch-error',
   'app:clear-state': 'app:clear-state-error',
   'device:keyboard-set': 'device:keyboard-set-error',
+  'device:run-reset': 'device:run-reset-error',
   'open-url': 'open-url:error',
   'input:type': 'input:type-error',
   'clipboard:read': 'clipboard:error',

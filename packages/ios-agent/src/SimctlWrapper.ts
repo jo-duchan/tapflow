@@ -48,6 +48,8 @@ const KEYBOARD_READ_TIMEOUT_MS = 800
 // the kill or never happened, nothing changed in the 3 s after, and an install or keychain add sent right after the kill
 // survived — CoreSimulatorService runs a device's requests in order.
 const RESET_CMD_TIMEOUT_MS = 10_000
+// An install copies the whole bundle, so it grows with the app where the reset's other commands do not.
+const REINSTALL_TIMEOUT_MS = 30_000
 // `Booted` appears in `simctl list` before the system services are up: `bootstatus` took 6–28 s more on an iOS 26.5
 // simulator. A reset sent in that gap reaches tccd and securityd before they serve.
 const BOOT_STATUS_TIMEOUT_MS = 60_000
@@ -353,6 +355,37 @@ export class SimctlWrapper {
    *  that boot with nothing able to release it. */
   async uninstallAppForReset(udid: string, bundleId: string): Promise<void> {
     await this.runner.execWithOpts({ timeoutMs: RESET_CMD_TIMEOUT_MS }, 'uninstall', udid, bundleId)
+  }
+
+  /**
+   * The app as a run's fresh install of it, without the build (#1139): the installed bundle copied aside, the app
+   * uninstalled and the copy installed. Clearing its files keeps notification permission and App Group containers,
+   * which only an uninstall drops — Maestro's `clearState` and Detox's `resetAppState` reinstall for the same reason.
+   * Measured 0.6–0.75 s for a 47 MB app, 0.8–0.9 s with every core busy. An app that is not installed is left alone,
+   * as `clearAppDataIfInstalled` leaves one.
+   */
+  async reinstallAppInPlace(udid: string, bundleId: string): Promise<void> {
+    let bundle: string
+    try {
+      bundle = (await this.runner.execWithOpts({ timeoutMs: RESET_CMD_TIMEOUT_MS }, 'get_app_container', udid, bundleId, 'app')).trim()
+    } catch (e) {
+      if (/No such file or directory/.test(String((e as { stderr?: unknown }).stderr ?? (e as Error).message))) return
+      throw e
+    }
+    if (!bundle.startsWith('/')) throw new PlatformError(`cannot resolve the installed bundle of ${bundleId}: ${bundle || 'empty simctl output'}`)
+    const aside = await fs.mkdtemp(join(tmpdir(), 'tapflow-reinstall-'))
+    try {
+      const copy = join(aside, bundle.split('/').pop()!)
+      await fs.cp(bundle, copy, { recursive: true, verbatimSymlinks: true })
+      await this.runner.execWithOpts({ timeoutMs: RESET_CMD_TIMEOUT_MS }, 'uninstall', udid, bundleId)
+      // Once more from the copy before giving up: after the uninstall it is the only one, and the finally deletes it.
+      const install = () => this.runner.execWithOpts({ timeoutMs: REINSTALL_TIMEOUT_MS }, 'install', udid, copy)
+      await install().catch(install).catch((e: unknown) => {
+        throw new PlatformError(`${bundleId} was uninstalled and could not be installed again: ${(e as Error).message.split('\n')[0]}`)
+      })
+    } finally {
+      await fs.rm(aside, { recursive: true, force: true }).catch(() => {})
+    }
   }
 
   // pm-clear analog for the simulator: wipe the app's data-container contents

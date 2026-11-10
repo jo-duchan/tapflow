@@ -32,6 +32,19 @@ function Footer({ children }: { children: React.ReactNode }) {
   return <div className="flex flex-col-reverse gap-2 border-t pt-4 sm:min-h-[calc(2.5rem+1rem+1px)] sm:flex-row sm:items-center sm:justify-end">{children}</div>
 }
 
+/** What the device reset before this replay did (#1139), said once it has answered; nothing while it runs. */
+function ResetReport({ reset }: { reset: CaptureState['reset'] }) {
+  if (reset === undefined) return null
+  if (reset === null) return <Notice title={copy.resetUnsupported} />
+  const named = (items: string[]) => items.map((i) => copy.resetItems[i] ?? i).join(', ')
+  return (
+    <>
+      {reset.done.length > 0 && <p className="text-sm text-muted-foreground">{copy.resetDone(named(reset.done))}</p>}
+      {reset.failed.length > 0 && <Notice title={copy.resetFailed(named(reset.failed))} />}
+    </>
+  )
+}
+
 function Notice({ title, children }: { title: string; children?: React.ReactNode }) {
   return (
     <div className="rounded-lg border border-warning-border bg-warning px-4 py-3 text-sm">
@@ -43,8 +56,9 @@ function Notice({ title, children }: { title: string; children?: React.ReactNode
 
 // ── Range ─────────────────────────────────────────────────────────────────────────────────────────────────────────
 
-export function RangeScreen({ state, dispatch, bundleId, onContinue, onCancel, continueRef }: {
+export function RangeScreen({ state, dispatch, bundleId, platform, onContinue, onCancel, continueRef }: {
   state: CaptureState
+  platform: string
   dispatch: Dispatch<CaptureEvent>
   bundleId: string | null
   onContinue: () => void
@@ -106,7 +120,7 @@ export function RangeScreen({ state, dispatch, bundleId, onContinue, onCancel, c
         </ul>
       )}
       {askedValues(steps, range).map((i) => <AskedPassword key={i} state={state} index={i} dispatch={dispatch} />)}
-      <Notice title={copy.replayNoticeTitle} />
+      <Notice title={copy.replayNoticeTitle}>{copy.replayNotice[platform === 'android' ? 'android' : 'ios']}</Notice>
       </div>
       <Footer>
         <Button variant="outline" className="w-24" onClick={onCancel}>{copy.cancel}</Button>
@@ -392,9 +406,12 @@ export function MatchScreen({ state, tap, marks, onStop, onRestart, onTakeWhatMa
         <div className="flex min-h-0 flex-col gap-3">
           <p role="status" className="flex items-center gap-2 text-sm font-medium">
             {!stopped && <Busy />}
-          {stopped ? state.error : <SteadyCount text={copy.matching(Math.min(done + 1, total), total)} widest={copy.matching(total, total)} />}
+          {/* The reset before the first step takes seconds and is not a step: said as what it is (#1139). */}
+          {stopped ? state.error : state.reset === undefined && done === 0 ? copy.resetting
+            : <SteadyCount text={copy.matching(Math.min(done + 1, total), total)} widest={copy.matching(total, total)} />}
           </p>
           <p className="text-sm text-muted-foreground">{copy.matchingHelp}</p>
+          <ResetReport reset={state.reset} />
         </div>
       </div>
       <Footer>
@@ -495,28 +512,31 @@ function EditRow({ index, step, selected, onSelect, onRemove, renamedTo, onRenam
   return (
     // Figma 394:1041 (List Item): 12 px in on the left, 8 px elsewhere; the head row centred on the 28 px buttons; the
     // reason 8 px under it with 4 px below.
-    <li className={cn('rounded-md border py-2 pl-3 pr-2', selected ? 'border-primary' : 'border-border', step.step === null && 'opacity-60')}>
+    // The label's button stretches over the whole card (its `after:` box), so the card is one target with no click
+    // handler of its own; the buttons and the field on it sit a layer above (`relative z-10`) and keep their own clicks.
+    // Keyboard and screen reader still meet the one button that selects.
+    <li className={cn('relative rounded-md border py-2 pl-3 pr-2 hover:bg-accent/40', selected ? 'border-primary' : 'border-border', step.step === null && 'opacity-60')}>
       <div className="flex items-center gap-2">
         {/* One line, as drawn; the whole label is the tooltip when it does not fit. */}
         <button type="button" onClick={onSelect} aria-current={selected ? 'true' : undefined} title={label}
-          className="min-w-0 flex-1 truncate rounded-sm text-left text-sm leading-5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
+          className="min-w-0 flex-1 truncate text-left text-sm leading-5 after:absolute after:inset-0 after:rounded-md after:content-[''] focus-visible:outline-none focus-visible:after:ring-2 focus-visible:after:ring-ring">
           <span className="text-muted-foreground">#{index + 1} </span>{label}
         </button>
         {step.fragile && <Badge variant="outline" className="shrink-0">{copy.fragile}</Badge>}
         {step.auto && <Badge variant="outline" className="shrink-0">{copy.auto}</Badge>}
         {step.skipped && <Badge variant="outline" className="shrink-0">{copy.skipped}</Badge>}
         {secretName && (
-          <Button variant="ghost" size="icon" className="size-7 shrink-0" aria-label={copy.stepDetails(label)} aria-expanded={open} aria-controls={detailsId} onClick={() => setOpen((v) => !v)}>
+          <Button variant="ghost" size="icon" className="relative z-10 size-7 shrink-0" aria-label={copy.stepDetails(label)} aria-expanded={open} aria-controls={detailsId} onClick={() => setOpen((v) => !v)}>
             <ChevronRight aria-hidden className={cn('h-4 w-4 transition-transform', open && 'rotate-90')} />
           </Button>
         )}
-        <Button data-remove variant="ghost" size="icon" className="size-7 shrink-0" aria-label={copy.removeStep(label)} onClick={onRemove}>
+        <Button data-remove variant="ghost" size="icon" className="relative z-10 size-7 shrink-0" aria-label={copy.removeStep(label)} onClick={onRemove}>
           <Trash2 aria-hidden className="h-4 w-4" />
         </Button>
       </div>
       {reason && <p className="pb-1 pt-2 text-xs text-muted-foreground">{reason}</p>}
       {secretName && open && (
-        <div id={detailsId} className="mt-2">
+        <div id={detailsId} className="relative z-10 mt-2">
           <SecretName from={secretName} current={renamedTo ?? secretName} onRename={onRename} renameError={renameError} />
         </div>
       )}
@@ -620,9 +640,11 @@ export function VerifyScreen({ state, tap, marks, total, onExport, onBack, prima
       <div className="flex min-h-0 flex-col gap-3">
         <h3 className="text-sm font-medium">{copy.verifyHeading}</h3>
         <p className="text-sm text-muted-foreground">{copy.verifyHelp}</p>
+        <ResetReport reset={state.reset} />
         <p role="status" className={cn('flex items-center gap-2 text-sm', failed && 'text-destructive')}>
           {verify?.status === 'running' && !state.error && <Busy />}
-          {state.error ?? (verify?.status === 'running'
+          {state.error ?? (verify?.status === 'running' && state.reset === undefined && verify.done === 0 ? copy.resetting
+            : verify?.status === 'running'
             ? <SteadyCount text={copy.verifying(Math.min(verify.done + 1, total), total)} widest={copy.verifying(total, total)} />
             : verify?.status === 'passed' ? copy.passed : result ? `${copy.failed} ${result.failureMessage ?? ''}` : '')}
         </p>

@@ -32,7 +32,22 @@ export const copy = {
   appPrefix: 'App:',
   appSuffix: ', from this build',
   noBundleId: 'This build’s bundle id could not be read, so the flow will not clear the app’s data before it starts.',
-  replayNoticeTitle: 'Continuing replays from a clean start: the app’s data is cleared.',
+  // What a run's reset does on each platform (#1139), so the person knows before it wipes their own QA device.
+  replayNoticeTitle: 'Continuing resets this device the way tapflow flow run does, then replays from there.',
+  replayNotice: {
+    ios: 'The app is reinstalled, and the keychain, privacy permissions, clipboard and location are reset for every app on the device, so other apps are signed out too. The device goes back online and upright.',
+    android: 'The app’s data is cleared and the device goes back online. On an emulator the clipboard is emptied and the device turned upright too.',
+  },
+  resetDone: (items: string) => `Reset before the replay: ${items}.`,
+  resetFailed: (items: string) => `Could not reset: ${items}. The replay went on, and these may still hold what was left on the device.`,
+  // At most the app's data: a build whose bundle id was not read has none to clear.
+  resetUnsupported: 'This device’s tapflow agent cannot reset it the way a run does. Update tapflow on that Mac.',
+  resetting: 'Resetting the device…',
+  resetItems: {
+    'app-reinstall': 'app reinstall', 'app-data': 'app data', 'app-files': 'app files', 'app-uninstall': 'app removal',
+    keychain: 'keychain', 'privacy-services': 'privacy permissions', pasteboard: 'clipboard', location: 'location',
+    network: 'network', orientation: 'orientation',
+  } as Record<string, string>,
   rangeWarnings: {
     'no-launch-at-start': 'The flow adds its own launch. Move the start past any tap on the home screen.',
     'no-clean-start': 'The app wasn’t cleared before this launch, so these steps ran on leftover data.',

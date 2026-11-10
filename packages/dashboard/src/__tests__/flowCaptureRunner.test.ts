@@ -37,7 +37,10 @@ const tap = {
 
 // What the device answers a keyboard-set with, in order; the last is repeated.
 let keyboardAnswers: string[] = ['done']
+// What the device answers a run reset with (#1139): a report, or `undefined` from an agent that cannot do it.
+let resetAnswer: { done: string[]; failed: string[] } | undefined = { done: ['keychain'], failed: [] }
 const channel = {
+  runReset: async (_s: string, apps: string[]) => { log.push(`reset ${apps.join(' ')}`.trimEnd()); return resetAnswer },
   clearState: async (_s: string, bundleId: string) => { log.push(`clearState ${bundleId}`) },
   setKeyboard: async (_s: string, keyboard?: string) => {
     log.push(`keyboard ${keyboard ?? 'first'}`)
@@ -66,6 +69,7 @@ beforeEach(() => {
   replay.refuse = false
   pauseOk = true
   keyboardAnswers = ['done']
+  resetAnswer = { done: ['keychain'], failed: [] }
   vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
     if (url.endsWith('/pause') && init?.method === 'PUT') {
       log.push('pause')
@@ -84,7 +88,7 @@ describe('matchRange', () => {
     const lease = new PauseLease(tap)
     await matchRange(tap, channel, lease, [tapStep], { start: 0, end: 1 }, 'com.example', hooks(), 'ko_KR@sw=Korean;hw=Automatic')
     await lease.stop()
-    expect(log.slice(0, 5)).toEqual(['pause', 'clearState com.example', 'keyboard ko_KR@sw=Korean;hw=Automatic', 'orientation landscape', 'launch'])
+    expect(log.slice(0, 5)).toEqual(['pause', 'reset com.example', 'keyboard ko_KR@sw=Korean;hw=Automatic', 'orientation landscape', 'launch'])
   })
 
   // Android switches only a keyboard that is up: asked again before the first step that types, and no more once set.
@@ -118,8 +122,9 @@ describe('matchRange', () => {
     const steps = await matchRange(tap, channel, lease, [typed], { start: 0, end: 1 }, null, { onStep, signal: new AbortController().signal })
     await lease.stop()
     expect(log.filter((l) => l.startsWith('replay'))).toEqual(['replay tap', 'replay text'])
-    expect(steps.map((s) => s.raw.kind)).toEqual(['tap', 'text'])
-    expect((steps[0]!.raw as { point: number[] }).point).toEqual([0.5, 0.225])
+    // The range was held sideways (the mocked start), so its turn leads.
+    expect(steps.map((s) => s.raw.kind)).toEqual(['rotate', 'tap', 'text'])
+    expect((steps[1]!.raw as { point: number[] }).point).toEqual([0.5, 0.225])
   })
 
   it('says to move the range when nothing has focus and the field cannot be found', async () => {
@@ -179,23 +184,39 @@ describe('matchRange', () => {
     expect(log.filter((l) => l.startsWith('keyboard'))).toEqual(['keyboard first'])
   })
 
-  it('pauses recording, clears the app, turns the device and launches it, then renews the pause before each step', async () => {
+  it('pauses recording, resets the device, turns it and launches the app, then renews the pause before each step', async () => {
     const lease = new PauseLease(tap)
-    const h = hooks()
+    const h = { ...hooks(), onReset: vi.fn() }
     await matchRange(tap, channel, lease, [tapStep, tapStep], { start: 0, end: 2 }, 'com.example', h)
     await lease.stop()
     expect(log).toEqual([
-      'pause', 'clearState com.example', 'keyboard first', 'orientation landscape', 'launch',
+      'pause', 'reset com.example', 'keyboard first', 'orientation landscape', 'launch',
       'pause', 'replay tap', 'pause', 'replay tap',
     ])
-    expect(h.onStep).toHaveBeenCalledTimes(2)
+    // The two steps, and the turn the range began in, which goes into the flow but is not replayed again.
+    expect(h.onStep.mock.calls.map(([s, , inserted]) => [s.raw.kind, inserted ?? false])).toEqual([['rotate', true], ['tap', false], ['tap', false]])
+    expect(h.onReset).toHaveBeenCalledWith({ done: ['keychain'], failed: [] })
   })
 
-  it('launches nothing for a range that starts with its own launch, and clears nothing with no bundle id', async () => {
+  // #1139: an agent that predates the reset still gets the app's data cleared, and the dialog is told it was not reset.
+  it('clears the app\'s data when the agent cannot reset the device, and says so', async () => {
+    resetAnswer = undefined
     const lease = new PauseLease(tap)
-    await matchRange(tap, channel, lease, [launchStep, tapStep], { start: 0, end: 2 }, null, hooks())
+    const h = { ...hooks(), onReset: vi.fn() }
+    await matchRange(tap, channel, lease, [tapStep], { start: 0, end: 1 }, 'com.example', h)
     await lease.stop()
-    expect(log).toEqual(['pause', 'keyboard first', 'orientation landscape', 'pause', 'replay launch', 'pause', 'replay tap'])
+    expect(log.slice(0, 3)).toEqual(['pause', 'reset com.example', 'clearState com.example'])
+    expect(h.onReset).toHaveBeenCalledWith(null)
+  })
+
+  it('launches nothing for a range that starts with its own launch, and resets no app with no bundle id', async () => {
+    const lease = new PauseLease(tap)
+    const h = hooks()
+    await matchRange(tap, channel, lease, [launchStep, tapStep], { start: 0, end: 2 }, null, h)
+    await lease.stop()
+    expect(log).toEqual(['pause', 'reset', 'keyboard first', 'orientation landscape', 'pause', 'replay launch', 'pause', 'replay tap'])
+    // The turn after the launch, so the flow does not read as starting without one and get a second.
+    expect(h.onStep.mock.calls.map(([s]) => s.raw.kind)).toEqual(['launch', 'rotate', 'tap'])
   })
 
   it('does not replay an install, which would uninstall the app it just launched, and still names it', async () => {
@@ -203,8 +224,8 @@ describe('matchRange', () => {
     const h = hooks()
     await matchRange(tap, channel, lease, [installStep, tapStep], { start: 0, end: 2 }, 'com.example', h)
     await lease.stop()
-    expect(log).toEqual(['pause', 'clearState com.example', 'keyboard first', 'orientation landscape', 'launch', 'pause', 'replay tap'])
-    expect(h.onStep.mock.calls.map(([s]) => s.raw.kind)).toEqual(['install', 'tap'])
+    expect(log).toEqual(['pause', 'reset com.example', 'keyboard first', 'orientation landscape', 'launch', 'pause', 'replay tap'])
+    expect(h.onStep.mock.calls.map(([s]) => s.raw.kind)).toEqual(['install', 'rotate', 'tap'])
   })
 
   it('replays nothing once stopped', async () => {
@@ -276,7 +297,17 @@ describe('verifyFlow', () => {
     const flow = { name: 'f', steps: [] }
     await verifyFlow(tap, channel, lease, flow, {}, () => {}, '한국어 (두벌식)')
     await lease.stop()
-    expect(log.filter((l) => l !== 'pause')).toEqual(['keyboard 한국어 (두벌식)', 'tap', 'keyboard 한국어 (두벌식)', 'type', 'key ImeAction'])
+    expect(log.filter((l) => l !== 'pause')).toEqual(['reset', 'keyboard 한국어 (두벌식)', 'tap', 'keyboard 한국어 (두벌식)', 'type', 'key ImeAction'])
+  })
+
+  // #1139: from where a run starts, the flow's own app reset as Match's was, before the keyboard is set.
+  it('resets the device for the flow\'s app before anything else, and reports it', async () => {
+    const lease = new PauseLease(tap)
+    const onReset = vi.fn()
+    await verifyFlow(tap, channel, lease, { name: 'f', appId: 'com.example', steps: [] }, {}, () => {}, undefined, undefined, onReset)
+    await lease.stop()
+    expect(log.filter((l) => l !== 'pause')[0]).toBe('reset com.example')
+    expect(onReset).toHaveBeenCalledWith({ done: ['keychain'], failed: [] })
   })
 
   it('says where the flow touches, for drawing on the device', async () => {

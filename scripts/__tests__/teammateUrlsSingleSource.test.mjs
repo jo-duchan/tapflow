@@ -96,6 +96,7 @@ const LOCATION_ALLOWED = {
   'packages/dashboard/hooks/useRelay.ts': "connects this page to its own relay, where the page's own host is correct",
   'packages/dashboard/hooks/useDecoderStream.ts': '`typeof location` guard, not a read',
   'packages/dashboard/src/layouts/DashboardLayout.tsx': 'a react-router useLocation() variable named location',
+  'packages/dashboard/lib/flowCapture/copy.ts': 'the name of a run reset item, `location` (#1139), and its label: strings, not a read',
 }
 
 export function judgeDashboardFile(path, text) {

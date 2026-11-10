@@ -152,6 +152,7 @@ function CaptureSession({ tap, session, snapshot, bundleId, setBusy, close }: {
     matchRange(tap, channel, lease, withAsked(state), state.range, bundleId, {
       signal,
       onTouch,
+      onReset: (report) => dispatch({ type: 'device-reset', report }),
       onStep: (step, screenshot, inserted) => {
         if (screenshot) run.keep(screenshot)
         dispatch({ type: 'step-matched', step, ...(screenshot ? { screenshot } : {}), ...(inserted ? { inserted } : {}) })
@@ -173,7 +174,10 @@ function CaptureSession({ tap, session, snapshot, bundleId, setBusy, close }: {
     dispatch({ type: 'verify-started' })
     setMarks(NO_MARKS)
     setBusy(true)
-    verifyFlow(tap, channel, lease, flow, edited.secrets, (mark) => dispatch({ type: 'verify-step', mark, at: Date.now() }), keyboard, onTouch)
+    verifyFlow(
+      tap, channel, lease, flow, edited.secrets, (mark) => dispatch({ type: 'verify-step', mark, at: Date.now() }), keyboard, onTouch,
+      (report) => dispatch({ type: 'device-reset', report }),
+    )
       .then((result) => dispatch({ type: 'verify-finished', result }))
       .catch((e: unknown) => dispatch({ type: 'match-failed', error: (e as Error).message }))
       .finally(() => setBusy(false))
@@ -200,7 +204,7 @@ function CaptureSession({ tap, session, snapshot, bundleId, setBusy, close }: {
       />
       <div {...swapFocus} className="h-full min-h-0">
         {state.phase === 'range' && (
-          <RangeScreen state={state} dispatch={dispatch} bundleId={bundleId} onContinue={startMatch} onCancel={close} continueRef={fallback} />
+          <RangeScreen state={state} dispatch={dispatch} bundleId={bundleId} platform={tap.platform} onContinue={startMatch} onCancel={close} continueRef={fallback} />
         )}
         {state.phase === 'matching' && (
           <MatchScreen

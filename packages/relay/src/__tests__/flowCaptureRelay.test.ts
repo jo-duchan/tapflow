@@ -112,7 +112,7 @@ describe('Flow Capture through the relay', () => {
       await waitForOpen(ws)
       ws.send(JSON.stringify({
         type: 'agent:register', platform: 'ios', agentName: `field-agent-${seq}`,
-        capabilities: ['field-value', 'keyboard-reset', 'keyboard-state', 'keyboard-set'],
+        capabilities: ['field-value', 'keyboard-reset', 'keyboard-state', 'keyboard-set', 'run-reset'],
         devices: [{ id: 'dev-2', name: 'iPhone 17', platform: 'ios', status: 'booted' }],
       }))
       sessionId = (await waitForType<AgentRegistered>(ws, 'agent:registered')).registeredSessions[0]!.sessionId
@@ -230,6 +230,45 @@ describe('Flow Capture through the relay', () => {
       agent.on('message', (d) => { if (String(d).includes('device:keyboard-set')) forwarded = true })
       alice.send(JSON.stringify({ type: 'device:keyboard-set', sessionId, requestId: 'ks2', payload: {} }))
       expect(await waitForType(alice, 'device:keyboard-set-error')).toMatchObject({ requestId: 'ks2', reason: 'unsupported' })
+      expect(forwarded).toBe(false)
+    })
+
+    // #1139: Match and Verify start from a run's reset on the device the person holds.
+    it('forwards a run reset to an agent that does it, and its report back', async () => {
+      const fieldAgent = await capableAgent()
+      const alice = await browser(1)
+      await join(alice)
+      alice.send(JSON.stringify({ type: 'device:run-reset', sessionId, requestId: 'rr1', payload: { apps: ['com.app'] } }))
+      expect(await waitForType(fieldAgent, 'device:run-reset')).toMatchObject({ requestId: 'rr1', payload: { apps: ['com.app'] } })
+      const report = { done: ['app-reinstall', 'keychain'], failed: ['location'] }
+      fieldAgent.send(JSON.stringify({ type: 'device:run-reset-done', sessionId, requestId: 'rr1', report }))
+      expect(await waitForType(alice, 'device:run-reset-done')).toMatchObject({ requestId: 'rr1', report })
+      expect(kinds((await snapshot(1))?.entries ?? [])).not.toContain('device:run-reset')
+    })
+
+    // iOS uninstalls and installs the app again; one whose install fails is gone, so the relay's record must not answer
+    // the next install as already done (pre-PR review of #1139).
+    it('forgets the build it recorded as installed when a run reset resets an app', async () => {
+      const fieldAgent = await capableAgent()
+      const alice = await browser(1)
+      await join(alice)
+      const session = (server as unknown as { sessions: { get(id: string): { installed?: unknown } } }).sessions.get(sessionId)!
+      session.installed = { buildId: 1, path: '/x.app' }
+      alice.send(JSON.stringify({ type: 'device:run-reset', sessionId, requestId: 'rr3', payload: { apps: [] } }))
+      await waitForType(fieldAgent, 'device:run-reset')
+      expect(session.installed).toBeDefined()
+      alice.send(JSON.stringify({ type: 'device:run-reset', sessionId, requestId: 'rr4', payload: { apps: ['com.app'] } }))
+      await waitForType(fieldAgent, 'device:run-reset')
+      expect(session.installed).toBeUndefined()
+    })
+
+    it('answers unsupported itself for an agent that cannot reset a held device', async () => {
+      const alice = await browser(1)
+      await join(alice)
+      let forwarded = false
+      agent.on('message', (d) => { if (String(d).includes('device:run-reset')) forwarded = true })
+      alice.send(JSON.stringify({ type: 'device:run-reset', sessionId, requestId: 'rr2', payload: { apps: [] } }))
+      expect(await waitForType(alice, 'device:run-reset-error')).toMatchObject({ requestId: 'rr2', reason: 'unsupported' })
       expect(forwarded).toBe(false)
     })
 

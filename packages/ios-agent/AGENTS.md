@@ -110,7 +110,9 @@ again** (measured both ways). The relay sends `device:keyboard-reset` when a dif
 that arrives before the device is up waits for the boot, and every reset waits for that boot's
 `syncKeyboardsFromLanguages`, which rewrites the list it reads.
 
-**A replay sets it to a named keyboard, and a run resets it** (#1135). `device:keyboard-set` (`keyboard-set`) writes
+**A replay sets it to a named keyboard, and a run resets it** (#1135). A keyboard set waits behind a `device:run-reset` in
+flight on the same device (`replayPrep`), whose own keyboard reset would otherwise land after it — a dialog closed mid-reset and opened
+again, or a dialog that gave up waiting while the agent went on, leaves exactly that. `device:keyboard-set` (`keyboard-set`) writes
 the keyboard Flow Capture recorded, or the first when none is named, and answers once the daemon has restarted, so the
 replay launches the app after it; a keyboard not in `AppleKeyboards` is an error and nothing is written. A field read
 carries `KeyboardLastUsed` as the language it was typed in. A `flow run` boot resets the keyboard last in its run reset,
@@ -688,7 +690,8 @@ is the app's business. Every read and write source measured, including the ones 
   it did only the Duo's input.
 - **What it stands up, and why.** Only a device with nothing to report — no reading and nothing remembered
   (`PhysicalOrientation.note`, for a host where neither source answers: the helper is arm64-only); **every
-  run's boot** (`runReset`), so a flow replays from the same orientation whatever a person left; and a
+  run's boot** (`runReset`), so a flow replays from the same orientation whatever a person left, and a held
+  device's `device:run-reset` (Flow Capture's Match and Verify, #1139); and a
   session with no frame, which cannot be told the turn and whose viewer draws the device upright. A
   per-device memory, not a per-session one: per session is #910's shape, which the design review found. A
   device is read every time rather than marked unreadable after a failure — one failure right after a boot

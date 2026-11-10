@@ -3295,6 +3295,96 @@ describe('AndroidAgent', () => {
       })
     })
 
+    // #1139: Match and Verify start from a run's reset on the device the session holds.
+    describe('device:run-reset', () => {
+      function replies() {
+        const out: Array<Record<string, unknown>> = []
+        const real = (agent as unknown as { sendMsg(m: unknown): void }).sendMsg.bind(agent)
+        vi.spyOn(agent as unknown as { sendMsg(m: unknown): void }, 'sendMsg').mockImplementation((m) => { out.push(m as Record<string, unknown>); real(m) })
+        return out
+      }
+      function pm(installed: string[]) {
+        const calls: string[] = []
+        const runner = (adb as unknown as { runner: AdbRunner }).runner
+        vi.mocked(runner.exec).mockImplementation(async (...args: string[]) => {
+          const at = args.indexOf('pm')
+          if (at < 0) return ''
+          const [verb, pkg] = [args[at + 1]!, args[at + 2]!]
+          if (verb !== 'path' && verb !== 'clear') return ''
+          calls.push(`${verb} ${pkg}`)
+          if (verb === 'path' && !installed.includes(pkg)) throw Object.assign(new Error('Command failed'), { code: 1, stdout: '', stderr: '' })
+          return verb === 'path' ? `package:/data/app/${pkg}/base.apk` : 'Success'
+        })
+        return calls
+      }
+      /** The gRPC backend's two halves the reset reaches: the clipboard and the body. */
+      function grpc() {
+        let clip = 'copied'
+        getState().grpcClient = { setClipboard: vi.fn(async (t: string) => { clip = t }), getClipboard: vi.fn(async () => clip), close: vi.fn() } as never
+      }
+
+      it('clears the app, turns airplane mode off, stands the body up, and reports each item', async () => {
+        const calls = pm(['com.app'])
+        grpc()
+        let airplane = true
+        vi.spyOn(adb, 'airplaneMode').mockImplementation(async () => airplane)
+        vi.spyOn(adb, 'setAirplaneMode').mockImplementation((async (_s: string, on: boolean) => { airplane = on; return { offline: on } }) as never)
+        ;(adb as unknown as { body: { at: number } }).body.at = 90
+        const out = replies()
+        inject({ type: 'device:run-reset', requestId: 'rq-rr', payload: { apps: ['com.app'] } })
+        await vi.waitFor(() => expect(out.find((m) => m['requestId'] === 'rq-rr')).toBeDefined(), { timeout: 3000 })
+        expect(out.find((m) => m['requestId'] === 'rq-rr')).toEqual({
+          type: 'device:run-reset-done', sessionId: agent.sessionId, requestId: 'rq-rr',
+          report: { done: ['app-data', 'pasteboard', 'network', 'orientation'], failed: [] },
+        })
+        expect(calls).toEqual(['path com.app', 'clear com.app'])
+        expect(airplane).toBe(false)
+        expect((adb as unknown as { body: { at: number } }).body.at).toBe(0)
+        // The viewer's toggle hears the device came back online.
+        expect(out.some((m) => m['type'] === 'network:state' && (m['payload'] as { offline?: boolean }).offline === false)).toBe(true)
+      })
+
+      // scrcpy has no gRPC client: no clipboard and no body, so neither is claimed — the dialog shows what was done.
+      it('claims neither the clipboard nor the body over scrcpy', async () => {
+        pm([])
+        const out = replies()
+        inject({ type: 'device:run-reset', requestId: 'rq-rr2', payload: { apps: ['com.app'] } })
+        await vi.waitFor(() => expect(out.find((m) => m['requestId'] === 'rq-rr2')).toBeDefined(), { timeout: 3000 })
+        expect(out.find((m) => m['requestId'] === 'rq-rr2')).toMatchObject({ type: 'device:run-reset-done', report: { done: ['app-data', 'network'], failed: [] } })
+      })
+
+      it('fails network when the device stays in airplane mode', async () => {
+        pm([])
+        vi.spyOn(console, 'warn').mockImplementation(() => {})
+        vi.spyOn(adb, 'airplaneMode').mockResolvedValue(true)
+        vi.spyOn(adb, 'setAirplaneMode').mockResolvedValue({ offline: true } as never)
+        const out = replies()
+        inject({ type: 'device:run-reset', requestId: 'rq-rr3', payload: { apps: [] } })
+        await vi.waitFor(() => expect(out.find((m) => m['requestId'] === 'rq-rr3')).toBeDefined(), { timeout: 3000 })
+        expect(out.find((m) => m['requestId'] === 'rq-rr3')).toMatchObject({ report: { failed: ['network'] } })
+      })
+
+      // A partial report behind a `-done` would read as a reset device (design review of #1139).
+      it('answers an error, not a partial report, when the device is restarted mid-reset', async () => {
+        const runner = (adb as unknown as { runner: AdbRunner }).runner
+        vi.mocked(runner.exec).mockImplementation(async (...args: string[]) => {
+          if (args.includes('pm')) getState().bootSeq++
+          return 'package:/data/app/x/base.apk'
+        })
+        const out = replies()
+        inject({ type: 'device:run-reset', requestId: 'rq-rr4', payload: { apps: ['com.app'] } })
+        await vi.waitFor(() => expect(out.find((m) => m['requestId'] === 'rq-rr4')).toBeDefined(), { timeout: 3000 })
+        expect(out.find((m) => m['requestId'] === 'rq-rr4')).toMatchObject({ type: 'device:run-reset-error' })
+      })
+
+      it('answers an error for a session with no device', async () => {
+        const out = replies()
+        internals(agent).handleRelayMessage({ type: 'device:run-reset', sessionId: 'no-such-session', requestId: 'rq-rr5', payload: { apps: [] } })
+        await vi.waitFor(() => expect(out.find((m) => m['requestId'] === 'rq-rr5')).toBeDefined(), { timeout: 3000 })
+        expect(out.find((m) => m['requestId'] === 'rq-rr5')).toMatchObject({ type: 'device:run-reset-error', message: 'No booted device' })
+      })
+    })
+
     describe('input — button', () => {
       it('forwards a named button press to the touch helper', () => {
         const helper = getState().touchHelper!

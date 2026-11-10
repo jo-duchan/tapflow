@@ -10,7 +10,7 @@ import type { RunResetStep } from '@tapflowio/agent-core/utils'
 import { createLogger, PlatformError, ValidationError, bootAbandonMessage, BOOT_NO_SESSION_STATE, SHUTDOWN_NO_SESSION_STATE, downloadBuild } from '@tapflowio/agent-core'
 import type {
   AgentControlOutbound, AgentDevicesApplied, DeviceReport, InputErrorReason, ClipboardReplyBody, OpenUrlReplyBody,
-  AppInstallReplyBody, AppLaunchReplyBody, AppLaunchToAgent, LaunchOptions, AppClearStateReplyBody, DeviceKeyboardSetReplyBody, FormFactor, ServiceTier, RunResetReport, RunResetRequest,
+  AppInstallReplyBody, AppLaunchReplyBody, AppLaunchToAgent, LaunchOptions, AppClearStateReplyBody, DeviceKeyboardSetReplyBody, DeviceRunResetReplyBody, FormFactor, ServiceTier, RunResetReport, RunResetRequest,
 } from '@tapflowio/protocol'
 import { appliedKeys, compactLaunchOptions, launchOptionsProblem } from '@tapflowio/protocol/launch'
 // Cross-platform button name → iOS device-chrome button name. Chrome uses hyphens and "power" (not "lock"); MCP's
@@ -38,7 +38,7 @@ const RUN_RESET_PASTEBOARD_TIMEOUT_MS = 10_000
 // actually took is per device and per app, and `network:state.available` carries that — the split the
 // protocol documents. Added last, after the handler and the boot-time arming, because the string on
 // its own is what puts a control on screen.
-const AGENT_CAPABILITIES: AgentCapability[] = ['clipboard', 'full-reset', 'network-control', 'build-download', 'launch-options', 'launch-env', 'touch-cancel', 'field-value', 'keyboard-reset', 'keyboard-state', 'keyboard-set']
+const AGENT_CAPABILITIES: AgentCapability[] = ['clipboard', 'full-reset', 'network-control', 'build-download', 'launch-options', 'launch-env', 'touch-cancel', 'field-value', 'keyboard-reset', 'keyboard-state', 'keyboard-set', 'run-reset']
 
 // Human prose for each reason. Not in `@tapflowio/protocol`: that package's main entry must stay
 // runtime-free so it erases under `import type` and never reaches the dashboard bundle — a lookup
@@ -1475,8 +1475,14 @@ export class IOSAgent implements DeviceAgent, NetworkControlCapability, Posturab
    * It waits for the system services first: `Booted` shows before tccd and securityd serve, and not only on a boot this
    * agent started — a device someone else just booted reads `booted` too. On a settled device the wait returns at once.
    * The wait does not watch `isStale`; a shutdown meanwhile holds this boot's abandonment until its deadline.
+   *
+   * `held`: the same reset on a device a session already holds (`device:run-reset`, #1139), where the boot's own steps
+   * have not just run. Its apps are reinstalled in place, since no build install follows to drop what clearing leaves,
+   * and it puts the network back online and the device upright, which every boot and a run's boot do outside this.
    */
-  private async resetForRun(deviceId: string, request: RunResetRequest, isStale: () => boolean): Promise<RunResetReport> {
+  private async resetForRun(
+    deviceId: string, request: RunResetRequest, isStale: () => boolean, held?: { sessionId: string; reinstall: string[] },
+  ): Promise<RunResetReport> {
     // One budget for the wait and the steps: a device whose services never come up spends it waiting, and the steps
     // that would have failed against it are reported failed instead of each running out its own timeout.
     const deadline = Date.now() + RUN_RESET_BUDGET_MS
@@ -1489,6 +1495,9 @@ export class IOSAgent implements DeviceAgent, NetworkControlCapability, Posturab
     if (request.clear.length > 0) {
       steps.push({ item: 'app-files', run: () => resetApps(request.clear, (id) => this.simctl.clearAppDataIfInstalled(deviceId, id), stop) })
     }
+    if (held && held.reinstall.length > 0) {
+      steps.push({ item: 'app-reinstall', run: () => resetApps(held.reinstall, (id) => this.simctl.reinstallAppInPlace(deviceId, id), stop) })
+    }
     steps.push(
       { item: 'keychain', run: () => this.simctl.resetKeychain(deviceId) },
       { item: 'privacy-services', run: () => this.simctl.resetPrivacy(deviceId) },
@@ -1496,6 +1505,23 @@ export class IOSAgent implements DeviceAgent, NetworkControlCapability, Posturab
       { item: 'pasteboard', run: () => this.clearPasteboardQueued(deviceId, stop) },
       { item: 'location', run: () => this.simctl.clearLocation(deviceId) },
     )
+    if (held) {
+      steps.push(
+        {
+          item: 'network',
+          run: async () => {
+            // Only a device taken offline is touched: going online runs the filter's host, which a Mac without it
+            // answers `filter-unavailable`, and an online device has nothing to undo. Told to the session unasked,
+            // as a boot's re-arm is: the viewer's toggle shows offline until it hears.
+            if (!this.network.state(deviceId).offline) return
+            const payload = await this.network.setOffline(deviceId, false)
+            this.sendMsg({ type: 'network:state', sessionId: held.sessionId, payload })
+            if (payload.offline) throw new PlatformError(`the device stayed offline${'reason' in payload ? `: ${payload.reason}` : ''}`)
+          },
+        },
+        { item: 'orientation', run: () => this.standUpHeld(deviceId, isStale) },
+      )
+    }
     const report = await runResetSteps(steps, isStale, (item, e) => logger.warn(`run reset: ${item} failed: ${firstLine(e)}`), deadline)
     // The keyboard in its first language, so a run types where Flow Capture's replay does (#1135). Before the ready, since
     // an app launched first keeps the language it started with (measured). Not a reported item: the request does not
@@ -1837,6 +1863,33 @@ export class IOSAgent implements DeviceAgent, NetworkControlCapability, Posturab
     return (await this.physical.read(deviceId)) ?? this.physical.last(deviceId)
   }
 
+  /**
+   * A held device turned upright for `device:run-reset`, the way a run's boot leaves it, and the viewer told. Queued with
+   * the rotations as the boot's is, and failing the step when the turn fails, which the queue alone would only log.
+   */
+  private async standUpHeld(deviceId: string, isStale: () => boolean): Promise<void> {
+    let failure: unknown
+    await this.enqueueRotation(deviceId, async () => {
+      if (isStale()) return
+      try {
+        if (this.multiPanelDevices.has(deviceId)) {
+          await this.turnHeld(deviceId, undefined, 'portrait', isStale)
+          this.applyLitPanel(deviceId)
+        } else {
+          await this.turnSingle(deviceId, undefined, 'portrait')
+          this.resendTurn(deviceId)
+        }
+        // Read back: both turns only log a turn that did not take (no helper, a refusal, no settle), and the report
+        // would then call a device still on its side upright (pre-PR review of #1139).
+        const now = (await this.physical.read(deviceId).catch(() => null)) ?? this.physical.last(deviceId)
+        if (now !== 'portrait') throw new PlatformError(`the device did not turn upright (${now ?? 'unread'})`)
+      } catch (e) {
+        failure = e
+      }
+    })
+    if (failure !== undefined) throw failure
+  }
+
   /** Turn a device nobody can say the orientation of upright, so there is one to turn from. */
   private async standUp(deviceId: string): Promise<DeviceOrientation> {
     await this.simctl.rotate(deviceId, PURPLE_ARGS.portrait)
@@ -1898,6 +1951,9 @@ export class IOSAgent implements DeviceAgent, NetworkControlCapability, Posturab
   // device must not interleave — each would read the other's marker instead of the real
   // clipboard. Keyed by device, not session: several sessions (and MCP) can address one device.
   private readonly clipboardQueue = createKeyedSerialQueue()
+  /** What a replay asks before it starts, one at a time per device: a run reset, then the keyboard set after it. A reset
+   *  a Stop left running still finishes before the next replay's keyboard set, so its keyboard reset cannot undo it. */
+  private readonly replayPrep = createKeyedSerialQueue()
   // Device-scoped, not operation-scoped. Several sessions (and MCP) can address one simulator,
   // so an operation that fails before parking anything may still be answering while ANOTHER
   // holds a marker down. The viewer decides from this whether pressing the plain chord is safe,
@@ -2745,9 +2801,19 @@ export class IOSAgent implements DeviceAgent, NetworkControlCapability, Posturab
         const keyboard = (msg.payload as { keyboard?: unknown } | undefined)?.keyboard
         // `deviceFor`, not the `booted` flag: a relay reconnect clears the flag while the simulator runs on, and a
         // replay would then start without the recorded keyboard.
+        // Behind a run reset in flight on the device: its own keyboard reset would otherwise land after this and undo it.
         void this.deviceFor(sessionId).then((deviceId): Promise<DeviceKeyboardSetReplyBody> | DeviceKeyboardSetReplyBody => (deviceId === undefined
           ? { type: 'device:keyboard-set-error', reason: 'failed', message: 'No booted device' }
-          : this.setKeyboard(deviceId, typeof keyboard === 'string' ? keyboard : undefined))).then(respond)
+          : this.replayPrep(deviceId, () => this.setKeyboard(deviceId, typeof keyboard === 'string' ? keyboard : undefined)))).then(respond)
+        break
+      }
+      case 'device:run-reset': {
+        const requestId = this.correlatorOf(msg)
+        if (requestId === null) break
+        const sessionId = msg.sessionId
+        const apps = (msg.payload as { apps?: unknown } | undefined)?.apps
+        void this.runResetHeld(sessionId, Array.isArray(apps) ? apps.filter((a): a is string => typeof a === 'string') : [])
+          .then((body) => this.sendMsg({ ...body, sessionId, requestId }))
         break
       }
       case 'device:keyboard-reset': {
@@ -2777,6 +2843,30 @@ export class IOSAgent implements DeviceAgent, NetworkControlCapability, Posturab
         break
       }
     }
+  }
+
+  /**
+   * `device:run-reset` (#1139): `resetForRun` on the device the session holds. Stale is the boot's own test — a shutdown or
+   * a newer boot moved `bootSeq`, or the session's device state was replaced — and a stale reset is an error, never a
+   * `-done` with what happened to run before it: the dialog would take a partial report for a reset device.
+   */
+  private async runResetHeld(sessionId: string, apps: string[]): Promise<DeviceRunResetReplyBody> {
+    const state = this.deviceStates.get(sessionId)
+    const deviceId = state ? await this.deviceFor(sessionId) : undefined
+    if (!state || deviceId === undefined) return { type: 'device:run-reset-error', message: 'No booted device' }
+    // A boot of its own runs its own reset and install; one held reset racing them could remove the app it installs.
+    if (state.bootsInFlight.size > 0) return { type: 'device:run-reset-error', message: 'The device is still booting' }
+    const seq = state.bootSeq
+    const isStale = () => seq !== state.bootSeq || this.deviceStates.get(sessionId) !== state
+    return this.replayPrep(deviceId, async (): Promise<DeviceRunResetReplyBody> => {
+      try {
+        const report = await this.resetForRun(deviceId, { uninstall: [], clear: [] }, isStale, { sessionId, reinstall: apps })
+        if (isStale()) return { type: 'device:run-reset-error', message: 'The device was shut down or restarted during the reset' }
+        return { type: 'device:run-reset-done', report }
+      } catch (e) {
+        return { type: 'device:run-reset-error', message: firstLine(e) }
+      }
+    })
   }
 
   /**

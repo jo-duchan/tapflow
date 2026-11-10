@@ -216,7 +216,7 @@ describe('RangeScreen', () => {
   ] as never
   const loaded = reduce(initialState, { type: 'loaded', steps, range: { start: 0, end: 2 }, name: 'login' })
   const draw = (state = loaded, dispatch = vi.fn()) => render(
-    <RangeScreen state={state} dispatch={dispatch} bundleId="com.example" onContinue={vi.fn()} onCancel={vi.fn()} continueRef={{ current: null }} />,
+    <RangeScreen state={state} dispatch={dispatch} bundleId="com.example" platform="ios" onContinue={vi.fn()} onCancel={vi.fn()} continueRef={{ current: null }} />,
   )
 
   it('asks for the password, hidden, and holds Continue until it is given', async () => {
@@ -347,6 +347,49 @@ describe('VerifyScreen', () => {
     expect(why).toHaveAttribute('aria-expanded', 'true')
     expect(screen.getByText('tapOn: "Row 22"')).toBeInTheDocument()
     expect(screen.getByText(/, not run/)).toBeInTheDocument()
+  })
+})
+
+// #1139: Match and Verify start from a run's reset, and say what it did.
+describe('the device reset', () => {
+  const props = { tap: { surface: () => null } as never, marks: { cursor: null, trails: [] }, onStop: vi.fn(), onRestart: vi.fn(), onTakeWhatMatched: vi.fn(), stopRef: { current: null } }
+  const matching = reduce({ ...initialState, phase: 'range' as const }, { type: 'match-started', total: 2 })
+
+  it('says what was reset, by name, once the agent has answered', () => {
+    const { rerender } = render(<MatchScreen state={matching} {...props} />)
+    expect(screen.queryByText(/Reset before the replay/)).not.toBeInTheDocument()
+    // The seconds the reset takes are not step 1 (pre-PR review of #1139).
+    expect(screen.getByRole('status')).toHaveTextContent('Resetting the device…')
+    rerender(<MatchScreen state={reduce(matching, { type: 'device-reset', report: { done: ['app-reinstall', 'keychain', 'pasteboard'], failed: [] } })} {...props} />)
+    expect(screen.getByText('Reset before the replay: app reinstall, keychain, clipboard.')).toBeInTheDocument()
+    expect(screen.getByRole('status')).toHaveTextContent('Step 1 of 2')
+  })
+
+  it('warns about what could not be reset, and about an agent that cannot reset at all', () => {
+    const { rerender } = render(<MatchScreen state={reduce(matching, { type: 'device-reset', report: { done: [], failed: ['keychain'] } })} {...props} />)
+    expect(screen.getByText(/Could not reset: keychain\./)).toBeInTheDocument()
+    rerender(<MatchScreen state={reduce(matching, { type: 'device-reset', report: null })} {...props} />)
+    expect(screen.getByText(/cannot reset it the way a run does/)).toBeInTheDocument()
+  })
+
+  // A report belongs to the replay it came before: Verify's own reset replaces Match's, not adds to it.
+  it('forgets the last replay\'s report when the next starts', () => {
+    const reported = reduce(matching, { type: 'device-reset', report: { done: ['keychain'], failed: [] } })
+    expect(reduce(reported, { type: 'verify-started' }).reset).toBeUndefined()
+    expect(reduce(reported, { type: 'match-started', total: 2 }).reset).toBeUndefined()
+  })
+
+  it('tells the person before Continue what the reset takes, for their platform', () => {
+    const steps = [{ at: 0, endAt: 0, outcome: 'landed', messages: [], kind: 'tap', point: [0.5, 0.5] }] as never
+    const loaded = reduce(initialState, { type: 'loaded', steps, range: { start: 0, end: 1 }, name: 'f' })
+    const draw = (platform: string) => render(
+      <RangeScreen state={loaded} dispatch={vi.fn()} bundleId="com.example" platform={platform} onContinue={vi.fn()} onCancel={vi.fn()} continueRef={{ current: null }} />,
+    )
+    draw('ios')
+    expect(screen.getByText(/other apps are signed out too/)).toBeInTheDocument()
+    cleanup()
+    draw('android')
+    expect(screen.getByText(/The app’s data is cleared and the device goes back online/)).toBeInTheDocument()
   })
 })
 

@@ -625,6 +625,72 @@ describe('SimctlWrapper', () => {
     })
   })
 
+  // #1139: what a run's fresh install leaves, without the build — clearing files keeps notification permission and
+  // App Group containers.
+  describe('reinstallAppInPlace', () => {
+    it('copies the installed bundle aside, uninstalls, installs the copy, and removes it', async () => {
+      const { mkdtemp, mkdir, writeFile, readdir, access } = await vi.importActual<typeof import('fs/promises')>('fs/promises')
+      const { tmpdir } = await import('os')
+      const { join } = await import('path')
+      const root = await mkdtemp(join(tmpdir(), 'tapflow-test-bundle-'))
+      const bundle = join(root, 'App.app')
+      await mkdir(bundle)
+      await writeFile(join(bundle, 'Info.plist'), 'plist')
+      let installedFrom = ''
+      let copyHeld: string[] = []
+      const runner = mockRunner()
+      vi.mocked(runner.execWithOpts).mockImplementation(async (_o, ...args: string[]) => {
+        if (args[0] === 'get_app_container') return `${bundle}\n`
+        if (args[0] === 'install') { installedFrom = args[2]!; copyHeld = await readdir(installedFrom) }
+        return ''
+      })
+      await new SimctlWrapper(runner).reinstallAppInPlace('device-1', 'com.app')
+      const order = vi.mocked(runner.execWithOpts).mock.calls.map(([, ...args]) => args[0])
+      expect(order).toEqual(['get_app_container', 'uninstall', 'install'])
+      expect(installedFrom).not.toBe(bundle)
+      expect(installedFrom.endsWith('/App.app')).toBe(true)
+      expect(copyHeld).toEqual(['Info.plist'])
+      await expect(access(installedFrom)).rejects.toThrow()
+    })
+
+    // After the uninstall the copy is the only one, and the finally deletes it (pre-PR review of #1139).
+    it('installs once more from the copy before giving up, and says the app is gone when that fails too', async () => {
+      const { mkdtemp, mkdir } = await vi.importActual<typeof import('fs/promises')>('fs/promises')
+      const { tmpdir } = await import('os')
+      const { join } = await import('path')
+      const bundle = join(await mkdtemp(join(tmpdir(), 'tapflow-test-bundle-')), 'App.app')
+      await mkdir(bundle)
+      const run = (installs: Array<'ok' | 'fail'>) => {
+        const runner = mockRunner()
+        vi.mocked(runner.execWithOpts).mockImplementation(async (_o, ...args: string[]) => {
+          if (args[0] === 'get_app_container') return bundle
+          if (args[0] === 'install' && installs.shift() === 'fail') throw new Error('install timed out\nCommand failed: xcrun simctl install')
+          return ''
+        })
+        return { runner, wrapper: new SimctlWrapper(runner) }
+      }
+      const once = run(['fail', 'ok'])
+      await once.wrapper.reinstallAppInPlace('device-1', 'com.app')
+      expect(vi.mocked(once.runner.execWithOpts).mock.calls.filter(([, a]) => a === 'install')).toHaveLength(2)
+      await expect(run(['fail', 'fail']).wrapper.reinstallAppInPlace('device-1', 'com.app'))
+        .rejects.toThrow('com.app was uninstalled and could not be installed again: install timed out')
+    })
+
+    it('leaves an app that is not installed alone', async () => {
+      const runner = mockRunner()
+      vi.mocked(runner.execWithOpts).mockRejectedValue(Object.assign(new Error('failed'), { stderr: 'No such file or directory' }))
+      await new SimctlWrapper(runner).reinstallAppInPlace('device-1', 'com.app')
+      expect(runner.execWithOpts).toHaveBeenCalledTimes(1)
+    })
+
+    it('does not uninstall when the bundle cannot be copied', async () => {
+      const runner = mockRunner()
+      vi.mocked(runner.execWithOpts).mockImplementation(async (_o, ...args: string[]) => (args[0] === 'get_app_container' ? '/nonexistent/App.app\n' : ''))
+      await expect(new SimctlWrapper(runner).reinstallAppInPlace('device-1', 'com.app')).rejects.toThrow()
+      expect(vi.mocked(runner.execWithOpts).mock.calls.map(([, ...args]) => args[0])).toEqual(['get_app_container'])
+    })
+  })
+
   describe('keyboardLanguage', () => {
     it('reads the keyboard in use', async () => {
       const runner = {

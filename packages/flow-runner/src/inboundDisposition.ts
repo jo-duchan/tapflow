@@ -48,6 +48,11 @@ export const INBOUND_DISPOSITION = {
   'app:clear-state-error': { settles: 'clearState' },
   'device:keyboard-set-done': { settles: 'setKeyboard' },
   'device:keyboard-set-error': { settles: 'setKeyboard' },
+  'device:run-reset-done': {
+    ignored: 'Asked only by the dashboard\'s channel, a subclass of `SessionChannel` built with the relay it talks to '
+      + '(#1139). A `flow run` resets its device at the boot instead, and the report rides on `device:ready`.',
+  },
+  'device:run-reset-error': { ignored: 'Never asked from this package, for the reason its `-done` is not read.' },
   'open-url:done': { settles: 'openUrl' },
   'open-url:error': { settles: 'openUrl' },
   'input:done': { settles: 'awaitInputAck' },

@@ -78,6 +78,9 @@ export interface Device {
 // `keyboard-set`: the agent takes `device:keyboard-set` and answers it, putting the keyboard in the language a replay
 // starts from (#1135).
 //
+// `run-reset`: the agent takes `device:run-reset` and answers it with what it reset, so Flow Capture's Match and Verify
+// start on a held device from where `tapflow flow run` starts on a booted one (#1139).
+//
 // **The vocabulary, not a declaration (#700).** This is every capability any agent can name. What one
 // agent *implements* is its own list, typed against this — an agent that announced the whole set
 // would start claiming a feature the moment another platform gained it. Same split as
@@ -86,7 +89,7 @@ export interface Device {
 // A runtime value rather than only a union so the relay, which can import from here, checks its
 // gates through `hasCapability` and a rename fails to compile there. The dashboard still cannot, and
 // `scripts/__tests__/agentCapabilityConsumers.test.mjs` holds its literals against this array.
-export const KNOWN_AGENT_CAPABILITIES = ['clipboard', 'full-reset', 'network-control', 'build-download', 'launch-options', 'launch-env', 'touch-cancel', 'field-value', 'keyboard-reset', 'keyboard-state', 'keyboard-set'] as const
+export const KNOWN_AGENT_CAPABILITIES = ['clipboard', 'full-reset', 'network-control', 'build-download', 'launch-options', 'launch-env', 'touch-cancel', 'field-value', 'keyboard-reset', 'keyboard-state', 'keyboard-set', 'run-reset'] as const
 export type AgentCapability = (typeof KNOWN_AGENT_CAPABILITIES)[number]
 
 export function isAgentCapability(s: string): s is AgentCapability {

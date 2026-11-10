@@ -9,11 +9,13 @@ import type { CaptureSnapshot } from '@tapflowio/protocol/capture'
 import { copy } from './copy'
 import { markOf, type StepMark } from './marks'
 import type { StepMark as FlowStepMark } from './machine'
-import type { DashboardSessionChannel } from './channel'
+import type { DashboardSessionChannel, HeldResetReport } from './channel'
 import type { CaptureTap } from './tap'
 
 const base = (tap: CaptureTap) => `/api/v1/sessions/${tap.sessionId}/capture`
 const SETTLE_TIMEOUT_MS = 15_000
+/** What a flow's start is made of: a turn the range was held in goes after them (`matchRange`). */
+const STARTS_A_FLOW = new Set<RawStep['kind']>(['clearState', 'install', 'launch'])
 /** Renewed at a third of the relay's 30 s lease, so one late timer does not lose it. */
 const RENEW_EVERY_MS = 10_000
 
@@ -151,13 +153,27 @@ export interface MatchHooks {
   onStep: (step: CapturedStep, screenshot?: string, inserted?: boolean) => void
   /** Where a step is about to touch, for drawing on the device as it does (the MCP watch view's marks). */
   onTouch?: (mark: StepMark) => void
+  /** What the device reset did before the replay, or `null` when its agent could not reset it (`resetDevice`). */
+  onReset?: (report: HeldResetReport | null) => void
   signal: AbortSignal
 }
 
 /**
+ * The start `tapflow flow run` gives a flow, on the device the session holds (#1139): the app as freshly installed, the
+ * keychain, privacy grants, clipboard and simulated location reset, the network back online and the device upright.
+ * An agent that cannot do it gets the app's data cleared, as before, and `null` says the rest was not.
+ */
+export async function resetDevice(channel: DashboardSessionChannel, sessionId: string, bundleId: string | null): Promise<HeldResetReport | null> {
+  const report = await channel.runReset(sessionId, bundleId ? [bundleId] : [])
+  if (report !== undefined) return report
+  if (bundleId) await channel.clearState(sessionId, bundleId)
+  return null
+}
+
+/**
  * Replay `range` of `steps` on the device from a clean start and match each against the screen it was replayed on.
- * The start is the flow's own: the app's data cleared, the device turned the way it was held, the app launched when
- * the range does not begin with a launch. Each step waits for the screen to settle and is matched against that read.
+ * The start is the flow's own: the device reset as a run's is (`resetDevice`), turned the way it was held, the app
+ * launched when the range does not begin with a launch. Each step waits for the screen to settle and is matched against that read.
  * An install in the range is not replayed (below).
  */
 export async function matchRange(
@@ -167,7 +183,10 @@ export async function matchRange(
   const sessionId = tap.sessionId
   const slice = steps.slice(range.start, range.end)
   await lease.start()
-  if (bundleId) await channel.clearState(sessionId, bundleId)
+  // Apart from the report: `onReset?.(await …)` skips the reset itself when nobody listens.
+  const reset = await resetDevice(channel, sessionId, bundleId)
+  hooks.onReset?.(reset)
+  hooks.signal.throwIfAborted()
   const alignment = new KeyboardAlignment(channel, sessionId, keyboard)
   await alignment.align()
   const orientation = rangeStartOrientation(steps, range)
@@ -176,8 +195,19 @@ export async function matchRange(
 
   const read = (signal: AbortSignal) => channel.queryUITreeWithTurn(sessionId, signal)
   const matched: CapturedStep[] = []
+  // The turn goes into the flow too: the reset, Verify and a run all start upright, so a range held sideways would
+  // replay its first steps on a screen laid out the other way (design review of #1139). After the clear and launch the
+  // range may open with, so the flow does not read as starting without a launch and get a second one.
+  let turnPending = orientation === 'landscape'
   for (const raw of slice) {
     hooks.signal.throwIfAborted()
+    if (turnPending && !STARTS_A_FLOW.has(raw.kind)) {
+      turnPending = false
+      const turn: RawStep = { at: raw.at, endAt: raw.at, outcome: 'landed', messages: [], kind: 'rotate', to: { orientation: 'landscape' } }
+      const step = matchStep(turn, { tree: [], postures: tap.postures().postures, platform: tap.platform })
+      matched.push(step)
+      hooks.onStep(step, undefined, true)
+    }
     // Not sent again: the flow has no install (its run installs and resets), so a replay of one would uninstall the app
     // just launched and match every step after it on a home screen the flow never sees. Matched as it is, it is skipped.
     if (raw.kind === 'install') {
@@ -245,8 +275,12 @@ export { toFlowSteps }
 export async function verifyFlow(
   tap: CaptureTap, channel: DashboardSessionChannel, lease: PauseLease, flow: Omit<Flow, 'file'>,
   secrets: Record<string, string>, onStep: (mark: FlowStepMark) => void, keyboard?: string, onTouch?: (mark: StepMark) => void,
+  onReset?: (report: HeldResetReport | null) => void,
 ): Promise<FlowResult> {
   await lease.start()
+  // From where a run starts, as Match did: the flow's own `clearState` cannot reach the keychain or the turn (#1139).
+  const reset = await resetDevice(channel, tap.sessionId, flow.appId ?? null)
+  onReset?.(reset)
   const alignment = new KeyboardAlignment(channel, tap.sessionId, keyboard)
   await alignment.align()
   const driver = new AligningDriver(channel, tap.sessionId, tap.buildId, alignment, onTouch)

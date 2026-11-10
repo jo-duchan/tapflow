@@ -33,11 +33,11 @@ If you typed into a password field on the on-screen keyboard, each such step get
 
 If the part does not start with a launch, the flow launches the app itself, and the dialog tells you to leave out any tap on the home screen before it. If nothing cleared the app before that launch, it also tells you the steps ran on data an earlier test left.
 
-**Continue** clears the app's data on the device and replays the steps in the next step, so an account that was signed in is signed out.
+**Continue** resets the device the way `tapflow flow run` does before a run, then replays the steps in the next step. On iOS the app is reinstalled, the keychain, privacy permissions, clipboard and location are reset for every app on the device, so other apps are signed out too, and the device is turned upright. On Android the app's data is cleared, and on an emulator the clipboard is emptied and the device turned upright. On both, a device taken offline goes back online.
 
 ### 4. Match: replay and name the steps {#match}
 
-tapflow clears the app's data on the same device, turns the device the way it was when the part started, launches the app, and replays the steps you picked one by one. It also sets the keyboard language the recording used. Before each step it reads the screen and finds the name (selector) of what the step touched. Progress shows as **Step 3 of 12**, and the device on the left shows where each step touches as a blue dot and trail.
+tapflow resets the same device that way, turns it the way it was when the part started, launches the app, and replays the steps you picked one by one. It shows what was reset, and anything that could not be. It also sets the keyboard language the recording used. Before each step it reads the screen and finds the name (selector) of what the step touched. Progress shows as **Step 3 of 12**, and the device on the left shows where each step touches as a blue dot and trail.
 
 A typing step replaces what the field holds with the value the field really held when you recorded: Korean, Caps Lock, the on-screen keyboard and Backspace all replay as they ended up. If you typed into a field that was focused before the part began, the replay taps that field first, and the tap goes into the flow.
 
@@ -65,7 +65,7 @@ Text typed into a field the app marks as a password, on either keyboard, is not 
 
 ### 6. Verify: check the flow {#verify}
 
-The edited flow runs from the start on the same device, this time with selectors only and not the recorded points, on the same engine as `tapflow flow run` in CI. The steps appear as they run, each marked passed or failed with how long it took.
+The edited flow runs from the start on the same device, after the same reset, this time with selectors only and not the recorded points, on the same engine as `tapflow flow run` in CI. The steps appear as they run, each marked passed or failed with how long it took.
 
 - If it passes, **Continue** moves on.
 - If it fails, the failed step opens to show why. When a tap found nothing, it also offers selectors that would have found the element on that screen. **Back to Edit** goes back to fix it, and **Export anyway** exports it as it is.
@@ -77,7 +77,7 @@ The file name (`flows/<name>.yaml`) and the YAML are shown.
 - **Download** saves the file, and **Copy YAML** copies it. Copying works only on a dashboard opened over HTTPS or on localhost. Over any other HTTP address, the button selects the YAML for you to copy with the keyboard.
 - Put the file in your app repository and CI runs it with `tapflow flow run`. The CI examples keep flow files under `.tapflow/flows/`. See [Flows](/automation/flows).
 - If the flow has secrets, the `--secret` options to pass when it runs are shown.
-- The exported flow starts by clearing the app's data (`clearState`) and launching it (`launchApp`), and runs only against builds of this app (its bundle id or package name). If the build's bundle id could not be read, Range says so, and the flow neither clears the app's data nor is tied to one app.
+- The exported flow starts by clearing the app's data (`clearState`) and launching it (`launchApp`), and runs only against builds of this app (its bundle id or package name). If the part began with the device turned sideways, the flow turns it with `setOrientation: landscape` after the launch. If the build's bundle id could not be read, Range says so, and the flow neither clears the app's data nor is tied to one app.
 
 **Done** closes the dialog. What you did not export is gone with it, and your capture stays until the session ends, so you can open the dialog again.
 
@@ -93,7 +93,7 @@ The file name (`flows/<name>.yaml`) and the YAML are shown.
 - A capture lives only in the relay's memory and is never written to disk or a log. Only the person who made it can read it, from their own browser.
 - A capture lasts as long as the session. It is cleared when the device is shut down or restarted, when you leave the session and the device shuts down, when you turn off **Capture my steps**, or when an MCP client takes over the device.
 - A session keeps about 20,000 inputs (about 4 MB). Past that, the points in the middle of drags go first, then the oldest steps. App launches, installs and clears are never dropped.
-- Match and Verify clear the app's data on the device before they replay.
+- Match and Verify reset the device before they replay. On iOS that resets the keychain, privacy permissions, clipboard and location of every app on the device, so do not use one whose other apps must stay signed in.
 - On iOS, reading a field needs the agent's UI-tree runner, which starts when someone with **Capture my steps** on boots a device: about 110–360 MB more per device (measured), and not on a Mac over its memory limit.
 - Replaying a typing step by replacing the field's contents needs Android 13 or later, and `imeAction` Android 11 or later. See [Flows](/automation/flows).
 - Every role can use it, Viewer included.
@@ -107,6 +107,7 @@ The file name (`flows/<name>.yaml`) and the YAML are shown.
 | **Your captured steps are gone: the device was released or restarted.** | The device was shut down or restarted, which cleared the capture. Test again to record it. |
 | **The connection to the relay was lost. Start again once it is back.** | The connection to the relay dropped. Click **Start again** once it is back. |
 | **Capturing could not be paused, so the replay stopped — its steps may now be mixed into your capture.** | Capturing could not be paused while it replayed. The replayed steps may be in your capture, so check the range again. |
+| **This device’s tapflow agent cannot reset it the way a run does.** | tapflow on that Mac predates the reset. The replay ran with at most the app's data cleared, so its result may differ from CI's. Update tapflow on that Mac. |
 
 ## Related {#related}
 
