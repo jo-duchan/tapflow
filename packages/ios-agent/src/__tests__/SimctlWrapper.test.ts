@@ -634,7 +634,7 @@ describe('SimctlWrapper', () => {
       } satisfies SimctlRunner
       expect(await new SimctlWrapper(runner).keyboardLanguage('device-1')).toBe('ko_KR@sw=Korean;hw=Automatic')
       expect(runner.execWithOpts).toHaveBeenCalledWith(
-        { timeoutMs: 5000 }, 'spawn', 'device-1', 'defaults', 'read', 'com.apple.keyboard.preferences', 'KeyboardLastUsed',
+        { timeoutMs: 800 }, 'spawn', 'device-1', 'defaults', 'read', 'com.apple.keyboard.preferences', 'KeyboardLastUsed',
       )
     })
 
@@ -645,6 +645,27 @@ describe('SimctlWrapper', () => {
         execWithOpts: vi.fn().mockRejectedValue(new Error('The domain/default pair does not exist')),
       } satisfies SimctlRunner
       expect(await new SimctlWrapper(runner).keyboardLanguage('device-1')).toBeUndefined()
+    })
+
+    // The runner retries after restarting CoreSimulatorService, past its own timeout: the read must not wait for it.
+    it('is undefined after 800 ms whatever the runner does', async () => {
+      vi.useFakeTimers()
+      try {
+        const runner = {
+          exec: vi.fn().mockResolvedValue(''),
+          execBinary: vi.fn().mockResolvedValue(Buffer.alloc(0)),
+          execWithOpts: vi.fn().mockReturnValue(new Promise<string>(() => {})),
+        } satisfies SimctlRunner
+        const read = new SimctlWrapper(runner).keyboardLanguage('device-1')
+        let settled = false
+        void read.then(() => { settled = true })
+        await vi.advanceTimersByTimeAsync(799)
+        expect(settled).toBe(false)
+        await vi.advanceTimersByTimeAsync(1)
+        expect(await read).toBeUndefined()
+      } finally {
+        vi.useRealTimers()
+      }
     })
   })
 
