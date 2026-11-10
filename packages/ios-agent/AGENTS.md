@@ -110,6 +110,18 @@ again** (measured both ways). The relay sends `device:keyboard-reset` when a dif
 that arrives before the device is up waits for the boot, and every reset waits for that boot's
 `syncKeyboardsFromLanguages`, which rewrites the list it reads.
 
+**A replay sets it to a named keyboard, and a run resets it** (#1135). `device:keyboard-set` (`keyboard-set`) writes
+the keyboard Flow Capture recorded, or the first when none is named, and answers once the daemon has restarted, so the
+replay launches the app after it; a keyboard not in `AppleKeyboards` is an error and nothing is written. A field read
+carries `KeyboardLastUsed` as the language it was typed in. A `flow run` boot resets the keyboard last in its run reset,
+each call bounded by what is left of the reset's budget, and does not report it as an item.
+
+**Where the soft keyboard is** (`ui:keyboard:request`, `keyboard-state`) comes from the runner's `GET /keyboard`, and
+rides on `/field` too: the `Keyboard` element's frame as fractions of the app's window, run to the window's bottom edge
+because its globe and dictation row sit below the element (measured), and turned into the portrait framebuffer a touch
+is in by the app's interface orientation, as `/tree`'s turn is. No soft keyboard is shown with a hardware keyboard
+connected. `ImeAction`, a key code tapflow names, presses Return.
+
 The daemon is `user/foreground/com.apple.TextInput.kbd`. `system/com.apple.kbd`, which the boot's sync kickstarted until
 then, does not exist on iOS 26.4 and failed in silence.
 

@@ -37,20 +37,16 @@ export function unavailableButtonMessage(problem: UnavailableButton, platform: s
     : `${where} has no "${problem.name}" button, so this flow cannot run on ${where} — press the app's own control with a selector instead, or tag the flow and run it only where the button exists`
 }
 
-/** Select-all, which `inputText { replace: true }` presses before it types. iOS takes it as a hardware chord. */
+/**
+ * Select-all, which `inputText { replace: true }` presses before it types. iOS takes it as a hardware chord; Android's
+ * agent holds Ctrl+A, which Android takes from 13 (#1135). Below that, or from an agent that predates it, the press is
+ * refused as unsupported and the step fails with `SELECT_ALL_REFUSED`: typed anyway, the text would land after what
+ * the field holds. Not refused before the run, since only the device can say.
+ */
 export const SELECT_ALL = { code: 'KeyA', modifiers: ['meta'] } as const
 
-/**
- * The first `inputText { replace: true }` on a platform that cannot select a field's text, or `null`. Android's agent
- * presses no select-all (it refuses the chord as unsupported), so the step would type after what the field holds.
- */
-export function unavailableReplace(flow: Pick<Flow, 'steps'>, platform: string): number | null {
-  if (platform !== 'android') return null
-  const index = flow.steps.findIndex((s) => (s.type === 'inputText' || s.type === 'inputSecret') && s.replace === true)
-  return index < 0 ? null : index
-}
+export const SELECT_ALL_REFUSED = 'this device cannot select what a field holds, so "inputText" with "replace" cannot run on it — '
+  + 'Android needs version 13 or later and an up-to-date tapflow agent; otherwise type into an empty field without "replace"'
 
-export function unavailableReplaceMessage(platform: string): string {
-  const where = PLATFORM_NAMES[platform] ?? platform
-  return `${where} cannot select what a field holds, so "inputText" with "replace" cannot run there — type into an empty field without "replace", or tag the flow and run it only on iOS`
-}
+/** The key code a flow's `imeAction` step presses: tapflow's name for the field's own action (protocol `InputKey`). */
+export const IME_ACTION = 'ImeAction'

@@ -1,7 +1,9 @@
 import { describe, it, expect } from 'vitest'
-import { parseFlow, type CapturedFlow, type CapturedStep, type FlowResult } from '@tapflowio/flow-runner/browser'
-import { canGoTo, initialState, reduce, stepIndex, type CaptureState } from '@/lib/flowCapture/machine'
+import { parseFlow, type CapturedFlow, type CapturedStep, type FlowResult, type RawStep } from '@tapflowio/flow-runner/browser'
+import { askedReady, canGoTo, initialState, reduce, stepIndex, withAsked, type CaptureState } from '@/lib/flowCapture/machine'
 import { editedCapture, fileNameOf, flowOf, moveEdge, yamlOf } from '@/lib/flowCapture/flow'
+import { addMark, markOf } from '@/lib/flowCapture/marks'
+import { NO_MARKS } from '@/lib/watchActions'
 
 // Flow Capture's dialog (#1125), the parts with no screen: the order of its states, and what Edit makes of the flow.
 const raw = {} as CapturedStep['raw']
@@ -43,6 +45,53 @@ describe('the dialog\'s states', () => {
     s = reduce(s, { type: 'step-matched', step: captured.steps[0]! })
     s = reduce(s, { type: 'match-failed', error: 'stopped' })
     expect(s).toMatchObject({ phase: 'matching', error: 'stopped', matched: [captured.steps[0]] })
+  })
+})
+
+// #1140: a password typed on the soft keyboard, its value given by the person before Match.
+describe('the passwords the person gives', () => {
+  const base = { at: 0, endAt: 0, outcome: 'landed', messages: [] }
+  const steps = [
+    { ...base, kind: 'tap', point: [0.5, 0.5] },
+    { ...base, kind: 'text', text: '', replace: true, fieldRead: 'secure', askValue: true },
+    { ...base, kind: 'text', text: 'ab', replace: true, fieldRead: 'secure', askValue: true },
+  ] as unknown as RawStep[]
+  const loaded = reduce(initialState, { type: 'loaded', steps, range: { start: 0, end: 3 }, name: '' })
+
+  it('holds Match until each one in the range has a value, starting from what the computer\'s keyboard typed', () => {
+    expect(askedReady(loaded)).toBe(false)
+    expect(askedReady({ ...loaded, range: { start: 2, end: 3 } })).toBe(true)
+    const given = reduce(loaded, { type: 'set-asked', index: 1, value: 's3cret' })
+    expect(askedReady(given)).toBe(true)
+    expect(askedReady(reduce(given, { type: 'set-asked', index: 2, value: '' }))).toBe(false)
+  })
+
+  it('replays the value given, and forgets them all when another recording loads', () => {
+    const given = reduce(loaded, { type: 'set-asked', index: 1, value: 's3cret' })
+    expect(withAsked(given).map((s) => (s.kind === 'text' ? s.text : s.kind))).toEqual(['tap', 's3cret', 'ab'])
+    expect(reduce(given, { type: 'loaded', steps, range: { start: 0, end: 3 }, name: '' }).asked).toEqual({})
+  })
+})
+
+describe('Match\'s count', () => {
+  // Review: a tap the replay added on the field typed into is not one of the range's steps.
+  it('does not count a step the replay added', () => {
+    let s = reduce(initialState, { type: 'match-started', total: 2 })
+    s = reduce(s, { type: 'step-matched', step: captured.steps[0]!, inserted: true })
+    s = reduce(s, { type: 'step-matched', step: captured.steps[0]! })
+    expect(s.progress.done).toBe(1)
+    expect(s.matched).toHaveLength(2)
+  })
+})
+
+describe('a verification as it runs', () => {
+  it('records each step as it starts and ends, timed, and counts the ended ones', () => {
+    let s = reduce(initialState, { type: 'verify-started' })
+    s = reduce(s, { type: 'verify-step', mark: { index: 0, name: 'launchApp', phase: 'start' }, at: 1000 })
+    expect(s.verify?.live).toEqual([{ index: 0, name: 'launchApp', status: 'running', startedAt: 1000 }])
+    s = reduce(s, { type: 'verify-step', mark: { index: 0, name: 'launchApp (cold)', phase: 'end', status: 'failed' }, at: 2500 })
+    expect(s.verify?.live).toEqual([{ index: 0, name: 'launchApp (cold)', status: 'failed', startedAt: 1000, durationMs: 1500 }])
+    expect(s.verify?.done).toBe(1)
   })
 })
 
@@ -131,5 +180,31 @@ describe('what Edit makes of the flow', () => {
     expect(moveEdge(range, 'end', 10, 10)).toEqual({ start: 2, end: 10 })
     expect(moveEdge(range, 'end', 14, 10)).toEqual({ start: 2, end: 10 })
     expect(moveEdge(range, 'end', 1, 10)).toEqual({ start: 2, end: 3 })
+  })
+})
+
+// What the dialog draws over a step's picture and the device, as the MCP watch view draws an agent's touches.
+describe('the touches drawn', () => {
+  const base = { at: 0, endAt: 0, outcome: 'landed', messages: [] }
+
+  it('marks a tap, a key, a long press and a swipe, and nothing else', () => {
+    expect(markOf({ ...base, kind: 'tap', point: [0.2, 0.3] } as unknown as RawStep)).toEqual({ kind: 'tap', x: 0.2, y: 0.3 })
+    expect(markOf({ ...base, kind: 'keyboardKey', point: [0.5, 0.9] } as unknown as RawStep)).toEqual({ kind: 'tap', x: 0.5, y: 0.9 })
+    expect(markOf({ ...base, kind: 'swipe', from: [0.1, 0.8], to: [0.1, 0.2], durationMs: 200 } as unknown as RawStep))
+      .toEqual({ kind: 'swipe', from: [0.1, 0.8], to: [0.1, 0.2] })
+    expect(markOf({ ...base, kind: 'text', text: 'a' } as unknown as RawStep)).toBeNull()
+  })
+
+  it('marks nothing on a turned device, whose points are in another frame than its picture', () => {
+    const turned = { ...base, kind: 'tap', point: [0.2, 0.3], chrome: { bodyRotation: 90, streamRotation: 0 } }
+    expect(markOf(turned as unknown as RawStep)).toBeNull()
+  })
+
+  it('moves the cursor to each touch and keeps the last few trails', () => {
+    let m = NO_MARKS
+    for (let i = 1; i <= 6; i++) m = addMark(m, i, { kind: 'tap', x: i / 10, y: 0.5 })
+    expect(m.cursor).toEqual({ x: 0.6, y: 0.5 })
+    expect(m.trails.map((t) => t.id)).toEqual([3, 4, 5, 6])
+    expect(addMark(m, 7, { kind: 'swipe', from: [0, 0], to: [1, 1] }).cursor).toEqual({ x: 1, y: 1 })
   })
 })

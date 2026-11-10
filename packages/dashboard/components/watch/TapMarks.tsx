@@ -1,6 +1,31 @@
+import { useId } from 'react'
 import type { WatchMarks } from '@/lib/watchActions'
 
 const BLUE = 'rgb(59 130 246)'
+const pct = (n: number) => `${n * 100}%`
+
+/**
+ * A swipe's stroke, inside an SVG laid over the picture (positions as fractions of it): dashed, faint where the finger
+ * went down and strong where it lifted, with a dot there, so its direction reads at a glance. One look for every place a
+ * touch is drawn — the MCP watch view, and Flow Capture's replay and its step pictures.
+ */
+export function SwipeStroke({ from, to }: { from: { left: number; top: number }; to: { left: number; top: number } }) {
+  // A url(#…) reference with React's `:r1:` ids in it is not resolved everywhere: the colons go.
+  const id = `swipe-${useId().replace(/:/g, '')}`
+  return (
+    <>
+      <defs>
+        <linearGradient id={id} gradientUnits="userSpaceOnUse" x1={pct(from.left)} y1={pct(from.top)} x2={pct(to.left)} y2={pct(to.top)}>
+          <stop offset="0" stopColor={BLUE} stopOpacity={0.1} />
+          <stop offset="1" stopColor={BLUE} stopOpacity={0.9} />
+        </linearGradient>
+      </defs>
+      <line x1={pct(from.left)} y1={pct(from.top)} x2={pct(to.left)} y2={pct(to.top)}
+        stroke={`url(#${id})`} strokeWidth={4} strokeLinecap="round" strokeDasharray="1 9" />
+      <circle cx={pct(to.left)} cy={pct(to.top)} r={5} fill={BLUE} />
+    </>
+  )
+}
 
 /**
  * The agent's pointer on the device (A2), the way computer-use views show one: a blue cursor that stays at the last
@@ -16,7 +41,6 @@ export function TapMarks({ marks, place }: {
   place: (x: number, y: number) => { left: number; top: number }
 }) {
   const cursor = marks.cursor && place(marks.cursor.x, marks.cursor.y)
-  const pct = (n: number) => `${n * 100}%`
   return (
     <div aria-hidden="true" data-testid="tap-marks" className="pointer-events-none absolute inset-0" style={{ zIndex: 5 }}>
       {marks.trails.map((t) => {
@@ -26,11 +50,10 @@ export function TapMarks({ marks, place }: {
           <span key={t.id}>
             {a && (
               <svg data-testid="trail" className="absolute inset-0 size-full overflow-visible motion-safe:animate-[swipe-mark_0.8s_ease-out_forwards]">
-                <line
-                  x1={pct(a.left)} y1={pct(a.top)} x2={pct(b.left)} y2={pct(b.top)}
-                  stroke={BLUE} strokeOpacity={t.kind === 'swipe' ? 0.7 : 0.45} strokeWidth={t.kind === 'swipe' ? 6 : 3}
-                  strokeLinecap="round" {...(t.kind === 'tap' ? { strokeDasharray: '1 7' } : {})}
-                />
+                {t.kind === 'swipe'
+                  ? <SwipeStroke from={a} to={b} />
+                  : <line x1={pct(a.left)} y1={pct(a.top)} x2={pct(b.left)} y2={pct(b.top)}
+                      stroke={BLUE} strokeOpacity={0.45} strokeWidth={3} strokeLinecap="round" strokeDasharray="1 7" />}
               </svg>
             )}
             <span

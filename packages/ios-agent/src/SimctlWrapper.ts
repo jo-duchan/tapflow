@@ -39,6 +39,9 @@ function langToKeyboard(lang: string): string {
 // A hung pasteboard call must not strand the caller: the read path holds a sentinel on the
 // device until it finishes, so "never returns" would leave the device clipboard destroyed.
 const CLIPBOARD_CMD_TIMEOUT_MS = 5_000
+// A field read waits on this, and a capture snapshot waits 1 s for a field read, so it is bounded below that: a read
+// takes about 0.41 s (measured, 5 of 5). Bounded as a whole too, since the runner retries after restarting the service.
+const KEYBOARD_READ_TIMEOUT_MS = 800
 // A run reset's device-wide commands take about a second each (measured: keychain 1.0 s, privacy 0.5 s, location 0.5 s).
 // A command this bound kills does not land later, which is why iOS needs nothing like Android's pending `pm clear` wait:
 // measured on iOS 26.5 by killing `simctl uninstall` and `simctl keychain reset` mid-flight, each either finished before
@@ -501,28 +504,62 @@ export class SimctlWrapper {
    * not in `AppleKeyboards`, whose order does not reset it. Written, then the keyboard daemon restarted; a running app
    * keeps its language until it is launched again (measured both ways).
    */
-  async resetKeyboardLanguage(udid: string): Promise<void> {
-    const out = await this.runner.exec('spawn', udid, 'defaults', 'read', '-g', 'AppleKeyboards')
+  async resetKeyboardLanguage(udid: string, timeoutMs?: number): Promise<void> {
+    await this.setKeyboardLanguage(udid, undefined, timeoutMs)
+  }
+
+  /**
+   * Put the device's keyboard in `keyboard` — an `AppleKeyboards` entry, as `keyboardLanguage` reads it — or in its
+   * first when absent, the way `resetKeyboardLanguage` does (#1135: a replay starts from the recording's keyboard).
+   * `false` when the device has no such keyboard, and nothing is written.
+   */
+  async setKeyboardLanguage(udid: string, keyboard?: string, timeoutMs?: number): Promise<boolean> {
+    // Bounded as a whole by `timeoutMs` when given (a run's reset budget): each call gets what is left of it, so up to
+    // five calls cannot take five budgets. Unbounded otherwise, as these always were.
+    const deadline = timeoutMs === undefined ? undefined : Date.now() + timeoutMs
+    const exec = (...args: string[]) => this.execBy(deadline, ...args)
+    const out = await exec('spawn', udid, 'defaults', 'read', '-g', 'AppleKeyboards')
     const keyboards = [...out.matchAll(/"([^"]+)"/g)].map((m) => m[1]!)
-    const first = keyboards[0]
-    if (!first) return
-    const next = keyboards.find((k) => k !== first && !k.startsWith('emoji')) ?? first
-    await this.runner.exec('spawn', udid, 'defaults', 'write', 'com.apple.keyboard.preferences', 'KeyboardLastUsed', first)
-    await this.runner.exec('spawn', udid, 'defaults', 'write', 'com.apple.keyboard.preferences', 'KeyboardsCurrentAndNext', '-array', first, first, next)
-    await this.restartKeyboardDaemon(udid)
+    const target = keyboard ?? keyboards[0]
+    if (!target || !keyboards.includes(target)) return false
+    const next = keyboards.find((k) => k !== target && !k.startsWith('emoji')) ?? target
+    await exec('spawn', udid, 'defaults', 'write', 'com.apple.keyboard.preferences', 'KeyboardLastUsed', target)
+    await exec('spawn', udid, 'defaults', 'write', 'com.apple.keyboard.preferences', 'KeyboardsCurrentAndNext', '-array', target, target, next)
+    await this.restartKeyboardDaemon(udid, deadline)
+    return true
+  }
+
+  /** The keyboard the device types with now (`KeyboardLastUsed`, an `AppleKeyboards` entry), or `undefined` before any
+   *  was used or when it cannot be read. */
+  async keyboardLanguage(udid: string): Promise<string | undefined> {
+    let timer: ReturnType<typeof setTimeout> | undefined
+    const out = await Promise.race([
+      this.runner
+        .execWithOpts({ timeoutMs: KEYBOARD_READ_TIMEOUT_MS }, 'spawn', udid, 'defaults', 'read', 'com.apple.keyboard.preferences', 'KeyboardLastUsed')
+        .catch(() => ''),
+      new Promise<string>((resolve) => { timer = setTimeout(() => resolve(''), KEYBOARD_READ_TIMEOUT_MS) }),
+    ]).finally(() => clearTimeout(timer))
+    const value = out.trim()
+    return value === '' ? undefined : value
   }
 
   // Restart the keyboard daemon so it picks up the new settings. `com.apple.TextInput.kbd` in the foreground user
   // domain on iOS 26.4 (measured), where `system/com.apple.kbd`, used until #1134, does not exist and failed in silence.
   // The old name is still tried when the new one fails, for an older runtime nobody has measured. Errors are ignored —
   // changes take effect on the next text field focus if the daemon isn't running yet.
-  private async restartKeyboardDaemon(udid: string): Promise<void> {
+  private async restartKeyboardDaemon(udid: string, deadline?: number): Promise<void> {
     for (const service of ['user/foreground/com.apple.TextInput.kbd', 'system/com.apple.kbd']) {
       try {
-        await this.runner.exec('spawn', udid, 'launchctl', 'kickstart', '-k', service)
+        await this.execBy(deadline, 'spawn', udid, 'launchctl', 'kickstart', '-k', service)
         return
       } catch { /* try the next name */ }
     }
+  }
+
+  /** A simctl call that ends by `deadline` (epoch ms), or unbounded without one. */
+  private execBy(deadline: number | undefined, ...args: string[]): Promise<string> {
+    if (deadline === undefined) return this.runner.exec(...args)
+    return this.runner.execWithOpts({ timeoutMs: Math.max(1, deadline - Date.now()) }, ...args)
   }
 
   async rotate(udid: string, orientation: 'portrait' | 'landscapeLeft' | 'landscapeRight' | 'portraitUpsideDown'): Promise<void> {

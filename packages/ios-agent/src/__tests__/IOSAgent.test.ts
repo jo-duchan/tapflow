@@ -207,6 +207,8 @@ function mockSimctl(booted: boolean | 'unknown' = false): SimctlWrapper {
     screenshot: vi.fn().mockResolvedValue(Buffer.from('png')),
     syncKeyboardsFromLanguages: vi.fn().mockResolvedValue(undefined),
     resetKeyboardLanguage: vi.fn().mockResolvedValue(undefined),
+    setKeyboardLanguage: vi.fn().mockResolvedValue(true),
+    keyboardLanguage: vi.fn().mockResolvedValue(undefined),
     showSoftwareKeyboard: vi.fn().mockResolvedValue(undefined),
     hideSoftwareKeyboard: vi.fn().mockResolvedValue(undefined),
     // Stateful pasteboard: the agent confirms a write by reading it back, so a mock that
@@ -899,6 +901,85 @@ describe('IOSAgent', () => {
       expect(simctl.resetKeyboardLanguage).not.toHaveBeenCalled()
       finishSync()
       await vi.waitFor(() => expect(simctl.resetKeyboardLanguage).toHaveBeenCalledWith('dev-1'), { timeout: 2000 })
+      agent.disconnect()
+      browser.close()
+    })
+
+    it('carries the keyboard language beside the field', async () => {
+      vi.spyOn(XCUITreeReader.prototype, 'readField').mockResolvedValue({ field: null, reason: 'no-focus', keyboard: { shown: true } })
+      const simctl = mockSimctl(true)
+      ;(simctl.keyboardLanguage as ReturnType<typeof vi.fn>).mockResolvedValue('ko_KR@sw=Korean;hw=Automatic')
+      const { agent, browser, internals, sent } = await bootedAgent(simctl)
+      internals.lastBundleIds.set('dev-1', 'com.app')
+      internals.handleRelayMessage({ type: 'ui:field:request', sessionId: agent.sessionId!, requestId: 'rq-fl' })
+      await vi.waitFor(() => expect(sent.some((m) => m.type === 'ui:field:response')).toBe(true), { timeout: 2000 })
+      expect(sent.find((m) => m.type === 'ui:field:response')).toMatchObject({
+        requestId: 'rq-fl', keyboard: { shown: true }, language: 'ko_KR@sw=Korean;hw=Automatic',
+      })
+      agent.disconnect()
+      browser.close()
+    })
+
+    it('answers ui:keyboard:request from the runner, and unknown when it fails', async () => {
+      const read = vi.spyOn(XCUITreeReader.prototype, 'readKeyboard').mockResolvedValueOnce({ shown: false }).mockRejectedValueOnce(new Error('gone'))
+      const { agent, browser, internals, sent } = await bootedAgent()
+      internals.lastBundleIds.set('dev-1', 'com.app')
+      internals.handleRelayMessage({ type: 'ui:keyboard:request', sessionId: agent.sessionId!, requestId: 'rq-k1' })
+      internals.handleRelayMessage({ type: 'ui:keyboard:request', sessionId: agent.sessionId!, requestId: 'rq-k2' })
+      await vi.waitFor(() => expect(sent.filter((m) => m.type === 'ui:keyboard:response')).toHaveLength(2), { timeout: 2000 })
+      expect(read).toHaveBeenCalledWith('dev-1', 'com.app')
+      expect(sent.find((m) => m.requestId === 'rq-k1')).toMatchObject({ keyboard: { shown: false } })
+      expect(sent.find((m) => m.requestId === 'rq-k2')).toMatchObject({ keyboard: { shown: null } })
+      agent.disconnect()
+      browser.close()
+    })
+
+    // #1135: a replay's starting keyboard, answered so the replay launches the app only after it.
+    it('sets a named keyboard once the boot\'s keyboard sync is done, and answers', async () => {
+      const simctl = mockSimctl(true)
+      let finishSync!: () => void
+      ;(simctl.syncKeyboardsFromLanguages as ReturnType<typeof vi.fn>).mockReturnValue(new Promise<void>((r) => { finishSync = r }))
+      const { agent, browser, internals, sent } = await bootedAgent(simctl)
+      internals.handleRelayMessage({ type: 'device:keyboard-set', sessionId: agent.sessionId!, requestId: 'rq-ks', payload: { keyboard: 'ko_KR@sw=Korean;hw=Automatic' } } as never)
+      await new Promise((r) => setTimeout(r, 50))
+      expect(simctl.setKeyboardLanguage).not.toHaveBeenCalled()
+      finishSync()
+      await vi.waitFor(() => expect(sent.find((m) => m.type === 'device:keyboard-set-done')).toMatchObject({ requestId: 'rq-ks' }), { timeout: 2000 })
+      expect(simctl.setKeyboardLanguage).toHaveBeenCalledWith('dev-1', 'ko_KR@sw=Korean;hw=Automatic')
+      agent.disconnect()
+      browser.close()
+    })
+
+    // Review of #1145: a relay reconnect clears `booted` while the simulator runs on, and the flag alone answered
+    // `No booted device`, so the replay started without the recorded keyboard.
+    it('sets the keyboard for a device that stayed up across a reconnect', async () => {
+      const simctl = mockSimctl(true)
+      const { agent, browser, internals, sent } = await bootedAgent(simctl)
+      for (const state of (agent as unknown as { deviceStates: Map<string, { booted: boolean }> }).deviceStates.values()) state.booted = false
+      internals.handleRelayMessage({ type: 'device:keyboard-set', sessionId: agent.sessionId!, requestId: 'rq-ks3', payload: { keyboard: 'en_US@sw=QWERTY;hw=Automatic' } } as never)
+      await vi.waitFor(() => expect(sent.find((m) => m.requestId === 'rq-ks3')).toMatchObject({ type: 'device:keyboard-set-done' }), { timeout: 2000 })
+      agent.disconnect()
+      browser.close()
+    })
+
+    // The failed command's first line only: node's message goes on with the udid and the whole argv.
+    it('answers a failed set with the first line of the error', async () => {
+      const simctl = mockSimctl(true)
+      ;(simctl.setKeyboardLanguage as ReturnType<typeof vi.fn>).mockRejectedValue(new Error('spawn failed\nCommand failed: xcrun simctl spawn dev-1 defaults read -g AppleKeyboards'))
+      const { agent, browser, internals, sent } = await bootedAgent(simctl)
+      internals.handleRelayMessage({ type: 'device:keyboard-set', sessionId: agent.sessionId!, requestId: 'rq-ks4', payload: {} } as never)
+      await vi.waitFor(() => expect(sent.find((m) => m.requestId === 'rq-ks4')).toMatchObject({ type: 'device:keyboard-set-error', message: 'spawn failed' }), { timeout: 2000 })
+      agent.disconnect()
+      browser.close()
+    })
+
+    it('answers an error for a keyboard the device does not have', async () => {
+      const simctl = mockSimctl(true)
+      ;(simctl.setKeyboardLanguage as ReturnType<typeof vi.fn>).mockResolvedValue(false)
+      const { agent, browser, internals, sent } = await bootedAgent(simctl)
+      internals.handleRelayMessage({ type: 'device:keyboard-set', sessionId: agent.sessionId!, requestId: 'rq-ks2', payload: {} } as never)
+      await vi.waitFor(() => expect(sent.find((m) => m.type === 'device:keyboard-set-error')).toMatchObject({ requestId: 'rq-ks2', reason: 'failed' }), { timeout: 2000 })
+      expect(simctl.setKeyboardLanguage).toHaveBeenCalledWith('dev-1', undefined)
       agent.disconnect()
       browser.close()
     })
@@ -4353,6 +4434,15 @@ describe('IOSAgent', () => {
       browser.close()
     })
 
+    // #1135: a flow's `imeAction` step. iOS's keyboard sends a field's action as Return.
+    it('input:key ImeAction presses Return', async () => {
+      const { browser, agent, thInstance } = await setupSession()
+      browser.send(JSON.stringify({ type: 'input:key', requestId: 'rq-ime', sessionId: agent.sessionId, payload: { code: 'ImeAction', modifiers: 0 } }))
+      await vi.waitFor(() => expect(thInstance.sendKey).toHaveBeenCalledWith(0x28, 0), { timeout: 500 })
+      agent.disconnect()
+      browser.close()
+    })
+
     it('input:key KeyA calls touchHelper.sendKey with HID usage 0x04', async () => {
       const { browser, agent, thInstance } = await setupSession()
       browser.send(JSON.stringify({ type: 'input:key', requestId: 'rq-in30', sessionId: agent.sessionId, payload: { code: 'KeyA', modifiers: 0 } }))
@@ -6054,6 +6144,7 @@ describe('IOSAgent', () => {
         resetKeychain: record('keychain'),
         resetPrivacy: record('privacy'),
         clearLocation: record('location'),
+        resetKeyboardLanguage: vi.fn(async () => { calls.push('keyboard') }),
       })
       return simctl
     }
@@ -6073,7 +6164,11 @@ describe('IOSAgent', () => {
       const simctl = resetSimctl(true)
       const { agent, browser } = await bootWith(simctl, { runReset: RESET })
       const ready = await waitForType(browser, 'device:ready')
-      expect(calls).toEqual(['bootstatus', 'uninstall:com.example.app', 'clear:com.example.helper', 'keychain', 'privacy', 'location'])
+      // The keyboard last and unreported (#1135): its first language, where a Flow Capture replay starts too.
+      expect(calls).toEqual(['bootstatus', 'uninstall:com.example.app', 'clear:com.example.helper', 'keychain', 'privacy', 'location', 'keyboard'])
+      // Bounded by what is left of the reset's budget, never unbounded.
+      const [, timeoutMs] = vi.mocked(simctl.resetKeyboardLanguage).mock.calls[0]!
+      expect(timeoutMs).toBeGreaterThan(0)
       expect(simctl.setPasteboard).toHaveBeenCalledWith('dev-1', '')
       expect((ready['payload'] as Record<string, unknown>)['runReset']).toEqual({
         done: ['app-uninstall', 'app-files', 'keychain', 'privacy-services', 'pasteboard', 'location'], failed: [],
@@ -6086,7 +6181,7 @@ describe('IOSAgent', () => {
       const simctl = resetSimctl(false)
       const { agent, browser } = await bootWith(simctl, { runReset: { uninstall: [], clear: [] } })
       await waitForType(browser, 'device:ready')
-      expect(calls).toEqual(['bootstatus', 'keychain', 'privacy', 'location'])
+      expect(calls).toEqual(['bootstatus', 'keychain', 'privacy', 'location', 'keyboard'])
       agent.disconnect(); browser.close()
     })
 

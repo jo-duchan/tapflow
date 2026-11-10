@@ -46,6 +46,8 @@ export const INBOUND_DISPOSITION = {
   'app:launch-error': { settles: 'launchApp' },
   'app:clear-state-done': { settles: 'clearState' },
   'app:clear-state-error': { settles: 'clearState' },
+  'device:keyboard-set-done': { settles: 'setKeyboard' },
+  'device:keyboard-set-error': { settles: 'setKeyboard' },
   'open-url:done': { settles: 'openUrl' },
   'open-url:error': { settles: 'openUrl' },
   'input:done': { settles: 'awaitInputAck' },

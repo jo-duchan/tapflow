@@ -6,6 +6,7 @@ import { readFileSync } from 'fs'
 import path from 'path'
 import { fileURLToPath } from 'url'
 import { defaultRunner, type AdbRunner } from './adb.js'
+import { FocusedServers, type FocusedOp } from './FocusedServer.js'
 import type { LaunchOptions } from '@tapflowio/protocol'
 import { hasLaunchOptions } from '@tapflowio/protocol/launch'
 import { androidLaunchExtras } from './launchExtras.js'
@@ -67,7 +68,38 @@ export class AdbWrapper {
   // a flow's is enough to get there.
   private readonly dumpQueue = new Map<string, Promise<unknown>>()
 
-  constructor(private readonly runner: AdbRunner = defaultRunner) {}
+  // The resident field server per device (#1135), when the runner can keep a child; the one-shot run otherwise.
+  private readonly focusedServers: FocusedServers | null
+
+  constructor(private readonly runner: AdbRunner = defaultRunner) {
+    this.focusedServers = runner.spawnPiped
+      // Quoted: adb joins the arguments and the device shell splits them, so an unquoted `FocusedServer <nonce>` was two
+      // patterns, and toybox pkill ORs them — killing any field server, a newer one included. The nonce is hex.
+      ? new FocusedServers({ spawn: runner.spawnPiped.bind(runner), kill: (serial, pattern) => this.pkill(serial, `'${pattern}'`) })
+      : null
+  }
+
+  /** End a device's field server: the device is going, or the agent is. */
+  stopFocusedServer(serial: string): Promise<void> {
+    return this.focusedServers?.stop(serial) ?? Promise.resolve()
+  }
+
+  stopFocusedServers(): Promise<void> {
+    return this.focusedServers?.stopAll() ?? Promise.resolve()
+  }
+
+  /**
+   * A field request through the device's server, inside the dump queue. `undefined`: the server could not take it, so
+   * the caller runs the one-shot `Focused`. `null`: sent and not answered — for a set or an IME action that is a
+   * failure, never a second try, since the device may have done it.
+   */
+  private async viaServer(serial: string, jar: string, op: FocusedOp, text?: string): Promise<string | null | undefined> {
+    if (!this.focusedServers) return undefined
+    const outcome = await this.focusedServers.request(serial, jar, op, text)
+    // The jar may be gone from the device: a wiped emulator comes back on the same serial with an empty /data/local/tmp.
+    if (outcome.startFailed) this.uidumpPushed.delete(serial)
+    return outcome.sent ? outcome.out : undefined
+  }
 
   getSerial(avdId: string): string | undefined {
     return this.serialMap.get(avdId)
@@ -513,14 +545,93 @@ export class AdbWrapper {
    * cannot be pushed or produced no XML. A dump with no XML is an explicit `PlatformError`, never a silent empty tree.
    */
   async dumpUiHierarchy(serial: string, timeoutSec = 10): Promise<string> {
+    return this.inDumpQueue(serial, () => this.dumpNow(serial, timeoutSec))
+  }
+
+  // One UiAutomation connection per device at a time: every jar run, and the dump fallback, waits its turn.
+  private async inDumpQueue<T>(serial: string, run: () => Promise<T>): Promise<T> {
     const previous = this.dumpQueue.get(serial) ?? Promise.resolve()
-    const mine = previous.catch(() => {}).then(() => this.dumpNow(serial, timeoutSec))
+    const mine = previous.catch(() => {}).then(run)
     this.dumpQueue.set(serial, mine)
     try {
       return await mine
     } finally {
       if (this.dumpQueue.get(serial) === mine) this.dumpQueue.delete(serial)
     }
+  }
+
+  /**
+   * The focused text field and the soft keyboard, through the jar's `Focused read` (#1135): ~30 ms through the device's
+   * field server, ~1 s when it runs on its own (starting app_process). `null` when the jar cannot run. The answer can
+   * hold what a person typed: never logged.
+   */
+  async readFocused(serial: string): Promise<FocusedRead | null> {
+    return this.inDumpQueue(serial, async () => {
+      const jar = await this.pushUidump(serial)
+      if (!jar) return null
+      // A read changes nothing, so one the server lost is asked again the slow way.
+      const served = await this.viaServer(serial, jar, 'read')
+      if (served) return parseJsonLine(served) as FocusedRead | null
+      const out = await this.runner.exec(
+        '-s', serial, 'exec-out', `CLASSPATH=${jar}:/system/framework/uiautomator.jar`,
+        'timeout', String(UIDUMP_TIMEOUT_SEC), 'app_process', '/system/bin', 'dev.tapflow.uidump.Focused', 'read',
+      ).catch(() => '')
+      const read = parseJsonLine(out) as FocusedRead | null
+      if (!read) this.uidumpPushed.delete(serial)
+      return read
+    })
+  }
+
+  /**
+   * Type `text` into the focused field with `ACTION_SET_TEXT` (#1135), where typing it would land: at the caret, over
+   * the selection (a select-all first makes it the whole value). The field takes it whatever the keyboard's language or
+   * composition, with no clipboard and no key events (Appium's sendKeys does the same). The text goes on stdin as
+   * base64 — never argv, where `ps` and a failed exec's message would show it, and it can be a password.
+   */
+  async setFocusedText(serial: string, text: string): Promise<SetTextResult> {
+    if (!this.runner.execInput) return 'unavailable'
+    const execInput = this.runner.execInput.bind(this.runner)
+    return this.inDumpQueue(serial, async () => {
+      const jar = await this.pushUidump(serial)
+      if (!jar) return 'unavailable'
+      const served = await this.viaServer(serial, jar, 'set', text)
+      if (served !== undefined) {
+        const result = served === null ? undefined : (parseJsonLine(served) as { result?: string } | null)?.result
+        return SET_TEXT_RESULTS.has(result ?? '') ? result as SetTextResult : 'failed'
+      }
+      const out = await execInput(
+        `${Buffer.from(text, 'utf8').toString('base64')}\n`, (UIDUMP_TIMEOUT_SEC + 2) * 1000,
+        '-s', serial, 'shell', `CLASSPATH=${jar}:/system/framework/uiautomator.jar`,
+        'timeout', String(UIDUMP_TIMEOUT_SEC), 'app_process', '/system/bin', 'dev.tapflow.uidump.Focused', 'set',
+      ).catch(() => '')
+      const result = (parseJsonLine(out) as { result?: string } | null)?.result
+      return SET_TEXT_RESULTS.has(result ?? '') ? result as SetTextResult : 'failed'
+    })
+  }
+
+  /** Press the focused field's IME action (Done, Next, Search, …) with `ACTION_IME_ENTER`, API 30+ (#1135). */
+  async imeAction(serial: string): Promise<'ok' | 'no-focus' | 'rejected' | 'unsupported' | 'failed'> {
+    return this.inDumpQueue(serial, async () => {
+      const jar = await this.pushUidump(serial)
+      if (!jar) return 'failed'
+      const served = await this.viaServer(serial, jar, 'ime')
+      const out = served !== undefined ? served ?? '' : await this.runner.exec(
+        '-s', serial, 'exec-out', `CLASSPATH=${jar}:/system/framework/uiautomator.jar`,
+        'timeout', String(UIDUMP_TIMEOUT_SEC), 'app_process', '/system/bin', 'dev.tapflow.uidump.Focused', 'ime',
+      ).catch(() => '')
+      const result = (parseJsonLine(out) as { result?: string } | null)?.result
+      return result === 'ok' || result === 'no-focus' || result === 'rejected' || result === 'unsupported' ? result : 'failed'
+    })
+  }
+
+  /**
+   * Whether the soft keyboard is up, and where it takes touches, from `dumpsys window InputMethod` (#1135): about
+   * 30 ms (measured), outside the dump queue. The touchable region is the jar's input-method window bounds exactly
+   * (measured); a hidden keyboard reads `isVisible=false`. `null` when the output cannot be read.
+   */
+  async imeWindow(serial: string): Promise<{ shown: boolean; rect?: { x: number; y: number; width: number; height: number } } | null> {
+    const out = await this.runner.exec('-s', serial, 'shell', 'dumpsys', 'window', 'InputMethod').catch(() => null)
+    return out === null ? null : parseImeWindow(out)
   }
 
   private async dumpNow(serial: string, timeoutSec: number): Promise<string> {
@@ -773,4 +884,35 @@ function deliverableDefaults(packageName: string, options: LaunchOptions, compon
     return undefined
   }
   return { arguments: options.arguments }
+}
+
+/** What the jar's `Focused read` prints: device pixels, in the display's space. */
+export interface FocusedRead {
+  identifier?: string
+  frame?: { x: number; y: number; width: number; height: number }
+  secure?: boolean
+  value?: string
+  reason?: string
+  keyboard?: { x: number; y: number; width: number; height: number }
+  language?: string
+}
+
+export type SetTextResult = 'ok' | 'transformed' | 'refused' | 'rejected' | 'no-focus' | 'cannot-append-secure' | 'unavailable' | 'failed'
+const SET_TEXT_RESULTS = new Set<string>(['ok', 'transformed', 'refused', 'rejected', 'no-focus', 'cannot-append-secure'])
+
+function parseJsonLine(out: string): unknown {
+  const line = out.split('\n').map((l) => l.trim()).find((l) => l.startsWith('{'))
+  if (!line) return null
+  try { return JSON.parse(line) } catch { return null }
+}
+
+/** `dumpsys window InputMethod`: `isVisible=` and `touchable region=SkRegion((l,t,r,b))`. */
+export function parseImeWindow(out: string): { shown: boolean; rect?: { x: number; y: number; width: number; height: number } } | null {
+  const visible = /isVisible=(true|false)/.exec(out)
+  if (!visible) return null
+  if (visible[1] === 'false') return { shown: false }
+  const r = /touchable region=SkRegion\(\((\d+),(\d+),(\d+),(\d+)\)\)/.exec(out)
+  if (!r) return { shown: true }
+  const [l, t, rt, b] = r.slice(1).map(Number) as [number, number, number, number]
+  return { shown: true, rect: { x: l, y: t, width: rt - l, height: b - t } }
 }

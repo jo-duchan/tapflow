@@ -2,7 +2,8 @@ import { describe, it, expect, vi } from 'vitest'
 import type { UIElement } from '@tapflowio/agent-core'
 import { runFlow, type FlowDriver } from '../engine.js'
 import { parseFlow } from '../schema.js'
-import { SessionEndedError } from '../sessionErrors.js'
+import { InputRefusedError, SessionEndedError } from '../sessionErrors.js'
+import { PlatformError } from '@tapflowio/agent-core/errors'
 import { DeviceLacksError, EnvironmentStepError, markEnvironmentFailure, TransientQueryError } from '../errors.js'
 import type { PinchFingers } from '../engine.js'
 import type { ChromeButton, ChromeData } from '@tapflowio/protocol'
@@ -580,6 +581,15 @@ describe('runFlow', () => {
       expect(swipes(driver)).toEqual([['swipe', [0.5, 0.3], [0.5, 0.7], 300], ['swipe', [0.5, 0.3], [0.5, 0.7], 300]])
     })
 
+    // iOS E2E: the fling was still carrying the list when Row 17 came into view; the tap after landed on Row 18, and on
+    // iOS a tap on a moving list only stops it, so the step passed with nothing tapped.
+    it('waits for what it found to stop moving before the next step, once it has swiped', async () => {
+      const driver = fakeDriver([[row('Row 1', 0.3)], [row('Row 16', 0.6)], [row('Row 16', 0.5)], [row('Row 16', 0.4)], [row('Row 16', 0.4)]])
+      const result = await runFlow(flowOf('steps:\n  - scroll: { until: "Row 16" }\n  - tapOn: "Row 16"\n'), driver, OPTS)
+      expect(result.status).toBe('passed')
+      expect(driver.calls.find((c) => c[0] === 'tap')).toEqual(['tap', 0.5, 0.425])
+    })
+
     // The agents clip frames to the screen, so a row cut by the edge content enters from ends exactly on it — and a
     // tap on its center can land on a bar drawn over that edge.
     it('keeps scrolling past a match cut by the edge the list scrolls in from', async () => {
@@ -1076,16 +1086,31 @@ describe('runFlow — a button the device lacks', () => {
       const flow = flowOf('steps:\n  - inputText: { secret: PASSWORD, replace: true }\n')
       expect((await runFlow(flow, driver, { ...OPTS, platform: 'ios', secrets: { PASSWORD: 'pw' } })).status).toBe('passed')
       expect(driver.calls).toEqual([['pressKey', 'KeyA'], ['inputText', 'pw']])
-      const android = await runFlow(flow, fakeDriver([[]]), { ...OPTS, platform: 'android', secrets: { PASSWORD: 'pw' } })
-      expect(android.failureMessage).toMatch(/Android cannot select what a field holds/)
     })
 
-    it('refuses it on Android, which cannot select a field, before anything reaches the device', async () => {
+    // Android selects with Ctrl+A from Android 13 (#1135): run, and stopped only by a device that refuses the press.
+    it('selects on Android too', async () => {
       const driver = fakeDriver([[]])
-      const result = await runFlow(flowOf(replaceFlow), driver, { ...OPTS, platform: 'android' })
-      expect(result).toMatchObject({ status: 'failed', failureKind: 'environment', failedBeforeRun: true })
-      expect(result.failureMessage).toMatch(/Android cannot select what a field holds/)
-      expect(driver.calls).toEqual([])
+      expect((await runFlow(flowOf(replaceFlow), driver, { ...OPTS, platform: 'android' })).status).toBe('passed')
+      expect(driver.calls).toEqual([['pressKey', 'KeyA'], ['inputText', '안녕']])
+    })
+
+    it('fails the step as the environment\'s, typing nothing, when the device cannot select', async () => {
+      for (const flow of [replaceFlow, 'steps:\n  - inputText: { secret: PASSWORD, replace: true }\n']) {
+        const driver = fakeDriver([[]])
+        vi.mocked(driver.pressKey).mockRejectedValue(new InputRefusedError('unsupported', new PlatformError('not supported')))
+        const result = await runFlow(flowOf(flow), driver, { ...OPTS, platform: 'android', secrets: { PASSWORD: 'pw' } })
+        expect(result).toMatchObject({ status: 'failed', failureKind: 'environment' })
+        expect(result.failureMessage).toMatch(/cannot select what a field holds/)
+        expect(result).not.toHaveProperty('failedBeforeRun')
+        expect(driver.inputText).not.toHaveBeenCalled()
+      }
+    })
+
+    it('presses the field\'s action for imeAction, under tapflow\'s key name', async () => {
+      const driver = fakeDriver([[]])
+      expect((await runFlow(flowOf('steps:\n  - imeAction\n'), driver, OPTS)).status).toBe('passed')
+      expect(driver.calls).toEqual([['pressKey', 'ImeAction']])
     })
   })
 

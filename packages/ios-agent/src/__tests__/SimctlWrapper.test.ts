@@ -573,6 +573,102 @@ describe('SimctlWrapper', () => {
     })
   })
 
+  // #1135: a replay starts from the keyboard the recording saw.
+  describe('setKeyboardLanguage', () => {
+    const LIST = '(\n    "en_US@sw=QWERTY;hw=Automatic",\n    "ko_KR@sw=Korean;hw=Automatic",\n    "emoji@sw=Emoji"\n)'
+    const runnerReading = (keyboards: string) => ({
+      exec: vi.fn().mockResolvedValueOnce(keyboards).mockResolvedValue(''),
+      execBinary: vi.fn().mockResolvedValue(Buffer.alloc(0)),
+      execWithOpts: vi.fn().mockResolvedValue(''),
+    }) satisfies SimctlRunner
+
+    it('makes a named keyboard the one in use, the next one after it', async () => {
+      const runner = runnerReading(LIST)
+      expect(await new SimctlWrapper(runner).setKeyboardLanguage('device-1', 'ko_KR@sw=Korean;hw=Automatic')).toBe(true)
+      expect(runner.exec.mock.calls.slice(1)).toEqual([
+        ['spawn', 'device-1', 'defaults', 'write', 'com.apple.keyboard.preferences', 'KeyboardLastUsed', 'ko_KR@sw=Korean;hw=Automatic'],
+        ['spawn', 'device-1', 'defaults', 'write', 'com.apple.keyboard.preferences', 'KeyboardsCurrentAndNext', '-array',
+          'ko_KR@sw=Korean;hw=Automatic', 'ko_KR@sw=Korean;hw=Automatic', 'en_US@sw=QWERTY;hw=Automatic'],
+        ['spawn', 'device-1', 'launchctl', 'kickstart', '-k', 'user/foreground/com.apple.TextInput.kbd'],
+      ])
+    })
+
+    // Review of #1145: the budget is for the whole reset, so each call gets what the ones before it left. With the same
+    // timeout for each, five calls could take five budgets while `device:ready` waited on them.
+    it('bounds the calls together when given a timeout, each by what is left', async () => {
+      vi.useFakeTimers({ toFake: ['Date'] })
+      vi.setSystemTime(0)
+      // Each call takes a second.
+      const after = (out: string) => async () => { vi.setSystemTime(Date.now() + 1_000); return out }
+      const runner = {
+        exec: vi.fn().mockResolvedValue(''),
+        execBinary: vi.fn().mockResolvedValue(Buffer.alloc(0)),
+        execWithOpts: vi.fn().mockImplementationOnce(after(LIST)).mockImplementation(after('')),
+      } satisfies SimctlRunner
+      try {
+        expect(await new SimctlWrapper(runner).setKeyboardLanguage('device-1', undefined, 5_000)).toBe(true)
+      } finally { vi.useRealTimers() }
+      expect(runner.exec).not.toHaveBeenCalled()
+      expect(runner.execWithOpts.mock.calls.map(([opts]) => opts)).toEqual([{ timeoutMs: 5_000 }, { timeoutMs: 4_000 }, { timeoutMs: 3_000 }, { timeoutMs: 2_000 }])
+    })
+
+    it('writes nothing for a keyboard the device does not have', async () => {
+      const runner = runnerReading(LIST)
+      expect(await new SimctlWrapper(runner).setKeyboardLanguage('device-1', 'fr_FR@sw=AZERTY;hw=Automatic')).toBe(false)
+      expect(runner.exec).toHaveBeenCalledTimes(1)
+    })
+
+    it('makes the first keyboard the one in use with none named', async () => {
+      const runner = runnerReading(LIST)
+      expect(await new SimctlWrapper(runner).setKeyboardLanguage('device-1')).toBe(true)
+      expect(runner.exec.mock.calls[1]).toEqual(['spawn', 'device-1', 'defaults', 'write', 'com.apple.keyboard.preferences', 'KeyboardLastUsed', 'en_US@sw=QWERTY;hw=Automatic'])
+    })
+  })
+
+  describe('keyboardLanguage', () => {
+    it('reads the keyboard in use', async () => {
+      const runner = {
+        exec: vi.fn().mockResolvedValue(''),
+        execBinary: vi.fn().mockResolvedValue(Buffer.alloc(0)),
+        execWithOpts: vi.fn().mockResolvedValue('ko_KR@sw=Korean;hw=Automatic\n'),
+      } satisfies SimctlRunner
+      expect(await new SimctlWrapper(runner).keyboardLanguage('device-1')).toBe('ko_KR@sw=Korean;hw=Automatic')
+      expect(runner.execWithOpts).toHaveBeenCalledWith(
+        { timeoutMs: 800 }, 'spawn', 'device-1', 'defaults', 'read', 'com.apple.keyboard.preferences', 'KeyboardLastUsed',
+      )
+    })
+
+    it('is undefined before any keyboard was used', async () => {
+      const runner = {
+        exec: vi.fn().mockResolvedValue(''),
+        execBinary: vi.fn().mockResolvedValue(Buffer.alloc(0)),
+        execWithOpts: vi.fn().mockRejectedValue(new Error('The domain/default pair does not exist')),
+      } satisfies SimctlRunner
+      expect(await new SimctlWrapper(runner).keyboardLanguage('device-1')).toBeUndefined()
+    })
+
+    // The runner retries after restarting CoreSimulatorService, past its own timeout: the read must not wait for it.
+    it('is undefined after 800 ms whatever the runner does', async () => {
+      vi.useFakeTimers()
+      try {
+        const runner = {
+          exec: vi.fn().mockResolvedValue(''),
+          execBinary: vi.fn().mockResolvedValue(Buffer.alloc(0)),
+          execWithOpts: vi.fn().mockReturnValue(new Promise<string>(() => {})),
+        } satisfies SimctlRunner
+        const read = new SimctlWrapper(runner).keyboardLanguage('device-1')
+        let settled = false
+        void read.then(() => { settled = true })
+        await vi.advanceTimersByTimeAsync(799)
+        expect(settled).toBe(false)
+        await vi.advanceTimersByTimeAsync(1)
+        expect(await read).toBeUndefined()
+      } finally {
+        vi.useRealTimers()
+      }
+    })
+  })
+
   describe('resetKeyboardLanguage', () => {
     const runnerReading = (keyboards: string) => ({
       exec: vi.fn().mockResolvedValueOnce(keyboards).mockResolvedValue(''),

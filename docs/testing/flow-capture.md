@@ -29,46 +29,52 @@ The steps you took are shown as a strip, and a frame marks the part that becomes
 - **drop first** and **drop last** take the first or last step out, one at a time.
 - Fill in **Name** and, optionally, **Tags** (comma-separated). The name becomes the file name you export.
 
+If you typed into a password field on the on-screen keyboard, each such step gets a field such as **Password for step 7**. A password field cannot be read, so you enter the value the replay should type, and **Continue** waits for it. What you typed on your computer's keyboard is filled in. The value is used for this replay only and never saved.
+
 If the part does not start with a launch, the flow launches the app itself, and the dialog tells you to leave out any tap on the home screen before it. If nothing cleared the app before that launch, it also tells you the steps ran on data an earlier test left.
 
 **Continue** clears the app's data on the device and replays the steps in the next step, so an account that was signed in is signed out.
 
 ### 4. Match: replay and name the steps {#match}
 
-tapflow clears the app's data on the same device, turns the device the way it was when the part started, launches the app, and replays the steps you picked one by one. Before each one it reads the screen and finds the name (selector) of what the step touched. Progress shows as **Step 3 of 12**, with the device on the left.
+tapflow clears the app's data on the same device, turns the device the way it was when the part started, launches the app, and replays the steps you picked one by one. It also sets the keyboard language the recording used. Before each step it reads the screen and finds the name (selector) of what the step touched. Progress shows as **Step 3 of 12**, and the device on the left shows where each step touches as a blue dot and trail.
+
+A typing step replaces what the field holds with the value the field really held when you recorded: Korean, Caps Lock, the on-screen keyboard and Backspace all replay as they ended up. If you typed into a field that was focused before the part began, the replay taps that field first, and the tap goes into the flow.
 
 - **Stop** halts the replay. Then **Start again** replays from the beginning, and **Edit what matched** goes on with the steps matched so far.
 - Step capturing pauses while it replays, so the replayed steps do not end up in your capture.
 
 ### 5. Edit: tidy up the steps {#edit}
 
-The steps of the flow are listed. Selecting one shows the screen just before it was replayed.
+The steps of the flow are listed. Selecting one shows its screenshot on the left, with where it touched: after the typing for a typing step, before it for a password, and just before the step for the rest.
 
 - Remove a step you do not want (a mistaken tap, for example) with its trash button.
 - A badge tells you about a step.
 
 | Badge | Meaning |
 |---|---|
-| **fragile** | A tap that taps a point on the screen because nothing there can be named, or a swipe that replays its two ends at the speed it was made. A different screen size or layout can make it land elsewhere. Text typed with Caps Lock on is marked too: depending on the device, Caps Lock switches the keyboard's language rather than its case, so what the device typed may differ. |
+| **fragile** | A tap that taps a point on the screen because nothing there can be named, or a swipe that replays its two ends at the speed it was made. A different screen size or layout can make it land elsewhere. Also a tap that may have been a key on the on-screen keyboard or the app, and typing whose field could not be read afterwards. |
 | **auto** | A swipe turned into "scroll until the element the next step taps is on screen" (`scroll: { until }`). How far one swipe goes differs from run to run, and this way the result does not. |
-| **not in the flow** | Something a flow cannot express, left out: switching the network, cut, putting the on-screen keyboard up or down, a long press of more than 60 seconds, and so on. The card says why. |
+| **not in the flow** | Something a flow cannot express, left out: switching the network, cut, putting the on-screen keyboard up or down, a long press of more than 60 seconds, a key on the on-screen keyboard whose typing could not be read, and so on. The card says why. |
 
-Text typed into a field the app marks as a password is not written to the flow file. The step keeps only a name, as in `inputText: { secret: PASSWORD }`. A password shown as plain text, as after tapping a show-password button, is an ordinary field and goes into the file as text, so keep it hidden while you record or remove that step. Before you commit the file, check that the YAML holds no password. Open the card with its expand button to rename it; a name uses letters, digits and `_` and does not start with a digit. To pass the value when the flow runs, see [Secrets](/automation/flows#secrets).
+Keys tapped on the on-screen keyboard are not kept one by one: they go into the field's single typing step. A Done or Search key that put the keyboard away becomes an `imeAction` step.
+
+Text typed into a field the app marks as a password, on either keyboard, is not written to the flow file. The step keeps only a name, as in `inputText: { secret: PASSWORD }`. A password shown as plain text, as after tapping a show-password button, is an ordinary field and goes into the file as text, so keep it hidden while you record or remove that step. Before you commit the file, check that the YAML holds no password. Open the card with its expand button to rename it; a name uses letters, digits and `_` and does not start with a digit. To pass the value when the flow runs, see [Secrets](/automation/flows#secrets).
 
 **Show YAML** previews the flow. **Verify and export** moves on.
 
 ### 6. Verify: check the flow {#verify}
 
-The edited flow runs from the start on the same device, this time with selectors only and not the recorded points, on the same engine as `tapflow flow run` in CI. Each step is marked passed, failed or not run.
+The edited flow runs from the start on the same device, this time with selectors only and not the recorded points, on the same engine as `tapflow flow run` in CI. The steps appear as they run, each marked passed or failed with how long it took.
 
 - If it passes, **Continue** moves on.
-- If it fails, the failed step and the reason are shown. **Back to Edit** goes back to fix it, and **Export anyway** exports it as it is.
+- If it fails, the failed step opens to show why. When a tap found nothing, it also offers selectors that would have found the element on that screen. **Back to Edit** goes back to fix it, and **Export anyway** exports it as it is.
 
 ### 7. Export: save the file {#export}
 
 The file name (`flows/<name>.yaml`) and the YAML are shown.
 
-- **Download** saves the file, and **Copy YAML** copies it. Copying works only on a dashboard opened over HTTPS or on localhost. Over any other HTTP address, select the YAML and copy it yourself.
+- **Download** saves the file, and **Copy YAML** copies it. Copying works only on a dashboard opened over HTTPS or on localhost. Over any other HTTP address, the button selects the YAML for you to copy with the keyboard.
 - Put the file in your app repository and CI runs it with `tapflow flow run`. The CI examples keep flow files under `.tapflow/flows/`. See [Flows](/automation/flows).
 - If the flow has secrets, the `--secret` options to pass when it runs are shown.
 - The exported flow starts by clearing the app's data (`clearState`) and launching it (`launchApp`), and runs only against builds of this app (its bundle id or package name). If the build's bundle id could not be read, Range says so, and the flow neither clears the app's data nor is tied to one app.
@@ -88,6 +94,8 @@ The file name (`flows/<name>.yaml`) and the YAML are shown.
 - A capture lasts as long as the session. It is cleared when the device is shut down or restarted, when you leave the session and the device shuts down, when you turn off **Capture my steps**, or when an MCP client takes over the device.
 - A session keeps about 20,000 inputs (about 4 MB). Past that, the points in the middle of drags go first, then the oldest steps. App launches, installs and clears are never dropped.
 - Match and Verify clear the app's data on the device before they replay.
+- On iOS, reading a field needs the agent's UI-tree runner, which starts when someone with **Capture my steps** on boots a device: about 110–360 MB more per device (measured), and not on a Mac over its memory limit.
+- Replaying a typing step by replacing the field's contents needs Android 13 or later, and `imeAction` Android 11 or later. See [Flows](/automation/flows).
 - Every role can use it, Viewer included.
 
 ## Troubleshooting {#troubleshooting}

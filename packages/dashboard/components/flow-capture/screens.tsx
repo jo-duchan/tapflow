@@ -1,7 +1,7 @@
 import { useEffect, useId, useRef, useState, type Dispatch, type RefObject } from 'react'
-import { ChevronRight, Trash2 } from 'lucide-react'
+import { ChevronRight, LoaderCircle, Trash2 } from 'lucide-react'
 import {
-  capturedStepLabel, rangeWarnings, rawStepLabel, type Flow, type RawStep,
+  askedValues, capturedStepLabel, rangeWarnings, rawStepLabel, type CapturedStep, type Flow, type RawStep,
 } from '@tapflowio/flow-runner/browser'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -10,25 +10,33 @@ import { FieldHint } from '@/components/ui/field-hint'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { TechLabel } from '@/components/ui/tech-label'
-import { Textarea } from '@/components/ui/textarea'
+import { CodeBlock, CodeBlockActions, CodeBlockContent, CodeBlockCopyButton, CodeBlockHeader, CodeBlockLine, CodeBlockTitle } from '@/components/ui/code-block'
+import { useHighlightedCode } from '@/hooks/useHighlightedCode'
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
 import { cn } from '@/lib/utils'
 import { copy } from '@/lib/flowCapture/copy'
 import { fileNameOf, moveEdge, yamlOf, type Edge } from '@/lib/flowCapture/flow'
-import type { CaptureEvent, CaptureState } from '@/lib/flowCapture/machine'
+import { askedReady, type CaptureEvent, type CaptureState } from '@/lib/flowCapture/machine'
 import type { CaptureTap } from '@/lib/flowCapture/tap'
+import { markOf } from '@/lib/flowCapture/marks'
+import type { WatchMarks } from '@/lib/watchActions'
+import { SwipeStroke, TapMarks } from '@/components/watch/TapMarks'
+import { TraceStep } from '@/components/TraceStep'
+import { typedOnScreenKeyboard } from '@/lib/flowCapture/runner'
 
 type FlowFile = Omit<Flow, 'file'>
 
+/** The step's buttons, at the bottom of the dialog on every step. As tall as a row of buttons (h-10, its pt-4 and border)
+ *  even with none in it (a verification running), so the line above them does not jump when they appear. */
 function Footer({ children }: { children: React.ReactNode }) {
-  return <div className="flex flex-col-reverse gap-2 border-t pt-4 sm:flex-row sm:items-center sm:justify-end">{children}</div>
+  return <div className="flex flex-col-reverse gap-2 border-t pt-4 sm:min-h-[calc(2.5rem+1rem+1px)] sm:flex-row sm:items-center sm:justify-end">{children}</div>
 }
 
-function Notice({ title, children }: { title: string; children: React.ReactNode }) {
+function Notice({ title, children }: { title: string; children?: React.ReactNode }) {
   return (
     <div className="rounded-lg border border-warning-border bg-warning px-4 py-3 text-sm">
       <p className="font-medium text-warning-foreground">{title}</p>
-      <p className="mt-1">{children}</p>
+      {children && <p className="mt-1">{children}</p>}
     </div>
   )
 }
@@ -50,7 +58,11 @@ export function RangeScreen({ state, dispatch, bundleId, onContinue, onCancel, c
   const warnings = rangeWarnings(steps, range)
   const count = range.end - range.start
   return (
-    <div className="grid min-h-0 gap-4">
+    <div className="grid h-full min-h-0 grid-rows-[minmax(0,1fr)_auto] gap-4">
+      {/* Flex, not grid: a grid row holding something that scrolls on its own (the strip) shrinks to nothing when the
+          step is taller than the dialog, and the strip then scrolls inside itself. Nothing in here shrinks; the body scrolls.
+          The 4 px padding, given back by the margin, is room for a focused field's ring, which the scroll would clip. */}
+      <div className="-m-1 flex min-h-0 flex-col gap-4 overflow-y-auto p-1 *:shrink-0">
       <div>
         <h3 className="text-sm font-medium">{copy.rangeHeading}</h3>
         <p className="text-sm text-muted-foreground">{copy.rangeHelp}</p>
@@ -86,12 +98,47 @@ export function RangeScreen({ state, dispatch, bundleId, onContinue, onCancel, c
       {bundleId
         ? <p className="text-xs text-muted-foreground">{copy.appPrefix} <TechLabel>{bundleId}</TechLabel>{copy.appSuffix}</p>
         : <p className="text-xs">{copy.noBundleId}</p>}
-      {warnings.map((w) => <p key={w} className="text-sm text-muted-foreground">{copy.rangeWarnings[w]}</p>)}
-      <Notice title={copy.replayNoticeTitle}>{copy.replayNotice}</Notice>
+      {/* Notes about the range, one short line each, in one list rather than a paragraph apiece. */}
+      {(warnings.length > 0 || typedOnScreenKeyboard(steps, range)) && (
+        <ul className="list-disc space-y-1 pl-5 text-xs text-muted-foreground">
+          {warnings.map((w) => <li key={w}>{copy.rangeWarnings[w]}</li>)}
+          {typedOnScreenKeyboard(steps, range) && <li>{copy.screenKeyboardAdvice}</li>}
+        </ul>
+      )}
+      {askedValues(steps, range).map((i) => <AskedPassword key={i} state={state} index={i} dispatch={dispatch} />)}
+      <Notice title={copy.replayNoticeTitle} />
+      </div>
       <Footer>
         <Button variant="outline" className="w-24" onClick={onCancel}>{copy.cancel}</Button>
-        <Button ref={continueRef} className="w-24" disabled={count === 0} onClick={onContinue}>{copy.continue}</Button>
+        <Button ref={continueRef} className="w-24" disabled={count === 0 || !askedReady(state)} onClick={onContinue}>{copy.continue}</Button>
       </Footer>
+    </div>
+  )
+}
+
+/**
+ * A password typed on the soft keyboard (#1140): no read can say it, and Match has to type it, so the person does. Held
+ * in the dialog only. Starts from what the computer's keyboard typed into the same field, if anything.
+ */
+function AskedPassword({ state, index, dispatch }: { state: CaptureState; index: number; dispatch: Dispatch<CaptureEvent> }) {
+  const id = useId()
+  const hintId = useId()
+  const step = state.steps[index]
+  const prefilled = step?.kind === 'text' ? step.text : ''
+  const value = state.asked[index] ?? prefilled
+  return (
+    <div className="grid content-start gap-2">
+      {/* Which field, beside the step: two passwords in one range differ by nothing else here. */}
+      <Label htmlFor={id}>
+        {copy.askedLabel(index + 1)}
+        {step?.kind === 'text' && step.field && <> <TechLabel>{step.field}</TechLabel></>}
+      </Label>
+      {/* `new-password` and the managers' own opt-outs: `off` is ignored on a password input, and a manager would offer
+          to save the app's test password under the dashboard, or fill in the dashboard's own. */}
+      <Input id={id} type="password" autoComplete="new-password" data-1p-ignore data-lpignore="true" aria-describedby={hintId} value={value}
+        onChange={(e) => dispatch({ type: 'set-asked', index, value: e.target.value })} />
+      {/* Said apart from an empty one: dots alone do not say they came from the computer's keyboard. */}
+      <FieldHint id={hintId}>{prefilled ? copy.askedPrefilledHint : copy.askedHint}</FieldHint>
     </div>
   )
 }
@@ -278,7 +325,7 @@ function RangeTile({ step, index, inRange, left }: { step: RawStep; index: numbe
 // ── Match ─────────────────────────────────────────────────────────────────────────────────────────────────────────
 
 /** The device as the viewer draws it, copied each frame: one decoder, two pictures. */
-function DeviceMirror({ tap, label }: { tap: CaptureTap; label: string }) {
+function DeviceMirror({ tap, label, marks }: { tap: CaptureTap; label: string; marks: WatchMarks }) {
   const canvas = useRef<HTMLCanvasElement>(null)
   useEffect(() => {
     let frame = 0
@@ -299,12 +346,38 @@ function DeviceMirror({ tap, label }: { tap: CaptureTap; label: string }) {
     frame = requestAnimationFrame(draw)
     return () => cancelAnimationFrame(frame)
   }, [tap])
-  return <canvas ref={canvas} role="img" aria-label={label} className="max-h-[60vh] w-auto max-w-full rounded-lg border bg-muted" />
+  // The replay's touches drawn over the device, as the MCP watch view draws an agent's: the canvas is the screen, so the
+  // box the marks are placed in must be exactly its size — `self-start`, or the column stretches it below the picture.
+  return (
+    <div className="relative max-h-full self-start">
+      <canvas ref={canvas} role="img" aria-label={label} className="block max-h-[var(--picture-max,60vh)] w-auto max-w-full rounded-lg border bg-muted" />
+      <TapMarks marks={marks} place={(x, y) => ({ left: x, top: y })} />
+    </div>
+  )
 }
 
-export function MatchScreen({ state, tap, onStop, onRestart, onTakeWhatMatched, stopRef }: {
+/**
+ * A count that changes as a run goes ("Step 3 of 15"), in the room its widest value takes, so the line does not move
+ * as the numbers do — the Range count's way.
+ */
+function SteadyCount({ text, widest }: { text: string; widest: string }) {
+  return (
+    <span className="grid tabular-nums">
+      <span className="invisible col-start-1 row-start-1" aria-hidden="true">{widest}</span>
+      <span className="col-start-1 row-start-1">{text}</span>
+    </span>
+  )
+}
+
+/** Something is running on the device: said beside the line that says what. Still under reduced motion. */
+function Busy() {
+  return <LoaderCircle aria-hidden="true" className="size-4 shrink-0 motion-safe:animate-spin" />
+}
+
+export function MatchScreen({ state, tap, marks, onStop, onRestart, onTakeWhatMatched, stopRef }: {
   state: CaptureState
   tap: CaptureTap
+  marks: WatchMarks
   onStop: () => void
   onRestart: () => void
   onTakeWhatMatched: () => void
@@ -313,22 +386,25 @@ export function MatchScreen({ state, tap, onStop, onRestart, onTakeWhatMatched, 
   const { done, total } = state.progress
   const stopped = state.error !== null
   return (
-    <div className="grid min-h-0 gap-4 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
-      <div className="flex justify-center"><DeviceMirror tap={tap} label={copy.steps[1]} /></div>
-      <div className="flex flex-col gap-3">
-        <p role="status" className="text-sm font-medium">{stopped ? state.error : copy.matching(Math.min(done + 1, total), total)}</p>
-        <p className="text-sm text-muted-foreground">{copy.matchingHelp}</p>
-        <div className="mt-auto flex flex-wrap justify-end gap-2 border-t pt-4">
-          {stopped ? (
-            <>
-              {state.matched.length > 0 && <Button variant="outline" onClick={onTakeWhatMatched}>{copy.editWhatMatched}</Button>}
-              <Button ref={stopRef} onClick={onRestart}>{copy.restart}</Button>
-            </>
-          ) : (
-            <Button ref={stopRef} variant="outline" className="w-24" onClick={onStop}>{copy.stop}</Button>
-          )}
+    <div className="grid h-full min-h-0 grid-rows-[minmax(0,1fr)_auto] gap-4">
+      <div className="grid min-h-0 gap-4 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
+        <div className="flex min-h-0 justify-center"><DeviceMirror tap={tap} label={copy.steps[1]} marks={marks} /></div>
+        <div className="flex min-h-0 flex-col gap-3">
+          <p role="status" className="flex items-center gap-2 text-sm font-medium">
+            {!stopped && <Busy />}
+          {stopped ? state.error : <SteadyCount text={copy.matching(Math.min(done + 1, total), total)} widest={copy.matching(total, total)} />}
+          </p>
+          <p className="text-sm text-muted-foreground">{copy.matchingHelp}</p>
         </div>
       </div>
+      <Footer>
+        {stopped && state.matched.length > 0 && <Button variant="outline" onClick={onTakeWhatMatched}>{copy.editWhatMatched}</Button>}
+        {/* One button that turns from Stop into Start again and back, not two: swapping elements dropped the focus of the
+            one pressed to the page (review of #1125). */}
+        <Button ref={stopRef} variant={stopped ? 'default' : 'outline'} className={stopped ? undefined : 'w-24'} onClick={stopped ? onRestart : onStop}>
+          {stopped ? copy.restart : copy.stop}
+        </Button>
+      </Footer>
     </div>
   )
 }
@@ -362,11 +438,20 @@ export function EditScreen({ state, dispatch, flow, renameError, onVerify, onBac
   }
 
   return (
-    <div className="grid min-h-0 gap-4">
+    <div className="grid h-full min-h-0 grid-rows-[minmax(0,1fr)_auto] gap-4">
       <div className="grid min-h-0 gap-4 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
+        {/* The device on the left, as on Match and Verify, so it does not jump sides between steps. The YAML takes the
+            picture's place rather than pushing the buttons down: one or the other is looked at. */}
+        <div className={cn('flex min-h-0 justify-center', showYaml ? 'items-stretch' : 'items-start')}>
+          {showYaml
+            ? <YamlField yaml={yaml} fill />
+            : state.screenshots[selected]
+              ? <StepPicture src={state.screenshots[selected]!} step={steps[selected]!} />
+              : <div aria-hidden className="aspect-[9/19] h-full max-h-[var(--picture-max,60vh)] rounded-lg border bg-muted" />}
+        </div>
         <div className="flex min-h-0 flex-col gap-2">
           <h3 className="text-sm font-medium">{copy.editHeading(kept.length)}</h3>
-          <ol ref={listRef} aria-label={copy.steps[2]} className="min-h-0 max-h-[50vh] space-y-1 overflow-y-auto pr-1">
+          <ol ref={listRef} aria-label={copy.steps[2]} className="-m-1 min-h-0 flex-1 space-y-1 overflow-y-auto p-1">
             {kept.map(({ s, i }, position) => (
               <EditRow key={i} index={i} step={s} selected={selected === i}
                 onSelect={() => setSelected(i)} onRemove={() => remove(i, position)}
@@ -375,13 +460,7 @@ export function EditScreen({ state, dispatch, flow, renameError, onVerify, onBac
             ))}
           </ol>
         </div>
-        <div className="flex min-h-0 items-start justify-center">
-          {state.screenshots[selected]
-            ? <img src={state.screenshots[selected]} alt={capturedStepLabel(steps[selected]!)} className="max-h-[50vh] w-auto rounded-lg border" />
-            : <div aria-hidden className="aspect-[9/19] h-[50vh] rounded-lg border bg-muted" />}
-        </div>
       </div>
-      {showYaml && <YamlField yaml={yaml} />}
       <Footer>
         <Button variant="ghost" className="sm:mr-auto" aria-expanded={showYaml} onClick={() => setShowYaml((v) => !v)}>
           {showYaml ? copy.hideYaml : copy.showYaml}
@@ -414,25 +493,28 @@ function EditRow({ index, step, selected, onSelect, onRemove, renamedTo, onRenam
   const secretName = step.step?.type === 'inputSecret' ? step.step.name : null
   const reason = step.skipped ? copy.skipReasons[step.skipped] : step.fragile ? copy.fragileReasons[step.fragile] : step.auto ? copy.autoReason : null
   return (
-    <li className={cn('rounded-md border p-2', selected ? 'border-primary' : 'border-border', step.step === null && 'opacity-60')}>
-      <div className="flex items-start gap-2">
-        <button type="button" onClick={onSelect} aria-current={selected ? 'true' : undefined}
-          className="min-w-0 flex-1 rounded-sm text-left text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
+    // Figma 394:1041 (List Item): 12 px in on the left, 8 px elsewhere; the head row centred on the 28 px buttons; the
+    // reason 8 px under it with 4 px below.
+    <li className={cn('rounded-md border py-2 pl-3 pr-2', selected ? 'border-primary' : 'border-border', step.step === null && 'opacity-60')}>
+      <div className="flex items-center gap-2">
+        {/* One line, as drawn; the whole label is the tooltip when it does not fit. */}
+        <button type="button" onClick={onSelect} aria-current={selected ? 'true' : undefined} title={label}
+          className="min-w-0 flex-1 truncate rounded-sm text-left text-sm leading-5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
           <span className="text-muted-foreground">#{index + 1} </span>{label}
         </button>
-        {step.fragile && <Badge variant="outline">{copy.fragile}</Badge>}
-        {step.auto && <Badge variant="outline">{copy.auto}</Badge>}
-        {step.skipped && <Badge variant="outline">{copy.skipped}</Badge>}
+        {step.fragile && <Badge variant="outline" className="shrink-0">{copy.fragile}</Badge>}
+        {step.auto && <Badge variant="outline" className="shrink-0">{copy.auto}</Badge>}
+        {step.skipped && <Badge variant="outline" className="shrink-0">{copy.skipped}</Badge>}
         {secretName && (
-          <Button variant="ghost" size="icon" className="h-7 w-7" aria-label={copy.stepDetails(label)} aria-expanded={open} aria-controls={detailsId} onClick={() => setOpen((v) => !v)}>
+          <Button variant="ghost" size="icon" className="size-7 shrink-0" aria-label={copy.stepDetails(label)} aria-expanded={open} aria-controls={detailsId} onClick={() => setOpen((v) => !v)}>
             <ChevronRight aria-hidden className={cn('h-4 w-4 transition-transform', open && 'rotate-90')} />
           </Button>
         )}
-        <Button data-remove variant="ghost" size="icon" className="h-7 w-7" aria-label={copy.removeStep(label)} onClick={onRemove}>
+        <Button data-remove variant="ghost" size="icon" className="size-7 shrink-0" aria-label={copy.removeStep(label)} onClick={onRemove}>
           <Trash2 aria-hidden className="h-4 w-4" />
         </Button>
       </div>
-      {reason && <p className="mt-1 text-xs text-muted-foreground">{reason}</p>}
+      {reason && <p className="pb-1 pt-2 text-xs text-muted-foreground">{reason}</p>}
       {secretName && open && (
         <div id={detailsId} className="mt-2">
           <SecretName from={secretName} current={renamedTo ?? secretName} onRename={onRename} renameError={renameError} />
@@ -468,15 +550,61 @@ function SecretName({ from, current, onRename, renameError }: {
   )
 }
 
-function YamlField({ yaml }: { yaml: string }) {
-  return <Textarea readOnly value={yaml} aria-label={copy.yamlLabel} className="h-48 resize-none font-mono text-xs" />
+/**
+ * A step's replay picture, with where the person touched drawn on it, as the MCP watch view draws an agent's: a tap is
+ * a ring, a swipe the same stroke (`SwipeStroke`).
+ */
+function StepPicture({ src, step }: { src: string; step: CapturedStep }) {
+  const mark = markOf(step.raw)
+  const pct = (n: number) => `${n * 100}%`
+  return (
+    <div className="relative max-h-full self-start">
+      <img src={src} alt={capturedStepLabel(step)} className="block max-h-[var(--picture-max,60vh)] w-auto max-w-full rounded-lg border" />
+      {mark && (
+        <svg aria-hidden="true" data-testid="step-mark" className="pointer-events-none absolute inset-0 size-full overflow-visible">
+          {mark.kind === 'swipe' ? (
+            <SwipeStroke from={{ left: mark.from[0], top: mark.from[1] }} to={{ left: mark.to[0], top: mark.to[1] }} />
+          ) : (
+            <circle cx={pct(mark.x)} cy={pct(mark.y)} r={11} fill={MARK_BLUE} fillOpacity={0.3} stroke={MARK_BLUE} strokeWidth={2} />
+          )}
+        </svg>
+      )}
+    </div>
+  )
+}
+
+/** The blue the MCP watch view's marks are drawn in (`TapMarks`). */
+const MARK_BLUE = 'rgb(59 130 246)'
+
+/** The flow's YAML, highlighted, with line numbers and a copy button: the shared CodeBlock, as Flow Runs and MCP's
+ *  capture page will show a flow. */
+function YamlField({ yaml, fill = false, contentRef }: { yaml: string; fill?: boolean; contentRef?: RefObject<HTMLPreElement | null> }) {
+  const lines = useHighlightedCode(yaml, 'yaml')
+  const ownRef = useRef<HTMLPreElement>(null)
+  const ref = contentRef ?? ownRef
+  // With no clipboard (plain HTTP, the usual self-hosted case) the copy icon selects the YAML instead of doing nothing.
+  const copyOrSelect = (text: string) => copyToClipboard(text).then((ok) => { if (!ok) selectYaml(ref.current); return ok })
+  return (
+    <CodeBlock size="sm" className={fill ? 'h-full' : 'max-h-72'}>
+      <CodeBlockHeader>
+        <CodeBlockTitle>{copy.yamlLabel}</CodeBlockTitle>
+        <CodeBlockActions><CodeBlockCopyButton value={yaml} copy={copyOrSelect} /></CodeBlockActions>
+      </CodeBlockHeader>
+      <CodeBlockContent ref={ref} aria-label={copy.yamlLabel} lineNumbers>
+        {lines.map((line, i) => <CodeBlockLine key={i}>{line}</CodeBlockLine>)}
+      </CodeBlockContent>
+    </CodeBlock>
+  )
 }
 
 // ── Verify ────────────────────────────────────────────────────────────────────────────────────────────────────────
 
-export function VerifyScreen({ state, tap, onExport, onBack, primaryRef }: {
+export function VerifyScreen({ state, tap, marks, total, onExport, onBack, primaryRef }: {
   state: CaptureState
   tap: CaptureTap
+  marks: WatchMarks
+  /** The flow's steps, which the run counts through; known before its result is. */
+  total: number
   onExport: () => void
   onBack: () => void
   primaryRef: RefObject<HTMLButtonElement | null>
@@ -484,39 +612,97 @@ export function VerifyScreen({ state, tap, onExport, onBack, primaryRef }: {
   const verify = state.verify
   const result = verify?.result
   const failed = result?.status === 'failed' || state.error !== null
+  const stuck = state.error !== null && !result
   return (
+    <div className="grid h-full min-h-0 grid-rows-[minmax(0,1fr)_auto] gap-4">
     <div className="grid min-h-0 gap-4 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
-      <div className="flex justify-center"><DeviceMirror tap={tap} label={copy.steps[3]} /></div>
+      <div className="flex min-h-0 justify-center"><DeviceMirror tap={tap} label={copy.steps[3]} marks={marks} /></div>
       <div className="flex min-h-0 flex-col gap-3">
         <h3 className="text-sm font-medium">{copy.verifyHeading}</h3>
         <p className="text-sm text-muted-foreground">{copy.verifyHelp}</p>
-        <p role="status" className={cn('text-sm', failed && 'text-destructive')}>
-          {state.error ?? (verify?.status === 'running' ? copy.verifying(verify.done + 1, result?.steps.length ?? verify.done + 1)
+        <p role="status" className={cn('flex items-center gap-2 text-sm', failed && 'text-destructive')}>
+          {verify?.status === 'running' && !state.error && <Busy />}
+          {state.error ?? (verify?.status === 'running'
+            ? <SteadyCount text={copy.verifying(Math.min(verify.done + 1, total), total)} widest={copy.verifying(total, total)} />
             : verify?.status === 'passed' ? copy.passed : result ? `${copy.failed} ${result.failureMessage ?? ''}` : '')}
         </p>
-        {result && (
-          <ol aria-label={copy.verifyHeading} className="min-h-0 space-y-1 overflow-y-auto text-sm">
-            {result.steps.map((s) => (
-              <li key={s.index} className={cn('flex gap-2', s.status === 'failed' && 'text-destructive', s.status === 'skipped' && 'text-muted-foreground')}>
-                <span aria-hidden>{s.status === 'passed' ? '✓' : s.status === 'failed' ? '✗' : '–'}</span>
-                <span>{s.name}</span>
-                <span className="sr-only">, {s.status === 'passed' ? copy.stepPassed : s.status === 'failed' ? copy.stepFailed : copy.stepSkipped}</span>
-              </li>
-            ))}
-          </ol>
-        )}
-        <div className="mt-auto flex flex-wrap justify-end gap-2 border-t pt-4">
-          {(result || state.error) && <Button variant="outline" onClick={onBack}>{copy.backToEdit}</Button>}
-          {result && (
-            <Button ref={primaryRef} onClick={onExport}>{failed ? copy.exportAnyway : copy.continue}</Button>
-          )}
-        </div>
+        <VerifyTrace verify={verify} />
       </div>
+    </div>
+      {/* The same footer as every step, at the bottom of the dialog: buttons that move between steps do not move. */}
+      <Footer>
+        {result && <Button variant="outline" onClick={onBack}>{copy.backToEdit}</Button>}
+        {/* There while it runs, busy (`aria-disabled`, not `disabled`, which drops focus): with nothing to hold, focus
+            fell to the page when Verify began and stayed there after it finished (review of #1125). A run that threw
+            has no result to export, so the same button, still holding focus, goes back to Edit instead of staying
+            unavailable for good. */}
+        <Button
+          ref={primaryRef} aria-disabled={(!result && !stuck) || undefined}
+          className="aria-disabled:pointer-events-none aria-disabled:opacity-50"
+          onClick={() => { if (result) onExport(); else if (stuck) onBack() }}
+        >
+          {stuck ? copy.backToEdit : failed ? copy.exportAnyway : copy.continue}
+        </Button>
+      </Footer>
     </div>
   )
 }
 
+/**
+ * The verification as a trace, as MCP's Agent activity shows a run (`TraceStep`): each step as it starts and ends while
+ * the run goes, then every step of the result, the one that failed open onto why and on what to select instead.
+ */
+function VerifyTrace({ verify }: { verify: CaptureState['verify'] }) {
+  const [toggled, setToggled] = useState<Record<number, boolean>>({})
+  const id = useId()
+  if (!verify) return null
+  const rows: Array<{ index: number; name: string; status: 'running' | 'passed' | 'failed' | 'skipped'; durationMs?: number; message?: string; suggestions?: { yaml: string }[] }> =
+    verify.result ? verify.result.steps : verify.live
+  if (rows.length === 0) return null
+  return (
+    <ol aria-label={copy.verifyHeading} className="-m-1 flex min-h-0 flex-col gap-2 overflow-y-auto p-1 text-sm">
+      {rows.map((s) => {
+        const why = s.status === 'failed' && (s.message || s.suggestions?.length)
+        const open = toggled[s.index] ?? true
+        return (
+          <li key={s.index}>
+            <TraceStep
+              state={s.status === 'passed' ? 'done' : s.status}
+              label={<>{s.name}<span className="sr-only">, {copy.stepStatus[s.status]}</span></>}
+              {...(s.durationMs !== undefined && s.status !== 'running' ? { meta: seconds(s.durationMs) } : {})}
+              {...(why ? { open, onToggle: () => setToggled((t) => ({ ...t, [s.index]: !open })), contentId: `${id}-${s.index}` } : {})}
+            >
+              {why && (
+                <div className="flex flex-col gap-1.5 text-foreground">
+                  {s.message && <p>{s.message}</p>}
+                  {s.suggestions && s.suggestions.length > 0 && (
+                    <>
+                      <p className="text-muted-foreground">{copy.suggestionsHeading}</p>
+                      <ul className="flex flex-col gap-1 font-mono text-xs">
+                        {s.suggestions.map((g) => <li key={g.yaml}>{g.yaml}</li>)}
+                      </ul>
+                    </>
+                  )}
+                </div>
+              )}
+            </TraceStep>
+          </li>
+        )
+      })}
+    </ol>
+  )
+}
+
+const seconds = (ms: number) => `${(ms / 1000).toFixed(1)}s`
+
 // ── Export ────────────────────────────────────────────────────────────────────────────────────────────────────────
+
+/** Focus the YAML and select it alone, for the keyboard to copy: select-all in a focused block takes the page. */
+function selectYaml(pre: HTMLPreElement | null): void {
+  if (!pre) return
+  pre.focus()
+  window.getSelection()?.selectAllChildren(pre.querySelector('[data-slot=code-block-code]') ?? pre)
+}
 
 /** A plain-HTTP page has no clipboard API. That is a copy that did not happen, not a failure. */
 function copyToClipboard(text: string): Promise<boolean> {
@@ -534,6 +720,15 @@ export function ExportScreen({ flow, bundleId, onDone, doneRef }: {
   const yaml = safeYaml(flow)
   const fileName = fileNameOf(flow.name)
   const [copied, setCopied] = useState<boolean | null>(null)
+  const yamlRef = useRef<HTMLPreElement>(null)
+  // No clipboard (a plain-HTTP page): the YAML is selected and focused instead, so ⌘C copies it — and only it, which
+  // select-all in a focused block would not (it takes the page).
+  const copyYaml = () => {
+    void copyToClipboard(yaml).then((ok) => {
+      setCopied(ok)
+      if (!ok) selectYaml(yamlRef.current)
+    })
+  }
   const secrets = [...new Set(flow.steps.flatMap((s) => (s.type === 'inputSecret' ? [s.name] : [])))]
   const download = () => {
     const url = URL.createObjectURL(new Blob([yaml], { type: 'application/yaml' }))
@@ -544,26 +739,30 @@ export function ExportScreen({ flow, bundleId, onDone, doneRef }: {
     URL.revokeObjectURL(url)
   }
   return (
-    <div className="grid min-h-0 gap-4">
-      <div>
-        <h3 className="text-sm font-medium">{copy.exportHeading}</h3>
-        <p className="text-sm text-muted-foreground">{copy.exportHelp}</p>
-      </div>
-      <div className="grid min-h-0 gap-4 sm:grid-cols-[minmax(0,2fr)_minmax(0,1fr)]">
-        <div className="grid min-h-0 gap-2">
+    <div className="grid h-full min-h-0 grid-rows-[minmax(0,1fr)_auto] gap-4">
+      {/* The YAML takes the height the rest leaves, and scrolls inside itself; the notes on using it sit under it. The
+          4 px padding, given back by the margin, is room for the file field's focus ring. */}
+      <div className="-m-1 flex min-h-0 flex-col gap-4 overflow-y-auto p-1">
+        <div className="shrink-0">
+          <h3 className="text-sm font-medium">{copy.exportHeading}</h3>
+          <p className="text-sm text-muted-foreground">{copy.exportHelp}</p>
+        </div>
+        <div className="grid shrink-0 gap-2">
           <Label htmlFor={fileId}>{copy.fileLabel}</Label>
           <Input id={fileId} readOnly value={fileName} className="font-mono" onFocus={(e) => e.currentTarget.select()} />
-          <YamlField yaml={yaml} />
         </div>
-        <div className="space-y-3 text-sm">
-          <p>{copy.howToUse}</p>
-          {secrets.length > 0 && <p className="text-muted-foreground">{copy.secretsToSet(secrets)}</p>}
-          {bundleId && <p className="text-muted-foreground">{copy.appPinned(bundleId)}</p>}
+        <div className="flex min-h-40 flex-1 flex-col">
+          <YamlField yaml={yaml} contentRef={yamlRef} fill />
         </div>
+        <ul className="shrink-0 list-disc space-y-1 pl-5 text-xs text-muted-foreground">
+          <li className="text-foreground">{copy.howToUse}</li>
+          {secrets.length > 0 && <li>{copy.secretsToSet(secrets)}</li>}
+          {bundleId && <li>{copy.appPinned(bundleId)}</li>}
+        </ul>
+        <p role="status" className="min-h-5 shrink-0 text-sm text-muted-foreground">{copied === true ? copy.copied : copied === false ? copy.copyByHand : ''}</p>
       </div>
-      <p role="status" className="text-sm text-muted-foreground">{copied === true ? copy.copied : copied === false ? copy.copyByHand : ''}</p>
       <Footer>
-        <Button variant="outline" onClick={() => { void copyToClipboard(yaml).then(setCopied) }}>{copy.copyYaml}</Button>
+        <Button variant="outline" onClick={copyYaml}>{copy.copyYaml}</Button>
         <Button variant="outline" onClick={download}>{copy.download}</Button>
         <Button ref={doneRef} className="w-24" onClick={onDone}>{copy.done}</Button>
       </Footer>

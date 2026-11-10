@@ -211,9 +211,9 @@ describe('browser-inbound routing matches the protocol union', () => {
   // empty set. L2 shipped exactly that mistake in the other direction — a lazy regex truncated a
   // nested literal to 6 of 11 fields and the by-name assertion passed anyway.
   it('the parser reached every forward site', () => {
-    expect(forwarded.size).toBe(26)
+    expect(forwarded.size).toBe(28)
     const sends = (relaySrc.match(/browserSocket\.send\(JSON\.stringify\(raw\)\)/g) ?? []).length
-    expect(sends).toBe(9) // 7 single-label blocks + the 13-label block + the owner-gated block
+    expect(sends).toBe(9) // 7 single-label blocks + the 15-label block + the owner-gated block
   })
 
   it('forwards an agent\'s boot error as it arrived, less only the relay-owned reason', () => {
@@ -276,7 +276,7 @@ describe('browser-inbound routing matches the protocol union', () => {
 
   it('RelayOrAgentToBrowser is shared by both directions rather than copied', () => {
     const shared = unionMembers(protocolSrc, 'RelayOrAgentToBrowser')
-    expect(shared.size).toBe(15)
+    expect(shared.size).toBe(16)
     for (const name of ['RelayToBrowser', 'AgentToBrowser']) {
       expect(protocolSrc).toContain(`export type ${name} =\n  | RelayOrAgentToBrowser`)
     }
@@ -307,6 +307,8 @@ describe('browser-inbound routing matches the protocol union', () => {
       'device:shutdown-done': 'payload requestId? sessionId',
       'app:launch-done': 'applied? requestId sessionId',
       'app:clear-state-done': 'requestId sessionId',
+      // #1135: a replay's keyboard language, set before the app launches.
+      'device:keyboard-set-done': 'requestId sessionId',
       'open-url:done': 'requestId sessionId',
       'input:done': 'requestId sessionId',
       'input:type-done': 'requestId sessionId',
@@ -325,6 +327,7 @@ describe('browser-inbound routing matches the protocol union', () => {
       'device:boot-error': 'message reason? requestId? sessionId',
       'open-url:error': 'message requestId sessionId',
       'app:clear-state-error': 'message requestId sessionId',
+      'device:keyboard-set-error': 'message reason? requestId sessionId',
       // #491 inverted this pair: `reason` is the closed union a consumer branches on and is now
       // required, `message` is producer prose and is now optional. The sibling below keeps `reason?`
       // because its agent-side producers answer with a rejected `adb` or pasteboard write and have no
@@ -354,6 +357,7 @@ describe('browser-inbound routing matches the protocol union', () => {
       'app:install': 'buildId keepIfInstalled? requestId sessionId',
       'app:launch': 'arguments? buildId env? requestId sessionId',
       'app:clear-state': 'payload requestId sessionId',
+      'device:keyboard-set': 'payload requestId sessionId',
       'open-url': 'payload requestId sessionId',
       'input:touch:start': 'payload sessionId',
       'input:touch:move': 'payload sessionId',
@@ -391,6 +395,10 @@ describe('browser-inbound routing matches the protocol union', () => {
       'ui:field:request': 'requestId sessionId',
       // #1134: another person took the device; sent only to an agent naming `keyboard-reset`.
       'device:keyboard-reset': 'sessionId',
+      // #1135: where the soft keyboard is, read around a person's inputs; relay-made, never forwarded.
+      'ui:keyboard:request': 'requestId sessionId',
+      // #1135: forwarded unchanged from the browser, to an agent naming `keyboard-set`.
+      'device:keyboard-set': 'payload requestId sessionId',
     },
     RelayToBrowser: {
       'agents:listed': 'features? sessions',

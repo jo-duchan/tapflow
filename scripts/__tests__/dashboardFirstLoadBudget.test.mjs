@@ -226,7 +226,16 @@ const carriesFlowRunner = (name) => {
   return FLOW_RUNNER_MARKERS.some((m) => text.includes(m))
 }
 
+// Shiki (CodeBlock's highlighting) is loaded on first use only, by `import()`: a static import anywhere on the session
+// page would put its ~115 KB core in it. `ShikiError` is its error class's name, which survives minifying.
+const carriesShiki = (name) => readFileSync(resolve(DASHBOARD_DIST, 'assets', name), 'utf8').includes('ShikiError')
+
 describe('Flow Capture is downloaded only by a session that captures', () => {
+  it('leaves Shiki out of everything the session page and the dialog import statically', () => {
+    expect(staticClosure(chunkNamed('QASession-')).filter(carriesShiki)).toEqual([])
+    expect(staticClosure(chunkNamed('FlowCaptureDialog-')).filter(carriesShiki)).toEqual([])
+  })
+
   it('leaves flow-runner out of everything the session page imports statically', () => {
     const reached = staticClosure(chunkNamed('QASession-'))
     expect(reached.length).toBeGreaterThan(1)

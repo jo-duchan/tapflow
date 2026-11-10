@@ -22,6 +22,7 @@ function stepValue(step: Step): unknown {
     case 'inputText': return { inputText: step.replace ? { text: step.text, replace: true } : step.text }
     case 'inputSecret': return { inputText: step.replace ? { secret: step.name, replace: true } : { secret: step.name } }
     case 'pressKey': return { pressKey: step.modifiers ? { code: step.code, modifiers: step.modifiers } : step.code }
+    case 'imeAction': return 'imeAction'
     case 'swipe': return { swipe: { from: step.from, to: step.to, durationMs: step.durationMs } }
     case 'scroll': return { scroll: step.until ? { direction: step.direction, until: selectorValue(step.until) } : step.direction }
     case 'openUrl': return { openUrl: step.url }

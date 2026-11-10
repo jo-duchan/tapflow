@@ -12,6 +12,9 @@ import {
 } from './sessionErrors.js'
 import { PERMANENT_QUERY_STATUSES } from './uiTreeRead.js'
 
+/** How `setKeyboard` ended: set, or why it was left. */
+export type KeyboardSetOutcome = 'done' | 'unsupported' | 'keyboard-hidden' | 'failed'
+
 // An input ack is a local round trip — the agent answers from its own dispatch, not from the device, which
 // HID is fire-and-forget about. Generous next to `typeText`'s 15s because that one drives a paste handshake
 // on the device; this one only has to cross the relay.
@@ -612,6 +615,27 @@ export abstract class SessionChannel {
       sessionId,
     )
     if (msg['type'] === 'app:clear-state-error') throw this.failed(sessionId, (msg['message'] as string) ?? 'clear state failed')
+  }
+
+  /**
+   * Put the device's keyboard in a replay's starting language (#1135): `keyboard`, or the device's first when absent.
+   * Answers why it was not set rather than throwing, since none of the reasons stops a replay: an agent that cannot
+   * set it (`unsupported`) leaves the device as it is, and an Android keyboard that is down (`keyboard-hidden`) is set
+   * when it comes up. A refusal of the request itself (not this session's, gone) throws like any other.
+   */
+  async setKeyboard(sessionId: string, keyboard?: string): Promise<KeyboardSetOutcome> {
+    const requestId = newRequestId()
+    this.send({ type: 'device:keyboard-set', sessionId, requestId, payload: keyboard === undefined ? {} : { keyboard } })
+    const msg = await this.waitFor(
+      (m) => (m['type'] === 'device:keyboard-set-done' || m['type'] === 'device:keyboard-set-error') && m['requestId'] === requestId,
+      30_000,
+      'set keyboard',
+      sessionId,
+    )
+    if (msg['type'] === 'device:keyboard-set-done') return 'done'
+    const reason = msg['reason']
+    if (reason === 'unsupported' || reason === 'keyboard-hidden' || reason === 'failed') return reason
+    throw this.failed(sessionId, (msg['message'] as string) ?? 'set keyboard failed')
   }
 
   // The correlator these mint is now read. It always was on the wire — the terminal frame declares it

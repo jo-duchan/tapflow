@@ -70,6 +70,15 @@ export const INBOUND_DISPOSITION = {
 
   // ── deliberately not read ─────────────────────────────────────────────────────────────────────────
 
+  'device:keyboard-set-done': {
+    ignored: 'Never requested: an agent drives the device as it finds it, and `run_flow` resets nothing beyond the '
+      + 'flow\'s own clearState (the guide says so). The dashboard\'s replay asks for it; a `flow run` boot resets it '
+      + 'with the rest of its run reset, in the agent.',
+  },
+  'device:keyboard-set-error': {
+    ignored: 'Never requested, for the reason its `-done` is not read.',
+  },
+
   'device:booting': {
     ignored: 'Not "no consumer" — it is the only signal separating "the agent picked the boot up" from '
       + '"nothing happened" during `bootDevice`\'s wait. It is ignored because it settles nothing: the '

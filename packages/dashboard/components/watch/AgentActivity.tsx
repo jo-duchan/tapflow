@@ -1,10 +1,9 @@
 import { useLayoutEffect, useRef, useState } from 'react'
 import {
-  ChevronRight, CircleCheck, CornerDownLeft, Download, Eraser, House, Keyboard, Link2, LoaderCircle, MousePointerClick,
-  MoveHorizontal, MoveVertical, Play, Scaling,
+  CornerDownLeft, Download, Eraser, House, Keyboard, Link2, MousePointerClick, MoveHorizontal, MoveVertical, Play, Scaling,
 } from 'lucide-react'
+import { TraceStep } from '@/components/TraceStep'
 import type { ReactElement } from 'react'
-import { cn } from '@/lib/utils'
 import { actionText, type WatchedAction } from '@/lib/watchActions'
 import type { WatchActionKind } from '@tapflowio/protocol'
 
@@ -15,8 +14,8 @@ interface Group { id: number; at: number; label: string | null; actions: { id: n
 
 /**
  * What the holder has done since this page started watching (A2), oldest first: each step a row that opens onto the
- * actions taken under it — the look of shadcn's Trace ("Thought for 5s"), rebuilt here as a plain disclosure because
- * Trace is Base UI and this package is Radix on Tailwind 3. Every step starts open; one someone closed stays closed.
+ * actions taken under it, drawn as `TraceStep` (shadcn's Trace look, shared with Flow Capture's Verify). Every step
+ * starts open; one someone closed stays closed.
  * The time is a tooltip.
  *
  * `live` is false once the watch is over: the log stays to be read, and no step is shown as still running.
@@ -72,38 +71,19 @@ export function AgentActivity({ actions, driver, live }: { actions: WatchedActio
 }
 
 function Step({ group: g, running, open, onToggle }: { group: Group; running: boolean; open: boolean; onToggle: () => void }) {
-  const head = (
-    <>
-      {running
-        ? <LoaderCircle aria-hidden="true" className="size-4 shrink-0 motion-safe:animate-spin" />
-        : <CircleCheck aria-hidden="true" className="size-4 shrink-0" />}
-      <span className="truncate">{g.label}</span>
-    </>
-  )
-  // A step that took no action (an assertion) has nothing to open.
-  if (g.actions.length === 0) {
-    return <div title={time(g.at)} className="flex min-w-0 items-center gap-2.5 text-muted-foreground">{head}</div>
-  }
   const contentId = `agent-step-${g.id}`
+  // A step that took no action (an assertion) has nothing to open.
   return (
-    <div className="flex flex-col gap-1.5">
-      <button
-        type="button"
-        title={time(g.at)}
-        aria-expanded={open}
-        aria-controls={contentId}
-        onClick={onToggle}
-        className="flex min-w-0 items-center gap-2.5 rounded-sm text-left text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-      >
-        {head}
-        <ChevronRight aria-hidden="true" className={cn('size-4 shrink-0 transition-transform', open && 'rotate-90')} />
-      </button>
-      {open && (
-        <ul id={contentId} className="ml-2 flex flex-col gap-1.5 border-l pl-4">
+    <TraceStep
+      state={running ? 'running' : 'done'} label={g.label} title={time(g.at)}
+      open={open} contentId={contentId} {...(g.actions.length > 0 ? { onToggle } : {})}
+    >
+      {g.actions.length > 0 && (
+        <ul className="flex flex-col gap-1.5">
           {g.actions.map((a) => <li key={a.id}><ActionLine {...a} /></li>)}
         </ul>
       )}
-    </div>
+    </TraceStep>
   )
 }
 

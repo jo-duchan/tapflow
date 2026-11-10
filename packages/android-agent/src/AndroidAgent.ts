@@ -8,7 +8,7 @@ import type {
 import { avdRotationLockMemory, formFactorOf, osVersionOf, type RotationLockMemory } from './avdConfig.js'
 import type {
   AgentControlOutbound, AgentDevicesApplied, DeviceReport, ClipboardReplyBody, OpenUrlReplyBody,
-  AppInstallReplyBody, AppLaunchReplyBody, AppLaunchToAgent, LaunchOptions, AppClearStateReplyBody, DevicePosture, FormFactor, RunResetReport, RunResetRequest,
+  AppInstallReplyBody, AppLaunchReplyBody, AppLaunchToAgent, LaunchOptions, AppClearStateReplyBody, DeviceKeyboardSetReplyBody, DevicePosture, FormFactor, RunResetReport, RunResetRequest,
   InputPinchStart, InputTouchStart, PointSpace,
 } from '@tapflowio/protocol'
 import { appliedKeys, compactLaunchOptions, launchOptionsProblem } from '@tapflowio/protocol/launch'
@@ -57,6 +57,7 @@ import { EmulatorLauncher, findEmulatorPid, probeEmulator, stopEmulatorProcess }
 import { ensureHelperApp, launchMuteOnlyTap, isAudioSupported } from '@tapflowio/audiotap-helper'
 import { AndroidTouchHelper } from './AndroidTouchHelper.js'
 import { parseUiAutomatorDump } from './uiTree.js'
+import { fieldResponseOf, keyboardStateOf } from './keyboard.js'
 import { ScrcpySession } from './scrcpy/ScrcpySession.js'
 import type { ScrcpyFrame } from './scrcpy/ScrcpyVideo.js'
 import { EmulatorGrpcClient, type AudioStream } from './emulator/EmulatorGrpcClient.js'
@@ -77,7 +78,10 @@ const logger = createLogger('android-agent')
 // actually works on a given image is per device, and `network:state.available` carries that — the
 // split the protocol documents. Added last, after the handler and the boot-time reset, because the
 // string on its own is what puts a control on screen.
-const AGENT_CAPABILITIES: AgentCapability[] = ['clipboard', 'full-reset', 'network-control', 'build-download', 'launch-options', 'touch-cancel']
+const AGENT_CAPABILITIES: AgentCapability[] = [
+  'clipboard', 'full-reset', 'network-control', 'build-download', 'launch-options', 'touch-cancel',
+  'field-value', 'keyboard-state', 'keyboard-set',
+]
 
 // Parse H.264 SPS NAL unit to extract frame dimensions.
 // scrcpy sends a new SPS (inside an IDR keyframe) whenever the capture size changes —
@@ -161,6 +165,17 @@ const KEYGUARD_DISMISS_MS = 1_000
 // is tens of ms. The stop is for an emulator that took the command and did not turn.
 const BODY_TURN_POLL_MS = 50
 const BODY_TURN_SETTLE_MS = 2_000
+
+// Android key codes held together by `input keycombination`.
+const KEY_SHIFT_LEFT = '59'
+const KEY_SPACE = '62'
+const KEY_CTRL_LEFT = '113'
+const KEY_A = '29'
+// A keyboard set up with more languages than this is not turned all the way round; the read comes back to where it
+// started well before then on the two- and three-language keyboards QA devices carry.
+const KEYBOARD_LANGUAGES_MAX = 8
+// Gboard redraws its title after a switch within a frame or two; the read that follows takes ~1 s anyway.
+const KEYBOARD_SWITCH_SETTLE_MS = 300
 
 const SKIN_DEGREES: Record<SkinRotation, 0 | 90 | 180 | 270> = {
   PORTRAIT: 0,
@@ -774,6 +789,7 @@ export class AndroidAgent implements DeviceAgent, NetworkControlCapability {
     if (this._reconnectTimer) { clearTimeout(this._reconnectTimer); this._reconnectTimer = null }
     if (this.resourcesTimer) { clearInterval(this.resourcesTimer); this.resourcesTimer = null }
     this.deviceWatcher.stop()
+    void this.adb.stopFocusedServers()
     for (const state of this.deviceStates.values()) {
       this.bumpBootSeq(state, 'relay-lost')
       this.cleanupDeviceState(state)
@@ -3290,7 +3306,7 @@ export class AndroidAgent implements DeviceAgent, NetworkControlCapability {
         // "dispatched nothing while claiming otherwise" — not "dispatched nothing".)
         // Ack on completion so a following input step (e.g. pressKey Enter) is
         // only sent after the text has actually landed.
-        Promise.resolve(text ? this.adb.inputText(serial, text) : undefined)
+        Promise.resolve(text ? this.typeText(serial, text) : undefined)
           .then(() => this.sendMsg({ type: 'input:type-done', sessionId, requestId }))
           .catch((e: unknown) => {
             const message = e instanceof Error ? e.message : String(e)
@@ -3556,6 +3572,58 @@ export class AndroidAgent implements DeviceAgent, NetworkControlCapability {
         }
         break
       }
+      case 'ui:field:request': {
+        const requestId = this.correlatorOf(msg)
+        if (requestId === null) break
+        const { sessionId } = msg
+        const state = this.deviceStates.get(sessionId)
+        const serial = state ? this.adb.getSerial(state.deviceId) : undefined
+        if (!state || !serial) {
+          this.sendMsg({ type: 'ui:field:response', sessionId, requestId, field: null, reason: 'failed' })
+          break
+        }
+        // What a person typed can be in the answer: it goes to the relay only, and is never logged here.
+        void Promise.all([this.adb.readFocused(serial).catch(() => null), this.screenSize(serial)])
+          .then(([read, screen]) => this.sendMsg({
+            type: 'ui:field:response', sessionId, requestId, ...fieldResponseOf(read, screen, this.frameTurn(state)),
+          }))
+        break
+      }
+      case 'ui:keyboard:request': {
+        const requestId = this.correlatorOf(msg)
+        if (requestId === null) break
+        const { sessionId } = msg
+        const state = this.deviceStates.get(sessionId)
+        const serial = state ? this.adb.getSerial(state.deviceId) : undefined
+        if (!state || !serial) {
+          this.sendMsg({ type: 'ui:keyboard:response', sessionId, requestId, keyboard: { shown: null } })
+          break
+        }
+        void Promise.all([this.adb.imeWindow(serial), this.screenSize(serial)])
+          .then(([ime, screen]) => this.sendMsg({
+            type: 'ui:keyboard:response', sessionId, requestId, keyboard: keyboardStateOf(ime, screen, this.frameTurn(state)),
+          }))
+          .catch(() => this.sendMsg({ type: 'ui:keyboard:response', sessionId, requestId, keyboard: { shown: null } }))
+        break
+      }
+      case 'device:keyboard-set': {
+        const requestId = this.correlatorOf(msg)
+        if (requestId === null) break
+        const { sessionId } = msg
+        const respond = (body: DeviceKeyboardSetReplyBody) => this.sendMsg({ ...body, sessionId, requestId })
+        const state = this.deviceStates.get(sessionId)
+        const serial = state ? this.adb.getSerial(state.deviceId) : undefined
+        if (!serial) {
+          respond({ type: 'device:keyboard-set-error', reason: 'failed', message: 'No booted device' })
+          break
+        }
+        this.setKeyboardLanguage(serial, (msg.payload as { keyboard?: unknown } | undefined)?.keyboard as string | undefined)
+          .then(respond)
+          .catch((e: unknown) => respond({
+            type: 'device:keyboard-set-error', reason: 'failed', message: e instanceof Error ? e.message : String(e),
+          }))
+        break
+      }
       case 'ui:tree:request': {
         const raw = msg as unknown as { requestId: string; sessionId?: string }
         const { requestId } = raw
@@ -3583,6 +3651,18 @@ export class AndroidAgent implements DeviceAgent, NetworkControlCapability {
   }
 
   private async handleKeyInput(serial: string, code: string, modifiers: number): Promise<InputOutcome> {
+    // The field's own action (Done, Next, Search), which an Enter key event does not reach in an app that checks the
+    // action it was given (#1135).
+    if (code === 'ImeAction') {
+      const result = await this.adb.imeAction(serial).catch(() => 'failed' as const)
+      return result === 'ok' ? 'delivered' : result === 'unsupported' ? 'unsupported' : 'failed'
+    }
+    // Caps Lock switches the keyboard's language, as it does on a Mac and on iOS: Gboard takes Shift+Space for that,
+    // and ignores the language-switch key code and Ctrl/Meta+Space (measured, API 34). Android 13+ (`keycombination`).
+    if (code === 'CapsLock' && modifiers === 0) {
+      const pressed = await this.keyCombination(serial, [KEY_SHIFT_LEFT, KEY_SPACE])
+      return pressed === null ? 'failed' : pressed ? 'delivered' : 'unsupported'
+    }
     const SPECIAL: Record<string, string> = {
       Backspace: '67', Enter: '66', Tab: '61', Space: '62', Escape: '111',
       ArrowLeft: '21', ArrowRight: '22', ArrowUp: '19', ArrowDown: '20',
@@ -3622,6 +3702,11 @@ export class AndroidAgent implements DeviceAgent, NetworkControlCapability {
     // clipboard shortcuts to dedicated keycodes (a Mac viewer sends Cmd = meta 0x08; treat
     // meta and ctrl alike). Any other chord+letter (e.g. Cmd+A) must NOT type the raw letter.
     if (modifiers & (0x01 | 0x08)) {
+      // Select-all, which `inputText` with `replace` presses before the text: Ctrl+A, Android 13+.
+      if (code === 'KeyA') {
+        const pressed = await this.keyCombination(serial, [KEY_CTRL_LEFT, KEY_A])
+        return pressed === null ? 'failed' : pressed ? 'delivered' : 'unsupported'
+      }
       const CLIP: Record<string, string> = { KeyC: 'KEYCODE_COPY', KeyV: 'KEYCODE_PASTE', KeyX: 'KEYCODE_CUT' }
       // Anything else — Cmd+A, Ctrl+S — is intentionally not sent. The channel is fine; we do not
       // implement it.
@@ -3656,6 +3741,90 @@ export class AndroidAgent implements DeviceAgent, NetworkControlCapability {
     return this.dispatchKey(() => this.adb.sendInput(serial, 'text', text))
   }
 
+  /** `true` pressed, `false` the device cannot hold keys together (below Android 13), `null` the press errored. */
+  private async keyCombination(serial: string, keys: string[]): Promise<boolean | null> {
+    try {
+      return await this.adb.sendKeyCombination(serial, keys)
+    } catch (e) {
+      logger.error('input keycombination failed:', e)
+      return null
+    }
+  }
+
+  /**
+   * `input:type`: the text set at the focused field's caret (#1135), so it lands as written whatever the keyboard's
+   * language — `input text` went through Gboard, which composed `dkssud` into `안녕` on a Korean keyboard. A field that
+   * changed the text as it took it (a mask, maxLength) passed: a person's typing would have met it too. One that kept
+   * what it had refused it. Only where the jar cannot set anything — no field it can see has focus (an input that
+   * exposes no accessibility node), or the jar cannot run — ASCII still goes through `input text`, which the keyboard
+   * composes in its language. Never for a password the jar declined to append to: `input text` would put it in argv.
+   * Never names the text: it can be a secret.
+   */
+  private async typeText(serial: string, text: string): Promise<void> {
+    const result = await this.adb.setFocusedText(serial, text)
+    if (result === 'ok') return
+    if (result === 'transformed') {
+      logger.info('input:type: the field changed the text as it took it (a mask, a filter or a length limit)')
+      return
+    }
+    if (result === 'refused' || result === 'rejected') throw new PlatformError('The focused text field did not take the text')
+    if (result === 'cannot-append-secure') throw new PlatformError('Text cannot be added to a password field that already holds some: clear it, or replace what it holds')
+    if (result === 'failed') throw new PlatformError('The focused text field could not be read or set')
+    if (/^[\x20-\x7e]*$/.test(text)) {
+      logger.info(`input:type: typed with adb input text (${result})`)
+      return this.adb.inputText(serial, text)
+    }
+    throw new PlatformError(result === 'no-focus'
+      ? 'No text field has focus, and text other than ASCII cannot be typed without one'
+      : 'Text other than ASCII could not be set on this device')
+  }
+
+  /** The screen Android draws, in device pixels: what a tree's and a keyboard's bounds are fractions of. */
+  private async screenSize(serial: string): Promise<{ width: number; height: number } | null> {
+    return (await this.adb.getDisplayMetrics(serial).catch(() => null))?.current ?? null
+  }
+
+  /** The turn `fromFrame` applies to a frame point, for the keyboard's rect in the frame's space. */
+  private frameTurn(state: DeviceState): 0 | 90 | 180 | 270 {
+    const skin = state.latestFrame?.skin ?? null
+    const skinDegrees = skin === null ? null : SKIN_DEGREES[skin] ?? null
+    if (skinDegrees === null) return 0
+    return ((((skinDegrees - (state.rotation ?? 0)) % 360) + 360) % 360) as 0 | 90 | 180 | 270
+  }
+
+  /**
+   * Put Gboard in the language `target` names (its window title, as a recording read it) for a replay (#1135). Gboard's
+   * language is its own setting, out of reach of `settings` and `ime` (measured), so it is read off the keyboard's
+   * window and turned with Shift+Space until it matches — which needs the keyboard up. With no `target` there is
+   * nothing to aim for: which language Gboard lists first cannot be read.
+   */
+  private async setKeyboardLanguage(serial: string, target: string | undefined): Promise<DeviceKeyboardSetReplyBody> {
+    if (target === undefined) {
+      return { type: 'device:keyboard-set-error', reason: 'unsupported', message: 'Android sets the keyboard language only to a named one' }
+    }
+    const ime = await this.adb.imeWindow(serial)
+    if (!ime?.shown) {
+      return { type: 'device:keyboard-set-error', reason: 'keyboard-hidden', message: 'The keyboard is not up, so its language cannot be read' }
+    }
+    const languageNow = async () => (await this.adb.readFocused(serial).catch(() => null))?.language
+    const start = await languageNow()
+    let now = start
+    for (let turn = 0; now !== undefined && turn < KEYBOARD_LANGUAGES_MAX; turn++) {
+      if (now === target) return { type: 'device:keyboard-set-done' }
+      const pressed = await this.adb.sendKeyCombination(serial, [KEY_SHIFT_LEFT, KEY_SPACE])
+      if (!pressed) return { type: 'device:keyboard-set-error', reason: 'unsupported', message: 'Switching the keyboard language needs Android 13 or later' }
+      await new Promise((resolve) => setTimeout(resolve, KEYBOARD_SWITCH_SETTLE_MS))
+      now = await languageNow()
+      if (now === start) break
+    }
+    if (now === target) return { type: 'device:keyboard-set-done' }
+    return {
+      type: 'device:keyboard-set-error',
+      reason: 'failed',
+      message: now === undefined ? 'The keyboard\'s language could not be read' : `The keyboard does not offer ${target}`,
+    }
+  }
+
   private async dispatchKey(send: () => Promise<void>): Promise<InputOutcome> {
     try {
       await send()
@@ -3680,6 +3849,7 @@ export class AndroidAgent implements DeviceAgent, NetworkControlCapability {
   async shutdown(avdId: string): Promise<void> {
     const serial = this.adb.getSerial(avdId)
     if (serial) {
+      await this.adb.stopFocusedServer(serial)
       await this.adb.shutdown(serial)
       this.adb.clearSerial(avdId)
       this.ownedDevices.delete(avdId)

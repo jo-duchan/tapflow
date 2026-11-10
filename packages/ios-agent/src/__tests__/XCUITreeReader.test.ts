@@ -3,7 +3,7 @@ import { EventEmitter } from 'events'
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'fs'
 import { tmpdir } from 'os'
 import { join } from 'path'
-import { XCUITreeReader, computeRunnerStamp, toFocusedField, type RunnerNative } from '../XCUITreeReader'
+import { XCUITreeReader, computeRunnerStamp, toFocusedField, toKeyboardState, type RunnerNative } from '../XCUITreeReader'
 
 type FakeProc = EventEmitter & {
   pid?: number
@@ -615,5 +615,32 @@ describe('toFocusedField', () => {
     expect(toFocusedField({ reason: 'something-new' })).toEqual({ field: null, reason: 'failed' })
     expect(toFocusedField({ identifier: 'x', frame: { x: 1 } })).toEqual({ field: null, reason: 'failed' })
     expect(toFocusedField('not json')).toEqual({ field: null, reason: 'failed' })
+  })
+})
+
+describe('toKeyboardState', () => {
+  const rect = { x: 0, y: 0.6, width: 1, height: 0.4 }
+
+  it('keeps a portrait app\'s keyboard as it is', () => {
+    expect(toKeyboardState({ shown: true, rect, orientation: 1 })).toEqual({ shown: true, rect })
+    // 0: the runtime has no orientation getter, which only a portrait app has ever met.
+    expect(toKeyboardState({ shown: true, rect, orientation: 0 })).toEqual({ shown: true, rect })
+  })
+
+  it('carries a landscape app\'s keyboard into the portrait framebuffer a touch lands in', () => {
+    // UIInterfaceOrientation 4 is a turn of 90 (as `/tree` reads it), which `toFramePoint` carries as (u, v) → (v, 1 − u):
+    // the keyboard along the app's bottom edge lies along the framebuffer's right one.
+    const k = toKeyboardState({ shown: true, rect: { x: 0, y: 0.5, width: 1, height: 0.5 }, orientation: 4 })
+    expect(k).toEqual({ shown: true, rect: { x: 0.5, y: 0, width: 0.5, height: 1 } })
+  })
+
+  it('tells hidden from unknown', () => {
+    expect(toKeyboardState({ shown: false, orientation: 1 })).toEqual({ shown: false })
+    expect(toKeyboardState({ shown: null, orientation: 0 })).toEqual({ shown: null })
+    expect(toKeyboardState('nonsense')).toEqual({ shown: null })
+  })
+
+  it('is shown with no rect when the rect cannot be read', () => {
+    expect(toKeyboardState({ shown: true, rect: { x: 'a' }, orientation: 1 })).toEqual({ shown: true })
   })
 })

@@ -5,8 +5,8 @@ import userEvent from '@testing-library/user-event'
 import type { CaptureEntry, CaptureSnapshot } from '@tapflowio/protocol/capture'
 import type { CapturedStep } from '@tapflowio/flow-runner/browser'
 import FlowCaptureDialog from '@/components/flow-capture/FlowCaptureDialog'
-import { EditScreen, ExportScreen } from '@/components/flow-capture/screens'
-import { initialState } from '@/lib/flowCapture/machine'
+import { EditScreen, ExportScreen, MatchScreen, RangeScreen, VerifyScreen } from '@/components/flow-capture/screens'
+import { initialState, reduce } from '@/lib/flowCapture/machine'
 import type { CaptureTap } from '@/lib/flowCapture/tap'
 import { withQuery } from './withQuery'
 
@@ -188,7 +188,7 @@ describe('FlowCaptureDialog', () => {
   })
 })
 
-describe('EditScreen', () => {
+describe('EditScreen — Verify', () => {
   const step = (over: Partial<CapturedStep>): CapturedStep => ({
     raw: { at: 0, endAt: 0, outcome: 'landed', messages: [], kind: 'network', offline: true }, step: null, skipped: 'network', ...over,
   })
@@ -207,6 +207,172 @@ describe('EditScreen', () => {
   })
 })
 
+// #1140: a password typed on the soft keyboard is the person's to give, before Match replays it.
+describe('RangeScreen', () => {
+  const base = { at: 0, endAt: 0, outcome: 'landed', messages: [] }
+  const steps = [
+    { ...base, kind: 'launch', buildId: 7 },
+    { ...base, kind: 'text', text: '', replace: true, fieldRead: 'secure', askValue: true },
+  ] as never
+  const loaded = reduce(initialState, { type: 'loaded', steps, range: { start: 0, end: 2 }, name: 'login' })
+  const draw = (state = loaded, dispatch = vi.fn()) => render(
+    <RangeScreen state={state} dispatch={dispatch} bundleId="com.example" onContinue={vi.fn()} onCancel={vi.fn()} continueRef={{ current: null }} />,
+  )
+
+  it('asks for the password, hidden, and holds Continue until it is given', async () => {
+    const dispatch = vi.fn()
+    draw(loaded, dispatch)
+    const field = screen.getByLabelText('Password for step 2')
+    expect(field).toHaveAttribute('type', 'password')
+    expect(screen.getByRole('button', { name: 'Continue' })).toBeDisabled()
+    await userEvent.type(field, 'x')
+    expect(dispatch).toHaveBeenCalledWith({ type: 'set-asked', index: 1, value: 'x' })
+  })
+
+  it('says a password filled in from the computer\'s keyboard was filled in', () => {
+    const typed = reduce(initialState, {
+      type: 'loaded', range: { start: 0, end: 2 }, name: 'login',
+      steps: [steps[0], { at: 0, endAt: 0, outcome: 'landed', messages: [], kind: 'text', text: 'abc', replace: true, fieldRead: 'secure', askValue: true, field: 'form.password' }] as never,
+    })
+    draw(typed)
+    expect(screen.getByLabelText('Password for step 2 form.password')).toHaveValue('abc')
+    expect(screen.getByText(/Filled in from what you typed on your computer/)).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Continue' })).toBeEnabled()
+  })
+
+  it('lets Continue go once it is given', () => {
+    draw(reduce(loaded, { type: 'set-asked', index: 1, value: 's3cret' }))
+    expect(screen.getByRole('button', { name: 'Continue' })).toBeEnabled()
+  })
+})
+
+describe('EditScreen', () => {
+  const raw = { at: 0, endAt: 0, outcome: 'landed', messages: [], kind: 'tap', point: [0.3, 0.4] }
+  const state = {
+    ...initialState, phase: 'edit' as const, reached: 2,
+    captured: { steps: [{ raw, step: { type: 'tapOn', selector: { text: 'Login' } } }], secrets: {}, launchAdded: false },
+    screenshots: ['blob:shot'],
+  } as never
+  const draw = () => render(
+    <EditScreen state={state} dispatch={vi.fn()} flow={null} renameError={() => null} onVerify={vi.fn()} onBackToRange={vi.fn()} verifyRef={{ current: null }} />,
+  )
+
+  it('draws where the step touched on its picture', () => {
+    draw()
+    expect(screen.getByTestId('step-mark')).toBeInTheDocument()
+  })
+
+  it('draws a swipe as a dashed trail that strengthens toward where the finger lifted', () => {
+    const swipe = { at: 0, endAt: 0, outcome: 'landed', messages: [], kind: 'swipe', from: [0.5, 0.7], to: [0.5, 0.3], durationMs: 200 }
+    const swiped = { ...(state as object), captured: { steps: [{ raw: swipe, step: { type: 'tapOn', selector: { text: 'Login' } } }], secrets: {}, launchAdded: false } } as never
+    render(<EditScreen state={swiped} dispatch={vi.fn()} flow={null} renameError={() => null} onVerify={vi.fn()} onBackToRange={vi.fn()} verifyRef={{ current: null }} />)
+    const mark = screen.getByTestId('step-mark')
+    const line = mark.querySelector('line')!
+    expect(line.getAttribute('stroke-dasharray')).toBe('1 9')
+    expect(line.getAttribute('stroke')).toBe(`url(#${mark.querySelector('linearGradient')!.id})`)
+    expect(mark.querySelector('linearGradient')!.getAttribute('y1')).toBe('70%')
+  })
+
+  // The YAML takes the picture's place, so the buttons stay where they are.
+  it('shows the YAML in place of the picture, and the picture again when it is hidden', async () => {
+    draw()
+    await userEvent.click(screen.getByRole('button', { name: 'Show YAML' }))
+    expect(screen.getByLabelText('Flow YAML')).toBeInTheDocument()
+    expect(screen.queryByRole('img')).not.toBeInTheDocument()
+    await userEvent.click(screen.getByRole('button', { name: 'Hide YAML' }))
+    expect(screen.getByRole('img')).toBeInTheDocument()
+  })
+
+  // Review: on plain HTTP (no clipboard API) the copy icon did nothing; it selects the YAML for the keyboard instead.
+  it('selects the YAML when the copy icon cannot copy, and names the block as a region', async () => {
+    draw()
+    await userEvent.click(screen.getByRole('button', { name: 'Show YAML' }))
+    Object.defineProperty(navigator, 'clipboard', { value: undefined, configurable: true })
+    const yaml = screen.getByRole('region', { name: 'Flow YAML' })
+    await userEvent.click(screen.getByRole('button', { name: 'Copy' }))
+    await waitFor(() => expect(document.activeElement).toBe(yaml))
+    expect(window.getSelection()?.toString().length).toBeGreaterThan(0)
+  })
+})
+
+describe('VerifyScreen', () => {
+  // The count said the step it was on twice ("2 of 2") until the result came, and moved the line as it grew.
+  it('counts through the flow\'s own steps, in the room of the widest count', () => {
+    const running = { ...initialState, phase: 'verifying' as const, verify: { status: 'running' as const, done: 2, live: [] } }
+    render(<VerifyScreen state={running} tap={{ surface: () => null } as never} marks={{ cursor: null, trails: [] }} total={15}
+      onExport={vi.fn()} onBack={vi.fn()} primaryRef={{ current: null }} />)
+    const status = screen.getByRole('status')
+    expect(status).toHaveTextContent('Running step 3 of 15')
+    expect(status.querySelector('[aria-hidden="true"].invisible')).toHaveTextContent('Running step 15 of 15')
+  })
+
+  // A Verify that threw (the device went away) has no result: its button, which held focus while it ran, goes back to
+  // Edit rather than staying an unavailable "Export anyway".
+  it('turns its button into Back to Edit, in place, when the run threw', async () => {
+    const running = { ...initialState, phase: 'verifying' as const, verify: { status: 'running' as const, done: 1, live: [] } }
+    const onBack = vi.fn()
+    const props = { tap: { surface: () => null } as never, marks: { cursor: null, trails: [] }, total: 3, onExport: vi.fn(), onBack, primaryRef: { current: null } }
+    const { rerender } = render(<VerifyScreen state={running} {...props} />)
+    const button = screen.getByRole('button', { name: 'Continue' })
+    button.focus()
+    rerender(<VerifyScreen state={{ ...running, error: 'the connection to the relay closed' }} {...props} />)
+    expect(screen.getAllByRole('button', { name: 'Back to Edit' })).toHaveLength(1)
+    expect(screen.queryByRole('button', { name: 'Export anyway' })).toBeNull()
+    expect(button).toHaveFocus()
+    expect(button).not.toHaveAttribute('aria-disabled')
+    await userEvent.click(button)
+    expect(onBack).toHaveBeenCalled()
+  })
+
+  // Drawn as MCP's Agent activity draws a run: the steps as they go, then the one that failed opened onto why.
+  it('shows the steps as they run, and opens the failed one onto its reason and what to select instead', () => {
+    const live = { ...initialState, phase: 'verifying' as const, verify: { status: 'running' as const, done: 1, live: [
+      { index: 0, name: 'launchApp', status: 'passed' as const, startedAt: 0, durationMs: 1200 },
+      { index: 1, name: 'tapOn("Row 23")', status: 'running' as const, startedAt: 1200 },
+    ] } }
+    const props = { tap: { surface: () => null } as never, marks: { cursor: null, trails: [] }, total: 3, onExport: vi.fn(), onBack: vi.fn(), primaryRef: { current: null } }
+    const { rerender } = render(<VerifyScreen state={live} {...props} />)
+    const list = screen.getByRole('list', { name: 'Verify' })
+    expect(within(list).getByText('launchApp')).toBeInTheDocument()
+    expect(within(list).getByText('1.2s')).toBeInTheDocument()
+    expect(within(list).getByText(/, running/)).toBeInTheDocument()
+    const failed = { ...live, verify: { ...live.verify, status: 'failed' as const, result: { status: 'failed', steps: [
+      { index: 0, name: 'launchApp', status: 'passed', durationMs: 1200 },
+      { index: 1, name: 'tapOn("Row 23")', status: 'failed', durationMs: 10000, message: 'no element matched "Row 23" within 10s',
+        suggestions: [{ yaml: 'tapOn: "Row 22"', element: { role: 'button', label: 'Row 22' } }] },
+      { index: 2, name: 'tapOn("Submit")', status: 'skipped', durationMs: 0 },
+    ] } as never } }
+    rerender(<VerifyScreen state={failed} {...props} />)
+    const why = screen.getByRole('button', { name: /tapOn\("Row 23"\)/ })
+    expect(why).toHaveAttribute('aria-expanded', 'true')
+    expect(screen.getByText('tapOn: "Row 22"')).toBeInTheDocument()
+    expect(screen.getByText(/, not run/)).toBeInTheDocument()
+  })
+})
+
+describe('focus through a run', () => {
+  const marks = { cursor: null, trails: [] }
+  const tapStub = { surface: () => null } as never
+
+  // Review of #1125: Stop's button was swapped for Start again's, and the focus of the one pressed fell to the page.
+  it('keeps focus on the button pressed when Stop becomes Start again', () => {
+    const running = { ...initialState, phase: 'matching' as const, progress: { done: 1, total: 3 } }
+    const props = { tap: tapStub, marks, onStop: vi.fn(), onRestart: vi.fn(), onTakeWhatMatched: vi.fn(), stopRef: { current: null } }
+    const { rerender } = render(<MatchScreen state={running} {...props} />)
+    const stop = screen.getByRole('button', { name: 'Stop' })
+    stop.focus()
+    rerender(<MatchScreen state={{ ...running, error: 'The replay stopped.' }} {...props} />)
+    expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Start again' }))
+  })
+
+  // With nothing to hold, focus fell to the page when Verify began and stayed there after it finished.
+  it('has its primary button there, busy, while Verify runs', () => {
+    const running = { ...initialState, phase: 'verifying' as const, verify: { status: 'running' as const, done: 0, live: [] } }
+    render(<VerifyScreen state={running} tap={tapStub} marks={marks} total={3} onExport={vi.fn()} onBack={vi.fn()} primaryRef={{ current: null }} />)
+    expect(screen.getByRole('button', { name: 'Continue' })).toHaveAttribute('aria-disabled', 'true')
+  })
+})
+
 describe('ExportScreen', () => {
   const flow = { name: 'Sign in', appId: 'com.example.app', steps: [{ type: 'clearState' as const }, { type: 'launchApp' as const }, { type: 'inputSecret' as const, name: 'PASSWORD' }] }
 
@@ -215,12 +381,15 @@ describe('ExportScreen', () => {
     render(<ExportScreen flow={flow} bundleId="com.example.app" onDone={onDone} doneRef={{ current: null }} />)
     expect(screen.getByLabelText('File')).toHaveValue('flows/sign-in.yaml')
     const yaml = screen.getByLabelText('Flow YAML')
-    expect(yaml).toHaveAttribute('readonly')
-    expect((yaml as HTMLTextAreaElement).value).toContain('secret: PASSWORD')
+    expect(yaml).toHaveAttribute('tabindex', '0')
+    expect(yaml.textContent).toContain('secret: PASSWORD')
     expect(screen.getByText(/--secret PASSWORD/)).toBeInTheDocument()
     Object.defineProperty(navigator, 'clipboard', { value: undefined, configurable: true })
     await userEvent.click(screen.getByRole('button', { name: 'Copy YAML' }))
-    expect(await screen.findByRole('status')).toHaveTextContent(/Select the YAML and copy it/)
+    expect(await screen.findByRole('status')).toHaveTextContent(/The YAML is selected/)
+    // Only the YAML is selected, and it has focus, so the keyboard copies it.
+    expect(document.activeElement).toBe(yaml)
+    expect(window.getSelection()?.toString()).toContain('secret: PASSWORD')
     await userEvent.click(screen.getByRole('button', { name: 'Done' }))
     expect(onDone).toHaveBeenCalled()
   })

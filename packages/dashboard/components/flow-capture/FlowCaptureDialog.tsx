@@ -9,9 +9,12 @@ import { useFocusAfterSwap } from '@/hooks/useFocusAfterSwap'
 import { DashboardSessionChannel } from '@/lib/flowCapture/channel'
 import { copy } from '@/lib/flowCapture/copy'
 import { editedCapture, flowOf } from '@/lib/flowCapture/flow'
-import { canGoTo, initialState, reachedStep, reduce, stepIndex, type CaptureState } from '@/lib/flowCapture/machine'
-import { DialogRun, loadSnapshot, matchRange, PauseLease, stepsOf, verifyFlow } from '@/lib/flowCapture/runner'
+import { canGoTo, initialState, reachedStep, reduce, stepIndex, withAsked, type CaptureState } from '@/lib/flowCapture/machine'
+import { DialogRun, keyboardOf, loadSnapshot, matchRange, PauseLease, stepsOf, verifyFlow } from '@/lib/flowCapture/runner'
 import type { CaptureTap } from '@/lib/flowCapture/tap'
+import { addMark, type StepMark } from '@/lib/flowCapture/marks'
+import { chromeOrientation } from '@tapflowio/protocol/screen'
+import { NO_MARKS, type WatchMarks } from '@/lib/watchActions'
 import { EditScreen, ExportScreen, MatchScreen, RangeScreen, VerifyScreen } from './screens'
 
 /**
@@ -73,14 +76,17 @@ export default function FlowCaptureDialog({ tap, returnFocusRef, onClose }: {
     <Dialog open onOpenChange={(open) => { if (!open) onClose() }}>
       <DialogContent
         size="xl"
-        className="max-h-[calc(100dvh-4rem)] grid-rows-[auto_auto_minmax(0,1fr)] overflow-hidden"
+        // One height for every step, so moving between them does not resize the dialog; each step scrolls inside it and
+        // keeps its buttons in view. Capped, so a tall screen does not make it a column. `--picture-max` is what is left
+        // for a device picture once the title, the stepper and the buttons are drawn (16rem, measured at this size).
+        className="h-[min(calc(100dvh-4rem),56rem)] max-h-[min(calc(100dvh-4rem),56rem)] grid-rows-[auto_minmax(0,1fr)] overflow-hidden [--picture-max:calc(min(100dvh-4rem,56rem)-16rem)]"
         // A click beside a running replay would end it by accident; Escape and Stop still do, on purpose.
         onInteractOutside={(e) => { if (busy) e.preventDefault() }}
         onCloseAutoFocus={(e) => { e.preventDefault(); returnFocusRef.current?.focus() }}
       >
         <DialogHeader>
           <DialogTitle>{copy.title}</DialogTitle>
-          <DialogDescription className="sr-only">{copy.matchingHelp}</DialogDescription>
+          <DialogDescription className="sr-only">{copy.description}</DialogDescription>
         </DialogHeader>
         {snapshot.isPending ? (
           <p role="status" className="text-sm text-muted-foreground">{copy.loading}</p>
@@ -118,6 +124,22 @@ function CaptureSession({ tap, session, snapshot, bundleId, setBusy, close }: {
   const [state, dispatch] = useReducer(reduce, snapshot, initFrom)
   const fallback = useRef<HTMLButtonElement>(null)
   const swapFocus = useFocusAfterSwap<HTMLDivElement>(state.phase, fallback)
+  // Where the replay is touching, drawn over the device on Match and Verify; each run starts with none.
+  const [marks, setMarks] = useState<WatchMarks>(NO_MARKS)
+  const markId = useRef(0)
+  // Only upright: the flow's points are the app's, the mirror is the framebuffer, and a turned device puts one in the
+  // other's wrong place (as `markOf` refuses for Match's recorded points).
+  const onTouch = (mark: StepMark) => {
+    const chrome = tap.chrome()
+    const o = chrome ? chromeOrientation(chrome) : undefined
+    if (o !== undefined && o !== 'portrait') return
+    // The id is taken here, not in the updater, which React may run twice.
+    const id = ++markId.current
+    setMarks((m) => addMark(m, id, mark))
+  }
+
+  // The keyboard language the range was recorded in, which both replays start from (#1135).
+  const keyboard = keyboardOf(snapshot, state.steps, state.range)
 
   const startMatch = () => {
     const opened = session.current
@@ -125,14 +147,16 @@ function CaptureSession({ tap, session, snapshot, bundleId, setBusy, close }: {
     const { channel, lease, run } = opened
     const signal = run.begin()
     dispatch({ type: 'match-started', total: state.range.end - state.range.start })
+    setMarks(NO_MARKS)
     setBusy(true)
-    matchRange(tap, channel, lease, state.steps, state.range, bundleId, {
+    matchRange(tap, channel, lease, withAsked(state), state.range, bundleId, {
       signal,
-      onStep: (step, screenshot) => {
+      onTouch,
+      onStep: (step, screenshot, inserted) => {
         if (screenshot) run.keep(screenshot)
-        dispatch({ type: 'step-matched', step, ...(screenshot ? { screenshot } : {}) })
+        dispatch({ type: 'step-matched', step, ...(screenshot ? { screenshot } : {}), ...(inserted ? { inserted } : {}) })
       },
-    })
+    }, keyboard)
       .then((matched) => dispatch({ type: 'match-finished', captured: toFlowSteps(matched) }))
       .catch((e: unknown) => dispatch({ type: 'match-failed', error: signal.aborted ? copy.matchStopped : (e as Error).message }))
       .finally(() => setBusy(false))
@@ -147,8 +171,9 @@ function CaptureSession({ tap, session, snapshot, bundleId, setBusy, close }: {
     if (!flow || !edited || !opened) return
     const { channel, lease } = opened
     dispatch({ type: 'verify-started' })
+    setMarks(NO_MARKS)
     setBusy(true)
-    verifyFlow(tap, channel, lease, flow, edited.secrets, (done) => dispatch({ type: 'verify-step', done }))
+    verifyFlow(tap, channel, lease, flow, edited.secrets, (mark) => dispatch({ type: 'verify-step', mark, at: Date.now() }), keyboard, onTouch)
       .then((result) => dispatch({ type: 'verify-finished', result }))
       .catch((e: unknown) => dispatch({ type: 'match-failed', error: (e as Error).message }))
       .finally(() => setBusy(false))
@@ -170,15 +195,16 @@ function CaptureSession({ tap, session, snapshot, bundleId, setBusy, close }: {
         reached={reachedStep(state)}
         canGoTo={(i) => canGoTo(state, i)}
         onGoTo={(step) => dispatch({ type: 'go-to', step })}
+        fill
         className="border-b pb-3"
       />
-      <div {...swapFocus} className="min-h-0">
+      <div {...swapFocus} className="h-full min-h-0">
         {state.phase === 'range' && (
           <RangeScreen state={state} dispatch={dispatch} bundleId={bundleId} onContinue={startMatch} onCancel={close} continueRef={fallback} />
         )}
         {state.phase === 'matching' && (
           <MatchScreen
-            state={state} tap={tap}
+            state={state} tap={tap} marks={marks}
             onStop={() => session.current?.run.abort()} onRestart={startMatch} onTakeWhatMatched={takeWhatMatched} stopRef={fallback}
           />
         )}
@@ -189,7 +215,7 @@ function CaptureSession({ tap, session, snapshot, bundleId, setBusy, close }: {
           />
         )}
         {state.phase === 'verifying' && (
-          <VerifyScreen state={state} tap={tap} onExport={() => dispatch({ type: 'to-export' })} onBack={() => dispatch({ type: 'go-to', step: 2 })} primaryRef={fallback} />
+          <VerifyScreen state={state} tap={tap} marks={marks} total={flow?.steps.length ?? 0} onExport={() => dispatch({ type: 'to-export' })} onBack={() => dispatch({ type: 'go-to', step: 2 })} primaryRef={fallback} />
         )}
         {state.phase === 'export' && flow && <ExportScreen flow={flow} bundleId={bundleId} onDone={close} doneRef={fallback} />}
       </div>

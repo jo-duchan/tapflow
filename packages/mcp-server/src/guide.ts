@@ -43,7 +43,7 @@ Goal: find real defects in the requested feature, prove each with evidence, and 
 - Empty, spaces only, leading/trailing spaces.
 - Too long, too short, exactly at a visible limit.
 - Wrong format (bad email, letters in a number field), 0, negative, decimal.
-- Special characters (' " < > &). Accented, CJK and emoji on iOS only: Android type_text takes ASCII.
+- Special characters (' " < > &), accented, CJK and emoji.
 - A required field missing; fields that disagree (password and confirmation).
 - Expect: an error that names the problem, near the field, gone once fixed. Submit stays disabled (enabled: false) or is rejected, never accepted.
 

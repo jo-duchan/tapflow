@@ -277,6 +277,7 @@ live in the spec, which the check holds to code. A component without a spec yet 
 | Field | assembly pattern — `Label` + control + `FieldHint` / `FieldError` | control 6 × hint 3 × message 3 | [field.md](./design/components/field.md) |
 | UserAvatar | `components/UserAvatar.tsx` | content 7 (image + 6 colors) | [user-avatar.md](./design/components/user-avatar.md) |
 | Stepper | `components/ui/stepper.tsx` | state 3 | [stepper.md](./design/components/stepper.md) |
+| CodeBlock | `components/ui/code-block.tsx` (shadcn `radix-nova`, on Tailwind 3; highlighting by `useHighlightedCode`) | variant 2 × size 2 | pending |
 
 Not in this list on purpose: components with no call site, or reachable by no device today (`form.tsx`,
 `avatar.tsx`, `CardFooter`, `Sheet`, `DropdownMenuRadioItem`, and others). Code kept for later is not

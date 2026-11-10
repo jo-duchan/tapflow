@@ -2,6 +2,7 @@ import type { PointSpace } from '@tapflowio/protocol'
 import type { CaptureEntry, CapturedMessage } from '@tapflowio/protocol/capture'
 import type { FocusedField } from '@tapflowio/protocol'
 import { keyChar } from './keys.js'
+import { judgeTouch, keyboardTimeline, type KeyboardTimeline } from './keyboard.js'
 
 export type Point = [number, number]
 export type Fingers = [Point, Point]
@@ -28,25 +29,41 @@ interface StepBase {
 }
 
 /** A person's action on the device: the unit the dialog lists, replays and turns into a flow step. */
+/** `keyboard: 'unknown'`: the soft keyboard may have been up around the touch and the reads could not say whether it was on a key
+ *  (#1135). Replayed and kept as the person did it, and marked, since a key it was would type in the replay. */
+type Touch = { space?: PointSpace; keyboard?: 'unknown' }
+
 export type RawStep = StepBase & (
-  | { kind: 'tap'; point: Point; space?: PointSpace }
-  | { kind: 'longPress'; point: Point; space?: PointSpace; durationMs: number }
-  | { kind: 'swipe'; from: Point; to: Point; space?: PointSpace; durationMs: number }
+  | { kind: 'tap'; point: Point } & Touch
+  | { kind: 'longPress'; point: Point; durationMs: number } & Touch
+  | { kind: 'swipe'; from: Point; to: Point; durationMs: number } & Touch
   /** Held, then moved: a drag after a long press. No flow step says it. */
-  | { kind: 'holdDrag'; from: Point; to: Point; space?: PointSpace; durationMs: number }
+  | { kind: 'holdDrag'; from: Point; to: Point; durationMs: number } & Touch
+  /**
+   * A touch on the soft keyboard (#1135): what it typed is in the field's value when the relay read it, and then the
+   * keys are folded into that `text` step. Left on its own, nothing said what it typed. Never replayed: a key types by
+   * the keyboard's state, which a replay does not share.
+   */
+  | { kind: 'keyboardKey'; point: Point; space?: PointSpace }
+  /** The keyboard's action key (Done, Next, Search), told by the keyboard closing after it. */
+  | { kind: 'imeAction' }
   | { kind: 'pinch'; start: Fingers; end: Fingers; space?: PointSpace; durationMs: number }
   /**
    * Keys that each typed a character, in a row, and what they typed. Two ways to know it:
    * - `replace`: the relay read the field once the person paused (#1135), so `text` is what the field held, and the
    *   step is every run and edit key typed into that one field. Whatever the device's IME, language or Caps Lock made
    *   of the keys is in it.
-   * - otherwise, `text` is the keys read on a US layout — right on Android, whose agent types them from that table, and
-   *   a guess on iOS, where the device's IME decides. `fieldRead` says whether a read was tried: `unread` when the
-   *   agent reads fields but none was usable (the warning is the reader's), `secure` for a field that never shows its
-   *   value. Absent: no read was tried, as on Android, or as on iOS when the relay read no field at all (the matcher
-   *   warns there, by platform).
+   * - otherwise, `text` is the keys read on a US layout, a guess on both platforms: the device's IME decides what
+   *   they type (Gboard on Android). `fieldRead` says whether a read was tried: `unread` when the agent reads fields
+   *   but none was usable (the warning is the reader's), `secure` for a field that never shows its value. Absent: the
+   *   relay read no field at all (an agent without `field-value`, a Mac over its memory line), and the matcher warns.
+   * - `field`: the identifier of the field the relay read it went into. A field focused before the range began has no
+   *   tap in it, so a replay from a fresh launch taps this one first (`focusTap`).
+   * - `askValue`: typed on the soft keyboard into a field that hides its text (#1140), so neither the keys nor a read
+   *   can say what it holds: the person says it before Match. `text` is what keys on the computer's keyboard typed in
+   *   the same field, if any, for them to start from.
    */
-  | { kind: 'text'; text: string; replace?: true; fieldRead?: 'unread' | 'secure' }
+  | { kind: 'text'; text: string; replace?: true; fieldRead?: 'unread' | 'secure'; field?: string; fieldPlaceholder?: string; askValue?: true }
   /** A key that types no character — Enter, Tab, Backspace, an arrow — or a chord. */
   | { kind: 'key'; code: string; modifiers: number }
   | { kind: 'paste'; text: string }
@@ -95,6 +112,7 @@ export function segment(entries: readonly CaptureEntry[]): RawStep[] {
   }
 
   const out: RawStep[] = []
+  const keyboard = keyboardTimeline(entries)
   let chrome: unknown
   let touch: TimedMessage[] | null = null
   let pinch: TimedMessage[] | null = null
@@ -161,7 +179,7 @@ export function segment(entries: readonly CaptureEntry[]): RawStep[] {
       case 'input:touch:end': {
         if (!touch) break
         touch.push(timed)
-        push(touchStep(touch, outcomeOf(m.requestId)))
+        push(onKeyboard(touchStep(touch, outcomeOf(m.requestId)), keyboard))
         touch = null
         break
       }
@@ -230,12 +248,27 @@ export function segment(entries: readonly CaptureEntry[]): RawStep[] {
     }
   }
   endRun()
-  return withFieldValues(out, entries)
+  return oneAskedSecret(withFieldValues(out, entries))
+}
+
+/** A touch as the keyboard reads around it judge it: a key, the action key, the app, or not known. */
+function onKeyboard(step: RawStep, t: KeyboardTimeline | null): RawStep {
+  if (!t || (step.kind !== 'tap' && step.kind !== 'longPress' && step.kind !== 'swipe' && step.kind !== 'holdDrag')) return step
+  const start = step.kind === 'tap' || step.kind === 'longPress' ? step.point : step.from
+  const verdict = judgeTouch(t, step.at, step.endAt, start, step.space)
+  const { at, endAt, outcome, messages, chrome } = step
+  const base = { at, endAt, outcome, messages, ...(chrome === undefined ? {} : { chrome }) }
+  if (verdict === 'key') return { ...base, kind: 'keyboardKey', point: start, ...(step.space ? { space: step.space } : {}) }
+  // Only a tap presses the action key; a held or dragged one did something else.
+  if (verdict === 'imeAction') return step.kind === 'tap' ? { ...base, kind: 'imeAction' } : { ...step, keyboard: 'unknown' }
+  return verdict === 'unknown' ? { ...step, keyboard: 'unknown' } : step
 }
 
 /** Keys that edit what a field holds without typing a character: a run of typing goes on through them. */
 const EDIT_KEYS = new Set(['Backspace', 'Delete', 'ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'Home', 'End'])
 const isEdit = (s: RawStep): boolean => s.kind === 'key' && EDIT_KEYS.has(s.code) && (s.modifiers & ~0x02) === 0
+/** What a group of typing into one field is made of: text runs, edit keys, and keys on the soft keyboard. */
+const isTyping = (s: RawStep): boolean => s.kind === 'text' || s.kind === 'keyboardKey' || isEdit(s)
 
 const sameField = (a: FocusedField, b: FocusedField): boolean =>
   a.identifier === b.identifier && a.placeholder === b.placeholder
@@ -256,9 +289,9 @@ function withFieldValues(steps: RawStep[], entries: readonly CaptureEntry[]): Ra
   const out: RawStep[] = []
   for (let i = 0; i < steps.length;) {
     let j = i
-    while (j < steps.length && (steps[j]!.kind === 'text' || isEdit(steps[j]!))) j++
+    while (j < steps.length && isTyping(steps[j]!)) j++
     const group = steps.slice(i, j)
-    if (!group.some((s) => s.kind === 'text')) { out.push(...steps.slice(i, Math.max(j, i + 1))); i = Math.max(j, i + 1); continue }
+    if (!group.some((s) => s.kind === 'text' || s.kind === 'keyboardKey')) { out.push(...steps.slice(i, Math.max(j, i + 1))); i = Math.max(j, i + 1); continue }
     i = j
     const first = group[0]!
     const last = group[group.length - 1]!
@@ -267,6 +300,10 @@ function withFieldValues(steps: RawStep[], entries: readonly CaptureEntry[]): Ra
     // The agent reads fields (there are reads), but none says which field this went into — typing that went on past
     // a key the relay does not end a run at, like Escape. Not read, so the reader warns.
     if (!focus) { out.push(...group.map((s) => (s.kind === 'text' ? { ...s, fieldRead: 'unread' } as RawStep : s))); continue }
+    // The placeholder too, as `sameField` tells fields apart: a password and its confirmation can share an identifier.
+    const field = focus.field?.identifier
+      ? { field: focus.field.identifier, ...(focus.field.placeholder ? { fieldPlaceholder: focus.field.placeholder } : {}) }
+      : {}
     // `phase` is also implied by the times — a focus read is asked at a key, so never between this group's last input
     // and the next — and no test can tell the two apart; it stays so the rule does not rest on the relay's timing alone.
     const value = focus.field && !focus.field.secure ? reads.filter((r) => r.phase === 'value'
@@ -277,14 +314,80 @@ function withFieldValues(steps: RawStep[], entries: readonly CaptureEntry[]): Ra
       out.push({
         at: first.at, endAt: last.endAt, outcome: 'landed', messages: group.flatMap((s) => s.messages),
         ...(first.chrome === undefined ? {} : { chrome: first.chrome }),
-        kind: 'text', text: value.field.value, replace: true,
+        kind: 'text', text: value.field.value, replace: true, ...field,
       })
       continue
     }
     const fieldRead = focus.reason === 'secure' || focus.field?.secure ? 'secure' : 'unread'
-    out.push(...group.map((s) => (s.kind === 'text' ? { ...s, fieldRead } as RawStep : s)))
+    // A password typed on the soft keyboard, even in part: one secret step whose value the person gives. Left as keys,
+    // the flow had no password step at all (#1140).
+    if (fieldRead === 'secure' && group.some((s) => s.kind === 'keyboardKey')) {
+      out.push({
+        at: first.at, endAt: last.endAt, outcome: 'landed', messages: group.flatMap((s) => s.messages),
+        ...(first.chrome === undefined ? {} : { chrome: first.chrome }),
+        kind: 'text', text: keysAfter(group, (s) => s.kind === 'keyboardKey'), replace: true,
+        fieldRead, ...field, askValue: true,
+      })
+      continue
+    }
+    out.push(...group.map((s) => (s.kind === 'text' ? { ...s, fieldRead, ...field } as RawStep : s)))
   }
   return out
+}
+
+/**
+ * A password field typed into more than once, on the soft keyboard at least once: one secret step, where the typing
+ * ended, whose value the person gives (#1140). No read can say what the field holds, so earlier typing may have been
+ * deleted (on the soft keyboard, measured: typed, deleted, typed again on the computer's keyboard) or kept; replayed one
+ * after another, the asked value and the later keys were typed together. A tap between them is kept: it is how the
+ * person went back to the field. The value starts from the computer's keys typed after the last soft-keyboard run.
+ */
+function oneAskedSecret(steps: RawStep[]): RawStep[] {
+  const out: RawStep[] = []
+  for (let i = 0; i < steps.length;) {
+    const first = steps[i]!
+    const field = first.kind === 'text' && first.fieldRead === 'secure' ? first.field : undefined
+    if (!field || first.kind !== 'text') { out.push(first); i++; continue }
+    const into = (s: RawStep | undefined) => s?.kind === 'text' && s.fieldRead === 'secure' && s.field === field
+      && s.fieldPlaceholder === first.fieldPlaceholder
+    // The run: typing into this field, its edit keys, and a tap only where it went back into the field — the tap just
+    // before typing into it again. Any other tap (Sign in, a "show password" eye) ends the run, so it keeps its place.
+    let j = i
+    let lastTyping = i
+    while (j < steps.length) {
+      const s = steps[j]!
+      if (into(s)) lastTyping = j
+      else if (!isEdit(s) && !(s.kind === 'tap' && into(steps[j + 1]))) break
+      j++
+    }
+    const run = steps.slice(i, lastTyping + 1)
+    const typed = run.filter((s): s is Extract<RawStep, { kind: 'text' }> => s.kind === 'text')
+    if (typed.length < 2 || !typed.some((s) => s.askValue)) { out.push(...run); i = lastTyping + 1; continue }
+    // Kept: the taps, in order, before the one step.
+    out.push(...run.filter((s) => s.kind === 'tap'))
+    const last = run[run.length - 1]!
+    out.push({
+      at: last.at, endAt: last.endAt, outcome: 'landed', messages: run.flatMap((s) => (s.kind === 'tap' ? [] : s.messages)),
+      ...(last.chrome === undefined ? {} : { chrome: last.chrome }),
+      kind: 'text', text: keysAfter(run, (s) => s.kind === 'text' && !!s.askValue), replace: true, fieldRead: 'secure', field,
+      ...(first.fieldPlaceholder ? { fieldPlaceholder: first.fieldPlaceholder } : {}), askValue: true,
+    })
+    i = lastTyping + 1
+  }
+  return out
+}
+
+/** What the computer's keyboard typed after the last soft-keyboard typing in `run`, Backspace applied; '' once an edit
+ *  key that moves the caret makes it a guess. Both the asked step and the merged one start from it. */
+function keysAfter(run: RawStep[], soft: (s: RawStep) => boolean): string {
+  const from = run.map(soft).lastIndexOf(true)
+  let text = ''
+  for (const s of run.slice(from + 1)) {
+    if (s.kind === 'text') text += s.text
+    else if (s.kind === 'key' && s.code === 'Backspace') text = text.slice(0, -1)
+    else if (s.kind === 'key') return ''
+  }
+  return text
 }
 
 function worst(a: Outcome, b: Outcome): Outcome {

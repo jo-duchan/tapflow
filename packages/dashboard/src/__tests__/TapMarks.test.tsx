@@ -27,6 +27,9 @@ describe('TapMarks', () => {
       ['10%', '5%', '90%', '95%'], ['50%', '95%', '50%', '5%'],
     ])
     expect(screen.getAllByTestId('ripple')).toHaveLength(2)
+    // A swipe is the shared stroke: dashed, strengthening toward where the finger lifted.
+    expect(lines[1]!.getAttribute('stroke-dasharray')).toBe('1 9')
+    expect(lines[1]!.getAttribute('stroke')).toMatch(/^url\(#swipe-/)
   })
 
   it('draws no path for the first tap, which has nowhere to come from', () => {

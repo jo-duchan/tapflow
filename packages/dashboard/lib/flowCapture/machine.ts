@@ -1,10 +1,27 @@
-import type { CapturedFlow, CapturedStep, FlowResult, RawStep, StepRange } from '@tapflowio/flow-runner/browser'
+import { askedValues, type CapturedFlow, type CapturedStep, type FlowResult, type RawStep, type StepRange } from '@tapflowio/flow-runner/browser'
 
 /**
  * Flow Capture's dialog as states and the events between them (#1125). Pure: the screens draw a state, the runner
  * sends events. Kept apart from both because the design keeps changing and the order of the five steps does not.
  */
 export type Phase = 'loading' | 'range' | 'matching' | 'edit' | 'verifying' | 'export' | 'failed'
+
+/** A step of a verification as it runs: started, then passed or failed, with how long it took. */
+export interface LiveStep {
+  index: number
+  name: string
+  status: 'running' | 'passed' | 'failed'
+  startedAt: number
+  durationMs?: number
+}
+
+/** The engine's mark for a step starting or ending (`runFlow`'s `onStep`). */
+export interface StepMark {
+  index: number
+  name: string
+  phase: 'start' | 'end'
+  status?: 'passed' | 'failed'
+}
 
 export interface MatchProgress {
   done: number
@@ -27,13 +44,17 @@ export interface CaptureState {
   removed: number[]
   /** Secrets the person renamed: old name → new name. */
   renamed: Record<string, string>
-  verify: { status: 'running' | 'passed' | 'failed'; done: number; result?: FlowResult } | null
+  /** `live`: the steps the run has reached, as they start and end, for showing it while it runs; `result` replaces it. */
+  verify: { status: 'running' | 'passed' | 'failed'; done: number; live: LiveStep[]; result?: FlowResult } | null
   /** Why the dialog stopped, said in the dialog. */
   error: string | null
   /** The range the matched steps were replayed from. Moved off it, they no longer describe the range. */
   matchedRange: StepRange | null
   /** The furthest step (stepper index) reached since the last replay, so a step back is not a step lost. */
   reached: number
+  /** What the person said a password typed on the soft keyboard was (#1140), by index into `steps`: Match types it.
+   *  Only ever in this state, never written down; gone with the dialog. */
+  asked: Record<number, string>
 }
 
 export type CaptureEvent =
@@ -42,8 +63,9 @@ export type CaptureEvent =
   | { type: 'set-range'; range: StepRange }
   | { type: 'set-name'; name: string }
   | { type: 'set-tags'; tags: string }
+  | { type: 'set-asked'; index: number; value: string }
   | { type: 'match-started'; total: number }
-  | { type: 'step-matched'; step: CapturedStep; screenshot?: string }
+  | { type: 'step-matched'; step: CapturedStep; screenshot?: string; inserted?: boolean }
   | { type: 'match-finished'; captured: CapturedFlow }
   | { type: 'match-failed'; error: string }
   | { type: 'remove-step'; index: number }
@@ -51,14 +73,15 @@ export type CaptureEvent =
   /** The stepper: go to a step already reached (`canGoTo`). */
   | { type: 'go-to'; step: number }
   | { type: 'verify-started' }
-  | { type: 'verify-step'; done: number }
+  /** `at`: when the dialog heard it, which times the step. */
+  | { type: 'verify-step'; mark: StepMark; at: number }
   | { type: 'verify-finished'; result: FlowResult }
   | { type: 'to-export' }
 
 export const initialState: CaptureState = {
   phase: 'loading', steps: [], range: { start: 0, end: 0 }, name: '', tags: '', progress: { done: 0, total: 0 },
   matched: [], screenshots: [], captured: null, removed: [], renamed: {}, verify: null, error: null,
-  matchedRange: null, reached: 0,
+  matchedRange: null, reached: 0, asked: {},
 }
 
 /**
@@ -74,17 +97,18 @@ const edited = (state: CaptureState) => ({ verify: null, reached: Math.min(state
 
 export function reduce(state: CaptureState, event: CaptureEvent): CaptureState {
   switch (event.type) {
-    case 'loaded': return { ...state, phase: 'range', steps: event.steps, range: event.range, name: event.name, error: null }
+    case 'loaded': return { ...state, phase: 'range', steps: event.steps, range: event.range, name: event.name, error: null, asked: {} }
     case 'load-failed': return { ...state, phase: 'failed', error: event.error }
     case 'set-range': return { ...state, range: event.range }
     case 'set-name': return { ...state, name: event.name }
     case 'set-tags': return { ...state, tags: event.tags }
+    case 'set-asked': return { ...state, asked: { ...state.asked, [event.index]: event.value } }
     case 'match-started': return { ...state, ...replayed, phase: 'matching', progress: { done: 0, total: event.total } }
     case 'step-matched': return {
       ...state,
       matched: [...state.matched, event.step],
       screenshots: [...state.screenshots, event.screenshot],
-      progress: { ...state.progress, done: state.progress.done + 1 },
+      progress: { ...state.progress, done: state.progress.done + (event.inserted ? 0 : 1) },
     }
     case 'match-finished': return { ...state, phase: 'edit', captured: event.captured, matchedRange: state.range, reached: 2 }
     // Stays on Match, so what was matched so far can still be taken into Edit or replayed from the start.
@@ -96,9 +120,11 @@ export function reduce(state: CaptureState, event: CaptureEvent): CaptureState {
       const phase = PHASE_AT[event.step]
       return phase && canGoTo(state, event.step) ? { ...state, phase, error: null } : state
     }
-    case 'verify-started': return { ...state, phase: 'verifying', verify: { status: 'running', done: 0 }, reached: 3 }
-    case 'verify-step': return state.verify ? { ...state, verify: { ...state.verify, done: event.done } } : state
-    case 'verify-finished': return { ...state, verify: { status: event.result.status, done: event.result.steps.length, result: event.result } }
+    case 'verify-started': return { ...state, phase: 'verifying', verify: { status: 'running', done: 0, live: [] }, reached: 3 }
+    case 'verify-step': return state.verify ? { ...state, verify: liveStep(state.verify, event.mark, event.at) } : state
+    case 'verify-finished': return state.verify
+      ? { ...state, verify: { ...state.verify, status: event.result.status, done: event.result.steps.length, result: event.result } }
+      : state
     case 'to-export': return { ...state, phase: 'export', reached: 4 }
   }
 }
@@ -139,4 +165,28 @@ export function stepIndex(phase: Phase): number {
     case 'verifying': return 3
     case 'export': return 4
   }
+}
+
+/**
+ * The recording as Match replays it: each password typed on the soft keyboard with the value the person gave (#1140),
+ * else what the computer's keyboard typed of it.
+ */
+export function withAsked(state: Pick<CaptureState, 'steps' | 'asked'>): RawStep[] {
+  return state.steps.map((s, i) => (s.kind === 'text' && s.askValue ? { ...s, text: state.asked[i] ?? s.text } : s))
+}
+
+/** Whether every password in the range that the person has to give has a value. */
+export function askedReady(state: Pick<CaptureState, 'steps' | 'asked' | 'range'>): boolean {
+  return askedValues(state.steps, state.range).every((i) => (state.asked[i] ?? (state.steps[i] as { text?: string }).text ?? '') !== '')
+}
+
+function liveStep(verify: NonNullable<CaptureState['verify']>, mark: StepMark, at: number): NonNullable<CaptureState['verify']> {
+  if (mark.phase === 'start') {
+    const live = [...verify.live.filter((s) => s.index !== mark.index), { index: mark.index, name: mark.name, status: 'running' as const, startedAt: at }]
+    return { ...verify, live }
+  }
+  const live = verify.live.map((s) => (s.index === mark.index
+    ? { ...s, name: mark.name, status: mark.status ?? 'passed', durationMs: at - s.startedAt }
+    : s))
+  return { ...verify, live, done: mark.index + 1 }
 }

@@ -15,7 +15,7 @@ export {
 } from './sessionErrors.js'
 export { SessionChannel, newRequestId } from './sessionChannel.js'
 export { parseUITreeResponse, isUIElement, PERMANENT_QUERY_STATUSES } from './uiTreeRead.js'
-export type { RelayMsg, ReplayInput } from './sessionChannel.js'
+export type { KeyboardSetOutcome, RelayMsg, ReplayInput } from './sessionChannel.js'
 export { SocketFlowDriver } from './SocketFlowDriver.js'
 export type { SessionDevice } from './SocketFlowDriver.js'
 // Flow Capture (#1125): a capture's record turned into a flow, for the dashboard's dialog.

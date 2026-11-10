@@ -673,6 +673,37 @@ export interface UiFieldRequest {
  * the language a tester switched to (Caps Lock on a device with two keyboards), and the next tester's keys would type
  * in it. Takes effect from the next app launch. Sent only to an agent whose capabilities include `keyboard-reset`.
  */
+/**
+ * Put the device's keyboard in the language a replay starts from (#1135): the one the recording first saw, or the
+ * device's first when `keyboard` is absent. Answered, unlike `device:keyboard-reset`, because Flow Capture launches
+ * the app only after it: a running iOS app keeps the language it has until it is launched again (measured), and an
+ * Android keyboard can be switched only while it is up. Browser → relay → agent, unchanged; sent only to an agent
+ * naming `keyboard-set`.
+ */
+export interface DeviceKeyboardSet {
+  type: 'device:keyboard-set'
+  sessionId: string
+  requestId: string
+  payload: { keyboard?: string }
+}
+
+export interface DeviceKeyboardSetDone {
+  type: 'device:keyboard-set-done'
+  sessionId: string
+  requestId: string
+}
+
+/** `keyboard-hidden`: an Android keyboard can be read and switched only while it is up; ask again once it is. */
+export interface DeviceKeyboardSetError extends SessionScoped {
+  type: 'device:keyboard-set-error'
+  message: string
+  requestId: string
+  reason?: 'keyboard-hidden' | 'unsupported' | 'failed'
+}
+
+export type DeviceKeyboardSetReply = DeviceKeyboardSetDone | DeviceKeyboardSetError
+export type DeviceKeyboardSetReplyBody<T = DeviceKeyboardSetReply> = T extends unknown ? Omit<T, 'sessionId' | 'requestId'> : never
+
 export interface DeviceKeyboardReset {
   type: 'device:keyboard-reset'
   sessionId: string
@@ -690,6 +721,8 @@ export type RelayToAgent =
   | UiTreeRequest
   | UiFieldRequest
   | DeviceKeyboardReset
+  | UiKeyboardRequest
+  | DeviceKeyboardSet
 
 export type SessionTerminatedReason = 'agent-disconnected'
 
@@ -1257,6 +1290,7 @@ export type RelayOrAgentToBrowser =
   | DeviceBootError
   | OpenUrlError
   | AppClearStateError
+  | DeviceKeyboardSetError
   | InputError
   // Moved out of `AgentToBrowser` in L5c: the relay originates this one now. An `input:type` whose session
   // the sender does not hold is refused here, and it has to be refused in *this* shape — the waiters in
@@ -1690,6 +1724,7 @@ export type AgentToBrowser =
   | DeviceShutdownDone
   | AppLaunchDone
   | AppClearStateDone
+  | DeviceKeyboardSetDone
   | OpenUrlDone
   | InputDone
   | InputTypeDone
@@ -1821,6 +1856,18 @@ export interface UiTreeError {
   message: string
 }
 
+/**
+ * The soft keyboard as an agent reads it (#1135): whether it is up and where it takes touches, in the display's space
+ * (`rect`) and, when the dashboard sends that device's touches in its video frame's space (Android body mode), in that
+ * space too (`frameRect`). `shown: null` is "could not tell", never "hidden".
+ */
+export interface KeyboardState {
+  shown: boolean | null
+  /** Fractions (0–1) of the screen, like a touch's point. */
+  rect?: { x: number; y: number; width: number; height: number }
+  frameRect?: { x: number; y: number; width: number; height: number }
+}
+
 /** The keyboard-focused text field, as `ui:field:response` carries it. */
 export interface FocusedField {
   identifier: string
@@ -1842,6 +1889,26 @@ export interface UiFieldResponse {
   /** `null` when no single text field has keyboard focus, or the read failed: `reason` says which. */
   field: FocusedField | null
   reason?: FieldReadReason
+  /** The soft keyboard at the same moment. Absent from an agent that does not report it: unknown, not hidden. */
+  keyboard?: KeyboardState
+  /** The keyboard's language as the device names it (`한국어 (두벌식)`, `ko_KR@sw=Korean;hw=Automatic`): what a
+   *  replay aligns the device to before it types. Absent when it cannot be read. */
+  language?: string
+}
+
+/** Where the soft keyboard is, for Flow Capture to tell a tap on it from a tap on the app (#1135). Cheap: ~30 ms on
+ *  Android (`dumpsys window`), one runner read on iOS. Sent only to an agent naming `keyboard-state`. */
+export interface UiKeyboardRequest {
+  type: 'ui:keyboard:request'
+  sessionId: string
+  requestId: string
+}
+
+export interface UiKeyboardResponse {
+  type: 'ui:keyboard:response'
+  sessionId: string
+  requestId: string
+  keyboard: KeyboardState
 }
 
 export type AgentToRelay =
@@ -1853,6 +1920,7 @@ export type AgentToRelay =
   | UiTreeResponse
   | UiTreeError
   | UiFieldResponse
+  | UiKeyboardResponse
 
 // ── stream socket → relay ────────────────────────────────────────────────────
 
@@ -1973,6 +2041,11 @@ export interface InputKey {
    * would be minted for a waiter that does not exist. Nor does `input:rotate`, for the same reason.
    */
   requestId: string
+  /**
+   * `code` is a `KeyboardEvent.code`, plus one tapflow names: `ImeAction`, the focused field's own action (Done, Next,
+   * Search, Go) as its keyboard would press it — Return on iOS, the field's IME action on Android (#1135). A flow's
+   * `imeAction` step sends it; a key on a person's keyboard never does.
+   */
   payload: { code: string; modifiers?: number }
 }
 
@@ -2378,6 +2451,7 @@ export type BrowserToRelay =
   | AppInstallToRelay
   | AppLaunchToRelay
   | AppClearState
+  | DeviceKeyboardSet
   | OpenUrl
   | InputTouchStart
   | InputTouchMove

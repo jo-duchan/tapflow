@@ -1051,3 +1051,79 @@ describe('AdbWrapper', () => {
     })
   })
 })
+
+// #1135: Flow Capture's field reads and writes, through the jar's `Focused` class.
+describe('AdbWrapper focused field', () => {
+  const runnerWith = (out: string, input?: (input: string, timeoutMs: number, ...args: string[]) => Promise<string>): AdbRunner => ({
+    exec: vi.fn(async (...args: string[]) => (args.includes('app_process') ? out : '')),
+    execBinary: vi.fn(),
+    listAvds: vi.fn(async () => []),
+    ...(input ? { execInput: vi.fn(input) } : {}),
+  })
+
+  it('reads the focused field from the jar\'s line of JSON', async () => {
+    const line = '{"identifier":"form.email","frame":{"x":1,"y":2,"width":3,"height":4},"secure":false,"value":"a\\nb"}'
+    const runner = runnerWith(`noise\n${line}\n`)
+    expect(await new AdbWrapper(runner).readFocused('emulator-5554')).toEqual({
+      identifier: 'form.email', frame: { x: 1, y: 2, width: 3, height: 4 }, secure: false, value: 'a\nb',
+    })
+    const call = vi.mocked(runner.exec).mock.calls.find((c) => c.includes('app_process'))!
+    expect(call.slice(-2)).toEqual(['dev.tapflow.uidump.Focused', 'read'])
+  })
+
+  it('reads nothing from output that is not JSON', async () => {
+    expect(await new AdbWrapper(runnerWith('Killed\n')).readFocused('emulator-5554')).toBeNull()
+  })
+
+  it('sets text through stdin as base64, never in argv', async () => {
+    const input = vi.fn(async () => '{"result":"ok"}\n')
+    const runner = runnerWith('', input)
+    expect(await new AdbWrapper(runner).setFocusedText('emulator-5554', '비밀 pass\nword')).toBe('ok')
+    const [stdin, , ...args] = input.mock.calls[0] as unknown as [string, number, ...string[]]
+    expect(Buffer.from(stdin.trim(), 'base64').toString('utf8')).toBe('비밀 pass\nword')
+    expect(stdin.endsWith('\n')).toBe(true)
+    expect(args.slice(-2)).toEqual(['dev.tapflow.uidump.Focused', 'set'])
+    expect(args.join(' ')).not.toMatch(/비밀|pass|word/)
+  })
+
+  it.each(['ok', 'transformed', 'refused', 'rejected', 'no-focus', 'cannot-append-secure'])('passes the jar\'s %s through', async (result) => {
+    const runner = runnerWith('', async () => `{"result":"${result}"}`)
+    expect(await new AdbWrapper(runner).setFocusedText('emulator-5554', 'x')).toBe(result)
+  })
+
+  it('answers failed for a verdict it does not know, or none', async () => {
+    expect(await new AdbWrapper(runnerWith('', async () => '{"result":"maybe"}')).setFocusedText('emulator-5554', 'x')).toBe('failed')
+    expect(await new AdbWrapper(runnerWith('', async () => { throw new Error('exit 1') })).setFocusedText('emulator-5554', 'x')).toBe('failed')
+  })
+
+  it('answers unavailable with no way to write stdin', async () => {
+    expect(await new AdbWrapper(runnerWith('')).setFocusedText('emulator-5554', 'x')).toBe('unavailable')
+  })
+
+  it('reads the keyboard window from dumpsys', async () => {
+    const runner: AdbRunner = {
+      exec: vi.fn(async () => '  Window #3 Window{a InputMethod}:\n    touchable region=SkRegion((0,1517,1080,2400))\n    isVisible=true\n'),
+      execBinary: vi.fn(),
+      listAvds: vi.fn(async () => []),
+    }
+    expect(await new AdbWrapper(runner).imeWindow('emulator-5554')).toEqual({ shown: true, rect: { x: 0, y: 1517, width: 1080, height: 883 } })
+    expect(vi.mocked(runner.exec).mock.calls[0]).toEqual(['-s', 'emulator-5554', 'shell', 'dumpsys', 'window', 'InputMethod'])
+  })
+})
+
+describe('parseImeWindow', () => {
+  it('reads a hidden keyboard', async () => {
+    const { parseImeWindow } = await import('../AdbWrapper')
+    expect(parseImeWindow('    isVisible=false\n')).toEqual({ shown: false })
+  })
+
+  it('reads a shown keyboard with no region as shown, rect unknown', async () => {
+    const { parseImeWindow } = await import('../AdbWrapper')
+    expect(parseImeWindow('    isVisible=true\n')).toEqual({ shown: true })
+  })
+
+  it('reads nothing it cannot recognise', async () => {
+    const { parseImeWindow } = await import('../AdbWrapper')
+    expect(parseImeWindow('')).toBeNull()
+  })
+})

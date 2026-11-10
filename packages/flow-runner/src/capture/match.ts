@@ -28,12 +28,12 @@ export interface MatchContext {
 
 export type SkipReason =
   | 'refused' | 'hold-drag' | 'held-button' | 'too-long' | 'no-pinch'
-  /** Android types through `adb input text`, which takes printable ASCII only. */
-  | 'paste-not-typeable'
   | 'orientation-unknown' | 'posture-between'
   /** The run installs and resets the app itself (`--build`, and the reset it does by default). */
   | 'install'
   | 'network' | 'cut' | 'keyboard'
+  /** A key on the soft keyboard whose typing no field read caught (#1135): what it typed is not known. */
+  | 'keyboard-key'
 
 export type FragileReason =
   /** Tapped where the tree names no element. */
@@ -47,6 +47,9 @@ export type FragileReason =
   /** Typed on a device whose agent reads fields, but no read of this one was usable — typed too fast before the next
    *  input, or the field changed under it — so the text is the keys read on a US layout, a guess on iOS (#1135). */
   | 'field-unread'
+  /** The soft keyboard may have been up around the touch and its reads could not say whether it was on a key (#1135). Replayed as
+   *  a tap: one on a key would type, which a following `replace` overwrites. */
+  | 'keyboard-unknown'
 
 export interface CapturedStep {
   raw: RawStep
@@ -130,16 +133,18 @@ function typedSecretly(ctx: MatchContext): boolean {
 const knownSecret = (ctx: MatchContext): boolean => focusedIn(ctx.tree)?.secure === true
 
 function typed(raw: RawStep, text: string, ctx: MatchContext): CapturedStep {
-  // A secret's value is the same guess, so it is marked too. On iOS a run with neither a value nor a tried read is one
-  // the relay never read — an agent without `field-value`, or a Mac over its memory line — and the same guess.
+  // A secret's value is the same guess, so it is marked too. A run with neither a value nor a tried read is one the
+  // relay never read — an agent without `field-value`, or a Mac over its memory line — and the same guess on both
+  // platforms: the keys went through the device's IME, Gboard on Android, which composes them in its own language.
   const unread = raw.kind === 'text'
-    && (raw.fieldRead === 'unread' || (ctx.platform === 'ios' && raw.fieldRead === undefined && raw.replace !== true))
+    && (raw.fieldRead === 'unread' || (raw.fieldRead === undefined && raw.replace !== true))
   const guess = unread ? { fragile: 'field-unread' as const } : {}
-  // Read as a password field when it was typed: still a secret whatever field Match finds focused, which can be
-  // another one, or the guess would go into the file as text.
-  const recordedSecure = raw.kind === 'text' && raw.fieldRead === 'secure'
-  if (recordedSecure || typedSecretly(ctx)) {
-    return { raw, step: null, secret: { value: text, known: recordedSecure || knownSecret(ctx) }, ...guess }
+  // Read as a password field when it was typed, or a value the person gave for one: still a secret whatever field
+  // Match finds focused, which can be another one, or a "show password" left on that reads it as plain text — the
+  // YAML would carry it.
+  const keptSecret = raw.kind === 'text' && (raw.fieldRead === 'secure' || raw.askValue === true)
+  if (keptSecret || typedSecretly(ctx)) {
+    return { raw, step: null, secret: { value: text, known: keptSecret || knownSecret(ctx) }, ...guess }
   }
   const replace = raw.kind === 'text' && raw.replace === true
   return { raw, step: replace ? { type: 'inputText', text, replace: true } : { type: 'inputText', text }, ...guess }
@@ -150,6 +155,12 @@ function typed(raw: RawStep, text: string, ctx: MatchContext): CapturedStep {
  * calls this; nothing here touches a device.
  */
 export function matchStep(raw: RawStep, ctx: MatchContext): CapturedStep {
+  const matched = matchAction(raw, ctx)
+  // A touch the keyboard reads could not place says so above any other reason: the person decides whether it was a key.
+  return 'keyboard' in raw && raw.keyboard === 'unknown' && matched.step ? { ...matched, fragile: 'keyboard-unknown' } : matched
+}
+
+function matchAction(raw: RawStep, ctx: MatchContext): CapturedStep {
   if (raw.outcome === 'refused') return { raw, step: null, skipped: 'refused' }
   switch (raw.kind) {
     case 'tap': {
@@ -198,9 +209,7 @@ export function matchStep(raw: RawStep, ctx: MatchContext): CapturedStep {
     }
     case 'text': return typed(raw, raw.text, ctx)
     case 'type': return typed(raw, raw.text, ctx)
-    case 'paste':
-      if (ctx.platform === 'android' && !/^[\x20-\x7e]*$/.test(raw.text)) return { raw, step: null, skipped: 'paste-not-typeable' }
-      return typed(raw, raw.text, ctx)
+    case 'paste': return typed(raw, raw.text, ctx)
     case 'key': {
       const modifiers = modifierNames(raw.modifiers)
       return { raw, step: modifiers.length > 0 ? { type: 'pressKey', code: raw.code, modifiers } : { type: 'pressKey', code: raw.code } }
@@ -232,20 +241,26 @@ export function matchStep(raw: RawStep, ctx: MatchContext): CapturedStep {
     case 'network': return { raw, step: null, skipped: 'network' }
     case 'cut': return { raw, step: null, skipped: 'cut' }
     case 'keyboardToggle': return { raw, step: null, skipped: 'keyboard' }
+    case 'keyboardKey': return { raw, step: null, skipped: 'keyboard-key' }
+    case 'imeAction': return { raw, step: { type: 'imeAction' } }
   }
 }
 
 /** Axis-parallel, and across the middle of the screen where `scroll` makes its own swipe. */
+// Twice as far along the axis as across it: within ~26° of straight. A swipe made with a mouse leans (iOS E2E: 0.44 up
+// and 0.19 across), and at 4:1 it stayed a swipe, whose distance does not replay, and the tap after it failed.
+const AXIS_RATIO = 2
+
 function scrollDirection(from: Point, to: Point): ScrollDirection | null {
   const dx = to[0] - from[0]
   const dy = to[1] - from[1]
-  if (Math.abs(dy) > Math.abs(dx) * 4) {
+  if (Math.abs(dy) > Math.abs(dx) * AXIS_RATIO) {
     const x = (from[0] + to[0]) / 2
     if (Math.abs(x - 0.5) > 0.3) return null
     // The finger moving up brings what is further down onto the screen.
     return dy < 0 ? 'down' : 'up'
   }
-  if (Math.abs(dx) > Math.abs(dy) * 4) {
+  if (Math.abs(dx) > Math.abs(dy) * AXIS_RATIO) {
     const y = (from[1] + to[1]) / 2
     if (Math.abs(y - 0.5) > 0.2) return null
     return dx < 0 ? 'right' : 'left'

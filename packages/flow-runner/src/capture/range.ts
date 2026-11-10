@@ -47,3 +47,16 @@ export function rangeWarnings(steps: readonly RawStep[], range: StepRange): Rang
   if (first?.kind === 'launch' && !cleanBefore) out.push('no-clean-start')
   return out
 }
+
+/**
+ * The steps in the range whose value the person has to give before Match (#1140): a password typed on the soft
+ * keyboard, which neither the keys nor a read of the field can say. Indices into `steps`.
+ */
+export function askedValues(steps: readonly RawStep[], range: StepRange): number[] {
+  const out: number[] = []
+  for (let i = range.start; i < range.end; i++) {
+    const s = steps[i]
+    if (s?.kind === 'text' && s.askValue) out.push(i)
+  }
+  return out
+}

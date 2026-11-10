@@ -10,7 +10,7 @@ import type { RunResetStep } from '@tapflowio/agent-core/utils'
 import { createLogger, PlatformError, ValidationError, bootAbandonMessage, BOOT_NO_SESSION_STATE, SHUTDOWN_NO_SESSION_STATE, downloadBuild } from '@tapflowio/agent-core'
 import type {
   AgentControlOutbound, AgentDevicesApplied, DeviceReport, InputErrorReason, ClipboardReplyBody, OpenUrlReplyBody,
-  AppInstallReplyBody, AppLaunchReplyBody, AppLaunchToAgent, LaunchOptions, AppClearStateReplyBody, FormFactor, ServiceTier, RunResetReport, RunResetRequest,
+  AppInstallReplyBody, AppLaunchReplyBody, AppLaunchToAgent, LaunchOptions, AppClearStateReplyBody, DeviceKeyboardSetReplyBody, FormFactor, ServiceTier, RunResetReport, RunResetRequest,
 } from '@tapflowio/protocol'
 import { appliedKeys, compactLaunchOptions, launchOptionsProblem } from '@tapflowio/protocol/launch'
 // Cross-platform button name → iOS device-chrome button name. Chrome uses hyphens and "power" (not "lock"); MCP's
@@ -38,7 +38,7 @@ const RUN_RESET_PASTEBOARD_TIMEOUT_MS = 10_000
 // actually took is per device and per app, and `network:state.available` carries that — the split the
 // protocol documents. Added last, after the handler and the boot-time arming, because the string on
 // its own is what puts a control on screen.
-const AGENT_CAPABILITIES: AgentCapability[] = ['clipboard', 'full-reset', 'network-control', 'build-download', 'launch-options', 'launch-env', 'touch-cancel', 'field-value', 'keyboard-reset']
+const AGENT_CAPABILITIES: AgentCapability[] = ['clipboard', 'full-reset', 'network-control', 'build-download', 'launch-options', 'launch-env', 'touch-cancel', 'field-value', 'keyboard-reset', 'keyboard-state', 'keyboard-set']
 
 // Human prose for each reason. Not in `@tapflowio/protocol`: that package's main entry must stay
 // runtime-free so it erases under `import type` and never reaches the dashboard bundle — a lookup
@@ -1496,7 +1496,16 @@ export class IOSAgent implements DeviceAgent, NetworkControlCapability, Posturab
       { item: 'pasteboard', run: () => this.clearPasteboardQueued(deviceId, stop) },
       { item: 'location', run: () => this.simctl.clearLocation(deviceId) },
     )
-    return runResetSteps(steps, isStale, (item, e) => logger.warn(`run reset: ${item} failed: ${firstLine(e)}`), deadline)
+    const report = await runResetSteps(steps, isStale, (item, e) => logger.warn(`run reset: ${item} failed: ${firstLine(e)}`), deadline)
+    // The keyboard in its first language, so a run types where Flow Capture's replay does (#1135). Before the ready, since
+    // an app launched first keeps the language it started with (measured). Not a reported item: the request does not
+    // name it, and a run's text goes in by paste, which no language changes.
+    // Bounded by what is left of the reset's budget, as the steps above are: a hung `defaults` would hold the ready.
+    if (!stop()) {
+      await this.simctl.resetKeyboardLanguage(deviceId, Math.max(1, deadline - Date.now()))
+        .catch((e: unknown) => logger.warn(`run reset: keyboard failed: ${firstLine(e)}`))
+    }
+    return report
   }
 
   /**
@@ -2317,7 +2326,8 @@ export class IOSAgent implements DeviceAgent, NetworkControlCapability, Posturab
         if (!state) { this.ackNoSession(msg.sessionId, requestId); break }
         this.ensureTouchHelper(state)
         const { code, modifiers } = msg.payload as { code: string; modifiers?: number }
-        const usage = KEY_CODE_MAP[code]
+        // `ImeAction` is no key: a field's own action (Done, Next, Search), which iOS's keyboard sends as Return (#1135).
+        const usage = KEY_CODE_MAP[code === 'ImeAction' ? 'Enter' : code]
         if (usage === undefined) {
           // Prose preserved (it names the code), reason added: `unsupported` tells a caller never to
           // retry, which the message alone could not.
@@ -2707,9 +2717,37 @@ export class IOSAgent implements DeviceAgent, NetworkControlCapability, Posturab
         const state = this.deviceStates.get(sessionId)
         if (!state) { this.sendMsg({ type: 'ui:field:response', sessionId, requestId, field: null, reason: 'failed' }); break }
         // The answer is the field's whole contents, typed or filled in: sent to the relay and nowhere else, never logged.
-        this.uiTreeReader.readField(state.deviceId, this.lastBundleIds.get(state.deviceId) ?? '')
-          .then((read) => this.sendMsg({ type: 'ui:field:response', sessionId, requestId, ...read }))
+        Promise.all([
+          this.uiTreeReader.readField(state.deviceId, this.lastBundleIds.get(state.deviceId) ?? ''),
+          this.simctl.keyboardLanguage(state.deviceId).catch(() => undefined),
+        ])
+          .then(([read, language]) => this.sendMsg({
+            type: 'ui:field:response', sessionId, requestId, ...read, ...(language !== undefined ? { language } : {}),
+          }))
           .catch(() => this.sendMsg({ type: 'ui:field:response', sessionId, requestId, field: null, reason: 'failed' }))
+        break
+      }
+      case 'ui:keyboard:request': {
+        const { requestId, sessionId } = msg
+        if (!sessionId || !requestId) break
+        const state = this.deviceStates.get(sessionId)
+        if (!state) { this.sendMsg({ type: 'ui:keyboard:response', sessionId, requestId, keyboard: { shown: null } }); break }
+        this.uiTreeReader.readKeyboard(state.deviceId, this.lastBundleIds.get(state.deviceId) ?? '')
+          .then((keyboard) => this.sendMsg({ type: 'ui:keyboard:response', sessionId, requestId, keyboard }))
+          .catch(() => this.sendMsg({ type: 'ui:keyboard:response', sessionId, requestId, keyboard: { shown: null } }))
+        break
+      }
+      case 'device:keyboard-set': {
+        const requestId = this.correlatorOf(msg)
+        if (requestId === null) break
+        const sessionId = msg.sessionId
+        const respond = (body: DeviceKeyboardSetReplyBody) => this.sendMsg({ ...body, sessionId, requestId })
+        const keyboard = (msg.payload as { keyboard?: unknown } | undefined)?.keyboard
+        // `deviceFor`, not the `booted` flag: a relay reconnect clears the flag while the simulator runs on, and a
+        // replay would then start without the recorded keyboard.
+        void this.deviceFor(sessionId).then((deviceId): Promise<DeviceKeyboardSetReplyBody> | DeviceKeyboardSetReplyBody => (deviceId === undefined
+          ? { type: 'device:keyboard-set-error', reason: 'failed', message: 'No booted device' }
+          : this.setKeyboard(deviceId, typeof keyboard === 'string' ? keyboard : undefined))).then(respond)
         break
       }
       case 'device:keyboard-reset': {
@@ -2738,6 +2776,25 @@ export class IOSAgent implements DeviceAgent, NetworkControlCapability, Posturab
           })
         break
       }
+    }
+  }
+
+  /**
+   * Put the device's keyboard in a replay's starting language (#1135), after the boot's keyboard sync has written the
+   * list it is chosen from. Answered once the daemon has restarted; the app takes it when it is next launched, which a
+   * replay does after this (measured: a running app keeps its language).
+   */
+  private async setKeyboard(deviceId: string, keyboard: string | undefined): Promise<DeviceKeyboardSetReplyBody> {
+    await this.keyboardSyncs.get(deviceId)
+    try {
+      if (await this.simctl.setKeyboardLanguage(deviceId, keyboard)) return { type: 'device:keyboard-set-done' }
+      return {
+        type: 'device:keyboard-set-error', reason: 'failed',
+        message: keyboard === undefined ? 'The device lists no keyboard' : `The device has no keyboard ${keyboard}`,
+      }
+    } catch (e) {
+      // `firstLine`: a failed `simctl spawn` echoes the udid and its whole argv, and this reaches the dashboard.
+      return { type: 'device:keyboard-set-error', reason: 'failed', message: firstLine(e) }
     }
   }
 

@@ -36,12 +36,15 @@ export type Step =
    *  lands wherever the layout puts that point. Its own type so every reader of `selector` stays one. */
   | { type: 'tapPoint'; at: [number, number] }
   /** `replace`: what the field holds is replaced, not added to — the field is selected first. What Flow Capture writes
-   *  when it read the field's value (#1135); iOS only, since Android has no select-all (refused before the run). */
+   *  when it read the field's value (#1135). Android selects with Ctrl+A, which it takes from Android 13. */
   | { type: 'inputText'; text: string; replace?: true }
   /** `inputText: { secret: NAME }` — the value is given to the run, never written in the flow, and never logged. */
   /** `replace`, as on `inputText`: a secret Flow Capture read as a field's whole value replaces what it holds. */
   | { type: 'inputSecret'; name: string; replace?: true }
   | { type: 'pressKey'; code: string; modifiers?: KeyModifier[] }
+  /** The focused field's own action — Done, Next, Search, Go — as its keyboard's action key presses it (#1135). Not
+   *  `pressKey: Enter`: an Android app that checks which action it was given does not take an Enter key event. */
+  | { type: 'imeAction' }
   | { type: 'swipe'; from: [number, number]; to: [number, number]; durationMs: number }
   /** With `until`, scrolls until that element is on screen rather than once — what a swipe was for, not how far it went. */
   | { type: 'scroll'; direction: ScrollDirection; until?: Selector }
@@ -158,6 +161,7 @@ function parseStep(raw: unknown, ctx: string): Step {
     if (raw === 'clearState') return { type: 'clearState' }
     if (raw === 'launchApp') return { type: 'launchApp' }
     if (raw === 'scroll') return { type: 'scroll', direction: 'down' }
+    if (raw === 'imeAction') return { type: 'imeAction' }
     throw new ValidationError(`${ctx}: unknown step "${raw}"`)
   }
   if (!isRecord(raw)) throw new ValidationError(`${ctx}: step must be a keyword or a single-key mapping`)
