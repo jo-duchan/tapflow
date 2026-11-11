@@ -35,6 +35,8 @@ const SESSION_NOTE_MARKERS = [
 // a typed error, so they carry no class to branch on — but the prefix is the
 // contract this package's own tests hold (see client.test.ts), not free prose.
 const UNCONFIRMED_INPUT_PREFIX = 'Could not confirm the input reached the device'
+/** How long a tap on an element waits for it, in seconds: a screen the agent just read, so shorter than a flow's 10 s. */
+const ELEMENT_WAIT_S = 5
 
 function toEnvironmentError(e: unknown): unknown {
   if (e instanceof EnvironmentStepError) return e
@@ -464,9 +466,7 @@ export function registerTools(server: McpServer, client: TapflowClient): void {
         'Query the accessibility tree of the current screen: interactive, text-bearing or identified elements as ' +
         '{ role, label, identifier, placeholder, frame, enabled, rawRole, secure, focused }. placeholder is a text field\'s hint, present only ' +
         'when it has one; a bare-text selector falls back to it after label. Frames are normalized 0-1 relative to the screen. ' +
-        'Prefer this over guessing coordinates from a screenshot: to tap an element, multiply the frame center by the ' +
-        'screenshot pixel size — x = (frame.x + frame.width / 2) * screenshotWidth, y = (frame.y + frame.height / 2) * screenshotHeight — ' +
-        'and pass those pixel coordinates to the tap tool.',
+        'Prefer this over a screenshot; tap an element through tap\'s element.',
       inputSchema: {
         sessionId: z.string().describe('Session ID from list_devices'),
       },
@@ -632,19 +632,34 @@ export function registerTools(server: McpServer, client: TapflowClient): void {
   register(
     'tap',
     {
-      description: 'Tap at a pixel coordinate matching the screenshot. Use the width and height from the screenshot tool response.',
+      description:
+        'Tap an element query_ui_tree lists, where the device reaches it (fails naming what covers it), or, where the ' +
+        'tree names nothing, a screenshot pixel with the screenshot size.',
       inputSchema: {
         sessionId: z.string().describe('Session ID from list_devices'),
-        x: z.number().describe('X pixel coordinate (from screenshot)'),
-        y: z.number().describe('Y pixel coordinate (from screenshot, 0 = top)'),
-        screenshotWidth: z.number().int().describe('Screenshot width in pixels (from screenshot tool)'),
-        screenshotHeight: z.number().int().describe('Screenshot height in pixels (from screenshot tool)'),
+        element: z.object({
+          id: z.string().optional(),
+          label: z.string().optional(),
+          role: z.string().optional(),
+          index: z.number().int().optional(),
+        }).optional().describe('identifier, else label; role or index picks one of several'),
+        x: z.number().optional().describe('Pixel x in the screenshot'),
+        y: z.number().optional().describe('Pixel y, 0 = top'),
+        screenshotWidth: z.number().int().optional().describe('From the screenshot tool'),
+        screenshotHeight: z.number().int().optional().describe('From the screenshot tool'),
         holdMs: z.number().optional().describe('Hold before releasing, ms: a long press (1000 typical)'),
       },
     },
-    // A long press is a held tap rather than a tool of its own: every tool's schema rides in every session (the
-    // budget in guide.test.ts), and a pinch is reachable through run_flow's `pinch` step.
-    async ({ sessionId, x, y, screenshotWidth, screenshotHeight, holdMs }) => {
+    // A long press is a held tap rather than a tool of its own, and so is a tap on an element: every tool's schema
+    // rides in every session (the budget in guide.test.ts), and a pinch is reachable through run_flow's `pinch` step.
+    async ({ sessionId, element, x, y, screenshotWidth, screenshotHeight, holdMs }) => {
+      const point = [x, y, screenshotWidth, screenshotHeight]
+      const hasPoint = point.some((v) => v !== undefined)
+      if (element !== undefined && hasPoint) return err('tap takes an element or a point, not both')
+      if (element !== undefined) return tapElement(sessionId, element, holdMs)
+      if (x === undefined || y === undefined || screenshotWidth === undefined || screenshotHeight === undefined) {
+        return err('tap needs an element, or x, y, screenshotWidth and screenshotHeight')
+      }
       try {
         if (holdMs !== undefined) await client.longPress(sessionId, x / screenshotWidth, y / screenshotHeight, holdMs)
         else await client.tap(sessionId, x / screenshotWidth, y / screenshotHeight)
@@ -654,6 +669,39 @@ export function registerTools(server: McpServer, client: TapflowClient): void {
       }
     },
   )
+
+  /**
+   * A tap on an element (#1147), as `run_flow`'s `tapOn` makes it, on the same engine and driver: it waits for the
+   * element, taps where the device reaches it, fails naming what covers it, and says when the device could not judge.
+   * The frame centre the agent would have computed is what a tab bar or a scrim covers.
+   */
+  async function tapElement(sessionId: string, element: { id?: string; label?: string; role?: string; index?: number }, holdMs: number | undefined): Promise<ToolResult> {
+    const selector = { ...element, timeout: ELEMENT_WAIT_S }
+    const step = holdMs === undefined ? { tapOn: selector } : { longPressOn: { on: selector, durationMs: holdMs } }
+    try {
+      // JSON is YAML, and the parser `run_flow` uses is what says an element names nothing.
+      const flow = parseFlow(JSON.stringify({ steps: [step] }), 'tap')
+      const result = await runFlow(flow, makeFlowDriver(client, sessionId), {})
+      const done = result.steps[0]
+      if (!done || done.status !== 'passed') {
+        // What `run_flow` reports of the same failure: whose it was, and the screen it failed on.
+        let screenshotPath: string | undefined
+        if (result.failureScreenshot) {
+          screenshotPath = path.join(os.tmpdir(), `tapflow-tap-failure-${Date.now()}.png`)
+          fs.writeFileSync(screenshotPath, result.failureScreenshot)
+        }
+        return err(JSON.stringify({
+          tapped: false, element: done?.name, message: done?.message ?? 'not tapped',
+          ...(result.failureKind ? { failureKind: result.failureKind } : {}),
+          ...(done?.suggestions ? { suggestions: done.suggestions } : {}),
+          ...(screenshotPath ? { failureScreenshotPath: screenshotPath } : {}),
+        }, null, 2))
+      }
+      return ok(JSON.stringify({ tapped: true, element: done.name, reach: done.reach, ...(done.reachNote ? { reachNote: done.reachNote } : {}), ...(holdMs !== undefined ? { holdMs } : {}) }))
+    } catch (e) {
+      return err(`tap failed: ${(e as Error).message}`)
+    }
+  }
 
   register(
     'swipe',

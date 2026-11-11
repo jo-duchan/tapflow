@@ -132,7 +132,7 @@ Connected straight to the relay's port on the Mac it runs on, the MCP server sta
 | `shutdown_device` | Power the device down (frees resources; forces a cold boot next time) |
 | `screenshot` | Capture the current screen (PNG, or JPEG on iOS when requested) |
 | `query_ui_tree` | Read the on-screen UI as a structured accessibility tree (role, label, identifier, frame) |
-| `tap` | Tap at a coordinate. With `holdMs`, press and hold (a long press); on Android's adb fallback this needs a current agent, see [Holding an element](/automation/flows#holding-an-element) |
+| `tap` | With `element` (an identifier or label from `query_ui_tree`), tap where the device says it reaches that element, so a tab bar or a sheet over its frame's centre is not what gets tapped; an element something covers fails, naming what covers it. Where the tree names nothing, tap a screenshot coordinate. With `holdMs`, press and hold (a long press); on Android's adb fallback this needs a current agent, see [Holding an element](/automation/flows#holding-an-element) |
 | `swipe` | Swipe between two coordinates |
 | `type_text` | Type text into the focused field |
 | `press_key` | Press a keyboard key |
