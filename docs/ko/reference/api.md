@@ -1263,6 +1263,14 @@ Query:
 
 사본을 버립니다. 사본이 없으면 `404`를 반환합니다.
 
+### `PUT /api/v1/sessions/:sessionId/capture/thumbnails/:requestId`
+
+입력이 시작될 때의 화면 그림을 남깁니다. 이미 기억된 입력에만 16KB 이하 JPEG를 한 번 보낼 수 있습니다. 대시보드가 입력을 보낸 뒤 보냅니다. 남기면 `201`, 남기지 않으면 `200`과 `{ "kept": false, "reason": … }`(`exists`, 키보드 읽기로 화면 키보드 밖임이 확인되지 않은 터치나 연속 입력 중간의 키면 `keyboard`, `full`)를 돌려줍니다. 이 세션에 내 기록이 없으면 `404`, 그 `requestId`의 입력이 아직 기억되지 않았으면 `409`, 본문이 더 크면 `413`, JPEG가 아니면 `415`를 돌려줍니다.
+
+### `GET /api/v1/sessions/:sessionId/capture/snapshot/thumbnails/:requestId`
+
+복사본에 든 단계의 그림을 `image/jpeg`로 돌려줍니다. 그림이 있는 단계는 복사본의 `thumbnails`에 나옵니다. 없으면 `404`를 돌려줍니다.
+
 ### `PUT /api/v1/sessions/:sessionId/capture/pause`
 
 기억을 잠시 멈춥니다. 대시보드가 기억한 단계를 기기에서 재생하는 동안 그 입력이 사람의 입력으로 기억되지 않게 하려고 씁니다. 멈춤은 응답의 `ttlMs`(30초)가 지나면 저절로 풀리며 다시 호출하면 연장됩니다. 기억한 단계가 없으면 `404`를 반환합니다. 재생 중에 이 응답을 받으면 기억이 이미 끝난 것이므로 재생을 멈춰야 합니다.

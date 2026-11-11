@@ -154,6 +154,15 @@ describe('segment: a recording as the actions a person took', () => {
       expect(steps[0]!.messages).toHaveLength(6)
     })
 
+    // 1b-3b: the merged step keeps the key its picture is under, the run's first key.
+    it('keys the merged step by the run\'s first key', () => {
+      const r = new Rec().key('KeyA')
+      read(r, 'focus', { ...email, value: 'a' }).key('KeyB').wait(700)
+      read(r, 'value', { ...email, value: 'ab' })
+      const [step] = r.steps()
+      expect(step).toMatchObject({ kind: 'text', text: 'ab', replace: true, thumbnailKey: 'r1' })
+    })
+
     it('goes on through Caps Lock, which switches the keyboard\'s language and types nothing', () => {
       // A text run takes Caps Lock in, so one read after the run covers both languages.
       const r = new Rec().key('KeyD')
@@ -575,6 +584,22 @@ describe('segment: touches on the soft keyboard', () => {
       kb(r, HIDDEN)
       expect(kinds(r)).toEqual(['launch', 'keyboardKey', 'keyboardKey', 'keyboardKey', 'tap'])
     })
+  })
+})
+
+// 1b-3b: the relay keeps the screen each step began on under the step's first requestId.
+describe('segment: where each step\'s picture is kept', () => {
+  it('keys a touch by its end, a button by its press, a typed run by its first key, a command by its own', () => {
+    const r = new Rec().launch()
+    r.touch([[0.4, 0.6]])
+    r.msg({ type: 'input:button', sessionId: 's', requestId: 'down', payload: { name: 'volume_up', phase: 'down' } }, true)
+      .wait(120).msg({ type: 'input:button', sessionId: 's', requestId: 'up', payload: { name: 'volume_up', phase: 'up' } }, true)
+    r.type('hi')
+    r.msg({ type: 'input:rotate', sessionId: 's' })
+    const steps = r.steps()
+    expect(steps.map((s) => [s.kind, s.thumbnailKey])).toEqual([
+      ['launch', 'r1'], ['tap', 'r2'], ['button', 'down'], ['text', 'r3'], ['rotate', undefined],
+    ])
   })
 })
 

@@ -26,6 +26,10 @@ interface StepBase {
   chrome?: unknown
   /** What the replayer sends, in order, with the times they were sent. */
   messages: TimedMessage[]
+  /** Where the relay keeps the screen this step began on (1b-3b): the first `requestId` among its messages — a touch's
+   *  end, a button's press, a typed run's first key. Absent on a step whose messages carry none (a turn, a fold, the
+   *  keyboard toggle), which therefore has no picture. */
+  thumbnailKey?: string
   /** Whether the home screen was in front when the step began, by the last keyboard read answered before it (`onHome`):
    *  where the default range starts when the app was opened from its icon. Absent when no read said. */
   onHome?: boolean
@@ -125,7 +129,7 @@ export function segment(entries: readonly CaptureEntry[]): RawStep[] {
     out.push(chrome === undefined ? step : { ...step, chrome })
   }
   const base = (messages: TimedMessage[], outcome: Outcome) => ({
-    at: messages[0]!.at, endAt: messages[messages.length - 1]!.at, outcome, messages,
+    at: messages[0]!.at, endAt: messages[messages.length - 1]!.at, outcome, messages, ...thumbnailKeyOf(messages),
   })
   const endRun = (): void => {
     if (run && run.text.length > 0) push({ ...base(run.steps, 'landed'), kind: 'text', text: run.text })
@@ -342,8 +346,9 @@ function withFieldValues(steps: RawStep[], entries: readonly CaptureEntry[]): Ra
       && r.field !== null && !r.field.secure && sameField(r.field, focus.field!)
       && typeof r.field.value === 'string' && r.field.value !== '').at(-1) : undefined
     if (value?.field?.value !== undefined) {
+      const messages = group.flatMap((s) => s.messages)
       out.push({
-        at: first.at, endAt: last.endAt, outcome: 'landed', messages: group.flatMap((s) => s.messages),
+        at: first.at, endAt: last.endAt, outcome: 'landed', messages, ...thumbnailKeyOf(messages),
         ...(first.chrome === undefined ? {} : { chrome: first.chrome }),
         kind: 'text', text: value.field.value, replace: true, ...field,
       })
@@ -353,8 +358,9 @@ function withFieldValues(steps: RawStep[], entries: readonly CaptureEntry[]): Ra
     // A password typed on the soft keyboard, even in part: one secret step whose value the person gives. Left as keys,
     // the flow had no password step at all (#1140).
     if (fieldRead === 'secure' && group.some((s) => s.kind === 'keyboardKey')) {
+      const messages = group.flatMap((s) => s.messages)
       out.push({
-        at: first.at, endAt: last.endAt, outcome: 'landed', messages: group.flatMap((s) => s.messages),
+        at: first.at, endAt: last.endAt, outcome: 'landed', messages, ...thumbnailKeyOf(messages),
         ...(first.chrome === undefined ? {} : { chrome: first.chrome }),
         kind: 'text', text: keysAfter(group, (s) => s.kind === 'keyboardKey'), replace: true,
         fieldRead, ...field, askValue: true,
@@ -397,8 +403,9 @@ function oneAskedSecret(steps: RawStep[]): RawStep[] {
     // Kept: the taps, in order, before the one step.
     out.push(...run.filter((s) => s.kind === 'tap'))
     const last = run[run.length - 1]!
+    const messages = run.flatMap((s) => (s.kind === 'tap' ? [] : s.messages))
     out.push({
-      at: last.at, endAt: last.endAt, outcome: 'landed', messages: run.flatMap((s) => (s.kind === 'tap' ? [] : s.messages)),
+      at: last.at, endAt: last.endAt, outcome: 'landed', messages, ...thumbnailKeyOf(messages),
       ...(last.chrome === undefined ? {} : { chrome: last.chrome }),
       kind: 'text', text: keysAfter(run, (s) => s.kind === 'text' && !!s.askValue), replace: true, fieldRead: 'secure', field,
       ...(first.fieldPlaceholder ? { fieldPlaceholder: first.fieldPlaceholder } : {}), askValue: true,
@@ -428,6 +435,12 @@ function worst(a: Outcome, b: Outcome): Outcome {
 
 const distance = (a: Point, b: Point): number => Math.hypot(a[0] - b[0], a[1] - b[1])
 
+/** `thumbnailKey`: the first requestId among a step's messages, which is what the dashboard keyed its picture by. */
+function thumbnailKeyOf(messages: TimedMessage[]): { thumbnailKey?: string } {
+  for (const m of messages) if ('requestId' in m.msg && m.msg.requestId) return { thumbnailKey: m.msg.requestId }
+  return {}
+}
+
 function touchStep(messages: TimedMessage[], outcome: Outcome): RawStep {
   const start = messages[0]!
   const { x, y, space } = (start.msg as Msg<'input:touch:start'>).payload
@@ -438,7 +451,7 @@ function touchStep(messages: TimedMessage[], outcome: Outcome): RawStep {
     return { at: t.at, point: [p.x, p.y] as Point }
   })
   const durationMs = messages[messages.length - 1]!.at - start.at
-  const base = { at: start.at, endAt: messages[messages.length - 1]!.at, outcome, messages, ...(space ? { space } : {}) }
+  const base = { at: start.at, endAt: messages[messages.length - 1]!.at, outcome, messages, ...thumbnailKeyOf(messages), ...(space ? { space } : {}) }
   const firstAway = points.find((p) => distance(p.point, from) >= TAP_SLOP)
   if (!firstAway) {
     return durationMs >= LONG_PRESS_MS
@@ -457,7 +470,7 @@ function pinchStep(messages: TimedMessage[], outcome: Outcome): RawStep {
   const moves = messages.filter((t) => t.msg.type === 'input:pinch:move')
   const last = moves.length > 0 ? (moves[moves.length - 1]!.msg as Msg<'input:pinch:move'>).payload : first
   return {
-    at: messages[0]!.at, endAt: messages[messages.length - 1]!.at, outcome, messages,
+    at: messages[0]!.at, endAt: messages[messages.length - 1]!.at, outcome, messages, ...thumbnailKeyOf(messages),
     kind: 'pinch',
     start: [[first.f0.x, first.f0.y], [first.f1.x, first.f1.y]],
     end: [[last.f0.x, last.f0.y], [last.f1.x, last.f1.y]],

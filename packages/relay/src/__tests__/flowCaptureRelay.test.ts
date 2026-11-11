@@ -334,6 +334,67 @@ describe('Flow Capture through the relay', () => {
     expect(kinds((await snapshot(1))!.entries)).toEqual(['input:touch:start', 'input:touch:end', 'ack'])
   })
 
+  // 1b-3b: the screen each step began on, sent by the person's own dashboard after the input.
+  describe('thumbnails', () => {
+    const JPEG = Buffer.concat([Buffer.from([0xff, 0xd8, 0xff, 0xe0]), Buffer.alloc(200, 7)])
+    const put = (userId: number, requestId: string, body: Buffer = JPEG) =>
+      fetch(`http://127.0.0.1:${tunnelPort}/api/v1/sessions/${sessionId}/capture/thumbnails/${requestId}`, {
+        method: 'PUT', headers: { cookie: cookieFor(userId), 'content-type': 'image/jpeg' }, body: new Uint8Array(body),
+      })
+    const get = (userId: number, requestId: string) =>
+      fetch(`http://127.0.0.1:${tunnelPort}/api/v1/sessions/${sessionId}/capture/snapshot/thumbnails/${requestId}`, { headers: { cookie: cookieFor(userId) } })
+
+    // A typed text, not a touch: a touch keeps a picture only when the keyboard reads place it, and this agent has none.
+    async function typeIt(ws: WebSocket, requestId: string): Promise<void> {
+      ws.send(JSON.stringify({ type: 'input:type', sessionId, requestId, payload: { text: 'x' } }))
+      await waitForType(agent, 'input:type')
+    }
+
+    it('keeps one for an input the capture holds, lists it in the snapshot and serves it to its owner', async () => {
+      const alice = await browser(1)
+      await join(alice)
+      await typeIt(alice, 'r1')
+      expect((await put(1, 'r1')).status).toBe(201)
+      expect((await snapshot(1))!.thumbnails).toEqual(['r1'])
+      const res = await get(1, 'r1')
+      expect(res.status).toBe(200)
+      expect(res.headers.get('content-type')).toBe('image/jpeg')
+      expect(res.headers.get('cache-control')).toBe('private, no-store')
+      expect(Buffer.from(await res.arrayBuffer())).toEqual(JPEG)
+    })
+
+    it('answers anyone else as if there were none', async () => {
+      const alice = await browser(1)
+      await join(alice)
+      await typeIt(alice, 'r1')
+      expect((await put(2, 'r1')).status).toBe(404)
+      expect((await put(1, 'r1')).status).toBe(201)
+      await snapshot(1)
+      expect((await get(2, 'r1')).status).toBe(404)
+    })
+
+    it('refuses an input not recorded yet, one already kept, and anything not a small JPEG', async () => {
+      const alice = await browser(1)
+      await join(alice)
+      await typeIt(alice, 'r1')
+      expect((await put(1, 'not-an-input')).status).toBe(409)
+      expect((await put(1, 'r1', Buffer.from('<svg/>'))).status).toBe(415)
+      expect((await put(1, 'r1', Buffer.concat([JPEG, Buffer.alloc(17 * 1024)]))).status).toBe(413)
+      expect((await put(1, 'r1')).status).toBe(201)
+      const again = await put(1, 'r1', Buffer.concat([JPEG, Buffer.from([1])]))
+      expect(again.status).toBe(200)
+      expect(await again.json()).toEqual({ kept: false, reason: 'exists' })
+    })
+
+    it('takes no cookie-less or token caller', async () => {
+      const alice = await browser(1)
+      await join(alice)
+      await typeIt(alice, 'r1')
+      const res = await fetch(`http://127.0.0.1:${tunnelPort}/api/v1/sessions/${sessionId}/capture/thumbnails/r1`, { method: 'PUT', body: new Uint8Array(JPEG) })
+      expect(res.status).toBe(401)
+    })
+  })
+
   it('keeps it across a reload by the same person', async () => {
     const tab = await browser(1, 'first')
     await join(tab)

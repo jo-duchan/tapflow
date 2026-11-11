@@ -1,5 +1,5 @@
 import { useEffect, useId, useRef, useState, type Dispatch, type RefObject } from 'react'
-import { ChevronRight, LoaderCircle, Trash2 } from 'lucide-react'
+import { ChevronRight, Keyboard, LoaderCircle, Trash2 } from 'lucide-react'
 import {
   askedValues, capturedStepLabel, rangeWarnings, rawStepLabel, type CapturedStep, type Flow, type RawStep, type StepExpect,
 } from '@tapflowio/flow-runner/browser'
@@ -56,9 +56,11 @@ function Notice({ title, children }: { title: string; children?: React.ReactNode
 
 // ── Range ─────────────────────────────────────────────────────────────────────────────────────────────────────────
 
-export function RangeScreen({ state, dispatch, bundleId, platform, onContinue, onCancel, continueRef }: {
+export function RangeScreen({ state, dispatch, bundleId, platform, onContinue, onCancel, continueRef, thumbnailOf }: {
   state: CaptureState
   platform: string
+  /** Where the screen a step began on can be read (1b-3b), or `null` when the relay holds no picture of it. */
+  thumbnailOf?: (step: RawStep) => string | null
   dispatch: Dispatch<CaptureEvent>
   bundleId: string | null
   onContinue: () => void
@@ -96,7 +98,7 @@ export function RangeScreen({ state, dispatch, bundleId, platform, onContinue, o
             onClick={() => dispatch({ type: 'set-range', range: { start: range.start, end: range.end - 1 } })}>{copy.dropLast}</Button>
         </span>
       </div>
-      <RangeStrip steps={steps} range={range} onChange={(next) => dispatch({ type: 'set-range', range: next })} />
+      <RangeStrip steps={steps} range={range} thumbnailOf={thumbnailOf} onChange={(next) => dispatch({ type: 'set-range', range: next })} />
       <div className="grid gap-4 sm:grid-cols-2">
         {/* `content-start`: the Tags column is a row taller with its hint, and a stretched grid shares that out. */}
         <div className="grid content-start gap-2">
@@ -184,9 +186,10 @@ const frameRight = (r: Range) => frameLeft(r) + (r.end - r.start) * STRIDE - GAP
  * The range as a frame over the steps, with a handle at each end — a video editor's trim. A step taken in or left out
  * slides into or out of the frame. Each handle is a slider for the keyboard, one step per arrow.
  */
-function RangeStrip({ steps, range, onChange }: {
+function RangeStrip({ steps, range, onChange, thumbnailOf }: {
   steps: RawStep[]
   range: Range
+  thumbnailOf?: (step: RawStep) => string | null
   onChange: (range: Range) => void
 }) {
   const scroller = useRef<HTMLDivElement | null>(null)
@@ -304,7 +307,7 @@ function RangeStrip({ steps, range, onChange }: {
           </div>
           <ol aria-label={copy.rangeStrip}>
             {steps.map((s, i) => (
-              <RangeTile key={i} step={s} index={i} inRange={i >= range.start && i < range.end} left={tileLeft(i, range)} />
+              <RangeTile key={i} step={s} index={i} inRange={i >= range.start && i < range.end} left={tileLeft(i, range)} picture={thumbnailOf?.(s) ?? null} />
             ))}
           </ol>
           {handle('start')}
@@ -315,8 +318,13 @@ function RangeStrip({ steps, range, onChange }: {
   )
 }
 
+/** A step made of touches on the soft keyboard — one key, or a typed run the keys were folded into — has no picture by
+ *  design (the relay keeps none of those screens). */
+const typedOnSoftKeyboard = (step: RawStep): boolean =>
+  step.kind === 'keyboardKey' || (step.kind === 'text' && step.messages.some((m) => m.msg.type === 'input:touch:end'))
+
 /** A name cut short in the tile is shown whole on hover. The list item already holds it whole for a screen reader. */
-function RangeTile({ step, index, inRange, left }: { step: RawStep; index: number; inRange: boolean; left: number }) {
+function RangeTile({ step, index, inRange, left, picture }: { step: RawStep; index: number; inRange: boolean; left: number; picture: string | null }) {
   const label = rawStepLabel(step)
   return (
     <Tooltip>
@@ -326,8 +334,19 @@ function RangeTile({ step, index, inRange, left }: { step: RawStep; index: numbe
           style={{ left, top: FRAME_Y + INNER_Y, width: TILE, height: TILE_H }}
         >
           <span className="h-4 leading-4 text-muted-foreground">#{index + 1}</span>{' '}
-          {/* Where the recorded picture goes (1b-3b). */}
-          <span aria-hidden className="h-[166px] w-full shrink-0 rounded-md border bg-background" />
+          {/* The screen the step began on (1b-3b). Decorative: the item's own text names the step. A key on the soft
+              keyboard has none by design — that screen shows what was just typed, a password's last character too — and
+              says so, rather than looking like a picture that failed to load. */}
+          {picture
+            ? <img src={picture} alt="" draggable={false} className="h-[166px] w-full shrink-0 rounded-md border bg-background object-contain" />
+            : typedOnSoftKeyboard(step)
+              ? (
+                <span className="flex h-[166px] w-full shrink-0 flex-col items-center justify-center gap-1.5 rounded-md border bg-background px-1 text-center text-[10px] leading-tight text-muted-foreground">
+                  <Keyboard aria-hidden className="size-4" />
+                  {copy.keyboardTile}
+                </span>
+              )
+              : <span aria-hidden className="h-[166px] w-full shrink-0 rounded-md border bg-background" />}
           <span className="truncate font-mono text-[11px] leading-[11px]">{label}</span>
         </li>
       </TooltipTrigger>

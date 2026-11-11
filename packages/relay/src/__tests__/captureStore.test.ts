@@ -651,3 +651,122 @@ describe('reading the soft keyboard around a person\'s inputs (#1135)', () => {
     expect(fieldReads(s)[0]).toMatchObject({ keyboard: SHOWN, language: '한국어 (두벌식)' })
   })
 })
+
+// 1b-3b: the screen each input began on, kept beside the record.
+describe('CaptureStore — thumbnails', () => {
+  const jpeg = (n: number) => Buffer.alloc(n, 1)
+  const record = (s: CaptureStore, ...msgs: CapturedMessage[]) => { for (const m of msgs) s.recordInput('s', ALICE, m) }
+  const typed = (requestId: string): CapturedMessage => ({ type: 'input:type', sessionId: 's', requestId, payload: { text: 'x' } })
+  const key = (requestId: string, code: string): CapturedMessage => ({ type: 'input:key', sessionId: 's', requestId, payload: { code, modifiers: 0 } })
+  const touchAt = (requestId: string, y: number): CapturedMessage[] => [
+    { type: 'input:touch:start', sessionId: 's', payload: { x: 0.3, y } },
+    { type: 'input:touch:end', sessionId: 's', requestId, payload: { x: 0.3, y } },
+  ]
+
+  it('keeps one for an input it holds, once, and serves it from the snapshot', () => {
+    const { s } = store()
+    record(s, typed('r1'))
+    expect(s.putThumbnail('s', '1', 'nope', jpeg(10))).toBe('unknown-input')
+    expect(s.putThumbnail('s', '1', 'r1', jpeg(10))).toBe('kept')
+    expect(s.putThumbnail('s', '1', 'r1', jpeg(11))).toBe('exists')
+    expect(s.putThumbnail('s', '2', 'r1', jpeg(10))).toBe('no-capture')
+    expect(s.thumbnail('s', '1', 'r1')).toBeNull() // no snapshot yet
+    expect(s.takeSnapshot('s', '1')!.thumbnails).toEqual(['r1'])
+    expect(s.thumbnail('s', '1', 'r1')).toEqual(jpeg(10))
+    expect(s.thumbnail('s', '2', 'r1')).toBeNull()
+  })
+
+  // The screen as a key on the soft keyboard is pressed shows the character before it, a password's included (#1140).
+  // So a touch keeps a picture only when the reads say it was off the keyboard, before and after it.
+  describe('a touch', () => {
+    async function withKeyboard(states: KeyboardState[]) {
+      vi.useFakeTimers()
+      let n = 0
+      const { s } = store({ now: () => Date.now(), readKeyboard: () => Promise.resolve(states[Math.min(n++, states.length - 1)]!) })
+      record(s, launch)
+      await vi.advanceTimersByTimeAsync(50)
+      return s
+    }
+    const UP: KeyboardState = { shown: true, rect: { x: 0, y: 0.6, width: 1, height: 0.4 } }
+    afterEach(() => vi.useRealTimers())
+
+    it('keeps one off the keyboard, before and after', async () => {
+      const s = await withKeyboard([UP])
+      record(s, ...touchAt('a', 0.2))
+      await vi.advanceTimersByTimeAsync(50)
+      expect(s.putThumbnail('s', '1', 'a', jpeg(10))).toBe('kept')
+    })
+
+    it('keeps none on the keyboard', async () => {
+      const s = await withKeyboard([UP])
+      record(s, ...touchAt('k', 0.8))
+      expect(s.putThumbnail('s', '1', 'k', jpeg(10))).toBe('keyboard')
+    })
+
+    it('keeps none when nothing read the keyboard, or nothing could say', async () => {
+      const { s } = store()
+      record(s, ...touchAt('t', 0.2))
+      expect(s.putThumbnail('s', '1', 't', jpeg(10))).toBe('keyboard')
+      const unknown = await withKeyboard([{ shown: null }])
+      record(unknown, ...touchAt('u', 0.2))
+      expect(unknown.putThumbnail('s', '1', 'u', jpeg(10))).toBe('keyboard')
+    })
+
+    // A fast typist's key lands before any read has seen the keyboard slide in: the read after it says it was a key.
+    it('keeps none when the read after it puts it on the keyboard', async () => {
+      const s = await withKeyboard([{ shown: false }, UP])
+      record(s, ...touchAt('k', 0.8))
+      await vi.advanceTimersByTimeAsync(50)
+      expect(s.putThumbnail('s', '1', 'k', jpeg(10))).toBe('keyboard')
+    })
+  })
+
+  it('keeps one for a typed run\'s first key only, whatever the dashboard sends', () => {
+    const { s } = store()
+    record(s, key('a', 'KeyA'), key('caps', 'CapsLock'), key('b', 'KeyB'), key('enter', 'Enter'), key('c', 'KeyC'))
+    expect(['a', 'caps', 'b', 'enter', 'c'].map((id) => s.putThumbnail('s', '1', id, jpeg(10)))).toEqual(['kept', 'keyboard', 'keyboard', 'kept', 'kept'])
+  })
+
+  it('drops the oldest past its own cap, never the record', () => {
+    const { s } = store({ maxThumbnailBytes: 25 })
+    record(s, typed('r1'), typed('r2'), typed('r3'))
+    for (const id of ['r1', 'r2', 'r3']) expect(s.putThumbnail('s', '1', id, jpeg(10))).toBe('kept')
+    const snap = s.takeSnapshot('s', '1')!
+    expect(snap.thumbnails).toEqual(['r2', 'r3'])
+    expect(snap.entries.filter((e) => e.kind === 'input')).toHaveLength(3)
+  })
+
+  it('lets a picture go with the step trimmed off the head, unless the dialog\'s snapshot still shows it', () => {
+    const { s } = store({ maxEntries: 8 })
+    record(s, typed('r1'))
+    s.putThumbnail('s', '1', 'r1', jpeg(10))
+    for (let i = 2; i <= 12; i++) record(s, typed(`r${i}`))
+    expect(s.takeSnapshot('s', '1')!.thumbnails).not.toContain('r1')
+    const { s: s2 } = store({ maxEntries: 8 })
+    record(s2, typed('r1'))
+    s2.putThumbnail('s', '1', 'r1', jpeg(10))
+    s2.takeSnapshot('s', '1')
+    for (let i = 2; i <= 12; i++) record(s2, typed(`r${i}`))
+    expect(s2.thumbnail('s', '1', 'r1')).toEqual(jpeg(10))
+  })
+
+  // A relay others have filled refuses this one, and leaves this capture's own pictures alone.
+  it('keeps none past the relay\'s line, and takes none of the capture\'s own to make room', () => {
+    const { s } = store({ maxTotalBytes: 1_500 })
+    record(s, typed('r1'), typed('r2'))
+    expect(s.putThumbnail('s', '1', 'r1', jpeg(500))).toBe('kept')
+    expect(s.putThumbnail('s', '1', 'r2', jpeg(2_000))).toBe('full')
+    expect(s.takeSnapshot('s', '1')!.thumbnails).toEqual(['r1'])
+  })
+
+  it('frees everything at the seal', () => {
+    const { s } = store({ maxTotalBytes: 2_000 })
+    record(s, typed('r1'))
+    s.putThumbnail('s', '1', 'r1', jpeg(1_000))
+    s.seal('s')
+    record(s, typed('r2'))
+    // Only room for this one if the sealed capture's picture was let go.
+    expect(s.putThumbnail('s', '1', 'r2', jpeg(1_000))).toBe('kept')
+    expect(s.takeSnapshot('s', '1')!.thumbnails).toEqual(['r2'])
+  })
+})

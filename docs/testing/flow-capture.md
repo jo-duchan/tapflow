@@ -13,7 +13,7 @@ Save the taps, swipes and typing you did in a [QA Session](/testing/qa-session) 
 
 ### 1. Turn on step capturing {#turn-on}
 
-Click your name at the bottom of the sidebar, choose **Settings**, and check that **Capture my steps** is on in the **Flow Capture** card. While it is, your taps, swipes and key presses in a QA Session are kept in the memory of the relay (the server that connects the dashboard and the agents). The session's info card shows **Steps · On** while it records and **Steps · Off** when it is off.
+Click your name at the bottom of the sidebar, choose **Settings**, and check that **Capture my steps** is on in the **Flow Capture** card. While it is, your taps, swipes and key presses in a QA Session are kept in the memory of the relay (the server that connects the dashboard and the agents), with a small picture of the screen as each step began. No picture is kept of a key pressed on the on-screen keyboard, since that screen shows what you just typed. The session's info card shows **Steps · On** while it records and **Steps · Off** when it is off.
 
 Test as usual. A run you want to keep as a flow is easier to pick out later if you start it with the toolbar's **Launch app** button.
 
@@ -23,7 +23,7 @@ Click **Capture flow** in the toolbar's Capture group. The dialog has five steps
 
 ### 3. Range: pick the part {#range}
 
-The steps you took are shown as a strip, and a frame marks the part that becomes the flow. It starts out from the first launch after the app was last installed or cleared to your last step.
+The steps you took are shown as a strip, each with a small picture of the screen as it began; a key pressed on the on-screen keyboard shows **On-screen keyboard** instead of a picture. A frame marks the part that becomes the flow. It starts out from the first launch after the app was last installed or cleared to your last step.
 
 - Drag the handles at either end to move the start and the end. With a handle focused, the arrow keys move it one step at a time.
 - **drop first** and **drop last** take the first or last step out, one at a time.

@@ -25,7 +25,48 @@ interface Capture {
   /** Entries were dropped to stay inside the budget (moves thinned first, then the oldest gestures). */
   thinned: boolean
   snapshot?: CaptureSnapshot
+  /**
+   * The screen as each step began, as the person's dashboard drew it (1b-3b): a small JPEG per input, keyed by the input's
+   * `requestId`, oldest first. Held under a cap of its own (`maxThumbnailBytes`), so pictures never push out the inputs
+   * they illustrate; counted in `totalBytes` with everything else.
+   */
+  thumbnails: Map<string, Buffer>
+  thumbnailBytes: number
+  /** Each touch's end, with the keyboard as last read when it began: a picture of a touch is kept only when the reads
+   *  show it was off the soft keyboard (`putThumbnail`). */
+  touches: Map<string, RecordedTouch>
 }
+
+interface RecordedTouch {
+  x: number
+  y: number
+  frame: boolean
+  /** The relay's clock at the touch's end, which is when the read that follows it is asked. */
+  at: number
+  /** The keyboard as last read when the touch began; absent when nothing was read. */
+  before: KeyboardState | undefined
+}
+
+/** A key that types a character, as flow-runner's `keyChar` judges one: what continues a typed run. */
+const CHARACTER_KEY = /^(Key[A-Z]|Digit\d|Space|Minus|Equal|BracketLeft|BracketRight|Backslash|Semicolon|Quote|Comma|Period|Slash|Backquote)$/
+/** Ctrl, Alt and Meta: a key held with one types no character. */
+const NOT_TYPING = 0x01 | 0x04 | 0x08
+/** flow-runner's `KEY_RUN_GAP_MS`: a pause this long between two keys starts a new run. */
+const KEY_RUN_GAP_MS = 10_000
+const continuesRun = (msg: CapturedMessage): boolean => msg.type === 'input:key'
+  && ((msg.payload.modifiers ?? 0) & NOT_TYPING) === 0
+  && (CHARACTER_KEY.test(msg.payload.code) || msg.payload.code === 'CapsLock')
+
+/** Whether the keyboard as read puts the point off it — said, not assumed: no read, or one that cannot say, is not. */
+function offKeyboard(t: RecordedTouch, keyboard: KeyboardState | undefined): boolean {
+  if (keyboard?.shown === false) return true
+  const rect = t.frame ? keyboard?.frameRect ?? keyboard?.rect : keyboard?.rect
+  if (keyboard?.shown !== true || !rect) return false
+  return t.x < rect.x || t.x > rect.x + rect.width || t.y < rect.y || t.y > rect.y + rect.height
+}
+
+/** Why a thumbnail was not kept, for the route to answer with. */
+export type ThumbnailRefusal = 'no-capture' | 'unknown-input' | 'exists' | 'keyboard' | 'full'
 
 /** Who drives the session the input came through, as the relay recorded it at the join: the declared kind and the
  *  user id. Not protocol's `SessionHolder`, which is a label for people and only ever an AI kind. */
@@ -73,6 +114,8 @@ export interface CaptureStoreOptions {
    *  entries with the capture and is not counted, so one capture can hold up to twice its budget while a dialog is open.
    *  Across every capture on this relay: N held sessions × the per-session cap would otherwise be the bound. */
   maxTotalBytes?: number
+  /** Thumbnails a capture may hold, in bytes, beside `maxBytes`. */
+  maxThumbnailBytes?: number
   pauseTtlMs?: number
   /** Ask the session's agent for its focused text field (#1135), or `null` when it cannot answer. */
   readField?: (sessionId: string) => Promise<FieldRead> | null
@@ -208,6 +251,7 @@ export class CaptureStore {
   private readonly maxEntries: number
   private readonly maxBytes: number
   private readonly maxTotalBytes: number
+  private readonly maxThumbnailBytes: number
   readonly pauseTtlMs: number
 
   constructor(private readonly opts: CaptureStoreOptions) {
@@ -215,6 +259,7 @@ export class CaptureStore {
     this.maxEntries = opts.maxEntries ?? 20_000
     this.maxBytes = opts.maxBytes ?? 4 * 1024 * 1024
     this.maxTotalBytes = opts.maxTotalBytes ?? 64 * 1024 * 1024
+    this.maxThumbnailBytes = opts.maxThumbnailBytes ?? 1.5 * 1024 * 1024
     this.pauseTtlMs = opts.pauseTtlMs ?? 30_000
   }
 
@@ -232,6 +277,10 @@ export class CaptureStore {
       // One time for the input and the read it starts, so a one-key run's focus read is never a millisecond past it.
       const at = this.now()
       this.append(capture, { at, kind: 'input', msg })
+      if (msg.type === 'input:touch:end' && msg.requestId) {
+        const tap = this.keyboards.get(sessionId)?.tap
+        capture.touches.set(msg.requestId, { x: tap?.x ?? msg.payload?.x ?? 0, y: tap?.y ?? msg.payload?.y ?? 0, frame: tap?.frame ?? false, at, before: tap?.keyboard })
+      }
       this.noteKeyboard(sessionId, holder, msg)
       this.noteTyping(sessionId, holder, msg, at)
     } catch { /* see above */ }
@@ -417,7 +466,7 @@ export class CaptureStore {
     this.keyboards.delete(sessionId)
     this.valueReads.delete(sessionId)
     const capture = this.captures.get(sessionId)
-    if (capture) this.totalBytes -= capture.bytes
+    if (capture) this.totalBytes -= capture.bytes + capture.thumbnailBytes
     this.captures.delete(sessionId)
     this.paused.delete(sessionId)
   }
@@ -460,8 +509,73 @@ export class CaptureStore {
   takeSnapshot(sessionId: string, user: string): CaptureSnapshot | null {
     const capture = this.owned(sessionId, user)
     if (!capture) return null
-    capture.snapshot = { id: randomUUID(), takenAt: this.now(), entries: capture.entries.slice(), thinned: capture.thinned }
+    capture.snapshot = {
+      id: randomUUID(), takenAt: this.now(), entries: capture.entries.slice(), thinned: capture.thinned,
+      thumbnails: [...capture.thumbnails.keys()],
+    }
     return capture.snapshot
+  }
+
+  /**
+   * Keep the screen an input began on (1b-3b), sent by the person's own dashboard after the input itself. Only for an
+   * input this capture holds — the picture is never ahead of its step, and nothing else can be parked here — once, and
+   * never for a touch on the soft keyboard. Over its cap the oldest go first.
+   */
+  putThumbnail(sessionId: string, user: string, requestId: string, jpeg: Buffer): 'kept' | ThumbnailRefusal {
+    const capture = this.owned(sessionId, user)
+    if (!capture) return 'no-capture'
+    if (capture.thumbnails.has(requestId)) return 'exists'
+    const at = capture.entries.findIndex((e) => e.kind === 'input' && 'requestId' in e.msg && e.msg.requestId === requestId)
+    if (at < 0) return 'unknown-input'
+    // A touch is kept only when the reads say it was off the soft keyboard, before it and after: the screen as a key is
+    // pressed shows what was just typed, a password's last character included. A touch with no read to say — an agent
+    // that does not read the keyboard, a Mac over its memory line, iOS with the app not in front — keeps no picture.
+    const touch = capture.touches.get(requestId)
+    if (touch) {
+      const after = capture.entries.find((e): e is Extract<CaptureEntry, { kind: 'keyboard' }> => e.kind === 'keyboard' && e.requestedAt >= touch.at)
+      if (!offKeyboard(touch, touch.before) || (after && !offKeyboard(touch, after.keyboard.shown === null ? undefined : after.keyboard))) return 'keyboard'
+    }
+    // A key inside a typed run is not where the run's step begins, and its screen shows the run so far: only the run's
+    // first key keeps one, whatever the dashboard sent.
+    const entry = capture.entries[at] as Extract<CaptureEntry, { kind: 'input' }>
+    if (continuesRun(entry.msg)) {
+      for (let i = at - 1; i >= 0; i--) {
+        const e = capture.entries[i]!
+        if (e.kind !== 'input') continue
+        if (continuesRun(e.msg) && entry.at - e.at <= KEY_RUN_GAP_MS) return 'keyboard'
+        break
+      }
+    }
+    // Room only from this capture's own older pictures, and only past its own cap: room the relay as a whole lacks is
+    // other captures', and taking this one's pictures would not make it.
+    if (this.totalBytes + jpeg.length > this.maxTotalBytes) return 'full'
+    capture.thumbnails.set(requestId, jpeg)
+    capture.thumbnailBytes += jpeg.length
+    this.totalBytes += jpeg.length
+    for (const [id, old] of capture.thumbnails) {
+      if (capture.thumbnailBytes <= this.maxThumbnailBytes) break
+      if (id === requestId) break
+      this.dropThumbnail(capture, id, old)
+    }
+    if (capture.thumbnailBytes > this.maxThumbnailBytes) {
+      this.dropThumbnail(capture, requestId, jpeg)
+      return 'full'
+    }
+    return 'kept'
+  }
+
+  /** A thumbnail of a step the dialog's snapshot holds: what the Range strip and Match read. */
+  thumbnail(sessionId: string, user: string, requestId: string): Buffer | null {
+    const capture = this.owned(sessionId, user)
+    if (!capture?.snapshot) return null
+    const inSnapshot = capture.snapshot.entries.some((e) => e.kind === 'input' && 'requestId' in e.msg && e.msg.requestId === requestId)
+    return inSnapshot ? capture.thumbnails.get(requestId) ?? null : null
+  }
+
+  private dropThumbnail(capture: Capture, requestId: string, jpeg: Buffer): void {
+    capture.thumbnails.delete(requestId)
+    capture.thumbnailBytes -= jpeg.length
+    this.totalBytes -= jpeg.length
   }
 
   snapshot(sessionId: string, user: string): CaptureSnapshot | null {
@@ -525,7 +639,10 @@ export class CaptureStore {
     // A join by anyone else has sealed it already; this covers an input racing that.
     if (capture && capture.ownerUser !== holder.user) { this.seal(sessionId); capture = undefined }
     if (!capture) {
-      capture = { id: randomUUID(), ownerUser: holder.user, startedAt: this.now(), entries: [], bytes: 0, thinned: false }
+      capture = {
+        id: randomUUID(), ownerUser: holder.user, startedAt: this.now(), entries: [], bytes: 0, thinned: false,
+        thumbnails: new Map(), thumbnailBytes: 0, touches: new Map(),
+      }
       this.captures.set(sessionId, capture)
       const chrome = this.opts.chromeOf?.(sessionId)
       if (chrome !== undefined) this.append(capture, { at: this.now(), kind: 'chrome', chrome: withoutImages(chrome) })
@@ -588,5 +705,10 @@ export class CaptureStore {
     this.totalBytes += bytes - capture.bytes
     capture.entries = entries
     capture.bytes = bytes
+    // A step cut off the head takes its picture with it, unless the dialog's snapshot still shows that step.
+    const kept = new Set<string>()
+    for (const e of [...entries, ...(capture.snapshot?.entries ?? [])]) if (e.kind === 'input' && 'requestId' in e.msg && e.msg.requestId) kept.add(e.msg.requestId)
+    for (const [id, jpeg] of capture.thumbnails) if (!kept.has(id)) this.dropThumbnail(capture, id, jpeg)
+    for (const id of capture.touches.keys()) if (!kept.has(id)) capture.touches.delete(id)
   }
 }
