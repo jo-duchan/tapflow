@@ -396,7 +396,10 @@ async function touchPoint(
   for (;;) {
     let r: ReachResult | undefined
     try {
-      [r] = await driver.reach([el])
+      // Bounded by the selector's deadline, or an agent that never answers holds the step for the relay's whole reach
+      // deadline (15 s and more) after the selector's ran out; never under REACH_FLOOR_MS, or an element that showed up
+      // late would be left no time to be asked and tapped unchecked.
+      [r] = await driver.reach([el], AbortSignal.timeout(Math.max(REACH_FLOOR_MS, deadline - Date.now())))
     } catch (e) {
       // A blip between here and the agent (a 502 while it reconnects, a 504) is polled past, as a tree read's is; one
       // that lasts to the deadline leaves the device unable to judge, and the touch goes where it went before reach.
@@ -703,6 +706,8 @@ const SPANS_SCROLL_AXIS: Record<ScrollDirection, (f: UIElement['frame']) => bool
 const SETTLE_MATCH_MS = 2_000
 /** How near two reach answers must be to count as the same point: under one thousandth of the screen. */
 const REACH_AGREE = 0.001
+/** The least a reach is given, however little of the selector's deadline is left: one takes 130–230 ms on iOS (measured). */
+const REACH_FLOOR_MS = 2_000
 /** The most targets one reach carries: the relay's limit (`MAX_TARGETS` in relay's `lib/reach.ts`). */
 const MAX_REACH_TARGETS = 64
 
