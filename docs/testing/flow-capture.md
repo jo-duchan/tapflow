@@ -31,7 +31,7 @@ The steps you took are shown as a strip, and a frame marks the part that becomes
 
 If you typed into a password field on the on-screen keyboard, each such step gets a field such as **Password for step 7**. A password field cannot be read, so you enter the value the replay should type, and **Continue** waits for it. What you typed on your computer's keyboard is filled in. The value is used for this replay only and never saved.
 
-If the part does not start with a launch, the flow launches the app itself, and the dialog tells you to leave out any tap on the home screen before it. If nothing cleared the app before that launch, it also tells you the steps ran on data an earlier test left.
+If you opened the app from its icon on the home screen, the part starts at the first step you took in the app, and the swipes and taps you made on the home screen to find it are left out. If the first step is not a launch and cannot be told to be in the app, the flow launches the app itself, and the dialog tells you to leave out any tap on the home screen before it. If nothing cleared the app before that launch, it also tells you the steps ran on data an earlier test left.
 
 **Continue** resets the device the way `tapflow flow run` does before a run, then replays the steps in the next step. On iOS the app is reinstalled, the keychain, privacy permissions, clipboard and location are reset for every app on the device, so other apps are signed out too, and the device is turned upright. On Android the app's data is cleared, and on an emulator the clipboard is emptied and the device turned upright. On both, a device taken offline goes back online.
 

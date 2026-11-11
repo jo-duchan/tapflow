@@ -34,6 +34,17 @@ describe('keyboardStateOf', () => {
     expect(keyboardStateOf(null, screen, 0)).toEqual({ shown: null })
   })
 
+  it('says the home screen was in front when the keyboard would type into the launcher', () => {
+    const launcher = 'com.google.android.apps.nexuslauncher'
+    expect(keyboardStateOf({ shown: false, target: launcher }, screen, 0, launcher)).toEqual({ shown: false, onHome: true })
+    expect(keyboardStateOf({ shown: false, target: 'com.android.settings' }, screen, 0, launcher)).toEqual({ shown: false, onHome: false })
+  })
+
+  it('says nothing of the home screen when either side is unknown', () => {
+    expect(keyboardStateOf({ shown: false }, screen, 0, 'com.google.android.apps.nexuslauncher')).toEqual({ shown: false })
+    expect(keyboardStateOf({ shown: false, target: 'com.android.settings' }, screen, 0, null)).toEqual({ shown: false })
+  })
+
   it('is shown with no rect when the screen size is unknown', () => {
     expect(keyboardStateOf({ shown: true, rect: { x: 0, y: 1200, width: 1000, height: 800 } }, null, 0)).toEqual({ shown: true })
   })

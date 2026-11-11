@@ -210,6 +210,32 @@ describe('Flow Capture through the relay', () => {
       expect(reads.map((r) => r.keyboard)).toEqual([keyboard])
     })
 
+    // The relay hands the agent's `app:*-done` to the capture: a unit test calling the store directly passed while the
+    // relay never did, and the read after an install was never asked.
+    it('reads the keyboard again once the agent says a clear-state is done', async () => {
+      const fieldAgent = await capableAgent()
+      const alice = await browser(1)
+      await join(alice)
+      let asked = 0
+      fieldAgent.on('message', (d) => {
+        const m = JSON.parse(String(d)) as { type: string; requestId: string }
+        if (m.type !== 'ui:keyboard:request') return
+        asked++
+        fieldAgent.send(JSON.stringify({ type: 'ui:keyboard:response', sessionId, requestId: m.requestId, keyboard: { shown: false, onHome: false } }))
+      })
+      alice.send(JSON.stringify({ type: 'app:clear-state', sessionId, requestId: 'c1', payload: { bundleId: 'com.example.app' } }))
+      await waitForType(fieldAgent, 'app:clear-state')
+      // The read the command started, and the one that settles it; then nothing until something asks again.
+      await new Promise((r) => setTimeout(r, 1200))
+      const before = asked
+      expect(before).toBeGreaterThan(0)
+      await new Promise((r) => setTimeout(r, 600))
+      expect(asked).toBe(before)
+      fieldAgent.send(JSON.stringify({ type: 'app:clear-state-done', sessionId, requestId: 'c1' }))
+      await new Promise((r) => setTimeout(r, 200))
+      expect(asked).toBeGreaterThan(before)
+    })
+
     it('forwards a replay\'s keyboard language to the agent and its answer back', async () => {
       const fieldAgent = await capableAgent()
       const alice = await browser(1)

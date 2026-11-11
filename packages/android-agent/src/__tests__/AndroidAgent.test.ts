@@ -3234,6 +3234,16 @@ describe('AndroidAgent', () => {
         await vi.waitFor(() => expect(out.find((m) => m['type'] === 'ui:keyboard:response')).toBeDefined())
         expect(out.find((m) => m['type'] === 'ui:keyboard:response')).toMatchObject({ requestId: 'rq-k1', keyboard })
       })
+
+      it('answers ui:keyboard:request with whether the home screen was in front', async () => {
+        vi.spyOn(adb, 'imeWindow').mockResolvedValue({ shown: false, target: 'com.google.android.apps.nexuslauncher' })
+        vi.spyOn(adb, 'homePackage').mockResolvedValue('com.google.android.apps.nexuslauncher')
+        vi.spyOn(adb, 'getDisplayMetrics').mockResolvedValue(screen)
+        const out = sent()
+        inject({ type: 'ui:keyboard:request', requestId: 'rq-k2' })
+        await vi.waitFor(() => expect(out.find((m) => m['type'] === 'ui:keyboard:response')).toBeDefined())
+        expect(out.find((m) => m['type'] === 'ui:keyboard:response')).toMatchObject({ requestId: 'rq-k2', keyboard: { shown: false, onHome: true } })
+      })
     })
 
     // #1125: where a touch meant for an element lands, from the jar; unknown, never a guess, when the jar cannot say.

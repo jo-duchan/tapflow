@@ -487,9 +487,12 @@ const ORIENTATION_TURN = { 1: 0, 2: 180, 3: 270, 4: 90 } as const
 export function toKeyboardState(body: unknown): KeyboardState {
   if (typeof body !== 'object' || body === null) return { shown: null }
   const b = body as Record<string, unknown>
-  if (b['shown'] !== true) return { shown: b['shown'] === false ? false : null }
+  // The runner says `null` only when the app is not in front (`TreeServer.keyboard`): the home screen, or another app.
+  if (b['shown'] === null) return { shown: null, onHome: true }
+  if (b['shown'] === false) return { shown: false, onHome: false }
+  if (b['shown'] !== true) return { shown: null }
   const r = b['rect'] as Record<string, unknown> | undefined
-  if (!r || !['x', 'y', 'width', 'height'].every((k) => typeof r[k] === 'number')) return { shown: true }
+  if (!r || !['x', 'y', 'width', 'height'].every((k) => typeof r[k] === 'number')) return { shown: true, onHome: false }
   const turn = ORIENTATION_TURN[b['orientation'] as 1 | 2 | 3 | 4]
   const [x, y, w, h] = [r['x'], r['y'], r['width'], r['height']] as [number, number, number, number]
   const a = toFramePoint(turn, [x, y])
@@ -497,6 +500,7 @@ export function toKeyboardState(body: unknown): KeyboardState {
   return {
     shown: true,
     rect: { x: Math.min(a[0], c[0]), y: Math.min(a[1], c[1]), width: Math.abs(a[0] - c[0]), height: Math.abs(a[1] - c[1]) },
+    onHome: false,
   }
 }
 

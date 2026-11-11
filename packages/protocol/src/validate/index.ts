@@ -107,6 +107,7 @@ const keyboardState = z.object({
   shown: z.boolean().nullable(),
   rect: normalizedRect.optional().catch(undefined),
   frameRect: normalizedRect.optional().catch(undefined),
+  onHome: z.boolean().optional().catch(undefined),
 })
 
 // ── envelope-tier builders ───────────────────────────────────────────────────

@@ -1965,6 +1965,11 @@ export interface KeyboardState {
   /** Fractions (0–1) of the screen, like a touch's point. */
   rect?: { x: number; y: number; width: number; height: number }
   frameRect?: { x: number; y: number; width: number; height: number }
+  /** The home screen is in front, not an app: what Flow Capture's default range leaves out before the app was opened from
+   *  its icon. Android: the window the keyboard would type into belongs to the launcher. iOS: the app under test is not
+   *  in front, which also counts another app (Safari for a sign-in) — only where it starts a capture does it matter.
+   *  Absent when it cannot be told. Not about the keyboard; carried here because it is read with it, after each input. */
+  onHome?: boolean
 }
 
 /** The keyboard-focused text field, as `ui:field:response` carries it. */

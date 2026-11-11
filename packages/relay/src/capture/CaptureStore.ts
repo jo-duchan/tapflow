@@ -51,6 +51,14 @@ export const FIELD_READ_TIMEOUT_MS = 5_000
 export const KEYBOARD_SETTLE_MS = 300
 /** Reads after the last input before the keyboard is taken as never settling (a keyboard animating for good). */
 const KEYBOARD_SETTLE_TRIES = 3
+/**
+ * While the home screen is in front (`onHome`), reads go on whether or not they settle: an app opened from its icon takes
+ * seconds to come up, and the read after the tap would otherwise be the last word on the screen until the next input —
+ * the first tap in the app, which the default range then left out as one on the home screen. Bounded, since a person
+ * may stay on the home screen.
+ */
+export const HOME_READ_MS = 500
+export const HOME_READS = 20
 
 export interface CaptureStoreOptions {
   /** The person's own setting (`users.flow_capture`), read from memory on every input. */
@@ -107,10 +115,20 @@ interface KeyboardProbe {
 
 /** Opening and moving frames: a keyboard read waits for the gesture's end, which is what can change it. */
 const MID_GESTURE = new Set(['input:touch:start', 'input:touch:move', 'input:pinch:start', 'input:pinch:move'])
+/** The commands whose ack says the app changed under the screen the read before it saw. */
+const APP_COMMANDS = new Set(['app:install', 'app:launch', 'app:clear-state'])
+
+function findLastInput(entries: readonly CaptureEntry[], requestId: string): CapturedMessage | undefined {
+  for (let i = entries.length - 1; i >= 0; i--) {
+    const e = entries[i]!
+    if (e.kind === 'input' && 'requestId' in e.msg && e.msg.requestId === requestId) return e.msg
+  }
+  return undefined
+}
 
 const near = (a: number, b: number): boolean => Math.abs(a - b) < 0.005
 function sameKeyboard(a: KeyboardState | undefined, b: KeyboardState): boolean {
-  if (!a || a.shown !== b.shown) return false
+  if (!a || a.shown !== b.shown || a.onHome !== b.onHome) return false
   if (!a.rect || !b.rect) return !a.rect && !b.rect
   return near(a.rect.x, b.rect.x) && near(a.rect.y, b.rect.y) && near(a.rect.width, b.rect.width) && near(a.rect.height, b.rect.height)
 }
@@ -250,18 +268,21 @@ export class CaptureStore {
       // Settled only on a read taken after a quiet spell, matching the one before it: an input in between asked again.
       const settled = settling && !probe.again && sameKeyboard(probe.last, keyboard)
       this.append(capture, { at: this.now(), kind: 'keyboard', requestedAt, keyboard, settled })
+      // The app came up: its keyboard gets the usual reads to settle, which the home screen's had used up.
+      if (probe.last?.onHome === true && keyboard.onHome !== true) probe.settleTries = 0
       probe.last = keyboard
       if (probe.again) {
         probe.again = false
         this.probeKeyboard(sessionId, probe, false)
         return
       }
-      if (settled || keyboard.shown === null || probe.settleTries >= KEYBOARD_SETTLE_TRIES) return
+      const home = keyboard.onHome === true
+      if (home ? probe.settleTries >= HOME_READS : settled || keyboard.shown === null || probe.settleTries >= KEYBOARD_SETTLE_TRIES) return
       probe.settleTries++
       probe.settleTimer = setTimeout(() => {
         probe.settleTimer = null
         this.probeKeyboard(sessionId, probe, true)
-      }, KEYBOARD_SETTLE_MS)
+      }, home ? HOME_READ_MS : KEYBOARD_SETTLE_MS)
     }).catch(() => { probe.inFlight = false })
     this.track(sessionId, done)
   }
@@ -344,6 +365,21 @@ export class CaptureStore {
       const capture = this.captures.get(sessionId)
       if (!capture || !this.recording(sessionId, holder, capture)) return
       this.append(capture, { at: this.now(), kind: 'ack', requestId, ok })
+    } catch { /* see recordInput */ }
+  }
+
+  /**
+   * An install, launch or clear-state the agent reports done. It took seconds, and the keyboard read it started answered
+   * at once, about the screen before it (the previous build open): read again, or that stale read is the last word
+   * before the person's first step, taken for one in the app when it was on the home screen. Not an ack: those replies
+   * have their own types (`app:install-done`), which `recordAck` never sees.
+   */
+  noteAppDone(sessionId: string, holder: Holder, requestId: string): void {
+    try {
+      const capture = this.captures.get(sessionId)
+      if (!capture || !this.recording(sessionId, holder, capture)) return
+      const sent = findLastInput(capture.entries, requestId)
+      if (sent && APP_COMMANDS.has(sent.type)) this.noteKeyboard(sessionId, holder, sent)
     } catch { /* see recordInput */ }
   }
 

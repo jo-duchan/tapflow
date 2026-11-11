@@ -3663,9 +3663,9 @@ export class AndroidAgent implements DeviceAgent, NetworkControlCapability {
           this.sendMsg({ type: 'ui:keyboard:response', sessionId, requestId, keyboard: { shown: null } })
           break
         }
-        void Promise.all([this.adb.imeWindow(serial), this.screenSize(serial)])
-          .then(([ime, screen]) => this.sendMsg({
-            type: 'ui:keyboard:response', sessionId, requestId, keyboard: keyboardStateOf(ime, screen, this.frameTurn(state)),
+        void Promise.all([this.adb.imeWindow(serial), this.screenSize(serial), this.adb.homePackage(serial)])
+          .then(([ime, screen, home]) => this.sendMsg({
+            type: 'ui:keyboard:response', sessionId, requestId, keyboard: keyboardStateOf(ime, screen, this.frameTurn(state), home),
           }))
           .catch(() => this.sendMsg({ type: 'ui:keyboard:response', sessionId, requestId, keyboard: { shown: null } }))
         break

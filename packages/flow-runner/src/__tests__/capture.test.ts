@@ -3,6 +3,7 @@ import { readFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import type { UIElement } from '@tapflowio/agent-core'
+import type { KeyboardState } from '@tapflowio/protocol'
 import type { CaptureEntry, CapturedMessage } from '@tapflowio/protocol/capture'
 import {
   askedValues, segment, defaultRange, rangeWarnings, matchStep, reachQuestions, toFlowSteps, flowSteps, flowToYaml, rawStepLabel, capturedStepLabel,
@@ -606,6 +607,81 @@ describe('defaultRange', () => {
     const steps = new Rec().touch([[0.1, 0.1]]).steps()
     expect(defaultRange(steps)).toEqual({ start: 0, end: 1 })
     expect(rangeWarnings(steps, defaultRange(steps))).toEqual(['no-launch-at-start'])
+  })
+
+  // Measured on Android (2026-11-09): a person opened the app from the drawer, and Match replayed the drawer's swipe and
+  // the icon's tap on top of the launched app. The reads after each input say whether the home screen was in front.
+  describe('after the home screen', () => {
+    const read = (r: Rec, keyboard: KeyboardState) => {
+      r.entries.push({ at: r.t + 20, kind: 'keyboard', requestedAt: r.t, keyboard, settled: false })
+      return r.wait(100)
+    }
+    const HOME: KeyboardState = { shown: false, onHome: true }
+    const APP: KeyboardState = { shown: false, onHome: false }
+    // iOS: the runner's answer while the app is not in front, which the keyboard's own judging takes as no read.
+    const IOS_HOME: KeyboardState = { shown: null, onHome: true }
+
+    it('starts at the first step taken in the app, and says nothing of a launch', () => {
+      const r = new Rec().install()
+      read(r, HOME).touch([[0.47, 0.52], [0.47, 0.31]])
+      read(r, HOME).touch([[0.42, 0.725]])
+      read(r, APP).touch([[0.5, 0.4]])
+      read(r, APP).touch([[0.5, 0.6]])
+      const steps = r.steps()
+      expect(steps.map((s) => s.kind)).toEqual(['install', 'swipe', 'tap', 'tap', 'tap'])
+      expect(defaultRange(steps)).toEqual({ start: 3, end: 5 })
+      expect(rangeWarnings(steps, defaultRange(steps))).toEqual([])
+    })
+
+    it('reads iOS\'s home screen, which the keyboard judging drops', () => {
+      const r = new Rec().install()
+      read(r, IOS_HOME).touch([[0.2, 0.3]])
+      read(r, APP).touch([[0.5, 0.4]])
+      expect(defaultRange(r.steps())).toEqual({ start: 2, end: 3 })
+    })
+
+    it('leaves out only the home screen before the app, not a visit to it later', () => {
+      const r = new Rec().install()
+      read(r, HOME).touch([[0.2, 0.3]])
+      read(r, APP).touch([[0.5, 0.4]])
+      read(r, HOME).touch([[0.5, 0.9]])
+      read(r, APP).touch([[0.5, 0.5]])
+      expect(defaultRange(r.steps())).toEqual({ start: 2, end: 5 })
+    })
+
+    it('stops at a step it cannot place, as before the reads said', () => {
+      const r = new Rec().install()
+      read(r, { shown: null }).touch([[0.2, 0.3]])
+      read(r, APP).touch([[0.5, 0.4]])
+      const steps = r.steps()
+      expect(defaultRange(steps)).toEqual({ start: 1, end: 3 })
+      expect(rangeWarnings(steps, defaultRange(steps))).toEqual(['no-launch-at-start'])
+    })
+
+    it('starts after the install as before when nothing was taken in the app', () => {
+      const r = new Rec().install()
+      read(r, HOME).touch([[0.2, 0.3]])
+      read(r, HOME).touch([[0.4, 0.3]])
+      expect(defaultRange(r.steps())).toEqual({ start: 1, end: 3 })
+    })
+
+    it('reads a step by the last read answered before it began, not one that came after', () => {
+      const r = new Rec().install()
+      read(r, HOME)
+      r.touch([[0.2, 0.3]])
+      // Answered after the tap began: it says what the tap did, not where it was made.
+      r.entries.push({ at: r.t + 1, kind: 'keyboard', requestedAt: r.t - 200, keyboard: APP, settled: false })
+      r.wait(100).touch([[0.5, 0.4]])
+      expect(defaultRange(r.steps())).toEqual({ start: 2, end: 3 })
+    })
+
+    it('keeps a Launch in charge when there is one', () => {
+      const r = new Rec().install()
+      read(r, HOME).touch([[0.2, 0.3]])
+      r.launch()
+      read(r, APP).touch([[0.5, 0.4]])
+      expect(defaultRange(r.steps())).toEqual({ start: 2, end: 4 })
+    })
   })
 })
 

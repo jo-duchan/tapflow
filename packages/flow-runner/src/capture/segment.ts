@@ -26,6 +26,9 @@ interface StepBase {
   chrome?: unknown
   /** What the replayer sends, in order, with the times they were sent. */
   messages: TimedMessage[]
+  /** Whether the home screen was in front when the step began, by the last keyboard read answered before it (`onHome`):
+   *  where the default range starts when the app was opened from its icon. Absent when no read said. */
+  onHome?: boolean
 }
 
 /** A person's action on the device: the unit the dialog lists, replays and turns into a flow step. */
@@ -248,7 +251,22 @@ export function segment(entries: readonly CaptureEntry[]): RawStep[] {
     }
   }
   endRun()
-  return oneAskedSecret(withFieldValues(out, entries))
+  return withHome(oneAskedSecret(withFieldValues(out, entries)), entries)
+}
+
+/**
+ * Each step marked with whether the home screen was in front as it began: the last keyboard read answered before its
+ * first message. From the raw entries, not `keyboardTimeline`, which drops iOS's reads off the app (`shown: null`).
+ */
+function withHome(steps: RawStep[], entries: readonly CaptureEntry[]): RawStep[] {
+  const reads = entries.flatMap((e) => (e.kind === 'keyboard' ? [e] : [])).sort((a, b) => a.at - b.at)
+  if (reads.length === 0) return steps
+  let i = 0
+  let last: boolean | undefined
+  return steps.map((s) => {
+    while (i < reads.length && reads[i]!.at <= s.at) last = reads[i++]!.keyboard.onHome
+    return last === undefined ? s : { ...s, onHome: last }
+  })
 }
 
 /** A touch as the keyboard reads around it judge it: a key, the action key, the app, or not known. */

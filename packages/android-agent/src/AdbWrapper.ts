@@ -67,6 +67,7 @@ export class AdbWrapper {
   // up fails ("UiAutomationService … already registered", measured 2 of 3 with three at once). A dashboard read during
   // a flow's is enough to get there.
   private readonly dumpQueue = new Map<string, Promise<unknown>>()
+  private readonly homePackages = new Map<string, Promise<string | null>>()
 
   // The resident field server per device (#1135), when the runner can keep a child; the one-shot run otherwise.
   private readonly focusedServers: FocusedServers | null
@@ -107,9 +108,13 @@ export class AdbWrapper {
 
   setSerial(avdId: string, serial: string): void {
     this.serialMap.set(avdId, serial)
+    // A serial is reused by whichever emulator boots next, and that one may have another launcher.
+    this.homePackages.delete(serial)
   }
 
   clearSerial(avdId: string): void {
+    const serial = this.serialMap.get(avdId)
+    if (serial) this.homePackages.delete(serial)
     this.serialMap.delete(avdId)
   }
 
@@ -653,9 +658,25 @@ export class AdbWrapper {
    * 30 ms (measured), outside the dump queue. The touchable region is the jar's input-method window bounds exactly
    * (measured); a hidden keyboard reads `isVisible=false`. `null` when the output cannot be read.
    */
-  async imeWindow(serial: string): Promise<{ shown: boolean; rect?: { x: number; y: number; width: number; height: number } } | null> {
+  async imeWindow(serial: string): Promise<ImeWindow | null> {
     const out = await this.runner.exec('-s', serial, 'shell', 'dumpsys', 'window', 'InputMethod').catch(() => null)
     return out === null ? null : parseImeWindow(out)
+  }
+
+  /**
+   * The package of the device's home screen, for telling a tap on it from one in an app (Flow Capture's `onHome`). Read
+   * once per device: the launcher does not change under a recording. `null` when no single one is the default (the
+   * system's chooser answers then, as package `android`), and a failed read is asked again next time.
+   */
+  homePackage(serial: string): Promise<string | null> {
+    let known = this.homePackages.get(serial)
+    if (!known) {
+      known = this.runner.exec('-s', serial, 'shell', 'cmd', 'package', 'resolve-activity', '--brief', '-a', 'android.intent.action.MAIN', '-c', 'android.intent.category.HOME')
+        .then((out) => parseHomePackage(out))
+        .catch(() => { this.homePackages.delete(serial); return null })
+      this.homePackages.set(serial, known)
+    }
+    return known
   }
 
   private async dumpNow(serial: string, timeoutSec: number): Promise<string> {
@@ -931,12 +952,30 @@ function parseJsonLine(out: string): unknown {
 }
 
 /** `dumpsys window InputMethod`: `isVisible=` and `touchable region=SkRegion((l,t,r,b))`. */
-export function parseImeWindow(out: string): { shown: boolean; rect?: { x: number; y: number; width: number; height: number } } | null {
+export interface ImeWindow {
+  shown: boolean
+  rect?: { x: number; y: number; width: number; height: number }
+  /** The package of the window the keyboard would type into: the app in front, or the launcher on the home screen. */
+  target?: string
+}
+
+export function parseImeWindow(out: string): ImeWindow | null {
   const visible = /isVisible=(true|false)/.exec(out)
   if (!visible) return null
-  if (visible[1] === 'false') return { shown: false }
+  // Measured (API 34): the input target names the app under the notification shade, where `mCurrentFocus` names the
+  // shade, and the launcher on the home screen, its app drawer and recents. A window with no package (the shade) is none.
+  const t = /imeInputTarget in display# \d+ Window\{\S+ u\d+ ([\w.]+)\//.exec(out) ?? /imeLayeringTarget in display# \d+ Window\{\S+ u\d+ ([\w.]+)\//.exec(out)
+  const target = t ? { target: t[1]! } : {}
+  if (visible[1] === 'false') return { shown: false, ...target }
   const r = /touchable region=SkRegion\(\((\d+),(\d+),(\d+),(\d+)\)\)/.exec(out)
-  if (!r) return { shown: true }
-  const [l, t, rt, b] = r.slice(1).map(Number) as [number, number, number, number]
-  return { shown: true, rect: { x: l, y: t, width: rt - l, height: b - t } }
+  if (!r) return { shown: true, ...target }
+  const [l, tp, rt, b] = r.slice(1).map(Number) as [number, number, number, number]
+  return { shown: true, rect: { x: l, y: tp, width: rt - l, height: b - tp }, ...target }
+}
+
+/** `cmd package resolve-activity --brief`'s last line, `package/activity`; the system chooser (`android`) is none. */
+export function parseHomePackage(out: string): string | null {
+  const last = out.trim().split('\n').map((l) => l.trim()).filter(Boolean).at(-1) ?? ''
+  const m = /^([\w.]+)\/\S+$/.exec(last)
+  return m && m[1] !== 'android' ? m[1]! : null
 }

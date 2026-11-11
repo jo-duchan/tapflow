@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, afterEach } from 'vitest'
-import { CaptureStore, FIELD_IDLE_MS, KEYBOARD_SETTLE_MS, SNAPSHOT_READ_WAIT_MS, type CapturedMessage, type FieldRead, type Holder } from '../capture/CaptureStore'
+import { CaptureStore, FIELD_IDLE_MS, HOME_READ_MS, HOME_READS, KEYBOARD_SETTLE_MS, SNAPSHOT_READ_WAIT_MS, type CapturedMessage, type FieldRead, type Holder } from '../capture/CaptureStore'
 import type { KeyboardState } from '@tapflowio/protocol'
 import { chromeOrientation } from '@tapflowio/protocol/screen'
 import type { ChromePayload } from '@tapflowio/protocol'
@@ -501,6 +501,57 @@ describe('reading the soft keyboard around a person\'s inputs (#1135)', () => {
     await wait(10 * (KEYBOARD_SETTLE_MS + 30))
     expect(asked).toHaveLength(4)
     expect(kbReads(s).every((r) => !r.settled)).toBe(true)
+  })
+
+  // An app opened from its icon can take seconds to come up. Reads that stopped while the home screen was still in front
+  // would leave it as the last word before the first tap in the app, and the default range would leave that tap out.
+  it('keeps reading while the home screen is in front, until the app comes up', async () => {
+    let home = true
+    const { s, asked, wait } = keyboardStore(() => (home ? { shown: null, onHome: true } : { shown: false, onHome: false }))
+    s.recordInput('s', ALICE, launch)
+    await wait(30 + 4 * (HOME_READ_MS + 30))
+    expect(asked.length).toBeGreaterThan(4)
+    home = false
+    await wait(HOME_READ_MS + 30)
+    expect(kbReads(s).at(-1)!.keyboard).toEqual({ shown: false, onHome: false })
+    // The app's own keyboard then gets the reads it needs to settle: an app that opens a field at launch shows it late.
+    await wait(KEYBOARD_SETTLE_MS * 4)
+    expect(kbReads(s).at(-1)).toMatchObject({ keyboard: { shown: false, onHome: false }, settled: true })
+    const after = asked.length
+    await wait(KEYBOARD_SETTLE_MS * 4)
+    expect(asked).toHaveLength(after)
+  })
+
+  // Measured shape: the install is recorded as it is sent, and the read it starts answers in ~30 ms about the screen
+  // before it — the previous build, open. Without a read after the install is done, that is the last word before the
+  // person's swipe on the home screen.
+  it('reads again once an install or launch is done', async () => {
+    let screen: KeyboardState = { shown: false, onHome: false }
+    const { s, wait } = keyboardStore(() => screen)
+    const install: CapturedMessage = { type: 'app:install', sessionId: 's', requestId: 'i', buildId: 1 }
+    s.recordInput('s', ALICE, install)
+    await wait(30 + 3 * (KEYBOARD_SETTLE_MS + 30))
+    screen = { shown: false, onHome: true }
+    s.noteAppDone('s', ALICE, 'i')
+    await wait(30)
+    expect(kbReads(s).at(-1)!.keyboard).toEqual({ shown: false, onHome: true })
+  })
+
+  it('reads nothing again for a request that changes no app', async () => {
+    const { s, asked, wait } = keyboardStore()
+    for (const m of at(0.5, 0.3, 't')) s.recordInput('s', ALICE, m)
+    await wait(30 + 3 * (KEYBOARD_SETTLE_MS + 30))
+    const before = asked.length
+    s.noteAppDone('s', ALICE, 't')
+    await wait(KEYBOARD_SETTLE_MS * 2)
+    expect(asked).toHaveLength(before)
+  })
+
+  it('stops reading a home screen nobody leaves', async () => {
+    const { s, asked, wait } = keyboardStore(() => ({ shown: false, onHome: true }))
+    s.recordInput('s', ALICE, launch)
+    await wait(HOME_READS * (HOME_READ_MS + 30) * 2)
+    expect(asked).toHaveLength(HOME_READS + 1)
   })
 
   it('takes a tap that starts on the keyboard as typing: one focus read, and the value read after the pause', async () => {
