@@ -293,12 +293,13 @@ ids it has pictures of; each is read with `GET …/capture/snapshot/thumbnails/:
   JSON characters, an estimate; a dialog's snapshot shares entries and is not counted, so a capture can hold up to twice
   its budget while one is open.
 - **The field typed into is read around each run of typing** (#1135), because the keys alone cannot say what the
-  device's IME made of them. At a run's first `input:key`/`input:type` the relay asks the session's agent for the
-  focused field (`ui:field:request`), and again `FIELD_IDLE_MS` (250 ms) after the run's last key — any key extends the
-  run, any other input ends it. **Nothing waits for a read**: an input is sent as before, and `requestedAt` and `at` on
-  the recorded entry let the reader drop a read that raced one. Only an agent naming `field-value` is asked (iOS), only
-  for a recorded holder, and the answer is kept only if the person is still recorded when it comes. A snapshot first
-  reads a field still being typed in and waits up to `SNAPSHOT_READ_WAIT_MS` for reads in flight (`settleReads`).
+  device's IME made of them. At a run's first `input:key`/`input:type`, or its first tap on the soft keyboard, the
+  relay asks the session's agent for the focused field (`ui:field:request`), and again `FIELD_IDLE_MS` (250 ms) after
+  the run's last key — any key extends the run, any other input ends it. **No input waits for a read**: an input is
+  sent as before (only a step's picture waits, `putThumbnail`), and `requestedAt` and `at` on the recorded entry let the reader drop a read that raced one. Only an
+  agent naming `field-value` is asked (both platforms do), only for a recorded holder, and the answer is kept only if
+  the person is still recorded when it comes. A snapshot first reads a field still being typed in and waits up to
+  `SNAPSHOT_READ_WAIT_MS` for reads in flight (`settleReads`).
   `ui:field:response` is consumed here and **never forwarded**: it is the field's whole contents — what the person
   typed, and any text the app or AutoFill put there — which only the capture keeps. It is accepted only from the
   session's own agent socket, and a secure field's `value` is dropped here whatever the agent sent. On a Mac over its
