@@ -60,12 +60,10 @@ export function handleAccept(
     if (!allowed.includes(info.mimeType)) { stream.resume(); return }
     fileMime = info.mimeType
     const chunks: Buffer[] = []
-    let size = 0
-    stream.on('data', (c: Buffer) => {
-      size += c.length
-      if (size <= 2 * 1024 * 1024) chunks.push(c)
-      else sizeError = true
-    })
+    stream.on('data', (c: Buffer) => { chunks.push(c) })
+    // busboy stops at `fileSize` rather than passing it, so counting bytes here never saw an oversized file and
+    // kept its first 2 MB as the avatar. `'limit'` is how it says the file was cut.
+    stream.on('limit', () => { sizeError = true })
     stream.on('end', () => { if (!sizeError) fileBuffer = Buffer.concat(chunks) })
   })
 

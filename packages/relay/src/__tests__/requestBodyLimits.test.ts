@@ -69,6 +69,21 @@ describe('request body limits on unauthenticated routes', () => {
     expect(reply.status).toBe(413)
   })
 
+  it('invitation accept refuses an avatar over 2 MB instead of keeping its first 2 MB', async () => {
+    const boundary = '----tapflowavatar'
+    const body = Buffer.concat([
+      Buffer.from(`--${boundary}\r\nContent-Disposition: form-data; name="token"\r\n\r\nt\r\n` +
+        `--${boundary}\r\nContent-Disposition: form-data; name="password"\r\n\r\npassword123\r\n` +
+        `--${boundary}\r\nContent-Disposition: form-data; name="avatar"; filename="a.png"\r\nContent-Type: image/png\r\n\r\n`),
+      Buffer.alloc(2 * 1024 * 1024 + 1),
+      Buffer.from(`\r\n--${boundary}--\r\n`),
+    ])
+    const headers = { 'Content-Type': `multipart/form-data; boundary=${boundary}`, 'Content-Length': body.length }
+    const reply = await post(port, '/api/v1/invitations/accept', headers, body)
+    expect(reply.status).toBe(400)
+    expect(reply.body.error).toBe('Max 2MB for avatar')
+  })
+
   it('invitation accept answers 413 to a field over the size limit', async () => {
     const { headers, body } = multipart([['token', 't'], ['password', 'x'.repeat(256 * 1024)]])
     const reply = await post(port, '/api/v1/invitations/accept', headers, body)
