@@ -3263,6 +3263,14 @@ describe('AndroidAgent', () => {
         await vi.waitFor(() => expect(out.find((m) => m['requestId'] === 'rq-r2')).toBeDefined())
         expect(out.find((m) => m['requestId'] === 'rq-r2')).toMatchObject({ results: [{ state: 'unknown' }] })
       })
+
+      it('answers a request that carries no list of targets, rather than throwing it away', async () => {
+        const reach = vi.spyOn(adb, 'reach').mockResolvedValue([])
+        const out = replies()
+        inject({ type: 'ui:reach:request', requestId: 'rq-r3', targets: 'nope' })
+        await vi.waitFor(() => expect(out.find((m) => m['requestId'] === 'rq-r3')).toMatchObject({ type: 'ui:reach:response', results: [] }))
+        expect(reach).toHaveBeenCalledWith('emulator-5554', [])
+      })
     })
 
     // #1135: a replay starts from the keyboard language the recording did.

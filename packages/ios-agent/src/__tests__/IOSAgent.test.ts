@@ -937,6 +937,16 @@ describe('IOSAgent', () => {
       browser.close()
     })
 
+    it('asks the runner about no targets when the request carries no list of them', async () => {
+      const reach = vi.spyOn(XCUITreeReader.prototype, 'reach').mockResolvedValueOnce([])
+      const { agent, browser, internals, sent } = await bootedAgent()
+      internals.handleRelayMessage({ type: 'ui:reach:request', sessionId: agent.sessionId!, requestId: 'rq-r3', targets: 'nope' } as never)
+      await vi.waitFor(() => expect(sent.find((m) => m.requestId === 'rq-r3')).toMatchObject({ type: 'ui:reach:response', results: [] }), { timeout: 2000 })
+      expect(reach).toHaveBeenCalledWith('dev-1', expect.any(String), [])
+      agent.disconnect()
+      browser.close()
+    })
+
     it('answers ui:keyboard:request from the runner, and unknown when it fails', async () => {
       const read = vi.spyOn(XCUITreeReader.prototype, 'readKeyboard').mockResolvedValueOnce({ shown: false }).mockRejectedValueOnce(new Error('gone'))
       const { agent, browser, internals, sent } = await bootedAgent()

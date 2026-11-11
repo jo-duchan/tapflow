@@ -2818,10 +2818,13 @@ export class IOSAgent implements DeviceAgent, NetworkControlCapability, Posturab
       }
       case 'ui:reach:request': {
         const { requestId, sessionId } = msg
-        const targets = (msg as unknown as { targets?: ReachTarget[] }).targets ?? []
+        if (!requestId) break
+        // Checked here too, not only by the relay: a throw below is swallowed, and the caller waits out its deadline.
+        const raw = (msg as unknown as { targets?: unknown }).targets
+        const targets = Array.isArray(raw) ? raw as ReachTarget[] : []
         const state = this.deviceStates.get(sessionId)
-        const answer = (results: ReachResult[]) => this.sendMsg({ type: 'ui:reach:response', sessionId, requestId: requestId!, results })
-        if (!state || !requestId) { if (requestId) answer(targets.map(() => ({ state: 'unknown', reason: 'no booted device' }))); break }
+        const answer = (results: ReachResult[]) => this.sendMsg({ type: 'ui:reach:response', sessionId, requestId, results })
+        if (!state) { answer(targets.map(() => ({ state: 'unknown', reason: 'no booted device' }))); break }
         // The app the tree is read for: the last launched or installed (`lastBundleIds`), as `/tree` and `/field` are.
         void this.uiTreeReader.reach(state.deviceId, this.lastBundleIds.get(state.deviceId) ?? '', targets)
           .then(answer, (e: unknown) => answer(targets.map(() => ({ state: 'unknown', reason: firstLine(e) }))))

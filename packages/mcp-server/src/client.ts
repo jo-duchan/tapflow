@@ -1415,25 +1415,28 @@ export class TapflowClient {
   }
 
   /**
-   * Where touches meant for `targets` land, as the device's agent judges them (#1125), for `run_flow`'s taps. Any answer
-   * this client cannot use is every target `unknown`: the flow then taps the centre and its result says the tap was not
-   * checked. A 401 still fails, naming the token, as a tree read does.
+   * Where touches meant for `targets` land, as the device's agent judges them (#1125), for `run_flow`'s taps. Failures
+   * are classed as a tree read's are, so a blip is retried until the step's deadline rather than taken as a tap nobody
+   * checked; a relay that predates the route (404) answers every target `unknown`, and the flow taps the centre unchecked.
    */
   async reach(sessionId: string, targets: ReachTarget[], signal?: AbortSignal): Promise<ReachResult[]> {
     const httpBase = this.relayUrl.replace(/^wss?/, (p) => (p === 'wss' ? 'https' : 'http'))
-    const unknown = (reason: string): ReachResult[] => targets.map(() => ({ state: 'unknown', reason }))
+    const ended = () => { const s = this.lifecycle.get(sessionId); return !!(s?.terminated || s?.needsReboot) }
     let res: Response
     try {
       res = await fetchWithToken(this.tokens, new URL(`/api/v1/sessions/${sessionId}/reach`, httpBase).toString(), reachRequest(targets, signal))
     } catch (e) {
-      return unknown(`reach query failed: ${(e as Error).message}`)
+      const message = `reach query failed: ${(e as Error).message}`
+      if (ended()) throw new EnvironmentStepError(`reach query failed: ${this.failed(sessionId, message).message}`)
+      throw new TransientQueryError(message, { cause: e })
     }
-    if (res.status === 401) throw new EnvironmentStepError(`reach query failed: ${this.failed(sessionId, tokenRefusal(this.tokens)).message}`)
     if (!res.ok) {
       const error = ((await res.json().catch(() => null)) as { error?: unknown } | null)?.error
       // The route's 404, not the session's: a relay with the route answers an unknown session `Session not found`.
-      if (res.status === 404 && error === 'Session not found') throw new EnvironmentStepError(`reach query failed: ${this.failed(sessionId, error).message}`)
-      return unknown(res.status === 404 ? 'this relay predates reach' : `reach query failed: ${res.status}`)
+      if (res.status === 404 && error !== 'Session not found') return targets.map(() => ({ state: 'unknown', reason: 'this relay predates reach' }))
+      const cause = this.failed(sessionId, res.status === 401 ? tokenRefusal(this.tokens) : typeof error === 'string' ? error : `reach query failed: ${res.status}`)
+      if (ended() || PERMANENT_QUERY_STATUSES.has(res.status)) throw new EnvironmentStepError(`reach query failed: ${cause.message}`, { cause })
+      throw new TransientQueryError(cause.message, { cause })
     }
     return readReachResults(await res.json().catch(() => null), targets.length)
   }

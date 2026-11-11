@@ -836,6 +836,22 @@ describe('runFlow', () => {
       expect(swipes(driver)).toEqual([])
     })
 
+    // The relay refuses more than 64 targets in one reach, and the one in view may be the last of them.
+    it('asks about many matches in batches the relay takes, down to the last', async () => {
+      const many = Array.from({ length: 70 }, (_, i) => row('Add', 0.1 + i * 0.01))
+      const driver = fakeDriver([many])
+      const sizes: number[] = []
+      driver.reach = vi.fn(async (targets: UIElement[]) => {
+        sizes.push(targets.length)
+        return targets.map((t): ReachResult => t === many[69]
+          ? { state: 'reachable', point: [0.5, 0.815], atCentre: true, frame: t.frame }
+          : { state: 'occluded' })
+      })
+      expect((await runFlow(flowOf('steps:\n  - scroll: { until: "Add" }\n'), driver, OPTS)).status).toBe('passed')
+      expect(sizes).toEqual([64, 6])
+      expect(swipes(driver)).toEqual([])
+    })
+
     // iOS E2E: the fling was still carrying the list when Row 17 came into view; the tap after landed on Row 18, and on
     // iOS a tap on a moving list only stops it, so the step passed with nothing tapped.
     it('waits for what it found to stop moving before the next step, once it has swiped', async () => {

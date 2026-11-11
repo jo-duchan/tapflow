@@ -166,7 +166,11 @@ final class TreeServer {
         var best: (element: XCUIElement, frame: CGRect, distance: Double)?
         var runnerUp = Double.infinity
         var onScreen = 0
-        for i in 0..<min(count, 24) {
+        // A long list can repeat one label past the cap, so a match beyond it may be the one on screen: then nothing
+        // below may say it is not there, only that it cannot judge.
+        let inspected = min(count, 24)
+        let truncated = count > inspected
+        for i in 0..<inspected {
             let element = query.element(boundBy: i)
             guard let frame = clipped(element.frame, to: window) else { continue }
             onScreen += 1
@@ -176,10 +180,12 @@ final class TreeServer {
             if let b = best { runnerUp = b.distance }
             best = (element, frame, d)
         }
-        if count > 0 && onScreen == 0 { return ["state": "offscreen"] }
+        if count > 0 && onScreen == 0 {
+            return truncated ? ["state": "unknown", "reason": "too many matches to judge"] : ["state": "offscreen"]
+        }
         // Not the element the client read: gone, moved past rounding, or two equally near. Read again, never guess.
         guard let found = best, found.distance < 0.02, runnerUp - found.distance > 0.002 else {
-            return ["state": "missing", "candidates": onScreen]
+            return truncated ? ["state": "unknown", "reason": "too many matches to judge"] : ["state": "missing", "candidates": onScreen]
         }
         guard found.element.isHittable else { return ["state": "occluded"] }
         guard found.element.responds(to: NSSelectorFromString("hitPointCoordinate")),

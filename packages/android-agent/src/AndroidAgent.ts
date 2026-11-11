@@ -3681,12 +3681,14 @@ export class AndroidAgent implements DeviceAgent, NetworkControlCapability {
       }
       case 'ui:reach:request': {
         const { requestId, sessionId } = msg
-        const targets = (msg as unknown as { targets?: ReachTarget[] }).targets ?? []
+        if (!requestId) break
+        // Checked here too, not only by the relay: a throw below is swallowed, and the caller waits out its deadline.
+        const raw = (msg as unknown as { targets?: unknown }).targets
+        const targets = Array.isArray(raw) ? raw as ReachTarget[] : []
         const state = this.deviceStates.get(sessionId)
         const serial = state ? this.adb.getSerial(state.deviceId) : undefined
-        const answer = (results: ReachResult[]) => this.sendMsg({ type: 'ui:reach:response', sessionId, requestId: requestId!, results })
+        const answer = (results: ReachResult[]) => this.sendMsg({ type: 'ui:reach:response', sessionId, requestId, results })
         const unknown = (reason: string) => answer(targets.map(() => ({ state: 'unknown', reason })))
-        if (!requestId) break
         if (!serial) { unknown('no booted device'); break }
         // A device whose jar cannot run (it fell back to `uiautomator dump`) cannot judge either: said, not guessed.
         void this.adb.reach(serial, targets)

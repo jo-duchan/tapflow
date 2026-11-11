@@ -703,6 +703,8 @@ const SPANS_SCROLL_AXIS: Record<ScrollDirection, (f: UIElement['frame']) => bool
 const SETTLE_MATCH_MS = 2_000
 /** How near two reach answers must be to count as the same point: under one thousandth of the screen. */
 const REACH_AGREE = 0.001
+/** The most targets one reach carries: the relay's limit (`MAX_TARGETS` in relay's `lib/reach.ts`). */
+const MAX_REACH_TARGETS = 64
 
 /**
  * The element `scrollUntil` found, read again until it is where it was the read before: the last swipe's fling is
@@ -730,15 +732,19 @@ async function settleMatch(driver: FlowDriver, sel: Selector, tree: UIElement[],
  */
 async function inView(driver: FlowDriver, matches: UIElement[]): Promise<boolean> {
   if (!driver.reach) return true
-  let results: ReachResult[]
-  try {
-    results = await driver.reach(matches)
-  } catch (e) {
-    // A blip on the way to the agent is a device that cannot judge this time: stop on the frame, as before reach.
-    if (e instanceof TransientQueryError) return true
-    throw e
+  // In batches the relay takes (it refuses more targets as a 400), all of them: a later match may be the one in view.
+  for (let i = 0; i < matches.length; i += MAX_REACH_TARGETS) {
+    let results: ReachResult[]
+    try {
+      results = await driver.reach(matches.slice(i, i + MAX_REACH_TARGETS))
+    } catch (e) {
+      // A blip on the way to the agent is a device that cannot judge this time: stop on the frame, as before reach.
+      if (e instanceof TransientQueryError) return true
+      throw e
+    }
+    if (results.some((r) => r.state === 'unknown' || (r.state === 'reachable' && r.atCentre))) return true
   }
-  return results.some((r) => r.state === 'unknown' || (r.state === 'reachable' && r.atCentre))
+  return false
 }
 
 /** What the end-of-list check compares: the structure and where it is, since one long text scrolls by moving alone. */
