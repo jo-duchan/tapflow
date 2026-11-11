@@ -48,6 +48,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+- **An unauthenticated request can no longer exhaust the relay's memory.** Sign-in, password reset and accepting an invitation read the whole request body before checking anything, with no limit, so anyone who could reach the relay port could send a body large enough to get the process killed for running out of memory ([GHSA-3rhv-q43w-vpjg](https://github.com/jo-duchan/tapflow/security/advisories/GHSA-3rhv-q43w-vpjg)). A JSON request body is now limited to 1 MiB and an invitation form to its own fields, and a request over the limit is answered `413`. Until you upgrade, a body-size limit on a proxy in front of the relay stops the request the same way. Thanks to @ttyang57 for the report.
 - **`node-forge` 1.4.2 and `follow-redirects` 1.16.2 in the Docker image.** Both come in through `acme-client`, which the relay uses only to issue LAN HTTPS certificates, and the advisories (GHSA-7wch-p9px-956x, GHSA-mrwp-f3q8-3g9p and ten more) sit in code paths that issuance does not reach: forge's TLS, PKCS#12 and certificate-chain checks, and redirects carrying custom sensitive headers. An npm install already resolved the patched versions; the image is built from the lockfile, which pinned the old ones until this release.
 
 ## [0.32.0] - 2026-10-31
