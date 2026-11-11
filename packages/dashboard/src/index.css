@@ -163,8 +163,11 @@
     transition-timing-function: cubic-bezier(0.4, 0, 0.2, 1);
     transition-duration: 120ms;
   }
-  button:active:not([aria-haspopup]):not(:disabled),
-  [role="button"]:active:not([aria-haspopup]):not(:disabled) {
+  /* Not on a button stretched over its card (`data-stretched`): a transform makes it the containing block of its
+     `::after`, so the press shrank the card-wide target to the label and the release landed off it. The click then
+     went to the card, and only the label selected Flow Capture's Edit rows (measured in Chrome). */
+  button:active:not([aria-haspopup]):not(:disabled):not([data-stretched]),
+  [role="button"]:active:not([aria-haspopup]):not(:disabled):not([data-stretched]) {
     transform: translateY(1px);
   }
 }
