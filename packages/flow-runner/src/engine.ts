@@ -393,6 +393,10 @@ async function touchPoint(
     return centre(el)
   }
   let last: [number, number] | undefined
+  // The last answer that said the touch would not reach the element. Once the device has said so, its going quiet (a
+  // reach cut off, an answer it could not give) is no licence to touch the centre, which is what covered it: the step
+  // asks until its deadline, then fails on that answer.
+  let lastBlocked: ReachResult | undefined
   for (;;) {
     let r: ReachResult | undefined
     try {
@@ -405,11 +409,17 @@ async function touchPoint(
       // that lasts to the deadline leaves the device unable to judge, and the touch goes where it went before reach.
       if (!(e instanceof TransientQueryError)) throw e
       if (Date.now() >= deadline) {
+        if (lastBlocked) throw new StepFailure(blocked(lastBlocked))
         report.reach = 'unchecked'
         report.reachNote = `the device did not say where a touch lands: ${e.message}`
         report.touched = el
         return centre(el)
       }
+      await delay(Math.min(pollIntervalMs, Math.max(0, deadline - Date.now())))
+      continue
+    }
+    if ((!r || r.state === 'unknown') && lastBlocked) {
+      if (Date.now() >= deadline) throw new StepFailure(blocked(lastBlocked))
       await delay(Math.min(pollIntervalMs, Math.max(0, deadline - Date.now())))
       continue
     }
@@ -426,8 +436,10 @@ async function touchPoint(
         return [round4(r.point[0]), round4(r.point[1])]
       }
       last = r.point
+      lastBlocked = undefined
     } else {
       last = undefined
+      lastBlocked = r
     }
     if (Date.now() >= deadline) throw new StepFailure(blocked(r))
     await delay(Math.min(pollIntervalMs, Math.max(0, deadline - Date.now())))

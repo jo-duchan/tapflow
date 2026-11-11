@@ -258,6 +258,23 @@ describe('runFlow — where a touch on an element lands', () => {
     expect(Date.now() - started).toBeLessThan(5_000)
   }, 10_000)
 
+  // Review of #1152: a device that said the row was covered and then went quiet had the covered centre tapped.
+  it('does not tap a centre the device said was covered when it then cannot answer', async () => {
+    for (const quiet of [
+      async () => { throw new TransientQueryError('reach query failed: aborted') },
+      async () => [{ state: 'unknown', reason: 'no answer' } as ReachResult],
+    ]) {
+      const driver = withReach(reachable([0.1, 0.885]))
+      let calls = 0
+      driver.reach = vi.fn(async () => (calls++ === 0 ? [{ state: 'occluded', by: 'Button Hard' } as ReachResult] : quiet()))
+      const result = await runFlow(flowOf('steps:\n  - tapOn: "Row 13"\n'), driver, { ...OPTS, defaultTimeoutMs: 500 })
+      expect(result.steps[0]).toMatchObject({ status: 'failed' })
+      expect(result.steps[0]!.message).toContain('covered by Button Hard')
+      expect(result.failureKind).toBe('product')
+      expect(driver.calls).toEqual([])
+    }
+  })
+
   it('reads again while it is covered, and taps once it is not', async () => {
     const driver = withReach({ state: 'occluded', by: 'Button Hard' }, reachable([0.5, 0.86]), reachable([0.5, 0.86]))
     const result = await runFlow(flowOf('steps:\n  - tapOn: "Row 13"\n'), driver, { ...OPTS, defaultTimeoutMs: 1000 })

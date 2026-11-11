@@ -558,6 +558,9 @@ export class RelayClient extends SessionChannel {
     try {
       return (await res.json()) as T
     } catch (e) {
+      // Cut off by the caller's deadline while the body was still arriving: a request that ran out of time, not a body
+      // that cannot be read, and as transient as one cut off before the headers came.
+      if (signal?.aborted) throw new RelayHttpError(`${what} failed: ${(e as Error).message}`, 0, { cause: e })
       throw new RelayHttpError(`${what} returned invalid JSON: ${(e as Error).message}`, res.status, { cause: e }, true)
     }
   }

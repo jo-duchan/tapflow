@@ -70,6 +70,17 @@ describe('RelayClient.queryUITree — transient vs permanent classification', ()
     await expect(client().queryUITree('s1', AbortSignal.timeout(10))).rejects.toBeInstanceOf(TransientQueryError)
   })
 
+  // Review of #1152: a reach cut off at its step's deadline while its body was still arriving read as invalid JSON,
+  // a permanent failure, where one cut off before the headers came is transient.
+  it('a body cut off by the signal while it arrived → TransientQueryError, not invalid JSON', async () => {
+    const controller = new AbortController()
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(new ReadableStream({
+      start(c) { c.enqueue(new TextEncoder().encode('[{"state":')); controller.abort(new DOMException('timed out', 'TimeoutError')); c.error(new DOMException('timed out', 'TimeoutError')) },
+    }), { status: 200, headers: { 'Content-Type': 'application/json' } }))
+    const target = { role: 'button' as const, label: 'x', frame: { x: 0, y: 0, width: 1, height: 1 } }
+    await expect(client().reach('s1', [target], controller.signal)).rejects.toBeInstanceOf(TransientQueryError)
+  })
+
   it('carries the server error message', async () => {
     vi.spyOn(globalThis, 'fetch').mockResolvedValue(jsonResponse(502, { error: 'is the app running in the foreground?' }))
     await expect(client().queryUITree('s1')).rejects.toThrow('is the app running in the foreground?')
