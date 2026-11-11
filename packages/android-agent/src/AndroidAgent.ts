@@ -131,6 +131,8 @@ const AGENT_CAPABILITIES: AgentCapability[] = [
  *  toolbar's rotate button, an app asking for a different orientation — and nothing here was
  *  watching for that either. */
 const SCREEN_WATCH_INTERVAL_MS = 2_000
+/** How long a keyboard read waits for the device's home package (`onHome`): the first read's PackageManager query, ~50 ms. */
+const HOME_WAIT_MS = 300
 
 /** How `stableDisplayMetrics` decides the display has settled.
  *
@@ -3663,7 +3665,10 @@ export class AndroidAgent implements DeviceAgent, NetworkControlCapability {
           this.sendMsg({ type: 'ui:keyboard:response', sessionId, requestId, keyboard: { shown: null } })
           break
         }
-        void Promise.all([this.adb.imeWindow(serial), this.screenSize(serial), this.adb.homePackage(serial)])
+        // The home package is read once per device and is ready from the second read on; the keyboard does not wait
+        // for it past a moment, so a slow PackageManager costs `onHome` for those reads, never the keyboard's place.
+        const home = Promise.race([this.adb.homePackage(serial), new Promise<null>((r) => setTimeout(() => r(null), HOME_WAIT_MS))])
+        void Promise.all([this.adb.imeWindow(serial), this.screenSize(serial), home])
           .then(([ime, screen, home]) => this.sendMsg({
             type: 'ui:keyboard:response', sessionId, requestId, keyboard: keyboardStateOf(ime, screen, this.frameTurn(state), home),
           }))

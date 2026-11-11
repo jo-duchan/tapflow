@@ -698,6 +698,17 @@ describe('defaultRange', () => {
       expect(defaultRange(steps)).toEqual({ start: 2, end: 4 })
     })
 
+    it('leaves out a home press on the home screen, and keeps a volume press: it changes the device the flow runs on', () => {
+      const press = (r: Rec, name: string) => r.msg({ type: 'input:button', sessionId: 's', requestId: r.id(), payload: { name } }, true)
+      const r = new Rec().install()
+      press(read(r, HOME), 'home')
+      press(read(r, HOME), 'volume_up')
+      read(read(r, HOME), APP).touch([[0.5, 0.4]])
+      const steps = r.steps()
+      expect(steps.map((s) => (s.kind === 'button' ? s.name : s.kind))).toEqual(['install', 'home', 'volume_up', 'tap'])
+      expect(defaultRange(steps)).toEqual({ start: 2, end: 4 })
+    })
+
     it('keeps a Launch in charge when there is one', () => {
       const r = new Rec().install()
       read(r, HOME).touch([[0.2, 0.3]])
