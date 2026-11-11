@@ -381,7 +381,9 @@ JWT 시크릿은 `getJwtSecret()`으로 **처음 쓸 때** 만든다. `RelayServ
   keyboard**, the last read asked for before its end that could say and the first one asked for after: that screen shows what was just typed, a password's last
   character included, which is the value #1140 keeps out of the record. No read to say (an agent without `keyboard-state`,
   a Mac over its memory line, iOS with the app not in front) is no picture, not a guess. A key inside a typed run keeps
-  none either: its screen shows the run so far.
+  none either: its screen shows the run so far. Nor does an input begun within 2 s of a typed character unless every
+  field read of that run says the field is not secure: a password field can still show the last character (1.5 s on
+  Android).
 
   A stream the relay is forwarding on its own is still never stored.
 - Do not allow session routing without authentication.

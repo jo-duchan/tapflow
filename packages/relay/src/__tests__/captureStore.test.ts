@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, afterEach } from 'vitest'
 import { CaptureStore, FIELD_IDLE_MS, HOME_READ_MS, HOME_READS, KEYBOARD_SETTLE_MS, SNAPSHOT_READ_WAIT_MS, type CapturedMessage, type FieldRead, type Holder } from '../capture/CaptureStore'
-import type { KeyboardState } from '@tapflowio/protocol'
+import type { FocusedField, KeyboardState } from '@tapflowio/protocol'
 import { chromeOrientation } from '@tapflowio/protocol/screen'
 import type { ChromePayload } from '@tapflowio/protocol'
 
@@ -656,7 +656,8 @@ describe('reading the soft keyboard around a person\'s inputs (#1135)', () => {
 describe('CaptureStore — thumbnails', () => {
   const jpeg = (n: number) => Buffer.alloc(n, 1)
   const record = (s: CaptureStore, ...msgs: CapturedMessage[]) => { for (const m of msgs) s.recordInput('s', ALICE, m) }
-  const typed = (requestId: string): CapturedMessage => ({ type: 'input:type', sessionId: 's', requestId, payload: { text: 'x' } })
+  // An input that types nothing, so the moment just after typing never comes into it.
+  const step = (requestId: string): CapturedMessage => ({ type: 'input:button', sessionId: 's', requestId, payload: { name: 'home', phase: 'down' } })
   const key = (requestId: string, code: string): CapturedMessage => ({ type: 'input:key', sessionId: 's', requestId, payload: { code, modifiers: 0 } })
   const touchAt = (requestId: string, y: number): CapturedMessage[] => [
     { type: 'input:touch:start', sessionId: 's', payload: { x: 0.3, y } },
@@ -665,7 +666,7 @@ describe('CaptureStore — thumbnails', () => {
 
   it('keeps one for an input it holds, once, and serves it from the snapshot', () => {
     const { s } = store()
-    record(s, typed('r1'))
+    record(s, step('r1'))
     expect(s.putThumbnail('s', '1', 'nope', jpeg(10))).toBe('unknown-input')
     expect(s.putThumbnail('s', '1', 'r1', jpeg(10))).toBe('kept')
     expect(s.putThumbnail('s', '1', 'r1', jpeg(11))).toBe('exists')
@@ -728,7 +729,7 @@ describe('CaptureStore — thumbnails', () => {
       record(s, launch)
       answers.shift()!({ shown: false })
       await vi.advanceTimersByTimeAsync(10)
-      record(s, typed('x'))
+      record(s, step('x'))
       await vi.advanceTimersByTimeAsync(10)
       record(s, ...touchAt('done', 0.95))
       answers.shift()!(UP)
@@ -758,15 +759,71 @@ describe('CaptureStore — thumbnails', () => {
     })
   })
 
-  it('keeps one for a typed run\'s first key only, whatever the dashboard sends', () => {
-    const { s } = store()
-    record(s, key('a', 'KeyA'), key('caps', 'CapsLock'), key('b', 'KeyB'), key('enter', 'Enter'), key('c', 'KeyC'))
+  const field = (secure: boolean): FocusedField => ({ identifier: secure ? 'password' : 'email', placeholder: '', frame: { x: 0, y: 0, width: 1, height: 1 }, secure })
+
+  it('keeps one for a typed run\'s first key only, whatever the dashboard sends', async () => {
+    const { s, tick } = store({ readField: () => Promise.resolve({ field: field(false) }) })
+    for (const [id, code] of [['a', 'KeyA'], ['caps', 'CapsLock'], ['b', 'KeyB'], ['enter', 'Enter'], ['c', 'KeyC']] as const) {
+      record(s, key(id, code))
+      await Promise.resolve()
+      tick(100)
+    }
     expect(['a', 'caps', 'b', 'enter', 'c'].map((id) => s.putThumbnail('s', '1', id, jpeg(10)))).toEqual(['kept', 'keyboard', 'keyboard', 'kept', 'kept'])
+  })
+
+  // A password field can show the character just typed for 1.5 s: the next input's screen would carry it.
+  describe('just after typing', () => {
+    async function typedInto(secure: boolean | 'unnamed' | null) {
+      vi.useFakeTimers()
+      const { s } = store({
+        now: () => Date.now(),
+        readKeyboard: () => Promise.resolve({ shown: false }),
+        ...(secure === null ? {} : { readField: () => Promise.resolve<FieldRead>(secure === 'unnamed' ? { field: null, reason: 'secure' } : { field: field(secure) }) }),
+      })
+      record(s, key('a', 'KeyA'), key('b', 'KeyB'))
+      await vi.advanceTimersByTimeAsync(500)
+      return s
+    }
+    afterEach(() => vi.useRealTimers())
+
+    it('keeps none from a secure field, or one no read could name', async () => {
+      for (const secure of [true, 'unnamed', null] as const) {
+        const s = await typedInto(secure)
+        record(s, ...touchAt('signIn', 0.2))
+        await vi.advanceTimersByTimeAsync(50)
+        expect(s.putThumbnail('s', '1', 'signIn', jpeg(10))).toBe('typed')
+      }
+    })
+
+    it('keeps one from a field read as not secure, and any once the moment has passed', async () => {
+      const s = await typedInto(false)
+      record(s, ...touchAt('next', 0.2))
+      await vi.advanceTimersByTimeAsync(50)
+      expect(s.putThumbnail('s', '1', 'next', jpeg(10))).toBe('kept')
+      const late = await typedInto(true)
+      await vi.advanceTimersByTimeAsync(2_000)
+      record(late, ...touchAt('later', 0.2))
+      await vi.advanceTimersByTimeAsync(50)
+      expect(late.putThumbnail('s', '1', 'later', jpeg(10))).toBe('kept')
+    })
+
+    it('counts a touch on the soft keyboard as typing', async () => {
+      vi.useFakeTimers()
+      const UP: KeyboardState = { shown: true, rect: { x: 0, y: 0.6, width: 1, height: 0.4 } }
+      const { s } = store({ now: () => Date.now(), readKeyboard: () => Promise.resolve(UP), readField: () => Promise.resolve({ field: field(true) }) })
+      record(s, launch)
+      await vi.advanceTimersByTimeAsync(50)
+      record(s, ...touchAt('key', 0.8))
+      await vi.advanceTimersByTimeAsync(300)
+      record(s, ...touchAt('signIn', 0.2))
+      await vi.advanceTimersByTimeAsync(50)
+      expect(s.putThumbnail('s', '1', 'signIn', jpeg(10))).toBe('typed')
+    })
   })
 
   it('drops the oldest past its own cap, never the record', () => {
     const { s } = store({ maxThumbnailBytes: 25 })
-    record(s, typed('r1'), typed('r2'), typed('r3'))
+    record(s, step('r1'), step('r2'), step('r3'))
     for (const id of ['r1', 'r2', 'r3']) expect(s.putThumbnail('s', '1', id, jpeg(10))).toBe('kept')
     const snap = s.takeSnapshot('s', '1')!
     expect(snap.thumbnails).toEqual(['r2', 'r3'])
@@ -775,22 +832,22 @@ describe('CaptureStore — thumbnails', () => {
 
   it('lets a picture go with the step trimmed off the head, unless the dialog\'s snapshot still shows it', () => {
     const { s } = store({ maxEntries: 8 })
-    record(s, typed('r1'))
+    record(s, step('r1'))
     s.putThumbnail('s', '1', 'r1', jpeg(10))
-    for (let i = 2; i <= 12; i++) record(s, typed(`r${i}`))
+    for (let i = 2; i <= 12; i++) record(s, step(`r${i}`))
     expect(s.takeSnapshot('s', '1')!.thumbnails).not.toContain('r1')
     const { s: s2 } = store({ maxEntries: 8 })
-    record(s2, typed('r1'))
+    record(s2, step('r1'))
     s2.putThumbnail('s', '1', 'r1', jpeg(10))
     s2.takeSnapshot('s', '1')
-    for (let i = 2; i <= 12; i++) record(s2, typed(`r${i}`))
+    for (let i = 2; i <= 12; i++) record(s2, step(`r${i}`))
     expect(s2.thumbnail('s', '1', 'r1')).toEqual(jpeg(10))
   })
 
   // A relay others have filled refuses this one, and leaves this capture's own pictures alone.
   it('keeps none past the relay\'s line, and takes none of the capture\'s own to make room', () => {
     const { s } = store({ maxTotalBytes: 1_500 })
-    record(s, typed('r1'), typed('r2'))
+    record(s, step('r1'), step('r2'))
     expect(s.putThumbnail('s', '1', 'r1', jpeg(500))).toBe('kept')
     expect(s.putThumbnail('s', '1', 'r2', jpeg(2_000))).toBe('full')
     expect(s.takeSnapshot('s', '1')!.thumbnails).toEqual(['r1'])
@@ -798,10 +855,10 @@ describe('CaptureStore — thumbnails', () => {
 
   it('frees everything at the seal', () => {
     const { s } = store({ maxTotalBytes: 2_000 })
-    record(s, typed('r1'))
+    record(s, step('r1'))
     s.putThumbnail('s', '1', 'r1', jpeg(1_000))
     s.seal('s')
-    record(s, typed('r2'))
+    record(s, step('r2'))
     // Only room for this one if the sealed capture's picture was let go.
     expect(s.putThumbnail('s', '1', 'r2', jpeg(1_000))).toBe('kept')
     expect(s.takeSnapshot('s', '1')!.thumbnails).toEqual(['r2'])

@@ -51,6 +51,9 @@ const CHARACTER_KEY = /^(Key[A-Z]|Digit\d|Space|Minus|Equal|BracketLeft|BracketR
 const NOT_TYPING = 0x01 | 0x04 | 0x08
 /** flow-runner's `KEY_RUN_GAP_MS`: a pause this long between two keys starts a new run. */
 const KEY_RUN_GAP_MS = 10_000
+/** How long a password field can show the character just typed: 1.5 s on Android (View's `PasswordTransformationMethod`,
+ *  Compose's `RevealLastTyped`), with room for the stream's lag behind the device. */
+const REVEAL_MS = 2_000
 const continuesRun = (msg: CapturedMessage): boolean => msg.type === 'input:key'
   && ((msg.payload.modifiers ?? 0) & NOT_TYPING) === 0
   && (CHARACTER_KEY.test(msg.payload.code) || msg.payload.code === 'CapsLock')
@@ -64,7 +67,7 @@ function offKeyboard(t: RecordedTouch, keyboard: KeyboardState | undefined): boo
 }
 
 /** Why a thumbnail was not kept, for the route to answer with. */
-export type ThumbnailRefusal = 'no-capture' | 'unknown-input' | 'not-yet' | 'exists' | 'keyboard' | 'full'
+export type ThumbnailRefusal = 'no-capture' | 'unknown-input' | 'not-yet' | 'exists' | 'keyboard' | 'typed' | 'full'
 
 /** Who drives the session the input came through, as the relay recorded it at the join: the declared kind and the
  *  user id. Not protocol's `SessionHolder`, which is a label for people and only ever an AI kind. */
@@ -530,20 +533,8 @@ export class CaptureStore {
     // that does not read the keyboard, a Mac over its memory line, iOS with the app not in front — keeps no picture.
     const touch = capture.touches.get(requestId)
     if (touch) {
-      // Before: the last read asked for before the touch's end that said anything — by when it was asked, not when it
-      // came back, so a read out during the touch counts. One that could not say (Android answers so for a moment after
-      // a launch, measured) is passed over, and none at all is no picture.
-      let before: KeyboardState | undefined
-      for (let i = capture.entries.length - 1; i >= 0 && !before; i--) {
-        const e = capture.entries[i]!
-        if (e.kind === 'keyboard' && e.requestedAt < touch.at && e.keyboard.shown !== null) before = e.keyboard
-      }
-      if (!offKeyboard(touch, before)) return 'keyboard'
-      // And after: the read before can be stale — a keyboard sliding up reads as down (measured: a first key kept) — so
-      // the read the touch itself asked for decides too. The picture can beat that read here: asked for again.
-      const after = capture.entries.find((e): e is Extract<CaptureEntry, { kind: 'keyboard' }> => e.kind === 'keyboard' && e.requestedAt >= touch.at)
-      if (!after) return 'not-yet'
-      if (!offKeyboard(touch, after.keyboard)) return 'keyboard'
+      const keys = this.touchOnKeys(capture, touch)
+      if (keys !== 'off') return keys === 'on' ? 'keyboard' : 'not-yet'
     }
     // A key inside a typed run is not where the run's step begins, and its screen shows the run so far: only the run's
     // first key keeps one, whatever the dashboard sent.
@@ -555,6 +546,36 @@ export class CaptureStore {
         if (continuesRun(e.msg) && entry.at - e.at <= KEY_RUN_GAP_MS) return 'keyboard'
         break
       }
+    }
+    // Just after typing, a password field can still show the last character. So an input begun within `REVEAL_MS` of a
+    // typed character keeps its picture only when every read of the field from that run on says it is not secure, and
+    // there is one: Email to Password keeps its pictures, Password to Sign in does not.
+    let startedAt = entry.at
+    let i = at - 1
+    if (touch) {
+      for (; i >= 0; i--) {
+        const e = capture.entries[i]!
+        if (e.kind === 'input' && e.msg.type === 'input:touch:start') { startedAt = e.at; i--; break }
+      }
+    }
+    let typedAt: number | undefined
+    for (; i >= 0 && typedAt === undefined; i--) {
+      const e = capture.entries[i]!
+      if (e.kind !== 'input') continue
+      if (e.at < startedAt - REVEAL_MS) break
+      if (this.typed(capture, e.msg)) typedAt = e.at
+    }
+    if (typedAt !== undefined) {
+      // Where that run began: its focus read is asked for at its first key.
+      let runStart = typedAt
+      for (; i >= 0; i--) {
+        const e = capture.entries[i]!
+        if (e.kind !== 'input') continue
+        if (!this.typed(capture, e.msg) || runStart - e.at > KEY_RUN_GAP_MS) break
+        runStart = e.at
+      }
+      const reads = capture.entries.filter((e): e is Extract<CaptureEntry, { kind: 'field' }> => e.kind === 'field' && e.requestedAt >= runStart && e.requestedAt < startedAt)
+      if (reads.length === 0 || reads.some((r) => r.field?.secure !== false)) return 'typed'
     }
     // Room only from this capture's own older pictures, and only past its own cap: room the relay as a whole lacks is
     // other captures', and taking this one's pictures would not make it.
@@ -580,6 +601,32 @@ export class CaptureStore {
     if (!capture?.snapshot) return null
     const inSnapshot = capture.snapshot.entries.some((e) => e.kind === 'input' && 'requestId' in e.msg && e.msg.requestId === requestId)
     return inSnapshot ? capture.thumbnails.get(requestId) ?? null : null
+  }
+
+  /**
+   * Whether the reads place a touch on the soft keyboard: before it, the last read asked for before its end that said
+   * anything — by when it was asked, not when it came back, so a read out during the touch counts; one that could not
+   * say (Android answers so for a moment after a launch, measured) is passed over, and none at all is `on`. After it,
+   * the first read it asked for, because the read before can be stale — a keyboard sliding up reads as down (measured:
+   * a first key kept). `not-yet` until that read is back: the picture can beat it, and is asked for again.
+   */
+  private touchOnKeys(capture: Capture, touch: RecordedTouch): 'off' | 'on' | 'not-yet' {
+    let before: KeyboardState | undefined
+    for (let i = capture.entries.length - 1; i >= 0 && !before; i--) {
+      const e = capture.entries[i]!
+      if (e.kind === 'keyboard' && e.requestedAt < touch.at && e.keyboard.shown !== null) before = e.keyboard
+    }
+    if (!offKeyboard(touch, before)) return 'on'
+    const after = capture.entries.find((e): e is Extract<CaptureEntry, { kind: 'keyboard' }> => e.kind === 'keyboard' && e.requestedAt >= touch.at)
+    if (!after) return 'not-yet'
+    return offKeyboard(touch, after.keyboard) ? 'off' : 'on'
+  }
+
+  /** Whether an input typed a character: a key that does, text typed, or a touch not shown to be off the keyboard. */
+  private typed(capture: Capture, msg: CapturedMessage): boolean {
+    if (continuesRun(msg) || msg.type === 'input:type') return true
+    const touch = msg.type === 'input:touch:end' && msg.requestId ? capture.touches.get(msg.requestId) : undefined
+    return touch !== undefined && this.touchOnKeys(capture, touch) !== 'off'
   }
 
   private dropThumbnail(capture: Capture, requestId: string, jpeg: Buffer): void {
