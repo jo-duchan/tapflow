@@ -24,7 +24,7 @@
     "@tapflowio/ios-agent": "workspace:*",
     "@tapflowio/protocol": "workspace:^",
     "@tapflowio/relay": "workspace:*",
-    "ws": "^8.22.1"
+    "ws": "^8.22.2"
   },
   "devDependencies": {
     "concurrently": "^9.2.5",
