@@ -1934,7 +1934,8 @@ export class RelayServer {
         if (session && (msg.type === 'input:done' || msg.type === 'input:error' || msg.type === 'input:type-done' || msg.type === 'input:type-error')) {
           this.captures.recordAck(session.id, captureHolder(session), msg.requestId, msg.type.endsWith('-done') || msg.type === 'input:done')
         }
-        if (session && (msg.type === 'app:install-done' || msg.type === 'app:launch-done' || msg.type === 'app:clear-state-done')) {
+        // A failed install counts too: iOS removes the old app first, so the screen it leaves is the home screen.
+        if (session && (msg.type === 'app:install-done' || msg.type === 'app:install-error' || msg.type === 'app:launch-done' || msg.type === 'app:clear-state-done')) {
           this.captures.noteAppDone(session.id, captureHolder(session), msg.requestId)
         }
         if (session && (msg.type === 'app:install-done' || msg.type === 'app:install-error')) {

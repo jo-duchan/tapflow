@@ -547,6 +547,14 @@ describe('reading the soft keyboard around a person\'s inputs (#1135)', () => {
     expect(asked).toHaveLength(before)
   })
 
+  it('stops reading a screen that keeps flipping between home and an app', async () => {
+    let n = 0
+    const { s, asked, wait } = keyboardStore(() => (n++ % 2 ? { shown: false, onHome: false } : { shown: false, onHome: true }))
+    s.recordInput('s', ALICE, launch)
+    await wait(HOME_READS * (HOME_READ_MS + 30) * 4)
+    expect(asked.length).toBeLessThanOrEqual(HOME_READS + 4)
+  })
+
   it('stops reading a home screen nobody leaves', async () => {
     const { s, asked, wait } = keyboardStore(() => ({ shown: false, onHome: true }))
     s.recordInput('s', ALICE, launch)

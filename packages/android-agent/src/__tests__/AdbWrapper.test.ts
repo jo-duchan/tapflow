@@ -1165,15 +1165,44 @@ describe('parseHomePackage', () => {
     expect(exec).toHaveBeenCalledTimes(2)
   })
 
-  it('asks again once the serial is another emulator\'s', async () => {
+  // A serial is reused by whichever emulator comes up next, and that one may have another launcher. Each way the agent
+  // learns a serial's new owner is tested alone, since any one of them clearing the cache would hide another that does not.
+  const NEXUS = 'x\ncom.google.android.apps.nexuslauncher/.NexusLauncherActivity\n'
+  const LAUNCHER3 = 'x\ncom.android.launcher3/.uioverlays.QuickstepLauncher\n'
+
+  it('asks again once tapflow boots another emulator on the serial', async () => {
     const { AdbWrapper } = await import('../AdbWrapper')
-    const exec = vi.fn().mockResolvedValueOnce('x\ncom.google.android.apps.nexuslauncher/.NexusLauncherActivity\n')
-      .mockResolvedValueOnce('x\ncom.android.launcher3/.uioverlays.QuickstepLauncher\n')
+    const exec = vi.fn().mockResolvedValueOnce(NEXUS).mockResolvedValueOnce(LAUNCHER3)
+    const adb = new AdbWrapper({ exec, execBinary: vi.fn(), listAvds: vi.fn(async () => []) } as AdbRunner)
+    adb.setSerial('avd:Pixel_9', 'emulator-5554')
+    expect(await adb.homePackage('emulator-5554')).toBe('com.google.android.apps.nexuslauncher')
+    adb.setSerial('avd:Other', 'emulator-5554')
+    expect(await adb.homePackage('emulator-5554')).toBe('com.android.launcher3')
+  })
+
+  it('asks again once the serial is let go', async () => {
+    const { AdbWrapper } = await import('../AdbWrapper')
+    const exec = vi.fn().mockResolvedValueOnce(NEXUS).mockResolvedValueOnce(LAUNCHER3)
     const adb = new AdbWrapper({ exec, execBinary: vi.fn(), listAvds: vi.fn(async () => []) } as AdbRunner)
     adb.setSerial('avd:Pixel_9', 'emulator-5554')
     expect(await adb.homePackage('emulator-5554')).toBe('com.google.android.apps.nexuslauncher')
     adb.clearSerial('avd:Pixel_9')
-    adb.setSerial('avd:Other', 'emulator-5554')
+    expect(await adb.homePackage('emulator-5554')).toBe('com.android.launcher3')
+  })
+
+  it('asks again once the device list finds another emulator on the serial', async () => {
+    const { AdbWrapper } = await import('../AdbWrapper')
+    let avd = 'Pixel_9'
+    const exec = vi.fn(async (...args: string[]) => {
+      if (args[0] === 'devices') return 'List of devices attached\nemulator-5554\tdevice\n'
+      if (args.includes('emu')) return `${avd}\nOK\n`
+      return avd === 'Pixel_9' ? NEXUS : LAUNCHER3
+    })
+    const adb = new AdbWrapper({ exec, execBinary: vi.fn(), listAvds: vi.fn(async () => ['Pixel_9', 'Other']) } as AdbRunner)
+    await adb.listDevices()
+    expect(await adb.homePackage('emulator-5554')).toBe('com.google.android.apps.nexuslauncher')
+    avd = 'Other'
+    await adb.listDevices()
     expect(await adb.homePackage('emulator-5554')).toBe('com.android.launcher3')
   })
 })

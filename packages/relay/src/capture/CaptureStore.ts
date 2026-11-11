@@ -109,6 +109,9 @@ interface KeyboardProbe {
   again: boolean
   settleTimer: ReturnType<typeof setTimeout> | null
   settleTries: number
+  /** The app came up since the last input, and its keyboard was given fresh reads: once per input, so a screen that
+   *  keeps flipping between home and app cannot keep the reads going. */
+  leftHome?: boolean
   last?: KeyboardState
   tap?: { x: number; y: number; frame: boolean; keyboard: KeyboardState | undefined }
 }
@@ -251,6 +254,7 @@ export class CaptureStore {
     if (probe.settleTimer) clearTimeout(probe.settleTimer)
     probe.settleTimer = null
     probe.settleTries = 0
+    probe.leftHome = false
     if (probe.inFlight) probe.again = true
     else this.probeKeyboard(sessionId, probe, false)
   }
@@ -269,7 +273,10 @@ export class CaptureStore {
       const settled = settling && !probe.again && sameKeyboard(probe.last, keyboard)
       this.append(capture, { at: this.now(), kind: 'keyboard', requestedAt, keyboard, settled })
       // The app came up: its keyboard gets the usual reads to settle, which the home screen's had used up.
-      if (probe.last?.onHome === true && keyboard.onHome !== true) probe.settleTries = 0
+      if (probe.last?.onHome === true && keyboard.onHome !== true && !probe.leftHome) {
+        probe.settleTries = 0
+        probe.leftHome = true
+      }
       probe.last = keyboard
       if (probe.again) {
         probe.again = false

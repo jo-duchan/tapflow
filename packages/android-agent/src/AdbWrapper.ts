@@ -124,15 +124,18 @@ export class AdbWrapper {
       this.getBootedAvdMap(),
     ])
 
-    // Sync serial map
+    // Sync serial map. An emulator started outside tapflow takes a serial another had, launcher and all, and reaches
+    // the map only here: the home package read for the serial goes with the binding it was read under.
     for (const [serial, avdName] of bootedMap) {
+      if (this.serialMap.get(`avd:${avdName}`) !== serial) this.homePackages.delete(serial)
       this.serialMap.set(`avd:${avdName}`, serial)
     }
     // Remove stale serials (emulator was killed externally)
     const bootedAvdNames = new Set(bootedMap.values())
-    for (const [avdId] of this.serialMap) {
+    for (const [avdId, serial] of this.serialMap) {
       if (!bootedAvdNames.has(avdId.replace('avd:', ''))) {
         this.serialMap.delete(avdId)
+        this.homePackages.delete(serial)
       }
     }
 
