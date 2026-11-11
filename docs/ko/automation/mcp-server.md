@@ -132,7 +132,7 @@ MCP를 지원하는 클라이언트라면 모두 tapflow를 사용할 수 있습
 | `shutdown_device` | 기기 전원 종료 (리소스 반납·다음 콜드 부팅 강제) |
 | `screenshot` | 현재 화면 캡처 (PNG, iOS는 요청 시 JPEG) |
 | `query_ui_tree` | 화면 UI를 구조화된 접근성 트리로 조회 (role·label·identifier·frame) |
-| `tap` | 좌표 터치. `holdMs`를 주면 그 시간 동안 누른 채로 유지(길게 누르기). Android adb fallback에서는 최신 에이전트가 필요합니다. [요소 길게 누르기](/ko/automation/flows#holding-an-element)를 보세요 |
+| `tap` | `element`(`query_ui_tree`의 identifier나 label)를 주면 기기가 그 요소에 닿는다고 답한 지점을 누릅니다. 탭 바나 시트가 frame 중앙을 가려도 요소를 누릅니다. 요소 자체가 가려져 있으면 무엇에 가렸는지 알리며 실패합니다. 트리에 이름이 없는 곳은 스크린샷 좌표로 누릅니다. `holdMs`를 주면 그 시간 동안 누른 채로 유지(길게 누르기). Android adb fallback에서는 최신 에이전트가 필요합니다. [요소 길게 누르기](/ko/automation/flows#holding-an-element)를 보세요 |
 | `swipe` | 스와이프 |
 | `type_text` | 텍스트 입력 |
 | `press_key` | 키보드 키 입력 |

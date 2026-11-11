@@ -393,20 +393,37 @@ async function touchPoint(
     return centre(el)
   }
   let last: [number, number] | undefined
+  // The last answer that left the centre unsafe: covered, off the screen, not where it was read, or reached only away
+  // from the centre (the centre is then not what the touch reaches). Once the device has said so, its going quiet (a
+  // reach cut off, an answer it could not give) is no licence to touch the centre: the step asks until its deadline,
+  // then fails on that answer. Only an answer that reaches the element at its centre clears it.
+  let lastBlocked: ReachResult | undefined
+  const quietFailure = (b: ReachResult): StepFailure => new StepFailure(b.state === 'reachable'
+    ? `${describeSelector(sel)} is reached only away from its centre, and the device stopped answering before that point could be confirmed`
+    : blocked(b))
   for (;;) {
     let r: ReachResult | undefined
     try {
-      [r] = await driver.reach([el])
+      // Bounded by the selector's deadline, or an agent that never answers holds the step for the relay's whole reach
+      // deadline (15 s and more) after the selector's ran out; never under REACH_FLOOR_MS, or an element that showed up
+      // late would be left no time to be asked and tapped unchecked.
+      [r] = await driver.reach([el], AbortSignal.timeout(Math.max(REACH_FLOOR_MS, deadline - Date.now())))
     } catch (e) {
       // A blip between here and the agent (a 502 while it reconnects, a 504) is polled past, as a tree read's is; one
       // that lasts to the deadline leaves the device unable to judge, and the touch goes where it went before reach.
       if (!(e instanceof TransientQueryError)) throw e
       if (Date.now() >= deadline) {
+        if (lastBlocked) throw quietFailure(lastBlocked)
         report.reach = 'unchecked'
         report.reachNote = `the device did not say where a touch lands: ${e.message}`
         report.touched = el
         return centre(el)
       }
+      await delay(Math.min(pollIntervalMs, Math.max(0, deadline - Date.now())))
+      continue
+    }
+    if ((!r || r.state === 'unknown') && lastBlocked) {
+      if (Date.now() >= deadline) throw quietFailure(lastBlocked)
       await delay(Math.min(pollIntervalMs, Math.max(0, deadline - Date.now())))
       continue
     }
@@ -423,8 +440,10 @@ async function touchPoint(
         return [round4(r.point[0]), round4(r.point[1])]
       }
       last = r.point
+      lastBlocked = r.atCentre ? undefined : r
     } else {
       last = undefined
+      lastBlocked = r
     }
     if (Date.now() >= deadline) throw new StepFailure(blocked(r))
     await delay(Math.min(pollIntervalMs, Math.max(0, deadline - Date.now())))
@@ -703,6 +722,8 @@ const SPANS_SCROLL_AXIS: Record<ScrollDirection, (f: UIElement['frame']) => bool
 const SETTLE_MATCH_MS = 2_000
 /** How near two reach answers must be to count as the same point: under one thousandth of the screen. */
 const REACH_AGREE = 0.001
+/** The least a reach is given, however little of the selector's deadline is left: one takes 130–230 ms on iOS (measured). */
+const REACH_FLOOR_MS = 2_000
 /** The most targets one reach carries: the relay's limit (`MAX_TARGETS` in relay's `lib/reach.ts`). */
 const MAX_REACH_TARGETS = 64
 

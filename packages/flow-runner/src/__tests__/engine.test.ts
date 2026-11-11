@@ -243,6 +243,56 @@ describe('runFlow — where a touch on an element lands', () => {
     expect(late.steps[0]).toMatchObject({ status: 'passed', reach: 'unchecked', reachNote: 'the device did not say where a touch lands: reach query failed: 502' })
   })
 
+  // Review of #1147: an agent that never answers held the step for the relay's whole reach deadline (15 s and more).
+  it('gives up on a reach the device never answers at the selector\'s deadline, and taps the centre unchecked', async () => {
+    const driver = withReach(reachable([0.1, 0.885]))
+    driver.reach = vi.fn((_targets: UIElement[], signal?: AbortSignal) => new Promise<ReachResult[]>((_, reject) => {
+      signal?.addEventListener('abort', () => reject(new TransientQueryError('reach query failed: aborted')))
+    }))
+    const started = Date.now()
+    const result = await runFlow(flowOf('steps:\n  - tapOn: "Row 13"\n'), driver, { ...OPTS, defaultTimeoutMs: 500 })
+    expect(result.steps[0]).toMatchObject({ status: 'passed', reach: 'unchecked' })
+    expect(driver.calls).toEqual([['tap', 0.5, 0.909]])
+    // Not under the floor that leaves a late element time to be asked, and nowhere near the relay's own deadline.
+    expect(Date.now() - started).toBeGreaterThanOrEqual(1_900)
+    expect(Date.now() - started).toBeLessThan(5_000)
+  }, 10_000)
+
+  // Review of #1152: a device that said the row was covered and then went quiet had the covered centre tapped.
+  it('does not tap a centre the device said was covered when it then cannot answer', async () => {
+    for (const quiet of [
+      async () => { throw new TransientQueryError('reach query failed: aborted') },
+      async () => [{ state: 'unknown', reason: 'no answer' } as ReachResult],
+    ]) {
+      const driver = withReach(reachable([0.1, 0.885]))
+      let calls = 0
+      driver.reach = vi.fn(async () => (calls++ === 0 ? [{ state: 'occluded', by: 'Button Hard' } as ReachResult] : quiet()))
+      const result = await runFlow(flowOf('steps:\n  - tapOn: "Row 13"\n'), driver, { ...OPTS, defaultTimeoutMs: 500 })
+      expect(result.steps[0]).toMatchObject({ status: 'failed' })
+      expect(result.steps[0]!.message).toContain('covered by Button Hard')
+      expect(result.failureKind).toBe('product')
+      expect(driver.calls).toEqual([])
+    }
+  })
+
+  // Review of #1152: one point reached away from the centre does not make the centre safe to tap when the device then
+  // goes quiet; one reached at the centre does.
+  it('does not tap the centre after a point reached only away from it, and does after one at it', async () => {
+    const offCentre = withReach(reachable([0.1, 0.885]))
+    let n = 0
+    offCentre.reach = vi.fn(async () => [n++ === 0 ? { state: 'occluded', by: 'Button Hard' } as ReachResult : n === 2 ? reachable([0.1, 0.885]) : { state: 'unknown', reason: 'no answer' } as ReachResult])
+    const failed = await runFlow(flowOf('steps:\n  - tapOn: "Row 13"\n'), offCentre, { ...OPTS, defaultTimeoutMs: 500 })
+    expect(failed.steps[0]).toMatchObject({ status: 'failed' })
+    expect(failed.steps[0]!.message).toContain('reached only away from its centre')
+    expect(offCentre.calls).toEqual([])
+    const atCentre = withReach(reachable([0.5, 0.909]))
+    let m = 0
+    atCentre.reach = vi.fn(async () => [m++ === 0 ? reachable([0.5, 0.909], true) : { state: 'unknown', reason: 'no answer' } as ReachResult])
+    const passed = await runFlow(flowOf('steps:\n  - tapOn: "Row 13"\n'), atCentre, { ...OPTS, defaultTimeoutMs: 500 })
+    expect(passed.steps[0]).toMatchObject({ status: 'passed', reach: 'unchecked' })
+    expect(atCentre.calls).toEqual([['tap', 0.5, 0.909]])
+  })
+
   it('reads again while it is covered, and taps once it is not', async () => {
     const driver = withReach({ state: 'occluded', by: 'Button Hard' }, reachable([0.5, 0.86]), reachable([0.5, 0.86]))
     const result = await runFlow(flowOf('steps:\n  - tapOn: "Row 13"\n'), driver, { ...OPTS, defaultTimeoutMs: 1000 })
