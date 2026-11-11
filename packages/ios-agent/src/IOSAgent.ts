@@ -296,15 +296,15 @@ export class IOSAgent implements DeviceAgent, NetworkControlCapability, Posturab
    *
    *  Typed with `AgentControlOutbound`, which is why this exists — an agent's literal used to reach `ws.send`
    *  with nothing checking it, and #489/#490 are what that cost. *
-   *  **The guard is not defensive tidying.** `ws.send` on anything other than OPEN takes the `sendAfterClose`
-   *  path, which adds the payload to a buffer nobody will flush and neither throws nor emits — so a reply
-   *  sent to a closing socket is indistinguishable from a delivered one at the call site. `reportResources`
-   *  has always checked; this did not, and the boot answers this file now owes a caller are exactly the
-   *  messages whose purpose is to end someone's wait.
-   *
-   *  The body is held character for character by `scripts/__tests__/agentSendTyped.test.mjs`, so the comment
-   *  lives out here: that check strips comments and matches the body exactly, having watched three earlier
-   *  drafts get bypassed by a renamed socket. */
+ *  **The guard is not defensive tidying.** `ws.send` on anything other than OPEN takes the `sendAfterClose`
+ *  path, which adds the payload to a buffer nobody will flush and neither throws nor emits — so a reply
+ *  sent to a closing socket is indistinguishable from a delivered one at the call site. `reportResources`
+ *  has always checked; this did not, and the boot answers this file now owes a caller are exactly the
+ *  messages whose purpose is to end someone's wait.
+ *
+ *  The body is held character for character by `scripts/__tests__/agentSendTyped.test.mjs`, so the comment
+ *  lives out here: that check strips comments and matches the body exactly, having watched three earlier
+ *  drafts get bypassed by a renamed socket. */
   private sendMsg(msg: AgentControlOutbound): void {
     if (this.ws?.readyState !== WebSocket.OPEN) return
     this.ws.send(JSON.stringify(msg))
@@ -638,11 +638,7 @@ export class IOSAgent implements DeviceAgent, NetworkControlCapability, Posturab
       await this.simctl.formFactorsByType().then(
         (map) => { this.formFactors = map },
         (e: unknown) => {
-          logger.warn(
-            `device types unavailable, registering with the last known form factors: ${
-              e instanceof Error ? e.message : String(e)
-            }`
-          )
+          logger.warn(`device types unavailable, registering with the last known form factors: ${e instanceof Error ? e.message : String(e)}`)
         },
       )
     }
@@ -656,11 +652,7 @@ export class IOSAgent implements DeviceAgent, NetworkControlCapability, Posturab
         .then(() => this.simctl.integratedPanelCounts(ask))
         .then(
           (counts) => { for (const [type, n] of counts) this.panelCounts.set(type, n) },
-          (e: unknown) => logger.warn(
-              `could not read the devices' panels, keeping the last answer: ${
-                e instanceof Error ? e.message : String(e)
-              }`
-            ),
+          (e: unknown) => logger.warn(`could not read the devices' panels, keeping the last answer: ${e instanceof Error ? e.message : String(e)}`),
         )
     }
     const multiPanel = allDevices.filter((d) => d.typeId && (this.panelCounts.get(d.typeId) ?? 1) > 1).map((d) => d.id)
@@ -794,10 +786,8 @@ export class IOSAgent implements DeviceAgent, NetworkControlCapability, Posturab
     const delay = delays[Math.min(this._reconnectAttempt, delays.length - 1)]
     this._reconnectAttempt++
     logger.warn(loss
-      ? `relay disconnected (${describeRelayLoss(loss)}) — reconnecting in ${delay / 1000}s (attempt ${
-            this._reconnectAttempt
-          })`
-        : `reconnecting in ${delay / 1000}s (attempt ${this._reconnectAttempt})`)
+      ? `relay disconnected (${describeRelayLoss(loss)}) — reconnecting in ${delay / 1000}s (attempt ${this._reconnectAttempt})`
+      : `reconnecting in ${delay / 1000}s (attempt ${this._reconnectAttempt})`)
 
     this._reconnectTimer = setTimeout(() => {
       this._reconnectTimer = null
@@ -980,9 +970,7 @@ export class IOSAgent implements DeviceAgent, NetworkControlCapability, Posturab
       ? setInterval(() => {
           const s = metrics.sample()
           logger.info(
-            `stream metrics [${state.deviceId}] ${s.fpsSent}fps ${s.kbPerSec}KB/s avg=${s.avgFrameKB}KB drop=${(
-              s.dropRate * 100
-            ).toFixed(1)}% (${s.droppedFrames}/${s.producedFrames})`
+            `stream metrics [${state.deviceId}] ${s.fpsSent}fps ${s.kbPerSec}KB/s avg=${s.avgFrameKB}KB drop=${(s.dropRate * 100).toFixed(1)}% (${s.droppedFrames}/${s.producedFrames})`,
           )
         }, 5000)
       : undefined
@@ -1399,11 +1387,7 @@ export class IOSAgent implements DeviceAgent, NetworkControlCapability, Posturab
     const tier = requested ?? this.defaultTier()
     try {
       if (!leanSupported(device.osVersion)) {
-        if (tier.name !== 'stock') logger.info(
-            `Service tier: ${tier.name} not applied to ${device.name} (${
-              device.osVersion ?? 'unknown runtime'
-            }) — iOS 18.5 or later only`
-          )
+        if (tier.name !== 'stock') logger.info(`Service tier: ${tier.name} not applied to ${device.name} (${device.osVersion ?? 'unknown runtime'}) — iOS 18.5 or later only`)
         return
       }
       this.leanStore.setTier(device.id, tier, labelsFor(tier))
@@ -1562,7 +1546,7 @@ export class IOSAgent implements DeviceAgent, NetworkControlCapability, Posturab
     let limit: ReturnType<typeof setTimeout> | undefined
     const started = Date.now()
     const outcome = await Promise.race([
-      channel.whenReady().then((ready) => (ready ? ('ready' as const) : ('stopped' as const))),
+      channel.whenReady().then((ready) => (ready ? 'ready' as const : 'stopped' as const)),
       new Promise<'timeout'>((resolve) => { limit = setTimeout(() => resolve('timeout'), this.touchReadyWaitMs) }),
     ]).finally(() => clearTimeout(limit))
     if (outcome === 'ready') logger.info(`touch input ready ${Date.now() - started}ms into the wait`)
@@ -1840,17 +1824,13 @@ export class IOSAgent implements DeviceAgent, NetworkControlCapability, Posturab
     if (!guest || !held) { logger.warn(`rotate ${deviceId}: ${guest ? 'its orientation could not be read' : 'no helper'}, not turning`); return }
     const landscape = held === 'landscapeLeft' || held === 'landscapeRight'
     const want: DeviceOrientation | null = direction ? turned(held, direction)
-      : target === 'portrait' ? held === 'portrait' ? null : 'portrait'
-      : target === 'landscape' ? landscape ? null : 'landscapeRight'
-      : landscape ? 'portrait' : 'landscapeRight'
+      : target === 'portrait' ? (held === 'portrait' ? null : 'portrait')
+      : target === 'landscape' ? (landscape ? null : 'landscapeRight')
+      : (landscape ? 'portrait' : 'landscapeRight')
     if (!want) return
     if (!(await guest.orient(ORIENT_LABELS[want]))) { logger.warn(`rotate ${deviceId}: the helper did not take ${want}`); return }
     if (!(await this.physical.await(deviceId, (o) => o === want, ROTATE_SETTLE_MS))) {
-      logger.warn(
-        `rotate ${deviceId}: asked for ${want}, still ${
-          this.physical.last(deviceId) ?? 'unread'
-        } after ${ROTATE_SETTLE_MS}ms`
-      )
+      logger.warn(`rotate ${deviceId}: asked for ${want}, still ${this.physical.last(deviceId) ?? 'unread'} after ${ROTATE_SETTLE_MS}ms`)
     }
   }
 
@@ -1880,20 +1860,16 @@ export class IOSAgent implements DeviceAgent, NetworkControlCapability, Posturab
   private async turnSingle(deviceId: string, direction?: 'clockwise' | 'counterclockwise', target?: 'portrait' | 'landscape'): Promise<void> {
     const held = (await this.heldSingle(deviceId)) ?? (await this.standUp(deviceId))
     const want: DeviceOrientation | null = direction ? turned(held, direction)
-      : target === 'portrait' ? held === 'portrait' ? null : 'portrait'
-      : target === 'landscape' ? held === 'landscapeLeft' ? null : 'landscapeLeft'
-      : held === 'portrait' ? 'landscapeLeft' : 'portrait'
+      : target === 'portrait' ? (held === 'portrait' ? null : 'portrait')
+      : target === 'landscape' ? (held === 'landscapeLeft' ? null : 'landscapeLeft')
+      : (held === 'portrait' ? 'landscapeLeft' : 'portrait')
     if (!want) return
     await this.simctl.rotate(deviceId, PURPLE_ARGS[want])
     // Read back once; a host that cannot read at all remembers what it set instead of waiting out the settle.
     const back = await this.physical.read(deviceId)
     if (!back) { this.physical.note(deviceId, want); return }
     if (back !== want && !(await this.physical.await(deviceId, (o) => o === want, ROTATE_SETTLE_MS))) {
-      logger.warn(
-        `rotate ${deviceId}: asked for ${want}, still ${
-          this.physical.last(deviceId) ?? 'unread'
-        } after ${ROTATE_SETTLE_MS}ms`
-      )
+      logger.warn(`rotate ${deviceId}: asked for ${want}, still ${this.physical.last(deviceId) ?? 'unread'} after ${ROTATE_SETTLE_MS}ms`)
     }
   }
 
@@ -2044,7 +2020,7 @@ export class IOSAgent implements DeviceAgent, NetworkControlCapability, Posturab
   private async ackInput(state: DeviceState, outcome: 'delivered' | InputErrorReason, requestId: string): Promise<void> {
     const reason: InputErrorReason | null = outcome !== 'delivered'
       ? outcome
-      : state.booted || (await this.isBooted(state.deviceId)) ? null : 'not-booted'
+      : (state.booted || (await this.isBooted(state.deviceId))) ? null : 'not-booted'
     if (reason === null) state.booted = true // cache the post-reconnect verify so later inputs skip simctl
     this.sendMsg(
       reason === null
@@ -2274,8 +2250,7 @@ export class IOSAgent implements DeviceAgent, NetworkControlCapability, Posturab
         // dashboard's. The memory is read when the step runs, not when it was queued, and written only
         // once the simulator took it: a step queued behind another toggles from what that one applied.
         const sessionId = msg.sessionId
-        const payload = msg.payload as
-          | { orientation?: 'portrait' | 'landscape'; direction?: 'clockwise' | 'counterclockwise' } | undefined
+        const payload = msg.payload as { orientation?: 'portrait' | 'landscape'; direction?: 'clockwise' | 'counterclockwise' } | undefined
         const target = payload?.orientation
         void this.enqueueRotation(state.deviceId, async () => {
           const live = this.deviceStates.get(sessionId) ?? state
@@ -2910,7 +2885,7 @@ export class IOSAgent implements DeviceAgent, NetworkControlCapability, Posturab
     }
 
     const entries = fs.readdirSync(outDir)
-    const appDir = entries.find((e) => e.endsWith('.app') && fs.statSync(path.join(outDir, e)).isDirectory())
+    const appDir = entries.find(e => e.endsWith('.app') && fs.statSync(path.join(outDir, e)).isDirectory())
     if (!appDir) {
       throw new ValidationError('.app 디렉토리를 찾을 수 없습니다. iphonesimulator 로 빌드한 .app 을 .app.zip 또는 .tar.gz 로 업로드하세요.')
     }

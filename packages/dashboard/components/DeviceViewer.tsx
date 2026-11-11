@@ -4,7 +4,7 @@ import { skeletonSize } from '@/lib/deviceSkeleton';
 import { framelessChrome } from '@/lib/framelessChrome';
 import { appendAppLogText } from '@/lib/appLogs';
 
-import type { BootRefusalReason, BrowserToRelay, FormFactor, SessionTerminatedReason } from '@tapflowio/protocol';
+import type { BootRefusalReason, BrowserToRelay, FormFactor, SessionTerminatedReason } from '@tapflowio/protocol'
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { useRelay } from '@/hooks/useRelay';
 import { usePerfMode } from '@/hooks/usePerfMode';

@@ -38,9 +38,9 @@ interface AndroidViewerProps {
   /** Mints and records the correlation id, then sends — the viewer above consumes the reply. */
   launchApp: () => void;
   connected: boolean;
-  joined: boolean
-  appLogText: string
-  appLogsSupported: boolean
+  joined: boolean;
+  appLogText: string;
+  appLogsSupported: boolean;
   deviceReady: boolean;
   installing: boolean;
   installed: boolean;
@@ -567,19 +567,12 @@ export function AndroidViewer({
   const DEVICE_BUTTONS = ['volume_up', 'volume_down', 'power'] as const;
 
   const buttonIcon = (name: string) =>
-    name === 'back' ? (
-      <ArrowLeft className="h-4 w-4" />
-    ) : name === 'recent_apps' ? (
-      <LayoutGrid className="h-4 w-4" />
-    ) : name === 'volume_up' ? (
-      <Volume2 className="h-4 w-4" />
-    ) : name === 'volume_down' ? (
-      <Volume1 className="h-4 w-4" />
-    ) : name === 'power' ? (
-      <Power className="h-4 w-4" />
-    ) : (
-      <Home className="h-4 w-4" />
-    )
+    name === 'back' ? <ArrowLeft className="h-4 w-4" />
+      : name === 'recent_apps' ? <LayoutGrid className="h-4 w-4" />
+      : name === 'volume_up' ? <Volume2 className="h-4 w-4" />
+      : name === 'volume_down' ? <Volume1 className="h-4 w-4" />
+      : name === 'power' ? <Power className="h-4 w-4" />
+      : <Home className="h-4 w-4" />;
 
   const buttonsIn = (order: readonly string[]) => (
     <>

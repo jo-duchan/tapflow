@@ -6,7 +6,7 @@ import { cn } from '@/lib/utils';
 import { performanceMode } from '@/lib/decoders/pickDecoder';
 import { PerformanceModeNotice } from '@/components/perf/PerformanceModeNotice';
 import { shouldAutoShowPerfNotice, PERF_NOTICE_KEY } from '@/lib/perfNotice';
-import type { BootRefusalReason } from '@tapflowio/protocol'
+import type { BootRefusalReason } from '@tapflowio/protocol';
 import { AppLogViewer } from './AppLogViewer'
 
 // init wizard와 같은 프로파일 용어로 — 디코더 jargon(WebCodecs/WASM) 대신.
@@ -18,9 +18,9 @@ const MODE_LABEL: Record<string, string | null> = {
 
 interface SimulatorInfoCardProps {
   joined: boolean;
-  fps: number
-  appLogText?: string
-  appLogsSupported?: boolean
+  fps: number;
+  appLogText?: string;
+  appLogsSupported?: boolean;
   connected: boolean;
   deviceReady: boolean;
   bootError: string | null;
@@ -175,7 +175,9 @@ export function SimulatorInfoCard(props: SimulatorInfoCardProps) {
           An automated run started this device with most background services off, apart from any it asked to keep. Restart the device to turn them back on.
         </p>
       )}
-      {props.note && <p className="text-[12px] text-muted-foreground leading-relaxed break-words">{props.note}</p>}
+      {props.note && (
+        <p className="text-[12px] text-muted-foreground leading-relaxed break-words">{props.note}</p>
+      )}
 
       <PerformanceModeNotice open={noticeOpen} onOpenChange={handleNoticeOpenChange} />
     </div>

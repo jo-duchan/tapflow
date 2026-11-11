@@ -47,9 +47,9 @@ interface IOSViewerProps {
   /** Mints and records the correlation id, then sends — the viewer above consumes the reply. */
   launchApp: () => void;
   connected: boolean;
-  joined: boolean
-  appLogText: string
-  appLogsSupported: boolean
+  joined: boolean;
+  appLogText: string;
+  appLogsSupported: boolean;
   deviceReady: boolean;
   installing: boolean;
   installed: boolean;
@@ -621,8 +621,7 @@ export function IOSViewer({
             <Home className="h-4 w-4" />
           </Button>
         </TooltipTrigger>
-        <TooltipContent side="left"><span className="flex items-center gap-3">Home{' '}
-            <KbdGroup><Kbd>⌘</Kbd><Kbd>⇧</Kbd><Kbd>U</Kbd></KbdGroup></span></TooltipContent>
+        <TooltipContent side="left"><span className="flex items-center gap-3">Home <KbdGroup><Kbd>⌘</Kbd><Kbd>⇧</Kbd><Kbd>U</Kbd></KbdGroup></span></TooltipContent>
       </Tooltip>
     </>
   );
@@ -671,12 +670,8 @@ export function IOSViewer({
         </TooltipTrigger>
         <TooltipContent side="left">
           {swKeyboardPending
-            ? (
-            <span>Software keyboard — changing it</span>
-          ) : (
-            <span className="flex items-center gap-3">Software keyboard{' '}
-              <KbdGroup><Kbd>⌘</Kbd><Kbd>⇧</Kbd><Kbd>K</Kbd></KbdGroup></span>
-          )}
+            ? <span>Software keyboard — changing it</span>
+            : <span className="flex items-center gap-3">Software keyboard <KbdGroup><Kbd>⌘</Kbd><Kbd>⇧</Kbd><Kbd>K</Kbd></KbdGroup></span>}
         </TooltipContent>
       </Tooltip>
     </>
