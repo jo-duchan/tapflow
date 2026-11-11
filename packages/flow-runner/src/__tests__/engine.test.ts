@@ -275,6 +275,24 @@ describe('runFlow — where a touch on an element lands', () => {
     }
   })
 
+  // Review of #1152: one point reached away from the centre does not make the centre safe to tap when the device then
+  // goes quiet; one reached at the centre does.
+  it('does not tap the centre after a point reached only away from it, and does after one at it', async () => {
+    const offCentre = withReach(reachable([0.1, 0.885]))
+    let n = 0
+    offCentre.reach = vi.fn(async () => [n++ === 0 ? { state: 'occluded', by: 'Button Hard' } as ReachResult : n === 2 ? reachable([0.1, 0.885]) : { state: 'unknown', reason: 'no answer' } as ReachResult])
+    const failed = await runFlow(flowOf('steps:\n  - tapOn: "Row 13"\n'), offCentre, { ...OPTS, defaultTimeoutMs: 500 })
+    expect(failed.steps[0]).toMatchObject({ status: 'failed' })
+    expect(failed.steps[0]!.message).toContain('reached only away from its centre')
+    expect(offCentre.calls).toEqual([])
+    const atCentre = withReach(reachable([0.5, 0.909]))
+    let m = 0
+    atCentre.reach = vi.fn(async () => [m++ === 0 ? reachable([0.5, 0.909], true) : { state: 'unknown', reason: 'no answer' } as ReachResult])
+    const passed = await runFlow(flowOf('steps:\n  - tapOn: "Row 13"\n'), atCentre, { ...OPTS, defaultTimeoutMs: 500 })
+    expect(passed.steps[0]).toMatchObject({ status: 'passed', reach: 'unchecked' })
+    expect(atCentre.calls).toEqual([['tap', 0.5, 0.909]])
+  })
+
   it('reads again while it is covered, and taps once it is not', async () => {
     const driver = withReach({ state: 'occluded', by: 'Button Hard' }, reachable([0.5, 0.86]), reachable([0.5, 0.86]))
     const result = await runFlow(flowOf('steps:\n  - tapOn: "Row 13"\n'), driver, { ...OPTS, defaultTimeoutMs: 1000 })

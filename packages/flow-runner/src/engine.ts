@@ -393,10 +393,14 @@ async function touchPoint(
     return centre(el)
   }
   let last: [number, number] | undefined
-  // The last answer that said the touch would not reach the element. Once the device has said so, its going quiet (a
-  // reach cut off, an answer it could not give) is no licence to touch the centre, which is what covered it: the step
-  // asks until its deadline, then fails on that answer.
+  // The last answer that left the centre unsafe: covered, off the screen, not where it was read, or reached only away
+  // from the centre (the centre is then not what the touch reaches). Once the device has said so, its going quiet (a
+  // reach cut off, an answer it could not give) is no licence to touch the centre: the step asks until its deadline,
+  // then fails on that answer. Only an answer that reaches the element at its centre clears it.
   let lastBlocked: ReachResult | undefined
+  const quietFailure = (b: ReachResult): StepFailure => new StepFailure(b.state === 'reachable'
+    ? `${describeSelector(sel)} is reached only away from its centre, and the device stopped answering before that point could be confirmed`
+    : blocked(b))
   for (;;) {
     let r: ReachResult | undefined
     try {
@@ -409,7 +413,7 @@ async function touchPoint(
       // that lasts to the deadline leaves the device unable to judge, and the touch goes where it went before reach.
       if (!(e instanceof TransientQueryError)) throw e
       if (Date.now() >= deadline) {
-        if (lastBlocked) throw new StepFailure(blocked(lastBlocked))
+        if (lastBlocked) throw quietFailure(lastBlocked)
         report.reach = 'unchecked'
         report.reachNote = `the device did not say where a touch lands: ${e.message}`
         report.touched = el
@@ -419,7 +423,7 @@ async function touchPoint(
       continue
     }
     if ((!r || r.state === 'unknown') && lastBlocked) {
-      if (Date.now() >= deadline) throw new StepFailure(blocked(lastBlocked))
+      if (Date.now() >= deadline) throw quietFailure(lastBlocked)
       await delay(Math.min(pollIntervalMs, Math.max(0, deadline - Date.now())))
       continue
     }
@@ -436,7 +440,7 @@ async function touchPoint(
         return [round4(r.point[0]), round4(r.point[1])]
       }
       last = r.point
-      lastBlocked = undefined
+      lastBlocked = r.atCentre ? undefined : r
     } else {
       last = undefined
       lastBlocked = r
