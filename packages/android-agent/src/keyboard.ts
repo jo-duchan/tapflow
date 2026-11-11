@@ -34,15 +34,20 @@ export function toFrameRect(r: Rect, turn: Turn): Rect {
   return { x, y, width: Math.abs(a.x - b.x), height: Math.abs(a.y - b.y) }
 }
 
-/** The keyboard as `dumpsys window InputMethod` reported it, in both spaces a recorded tap can be in. */
+/**
+ * The keyboard as `dumpsys window InputMethod` reported it, in both spaces a recorded tap can be in, and whether the
+ * home screen was in front: the window it would type into is the launcher's (`home`, `AdbWrapper.homePackage`).
+ */
 export function keyboardStateOf(
-  ime: { shown: boolean; rect?: Rect } | null, screen: { width: number; height: number } | null, frameTurn: Turn,
+  ime: { shown: boolean; rect?: Rect; target?: string } | null, screen: { width: number; height: number } | null, frameTurn: Turn,
+  home?: string | null,
 ): KeyboardState {
   if (!ime) return { shown: null }
-  if (!ime.shown) return { shown: false }
-  if (!ime.rect || !screen) return { shown: true }
+  const onHome = ime.target && home ? { onHome: ime.target === home } : {}
+  if (!ime.shown) return { shown: false, ...onHome }
+  if (!ime.rect || !screen) return { shown: true, ...onHome }
   const rect = normalizeRect(ime.rect, screen)
-  return { shown: true, rect, frameRect: toFrameRect(rect, frameTurn) }
+  return { shown: true, rect, frameRect: toFrameRect(rect, frameTurn), ...onHome }
 }
 
 const REASONS = new Set<string>(['no-app', 'no-focus', 'ambiguous', 'secure', 'failed'])

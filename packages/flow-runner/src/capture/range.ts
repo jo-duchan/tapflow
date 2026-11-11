@@ -7,9 +7,10 @@ export interface StepRange {
 }
 
 export type RangeWarning =
-  /** The range does not begin with a launch: the app was opened some other way, such as its icon on the home screen
-   *  (the dashboard's install does not launch it, only its Launch button does). The flow is given a `launchApp` of its
-   *  own (`toFlowSteps`), the replay launches the app before its first step, and a home-screen tap at the start is the
+  /** The range does not begin with a launch, nor with a step the reads place in the app (`onHome: false`): the app was
+   *  opened some other way, such as its icon on the home screen (the dashboard's install does not launch it, only its
+   *  Launch button does), on an agent that cannot say where it was. The flow is given a `launchApp` of its own
+   *  (`toFlowSteps`), the replay launches the app before its first step, and a home-screen tap at the start is the
    *  person's to leave out by moving the start. */
   | 'no-launch-at-start'
   /** No clear-state or install before the launch: the app runs on data an earlier test left. */
@@ -17,16 +18,25 @@ export type RangeWarning =
 
 /**
  * Where a captured flow begins by default: the first launch after the last clear-state or install — the point from
- * which the app's state is the app's own. With no launch after it, the step after it: measured, a person in the
- * dashboard opens the app they just installed from its home-screen icon as often as with Launch. Without a clean
- * start, the last launch; without either, the beginning. Always to the end. A launch the device refused is not one.
+ * which the app's state is the app's own. With no launch after it, the first step after it taken in the app: measured,
+ * a person in the dashboard opens the app they just installed from its home-screen icon as often as with Launch, and
+ * the swipes and taps that found it are the home screen's. Without a clean start, the last launch; without either, the
+ * beginning. Always to the end. A launch the device refused is not one.
  */
 export function defaultRange(steps: readonly RawStep[]): StepRange {
   const counts = (s: RawStep) => s.outcome !== 'refused'
   let clean = -1
   for (let i = 0; i < steps.length; i++) if ((steps[i]!.kind === 'clearState' || steps[i]!.kind === 'install') && counts(steps[i]!)) clean = i
   let start = clean < 0 ? -1 : steps.findIndex((s, i) => i > clean && s.kind === 'launch' && counts(s))
-  if (start < 0 && clean >= 0) start = clean + 1
+  if (start < 0 && clean >= 0) {
+    // Opened from its icon: the steps on the home screen before it are the person finding the app, which a replay that
+    // launches it would make on top of it. Only the run straight after the clean start, and only steps the reads place
+    // there — a step they cannot place stops it, and a visit home later is the person's own.
+    start = clean + 1
+    let inApp = start
+    while (inApp < steps.length && steps[inApp]!.onHome === true && findsTheApp(steps[inApp]!)) inApp++
+    if (inApp < steps.length) start = inApp
+  }
   // Nothing after the clean start (the last step was the install or clear): the range would be empty, with no step at
   // either handle. The rest of the rule picks one instead.
   if (start >= steps.length) start = -1
@@ -37,10 +47,18 @@ export function defaultRange(steps: readonly RawStep[]): StepRange {
   return { start, end: steps.length }
 }
 
+/** What a person does on the home screen to find the app: touches, and the buttons that move between screens. Not a
+ *  command the dashboard sent — an `openUrl` from the home screen is how the app was opened, and the replay must open
+ *  the same place — nor a volume or power press, which changes the device the flow then runs on. */
+const FINDS_THE_APP = new Set<RawStep['kind']>(['tap', 'longPress', 'swipe', 'holdDrag', 'pinch'])
+const NAVIGATION_BUTTONS = new Set(['home', 'back', 'recent_apps'])
+const findsTheApp = (s: RawStep): boolean => FINDS_THE_APP.has(s.kind) || (s.kind === 'button' && NAVIGATION_BUTTONS.has(s.name))
+
 export function rangeWarnings(steps: readonly RawStep[], range: StepRange): RangeWarning[] {
   const first = steps[range.start]
   const out: RangeWarning[] = []
-  if (first?.kind !== 'launch') out.push('no-launch-at-start')
+  // A step the reads place in the app needs no launch of its own to start from: the replay launches the app first.
+  if (first?.kind !== 'launch' && first?.onHome !== false) out.push('no-launch-at-start')
   const before = steps.slice(0, range.start)
   const lastLaunch = before.map((s) => s.kind).lastIndexOf('launch')
   const cleanBefore = before.some((s, i) => (s.kind === 'clearState' || s.kind === 'install') && s.outcome !== 'refused' && i > lastLaunch)

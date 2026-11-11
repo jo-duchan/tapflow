@@ -1126,4 +1126,95 @@ describe('parseImeWindow', () => {
     const { parseImeWindow } = await import('../AdbWrapper')
     expect(parseImeWindow('')).toBeNull()
   })
+
+  // Lines as `dumpsys window InputMethod` printed them on API 34 (Pixel 9 emulator, 2026-11-11).
+  it('reads the package the keyboard would type into', async () => {
+    const { parseImeWindow } = await import('../AdbWrapper')
+    const home = '    isVisible=false\n  imeLayeringTarget in display# 0 Window{fa7e255 u0 com.google.android.apps.nexuslauncher/com.google.android.apps.nexuslauncher.NexusLauncherActivity}\n  imeInputTarget in display# 0 Window{fa7e255 u0 com.google.android.apps.nexuslauncher/com.google.android.apps.nexuslauncher.NexusLauncherActivity}\n'
+    expect(parseImeWindow(home)).toEqual({ shown: false, target: 'com.google.android.apps.nexuslauncher' })
+    const layeringOnly = '    isVisible=false\n  imeLayeringTarget in display# 0 Window{136eb2b u0 com.android.settings/com.android.settings.Settings}\n'
+    expect(parseImeWindow(layeringOnly)).toEqual({ shown: false, target: 'com.android.settings' })
+  })
+
+  it('names no package for a window that has none', async () => {
+    const { parseImeWindow } = await import('../AdbWrapper')
+    expect(parseImeWindow('    isVisible=false\n  imeInputTarget in display# 0 Window{e0230a5 u0 NotificationShade}\n')).toEqual({ shown: false })
+  })
+})
+
+describe('parseHomePackage', () => {
+  it('reads the launcher from resolve-activity --brief', async () => {
+    const { parseHomePackage } = await import('../AdbWrapper')
+    expect(parseHomePackage('priority=0 preferredOrder=0 match=0x108000 specificIndex=-1 isDefault=true\ncom.google.android.apps.nexuslauncher/.NexusLauncherActivity\n'))
+      .toBe('com.google.android.apps.nexuslauncher')
+  })
+
+  it('names none when the system would ask which home to use', async () => {
+    const { parseHomePackage } = await import('../AdbWrapper')
+    expect(parseHomePackage('priority=0 preferredOrder=0\nandroid/com.android.internal.app.ResolverActivity\n')).toBeNull()
+    expect(parseHomePackage('No activity found\n')).toBeNull()
+  })
+
+  it('asks a device once, and again after a failed read', async () => {
+    const { AdbWrapper } = await import('../AdbWrapper')
+    const exec = vi.fn().mockRejectedValueOnce(new Error('offline')).mockResolvedValue('x\ncom.sec.android.app.launcher/.activities.LauncherActivity\n')
+    const adb = new AdbWrapper({ exec, execBinary: vi.fn(), listAvds: vi.fn(async () => []) } as AdbRunner)
+    expect(await adb.homePackage('emulator-5554')).toBeNull()
+    expect(await adb.homePackage('emulator-5554')).toBe('com.sec.android.app.launcher')
+    expect(await adb.homePackage('emulator-5554')).toBe('com.sec.android.app.launcher')
+    expect(exec).toHaveBeenCalledTimes(2)
+  })
+
+  // A serial is reused by whichever emulator comes up next, and that one may have another launcher. Each way the agent
+  // learns a serial's new owner is tested alone, since any one of them clearing the cache would hide another that does not.
+  const NEXUS = 'x\ncom.google.android.apps.nexuslauncher/.NexusLauncherActivity\n'
+  const LAUNCHER3 = 'x\ncom.android.launcher3/.uioverlays.QuickstepLauncher\n'
+
+  // A read that never answers would stay cached, and every keyboard read waits on it.
+  it('bounds the read, and asks again after one that timed out', async () => {
+    const { AdbWrapper } = await import('../AdbWrapper')
+    const execBounded = vi.fn().mockRejectedValueOnce(new Error('timed out')).mockResolvedValue(NEXUS)
+    const exec = vi.fn()
+    const adb = new AdbWrapper({ exec, execBounded, execBinary: vi.fn(), listAvds: vi.fn(async () => []) } as AdbRunner)
+    expect(await adb.homePackage('emulator-5554')).toBeNull()
+    expect(await adb.homePackage('emulator-5554')).toBe('com.google.android.apps.nexuslauncher')
+    expect(execBounded.mock.calls[0]![0]).toBeGreaterThan(0)
+    expect(exec).not.toHaveBeenCalled()
+  })
+
+  it('asks again once tapflow boots another emulator on the serial', async () => {
+    const { AdbWrapper } = await import('../AdbWrapper')
+    const exec = vi.fn().mockResolvedValueOnce(NEXUS).mockResolvedValueOnce(LAUNCHER3)
+    const adb = new AdbWrapper({ exec, execBinary: vi.fn(), listAvds: vi.fn(async () => []) } as AdbRunner)
+    adb.setSerial('avd:Pixel_9', 'emulator-5554')
+    expect(await adb.homePackage('emulator-5554')).toBe('com.google.android.apps.nexuslauncher')
+    adb.setSerial('avd:Other', 'emulator-5554')
+    expect(await adb.homePackage('emulator-5554')).toBe('com.android.launcher3')
+  })
+
+  it('asks again once the serial is let go', async () => {
+    const { AdbWrapper } = await import('../AdbWrapper')
+    const exec = vi.fn().mockResolvedValueOnce(NEXUS).mockResolvedValueOnce(LAUNCHER3)
+    const adb = new AdbWrapper({ exec, execBinary: vi.fn(), listAvds: vi.fn(async () => []) } as AdbRunner)
+    adb.setSerial('avd:Pixel_9', 'emulator-5554')
+    expect(await adb.homePackage('emulator-5554')).toBe('com.google.android.apps.nexuslauncher')
+    adb.clearSerial('avd:Pixel_9')
+    expect(await adb.homePackage('emulator-5554')).toBe('com.android.launcher3')
+  })
+
+  it('asks again once the device list finds another emulator on the serial', async () => {
+    const { AdbWrapper } = await import('../AdbWrapper')
+    let avd = 'Pixel_9'
+    const exec = vi.fn(async (...args: string[]) => {
+      if (args[0] === 'devices') return 'List of devices attached\nemulator-5554\tdevice\n'
+      if (args.includes('emu')) return `${avd}\nOK\n`
+      return avd === 'Pixel_9' ? NEXUS : LAUNCHER3
+    })
+    const adb = new AdbWrapper({ exec, execBinary: vi.fn(), listAvds: vi.fn(async () => ['Pixel_9', 'Other']) } as AdbRunner)
+    await adb.listDevices()
+    expect(await adb.homePackage('emulator-5554')).toBe('com.google.android.apps.nexuslauncher')
+    avd = 'Other'
+    await adb.listDevices()
+    expect(await adb.homePackage('emulator-5554')).toBe('com.android.launcher3')
+  })
 })

@@ -26,6 +26,9 @@ interface StepBase {
   chrome?: unknown
   /** What the replayer sends, in order, with the times they were sent. */
   messages: TimedMessage[]
+  /** Whether the home screen was in front when the step began, by the last keyboard read answered before it (`onHome`):
+   *  where the default range starts when the app was opened from its icon. Absent when no read said. */
+  onHome?: boolean
 }
 
 /** A person's action on the device: the unit the dialog lists, replays and turns into a flow step. */
@@ -248,7 +251,35 @@ export function segment(entries: readonly CaptureEntry[]): RawStep[] {
     }
   }
   endRun()
-  return oneAskedSecret(withFieldValues(out, entries))
+  return withHome(oneAskedSecret(withFieldValues(out, entries)), entries)
+}
+
+/**
+ * Each step marked with whether the home screen was in front as it began: the last keyboard read answered before its
+ * first message. From the raw entries, not `keyboardTimeline`, which drops iOS's reads off the app (`shown: null`).
+ *
+ * Home is also asked of the first read taken after the step: a read before it can be stale, taken just after the icon
+ * tap while the app was still coming up, and a person quick to tap in the app would have that tap read as the home
+ * screen's and left out. A step home before and the app after is not known, which stops the default range there.
+ */
+function withHome(steps: RawStep[], entries: readonly CaptureEntry[]): RawStep[] {
+  const reads = entries.flatMap((e) => (e.kind === 'keyboard' ? [e] : [])).sort((a, b) => a.at - b.at)
+  if (reads.length === 0) return steps
+  let i = 0
+  let lastRead: (typeof reads)[number] | undefined
+  let previousEnd = -Infinity
+  return steps.map((s) => {
+    while (i < reads.length && reads[i]!.at <= s.at) lastRead = reads[i++]
+    const sinceLast = previousEnd
+    previousEnd = s.endAt
+    // A read asked for before the step ahead ended, and answered after it, is about the screen that step left: the icon
+    // tap's would place the first tap in the app on the home screen.
+    const last = lastRead && lastRead.requestedAt >= sinceLast ? lastRead.keyboard.onHome : undefined
+    if (last === undefined) return s
+    const after = last ? reads.find((r) => r.requestedAt >= s.endAt)?.keyboard.onHome : undefined
+    if (last && after === false) return s
+    return { ...s, onHome: last }
+  })
 }
 
 /** A touch as the keyboard reads around it judge it: a key, the action key, the app, or not known. */

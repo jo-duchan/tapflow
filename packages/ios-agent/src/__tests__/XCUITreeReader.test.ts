@@ -622,25 +622,31 @@ describe('toKeyboardState', () => {
   const rect = { x: 0, y: 0.6, width: 1, height: 0.4 }
 
   it('keeps a portrait app\'s keyboard as it is', () => {
-    expect(toKeyboardState({ shown: true, rect, orientation: 1 })).toEqual({ shown: true, rect })
+    expect(toKeyboardState({ shown: true, rect, orientation: 1 })).toEqual({ shown: true, rect, onHome: false })
     // 0: the runtime has no orientation getter, which only a portrait app has ever met.
-    expect(toKeyboardState({ shown: true, rect, orientation: 0 })).toEqual({ shown: true, rect })
+    expect(toKeyboardState({ shown: true, rect, orientation: 0 })).toEqual({ shown: true, rect, onHome: false })
   })
 
   it('carries a landscape app\'s keyboard into the portrait framebuffer a touch lands in', () => {
     // UIInterfaceOrientation 4 is a turn of 90 (as `/tree` reads it), which `toFramePoint` carries as (u, v) → (v, 1 − u):
     // the keyboard along the app's bottom edge lies along the framebuffer's right one.
     const k = toKeyboardState({ shown: true, rect: { x: 0, y: 0.5, width: 1, height: 0.5 }, orientation: 4 })
-    expect(k).toEqual({ shown: true, rect: { x: 0.5, y: 0, width: 0.5, height: 1 } })
+    expect(k).toEqual({ shown: true, rect: { x: 0.5, y: 0, width: 0.5, height: 1 }, onHome: false })
   })
 
   it('tells hidden from unknown', () => {
-    expect(toKeyboardState({ shown: false, orientation: 1 })).toEqual({ shown: false })
-    expect(toKeyboardState({ shown: null, orientation: 0 })).toEqual({ shown: null })
+    expect(toKeyboardState({ shown: false, orientation: 1 })).toEqual({ shown: false, onHome: false })
     expect(toKeyboardState('nonsense')).toEqual({ shown: null })
+    expect(toKeyboardState({ orientation: 1 })).toEqual({ shown: null })
+  })
+
+  // The runner answers `shown: null` for one reason only, that the app is not in front: the home screen, for Flow
+  // Capture's default range. A read that failed never reaches the runner and carries no `onHome`.
+  it('reads the runner\'s null as the app not in front', () => {
+    expect(toKeyboardState({ shown: null, orientation: 0 })).toEqual({ shown: null, onHome: true })
   })
 
   it('is shown with no rect when the rect cannot be read', () => {
-    expect(toKeyboardState({ shown: true, rect: { x: 'a' }, orientation: 1 })).toEqual({ shown: true })
+    expect(toKeyboardState({ shown: true, rect: { x: 'a' }, orientation: 1 })).toEqual({ shown: true, onHome: false })
   })
 })
