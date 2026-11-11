@@ -34,7 +34,7 @@ export function defaultRange(steps: readonly RawStep[]): StepRange {
     // there — a step they cannot place stops it, and a visit home later is the person's own.
     start = clean + 1
     let inApp = start
-    while (inApp < steps.length && steps[inApp]!.onHome === true) inApp++
+    while (inApp < steps.length && steps[inApp]!.onHome === true && FINDS_THE_APP.has(steps[inApp]!.kind)) inApp++
     if (inApp < steps.length) start = inApp
   }
   // Nothing after the clean start (the last step was the install or clear): the range would be empty, with no step at
@@ -46,6 +46,10 @@ export function defaultRange(steps: readonly RawStep[]): StepRange {
   }
   return { start, end: steps.length }
 }
+
+/** What a person does on the home screen to find the app: touches and buttons. Not a command the dashboard sent — an
+ *  `openUrl` from the home screen is how the app was opened, and the replay must open the same place. */
+const FINDS_THE_APP = new Set<RawStep['kind']>(['tap', 'longPress', 'swipe', 'holdDrag', 'pinch', 'button'])
 
 export function rangeWarnings(steps: readonly RawStep[], range: StepRange): RangeWarning[] {
   const first = steps[range.start]

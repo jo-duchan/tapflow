@@ -257,6 +257,10 @@ export function segment(entries: readonly CaptureEntry[]): RawStep[] {
 /**
  * Each step marked with whether the home screen was in front as it began: the last keyboard read answered before its
  * first message. From the raw entries, not `keyboardTimeline`, which drops iOS's reads off the app (`shown: null`).
+ *
+ * Home is also asked of the first read taken after the step: a read before it can be stale, taken just after the icon
+ * tap while the app was still coming up, and a person quick to tap in the app would have that tap read as the home
+ * screen's and left out. A step home before and the app after is not known, which stops the default range there.
  */
 function withHome(steps: RawStep[], entries: readonly CaptureEntry[]): RawStep[] {
   const reads = entries.flatMap((e) => (e.kind === 'keyboard' ? [e] : [])).sort((a, b) => a.at - b.at)
@@ -265,7 +269,10 @@ function withHome(steps: RawStep[], entries: readonly CaptureEntry[]): RawStep[]
   let last: boolean | undefined
   return steps.map((s) => {
     while (i < reads.length && reads[i]!.at <= s.at) last = reads[i++]!.keyboard.onHome
-    return last === undefined ? s : { ...s, onHome: last }
+    if (last === undefined) return s
+    const after = last ? reads.find((r) => r.requestedAt >= s.endAt)?.keyboard.onHome : undefined
+    if (last && after === false) return s
+    return { ...s, onHome: last }
   })
 }
 

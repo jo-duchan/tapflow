@@ -625,7 +625,8 @@ describe('defaultRange', () => {
       const r = new Rec().install()
       read(r, HOME).touch([[0.47, 0.52], [0.47, 0.31]])
       read(r, HOME).touch([[0.42, 0.725]])
-      read(r, APP).touch([[0.5, 0.4]])
+      // Measured order: the read the icon's tap starts still says home; the app's comes a read or more later.
+      read(read(r, HOME), APP).touch([[0.5, 0.4]])
       read(r, APP).touch([[0.5, 0.6]])
       const steps = r.steps()
       expect(steps.map((s) => s.kind)).toEqual(['install', 'swipe', 'tap', 'tap', 'tap'])
@@ -636,16 +637,16 @@ describe('defaultRange', () => {
     it('reads iOS\'s home screen, which the keyboard judging drops', () => {
       const r = new Rec().install()
       read(r, IOS_HOME).touch([[0.2, 0.3]])
-      read(r, APP).touch([[0.5, 0.4]])
+      read(read(r, IOS_HOME), APP).touch([[0.5, 0.4]])
       expect(defaultRange(r.steps())).toEqual({ start: 2, end: 3 })
     })
 
     it('leaves out only the home screen before the app, not a visit to it later', () => {
       const r = new Rec().install()
       read(r, HOME).touch([[0.2, 0.3]])
-      read(r, APP).touch([[0.5, 0.4]])
+      read(read(r, HOME), APP).touch([[0.5, 0.4]])
       read(r, HOME).touch([[0.5, 0.9]])
-      read(r, APP).touch([[0.5, 0.5]])
+      read(read(r, HOME), APP).touch([[0.5, 0.5]])
       expect(defaultRange(r.steps())).toEqual({ start: 2, end: 5 })
     })
 
@@ -673,6 +674,28 @@ describe('defaultRange', () => {
       r.entries.push({ at: r.t + 1, kind: 'keyboard', requestedAt: r.t - 200, keyboard: APP, settled: false })
       r.wait(100).touch([[0.5, 0.4]])
       expect(defaultRange(r.steps())).toEqual({ start: 2, end: 3 })
+    })
+
+    // A tap made before the next read answered: the read before it is the one the icon's tap started, still home.
+    it('keeps a quick first tap in the app, which only the read after it places', () => {
+      const r = new Rec().install()
+      read(r, HOME).touch([[0.2, 0.3]])
+      read(r, HOME).touch([[0.42, 0.725]])
+      read(r, HOME).touch([[0.5, 0.4]])
+      read(r, APP).touch([[0.5, 0.6]])
+      const steps = r.steps()
+      expect(steps.map((s) => s.onHome)).toEqual([undefined, true, true, undefined, false])
+      expect(defaultRange(steps)).toEqual({ start: 3, end: 5 })
+    })
+
+    it('keeps an open-url sent from the home screen: it is how the app was opened', () => {
+      const r = new Rec().install()
+      read(r, HOME).touch([[0.2, 0.3]])
+      read(r, HOME).msg({ type: 'open-url', sessionId: 's', requestId: r.id(), payload: { url: 'app://orders/7' } }, true)
+      read(read(r, HOME), APP).touch([[0.5, 0.4]])
+      const steps = r.steps()
+      expect(steps.map((s) => s.kind)).toEqual(['install', 'tap', 'openUrl', 'tap'])
+      expect(defaultRange(steps)).toEqual({ start: 2, end: 4 })
     })
 
     it('keeps a Launch in charge when there is one', () => {

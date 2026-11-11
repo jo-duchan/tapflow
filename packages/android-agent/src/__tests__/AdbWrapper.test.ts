@@ -1170,6 +1170,18 @@ describe('parseHomePackage', () => {
   const NEXUS = 'x\ncom.google.android.apps.nexuslauncher/.NexusLauncherActivity\n'
   const LAUNCHER3 = 'x\ncom.android.launcher3/.uioverlays.QuickstepLauncher\n'
 
+  // A read that never answers would stay cached, and every keyboard read waits on it.
+  it('bounds the read, and asks again after one that timed out', async () => {
+    const { AdbWrapper } = await import('../AdbWrapper')
+    const execBounded = vi.fn().mockRejectedValueOnce(new Error('timed out')).mockResolvedValue(NEXUS)
+    const exec = vi.fn()
+    const adb = new AdbWrapper({ exec, execBounded, execBinary: vi.fn(), listAvds: vi.fn(async () => []) } as AdbRunner)
+    expect(await adb.homePackage('emulator-5554')).toBeNull()
+    expect(await adb.homePackage('emulator-5554')).toBe('com.google.android.apps.nexuslauncher')
+    expect(execBounded.mock.calls[0]![0]).toBeGreaterThan(0)
+    expect(exec).not.toHaveBeenCalled()
+  })
+
   it('asks again once tapflow boots another emulator on the serial', async () => {
     const { AdbWrapper } = await import('../AdbWrapper')
     const exec = vi.fn().mockResolvedValueOnce(NEXUS).mockResolvedValueOnce(LAUNCHER3)

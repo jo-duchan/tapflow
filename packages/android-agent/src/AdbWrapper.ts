@@ -54,6 +54,8 @@ const RESOLVE_WAIT_SEC = 3
 /** Each adb call of a device list re-read (#1085). `adb devices` answers in about 10 ms and `emu avd name` and `getprop`
  *  in well under a second; this is only there so a wedged emulator cannot hold the re-read for ever. */
 const PEEK_CALL_TIMEOUT_MS = 10_000
+/** The home package read (`homePackage`): one PackageManager query, which answers in tens of ms. */
+const HOME_PACKAGE_TIMEOUT_MS = 5_000
 
 export class AdbWrapper {
   // avdId ("avd:<name>") → ADB serial ("emulator-5554")
@@ -674,7 +676,9 @@ export class AdbWrapper {
   homePackage(serial: string): Promise<string | null> {
     let known = this.homePackages.get(serial)
     if (!known) {
-      known = this.runner.exec('-s', serial, 'shell', 'cmd', 'package', 'resolve-activity', '--brief', '-a', 'android.intent.action.MAIN', '-c', 'android.intent.category.HOME')
+      // Bounded: a hung read would stay cached, and every keyboard read after it waits on this one (`Promise.all`).
+      const args = ['-s', serial, 'shell', 'cmd', 'package', 'resolve-activity', '--brief', '-a', 'android.intent.action.MAIN', '-c', 'android.intent.category.HOME']
+      known = (this.runner.execBounded?.(HOME_PACKAGE_TIMEOUT_MS, ...args) ?? this.runner.exec(...args))
         .then((out) => parseHomePackage(out))
         .catch(() => { this.homePackages.delete(serial); return null })
       this.homePackages.set(serial, known)
