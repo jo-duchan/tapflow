@@ -58,6 +58,7 @@ export async function handlePutThumbnail(req: http.IncomingMessage, res: http.Se
   const result = store.putThumbnail(params['sessionId']!, String(auth.userId), params['requestId']!, body)
   if (result === 'no-capture') return json(res, 404, { error: 'No captured steps for this session' })
   if (result === 'unknown-input') return json(res, 409, { error: 'No captured input has this requestId yet' })
+  if (result === 'not-yet') return json(res, 409, { error: 'The keyboard has not been read since this touch yet' })
   json(res, result === 'kept' ? 201 : 200, result === 'kept' ? { kept: true } : { kept: false, reason: result })
 }
 

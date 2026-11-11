@@ -32,8 +32,8 @@ interface Capture {
    */
   thumbnails: Map<string, Buffer>
   thumbnailBytes: number
-  /** Each touch's end, with the keyboard as last read when it began: a picture of a touch is kept only when the reads
-   *  show it was off the soft keyboard (`putThumbnail`). */
+  /** Each touch's end and where it was: a picture of a touch is kept only when the reads on either side of it show it
+   *  was off the soft keyboard (`putThumbnail`). */
   touches: Map<string, RecordedTouch>
 }
 
@@ -43,8 +43,6 @@ interface RecordedTouch {
   frame: boolean
   /** The relay's clock at the touch's end, which is when the read that follows it is asked. */
   at: number
-  /** The keyboard as last read when the touch began; absent when nothing was read. */
-  before: KeyboardState | undefined
 }
 
 /** A key that types a character, as flow-runner's `keyChar` judges one: what continues a typed run. */
@@ -66,7 +64,7 @@ function offKeyboard(t: RecordedTouch, keyboard: KeyboardState | undefined): boo
 }
 
 /** Why a thumbnail was not kept, for the route to answer with. */
-export type ThumbnailRefusal = 'no-capture' | 'unknown-input' | 'exists' | 'keyboard' | 'full'
+export type ThumbnailRefusal = 'no-capture' | 'unknown-input' | 'not-yet' | 'exists' | 'keyboard' | 'full'
 
 /** Who drives the session the input came through, as the relay recorded it at the join: the declared kind and the
  *  user id. Not protocol's `SessionHolder`, which is a label for people and only ever an AI kind. */
@@ -279,7 +277,7 @@ export class CaptureStore {
       this.append(capture, { at, kind: 'input', msg })
       if (msg.type === 'input:touch:end' && msg.requestId) {
         const tap = this.keyboards.get(sessionId)?.tap
-        capture.touches.set(msg.requestId, { x: tap?.x ?? msg.payload?.x ?? 0, y: tap?.y ?? msg.payload?.y ?? 0, frame: tap?.frame ?? false, at, before: tap?.keyboard })
+        capture.touches.set(msg.requestId, { x: tap?.x ?? msg.payload?.x ?? 0, y: tap?.y ?? msg.payload?.y ?? 0, frame: tap?.frame ?? false, at })
       }
       this.noteKeyboard(sessionId, holder, msg)
       this.noteTyping(sessionId, holder, msg, at)
@@ -532,8 +530,20 @@ export class CaptureStore {
     // that does not read the keyboard, a Mac over its memory line, iOS with the app not in front — keeps no picture.
     const touch = capture.touches.get(requestId)
     if (touch) {
+      // Before: the last read asked for before the touch's end that said anything — by when it was asked, not when it
+      // came back, so a read out during the touch counts. One that could not say (Android answers so for a moment after
+      // a launch, measured) is passed over, and none at all is no picture.
+      let before: KeyboardState | undefined
+      for (let i = capture.entries.length - 1; i >= 0 && !before; i--) {
+        const e = capture.entries[i]!
+        if (e.kind === 'keyboard' && e.requestedAt < touch.at && e.keyboard.shown !== null) before = e.keyboard
+      }
+      if (!offKeyboard(touch, before)) return 'keyboard'
+      // And after: the read before can be stale — a keyboard sliding up reads as down (measured: a first key kept) — so
+      // the read the touch itself asked for decides too. The picture can beat that read here: asked for again.
       const after = capture.entries.find((e): e is Extract<CaptureEntry, { kind: 'keyboard' }> => e.kind === 'keyboard' && e.requestedAt >= touch.at)
-      if (!offKeyboard(touch, touch.before) || (after && !offKeyboard(touch, after.keyboard.shown === null ? undefined : after.keyboard))) return 'keyboard'
+      if (!after) return 'not-yet'
+      if (!offKeyboard(touch, after.keyboard)) return 'keyboard'
     }
     // A key inside a typed run is not where the run's step begins, and its screen shows the run so far: only the run's
     // first key keeps one, whatever the dashboard sent.

@@ -378,7 +378,7 @@ JWT 시크릿은 `getJwtSecret()`으로 **처음 쓸 때** 만든다. `RelayServ
   that capture already holds and only once, in memory under a cap of its own (1.5 MB a capture, counted in the relay's
   total), cookie-only and owner-only (404 to anyone else), gone with the capture's seal, its trim and the person turning
   capturing off, never on disk, in a log or forwarded. **A touch only when the keyboard reads place it off the soft
-  keyboard**, the read when it began and the first one after: that screen shows what was just typed, a password's last
+  keyboard**, the last read asked for before its end that could say and the first one asked for after: that screen shows what was just typed, a password's last
   character included, which is the value #1140 keeps out of the record. No read to say (an agent without `keyboard-state`,
   a Mac over its memory line, iOS with the app not in front) is no picture, not a guess. A key inside a typed run keeps
   none either: its screen shows the run so far.

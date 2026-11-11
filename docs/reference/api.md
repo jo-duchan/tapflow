@@ -1263,7 +1263,7 @@ Discard the copy. Returns `404` when there is none.
 
 ### `PUT /api/v1/sessions/:sessionId/capture/thumbnails/:requestId`
 
-Keep a picture of the screen as an input began: a JPEG of at most 16 KB, for an input already remembered, sent once. The dashboard sends it after the input. Returns `201` when kept, `200` with `{ "kept": false, "reason": … }` when it was not (`exists`, `keyboard` for a touch the keyboard reads do not place off the on-screen keyboard, or a key inside a typed run, `full`), `404` when no steps are remembered for you on this session, `409` when no remembered input has that `requestId` yet, `413` for a larger body and `415` for one that is not a JPEG.
+Keep a picture of the screen as an input began: a JPEG of at most 16 KB, for an input already remembered, sent once. The dashboard sends it after the input. Returns `201` when kept, `200` with `{ "kept": false, "reason": … }` when it was not (`exists`, `keyboard` for a touch the keyboard reads do not place off the on-screen keyboard, or a key inside a typed run, `full`), `404` when no steps are remembered for you on this session, `409` when no remembered input has that `requestId` yet or the keyboard read after that touch is still out (send it again shortly), `413` for a larger body and `415` for one that is not a JPEG.
 
 ### `GET /api/v1/sessions/:sessionId/capture/snapshot/thumbnails/:requestId`
 

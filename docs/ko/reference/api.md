@@ -1265,7 +1265,7 @@ Query:
 
 ### `PUT /api/v1/sessions/:sessionId/capture/thumbnails/:requestId`
 
-입력이 시작될 때의 화면 그림을 남깁니다. 이미 기억된 입력에만 16KB 이하 JPEG를 한 번 보낼 수 있습니다. 대시보드가 입력을 보낸 뒤 보냅니다. 남기면 `201`, 남기지 않으면 `200`과 `{ "kept": false, "reason": … }`(`exists`, 키보드 읽기로 화면 키보드 밖임이 확인되지 않은 터치나 연속 입력 중간의 키면 `keyboard`, `full`)를 돌려줍니다. 이 세션에 내 기록이 없으면 `404`, 그 `requestId`의 입력이 아직 기억되지 않았으면 `409`, 본문이 더 크면 `413`, JPEG가 아니면 `415`를 돌려줍니다.
+입력이 시작될 때의 화면 그림을 남깁니다. 이미 기억된 입력에만 16KB 이하 JPEG를 한 번 보낼 수 있습니다. 대시보드가 입력을 보낸 뒤 보냅니다. 남기면 `201`, 남기지 않으면 `200`과 `{ "kept": false, "reason": … }`(`exists`, 키보드 읽기로 화면 키보드 밖임이 확인되지 않은 터치나 연속 입력 중간의 키면 `keyboard`, `full`)를 돌려줍니다. 이 세션에 내 기록이 없으면 `404`, 그 `requestId`의 입력이 아직 기억되지 않았거나 터치 뒤 키보드 읽기가 돌아오기 전이면 `409`(잠시 뒤 다시 보내면 됩니다), 본문이 더 크면 `413`, JPEG가 아니면 `415`를 돌려줍니다.
 
 ### `GET /api/v1/sessions/:sessionId/capture/snapshot/thumbnails/:requestId`
 

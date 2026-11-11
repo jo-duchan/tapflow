@@ -703,6 +703,41 @@ describe('CaptureStore — thumbnails', () => {
       expect(s.putThumbnail('s', '1', 'k', jpeg(10))).toBe('keyboard')
     })
 
+    // Measured on Android: a read right after a launch cannot say; the last one that could decides.
+    it('passes over a read that could not say, to the last one that did', async () => {
+      const s = await withKeyboard([{ shown: false }, { shown: null }, { shown: false }])
+      await vi.advanceTimersByTimeAsync(400)
+      record(s, ...touchAt('a', 0.2))
+      await vi.advanceTimersByTimeAsync(50)
+      expect(s.putThumbnail('s', '1', 'a', jpeg(10))).toBe('kept')
+    })
+
+    // A Done key closes the keyboard: down after it, up before it — the read before is what says it was a key.
+    it('keeps none for a touch the keyboard was up under, though it went down after', async () => {
+      const s = await withKeyboard([UP, { shown: false }])
+      record(s, ...touchAt('done', 0.95))
+      await vi.advanceTimersByTimeAsync(50)
+      expect(s.putThumbnail('s', '1', 'done', jpeg(10))).toBe('keyboard')
+    })
+
+    // Reads go one at a time: one asked for before the touch can come back after its end, with the keyboard up.
+    it('takes a read asked for before it as the read before, though it came back after', async () => {
+      vi.useFakeTimers()
+      const answers: Array<(k: KeyboardState) => void> = []
+      const { s } = store({ now: () => Date.now(), readKeyboard: () => new Promise<KeyboardState>((r) => answers.push(r)) })
+      record(s, launch)
+      answers.shift()!({ shown: false })
+      await vi.advanceTimersByTimeAsync(10)
+      record(s, typed('x'))
+      await vi.advanceTimersByTimeAsync(10)
+      record(s, ...touchAt('done', 0.95))
+      answers.shift()!(UP)
+      await vi.advanceTimersByTimeAsync(10)
+      answers.shift()!({ shown: false })
+      await vi.advanceTimersByTimeAsync(10)
+      expect(s.putThumbnail('s', '1', 'done', jpeg(10))).toBe('keyboard')
+    })
+
     it('keeps none when nothing read the keyboard, or nothing could say', async () => {
       const { s } = store()
       record(s, ...touchAt('t', 0.2))
@@ -712,10 +747,12 @@ describe('CaptureStore — thumbnails', () => {
       expect(unknown.putThumbnail('s', '1', 'u', jpeg(10))).toBe('keyboard')
     })
 
-    // A fast typist's key lands before any read has seen the keyboard slide in: the read after it says it was a key.
-    it('keeps none when the read after it puts it on the keyboard', async () => {
+    // Measured on Android: the read before a first key said the keyboard was down while it slid up; the read after it
+    // said it was a key. And the picture arrived before that read did, so it waits for it.
+    it('keeps none when the read after it puts it on the keyboard, and waits for that read', async () => {
       const s = await withKeyboard([{ shown: false }, UP])
       record(s, ...touchAt('k', 0.8))
+      expect(s.putThumbnail('s', '1', 'k', jpeg(10))).toBe('not-yet')
       await vi.advanceTimersByTimeAsync(50)
       expect(s.putThumbnail('s', '1', 'k', jpeg(10))).toBe('keyboard')
     })
