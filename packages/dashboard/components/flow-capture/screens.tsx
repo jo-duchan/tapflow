@@ -514,11 +514,12 @@ function EditRow({ index, step, selected, onSelect, onRemove, renamedTo, onRenam
     // reason 8 px under it with 4 px below.
     // The label's button stretches over the whole card (its `after:` box), so the card is one target with no click
     // handler of its own; the buttons and the field on it sit a layer above (`relative z-10`) and keep their own clicks.
-    // Keyboard and screen reader still meet the one button that selects.
+    // Keyboard and screen reader still meet the one button that selects. `data-stretched` keeps it out of the press
+    // nudge in index.css: a transform on it would shrink the `after:` box to the label mid-click.
     <li className={cn('relative rounded-md border py-2 pl-3 pr-2 hover:bg-accent/40', selected ? 'border-primary' : 'border-border', step.step === null && 'opacity-60')}>
       <div className="flex items-center gap-2">
         {/* One line, as drawn; the whole label is the tooltip when it does not fit. */}
-        <button type="button" onClick={onSelect} aria-current={selected ? 'true' : undefined} title={label}
+        <button type="button" data-stretched onClick={onSelect} aria-current={selected ? 'true' : undefined} title={label}
           className="min-w-0 flex-1 truncate text-left text-sm leading-5 after:absolute after:inset-0 after:rounded-md after:content-[''] focus-visible:outline-none focus-visible:after:ring-2 focus-visible:after:ring-ring">
           <span className="text-muted-foreground">#{index + 1} </span>{label}
         </button>
