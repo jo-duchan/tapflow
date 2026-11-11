@@ -266,9 +266,15 @@ function withHome(steps: RawStep[], entries: readonly CaptureEntry[]): RawStep[]
   const reads = entries.flatMap((e) => (e.kind === 'keyboard' ? [e] : [])).sort((a, b) => a.at - b.at)
   if (reads.length === 0) return steps
   let i = 0
-  let last: boolean | undefined
+  let lastRead: (typeof reads)[number] | undefined
+  let previousEnd = -Infinity
   return steps.map((s) => {
-    while (i < reads.length && reads[i]!.at <= s.at) last = reads[i++]!.keyboard.onHome
+    while (i < reads.length && reads[i]!.at <= s.at) lastRead = reads[i++]
+    const sinceLast = previousEnd
+    previousEnd = s.endAt
+    // A read asked for before the step ahead ended, and answered after it, is about the screen that step left: the icon
+    // tap's would place the first tap in the app on the home screen.
+    const last = lastRead && lastRead.requestedAt >= sinceLast ? lastRead.keyboard.onHome : undefined
     if (last === undefined) return s
     const after = last ? reads.find((r) => r.requestedAt >= s.endAt)?.keyboard.onHome : undefined
     if (last && after === false) return s

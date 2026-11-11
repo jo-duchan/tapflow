@@ -688,6 +688,22 @@ describe('defaultRange', () => {
       expect(defaultRange(steps)).toEqual({ start: 3, end: 5 })
     })
 
+    // A read asked for on the home screen that answered only after the icon's tap: it says nothing of where the tap
+    // after the icon's was made, and with no read after that tap to place it either, the tap is not known.
+    it('takes no read an input overtook as placing the step after it', () => {
+      const r = new Rec().install()
+      read(r, HOME).touch([[0.2, 0.3]])
+      read(r, HOME)
+      // Asked for as the icon's tap began, answered after it ended.
+      const asked = r.t
+      r.touch([[0.42, 0.725]])
+      r.entries.push({ at: r.t + 5, kind: 'keyboard', requestedAt: asked, keyboard: HOME, settled: false })
+      r.wait(100).touch([[0.5, 0.4]])
+      const steps = r.steps()
+      expect(steps.map((s) => s.onHome)).toEqual([undefined, true, true, undefined])
+      expect(defaultRange(steps)).toEqual({ start: 3, end: 4 })
+    })
+
     it('keeps an open-url sent from the home screen: it is how the app was opened', () => {
       const r = new Rec().install()
       read(r, HOME).touch([[0.2, 0.3]])
