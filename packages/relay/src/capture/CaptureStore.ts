@@ -246,6 +246,8 @@ export class CaptureStore {
   /** A session's value read in flight, and whether another was asked for meanwhile (single-flight, as keyboard probes). */
   private readonly valueReads = new Map<string, { again: Holder | null }>()
   private readonly reads = new Map<string, Set<Promise<void>>>()
+  /** When each field read still out was asked for: a picture just after typing waits for the ones that cover it. */
+  private readonly fieldReadsOut = new Map<string, Set<number>>()
   private readonly keyboards = new Map<string, KeyboardProbe>()
   private totalBytes = 0
   private readonly now: () => number
@@ -394,7 +396,10 @@ export class CaptureStore {
   private read(sessionId: string, holder: Holder, phase: 'focus' | 'value', requestedAt = this.now()): Promise<void> | undefined {
     const answer = this.opts.readField?.(sessionId)
     if (!answer) return undefined
-    const done = answer.then((read) => {
+    let out = this.fieldReadsOut.get(sessionId)
+    if (!out) this.fieldReadsOut.set(sessionId, out = new Set())
+    out.add(requestedAt)
+    const done = answer.finally(() => { out.delete(requestedAt) }).then((read) => {
       const capture = this.captures.get(sessionId)
       // The person may have stopped being recorded while the agent answered: a pause, a seal, a setting turned off.
       if (!capture || !this.recording(sessionId, holder, capture)) return
@@ -466,6 +471,7 @@ export class CaptureStore {
     if (probe?.settleTimer) clearTimeout(probe.settleTimer)
     this.keyboards.delete(sessionId)
     this.valueReads.delete(sessionId)
+    this.fieldReadsOut.delete(sessionId)
     const capture = this.captures.get(sessionId)
     if (capture) this.totalBytes -= capture.bytes + capture.thumbnailBytes
     this.captures.delete(sessionId)
@@ -552,10 +558,12 @@ export class CaptureStore {
     // there is one: Email to Password keeps its pictures, Password to Sign in does not.
     let startedAt = entry.at
     let i = at - 1
-    if (touch) {
+    // A gesture's picture is taken as it starts.
+    const opening = touch ? 'input:touch:start' : entry.msg.type === 'input:pinch:end' ? 'input:pinch:start' : undefined
+    if (opening) {
       for (; i >= 0; i--) {
         const e = capture.entries[i]!
-        if (e.kind === 'input' && e.msg.type === 'input:touch:start') { startedAt = e.at; i--; break }
+        if (e.kind === 'input' && e.msg.type === opening) { startedAt = e.at; i--; break }
       }
     }
     let typedAt: number | undefined
@@ -575,6 +583,8 @@ export class CaptureStore {
         runStart = e.at
       }
       const reads = capture.entries.filter((e): e is Extract<CaptureEntry, { kind: 'field' }> => e.kind === 'field' && e.requestedAt >= runStart && e.requestedAt < startedAt)
+      // A read still out may be the one that names a secure field (iOS takes about 0.45 s, one at a time): wait for it.
+      if ([...this.fieldReadsOut.get(sessionId) ?? []].some((t) => t >= runStart && t < startedAt)) return 'not-yet'
       if (reads.length === 0 || reads.some((r) => r.field?.secure !== false)) return 'typed'
     }
     // Room only from this capture's own older pictures, and only past its own cap: room the relay as a whole lacks is

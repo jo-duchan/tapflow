@@ -807,6 +807,32 @@ describe('CaptureStore — thumbnails', () => {
       expect(late.putThumbnail('s', '1', 'later', jpeg(10))).toBe('kept')
     })
 
+    it('judges a pinch by when it began, which is when its picture was taken', async () => {
+      const s = await typedInto(true)
+      record(s, { type: 'input:pinch:start', sessionId: 's', payload: { f0: { x: 0.4, y: 0.5 }, f1: { x: 0.6, y: 0.5 } } })
+      await vi.advanceTimersByTimeAsync(2_000)
+      record(s, { type: 'input:pinch:end', sessionId: 's', requestId: 'pinch' })
+      expect(s.putThumbnail('s', '1', 'pinch', jpeg(10))).toBe('typed')
+    })
+
+    // A read still out may be the one naming a secure field: the picture waits for it, as for a keyboard read.
+    it('waits for a field read still out', async () => {
+      vi.useFakeTimers()
+      const answers: Array<() => void> = []
+      const { s } = store({
+        now: () => Date.now(), readKeyboard: () => Promise.resolve({ shown: false }),
+        readField: () => new Promise<FieldRead>((r) => answers.push(() => r({ field: field(false) }))),
+      })
+      record(s, key('a', 'KeyA'))
+      await vi.advanceTimersByTimeAsync(100)
+      record(s, ...touchAt('next', 0.2))
+      await vi.advanceTimersByTimeAsync(50)
+      expect(s.putThumbnail('s', '1', 'next', jpeg(10))).toBe('not-yet')
+      for (const answer of answers) answer()
+      await vi.advanceTimersByTimeAsync(10)
+      expect(s.putThumbnail('s', '1', 'next', jpeg(10))).toBe('kept')
+    })
+
     it('counts a touch on the soft keyboard as typing', async () => {
       vi.useFakeTimers()
       const UP: KeyboardState = { shown: true, rect: { x: 0, y: 0.6, width: 1, height: 0.4 } }

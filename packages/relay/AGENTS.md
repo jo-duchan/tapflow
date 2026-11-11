@@ -294,7 +294,7 @@ ids it has pictures of; each is read with `GET …/capture/snapshot/thumbnails/:
   its budget while one is open.
 - **The field typed into is read around each run of typing** (#1135), because the keys alone cannot say what the
   device's IME made of them. At a run's first `input:key`/`input:type` the relay asks the session's agent for the
-  focused field (`ui:field:request`), and again `FIELD_IDLE_MS` (600 ms) after the run's last key — any key extends the
+  focused field (`ui:field:request`), and again `FIELD_IDLE_MS` (250 ms) after the run's last key — any key extends the
   run, any other input ends it. **Nothing waits for a read**: an input is sent as before, and `requestedAt` and `at` on
   the recorded entry let the reader drop a read that raced one. Only an agent naming `field-value` is asked (iOS), only
   for a recorded holder, and the answer is kept only if the person is still recorded when it comes. A snapshot first
