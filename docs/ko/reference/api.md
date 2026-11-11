@@ -16,7 +16,7 @@ description: "tapflow REST API 전체 레퍼런스(/api/v1): 인증, 초대, 비
 | PAT scope | 엔드포인트 |
 |-----------|-----------|
 | `builds:write` | `POST /builds`, `GET /builds`, `GET /builds/:id`, `POST /comments`, 웹훅 엔드포인트 전체, 실행 기록 쓰기(`POST /runs` 아래) |
-| `view` | `GET /apps`, `GET /runs` 아래, `GET /sessions/:sessionId/screenshot`, `GET /sessions/:sessionId/ui-tree`, `/uploads/` 아래 파일(`/api/v1/`이 아닌 릴레이 루트 경로), 원격에서 여는 기기 세션 WebSocket |
+| `view` | `GET /apps`, `GET /runs` 아래, `GET /sessions/:sessionId/screenshot`, `GET /sessions/:sessionId/ui-tree`, `POST /sessions/:sessionId/reach`, `/uploads/` 아래 파일(`/api/v1/`이 아닌 릴레이 루트 경로), 원격에서 여는 기기 세션 WebSocket |
 | `agent` | 원격 에이전트의 WebSocket 연결. 토큰을 발급한 팀원이 Admin인 동안에만 받습니다 |
 
 **역할.** PAT로 호출해도 토큰 주인의 현재 역할이 적용됩니다. Viewer는 읽기 전용이라 빌드 업로드·수정·삭제 예약, 앱 생성·수정·삭제, 웹훅 엔드포인트 전체, 실행 기록 쓰기에서 `403`을 받습니다. 빌드 조회와 댓글 작성은 Viewer도 할 수 있습니다. 역할을 확인하는 엔드포인트는 요청마다 역할을 다시 읽으므로 역할을 바꾸면 다시 로그인하거나 토큰을 새로 만들지 않아도 바로 적용됩니다.
@@ -1213,6 +1213,38 @@ Query:
 `interfaceTurn`은 기기의 세로 화면을 시계 방향으로 몇 도 돌려야 앱 화면이 똑바로 서는지 나타냅니다(`0`, `90`, `180`, `270`). 에이전트가 앱의 방향을 읽을 수 있을 때만 들어 있으며 현재는 iOS만 보냅니다. 값이 없으면 방향 정보가 없다는 뜻입니다.
 
 입력 칸(`role: "input"`)에는 `secure`가 함께 옵니다. 비밀번호처럼 입력한 글자를 가리는 칸이면 `true`, 아니면 `false`입니다. 입력 칸이 아니어도 글자를 가린다고 알려 온 요소에는 `secure: true`가 붙습니다. 입력 칸인데 `secure`가 없으면 에이전트가 판단하지 못했다는 뜻이므로 비밀번호 칸으로 다루세요. 지금 입력을 받는 칸에는 `focused: true`가 붙습니다.
+
+켜진 스위치나 체크박스에는 `checked: true`가, 선택된 탭·세그먼트·행에는 `selected: true`가 붙습니다. 그렇지 않으면 둘 다 없고 이 값을 읽지 않는 에이전트도 보내지 않습니다.
+
+### `POST /api/v1/sessions/:sessionId/reach`
+
+`ui-tree`에서 읽은 요소마다 그 요소를 누르려는 터치가 어디에 닿는지 묻습니다. 플로우는 요소의 중심 대신 여기서 받은 지점을 누릅니다. 중심은 탭 바나 떠 있는 버튼, 반투명 막에 덮일 수 있기 때문입니다.
+
+**요청**
+
+```json
+{ "targets": [{ "role": "cell", "label": "Row 13", "frame": { "x": 0, "y": 0.86, "width": 1, "height": 0.06 } }] }
+```
+
+각 대상은 `ui-tree`가 돌려준 요소 그대로입니다. `role`, `label`, `frame`과 있으면 `identifier`를 넣습니다. 대상은 64개, 본문은 64KB까지입니다.
+
+**응답 `200`**
+
+```json
+{ "results": [{ "state": "reachable", "point": [0.1, 0.9], "atCentre": false, "frame": { "x": 0, "y": 0.86, "width": 1, "height": 0.03 } }] }
+```
+
+대상마다 결과가 하나씩 같은 순서로 옵니다.
+
+| `state` | 의미 |
+|---|---|
+| `reachable` | `point`를 누르면 그 요소에 닿습니다. `point`는 터치를 보내는 공간 기준 0–1입니다. iOS는 앱이 돌아간 화면이 아니라 기기의 세로 화면이고 Android는 `ui-tree`의 frame처럼 Android가 그리는 화면입니다. `atCentre`는 그 지점이 요소의 중심인지 알려 줍니다. |
+| `occluded` | 터치를 받는 다른 요소가 전부 덮고 있습니다. 알 수 있으면 `by`에 그 요소를 적습니다. |
+| `offscreen` | 요소가 화면 밖에 있습니다. |
+| `missing` | 읽은 자리에 그 요소가 없습니다. `candidates`는 근처 요소 수입니다. 트리를 다시 읽으세요. |
+| `unknown` | 기기가 판정하지 못합니다. `reason`에 이유가 있습니다. 이 엔드포인트 이전의 에이전트는 모든 대상에 이렇게 답합니다. |
+
+본문이 잘못되면 `400`, 64KB를 넘으면 `413`, 세션이 없으면 `404`, 기기가 꺼져 있으면 `409`, 에이전트가 오프라인이면 `502`, 15초에 대상마다 0.3초를 더한 시간이 지나면 `504`를 반환합니다.
 
 
 ## Flow Capture

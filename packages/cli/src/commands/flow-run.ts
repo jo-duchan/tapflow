@@ -227,6 +227,17 @@ function printFailure(result: FlowResult, flow: Flow, flowIndex: number, opts: F
   }
 }
 
+/**
+ * Touches the device could not judge (#1125), said under a flow whether it passed or failed: such a step touched its
+ * element's centre, which is how a covered row once passed as tapped, so a green flow must not hide that it has them.
+ */
+function printUnchecked(result: FlowResult, prefix = ''): void {
+  const unchecked = result.steps.filter((st) => st.reach === 'unchecked')
+  if (unchecked.length === 0) return
+  const why = [...new Set(unchecked.map((st) => st.reachNote ?? 'no reason given'))].join('; ')
+  console.error(`${prefix}  ! ${unchecked.length} touch${unchecked.length === 1 ? '' : 'es'} not checked to land on ${unchecked.length === 1 ? 'its element' : 'their elements'} (${why}) — touched at the centre`)
+}
+
 /** What a run's boot reset, said once per device. */
 function printReset(report: BootOutcome['runReset'], deviceName: string, prefix = ''): void {
   if (!report) {
@@ -246,6 +257,9 @@ function flowReport(result: FlowResult, device?: DeviceInfo): FlowReport {
     steps: result.steps.map((st) => ({
       index: st.index, name: st.name, status: st.status, durationMs: st.durationMs,
       ...(st.message ? { message: st.message } : {}),
+      ...(st.reach ? { reach: st.reach } : {}),
+      ...(st.reachNote ? { reachNote: st.reachNote } : {}),
+      ...(st.effect ? { effect: st.effect } : {}),
       ...(st.suggestions ? { suggestions: st.suggestions } : {}),
     })),
     // A flow refused before a device was chosen ran on none.
@@ -399,6 +413,7 @@ async function runParallel(run: ParallelRun, workerCount: number): Promise<Paral
         recorder?.reportFlow(idx, flowReport(result, device), result.failureScreenshot ?? result.lastScreenshot)
         console.log(`${prefix}${result.status === 'passed' ? '✓' : '✗'} ${flow.name} (${(result.durationMs / 1000).toFixed(1)}s)`)
         if (result.status === 'failed') printFailure(result, flow, idx, opts, prefix)
+        printUnchecked(result, prefix)
         // The device, not the app: whatever went wrong may still be wrong for the next flow, so this worker stops.
         // Unless nothing reached the device — a flow pressing a button this device lacks says nothing about the device,
         // and leaving over it would cost the run a healthy one per such flow. A pinch refused as unsupported does leave:
@@ -776,6 +791,7 @@ export async function cmdFlowRun(files: string[], opts: FlowRunOptions): Promise
       if (result.status === 'failed' && result.failureKind !== 'environment') sawProductFailure = true
       console.log(result.status === 'passed' ? `✓ (${(result.durationMs / 1000).toFixed(1)}s)` : '✗')
       if (result.status === 'failed') printFailure(result, flow, flowIndex, opts)
+      printUnchecked(result)
     }
 
     if (opts.junit) {

@@ -92,6 +92,18 @@ describe('parseUiAutomatorDump', () => {
     ])
   })
 
+  // #1125: what a tap on a switch or a tab changed, where nothing else in the tree does — its expected effect.
+  it('reads a checked switch and a selected tab, and nothing for the rest', () => {
+    const xml = wrap([
+      `<node ${attrs({ class: 'android.widget.Switch', 'resource-id': 'form.notify', checkable: 'true', checked: 'true', clickable: 'true', bounds: '[880,950][1030,1040]' })} />`,
+      `<node ${attrs({ class: 'android.widget.Switch', 'resource-id': 'form.other', checkable: 'true', clickable: 'true', bounds: '[880,1050][1030,1140]' })} />`,
+      `<node ${attrs({ class: 'android.view.View', 'resource-id': 'tab.form', selected: 'true', focusable: 'true', bounds: '[0,2127][255,2337]' })} />`,
+    ].join('\n'))
+    expect(parseUiAutomatorDump(xml).map((e) => [e.identifier, e.checked ?? false, e.selected ?? false])).toEqual([
+      ['form.notify', true, false], ['form.other', false, false], ['tab.form', false, true],
+    ])
+  })
+
   it('never lets a frame reach past the screen by rounding', () => {
     // Flush with the bottom edge at the bounds an Android 14 emulator's navigation bar had: rounding y and height
     // apart gave y + height = 1.0001 and the whole tree was refused. Any clickable bottom bar reached it.

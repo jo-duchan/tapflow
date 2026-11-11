@@ -6,9 +6,10 @@ import { WebSocket } from 'ws'
 import type { UIElement } from '@tapflowio/agent-core'
 import { PlatformError } from '@tapflowio/agent-core/errors'
 import type { InterfaceTurn } from '@tapflowio/protocol/screen'
+import type { ReachResult, ReachTarget } from '@tapflowio/protocol'
 import { authHeader, fetchWithToken, fixedToken, tokenRefusal, type TokenSource } from './credentials.js'
 import { SessionChannel, type RelayMsg } from './sessionChannel.js'
-import { parseUITreeResponse } from './uiTreeRead.js'
+import { parseUITreeResponse, reachRequest, readReachResults } from './uiTreeRead.js'
 import { RelayHttpError, RelayUnavailableError } from './sessionErrors.js'
 
 export {
@@ -536,10 +537,10 @@ export class RelayClient extends SessionChannel {
     return this.relayUrl.replace(/^wss?/, (p) => (p === 'wss' ? 'https' : 'http'))
   }
 
-  private async getJson<T>(path: string, what: string, signal?: AbortSignal): Promise<T> {
+  private async getJson<T>(path: string, what: string, signal?: AbortSignal, init: Omit<RequestInit, 'headers'> & { headers?: Record<string, string> } = {}): Promise<T> {
     let res: Response
     try {
-      res = await fetchWithToken(this.tokens, new URL(path, this.httpBase()).toString(), { ...(signal ? { signal } : {}) })
+      res = await fetchWithToken(this.tokens, new URL(path, this.httpBase()).toString(), { ...init, ...(signal ? { signal } : {}) })
     } catch (e) {
       throw new RelayHttpError(`${what} failed: ${(e as Error).message}`, 0, { cause: e })
     }
@@ -592,6 +593,23 @@ export class RelayClient extends SessionChannel {
     try {
       return parseUITreeResponse(await this.getJson<unknown>(`/api/v1/sessions/${sessionId}/ui-tree`, 'ui-tree query', signal))
     } catch (e) {
+      throw this.treeQueryFailure(sessionId, e)
+    }
+  }
+
+  /**
+   * Where touches meant for `targets` land, as the device's agent judges them (#1125). A relay that predates the route
+   * (404) answers every target `unknown`, as an agent without `reach` does: the flow runs, its taps unchecked and said so.
+   */
+  async reach(sessionId: string, targets: ReachTarget[], signal?: AbortSignal): Promise<ReachResult[]> {
+    try {
+      const body = await this.getJson<unknown>(`/api/v1/sessions/${sessionId}/reach`, 'reach query', signal, reachRequest(targets))
+      return readReachResults(body, targets.length)
+    } catch (e) {
+      // The route's 404, not the session's: a relay with the route answers an unknown session `Session not found`.
+      if (e instanceof RelayHttpError && e.status === 404 && e.message !== 'Session not found') {
+        return targets.map(() => ({ state: 'unknown', reason: 'this relay predates reach' }))
+      }
       throw this.treeQueryFailure(sessionId, e)
     }
   }

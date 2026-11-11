@@ -3236,6 +3236,43 @@ describe('AndroidAgent', () => {
       })
     })
 
+    // #1125: where a touch meant for an element lands, from the jar; unknown, never a guess, when the jar cannot say.
+    describe('ui:reach:request', () => {
+      const target = { role: 'button', label: 'Row 10', identifier: 'list.row.10', frame: { x: 0, y: 0.78, width: 1, height: 0.06 } }
+      function replies() {
+        const out: Array<Record<string, unknown>> = []
+        const real = (agent as unknown as { sendMsg(m: unknown): void }).sendMsg.bind(agent)
+        vi.spyOn(agent as unknown as { sendMsg(m: unknown): void }, 'sendMsg').mockImplementation((m) => { out.push(m as Record<string, unknown>); real(m) })
+        return out
+      }
+
+      it('answers with the jar\'s results', async () => {
+        const results = [{ state: 'occluded', by: 'View list.fab' }]
+        const reach = vi.spyOn(adb, 'reach').mockResolvedValue(results as never)
+        const out = replies()
+        inject({ type: 'ui:reach:request', requestId: 'rq-r1', targets: [target] })
+        await vi.waitFor(() => expect(out.find((m) => m['requestId'] === 'rq-r1')).toBeDefined())
+        expect(reach).toHaveBeenCalledWith('emulator-5554', [target])
+        expect(out.find((m) => m['requestId'] === 'rq-r1')).toMatchObject({ type: 'ui:reach:response', results })
+      })
+
+      it.each([[null], [[]]])('answers unknown when the jar cannot run or answers for other elements (%j)', async (got) => {
+        vi.spyOn(adb, 'reach').mockResolvedValue(got as never)
+        const out = replies()
+        inject({ type: 'ui:reach:request', requestId: 'rq-r2', targets: [target] })
+        await vi.waitFor(() => expect(out.find((m) => m['requestId'] === 'rq-r2')).toBeDefined())
+        expect(out.find((m) => m['requestId'] === 'rq-r2')).toMatchObject({ results: [{ state: 'unknown' }] })
+      })
+
+      it('answers a request that carries no list of targets, rather than throwing it away', async () => {
+        const reach = vi.spyOn(adb, 'reach').mockResolvedValue([])
+        const out = replies()
+        inject({ type: 'ui:reach:request', requestId: 'rq-r3', targets: 'nope' })
+        await vi.waitFor(() => expect(out.find((m) => m['requestId'] === 'rq-r3')).toMatchObject({ type: 'ui:reach:response', results: [] }))
+        expect(reach).toHaveBeenCalledWith('emulator-5554', [])
+      })
+    })
+
     // #1135: a replay starts from the keyboard language the recording did.
     describe('device:keyboard-set', () => {
       function languages(...titles: string[]) {

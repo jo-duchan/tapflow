@@ -85,11 +85,80 @@ final class FormViewController: UIViewController, UITextFieldDelegate {
 // MARK: - List
 
 final class ListViewController: UITableViewController {
+    private let scrim = UIView()
+    private let close = UIButton(type: .system)
+    private var decorY: NSLayoutConstraint?
+
     override func viewDidLoad() {
         super.viewDidLoad()
         tableView.accessibilityIdentifier = "list.table"
         tableView.register(UITableViewCell.self, forCellReuseIdentifier: "row")
+        addLayers()
     }
+
+    /// Three layers over the rows, as the SwiftUI target has them: a label that takes no touches over Row 5, a floating
+    /// button at the bottom right, and the scrim it opens over every row until Close. Pinned to the table's frame, not
+    /// its content, so they stay put while the rows scroll under them.
+    private func addLayers() {
+        let frame = tableView.frameLayoutGuide
+        let decor = UILabel()
+        decor.text = "  Decor  "
+        decor.backgroundColor = UIColor.systemYellow.withAlphaComponent(0.5)
+        decor.layer.cornerRadius = 16
+        decor.clipsToBounds = true
+        decor.isUserInteractionEnabled = false
+        decor.accessibilityIdentifier = "list.decor"
+        let fab = UIButton(type: .system)
+        fab.setImage(UIImage(systemName: "plus"), for: .normal)
+        fab.tintColor = .white
+        fab.backgroundColor = .systemBlue
+        fab.layer.cornerRadius = 28
+        fab.accessibilityLabel = "Add"
+        fab.accessibilityIdentifier = "list.fab"
+        fab.addAction(UIAction { [weak self] _ in Status.shared.tapped("list.fab"); self?.showScrim(true) }, for: .touchUpInside)
+        scrim.backgroundColor = UIColor.black.withAlphaComponent(0.3)
+        scrim.accessibilityIdentifier = "list.scrim"
+        scrim.isHidden = true
+        scrim.addGestureRecognizer(UITapGestureRecognizer(target: self, action: #selector(scrimTapped)))
+        close.setTitle("Close", for: .normal)
+        close.accessibilityIdentifier = "list.scrim.close"
+        close.isHidden = true
+        close.addAction(UIAction { [weak self] _ in Status.shared.tapped("list.scrim.close"); self?.showScrim(false) }, for: .touchUpInside)
+        for v in [decor, fab, scrim, close] as [UIView] {
+            v.translatesAutoresizingMaskIntoConstraints = false
+            tableView.addSubview(v)
+        }
+        NSLayoutConstraint.activate([
+            decor.centerXAnchor.constraint(equalTo: frame.centerXAnchor),
+            decor.heightAnchor.constraint(equalToConstant: 44),
+            fab.widthAnchor.constraint(equalToConstant: 56), fab.heightAnchor.constraint(equalToConstant: 56),
+            // The safe area, not the frame: the table runs under the tab bar, which would cover the button.
+            fab.trailingAnchor.constraint(equalTo: tableView.safeAreaLayoutGuide.trailingAnchor, constant: -16),
+            fab.bottomAnchor.constraint(equalTo: tableView.safeAreaLayoutGuide.bottomAnchor, constant: -16),
+            scrim.topAnchor.constraint(equalTo: frame.topAnchor), scrim.bottomAnchor.constraint(equalTo: frame.bottomAnchor),
+            scrim.leadingAnchor.constraint(equalTo: frame.leadingAnchor), scrim.trailingAnchor.constraint(equalTo: frame.trailingAnchor),
+            close.centerXAnchor.constraint(equalTo: frame.centerXAnchor), close.centerYAnchor.constraint(equalTo: frame.centerYAnchor),
+        ])
+        decorY = decor.centerYAnchor.constraint(equalTo: frame.topAnchor)
+        decorY?.isActive = true
+    }
+
+    override func viewDidLayoutSubviews() {
+        super.viewDidLayoutSubviews()
+        // 40% down, as the SwiftUI target places it: over Row 5 or so, never over Row 0.
+        decorY?.constant = tableView.frame.height * 0.4
+        // Cells are added as they scroll in, above anything added before them: the layers go back on top.
+        for id in ["list.decor", "list.fab", "list.scrim", "list.scrim.close"] {
+            if let v = tableView.subviews.first(where: { $0.accessibilityIdentifier == id }) { tableView.bringSubviewToFront(v) }
+        }
+    }
+
+    private func showScrim(_ shown: Bool) {
+        scrim.isHidden = !shown
+        close.isHidden = !shown
+    }
+
+    @objc private func scrimTapped() { Status.shared.tapped("list.scrim") }
 
     // Fifty rows so the list runs past the screen: rows that are not on screen are not loaded, and the
     // measurement records whether the tree reports them anyway.

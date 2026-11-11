@@ -394,6 +394,22 @@ describe('cmdFlowRun records the run on the relay (A3)', () => {
 
   const errLines = () => vi.mocked(console.error).mock.calls.map(([l]) => String(l))
 
+  // #1125: a touch the device could not judge went to the element's centre, so even a green flow says it has one.
+  it('says under a passed flow which touches were not checked, and records why with the step', async () => {
+    const relay = fakeRelay()
+    mocks.runFlow.mockResolvedValue({
+      ...resultOf('passed'),
+      steps: [
+        { index: 0, name: 'tapOn("Row 13")', status: 'passed', durationMs: 5, reach: 'unchecked', reachNote: 'this relay predates reach' },
+        { index: 1, name: 'tapOn("Save")', status: 'passed', durationMs: 5, reach: 'verified', effect: 'confirmed' },
+      ],
+    })
+    await cmdFlowRun([file], { token: 'tflw_pat_x' })
+    expect(errLines()).toContain('  ! 1 touch not checked to land on its element (this relay predates reach) — touched at the centre')
+    const report = relay.calls.find((c) => c.url.endsWith('/flows/0'))!.body as { steps: { reach?: string; reachNote?: string; effect?: string }[] }
+    expect(report.steps.map((s) => [s.reach, s.reachNote, s.effect])).toEqual([['unchecked', 'this relay predates reach', undefined], ['verified', undefined, 'confirmed']])
+  })
+
   // B2: a tapOn's suggestions go to the console under the failure, and with the step to the record.
   it('prints a failed tapOn\'s suggestions and records them with the step', async () => {
     const relay = fakeRelay()

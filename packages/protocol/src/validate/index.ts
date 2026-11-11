@@ -62,7 +62,7 @@ import type {
   InputPinchEnd, InputPinchMove, InputPinchStart, InputPosture, InputRotate, InputTouchCancel, InputTouchEnd, InputTouchMove,
   InputTouchStart, InputType, InputTypeDone, InputTypeError, KeyboardToggled, OpenUrl, OpenUrlDone,
   OpenUrlError, ScreenshotDone, ScreenshotError, SessionChrome, SessionDeviceInfo, SessionEnd,
-  SessionActivity, SessionLeave, SessionStart, StreamRegister, UiTreeError, UiTreeResponse, UiFieldResponse, UiKeyboardResponse, DeviceKeyboardSet, DeviceKeyboardSetDone, DeviceKeyboardSetError,
+  SessionActivity, SessionLeave, SessionStart, StreamRegister, UiTreeError, UiTreeResponse, UiReachResponse, UiFieldResponse, UiKeyboardResponse, DeviceKeyboardSet, DeviceKeyboardSetDone, DeviceKeyboardSetError,
   DeviceRunReset, DeviceRunResetDone, DeviceRunResetError,
   WatchStart, WatchStop,
 } from '../index.js'
@@ -361,6 +361,8 @@ const AGENT_CONSUMED = {
       // field a third-party agent spelled `"true"`. A dropped `secure` reads as unknown, which is secret.
       secure: z.boolean().optional().catch(undefined),
       focused: z.boolean().optional().catch(undefined),
+      checked: z.boolean().optional().catch(undefined),
+      selected: z.boolean().optional().catch(undefined),
     })).default([]),
     // Optional and forgiving: a value this relay does not know drops the field, not the frame. A closed enum
     // would refuse the whole tree for one unknown turn, and the caller would wait out the 15 s deadline for a
@@ -369,6 +371,21 @@ const AGENT_CONSUMED = {
   }),
   'ui:tree:error': z.object({
     type: z.literal('ui:tree:error'), sessionId, requestId, message: z.string().default(''),
+  }),
+  // One result per target, each read on its own: a result this relay cannot read is `unknown`, so the caller taps
+  // knowing the tap was not checked, rather than losing the other targets' answers or waiting out its deadline.
+  'ui:reach:response': z.object({
+    type: z.literal('ui:reach:response'), sessionId, requestId,
+    results: z.array(z.discriminatedUnion('state', [
+      z.object({
+        state: z.literal('reachable'), point: z.tuple([z.number(), z.number()]), atCentre: z.boolean(),
+        frame: z.object({ x: z.number(), y: z.number(), width: z.number(), height: z.number() }),
+      }),
+      z.object({ state: z.literal('occluded'), by: z.string().optional() }),
+      z.object({ state: z.literal('offscreen') }),
+      z.object({ state: z.literal('missing'), candidates: z.number().int() }),
+      z.object({ state: z.literal('unknown'), reason: z.string() }),
+    ]).catch({ state: 'unknown' as const, reason: 'unreadable answer' })).default([]),
   }),
   'ui:field:response': z.object({
     type: z.literal('ui:field:response'), sessionId, requestId,
@@ -684,6 +701,7 @@ type _AgentDevices = Assert<V<'agent:devices', AgentDevices>>
 type _ScreenshotDone = Assert<V<'screenshot:done', ScreenshotDone>>
 type _ScreenshotError = Assert<V<'screenshot:error', ScreenshotError>>
 type _UiTreeResponse = Assert<V<'ui:tree:response', UiTreeResponse>>
+type _UiReachResponse = Assert<V<'ui:reach:response', UiReachResponse>>
 type _UiTreeError = Assert<V<'ui:tree:error', UiTreeError>>
 type _UiFieldResponse = Assert<V<'ui:field:response', UiFieldResponse>>
 type _UiKeyboardResponse = Assert<V<'ui:keyboard:response', UiKeyboardResponse>>

@@ -10,7 +10,7 @@ import type { RunResetStep } from '@tapflowio/agent-core/utils'
 import { createLogger, PlatformError, ValidationError, bootAbandonMessage, BOOT_NO_SESSION_STATE, SHUTDOWN_NO_SESSION_STATE, downloadBuild } from '@tapflowio/agent-core'
 import type {
   AgentControlOutbound, AgentDevicesApplied, DeviceReport, InputErrorReason, ClipboardReplyBody, OpenUrlReplyBody,
-  AppInstallReplyBody, AppLaunchReplyBody, AppLaunchToAgent, LaunchOptions, AppClearStateReplyBody, DeviceKeyboardSetReplyBody, DeviceRunResetReplyBody, FormFactor, ServiceTier, RunResetReport, RunResetRequest,
+  AppInstallReplyBody, AppLaunchReplyBody, AppLaunchToAgent, LaunchOptions, AppClearStateReplyBody, DeviceKeyboardSetReplyBody, DeviceRunResetReplyBody, FormFactor, ServiceTier, RunResetReport, RunResetRequest, ReachResult, ReachTarget,
 } from '@tapflowio/protocol'
 import { appliedKeys, compactLaunchOptions, launchOptionsProblem } from '@tapflowio/protocol/launch'
 // Cross-platform button name → iOS device-chrome button name. Chrome uses hyphens and "power" (not "lock"); MCP's
@@ -38,7 +38,7 @@ const RUN_RESET_PASTEBOARD_TIMEOUT_MS = 10_000
 // actually took is per device and per app, and `network:state.available` carries that — the split the
 // protocol documents. Added last, after the handler and the boot-time arming, because the string on
 // its own is what puts a control on screen.
-const AGENT_CAPABILITIES: AgentCapability[] = ['clipboard', 'full-reset', 'network-control', 'build-download', 'launch-options', 'launch-env', 'touch-cancel', 'field-value', 'keyboard-reset', 'keyboard-state', 'keyboard-set', 'run-reset']
+const AGENT_CAPABILITIES: AgentCapability[] = ['clipboard', 'full-reset', 'network-control', 'build-download', 'launch-options', 'launch-env', 'touch-cancel', 'field-value', 'keyboard-reset', 'keyboard-state', 'keyboard-set', 'run-reset', 'reach']
 
 // Human prose for each reason. Not in `@tapflowio/protocol`: that package's main entry must stay
 // runtime-free so it erases under `import type` and never reaches the dashboard bundle — a lookup
@@ -2814,6 +2814,20 @@ export class IOSAgent implements DeviceAgent, NetworkControlCapability, Posturab
         const apps = (msg.payload as { apps?: unknown } | undefined)?.apps
         void this.runResetHeld(sessionId, Array.isArray(apps) ? apps.filter((a): a is string => typeof a === 'string') : [])
           .then((body) => this.sendMsg({ ...body, sessionId, requestId }))
+        break
+      }
+      case 'ui:reach:request': {
+        const { requestId, sessionId } = msg
+        if (!requestId) break
+        // Checked here too, not only by the relay: a throw below is swallowed, and the caller waits out its deadline.
+        const raw = (msg as unknown as { targets?: unknown }).targets
+        const targets = Array.isArray(raw) ? raw as ReachTarget[] : []
+        const state = this.deviceStates.get(sessionId)
+        const answer = (results: ReachResult[]) => this.sendMsg({ type: 'ui:reach:response', sessionId, requestId, results })
+        if (!state) { answer(targets.map(() => ({ state: 'unknown', reason: 'no booted device' }))); break }
+        // The app the tree is read for: the last launched or installed (`lastBundleIds`), as `/tree` and `/field` are.
+        void this.uiTreeReader.reach(state.deviceId, this.lastBundleIds.get(state.deviceId) ?? '', targets)
+          .then(answer, (e: unknown) => answer(targets.map(() => ({ state: 'unknown', reason: firstLine(e) }))))
         break
       }
       case 'device:keyboard-reset': {

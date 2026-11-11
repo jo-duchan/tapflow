@@ -31,6 +31,7 @@ export interface FlowReport {
   failureMessage?: string
   steps: {
     index: number; name: string; status: string; durationMs: number; message?: string
+    reach?: 'verified' | 'delivered' | 'unchecked'; reachNote?: string; effect?: 'confirmed' | 'failed'
     suggestions?: { yaml: string; element: { role: string; label: string; identifier?: string } }[]
   }[]
   device?: { id: string; name: string; platform?: string }

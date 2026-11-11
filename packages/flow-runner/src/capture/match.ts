@@ -1,6 +1,7 @@
-import type { DevicePosture, PointSpace, UIElement } from '@tapflowio/protocol'
+import type { DevicePosture, PointSpace, ReachResult, UIElement } from '@tapflowio/protocol'
 import type { InterfaceTurn } from '@tapflowio/protocol/screen'
 import type { ScrollDirection, Selector, Step } from '../schema.js'
+import type { StepExpect } from '../effect.js'
 import { matchSelector } from '../selector.js'
 import { selectorFor } from '../suggest.js'
 import { modifierNames } from './keys.js'
@@ -24,6 +25,9 @@ export interface MatchContext {
   /** The device's postures, most closed first (`device:postures`). */
   postures?: DevicePosture[]
   platform?: string
+  /** The device's answers to `reachQuestions` for this step, in their order, asked against `tree` (#1125). Absent where
+   *  the host could not ask: the step is then judged by the tree's frames alone, as it was before reach. */
+  reach?: ReachResult[]
 }
 
 export type SkipReason =
@@ -40,7 +44,8 @@ export type FragileReason =
   | 'no-element'
   /** The element under the point could not be named so that a selector finds it alone. */
   | 'no-selector'
-  /** Tapping the element's centre would not tap what the person did: a bigger element, or one partly covered. */
+  /** Tapping the element's centre would not tap what the person did: a bigger element, or one partly covered — in the
+   *  tree, or on the device where it can say (#1125). */
   | 'not-centre'
   /** A swipe replays its two ends at the speed it was made, not what it brought on screen. */
   | 'swipe'
@@ -63,6 +68,13 @@ export interface CapturedStep {
   auto?: true
   /** The tree the step was matched against, kept for the scroll rule in `toFlowSteps`. */
   tree?: UIElement[]
+  /** On a swipe: the elements of `tree`, by index, that were on it but not wholly in view — partly off the screen, or
+   *  their centre covered on the device (#1125). The scroll rule reads them as not yet brought into view. */
+  notInView?: number[]
+  /** On a touch: what Match's replay saw it do, from the screen before it to the screen the next step was read on.
+   *  Export writes only what Verify saw it do as well (`agreedEffect`), since a number that changes by itself usually
+   *  reads differently minutes apart (#1125). Absent where the replay could not read the screen after it. */
+  observed?: StepExpect | null
 }
 
 const MAX_GESTURE_MS = 60_000
@@ -107,14 +119,93 @@ export function hitTest(tree: readonly UIElement[], point: Point): UIElement | n
 
 const centre = (e: UIElement): Point => [e.frame.x + e.frame.width / 2, e.frame.y + e.frame.height / 2]
 
-/** A selector for what is at `point`, or why the point has to be kept. The engine taps an element's centre, so a
- *  selector is used only when that centre lands on the same element the person's point did. */
-function target(tree: UIElement[], point: Point): { selector: Selector } | { fragile: FragileReason } {
+/**
+ * A selector for what is at `point`, or why the point has to be kept. A selector is used only when the element's centre
+ * lands on it: then whatever the engine taps on it, the person's touch went to it too. The tree alone cannot say that —
+ * an iOS row under a tab bar, or under a scrim the tree names, has a frame whose centre is the bar (#1125) — so where the
+ * device answered, its word decides: reached at the centre, or the point is kept. Where it could not judge, the tree's
+ * frames are all there is, as before reach.
+ */
+function target(tree: UIElement[], point: Point, reach: ReachResult | undefined): { selector: Selector } | { fragile: FragileReason } {
   const hit = hitTest(tree, point)
   if (!hit) return { fragile: 'no-element' }
   if (hitTest(tree, centre(hit)) !== hit) return { fragile: 'not-centre' }
+  // Covered at its centre or wholly: the person's point may have gone to the cover, and only replaying it says so.
+  if (reach && (reach.state === 'occluded' || (reach.state === 'reachable' && !reach.atCentre))) return { fragile: 'not-centre' }
   const selector = selectorFor(tree, hit)
   return selector ? { selector } : { fragile: 'no-selector' }
+}
+
+/** The point a touch step was made at, on the screen as the app draws it; `null` for a step that touches no element. */
+function touchedAt(raw: RawStep, ctx: Pick<MatchContext, 'interfaceTurn' | 'frameTurn'>): Point | null {
+  switch (raw.kind) {
+    case 'tap': case 'longPress': return toScreen(raw.point, raw.space, ctx)
+    case 'pinch': {
+      const [a, b] = raw.start.map((f) => toScreen(f, raw.space, ctx)) as [Point, Point]
+      return [round4((a[0] + b[0]) / 2), round4((a[1] + b[1]) / 2)]
+    }
+    default: return null
+  }
+}
+
+/** The most a swipe asks about: the relay's limit on one reach. */
+const MAX_SWIPE_QUESTIONS = 64
+
+const overlaps = (a: UIElement, b: UIElement): boolean => {
+  const w = Math.min(a.frame.x + a.frame.width, b.frame.x + b.frame.width) - Math.max(a.frame.x, b.frame.x)
+  const h = Math.min(a.frame.y + a.frame.height, b.frame.y + b.frame.height) - Math.max(a.frame.y, b.frame.y)
+  return w > 1e-4 && h > 1e-4
+}
+const within = (inner: UIElement, outer: UIElement): boolean =>
+  inner.frame.x >= outer.frame.x && inner.frame.y >= outer.frame.y
+  && inner.frame.x + inner.frame.width <= outer.frame.x + outer.frame.width
+  && inner.frame.y + inner.frame.height <= outer.frame.y + outer.frame.height
+const offScreenPart = (e: UIElement): boolean =>
+  e.frame.x < 0 || e.frame.y < 0 || e.frame.x + e.frame.width > 1 || e.frame.y + e.frame.height > 1
+
+/**
+ * The elements of `ctx.tree` whose reach decides how `raw` is matched (#1125), for the host to ask the device before it
+ * replays the step and hand back as `MatchContext.reach`, in this order.
+ *
+ * - A tap, long press or pinch: the element under its point.
+ * - A swipe: each element on the screen the swipe started from that something else in the tree overlaps without either
+ *   holding the other — a row under a bar, a FAB or a named scrim. The scroll rule needs to know which of them were in
+ *   view, and asking every element would cost a reach each (130 ms on iOS, measured); one nothing in the tree overlaps
+ *   is taken as in view, which is all the tree could say before. A frame running off the screen is not in view and needs
+ *   no question.
+ */
+export function reachQuestions(raw: RawStep, ctx: Pick<MatchContext, 'tree' | 'interfaceTurn' | 'frameTurn'>): UIElement[] {
+  if (raw.outcome === 'refused') return []
+  if (raw.kind === 'swipe') return swipeQuestions(ctx.tree)
+  const p = touchedAt(raw, ctx)
+  const hit = p ? hitTest(ctx.tree, p) : null
+  return hit ? [hit] : []
+}
+
+function swipeQuestions(tree: readonly UIElement[]): UIElement[] {
+  const asked: UIElement[] = []
+  for (const e of tree) {
+    if (asked.length >= MAX_SWIPE_QUESTIONS) break
+    if (e.frame.width <= 0 || e.frame.height <= 0 || offScreenPart(e)) continue
+    if (tree.some((o) => o !== e && overlaps(o, e) && !within(o, e) && !within(e, o))) asked.push(e)
+  }
+  return asked
+}
+
+/** Which of a swipe's tree was on it but not wholly in view, by index: off the screen in part, or not reached at its
+ *  centre where the device answered (an element it could not judge counts as in view, as `scroll { until }` does). */
+function notInView(tree: UIElement[], ctx: MatchContext): number[] {
+  const asked = swipeQuestions(tree)
+  const out = new Set<number>()
+  tree.forEach((e, i) => { if (e.frame.width > 0 && e.frame.height > 0 && offScreenPart(e)) out.add(i) })
+  if (ctx.reach && ctx.reach.length === asked.length) {
+    asked.forEach((e, k) => {
+      const r = ctx.reach![k]!
+      if (r.state === 'unknown' || (r.state === 'reachable' && r.atCentre)) return
+      out.add(tree.indexOf(e))
+    })
+  }
+  return [...out].sort((a, b) => a - b)
 }
 
 /** Where typing went: the field with text focus. */
@@ -162,10 +253,12 @@ export function matchStep(raw: RawStep, ctx: MatchContext): CapturedStep {
 
 function matchAction(raw: RawStep, ctx: MatchContext): CapturedStep {
   if (raw.outcome === 'refused') return { raw, step: null, skipped: 'refused' }
+  // One question for a touch: the element under its point.
+  const reach = ctx.reach?.length === 1 ? ctx.reach[0] : undefined
   switch (raw.kind) {
     case 'tap': {
       const p = toScreen(raw.point, raw.space, ctx)
-      const t = target(ctx.tree, p)
+      const t = target(ctx.tree, p, reach)
       return 'selector' in t
         ? { raw, step: { type: 'tapOn', selector: t.selector }, tree: ctx.tree }
         : { raw, step: { type: 'tapPoint', at: p }, fragile: t.fragile, tree: ctx.tree }
@@ -173,7 +266,7 @@ function matchAction(raw: RawStep, ctx: MatchContext): CapturedStep {
     case 'longPress': {
       if (raw.durationMs > MAX_GESTURE_MS) return { raw, step: null, skipped: 'too-long' }
       const p = toScreen(raw.point, raw.space, ctx)
-      const t = target(ctx.tree, p)
+      const t = target(ctx.tree, p, reach)
       return 'selector' in t
         ? { raw, step: { type: 'longPressOn', selector: t.selector, durationMs: raw.durationMs } }
         : { raw, step: { type: 'longPressPoint', at: p, durationMs: raw.durationMs }, fragile: t.fragile }
@@ -184,6 +277,7 @@ function matchAction(raw: RawStep, ctx: MatchContext): CapturedStep {
         step: { type: 'swipe', from: toScreen(raw.from, raw.space, ctx), to: toScreen(raw.to, raw.space, ctx), durationMs: Math.max(1, raw.durationMs) },
         fragile: 'swipe',
         tree: ctx.tree,
+        notInView: notInView(ctx.tree, ctx),
       }
     case 'holdDrag': return { raw, step: null, skipped: 'hold-drag' }
     case 'pinch': {
@@ -195,7 +289,7 @@ function matchAction(raw: RawStep, ctx: MatchContext): CapturedStep {
       if (Math.abs(scale - 1) < PINCH_DEAD_ZONE) return { raw, step: null, skipped: 'no-pinch' }
       if (raw.durationMs > MAX_GESTURE_MS) return { raw, step: null, skipped: 'too-long' }
       const mid: Point = [round4((start[0][0] + start[1][0]) / 2), round4((start[0][1] + start[1][1]) / 2)]
-      const t = target(ctx.tree, mid)
+      const t = target(ctx.tree, mid, reach)
       return {
         raw,
         step: {
@@ -280,10 +374,11 @@ export interface CapturedFlow {
 /**
  * The matched steps of a range as the flow's steps, with two decisions that need a neighbour:
  *
- * - **A swipe that brought a tapped element on screen becomes `scroll { until }`** — what the swipe was for, since its
- *   distance does not replay (a fling's length depends on its release). Only when the element was not on the screen
- *   the swipe started from, and the swipe could be the engine's own (straight, across the middle): a pager swiped to
- *   a page whose button every page has must stay a swipe and a tap.
+ * - **A swipe that brought a tapped element into view becomes `scroll { until }`** — what the swipe was for, since its
+ *   distance does not replay (a fling's length depends on its release). Only when the element was not wholly in view on
+ *   the screen the swipe started from (absent, or there but in `notInView`: an iOS tree carries the rows under a tab
+ *   bar, #1125), and the swipe could be the engine's own (straight, across the middle): a pager swiped to a page whose
+ *   button every page has must stay a swipe and a tap.
  * - **A flow begins with a launch**: one is added when the range has none (`launchAdded`).
  * - **Each secret gets a name**: `PASSWORD` for a field that says it hides its text, `SECRET` for one that could not
  *   say, numbered from the second.
@@ -295,7 +390,9 @@ export function toFlowSteps(matched: readonly CapturedStep[]): CapturedFlow {
     const next = steps.slice(i + 1).find((s) => s.step !== null)
     if (swipe.step?.type !== 'swipe' || next?.step?.type !== 'tapOn' || !swipe.tree) continue
     const direction = scrollDirection(swipe.step.from, swipe.step.to)
-    if (!direction || matchSelector(swipe.tree, next.step.selector).length > 0) continue
+    const hidden = new Set(swipe.notInView ?? [])
+    const inView = matchSelector(swipe.tree, next.step.selector).some((e) => !hidden.has(swipe.tree!.indexOf(e)))
+    if (!direction || inView) continue
     steps[i] = { raw: swipe.raw, step: { type: 'scroll', direction, until: next.step.selector }, auto: true }
   }
 

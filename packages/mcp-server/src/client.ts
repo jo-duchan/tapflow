@@ -1,8 +1,8 @@
 import { randomUUID } from 'node:crypto'
 import type {
-  BootRefusalReason, BrowserToRelay, ChromePayload, DeviceSummary, PosturesPayload, InputErrorReason, LaunchApplied, LaunchOptions, SessionTerminatedReason, UIElement,
+  BootRefusalReason, BrowserToRelay, ChromePayload, DeviceSummary, PosturesPayload, InputErrorReason, LaunchApplied, LaunchOptions, ReachResult, ReachTarget, SessionTerminatedReason, UIElement,
 } from '@tapflowio/protocol'
-import { AdmissionRefusedError, DeviceLacksError, EnvironmentStepError, TransientQueryError, markEnvironmentFailure, authHeader, fetchWithToken, fixedToken, lookupBuild, tokenRefusal, keyModifierBits, type BuildLookup, type KeyModifier, type TokenSource } from '@tapflowio/flow-runner'
+import { AdmissionRefusedError, DeviceLacksError, EnvironmentStepError, TransientQueryError, markEnvironmentFailure, authHeader, fetchWithToken, fixedToken, lookupBuild, reachRequest, readReachResults, tokenRefusal, keyModifierBits, type BuildLookup, type KeyModifier, type TokenSource } from '@tapflowio/flow-runner'
 
 // Protocol owns the wire shape; this file used to declare an identical copy under a name the
 // relay uses for a *different* shape. Kept exported as `DeviceInfo` because that is this
@@ -1412,6 +1412,33 @@ export class TapflowClient {
       throw this.failed(sessionId, message)
     }
     return Buffer.from(await res.arrayBuffer())
+  }
+
+  /**
+   * Where touches meant for `targets` land, as the device's agent judges them (#1125), for `run_flow`'s taps. Failures
+   * are classed as a tree read's are, so a blip is retried until the step's deadline rather than taken as a tap nobody
+   * checked; a relay that predates the route (404) answers every target `unknown`, and the flow taps the centre unchecked.
+   */
+  async reach(sessionId: string, targets: ReachTarget[], signal?: AbortSignal): Promise<ReachResult[]> {
+    const httpBase = this.relayUrl.replace(/^wss?/, (p) => (p === 'wss' ? 'https' : 'http'))
+    const ended = () => { const s = this.lifecycle.get(sessionId); return !!(s?.terminated || s?.needsReboot) }
+    let res: Response
+    try {
+      res = await fetchWithToken(this.tokens, new URL(`/api/v1/sessions/${sessionId}/reach`, httpBase).toString(), reachRequest(targets, signal))
+    } catch (e) {
+      const message = `reach query failed: ${(e as Error).message}`
+      if (ended()) throw new EnvironmentStepError(`reach query failed: ${this.failed(sessionId, message).message}`)
+      throw new TransientQueryError(message, { cause: e })
+    }
+    if (!res.ok) {
+      const error = ((await res.json().catch(() => null)) as { error?: unknown } | null)?.error
+      // The route's 404, not the session's: a relay with the route answers an unknown session `Session not found`.
+      if (res.status === 404 && error !== 'Session not found') return targets.map(() => ({ state: 'unknown', reason: 'this relay predates reach' }))
+      const cause = this.failed(sessionId, res.status === 401 ? tokenRefusal(this.tokens) : typeof error === 'string' ? error : `reach query failed: ${res.status}`)
+      if (ended() || PERMANENT_QUERY_STATUSES.has(res.status)) throw new EnvironmentStepError(`reach query failed: ${cause.message}`, { cause })
+      throw new TransientQueryError(cause.message, { cause })
+    }
+    return readReachResults(await res.json().catch(() => null), targets.length)
   }
 
   async queryUITree(sessionId: string, signal?: AbortSignal): Promise<UIElement[]> {

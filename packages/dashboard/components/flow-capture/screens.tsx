@@ -1,7 +1,7 @@
 import { useEffect, useId, useRef, useState, type Dispatch, type RefObject } from 'react'
 import { ChevronRight, LoaderCircle, Trash2 } from 'lucide-react'
 import {
-  askedValues, capturedStepLabel, rangeWarnings, rawStepLabel, type CapturedStep, type Flow, type RawStep,
+  askedValues, capturedStepLabel, rangeWarnings, rawStepLabel, type CapturedStep, type Flow, type RawStep, type StepExpect,
 } from '@tapflowio/flow-runner/browser'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -678,14 +678,23 @@ function VerifyTrace({ verify }: { verify: CaptureState['verify'] }) {
   const [toggled, setToggled] = useState<Record<number, boolean>>({})
   const id = useId()
   if (!verify) return null
-  const rows: Array<{ index: number; name: string; status: 'running' | 'passed' | 'failed' | 'skipped'; durationMs?: number; message?: string; suggestions?: { yaml: string }[] }> =
+  const rows: Array<{
+    index: number; name: string; status: 'running' | 'passed' | 'failed' | 'skipped'; durationMs?: number; message?: string
+    reach?: string; reachNote?: string; suggestions?: { yaml: string }[]; observed?: StepExpect | null
+  }> =
     verify.result ? verify.result.steps : verify.live
   if (rows.length === 0) return null
   return (
     <ol aria-label={copy.verifyHeading} className="-m-1 flex min-h-0 flex-col gap-2 overflow-y-auto p-1 text-sm">
       {rows.map((s) => {
-        const why = s.status === 'failed' && (s.message || s.suggestions?.length)
-        const open = toggled[s.index] ?? true
+        // A touch the device could not judge opens too, on a passed step: a covered element passes that way (#1125). So
+        // does one that changed nothing: an overlay the tree does not show takes the touch and the step still passes.
+        const unchecked = s.reach === 'unchecked'
+        const unchanged = s.status === 'passed' && s.observed === null
+        const opens = Boolean((s.status === 'failed' && (s.message || s.suggestions?.length)) || unchecked || unchanged)
+        const effect = s.observed ? effectLine(s.observed) : null
+        const why = opens || effect !== null
+        const open = toggled[s.index] ?? opens
         return (
           <li key={s.index}>
             <TraceStep
@@ -696,8 +705,11 @@ function VerifyTrace({ verify }: { verify: CaptureState['verify'] }) {
             >
               {why && (
                 <div className="flex flex-col gap-1.5 text-foreground">
-                  {s.message && <p>{s.message}</p>}
-                  {s.suggestions && s.suggestions.length > 0 && (
+                  {s.status === 'failed' && s.message && <p>{s.message}</p>}
+                  {unchecked && <p className="text-muted-foreground">{copy.uncheckedTouch(s.reachNote)}</p>}
+                  {unchanged && <p className="text-muted-foreground">{copy.touchChangedNothing}</p>}
+                  {effect && <p className="text-muted-foreground">{copy.touchEffect(effect)}</p>}
+                  {s.status === 'failed' && s.suggestions && s.suggestions.length > 0 && (
                     <>
                       <p className="text-muted-foreground">{copy.suggestionsHeading}</p>
                       <ul className="flex flex-col gap-1 font-mono text-xs">
@@ -716,6 +728,12 @@ function VerifyTrace({ verify }: { verify: CaptureState['verify'] }) {
 }
 
 const seconds = (ms: number) => `${(ms / 1000).toFixed(1)}s`
+
+/** What a run will look for after a touch, in a line: `"Saved" appears, "Save" goes`. */
+function effectLine(seen: StepExpect): string {
+  const name = (a: NonNullable<StepExpect['appear']>[number]) => (a.text !== undefined ? `"${a.text}"` : a.id ?? '')
+  return [...(seen.appear ?? []).map((a) => `${name(a)} appears`), ...(seen.gone ?? []).map((a) => `${name(a)} goes`)].join(', ')
+}
 
 // ── Export ────────────────────────────────────────────────────────────────────────────────────────────────────────
 

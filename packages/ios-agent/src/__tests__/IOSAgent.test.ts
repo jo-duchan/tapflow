@@ -920,6 +920,33 @@ describe('IOSAgent', () => {
       browser.close()
     })
 
+    // #1125: where a touch meant for an element lands, from the runner, for the app the tree is read for.
+    it('answers ui:reach:request from the runner, and unknown when it throws', async () => {
+      const target = { role: 'button', label: 'Row 13', identifier: 'list.row.13', frame: { x: 0, y: 0.879, width: 1, height: 0.06 } }
+      const reached = { state: 'reachable', point: [0.1, 0.885], atCentre: false, frame: target.frame }
+      const reach = vi.spyOn(XCUITreeReader.prototype, 'reach').mockResolvedValueOnce([reached] as never).mockRejectedValueOnce(new Error('gone\nstack'))
+      const { agent, browser, internals, sent } = await bootedAgent()
+      internals.lastBundleIds.set('dev-1', 'com.app')
+      internals.handleRelayMessage({ type: 'ui:reach:request', sessionId: agent.sessionId!, requestId: 'rq-r1', targets: [target] } as never)
+      internals.handleRelayMessage({ type: 'ui:reach:request', sessionId: agent.sessionId!, requestId: 'rq-r2', targets: [target] } as never)
+      await vi.waitFor(() => expect(sent.filter((m) => m.type === 'ui:reach:response')).toHaveLength(2), { timeout: 2000 })
+      expect(reach).toHaveBeenCalledWith('dev-1', 'com.app', [target])
+      expect(sent.find((m) => m.requestId === 'rq-r1')).toMatchObject({ results: [reached] })
+      expect(sent.find((m) => m.requestId === 'rq-r2')).toMatchObject({ results: [{ state: 'unknown', reason: 'gone' }] })
+      agent.disconnect()
+      browser.close()
+    })
+
+    it('asks the runner about no targets when the request carries no list of them', async () => {
+      const reach = vi.spyOn(XCUITreeReader.prototype, 'reach').mockResolvedValueOnce([])
+      const { agent, browser, internals, sent } = await bootedAgent()
+      internals.handleRelayMessage({ type: 'ui:reach:request', sessionId: agent.sessionId!, requestId: 'rq-r3', targets: 'nope' } as never)
+      await vi.waitFor(() => expect(sent.find((m) => m.requestId === 'rq-r3')).toMatchObject({ type: 'ui:reach:response', results: [] }), { timeout: 2000 })
+      expect(reach).toHaveBeenCalledWith('dev-1', expect.any(String), [])
+      agent.disconnect()
+      browser.close()
+    })
+
     it('answers ui:keyboard:request from the runner, and unknown when it fails', async () => {
       const read = vi.spyOn(XCUITreeReader.prototype, 'readKeyboard').mockResolvedValueOnce({ shown: false }).mockRejectedValueOnce(new Error('gone'))
       const { agent, browser, internals, sent } = await bootedAgent()

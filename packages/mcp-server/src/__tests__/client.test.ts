@@ -1144,6 +1144,51 @@ describe('TapflowClient', () => {
       }
     })
 
+    // #1125: an `unknown` reach is a tap nobody checked, so a blip must be retried as a tree read is, not answered so.
+    describe('reach', () => {
+      const TARGET = { role: 'button' as const, label: 'Go', frame: { x: 0, y: 0, width: 0.5, height: 0.1 } }
+      const reachWith = async (fetchImpl: typeof globalThis.fetch) => {
+        const origFetch = globalThis.fetch
+        globalThis.fetch = fetchImpl
+        try {
+          return await client.reach('sess-1', [TARGET])
+        } finally {
+          globalThis.fetch = origFetch
+        }
+      }
+
+      it.each([500, 502, 503, 504])('classifies %d as transient, for the engine to retry', async (status) => {
+        await expect(reachWith(async () => new Response(JSON.stringify({ error: 'temporary' }), { status }))).rejects.toBeInstanceOf(TransientQueryError)
+      })
+
+      it('classifies a dropped connection as transient', async () => {
+        await expect(reachWith(async () => { throw new TypeError('fetch failed') })).rejects.toBeInstanceOf(TransientQueryError)
+      })
+
+      it.each([400, 401, 409])('fails %d as the environment', async (status) => {
+        await expect(reachWith(async () => new Response(JSON.stringify({ error: 'refused' }), { status }))).rejects.toBeInstanceOf(EnvironmentStepError)
+      })
+
+      it('fails an unknown session as the environment', async () => {
+        await expect(reachWith(async () => new Response(JSON.stringify({ error: 'Session not found' }), { status: 404 }))).rejects.toBeInstanceOf(EnvironmentStepError)
+      })
+
+      // A session the relay ended will not come back, so neither a 502 nor a dropped socket is worth waiting on.
+      it.each([
+        ['a 502', async () => new Response(JSON.stringify({ error: 'temporary' }), { status: 502 })],
+        ['a dropped connection', async () => { throw new TypeError('fetch failed') }],
+      ])('fails %s on an ended session as the environment', async (_, fetchImpl) => {
+        relay.send({ type: 'session:terminated', sessionId: 'sess-1', reason: 'agent-disconnected' })
+        await settle(relay, client)
+        await expect(reachWith(fetchImpl as typeof globalThis.fetch)).rejects.toBeInstanceOf(EnvironmentStepError)
+      })
+
+      it('answers unknown from a relay without the route', async () => {
+        expect(await reachWith(async () => new Response(JSON.stringify({ error: 'Not found' }), { status: 404 })))
+          .toEqual([{ state: 'unknown', reason: 'this relay predates reach' }])
+      })
+    })
+
     it.each([
       {},
       { elements: [{}] },

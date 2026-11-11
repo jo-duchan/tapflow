@@ -5,7 +5,7 @@ import { createLogger } from '@tapflowio/agent-core'
 const logger = createLogger('android-agent:focused-server')
 
 /** A request to the jar's `Focused`: read the field, set its text, or press its IME action. */
-export type FocusedOp = 'read' | 'set' | 'ime'
+export type FocusedOp = 'read' | 'set' | 'ime' | 'reach'
 
 /**
  * What became of a request. `not-sent`: nothing reached the device, so the one-shot `Focused` may do it instead.

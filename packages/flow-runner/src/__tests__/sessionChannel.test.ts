@@ -104,6 +104,8 @@ describe('SocketFlowDriver over a channel', () => {
     })
     const result = await runFlow(parseFlow('steps:\n  - tapOn: OK\n  - pressKey: Enter\n', 'f.yaml'), new SocketFlowDriver(device, 's1'))
     expect(result.status).toBe('passed')
+    // A device written before reach (#1125) still runs the flow, and says the touch was not checked.
+    expect(result.steps[0]).toMatchObject({ reach: 'unchecked', reachNote: 'this channel cannot ask where a touch lands' })
     const touch = ch.sent.find((m) => m.type === 'input:touch:end') as { payload: { x: number; y: number } }
     expect(touch.payload.x).toBeCloseTo(0.5)
     expect(touch.payload.y).toBeCloseTo(0.65)

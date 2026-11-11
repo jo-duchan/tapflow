@@ -67,6 +67,10 @@ interface RawNode {
   /** Text-input focus: the line's trailing flags carry `Keyboard Focused`. A bare `Focused` is not it — a focused
    *  button prints that too (`Selected, Focused` on a tab), and typing does not go there. */
   focused?: boolean
+  /** A switch's `value: 1` (its `0`/`1` is the only value read: a field's echoes its placeholder, and text is not state). */
+  on?: boolean
+  /** The trailing `Selected` flag: a tab, a segment, a selected row. */
+  selected?: boolean
 }
 
 const FRAME_RE = /\{\{(-?[\d.]+), (-?[\d.]+)\}, \{(-?[\d.]+), (-?[\d.]+)\}\}/
@@ -88,6 +92,9 @@ const PLACEHOLDER_RE = new RegExp(String.raw`, placeholderValue: '(.*?)'(?=, val
 // Read from the flags at the end of the line only. Searching the whole line would take `label: 'Tap, Keyboard
 // Focused'` for a flag; a quoted field ends in `'`, so the tail cannot reach into one.
 const FLAG_TAIL_RE = new RegExp(TRAILING_FLAGS)
+// Unquoted, so it runs to the flags or the end; only a toggle's 0 or 1 is read from it.
+const TOGGLE_VALUE_RE = new RegExp(String.raw`, value: ([01])(?=${TRAILING_FLAGS})`)
+const TOGGLES = new Set(['Switch', 'Toggle', 'CheckBox'])
 
 function parseLine(line: string): RawNode | null {
   // Strip indentation + the root arrow, then take the type up to ", 0x<addr>".
@@ -106,7 +113,10 @@ function parseLine(line: string): RawNode | null {
   const pm = PLACEHOLDER_RE.exec(line)
   if (pm && pm[1] !== '') node.placeholder = pm[1]
   const tail = FLAG_TAIL_RE.exec(line)?.[0] ?? ''
-  if (tail.split(', ').includes('Keyboard Focused')) node.focused = true
+  const flags = tail.split(', ')
+  if (flags.includes('Keyboard Focused')) node.focused = true
+  if (flags.includes('Selected')) node.selected = true
+  if (TOGGLES.has(node.type) && TOGGLE_VALUE_RE.exec(line)?.[1] === '1') node.on = true
   return node
 }
 
@@ -180,6 +190,8 @@ export function parseTreeText(text: string): UIElement[] {
     // Stated on every input so that a missing value means "unknown" (see `UIElement.secure`).
     if (role === 'input') element.secure = node.type === 'SecureTextField'
     if (node.focused && role === 'input') element.focused = true
+    if (node.on) element.checked = true
+    if (node.selected) element.selected = true
     elements.push(element)
   }
   return elements

@@ -5,7 +5,7 @@ import { fileURLToPath } from 'node:url'
 import type { UIElement } from '@tapflowio/agent-core'
 import type { CaptureEntry, CapturedMessage } from '@tapflowio/protocol/capture'
 import {
-  askedValues, segment, defaultRange, rangeWarnings, matchStep, toFlowSteps, flowSteps, flowToYaml, rawStepLabel, capturedStepLabel,
+  askedValues, segment, defaultRange, rangeWarnings, matchStep, reachQuestions, toFlowSteps, flowSteps, flowToYaml, rawStepLabel, capturedStepLabel,
   type MatchContext, type RawStep,
 } from '../capture/index.js'
 import { parseFlow } from '../schema.js'
@@ -631,6 +631,32 @@ describe('matchStep', () => {
     expect(matchStep(tap!, ctxOf([cell, star]))).toMatchObject({ step: { type: 'tapPoint' }, fragile: 'not-centre' })
   })
 
+  // #1125: the tree cannot see what covers an element on the device — an iOS row under the tab bar keeps its whole frame.
+  describe('where the device says a touch on the element lands', () => {
+    const row = el({ role: 'cell', label: 'Row 13', frame: { x: 0, y: 0.86, width: 1, height: 0.06 } })
+    const tapRow = () => new Rec().touch([[0.1, 0.87]]).steps()[0]!
+    const reachable = (atCentre: boolean) => ({ state: 'reachable' as const, point: [0.1, 0.87] as [number, number], atCentre, frame: row.frame })
+
+    it('asks about the element under the point', () => {
+      expect(reachQuestions(tapRow(), ctxOf([row]))).toEqual([row])
+    })
+
+    it('names it when the device reaches it at its centre', () => {
+      expect(matchStep(tapRow(), ctxOf([row], { reach: [reachable(true)] })).step).toEqual({ type: 'tapOn', selector: { text: 'Row 13' } })
+    })
+
+    it('keeps the point when its centre is covered on the device, or all of it is', () => {
+      for (const r of [reachable(false), { state: 'occluded' as const, by: 'Tab Bar' }]) {
+        expect(matchStep(tapRow(), ctxOf([row], { reach: [r] }))).toMatchObject({ step: { type: 'tapPoint' }, fragile: 'not-centre' })
+      }
+    })
+
+    it('goes by the tree where the device cannot judge', () => {
+      const m = matchStep(tapRow(), ctxOf([row], { reach: [{ state: 'unknown', reason: 'old agent' }] }))
+      expect(m.step).toEqual({ type: 'tapOn', selector: { text: 'Row 13' } })
+    })
+  })
+
   it('never names an element by a label that may be what was typed into it', () => {
     // An Android password node of another class: secure, not an input, its label the masked text.
     const node = el({ role: 'other', label: '••••', secure: true, frame: { x: 0.2, y: 0.4, width: 0.6, height: 0.1 } })
@@ -815,6 +841,44 @@ describe('toFlowSteps', () => {
     expect(flow.steps[0]!.step).toEqual({ type: 'scroll', direction: 'down', until: { text: 'Item 30' } })
   })
 
+  // #1125, iOS E2E: Row 13 was in the tree under the tab bar when the swipe began, so the swipe stayed a swipe, replayed
+  // shorter, and the tap on Row 13 landed on the tab.
+  describe('an element on the screen the swipe began from, but not in view', () => {
+    const under = el({ role: 'cell', label: 'Row 13', frame: { x: 0, y: 0.86, width: 1, height: 0.06 } })
+    const bar = el({ role: 'other', label: 'Tab Bar', frame: { x: 0, y: 0.89, width: 1, height: 0.11 } })
+    const row13 = el({ role: 'cell', label: 'Row 13', frame: { x: 0, y: 0.5, width: 1, height: 0.06 } })
+    const steps = () => new Rec().touch([[0.5, 0.8], [0.5, 0.3]]).touch([[0.5, 0.53]]).steps()
+
+    it('asks the device about each element something else overlaps', () => {
+      const [swipe] = steps()
+      expect(reachQuestions(swipe!, ctxOf([...list(3), under, bar]))).toEqual([under, bar])
+    })
+
+    it('becomes scroll until it when the device does not reach it at its centre', () => {
+      const [swipe, tap] = steps()
+      const reach = [
+        { state: 'reachable' as const, point: [0.5, 0.87] as [number, number], atCentre: false, frame: under.frame },
+        { state: 'reachable' as const, point: [0.5, 0.95] as [number, number], atCentre: true, frame: bar.frame },
+      ]
+      const flow = toFlowSteps([matchStep(swipe!, ctxOf([...list(3), under, bar], { reach })), matchStep(tap!, ctxOf([row13]))])
+      expect(flow.steps[0]!.step).toEqual({ type: 'scroll', direction: 'down', until: { text: 'Row 13' } })
+    })
+
+    it('stays a swipe where the device cannot judge, as the tree alone said before', () => {
+      const [swipe, tap] = steps()
+      const reach = [{ state: 'unknown' as const, reason: 'old agent' }, { state: 'unknown' as const, reason: 'old agent' }]
+      const flow = toFlowSteps([matchStep(swipe!, ctxOf([...list(3), under, bar], { reach })), matchStep(tap!, ctxOf([row13]))])
+      expect(flow.steps[0]!.step?.type).toBe('swipe')
+    })
+
+    it('becomes scroll until it when its frame runs off the screen, with nothing to ask', () => {
+      const [swipe, tap] = steps()
+      const cut = el({ role: 'cell', label: 'Row 13', frame: { x: 0, y: 0.97, width: 1, height: 0.06 } })
+      const flow = toFlowSteps([matchStep(swipe!, ctxOf([...list(3), cut])), matchStep(tap!, ctxOf([row13]))])
+      expect(flow.steps[0]!.step).toEqual({ type: 'scroll', direction: 'down', until: { text: 'Row 13' } })
+    })
+  })
+
   it('keeps a diagonal swipe a swipe', () => {
     const [swipe, tap] = new Rec().touch([[0.2, 0.8], [0.7, 0.3]]).touch([[0.5, 0.55]]).steps()
     const flow = toFlowSteps([matchStep(swipe!, ctxOf(list(3))), matchStep(tap!, ctxOf([item30]))])
@@ -871,6 +935,19 @@ describe('flowToYaml', () => {
     expect(parseFlow(yaml, 'x.yaml').steps).toEqual(steps)
     expect(yaml).toContain('tapOn: [ 0.4, 0.6 ]')
     expect(yaml).toContain('inputText:\n      secret: PASSWORD')
+  })
+
+  // #1125: what a touch brings rides beside its action, in the same file.
+  it('writes what a touch brings beside it, and it reads back', () => {
+    const steps = [
+      { type: 'tapOn', selector: { text: 'Save' }, expect: { appear: [{ text: 'Saved', role: 'text' }], gone: [{ id: 'save', checked: false }] } },
+      { type: 'longPressPoint', at: [0.1, 0.2], durationMs: 700, expect: { appear: [{ id: 'menu' }] } },
+    ] as const
+    const yaml = flowToYaml({ name: 'x', steps: steps as never })
+    expect(parseFlow(yaml, 'x.yaml').steps).toEqual(steps)
+    expect(yaml).toContain('  - tapOn: Save\n    expect:\n      appear:\n')
+    const sized = flowToYaml({ name: 'x', viewport: { width: 402, height: 874 }, steps: steps as never })
+    expect(parseFlow(sized, 'x.yaml').viewport).toEqual({ width: 402, height: 874 })
   })
 
   it('refuses to write a flow that would read back as different steps', () => {

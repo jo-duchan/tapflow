@@ -137,6 +137,9 @@ export function parseUiAutomatorDump(xml: string): UIElement[] {
       // takes focus once a key event leaves touch mode. Neither is where typing goes.
       if (attrs['focused'] === 'true') element.focused = true
     }
+    // What a tap on a switch, a checkbox or a tab changed, where nothing else in the tree does (#1125): only when true.
+    if (attrs['checked'] === 'true') element.checked = true
+    if (attrs['selected'] === 'true') element.selected = true
     elements.push(element)
   }
   return elements

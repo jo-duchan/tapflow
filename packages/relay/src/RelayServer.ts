@@ -9,6 +9,7 @@ import { SessionManager, isAiClientKind } from './SessionManager.js'
 import type { AgentIdentity, InstalledBuild, Session } from './SessionManager.js'
 import type { AgentResources } from './types.js'
 import type { DeviceDetails, UIElement } from './types.js'
+import type { ReachResult, ReachTarget } from '@tapflowio/protocol'
 import type { AdmissionRefusal, BootRefusalReason, ChromePayload, LeaseRefusalReason, InputErrorReason, KeyboardState, MacAdmission, RelayOutbound, PosturesPayload, WatchActionKind, WatchRefusal } from '@tapflowio/protocol'
 import { gestureAction, keyForWatchers } from './lib/watchActions.js'
 import { HostBootGate, GATE_DEFAULTS, type BooterClass, type Effect, type GateEvent, type GateTiming } from './admission/HostBootGate.js'
@@ -19,7 +20,8 @@ import { chooseLease, type LeaseCandidate, type LeaseHost } from './admission/le
 import { directionOf, parseInbound, readyFacts } from '@tapflowio/protocol/validate'
 import { compactLaunchOptions, launchOptionsProblem } from '@tapflowio/protocol/launch'
 import type { ParsedInbound, ParseFailure, ParseResult } from '@tapflowio/protocol/validate'
-import { Router, json } from './router.js'
+import { Router, json, readBodyLimited } from './router.js'
+import { readReachTargets, REACH_BODY_MAX_BYTES, REACH_MS_PER_TARGET } from './lib/reach.js'
 import { requireViewAuth, requireAuth, getAuth, verifyPat, touchPat, findPat, findUser } from './middleware/auth.js'
 import { AGENT_SCOPE, VIEW_SCOPE, WS_ACCESS_CHANGED_REASON, WS_AGENT_OWNER_REASON, WS_SCOPE_REASON, classifyConnection, isAffectedBy, revalidatePrincipal, type AuthChange, type SocketPrincipal } from './lib/connectionAuth.js'
 import { isTunnelIngress, markTunnelIngress, proxiedWithoutForwardedFor, resolveClientAddress, resolveRequestClient } from './lib/clientAddress.js'
@@ -445,6 +447,14 @@ export class RelayServer {
     reject: (err: Error) => void
     timer: ReturnType<typeof setTimeout>
   }>()
+  /** `ui:reach:request`s waiting on their agent (#1125): answered only from the socket they were sent to. */
+  private pendingReaches = new Map<string, {
+    sessionId: string
+    agentSocket: WebSocket
+    resolve: (results: ReachResult[]) => void
+    reject: (err: Error) => void
+    timer: ReturnType<typeof setTimeout>
+  }>()
   /**
    * Who asked for each correlated `device:shutdown` still waiting on its agent (#567). The agent's answer
    * goes to the session's `browserSocket`, and a caller that never joined — an MCP client shutting down a
@@ -728,6 +738,8 @@ export class RelayServer {
       (req, res, params) => this.handleGetScreenshot(req, res, params))
     this.router.get('/api/v1/sessions/:sessionId/ui-tree',
       (req, res, params) => this.handleGetUITree(req, res, params))
+    this.router.post('/api/v1/sessions/:sessionId/reach',
+      (req, res, params) => this.handleReach(req, res, params))
   }
 
   pushLog(msg: string): void {
@@ -1665,6 +1677,7 @@ export class RelayServer {
       case 'screenshot:error':   this.handleScreenshotError(msg); break
       case 'ui:tree:response':   this.handleUITreeResponse(msg); break
       case 'ui:tree:error':      this.handleUITreeError(msg); break
+      case 'ui:reach:response':  this.handleUIReachResponse(ws, msg); break
       case 'ui:field:response':  this.handleUIFieldResponse(ws, msg); break
       case 'ui:keyboard:response': this.handleUIKeyboardResponse(ws, msg); break
       case 'agents:list': {
@@ -2323,7 +2336,7 @@ export class RelayServer {
       const session = this.sessions.get(id)
       if (session) this.dropPendingInstall(session, reason)
     }
-    for (const pendings of [this.pendingScreenshots, this.pendingUITrees]) {
+    for (const pendings of [this.pendingScreenshots, this.pendingUITrees, this.pendingReaches]) {
       for (const [reqId, pending] of pendings.entries()) {
         if (!sessionIds.has(pending.sessionId)) continue
         clearTimeout(pending.timer)
@@ -4085,6 +4098,59 @@ export class RelayServer {
     const pending = this.pendingUITrees.get(msg.requestId)
     if (!pending) return
     pending.resolve(msg.interfaceTurn === undefined ? { elements: msg.elements } : { elements: msg.elements, interfaceTurn: msg.interfaceTurn })
+  }
+
+  private handleUIReachResponse(ws: WebSocket, msg: Inbound<'ui:reach:response'>): void {
+    const pending = this.pendingReaches.get(msg.requestId)
+    // The session's own agent only: another agent naming this id must not say where this device's touch lands.
+    if (!pending || pending.agentSocket !== ws) return
+    pending.resolve(msg.results)
+  }
+
+  /**
+   * Where touches meant for elements land on the session's device, as its agent judges them (#1125): the flow engine
+   * taps there rather than at a frame's centre, which a tab bar or a scrim can cover. One result per target, in order.
+   * An agent without `reach`, or one that answers the wrong number, gets every target `unknown`: the caller then taps
+   * knowing the tap is unchecked, rather than failing a flow over an older Mac.
+   */
+  private async handleReach(req: http.IncomingMessage, res: http.ServerResponse, params: Record<string, string>): Promise<void> {
+    if (!requireViewAuth(req, res)) return
+    const { sessionId } = params
+    const session = this.sessions.get(sessionId)
+    if (!session) { json(res, 404, { error: 'Session not found' }); return }
+    if (session.deviceStatus === 'shutdown') { json(res, 409, { error: 'Device is not booted' }); return }
+    const buf = await readBodyLimited(req, REACH_BODY_MAX_BYTES)
+    if (buf === null) { json(res, 413, { error: 'Body too large' }); return }
+    let targets: ReachTarget[]
+    try {
+      targets = readReachTargets(JSON.parse(buf.toString('utf-8')))
+    } catch (e) {
+      json(res, 400, { error: (e as Error).message })
+      return
+    }
+    const unknown = (reason: string): ReachResult[] => targets.map(() => ({ state: 'unknown', reason }))
+    if (!hasCapability(session.agentCapabilities, 'reach')) {
+      json(res, 200, { results: unknown('This device\'s tapflow agent cannot judge where a touch lands') })
+      return
+    }
+    if (session.agentSocket.readyState !== WebSocket.OPEN) { json(res, 502, { error: 'Agent offline' }); return }
+    const agentSocket = session.agentSocket
+    const requestId = randomUUID()
+    return new Promise<void>((resolve) => {
+      const done = () => { clearTimeout(timer); this.pendingReaches.delete(requestId); resolve() }
+      // Per target on top of the tree's deadline: the agent judges each element in turn (~130 ms each on iOS, whose own
+      // budget is 5 s + 0.3 s a target), so a flat 15 s gave up on a 64-element batch the agent was still answering.
+      const timer = setTimeout(() => { done(); json(res, 504, { error: 'Reach query timed out' }) }, this.uiTreeTimeoutMs + REACH_MS_PER_TARGET * targets.length)
+      this.pendingReaches.set(requestId, {
+        sessionId, agentSocket, timer,
+        resolve: (results) => {
+          done()
+          json(res, 200, { results: results.length === targets.length ? results : unknown('The agent answered for a different number of elements') })
+        },
+        reject: (err) => { done(); json(res, 502, { error: err.message }) },
+      })
+      this.sendTo(agentSocket, { type: 'ui:reach:request', sessionId, requestId, targets })
+    })
   }
 
   private handleUITreeError(msg: Inbound<'ui:tree:error'>): void {

@@ -16,7 +16,7 @@ Only the endpoints below accept a personal access token (PAT), and they accept t
 | PAT scope | Endpoints |
 |-----------|-----------|
 | `builds:write` | `POST /builds`, `GET /builds`, `GET /builds/:id`, `POST /comments`, every webhook endpoint, writing run records (`POST` under `/runs`) |
-| `view` | `GET /apps`, `GET` under `/runs`, `GET /sessions/:sessionId/screenshot`, `GET /sessions/:sessionId/ui-tree`, files under `/uploads/` (at the relay root, not under `/api/v1/`), device-session WebSockets opened from a remote machine |
+| `view` | `GET /apps`, `GET` under `/runs`, `GET /sessions/:sessionId/screenshot`, `GET /sessions/:sessionId/ui-tree`, `POST /sessions/:sessionId/reach`, files under `/uploads/` (at the relay root, not under `/api/v1/`), device-session WebSockets opened from a remote machine |
 | `agent` | A remote agent's WebSocket connection, accepted only while the member who issued the token is an Admin |
 
 **Roles.** A call made with a PAT is held to its owner's current role. Viewer is read-only: uploading, updating or scheduling deletion of a build, creating, renaming or deleting an app, every webhook endpoint and writing run records return `403` for a Viewer. Reading builds and posting comments work for a Viewer too. The endpoints that check roles read the role on every request, so a role change applies there without signing in again or issuing a new token.
@@ -1211,6 +1211,38 @@ Return the UI elements on the session device's current screen.
 `interfaceTurn` is how many degrees clockwise the device's portrait screen has to turn for the app's interface to stand upright: `0`, `90`, `180` or `270`. It is present only when the agent can read the app's orientation, which today is iOS only. When it is absent, there is no information about the turn.
 
 Text fields (`role: "input"`) carry `secure`: `true` for a field that hides what is typed, such as a password, and `false` otherwise. Any other element that reports hiding its text has `secure: true` too. A text field without `secure` means the agent could not tell, so treat it as a password field. The field that is taking typing now has `focused: true`.
+
+A switch or checkbox that is on has `checked: true`, and a selected tab, segment or row has `selected: true`. Both are absent otherwise, and from an agent that does not read them.
+
+### `POST /api/v1/sessions/:sessionId/reach`
+
+Ask where a touch meant for each element lands, for elements read from `ui-tree`. Flows tap the point it returns instead of the element's center, which a tab bar, a floating button or a scrim can cover.
+
+**Request**
+
+```json
+{ "targets": [{ "role": "cell", "label": "Row 13", "frame": { "x": 0, "y": 0.86, "width": 1, "height": 0.06 } }] }
+```
+
+Each target is an element as `ui-tree` returned it: `role`, `label`, `frame`, and `identifier` when it has one. At most 64 targets and 64 KB.
+
+**Response `200`**
+
+```json
+{ "results": [{ "state": "reachable", "point": [0.1, 0.9], "atCentre": false, "frame": { "x": 0, "y": 0.86, "width": 1, "height": 0.03 } }] }
+```
+
+One result per target, in order:
+
+| `state` | Meaning |
+|---|---|
+| `reachable` | A touch at `point` reaches the element. `point` is 0–1 in the space a touch is sent in: on iOS the device's portrait screen, not the app's turned one, and on Android the screen as Android draws it, as `ui-tree` frames are. `atCentre` says whether that is the element's center. |
+| `occluded` | Something that takes touches covers all of it. `by` names it when known. |
+| `offscreen` | The element is not on the screen. |
+| `missing` | The element was not where it was read. `candidates` counts the elements near it. Read the tree again. |
+| `unknown` | The device cannot judge. `reason` says why. An agent from before this endpoint answers every target this way. |
+
+Returns `400` for a malformed body, `413` for one over 64 KB, `404` when the session does not exist, `409` when its device is shut down, `502` when the agent is offline and `504` after 15 seconds plus 0.3 seconds per target.
 
 
 ## Flow Capture

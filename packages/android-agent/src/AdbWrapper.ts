@@ -7,7 +7,7 @@ import path from 'path'
 import { fileURLToPath } from 'url'
 import { defaultRunner, type AdbRunner } from './adb.js'
 import { FocusedServers, type FocusedOp } from './FocusedServer.js'
-import type { LaunchOptions } from '@tapflowio/protocol'
+import type { LaunchOptions, ReachResult, ReachTarget } from '@tapflowio/protocol'
 import { hasLaunchOptions } from '@tapflowio/protocol/launch'
 import { androidLaunchExtras } from './launchExtras.js'
 import { parseKeyguard } from './postures.js'
@@ -579,6 +579,30 @@ export class AdbWrapper {
       const read = parseJsonLine(out) as FocusedRead | null
       if (!read) this.uidumpPushed.delete(serial)
       return read
+    })
+  }
+
+  /**
+   * Where touches meant for `targets` land (#1125), through the jar's `Focused reach` (`Reach.java`): the node that takes
+   * a touch at a point, read from the accessibility tree's windows, drawing order and touch flags. `null` when the jar
+   * cannot run here. The targets go as base64 JSON, the way `set` sends its text.
+   */
+  async reach(serial: string, targets: ReachTarget[]): Promise<ReachResult[] | null> {
+    const execInput = this.runner.execInput?.bind(this.runner)
+    return this.inDumpQueue(serial, async () => {
+      const jar = await this.pushUidump(serial)
+      if (!jar) return null
+      const body = JSON.stringify(targets)
+      const served = await this.viaServer(serial, jar, 'reach', body)
+      const read = (out: string | null | undefined) => (parseJsonLine(out ?? '') as { results?: ReachResult[] } | null)?.results ?? null
+      if (served !== undefined) return read(served)
+      if (!execInput) return null
+      const out = await execInput(
+        `${Buffer.from(body, 'utf8').toString('base64')}\n`, (UIDUMP_TIMEOUT_SEC + 2) * 1000,
+        '-s', serial, 'shell', `CLASSPATH=${jar}:/system/framework/uiautomator.jar`,
+        'timeout', String(UIDUMP_TIMEOUT_SEC), 'app_process', '/system/bin', 'dev.tapflow.uidump.Focused', 'reach',
+      ).catch(() => '')
+      return read(out)
     })
   }
 
