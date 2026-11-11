@@ -71,7 +71,7 @@ describe('a refused WebSocket', () => {
     socket.destroy()
   })
 
-  it('still tells an ordinary client why, and lets it go within seconds', async () => {
+  it('still tells an ordinary client why, and lets it go at once', async () => {
     const started = Date.now()
     const { code, reason } = await new Promise<{ code: number; reason: string }>((resolve, reject) => {
       const ws = new WebSocket(`ws://127.0.0.1:${tunnelPort}`)
@@ -80,7 +80,8 @@ describe('a refused WebSocket', () => {
     })
     expect(code).toBe(1008)
     expect(reason).not.toBe('')
-    // Unread, the client's close reply would otherwise keep both ends waiting for ws's 30 s close timer.
-    expect(Date.now() - started).toBeLessThan(5_000)
+    // Well under a second: MCP's startup reads the close code for 1 s and calls anything later a slow relay. Unread,
+    // the client's close reply would otherwise leave it waiting on the relay's linger timer or ws's 30 s one.
+    expect(Date.now() - started).toBeLessThan(500)
   })
 })
