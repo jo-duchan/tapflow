@@ -24,6 +24,8 @@ export class CaptureGone extends Error {}
 
 /** The person's steps so far, frozen for the dialog. `null` when nothing was captured on this device. */
 export async function loadSnapshot(tap: CaptureTap): Promise<CaptureSnapshot | null> {
+  // The pictures of the last steps go up after the steps themselves: wait for them, or the newest tiles are blank.
+  await tap.flushThumbnails?.()
   const res = await fetch(`${base(tap)}/snapshot`, { method: 'POST', credentials: 'include' })
   if (res.status === 404) return null
   if (!res.ok) throw new Error(`Could not read the captured steps (${res.status})`)

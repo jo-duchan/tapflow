@@ -22,6 +22,7 @@ export function viewerCaptureTap(refs: {
   listeners: MutableRefObject<Set<(msg: BrowserInbound) => void>>
   closeListeners: MutableRefObject<Set<() => void>>
   surface: MutableRefObject<(() => CanvasImageSource | null) | null>
+  thumbnails?: MutableRefObject<{ flush(): Promise<void> } | null>
 }): CaptureTap {
   return {
     get sessionId() { return refs.state.current.sessionId },
@@ -40,6 +41,7 @@ export function viewerCaptureTap(refs: {
     chrome: () => refs.state.current.chrome,
     postures: () => refs.state.current.postures,
     surface: () => refs.surface.current?.() ?? null,
+    flushThumbnails: () => refs.thumbnails?.current?.flush() ?? Promise.resolve(),
   }
 }
 

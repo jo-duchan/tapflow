@@ -43,4 +43,7 @@ export interface CaptureSnapshot {
   entries: CaptureEntry[]
   /** Entries were dropped to stay inside the budget: moves thinned (a gesture keeps its last one), then old gestures. */
   thinned: boolean
+  /** The `requestId`s of the inputs whose screen the relay holds a picture of (1b-3b), read one at a time from
+   *  `GET …/capture/snapshot/thumbnails/:requestId`. Absent from a relay that keeps none. */
+  thumbnails?: string[]
 }

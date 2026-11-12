@@ -119,7 +119,7 @@ import { handleUploadRecording, handleListRecordings, handleDownloadRecording, p
 import { handleEndVideo, handleOpenVideo, handleVideoChunk, handleVideoData, handleVideoIndex, purgeRunVideos, releaseStaleVideoReservations, runVideosDirFor, videoSummaries } from './api/runVideos.js'
 import { abandonRunsOf, handleCreateRun, handleFinishRun, handleReportDevice, handleStartFlow, handleGetFlowScreenshot, handleGetRun, handleListRuns, handleReportFlow, handleUploadFlowScreenshot, purgeExpiredRuns, runScreenshotsDirFor, type RunHolders } from './api/runs.js'
 import { handleListAgents, handleGetAgentResources } from './api/agents.js'
-import { handleDropSnapshot, handleGetSnapshot, handlePause, handleTakeSnapshot, handleUpdatePreferences } from './api/captures.js'
+import { handleDropSnapshot, handleGetSnapshot, handleGetThumbnail, handlePause, handlePutThumbnail, handleTakeSnapshot, handleUpdatePreferences } from './api/captures.js'
 import { CaptureStore, FIELD_READ_TIMEOUT_MS, type FieldRead, type Holder } from './capture/CaptureStore.js'
 import { FlowCapturePreference } from './capture/preference.js'
 
@@ -665,6 +665,8 @@ export class RelayServer {
     this.router.post('/api/v1/sessions/:sessionId/capture/snapshot', (req, res, params) => handleTakeSnapshot(req, res, params, this.captures))
     this.router.get('/api/v1/sessions/:sessionId/capture/snapshot', (req, res, params) => handleGetSnapshot(req, res, params, this.captures))
     this.router.delete('/api/v1/sessions/:sessionId/capture/snapshot', (req, res, params) => handleDropSnapshot(req, res, params, this.captures))
+    this.router.put('/api/v1/sessions/:sessionId/capture/thumbnails/:requestId', (req, res, params) => handlePutThumbnail(req, res, params, this.captures))
+    this.router.get('/api/v1/sessions/:sessionId/capture/snapshot/thumbnails/:requestId', (req, res, params) => handleGetThumbnail(req, res, params, this.captures))
     this.router.put('/api/v1/sessions/:sessionId/capture/pause', (req, res, params) => handlePause(req, res, params, this.captures))
     this.router.delete('/api/v1/sessions/:sessionId/capture/pause', (req, res, params) => handlePause(req, res, params, this.captures))
 

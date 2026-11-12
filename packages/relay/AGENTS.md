@@ -257,6 +257,14 @@ relay's clock — so the dashboard can later turn a stretch of it into a flow; i
 It holds **what was typed** (`input:key`, `input:type`, a pasted `clipboard:write`), which the relay otherwise never
 keeps: watchers get a character count. Most of what follows exists because of that.
 
+**Beside the inputs, a picture of the screen each step began on** (1b-3b), sent by the person's dashboard over REST after
+the input, keyed by the step's first `requestId` (flow-runner's `thumbnailKey`): see the third exception under HOW NOT.
+A picture is never ahead of its input (409 until the input is recorded and the reads it waits on are back; the dashboard
+asks again every 500 ms for 6 s, as long as one read can be out; a read queued behind another may outlast that and leave
+the step without a picture), never replaced,
+and goes with the input when a trim cuts it — unless the dialog's snapshot still shows that step. The snapshot lists the
+ids it has pictures of; each is read with `GET …/capture/snapshot/thumbnails/:requestId`, `private, no-store`.
+
 - **Recorded after the send, never before.** One `captures.recordInput` call follows each `agentSocket.send` in the
   input, app-command, clipboard and network paths, so a refused input is not recorded. `CaptureStore` never throws into
   that path. The agent's ack is recorded too (`recordAck`), so a refused or failed input reads differently from one that
@@ -287,12 +295,13 @@ keeps: watchers get a character count. Most of what follows exists because of th
   JSON characters, an estimate; a dialog's snapshot shares entries and is not counted, so a capture can hold up to twice
   its budget while one is open.
 - **The field typed into is read around each run of typing** (#1135), because the keys alone cannot say what the
-  device's IME made of them. At a run's first `input:key`/`input:type` the relay asks the session's agent for the
-  focused field (`ui:field:request`), and again `FIELD_IDLE_MS` (600 ms) after the run's last key — any key extends the
-  run, any other input ends it. **Nothing waits for a read**: an input is sent as before, and `requestedAt` and `at` on
-  the recorded entry let the reader drop a read that raced one. Only an agent naming `field-value` is asked (iOS), only
-  for a recorded holder, and the answer is kept only if the person is still recorded when it comes. A snapshot first
-  reads a field still being typed in and waits up to `SNAPSHOT_READ_WAIT_MS` for reads in flight (`settleReads`).
+  device's IME made of them. At a run's first `input:key`/`input:type`, or its first tap on the soft keyboard, the
+  relay asks the session's agent for the focused field (`ui:field:request`), and again `FIELD_IDLE_MS` (250 ms) after
+  the run's last key — any key extends the run, any other input ends it. **No input waits for a read**: an input is
+  sent as before (only a step's picture waits, `putThumbnail`), and `requestedAt` and `at` on the recorded entry let the reader drop a read that raced one. Only an
+  agent naming `field-value` is asked (both platforms do), only for a recorded holder, and the answer is kept only if
+  the person is still recorded when it comes. A snapshot first reads a field still being typed in and waits up to
+  `SNAPSHOT_READ_WAIT_MS` for reads in flight (`settleReads`).
   `ui:field:response` is consumed here and **never forwarded**: it is the field's whole contents — what the person
   typed, and any text the app or AutoFill put there — which only the capture keeps. It is accepted only from the
   session's own agent socket, and a secure field's `value` is dropped here whatever the agent sent. On a Mac over its
@@ -363,9 +372,21 @@ JWT 시크릿은 `getJwtSecret()`으로 **처음 쓸 때** 만든다. `RelayServ
 
 ## HOW NOT
 
-- Do not store or analyze screen data in the relay. **Two exceptions, both uploaded by a flow runner to its own run** — bound to the run's creator, and deleted with the run:
+- Do not store or analyze screen data in the relay. **Two exceptions uploaded by a flow runner to its own run** — bound to the run's creator, and deleted with the run:
   - the screenshot (`api/runs.ts`) — at most one image per flow (the screen it failed on, or a passed flow's last screen), PNG or JPEG by its bytes, at most 5 MB, served back as its own type with `nosniff`;
   - the video (`api/runVideos.ts`) — capped per flow, kept by the retention policy and the disk cap below. The relay reads only the open call's JSON, never the frames.
+
+  **And one uploaded by a person's own dashboard to their own capture** (1b-3b): the screen each recorded step began on
+  (`api/captures.ts`, `CaptureStore.putThumbnail`) — a JPEG of at most 16 KB (160 px wide, about 5 KB), only for an input
+  that capture already holds and only once, in memory under a cap of its own (1.5 MB a capture, counted in the relay's
+  total), cookie-only and owner-only (404 to anyone else), gone with the capture's seal, its trim and the person turning
+  capturing off, never on disk, in a log or forwarded. **A touch only when the keyboard reads place it off the soft
+  keyboard**, the last read asked for before its end that could say and the first one asked for after: that screen shows what was just typed, a password's last
+  character included, which is the value #1140 keeps out of the record. No read to say (an agent without `keyboard-state`,
+  a Mac over its memory line, iOS with the app not in front) is no picture, not a guess. A key inside a typed run keeps
+  none either: its screen shows the run so far. Nor does an input begun within 2 s of a typed character unless every
+  field read of that run says the field is not secure: a password field can still show the last character (1.5 s on
+  Android).
 
   A stream the relay is forwarding on its own is still never stored.
 - Do not allow session routing without authentication.

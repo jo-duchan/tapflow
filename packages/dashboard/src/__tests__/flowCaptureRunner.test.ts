@@ -32,7 +32,7 @@ vi.mock('@tapflowio/flow-runner/browser', async (importOriginal) => ({
   },
 }))
 
-const { keyboardOf, matchRange, PauseLease, typedOnScreenKeyboard, verifyFlow } = await import('@/lib/flowCapture/runner')
+const { keyboardOf, loadSnapshot: loadSnapshotForTest, matchRange, PauseLease, typedOnScreenKeyboard, verifyFlow } = await import('@/lib/flowCapture/runner')
 type Tap = ConstructorParameters<typeof PauseLease>[0]
 type Channel = Parameters<typeof matchRange>[1]
 
@@ -418,5 +418,23 @@ describe('the keyboard a range was recorded in', () => {
     expect(typedOnScreenKeyboard([tapStep, key], { start: 0, end: 2 })).toBe(true)
     expect(typedOnScreenKeyboard([tapStep, unsure], { start: 1, end: 2 })).toBe(true)
     expect(typedOnScreenKeyboard([key, tapStep], { start: 1, end: 2 })).toBe(false)
+  })
+})
+
+// 1b-3b: the pictures of the last steps go up after the steps; the snapshot is taken once they are there.
+describe('loadSnapshot', () => {
+  afterEach(() => vi.restoreAllMocks())
+  it('waits for the viewer\'s pictures before it takes the snapshot', async () => {
+    const order: string[] = []
+    let release!: () => void
+    const flushed = new Promise<void>((r) => { release = r })
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async () => { order.push('snapshot'); return new Response(JSON.stringify({ id: 'x', takenAt: 0, entries: [], thinned: false }), { status: 200 }) })
+    const tap = { sessionId: 's', flushThumbnails: () => flushed.then(() => { order.push('flushed') }) } as never
+    const loading = loadSnapshotForTest(tap)
+    await new Promise((r) => setTimeout(r, 10))
+    expect(order).toEqual([])
+    release()
+    await loading
+    expect(order).toEqual(['flushed', 'snapshot'])
   })
 })

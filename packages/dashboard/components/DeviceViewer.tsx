@@ -25,6 +25,7 @@ import { MetricsPanel } from './perf/MetricsPanel';
 import { toast } from 'sonner';
 import { dropCaptureSnapshot, viewerCaptureTap, type ViewerCaptureState } from '@/lib/flowCapture/viewerTap';
 import type { CaptureTap } from '@/lib/flowCapture/tap';
+import { ThumbnailRecorder } from '@/lib/flowCapture/thumbnails';
 
 // Its own chunk: the dialog brings flow-runner's engine and `yaml` with it, which a QA session that never captures does
 // not need (#1125).
@@ -74,6 +75,17 @@ export function DeviceViewer({ sessionId, deviceId, formFactor, platform = 'ios'
   const captureCloseListenersRef = useRef(new Set<() => void>());
   const captureButtonRef = useRef<HTMLButtonElement | null>(null);
   const captureSurfaceRef = useRef<(() => CanvasImageSource | null) | null>(null);
+  const capturingRef = useRef(false);
+  const captureOpenRef = useRef(false);
+  const thumbnailsRef = useRef<ThumbnailRecorder | null>(null);
+  useEffect(() => {
+    thumbnailsRef.current = new ThumbnailRecorder({
+      sessionId,
+      surface: () => captureSurfaceRef.current?.() ?? null,
+      recording: () => capturingRef.current && !captureOpenRef.current,
+    });
+    return () => { thumbnailsRef.current = null; };
+  }, [sessionId]);
   const captureStateRef = useRef<ViewerCaptureState>({
     sessionId, platform, buildId: buildId ?? 0, connected: false, chrome: null, postures: { postures: [], currentId: null },
   });
@@ -614,9 +626,17 @@ export function DeviceViewer({ sessionId, deviceId, formFactor, platform = 'ios'
     binaryFrameHandlerRef.current?.(payload, meta);
   }, [pushAudioFrame]);
 
-  const { send, connected } = useRelay(handleMessage, handleBinaryFrame, () => {
+  const { send: relaySend, connected } = useRelay(handleMessage, handleBinaryFrame, () => {
     for (const listener of captureCloseListenersRef.current) listener();
   });
+  // Every input this viewer sends passes here once, toolbar commands and the dialog's replay included, so the picture
+  // of the screen each recorded step began on is taken in one place (1b-3b). The recorder decides from refs whether
+  // the person is being recorded right now; the dialog's own replay is not (`captureOpen`).
+  const send = useCallback((msg: BrowserToRelay) => {
+    const sent = relaySend(msg);
+    if (sent) thumbnailsRef.current?.note(msg);
+    return sent;
+  }, [relaySend]);
   useLayoutEffect(() => { sendRef.current = send; });
 
   useEffect(() => {
@@ -781,6 +801,7 @@ export function DeviceViewer({ sessionId, deviceId, formFactor, platform = 'ios'
     // Only with capturing on and a build: a capture replays against the build it was made with.
     onCaptureFlow: capturingSteps && buildId !== undefined ? () => setCaptureTap(viewerCaptureTap({
       state: captureStateRef, send: sendRef, listeners: captureListenersRef, closeListeners: captureCloseListenersRef, surface: captureSurfaceRef,
+      thumbnails: thumbnailsRef,
     })) : undefined,
     captureButtonRef,
     captureSurfaceRef,
@@ -788,6 +809,8 @@ export function DeviceViewer({ sessionId, deviceId, formFactor, platform = 'ios'
 
   useLayoutEffect(() => {
     captureStateRef.current = { sessionId, platform, buildId: buildId ?? 0, connected, chrome, postures };
+    capturingRef.current = capturingSteps === true;
+    captureOpenRef.current = captureOpen;
   });
 
   // Before chrome arrives, show a phone skeleton + status card so the layout isn't empty

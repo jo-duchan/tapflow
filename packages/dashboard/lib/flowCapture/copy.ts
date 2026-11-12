@@ -17,7 +17,9 @@ export const copy = {
   nothingCaptured: 'No steps have been captured on this device yet. Turn on “Capture my steps” and test as usual.',
 
   rangeHeading: 'Which part of the session is the flow?',
-  rangeHelp: 'Starts at the last clean launch, ends at your last step. Drag the handles to change it.',
+  rangeHelp: 'Starts at your first step in the app, ends at your last step. Drag the handles to change it.',
+  /** A key pressed on the on-screen keyboard: no picture is kept of it, since that screen shows what was just typed. */
+  keyboardTile: 'On-screen keyboard',
   rangeStrip: 'Steps',
   rangeStart: 'Start of the flow',
   rangeEnd: 'End of the flow',

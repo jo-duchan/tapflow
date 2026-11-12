@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, afterEach } from 'vitest'
 import { CaptureStore, FIELD_IDLE_MS, HOME_READ_MS, HOME_READS, KEYBOARD_SETTLE_MS, SNAPSHOT_READ_WAIT_MS, type CapturedMessage, type FieldRead, type Holder } from '../capture/CaptureStore'
-import type { KeyboardState } from '@tapflowio/protocol'
+import type { FocusedField, KeyboardState } from '@tapflowio/protocol'
 import { chromeOrientation } from '@tapflowio/protocol/screen'
 import type { ChromePayload } from '@tapflowio/protocol'
 
@@ -649,5 +649,287 @@ describe('reading the soft keyboard around a person\'s inputs (#1135)', () => {
     s.recordInput('s', ALICE, { type: 'input:key', sessionId: 's', requestId: 'a', payload: { code: 'KeyA' } })
     await vi.advanceTimersByTimeAsync(10)
     expect(fieldReads(s)[0]).toMatchObject({ keyboard: SHOWN, language: '한국어 (두벌식)' })
+  })
+})
+
+// 1b-3b: the screen each input began on, kept beside the record.
+describe('CaptureStore — thumbnails', () => {
+  const jpeg = (n: number) => Buffer.alloc(n, 1)
+  const record = (s: CaptureStore, ...msgs: CapturedMessage[]) => { for (const m of msgs) s.recordInput('s', ALICE, m) }
+  // An input that types nothing, so the moment just after typing never comes into it.
+  const step = (requestId: string): CapturedMessage => ({ type: 'input:button', sessionId: 's', requestId, payload: { name: 'home', phase: 'down' } })
+  const key = (requestId: string, code: string): CapturedMessage => ({ type: 'input:key', sessionId: 's', requestId, payload: { code, modifiers: 0 } })
+  const touchAt = (requestId: string, y: number): CapturedMessage[] => [
+    { type: 'input:touch:start', sessionId: 's', payload: { x: 0.3, y } },
+    { type: 'input:touch:end', sessionId: 's', requestId, payload: { x: 0.3, y } },
+  ]
+
+  it('keeps one for an input it holds, once, and serves it from the snapshot', () => {
+    const { s } = store()
+    record(s, step('r1'))
+    expect(s.putThumbnail('s', '1', 'nope', jpeg(10))).toBe('unknown-input')
+    expect(s.putThumbnail('s', '1', 'r1', jpeg(10))).toBe('kept')
+    expect(s.putThumbnail('s', '1', 'r1', jpeg(11))).toBe('exists')
+    expect(s.putThumbnail('s', '2', 'r1', jpeg(10))).toBe('no-capture')
+    expect(s.thumbnail('s', '1', 'r1')).toBeNull() // no snapshot yet
+    expect(s.takeSnapshot('s', '1')!.thumbnails).toEqual(['r1'])
+    expect(s.thumbnail('s', '1', 'r1')).toEqual(jpeg(10))
+    expect(s.thumbnail('s', '2', 'r1')).toBeNull()
+  })
+
+  // The screen as a key on the soft keyboard is pressed shows the character before it, a password's included (#1140).
+  // So a touch keeps a picture only when the reads say it was off the keyboard, before and after it.
+  describe('a touch', () => {
+    async function withKeyboard(states: KeyboardState[]) {
+      vi.useFakeTimers()
+      let n = 0
+      const { s } = store({ now: () => Date.now(), readKeyboard: () => Promise.resolve(states[Math.min(n++, states.length - 1)]!) })
+      record(s, launch)
+      await vi.advanceTimersByTimeAsync(50)
+      return s
+    }
+    const UP: KeyboardState = { shown: true, rect: { x: 0, y: 0.6, width: 1, height: 0.4 } }
+    afterEach(() => vi.useRealTimers())
+
+    it('keeps one off the keyboard, before and after', async () => {
+      const s = await withKeyboard([UP])
+      record(s, ...touchAt('a', 0.2))
+      await vi.advanceTimersByTimeAsync(50)
+      expect(s.putThumbnail('s', '1', 'a', jpeg(10))).toBe('kept')
+    })
+
+    it('keeps none on the keyboard', async () => {
+      const s = await withKeyboard([UP])
+      record(s, ...touchAt('k', 0.8))
+      expect(s.putThumbnail('s', '1', 'k', jpeg(10))).toBe('keyboard')
+    })
+
+    // Measured on Android: a read right after a launch cannot say; the last one that could decides.
+    it('passes over a read that could not say, to the last one that did', async () => {
+      const s = await withKeyboard([{ shown: false }, { shown: null }, { shown: false }])
+      await vi.advanceTimersByTimeAsync(400)
+      record(s, ...touchAt('a', 0.2))
+      await vi.advanceTimersByTimeAsync(50)
+      expect(s.putThumbnail('s', '1', 'a', jpeg(10))).toBe('kept')
+    })
+
+    // A Done key closes the keyboard: down after it, up before it — the read before is what says it was a key.
+    it('keeps none for a touch the keyboard was up under, though it went down after', async () => {
+      const s = await withKeyboard([UP, { shown: false }])
+      record(s, ...touchAt('done', 0.95))
+      await vi.advanceTimersByTimeAsync(50)
+      expect(s.putThumbnail('s', '1', 'done', jpeg(10))).toBe('keyboard')
+    })
+
+    // Reads go one at a time: one asked for before the touch can come back after its end, with the keyboard up.
+    it('takes a read asked for before it as the read before, though it came back after', async () => {
+      vi.useFakeTimers()
+      const answers: Array<(k: KeyboardState) => void> = []
+      const { s } = store({ now: () => Date.now(), readKeyboard: () => new Promise<KeyboardState>((r) => answers.push(r)) })
+      record(s, launch)
+      answers.shift()!({ shown: false })
+      await vi.advanceTimersByTimeAsync(10)
+      record(s, step('x'))
+      await vi.advanceTimersByTimeAsync(10)
+      record(s, ...touchAt('done', 0.95))
+      answers.shift()!(UP)
+      await vi.advanceTimersByTimeAsync(10)
+      answers.shift()!({ shown: false })
+      await vi.advanceTimersByTimeAsync(10)
+      expect(s.putThumbnail('s', '1', 'done', jpeg(10))).toBe('keyboard')
+    })
+
+    it('keeps none when nothing read the keyboard, or nothing could say', async () => {
+      const { s } = store()
+      record(s, ...touchAt('t', 0.2))
+      expect(s.putThumbnail('s', '1', 't', jpeg(10))).toBe('keyboard')
+      const unknown = await withKeyboard([{ shown: null }])
+      record(unknown, ...touchAt('u', 0.2))
+      expect(unknown.putThumbnail('s', '1', 'u', jpeg(10))).toBe('keyboard')
+    })
+
+    // Measured on Android: the read before a first key said the keyboard was down while it slid up; the read after it
+    // said it was a key. And the picture arrived before that read did, so it waits for it.
+    it('keeps none when the read after it puts it on the keyboard, and waits for that read', async () => {
+      const s = await withKeyboard([{ shown: false }, UP])
+      record(s, ...touchAt('k', 0.8))
+      expect(s.putThumbnail('s', '1', 'k', jpeg(10))).toBe('not-yet')
+      await vi.advanceTimersByTimeAsync(50)
+      expect(s.putThumbnail('s', '1', 'k', jpeg(10))).toBe('keyboard')
+    })
+  })
+
+  const field = (secure: boolean): FocusedField => ({ identifier: secure ? 'password' : 'email', placeholder: '', frame: { x: 0, y: 0, width: 1, height: 1 }, secure })
+
+  it('keeps one for a typed run\'s first key only, whatever the dashboard sends', async () => {
+    const { s, tick } = store({ readField: () => Promise.resolve({ field: field(false) }) })
+    for (const [id, code] of [['a', 'KeyA'], ['caps', 'CapsLock'], ['b', 'KeyB'], ['enter', 'Enter'], ['c', 'KeyC']] as const) {
+      record(s, key(id, code))
+      await Promise.resolve()
+      tick(100)
+    }
+    expect(['a', 'caps', 'b', 'enter', 'c'].map((id) => s.putThumbnail('s', '1', id, jpeg(10)))).toEqual(['kept', 'keyboard', 'keyboard', 'kept', 'kept'])
+  })
+
+  // A password field can show the character just typed for 1.5 s: the next input's screen would carry it.
+  describe('just after typing', () => {
+    async function typedInto(secure: boolean | 'unnamed' | null) {
+      vi.useFakeTimers()
+      const { s } = store({
+        now: () => Date.now(),
+        readKeyboard: () => Promise.resolve({ shown: false }),
+        ...(secure === null ? {} : { readField: () => Promise.resolve<FieldRead>(secure === 'unnamed' ? { field: null, reason: 'secure' } : { field: field(secure) }) }),
+      })
+      record(s, key('a', 'KeyA'), key('b', 'KeyB'))
+      await vi.advanceTimersByTimeAsync(500)
+      return s
+    }
+    afterEach(() => vi.useRealTimers())
+
+    it('keeps none from a secure field, or one no read could name', async () => {
+      for (const secure of [true, 'unnamed', null] as const) {
+        const s = await typedInto(secure)
+        record(s, ...touchAt('signIn', 0.2))
+        await vi.advanceTimersByTimeAsync(50)
+        expect(s.putThumbnail('s', '1', 'signIn', jpeg(10))).toBe('typed')
+      }
+    })
+
+    it('keeps one from a field read as not secure, and any once the moment has passed', async () => {
+      const s = await typedInto(false)
+      record(s, ...touchAt('next', 0.2))
+      await vi.advanceTimersByTimeAsync(50)
+      expect(s.putThumbnail('s', '1', 'next', jpeg(10))).toBe('kept')
+      const late = await typedInto(true)
+      await vi.advanceTimersByTimeAsync(2_000)
+      record(late, ...touchAt('later', 0.2))
+      await vi.advanceTimersByTimeAsync(50)
+      expect(late.putThumbnail('s', '1', 'later', jpeg(10))).toBe('kept')
+    })
+
+    it('judges a pinch by when it began, which is when its picture was taken', async () => {
+      const s = await typedInto(true)
+      record(s, { type: 'input:pinch:start', sessionId: 's', payload: { f0: { x: 0.4, y: 0.5 }, f1: { x: 0.6, y: 0.5 } } })
+      await vi.advanceTimersByTimeAsync(2_000)
+      record(s, { type: 'input:pinch:end', sessionId: 's', requestId: 'pinch' })
+      expect(s.putThumbnail('s', '1', 'pinch', jpeg(10))).toBe('typed')
+    })
+
+    // A read still out may be the one naming a secure field: the picture waits for it, as for a keyboard read.
+    it('waits for a field read still out', async () => {
+      vi.useFakeTimers()
+      const answers: Array<() => void> = []
+      const { s } = store({
+        now: () => Date.now(), readKeyboard: () => Promise.resolve({ shown: false }),
+        readField: () => new Promise<FieldRead>((r) => answers.push(() => r({ field: field(false) }))),
+      })
+      record(s, key('a', 'KeyA'))
+      await vi.advanceTimersByTimeAsync(100)
+      record(s, ...touchAt('next', 0.2))
+      await vi.advanceTimersByTimeAsync(50)
+      expect(s.putThumbnail('s', '1', 'next', jpeg(10))).toBe('not-yet')
+      for (const answer of answers) answer()
+      await vi.advanceTimersByTimeAsync(10)
+      expect(s.putThumbnail('s', '1', 'next', jpeg(10))).toBe('kept')
+    })
+
+    // CodeRabbit on #1153: two reads asked in the same millisecond, the first answered: the second still holds it.
+    it('waits for each of two field reads asked in the same millisecond', async () => {
+      vi.useFakeTimers()
+      const answers: Array<() => void> = []
+      const { s } = store({
+        now: () => Date.now(), readKeyboard: () => Promise.resolve({ shown: false }),
+        readField: () => new Promise<FieldRead>((r) => answers.push(() => r({ field: field(false) }))),
+      })
+      // A run, an input that ends it, and a run again, all at one time: two focus reads asked at that time.
+      record(s, key('a', 'KeyA'), step('x'), key('b', 'KeyB'))
+      await vi.advanceTimersByTimeAsync(100)
+      record(s, ...touchAt('next', 0.2))
+      await vi.advanceTimersByTimeAsync(50)
+      expect(answers).toHaveLength(2)
+      answers[0]!()
+      await vi.advanceTimersByTimeAsync(10)
+      expect(s.putThumbnail('s', '1', 'next', jpeg(10))).toBe('not-yet')
+      for (const answer of answers.slice(1)) answer()
+      await vi.advanceTimersByTimeAsync(10)
+      expect(s.putThumbnail('s', '1', 'next', jpeg(10))).toBe('kept')
+    })
+
+    // CodeRabbit on #1153: the second of those reads failing must not leave the first to pass the picture.
+    it('counts a field read that failed as one that could not say', async () => {
+      vi.useFakeTimers()
+      const answers: Array<() => void> = []
+      let n = 0
+      const { s } = store({
+        now: () => Date.now(), readKeyboard: () => Promise.resolve({ shown: false }),
+        readField: () => n++ === 0
+          ? new Promise<FieldRead>((r) => answers.push(() => r({ field: field(false) })))
+          : new Promise<FieldRead>((_r, reject) => answers.push(() => reject(new Error('agent gone')))),
+      })
+      record(s, key('a', 'KeyA'), step('x'), key('b', 'KeyB'))
+      await vi.advanceTimersByTimeAsync(100)
+      record(s, ...touchAt('next', 0.2))
+      await vi.advanceTimersByTimeAsync(50)
+      expect(answers).toHaveLength(2)
+      for (const answer of answers) answer()
+      await vi.advanceTimersByTimeAsync(10)
+      expect(s.putThumbnail('s', '1', 'next', jpeg(10))).toBe('typed')
+    })
+
+    it('counts a touch on the soft keyboard as typing', async () => {
+      vi.useFakeTimers()
+      const UP: KeyboardState = { shown: true, rect: { x: 0, y: 0.6, width: 1, height: 0.4 } }
+      const { s } = store({ now: () => Date.now(), readKeyboard: () => Promise.resolve(UP), readField: () => Promise.resolve({ field: field(true) }) })
+      record(s, launch)
+      await vi.advanceTimersByTimeAsync(50)
+      record(s, ...touchAt('key', 0.8))
+      await vi.advanceTimersByTimeAsync(300)
+      record(s, ...touchAt('signIn', 0.2))
+      await vi.advanceTimersByTimeAsync(50)
+      expect(s.putThumbnail('s', '1', 'signIn', jpeg(10))).toBe('typed')
+    })
+  })
+
+  it('drops the oldest past its own cap, never the record', () => {
+    const { s } = store({ maxThumbnailBytes: 25 })
+    record(s, step('r1'), step('r2'), step('r3'))
+    for (const id of ['r1', 'r2', 'r3']) expect(s.putThumbnail('s', '1', id, jpeg(10))).toBe('kept')
+    const snap = s.takeSnapshot('s', '1')!
+    expect(snap.thumbnails).toEqual(['r2', 'r3'])
+    expect(snap.entries.filter((e) => e.kind === 'input')).toHaveLength(3)
+  })
+
+  it('lets a picture go with the step trimmed off the head, unless the dialog\'s snapshot still shows it', () => {
+    const { s } = store({ maxEntries: 8 })
+    record(s, step('r1'))
+    s.putThumbnail('s', '1', 'r1', jpeg(10))
+    for (let i = 2; i <= 12; i++) record(s, step(`r${i}`))
+    expect(s.takeSnapshot('s', '1')!.thumbnails).not.toContain('r1')
+    const { s: s2 } = store({ maxEntries: 8 })
+    record(s2, step('r1'))
+    s2.putThumbnail('s', '1', 'r1', jpeg(10))
+    s2.takeSnapshot('s', '1')
+    for (let i = 2; i <= 12; i++) record(s2, step(`r${i}`))
+    expect(s2.thumbnail('s', '1', 'r1')).toEqual(jpeg(10))
+  })
+
+  // A relay others have filled refuses this one, and leaves this capture's own pictures alone.
+  it('keeps none past the relay\'s line, and takes none of the capture\'s own to make room', () => {
+    const { s } = store({ maxTotalBytes: 1_500 })
+    record(s, step('r1'), step('r2'))
+    expect(s.putThumbnail('s', '1', 'r1', jpeg(500))).toBe('kept')
+    expect(s.putThumbnail('s', '1', 'r2', jpeg(2_000))).toBe('full')
+    expect(s.takeSnapshot('s', '1')!.thumbnails).toEqual(['r1'])
+  })
+
+  it('frees everything at the seal', () => {
+    const { s } = store({ maxTotalBytes: 2_000 })
+    record(s, step('r1'))
+    s.putThumbnail('s', '1', 'r1', jpeg(1_000))
+    s.seal('s')
+    record(s, step('r2'))
+    // Only room for this one if the sealed capture's picture was let go.
+    expect(s.putThumbnail('s', '1', 'r2', jpeg(1_000))).toBe('kept')
+    expect(s.takeSnapshot('s', '1')!.thumbnails).toEqual(['r2'])
   })
 })

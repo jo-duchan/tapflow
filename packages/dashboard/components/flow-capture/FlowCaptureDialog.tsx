@@ -1,6 +1,6 @@
 import { useEffect, useReducer, useRef, useState, type MutableRefObject, type RefObject } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { isSecretName, toFlowSteps } from '@tapflowio/flow-runner/browser'
+import { isSecretName, toFlowSteps, type RawStep } from '@tapflowio/flow-runner/browser'
 import type { CaptureSnapshot } from '@tapflowio/protocol/capture'
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Stepper } from '@/components/ui/stepper'
@@ -107,6 +107,13 @@ export default function FlowCaptureDialog({ tap, returnFocusRef, onClose }: {
   )
 }
 
+/** The picture of the screen `step` began on, read from the snapshot the dialog took (1b-3b); `null` when there is none. */
+function thumbnailUrl(sessionId: string, snapshot: CaptureSnapshot, step: RawStep): string | null {
+  const key = step.thumbnailKey
+  if (!key || !snapshot.thumbnails?.includes(key)) return null
+  return `/api/v1/sessions/${sessionId}/capture/snapshot/thumbnails/${encodeURIComponent(key)}`
+}
+
 function initFrom(snapshot: CaptureSnapshot): CaptureState {
   const { steps, range } = stepsOf(snapshot)
   return reduce(initialState, { type: 'loaded', steps, range, name: '' })
@@ -204,7 +211,8 @@ function CaptureSession({ tap, session, snapshot, bundleId, setBusy, close }: {
       />
       <div {...swapFocus} className="h-full min-h-0">
         {state.phase === 'range' && (
-          <RangeScreen state={state} dispatch={dispatch} bundleId={bundleId} platform={tap.platform} onContinue={startMatch} onCancel={close} continueRef={fallback} />
+          <RangeScreen state={state} dispatch={dispatch} bundleId={bundleId} platform={tap.platform} onContinue={startMatch} onCancel={close} continueRef={fallback}
+            thumbnailOf={(step) => thumbnailUrl(tap.sessionId, snapshot, step)} />
         )}
         {state.phase === 'matching' && (
           <MatchScreen

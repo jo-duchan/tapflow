@@ -1261,6 +1261,14 @@ Return the last copy made. Returns `404` when there is none.
 
 Discard the copy. Returns `404` when there is none.
 
+### `PUT /api/v1/sessions/:sessionId/capture/thumbnails/:requestId`
+
+Keep a picture of the screen as an input began: a JPEG of at most 16 KB, for an input already remembered, sent once. The dashboard sends it after the input. Returns `201` when kept, `200` with `{ "kept": false, "reason": … }` when it was not (`exists`, `keyboard` for a touch the keyboard reads do not place off the on-screen keyboard, or a key inside a typed run, `typed` for an input begun within 2 seconds of a typed character when the field typed into is not read as non-secure, `full`), `404` when no steps are remembered for you on this session, `409` when no remembered input has that `requestId` yet or a keyboard or field read it waits on is still out (send it again shortly), `413` for a larger body and `415` for one that is not a JPEG.
+
+### `GET /api/v1/sessions/:sessionId/capture/snapshot/thumbnails/:requestId`
+
+Return the picture of a step in the copy, as `image/jpeg`. The copy's `thumbnails` lists the steps that have one. Returns `404` when there is none.
+
 ### `PUT /api/v1/sessions/:sessionId/capture/pause`
 
 Stop remembering for a while. The dashboard uses it while it replays the remembered steps on the device, so the replay is not remembered as the person's input. The pause lifts on its own after the `ttlMs` in the response (30 seconds), and calling it again extends it. Returns `404` when no steps are remembered. A `404` during a replay means remembering has already ended, so stop the replay.

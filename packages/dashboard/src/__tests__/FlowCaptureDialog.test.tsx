@@ -219,6 +219,29 @@ describe('RangeScreen', () => {
     <RangeScreen state={state} dispatch={dispatch} bundleId="com.example" platform="ios" onContinue={vi.fn()} onCancel={vi.fn()} continueRef={{ current: null }} />,
   )
 
+  // 1b-3b: the screen each step began on, and a mark where none is kept on purpose.
+  it('draws the screen a step began on, and marks a key on the soft keyboard as kept without one', () => {
+    const pictured = reduce(initialState, {
+      type: 'loaded', range: { start: 0, end: 5 }, name: 'login',
+      steps: [
+        { ...base, kind: 'launch', buildId: 7, thumbnailKey: 'l' },
+        { ...base, kind: 'tap', point: [0.5, 0.5], thumbnailKey: 't' },
+        { ...base, kind: 'keyboardKey', point: [0.3, 0.8], thumbnailKey: 'k' },
+        { ...base, kind: 'text', text: 'hi', thumbnailKey: 'h', messages: [{ at: 0, msg: { type: 'input:touch:end', sessionId: 's', requestId: 'h', payload: { x: 0.6, y: 0.8 } } }] },
+        { ...base, kind: 'text', text: 'hi', thumbnailKey: 'c' },
+      ] as never,
+    })
+    const { container } = render(
+      <RangeScreen state={pictured} dispatch={vi.fn()} bundleId="com.example" platform="ios" onContinue={vi.fn()} onCancel={vi.fn()} continueRef={{ current: null }}
+        thumbnailOf={(step) => (step.thumbnailKey === 't' ? '/pic/t' : null)} />,
+    )
+    const pictures = container.querySelectorAll('img')
+    expect([...pictures].map((img) => img.getAttribute('src'))).toEqual(['/pic/t'])
+    expect(pictures[0]).toHaveAttribute('alt', '')
+    // A key, and a run typed with keys on it; not a run typed on the computer's keyboard.
+    expect(screen.getAllByText('On-screen keyboard')).toHaveLength(2)
+  })
+
   it('asks for the password, hidden, and holds Continue until it is given', async () => {
     const dispatch = vi.fn()
     draw(loaded, dispatch)

@@ -22,4 +22,7 @@ export interface CaptureTap {
   postures(): PosturesPayload
   /** The decoded frame the viewer draws, for the dialog to show the replay on; `null` before the first frame. */
   surface(): CanvasImageSource | null
+  /** Wait for the pictures of the person's last steps to reach the relay (1b-3b), before the dialog takes its snapshot.
+   *  Absent where nothing records them. */
+  flushThumbnails?(): Promise<void>
 }
