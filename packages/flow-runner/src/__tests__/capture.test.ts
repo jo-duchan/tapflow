@@ -6,7 +6,7 @@ import type { UIElement } from '@tapflowio/agent-core'
 import type { KeyboardState } from '@tapflowio/protocol'
 import type { CaptureEntry, CapturedMessage } from '@tapflowio/protocol/capture'
 import {
-  askedValues, segment, defaultRange, rangeWarnings, matchStep, reachQuestions, toFlowSteps, flowSteps, flowToYaml, rawStepLabel, capturedStepLabel,
+  askedValues, segment, defaultRange, rangeWarnings, stepsBeforeRange, matchStep, reachQuestions, toFlowSteps, flowSteps, flowToYaml, rawStepLabel, capturedStepLabel,
   type MatchContext, type RawStep,
 } from '../capture/index.js'
 import { parseFlow } from '../schema.js'
@@ -604,6 +604,82 @@ describe('segment: where each step\'s picture is kept', () => {
     expect(steps.map((s) => [s.kind, s.thumbnailKey])).toEqual([
       ['launch', 'r1'], ['tap', 'r2'], ['button', 'down'], ['text', 'r3'], ['rotate', undefined],
     ])
+  })
+})
+
+// 1b-3b: Match leaves the on-screen keyboard out of its comparison, where the recording saw it as the step began.
+describe('segment: where the keyboard was as each step began', () => {
+  const kb = (r: Rec, keyboard: KeyboardState, at = r.t + 20, requestedAt = r.t) => {
+    r.entries.push({ at, kind: 'keyboard', requestedAt, keyboard, settled: true })
+    return r
+  }
+  const UP = { x: 0, y: 0.6, width: 1, height: 0.4 }
+
+  it('takes the frame\'s rect where the agent gives one, the picture being the frame', () => {
+    const r = new Rec().launch()
+    kb(r.wait(100), { shown: true, rect: UP, frameRect: { x: 0.6, y: 0, width: 0.4, height: 1 } }).wait(100).touch([[0.3, 0.3]])
+    expect(r.steps()[1]!.keyboardRect).toEqual({ x: 0.6, y: 0, width: 0.4, height: 1 })
+  })
+
+  it('joins the read before the step and the first asked after it, one of them still on its way up', () => {
+    const r = new Rec().launch()
+    kb(r.wait(100), { shown: true, rect: { x: 0, y: 0.8, width: 1, height: 0.2 } }).wait(100)
+    const at = r.t
+    r.touch([[0.3, 0.3]])
+    kb(r, { shown: true, rect: UP }, r.t + 20, at + 10)
+    expect(r.steps()[1]!.keyboardRect).toEqual(UP)
+  })
+
+  // CodeRabbit on #1155: a step with no read of its own must not take the next step's keyboard.
+  it('takes no read asked after the next step began', () => {
+    const r = new Rec().launch().wait(100)
+    r.touch([[0.3, 0.3]]).wait(100)
+    const next = r.t
+    r.touch([[0.5, 0.5]])
+    kb(r, { shown: true, rect: UP }, r.t + 20, next + 10)
+    const steps = r.steps()
+    expect(steps[1]!.keyboardRect).toBeUndefined()
+    expect(steps[2]!.keyboardRect).toEqual(UP)
+  })
+
+  // Review of 1b-3b: the first read asked after the step, not the first answered.
+  it('takes the read asked first after the step, whichever answered first', () => {
+    const r = new Rec().launch().wait(100)
+    const at = r.t
+    r.touch([[0.3, 0.3]])
+    kb(r, { shown: false }, r.t + 10, at + 50)
+    kb(r, { shown: true, rect: UP }, r.t + 20, at + 10)
+    expect(r.steps()[1]!.keyboardRect).toEqual(UP)
+  })
+
+  it('takes the read after when there was none before, and leaves a step with the keyboard down alone', () => {
+    const r = new Rec().launch().wait(100)
+    const at = r.t
+    r.touch([[0.3, 0.3]])
+    kb(r, { shown: true, rect: UP }, r.t + 20, at + 10).wait(100)
+    kb(r, { shown: false }).wait(100)
+    const later = r.t
+    r.touch([[0.5, 0.5]])
+    kb(r, { shown: false }, r.t + 20, later + 10)
+    const steps = r.steps()
+    expect(steps[1]!.keyboardRect).toEqual(UP)
+    expect(steps[2]!.keyboardRect).toBeUndefined()
+  })
+})
+
+describe('stepsBeforeRange', () => {
+  const at = (onHome: boolean | undefined, over: Partial<RawStep> = {}): RawStep =>
+    ({ at: 0, endAt: 0, outcome: 'landed', messages: [], kind: 'tap', point: [0.5, 0.5], ...(onHome === undefined ? {} : { onHome }), ...over }) as RawStep
+
+  it('names the steps taken in the app before the start, back to the last clean start', () => {
+    const steps = [at(false), at(undefined, { kind: 'clearState', bundleId: 'b' } as Partial<RawStep>), at(false), at(true), at(undefined), at(false), at(false)]
+    // #1 is before the clear-state: a replay starting there would clear what it did and stop at the same place.
+    expect(stepsBeforeRange(steps, { start: 6, end: 7 })).toEqual([2, 5])
+  })
+
+  it('leaves out a refused step and a refused clear-state', () => {
+    const steps = [at(false), at(undefined, { kind: 'clearState', bundleId: 'b', outcome: 'refused' } as Partial<RawStep>), at(false, { outcome: 'refused' }), at(false)]
+    expect(stepsBeforeRange(steps, { start: 3, end: 4 })).toEqual([0])
   })
 })
 

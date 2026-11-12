@@ -405,7 +405,7 @@ describe('VerifyScreen', () => {
 
 // #1139: Match and Verify start from a run's reset, and say what it did.
 describe('the device reset', () => {
-  const props = { tap: { surface: () => null } as never, marks: { cursor: null, trails: [] }, onStop: vi.fn(), onRestart: vi.fn(), onTakeWhatMatched: vi.fn(), stopRef: { current: null } }
+  const props = { tap: { surface: () => null } as never, marks: { cursor: null, trails: [] }, onStop: vi.fn(), onRestart: vi.fn(), onTakeWhatMatched: vi.fn(), onBackToRange: vi.fn(), onContinueAnyway: vi.fn(), stopRef: { current: null } }
   const matching = reduce({ ...initialState, phase: 'range' as const }, { type: 'match-started', total: 2 })
 
   it('says what was reset, by name, once the agent has answered', () => {
@@ -453,7 +453,7 @@ describe('focus through a run', () => {
   // Review of #1125: Stop's button was swapped for Start again's, and the focus of the one pressed fell to the page.
   it('keeps focus on the button pressed when Stop becomes Start again', () => {
     const running = { ...initialState, phase: 'matching' as const, progress: { done: 1, total: 3 } }
-    const props = { tap: tapStub, marks, onStop: vi.fn(), onRestart: vi.fn(), onTakeWhatMatched: vi.fn(), stopRef: { current: null } }
+    const props = { tap: tapStub, marks, onStop: vi.fn(), onRestart: vi.fn(), onTakeWhatMatched: vi.fn(), onBackToRange: vi.fn(), onContinueAnyway: vi.fn(), stopRef: { current: null } }
     const { rerender } = render(<MatchScreen state={running} {...props} />)
     const stop = screen.getByRole('button', { name: 'Stop' })
     stop.focus()

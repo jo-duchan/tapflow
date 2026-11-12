@@ -1,7 +1,8 @@
 import { useEffect, useId, useRef, useState, type Dispatch, type RefObject } from 'react'
 import { ChevronRight, Keyboard, LoaderCircle, Trash2 } from 'lucide-react'
 import {
-  askedValues, capturedStepLabel, rangeWarnings, rawStepLabel, type CapturedStep, type Flow, type RawStep, type StepExpect,
+  askedValues, capturedStepLabel, defaultRange, rangeWarnings, rawStepLabel, stepsBeforeRange, type CapturedStep, type Flow, type RawStep, type ScreenRect,
+  type StepExpect,
 } from '@tapflowio/flow-runner/browser'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -25,6 +26,10 @@ import { TraceStep } from '@/components/TraceStep'
 import { typedOnScreenKeyboard } from '@/lib/flowCapture/runner'
 
 type FlowFile = Omit<Flow, 'file'>
+
+/** Step numbers as the strip shows them: `#4` or `#4–#6`, from indices into the steps. */
+const spanOf = (indices: number[]): string =>
+  indices.length === 1 ? `#${indices[0]! + 1}` : `#${indices[0]! + 1}–#${indices[indices.length - 1]! + 1}`
 
 /** The step's buttons, at the bottom of the dialog on every step. As tall as a row of buttons (h-10, its pt-4 and border)
  *  even with none in it (a verification running), so the line above them does not jump when they appear. */
@@ -115,8 +120,9 @@ export function RangeScreen({ state, dispatch, bundleId, platform, onContinue, o
         ? <p className="text-xs text-muted-foreground">{copy.appPrefix} <TechLabel>{bundleId}</TechLabel>{copy.appSuffix}</p>
         : <p className="text-xs">{copy.noBundleId}</p>}
       {/* Notes about the range, one short line each, in one list rather than a paragraph apiece. */}
-      {(warnings.length > 0 || typedOnScreenKeyboard(steps, range)) && (
+      {(warnings.length > 0 || typedOnScreenKeyboard(steps, range) || state.moved) && (
         <ul className="list-disc space-y-1 pl-5 text-xs text-muted-foreground">
+          {state.moved && <li>{copy.rangeMoved(state.moved[0]! + 1, spanOf(state.moved))}</li>}
           {warnings.map((w) => <li key={w}>{copy.rangeWarnings[w]}</li>)}
           {typedOnScreenKeyboard(steps, range) && <li>{copy.screenKeyboardAdvice}</li>}
         </ul>
@@ -407,15 +413,20 @@ function Busy() {
   return <LoaderCircle aria-hidden="true" className="size-4 shrink-0 motion-safe:animate-spin" />
 }
 
-export function MatchScreen({ state, tap, marks, onStop, onRestart, onTakeWhatMatched, stopRef }: {
+export function MatchScreen({ state, tap, marks, onStop, onRestart, onTakeWhatMatched, onBackToRange, onContinueAnyway, stopRef }: {
   state: CaptureState
   tap: CaptureTap
   marks: WatchMarks
   onStop: () => void
   onRestart: () => void
   onTakeWhatMatched: () => void
+  onBackToRange: () => void
+  onContinueAnyway: () => void
   stopRef: RefObject<HTMLButtonElement | null>
 }) {
+  if (state.diverged) {
+    return <DivergedView state={state} onTakeWhatMatched={onTakeWhatMatched} onBackToRange={onBackToRange} onContinueAnyway={onContinueAnyway} continueRef={stopRef} />
+  }
   const { done, total } = state.progress
   const stopped = state.error !== null
   return (
@@ -442,6 +453,72 @@ export function MatchScreen({ state, tap, marks, onStop, onRestart, onTakeWhatMa
         </Button>
       </Footer>
     </div>
+  )
+}
+
+/**
+ * Match stopped at a step whose screen looked different from its recording (1b-3b): the two pictures, what is known for
+ * certain, and the causes it can have. Never a cause named as the cause — the person judges by the pictures. The buttons
+ * keep their places and their emphasis whatever happened, since people press them from habit: going on is the primary,
+ * where Continue is on the other steps, and Verify still catches a flow that went on past a real difference.
+ */
+function DivergedView({ state, onTakeWhatMatched, onBackToRange, onContinueAnyway, continueRef }: {
+  state: CaptureState
+  onTakeWhatMatched: () => void
+  onBackToRange: () => void
+  onContinueAnyway: () => void
+  continueRef: RefObject<HTMLButtonElement | null>
+}) {
+  const d = state.diverged!
+  const done = state.progress.done
+  const before = stepsBeforeRange(state.steps, state.range)
+  const facts = [
+    before.length > 0 ? copy.divergedBefore(spanOf(before), before.length, state.range.start === defaultRange(state.steps).start) : null,
+    done > 0 ? copy.divergedMatched(done) : null,
+  ].filter(Boolean).join(' ')
+  return (
+    <div className="grid h-full min-h-0 grid-rows-[minmax(0,1fr)_auto] gap-4">
+      <div className="grid min-h-0 gap-6 overflow-y-auto sm:grid-cols-[auto_minmax(0,1fr)]">
+        <div className="flex flex-col gap-2">
+          <div className="flex gap-4">
+            <ComparedPicture title={copy.divergedRecorded(d.index + 1)} src={d.recordedUrl} masks={d.masks} />
+            <ComparedPicture title={copy.divergedNow} src={d.nowUrl} masks={d.masks} differs />
+          </div>
+          {/* Under both pictures, from the left: "not compared" is true of both, and the order follows the pictures. */}
+          <p className="flex items-center gap-3 text-xs text-muted-foreground">
+            <span className="flex items-center gap-1.5"><span aria-hidden className="inline-block size-2.5 rounded-sm border border-dashed border-muted-foreground bg-foreground/5" />{copy.notCompared}</span>
+            <span className="flex items-center gap-1.5"><span aria-hidden className="inline-block size-2.5 rounded-sm border-2 border-warning-solid" />{copy.differs}</span>
+          </p>
+        </div>
+        <div className="flex flex-col gap-2">
+          <p role="status" className="text-sm font-medium">{copy.divergedTitle(d.index - state.range.start + 1, state.progress.total)}</p>
+          <p className="text-sm text-muted-foreground">{facts ? `${facts} ` : ''}{copy.divergedCauses}</p>
+        </div>
+      </div>
+      <Footer>
+        {/* At the far left, and only when something matched: its coming and going moves nothing else. */}
+        {done > 0 && <Button variant="outline" onClick={onTakeWhatMatched}>{copy.editWhatMatched}</Button>}
+        <Button variant="outline" onClick={onBackToRange}>{copy.backToRange}</Button>
+        <Button ref={continueRef} onClick={onContinueAnyway}>{copy.continueAnyway}</Button>
+      </Footer>
+    </div>
+  )
+}
+
+/** One of the two pictures, with what the comparison left out drawn over it: a light tint and a dashed edge, so what is
+ *  under it still shows. The replay's carries the outline, the whole picture: where a part differs is not measured. */
+function ComparedPicture({ title, src, masks, differs = false }: { title: string; src: string | null; masks: ScreenRect[]; differs?: boolean }) {
+  return (
+    <figure className="flex flex-col gap-2">
+      <figcaption className="text-xs font-medium">{title}</figcaption>
+      <div className={cn('relative w-[230px] overflow-hidden rounded-lg border', differs && 'border-2 border-warning-solid')}>
+        {src ? <img src={src} alt={title} className="block w-full" /> : <div aria-hidden className="aspect-[9/19] w-full bg-muted" />}
+        {masks.map((m, i) => (
+          <div key={i} aria-hidden className="absolute border border-dashed border-muted-foreground bg-foreground/5"
+            style={{ left: `${m.x * 100}%`, top: `${m.y * 100}%`, width: `${m.width * 100}%`, height: `${m.height * 100}%` }} />
+        ))}
+      </div>
+    </figure>
   )
 }
 

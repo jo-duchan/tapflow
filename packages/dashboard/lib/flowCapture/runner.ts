@@ -1,8 +1,8 @@
 import {
   defaultRange, EffectWatch, focusTap, matchStep, rangeStartKeyboard, rangeStartOrientation, reachQuestions, reachTargetOf, replayStep, runFlow,
-  segment, SocketFlowDriver,
+  segment, SocketFlowDriver, statusBarRect,
   toFlowSteps, waitForStableScreen, type CapturedStep, type Flow, type FlowResult, type KeyModifier, type MatchContext,
-  type RawStep, type StepExpect, type StepRange,
+  type RawStep, type ScreenRect, type StepExpect, type StepRange,
 } from '@tapflowio/flow-runner/browser'
 import { chromeOrientation } from '@tapflowio/protocol/screen'
 import type { AndroidChrome, ChromePayload, UIElement } from '@tapflowio/protocol'
@@ -158,8 +158,27 @@ export interface MatchHooks {
   onTouch?: (mark: StepMark) => void
   /** What the device reset did before the replay, or `null` when its agent could not reset it (`resetDevice`). */
   onReset?: (report: HeldResetReport | null) => void
+  /** The screen a step is about to act on against the one it was recorded on (1b-3b), `masks` left out of both: what it
+   *  measured when they differ, `null` when they look alike or cannot be compared. */
+  compare?: (step: RawStep, masks: ScreenRect[]) => Promise<ScreenDivergence | null>
+  /** They differ, at `index` into the steps: resolves when the person goes on, rejects when the run is stopped. */
+  onDiverged?: (index: number, divergence: ScreenDivergence) => Promise<void>
   signal: AbortSignal
 }
+
+/** What the comparison measured, and the picture it measured: shown beside the recording's. */
+export interface ScreenDivergence {
+  diff: number
+  /** The device's frame as it was compared, an object URL. */
+  nowUrl: string
+  masks: ScreenRect[]
+}
+
+/** Steps that act on the screen in front of them: each is compared with its recording before it is replayed. A command
+ *  (launch, URL, network), a turn and a button make their own screen — except Back, which goes wherever the screen it
+ *  is pressed on leads; a key on the soft keyboard is never replayed. */
+const COMPARED = new Set<RawStep['kind']>(['tap', 'longPress', 'swipe', 'holdDrag', 'pinch', 'imeAction', 'text', 'key', 'paste', 'type'])
+const compared = (raw: RawStep): boolean => COMPARED.has(raw.kind) || (raw.kind === 'button' && raw.name === 'back')
 
 /**
  * The start `tapflow flow run` gives a flow, on the device the session holds (#1139): the app as freshly installed, the
@@ -213,10 +232,16 @@ export async function matchRange(
   // replay its first steps on a screen laid out the other way (design review of #1139). After the clear and launch the
   // range may open with, so the flow does not read as starting without a launch and get a second one.
   let turnPending = orientation === 'landscape'
-  for (const raw of slice) {
+  // The step after a turn the replay put in, or after an install it left out, begins on a screen the recording did not:
+  // not compared.
+  let unlike = false
+  for (const [offset, raw] of slice.entries()) {
     hooks.signal.throwIfAborted()
+    let skipCompare = unlike
+    unlike = false
     if (turnPending && !STARTS_A_FLOW.has(raw.kind)) {
       turnPending = false
+      skipCompare = true
       const turn: RawStep = { at: raw.at, endAt: raw.at, outcome: 'landed', messages: [], kind: 'rotate', to: { orientation: 'landscape' } }
       const step = matchStep(turn, { tree: [], postures: tap.postures().postures, platform: tap.platform })
       matched.push(step)
@@ -228,6 +253,7 @@ export async function matchRange(
       const step = matchStep(raw, { tree: [], postures: tap.postures().postures, platform: tap.platform })
       matched.push(step)
       hooks.onStep(step)
+      unlike = true
       continue
     }
     await lease.ensure()
@@ -245,6 +271,15 @@ export async function matchRange(
       matched.push(tapped)
       hooks.onStep(tapped, focusShot ? URL.createObjectURL(new Blob([focusShot as BlobPart], { type: 'image/jpeg' })) : undefined, true)
       before = await waitForStableScreen(read, { timeoutMs: SETTLE_TIMEOUT_MS })
+    }
+    // After the focus tap and its settle: a typed step's picture was taken at its first key, with the field focused.
+    if (hooks.compare && hooks.onDiverged && compared(raw) && !skipCompare) {
+      const turn = before?.interfaceTurn ?? frameTurnOf(tap.chrome())
+      const masks = [statusBarRect(tap.platform, turn), raw.keyboardRect].filter((m): m is ScreenRect => m !== undefined)
+      // A picture that cannot be read is no reason to stop: the step is replayed as before the comparison existed.
+      const differs = await hooks.compare(raw, masks).catch(() => null)
+      hooks.signal.throwIfAborted()
+      if (differs) await hooks.onDiverged(range.start + offset, differs)
     }
     const shoot = () => channel.screenshot(sessionId, hooks.signal).catch(() => null)
     // A password is pictured before it is typed: after, Android shows its last character for a moment.
@@ -296,6 +331,8 @@ export async function matchRange(
   }
   // The last touch has no next step to read after it.
   if (watching) closeWatch((await waitForStableScreen(read, { timeoutMs: SETTLE_TIMEOUT_MS }))?.elements)
+  // A Stop pressed during those last reads, which do not watch the signal, is a stop, not a run that finished.
+  hooks.signal.throwIfAborted()
   return matched.map((m) => (observed.has(m) ? { ...m, observed: observed.get(m)! } : m))
 }
 
@@ -378,6 +415,25 @@ export class DialogRun {
   }
 
   abort(): void { this.controller?.abort() }
+
+  /** Whether `signal` is this run's, not one a later `begin` stopped: an answer from a stopped run is not this one's. */
+  isCurrent(signal: AbortSignal): boolean { return this.controller?.signal === signal }
+
+  private decision: (() => void) | null = null
+
+  /** Wait for the person to go on past a step that looked different (1b-3b). Rejects when the run is stopped, which is
+   *  what Back to Range and Edit what matched do: the replay must not stay parked behind a screen nobody is on. */
+  decide(signal: AbortSignal): Promise<void> {
+    return new Promise((resolve, reject) => {
+      if (signal.aborted) { reject(signal.reason as Error); return }
+      const stopped = () => { this.decision = null; reject(signal.reason as Error) }
+      signal.addEventListener('abort', stopped, { once: true })
+      this.decision = () => { signal.removeEventListener('abort', stopped); this.decision = null; resolve() }
+    })
+  }
+
+  /** Continue anyway. */
+  goOn(): void { this.decision?.() }
 
   keep(url: string): void { this.urls.add(url) }
 

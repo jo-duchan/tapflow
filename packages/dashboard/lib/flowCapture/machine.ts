@@ -1,4 +1,6 @@
-import { askedValues, type CapturedFlow, type CapturedStep, type FlowResult, type RawStep, type StepRange } from '@tapflowio/flow-runner/browser'
+import {
+  askedValues, defaultRange, stepsBeforeRange, type CapturedFlow, type CapturedStep, type FlowResult, type RawStep, type ScreenRect, type StepRange,
+} from '@tapflowio/flow-runner/browser'
 import type { HeldResetReport } from './channel'
 
 /**
@@ -59,6 +61,24 @@ export interface CaptureState {
   /** What the device reset did before the replay running or last run (#1139): `null` when its agent could not reset
    *  it, absent until it has answered. */
   reset?: HeldResetReport | null
+  /** Match is waiting at a step whose screen looked different from its recording (1b-3b). `diff` is kept to tune the
+   *  threshold by: what a stop measured is the only data there will be. */
+  diverged?: Divergence
+  /** Back to Range moved the start to take in steps before it, said on Range until the range changes. Indices. */
+  moved?: number[]
+  /** How many of the last matched steps the replay added (a focus tap, a turn): taken to Edit without the step they were
+   *  added for, they would be a flow of its own. */
+  insertedTail: number
+}
+
+export interface Divergence {
+  /** Into `steps`. */
+  index: number
+  diff: number
+  recordedUrl: string | null
+  nowUrl: string
+  /** What was left out of the comparison, as fractions of the picture: drawn as not compared. */
+  masks: ScreenRect[]
 }
 
 export type CaptureEvent =
@@ -72,6 +92,11 @@ export type CaptureEvent =
   | { type: 'step-matched'; step: CapturedStep; screenshot?: string; inserted?: boolean }
   | { type: 'match-finished'; captured: CapturedFlow }
   | { type: 'match-failed'; error: string }
+  | ({ type: 'diverged' } & Divergence)
+  /** Continue anyway: the step is replayed and the comparison goes on from the next. */
+  | { type: 'went-on' }
+  /** Back to Range from a stop: the start moves to take in the steps before it, when it is still the default. */
+  | { type: 'back-to-range' }
   | { type: 'remove-step'; index: number }
   | { type: 'rename-secret'; from: string; to: string }
   /** The stepper: go to a step already reached (`canGoTo`). */
@@ -86,14 +111,17 @@ export type CaptureEvent =
 export const initialState: CaptureState = {
   phase: 'loading', steps: [], range: { start: 0, end: 0 }, name: '', tags: '', progress: { done: 0, total: 0 },
   matched: [], screenshots: [], captured: null, removed: [], renamed: {}, verify: null, error: null,
-  matchedRange: null, reached: 0, asked: {},
+  matchedRange: null, reached: 0, asked: {}, insertedTail: 0,
 }
 
 /**
  * What a new replay throws away: what the last one produced, and the removals made on it, whose indices may not mean
  * the same steps in the next. Renamed secrets carry over: they are keyed by the name the capture gave the secret.
  */
-const replayed = { matched: [], screenshots: [], captured: null, removed: [], verify: null, error: null, matchedRange: null, reached: 1, reset: undefined }
+const replayed = {
+  matched: [], screenshots: [], captured: null, removed: [], verify: null, error: null, matchedRange: null, reached: 1, reset: undefined,
+  diverged: undefined, moved: undefined, insertedTail: 0,
+}
 
 const PHASE_AT: Record<number, Phase> = { 0: 'range', 2: 'edit', 3: 'verifying', 4: 'export' }
 
@@ -104,7 +132,7 @@ export function reduce(state: CaptureState, event: CaptureEvent): CaptureState {
   switch (event.type) {
     case 'loaded': return { ...state, phase: 'range', steps: event.steps, range: event.range, name: event.name, error: null, asked: {} }
     case 'load-failed': return { ...state, phase: 'failed', error: event.error }
-    case 'set-range': return { ...state, range: event.range }
+    case 'set-range': return { ...state, range: event.range, moved: undefined }
     case 'set-name': return { ...state, name: event.name }
     case 'set-tags': return { ...state, tags: event.tags }
     case 'set-asked': return { ...state, asked: { ...state.asked, [event.index]: event.value } }
@@ -114,10 +142,27 @@ export function reduce(state: CaptureState, event: CaptureEvent): CaptureState {
       matched: [...state.matched, event.step],
       screenshots: [...state.screenshots, event.screenshot],
       progress: { ...state.progress, done: state.progress.done + (event.inserted ? 0 : 1) },
+      insertedTail: event.inserted ? state.insertedTail + 1 : 0,
     }
-    case 'match-finished': return { ...state, phase: 'edit', captured: event.captured, matchedRange: state.range, reached: 2 }
-    // Stays on Match, so what was matched so far can still be taken into Edit or replayed from the start.
-    case 'match-failed': return { ...state, error: event.error }
+    // Clears a stop's message: Edit what matched after Stop used to carry "stopped" into Verify, which then began failed.
+    case 'match-finished': return { ...state, phase: 'edit', captured: event.captured, matchedRange: state.range, reached: 2, error: null, diverged: undefined }
+    // Stays on Match, so what was matched so far can still be taken into Edit or replayed from the start. Only while a
+    // run is on screen: a run stopped by Back to Range or Edit what matched answers after the dialog has moved on.
+    case 'match-failed': return state.phase === 'matching' || state.phase === 'verifying' ? { ...state, error: event.error, diverged: undefined } : state
+    case 'diverged': {
+      const { type: _, ...divergence } = event
+      return state.phase === 'matching' ? { ...state, diverged: divergence } : state
+    }
+    case 'went-on': return { ...state, diverged: undefined }
+    case 'back-to-range': {
+      const before = stepsBeforeRange(state.steps, state.range)
+      // A range the person chose is theirs: only one still at the default is moved, and the move is said.
+      const move = before.length > 0 && state.range.start === defaultRange(state.steps).start
+      return {
+        ...state, phase: 'range', error: null, diverged: undefined,
+        ...(move ? { range: { ...state.range, start: before[0]! }, moved: before } : {}),
+      }
+    }
     case 'remove-step': return state.removed.includes(event.index) ? state : { ...state, ...edited(state), removed: [...state.removed, event.index] }
     // A rename to the name it already has changes no flow, so it keeps the verification.
     case 'rename-secret': return (state.renamed[event.from] ?? event.from) === event.to ? state : { ...state, ...edited(state), renamed: { ...state.renamed, [event.from]: event.to } }
@@ -125,7 +170,7 @@ export function reduce(state: CaptureState, event: CaptureEvent): CaptureState {
       const phase = PHASE_AT[event.step]
       return phase && canGoTo(state, event.step) ? { ...state, phase, error: null } : state
     }
-    case 'verify-started': return { ...state, phase: 'verifying', verify: { status: 'running', done: 0, live: [] }, reached: 3, reset: undefined }
+    case 'verify-started': return { ...state, phase: 'verifying', verify: { status: 'running', done: 0, live: [] }, reached: 3, reset: undefined, error: null }
     case 'device-reset': return { ...state, reset: event.report }
     case 'verify-step': return state.verify ? { ...state, verify: liveStep(state.verify, event.mark, event.at) } : state
     case 'verify-finished': return state.verify
