@@ -401,7 +401,10 @@ export class CaptureStore {
     if (!out) this.fieldReadsOut.set(sessionId, out = new Set())
     const pending = { requestedAt }
     out.add(pending)
-    const done = answer.finally(() => { out.delete(pending) }).then((read) => {
+    // A read that failed is kept as one that could not say, as a timed-out read is: a picture just after typing then
+    // finds a read it cannot pass, rather than none in its place and another run's to pass on.
+    const settled = answer.catch((): FieldRead => ({ field: null, reason: 'failed' }))
+    const done = settled.finally(() => { out.delete(pending) }).then((read) => {
       const capture = this.captures.get(sessionId)
       // The person may have stopped being recorded while the agent answered: a pause, a seal, a setting turned off.
       if (!capture || !this.recording(sessionId, holder, capture)) return
@@ -411,7 +414,7 @@ export class CaptureStore {
         ...(read.keyboard ? { keyboard: read.keyboard } : {}),
         ...(read.language ? { language: read.language } : {}),
       })
-    }).catch(() => { /* a read that failed is a read that is not there */ })
+    }).catch(() => { /* recording it failed: nothing to keep */ })
     this.track(sessionId, done)
     return done
   }

@@ -855,6 +855,27 @@ describe('CaptureStore — thumbnails', () => {
       expect(s.putThumbnail('s', '1', 'next', jpeg(10))).toBe('kept')
     })
 
+    // CodeRabbit on #1153: the second of those reads failing must not leave the first to pass the picture.
+    it('counts a field read that failed as one that could not say', async () => {
+      vi.useFakeTimers()
+      const answers: Array<() => void> = []
+      let n = 0
+      const { s } = store({
+        now: () => Date.now(), readKeyboard: () => Promise.resolve({ shown: false }),
+        readField: () => n++ === 0
+          ? new Promise<FieldRead>((r) => answers.push(() => r({ field: field(false) })))
+          : new Promise<FieldRead>((_r, reject) => answers.push(() => reject(new Error('agent gone')))),
+      })
+      record(s, key('a', 'KeyA'), step('x'), key('b', 'KeyB'))
+      await vi.advanceTimersByTimeAsync(100)
+      record(s, ...touchAt('next', 0.2))
+      await vi.advanceTimersByTimeAsync(50)
+      expect(answers).toHaveLength(2)
+      for (const answer of answers) answer()
+      await vi.advanceTimersByTimeAsync(10)
+      expect(s.putThumbnail('s', '1', 'next', jpeg(10))).toBe('typed')
+    })
+
     it('counts a touch on the soft keyboard as typing', async () => {
       vi.useFakeTimers()
       const UP: KeyboardState = { shown: true, rect: { x: 0, y: 0.6, width: 1, height: 0.4 } }
