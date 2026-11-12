@@ -67,6 +67,23 @@ export function rangeWarnings(steps: readonly RawStep[], range: StepRange): Rang
 }
 
 /**
+ * Steps the person took in the app before the range starts, back to the last clean start (1b-3b): what Match says, as a
+ * fact and never as the cause, when a replayed step looks different from its recording. Only steps the reads place in
+ * the app, and none before the last clear-state or install ahead of the range — with one inside the range, a replay
+ * would clear what those steps did and stop at the same place again. Indices into `steps`.
+ */
+export function stepsBeforeRange(steps: readonly RawStep[], range: StepRange): number[] {
+  let from = 0
+  for (let i = 0; i < range.start; i++) {
+    const s = steps[i]!
+    if ((s.kind === 'clearState' || s.kind === 'install') && s.outcome !== 'refused') from = i + 1
+  }
+  const out: number[] = []
+  for (let i = from; i < range.start; i++) if (steps[i]!.onHome === false && steps[i]!.outcome !== 'refused') out.push(i)
+  return out
+}
+
+/**
  * The steps in the range whose value the person has to give before Match (#1140): a password typed on the soft
  * keyboard, which neither the keys nor a read of the field can say. Indices into `steps`.
  */

@@ -53,6 +53,7 @@ All color values are defined as CSS variables in `src/index.css`. Tailwind refer
 | `--warning` | `48 100% 96%` (~`#fffbeb`) | `31 60% 14%` | Background of a notice that needs attention but blocks nothing |
 | `--warning-foreground` | `31 85% 25%` | `48 65% 78%` | The notice's title. Its body stays `--foreground` |
 | `--warning-border` | `48 97% 77%` (~`#fde68a`) | `31 50% 30%` | The notice's border |
+| `--warning-solid` | `40 91% 57%` (~`#f3b23b`) | `43 96% 60%` | A line or mark that needs attention: the outline on a picture that differs |
 
 > **Dark mode `--destructive`**: lightness is raised from `47%` to `62%`. Both the `/10` background opacity and the text color need L ≥ 60% to stay visible on dark surfaces.
 
@@ -65,6 +66,12 @@ All color values are defined as CSS variables in `src/index.css`. Tailwind refer
 > on the light fill is 3.5:1. Red stays for errors and destructive actions, so a notice that blocks
 > nothing does not read as a failure next to a field's error. The border is `border-warning-border`:
 > `border-warning` also exists, because the key nests, and paints the near-white fill.
+>
+> **`--warning-solid` is the one that is a colour**: a line or a mark, never a fill text sits on. It came
+> with Flow Capture's comparison (1b-3b), whose outline on the replay's picture must stand out on both
+> themes; `--warning-foreground` there read as brown. Dark mode raises it to hold on dark surfaces.
+> QASession's raw amber dots and the network control's amber are the same colour by another route and
+> are not moved to it yet.
 >
 > ```tsx
 > <div className="rounded-lg border border-warning-border bg-warning px-4 py-3 text-sm">

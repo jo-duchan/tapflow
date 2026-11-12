@@ -11,6 +11,7 @@ import { copy } from '@/lib/flowCapture/copy'
 import { editedCapture, exportedFlow, flowOf } from '@/lib/flowCapture/flow'
 import { canGoTo, initialState, reachedStep, reduce, stepIndex, withAsked, type CaptureState } from '@/lib/flowCapture/machine'
 import { DialogRun, keyboardOf, loadSnapshot, matchRange, PauseLease, stepsOf, verifyFlow } from '@/lib/flowCapture/runner'
+import { compareWithRecording } from '@/lib/flowCapture/screenCompare'
 import type { CaptureTap } from '@/lib/flowCapture/tap'
 import { addMark, type StepMark } from '@/lib/flowCapture/marks'
 import { chromeOrientation } from '@tapflowio/protocol/screen'
@@ -130,7 +131,8 @@ function CaptureSession({ tap, session, snapshot, bundleId, setBusy, close }: {
 }) {
   const [state, dispatch] = useReducer(reduce, snapshot, initFrom)
   const fallback = useRef<HTMLButtonElement>(null)
-  const swapFocus = useFocusAfterSwap<HTMLDivElement>(state.phase, fallback)
+  // A stop at a step that looked different is a view of its own: its buttons replace Stop, and the focus on Stop with them.
+  const swapFocus = useFocusAfterSwap<HTMLDivElement>(state.phase === 'matching' && state.diverged ? 'diverged' : state.phase, fallback)
   // Where the replay is touching, drawn over the device on Match and Verify; each run starts with none.
   const [marks, setMarks] = useState<WatchMarks>(NO_MARKS)
   const markId = useRef(0)
@@ -164,13 +166,37 @@ function CaptureSession({ tap, session, snapshot, bundleId, setBusy, close }: {
         if (screenshot) run.keep(screenshot)
         dispatch({ type: 'step-matched', step, ...(screenshot ? { screenshot } : {}), ...(inserted ? { inserted } : {}) })
       },
+      compare: (step, masks) => {
+        const recorded = thumbnailUrl(tap.sessionId, snapshot, step)
+        return recorded ? compareWithRecording(recorded, tap.surface(), masks, signal) : Promise.resolve(null)
+      },
+      onDiverged: (index, divergence) => {
+        run.keep(divergence.nowUrl)
+        const step = state.steps[index]
+        dispatch({ type: 'diverged', index, ...divergence, recordedUrl: step ? thumbnailUrl(tap.sessionId, snapshot, step) : null })
+        return run.decide(signal)
+      },
     }, keyboard)
-      .then((matched) => dispatch({ type: 'match-finished', captured: toFlowSteps(matched) }))
-      .catch((e: unknown) => dispatch({ type: 'match-failed', error: signal.aborted ? copy.matchStopped : (e as Error).message }))
-      .finally(() => setBusy(false))
+      // A run a later one replaced answers into nothing: its failure would be shown on the new one, its end would end it.
+      .then((matched) => { if (run.isCurrent(signal)) dispatch({ type: 'match-finished', captured: toFlowSteps(matched) }) })
+      .catch((e: unknown) => { if (run.isCurrent(signal)) dispatch({ type: 'match-failed', error: signal.aborted ? copy.matchStopped : (e as Error).message }) })
+      .finally(() => { if (run.isCurrent(signal)) setBusy(false) })
   }
 
-  const takeWhatMatched = () => dispatch({ type: 'match-finished', captured: toFlowSteps(state.matched) })
+  // Without the steps the replay added at the end (a tap on the field the next, unmatched step types into): on their own
+  // they are a flow nobody made. Stops the run first when it is waiting at a step that looked different.
+  const takeWhatMatched = () => {
+    if (state.diverged) session.current?.run.abort()
+    dispatch({ type: 'match-finished', captured: toFlowSteps(state.matched.slice(0, state.matched.length - state.insertedTail)) })
+  }
+  const continueAnyway = () => {
+    dispatch({ type: 'went-on' })
+    session.current?.run.goOn()
+  }
+  const backToRange = () => {
+    session.current?.run.abort()
+    dispatch({ type: 'back-to-range' })
+  }
 
   const flow = flowOf(state, bundleId)
   const startVerify = () => {
@@ -217,7 +243,8 @@ function CaptureSession({ tap, session, snapshot, bundleId, setBusy, close }: {
         {state.phase === 'matching' && (
           <MatchScreen
             state={state} tap={tap} marks={marks}
-            onStop={() => session.current?.run.abort()} onRestart={startMatch} onTakeWhatMatched={takeWhatMatched} stopRef={fallback}
+            onStop={() => session.current?.run.abort()} onRestart={startMatch} onTakeWhatMatched={takeWhatMatched}
+            onBackToRange={backToRange} onContinueAnyway={continueAnyway} stopRef={fallback}
           />
         )}
         {state.phase === 'edit' && (

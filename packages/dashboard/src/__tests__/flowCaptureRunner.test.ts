@@ -32,7 +32,7 @@ vi.mock('@tapflowio/flow-runner/browser', async (importOriginal) => ({
   },
 }))
 
-const { keyboardOf, loadSnapshot: loadSnapshotForTest, matchRange, PauseLease, typedOnScreenKeyboard, verifyFlow } = await import('@/lib/flowCapture/runner')
+const { DialogRun, keyboardOf, loadSnapshot: loadSnapshotForTest, matchRange, PauseLease, typedOnScreenKeyboard, verifyFlow } = await import('@/lib/flowCapture/runner')
 type Tap = ConstructorParameters<typeof PauseLease>[0]
 type Channel = Parameters<typeof matchRange>[1]
 
@@ -317,6 +317,103 @@ describe('matchRange', () => {
     await expect(matchRange(tap, channel, lease, [tapStep], { start: 0, end: 1 }, 'com.example', hooks())).rejects.toThrow()
     await lease.stop()
     expect(log).toEqual(['pause'])
+  })
+})
+
+// 1b-3b: each step that acts on the screen is compared with the picture of the screen it was recorded on, and Match
+// waits at one that looks different until the person goes on or stops the run.
+describe('matchRange: comparing each step with its recording', () => {
+  const lease = { start: async () => {}, ensure: async () => {}, stop: async () => {} } as unknown as InstanceType<typeof PauseLease>
+  const viewer = { ...tap, chrome: () => null } as unknown as Tap
+  const KEYS = { x: 0, y: 0.6, width: 1, height: 0.4 }
+  const differs = { diff: 0.2, nowUrl: 'blob:now', masks: [] }
+
+  it('compares a step before it is replayed, the status bar and the recorded keyboard left out', async () => {
+    const compared: unknown[] = []
+    const typed = { ...textStep, keyboardRect: KEYS } as RawStep
+    // The range is held sideways in this suite: its first step comes after a turn the replay puts in, and is not compared.
+    await matchRange(viewer, channel, lease, [tapStep, tapStep, typed], { start: 0, end: 3 }, null, {
+      ...hooks(),
+      compare: async (step, masks) => { log.push(`compare ${step.kind}`); compared.push(masks); return null },
+      onDiverged: async () => {},
+    })
+    expect(log.filter((l) => l.startsWith('compare') || l.startsWith('replay'))).toEqual(['replay tap', 'compare tap', 'replay tap', 'compare text', 'replay text'])
+    expect(compared[1]).toEqual([{ x: 0, y: 0, width: 1, height: 0.055 }, KEYS])
+  })
+
+  it('does not compare a launch, nor the step after an install it leaves out', async () => {
+    const marked = (n: number) => ({ ...tapStep, thumbnailKey: `r${n}` }) as RawStep
+    await matchRange(viewer, channel, lease, [launchStep, marked(1), installStep, marked(2), marked(3)], { start: 0, end: 5 }, null, {
+      ...hooks(),
+      compare: async (step) => { log.push(`compare ${step.thumbnailKey}`); return null },
+      onDiverged: async () => {},
+    })
+    // #1 comes after the turn the replay puts in, #2 after the install it leaves out: only #3 is compared.
+    expect(log.filter((l) => l.startsWith('compare'))).toEqual(['compare r3'])
+  })
+
+  it('waits at a step that looks different, and replays it once the person goes on', async () => {
+    let goOn: () => void = () => {}
+    const at: number[] = []
+    const run = matchRange(viewer, channel, lease, [tapStep, tapStep], { start: 0, end: 2 }, null, {
+      ...hooks(),
+      compare: async () => differs,
+      onDiverged: (index) => { at.push(index); log.push('stopped'); return new Promise<void>((resolve) => { goOn = resolve }) },
+    })
+    await vi.waitFor(() => expect(log).toContain('stopped'))
+    expect(log.filter((l) => l === 'replay tap')).toHaveLength(1)
+    goOn()
+    await run
+    expect(at).toEqual([1])
+    expect(log.filter((l) => l === 'replay tap')).toHaveLength(2)
+  })
+
+  it('replays nothing more when the run is stopped while it waits', async () => {
+    const controller = new AbortController()
+    const run = matchRange(viewer, channel, lease, [tapStep, tapStep], { start: 0, end: 2 }, null, {
+      onStep: vi.fn(), signal: controller.signal,
+      compare: async () => differs,
+      onDiverged: () => new Promise<void>((_resolve, reject) => {
+        log.push('stopped')
+        controller.signal.addEventListener('abort', () => reject(new Error('stopped')))
+      }),
+    })
+    await vi.waitFor(() => expect(log).toContain('stopped'))
+    controller.abort()
+    await expect(run).rejects.toThrow()
+    expect(log.filter((l) => l === 'replay tap')).toHaveLength(1)
+  })
+
+  it('replays a step whose picture could not be compared, as before', async () => {
+    await matchRange(viewer, channel, lease, [tapStep, tapStep], { start: 0, end: 2 }, null, {
+      ...hooks(),
+      compare: async () => { throw new Error('thumbnail 404') },
+      onDiverged: async () => { log.push('stopped') },
+    })
+    expect(log).not.toContain('stopped')
+    expect(log.filter((l) => l === 'replay tap')).toHaveLength(2)
+  })
+})
+
+// Review of 1b-3b: the wait at a step that looked different, which Continue anyway ends and a stop rejects.
+describe('DialogRun: deciding at a stop', () => {
+  it('goes on when told, and rejects when the run is stopped', async () => {
+    const run = new DialogRun()
+    const signal = run.begin()
+    const waiting = run.decide(signal)
+    run.goOn()
+    await expect(waiting).resolves.toBeUndefined()
+    const again = run.decide(signal)
+    run.abort()
+    await expect(again).rejects.toBeDefined()
+  })
+
+  it('knows a run a later one replaced', () => {
+    const run = new DialogRun()
+    const first = run.begin()
+    expect(run.isCurrent(first)).toBe(true)
+    run.begin()
+    expect(run.isCurrent(first)).toBe(false)
   })
 })
 

@@ -67,6 +67,20 @@ export const copy = {
   restart: 'Start again',
   editWhatMatched: 'Edit what matched',
   matchStopped: 'The replay stopped.',
+  // 1b-3b: a step whose screen looked different from its recording. Facts first, then the causes it can have, never one
+  // named as the cause: two pictures are what the person judges by.
+  divergedTitle: (step: number, total: number) => `Step ${step} of ${total} doesn’t look like it did when you recorded it`,
+  // Back to Range moves only a start still at its default: a start the person chose is told the fact and nothing more.
+  divergedBefore: (span: string, n: number, moves: boolean) =>
+    `${span} ${n === 1 ? 'comes' : 'come'} before the range${moves ? ': Back to Range starts it there.' : '.'}`,
+  divergedMatched: (n: number) => `${n} ${n === 1 ? 'step' : 'steps'} before it matched.`,
+  divergedCauses: 'Compare the two pictures: a step left out of the range, a prompt or first-run screen the reset brings back, data that changed since you recorded, or a screen caught mid-animation can each do this.',
+  divergedRecorded: (step: number) => `When you recorded #${step}`,
+  divergedNow: 'Now, on the replay',
+  notCompared: 'Not compared',
+  differs: 'Differs',
+  continueAnyway: 'Continue anyway',
+  rangeMoved: (to: number, span: string) => `The start moved to #${to} to take in ${span}, which came before the step that looked different. Continue to match again.`,
 
   editHeading: (n: number) => `${n} steps`,
   removeStep: (label: string) => `Remove ${label}`,

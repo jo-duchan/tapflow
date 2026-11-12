@@ -2,10 +2,12 @@
 // reads the screen around it, and passes what it read in; nothing here touches a device.
 export { segment, LONG_PRESS_MS, TAP_SLOP, KEY_RUN_GAP_MS } from './segment.js'
 export type { RawStep, Outcome, Point, Fingers, TimedMessage } from './segment.js'
-export { defaultRange, rangeWarnings, askedValues } from './range.js'
+export { defaultRange, rangeWarnings, askedValues, stepsBeforeRange } from './range.js'
 export type { StepRange, RangeWarning } from './range.js'
 export { matchStep, toFlowSteps, flowSteps, toScreen, hitTest, reachQuestions } from './match.js'
 export type { MatchContext, CapturedStep, CapturedFlow, SkipReason, FragileReason } from './match.js'
+export { screenDiff, statusBarRect, turnRect, sameShape, SCREEN_DIFF_THRESHOLD } from './compare.js'
+export type { Pixels, Rect as ScreenRect } from './compare.js'
 export { flowToYaml } from './yaml.js'
 export { rawStepLabel, capturedStepLabel } from './label.js'
 export { keyChar } from './keys.js'

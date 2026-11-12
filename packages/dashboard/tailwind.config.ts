@@ -45,6 +45,7 @@ const config: Config = {
           DEFAULT: 'hsl(var(--warning))',
           foreground: 'hsl(var(--warning-foreground))',
           border: 'hsl(var(--warning-border))',
+          solid: 'hsl(var(--warning-solid))',
         },
         card: {
           DEFAULT: 'hsl(var(--card))',

@@ -1,6 +1,6 @@
 import type { PointSpace } from '@tapflowio/protocol'
 import type { CaptureEntry, CapturedMessage } from '@tapflowio/protocol/capture'
-import type { FocusedField } from '@tapflowio/protocol'
+import type { FocusedField, KeyboardState } from '@tapflowio/protocol'
 import { keyChar } from './keys.js'
 import { judgeTouch, keyboardTimeline, type KeyboardTimeline } from './keyboard.js'
 
@@ -33,7 +33,14 @@ interface StepBase {
   /** Whether the home screen was in front when the step began, by the last keyboard read answered before it (`onHome`):
    *  where the default range starts when the app was opened from its icon. Absent when no read said. */
   onHome?: boolean
+  /** Where the on-screen keyboard was as the step began, in the picture's space (the frame's, `frameRect ?? rect`), for
+   *  Match to leave out of its comparison (1b-3b): its suggestions differ between any two runs. Both the last read
+   *  answered before the step and the first asked after it: right after a field is tapped the one before can still have
+   *  the keyboard on its way up, or be missing, and leaving a little more out costs less than a false stop. */
+  keyboardRect?: KeyboardRect
 }
+
+type KeyboardRect = NonNullable<KeyboardState['rect']>
 
 /** A person's action on the device: the unit the dialog lists, replays and turns into a flow step. */
 /** `keyboard: 'unknown'`: the soft keyboard may have been up around the touch and the reads could not say whether it was on a key
@@ -255,7 +262,33 @@ export function segment(entries: readonly CaptureEntry[]): RawStep[] {
     }
   }
   endRun()
-  return withHome(oneAskedSecret(withFieldValues(out, entries)), entries)
+  return withKeyboardRect(withHome(oneAskedSecret(withFieldValues(out, entries)), entries), entries)
+}
+
+/** Each step with the keyboard area around its start (`keyboardRect`), from the raw reads as `withHome` takes them. */
+function withKeyboardRect(steps: RawStep[], entries: readonly CaptureEntry[]): RawStep[] {
+  const reads = entries.flatMap((e) => (e.kind === 'keyboard' ? [e] : [])).sort((a, b) => a.at - b.at)
+  if (reads.length === 0) return steps
+  // The picture is the frame, so the frame's rect where the agent gives one (Android sideways), else the screen's.
+  const shown = (k: KeyboardState | undefined) => (k?.shown === true ? k.frameRect ?? k.rect : undefined)
+  let i = 0
+  let last: KeyboardState | undefined
+  return steps.map((s) => {
+    while (i < reads.length && reads[i]!.at <= s.at) last = reads[i++]!.keyboard
+    const before = shown(last)
+    // The first asked after the step began, by when it was asked: `reads` are in the order they were answered.
+    let first: (typeof reads)[number] | undefined
+    for (const r of reads) if (r.requestedAt >= s.at && (!first || r.requestedAt < first.requestedAt)) first = r
+    const after = shown(first?.keyboard)
+    const rect = before && after ? union(before, after) : before ?? after
+    return rect ? { ...s, keyboardRect: rect } : s
+  })
+}
+
+function union(a: KeyboardRect, b: KeyboardRect): KeyboardRect {
+  const x = Math.min(a.x, b.x)
+  const y = Math.min(a.y, b.y)
+  return { x, y, width: Math.max(a.x + a.width, b.x + b.width) - x, height: Math.max(a.y + a.height, b.y + b.height) - y }
 }
 
 /**
