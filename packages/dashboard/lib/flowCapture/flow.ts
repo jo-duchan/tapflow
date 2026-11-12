@@ -10,7 +10,8 @@ export function editedCapture(state: Pick<CaptureState, 'captured' | 'removed' |
   const steps = captured.steps
     .map((s, i) => {
       const name = made[i]
-      if (name === undefined || s.step?.type !== 'inputText') return s
+      // A removed step's value goes with it: renamed onto a kept secret, it would be what Verify types there.
+      if (name === undefined || removed.includes(i) || s.step?.type !== 'inputText') return s
       // Its value goes where a password's does: verified with in the dialog, never written to the file.
       values[name] = s.step.text
       return asSecret(s, name)

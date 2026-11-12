@@ -156,7 +156,10 @@ export function reduce(state: CaptureState, event: CaptureEvent): CaptureState {
       insertedTail: event.inserted ? state.insertedTail + 1 : 0,
     }
     // Clears a stop's message: Edit what matched after Stop used to carry "stopped" into Verify, which then began failed.
-    case 'match-finished': return { ...state, phase: 'edit', captured: event.captured, matchedRange: state.range, reached: 2, error: null, diverged: undefined }
+    case 'match-finished': return {
+      ...state, phase: 'edit', captured: event.captured, renamed: joinsThatHold(state.renamed, event.captured.secrets),
+      matchedRange: state.range, reached: 2, error: null, diverged: undefined,
+    }
     // Stays on Match, so what was matched so far can still be taken into Edit or replayed from the start. Only while a
     // run is on screen: a run stopped by Back to Range or Edit what matched answers after the dialog has moved on.
     case 'match-failed': return state.phase === 'matching' || state.phase === 'verifying' ? { ...state, error: event.error, diverged: undefined } : state
@@ -179,8 +182,10 @@ export function reduce(state: CaptureState, event: CaptureEvent): CaptureState {
     case 'rename-secret': {
       const current = state.renamed[event.from] ?? event.from
       if (current === event.to) return state
-      // Every secret going by the old name goes by the new one: two merged under one name (1b-3c) stay merged.
-      const renamed = Object.fromEntries(Object.entries(state.renamed).map(([k, v]) => [k, v === current ? event.to : v]))
+      // Every secret going by the old name goes by the new one, whichever of two joined (1b-3c) is renamed — the one
+      // still under its own name too, which has no entry to sweep.
+      const renamed = { ...state.renamed }
+      for (const name of secretNames(state)) if ((renamed[name] ?? name) === current) renamed[name] = event.to
       return { ...state, ...edited(state), renamed: { ...renamed, [event.from]: event.to } }
     }
     case 'make-secret': {
@@ -269,6 +274,25 @@ function liveStep(verify: NonNullable<CaptureState['verify']>, mark: StepMark, a
     ? { ...s, name: mark.name, status: mark.status ?? 'passed', durationMs: at - s.startedAt }
     : s))
   return { ...verify, live, done: mark.index + 1 }
+}
+
+/** Every secret's own name: captured, and made in Edit. */
+function secretNames(state: CaptureState): string[] {
+  return [...Object.keys(state.captured?.secrets ?? {}), ...Object.values(state.made)]
+}
+
+/**
+ * Renames kept through a replay, less the joins it broke: a replay of another range can give two secrets joined under
+ * one name different values, and one name has one value, which would be typed into both fields. Every secret going by
+ * a name whose values now differ goes back to its own.
+ */
+function joinsThatHold(renamed: Record<string, string>, secrets: Record<string, string>): Record<string, string> {
+  const valuesUnder = new Map<string, Set<string>>()
+  for (const [name, value] of Object.entries(secrets)) {
+    const to = renamed[name] ?? name
+    valuesUnder.set(to, (valuesUnder.get(to) ?? new Set()).add(value))
+  }
+  return Object.fromEntries(Object.entries(renamed).filter(([, to]) => (valuesUnder.get(to)?.size ?? 0) <= 1))
 }
 
 /** The first of `SECRET`, `SECRET_2`, … no secret goes by, as captured, made or renamed. */

@@ -84,6 +84,31 @@ describe('one secret for one value', () => {
   })
 })
 
+// CodeRabbit on #1156.
+describe('joined secrets, renamed and replayed', () => {
+  it('renames both when the one that joined is renamed, not only when the other is', () => {
+    const joined = reduce(edit, { type: 'rename-secret', from: 'PASSWORD_2', to: 'PASSWORD' })
+    const later = editedCapture(reduce(joined, { type: 'rename-secret', from: 'PASSWORD_2', to: 'LOGIN' }))!
+    expect(later.steps.slice(2, 4).map((s) => s.step?.type === 'inputSecret' && s.step.name)).toEqual(['LOGIN', 'LOGIN'])
+    expect(later.secrets).toEqual({ LOGIN: 'hunter2!' })
+  })
+
+  it('parts a join a replay gave two values, and keeps one it did not', () => {
+    const joined = reduce(edit, { type: 'rename-secret', from: 'PASSWORD_2', to: 'PASSWORD' })
+    const replayed = (secrets: Record<string, string>) =>
+      reduce(reduce(joined, { type: 'match-started', total: 5 }), { type: 'match-finished', captured: { ...captured, secrets } }).renamed
+    expect(replayed({ PASSWORD: 'hunter2!', PASSWORD_2: 'other' })).toEqual({})
+    expect(replayed({ PASSWORD: 'hunter2!', PASSWORD_2: 'hunter2!' })).toEqual({ PASSWORD_2: 'PASSWORD' })
+  })
+
+  it('takes no value from a removed step', () => {
+    // Reached only through the reducer: Edit's own check would refuse the join, the values differing.
+    const removed = reduce(reduce(reduce(edit, { type: 'make-secret', index: 1 }), { type: 'rename-secret', from: 'SECRET', to: 'PASSWORD' }),
+      { type: 'remove-step', index: 1 })
+    expect(editedCapture(removed)!.secrets.PASSWORD).toBe('hunter2!')
+  })
+})
+
 describe('Edit, a typed step', () => {
   const draw = (state: CaptureState, check: (current: string, to: string) => { error?: string; note?: string } = () => ({})) => {
     const dispatch = vi.fn()

@@ -58,14 +58,14 @@ describe('the dialog\'s state at a step that looked different', () => {
   it('takes no failure from a run the dialog has left', () => {
     const back = reduce(stopped(matching), { type: 'back-to-range' })
     expect(reduce(back, { type: 'match-failed', error: 'The replay stopped.' }).error).toBeNull()
-    const edit = reduce(stopped(matching), { type: 'match-finished', captured: { steps: [] } as never })
+    const edit = reduce(stopped(matching), { type: 'match-finished', captured: { steps: [], secrets: {}, launchAdded: false } })
     expect(reduce(edit, { type: 'match-failed', error: 'The replay stopped.' }).error).toBeNull()
   })
 
   // Found by the same review, and older than it: Stop, Edit what matched, Verify began as failed.
   it('starts Edit and Verify without the stop\'s message', () => {
     const stoppedRun = reduce(matching, { type: 'match-failed', error: 'The replay stopped.' })
-    const edit = reduce(stoppedRun, { type: 'match-finished', captured: { steps: [] } as never })
+    const edit = reduce(stoppedRun, { type: 'match-finished', captured: { steps: [], secrets: {}, launchAdded: false } })
     expect(edit.error).toBeNull()
     expect(reduce({ ...edit, error: 'left over' }, { type: 'verify-started' }).error).toBeNull()
   })
