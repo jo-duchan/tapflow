@@ -43,7 +43,7 @@ A typing step replaces what the field holds with the value the field really held
 
 Just before each step runs, the screen is compared with the one the step began on when you recorded it. When the two differ, the replay stops at that step and shows the recorded picture beside the screen now, and says so if steps you took come before the part. The status bar, and the area the on-screen keyboard covered when you recorded, are not compared, and are marked on the pictures with a light gray tint and a dashed edge. A step with no picture (a key on the on-screen keyboard, a step begun right after typing a password) is not compared.
 
-- **Continue anyway** runs that step and goes on replaying. If the screen really was different, Verify catches it.
+- **Continue anyway** runs that step and goes on replaying. Verify then runs the flow with selectors only, so a step whose element is not on the screen fails there; it does not compare the screen with the recording.
 - **Back to Range** returns to Range. When the start is still where it began and steps you took in the app come before it, the start moves back to them, and Range says so.
 - **Edit what matched** appears only when some steps matched, and goes on to Edit with those steps.
 - **Stop** halts the replay. Then **Start again** replays from the beginning, and **Edit what matched** goes on with the steps matched so far.

@@ -175,8 +175,10 @@ export interface ScreenDivergence {
 }
 
 /** Steps that act on the screen in front of them: each is compared with its recording before it is replayed. A command
- *  (launch, URL, network), a button and a turn make their own screen; a key on the soft keyboard is never replayed. */
+ *  (launch, URL, network), a turn and a button make their own screen — except Back, which goes wherever the screen it
+ *  is pressed on leads; a key on the soft keyboard is never replayed. */
 const COMPARED = new Set<RawStep['kind']>(['tap', 'longPress', 'swipe', 'holdDrag', 'pinch', 'imeAction', 'text', 'key', 'paste', 'type'])
+const compared = (raw: RawStep): boolean => COMPARED.has(raw.kind) || (raw.kind === 'button' && raw.name === 'back')
 
 /**
  * The start `tapflow flow run` gives a flow, on the device the session holds (#1139): the app as freshly installed, the
@@ -271,7 +273,7 @@ export async function matchRange(
       before = await waitForStableScreen(read, { timeoutMs: SETTLE_TIMEOUT_MS })
     }
     // After the focus tap and its settle: a typed step's picture was taken at its first key, with the field focused.
-    if (hooks.compare && hooks.onDiverged && COMPARED.has(raw.kind) && !skipCompare) {
+    if (hooks.compare && hooks.onDiverged && compared(raw) && !skipCompare) {
       const turn = before?.interfaceTurn ?? frameTurnOf(tap.chrome())
       const masks = [statusBarRect(tap.platform, turn), raw.keyboardRect].filter((m): m is ScreenRect => m !== undefined)
       // A picture that cannot be read is no reason to stop: the step is replayed as before the comparison existed.
@@ -329,6 +331,8 @@ export async function matchRange(
   }
   // The last touch has no next step to read after it.
   if (watching) closeWatch((await waitForStableScreen(read, { timeoutMs: SETTLE_TIMEOUT_MS }))?.elements)
+  // A Stop pressed during those last reads, which do not watch the signal, is a stop, not a run that finished.
+  hooks.signal.throwIfAborted()
   return matched.map((m) => (observed.has(m) ? { ...m, observed: observed.get(m)! } : m))
 }
 

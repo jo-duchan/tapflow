@@ -384,6 +384,26 @@ describe('matchRange: comparing each step with its recording', () => {
     expect(log.filter((l) => l === 'replay tap')).toHaveLength(1)
   })
 
+  // CodeRabbit on #1155: Back goes wherever the screen it is pressed on leads; Home and the rest do not.
+  it('compares a Back press, and no other button', async () => {
+    const button = (name: string) => ({ ...base, kind: 'button', name, thumbnailKey: name }) as unknown as RawStep
+    await matchRange(viewer, channel, lease, [tapStep, button('back'), button('home')], { start: 0, end: 3 }, null, {
+      ...hooks(),
+      compare: async (step) => { log.push(`compare ${step.thumbnailKey}`); return null },
+      onDiverged: async () => {},
+    })
+    expect(log.filter((l) => l.startsWith('compare'))).toEqual(['compare back'])
+  })
+
+  // CodeRabbit on #1155: Stop pressed during the reads after the last step, which do not watch the signal.
+  it('ends as stopped when Stop lands after the last step', async () => {
+    const controller = new AbortController()
+    const run = matchRange(viewer, channel, lease, [tapStep], { start: 0, end: 1 }, null, {
+      onStep: () => controller.abort(), signal: controller.signal,
+    })
+    await expect(run).rejects.toThrow()
+  })
+
   it('replays a step whose picture could not be compared, as before', async () => {
     await matchRange(viewer, channel, lease, [tapStep, tapStep], { start: 0, end: 2 }, null, {
       ...hooks(),

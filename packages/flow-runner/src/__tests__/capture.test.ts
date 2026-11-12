@@ -630,6 +630,18 @@ describe('segment: where the keyboard was as each step began', () => {
     expect(r.steps()[1]!.keyboardRect).toEqual(UP)
   })
 
+  // CodeRabbit on #1155: a step with no read of its own must not take the next step's keyboard.
+  it('takes no read asked after the next step began', () => {
+    const r = new Rec().launch().wait(100)
+    r.touch([[0.3, 0.3]]).wait(100)
+    const next = r.t
+    r.touch([[0.5, 0.5]])
+    kb(r, { shown: true, rect: UP }, r.t + 20, next + 10)
+    const steps = r.steps()
+    expect(steps[1]!.keyboardRect).toBeUndefined()
+    expect(steps[2]!.keyboardRect).toEqual(UP)
+  })
+
   // Review of 1b-3b: the first read asked after the step, not the first answered.
   it('takes the read asked first after the step, whichever answered first', () => {
     const r = new Rec().launch().wait(100)

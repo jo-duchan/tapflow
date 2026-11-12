@@ -273,12 +273,14 @@ function withKeyboardRect(steps: RawStep[], entries: readonly CaptureEntry[]): R
   const shown = (k: KeyboardState | undefined) => (k?.shown === true ? k.frameRect ?? k.rect : undefined)
   let i = 0
   let last: KeyboardState | undefined
-  return steps.map((s) => {
+  return steps.map((s, n) => {
     while (i < reads.length && reads[i]!.at <= s.at) last = reads[i++]!.keyboard
     const before = shown(last)
-    // The first asked after the step began, by when it was asked: `reads` are in the order they were answered.
+    // The first asked after the step began and before the next one did, by when it was asked: `reads` are in the order
+    // they were answered, and a read asked after the next step began is about that step's screen.
+    const end = steps[n + 1]?.at ?? Infinity
     let first: (typeof reads)[number] | undefined
-    for (const r of reads) if (r.requestedAt >= s.at && (!first || r.requestedAt < first.requestedAt)) first = r
+    for (const r of reads) if (r.requestedAt >= s.at && r.requestedAt < end && (!first || r.requestedAt < first.requestedAt)) first = r
     const after = shown(first?.keyboard)
     const rect = before && after ? union(before, after) : before ?? after
     return rect ? { ...s, keyboardRect: rect } : s
