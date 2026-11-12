@@ -142,7 +142,7 @@ describe('the steps the stepper goes to', () => {
 })
 
 describe('what Edit makes of the flow', () => {
-  const state = { captured, removed: [2], renamed: { PASSWORD: 'LOGIN_PASSWORD' }, name: 'Sign in', tags: 'smoke, login' }
+  const state = { captured, removed: [2], renamed: { PASSWORD: 'LOGIN_PASSWORD' }, made: {}, name: 'Sign in', tags: 'smoke, login' }
 
   it('drops removed steps, renames secrets, and keeps only the values of secrets still used', () => {
     const edited = editedCapture(state)!

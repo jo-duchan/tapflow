@@ -194,7 +194,7 @@ describe('EditScreen — Verify', () => {
   })
   const edit = (steps: CapturedStep[], removed: number[] = []) => render(
     <EditScreen state={{ ...initialState, phase: 'edit', captured: { steps, launchAdded: false, secrets: {} }, removed }}
-      dispatch={vi.fn()} flow={null} renameError={() => null} onVerify={vi.fn()} onBackToRange={vi.fn()} verifyRef={{ current: null }} />,
+      dispatch={vi.fn()} flow={null} renameCheck={() => ({})} onVerify={vi.fn()} onBackToRange={vi.fn()} verifyRef={{ current: null }} />,
   )
 
   it('cannot verify a flow left with no step a flow can say', () => {
@@ -277,7 +277,7 @@ describe('EditScreen', () => {
     screenshots: ['blob:shot'],
   } as never
   const draw = () => render(
-    <EditScreen state={state} dispatch={vi.fn()} flow={null} renameError={() => null} onVerify={vi.fn()} onBackToRange={vi.fn()} verifyRef={{ current: null }} />,
+    <EditScreen state={state} dispatch={vi.fn()} flow={null} renameCheck={() => ({})} onVerify={vi.fn()} onBackToRange={vi.fn()} verifyRef={{ current: null }} />,
   )
 
   it('draws where the step touched on its picture', () => {
@@ -288,7 +288,7 @@ describe('EditScreen', () => {
   it('draws a swipe as a dashed trail that strengthens toward where the finger lifted', () => {
     const swipe = { at: 0, endAt: 0, outcome: 'landed', messages: [], kind: 'swipe', from: [0.5, 0.7], to: [0.5, 0.3], durationMs: 200 }
     const swiped = { ...(state as object), captured: { steps: [{ raw: swipe, step: { type: 'tapOn', selector: { text: 'Login' } } }], secrets: {}, launchAdded: false } } as never
-    render(<EditScreen state={swiped} dispatch={vi.fn()} flow={null} renameError={() => null} onVerify={vi.fn()} onBackToRange={vi.fn()} verifyRef={{ current: null }} />)
+    render(<EditScreen state={swiped} dispatch={vi.fn()} flow={null} renameCheck={() => ({})} onVerify={vi.fn()} onBackToRange={vi.fn()} verifyRef={{ current: null }} />)
     const mark = screen.getByTestId('step-mark')
     const line = mark.querySelector('line')!
     expect(line.getAttribute('stroke-dasharray')).toBe('1 9')

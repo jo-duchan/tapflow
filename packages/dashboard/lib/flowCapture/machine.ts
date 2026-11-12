@@ -47,6 +47,9 @@ export interface CaptureState {
   removed: number[]
   /** Secrets the person renamed: old name → new name. */
   renamed: Record<string, string>
+  /** Typed text the person made a secret in Edit (1b-3c), by index into `captured.steps`: the name it was given. A field
+   *  the app does not mark as hiding its text — a card number, an API key — is otherwise written into the file. */
+  made: Record<number, string>
   /** `live`: the steps the run has reached, as they start and end, for showing it while it runs; `result` replaces it. */
   verify: { status: 'running' | 'passed' | 'failed'; done: number; live: LiveStep[]; result?: FlowResult } | null
   /** Why the dialog stopped, said in the dialog. */
@@ -99,6 +102,8 @@ export type CaptureEvent =
   | { type: 'back-to-range' }
   | { type: 'remove-step'; index: number }
   | { type: 'rename-secret'; from: string; to: string }
+  | { type: 'make-secret'; index: number }
+  | { type: 'keep-as-text'; index: number }
   /** The stepper: go to a step already reached (`canGoTo`). */
   | { type: 'go-to'; step: number }
   | { type: 'verify-started' }
@@ -110,7 +115,7 @@ export type CaptureEvent =
 
 export const initialState: CaptureState = {
   phase: 'loading', steps: [], range: { start: 0, end: 0 }, name: '', tags: '', progress: { done: 0, total: 0 },
-  matched: [], screenshots: [], captured: null, removed: [], renamed: {}, verify: null, error: null,
+  matched: [], screenshots: [], captured: null, removed: [], renamed: {}, made: {}, verify: null, error: null,
   matchedRange: null, reached: 0, asked: {}, insertedTail: 0,
 }
 
@@ -119,7 +124,7 @@ export const initialState: CaptureState = {
  * the same steps in the next. Renamed secrets carry over: they are keyed by the name the capture gave the secret.
  */
 const replayed = {
-  matched: [], screenshots: [], captured: null, removed: [], verify: null, error: null, matchedRange: null, reached: 1, reset: undefined,
+  matched: [], screenshots: [], captured: null, removed: [], made: {}, verify: null, error: null, matchedRange: null, reached: 1, reset: undefined,
   diverged: undefined, moved: undefined, insertedTail: 0,
 }
 
@@ -136,7 +141,13 @@ export function reduce(state: CaptureState, event: CaptureEvent): CaptureState {
     case 'set-name': return { ...state, name: event.name }
     case 'set-tags': return { ...state, tags: event.tags }
     case 'set-asked': return { ...state, asked: { ...state.asked, [event.index]: event.value } }
-    case 'match-started': return { ...state, ...replayed, phase: 'matching', progress: { done: 0, total: event.total } }
+    case 'match-started': {
+      // A secret made in Edit is the replay's step, and goes with it; so does a rename of it, or the next replay's own
+      // secret of that name would take it.
+      const made = new Set(Object.values(state.made))
+      const renamed = Object.fromEntries(Object.entries(state.renamed).filter(([from]) => !made.has(from)))
+      return { ...state, ...replayed, renamed, phase: 'matching', progress: { done: 0, total: event.total } }
+    }
     case 'step-matched': return {
       ...state,
       matched: [...state.matched, event.step],
@@ -165,7 +176,25 @@ export function reduce(state: CaptureState, event: CaptureEvent): CaptureState {
     }
     case 'remove-step': return state.removed.includes(event.index) ? state : { ...state, ...edited(state), removed: [...state.removed, event.index] }
     // A rename to the name it already has changes no flow, so it keeps the verification.
-    case 'rename-secret': return (state.renamed[event.from] ?? event.from) === event.to ? state : { ...state, ...edited(state), renamed: { ...state.renamed, [event.from]: event.to } }
+    case 'rename-secret': {
+      const current = state.renamed[event.from] ?? event.from
+      if (current === event.to) return state
+      // Every secret going by the old name goes by the new one: two merged under one name (1b-3c) stay merged.
+      const renamed = Object.fromEntries(Object.entries(state.renamed).map(([k, v]) => [k, v === current ? event.to : v]))
+      return { ...state, ...edited(state), renamed: { ...renamed, [event.from]: event.to } }
+    }
+    case 'make-secret': {
+      const step = state.captured?.steps[event.index]?.step
+      if (step?.type !== 'inputText' || state.made[event.index] !== undefined) return state
+      return { ...state, ...edited(state), made: { ...state.made, [event.index]: freeSecretName(state) } }
+    }
+    case 'keep-as-text': {
+      const name = state.made[event.index]
+      if (name === undefined) return state
+      const { [event.index]: _, ...made } = state.made
+      const { [name]: __, ...renamed } = state.renamed
+      return { ...state, ...edited(state), made, renamed }
+    }
     case 'go-to': {
       const phase = PHASE_AT[event.step]
       return phase && canGoTo(state, event.step) ? { ...state, phase, error: null } : state
@@ -240,4 +269,15 @@ function liveStep(verify: NonNullable<CaptureState['verify']>, mark: StepMark, a
     ? { ...s, name: mark.name, status: mark.status ?? 'passed', durationMs: at - s.startedAt }
     : s))
   return { ...verify, live, done: mark.index + 1 }
+}
+
+/** The first of `SECRET`, `SECRET_2`, … no secret goes by, as captured, made or renamed. */
+function freeSecretName(state: CaptureState): string {
+  const names = new Set([
+    ...Object.keys(state.captured?.secrets ?? {}), ...Object.values(state.made), ...Object.values(state.renamed),
+  ])
+  if (!names.has('SECRET')) return 'SECRET'
+  let n = 2
+  while (names.has(`SECRET_${n}`)) n++
+  return `SECRET_${n}`
 }
