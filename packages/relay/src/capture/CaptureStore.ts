@@ -246,8 +246,9 @@ export class CaptureStore {
   /** A session's value read in flight, and whether another was asked for meanwhile (single-flight, as keyboard probes). */
   private readonly valueReads = new Map<string, { again: Holder | null }>()
   private readonly reads = new Map<string, Set<Promise<void>>>()
-  /** When each field read still out was asked for: a picture just after typing waits for the ones that cover it. */
-  private readonly fieldReadsOut = new Map<string, Set<number>>()
+  /** When each field read still out was asked for: a picture just after typing waits for the ones that cover it. One
+   *  entry per read, not per time: two asked in the same millisecond must not leave when the first is answered. */
+  private readonly fieldReadsOut = new Map<string, Set<{ requestedAt: number }>>()
   private readonly keyboards = new Map<string, KeyboardProbe>()
   private totalBytes = 0
   private readonly now: () => number
@@ -398,8 +399,9 @@ export class CaptureStore {
     if (!answer) return undefined
     let out = this.fieldReadsOut.get(sessionId)
     if (!out) this.fieldReadsOut.set(sessionId, out = new Set())
-    out.add(requestedAt)
-    const done = answer.finally(() => { out.delete(requestedAt) }).then((read) => {
+    const pending = { requestedAt }
+    out.add(pending)
+    const done = answer.finally(() => { out.delete(pending) }).then((read) => {
       const capture = this.captures.get(sessionId)
       // The person may have stopped being recorded while the agent answered: a pause, a seal, a setting turned off.
       if (!capture || !this.recording(sessionId, holder, capture)) return
@@ -584,7 +586,7 @@ export class CaptureStore {
       }
       const reads = capture.entries.filter((e): e is Extract<CaptureEntry, { kind: 'field' }> => e.kind === 'field' && e.requestedAt >= runStart && e.requestedAt < startedAt)
       // A read still out may be the one that names a secure field (iOS takes about 0.45 s, one at a time): wait for it.
-      if ([...this.fieldReadsOut.get(sessionId) ?? []].some((t) => t >= runStart && t < startedAt)) return 'not-yet'
+      if ([...this.fieldReadsOut.get(sessionId) ?? []].some((t) => t.requestedAt >= runStart && t.requestedAt < startedAt)) return 'not-yet'
       if (reads.length === 0 || reads.some((r) => r.field?.secure !== false)) return 'typed'
     }
     // Room only from this capture's own older pictures, and only past its own cap: room the relay as a whole lacks is

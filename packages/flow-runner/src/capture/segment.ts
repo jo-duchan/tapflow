@@ -27,7 +27,7 @@ interface StepBase {
   /** What the replayer sends, in order, with the times they were sent. */
   messages: TimedMessage[]
   /** Where the relay keeps the screen this step began on (1b-3b): the first `requestId` among its messages — a touch's
-   *  end, a button's press, a typed run's first key. Absent on a step whose messages carry none (a turn, a fold, the
+   *  end, a button's press, a typed run's first key; a merged password step's is its last typing's, which it is dated by. Absent on a step whose messages carry none (a turn, a fold, the
    *  keyboard toggle), which therefore has no picture. */
   thumbnailKey?: string
   /** Whether the home screen was in front when the step began, by the last keyboard read answered before it (`onHome`):
@@ -405,7 +405,8 @@ function oneAskedSecret(steps: RawStep[]): RawStep[] {
     const last = run[run.length - 1]!
     const messages = run.flatMap((s) => (s.kind === 'tap' ? [] : s.messages))
     out.push({
-      at: last.at, endAt: last.endAt, outcome: 'landed', messages, ...thumbnailKeyOf(messages),
+      // The picture of the typing it is dated by: the replay types it where the last typing began, after the taps.
+      at: last.at, endAt: last.endAt, outcome: 'landed', messages, ...(last.thumbnailKey ? { thumbnailKey: last.thumbnailKey } : {}),
       ...(last.chrome === undefined ? {} : { chrome: last.chrome }),
       kind: 'text', text: keysAfter(run, (s) => s.kind === 'text' && !!s.askValue), replace: true, fieldRead: 'secure', field,
       ...(first.fieldPlaceholder ? { fieldPlaceholder: first.fieldPlaceholder } : {}), askValue: true,
@@ -435,7 +436,8 @@ function worst(a: Outcome, b: Outcome): Outcome {
 
 const distance = (a: Point, b: Point): number => Math.hypot(a[0] - b[0], a[1] - b[1])
 
-/** `thumbnailKey`: the first requestId among a step's messages, which is what the dashboard keyed its picture by. */
+/** `thumbnailKey`: the first requestId among a step's messages, which is what the dashboard keyed its picture by
+ *  (`oneAskedSecret` takes its last typing's instead). */
 function thumbnailKeyOf(messages: TimedMessage[]): { thumbnailKey?: string } {
   for (const m of messages) if ('requestId' in m.msg && m.msg.requestId) return { thumbnailKey: m.msg.requestId }
   return {}

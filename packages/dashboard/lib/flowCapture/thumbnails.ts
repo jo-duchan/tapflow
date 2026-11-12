@@ -14,8 +14,14 @@ import type { BrowserToRelay } from '@tapflowio/protocol'
 /** 160 px wide: the Range tile is 80 px, drawn at 2×. JPEG q0.6 measured 4.6 KB a step (median), 5 KB at most. */
 export const THUMBNAIL_WIDTH = 160
 const QUALITY = 0.6
-/** The relay answers 409 for an input it has not recorded yet: the input went on the socket, this on HTTP. */
+/** The relay answers 409 for an input it has not recorded yet (the input went on the socket, this on HTTP), or while a
+ *  keyboard or field read the picture waits on is still out. Asked again every half second for as long as one read can
+ *  take (the relay gives up on it after 5 s, `FIELD_READ_TIMEOUT_MS`). A read queued behind another can outlast that,
+ *  and leaves its step with no picture: never one kept early, and the dialog waits no longer for it. */
 const RETRY_AFTER_MS = 500
+const RETRY_FOR_MS = 6_000
+/** The dialog waits this long at most for pictures still on their way: a missing picture must not hold its snapshot. */
+const FLUSH_LIMIT_MS = RETRY_FOR_MS + 2_000
 /** A pause this long between two character keys starts a new typed run, as flow-runner's `KEY_RUN_GAP_MS` does. */
 const KEY_RUN_GAP_MS = 10_000
 
@@ -57,7 +63,8 @@ export class ThumbnailRecorder {
 
   /** Called with each message the viewer has just sent. */
   note(msg: BrowserToRelay): void {
-    if (!this.opts.recording()) { this.drop(); return }
+    // Turning capture off ends that capture: a key after it turned back on starts a new one, never a run.
+    if (!this.opts.recording()) { this.drop(); this.lastCharacterKeyAt = -Infinity; return }
     // Any other recorded input ends a typed run, as flow-runner's `segment` ends it: the next character key starts a step.
     if (msg.type !== 'input:key' && recorded(msg)) this.lastCharacterKeyAt = -Infinity
     switch (msg.type) {
@@ -109,7 +116,14 @@ export class ThumbnailRecorder {
 
   /** Every picture still on its way, for the dialog to wait on before it takes its snapshot. */
   async flush(): Promise<void> {
-    while (this.pending.size > 0) await Promise.allSettled([...this.pending])
+    let timer: ReturnType<typeof setTimeout> | undefined
+    const limit = new Promise<void>((resolve) => { timer = setTimeout(resolve, FLUSH_LIMIT_MS) })
+    const all = (async () => { while (this.pending.size > 0) await Promise.allSettled([...this.pending]) })()
+    try {
+      await Promise.race([all, limit])
+    } finally {
+      clearTimeout(timer)
+    }
   }
 
   /** A gesture's picture nobody will send: let the full-size frame go now, not at the next collection. */
@@ -148,10 +162,11 @@ export class ThumbnailRecorder {
     const upload = this.opts.upload ?? ((id, body) => fetch(`/api/v1/sessions/${this.opts.sessionId}/capture/thumbnails/${encodeURIComponent(id)}`, {
       method: 'PUT', credentials: 'include', headers: { 'Content-Type': 'image/jpeg' }, body,
     }))
-    const first = await upload(requestId, jpeg)
-    if (first.status === 409) {
+    const until = this.opts.now() + RETRY_FOR_MS
+    let answer = await upload(requestId, jpeg)
+    while (answer.status === 409 && this.opts.now() < until) {
       await new Promise((r) => setTimeout(r, RETRY_AFTER_MS))
-      await upload(requestId, jpeg)
+      answer = await upload(requestId, jpeg)
     }
   }
 }

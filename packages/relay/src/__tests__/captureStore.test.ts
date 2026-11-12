@@ -833,6 +833,28 @@ describe('CaptureStore — thumbnails', () => {
       expect(s.putThumbnail('s', '1', 'next', jpeg(10))).toBe('kept')
     })
 
+    // CodeRabbit on #1153: two reads asked in the same millisecond, the first answered: the second still holds it.
+    it('waits for each of two field reads asked in the same millisecond', async () => {
+      vi.useFakeTimers()
+      const answers: Array<() => void> = []
+      const { s } = store({
+        now: () => Date.now(), readKeyboard: () => Promise.resolve({ shown: false }),
+        readField: () => new Promise<FieldRead>((r) => answers.push(() => r({ field: field(false) }))),
+      })
+      // A run, an input that ends it, and a run again, all at one time: two focus reads asked at that time.
+      record(s, key('a', 'KeyA'), step('x'), key('b', 'KeyB'))
+      await vi.advanceTimersByTimeAsync(100)
+      record(s, ...touchAt('next', 0.2))
+      await vi.advanceTimersByTimeAsync(50)
+      expect(answers).toHaveLength(2)
+      answers[0]!()
+      await vi.advanceTimersByTimeAsync(10)
+      expect(s.putThumbnail('s', '1', 'next', jpeg(10))).toBe('not-yet')
+      for (const answer of answers.slice(1)) answer()
+      await vi.advanceTimersByTimeAsync(10)
+      expect(s.putThumbnail('s', '1', 'next', jpeg(10))).toBe('kept')
+    })
+
     it('counts a touch on the soft keyboard as typing', async () => {
       vi.useFakeTimers()
       const UP: KeyboardState = { shown: true, rect: { x: 0, y: 0.6, width: 1, height: 0.4 } }

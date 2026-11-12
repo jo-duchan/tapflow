@@ -259,7 +259,9 @@ keeps: watchers get a character count. Most of what follows exists because of th
 
 **Beside the inputs, a picture of the screen each step began on** (1b-3b), sent by the person's dashboard over REST after
 the input, keyed by the step's first `requestId` (flow-runner's `thumbnailKey`): see the third exception under HOW NOT.
-A picture is never ahead of its input (409 until the input is recorded, and the dashboard asks once more), never replaced,
+A picture is never ahead of its input (409 until the input is recorded and the reads it waits on are back; the dashboard
+asks again every 500 ms for 6 s, as long as one read can be out; a read queued behind another may outlast that and leave
+the step without a picture), never replaced,
 and goes with the input when a trim cuts it — unless the dialog's snapshot still shows that step. The snapshot lists the
 ids it has pictures of; each is read with `GET …/capture/snapshot/thumbnails/:requestId`, `private, no-store`.
 

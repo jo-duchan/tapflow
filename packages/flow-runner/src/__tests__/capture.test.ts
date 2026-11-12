@@ -219,6 +219,10 @@ describe('segment: a recording as the actions a person took', () => {
       const steps = r.steps()
       expect(steps.map((s) => s.kind)).toEqual(['launch', 'tap', 'text', 'key'])
       expect(steps[2]).toMatchObject({ kind: 'text', text: 'ab', askValue: true, replace: true, field: 'form.password' })
+      // Dated by the last typing (⌫ cut it from the E), so pictured by it too: the first typing's screen is before the tap.
+      const keyA = r.entries.find((e) => e.kind === 'input' && e.msg.type === 'input:key' && e.msg.payload.code === 'KeyA')
+      expect(keyA?.at).toBe(steps[2]!.at)
+      expect(steps[2]!.thumbnailKey).toBe(keyA?.kind === 'input' && 'requestId' in keyA.msg ? keyA.msg.requestId : 'missing')
     })
 
     // Review: helpers for a password typed on the soft keyboard (a tap on a key) and on the computer's.

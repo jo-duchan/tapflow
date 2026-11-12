@@ -117,14 +117,59 @@ describe('ThumbnailRecorder', () => {
     expect(uploads).toEqual(['k'])
   })
 
-  it('asks once more when the relay has not recorded the input yet', async () => {
+  it('asks again while the relay has not recorded the input or a read it waits on is still out', async () => {
     vi.useFakeTimers()
-    const { r, uploads } = recorder({ status: [409, 201] })
+    const { r, uploads } = recorder({ status: [409, 409, 409, 201] })
     r.note(key('k', 'Enter'))
     const done = r.flush()
-    await vi.advanceTimersByTimeAsync(600)
+    await vi.advanceTimersByTimeAsync(2_000)
     await done
-    expect(uploads).toEqual(['k', 'k'])
+    expect(uploads).toEqual(['k', 'k', 'k', 'k'])
     vi.useRealTimers()
+  })
+
+  it('stops asking once a read could no longer be out', async () => {
+    vi.useFakeTimers()
+    const { r, uploads } = recorder({ status: Array<number>(40).fill(409) })
+    r.note(key('k', 'Enter'))
+    const done = r.flush()
+    await vi.advanceTimersByTimeAsync(10_000)
+    await done
+    // Every 500 ms for 6 s: the first ask and twelve more.
+    expect(uploads).toHaveLength(13)
+    vi.useRealTimers()
+  })
+
+  // CodeRabbit on #1153: an upload that never answers must not keep the dialog on its loading screen.
+  it('lets the dialog go on without a picture that does not arrive', async () => {
+    vi.useFakeTimers()
+    const r = new ThumbnailRecorder({
+      sessionId: 's', surface: () => ({}) as CanvasImageSource, recording: () => true,
+      grab: async () => ({}) as ImageBitmap, encode: async () => new Blob(['jpeg']),
+      upload: () => new Promise<Response>(() => {}),
+    })
+    r.note(key('k', 'Enter'))
+    let flushed = false
+    void r.flush().then(() => { flushed = true })
+    await vi.advanceTimersByTimeAsync(7_000)
+    expect(flushed).toBe(false)
+    await vi.advanceTimersByTimeAsync(1_500)
+    expect(flushed).toBe(true)
+    vi.useRealTimers()
+  })
+
+  // CodeRabbit on #1153: capture turned off ends that capture, so a key soon after it turns back on starts a new one.
+  it('starts a typed run afresh after capture was turned off', async () => {
+    let t = 0
+    let on = true
+    const { r, uploads } = recorder({ now: () => t, recording: () => on })
+    r.note(key('a', 'KeyA'))
+    on = false
+    r.note(key('off', 'KeyB'))
+    on = true
+    t = 1_000
+    r.note(key('c', 'KeyC'))
+    await r.flush()
+    expect(uploads).toEqual(['a', 'c'])
   })
 })

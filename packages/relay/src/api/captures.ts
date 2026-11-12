@@ -46,8 +46,8 @@ const JPEG_MAGIC = Buffer.from([0xff, 0xd8, 0xff])
 /**
  * `PUT /api/v1/sessions/:sessionId/capture/thumbnails/:requestId` — the screen an input began on, from the person's own
  * dashboard (1b-3b), for an input this capture already holds. 409 when the input has not been recorded yet: it travels
- * on the socket and can land after this, and the dashboard asks once more. A touch on the soft keyboard is answered and
- * not kept, since its screen shows what was just typed.
+ * on the socket and can land after this, or while a read it waits on is out; the dashboard asks again for 6 s. A touch
+ * on the soft keyboard is answered and not kept, since its screen shows what was just typed.
  */
 export async function handlePutThumbnail(req: http.IncomingMessage, res: http.ServerResponse, params: Params, store: CaptureStore): Promise<void> {
   const auth = requireAuth(req, res)
