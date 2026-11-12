@@ -101,6 +101,19 @@ describe('joined secrets, renamed and replayed', () => {
     expect(replayed({ PASSWORD: 'hunter2!', PASSWORD_2: 'hunter2!' })).toEqual({ PASSWORD_2: 'PASSWORD' })
   })
 
+  // CodeRabbit on #1156: a name given back by a parted join can be one another secret was renamed to since.
+  it('asks again after parting a join, until no name has two values', () => {
+    const three = { ...captured, steps: [...captured.steps, row({ type: 'inputSecret', name: 'PASSWORD_3' })], secrets: { ...captured.secrets, PASSWORD_3: 'other' } }
+    let state = reduce({ ...edit, captured: three }, { type: 'rename-secret', from: 'PASSWORD_2', to: 'PASSWORD' })
+    state = reduce(state, { type: 'rename-secret', from: 'PASSWORD', to: 'LOGIN' })
+    state = reduce(state, { type: 'rename-secret', from: 'PASSWORD_3', to: 'PASSWORD' })
+    const after = reduce(reduce(state, { type: 'match-started', total: 6 }),
+      { type: 'match-finished', captured: { ...three, secrets: { PASSWORD: 'hunter2!', PASSWORD_2: 'changed', PASSWORD_3: 'other' } } })
+    expect(after.renamed).toEqual({})
+    const edited = editedCapture(after)!
+    expect(edited.secrets).toEqual({ PASSWORD: 'hunter2!', PASSWORD_2: 'changed', PASSWORD_3: 'other' })
+  })
+
   it('takes no value from a removed step', () => {
     // Reached only through the reducer: Edit's own check would refuse the join, the values differing.
     const removed = reduce(reduce(reduce(edit, { type: 'make-secret', index: 1 }), { type: 'rename-secret', from: 'SECRET', to: 'PASSWORD' }),

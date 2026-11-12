@@ -284,15 +284,21 @@ function secretNames(state: CaptureState): string[] {
 /**
  * Renames kept through a replay, less the joins it broke: a replay of another range can give two secrets joined under
  * one name different values, and one name has one value, which would be typed into both fields. Every secret going by
- * a name whose values now differ goes back to its own.
+ * a name whose values now differ goes back to its own — and a name given back can be one another secret was renamed
+ * to since, so it is asked again until no name has two values. Each pass only drops renames, so it ends.
  */
 function joinsThatHold(renamed: Record<string, string>, secrets: Record<string, string>): Record<string, string> {
-  const valuesUnder = new Map<string, Set<string>>()
-  for (const [name, value] of Object.entries(secrets)) {
-    const to = renamed[name] ?? name
-    valuesUnder.set(to, (valuesUnder.get(to) ?? new Set()).add(value))
+  let kept = renamed
+  for (;;) {
+    const valuesUnder = new Map<string, Set<string>>()
+    for (const [name, value] of Object.entries(secrets)) {
+      const to = kept[name] ?? name
+      valuesUnder.set(to, (valuesUnder.get(to) ?? new Set()).add(value))
+    }
+    const next = Object.fromEntries(Object.entries(kept).filter(([, to]) => (valuesUnder.get(to)?.size ?? 0) <= 1))
+    if (Object.keys(next).length === Object.keys(kept).length) return kept
+    kept = next
   }
-  return Object.fromEntries(Object.entries(renamed).filter(([, to]) => (valuesUnder.get(to)?.size ?? 0) <= 1))
 }
 
 /** The first of `SECRET`, `SECRET_2`, … no secret goes by, as captured, made or renamed. */
