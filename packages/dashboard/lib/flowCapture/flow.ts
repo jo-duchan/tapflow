@@ -1,26 +1,49 @@
 import { agreedEffect, flowSteps, flowToYaml, type CapturedFlow, type CapturedStep, type Flow, type FlowResult, type Step, type StepExpect } from '@tapflowio/flow-runner/browser'
 import type { CaptureState } from './machine'
 
-/** The captured flow as Edit left it: removed steps gone, renamed secrets renamed, values of unused secrets dropped. */
-export function editedCapture(state: Pick<CaptureState, 'captured' | 'removed' | 'renamed'>): CapturedFlow | null {
-  const { captured, removed, renamed } = state
+/** The captured flow as Edit left it: typed text made a secret, removed steps gone, renamed secrets renamed, values of
+ *  unused secrets dropped. */
+export function editedCapture(state: Pick<CaptureState, 'captured' | 'removed' | 'renamed' | 'made'>): CapturedFlow | null {
+  const { captured, removed, renamed, made } = state
   if (!captured) return null
+  const values: Record<string, string> = { ...captured.secrets }
   const steps = captured.steps
+    .map((s, i) => {
+      const name = made[i]
+      // A removed step's value goes with it: renamed onto a kept secret, it would be what Verify types there.
+      if (name === undefined || removed.includes(i) || s.step?.type !== 'inputText') return s
+      // Its value goes where a password's does: verified with in the dialog, never written to the file.
+      values[name] = s.step.text
+      return asSecret(s, name)
+    })
     .filter((_, i) => !removed.includes(i))
     .map((s) => s.step?.type === 'inputSecret' && renamed[s.step.name] !== undefined
       ? { ...s, step: { ...s.step, name: renamed[s.step.name]! } }
       : s)
   const used = new Set(steps.flatMap((s) => (s.step?.type === 'inputSecret' ? [s.step.name] : [])))
   const secrets: Record<string, string> = {}
-  for (const [name, value] of Object.entries(captured.secrets)) {
+  for (const [name, value] of Object.entries(values)) {
     const to = renamed[name] ?? name
     if (used.has(to)) secrets[to] = value
   }
   return { ...captured, steps, secrets }
 }
 
+/** A typed step made the secret `name` (1b-3c): what Edit draws and what the file gets. */
+export function asSecret(step: CapturedStep, name: string): CapturedStep {
+  if (step.step?.type !== 'inputText') return step
+  return { ...step, step: step.step.replace ? { type: 'inputSecret', name, replace: true } : { type: 'inputSecret', name } }
+}
+
+/** Renaming the secret now called `current` to a name another secret has: `'joins'` when the two values are the same,
+ *  which makes them one (1b-3c: a password and its confirmation), `'taken'` when they differ. `null` for a free name. */
+export function secretRename(edited: CapturedFlow, current: string, to: string): 'joins' | 'taken' | null {
+  if (to === current || edited.secrets[to] === undefined) return null
+  return edited.secrets[to] === edited.secrets[current] ? 'joins' : 'taken'
+}
+
 /** The flow file's content. `appId` is the build's bundle id: the flow clears and runs that app, and only that app. */
-export function flowOf(state: Pick<CaptureState, 'captured' | 'removed' | 'renamed' | 'name' | 'tags'>, appId: string | null): Omit<Flow, 'file'> | null {
+export function flowOf(state: Pick<CaptureState, 'captured' | 'removed' | 'renamed' | 'made' | 'name' | 'tags'>, appId: string | null): Omit<Flow, 'file'> | null {
   const edited = editedCapture(state)
   if (!edited) return null
   const tags = state.tags.split(',').map((t) => t.trim()).filter(Boolean)
@@ -61,7 +84,7 @@ export function withEffects(flow: Omit<Flow, 'file'>, verified: FlowResult | und
 }
 
 /** The flow Export shows and writes: Edit's flow with what Verify and Match both saw beside each touch. */
-export function exportedFlow(state: Pick<CaptureState, 'captured' | 'removed' | 'renamed' | 'name' | 'tags' | 'verify'>, appId: string | null): Omit<Flow, 'file'> | null {
+export function exportedFlow(state: Pick<CaptureState, 'captured' | 'removed' | 'renamed' | 'made' | 'name' | 'tags' | 'verify'>, appId: string | null): Omit<Flow, 'file'> | null {
   const flow = flowOf(state, appId)
   return flow ? withEffects(flow, state.verify?.result, state.captured?.steps) : null
 }

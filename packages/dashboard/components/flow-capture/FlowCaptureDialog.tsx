@@ -8,7 +8,7 @@ import { getBuild, queryKeys } from '@/lib/queries'
 import { useFocusAfterSwap } from '@/hooks/useFocusAfterSwap'
 import { DashboardSessionChannel } from '@/lib/flowCapture/channel'
 import { copy } from '@/lib/flowCapture/copy'
-import { editedCapture, exportedFlow, flowOf } from '@/lib/flowCapture/flow'
+import { editedCapture, exportedFlow, flowOf, secretRename } from '@/lib/flowCapture/flow'
 import { canGoTo, initialState, reachedStep, reduce, stepIndex, withAsked, type CaptureState } from '@/lib/flowCapture/machine'
 import { DialogRun, keyboardOf, loadSnapshot, matchRange, PauseLease, stepsOf, verifyFlow } from '@/lib/flowCapture/runner'
 import { compareWithRecording } from '@/lib/flowCapture/screenCompare'
@@ -216,11 +216,13 @@ function CaptureSession({ tap, session, snapshot, bundleId, setBusy, close }: {
       .finally(() => setBusy(false))
   }
 
-  // A rename is refused, with the reason, rather than written: a name that is not one, or one another secret has.
-  const renameError = (from: string, to: string): string | null => {
-    if (!isSecretName(to)) return copy.secretInvalid
-    const names = new Set((editedCapture(state)?.steps ?? []).flatMap((s) => (s.step?.type === 'inputSecret' ? [s.step.name] : [])))
-    return to !== from && names.has(to) ? copy.secretTaken : null
+  // A rename is refused, with the reason, rather than written: a name that is not one, or one another secret has with
+  // another value. Another secret's name with the same value is taken, and makes the two one (1b-3c).
+  const renameCheck = (current: string, to: string): { error?: string; note?: string } => {
+    if (!isSecretName(to)) return { error: copy.secretInvalid }
+    const edited = editedCapture(state)
+    const verdict = edited ? secretRename(edited, current, to) : null
+    return verdict === 'taken' ? { error: copy.secretTaken } : verdict === 'joins' ? { note: copy.secretJoins(to) } : {}
   }
 
   return (
@@ -249,7 +251,7 @@ function CaptureSession({ tap, session, snapshot, bundleId, setBusy, close }: {
         )}
         {state.phase === 'edit' && (
           <EditScreen
-            state={state} dispatch={dispatch} flow={flow} renameError={renameError}
+            state={state} dispatch={dispatch} flow={flow} renameCheck={renameCheck}
             onVerify={startVerify} onBackToRange={() => dispatch({ type: 'go-to', step: 0 })} verifyRef={fallback}
           />
         )}

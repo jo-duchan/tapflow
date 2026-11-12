@@ -16,7 +16,7 @@ import { useHighlightedCode } from '@/hooks/useHighlightedCode'
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
 import { cn } from '@/lib/utils'
 import { copy } from '@/lib/flowCapture/copy'
-import { fileNameOf, moveEdge, yamlOf, type Edge } from '@/lib/flowCapture/flow'
+import { asSecret, fileNameOf, moveEdge, yamlOf, type Edge } from '@/lib/flowCapture/flow'
 import { askedReady, type CaptureEvent, type CaptureState } from '@/lib/flowCapture/machine'
 import type { CaptureTap } from '@/lib/flowCapture/tap'
 import { markOf } from '@/lib/flowCapture/marks'
@@ -524,11 +524,11 @@ function ComparedPicture({ title, src, masks, differs = false }: { title: string
 
 // ── Edit ──────────────────────────────────────────────────────────────────────────────────────────────────────────
 
-export function EditScreen({ state, dispatch, flow, renameError, onVerify, onBackToRange, verifyRef }: {
+export function EditScreen({ state, dispatch, flow, renameCheck, onVerify, onBackToRange, verifyRef }: {
   state: CaptureState
   dispatch: Dispatch<CaptureEvent>
   flow: FlowFile | null
-  renameError: (from: string, to: string) => string | null
+  renameCheck: RenameCheck
   onVerify: () => void
   onBackToRange: () => void
   verifyRef: RefObject<HTMLButtonElement | null>
@@ -566,10 +566,11 @@ export function EditScreen({ state, dispatch, flow, renameError, onVerify, onBac
           <h3 className="text-sm font-medium">{copy.editHeading(kept.length)}</h3>
           <ol ref={listRef} aria-label={copy.steps[2]} className="-m-1 min-h-0 flex-1 space-y-1 overflow-y-auto p-1">
             {kept.map(({ s, i }, position) => (
-              <EditRow key={i} index={i} step={s} selected={selected === i}
+              <EditRow key={i} index={i} step={madeSecret(s, state.made[i])} made={state.made[i] !== undefined} selected={selected === i}
                 onSelect={() => setSelected(i)} onRemove={() => remove(i, position)}
-                renamedTo={s.step?.type === 'inputSecret' ? state.renamed[s.step.name] : undefined}
-                onRename={(from, to) => dispatch({ type: 'rename-secret', from, to })} renameError={renameError} />
+                renamedTo={secretBase(madeSecret(s, state.made[i])) !== null ? state.renamed[secretBase(madeSecret(s, state.made[i]))!] : undefined}
+                onRename={(from, to) => dispatch({ type: 'rename-secret', from, to })} renameCheck={renameCheck}
+                onMakeSecret={() => dispatch({ type: 'make-secret', index: i })} onKeepAsText={() => dispatch({ type: 'keep-as-text', index: i })} />
             ))}
           </ol>
         </div>
@@ -590,20 +591,40 @@ function safeYaml(flow: FlowFile): string {
   try { return yamlOf(flow) } catch (e) { return `# ${(e as Error).message}` }
 }
 
-function EditRow({ index, step, selected, onSelect, onRemove, renamedTo, onRename, renameError }: {
+type CapturedRow = NonNullable<CaptureState['captured']>['steps'][number]
+/** What a rename to `to` of the secret now called `current` comes to: refused with a reason, or a note. */
+type RenameCheck = (current: string, to: string) => { error?: string; note?: string }
+
+/** A row the person made a secret (1b-3c), drawn as the secret step it becomes. */
+const madeSecret = (step: CapturedRow, name: string | undefined): CapturedRow => (name === undefined ? step : asSecret(step, name))
+const secretBase = (step: CapturedRow): string | null => (step.step?.type === 'inputSecret' ? step.step.name : null)
+
+function EditRow({ index, step, made, selected, onSelect, onRemove, renamedTo, onRename, renameCheck, onMakeSecret, onKeepAsText }: {
   index: number
-  step: NonNullable<CaptureState['captured']>['steps'][number]
+  step: CapturedRow
+  /** Made a secret in Edit: it can be kept as text again. */
+  made: boolean
   selected: boolean
   onSelect: () => void
   onRemove: () => void
   renamedTo: string | undefined
   onRename: (from: string, to: string) => void
-  renameError: (from: string, to: string) => string | null
+  renameCheck: RenameCheck
+  onMakeSecret: () => void
+  onKeepAsText: () => void
 }) {
   const label = capturedStepLabel(step)
   const detailsId = useId()
   const [open, setOpen] = useState(false)
-  const secretName = step.step?.type === 'inputSecret' ? step.step.name : null
+  const details = useRef<HTMLDivElement>(null)
+  const secretName = secretBase(step)
+  // Typed text written into the file as typed: the one kind of step Make secret is for.
+  const typed = step.step?.type === 'inputText' && 'text' in step.step
+  // The control pressed goes with the swap: focus moves to what took its place, the name or Make secret.
+  const swap = (change: () => void) => {
+    change()
+    requestAnimationFrame(() => details.current?.querySelector<HTMLElement>('input, button')?.focus())
+  }
   const reason = step.skipped ? copy.skipReasons[step.skipped] : step.fragile ? copy.fragileReasons[step.fragile] : step.auto ? copy.autoReason : null
   return (
     // Figma 394:1041 (List Item): 12 px in on the left, 8 px elsewhere; the head row centred on the 28 px buttons; the
@@ -622,7 +643,7 @@ function EditRow({ index, step, selected, onSelect, onRemove, renamedTo, onRenam
         {step.fragile && <Badge variant="outline" className="shrink-0">{copy.fragile}</Badge>}
         {step.auto && <Badge variant="outline" className="shrink-0">{copy.auto}</Badge>}
         {step.skipped && <Badge variant="outline" className="shrink-0">{copy.skipped}</Badge>}
-        {secretName && (
+        {(secretName || typed) && (
           <Button variant="ghost" size="icon" className="relative z-10 size-7 shrink-0" aria-label={copy.stepDetails(label)} aria-expanded={open} aria-controls={detailsId} onClick={() => setOpen((v) => !v)}>
             <ChevronRight aria-hidden className={cn('h-4 w-4 transition-transform', open && 'rotate-90')} />
           </Button>
@@ -632,37 +653,56 @@ function EditRow({ index, step, selected, onSelect, onRemove, renamedTo, onRenam
         </Button>
       </div>
       {reason && <p className="pb-1 pt-2 text-xs text-muted-foreground">{reason}</p>}
-      {secretName && open && (
-        <div id={detailsId} className="relative z-10 mt-2">
-          <SecretName from={secretName} current={renamedTo ?? secretName} onRename={onRename} renameError={renameError} />
+      {open && (secretName || typed) && (
+        <div id={detailsId} ref={details} className="relative z-10 mt-2">
+          {secretName
+            ? (
+              <div className="grid gap-2">
+                {/* Keyed by the name: a rename of another secret can rename this one too (a join, then a rename of
+                    either side), and a field still holding the old name would rename it back when it loses focus. */}
+                <SecretName key={renamedTo ?? secretName} from={secretName} current={renamedTo ?? secretName} onRename={onRename} renameCheck={renameCheck} />
+                {made && <Button variant="link" size="sm" className="h-auto justify-self-start p-0 text-xs" onClick={() => swap(onKeepAsText)}>{copy.keepAsText}</Button>}
+              </div>
+            )
+            : (
+              <div className="flex items-center justify-between gap-3 rounded-md bg-muted px-3 py-2">
+                <p className="text-xs text-muted-foreground">{copy.typedIntoFile}</p>
+                <Button variant="outline" size="sm" className="shrink-0" onClick={() => swap(onMakeSecret)}>{copy.makeSecret}</Button>
+              </div>
+            )}
         </div>
       )}
     </li>
   )
 }
 
-function SecretName({ from, current, onRename, renameError }: {
+function SecretName({ from, current, onRename, renameCheck }: {
   from: string
   current: string
   onRename: (from: string, to: string) => void
-  renameError: (from: string, to: string) => string | null
+  renameCheck: RenameCheck
 }) {
   const id = useId()
   const hintId = useId()
   const errorId = useId()
+  const noteId = useId()
   const [value, setValue] = useState(current)
-  const error = value === current ? null : renameError(current, value)
+  const { error, note } = value === current ? {} : renameCheck(current, value)
   return (
     <div className="grid gap-1.5">
       <Label htmlFor={id}>{copy.secretLabel}</Label>
       <Input
         id={id} value={value} className="font-mono"
-        aria-describedby={error ? `${hintId} ${errorId}` : hintId} aria-invalid={error ? true : undefined}
+        aria-describedby={[hintId, error && errorId, note && noteId].filter(Boolean).join(' ')} aria-invalid={error ? true : undefined}
         onChange={(e) => setValue(e.target.value)}
         onBlur={() => { if (!error && value !== current) onRename(from, value) }}
       />
-      <FieldHint id={hintId}>{copy.secretHint}</FieldHint>
+      <FieldHint id={hintId}>
+        {copy.secretHint}{' '}
+        <a href={copy.secretDocsUrl} target="_blank" rel="noreferrer" className="underline underline-offset-2">{copy.secretDocs}</a>
+      </FieldHint>
       {error && <FieldError id={errorId} message={error} />}
+      {note && <p id={noteId} className="text-xs">{note}</p>}
     </div>
   )
 }
