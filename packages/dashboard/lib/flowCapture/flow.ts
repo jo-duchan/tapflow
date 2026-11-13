@@ -1,22 +1,34 @@
-import { agreedEffect, flowSteps, flowToYaml, type CapturedFlow, type CapturedStep, type Flow, type FlowResult, type Step, type StepExpect } from '@tapflowio/flow-runner/browser'
+import {
+  agreedEffect, flowSteps, flowToYaml, mentionsSecret, type CapturedFlow, type CapturedStep, type Flow, type FlowResult, type Selector, type Step,
+  type StepExpect,
+} from '@tapflowio/flow-runner/browser'
 import type { CaptureState } from './machine'
 
-/** The captured flow as Edit left it: typed text made a secret, removed steps gone, renamed secrets renamed, values of
- *  unused secrets dropped. */
-export function editedCapture(state: Pick<CaptureState, 'captured' | 'removed' | 'renamed' | 'made'>): CapturedFlow | null {
-  const { captured, removed, renamed, made } = state
+/** The captured flow as Edit left it: typed text made a secret, each touch followed by what the person expects it to
+ *  bring, removed steps gone (with what was expected of them), renamed secrets renamed, values of unused secrets dropped. */
+export function editedCapture(state: Pick<CaptureState, 'captured' | 'removed' | 'renamed' | 'made' | 'expected'>): CapturedFlow | null {
+  const { captured, removed, renamed, made, expected } = state
   if (!captured) return null
   const values: Record<string, string> = { ...captured.secrets }
+  for (const [i, name] of Object.entries(made)) {
+    const s = captured.steps[Number(i)]
+    // A removed step's value goes with it: renamed onto a kept secret, it would be what Verify types there.
+    if (!removed.includes(Number(i)) && s?.step?.type === 'inputText') values[name] = s.step.text
+  }
+  // An expected element whose text holds a secret's value would write it into the file: left out, whenever the secret
+  // was made — before or after the element was picked.
+  const hidden = Object.values(values)
+  const shows = (sel: Selector) => !mentionsSecret(sel.label ?? '', hidden) && !mentionsSecret(sel.id ?? '', hidden)
+  // One pass over the captured steps, by their own indices: what is removed and what is expected are both keyed by them.
   const steps = captured.steps
-    .map((s, i) => {
+    .flatMap((s, i): CapturedStep[] => {
+      if (removed.includes(i)) return []
       const name = made[i]
-      // A removed step's value goes with it: renamed onto a kept secret, it would be what Verify types there.
-      if (name === undefined || removed.includes(i) || s.step?.type !== 'inputText') return s
       // Its value goes where a password's does: verified with in the dialog, never written to the file.
-      values[name] = s.step.text
-      return asSecret(s, name)
+      const step = name !== undefined && s.step?.type === 'inputText' ? asSecret(s, name) : s
+      const checks = (expected[i] ?? []).filter(shows).map((selector): CapturedStep => ({ raw: s.raw, step: { type: 'assertVisible', selector } }))
+      return [step, ...checks]
     })
-    .filter((_, i) => !removed.includes(i))
     .map((s) => s.step?.type === 'inputSecret' && renamed[s.step.name] !== undefined
       ? { ...s, step: { ...s.step, name: renamed[s.step.name]! } }
       : s)
@@ -43,7 +55,7 @@ export function secretRename(edited: CapturedFlow, current: string, to: string):
 }
 
 /** The flow file's content. `appId` is the build's bundle id: the flow clears and runs that app, and only that app. */
-export function flowOf(state: Pick<CaptureState, 'captured' | 'removed' | 'renamed' | 'made' | 'name' | 'tags'>, appId: string | null): Omit<Flow, 'file'> | null {
+export function flowOf(state: Pick<CaptureState, 'captured' | 'removed' | 'renamed' | 'made' | 'expected' | 'name' | 'tags'>, appId: string | null): Omit<Flow, 'file'> | null {
   const edited = editedCapture(state)
   if (!edited) return null
   const tags = state.tags.split(',').map((t) => t.trim()).filter(Boolean)
@@ -84,7 +96,7 @@ export function withEffects(flow: Omit<Flow, 'file'>, verified: FlowResult | und
 }
 
 /** The flow Export shows and writes: Edit's flow with what Verify and Match both saw beside each touch. */
-export function exportedFlow(state: Pick<CaptureState, 'captured' | 'removed' | 'renamed' | 'made' | 'name' | 'tags' | 'verify'>, appId: string | null): Omit<Flow, 'file'> | null {
+export function exportedFlow(state: Pick<CaptureState, 'captured' | 'removed' | 'renamed' | 'made' | 'expected' | 'name' | 'tags' | 'verify'>, appId: string | null): Omit<Flow, 'file'> | null {
   const flow = flowOf(state, appId)
   return flow ? withEffects(flow, state.verify?.result, state.captured?.steps) : null
 }

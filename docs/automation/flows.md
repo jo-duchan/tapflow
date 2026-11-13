@@ -89,11 +89,14 @@ There is no fixed `sleep` step. Waiting is always condition-based. To wait for a
 
 # a label-less row: pick the Nth of its kind (0-based)
 - tapOn: { role: cell, index: 2 }
+
+# check a value: the whole label must match, never one that contains it
+- assertVisible: { label: "Total $32.00", exact: true }
 ```
 
 A bare-string selector resolves in the order **exact identifier → exact label → partial label → exact placeholder**. Once a stage matches, later stages are not tried.
 
-A placeholder is the hint text an empty input field shows. An input field with neither a label nor an identifier can be found by its placeholder. Because the placeholder is the last stage, an element whose label is the same text matches first. A placeholder never matches in part. On iOS the field can still be found by its placeholder after a value is typed into it. Android's UI tree carries no placeholder, so on Android this stage never matches. A `label:` selector looks at labels only.
+A placeholder is the hint text an empty input field shows. An input field with neither a label nor an identifier can be found by its placeholder. Because the placeholder is the last stage, an element whose label is the same text matches first. A placeholder never matches in part. On iOS the field can still be found by its placeholder after a value is typed into it. Android's UI tree carries no placeholder, so on Android this stage never matches. A `label:` selector looks at labels only. When no label is exactly the same, `label:` falls back to a label that contains the text; add `exact: true` to match only an element whose whole label is the same. Use it to check a value such as a total or a count: without it, "Total $32.00" also passes on "Total $32.001". `exact` takes a `label` and nothing else.
 
 If a `tapOn` selector matches more than one element, it fails immediately and lists the candidates. It never picks the first one implicitly, so an ambiguous selector fails visibly instead of quietly tapping the wrong place. `assertVisible` checks presence only, so it passes when at least one element matches.
 

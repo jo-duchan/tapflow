@@ -1,7 +1,7 @@
 ---
 component: TabsTrigger
 source: components/ui/tabs.tsx
-cva: none
+cva: tabsTriggerVariants
 own: state
 ---
 
@@ -10,9 +10,10 @@ own: state
 > Shared rules (state names, focus ring, disabled, tokens) live in [DESIGN.md](../../DESIGN.md).
 > This file holds only what is specific to TabsTrigger.
 
-`components/ui/tabs.tsx` wraps Radix Tabs and has no `cva`. This spec covers the trigger and the `TabsList` it
-sits in; `state` below is what renders, not a prop. The dashboard uses one look: a segmented control, a muted
-track with the active tab raised on it.
+`components/ui/tabs.tsx` wraps Radix Tabs. This spec covers the trigger and the `TabsList` it sits in; `state` below
+is what renders, not a prop. Two looks, set by `variant` on the list (`tabsListVariants`) and read by its triggers
+(`tabsTriggerVariants`): a segmented control, a muted track with the active tab raised on it, and a line, an
+underline under the active tab. The anatomy below is the segmented one.
 
 ## Anatomy
 
@@ -33,6 +34,16 @@ TabsList — 36px high, --muted track, 4px padding
 - **Panel** (`TabsContent`) — 8px under the list (`mt-2`) by default. Only one call site has panels (below).
 
 ## Properties
+
+### `variant`
+
+| Value | Looks like | Call sites |
+|-------|------------|-----------:|
+| `segmented` | Default. A 36px `--muted` track, 4px padding, the active tab raised on it (`--background`, `shadow-sm`) | 3 |
+| `line` | No track. Tabs 16px apart (`gap-4`); the active one `--foreground` text over a 2px `--foreground` underline, the rest `--muted-foreground` over a transparent one. A press moves the label alone, not the underline | 1 |
+
+Use `line` for views of one picture, where a raised track reads as a second frame around it (Flow Capture's Edit,
+At this tap / After this tap).
 
 ### `state`
 

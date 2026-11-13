@@ -170,6 +170,10 @@ function CaptureSession({ tap, session, snapshot, bundleId, setBusy, close }: {
         const recorded = thumbnailUrl(tap.sessionId, snapshot, step)
         return recorded ? compareWithRecording(recorded, tap.surface(), masks, signal) : Promise.resolve(null)
       },
+      onAfter: (index, after) => {
+        if (after.screenshot) run.keep(after.screenshot)
+        dispatch({ type: 'step-after', index, after })
+      },
       onDiverged: (index, divergence) => {
         run.keep(divergence.nowUrl)
         const step = state.steps[index]

@@ -217,6 +217,7 @@ function describeSelector(sel: Selector): string {
   if (sel.label !== undefined) parts.push(`label="${sel.label}"`)
   if (sel.role !== undefined) parts.push(`role=${sel.role}`)
   if (sel.index !== undefined) parts.push(`index=${sel.index}`)
+  if (sel.exact) parts.push('exact')
   return parts.join(', ')
 }
 
