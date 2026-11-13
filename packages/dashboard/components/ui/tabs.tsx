@@ -56,6 +56,7 @@ const TabsTrigger = React.forwardRef<
   React.ComponentPropsWithoutRef<typeof TabsPrimitive.Trigger>
 >(({ className, children, ...props }, ref) => {
   const variant = React.useContext(TabsVariantContext)
+  // `line` wraps the label in a span, so it cannot take `asChild`; no call site needs both.
   return (
     <TabsPrimitive.Trigger
       ref={ref}

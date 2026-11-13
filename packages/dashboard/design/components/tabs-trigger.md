@@ -31,7 +31,7 @@ TabsList — 36px high, --muted track, 4px padding
   gap and no divider between them.
 - **Trigger** — 28px high: `text-sm` (14px) `font-medium` on a 20px line, 4px top and bottom, 12px sides
   (`px-3 py-1`). `rounded-sm` (4px). One line, never wraps.
-- **Panel** (`TabsContent`) — 8px under the list (`mt-2`) by default. Only one call site has panels (below).
+- **Panel** (`TabsContent`) — 8px under the list (`mt-2`) by default. Two call sites have panels (below).
 
 ## Properties
 
@@ -49,16 +49,17 @@ At this tap / After this tap).
 
 | Value | Looks like | Call sites |
 |-------|------------|-----------:|
-| `default` | No fill, `--muted-foreground` text — the track shows through | 3 |
-| `active` | `--background` fill, `--foreground` text, Tailwind `shadow-sm` | 3 |
-| `focus` | Shared ring with a 2px `--background` offset (DESIGN.md), on keyboard focus only (`focus-visible:`) | 3 |
-| `disabled` | 50% opacity, no pointer events | 0 — defined, no call site disables a tab |
+| `default` | No fill, `--muted-foreground` text — the track shows through (`line`: no underline) | 4 |
+| `active` | `--background` fill, `--foreground` text, Tailwind `shadow-sm` (`line`: `--foreground` text and underline) | 4 |
+| `focus` | Shared ring with a 2px `--background` offset (DESIGN.md), on keyboard focus only (`focus-visible:`) | 4 |
+| `disabled` | 50% opacity, no pointer events; the arrow keys skip it | 1 — Flow Capture's After, on a step with no screen after it |
 
 - **No `hover`.** An inactive tab does not change under the pointer.
 - **Dark mode turns the active tab darker than the track.** `--background` (9%) on `--muted` (15%): the raised tab
   is a darker inset, not a lighter one. Draw both themes.
 - **Pressed moves it 1px.** A trigger is a `<button role="tab">` with no `aria-haspopup`, so the global press motion
-  applies (DESIGN.md). That rule also replaces the trigger's own `transition-all`: color and fill change over 120ms,
+  applies (DESIGN.md). A `line` trigger opts out with `data-press-label` and moves its label alone, so the underline
+  stays put; it wraps its children in a span to do so, so it cannot take `asChild`. That rule also replaces the trigger's own `transition-all`: color and fill change over 120ms,
   and the shadow appears at once.
 - The focus ring's 2px offset is `--background`: on the light track (98% on 96%) it barely shows, and in dark mode it
   is a dark band between the tab and the ring. Draw both. The ring reaches 4px outside the tab, so it fills the list's
@@ -70,9 +71,10 @@ At this tap / After this tap).
 |-------|----------|-----|
 | QA session side panel — Comments / Recordings | List `w-full`, each trigger `flex-1 gap-1.5` with a 14px icon before the label; panels 12px under the list (`mt-3`) | Two equal halves of a 312px list, inset 4px (`px-1`) inside the 320px panel |
 | Flow Runs — All / CI / Local | None. No panels: the tabs filter the list below | A source filter in the toolbar, beside 32px controls (the status Select and the search box) |
+| Flow Capture's Edit — At this tap / After this tap | `line`. Left-aligned to the picture, 16px above it; After disabled on a step with no screen after it | A picture's width follows the device and its turn, so a centred switch would sit nowhere in particular; every step keeps the tabs so the picture keeps one size |
 | Mac resources — 1h / 6h / 24h / 7d | None. No panels: the tabs set the chart's range | A range picker beside the Mac's name. The list has no name, so a screen reader hears "1h" with nothing saying it is a time range (tracked in #979) |
 
-Two of the three are filters, not tabs over panels. They look and behave the same; Radix still gives them
+Two of the four are filters, not tabs over panels. They look and behave the same; Radix still gives them
 `role="tab"` and arrow-key movement.
 
 The Flow Runs list sits 36px high beside 32px controls (`h-8`); the heights are not matched.

@@ -96,6 +96,39 @@ describe('Edit, a tap and the screen it left', () => {
     expect(screen.getByText(/It was on the screen before this tap too/)).toBeInTheDocument()
   })
 
+  // Review of 1b-3c's design pass: Escape takes back the offer, not the dialog, and focus stays on the element.
+  it('closes an offer with Escape and keeps focus on the element it was about', () => {
+    draw(edit)
+    pick(1)
+    fireEvent.mouseDown(screen.getByRole('tab', { name: 'After this tap' }))
+    const total = screen.getByRole('button', { name: 'Expect “Total ₩32,000”' })
+    fireEvent.click(total)
+    const add = screen.getByRole('button', { name: 'Add' })
+    expect(add.closest('[data-escape-local]')).not.toBeNull()
+    fireEvent.keyDown(add, { key: 'Escape' })
+    expect(screen.queryByRole('button', { name: 'Add' })).not.toBeInTheDocument()
+    expect(document.activeElement).toBe(total)
+    expect(total.closest('[data-escape-local]')).toBeNull()
+  })
+
+  it('keeps the screen after a tap when the chosen step is chosen again, and drops what was shown on At', () => {
+    draw(reduce(edit, { type: 'add-expected', index: 1, selector: total }))
+    pick(1)
+    fireEvent.click(within(row(1)).getByRole('button', { name: 'Show “Total ₩32,000” on the screen after this tap' }))
+    pick(1)
+    expect(screen.getByRole('tab', { name: 'After this tap' })).toHaveAttribute('aria-selected', 'true')
+    expect(screen.getByRole('button', { name: 'Expect “Total ₩32,000”' })).toHaveClass('z-10')
+    fireEvent.mouseDown(screen.getByRole('tab', { name: 'At this tap' }))
+    fireEvent.mouseDown(screen.getByRole('tab', { name: 'After this tap' }))
+    expect(screen.getByRole('button', { name: 'Expect “Total ₩32,000”' })).not.toHaveClass('z-10')
+  })
+
+  it('uses line tabs, whose press moves the label and not the underline', () => {
+    draw(edit)
+    pick(1)
+    expect(screen.getByRole('tab', { name: 'At this tap' })).toHaveAttribute('data-press-label')
+  })
+
   // Design review of 1b-3c: an element already expected is not offered again.
   it('says an element is already expected instead of offering it again', () => {
     draw(reduce(edit, { type: 'add-expected', index: 1, selector: total }))

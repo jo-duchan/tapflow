@@ -544,6 +544,7 @@ export function EditScreen({ state, dispatch, flow, renameCheck, onVerify, onBac
   const [view, setView] = useState<'at' | 'after'>('at')
   const [shown, setShown] = useState<Selector | null>(null)
   const select = (i: number) => {
+    if (i === selected) return
     setSelected(i)
     setView('at')
     setShown(null)
@@ -849,12 +850,19 @@ function AfterPicture({ step, after, before, secrets, shown, expected, onAdd }: 
   const element = picked !== null ? after.tree[picked] : undefined
   const verdict = element ? expectedFor(element, { secrets, ...(before ? { before } : {}) }) : null
   const already = verdict && 'selector' in verdict && expected.some((s) => sameSelector(s, verdict.selector))
+  const root = useRef<HTMLDivElement>(null)
+  // Escape takes the offer away and leaves focus on the element it was about, never on the page.
+  const dismiss = () => {
+    root.current?.querySelector<HTMLButtonElement>(`[data-pick="${picked}"]`)?.focus()
+    setPicked(null)
+  }
   return (
-    <div className="relative self-start">
+    <div ref={root} className="relative self-start" data-escape-local={picked !== null ? '' : undefined}
+      onKeyDown={(ev) => { if (ev.key === 'Escape' && picked !== null) dismiss() }}>
       <div className="relative overflow-hidden rounded-lg border">
         <img src={after.screenshot} alt={copy.afterAlt(step)} className="block max-h-[var(--picture-tap,var(--picture-max,60vh))] w-auto max-w-full" />
         {pickable(after.tree).map(({ e, i }) => (
-          <button key={i} type="button" aria-label={copy.pickElement(e.label)} aria-describedby={hintId}
+          <button key={i} type="button" data-pick={i} aria-label={copy.pickElement(e.label)} aria-describedby={hintId}
             className={cn('absolute rounded-sm hover:bg-blue-500/10 hover:outline hover:outline-2 hover:outline-blue-500 focus-visible:outline focus-visible:outline-2 focus-visible:outline-blue-500',
               picked === i && 'outline outline-2 outline-blue-500', lit?.has(e) && 'z-10 outline outline-2 outline-offset-2 outline-blue-500 shadow-[0_0_0_9999px_rgba(255,255,255,0.55)]')}
             style={{ left: pct(e.frame.x), top: pct(e.frame.y), width: pct(e.frame.width), height: pct(e.frame.height) }}
@@ -864,8 +872,7 @@ function AfterPicture({ step, after, before, secrets, shown, expected, onAdd }: 
       <p id={hintId} className="mt-2 text-xs text-muted-foreground">{copy.afterLead(step)} {copy.afterHint}</p>
       {element && verdict && (
         <div role="group" aria-label={copy.expectTitle(element.label)} className="absolute left-1 z-20 w-80 max-w-[calc(100%-0.5rem)] rounded-lg border bg-popover p-3 text-popover-foreground shadow-lg"
-          style={{ top: pct(Math.min(element.frame.y + element.frame.height, 0.8)) }}
-          onKeyDown={(ev) => { if (ev.key === 'Escape') setPicked(null) }}>
+          style={{ top: pct(Math.min(element.frame.y + element.frame.height, 0.8)) }}>
           {'refused' in verdict
             ? <p className="text-xs text-muted-foreground">{copy.expectRefused[verdict.refused]}</p>
             : already
