@@ -93,6 +93,7 @@ Named imperatively from `AGENTS.md` — these describe a gate you are about to h
 | [ios-orientation-sources.md](./ios-orientation-sources.md) | reference | ios, rotation, simulator, reverse-engineering |
 | [simulator-audio.md](./simulator-audio.md) | rationale | audio, ios, android |
 | [ios-device-recovery.md](./ios-device-recovery.md) | rationale | ios, lifecycle, recovery |
+| [capture-lag-attached-runner.md](./capture-lag-attached-runner.md) | diagnosis | performance, ios, flow-capture, measurement |
 | [macos-settings-deep-link-diagnosis.md](./macos-settings-deep-link-diagnosis.md) | diagnosis | macos, ios, system-extension, setup, cli |
 
 ### Android
