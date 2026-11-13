@@ -50,6 +50,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+- **A signed-in member can no longer fill the relay's disk with uploads** ([GHSA-jj96-5xwq-j8mx](https://github.com/jo-duchan/tapflow/security/advisories/GHSA-jj96-5xwq-j8mx)). A session recording had no size limit, any role could upload one, and no upload checked the free space left on the disk the database shares, so repeated uploads made app creation and other writes fail until the files were removed. Every upload now stops 1 GB short of a full disk with `507` and removes what it wrote (`TAPFLOW_MIN_FREE_DISK_BYTES`), and a recording is limited to 2 GB (`TAPFLOW_MAX_RECORDING_BYTES`). A recording upload with more than one file also kept the extra files on disk with nothing to remove them; only the first is written now. Thanks to mmj for the report.
 - **`node-forge` 1.4.2 and `follow-redirects` 1.16.2 in the Docker image.** Both come in through `acme-client`, which the relay uses only to issue LAN HTTPS certificates, and the advisories (GHSA-7wch-p9px-956x, GHSA-mrwp-f3q8-3g9p and ten more) sit in code paths that issuance does not reach: forge's TLS, PKCS#12 and certificate-chain checks, and redirects carrying custom sensitive headers. An npm install already resolved the patched versions; the image is built from the lockfile, which pinned the old ones until this release.
 
 ## [0.32.0] - 2026-10-31

@@ -9,7 +9,7 @@ import busboy from 'busboy'
 import { getDb } from '../db.js'
 import { assertCanWrite, requireAuth, requireBuildAuth } from '../middleware/auth.js'
 import { json, readJson } from '../router.js'
-import { pipeUpload, unlinkSafe } from '../lib/uploads.js'
+import { pipeUpload, unlinkSafe, StorageFullError } from '../lib/uploads.js'
 import { deliverWebhooks } from '../lib/webhooks.js'
 import { deleteBuildsWithDependents, type BuildFileDirs } from '../lib/buildDeletion.js'
 import { clampLabel, cleanBuildText, overrideOf, withBinary, MAX_BUILD_TEXT } from '../lib/buildVersion.js'
@@ -637,7 +637,8 @@ export function handleUploadBuild(
     // `pipeUpload` has already removed the file.
     try {
       await writePromise
-    } catch {
+    } catch (err) {
+      if (err instanceof StorageFullError) return json(res, 507, { error: err.message })
       return json(res, 500, { error: 'Upload failed' })
     }
     if (fileError) {

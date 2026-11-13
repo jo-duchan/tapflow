@@ -1,13 +1,23 @@
 import http from 'http'
 import fs from 'fs'
-import { pipeUpload } from '../lib/uploads.js'
+import { pipeUpload, unlinkSafe, StorageFullError } from '../lib/uploads.js'
 import path from 'path'
 import { randomUUID } from 'crypto'
 import busboy from 'busboy'
 import { requireAuth, getAuth } from '../middleware/auth.js'
 import { getDb } from '../db.js'
+import { json } from '../router.js'
 
 const TTL_MS = 72 * 60 * 60 * 1000
+
+/**
+ * The dashboard records a whole session into one file and sets no limit of its own, so this is sized for a long
+ * session (an hour is about 1 GB at the browser's default bitrate), not for a typical one.
+ */
+function maxRecordingBytes(): number {
+  const v = Number(process.env.TAPFLOW_MAX_RECORDING_BYTES)
+  return Number.isFinite(v) && v > 0 ? v : 2 * 1024 * 1024 * 1024
+}
 
 function expiresAt(): string {
   return new Date(Date.now() + TTL_MS).toISOString().replace('T', ' ').slice(0, 19)
@@ -31,8 +41,10 @@ export function handleUploadRecording(
   let filename = ''
   let mime = 'video/webm'
   let writeDone: Promise<void> | null = null
+  let sizeError = false
 
-  const bb = busboy({ headers: req.headers as Record<string, string | string[]> })
+  // One file: a second part would be written to disk with no row naming it, so the TTL purge would never remove it.
+  const bb = busboy({ headers: req.headers as Record<string, string | string[]>, limits: { files: 1, fileSize: maxRecordingBytes() } })
   bb.on('file', (_field, fileStream, info) => {
     // busboy destroys a file's stream with an error when the body ends inside it, and a stream with no
     // `'error'` listener throws. The response is `bb`'s own `'error'` handler's job.
@@ -41,12 +53,18 @@ export function handleUploadRecording(
     mime = info.mimeType || mime
     filename = `${randomUUID()}-${Date.now()}${ext}`
     filePath = path.join(recordingsDir, filename)
+    // busboy stops at the size limit rather than erroring; the cut file must not be kept as the recording.
+    fileStream.on('limit', () => { sizeError = true })
     writeDone = pipeUpload(fileStream, filePath, 'failed recording upload')
   })
   bb.on('finish', () => {
     if (!writeDone) { res.writeHead(400); res.end('No file'); return }
     writeDone
       .then(() => {
+        if (sizeError) {
+          unlinkSafe(filePath, 'oversized recording')
+          return json(res, 413, { error: `A recording is at most ${maxRecordingBytes()} bytes` })
+        }
         const stat = fs.statSync(filePath)
         const db = getDb()
         db.prepare(`
@@ -56,7 +74,10 @@ export function handleUploadRecording(
         res.writeHead(200, { 'Content-Type': 'application/json' })
         res.end(JSON.stringify({ url: `/api/v1/recordings/${filename}` }))
       })
-      .catch(() => { res.writeHead(500); res.end('Write failed') })
+      .catch((err: unknown) => {
+        if (err instanceof StorageFullError) return json(res, 507, { error: err.message })
+        res.writeHead(500); res.end('Write failed')
+      })
   })
   bb.on('error', () => { res.writeHead(500); res.end('Upload failed') })
   req.pipe(bb)
