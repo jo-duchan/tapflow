@@ -36,7 +36,9 @@
     "dist",
     "public",
     "README.md",
-    "LICENSE"
+    "LICENSE",
+    "LICENSE-APACHE-2.0",
+    "NOTICE"
   ],
   "engines": {
     "node": ">=22.0.0"

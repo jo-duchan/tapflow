@@ -258,6 +258,10 @@ pnpm install
 pnpm dev
 ```
 
+## Recognition
+
+- Gold Prize (NIPA President's Award), Open Track — [2026 Open Source Developer Contest (Korea)](https://osscontest.kr/notice/48)
+
 ## License
 
 [MIT](LICENSE) — Copyright © 2026-present tapflow contributors

@@ -1,0 +1,10 @@
+@tapflowio/relay — Third-Party Notices
+
+This package is licensed under the MIT License (see LICENSE), except for the
+files below, which are licensed under the Apache License, Version 2.0
+(see LICENSE-APACHE-2.0).
+
+public/assets/tinyh264.worker-*.js, and the decoder code in the dashboard
+chunks under public/assets that import it, are built from tinyh264
+(https://github.com/udevbe/tinyh264), by Erik De Rijcke. The dashboard uses it
+to decode H.264 video in the browser when WebCodecs is not available.
