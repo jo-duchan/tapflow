@@ -61,6 +61,9 @@ export function unlinkSafe(filePath: string, label: string): void {
  * Free space is checked before the first byte and again every `RECHECK_EVERY_BYTES`, so a run of uploads stops at
  * the floor rather than at a full disk; the rejection is then a `StorageFullError`. Free space, not a count of
  * bytes in flight: what this upload wrote is already out of it, so concurrent uploads see each other's writes.
+ * There is no reservation as run videos have: each upload in flight can pass the floor by under
+ * `RECHECK_EVERY_BYTES` before it sees the others, so filling a disk past a 1 GiB floor takes about a thousand
+ * authenticated uploads at once. The floor keeps the database room; it is not an exact cap.
  */
 export function pipeUpload(stream: NodeJS.ReadableStream, dest: string, label: string): Promise<void> {
   const dir = path.dirname(dest)

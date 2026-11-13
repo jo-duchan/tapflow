@@ -9,7 +9,7 @@ import busboy from 'busboy'
 import { getDb } from '../db.js'
 import { assertCanWrite, requireAuth, requireBuildAuth } from '../middleware/auth.js'
 import { json, readJson } from '../router.js'
-import { pipeUpload, unlinkSafe, StorageFullError } from '../lib/uploads.js'
+import { pipeUpload, unlinkSafe, StorageFullError, assertDiskRoom } from '../lib/uploads.js'
 import { deliverWebhooks } from '../lib/webhooks.js'
 import { deleteBuildsWithDependents, type BuildFileDirs } from '../lib/buildDeletion.js'
 import { clampLabel, cleanBuildText, overrideOf, withBinary, MAX_BUILD_TEXT } from '../lib/buildVersion.js'
@@ -270,6 +270,9 @@ function nullBundleMessage(aaptFound: boolean): string {
  * lipo 미설치(Linux relay) 시 null 반환 → 검증 skip.
  */
 function lipoHasSimSlice(binaryBuf: Buffer): boolean | null {
+  // The executable can be 256 MB, written while the upload itself is still on disk. Below the floor the check is
+  // skipped, as it is with no lipo: the install reports a device-only build anyway.
+  try { assertDiskRoom(tmpdir(), binaryBuf.length) } catch { return null }
   const tmpBin = path.join(tmpdir(), `tapflow-lipo-${randomUUID()}`)
   fs.writeFileSync(tmpBin, binaryBuf)
   try {
