@@ -174,6 +174,7 @@ function CaptureSession({ tap, session, snapshot, bundleId, setBusy, close }: {
         return recorded ? compareWithRecording(recorded, tap.surface(), masks, signal) : Promise.resolve(null)
       },
       onAfter: (index, after) => {
+        if (!run.isCurrent(signal)) return
         if (after.screenshot) run.keep(after.screenshot)
         dispatch({ type: 'step-after', index, after })
       },

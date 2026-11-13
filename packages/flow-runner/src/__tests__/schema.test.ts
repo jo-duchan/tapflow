@@ -495,5 +495,10 @@ describe('parseFlow — exact', () => {
     expect(() => parseFlow(flow('{ id: "total", exact: true }'), 'f.yaml')).toThrow(/"exact" needs a "label"/)
     expect(() => parseFlow(flow('{ label: "x", exact: false }'), 'f.yaml')).toThrow(/"exact" must be true/)
   })
+  // CodeRabbit on #1158: the JSON schema an editor validates with refuses what the parser refuses.
+  it('is refused without a label by the JSON schema too', () => {
+    const schema = JSON.parse(readFileSync(join(dirname(fileURLToPath(import.meta.url)), '..', '..', 'schema', 'tapflow-flow.schema.json'), 'utf8'))
+    expect(schema.definitions.selector.oneOf[1].dependencies).toEqual({ exact: ['label'] })
+  })
 })
 

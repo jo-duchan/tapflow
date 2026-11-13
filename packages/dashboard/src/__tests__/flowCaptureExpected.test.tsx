@@ -55,6 +55,13 @@ describe('what the flow gets', () => {
     expect(editedCapture(secret)!.steps.some((s) => s.step?.type === 'assertVisible')).toBe(false)
   })
 
+  // CodeRabbit on #1158: removing the step made a secret does not let its value back into the file.
+  it('keeps a made secret\'s value out of the file after its step is removed', () => {
+    const signedIn = { label: 'Signed in as alice@x.com', exact: true as const }
+    const gone = reduce(reduce(reduce(edit, { type: 'add-expected', index: 1, selector: signedIn }), { type: 'make-secret', index: 3 }), { type: 'remove-step', index: 3 })
+    expect(editedCapture(gone)!.steps.some((s) => s.step?.type === 'assertVisible')).toBe(false)
+  })
+
   it('takes one element once, and removes it by its place', () => {
     const twice = reduce(reduce(edit, { type: 'add-expected', index: 1, selector: total }), { type: 'add-expected', index: 1, selector: total })
     expect(twice.expected[1]).toHaveLength(1)
@@ -168,6 +175,26 @@ describe('Edit, a tap and the screen it left', () => {
     await waitFor(() => expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Show “Total ₩32,000” on the screen after this tap' })))
     fireEvent.click(screen.getByRole('button', { name: 'Remove “Total ₩32,000” from what this tap should bring' }))
     await waitFor(() => expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Add what this tap should bring' })))
+  })
+
+  // CodeRabbit on #1158: what the file leaves out is not shown as expected.
+  it('strikes out an expected element the flow leaves out for a secret, and does not count it', () => {
+    const signedIn = { label: 'Signed in as alice@x.com', exact: true as const }
+    const struck = reduce(reduce(edit, { type: 'add-expected', index: 1, selector: signedIn }), { type: 'make-secret', index: 3 })
+    draw(struck)
+    expect(within(row(1)).queryByText('1 expected')).not.toBeInTheDocument()
+    expect(within(row(1)).queryByText(/expected/)).toBeNull()
+    pick(1)
+    expect(within(row(1)).getByRole('button', { name: /left out of the flow/ })).toBeInTheDocument()
+    expect(within(row(1)).getByText(/so the flow leaves it out/)).toBeInTheDocument()
+  })
+
+  it('takes the YAML away when an expected element is asked for', () => {
+    draw(reduce(edit, { type: 'add-expected', index: 1, selector: total }))
+    pick(1)
+    fireEvent.click(screen.getByRole('button', { name: 'Show YAML' }))
+    fireEvent.click(within(row(1)).getByRole('button', { name: 'Show “Total ₩32,000” on the screen after this tap' }))
+    expect(screen.getByRole('img', { name: 'The screen after #2' })).toBeInTheDocument()
   })
 
   it('marks a step found by its place among elements alike', () => {

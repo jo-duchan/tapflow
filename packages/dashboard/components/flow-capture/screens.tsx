@@ -18,7 +18,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
 import { cn } from '@/lib/utils'
 import { copy } from '@/lib/flowCapture/copy'
-import { asSecret, editedCapture, fileNameOf, moveEdge, yamlOf, type Edge } from '@/lib/flowCapture/flow'
+import { asSecret, fileNameOf, holdsSecret, moveEdge, secretValues, yamlOf, type Edge } from '@/lib/flowCapture/flow'
 import { askedReady, type CaptureEvent, type CaptureState } from '@/lib/flowCapture/machine'
 import type { CaptureTap } from '@/lib/flowCapture/tap'
 import { markOf } from '@/lib/flowCapture/marks'
@@ -558,7 +558,8 @@ export function EditScreen({ state, dispatch, flow, renameCheck, onVerify, onBac
     const to = target === 'last-chip' && chips?.length ? chips[chips.length - 1] : row?.querySelector<HTMLButtonElement>('[data-add-expected]')
     to?.focus()
   })
-  const secrets = Object.values(editedCapture(state)?.secrets ?? {})
+  // The values the file must not hold, removed steps' too: what Edit refuses to offer and what it strikes out.
+  const secrets = secretValues(state)
   const listRef = useRef<HTMLOListElement>(null)
   const yaml = flow ? safeYaml(flow) : ''
 
@@ -614,8 +615,8 @@ export function EditScreen({ state, dispatch, flow, renameCheck, onVerify, onBac
             {kept.map(({ s, i }, position) => (
               <EditRow key={i} index={i} step={madeSecret(s, state.made[i])} made={state.made[i] !== undefined} selected={selected === i}
                 onSelect={() => select(i)} onRemove={() => remove(i, position)}
-                expected={state.expected[i] ?? []} canExpect={selected === i && after !== null} shown={view === 'after' ? shown : null}
-                onAddExpected={() => { setView('after'); setShown(null) }} onShowExpected={(sel) => { setView('after'); setShown(sel) }}
+                expected={state.expected[i] ?? []} leftOut={(sel) => holdsSecret(sel, secrets)} canExpect={selected === i && after !== null} shown={view === 'after' ? shown : null}
+                onAddExpected={() => { setShowYaml(false); setView('after'); setShown(null) }} onShowExpected={(sel) => { setShowYaml(false); setView('after'); setShown(sel) }}
                 onRemoveExpected={(n) => { dispatch({ type: 'remove-expected', index: i, n }); setShown(null); focusOnRow('add') }}
                 renamedTo={secretBase(madeSecret(s, state.made[i])) !== null ? state.renamed[secretBase(madeSecret(s, state.made[i]))!] : undefined}
                 onRename={(from, to) => dispatch({ type: 'rename-secret', from, to })} renameCheck={renameCheck}
@@ -650,7 +651,7 @@ const secretBase = (step: CapturedRow): string | null => (step.step?.type === 'i
 
 function EditRow({
   index, step, made, selected, onSelect, onRemove, renamedTo, onRename, renameCheck, onMakeSecret, onKeepAsText,
-  expected, canExpect, shown, onAddExpected, onShowExpected, onRemoveExpected,
+  expected, leftOut, canExpect, shown, onAddExpected, onShowExpected, onRemoveExpected,
 }: {
   index: number
   step: CapturedRow
@@ -664,6 +665,7 @@ function EditRow({
   canExpect: boolean
   shown: Selector | null
   onAddExpected: () => void
+  leftOut: (selector: Selector) => boolean
   onShowExpected: (selector: Selector) => void
   onRemoveExpected: (n: number) => void
   renamedTo: string | undefined
@@ -699,7 +701,7 @@ function EditRow({
           className="min-w-0 flex-1 truncate text-left text-sm leading-5 after:absolute after:inset-0 after:rounded-md after:content-[''] focus-visible:outline-none focus-visible:after:ring-2 focus-visible:after:ring-ring">
           <span className="text-muted-foreground">#{index + 1} </span>{label}
         </button>
-        {!canExpect && expected.length > 0 && <Badge variant="outline" className="shrink-0">{copy.expectedCount(expected.length)}</Badge>}
+        {!canExpect && expected.filter((sel) => !leftOut(sel)).length > 0 && <Badge variant="outline" className="shrink-0">{copy.expectedCount(expected.filter((sel) => !leftOut(sel)).length)}</Badge>}
         {byPosition(step) && <Badge variant="outline" className="shrink-0 border-dashed text-muted-foreground" title={copy.byPositionHint}>{copy.byPosition}</Badge>}
         {step.fragile && <Badge variant="outline" className="shrink-0">{copy.fragile}</Badge>}
         {step.auto && <Badge variant="outline" className="shrink-0">{copy.auto}</Badge>}
@@ -718,14 +720,16 @@ function EditRow({
         <div className="relative z-10 mt-2 flex flex-wrap items-center gap-1.5 border-t pt-2">
           <span className="mr-1 text-xs text-muted-foreground">{copy.expected}</span>
           {expected.map((sel, n) => (
-            <span key={JSON.stringify(sel)} className={cn('inline-flex h-6 items-center rounded-full border border-transparent bg-secondary text-xs text-secondary-foreground', sameSelector(sel, shown) && 'border-blue-500')}>
-              <button type="button" data-expected-chip className="h-full rounded-l-full pl-2 pr-1" aria-label={copy.showExpected(sel.label ?? sel.id ?? '')} onClick={() => onShowExpected(sel)}>
+            // Kept in the list, struck out, rather than hidden: Keep as text brings it back, and removal is by its place.
+            <span key={JSON.stringify(sel)} className={cn('inline-flex h-6 items-center rounded-full border border-transparent bg-secondary text-xs text-secondary-foreground', sameSelector(sel, shown) && 'border-blue-500', leftOut(sel) && 'text-muted-foreground line-through')}>
+              <button type="button" data-expected-chip className="h-full rounded-l-full pl-2 pr-1" aria-label={leftOut(sel) ? copy.expectedLeftOutLabel(sel.label ?? sel.id ?? '') : copy.showExpected(sel.label ?? sel.id ?? '')} onClick={() => onShowExpected(sel)}>
                 {copy.expectedChip(sel.label ?? sel.id ?? '')}
               </button>
               <button type="button" className="grid size-5 place-items-center rounded-full text-muted-foreground hover:bg-foreground/10" aria-label={copy.removeExpected(sel.label ?? sel.id ?? '')} onClick={() => onRemoveExpected(n)}>×</button>
             </span>
           ))}
           <button type="button" data-add-expected className="h-6 rounded-full border border-dashed px-2 text-xs text-muted-foreground hover:text-foreground" aria-label={copy.addExpectedLabel} onClick={onAddExpected}>{copy.addExpected}</button>
+          {expected.some(leftOut) && <p className="basis-full text-xs text-muted-foreground">{copy.expectedLeftOut}</p>}
         </div>
       )}
       {open && (secretName || typed) && (

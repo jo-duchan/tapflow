@@ -137,6 +137,8 @@ export const copy = {
   expectedChip: (label: string) => `“${label}”`,
   showExpected: (label: string) => `Show “${label}” on the screen after this tap`,
   removeExpected: (label: string) => `Remove “${label}” from what this tap should bring`,
+  expectedLeftOut: 'Struck out: it shows a secret’s value, so the flow leaves it out.',
+  expectedLeftOutLabel: (label: string) => `Show “${label}” on the screen after this tap — left out of the flow, it shows a secret’s value`,
   expectedCount: (n: number) => `${n} expected`,
   expectTitle: (label: string) => `Expect “${label}” after this tap`,
   expectMatches: (n: number) => `Matches ${n} ${n === 1 ? 'element' : 'elements'} here`,

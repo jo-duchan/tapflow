@@ -15,10 +15,8 @@ export function editedCapture(state: Pick<CaptureState, 'captured' | 'removed' |
     // A removed step's value goes with it: renamed onto a kept secret, it would be what Verify types there.
     if (!removed.includes(Number(i)) && s?.step?.type === 'inputText') values[name] = s.step.text
   }
-  // An expected element whose text holds a secret's value would write it into the file: left out, whenever the secret
-  // was made — before or after the element was picked.
-  const hidden = Object.values(values)
-  const shows = (sel: Selector) => !mentionsSecret(sel.label ?? '', hidden) && !mentionsSecret(sel.id ?? '', hidden)
+  const hidden = secretValues(state)
+  const shows = (sel: Selector) => !holdsSecret(sel, hidden)
   // One pass over the captured steps, by their own indices: what is removed and what is expected are both keyed by them.
   const steps = captured.steps
     .flatMap((s, i): CapturedStep[] => {
@@ -39,6 +37,22 @@ export function editedCapture(state: Pick<CaptureState, 'captured' | 'removed' |
     if (used.has(to)) secrets[to] = value
   }
   return { ...captured, steps, secrets }
+}
+
+/** Every value the file must not hold (1b-3c): the passwords, and the text of every step made a secret — removed ones
+ *  too. A removed step's value is out of what Verify types, but an element picked while it was there can still show it. */
+export function secretValues(state: Pick<CaptureState, 'captured' | 'made'>): string[] {
+  const made = Object.keys(state.made).flatMap((i) => {
+    const s = state.captured?.steps[Number(i)]
+    return s?.step?.type === 'inputText' ? [s.step.text] : []
+  })
+  return [...Object.values(state.captured?.secrets ?? {}), ...made]
+}
+
+/** Whether an expected element's selector holds one of `values`: it is left out of the file, whenever the secret was
+ *  made — before or after the element was picked. */
+export function holdsSecret(sel: Selector, values: readonly string[]): boolean {
+  return mentionsSecret(sel.label ?? '', values) || mentionsSecret(sel.id ?? '', values)
 }
 
 /** A typed step made the secret `name` (1b-3c): what Edit draws and what the file gets. */
