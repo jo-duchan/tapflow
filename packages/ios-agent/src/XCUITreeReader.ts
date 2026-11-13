@@ -130,6 +130,9 @@ async function answers(port: number, token: string): Promise<boolean> {
 // Drives the resident XCUITest tree runners, one per simulator: builds the runner once, launches it per device
 // (staying resident), and queries GET /tree over the simulator-shared loopback. Replaces the AXUIElement path
 // (UITreeReader), which required a Simulator.app window.
+/** How long a runner nobody kept is left attached after its last request ends (see `kept`). */
+export const RUNNER_IDLE_MS = 30_000
+
 export class XCUITreeReader {
   private readonly runners = new Map<string, RunnerHandle>()
   private readonly starting = new Map<string, Promise<ReadyRunner>>()
@@ -141,8 +144,34 @@ export class XCUITreeReader {
   // stop()'s share, so stopping everything also cancels a device that is only building and holds no handle yet.
   private readonly generations = new Map<string, number>()
   private epoch = 0
+  // A runner an automation client's boot warmed stays for the device's life. Any other — started by a person's Capture
+  // dialog asking for a tree or a reach — is released once no request has been in flight for `idleMs`: an attached
+  // runner made a busy SwiftUI app visibly lag with no query running (measured on Food Truck, iOS 26.5), so one left
+  // behind would bring the lag back for the rest of the person's session.
+  private readonly kept = new Set<string>()
+  private readonly inFlight = new Map<string, number>()
+  private readonly idle = new Map<string, ReturnType<typeof setTimeout>>()
 
-  constructor(private readonly native: RunnerNative = defaultNative) {}
+  constructor(private readonly native: RunnerNative = defaultNative, private readonly idleMs = RUNNER_IDLE_MS) {}
+
+  private begin(udid: string): void {
+    this.inFlight.set(udid, (this.inFlight.get(udid) ?? 0) + 1)
+    clearTimeout(this.idle.get(udid))
+    this.idle.delete(udid)
+  }
+
+  private end(udid: string): void {
+    const left = (this.inFlight.get(udid) ?? 1) - 1
+    if (left > 0) { this.inFlight.set(udid, left); return }
+    this.inFlight.delete(udid)
+    if (this.kept.has(udid) || !this.runners.has(udid)) return
+    const timer = setTimeout(() => {
+      this.idle.delete(udid)
+      if (!this.kept.has(udid) && !this.inFlight.has(udid)) this.stopIfDevice(udid)
+    }, this.idleMs)
+    timer.unref?.()
+    this.idle.set(udid, timer)
+  }
 
   private destination(udid: string): string {
     // No arch — xcodebuild resolves it (arm64 on Apple Silicon, x86_64 on Intel).
@@ -218,12 +247,14 @@ export class XCUITreeReader {
    * Start the runner before anything asks for a tree, for a device an automation client just booted. A cold
    * start is about 3 s on a running simulator and 8–9 s right after a boot (iOS 26.5), and on the first query
    * that time is spent inside the step's selector timeout (10 s by default). Manual sessions are not warmed:
-   * they never read the tree, and a runner costs about 650 MB per device.
+   * they never read the tree, and an attached runner makes a busy app lag (and costs 110–360 MB, measured). A device
+   * warmed here keeps its runner until `unkeep` or a stop.
    *
    * Each device has its own runner, so warming one never touches another's. A read during the warm-up waits on
    * the same launch.
    */
   warm(udid: string): void {
+    this.kept.add(udid)
     if (this.starting.has(udid)) return
     const held = this.runners.get(udid)
     let generation = this.generation(udid)
@@ -337,6 +368,15 @@ export class XCUITreeReader {
   /** The tree with the app's interface turn the runner read beside it (`UiTreeResponse.interfaceTurn`). */
   async readWithTurn(udid: string, bundleId: string): Promise<{ elements: UIElement[]; interfaceTurn?: 0 | 90 | 180 | 270 }> {
     if (!bundleId) throw new PlatformError('UI tree query needs a foreground app — launch an app first')
+    this.begin(udid)
+    try {
+      return await this.readTree(udid, bundleId)
+    } finally {
+      this.end(udid)
+    }
+  }
+
+  private async readTree(udid: string, bundleId: string): Promise<{ elements: UIElement[]; interfaceTurn?: 0 | 90 | 180 | 270 }> {
     const handle = await this.ensureRunner(udid)
     let text: string
     try {
@@ -365,50 +405,21 @@ export class XCUITreeReader {
   }
 
   /**
-   * The keyboard-focused text field (#1135), from the runner's `/field`: the value as the app holds it, unquoted and
-   * whole, where the tree's `value:` is cut at 18 characters (measured). A secure field comes back without one. The
-   * body is a field's contents, typed or filled in: it is parsed and returned, never logged.
-   */
-  async readField(udid: string, bundleId: string): Promise<{ field: FocusedField | null; reason?: FieldReadReason; keyboard?: KeyboardState }> {
-    if (!bundleId) return { field: null, reason: 'no-app' }
-    const handle = await this.ensureRunner(udid)
-    let body: unknown
-    try {
-      const r = await fetch(`http://localhost:${handle.port}/field?bundleId=${encodeURIComponent(bundleId)}`, { signal: AbortSignal.timeout(5_000) })
-      if (!r.ok) return { field: null, reason: 'failed' }
-      body = await r.json()
-    } catch (e) {
-      if (refused(e)) this.dropRunner(udid, handle)
-      return { field: null, reason: 'failed' }
-    }
-    const keyboard = toKeyboardState((body as { keyboard?: unknown } | null)?.keyboard)
-    return { ...toFocusedField(body), ...(keyboard.shown !== null ? { keyboard } : {}) }
-  }
-
-  /**
-   * The soft keyboard (#1135), from the runner's `/keyboard`: one query, about the cost of a field read. Unknown, never
-   * hidden, when it cannot be asked.
-   */
-  async readKeyboard(udid: string, bundleId: string): Promise<KeyboardState> {
-    if (!bundleId) return { shown: null }
-    const handle = await this.ensureRunner(udid)
-    try {
-      const r = await fetch(`http://localhost:${handle.port}/keyboard?bundleId=${encodeURIComponent(bundleId)}`, { signal: AbortSignal.timeout(5_000) })
-      if (!r.ok) return { shown: null }
-      return toKeyboardState(await r.json())
-    } catch (e) {
-      if (refused(e)) this.dropRunner(udid, handle)
-      return { shown: null }
-    }
-  }
-
-  /**
    * Where touches meant for `targets` land, as the runner's XCTest judges them (`/reach`, #1125). Every target `unknown`
    * when the runner cannot answer: the client taps then knowing the tap was not checked. ~130 ms a target (measured).
    */
   async reach(udid: string, bundleId: string, targets: ReachTarget[]): Promise<ReachResult[]> {
     const unknown = (reason: string): ReachResult[] => targets.map(() => ({ state: 'unknown', reason }))
     if (!bundleId) return unknown('no app has been launched or installed')
+    this.begin(udid)
+    try {
+      return await this.reachOnce(udid, bundleId, targets, unknown)
+    } finally {
+      this.end(udid)
+    }
+  }
+
+  private async reachOnce(udid: string, bundleId: string, targets: ReachTarget[], unknown: (reason: string) => ReachResult[]): Promise<ReachResult[]> {
     const handle = await this.ensureRunner(udid)
     const q = encodeURIComponent(Buffer.from(JSON.stringify(targets)).toString('base64'))
     try {
@@ -433,9 +444,24 @@ export class XCUITreeReader {
     this.killHandle(handle)
   }
 
+  /**
+   * A device booted for a person after an automation client warmed it: its runner is no longer kept, and goes the way of
+   * any other once idle — or a person picking the device up after a flow run would keep the runner, and its lag, all
+   * session.
+   */
+  unkeep(udid: string): void {
+    if (!this.kept.delete(udid)) return
+    if (this.inFlight.has(udid)) return
+    this.inFlight.set(udid, 1)
+    this.end(udid)
+  }
+
   // Stop every device's runner, including launches still building (agent shutdown).
   stop(): void {
     this.epoch++
+    this.kept.clear()
+    for (const timer of this.idle.values()) clearTimeout(timer)
+    this.idle.clear()
     for (const handle of this.runners.values()) this.killHandle(handle)
     this.runners.clear()
   }
@@ -443,6 +469,9 @@ export class XCUITreeReader {
   // Stop this device's runner, or the launch starting one for it — on device shutdown and before an erase.
   stopIfDevice(udid: string): void {
     this.bumpGeneration(udid)
+    this.kept.delete(udid)
+    clearTimeout(this.idle.get(udid))
+    this.idle.delete(udid)
     const handle = this.runners.get(udid)
     if (!handle) return
     this.runners.delete(udid)

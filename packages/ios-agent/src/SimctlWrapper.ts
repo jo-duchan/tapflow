@@ -638,6 +638,12 @@ export class SimctlWrapper {
     await this.runner.exec('spawn', udid, 'launchctl', 'setenv', name, value)
   }
 
+  /** Whether `bundleId` has a process on the device: its `UIKitApplication:<bundle>[…]` job in `launchctl list`. */
+  async appRunning(udid: string, bundleId: string): Promise<boolean> {
+    const out = await this.runner.exec('spawn', udid, 'launchctl', 'list')
+    return out.split('\n').some((line) => line.includes(`UIKitApplication:${bundleId}[`) && /^\d+\s/.test(line.trim()))
+  }
+
   async showSoftwareKeyboard(udid: string): Promise<void> {
     await this.kbd.show(udid)
   }

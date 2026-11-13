@@ -306,7 +306,9 @@ ids it has pictures of; each is read with `GET …/capture/snapshot/thumbnails/:
   typed, and any text the app or AutoFill put there — which only the capture keeps. It is accepted only from the
   session's own agent socket, and a secure field's `value` is dropped here whatever the agent sent. On a Mac over its
   memory line no field is read and a recorded boot warms nothing: a person's join is let past the memory check because
-  their device is up, and the runner a read needs is not (`recorded` on `device:boot`).
+  their device is up, and an older iOS agent's runner, which its reads need, is not (`recorded` on `device:boot`). A
+  current iOS agent reads from inside the app and starts no runner (ios-agent AGENTS.md, "App observer"); the gate is
+  not relaxed for it, which only leaves those steps unread on a Mac short of memory.
 - **Another person taking a device resets its keyboard language** (#1134). A device keeps the language a tester
   switched to, so the next person's keys would type in it. `SessionManager` keeps `lastPersonUser` — a signed-in
   person, never an AI client, `anon` or `unidentified:*`, so coming back from one's own MCP or flow run is not someone

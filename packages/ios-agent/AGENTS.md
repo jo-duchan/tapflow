@@ -373,7 +373,7 @@ The iOS UI tree comes from a resident **XCUITest runner** that runs *inside* the
 - `XCUITreeReader.ts` builds the runner (`build-for-testing`, cached under `xctest-runner/build/`, gitignored) and rebuilds when `build/tapflow-runner.stamp` no longer matches the runner sources, the checked-in project and `xcodebuild -version`. It launches one runner per device (`test-without-building`, resident), then fetches `/tree` from that device's port. Faults on one device (a refused read, a start that never answered) drop only that device's runner. `xcuiTree.ts` parses the debugDescription text into the unified schema — kept a **pure function** so it stays unit-testable against the `xcuiTree.test.ts` fixture (Open Q9: a future Xcode format change fails there).
 - Queries by bundleId: the reader needs the foreground app's bundleId, tracked in `IOSAgent.lastBundleIds` on `app:launch` and on a successful `app:install` (a person may open the app from its home-screen icon rather than with Launch) — deliberately outside `DeviceState`, so it survives a relay reconnect that rebuilds that map. `readUITree` throws an actionable `PlatformError` if no app has been launched — never a silent empty tree.
 - Frames: debugDescription frames are points; the parser normalizes them 0-1 against the `Window` frame (same coordinate space as the touch path).
-- Lifecycle: started when an automation client (flow runner, MCP) boots the device, or a person Flow Capture records boots it on a relay that knows this agent reads fields (`recorded` on `device:boot`, #1135), otherwise on the first UI-tree query. A manual QA session with capturing off never pays for it. The cost was written here as about 650 MB per device; measured 2026-11-08 on iOS 26.4–26.5 it was 66–269 MB for the runner plus 46–92 MB for its xcodebuild (RSS). Warming for a recorded person is what lets the first field they type into be read: started on that first key, the runner's cold start (~12.5 s measured) outlasts the typing, and the read counts as not read. Keys are not slowed by it — measured, 20 keys typed during a cold start acked in 1 ms each and all landed, focus kept. Killed on that device's shutdown, before an erase boot, and for every device on disconnect.
+- Lifecycle: started when an automation client (flow runner, MCP) boots the device, and kept until a person boots it (`unkeep`); otherwise on the first UI-tree or reach query, and **released once no request has been in flight for 30 s** (`RUNNER_IDLE_MS`, counted from the last request in flight, so a Match or Verify replay is not cut off). A recorded person's boot no longer warms it (`recorded` on `device:boot` is ignored here): their keyboard and field reads come from the app observer below. **An attached runner costs the app, not only memory**: measured on Food Truck (iOS 26.5), the app lagged visibly with the runner attached and no query running, and was smooth with it gone; each `/keyboard` query also held the app 70–155 ms. The memory was written here as about 650 MB per device; measured 2026-11-08 on iOS 26.4–26.5 it was 66–269 MB for the runner plus 46–92 MB for its xcodebuild (RSS). Killed on that device's shutdown, before an erase boot, and for every device on disconnect. `/keyboard` and `/field` stay in the runner for an agent's own checks; the agent no longer asks them.
 - `enabled`: debugDescription does not expose it, so elements default to `enabled: true`. If fidelity needs it, switch to the private snapshot API (plan Open Q9).
 - `secure` / `focused` (Flow Capture, #1125): `secure` is `type === 'SecureTextField'`, stated `true` or `false` on **every** input so that an input without it means "unknown" to a consumer deciding whether typed text may be written down. `focused` comes from `Keyboard Focused` in the line's **trailing flags only** — the whole line would match a quoted label containing those words — and only on an input: a tab prints `Selected, Focused` and is not where typing goes. Measured on iOS 26.5 / Xcode 26.6 and iOS 27.0 / Xcode 27.1, UIKit and SwiftUI alike: `SecureTextField, …, placeholderValue: 'Password', value: •••, Keyboard Focused`.
 
@@ -385,6 +385,67 @@ After editing runner sources, regenerate the committed project (the runner binar
 ```bash
 cd packages/ios-agent/xctest-runner && xcodegen generate
 ```
+
+---
+
+### App observer (Flow Capture's keyboard and field reads)
+
+`src/app-observer.m`, linked into `bin/libtapflow-nethook.dylib`, answers the relay's `ui:keyboard:request` and
+`ui:field:request` from **inside the app under test**, with no accessibility client: UIKit's keyboard notifications
+for the soft keyboard's frame, the responder chain for the focused field. `src/AppObserver.ts` is the host side. The
+XCUITest runner answered these before, and an attached runner made the app lag (see the runner's lifecycle above). The
+observer answers in the runner's own shapes, so `toKeyboardState` and `toFocusedField` read both.
+
+- **It rides on the network layer's injection, not its target.** `DYLD_INSERT_LIBRARIES` is set at every boot by
+  `SimulatorNetwork.arm()` (with or without the host system extension), so the code is in every process; it activates
+  only in the app `TAPFLOW_OBSERVE_BUNDLE` names, which the agent sets **at install** as well as before Launch, so an
+  app opened from its home-screen icon is observed. Its own variable: naming the network target also opens that
+  control's verdict window (`SimulatorNetwork.target`) and would unsettle an app already running.
+- **No UIKit or CoreGraphics at link time.** Every process in the simulator loads the dylib, daemons included, and the
+  gate runs after load. UIKit is reached at run time, after the gate: class names, selectors, the string values of its
+  constants, rects as four doubles. The gate has network-hook.m's refusals (an embedded NUL in the bundle id, a udid
+  that does not fit).
+- **Asked by file, answered by file, in `/tmp/tapflow-observe-<udid>` (0700).** The host's /tmp is the simulator's
+  (measured), so the agent writes a nonce to `request` by rename and the app, watching the directory, answers
+  `<nonce>.json` (0600), which the agent reads and removes; an answer whose nonce or bundle is not the one asked is
+  dropped. 3–4 ms a request, measured; a Darwin notification needed a `simctl spawn` per request, 441 ms. The agent
+  asks one request at a time per device (a keyboard probe and a field read are often asked together), each answer
+  carries both, and a read that waited in that line longer than the relay waits (4 s) is answered unknown without
+  asking. `prepare()` makes the directory 0700 (`chmod` too: `mkdir` leaves one that exists as it was) and empties it of
+  answers and requests at every boot; the background marker stays, since a device picked up again may hold the app
+  suspended, and a new process clears it itself. The request is taken back once answered or given up on, since a process started within 2 s answers one
+  left behind; an answer that lands after its asker gave up is removed 3 s later, and any answer (or `.tmp`) older than
+  5 s is swept at each request. So a non-secure value outlives its read by a few seconds at most.
+- **No answer is not the home screen.** A suspended app cannot answer, so the observer leaves a `background` marker on
+  `DidEnterBackground` and clears it on `WillEnterForeground`. Marker present, or no process for the app
+  (`launchctl list`): `away`, the runner's "not in front" (`shown: null`, `onHome: true`; field `no-app`). Running and
+  silent: unknown (`shown: null`; field `failed`). `DidEnterBackground`, never resign-active, which a permission alert,
+  Control Center and the app switcher also send (measured on iOS 26.5 and 27.0). On iOS 27 another app's cold launch
+  delays the background by 7–9 s, but the other app shows nothing until then (screenshots once a second, measured), so
+  nothing can be typed there in the window.
+- **Each answer carries the app's state, because answering does not mean being in front.** An app keeps running for a
+  while after it leaves the foreground: measured on iOS 27, it answered 3 s after Home, past its own
+  `DidEnterBackground`. So `keyboardOf` reads `applicationState`: background is "not in front"; inactive with the
+  keyboard up is unknown (Home was pressed and the app has not reached the background — 0.5–2 s, measured — and a touch
+  on the home screen there must not be judged against that keyboard); inactive with the keyboard down is down, so a
+  permission alert's Allow stays an app tap. Shown only when the end frame overlaps the window by more than a point each
+  way (EarlGrey's rule), so a hardware keyboard's accessory alone reads as not shown. An app still coming up (launched,
+  or opened from its icon) gets up to 1 s to become active before it answers, and a request written before it was
+  watching is answered at start if it is under 2 s old; on iOS 27 a cold launch can outlast the agent's 1.5 s, which
+  reads as unknown.
+- **A field read is trusted as not secure only from UIKit's text classes** (`UITextField`, `UITextView` and their
+  subclasses: SwiftUI's `UIKitTextField`, React Native's `RCTUITextField`). Any other first responder — a WKWebView, whose
+  field lives in another process (it read `secure: false` on a password input), Flutter, a custom `UITextInput` —
+  answers `reason: secure`, which flow-runner turns into a secret step. So does any field read while the app is not
+  active: typing then goes elsewhere, a system sign-in alert's password field among them.
+- **What it does not read**: a SwiftUI field's `.accessibilityIdentifier`, which SwiftUI keeps on its accessibility
+  node and creates only with app accessibility on (`ApplicationAccessibilityEnabled`). Left off on purpose (decided
+  2026-11-14): it persists on the device and an agent that dies could not restore it. Such a field is told apart by
+  placeholder and frame, and Match cannot add a focusing tap for it — failures that show as unread or a divergence,
+  never a wrong flow. The home screen is outside the app too, hence the marker.
+- **Verified with a probe app** on iOS 26.5 (MacBook) and 27.0 (Mac mini, Xcode 27.1): UIKit, SwiftUI `TextField` and
+  `SecureField`, React Native fields, a WKWebView's inputs, the soft keyboard in portrait and landscape, a hardware
+  keyboard, and the lifecycle above. The probe is not committed; the measurements are here.
 
 ---
 
