@@ -8,6 +8,7 @@ import { initDb, getDb, closeDb } from '../db'
 import { makePasswordHash } from '../api/auth'
 import { signJwt } from '../middleware/auth'
 import { writeZipFixture, makeAppZip } from './helpers/zipFixture'
+import { minFreeDiskBytes } from '../lib/uploads'
 
 const APP_PLIST = `<?xml version="1.0" encoding="UTF-8"?>
 <plist version="1.0"><dict>
@@ -234,7 +235,8 @@ describe('upload size-limit handling', () => {
     const realStatfs = fs.statfsSync.bind(fs)
     vi.spyOn(fs, 'statfsSync').mockImplementation(((p: fs.PathLike) => {
       const st = realStatfs(p)
-      return String(p) === os.tmpdir() ? { ...st, bsize: 1, bavail: 0 } : st
+      // One byte over the floor: only the executable's own length takes it below, so the check must count it.
+      return String(p) === os.tmpdir() ? { ...st, bsize: 1, bavail: minFreeDiskBytes() + 1 } : st
     }) as typeof fs.statfsSync)
     const lipoWrites: string[] = []
     const realWrite = fs.writeFileSync.bind(fs)
