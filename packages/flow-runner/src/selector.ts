@@ -1,7 +1,7 @@
 import type { UIElement } from '@tapflowio/agent-core'
 import type { Selector } from './schema.js'
 
-// Selector resolution: explicit id → identifier only; explicit label → exact then partial; bare text →
+// Selector resolution: explicit id → identifier only; explicit label → exact then partial (exact only with `exact`); bare text →
 // exact identifier, then exact label, then partial label, then exact placeholder. The placeholder comes last
 // so it only answers a selector that found nothing before it existed — a flow that resolved by label keeps
 // resolving to the same element. It is never matched in part: placeholders are short, common words
@@ -28,7 +28,7 @@ export function matchSelector(tree: UIElement[], sel: Selector): UIElement[] {
     if (sel.label !== undefined) {
       const label = sel.label
       const exact = pool.filter((e) => e.label === label)
-      pool = exact.length > 0 ? exact : pool.filter((e) => e.label.includes(label))
+      pool = exact.length > 0 || sel.exact ? exact : pool.filter((e) => e.label.includes(label))
     }
   }
   if (sel.role !== undefined) pool = pool.filter((e) => e.role === sel.role)

@@ -484,3 +484,21 @@ describe('points and secrets', () => {
     expect(() => step(yaml)).toThrow(error)
   })
 })
+
+// 1b-3c: `exact` on a selector, for a value a flow checks.
+describe('parseFlow — exact', () => {
+  const flow = (sel: string) => `name: f\nappId: a\nsteps:\n  - assertVisible: ${sel}\n`
+  it('reads it beside a label', () => {
+    expect(parseFlow(flow('{ label: "Total $12", exact: true }'), 'f.yaml').steps[0]).toEqual({ type: 'assertVisible', selector: { label: 'Total $12', exact: true } })
+  })
+  it('refuses it without a label, or as anything but true', () => {
+    expect(() => parseFlow(flow('{ id: "total", exact: true }'), 'f.yaml')).toThrow(/"exact" needs a "label"/)
+    expect(() => parseFlow(flow('{ label: "x", exact: false }'), 'f.yaml')).toThrow(/"exact" must be true/)
+  })
+  // CodeRabbit on #1158: the JSON schema an editor validates with refuses what the parser refuses.
+  it('is refused without a label by the JSON schema too', () => {
+    const schema = JSON.parse(readFileSync(join(dirname(fileURLToPath(import.meta.url)), '..', '..', 'schema', 'tapflow-flow.schema.json'), 'utf8'))
+    expect(schema.definitions.selector.oneOf[1].dependencies).toEqual({ exact: ['label'] })
+  })
+})
+

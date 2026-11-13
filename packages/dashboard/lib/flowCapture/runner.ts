@@ -4,7 +4,7 @@ import {
   toFlowSteps, waitForStableScreen, type CapturedStep, type Flow, type FlowResult, type KeyModifier, type MatchContext,
   type RawStep, type ScreenRect, type StepExpect, type StepRange,
 } from '@tapflowio/flow-runner/browser'
-import { chromeOrientation } from '@tapflowio/protocol/screen'
+import { chromeOrientation, type InterfaceTurn } from '@tapflowio/protocol/screen'
 import type { AndroidChrome, ChromePayload, UIElement } from '@tapflowio/protocol'
 import type { CaptureSnapshot } from '@tapflowio/protocol/capture'
 import { copy } from './copy'
@@ -161,9 +161,20 @@ export interface MatchHooks {
   /** The screen a step is about to act on against the one it was recorded on (1b-3b), `masks` left out of both: what it
    *  measured when they differ, `null` when they look alike or cannot be compared. */
   compare?: (step: RawStep, masks: ScreenRect[]) => Promise<ScreenDivergence | null>
+  /** The screen a touch left, by its index into the matched steps (1b-3c): Edit's "after this tap". Not on the steps,
+   *  which have gone to the dialog by then, and which Edit what matched takes as they are. */
+  onAfter?: (index: number, after: AfterTouch) => void
   /** They differ, at `index` into the steps: resolves when the person goes on, rejects when the run is stopped. */
   onDiverged?: (index: number, divergence: ScreenDivergence) => Promise<void>
   signal: AbortSignal
+}
+
+/** The screen right after a touch: its tree (as the app draws it, turned by `interfaceTurn` from the picture) and its
+ *  picture, an object URL. */
+export interface AfterTouch {
+  tree: UIElement[]
+  interfaceTurn?: InterfaceTurn
+  screenshot?: string
 }
 
 /** What the comparison measured, and the picture it measured: shown beside the recording's. */
@@ -221,12 +232,22 @@ export async function matchRange(
   // steps rather than on them, since those went to the dialog already; Export writes only what Verify sees too.
   const effects = new EffectWatch()
   const observed = new Map<CapturedStep, StepExpect | null>()
-  let watching: { step: CapturedStep; before: UIElement[]; touched?: UIElement } | undefined
-  const closeWatch = (after: UIElement[] | undefined) => {
-    if (watching && after) {
-      observed.set(watching.step, effects.observe(watching.before, after, after, watching.touched ? { touched: watching.touched } : {}))
-    }
+  let watching: { step: CapturedStep; index: number; before: UIElement[]; touched?: UIElement } | undefined
+  // The screen the touch left, read before anything else happens on it: what Edit shows as "after this tap", where the
+  // person picks what the touch should bring (1b-3c). The next step's own picture is not it — a typing step's is the
+  // screen after the typing — so it is taken here, once, with the tree it is read with.
+  const closeWatch = async (after: { elements: UIElement[]; interfaceTurn?: InterfaceTurn } | null | undefined) => {
+    const closing = watching
     watching = undefined
+    if (!closing || !after) return
+    observed.set(closing.step, effects.observe(closing.before, after.elements, after.elements, closing.touched ? { touched: closing.touched } : {}))
+    if (!hooks.onAfter) return
+    const shot = await channel.screenshot(sessionId, hooks.signal).catch(() => null)
+    hooks.onAfter(closing.index, {
+      tree: after.elements,
+      ...(after.interfaceTurn !== undefined ? { interfaceTurn: after.interfaceTurn } : {}),
+      ...(shot ? { screenshot: URL.createObjectURL(new Blob([shot as BlobPart], { type: 'image/jpeg' })) } : {}),
+    })
   }
   // The turn goes into the flow too: the reset, Verify and a run all start upright, so a range held sideways would
   // replay its first steps on a screen laid out the other way (design review of #1139). After the clear and launch the
@@ -258,7 +279,7 @@ export async function matchRange(
     }
     await lease.ensure()
     let before = await waitForStableScreen(read, { timeoutMs: SETTLE_TIMEOUT_MS })
-    closeWatch(before?.elements)
+    await closeWatch(before)
     // Typing into a field the person focused before the range began: tapped first, and the tap goes into the flow.
     // The tree's frames are the app as drawn, which an iOS tap is not when the app is turned: then it is left as it was.
     const focus = before && !before.interfaceTurn ? focusTap(raw, before.elements) : undefined
@@ -325,12 +346,12 @@ export async function matchRange(
     const step = matchStep(raw, ctx)
     matched.push(step)
     if ((raw.kind === 'tap' || raw.kind === 'longPress') && before) {
-      watching = { step, before: before.elements, ...(questions[0] ? { touched: questions[0] } : {}) }
+      watching = { step, index: matched.length - 1, before: before.elements, ...(questions[0] ? { touched: questions[0] } : {}) }
     }
     hooks.onStep(step, shot ? URL.createObjectURL(new Blob([shot as BlobPart], { type: 'image/jpeg' })) : undefined)
   }
   // The last touch has no next step to read after it.
-  if (watching) closeWatch((await waitForStableScreen(read, { timeoutMs: SETTLE_TIMEOUT_MS }))?.elements)
+  if (watching) await closeWatch(await waitForStableScreen(read, { timeoutMs: SETTLE_TIMEOUT_MS }))
   // A Stop pressed during those last reads, which do not watch the signal, is a stop, not a run that finished.
   hooks.signal.throwIfAborted()
   return matched.map((m) => (observed.has(m) ? { ...m, observed: observed.get(m)! } : m))

@@ -8,6 +8,8 @@ export { matchStep, toFlowSteps, flowSteps, toScreen, hitTest, reachQuestions } 
 export type { MatchContext, CapturedStep, CapturedFlow, SkipReason, FragileReason } from './match.js'
 export { screenDiff, statusBarRect, turnRect, sameShape, SCREEN_DIFF_THRESHOLD } from './compare.js'
 export type { Pixels, Rect as ScreenRect } from './compare.js'
+export { expectedFor, mentionsSecret } from './expected.js'
+export type { ExpectedVerdict, ExpectRefusal, ExpectWarning } from './expected.js'
 export { flowToYaml } from './yaml.js'
 export { rawStepLabel, capturedStepLabel } from './label.js'
 export { keyChar } from './keys.js'

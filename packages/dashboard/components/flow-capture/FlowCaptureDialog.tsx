@@ -83,6 +83,9 @@ export default function FlowCaptureDialog({ tap, returnFocusRef, onClose }: {
         className="h-[min(calc(100dvh-4rem),56rem)] max-h-[min(calc(100dvh-4rem),56rem)] grid-rows-[auto_minmax(0,1fr)] overflow-hidden [--picture-max:calc(min(100dvh-4rem,56rem)-16rem)]"
         // A click beside a running replay would end it by accident; Escape and Stop still do, on purpose.
         onInteractOutside={(e) => { if (busy) e.preventDefault() }}
+        // Escape closes the innermost thing open: Edit's offer of an element (`data-escape-local`) before the dialog.
+        // Radix hears it first, on the document, so the offer's own handler alone would close everything.
+        onEscapeKeyDown={(e) => { if ((e.target as Element | null)?.closest?.('[data-escape-local]')) e.preventDefault() }}
         onCloseAutoFocus={(e) => { e.preventDefault(); returnFocusRef.current?.focus() }}
       >
         <DialogHeader>
@@ -169,6 +172,11 @@ function CaptureSession({ tap, session, snapshot, bundleId, setBusy, close }: {
       compare: (step, masks) => {
         const recorded = thumbnailUrl(tap.sessionId, snapshot, step)
         return recorded ? compareWithRecording(recorded, tap.surface(), masks, signal) : Promise.resolve(null)
+      },
+      onAfter: (index, after) => {
+        if (!run.isCurrent(signal)) return
+        if (after.screenshot) run.keep(after.screenshot)
+        dispatch({ type: 'step-after', index, after })
       },
       onDiverged: (index, divergence) => {
         run.keep(divergence.nowUrl)

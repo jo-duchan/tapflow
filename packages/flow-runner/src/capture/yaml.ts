@@ -8,6 +8,7 @@ function selectorValue(s: Selector): unknown {
     ...(s.label !== undefined ? { label: s.label } : {}),
     ...(s.role !== undefined ? { role: s.role } : {}),
     ...(s.index !== undefined ? { index: s.index } : {}),
+    ...(s.exact ? { exact: true } : {}),
     ...(s.timeoutMs !== undefined ? { timeout: s.timeoutMs / 1000 } : {}),
   }
 }

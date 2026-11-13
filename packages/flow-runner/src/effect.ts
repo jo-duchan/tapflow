@@ -57,6 +57,15 @@ const VOLATILE = [
   /\b(?=[A-Za-z0-9_-]*\d)(?=[A-Za-z0-9_-]*[A-Za-z])[A-Za-z0-9_-]{12,}\b/,
 ]
 const volatile = (text: string): boolean => VOLATILE.some((re) => re.test(text))
+/** iOS keyboard keys and the keyboard itself (Android's keyboard is another window and not in the app's tree). */
+const KEYBOARD_ROLES = new Set(['Key', 'Keyboard'])
+/** The clock, a date and a time ago of `VOLATILE` — not its long numbers, which are also the values a person checks
+ *  (a total, an order number): what Flow Capture warns about when a person expects such text (1b-3c). */
+export const tellsTime = (text: string): boolean => [0, 1, 3, 4].some((i) => VOLATILE[i]!.test(text))
+/** An element nothing typed or hides: an input shows what was typed, a secure one hides it, a key is the keyboard. */
+export const showsTyping = (e: UIElement): boolean => e.role === 'input' || e.secure === true || (e.rawRole !== undefined && KEYBOARD_ROLES.has(e.rawRole))
+/** An identifier the app gave the element for good, not one it minted for this run. */
+export const lastingId = (e: UIElement): string | undefined => (e.identifier && !MINTED.test(e.identifier) ? e.identifier : undefined)
 /** e2e's count text: a tally the screen shows of its own data, which another run's data changes. */
 const COUNT_TEXT = [/\b\d+\s*(?:to|-|–)\s*\d+\s+of\s+\d+\b/i, /\b\d+\s+(?:results?|items?|rows?|entries|records?|matches|total)\b/i]
 /** A label with its numbers taken out: two labels of one shape that differ only in their numbers. */
@@ -87,9 +96,6 @@ function driftingShapes(before: readonly UIElement[], after: readonly UIElement[
   moved(before, after, (label) => COUNT_TEXT.some((re) => re.test(label)))
   return drifting
 }
-/** iOS keyboard keys and the keyboard itself (Android's keyboard is another window and not in the app's tree). */
-const KEYBOARD_ROLES = new Set(['Key', 'Keyboard'])
-
 /** `inner`'s frame lies within `outer`'s: a button inside the dialog it closes. */
 const within = (inner: UIElement, outer: UIElement): boolean =>
   inner.frame.x >= outer.frame.x && inner.frame.y >= outer.frame.y
@@ -122,13 +128,14 @@ function identity(e: UIElement, hidden: readonly string[], drifting: ReadonlySet
   const cx = e.frame.x + e.frame.width / 2
   const cy = e.frame.y + e.frame.height / 2
   if (cx < 0 || cx > 1 || cy < 0 || cy > 1) return null
-  if (e.role === 'input' || e.secure === true || (e.rawRole !== undefined && KEYBOARD_ROLES.has(e.rawRole))) return null
+  if (showsTyping(e)) return null
   if (hidden.some((h) => h.length > 0 && (e.label.includes(h) || (e.identifier ?? '').includes(h)))) return null
   // A bare number with no id to name it is a badge or a tally (e2e's rule); with one, the id says what it counts.
-  const bareNumber = /^\d+$/.test(e.label) && !(e.identifier && !MINTED.test(e.identifier))
+  const id = lastingId(e)
+  const bareNumber = /^\d+$/.test(e.label) && !id
   const text = e.label.length > 0 && e.label.length <= MAX_TEXT && !volatile(e.label) && !bareNumber && !drifting.has(shapeOf(e.label))
     ? e.label : undefined
-  if (e.identifier && !MINTED.test(e.identifier)) return text !== undefined ? { id: e.identifier, text } : { id: e.identifier }
+  if (id) return text !== undefined ? { id, text } : { id }
   return text !== undefined ? { text, role: e.role } : null
 }
 
