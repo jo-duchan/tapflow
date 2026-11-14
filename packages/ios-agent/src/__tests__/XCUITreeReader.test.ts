@@ -146,6 +146,27 @@ describe('XCUITreeReader', () => {
       reader.stop()
     })
 
+    it('is held through a request still in flight when the person\'s boot comes', async () => {
+      const native = setup()
+      let release!: () => void
+      const slow = new Promise<void>((r) => { release = r })
+      fetchMock.mockImplementation(async (url: string) => {
+        if (url.includes('/tree') && url.includes('slow')) { await slow; return { ok: true, text: async () => TREE } as Response }
+        return healthy(url)
+      })
+      const reader = new XCUITreeReader(native, 30)
+      reader.warm('udid-A')
+      const held = reader.read('udid-A', 'com.slow')
+      await vi.waitFor(() => expect(fetchMock.mock.calls.some((c) => String(c[0]).includes('slow'))).toBe(true))
+      reader.unkeep('udid-A')
+      await wait(90)
+      expect(native.terminateRunner).not.toHaveBeenCalled()
+      release()
+      await held
+      await vi.waitFor(() => expect(native.terminateRunner).toHaveBeenCalledWith('udid-A'), { timeout: 1000 })
+      reader.stop()
+    })
+
     // `unkeep` while the warm-up was still building found no runner to time out; the runner it then started stayed
     // attached, and the person's app lagged, until the next read (review finding).
     it('is let go when the person\'s boot came while the warm-up was still building it', async () => {
