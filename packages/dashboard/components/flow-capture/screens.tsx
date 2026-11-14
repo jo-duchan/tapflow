@@ -512,7 +512,7 @@ function ReviewView({ state, review, tap, marks, onRestart, onContinue, onKeep, 
       <div className="grid min-h-0 gap-4 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
         <div className="flex min-h-0 flex-col items-center gap-2">
           {picture
-            ? <><StepPicture src={picture} step={review.matched[picked.index]!} /><p className="text-xs text-muted-foreground">{copy.reviewPicture(picked.step + 1)}</p></>
+            ? <><StepPicture src={picture} step={review.matched[picked.index]!} fill /><p className="text-xs text-muted-foreground">{copy.reviewPicture(picked.step + 1)}</p></>
             : <DeviceMirror tap={tap} label={copy.steps[1]} marks={marks} />}
         </div>
         {/* 4 px in on every side: the column scrolls, and a focus ring on its edge would be cut. */}
@@ -909,15 +909,17 @@ function SecretName({ from, current, onRename, renameCheck }: {
  * A step's replay picture, with where the person touched drawn on it, as the MCP watch view draws an agent's: a tap is
  * a ring, a swipe the same stroke (`SwipeStroke`).
  */
-function StepPicture({ src, step }: { src: string; step: CapturedStep }) {
+/** `fill`: drawn at the device's height, as the live device is beside it — a recorded picture (1b-3b) is 160 px wide,
+ *  and at its own size it shrank the device to a thumbnail when Match's review showed one (P2c). */
+function StepPicture({ src, step, fill = false }: { src: string; step: CapturedStep; fill?: boolean }) {
   const mark = markOf(step.raw)
   const pct = (n: number) => `${n * 100}%`
   return (
     // The border on the frame, not the image, as on the screen after a tap: on the image it came out of the height cap,
     // and the two pictures of one step differed by its width when the tabs were switched.
     // Not clipped: a tap's mark near the edge is drawn past it.
-    <div className="relative max-h-full self-start rounded-lg border">
-      <img src={src} alt={capturedStepLabel(step)} className="block max-h-[var(--picture-tap,var(--picture-max,60vh))] w-auto max-w-full rounded-md" />
+    <div className={cn('relative max-h-full rounded-lg border', fill ? 'self-center' : 'self-start')}>
+      <img src={src} alt={capturedStepLabel(step)} className={cn('block w-auto max-w-full rounded-md', fill ? 'h-[var(--picture-max,60vh)] bg-muted' : 'max-h-[var(--picture-tap,var(--picture-max,60vh))]')} />
       {mark && (
         <svg aria-hidden="true" data-testid="step-mark" className="pointer-events-none absolute inset-0 size-full overflow-visible">
           {mark.kind === 'swipe' ? (
