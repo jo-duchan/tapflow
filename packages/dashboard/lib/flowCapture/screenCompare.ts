@@ -51,13 +51,18 @@ export async function recordedAlike(a: string, b: string, masks: ScreenRect[]): 
     const pa = pixelsOf(first, first.width, first.height)
     const pb = pixelsOf(second, first.width, first.height)
     if (!pa || !pb) return false
-    const diff = screenDiff(pa, pb, masks)
-    return diff !== 'incomparable' && diff <= SCREEN_DIFF_THRESHOLD
+    // Not a cell different: "did nothing change" is a far narrower question than Match's "same screen" (1%), under
+    // which a stepper's digit or a switch flipping reads alike (review of P2c). Measured on the user's session
+    // af948002: the menu item that took two taps scores 0; neighbouring steps that changed the screen 0.045 and up.
+    return unchanged(screenDiff(pa, pb, masks))
   } finally {
     first?.close()
     second?.close()
   }
 }
+
+/** `recordedAlike`'s verdict on a `screenDiff`: not one cell different. */
+export const unchanged = (diff: number | 'incomparable'): boolean => diff === 0
 
 function pixelsOf(image: ImageBitmap, width: number, height: number): Pixels | null {
   const canvas = document.createElement('canvas')

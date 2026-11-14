@@ -1269,8 +1269,8 @@ describe('touch reports', () => {
     it('pairs taps one after the other on the same named element, and nothing else', () => {
       const steps = new Rec()
         .touch([[0.6, 0.52]]).touched({ moving: false, element: blueberry })
-        .touch([[0.45, 0.51]]).touched({ moving: false, element: blueberry })
-        .touch([[0.1, 0.1]]).touched({ moving: false, element: { label: 'Back', traits: 1 } })
+        .wait(1500).touch([[0.45, 0.51]]).touched({ moving: false, element: blueberry })
+        .wait(1500).touch([[0.1, 0.1]]).touched({ moving: false, element: { label: 'Back', traits: 1 } })
         .touch([[0.5, 0.5]]).touched({ moving: false, element: { label: 'Plus', traits: 1 } })
         .touch([[0.5, 0.5]])
         .steps()
@@ -1289,6 +1289,17 @@ describe('touch reports', () => {
       const refused = new Rec().touch([[0.6, 0.52]], { ok: false }).touched({ moving: false, element: blueberry })
         .touch([[0.45, 0.51]]).touched({ moving: false, element: blueberry }).steps()
       expect(retryCandidates(refused)).toEqual([])
+    })
+    // Review of P2c: a double tap is two taps by design; a quick second tap's picture may predate the first's effect;
+    // a field's first tap may only place the caret.
+    it('does not pair a double tap, two taps under a second apart, or taps into a field', () => {
+      const pair = (b: Partial<TouchObservation>, gap = 1500, element = blueberry) => retryCandidates(new Rec()
+        .touch([[0.6, 0.52]]).touched({ moving: false, element })
+        .wait(gap).touch([[0.6, 0.52]]).touched({ moving: false, element, ...b }).steps())
+      expect(pair({})).toEqual([[0, 1]])
+      expect(pair({ tapCount: 2 })).toEqual([])
+      expect(pair({}, 400)).toEqual([])
+      expect(pair({}, 1500, { identifier: 'form.email', traits: 0, input: true } as never)).toEqual([])
     })
   })
 

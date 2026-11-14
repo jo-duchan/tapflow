@@ -614,7 +614,8 @@ describe('loadSnapshot: a tap made again', () => {
     { at: at + 90, kind: 'ack', requestId: id, ok: true },
     { at: at + 95, kind: 'touched', requestId: id, touched: { point: { x, y: 0.5 }, moving: false, element: { label: 'Blueberry Dough', traits: 1 } } },
   ]
-  const snapshotOf = (thumbnails: string[]) => ({ id: 'x', takenAt: 0, thinned: false, thumbnails, entries: [...touch(1000, 'a', 0.6), ...touch(3000, 'b', 0.45)] })
+  const chrome = (streamRotation: number) => ({ at: 0, kind: 'chrome', chrome: { framePng: '', streamRotation } })
+  const snapshotOf = (thumbnails: string[], turn = 0) => ({ id: 'x', takenAt: 0, thinned: false, thumbnails, entries: [chrome(turn), ...touch(1000, 'a', 0.6), ...touch(3000, 'b', 0.45)] })
   const tap = { sessionId: 's', platform: 'ios' } as never
   const load = (snap: unknown, alike: (a: string, b: string) => Promise<boolean>) => {
     vi.spyOn(globalThis, 'fetch').mockImplementation(async () => new Response(JSON.stringify(snap), { status: 200 }))
@@ -629,10 +630,20 @@ describe('loadSnapshot: a tap made again', () => {
     expect(stepsOf(loaded!).steps.map((s) => s.dropped ?? null)).toEqual(['retried', null])
   })
 
+  // Review of P2c: Match's 1% "same screen" read a stepper's digit as alike. Measured on af948002: the pair scores 0.
+  it('takes a picture as unchanged only when not a cell differs', async () => {
+    const { unchanged } = await import('@/lib/flowCapture/screenCompare')
+    expect(unchanged(0)).toBe(true)
+    expect(unchanged(0.0004)).toBe(false)
+    expect(unchanged('incomparable')).toBe(false)
+  })
+
   it('keeps both when the screen changed, or a picture is missing', async () => {
     expect((await load(snapshotOf(['a', 'b']), async () => false))!.retried).toEqual([])
     const alike = vi.fn(async () => true)
     expect((await load(snapshotOf(['b']), alike))!.retried).toEqual([])
+    // Turned, the status bar is not where the mask is: not judged.
+    expect((await load(snapshotOf(['a', 'b'], 90), alike))!.retried).toEqual([])
     expect(alike).not.toHaveBeenCalled()
   })
 })

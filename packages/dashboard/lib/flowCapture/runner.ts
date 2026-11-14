@@ -50,7 +50,14 @@ async function retriedTaps(tap: CaptureTap, snapshot: CaptureSnapshot, alike: (a
   const url = (s: RawStep) => (s.thumbnailKey && pictured.has(s.thumbnailKey) ? `${base(tap)}/snapshot/thumbnails/${encodeURIComponent(s.thumbnailKey)}` : null)
   const masks = [statusBarRect(tap.platform, 0)].filter((m): m is ScreenRect => m !== undefined)
   const out: number[] = []
+  // The status bar is masked where it is on an upright screen: a turned one is not judged, and the tap stays.
+  const chromes = snapshot.entries.filter((e) => e.kind === 'chrome')
+  const upright = (at: number) => {
+    const last = chromes.filter((e) => e.at <= at).at(-1)
+    return last !== undefined && chromeOrientation((last as { chrome: unknown }).chrome as never) === 'portrait'
+  }
   for (const [first, again] of retryCandidates(steps)) {
+    if (!upright(steps[first]!.at) || !upright(steps[again]!.at)) continue
     const a = url(steps[first]!), b = url(steps[again]!)
     if (a && b && await alike(a, b, masks).catch(() => false)) out.push(first)
   }
