@@ -310,9 +310,10 @@ describe('runFlow — where a touch on an element lands', () => {
   // A cover sliding in over a still row (a sheet, a toast) leaves the row's frame as it was while the point a touch
   // reaches moves: only the centre, where nothing covers it, is taken on one answer (design review).
   it('asks a second round for an answer reached away from the centre, or in a frame the read did not see', async () => {
+    const elsewhere = (edge: Partial<UIElement['frame']>): ReachResult => ({ state: 'reachable', point: [0.5, 0.909], atCentre: true, frame: { ...row.frame, ...edge } })
     for (const first of [
       reachable([0.1, 0.885]),
-      { state: 'reachable', point: [0.5, 0.909], atCentre: true, frame: { ...row.frame, y: 0.875 } } as ReachResult,
+      elsewhere({ x: 0.01 }), elsewhere({ y: 0.875 }), elsewhere({ width: 0.98 }), elsewhere({ height: 0.05 }),
     ]) {
       const driver = withReach(first, reachable([0.2, 0.9]), reachable([0.2, 0.9]))
       await runFlow(flowOf('steps:\n  - tapOn: "Row 13"\n'), driver, { ...OPTS, defaultTimeoutMs: 1000 })
@@ -336,7 +337,7 @@ describe('runFlow — where a touch on an element lands', () => {
     slow.reach = vi.fn(async () => { await new Promise((r) => setTimeout(r, 200)); return [reachable([0.1, 0.885])] })
     const result = await runFlow(flowOf('steps:\n  - tapOn: "Row 13"\n'), slow, { ...OPTS, defaultTimeoutMs: 150 })
     expect(result).toMatchObject({ status: 'failed', failureKind: 'product' })
-    expect(result.steps[0]!.message).toMatch(/^"Row 13" was reached, but the device answered too slowly to confirm the point before the timeout \(an answer took 0\.\d s\)$/)
+    expect(result.steps[0]!.message).toMatch(/^"Row 13" was reached, but the device answered too slowly to confirm the point before the timeout \(an answer took 0\.[2-9] s\)$/)
     expect(slow.calls).toEqual([])
   })
 
