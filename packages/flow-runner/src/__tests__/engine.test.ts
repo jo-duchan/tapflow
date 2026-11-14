@@ -337,7 +337,9 @@ describe('runFlow — where a touch on an element lands', () => {
     slow.reach = vi.fn(async () => { await new Promise((r) => setTimeout(r, 200)); return [reachable([0.1, 0.885])] })
     const result = await runFlow(flowOf('steps:\n  - tapOn: "Row 13"\n'), slow, { ...OPTS, defaultTimeoutMs: 150 })
     expect(result).toMatchObject({ status: 'failed', failureKind: 'product' })
-    expect(result.steps[0]!.message).toMatch(/^"Row 13" was reached, but the device answered too slowly to confirm the point before the timeout \(an answer took 0\.[2-9] s\)$/)
+    const m = /^"Row 13" was reached, but the device answered too slowly to confirm the point before the timeout \(a reach took (\d+\.\d) s, a read of the screen (\d+\.\d) s\)$/.exec(result.steps[0]!.message ?? '')
+    expect(m).not.toBeNull()
+    expect(Number(m![1])).toBeGreaterThanOrEqual(0.2)
     expect(slow.calls).toEqual([])
   })
 
@@ -347,11 +349,14 @@ describe('runFlow — where a touch on an element lands', () => {
     let reads = 0
     driver.queryUITree = vi.fn(async () => {
       if (reads++ === 0) return [row]
-      await new Promise((r) => setTimeout(r, 15))
+      await new Promise((r) => setTimeout(r, 150))
       throw new TransientQueryError('ui-tree query failed: The operation was aborted due to timeout')
     })
     const result = await runFlow(flowOf('steps:\n  - tapOn: "Row 13"\n'), driver, { pollIntervalMs: 1, defaultTimeoutMs: 40 })
-    expect(result.steps[0]!.message).toContain('answered too slowly to confirm the point')
+    // The read is what ran out here, not the reach, and the message says so (pre-PR review).
+    const m = /a reach took (\d+\.\d) s, a read of the screen (\d+\.\d) s\)$/.exec(result.steps[0]!.message ?? '')
+    expect(m).not.toBeNull()
+    expect(Number(m![2])).toBeGreaterThanOrEqual(0.1)
     expect(result.steps[0]!.message).not.toContain('kept moving')
     expect(driver.calls).toEqual([])
   })
