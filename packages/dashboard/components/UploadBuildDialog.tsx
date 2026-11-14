@@ -37,6 +37,7 @@ export function UploadBuildDialog({ onSuccess, appId, canWrite }: Props) {
   const inputRef = useRef<HTMLInputElement>(null)
   const fileId = useId()
   const statusId = useId()
+  const fileNameCharacters = Array.from(file?.name ?? '')
 
   function handleUpload(e: FormEvent) {
     e.preventDefault()
@@ -97,24 +98,31 @@ export function UploadBuildDialog({ onSuccess, appId, canWrite }: Props) {
       <DialogTrigger asChild>
         <Button size="sm"><Upload className="mr-2 h-4 w-4" />Upload build</Button>
       </DialogTrigger>
-      <DialogContent size="md" className="max-h-[calc(100dvh-2rem)] grid-rows-[auto_minmax(0,1fr)]">
+      <DialogContent size="md">
         <DialogHeader>
           <DialogTitle>Upload build</DialogTitle>
         </DialogHeader>
-        <form onSubmit={handleUpload} className="-mx-1 -mb-1 flex flex-col gap-4 overflow-y-auto px-1 pb-1 pt-2">
+        <form onSubmit={handleUpload} className="flex flex-col gap-4 pt-2">
           <div className="grid gap-2">
             <Label htmlFor={fileId}>File</Label>
             <Button
               id={fileId}
               type="button"
               variant="outline"
+              title={file?.name}
               aria-describedby={`${fileId}-name`}
-              className="h-auto min-h-24 w-full whitespace-normal break-all border-2 border-dashed font-normal text-muted-foreground hover:border-primary hover:bg-background hover:text-muted-foreground"
+              className="h-24 min-w-0 w-full border-2 border-dashed font-normal text-muted-foreground hover:border-primary hover:bg-background hover:text-muted-foreground"
               onClick={() => inputRef.current?.click()}
               onDragOver={(e) => e.preventDefault()}
               onDrop={(e) => { e.preventDefault(); const f = e.dataTransfer.files[0]; if (f) setFile(f) }}
             >
-              <span id={`${fileId}-name`}>{file ? file.name : 'Click or drag to upload'}</span>
+              <span id={`${fileId}-name`} className="sr-only">{file ? file.name : 'Click or drag to upload'}</span>
+              {file ? (
+                <span aria-hidden="true" className="flex min-w-0 max-w-full">
+                  <span className="truncate">{fileNameCharacters.slice(0, -16).join('')}</span>
+                  <span className="shrink-0">{fileNameCharacters.slice(-16).join('')}</span>
+                </span>
+              ) : <span aria-hidden="true">Click or drag to upload</span>}
             </Button>
             <input
               ref={inputRef}

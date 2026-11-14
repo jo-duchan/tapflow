@@ -83,6 +83,24 @@ describe('UploadBuildDialog file and status accessibility', () => {
     expect(form.get('file')).toBe(file)
   })
 
+  it.each(['app.apk', `${'MyApp-staging-'.repeat(15)}1.4.2-build-1873.apk`])(
+    'keeps the complete filename accessible and submits it when displaying %s',
+    async (name) => {
+      const { user, onSuccess } = await open()
+      const file = new File(['build'], name)
+      await user.upload(fileInput(), file)
+      const picker = screen.getByRole('button', { name: 'File' })
+
+      expect(picker).toHaveAccessibleDescription(name)
+      expect(picker).toHaveAttribute('title', name)
+
+      await user.click(screen.getByRole('button', { name: 'Upload' }))
+      await waitFor(() => expect(onSuccess).toHaveBeenCalledOnce())
+      const form = fetchMock.mock.calls[0]![1].body as FormData
+      expect(form.get('file')).toBe(file)
+    },
+  )
+
   it('activates the File and Status controls from their visible labels', async () => {
     const { user } = await open()
     const status = screen.getByRole('combobox', { name: 'Status (optional)' })
