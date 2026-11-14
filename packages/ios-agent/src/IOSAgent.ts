@@ -118,7 +118,7 @@ import { PhysicalOrientation, ORIENTATION_DEGREES, turned, type DeviceOrientatio
 import type { GuestOrientation } from './GuestHelper.js'
 import type { IntegratedScreen } from './panels.js'
 import { XCUITreeReader } from './XCUITreeReader.js'
-import { AppObserver, fieldOf, keyboardOf, type AppTouch } from './AppObserver.js'
+import { AppObserver, fieldOf, keyboardOf, type AppTouch, type ObserverRead } from './AppObserver.js'
 import { AppAccessibility } from './AppAccessibility.js'
 import { DeviceChromeLoader, type ChromeData, type ChromePanel } from './DeviceChromeLoader.js'
 import { TypePanels, panelFrame } from './TypePanels.js'
@@ -406,6 +406,8 @@ export class IOSAgent implements DeviceAgent, NetworkControlCapability, Posturab
   private readonly appAccessibility: AppAccessibility
   // Devices whose app reports each touch-down, while a person is recorded on a relay that keeps them (record-time
   // observation): the gestures sent there, newest last, and the reports not yet paired with one.
+  // Apps being installed, by device: such an app cannot be in front, which a read with no app named yet then says.
+  private readonly installing = new Map<string, string>()
   private readonly touchWatch = new Map<string, { starts: Array<{ x: number; y: number; at: number }>; reports: AppTouch[] }>()
   // Holds a macOS power assertion while connected so the host doesn't idle-throttle the
   // simulator capture/encode when the Mac is unattended. No-op off macOS.
@@ -1464,6 +1466,17 @@ export class IOSAgent implements DeviceAgent, NetworkControlCapability, Posturab
    * and a udid that no longer exists (the host directory outlives `simctl delete`) is not ours to count.
    */
   /**
+   * The app observer's read for the app under test. With none named yet and one being installed, the answer is that
+   * no app is in front: an app still installing cannot be, and asking nobody read as unknown, which kept Capture's
+   * range on the home-screen taps a person made while the install ran (a Food Truck install took ~10 s; measured).
+   */
+  private observerRead(deviceId: string): Promise<ObserverRead> {
+    const bundle = this.lastBundleIds.get(deviceId)
+    if (!bundle && this.installing.has(deviceId)) return Promise.resolve({ kind: 'away' })
+    return this.appObserver.read(deviceId, bundle ?? '')
+  }
+
+  /**
    * Pair the app's report of a touch-down with the gesture `requestId` ended, and give it to the relay's capture. The
    * agent pairs them, not the relay: it sent the touch and the app reported it on this Mac's clock, where the relay may
    * run on another. Matched by the point (the same portrait space) and the time; waited for briefly, since the app
@@ -2260,7 +2273,9 @@ export class IOSAgent implements DeviceAgent, NetworkControlCapability, Posturab
           respond({ type: 'app:install-error', message: 'No booted device' })
           break
         }
+        if (bundleId) this.installing.set(installState.deviceId, bundleId)
         this.installBuild(installState.deviceId, filePath, bundleId, { buildTicket, buildName, buildBytes })
+          .finally(() => { if (this.installing.get(installState.deviceId) === bundleId) this.installing.delete(installState.deviceId) })
           .then(async () => {
             // A person may open the app from its home-screen icon rather than with Launch (measured, flow-runner
             // AGENTS.md): without this, every tree and field read on it would answer that no app was launched.
@@ -2917,7 +2932,7 @@ export class IOSAgent implements DeviceAgent, NetworkControlCapability, Posturab
         if (!state) { this.sendMsg({ type: 'ui:field:response', sessionId, requestId, field: null, reason: 'failed' }); break }
         // The answer is the field's whole contents, typed or filled in: sent to the relay and nowhere else, never logged.
         Promise.all([
-          this.appObserver.read(state.deviceId, this.lastBundleIds.get(state.deviceId) ?? '').then(fieldOf),
+          this.observerRead(state.deviceId).then(fieldOf),
           this.simctl.keyboardLanguage(state.deviceId).catch(() => undefined),
         ])
           .then(([read, language]) => this.sendMsg({
@@ -2931,7 +2946,7 @@ export class IOSAgent implements DeviceAgent, NetworkControlCapability, Posturab
         if (!sessionId || !requestId) break
         const state = this.deviceStates.get(sessionId)
         if (!state) { this.sendMsg({ type: 'ui:keyboard:response', sessionId, requestId, keyboard: { shown: null } }); break }
-        this.appObserver.read(state.deviceId, this.lastBundleIds.get(state.deviceId) ?? '')
+        this.observerRead(state.deviceId)
           .then((read) => this.sendMsg({ type: 'ui:keyboard:response', sessionId, requestId, keyboard: keyboardOf(read) }))
           .catch(() => this.sendMsg({ type: 'ui:keyboard:response', sessionId, requestId, keyboard: { shown: null } }))
         break

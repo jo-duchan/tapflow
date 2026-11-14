@@ -875,6 +875,27 @@ describe('IOSAgent', () => {
       browser.close()
     })
 
+    // A person's E2E: Capture's range began on home-screen taps made while a ~10 s install ran, since those reads asked
+    // no app and came back unknown. An app still installing cannot be in front.
+    it('answers no app in front while the app is installing and none is named yet, then asks the app', async () => {
+      const read = vi.spyOn(AppObserver.prototype, 'read').mockResolvedValue(answer({ reason: 'no-focus' }))
+      const { agent, browser, internals, sent } = await bootedAgent(mockSimctl(true))
+      let finish!: () => void
+      ;(agent as unknown as { installBuild: () => Promise<void> }).installBuild = () => new Promise<void>((r) => { finish = r })
+      internals.handleRelayMessage({ type: 'app:install', sessionId: agent.sessionId!, requestId: 'rq-i', payload: { filePath: '/b.zip', bundleId: 'com.installed' } } as never)
+      internals.handleRelayMessage({ type: 'ui:keyboard:request', sessionId: agent.sessionId!, requestId: 'rq-k1' })
+      await vi.waitFor(() => expect(sent.find((m) => m.type === 'ui:keyboard:response')).toBeDefined(), { timeout: 2000 })
+      expect(sent.find((m) => m.type === 'ui:keyboard:response')!['keyboard']).toEqual({ shown: null, onHome: true })
+      expect(read).not.toHaveBeenCalled()
+      finish()
+      await vi.waitFor(() => expect(sent.some((m) => m.type === 'app:install-done')).toBe(true), { timeout: 2000 })
+      internals.handleRelayMessage({ type: 'ui:keyboard:request', sessionId: agent.sessionId!, requestId: 'rq-k2' })
+      await vi.waitFor(() => expect(read).toHaveBeenCalledWith('dev-1', 'com.installed'), { timeout: 2000 })
+      read.mockRestore()
+      agent.disconnect()
+      browser.close()
+    })
+
     it('reads the app an install put on the device, which a person may open from its icon rather than with Launch', async () => {
       const readField = vi.spyOn(AppObserver.prototype, 'read').mockResolvedValue(answer({ reason: 'no-focus' }))
       const simctl = mockSimctl(true)
