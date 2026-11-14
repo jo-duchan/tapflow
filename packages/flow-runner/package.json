@@ -57,7 +57,7 @@
   "dependencies": {
     "@tapflowio/agent-core": "workspace:*",
     "@tapflowio/protocol": "workspace:*",
-    "ws": "^8.22.1",
+    "ws": "^8.22.2",
     "yaml": "^2.9.1"
   },
   "devDependencies": {

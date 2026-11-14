@@ -167,9 +167,11 @@
   }
   /* Not on a button stretched over its card (`data-stretched`): a transform makes it the containing block of its
      `::after`, so the press shrank the card-wide target to the label and the release landed off it. The click then
-     went to the card, and only the label selected Flow Capture's Edit rows (measured in Chrome). */
-  button:active:not([aria-haspopup]):not(:disabled):not([data-stretched]),
-  [role="button"]:active:not([aria-haspopup]):not(:disabled):not([data-stretched]) {
+     went to the card, and only the label selected Flow Capture's Edit rows (measured in Chrome). Nor on one that
+     moves its label itself (`data-press-label`): a line tab's underline marks where the tab is and stays put. A
+     utility cannot undo this rule, whose selector outweighs any `active:` class. */
+  button:active:not([aria-haspopup]):not(:disabled):not([data-stretched]):not([data-press-label]),
+  [role="button"]:active:not([aria-haspopup]):not(:disabled):not([data-stretched]):not([data-press-label]) {
     transform: translateY(1px);
   }
 }

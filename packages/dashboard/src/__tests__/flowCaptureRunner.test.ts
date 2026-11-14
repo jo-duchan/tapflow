@@ -11,15 +11,18 @@ const screen: { elements: unknown[] } = { elements: [] }
 const replay = { refuse: false }
 // What each step was matched with: one test reads the device's reach answers off it.
 const matchedWith: unknown[] = []
+// Settle reads and replays in the order they happened: one test needs reads it does not log above.
+const seq: string[] = []
 // The options the engine was last run with.
 const ran: { options?: { observeEffects?: boolean } } = {}
 vi.mock('@tapflowio/flow-runner/browser', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@tapflowio/flow-runner/browser')>()),
   rangeStartOrientation: () => 'landscape',
-  waitForStableScreen: async () => ({ elements: screen.elements }),
+  waitForStableScreen: async () => { seq.push('settle'); return { elements: screen.elements } },
   replayStep: async (_c: unknown, _s: string, raw: RawStep) => {
     if (replay.refuse) throw new Error('channel-unavailable')
     log.push(`replay ${raw.kind}`)
+    seq.push(`replay ${raw.kind}`)
   },
   matchStep: (raw: RawStep, ctx: unknown) => { matchedWith.push(ctx); return { raw, step: null } },
   // The engine as far as the keyboard is concerned: a tap, then typing and a key, through the driver it was given.
@@ -76,6 +79,7 @@ const textStep = { ...base, kind: 'text', text: '안녕', replace: true } as unk
 let pauseOk = true
 beforeEach(() => {
   log.length = 0
+  seq.length = 0
   screen.elements = []
   replay.refuse = false
   pauseOk = true
@@ -292,6 +296,15 @@ describe('matchRange', () => {
     expect(h.onStep.mock.calls.map(([s]) => s.raw.kind)).toEqual(['launch', 'rotate', 'tap'])
   })
 
+  // Measured (Sample SwiftUI, iOS 26.5): after the reset the app is not running, and the settle read before the range's
+  // launch went unanswered until its 15 s deadline, every Match.
+  it('reads no screen before a launch that nothing is waiting on, and does before one that ends a touch\'s watch', async () => {
+    const lease = new PauseLease(tap)
+    await matchRange(tap, channel, lease, [launchStep, tapStep, launchStep, tapStep], { start: 0, end: 4 }, null, hooks())
+    await lease.stop()
+    expect(seq).toEqual(['replay launch', 'settle', 'replay tap', 'settle', 'replay launch', 'settle', 'replay tap', 'settle'])
+  })
+
   it('does not replay an install, which would uninstall the app it just launched, and still names it', async () => {
     const lease = new PauseLease(tap)
     const h = hooks()
@@ -416,6 +429,22 @@ describe('matchRange: comparing each step with its recording', () => {
 })
 
 // Review of 1b-3b: the wait at a step that looked different, which Continue anyway ends and a stop rejects.
+// 1b-3c: the screen each touch left, for Edit's "after this tap", by the touch's index into the matched steps.
+describe('matchRange: the screen a touch left', () => {
+  const lease = { start: async () => {}, ensure: async () => {}, stop: async () => {} } as unknown as InstanceType<typeof PauseLease>
+  const viewer = { ...tap, chrome: () => null } as unknown as Tap
+  it('hands over each tap\'s after-screen with its tree, the last one from the read after it', async () => {
+    const afters: Array<[number, unknown]> = []
+    screen.elements = [{ role: 'text', label: 'Welcome', frame: { x: 0, y: 0, width: 1, height: 0.1 }, enabled: true }]
+    await matchRange(viewer, channel, lease, [launchStep, tapStep, textStep, tapStep], { start: 0, end: 4 }, null, {
+      ...hooks(), onAfter: (index, after) => afters.push([index, after.tree]),
+    })
+    // launch #0, the turn the suite puts in #1, tap #2, text #3, tap #4: the two taps, by their places.
+    expect(afters.map(([i]) => i)).toEqual([2, 4])
+    expect(afters[0]![1]).toEqual(screen.elements)
+  })
+})
+
 describe('DialogRun: deciding at a stop', () => {
   it('goes on when told, and rejects when the run is stopped', async () => {
     const run = new DialogRun()

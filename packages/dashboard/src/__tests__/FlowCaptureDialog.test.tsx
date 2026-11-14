@@ -372,6 +372,30 @@ describe('VerifyScreen', () => {
     expect(screen.getByText(/, not run/)).toBeInTheDocument()
   })
 
+  // The list follows the step running, as Agent activity does (a long Verify ran below the fold). The result lists every
+  // step after a failure as not run, and following those to the bottom pushed the failed step, opened onto why, out of
+  // view (pre-PR review): the result does not move the list.
+  it('follows the step running, and does not move when the result adds the steps that did not run', () => {
+    const props = { tap: { surface: () => null } as never, marks: { cursor: null, trails: [] }, total: 3, onExport: vi.fn(), onBack: vi.fn(), primaryRef: { current: null } }
+    const step0 = { index: 0, name: 'launchApp', status: 'passed' as const, startedAt: 0, durationMs: 1200 }
+    const one = { ...initialState, phase: 'verifying' as const, verify: { status: 'running' as const, done: 0, live: [step0] } }
+    const { rerender } = render(<VerifyScreen state={one} {...props} />)
+    const list = screen.getByRole('list', { name: 'Verify' })
+    Object.defineProperty(list, 'scrollHeight', { configurable: true, value: 300 })
+    Object.defineProperty(list, 'clientHeight', { configurable: true, value: 100 })
+    const two = { ...one, verify: { ...one.verify, done: 1, live: [step0, { index: 1, name: 'tapOn("Row 23")', status: 'running' as const, startedAt: 1200 }] } }
+    rerender(<VerifyScreen state={two} {...props} />)
+    expect(list.scrollTop).toBe(300)
+    Object.defineProperty(list, 'scrollHeight', { configurable: true, value: 900 })
+    const failed = { ...two, verify: { ...two.verify, status: 'failed' as const, result: { status: 'failed', steps: [
+      { index: 0, name: 'launchApp', status: 'passed', durationMs: 1200 },
+      { index: 1, name: 'tapOn("Row 23")', status: 'failed', durationMs: 10000, message: 'no element matched "Row 23" within 10s' },
+      { index: 2, name: 'tapOn("Submit")', status: 'skipped', durationMs: 0 },
+    ] } as never } }
+    rerender(<VerifyScreen state={failed} {...props} />)
+    expect(list.scrollTop).toBe(300)
+  })
+
   // #1125: a passed step whose touch the device could not judge opens onto why, since a covered row passed that way.
   it('opens a passed step onto a touch that was not checked to land on its element', () => {
     const props = { tap: { surface: () => null } as never, marks: { cursor: null, trails: [] }, total: 1, onExport: vi.fn(), onBack: vi.fn(), primaryRef: { current: null } }

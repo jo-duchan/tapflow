@@ -100,6 +100,118 @@ describe('XCUITreeReader', () => {
     reader.stop()
   })
 
+  // An attached runner made a busy SwiftUI app lag with no query running (Food Truck, iOS 26.5): one started for a
+  // person's Capture dialog (a tree read, a reach) is let go once nothing has been asked of it for a while.
+  describe('a runner nobody kept', () => {
+    const wait = (ms: number) => new Promise((r) => setTimeout(r, ms))
+
+    it('is released once no request has been in flight for the idle period', async () => {
+      const native = setup()
+      const reader = new XCUITreeReader(native, 30)
+      await reader.read('udid-A', 'com.app')
+      expect(native.terminateRunner).not.toHaveBeenCalled()
+      await vi.waitFor(() => expect(native.terminateRunner).toHaveBeenCalledWith('udid-A'), { timeout: 1000 })
+      // The next read starts it again.
+      await reader.read('udid-A', 'com.app')
+      expect(native.spawn).toHaveBeenCalledTimes(2)
+      reader.stop()
+    })
+
+    it('is held while a request is still in flight, and released after the last one', async () => {
+      const native = setup()
+      let release!: () => void
+      const slow = new Promise<void>((r) => { release = r })
+      fetchMock.mockImplementation(async (url: string) => {
+        if (url.includes('/tree') && url.includes('slow')) { await slow; return { ok: true, text: async () => TREE } as Response }
+        return healthy(url)
+      })
+      const reader = new XCUITreeReader(native, 30)
+      const held = reader.read('udid-A', 'com.slow')
+      await reader.read('udid-A', 'com.app')
+      await wait(90)
+      expect(native.terminateRunner).not.toHaveBeenCalled()
+      release()
+      await held
+      await vi.waitFor(() => expect(native.terminateRunner).toHaveBeenCalledWith('udid-A'), { timeout: 1000 })
+      reader.stop()
+    })
+
+    it('is let go once a person boots the device an automation client warmed', async () => {
+      const native = setup()
+      const reader = new XCUITreeReader(native, 30)
+      reader.warm('udid-A')
+      await reader.read('udid-A', 'com.app')
+      reader.unkeep('udid-A')
+      await vi.waitFor(() => expect(native.terminateRunner).toHaveBeenCalledWith('udid-A'), { timeout: 1000 })
+      reader.stop()
+    })
+
+    it('is held through a request still in flight when the person\'s boot comes', async () => {
+      const native = setup()
+      let release!: () => void
+      const slow = new Promise<void>((r) => { release = r })
+      fetchMock.mockImplementation(async (url: string) => {
+        if (url.includes('/tree') && url.includes('slow')) { await slow; return { ok: true, text: async () => TREE } as Response }
+        return healthy(url)
+      })
+      const reader = new XCUITreeReader(native, 30)
+      reader.warm('udid-A')
+      const held = reader.read('udid-A', 'com.slow')
+      await vi.waitFor(() => expect(fetchMock.mock.calls.some((c) => String(c[0]).includes('slow'))).toBe(true))
+      reader.unkeep('udid-A')
+      await wait(90)
+      expect(native.terminateRunner).not.toHaveBeenCalled()
+      release()
+      await held
+      await vi.waitFor(() => expect(native.terminateRunner).toHaveBeenCalledWith('udid-A'), { timeout: 1000 })
+      reader.stop()
+    })
+
+    // `unkeep` while the warm-up was still building found no runner to time out; the runner it then started stayed
+    // attached, and the person's app lagged, until the next read (review finding).
+    it('is let go when the person\'s boot came while the warm-up was still building it', async () => {
+      let finishBuild!: () => void
+      const native = setup({ builtStamp: vi.fn(() => undefined), build: vi.fn(() => new Promise<void>((r) => { finishBuild = r })) })
+      const reader = new XCUITreeReader(native, 30)
+      reader.warm('udid-A')
+      await vi.waitFor(() => expect(native.build).toHaveBeenCalled())
+      reader.unkeep('udid-A')
+      finishBuild()
+      await vi.waitFor(() => expect(native.spawn).toHaveBeenCalled())
+      await vi.waitFor(() => expect(native.terminateRunner).toHaveBeenCalledWith('udid-A'), { timeout: 1000 })
+      reader.stop()
+    })
+
+    // Read, then warm and unkeep: the read's countdown was left pending beside unkeep's, fired first, and the later one
+    // then stopped the runner the next read started (review finding).
+    it('counts down once per device, so an earlier countdown cannot stop a runner a later read is using', async () => {
+      const native = setup()
+      // 150 ms of slack on each side, against a loaded machine's event loop: the read's countdown would end at 400,
+      // unkeep's at 600, and the second read comes at 450.
+      const reader = new XCUITreeReader(native, 400)
+      await reader.read('udid-A', 'com.app')
+      await wait(200)
+      reader.warm('udid-A')
+      reader.unkeep('udid-A')
+      await wait(250)
+      await reader.read('udid-A', 'com.app')
+      await wait(250)
+      expect(native.terminateRunner).not.toHaveBeenCalled()
+      expect(native.spawn).toHaveBeenCalledTimes(1)
+      reader.stop()
+    })
+
+    it('is not a runner an automation client\'s boot warmed, which stays for the device\'s life', async () => {
+      const native = setup()
+      const reader = new XCUITreeReader(native, 30)
+      reader.warm('udid-A')
+      await reader.read('udid-A', 'com.app')
+      await wait(90)
+      expect(native.terminateRunner).not.toHaveBeenCalled()
+      reader.stop()
+    })
+  })
+
   it('serializes concurrent reads into a single spawn (mutex)', async () => {
     const native = setup()
     const reader = new XCUITreeReader(native)

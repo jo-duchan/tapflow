@@ -36,7 +36,9 @@
     "dist",
     "public",
     "README.md",
-    "LICENSE"
+    "LICENSE",
+    "LICENSE-APACHE-2.0",
+    "NOTICE"
   ],
   "engines": {
     "node": ">=22.0.0"
@@ -58,8 +60,8 @@
     "better-sqlite3": "^12.11.1",
     "busboy": "^1.6.0",
     "jsonwebtoken": "^9.0.3",
-    "nodemailer": "^10.3.1",
-    "ws": "^8.22.1",
+    "nodemailer": "^10.4.0",
+    "ws": "^8.22.2",
     "zod": "^4.6.7"
   },
   "devDependencies": {

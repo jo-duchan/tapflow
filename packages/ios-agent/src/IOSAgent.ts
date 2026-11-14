@@ -111,6 +111,7 @@ import { PhysicalOrientation, ORIENTATION_DEGREES, turned, type DeviceOrientatio
 import type { GuestOrientation } from './GuestHelper.js'
 import type { IntegratedScreen } from './panels.js'
 import { XCUITreeReader } from './XCUITreeReader.js'
+import { AppObserver, fieldOf, keyboardOf } from './AppObserver.js'
 import { DeviceChromeLoader, type ChromeData, type ChromePanel } from './DeviceChromeLoader.js'
 import { TypePanels, panelFrame } from './TypePanels.js'
 import { KEY_CODE_MAP, MODIFIER_BITS } from './KeyCodeMap.js'
@@ -154,6 +155,9 @@ export interface IOSAgentOptions {
   lean?: boolean
   /** Where the launchd overrides are written. Injectable for the same reason as `network`. */
   leanStore?: LeanStore
+  /** The app observer's host side. Injectable for the same reason as `network`; under vitest the default asks in a
+   *  directory under the OS temp folder rather than the simulators' /tmp. */
+  appObserver?: AppObserver
   /** Device frame loading. Under vitest the default points at directories that do not exist, so a suite never
    *  reads the developer's Xcode chrome or spends seconds rendering it. */
   chromeLoader?: DeviceChromeLoader
@@ -385,6 +389,9 @@ export class IOSAgent implements DeviceAgent, NetworkControlCapability, Posturab
   // The posture last reported per device, so the poll reports only a change.
   private readonly reportedPosture = new Map<string, string | null>()
   private readonly uiTreeReader = new XCUITreeReader()
+  // The soft keyboard and the focused field for Flow Capture, from inside the app under test rather than through the
+  // tree runner (AGENTS.md, "App observer").
+  private readonly appObserver: AppObserver
   // Holds a macOS power assertion while connected so the host doesn't idle-throttle the
   // simulator capture/encode when the Mac is unattended. No-op off macOS.
   private readonly sleepBlocker: SleepBlocker
@@ -455,6 +462,10 @@ export class IOSAgent implements DeviceAgent, NetworkControlCapability, Posturab
     // handler, so the only path that tells a tester enforcement was lost was reachable in production
     // and in nothing else.
     this.network.setEnforcementLostHandler((deviceId) => { this.reportEnforcementLost(deviceId) })
+    this.appObserver = options.appObserver ?? new AppObserver(
+      { appRunning: (udid, bundleId) => this.simctl.appRunning(udid, bundleId) },
+      process.env.VITEST ? { root: path.join(tmpdir(), 'tapflow-test-observe') } : {},
+    )
     this.fps = options.fps ?? 30
     this.intervalMs = options.intervalMs
     this.reconnectDelays = options.reconnectDelays ?? [1000, 2000, 4000, 8000, 16000, 30000]
@@ -1045,6 +1056,18 @@ export class IOSAgent implements DeviceAgent, NetworkControlCapability, Posturab
    *  `device:boot-error` as a failure — deliberately, since Android's dead-stream report has no id it could
    *  carry (#426). So sending one for a boot with no correlator would put an error toast on a tester's
    *  screen for a device that is booting normally. */
+  /**
+   * Name the app the observer answers for (`TAPFLOW_OBSERVE_BUNDLE`), before it can start: dyld reads the environment
+   * at process start. Its own variable, not the network target's, which also opens that control's verdict window
+   * (`SimulatorNetwork.target`) and would unsettle the network state of an app already running. Best-effort: an app
+   * not named is not observed, and its reads come back unknown.
+   */
+  private async observeApp(deviceId: string, bundleId: string): Promise<void> {
+    await this.simctl.setSimulatorEnv(deviceId, 'TAPFLOW_OBSERVE_BUNDLE', bundleId).catch((e: unknown) => {
+      logger.warn('could not name the app to observe:', (e as Error).message)
+    })
+  }
+
   private abandonBoot(state: DeviceState, seq: number, sessionId: string, requestId?: string): void {
     const reason = state.bootAbandon.get(seq) ?? 'superseded'
     state.bootAbandon.delete(seq)
@@ -1215,6 +1238,11 @@ export class IOSAgent implements DeviceAgent, NetworkControlCapability, Posturab
       await this.network.arm(deviceId).catch((e: unknown) => {
         logger.warn('could not arm the network injection:', (e as Error).message)
       })
+      // The app observer rides on the same injection: its directory, made private and emptied before any app runs,
+      // so nothing a previous boot left is read as this one's.
+      await this.appObserver.prepare(deviceId).catch((e: unknown) => {
+        logger.warn('could not prepare the app observer:', (e as Error).message)
+      })
       // **Where it is held, before the first frame says so** (#910). The orientation is the device's, shared with
       // DeviceHub and every viewer, so it is read and reported as it is, and a reload or a second viewer joins it
       // there rather than turning it under the first. It is stood up only when there is nothing to report — no
@@ -1304,6 +1332,7 @@ export class IOSAgent implements DeviceAgent, NetworkControlCapability, Posturab
       // An automation client's first selector step would otherwise spend the runner's cold start inside its timeout, and
       // a person Flow Capture records would have their first field read only after it (~12 s measured, #1135).
       if (warmTree) this.uiTreeReader.warm(deviceId)
+      else this.uiTreeReader.unkeep(deviceId)
 
       // Sync AppleKeyboards after ready — fire-and-forget so streaming isn't delayed.
       // hw=Automatic lets the hardware layout follow the active input source on LANG1/CapsLock.
@@ -2099,9 +2128,9 @@ export class IOSAgent implements DeviceAgent, NetworkControlCapability, Posturab
     switch (msg.type) {
       case 'device:boot': {
         // `external` and `automation` are added by the relay, never by the browser (see `DeviceBoot`).
-        const { deviceId, resetMode, acceptH264, secureContext, external, automation, recorded, serviceTier, runReset } = msg.payload as { deviceId: string; resetMode?: string; acceptH264?: boolean; secureContext?: boolean; external?: boolean; automation?: boolean; recorded?: boolean; serviceTier?: ServiceTier; runReset?: RunResetRequest }
+        const { deviceId, resetMode, acceptH264, secureContext, external, automation, serviceTier, runReset } = msg.payload as { deviceId: string; resetMode?: string; acceptH264?: boolean; secureContext?: boolean; external?: boolean; automation?: boolean; serviceTier?: ServiceTier; runReset?: RunResetRequest }
         const sessionId = msg.sessionId
-        this.handleDeviceBoot(sessionId, deviceId, resetMode === 'full-erase', acceptH264 === true, { secureContext: !!secureContext, external: !!external }, msg.requestId, automation === true || recorded === true, serviceTier, runReset)
+        this.handleDeviceBoot(sessionId, deviceId, resetMode === 'full-erase', acceptH264 === true, { secureContext: !!secureContext, external: !!external }, msg.requestId, automation === true, serviceTier, runReset)
           .catch((e) => logger.error('handleDeviceBoot failed:', e))
         break
       }
@@ -2132,10 +2161,15 @@ export class IOSAgent implements DeviceAgent, NetworkControlCapability, Posturab
           break
         }
         this.installBuild(installState.deviceId, filePath, bundleId, { buildTicket, buildName, buildBytes })
-          .then(() => {
+          .then(async () => {
             // A person may open the app from its home-screen icon rather than with Launch (measured, flow-runner
             // AGENTS.md): without this, every tree and field read on it would answer that no app was launched.
-            if (bundleId) this.lastBundleIds.set(installState.deviceId, bundleId)
+            if (bundleId) {
+              this.lastBundleIds.set(installState.deviceId, bundleId)
+              // Named for the observer now, not at Launch, for the same reason: an app opened from its icon is observed
+              // only if it was named before it started.
+              await this.observeApp(installState.deviceId, bundleId)
+            }
             respond({ type: 'app:install-done' })
           })
           .catch((e: unknown) => {
@@ -2173,6 +2207,7 @@ export class IOSAgent implements DeviceAgent, NetworkControlCapability, Posturab
         // this one unhooked while `available` would still say true.
         this.network.target(launchState.deviceId, bundleId)
           .catch((e: unknown) => logger.warn('could not name the network target:', (e as Error).message))
+          .then(() => this.observeApp(launchState.deviceId, bundleId))
           .then(() => this.simctl.launchApp(launchState.deviceId, bundleId, options))
           .then((pid) => {
             // **After the launch, with the pid it returned.** The network control measures how long a
@@ -2774,7 +2809,7 @@ export class IOSAgent implements DeviceAgent, NetworkControlCapability, Posturab
         if (!state) { this.sendMsg({ type: 'ui:field:response', sessionId, requestId, field: null, reason: 'failed' }); break }
         // The answer is the field's whole contents, typed or filled in: sent to the relay and nowhere else, never logged.
         Promise.all([
-          this.uiTreeReader.readField(state.deviceId, this.lastBundleIds.get(state.deviceId) ?? ''),
+          this.appObserver.read(state.deviceId, this.lastBundleIds.get(state.deviceId) ?? '').then(fieldOf),
           this.simctl.keyboardLanguage(state.deviceId).catch(() => undefined),
         ])
           .then(([read, language]) => this.sendMsg({
@@ -2788,8 +2823,8 @@ export class IOSAgent implements DeviceAgent, NetworkControlCapability, Posturab
         if (!sessionId || !requestId) break
         const state = this.deviceStates.get(sessionId)
         if (!state) { this.sendMsg({ type: 'ui:keyboard:response', sessionId, requestId, keyboard: { shown: null } }); break }
-        this.uiTreeReader.readKeyboard(state.deviceId, this.lastBundleIds.get(state.deviceId) ?? '')
-          .then((keyboard) => this.sendMsg({ type: 'ui:keyboard:response', sessionId, requestId, keyboard }))
+        this.appObserver.read(state.deviceId, this.lastBundleIds.get(state.deviceId) ?? '')
+          .then((read) => this.sendMsg({ type: 'ui:keyboard:response', sessionId, requestId, keyboard: keyboardOf(read) }))
           .catch(() => this.sendMsg({ type: 'ui:keyboard:response', sessionId, requestId, keyboard: { shown: null } }))
         break
       }
