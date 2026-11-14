@@ -44,7 +44,7 @@ vi.mock('@tapflowio/flow-runner/browser', async (importOriginal) => ({
   },
 }))
 
-const { DialogRun, keyboardOf, loadSnapshot: loadSnapshotForTest, matchRange, PauseLease, typedOnScreenKeyboard, verifyFlow } = await import('@/lib/flowCapture/runner')
+const { DialogRun, keyboardOf, loadSnapshot: loadSnapshotForTest, stepsOf, matchRange, PauseLease, typedOnScreenKeyboard, verifyFlow } = await import('@/lib/flowCapture/runner')
 type Tap = ConstructorParameters<typeof PauseLease>[0]
 type Channel = Parameters<typeof matchRange>[1]
 
@@ -602,6 +602,38 @@ describe('loadSnapshot', () => {
     release()
     await loading
     expect(order).toEqual(['flushed', 'snapshot'])
+  })
+})
+
+// P2c, the user's session af948002: a menu item tapped twice, the first doing nothing. Judged when the snapshot is read.
+describe('loadSnapshot: a tap made again', () => {
+  afterEach(() => vi.restoreAllMocks())
+  const touch = (at: number, id: string, x: number) => [
+    { at, kind: 'input', msg: { type: 'input:touch:start', sessionId: 's', payload: { x, y: 0.5 } } },
+    { at: at + 80, kind: 'input', msg: { type: 'input:touch:end', sessionId: 's', requestId: id } },
+    { at: at + 90, kind: 'ack', requestId: id, ok: true },
+    { at: at + 95, kind: 'touched', requestId: id, touched: { point: { x, y: 0.5 }, moving: false, element: { label: 'Blueberry Dough', traits: 1 } } },
+  ]
+  const snapshotOf = (thumbnails: string[]) => ({ id: 'x', takenAt: 0, thinned: false, thumbnails, entries: [...touch(1000, 'a', 0.6), ...touch(3000, 'b', 0.45)] })
+  const tap = { sessionId: 's', platform: 'ios' } as never
+  const load = (snap: unknown, alike: (a: string, b: string) => Promise<boolean>) => {
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async () => new Response(JSON.stringify(snap), { status: 200 }))
+    return loadSnapshotForTest(tap, alike)
+  }
+
+  it('leaves out the first when the recorded screen did not change between them', async () => {
+    const asked: string[][] = []
+    const loaded = await load(snapshotOf(['a', 'b']), async (a, b) => { asked.push([a, b]); return true })
+    expect(loaded!.retried).toEqual([0])
+    expect(asked).toEqual([['/api/v1/sessions/s/capture/snapshot/thumbnails/a', '/api/v1/sessions/s/capture/snapshot/thumbnails/b']])
+    expect(stepsOf(loaded!).steps.map((s) => s.dropped ?? null)).toEqual(['retried', null])
+  })
+
+  it('keeps both when the screen changed, or a picture is missing', async () => {
+    expect((await load(snapshotOf(['a', 'b']), async () => false))!.retried).toEqual([])
+    const alike = vi.fn(async () => true)
+    expect((await load(snapshotOf(['b']), alike))!.retried).toEqual([])
+    expect(alike).not.toHaveBeenCalled()
   })
 })
 

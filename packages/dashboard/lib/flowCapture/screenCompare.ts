@@ -34,6 +34,31 @@ export async function compareWithRecording(
   }
 }
 
+/**
+ * Whether two recorded pictures (1b-3b) show the same screen, outside `masks` (the status bar's clock): for a tap made
+ * again on the same element (P2c), the screen unchanged between them says the first did nothing. `false` whenever it
+ * cannot tell — a picture missing, unreadable or of another shape — since what it decides is leaving a step out.
+ */
+export async function recordedAlike(a: string, b: string, masks: ScreenRect[]): Promise<boolean> {
+  if (typeof createImageBitmap !== 'function') return false
+  const load = async (url: string) => {
+    const response = await fetch(url, { credentials: 'include' })
+    return response.ok ? createImageBitmap(await response.blob()) : null
+  }
+  const [first, second] = await Promise.all([load(a).catch(() => null), load(b).catch(() => null)])
+  try {
+    if (!first || !second || !sameShape(first, second)) return false
+    const pa = pixelsOf(first, first.width, first.height)
+    const pb = pixelsOf(second, first.width, first.height)
+    if (!pa || !pb) return false
+    const diff = screenDiff(pa, pb, masks)
+    return diff !== 'incomparable' && diff <= SCREEN_DIFF_THRESHOLD
+  } finally {
+    first?.close()
+    second?.close()
+  }
+}
+
 function pixelsOf(image: ImageBitmap, width: number, height: number): Pixels | null {
   const canvas = document.createElement('canvas')
   canvas.width = width

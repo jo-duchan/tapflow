@@ -347,7 +347,7 @@ const typedOnSoftKeyboard = (step: RawStep): boolean =>
 /** A name cut short in the tile is shown whole on hover. The list item already holds it whole for a screen reader. */
 function RangeTile({ step, index, inRange, left, picture }: { step: RawStep; index: number; inRange: boolean; left: number; picture: string | null }) {
   // A tap left out before the replay is drawn as one outside the range, and says why.
-  const label = step.dropped ? `${rawStepLabel(step)} — ${copy.droppedTile}` : rawStepLabel(step)
+  const label = step.dropped ? `${rawStepLabel(step)} — ${copy.droppedTile[step.dropped]}` : rawStepLabel(step)
   return (
     <Tooltip>
       <TooltipTrigger asChild>
@@ -571,7 +571,7 @@ function DivergedView({ state, onTakeWhatMatched, onBackToRange, onContinueAnywa
   const dropped: number[] = []
   for (let i = state.range.start; i < d.index; i++) if (state.steps[i]?.dropped) dropped.push(i)
   const facts = [
-    dropped.length > 0 ? copy.divergedDropped(spanOf(dropped), dropped.length) : null,
+    dropped.length > 0 ? copy.divergedDropped(spanOf(dropped), dropped.length, dropped.every((i) => state.steps[i]!.dropped === state.steps[dropped[0]!]!.dropped) ? state.steps[dropped[0]!]!.dropped ?? null : null) : null,
     before.length > 0 ? copy.divergedBefore(spanOf(before), before.length, state.range.start === defaultRange(state.steps).start) : null,
     done > 0 ? copy.divergedMatched(done) : null,
   ].filter(Boolean).join(' ')

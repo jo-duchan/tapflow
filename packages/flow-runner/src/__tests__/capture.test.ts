@@ -7,7 +7,7 @@ import type { KeyboardState } from '@tapflowio/protocol'
 import type { CaptureEntry, CapturedMessage } from '@tapflowio/protocol/capture'
 import {
   askedValues, segment, defaultRange, rangeWarnings, stepsBeforeRange, matchStep, reachQuestions, toFlowSteps, flowSteps, flowToYaml, rawStepLabel, capturedStepLabel,
-  recordedTarget, recordedSelector, scrollDirectionOf, replayStep, noResponseTaps, leaveOut,
+  recordedTarget, recordedSelector, scrollDirectionOf, replayStep, noResponseTaps, leaveOut, retryCandidates, dropRetried,
   type MatchContext, type RawStep, type CapturedStep,
 } from '../capture/index.js'
 import type { Step } from '../schema.js'
@@ -1260,6 +1260,36 @@ describe('touch reports', () => {
     expect(steps.every((s) => 'touched' in s && s.touched !== undefined)).toBe(true)
     const named = (s: RawStep) => ('touched' in s ? s.touched?.element?.label : undefined)
     expect([named(steps[0]!), named(steps[1]!)]).toEqual(['Donuts', 'Truck'])
+  })
+
+  // P2c, the user's session af948002: a menu item that took two taps; the first, replayed, chose it, and the second
+  // opened the menu again.
+  describe('retried taps', () => {
+    const blueberry = { label: 'Blueberry Dough', traits: 1 }
+    it('pairs taps one after the other on the same named element, and nothing else', () => {
+      const steps = new Rec()
+        .touch([[0.6, 0.52]]).touched({ moving: false, element: blueberry })
+        .touch([[0.45, 0.51]]).touched({ moving: false, element: blueberry })
+        .touch([[0.1, 0.1]]).touched({ moving: false, element: { label: 'Back', traits: 1 } })
+        .touch([[0.5, 0.5]]).touched({ moving: false, element: { label: 'Plus', traits: 1 } })
+        .touch([[0.5, 0.5]])
+        .steps()
+      expect(retryCandidates(steps)).toEqual([[0, 1]])
+      const out = dropRetried(steps, [0])
+      expect(out.map((s) => s.dropped ?? null)).toEqual(['retried', null, null, null, null])
+      expect(matchStep(out[0]!, ctxOf([])).skipped).toBe('retried')
+    })
+    it('does not pair across another step, a refused tap, or one already left out', () => {
+      const steps = new Rec()
+        .touch([[0.6, 0.52]]).touched({ moving: true, element: blueberry })
+        .touch([[0.45, 0.51]]).touched({ moving: false, element: blueberry })
+        .steps()
+      // The first stopped a list: it is out already.
+      expect(retryCandidates(steps)).toEqual([])
+      const refused = new Rec().touch([[0.6, 0.52]], { ok: false }).touched({ moving: false, element: blueberry })
+        .touch([[0.45, 0.51]]).touched({ moving: false, element: blueberry }).steps()
+      expect(retryCandidates(refused)).toEqual([])
+    })
   })
 
   // P2c: the taps Match's review offers to leave out, and leaving them out before the flow is made.

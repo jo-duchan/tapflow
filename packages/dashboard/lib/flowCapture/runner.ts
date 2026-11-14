@@ -1,5 +1,5 @@
 import {
-  defaultRange, EffectWatch, focusTap, matchStep, rangeStartKeyboard, rangeStartOrientation, reachQuestions, reachTargetOf, recordedSelector,
+  defaultRange, dropRetried, EffectWatch, focusTap, retryCandidates, matchStep, rangeStartKeyboard, rangeStartOrientation, reachQuestions, reachTargetOf, recordedSelector,
   recordedTarget, replayStep, runFlow, scrollDirectionOf, segment, selectorFor, SocketFlowDriver, statusBarRect,
   toFlowSteps, waitForStableScreen, type CapturedStep, type Flow, type FlowResult, type KeyModifier, type MatchContext,
   type RawStep, type ScreenRect, type ScrollDirection, type Selector, type Step, type StepExpect, type StepRange,
@@ -12,6 +12,7 @@ import { markOf, type StepMark } from './marks'
 import type { StepMark as FlowStepMark } from './machine'
 import type { DashboardSessionChannel, HeldResetReport } from './channel'
 import type { CaptureTap } from './tap'
+import { recordedAlike } from './screenCompare'
 
 const base = (tap: CaptureTap) => `/api/v1/sessions/${tap.sessionId}/capture`
 const SETTLE_TIMEOUT_MS = 15_000
@@ -23,17 +24,41 @@ const RENEW_EVERY_MS = 10_000
 export class CaptureGone extends Error {}
 
 /** The person's steps so far, frozen for the dialog. `null` when nothing was captured on this device. */
-export async function loadSnapshot(tap: CaptureTap): Promise<CaptureSnapshot | null> {
+/** The snapshot as the dialog reads it, with the taps found to be retried (P2c) by index into `stepsOf`'s steps. */
+export type LoadedSnapshot = CaptureSnapshot & { retried?: number[] }
+
+export async function loadSnapshot(
+  tap: CaptureTap, alike: (a: string, b: string, masks: ScreenRect[]) => Promise<boolean> = recordedAlike,
+): Promise<LoadedSnapshot | null> {
   // The pictures of the last steps go up after the steps themselves: wait for them, or the newest tiles are blank.
   await tap.flushThumbnails?.()
   const res = await fetch(`${base(tap)}/snapshot`, { method: 'POST', credentials: 'include' })
   if (res.status === 404) return null
   if (!res.ok) throw new Error(`Could not read the captured steps (${res.status})`)
-  return await res.json() as CaptureSnapshot
+  const snapshot = await res.json() as CaptureSnapshot
+  return { ...snapshot, retried: await retriedTaps(tap, snapshot, alike) }
 }
 
-export function stepsOf(snapshot: CaptureSnapshot): { steps: RawStep[]; range: StepRange } {
+/**
+ * The taps made again on the same element whose recorded screen did not change between the two (P2c): the first did
+ * nothing, and replayed it would act where the recording's did not. Judged before Range, so the range and its strip
+ * show them out. The clock in the status bar is not compared. No pictures, no verdict: the tap stays.
+ */
+async function retriedTaps(tap: CaptureTap, snapshot: CaptureSnapshot, alike: (a: string, b: string, masks: ScreenRect[]) => Promise<boolean>): Promise<number[]> {
   const steps = segment(snapshot.entries)
+  const pictured = new Set(snapshot.thumbnails ?? [])
+  const url = (s: RawStep) => (s.thumbnailKey && pictured.has(s.thumbnailKey) ? `${base(tap)}/snapshot/thumbnails/${encodeURIComponent(s.thumbnailKey)}` : null)
+  const masks = [statusBarRect(tap.platform, 0)].filter((m): m is ScreenRect => m !== undefined)
+  const out: number[] = []
+  for (const [first, again] of retryCandidates(steps)) {
+    const a = url(steps[first]!), b = url(steps[again]!)
+    if (a && b && await alike(a, b, masks).catch(() => false)) out.push(first)
+  }
+  return out
+}
+
+export function stepsOf(snapshot: LoadedSnapshot): { steps: RawStep[]; range: StepRange } {
+  const steps = dropRetried(segment(snapshot.entries), snapshot.retried ?? [])
   return { steps, range: defaultRange(steps) }
 }
 

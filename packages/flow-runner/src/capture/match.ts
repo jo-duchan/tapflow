@@ -40,6 +40,8 @@ export type SkipReason =
   | 'keyboard-key'
   /** Went down on a list that was still moving: it stopped the list and pressed nothing (`RawStep.dropped`). */
   | 'stopped-scroll'
+  /** Tapped again right after on the same element, the screen unchanged: the first tap did nothing (`RawStep.dropped`). */
+  | 'retried'
   /** The app did not respond to it when it was recorded (`TouchObservation.acted === false`), and the person left it
    *  out at the end of Match (`noResponseTaps`, `leaveOut`). */
   | 'no-response'
@@ -374,6 +376,30 @@ function nearestTo(found: UIElement[], named: ObservedElement): UIElement | null
   const f = named.frame
   const d = (e: UIElement) => Math.hypot(e.frame.x + e.frame.width / 2 - (f.x + f.width / 2), e.frame.y + e.frame.height / 2 - (f.y + f.height / 2))
   return found.reduce((a, b) => (d(b) < d(a) ? b : a))
+}
+
+/**
+ * Pairs of taps one after the other that the app named as the same element (`recordedSelector`): the first may have
+ * done nothing and the second be its retry — a menu item that took two taps, a button pressed again (P2c, the user's
+ * session af948002). Only candidates: the host confirms one by the recorded pictures, the screen the same before both,
+ * since a stepper's + pressed twice is the same element too and changes the screen each time. Replaying such a first
+ * tap acts where the recording's did not, and the second then lands on the screen the first made.
+ */
+export function retryCandidates(steps: readonly RawStep[]): Array<[number, number]> {
+  const out: Array<[number, number]> = []
+  for (let i = 0; i + 1 < steps.length; i++) {
+    const a = steps[i]!, b = steps[i + 1]!
+    if (a.kind !== 'tap' || b.kind !== 'tap' || a.dropped || b.dropped || a.outcome === 'refused' || b.outcome === 'refused') continue
+    const sa = recordedSelector(a.touched), sb = recordedSelector(b.touched)
+    if (sa && sb && JSON.stringify(sa) === JSON.stringify(sb)) out.push([i, i + 1])
+  }
+  return out
+}
+
+/** The steps with those at `indices` left out before the replay as retried (`retryCandidates`, confirmed). */
+export function dropRetried(steps: readonly RawStep[], indices: Iterable<number>): RawStep[] {
+  const out = new Set(indices)
+  return steps.map((s, i) => (out.has(i) && !s.dropped ? { ...s, dropped: 'retried' as const } : s))
 }
 
 /** A selector for what a touch's report names, for an element the screen does not show yet (`scroll { until }`). */
