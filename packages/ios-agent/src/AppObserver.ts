@@ -62,6 +62,7 @@ export class AppObserver {
   // One request at a time per device: the observer answers the request it reads, and a second written before the
   // first is answered would replace it — a keyboard probe and a field read are often asked together.
   private readonly queues = new Map<string, Promise<unknown>>()
+  private readonly touchTakes = new Map<string, Promise<AppTouch[]>>()
 
   constructor(private readonly host: ObserverHost, opts: AppObserverOptions = {}) {
     this.root = opts.root ?? '/tmp'
@@ -119,7 +120,16 @@ export class AppObserver {
    * cannot be read is dropped. Stray ones a reader never came for are swept with the answers (5 s), as they name what
    * a person touched.
    */
-  async takeTouches(udid: string): Promise<AppTouch[]> {
+  takeTouches(udid: string): Promise<AppTouch[]> {
+    // One take at a time per device: each gesture's pairing takes on its own, and two takes in flight together both
+    // read a report before either removed it, so one touch could be paired with two gestures (CodeRabbit, #1166).
+    const next = (this.touchTakes.get(udid) ?? Promise.resolve()).catch(() => undefined).then(() => this.takeTouchFiles(udid))
+    this.touchTakes.set(udid, next)
+    void next.finally(() => { if (this.touchTakes.get(udid) === next) this.touchTakes.delete(udid) }).catch(() => undefined)
+    return next
+  }
+
+  private async takeTouchFiles(udid: string): Promise<AppTouch[]> {
     const dir = this.dir(udid)
     const out: AppTouch[] = []
     for (const name of await readdir(dir).catch(() => [] as string[])) {

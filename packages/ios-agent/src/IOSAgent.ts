@@ -1278,6 +1278,9 @@ export class IOSAgent implements DeviceAgent, NetworkControlCapability, Posturab
       await (recorded ? this.appAccessibility.enable(deviceId) : this.appAccessibility.restore(deviceId)).catch((e: unknown) => {
         logger.warn(`could not ${recorded ? 'turn on' : 'restore'} app accessibility:`, (e as Error).message)
       })
+      // The write above can take seconds (`defaults`, up to 5 s): a shutdown or disconnect in it already stopped the
+      // reports, and this boot must not turn them back on with nobody left to read them (CodeRabbit, #1166).
+      if (seq !== state.bootSeq) { this.abandonBoot(state, seq, sessionId, requestId); return }
       // What each touch hits, reported by the app while this person is recorded — only to a relay that keeps it.
       const observeTouches = recorded && touchObservations
       if (observeTouches) this.touchWatch.set(deviceId, { starts: [], reports: [] })

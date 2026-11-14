@@ -188,6 +188,15 @@ describe('the app\'s touch reports', () => {
     expect(readdirSync(dir).sort()).toEqual(['background'])
   })
 
+  // CodeRabbit on #1166: every gesture's pairing takes on its own, and two takes in flight read the same report.
+  it('gives each report to one take, when takes overlap', async () => {
+    const { observer, dir } = setup()
+    await observer.prepare(UDID)
+    for (let seq = 1; seq <= 5; seq++) writeFileSync(join(dir, `touch-${seq}.json`), JSON.stringify({ seq, at: seq, bundle: 'com.app', point: { x: 0.5, y: 0.5 }, moving: false }))
+    const takes = await Promise.all([observer.takeTouches(UDID), observer.takeTouches(UDID), observer.takeTouches(UDID)])
+    expect(takes.flat().map((t) => t.seq).sort()).toEqual([1, 2, 3, 4, 5])
+  })
+
   it('cuts a long label or identifier, which would fill the capture on every tap', async () => {
     const { observer, dir } = setup()
     await observer.prepare(UDID)

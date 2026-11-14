@@ -273,7 +273,12 @@ static void tfo_touch_answer(id window, id view, TFOPoint fixed, TFOPoint inWind
     TFORect wb = tfo_rect(window, "bounds");
     TFOPoint p = { inWindow.x * wb.w, inWindow.y * wb.h };
     SEL hit = sel_registerName("accessibilityHitTest:withEvent:");   // iOS 18+
-    id e = [window respondsToSelector:hit] ? ((id (*)(id, SEL, TFOPoint, id))objc_msgSend)(window, hit, p, nil) : nil;
+    // This runs after the touch-down was delivered: an app that changes screen on touch-down (rather than on lift) has
+    // put another view under the point, and its element is not what the person touched. The view UIKit hit before
+    // delivery is the touch's own; a different one now names nothing rather than the wrong thing (CodeRabbit, #1166).
+    id under = ((id (*)(id, SEL, TFOPoint, id))objc_msgSend)(window, sel_registerName("hitTest:withEvent:"), p, nil);
+    BOOL same = !view || under == view;
+    id e = same && [window respondsToSelector:hit] ? ((id (*)(id, SEL, TFOPoint, id))objc_msgSend)(window, hit, p, nil) : nil;
     NSDictionary *element = tfo_element(e, window);
     if (element) out[@"element"] = element;
     // The nearest container marked a button: a grid cell rather than its subtitle (measured: "Daytime, Salty").
@@ -292,7 +297,9 @@ static void tfo_touch_answer(id window, id view, TFOPoint fixed, TFOPoint inWind
   // Serialised here, written off the main queue (0.3–0.8 ms measured): only bytes cross, nothing the app may still change.
   NSString *path = [g_dir stringByAppendingFormat:@"/touch-%llu.json", g_touch_seq];
   NSData *json = [NSJSONSerialization dataWithJSONObject:out options:0 error:nil];
-  if (json) dispatch_async(dispatch_get_global_queue(QOS_CLASS_UTILITY, 0), ^{ tfo_write_data(path, json); });
+  // Checked again where it is written: a write still queued when the agent stopped the reports and swept them would
+  // leave this one, naming what a person touched, with nothing to sweep it (CodeRabbit, #1166).
+  if (json) dispatch_async(dispatch_get_global_queue(QOS_CLASS_UTILITY, 0), ^{ if (tfo_touches_on()) tfo_write_data(path, json); });
 }
 
 /**

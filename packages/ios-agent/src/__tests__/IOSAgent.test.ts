@@ -1073,6 +1073,27 @@ describe('IOSAgent', () => {
       browser.close()
     })
 
+    // CodeRabbit on #1166: a shutdown during the accessibility write stopped the reports, and the abandoned boot turned
+    // them back on when the write returned, with nobody left to read them.
+    it('does not turn touch reports on for a boot a shutdown abandoned during the accessibility write', async () => {
+      const watch = vi.spyOn(AppObserver.prototype, 'watchTouches').mockResolvedValue()
+      let finish!: () => void
+      const enable = vi.spyOn(AppAccessibility.prototype, 'enable').mockImplementation(() => new Promise<void>((r) => { finish = r }))
+      const restore = vi.spyOn(AppAccessibility.prototype, 'restore').mockResolvedValue()
+      const { agent, browser, internals, sent } = await bootedAgent(mockSimctl(true), false)
+      watch.mockClear()
+      internals.handleRelayMessage({ type: 'device:boot', sessionId: agent.sessionId!, requestId: 'rq-r', payload: { deviceId: 'dev-1', recorded: true, touchObservations: true } } as never)
+      await vi.waitFor(() => expect(enable).toHaveBeenCalled(), { timeout: 3000 })
+      internals.handleRelayMessage({ type: 'device:shutdown', sessionId: agent.sessionId!, requestId: 'rq-off', payload: { deviceId: 'dev-1' } } as never)
+      await new Promise((r) => setTimeout(r, 100))
+      finish()
+      await vi.waitFor(() => expect(sent.some((m) => m.type === 'device:boot-error' && m['requestId'] === 'rq-r')).toBe(true), { timeout: 3000 })
+      expect(watch).not.toHaveBeenCalledWith('dev-1', true)
+      watch.mockRestore(); enable.mockRestore(); restore.mockRestore()
+      agent.disconnect()
+      browser.close()
+    })
+
     it('boots anyway when app accessibility cannot be turned on', async () => {
       const enable = vi.spyOn(AppAccessibility.prototype, 'enable').mockRejectedValue(new Error('defaults timed out'))
       const { agent, browser, internals, sent } = await bootedAgent(mockSimctl(true), false)

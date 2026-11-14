@@ -64,6 +64,7 @@ export class AppAccessibility {
 
   /** Every device a marker names: what an agent that died left on. */
   markedDevices(): string[] {
+    if (!this.rootIsOurs()) return []
     try {
       return readdirSync(this.root).filter((f) => f.endsWith('.json')).map((f) => f.slice(0, -'.json'.length))
     } catch {
@@ -84,7 +85,21 @@ export class AppAccessibility {
     chmodSync(this.root, 0o700)
   }
 
-  private marked(udid: string): boolean { return existsSync(this.markerPath(udid)) }
+  // A marker is trusted only in a directory this user owns: one someone else made could hold a forged prior value, and
+  // enable and restore read markers before `ownRoot` would refuse it (CodeRabbit, #1166).
+  private marked(udid: string): boolean {
+    const path = this.markerPath(udid)   // the udid refused first, whatever the directory
+    return this.rootIsOurs() && existsSync(path)
+  }
+
+  private rootIsOurs(): boolean {
+    try {
+      const st = lstatSync(this.root)
+      return st.isDirectory() && !st.isSymbolicLink() && (!process.getuid || st.uid === process.getuid())
+    } catch {
+      return false
+    }
+  }
   // A udid comes from the relay's payload and names a file here: nothing but a udid's characters gets that far.
   private markerPath(udid: string): string {
     if (!/^[A-Za-z0-9-]+$/.test(udid)) throw new Error(`not a device id: ${JSON.stringify(udid)}`)

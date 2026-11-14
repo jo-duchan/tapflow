@@ -119,6 +119,21 @@ describe('AppAccessibility', () => {
     expect(JSON.parse(readFileSync(join(markers, 'UDID-1.json'), 'utf8'))).toEqual({ prior: false })
   })
 
+  // CodeRabbit on #1166: a marker already in a planted directory skipped the directory check, on enable and restore.
+  it('trusts no marker in a directory that is not ours: enable refuses, restore and the leftover sweep do nothing', async () => {
+    const { host } = setup(false)
+    const elsewhere = join(root, 'planted')
+    mkdirSync(elsewhere)
+    writeFileSync(join(elsewhere, 'UDID-1.json'), JSON.stringify({ prior: true }))
+    symlinkSync(elsewhere, join(root, 'linked'))
+    const ax = new AppAccessibility(host, join(root, 'linked'))
+    expect(ax.markedDevices()).toEqual([])
+    await ax.restore('UDID-1')
+    expect(host.writeAppAccessibility).not.toHaveBeenCalled()
+    await expect(ax.enable('UDID-1')).rejects.toThrow('refusing')
+    expect(host.writeAppAccessibility).not.toHaveBeenCalled()
+  })
+
   it('lists nothing before any marker was written', () => {
     const { ax } = setup(false)
     expect(ax.markedDevices()).toEqual([])
