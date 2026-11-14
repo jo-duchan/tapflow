@@ -40,25 +40,48 @@ export async function compareWithRecording(
  * cannot tell — a picture missing, unreadable or of another shape — since what it decides is leaving a step out.
  */
 export async function recordedAlike(a: string, b: string, masks: ScreenRect[]): Promise<boolean> {
-  if (typeof createImageBitmap !== 'function') return false
-  const load = async (url: string) => {
-    const response = await fetch(url, { credentials: 'include' })
-    return response.ok ? createImageBitmap(await response.blob()) : null
-  }
+  const load = async (url: string) => { const r = await fetch(url, { credentials: 'include' }); return r.ok ? r.blob() : null }
   const [first, second] = await Promise.all([load(a).catch(() => null), load(b).catch(() => null)])
+  if (!first || !second) return false
+  const diff = await picturesDiff(first, second, masks)
+  return diff !== null && unchanged(diff)
+}
+
+/** How far two pictures differ outside `masks` (`screenDiff`), or `null` when either cannot be read or laid on the other. */
+export async function picturesDiff(a: Blob, b: Blob, masks: ScreenRect[]): Promise<number | null> {
+  if (typeof createImageBitmap !== 'function') return null
+  const [first, second] = await Promise.all([createImageBitmap(a).catch(() => null), createImageBitmap(b).catch(() => null)])
   try {
-    if (!first || !second || !sameShape(first, second)) return false
+    if (!first || !second || !sameShape(first, second)) return null
     const pa = pixelsOf(first, first.width, first.height)
     const pb = pixelsOf(second, first.width, first.height)
-    if (!pa || !pb) return false
-    // Not a cell different: "did nothing change" is a far narrower question than Match's "same screen" (1%), under
-    // which a stepper's digit or a switch flipping reads alike (review of P2c). Measured on the user's session
-    // af948002: the menu item that took two taps scores 0; neighbouring steps that changed the screen 0.045 and up.
-    return unchanged(screenDiff(pa, pb, masks))
+    if (!pa || !pb) return null
+    const diff = screenDiff(pa, pb, masks)
+    return diff === 'incomparable' ? null : diff
   } finally {
     first?.close()
     second?.close()
   }
+}
+
+/**
+ * Whether a replayed tap did nothing where the recorded one did something (P2c): the replay's screen before the tap and
+ * now not a cell different, and the recording's pictures before the tap and before the next step different. `false`
+ * whenever a picture is missing or cannot be read, since what it decides is pressing again.
+ */
+export async function tapDidNothing(
+  recordedBefore: string | null, recordedNext: string | null, shotBefore: Uint8Array, shotNow: Uint8Array, masks: ScreenRect[],
+  diff: (a: Blob, b: Blob, masks: ScreenRect[]) => Promise<number | null> = picturesDiff,
+): Promise<boolean> {
+  if (!recordedBefore || !recordedNext) return false
+  const jpeg = (bytes: Uint8Array) => new Blob([bytes as BlobPart], { type: 'image/jpeg' })
+  const replayed = await diff(jpeg(shotBefore), jpeg(shotNow), masks)
+  if (replayed === null || !unchanged(replayed)) return false
+  const load = async (url: string) => { const r = await fetch(url, { credentials: 'include' }); return r.ok ? r.blob() : null }
+  const [a, b] = await Promise.all([load(recordedBefore).catch(() => null), load(recordedNext).catch(() => null)])
+  if (!a || !b) return false
+  const recorded = await diff(a, b, masks)
+  return recorded !== null && !unchanged(recorded)
 }
 
 /** `recordedAlike`'s verdict on a `screenDiff`: not one cell different. */

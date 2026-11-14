@@ -11,7 +11,7 @@ import { copy } from '@/lib/flowCapture/copy'
 import { editedCapture, exportedFlow, flowOf, secretRename } from '@/lib/flowCapture/flow'
 import { canGoTo, initialState, reachedStep, matchEnded, reduce, stepIndex, withAsked, type CaptureState } from '@/lib/flowCapture/machine'
 import { DialogRun, keyboardOf, loadSnapshot, matchRange, PauseLease, stepsOf, verifyFlow } from '@/lib/flowCapture/runner'
-import { compareWithRecording } from '@/lib/flowCapture/screenCompare'
+import { compareWithRecording, tapDidNothing } from '@/lib/flowCapture/screenCompare'
 import type { CaptureTap } from '@/lib/flowCapture/tap'
 import { addMark, type StepMark } from '@/lib/flowCapture/marks'
 import { chromeOrientation } from '@tapflowio/protocol/screen'
@@ -183,6 +183,8 @@ function CaptureSession({ tap, session, snapshot, bundleId, setBusy, close }: {
         if (after.screenshot) run.keep(after.screenshot)
         dispatch({ type: 'step-after', index, after })
       },
+      tapDidNothing: (prev, next, before, now, masks) =>
+        tapDidNothing(thumbnailUrl(tap.sessionId, snapshot, prev), thumbnailUrl(tap.sessionId, snapshot, next), before, now, masks),
       onDiverged: (index, divergence) => {
         run.keep(divergence.nowUrl)
         const step = state.steps[index]

@@ -200,6 +200,14 @@ export interface MatchHooks {
   onObserved?: (index: number, observed: StepExpect | null) => void
   /** They differ, at `index` into the steps: resolves when the person goes on, rejects when the run is stopped. */
   onDiverged?: (index: number, divergence: ScreenDivergence) => Promise<void>
+  /**
+   * Whether the tap `prev` did nothing on the replay where it did something when recorded (P2c): the replay's screen
+   * before it (`shotBefore`) and now (`shotNow`) not a cell different, and the recording's before it and before `next`
+   * different. Asked only when the step after it looks different; `true` replays the tap once more before stopping. An
+   * app now and then lets a tap go by (a Food Truck menu item, sessions af948002 and ff5d3d3c), as it did the person's
+   * once; a second, on a screen the first did not change, cannot act twice.
+   */
+  tapDidNothing?: (prev: RawStep, next: RawStep, shotBefore: Uint8Array, shotNow: Uint8Array, masks: ScreenRect[]) => Promise<boolean>
   signal: AbortSignal
 }
 
@@ -377,6 +385,9 @@ export async function matchRange(
   // The step after a turn the replay put in, or after an install it left out, begins on a screen the recording did not:
   // not compared.
   let unlike = false
+  // The tap just replayed, with the screen it was replayed on: tapped once more when the next step looks different and
+  // it did nothing (`tapDidNothing`). Once per tap.
+  let lastTap: { raw: RawStep; named?: NamedTap; shot: Uint8Array } | undefined
   for (const [offset, raw] of slice.entries()) {
     hooks.signal.throwIfAborted()
     let skipCompare = unlike
@@ -423,14 +434,38 @@ export async function matchRange(
       : undefined
     // After the focus tap and its settle: a typed step's picture was taken at its first key, with the field focused.
     // A tap the app named is judged by finding that element, not by the picture: the list under it may sit elsewhere.
-    const compareNow = async () => {
+    const prevTap = lastTap
+    lastTap = undefined
+    const compareNow = async (): Promise<void> => {
       if (!hooks.compare || !hooks.onDiverged) return
       const turn = before?.interfaceTurn ?? frameTurnOf(tap.chrome())
       const masks = [statusBarRect(tap.platform, turn), raw.keyboardRect].filter((m): m is ScreenRect => m !== undefined)
       // A picture that cannot be read is no reason to stop: the step is replayed as before the comparison existed.
       const differs = await hooks.compare(raw, masks).catch(() => null)
       hooks.signal.throwIfAborted()
-      if (differs) await hooks.onDiverged(range.start + offset, differs)
+      if (!differs) return
+      if (prevTap && await retriedTap(prevTap, masks)) {
+        before = (await waitForStableScreen(read, { timeoutMs: SETTLE_TIMEOUT_MS })) ?? before
+        const still = await hooks.compare(raw, masks).catch(() => null)
+        hooks.signal.throwIfAborted()
+        if (still) await hooks.onDiverged(range.start + offset, still)
+        return
+      }
+      await hooks.onDiverged(range.start + offset, differs)
+    }
+    // The tap before this step, replayed once more when it did nothing on the replay and something when recorded.
+    const retriedTap = async (prev: NonNullable<typeof lastTap>, masks: ScreenRect[]): Promise<boolean> => {
+      if (!hooks.tapDidNothing) return false
+      const now = await channel.screenshot(sessionId, hooks.signal).catch(() => null)
+      if (!now || !(await hooks.tapDidNothing(prev.raw, raw, prev.shot, now, masks).catch(() => false))) return false
+      hooks.signal.throwIfAborted()
+      if (prev.named) {
+        if ((await runNamed(prev.named)).tapped) return true
+      }
+      const mark = markOf(prev.raw)
+      if (mark) hooks.onTouch?.(mark)
+      await replayStep(channel, sessionId, prev.raw, hooks.signal)
+      return true
     }
     // A turned app replays its taps at their points (`namedTap`), so the swipe before one is compared as any other.
     if (compared(raw) && !skipCompare && !named && (!!before?.interfaceTurn || !swipeBeforeNamedTap(slice, offset))) await compareNow()
@@ -463,6 +498,8 @@ export async function matchRange(
         matched.push(step)
         // What it did is read against the screen it was tapped on, which a scroll before it has moved from `before`.
         if (!scrolled) watching = { step, index: matched.length - 1, before: before!.elements, touched: named.target! }
+        // Not after a search: the screen it was tapped on is not the one pictured before the search.
+        if (!scrolled && shot) lastTap = { raw, named, shot }
         hooks.onStep(step, shot ? URL.createObjectURL(new Blob([shot as BlobPart], { type: 'image/jpeg' })) : undefined)
         continue
       }
@@ -503,6 +540,7 @@ export async function matchRange(
     if ((raw.kind === 'tap' || raw.kind === 'longPress') && before) {
       watching = { step, index: matched.length - 1, before: before.elements, ...(questions[0] ? { touched: questions[0] } : {}) }
     }
+    if (raw.kind === 'tap' && shot) lastTap = { raw, shot }
     hooks.onStep(step, shot ? URL.createObjectURL(new Blob([shot as BlobPart], { type: 'image/jpeg' })) : undefined)
   }
   // The last touch has no next step to read after it.

@@ -648,6 +648,63 @@ describe('loadSnapshot: a tap made again', () => {
   })
 })
 
+// P2c, the user's session ff5d3d3c: a menu item's tap did nothing on the replay, where it chose the item when recorded,
+// and Match stopped at the step after it. Pressed once more, on evidence, before stopping.
+describe('matchRange: a tap that did nothing on the replay', () => {
+  const ctap = { ...(tap as object), chrome: () => null } as unknown as Tap
+  const shooting = { ...channel, screenshot: async () => new Uint8Array([1]) } as unknown as Channel
+  const menuItem = { ...tapStep, point: [0.6, 0.51] } as unknown as RawStep
+  const back = { ...tapStep, point: [0.1, 0.09] } as unknown as RawStep
+  const run = async (didNothing: boolean, stillDiffers = false) => {
+    vi.stubGlobal('URL', Object.assign(URL, { createObjectURL: () => 'blob:x' }))
+    let asked = 0
+    const compare = vi.fn(async (raw: RawStep) => (raw === back && (asked++ === 0 || stillDiffers) ? { diff: 0.2, nowUrl: 'blob:now', masks: [] } : null))
+    const tapDidNothing = vi.fn(async () => didNothing)
+    const onDiverged = vi.fn(async () => {})
+    const lease = new PauseLease(ctap)
+    // A tapStep first: the first step after the launch is never compared here.
+    await matchRange(ctap, shooting, lease, [launchStep, tapStep, menuItem, back], { start: 0, end: 4 }, null, { ...hooks(), compare, onDiverged, tapDidNothing })
+    await lease.stop()
+    return { tapDidNothing, onDiverged, taps: log.filter((l) => l === 'replay tap').length }
+  }
+
+  it('taps it once more and goes on when the step after it then looks as recorded', async () => {
+    const r = await run(true)
+    expect(r.tapDidNothing).toHaveBeenCalledWith(menuItem, back, expect.any(Uint8Array), expect.any(Uint8Array), expect.any(Array))
+    // tapStep, the menu item, the menu item again, back.
+    expect(r.taps).toBe(4)
+    expect(r.onDiverged).not.toHaveBeenCalled()
+  })
+
+  it('judges "did nothing" only on both pictures: unchanged on the replay, changed when recorded', async () => {
+    const { tapDidNothing } = await import('@/lib/flowCapture/screenCompare')
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async () => new Response(new Blob(['x'])))
+    const bytes = new Uint8Array([1])
+    const judge = (replayed: number | null, recorded: number | null, urls: [string | null, string | null] = ['/a', '/b']) => {
+      let n = 0
+      return tapDidNothing(urls[0], urls[1], bytes, bytes, [], async () => (n++ === 0 ? replayed : recorded))
+    }
+    expect(await judge(0, 0.05)).toBe(true)
+    expect(await judge(0.001, 0.05)).toBe(false)
+    expect(await judge(0, 0)).toBe(false)
+    expect(await judge(0, null)).toBe(false)
+    expect(await judge(null, 0.05)).toBe(false)
+    expect(await judge(0, 0.05, [null, '/b'])).toBe(false)
+    vi.restoreAllMocks()
+  })
+
+  it('stops as before when the tap did something, or when once more did not help', async () => {
+    const r = await run(false)
+    expect(r.taps).toBe(3)
+    expect(r.onDiverged).toHaveBeenCalledTimes(1)
+    log.length = 0
+    const again = await run(true, true)
+    // Once only: pressed again a single time, then the stop.
+    expect(again.taps).toBe(4)
+    expect(again.onDiverged).toHaveBeenCalledTimes(1)
+  })
+})
+
 // Record-time observation (P2b): a tap the app named is replayed on that element through the engine, wherever the list
 // now puts it; a tap that only stopped a moving list is not compared.
 describe('matchRange with the app\'s touch reports', () => {
