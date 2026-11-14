@@ -896,6 +896,28 @@ describe('IOSAgent', () => {
       browser.close()
     })
 
+    it('keeps saying so while any of two overlapping installs is still running', async () => {
+      const read = vi.spyOn(AppObserver.prototype, 'read').mockResolvedValue({ kind: 'silent' })
+      const { agent, browser, internals, sent } = await bootedAgent(mockSimctl(true))
+      const finishes: Array<(fail?: boolean) => void> = []
+      ;(agent as unknown as { installBuild: () => Promise<void> }).installBuild = () => new Promise<void>((resolve, reject) => { finishes.push((fail) => (fail ? reject(new Error('x')) : resolve())) })
+      internals.handleRelayMessage({ type: 'app:install', sessionId: agent.sessionId!, requestId: 'rq-a', payload: { filePath: '/a.zip', bundleId: 'com.a' } } as never)
+      internals.handleRelayMessage({ type: 'app:install', sessionId: agent.sessionId!, requestId: 'rq-b', payload: { filePath: '/b.zip', bundleId: 'com.a' } } as never)
+      finishes[1]!(true)
+      await vi.waitFor(() => expect(sent.some((m) => m.type === 'app:install-error')).toBe(true), { timeout: 2000 })
+      internals.handleRelayMessage({ type: 'ui:keyboard:request', sessionId: agent.sessionId!, requestId: 'rq-k' })
+      await vi.waitFor(() => expect(sent.find((m) => m.type === 'ui:keyboard:response')).toBeDefined(), { timeout: 2000 })
+      expect(sent.find((m) => m.type === 'ui:keyboard:response')!['keyboard']).toEqual({ shown: null, onHome: true })
+      expect(read).not.toHaveBeenCalled()
+      finishes[0]!(true)
+      await vi.waitFor(() => expect(sent.filter((m) => m.type === 'app:install-error')).toHaveLength(2), { timeout: 2000 })
+      internals.handleRelayMessage({ type: 'ui:keyboard:request', sessionId: agent.sessionId!, requestId: 'rq-k2' })
+      await vi.waitFor(() => expect(read).toHaveBeenCalled(), { timeout: 2000 })
+      read.mockRestore()
+      agent.disconnect()
+      browser.close()
+    })
+
     it('stops saying so once an install failed, rather than for the rest of the session', async () => {
       const read = vi.spyOn(AppObserver.prototype, 'read').mockResolvedValue({ kind: 'silent' })
       const { agent, browser, internals, sent } = await bootedAgent(mockSimctl(true))

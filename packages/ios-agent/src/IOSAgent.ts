@@ -404,10 +404,11 @@ export class IOSAgent implements DeviceAgent, NetworkControlCapability, Posturab
   // tree runner (AGENTS.md, "App observer").
   private readonly appObserver: AppObserver
   private readonly appAccessibility: AppAccessibility
+  // Apps being installed, by device, with how many installs of each are in flight: such an app cannot be in front,
+  // which a read with no app named yet then says.
+  private readonly installing = new Map<string, Map<string, number>>()
   // Devices whose app reports each touch-down, while a person is recorded on a relay that keeps them (record-time
   // observation): the gestures sent there, newest last, and the reports not yet paired with one.
-  // Apps being installed, by device: such an app cannot be in front, which a read with no app named yet then says.
-  private readonly installing = new Map<string, string>()
   private readonly touchWatch = new Map<string, { starts: Array<{ x: number; y: number; at: number }>; reports: AppTouch[] }>()
   // Holds a macOS power assertion while connected so the host doesn't idle-throttle the
   // simulator capture/encode when the Mac is unattended. No-op off macOS.
@@ -1460,12 +1461,6 @@ export class IOSAgent implements DeviceAgent, NetworkControlCapability, Posturab
   }
 
   /**
-   * A device left lean by a run that ended without shutting it down — a crash, a lost relay, a
-   * tester quitting the simulator — is put back here if it is off, whatever `lean` says now: if Lean
-   * mode is on, the next boot through tapflow applies it again. One still running is left alone,
-   * and a udid that no longer exists (the host directory outlives `simctl delete`) is not ours to count.
-   */
-  /**
    * The app observer's read for the app under test. With none named yet and one being installed, the answer is that
    * no app is in front: an app still installing cannot be, and asking nobody read as unknown, which kept Capture's
    * range on the home-screen taps a person made while the install ran (a Food Truck install took ~10 s; measured).
@@ -1531,6 +1526,12 @@ export class IOSAgent implements DeviceAgent, NetworkControlCapability, Posturab
     }
   }
 
+  /**
+   * A device left lean by a run that ended without shutting it down — a crash, a lost relay, a
+   * tester quitting the simulator — is put back here if it is off, whatever `lean` says now: if Lean
+   * mode is on, the next boot through tapflow applies it again. One still running is left alone,
+   * and a udid that no longer exists (the host directory outlives `simctl delete`) is not ours to count.
+   */
   private revertLeftoverLean(devices: Device[]): void {
     let marked: string[]
     try { marked = this.leanStore.applied() } catch { return }
@@ -2273,9 +2274,19 @@ export class IOSAgent implements DeviceAgent, NetworkControlCapability, Posturab
           respond({ type: 'app:install-error', message: 'No booted device' })
           break
         }
-        if (bundleId) this.installing.set(installState.deviceId, bundleId)
+        const installingHere = this.installing.get(installState.deviceId) ?? new Map<string, number>()
+        if (bundleId) {
+          installingHere.set(bundleId, (installingHere.get(bundleId) ?? 0) + 1)
+          this.installing.set(installState.deviceId, installingHere)
+        }
         this.installBuild(installState.deviceId, filePath, bundleId, { buildTicket, buildName, buildBytes })
-          .finally(() => { if (this.installing.get(installState.deviceId) === bundleId) this.installing.delete(installState.deviceId) })
+          .finally(() => {
+            if (!bundleId) return
+            const left = (installingHere.get(bundleId) ?? 1) - 1
+            if (left > 0) installingHere.set(bundleId, left)
+            else installingHere.delete(bundleId)
+            if (installingHere.size === 0 && this.installing.get(installState.deviceId) === installingHere) this.installing.delete(installState.deviceId)
+          })
           .then(async () => {
             // A person may open the app from its home-screen icon rather than with Launch (measured, flow-runner
             // AGENTS.md): without this, every tree and field read on it would answer that no app was launched.

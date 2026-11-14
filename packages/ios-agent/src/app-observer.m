@@ -154,10 +154,8 @@ static NSDictionary *tfo_field(id window, NSDictionary *keyboard) {
   return out;
 }
 
-/** `body` as JSON at `path`, written 0600 under the 0700 directory and renamed into place whole. */
-static void tfo_write(NSString *path, NSDictionary *body) {
-  NSData *json = [NSJSONSerialization dataWithJSONObject:body options:0 error:nil];
-  if (!json) return;
+/** `json` at `path`, written 0600 under the 0700 directory and renamed into place whole. */
+static void tfo_write_data(NSString *path, NSData *json) {
   NSString *tmp = [path stringByAppendingString:@".tmp"];
   int fd = open(tmp.fileSystemRepresentation, O_WRONLY | O_CREAT | O_TRUNC | O_NOFOLLOW, 0600);
   if (fd < 0) return;
@@ -165,6 +163,12 @@ static void tfo_write(NSString *path, NSDictionary *body) {
   close(fd);
   if (whole) rename(tmp.fileSystemRepresentation, path.fileSystemRepresentation);
   else unlink(tmp.fileSystemRepresentation);
+}
+
+/** `body` as JSON at `path`. */
+static void tfo_write(NSString *path, NSDictionary *body) {
+  NSData *json = [NSJSONSerialization dataWithJSONObject:body options:0 error:nil];
+  if (json) tfo_write_data(path, json);
 }
 
 /** One answer to request `nonce`. */
@@ -285,9 +289,10 @@ static void tfo_touch_answer(id window, id view, TFOPoint fixed, TFOPoint inWind
     if (button && tfo_text_input(e)) button = button[@"identifier"] ? @{ @"identifier": button[@"identifier"], @"traits": button[@"traits"] } : nil;
     if (button) out[@"button"] = button;
   }
-  // Off the main queue: the dictionary is built, nothing UIKit is touched from here (0.3–0.8 ms measured).
+  // Serialised here, written off the main queue (0.3–0.8 ms measured): only bytes cross, nothing the app may still change.
   NSString *path = [g_dir stringByAppendingFormat:@"/touch-%llu.json", g_touch_seq];
-  dispatch_async(dispatch_get_global_queue(QOS_CLASS_UTILITY, 0), ^{ tfo_write(path, out); });
+  NSData *json = [NSJSONSerialization dataWithJSONObject:out options:0 error:nil];
+  if (json) dispatch_async(dispatch_get_global_queue(QOS_CLASS_UTILITY, 0), ^{ tfo_write_data(path, json); });
 }
 
 /**
@@ -304,6 +309,12 @@ static void tfo_warm_later(id window) {
   dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 700 * NSEC_PER_MSEC), dispatch_get_main_queue(), ^{
     if (gen != g_warm_gen || !tfo_touches_on()) return;
     TFORect wb = tfo_rect(window, "bounds");
+    // A fling's glide runs 1–3 s: while a list under the centre still moves, wait again rather than cost a frame in it.
+    id centre = ((id (*)(id, SEL, TFOPoint, id))objc_msgSend)(window, sel_registerName("hitTest:withEvent:"), (TFOPoint){ wb.w / 2, wb.h / 2 }, nil);
+    Class scroll = NSClassFromString(@"UIScrollView");
+    for (id v = centre; v; v = tfo_send(v, "superview")) {
+      if ([v isKindOfClass:scroll] && (tfo_bool(v, "isDecelerating") || tfo_bool(v, "_isBouncing"))) { tfo_warm_later(window); return; }
+    }
     SEL hit = sel_registerName("accessibilityHitTest:withEvent:");
     if ([window respondsToSelector:hit]) (void)((id (*)(id, SEL, TFOPoint, id))objc_msgSend)(window, hit, (TFOPoint){ wb.w / 2, wb.h / 2 }, nil);
   });
@@ -319,7 +330,8 @@ static void tfo_send_event(id app, SEL cmd, id event) {
   if (g_dir && tfo_touches_on()) {
     for (id t in tfo_send(event, "allTouches")) {
       NSInteger phase = tfo_int(t, "phase");
-      if (phase == 3) tfo_warm_later(tfo_send(t, "window"));   // UITouchPhaseEnded: the screen it leaves
+      // UITouchPhaseEnded: the screen it leaves — the app's key window, since a key's touch ends in the keyboard's.
+      if (phase == 3) tfo_warm_later(tfo_key_window());
       if (phase != 0) continue;   // UITouchPhaseBegan
       g_warm_gen++;               // a warm-up still pending would run in this touch's frames
       // Two at most: a hit test costs up to 14 ms on the main queue, and the agent never sends more than two fingers.
