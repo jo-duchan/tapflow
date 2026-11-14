@@ -112,8 +112,8 @@ There is no focus ring inside the list: the highlighted fill is the focus indica
 
 - **Name every trigger.** In a form, a `Label` with `htmlFor` pointing at the trigger's `id` (token expiry,
   token type, invite role, app platform). Outside a form — toolbars and table cells — an `aria-label`
-  ("Filter by status", `Status for <build>`, "Playback speed"). Two triggers have neither today: the upload
-  dialog's Status and the Team role cell (tracked in #979).
+  ("Filter by status", `Status for <build>`, "Playback speed"). The Team role cell still has neither
+  (tracked in #979).
 - Use `h-10` in a form, `h-8` in a toolbar, and the smaller heights only inside a dense row (`h-9` build row,
   `h-7` table cell). Set a width whenever the height is overridden.
 - Item text says what the option does, not just its key: `API — CI uploads & API access`. Content grows to fit

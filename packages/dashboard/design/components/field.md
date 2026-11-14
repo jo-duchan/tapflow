@@ -81,6 +81,8 @@ saved with the form.
 **File drop zone** (Upload build). 96px high, full width, `rounded-md`, a 2px dashed `--border`, centered text
 14px `--muted-foreground`: `Click or drag to upload`, replaced by the chosen file's name once one is picked. On hover the border turns
 `--primary`. Click or drop a file on it.
+Long file names truncate in the middle, keeping the final 16 characters visible to distinguish builds.
+The full file name is available in the hover tooltip and the control's accessible description.
 
 ### `hint`
 
