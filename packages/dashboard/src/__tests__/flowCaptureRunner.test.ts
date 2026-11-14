@@ -6,7 +6,7 @@ import type { RawStep } from '@tapflowio/flow-runner/browser'
 // has to be called, so it is stubbed to say what it was called with.
 const log: string[] = []
 // What the screen reads as before each step: one test puts a field on it.
-const screen: { elements: unknown[] } = { elements: [] }
+const screen: { elements: unknown[]; interfaceTurn?: number } = { elements: [] }
 // One test has the device refuse what is replayed.
 const replay = { refuse: false }
 // What each step was matched with: one test reads the device's reach answers off it.
@@ -18,7 +18,7 @@ const ran: { options?: { observeEffects?: boolean }; flows: Array<{ steps: unkno
 vi.mock('@tapflowio/flow-runner/browser', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@tapflowio/flow-runner/browser')>()),
   rangeStartOrientation: () => 'landscape',
-  waitForStableScreen: async () => { seq.push('settle'); return { elements: screen.elements } },
+  waitForStableScreen: async () => { seq.push('settle'); return { elements: screen.elements, ...(screen.interfaceTurn !== undefined ? { interfaceTurn: screen.interfaceTurn } : {}) } },
   replayStep: async (_c: unknown, _s: string, raw: RawStep) => {
     if (replay.refuse) throw new Error('channel-unavailable')
     log.push(`replay ${raw.kind}`)
@@ -92,6 +92,7 @@ beforeEach(() => {
   log.length = 0
   seq.length = 0
   screen.elements = []
+  screen.interfaceTurn = undefined
   replay.refuse = false
   pauseOk = true
   keyboardAnswers = ['done']
@@ -671,6 +672,17 @@ describe('matchRange with the app\'s touch reports', () => {
     await lease.stop()
     expect(log.filter((l) => l.startsWith('reach')).at(-1)).toBe('reach Row 3')
     expect(log.indexOf('reach Row 3')).toBeLessThan(log.lastIndexOf('replay tap'))
+  })
+
+  // Review of the CodeRabbit fixes: a turned app replays the tap at its point, so its swipe is not exempt from the picture.
+  it('compares the swipe before a named tap when the app is drawn turned', async () => {
+    screen.elements = [orders]
+    screen.interfaceTurn = 90
+    const { compare, h } = compareHooks()
+    const lease = new PauseLease(ctap)
+    await matchRange(ctap, channel, lease, [launchStep, tapStep, tapStep, swipeUp, named], { start: 0, end: 5 }, null, h)
+    await lease.stop()
+    expect(compare.mock.calls.map((c) => c[0])).toContain(swipeUp)
   })
 
   // CodeRabbit on #1167: an iOS tree keeps rows a list scrolled past, and `tapOn` alone failed such a row as off screen.

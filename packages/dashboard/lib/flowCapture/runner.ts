@@ -281,7 +281,9 @@ export async function matchRange(
   const read = (signal: AbortSignal) => channel.queryUITreeWithTurn(sessionId, signal)
   // The engine Verify runs, for the taps the app named: found and tapped as `flow run` would.
   const driver = new AligningDriver(channel, sessionId, tap.buildId, alignment, hooks.onTouch, hooks.signal)
-  // Whether the element was tapped, and whether a search scrolled the screen away from the read before it.
+  // Whether the element was tapped, and whether a search ran — taken as having moved the screen away from the read
+  // before it, since the engine does not say whether it swiped: a search that found it in place costs that tap's
+  // after-screen, never a wrong one.
   const runNamed = async (named: NamedTap): Promise<{ tapped: boolean; scrolled: boolean }> => {
     const attempt = async (steps: Step[]): Promise<boolean> => {
       const result = await runFlow({ name: 'match', steps }, driver, { platform: tap.platform })
@@ -293,7 +295,8 @@ export async function matchRange(
     const tapIt: Step = { type: 'tapOn', selector: named.selector }
     if (named.target && await attempt([tapIt])) return { tapped: true, scrolled: false }
     // On the screen but not reached (a tab bar over the row): with a swipe before it to say which way, the search
-    // brings it out from under what covers it rather than falling back to the point.
+    // brings it out from under what covers it rather than falling back to the point. An element the device never
+    // reaches however the list moves would be searched to both ends of the list first; none is known, and Stop ends it.
     if (!named.direction) return { tapped: false, scrolled: false }
     // Back the other way only here: this replay sent the recorded swipe, and a fling longer than the recording's
     // carries the element past. The exported flow needs no such retry: where `toFlowSteps` turns the swipe into
@@ -389,7 +392,8 @@ export async function matchRange(
       hooks.signal.throwIfAborted()
       if (differs) await hooks.onDiverged(range.start + offset, differs)
     }
-    if (compared(raw) && !skipCompare && !named && !swipeBeforeNamedTap(slice, offset)) await compareNow()
+    // A turned app replays its taps at their points (`namedTap`), so the swipe before one is compared as any other.
+    if (compared(raw) && !skipCompare && !named && (!!before?.interfaceTurn || !swipeBeforeNamedTap(slice, offset))) await compareNow()
     const shoot = () => channel.screenshot(sessionId, hooks.signal).catch(() => null)
     // A password is pictured before it is typed: after, Android shows its last character for a moment.
     const after = SHOWN_AFTER.has(raw.kind) && !(raw.kind === 'text' && (raw.fieldRead === 'secure' || raw.askValue))
