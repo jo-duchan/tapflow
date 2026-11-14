@@ -983,7 +983,9 @@ function VerifyTrace({ verify }: { verify: CaptureState['verify'] }) {
   const [toggled, setToggled] = useState<Record<number, boolean>>({})
   const id = useId()
   // Follows the step running, as Agent activity does: a long flow ran below the dialog's fold and had to be scrolled to.
-  const follow = useFollowBottom<HTMLOListElement>(verify?.result ?? verify?.live)
+  // The live steps only: the result lists every step after a failure as not run, and following those to the bottom
+  // pushed the failed step, opened onto why, out of view (pre-PR review).
+  const follow = useFollowBottom<HTMLOListElement>(verify?.live)
   if (!verify) return null
   const rows: Array<{
     index: number; name: string; status: 'running' | 'passed' | 'failed' | 'skipped'; durationMs?: number; message?: string
