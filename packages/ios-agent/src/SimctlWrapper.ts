@@ -560,6 +560,12 @@ export class SimctlWrapper {
     const target = keyboard ?? keyboards[0]
     if (!target || !keyboards.includes(target)) return false
     const next = keyboards.find((k) => k !== target && !k.startsWith('emoji')) ?? target
+    // Already so: the daemon is not restarted. A restart right after another one (a run reset's, then a replay's
+    // keyboard-set) took 10.3 s, against 0.37 s cold (measured, iOS 26.5), and Match paid it on every run. Both keys must
+    // say so: the daemon writes `KeyboardLastUsed` when a person switches language (Caps Lock), so a device left with it
+    // and the list disagreeing (measured: ko and en, typing in ko) is restarted.
+    const prefs = await exec('spawn', udid, 'defaults', 'read', 'com.apple.keyboard.preferences').catch(() => '')
+    if (keyboardPrefsAre(prefs, target)) return true
     await exec('spawn', udid, 'defaults', 'write', 'com.apple.keyboard.preferences', 'KeyboardLastUsed', target)
     await exec('spawn', udid, 'defaults', 'write', 'com.apple.keyboard.preferences', 'KeyboardsCurrentAndNext', '-array', target, target, next)
     await this.restartKeyboardDaemon(udid, deadline)
@@ -659,4 +665,15 @@ export class SimctlWrapper {
   stopKeyboardDaemon(): void {
     this.kbd.stop()
   }
+}
+
+/** Whether `defaults read com.apple.keyboard.preferences` says `target` is both the keyboard last used and the first of
+ *  the current-and-next list, as `setKeyboardLanguage` writes them. Anything unreadable is not. */
+export function keyboardPrefsAre(prefs: string, target: string): boolean {
+  // Quoted when it holds `;` or `=`, as every keyboard name does: `"ko_KR@sw=Korean;hw=Automatic"`.
+  const m = /KeyboardLastUsed\s*=\s*(?:"([^"]*)"|([^;\s]+));/.exec(prefs)
+  const lastUsed = m?.[1] ?? m?.[2]
+  const list = /KeyboardsCurrentAndNext\s*=\s*\(([^)]*)\)/.exec(prefs)?.[1]
+  const first = list ? /"([^"]+)"|([^\s,]+)/.exec(list.trim()) : null
+  return lastUsed === target && (first?.[1] ?? first?.[2]) === target
 }

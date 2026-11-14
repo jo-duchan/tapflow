@@ -585,7 +585,7 @@ describe('SimctlWrapper', () => {
     it('makes a named keyboard the one in use, the next one after it', async () => {
       const runner = runnerReading(LIST)
       expect(await new SimctlWrapper(runner).setKeyboardLanguage('device-1', 'ko_KR@sw=Korean;hw=Automatic')).toBe(true)
-      expect(runner.exec.mock.calls.slice(1)).toEqual([
+      expect(runner.exec.mock.calls.slice(2)).toEqual([
         ['spawn', 'device-1', 'defaults', 'write', 'com.apple.keyboard.preferences', 'KeyboardLastUsed', 'ko_KR@sw=Korean;hw=Automatic'],
         ['spawn', 'device-1', 'defaults', 'write', 'com.apple.keyboard.preferences', 'KeyboardsCurrentAndNext', '-array',
           'ko_KR@sw=Korean;hw=Automatic', 'ko_KR@sw=Korean;hw=Automatic', 'en_US@sw=QWERTY;hw=Automatic'],
@@ -609,7 +609,41 @@ describe('SimctlWrapper', () => {
         expect(await new SimctlWrapper(runner).setKeyboardLanguage('device-1', undefined, 5_000)).toBe(true)
       } finally { vi.useRealTimers() }
       expect(runner.exec).not.toHaveBeenCalled()
-      expect(runner.execWithOpts.mock.calls.map(([opts]) => opts)).toEqual([{ timeoutMs: 5_000 }, { timeoutMs: 4_000 }, { timeoutMs: 3_000 }, { timeoutMs: 2_000 }])
+      expect(runner.execWithOpts.mock.calls.map(([opts]) => opts)).toEqual([{ timeoutMs: 5_000 }, { timeoutMs: 4_000 }, { timeoutMs: 3_000 }, { timeoutMs: 2_000 }, { timeoutMs: 1_000 }])
+    })
+
+    // `defaults read com.apple.keyboard.preferences` as an iOS 26.5 simulator prints it (trimmed).
+    const prefs = (lastUsed: string, first: string) => `{
+    HWKeyboardCapsLockRomanSwitch = 1;
+    KeyboardLastUsed = "${lastUsed}";
+    KeyboardsCurrentAndNext =     (
+        "${first}",
+        "${first}",
+        "en_US@sw=QWERTY;hw=Automatic"
+    );
+}`
+    const KO = 'ko_KR@sw=Korean;hw=Automatic'
+    const EN = 'en_US@sw=QWERTY;hw=Automatic'
+    const runnerWith = (current: string) => ({
+      exec: vi.fn().mockResolvedValueOnce(LIST).mockResolvedValueOnce(current).mockResolvedValue(''),
+      execBinary: vi.fn().mockResolvedValue(Buffer.alloc(0)),
+      execWithOpts: vi.fn().mockResolvedValue(''),
+    }) satisfies SimctlRunner
+
+    // A replay's keyboard-set right after a run reset restarted the daemon a second time, which took 10.3 s (measured).
+    it('restarts nothing when the device is already in that keyboard', async () => {
+      const runner = runnerWith(prefs(KO, KO))
+      expect(await new SimctlWrapper(runner).setKeyboardLanguage('device-1', KO)).toBe(true)
+      expect(runner.exec).toHaveBeenCalledTimes(2)
+    })
+
+    // Measured: a device left with these disagreeing typed in the one last used, not the list's first.
+    it('still sets and restarts when the last used and the list disagree, either way', async () => {
+      for (const current of [prefs(KO, EN), prefs(EN, KO), prefs(EN, EN), '']) {
+        const runner = runnerWith(current)
+        expect(await new SimctlWrapper(runner).setKeyboardLanguage('device-1', KO)).toBe(true)
+        expect(runner.exec.mock.calls.at(-1)).toEqual(['spawn', 'device-1', 'launchctl', 'kickstart', '-k', 'user/foreground/com.apple.TextInput.kbd'])
+      }
     })
 
     it('writes nothing for a keyboard the device does not have', async () => {
@@ -621,7 +655,7 @@ describe('SimctlWrapper', () => {
     it('makes the first keyboard the one in use with none named', async () => {
       const runner = runnerReading(LIST)
       expect(await new SimctlWrapper(runner).setKeyboardLanguage('device-1')).toBe(true)
-      expect(runner.exec.mock.calls[1]).toEqual(['spawn', 'device-1', 'defaults', 'write', 'com.apple.keyboard.preferences', 'KeyboardLastUsed', 'en_US@sw=QWERTY;hw=Automatic'])
+      expect(runner.exec.mock.calls[2]).toEqual(['spawn', 'device-1', 'defaults', 'write', 'com.apple.keyboard.preferences', 'KeyboardLastUsed', 'en_US@sw=QWERTY;hw=Automatic'])
     })
   })
 
@@ -761,7 +795,7 @@ describe('SimctlWrapper', () => {
       // Where a Caps Lock press stores the language (measured, iOS 26.4), not AppleKeyboards' order.
       const runner = runnerReading('(\n    "ko_KR@sw=Korean;hw=Automatic",\n    "en_US@sw=QWERTY;hw=Automatic",\n    "emoji@sw=Emoji"\n)')
       await new SimctlWrapper(runner).resetKeyboardLanguage('device-1')
-      expect(runner.exec.mock.calls.slice(1)).toEqual([
+      expect(runner.exec.mock.calls.slice(2)).toEqual([
         ['spawn', 'device-1', 'defaults', 'write', 'com.apple.keyboard.preferences', 'KeyboardLastUsed', 'ko_KR@sw=Korean;hw=Automatic'],
         ['spawn', 'device-1', 'defaults', 'write', 'com.apple.keyboard.preferences', 'KeyboardsCurrentAndNext', '-array',
           'ko_KR@sw=Korean;hw=Automatic', 'ko_KR@sw=Korean;hw=Automatic', 'en_US@sw=QWERTY;hw=Automatic'],
@@ -773,7 +807,7 @@ describe('SimctlWrapper', () => {
       const runner = {
         exec: vi.fn()
           .mockResolvedValueOnce('(\n    "en_US@sw=QWERTY;hw=Automatic"\n)')
-          .mockResolvedValueOnce('').mockResolvedValueOnce('')
+          .mockResolvedValueOnce('').mockResolvedValueOnce('').mockResolvedValueOnce('')
           .mockRejectedValueOnce(new Error('Could not find service'))
           .mockResolvedValue(''),
         execBinary: vi.fn().mockResolvedValue(Buffer.alloc(0)),
