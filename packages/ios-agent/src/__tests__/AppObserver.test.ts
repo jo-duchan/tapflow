@@ -166,6 +166,70 @@ describe('asking the app', () => {
   })
 })
 
+// Record-time observation: the app writes a report per touch-down while the agent records a person.
+describe('the app\'s touch reports', () => {
+  it('turns them on and off with the file the app looks for', async () => {
+    const { observer, dir } = setup()
+    await observer.prepare(UDID)
+    await observer.watchTouches(UDID, true)
+    expect(statSync(join(dir, 'touches')).mode & 0o777).toBe(0o600)
+    await observer.watchTouches(UDID, false)
+    expect(existsSync(join(dir, 'touches'))).toBe(false)
+  })
+
+  it('stops the reports and removes any left on disk', async () => {
+    const { observer, dir } = setup()
+    await observer.prepare(UDID)
+    await observer.watchTouches(UDID, true)
+    writeFileSync(join(dir, 'touch-1.json'), '{}')
+    writeFileSync(join(dir, 'touch-2.json.tmp'), '{}')
+    writeFileSync(join(dir, 'background'), 'com.app')
+    await observer.stopTouches(UDID)
+    expect(readdirSync(dir).sort()).toEqual(['background'])
+  })
+
+  // CodeRabbit on #1166: every gesture's pairing takes on its own, and two takes in flight read the same report.
+  it('gives each report to one take, when takes overlap', async () => {
+    const { observer, dir } = setup()
+    await observer.prepare(UDID)
+    for (let seq = 1; seq <= 5; seq++) writeFileSync(join(dir, `touch-${seq}.json`), JSON.stringify({ seq, at: seq, bundle: 'com.app', point: { x: 0.5, y: 0.5 }, moving: false }))
+    const takes = await Promise.all([observer.takeTouches(UDID), observer.takeTouches(UDID), observer.takeTouches(UDID)])
+    expect(takes.flat().map((t) => t.seq).sort()).toEqual([1, 2, 3, 4, 5])
+  })
+
+  it('cuts a long label or identifier, which would fill the capture on every tap', async () => {
+    const { observer, dir } = setup()
+    await observer.prepare(UDID)
+    writeFileSync(join(dir, 'touch-1.json'), JSON.stringify({ seq: 1, at: 1, bundle: 'com.app', point: { x: 0, y: 0 }, moving: false, element: { label: 'x'.repeat(5000), identifier: 'y'.repeat(5000), traits: 0 } }))
+    const [t] = await observer.takeTouches(UDID)
+    expect(t!.observation.element!.label).toHaveLength(256)
+    expect(t!.observation.element!.identifier).toHaveLength(256)
+  })
+
+  it('reads each report once, oldest first, and keeps only what the protocol carries', async () => {
+    const { observer, dir } = setup()
+    await observer.prepare(UDID)
+    const write = (seq: number, body: Record<string, unknown>) => writeFileSync(join(dir, `touch-${seq}.json`), JSON.stringify({ seq, at: 1000 + seq, bundle: 'com.app', point: { x: 0.5, y: 0.4 }, moving: false, ...body }))
+    write(2, { element: { label: 'Donuts', identifier: 'd', traits: 1, frame: { x: 0.1, y: 0.2, width: 0.3, height: 0.04 }, extra: 'x' }, windowPoint: { x: 0.5, y: 0.4 } })
+    write(1, { moving: true })
+    // A text input is named by its identifier only, whatever the file says.
+    write(3, { element: { label: 'hunter2', identifier: 'form.password', traits: 262144, input: true } })
+    write(4, { surface: 'keyboard', element: { label: 'q', traits: 1 } })
+    // Ten sorts before two by name: the order is the app's sequence, not the file name's.
+    write(10, { moving: false })
+    writeFileSync(join(dir, 'touch-5.json'), 'not json')
+    writeFileSync(join(dir, 'touch-6.json'), JSON.stringify({ seq: 6, at: 'soon', bundle: 'com.app', point: { x: 0, y: 0 } }))
+    const touches = await observer.takeTouches(UDID)
+    expect(touches.map((t) => t.seq)).toEqual([1, 2, 3, 4, 10])
+    expect(touches[0]!.observation).toEqual({ point: { x: 0.5, y: 0.4 }, moving: true })
+    expect(touches[1]!.observation.element).toEqual({ label: 'Donuts', identifier: 'd', traits: 1, frame: { x: 0.1, y: 0.2, width: 0.3, height: 0.04 } })
+    expect(touches[2]!.observation.element).toEqual({ identifier: 'form.password', traits: 262144, input: true })
+    expect(touches[3]!.observation).toEqual({ point: { x: 0.5, y: 0.4 }, moving: false, surface: 'keyboard' })
+    expect(readdirSync(dir).filter((f) => f.startsWith('touch-'))).toEqual([])
+    expect(await observer.takeTouches(UDID)).toEqual([])
+  })
+})
+
 describe('preparing a device', () => {
   it('makes the directory private and empties what a previous boot left', async () => {
     const { observer, dir } = setup()

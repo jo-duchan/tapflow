@@ -439,11 +439,29 @@ observer answers in the runner's own shapes, so `toKeyboardState` and `toFocused
   field lives in another process (it read `secure: false` on a password input), Flutter, a custom `UITextInput` —
   answers `reason: secure`, which flow-runner turns into a secret step. So does any field read while the app is not
   active: typing then goes elsewhere, a system sign-in alert's password field among them.
-- **What it does not read**: a SwiftUI field's `.accessibilityIdentifier`, which SwiftUI keeps on its accessibility
-  node and creates only with app accessibility on (`ApplicationAccessibilityEnabled`). Left off on purpose (decided
-  2026-11-14): it persists on the device and an agent that dies could not restore it. Such a field is told apart by
-  placeholder and frame, and Match cannot add a focusing tap for it — failures that show as unread or a divergence,
-  never a wrong flow. The home screen is outside the app too, hence the marker.
+- **Touch reports, while a person is recorded** (record-time observation). The observer wraps `-[UIApplication
+  sendEvent:]` (the original IMP kept, so other SDKs' wrappers chain) and, while a `touches` file is in the directory,
+  writes `touch-<seq>.json` per touch-down: whether a list under it was still moving (`isDecelerating`, or the private
+  `_isBouncing` at the end of a list, read **before** the event is delivered, since the touch stops the scroll), and the
+  accessibility element and nearest button it hit (identifier, label — never a text input's — traits, frame), or only
+  the surface for the keyboard, a web view or Flutter. The agent pairs each with the gesture it delivered (point and
+  time, both on this Mac) and sends `capture:touched`, only to a relay that asked (`touchObservations` on the boot).
+  **Cost, measured on Food Truck (iOS 26.5):** the hit test is the cost — 10–30 ms the first time on a screen, 3–5 ms
+  after — so one is run 0.7 s after a touch lifts and after the app becomes active, when nothing moves (a touch cancels
+  it), and the touch-down's own costs under 5.5 ms; the file is written off the main queue. Frame-count comparisons over
+  a run were too noisy to resolve this (one "on" run drew more frames than "off"); time the hook itself instead.
+- **App accessibility is on for a person Flow Capture records** (`AppAccessibility`, `ApplicationAccessibilityEnabled`).
+  Without it SwiftUI and React Native build no accessibility nodes, so the observer can name neither a SwiftUI field's
+  `.accessibilityIdentifier` nor what a touch hit (measured on iOS 26.5: Food Truck, Sample SwiftUI/UIKit, a React Native
+  app — nothing off, every element named on; scroll smoothness the same either way). It was left off in #1162 because
+  it persists on the device and a dead agent could not restore it, so turning it on writes a host marker with the value
+  it replaces (`/private/var/tmp/tapflow-app-accessibility/<udid>.json`), and the marker puts it back: at a boot that is
+  not recorded, before a shutdown, and for a running device when the agent starts. A value already on is someone
+  else's and is never touched. **A running app keeps what it launched with** (measured), so it is set at the boot, before
+  any app runs; a recorded person who picked up a device with the app already running gets names from its next launch.
+  A relay sends `recorded` false over the memory line (a rule from the runner era); such a boot stays off. Without it a
+  field is told apart by placeholder and frame, failures that show as unread or a divergence, never a wrong flow. The
+  home screen is outside the app too, hence the marker.
 - **Verified with a probe app** on iOS 26.5 (MacBook) and 27.0 (Mac mini, Xcode 27.1): UIKit, SwiftUI `TextField` and
   `SecureField`, React Native fields, a WKWebView's inputs, the soft keyboard in portrait and landscape, a hardware
   keyboard, and the lifecycle above. The probe is not committed; the measurements are here.

@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto'
-import type { ClientKind, FieldReadReason, FocusedField, KeyboardState } from '@tapflowio/protocol'
+import type { ClientKind, FieldReadReason, FocusedField, KeyboardState, TouchObservation } from '@tapflowio/protocol'
 import type { CapturedMessage, CaptureEntry, CaptureSnapshot } from '@tapflowio/protocol/capture'
 
 /**
@@ -447,6 +447,18 @@ export class CaptureStore {
       if (!capture || !this.recording(sessionId, holder, capture)) return
       const sent = findLastInput(capture.entries, requestId)
       if (sent && APP_COMMANDS.has(sent.type)) this.noteKeyboard(sessionId, holder, sent)
+    } catch { /* see recordInput */ }
+  }
+
+  /**
+   * What a recorded gesture's touch-down hit, as the agent observed it inside the app. Kept only for a gesture this
+   * capture recorded: an id it never saw names nothing in it.
+   */
+  recordTouched(sessionId: string, holder: Holder, requestId: string, touched: TouchObservation): void {
+    try {
+      const capture = this.captures.get(sessionId)
+      if (!capture || !this.recording(sessionId, holder, capture) || !capture.touches.has(requestId)) return
+      this.append(capture, { at: this.now(), kind: 'touched', requestId, touched })
     } catch { /* see recordInput */ }
   }
 

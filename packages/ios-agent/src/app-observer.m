@@ -154,17 +154,8 @@ static NSDictionary *tfo_field(id window, NSDictionary *keyboard) {
   return out;
 }
 
-/** One answer to request `nonce`, written 0600 under the 0700 directory and renamed into place whole. */
-static void tfo_answer(uint64_t nonce) {
-  id window = tfo_key_window();
-  NSDictionary *keyboard = tfo_keyboard(window);
-  NSDictionary *body = @{
-    @"nonce": [NSString stringWithFormat:@"%llu", nonce], @"bundle": g_bundle, @"pid": @(getpid()),
-    @"keyboard": keyboard, @"field": tfo_field(window, keyboard),
-  };
-  NSData *json = [NSJSONSerialization dataWithJSONObject:body options:0 error:nil];
-  if (!json) return;
-  NSString *path = [g_dir stringByAppendingFormat:@"/%llu.json", nonce];
+/** `json` at `path`, written 0600 under the 0700 directory and renamed into place whole. */
+static void tfo_write_data(NSString *path, NSData *json) {
   NSString *tmp = [path stringByAppendingString:@".tmp"];
   int fd = open(tmp.fileSystemRepresentation, O_WRONLY | O_CREAT | O_TRUNC | O_NOFOLLOW, 0600);
   if (fd < 0) return;
@@ -172,6 +163,23 @@ static void tfo_answer(uint64_t nonce) {
   close(fd);
   if (whole) rename(tmp.fileSystemRepresentation, path.fileSystemRepresentation);
   else unlink(tmp.fileSystemRepresentation);
+}
+
+/** `body` as JSON at `path`. */
+static void tfo_write(NSString *path, NSDictionary *body) {
+  NSData *json = [NSJSONSerialization dataWithJSONObject:body options:0 error:nil];
+  if (json) tfo_write_data(path, json);
+}
+
+/** One answer to request `nonce`. */
+static void tfo_answer(uint64_t nonce) {
+  id window = tfo_key_window();
+  NSDictionary *keyboard = tfo_keyboard(window);
+  NSDictionary *body = @{
+    @"nonce": [NSString stringWithFormat:@"%llu", nonce], @"bundle": g_bundle, @"pid": @(getpid()),
+    @"keyboard": keyboard, @"field": tfo_field(window, keyboard),
+  };
+  tfo_write([g_dir stringByAppendingFormat:@"/%llu.json", nonce], body);
 }
 
 /**
@@ -187,6 +195,187 @@ static void tfo_mark_background(BOOL away) {
   if (fd < 0) return;
   (void)write(fd, body.bytes, body.length);
   close(fd);
+}
+
+// ── touches: what each touch-down hit (record-time observation) ─────────────
+
+/*
+ * While the agent records a person (a `touches` file in the directory), each touch-down is written as
+ * `touch-<seq>.json`: where it landed, whether the list under it was still moving, and the accessibility element it hit
+ * with its nearest button. The agent pairs it with the input it sent and gives it to the relay's capture. Measured on
+ * iOS 26.5 (P0 of the record-time observation plan): with app accessibility on, SwiftUI, UIKit and React Native name
+ * the element; a tap on a gliding list reads `isDecelerating`, one on the bounce at its end only `_isBouncing`.
+ *
+ * Nothing it writes is a value: a text field is named by its identifier only (its label can be what was typed), and a
+ * touch on the keyboard, a web view or Flutter is written as the surface it landed on and nothing more.
+ */
+typedef struct { double x, y; } TFOPoint;
+static IMP g_send_event;
+static uint64_t g_touch_seq;
+
+static BOOL tfo_touches_on(void) {
+  struct stat st;
+  return lstat([g_dir stringByAppendingPathComponent:@"touches"].fileSystemRepresentation, &st) == 0 && S_ISREG(st.st_mode);
+}
+
+static double tfo_now_ms(void) {
+  struct timespec ts;
+  clock_gettime(CLOCK_REALTIME, &ts);
+  return ts.tv_sec * 1000.0 + ts.tv_nsec / 1e6;
+}
+
+static NSString *tfo_surface(id window, id view) {
+  NSString *w = NSStringFromClass([window class]), *v = NSStringFromClass([view class]);
+  if ([w containsString:@"Keyboard"] || [w containsString:@"TextEffects"]) return @"keyboard";
+  if ([v hasPrefix:@"WK"]) return @"web";
+  if ([v hasPrefix:@"Flutter"]) return @"flutter";
+  return nil;
+}
+
+static BOOL tfo_text_input(id e) {
+  if ([e isKindOfClass:NSClassFromString(@"UITextField")] || [e isKindOfClass:NSClassFromString(@"UITextView")]) return YES;
+  // UIAccessibilityTraitSearchField, and the trait a text field's element carries (1 << 18, measured on iOS 26.5).
+  NSInteger traits = tfo_int(e, "accessibilityTraits");
+  return (traits & (1 << 10)) || (traits & (1 << 18));
+}
+
+/** An accessibility element as the tree names one: identifier, label (not for a text input), traits, frame in the window. */
+static NSDictionary *tfo_element(id e, id window) {
+  if (!e) return nil;
+  NSMutableDictionary *d = [NSMutableDictionary dictionary];
+  NSString *ident = tfo_send(e, "accessibilityIdentifier");
+  if ([ident isKindOfClass:NSString.class] && ident.length) d[@"identifier"] = ident;
+  BOOL text = tfo_text_input(e);
+  if (!text) {
+    NSString *label = tfo_send(e, "accessibilityLabel");
+    if ([label isKindOfClass:NSString.class] && label.length) d[@"label"] = label;
+  }
+  d[@"traits"] = @(tfo_int(e, "accessibilityTraits"));
+  if (text) d[@"input"] = @YES;
+  // `accessibilityFrame` is in screen coordinates; the tree's frames are the window's, normalised.
+  TFORect f = tfo_rect(e, "accessibilityFrame");
+  TFORect wb = tfo_rect(window, "bounds");
+  SEL convert = sel_registerName("convertRect:fromWindow:");
+  if ([window respondsToSelector:convert]) f = ((TFORect (*)(id, SEL, TFORect, id))objc_msgSend)(window, convert, f, nil);
+  if (wb.w > 0 && wb.h > 0) d[@"frame"] = @{ @"x": @(f.x / wb.w), @"y": @(f.y / wb.h), @"width": @(f.w / wb.w), @"height": @(f.h / wb.h) };
+  return d;
+}
+
+static void tfo_touch_answer(id window, id view, TFOPoint fixed, TFOPoint inWindow, BOOL moving, double at) {
+  NSMutableDictionary *out = [@{
+    @"seq": @(++g_touch_seq), @"at": @(at), @"bundle": g_bundle, @"moving": @(moving),
+    @"point": @{ @"x": @(fixed.x), @"y": @(fixed.y) }, @"windowPoint": @{ @"x": @(inWindow.x), @"y": @(inWindow.y) },
+  } mutableCopy];
+  NSString *surface = tfo_surface(window, view);
+  if (surface) {
+    out[@"surface"] = surface;
+  } else {
+    TFORect wb = tfo_rect(window, "bounds");
+    TFOPoint p = { inWindow.x * wb.w, inWindow.y * wb.h };
+    SEL hit = sel_registerName("accessibilityHitTest:withEvent:");   // iOS 18+
+    // This runs after the touch-down was delivered: an app that changes screen on touch-down (rather than on lift) has
+    // put another view under the point, and its element is not what the person touched. The view UIKit hit before
+    // delivery is the touch's own; a different one now names nothing rather than the wrong thing (CodeRabbit, #1166).
+    id under = ((id (*)(id, SEL, TFOPoint, id))objc_msgSend)(window, sel_registerName("hitTest:withEvent:"), p, nil);
+    BOOL same = !view || under == view;
+    id e = same && [window respondsToSelector:hit] ? ((id (*)(id, SEL, TFOPoint, id))objc_msgSend)(window, hit, p, nil) : nil;
+    NSDictionary *element = tfo_element(e, window);
+    if (element) out[@"element"] = element;
+    // The nearest container marked a button: a grid cell rather than its subtitle (measured: "Daytime, Salty").
+    id b = e;
+    for (int depth = 0; b && depth < 12; depth++) {
+      if (tfo_int(b, "accessibilityTraits") & 1) break;   // UIAccessibilityTraitButton
+      b = tfo_send(b, "accessibilityContainer");
+    }
+    // Only a container that is a button: a walk that ran out of depth found none.
+    NSDictionary *button = b && b != e && (tfo_int(b, "accessibilityTraits") & 1) ? tfo_element(b, window) : nil;
+    // A container over a text input (a row of a label and a field, combined) can carry the field's text in its label:
+    // named by its identifier only, as the input is.
+    if (button && tfo_text_input(e)) button = button[@"identifier"] ? @{ @"identifier": button[@"identifier"], @"traits": button[@"traits"] } : nil;
+    if (button) out[@"button"] = button;
+  }
+  // Serialised here, written off the main queue (0.3–0.8 ms measured): only bytes cross, nothing the app may still change.
+  NSString *path = [g_dir stringByAppendingFormat:@"/touch-%llu.json", g_touch_seq];
+  NSData *json = [NSJSONSerialization dataWithJSONObject:out options:0 error:nil];
+  // Checked again where it is written: a write still queued when the agent stopped the reports and swept them would
+  // leave this one, naming what a person touched, with nothing to sweep it (CodeRabbit, #1166).
+  if (json) dispatch_async(dispatch_get_global_queue(QOS_CLASS_UTILITY, 0), ^{ if (tfo_touches_on()) tfo_write_data(path, json); });
+}
+
+/**
+ * The first accessibility hit test on a screen costs 10–30 ms (SwiftUI builds its nodes then), later ones 3–5 ms
+ * (measured on iOS 26.5, Food Truck). So a hit test is run once the screen has had time to settle — 0.7 s after a touch
+ * lifts, or after the app becomes active — when nothing is moving and nobody sees the main queue busy, and the one at
+ * the next touch-down finds the nodes built: under 5.5 ms per tap measured, against up to 15 ms without. A touch in the
+ * meantime cancels it; that touch warms nothing it needs.
+ */
+static uint64_t g_warm_gen;
+static void tfo_warm_later(id window) {
+  if (!window) return;
+  uint64_t gen = ++g_warm_gen;
+  dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 700 * NSEC_PER_MSEC), dispatch_get_main_queue(), ^{
+    if (gen != g_warm_gen || !tfo_touches_on()) return;
+    TFORect wb = tfo_rect(window, "bounds");
+    // A fling's glide runs 1–3 s: while a list under the centre still moves, wait again rather than cost a frame in it.
+    id centre = ((id (*)(id, SEL, TFOPoint, id))objc_msgSend)(window, sel_registerName("hitTest:withEvent:"), (TFOPoint){ wb.w / 2, wb.h / 2 }, nil);
+    Class scroll = NSClassFromString(@"UIScrollView");
+    for (id v = centre; v; v = tfo_send(v, "superview")) {
+      if ([v isKindOfClass:scroll] && (tfo_bool(v, "isDecelerating") || tfo_bool(v, "_isBouncing"))) { tfo_warm_later(window); return; }
+    }
+    SEL hit = sel_registerName("accessibilityHitTest:withEvent:");
+    if ([window respondsToSelector:hit]) (void)((id (*)(id, SEL, TFOPoint, id))objc_msgSend)(window, hit, (TFOPoint){ wb.w / 2, wb.h / 2 }, nil);
+  });
+}
+
+/**
+ * `-[UIApplication sendEvent:]`, wrapped: what was moving is read before the event is delivered (the touch stops the
+ * scroll), what was hit after (on the next turn of the main queue, so delivery waits for nothing: the hit test costs
+ * 1–14 ms, measured). The original implementation is kept and called, so another SDK's wrapper still chains.
+ */
+static void tfo_send_event(id app, SEL cmd, id event) {
+  NSMutableArray *began = nil;
+  if (g_dir && tfo_touches_on()) {
+    for (id t in tfo_send(event, "allTouches")) {
+      NSInteger phase = tfo_int(t, "phase");
+      // UITouchPhaseEnded: the screen it leaves — the app's key window, since a key's touch ends in the keyboard's.
+      if (phase == 3) tfo_warm_later(tfo_key_window());
+      if (phase != 0) continue;   // UITouchPhaseBegan
+      g_warm_gen++;               // a warm-up still pending would run in this touch's frames
+      // Two at most: a hit test costs up to 14 ms on the main queue, and the agent never sends more than two fingers.
+      if (began.count >= 2) break;
+      id window = tfo_send(t, "window"), view = tfo_send(t, "view");
+      if (!window) continue;
+      TFOPoint p = ((TFOPoint (*)(id, SEL, id))objc_msgSend)(t, sel_registerName("locationInView:"), window);
+      BOOL moving = NO;
+      Class scroll = NSClassFromString(@"UIScrollView");
+      for (id v = view; v && !moving; v = tfo_send(v, "superview")) {
+        if ([v isKindOfClass:scroll] && (tfo_bool(v, "isDecelerating") || tfo_bool(v, "_isBouncing"))) moving = YES;
+      }
+      // The point in the device's portrait space, which the agent's touch was sent in, normalised.
+      id screen = tfo_send(window, "screen");
+      id fixedSpace = tfo_send(screen, "fixedCoordinateSpace");
+      TFOPoint f = p;
+      SEL conv = sel_registerName("convertPoint:toCoordinateSpace:");
+      if (fixedSpace && [window respondsToSelector:conv]) f = ((TFOPoint (*)(id, SEL, TFOPoint, id))objc_msgSend)(window, conv, p, fixedSpace);
+      TFORect fb = tfo_rect(fixedSpace, "bounds"), wb = tfo_rect(window, "bounds");
+      if (fb.w <= 0 || fb.h <= 0 || wb.w <= 0 || wb.h <= 0) continue;
+      if (!began) began = [NSMutableArray array];
+      [began addObject:@[ window, view ?: NSNull.null, @(f.x / fb.w), @(f.y / fb.h), @(p.x / wb.w), @(p.y / wb.h), @(moving), @(tfo_now_ms()) ]];
+    }
+  }
+  ((void (*)(id, SEL, id))g_send_event)(app, cmd, event);
+  for (NSArray *b in began) {
+    dispatch_async(dispatch_get_main_queue(), ^{
+      tfo_touch_answer(b[0], b[1] == NSNull.null ? nil : b[1], (TFOPoint){ [b[2] doubleValue], [b[3] doubleValue] },
+                       (TFOPoint){ [b[4] doubleValue], [b[5] doubleValue] }, [b[6] boolValue], [b[7] doubleValue]);
+    });
+  }
+}
+
+/** Wrapped once UIKit is loaded: an inserted library's constructor can run before the app's frameworks are. */
+static void tfo_wrap_send_event(void) {
+  Method m = class_getInstanceMethod(NSClassFromString(@"UIApplication"), sel_registerName("sendEvent:"));
+  if (m && !g_send_event) g_send_event = method_setImplementation(m, (IMP)tfo_send_event);
 }
 
 // ── gate and setup ───────────────────────────────────────────────────────────
@@ -237,7 +426,7 @@ static void tfo_install(void) {
   [nc addObserverForName:@"UIApplicationWillEnterForegroundNotification" object:nil queue:main
               usingBlock:^(NSNotification *n) { tfo_mark_background(NO); g_coming_up = YES; }];
   [nc addObserverForName:@"UIApplicationDidBecomeActiveNotification" object:nil queue:main
-              usingBlock:^(NSNotification *n) { g_coming_up = NO; }];
+              usingBlock:^(NSNotification *n) { g_coming_up = NO; tfo_warm_later(tfo_key_window()); }];
 
   // A request: the agent writes a nonce and the bundle it asks about, on two lines, to `request` in the directory, by
   // rename, and the observer of that bundle, watching the directory, answers it once. Every app observed since the boot
@@ -275,6 +464,7 @@ static void tfo_install(void) {
   dispatch_source_set_event_handler(watch, handle);
   dispatch_source_set_cancel_handler(watch, ^{ close(dirfd); });
   dispatch_resume(watch);
+  dispatch_async(dispatch_get_main_queue(), ^{ tfo_wrap_send_event(); });
   static dispatch_source_t g_watch;   // held for the life of the process
   g_watch = watch;
   // A request written before this process was watching (the agent asks right after a launch returns) sends no event:

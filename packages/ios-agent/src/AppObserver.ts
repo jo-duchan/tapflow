@@ -1,7 +1,7 @@
 import { randomBytes } from 'node:crypto'
 import { chmod, lstat, mkdir, readFile, readdir, rename, rm, unlink, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
-import type { FieldReadReason, FocusedField, KeyboardState } from '@tapflowio/protocol'
+import type { FieldReadReason, FocusedField, KeyboardState, ObservedElement, TouchObservation } from '@tapflowio/protocol'
 import { toFocusedField, toKeyboardState } from './XCUITreeReader.js'
 
 /**
@@ -62,6 +62,7 @@ export class AppObserver {
   // One request at a time per device: the observer answers the request it reads, and a second written before the
   // first is answered would replace it — a keyboard probe and a field read are often asked together.
   private readonly queues = new Map<string, Promise<unknown>>()
+  private readonly touchTakes = new Map<string, Promise<AppTouch[]>>()
 
   constructor(private readonly host: ObserverHost, opts: AppObserverOptions = {}) {
     this.root = opts.root ?? '/tmp'
@@ -93,6 +94,52 @@ export class AppObserver {
     for (const name of await readdir(dir).catch(() => [] as string[])) {
       if (name !== 'background') await rm(join(dir, name), { force: true })
     }
+  }
+
+  /** Whether the app reports each touch-down (record-time observation): the `touches` file app-observer.m looks for. */
+  async watchTouches(udid: string, on: boolean): Promise<void> {
+    const flag = join(this.dir(udid), 'touches')
+    if (on) await writeFile(flag, '', { mode: 0o600 })
+    else await rm(flag, { force: true })
+  }
+
+  /**
+   * Touch reports off and any left on disk removed: for a device the agent no longer records, or one an earlier agent
+   * left reporting (it stopped while the device ran). The reports name what a person touched; nothing else sweeps them.
+   */
+  async stopTouches(udid: string): Promise<void> {
+    const dir = this.dir(udid)
+    await rm(join(dir, 'touches'), { force: true })
+    for (const name of await readdir(dir).catch(() => [] as string[])) {
+      if (/^touch-\d+\.json(\.tmp)?$/.test(name)) await rm(join(dir, name), { force: true })
+    }
+  }
+
+  /**
+   * The touch-downs the app reported since the last call, oldest first. Each file is read once and removed; one that
+   * cannot be read is dropped. Stray ones a reader never came for are swept with the answers (5 s), as they name what
+   * a person touched.
+   */
+  takeTouches(udid: string): Promise<AppTouch[]> {
+    // One take at a time per device: each gesture's pairing takes on its own, and two takes in flight together both
+    // read a report before either removed it, so one touch could be paired with two gestures (CodeRabbit, #1166).
+    const next = (this.touchTakes.get(udid) ?? Promise.resolve()).catch(() => undefined).then(() => this.takeTouchFiles(udid))
+    this.touchTakes.set(udid, next)
+    void next.finally(() => { if (this.touchTakes.get(udid) === next) this.touchTakes.delete(udid) }).catch(() => undefined)
+    return next
+  }
+
+  private async takeTouchFiles(udid: string): Promise<AppTouch[]> {
+    const dir = this.dir(udid)
+    const out: AppTouch[] = []
+    for (const name of await readdir(dir).catch(() => [] as string[])) {
+      if (!/^touch-\d+\.json$/.test(name)) continue
+      const text = await readFile(join(dir, name), 'utf8').catch(() => undefined)
+      await unlink(join(dir, name)).catch(() => undefined)
+      const touch = text === undefined ? undefined : touchOf(parse(text))
+      if (touch) out.push(touch)
+    }
+    return out.sort((a, b) => a.seq - b.seq)
   }
 
   read(udid: string, bundleId: string): Promise<ObserverRead> {
@@ -165,6 +212,52 @@ export class AppObserver {
     const marker = await readFile(join(dir, 'background'), 'utf8').catch(() => undefined)
     return marker === bundleId
   }
+}
+
+/** One touch-down as app-observer.m reports it: the observation, and when (the Mac's clock, ms) and in which app. */
+export interface AppTouch {
+  seq: number
+  at: number
+  bundle: string
+  observation: TouchObservation
+}
+
+/** The longest identifier or label a touch report keeps. */
+const OBSERVED_TEXT_MAX = 256
+
+const num = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v)
+
+/** Only the fields the protocol carries, of the types it carries: the app's file is not trusted to be anything else. */
+function touchOf(body: Record<string, unknown> | undefined): AppTouch | undefined {
+  if (!body) return undefined
+  const point = body['point'] as Record<string, unknown> | undefined
+  if (!num(body['seq']) || !num(body['at']) || typeof body['bundle'] !== 'string' || !point || !num(point['x']) || !num(point['y'])) return undefined
+  const observation: TouchObservation = { point: { x: point['x'], y: point['y'] }, moving: body['moving'] === true }
+  const surface = body['surface']
+  if (surface === 'keyboard' || surface === 'web' || surface === 'flutter') {
+    observation.surface = surface
+  } else {
+    const element = elementOf(body['element'])
+    const button = elementOf(body['button'])
+    if (element) observation.element = element
+    if (button) observation.button = button
+  }
+  return { seq: body['seq'], at: body['at'], bundle: body['bundle'], observation }
+}
+
+function elementOf(v: unknown): ObservedElement | undefined {
+  if (typeof v !== 'object' || v === null) return undefined
+  const e = v as Record<string, unknown>
+  if (!num(e['traits'])) return undefined
+  const out: ObservedElement = { traits: e['traits'] }
+  if (typeof e['identifier'] === 'string') out.identifier = e['identifier'].slice(0, OBSERVED_TEXT_MAX)
+  if (e['input'] === true) out.input = true
+  // A text input is named by its identifier only, whatever the file says: its label can be what was typed. A label is
+  // cut, too: a cell's combined label can be a whole article, on every tap, inside the capture's budget.
+  else if (typeof e['label'] === 'string') out.label = e['label'].slice(0, OBSERVED_TEXT_MAX)
+  const f = e['frame'] as Record<string, unknown> | undefined
+  if (f && num(f['x']) && num(f['y']) && num(f['width']) && num(f['height'])) out.frame = { x: f['x'], y: f['y'], width: f['width'], height: f['height'] }
+  return out
 }
 
 function parse(text: string): Record<string, unknown> | undefined {

@@ -2015,6 +2015,45 @@ export interface UiKeyboardResponse {
   keyboard: KeyboardState
 }
 
+/**
+ * What one touch-down hit, seen from inside the app while a person was recorded (record-time observation, the `.work`
+ * plan's P1): the agent pairs the app observer's report with the gesture it delivered and names it by that gesture's
+ * `requestId` (its `input:touch:end`'s). Facts only — what Capture makes of them is flow-runner's.
+ */
+export interface TouchObservation {
+  /** Where the touch went down, normalised, in the device's portrait space (the touch path's). */
+  point: { x: number; y: number }
+  /** A list under the touch was still gliding or bouncing: on iOS such a touch stops the list and activates nothing. */
+  moving: boolean
+  /** Where the touch landed when it was not on the app's own views: the soft keyboard, a web view, Flutter. Nothing
+   *  else is said about such a touch. */
+  surface?: 'keyboard' | 'web' | 'flutter'
+  /** The accessibility element at the point, and its nearest container marked a button (a grid cell over its
+   *  subtitle). Absent when the app built none there (app accessibility off, a touch mid-scroll). */
+  element?: ObservedElement
+  button?: ObservedElement
+}
+
+/** An element as the app's accessibility names it. `label` is absent for a text input, whose label can be its text. */
+export interface ObservedElement {
+  identifier?: string
+  label?: string
+  traits: number
+  /** A text input: named by its identifier only. */
+  input?: boolean
+  /** In the app as drawn, normalised, as the UI tree's frames are. */
+  frame?: UIElementFrame
+}
+
+/** Agent → relay: a `TouchObservation` for the gesture `requestId` ended. Sent only to a relay that asked for them
+ *  (`touchObservations` on the boot), since an older one logs every message type it does not know. */
+export interface CaptureTouched {
+  type: 'capture:touched'
+  sessionId: string
+  requestId: string
+  observation: TouchObservation
+}
+
 export type AgentToRelay =
   | AgentRegister
   | AgentDevices
@@ -2026,6 +2065,7 @@ export type AgentToRelay =
   | UiTreeError
   | UiFieldResponse
   | UiKeyboardResponse
+  | CaptureTouched
 
 // ── stream socket → relay ────────────────────────────────────────────────────
 
