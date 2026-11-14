@@ -88,6 +88,22 @@ describe('the review screen', () => {
     expect(p.onKeep).toHaveBeenCalledWith(2, true)
   })
 
+  // User (P2c): the recorded picture is 160 px wide; the replay's own, of the same screen, is drawn instead.
+  it('shows the replay\'s picture of a card\'s screen where it has one, the recording\'s where not', () => {
+    let state = matching
+    state = reduce(state, { type: 'step-matched', step: matched[0]!, screenshot: 'blob:replay-title' })
+    state = reduce(state, { type: 'step-matched', step: matched[1]! })
+    state = reduce(state, { type: 'step-matched', step: matched[2]! })
+    state = reduce(state, { type: 'match-reviewed', review: { matched, taps: reviewTaps(steps, matched) } })
+    render(<MatchScreen {...props(state)} />)
+    fireEvent.click(screen.getByRole('button', { name: /will be left out/ }))
+    expect(screen.getByRole('img')).toHaveAttribute('src', 'blob:replay-title')
+    expect(screen.getByText('#1 on the replay')).toBeInTheDocument()
+    fireEvent.focus(screen.getByRole('checkbox', { name: /#3 tapOn/ }))
+    expect(screen.getByRole('img')).toHaveAttribute('src', 'blob:plus')
+    expect(screen.getByText('#3 as you recorded it')).toBeInTheDocument()
+  })
+
   it('shows the screen a card was tapped on, and counts what is kept', () => {
     const kept = reduce(reviewing, { type: 'set-kept', step: 2, kept: true })
     render(<MatchScreen {...props(kept)} />)

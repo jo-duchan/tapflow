@@ -506,13 +506,16 @@ function ReviewView({ state, review, tap, marks, onRestart, onContinue, onKeep, 
   const total = review.taps.length
   const left = review.taps.filter((t) => !state.kept.includes(t.step)).length
   const picked = review.taps.find((t) => t.index === shown) ?? review.taps[0]!
-  const picture = open ? thumbnailOf(review.matched[picked.index]!.raw) : null
+  // The replay's own picture of the screen the tap was replayed on, taken at full size; the recording's (160 px wide) only
+  // where the replay has none. Reaching the review, the two showed the same screen (user, P2c).
+  const replayed = state.screenshots[picked.index]
+  const picture = open ? replayed ?? thumbnailOf(review.matched[picked.index]!.raw) : null
   return (
     <div className="grid h-full min-h-0 grid-rows-[minmax(0,1fr)_auto] gap-4">
       <div className="grid min-h-0 gap-4 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
         <div className="flex min-h-0 flex-col items-center gap-2">
           {picture
-            ? <><StepPicture src={picture} step={review.matched[picked.index]!} fill /><p className="text-xs text-muted-foreground">{copy.reviewPicture(picked.step + 1)}</p></>
+            ? <><StepPicture src={picture} step={review.matched[picked.index]!} fill /><p className="text-xs text-muted-foreground">{replayed ? copy.reviewPictureReplayed(picked.step + 1) : copy.reviewPicture(picked.step + 1)}</p></>
             : <DeviceMirror tap={tap} label={copy.steps[1]} marks={marks} />}
         </div>
         {/* 4 px in on every side: the column scrolls, and a focus ring on its edge would be cut. */}

@@ -78,6 +78,7 @@ export const copy = {
   reviewHint: 'Check the ones to keep.',
   reviewAgain: 'again',
   reviewPicture: (step: number) => `#${step} as you recorded it`,
+  reviewPictureReplayed: (step: number) => `#${step} on the replay`,
   continueToEdit: 'Continue to Edit',
   matchStopped: 'The replay stopped.',
   // 1b-3b: a step whose screen looked different from its recording. Facts first, then the causes it can have, never one
