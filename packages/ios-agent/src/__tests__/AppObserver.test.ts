@@ -186,10 +186,12 @@ describe('the app\'s touch reports', () => {
     // A text input is named by its identifier only, whatever the file says.
     write(3, { element: { label: 'hunter2', identifier: 'form.password', traits: 262144, input: true } })
     write(4, { surface: 'keyboard', element: { label: 'q', traits: 1 } })
+    // Ten sorts before two by name: the order is the app's sequence, not the file name's.
+    write(10, { moving: false })
     writeFileSync(join(dir, 'touch-5.json'), 'not json')
     writeFileSync(join(dir, 'touch-6.json'), JSON.stringify({ seq: 6, at: 'soon', bundle: 'com.app', point: { x: 0, y: 0 } }))
     const touches = await observer.takeTouches(UDID)
-    expect(touches.map((t) => t.seq)).toEqual([1, 2, 3, 4])
+    expect(touches.map((t) => t.seq)).toEqual([1, 2, 3, 4, 10])
     expect(touches[0]!.observation).toEqual({ point: { x: 0.5, y: 0.4 }, moving: true })
     expect(touches[1]!.observation.element).toEqual({ label: 'Donuts', identifier: 'd', traits: 1, frame: { x: 0.1, y: 0.2, width: 0.3, height: 0.04 } })
     expect(touches[2]!.observation.element).toEqual({ identifier: 'form.password', traits: 262144, input: true })

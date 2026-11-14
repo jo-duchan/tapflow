@@ -351,7 +351,12 @@ describe('Flow Capture through the relay', () => {
       await join(alice)
       await tap(alice, 'r1')
       agent.send(JSON.stringify({ type: 'capture:touched', sessionId, requestId: 'nobody', observation }))
-      const other = await browser(2)
+      // Another Mac's agent, naming this session: only the session's own agent says what its device's touches hit.
+      const other = new WebSocket(`ws://localhost:${relayPort}`)
+      open.push(other)
+      await waitForOpen(other)
+      other.send(JSON.stringify({ type: 'agent:register', platform: 'ios', agentName: `other-agent-${seq}`, devices: [{ id: 'dev-9', name: 'iPhone 17', platform: 'ios', status: 'booted' }] }))
+      await waitForType(other, 'agent:registered')
       other.send(JSON.stringify({ type: 'capture:touched', sessionId, requestId: 'r1', observation }))
       agent.send(JSON.stringify({ type: 'capture:touched', sessionId, requestId: 'r1', observation: { point: 'here' } }))
       // Ordered after the three: a tap the agent answers.
