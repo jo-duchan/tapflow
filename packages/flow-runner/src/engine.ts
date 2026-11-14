@@ -382,7 +382,14 @@ async function touchPoint(
   const centre = (e: UIElement): [number, number] => [round4(e.frame.x + e.frame.width / 2), round4(e.frame.y + e.frame.height / 2)]
   // The read the element was found in is the screen before the touch, which its effect is judged against.
   const seen = (tree: UIElement[]) => { report.screen = tree }
-  const blocked = (r: ReachResult): string => r.state === 'reachable' ? `${describeSelector(sel)} kept moving, so no touch could be placed on it`
+  // Whether two points it was reached at ever disagreed. Without that, a reachable last answer means the device was too
+  // slow to answer twice in time, not that anything moved: Food Truck's points agreed on every read (a reach 1.7–2.1 s,
+  // a tree read up to 3.4 s), and the step said "kept moving".
+  let moved = false
+  let answerMs = 0
+  const blocked = (r: ReachResult): string => r.state === 'reachable'
+    ? moved ? `${describeSelector(sel)} kept moving, so no touch could be placed on it`
+      : `${describeSelector(sel)} was reached, but the device answered too slowly to confirm the point before the timeout (an answer took ${(answerMs / 1000).toFixed(1)} s)`
     : r.state === 'occluded' ? `${describeSelector(sel)} is covered${r.by ? ` by ${r.by}` : ''}: a touch on it would land on that instead`
     : r.state === 'offscreen' ? `${describeSelector(sel)} is not on the screen`
     : `${describeSelector(sel)} was not where the screen was read (${r.state === 'missing' ? r.candidates : 0} near it)`
@@ -408,7 +415,9 @@ async function touchPoint(
       // Bounded by the selector's deadline, or an agent that never answers holds the step for the relay's whole reach
       // deadline (15 s and more) after the selector's ran out; never under REACH_FLOOR_MS, or an element that showed up
       // late would be left no time to be asked and tapped unchecked.
-      [r] = await driver.reach([el], AbortSignal.timeout(Math.max(REACH_FLOOR_MS, deadline - Date.now())))
+      const asked = Date.now()
+      ;[r] = await driver.reach([el], AbortSignal.timeout(Math.max(REACH_FLOOR_MS, deadline - Date.now())))
+      answerMs = Date.now() - asked
     } catch (e) {
       // A blip between here and the agent (a 502 while it reconnects, a 504) is polled past, as a tree read's is; one
       // that lasts to the deadline leaves the device unable to judge, and the touch goes where it went before reach.
@@ -435,11 +444,17 @@ async function touchPoint(
       return centre(el)
     }
     if (r.state === 'reachable') {
-      if (last && Math.abs(last[0] - r.point[0]) < REACH_AGREE && Math.abs(last[1] - r.point[1]) < REACH_AGREE) {
+      // Reached at its centre, nothing covers it there, and in the frame the read just before found it in: it held
+      // still across two independent reads, as two agreeing reaches show. Neither proves stillness at the touch itself;
+      // this samples over a shorter span (read to reach). Away from the centre, a cover sliding in over a still row
+      // keeps its frame while the point moves, so that takes the second round (design review).
+      const agrees = !!last && Math.abs(last[0] - r.point[0]) < REACH_AGREE && Math.abs(last[1] - r.point[1]) < REACH_AGREE
+      if (agrees || (r.atCentre && sameFrame(r.frame, el.frame))) {
         report.reach = 'verified'
         report.touched = el
         return [round4(r.point[0]), round4(r.point[1])]
       }
+      if (last) moved = true
       last = r.point
       lastBlocked = r.atCentre ? undefined : r
     } else {
@@ -723,6 +738,12 @@ const SPANS_SCROLL_AXIS: Record<ScrollDirection, (f: UIElement['frame']) => bool
 const SETTLE_MATCH_MS = 2_000
 /** How near two reach answers must be to count as the same point: under one thousandth of the screen. */
 const REACH_AGREE = 0.001
+
+/** The same frame to within `REACH_AGREE` on every edge: the tree and both agents' reach clip and normalize alike. */
+function sameFrame(a: UIElement['frame'], b: UIElement['frame']): boolean {
+  return Math.abs(a.x - b.x) < REACH_AGREE && Math.abs(a.y - b.y) < REACH_AGREE
+    && Math.abs(a.width - b.width) < REACH_AGREE && Math.abs(a.height - b.height) < REACH_AGREE
+}
 /** The least a reach is given, however little of the selector's deadline is left: one takes 130–230 ms on iOS (measured). */
 const REACH_FLOOR_MS = 2_000
 /** The most targets one reach carries: the relay's limit (`MAX_TARGETS` in relay's `lib/reach.ts`). */

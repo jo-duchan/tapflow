@@ -287,10 +287,72 @@ describe('runFlow — where a touch on an element lands', () => {
     expect(offCentre.calls).toEqual([])
     const atCentre = withReach(reachable([0.5, 0.909]))
     let m = 0
-    atCentre.reach = vi.fn(async () => [m++ === 0 ? reachable([0.5, 0.909], true) : { state: 'unknown', reason: 'no answer' } as ReachResult])
+    // Moved since the read (another frame), so one answer does not confirm it and the second round is asked.
+    const moved: ReachResult = { state: 'reachable', point: [0.5, 0.909], atCentre: true, frame: { ...row.frame, y: 0.875 } }
+    atCentre.reach = vi.fn(async () => [m++ === 0 ? moved : { state: 'unknown', reason: 'no answer' } as ReachResult])
     const passed = await runFlow(flowOf('steps:\n  - tapOn: "Row 13"\n'), atCentre, { ...OPTS, defaultTimeoutMs: 500 })
     expect(passed.steps[0]).toMatchObject({ status: 'passed', reach: 'unchecked' })
     expect(atCentre.calls).toEqual([['tap', 0.5, 0.909]])
+  })
+
+  // Food Truck through the relay: a reach took 1.7–2.1 s and a tree read 0.8–3.4 s, and the second round (read, reach)
+  // ran the step past its 10 s. An element reached at its centre, in the frame the read just before found it in, has
+  // held still across two independent reads already.
+  it('takes one answer reached at the centre, in the frame the read found it in, without a second round', async () => {
+    const driver = withReach(reachable([0.5, 0.909], true))
+    const result = await runFlow(flowOf('steps:\n  - tapOn: "Row 13"\n'), driver, OPTS)
+    expect(driver.calls).toEqual([['tap', 0.5, 0.909]])
+    expect(result.steps[0]).toMatchObject({ status: 'passed', reach: 'verified' })
+    expect(driver.reach).toHaveBeenCalledTimes(1)
+    expect(driver.queryUITree).toHaveBeenCalledTimes(1)
+  })
+
+  // A cover sliding in over a still row (a sheet, a toast) leaves the row's frame as it was while the point a touch
+  // reaches moves: only the centre, where nothing covers it, is taken on one answer (design review).
+  it('asks a second round for an answer reached away from the centre, or in a frame the read did not see', async () => {
+    for (const first of [
+      reachable([0.1, 0.885]),
+      { state: 'reachable', point: [0.5, 0.909], atCentre: true, frame: { ...row.frame, y: 0.875 } } as ReachResult,
+    ]) {
+      const driver = withReach(first, reachable([0.2, 0.9]), reachable([0.2, 0.9]))
+      await runFlow(flowOf('steps:\n  - tapOn: "Row 13"\n'), driver, { ...OPTS, defaultTimeoutMs: 1000 })
+      expect(driver.calls).toEqual([['tap', 0.2, 0.9]])
+    }
+  })
+
+  // "kept moving" on a screen where nothing moved: Food Truck's points agreed every time, and the step ran out of time
+  // between a slow read and a slow reach. Said only when two points did disagree.
+  it('says the element kept moving only when two points it was reached at disagreed', async () => {
+    const moving = withReach(reachable([0.1, 0.8]))
+    let y = 0.8
+    moving.reach = vi.fn(async () => [reachable([0.1, (y += 0.01)])])
+    const failed = await runFlow(flowOf('steps:\n  - tapOn: "Row 13"\n'), moving, { ...OPTS, defaultTimeoutMs: 300 })
+    expect(failed.steps[0]!.message).toBe('"Row 13" kept moving, so no touch could be placed on it')
+  })
+
+  it('says the device was too slow to confirm, not that it moved, when the time ran out on agreeing answers', async () => {
+    const slow = withReach(reachable([0.1, 0.885]))
+    // The first answer lands past the step's deadline (a reach is given at least REACH_FLOOR_MS, 2 s).
+    slow.reach = vi.fn(async () => { await new Promise((r) => setTimeout(r, 200)); return [reachable([0.1, 0.885])] })
+    const result = await runFlow(flowOf('steps:\n  - tapOn: "Row 13"\n'), slow, { ...OPTS, defaultTimeoutMs: 150 })
+    expect(result).toMatchObject({ status: 'failed', failureKind: 'product' })
+    expect(result.steps[0]!.message).toMatch(/^"Row 13" was reached, but the device answered too slowly to confirm the point before the timeout \(an answer took 0\.\d s\)$/)
+    expect(slow.calls).toEqual([])
+  })
+
+  // Design review: the likeliest Food Truck path — the read after the wait ran out of time — said "kept moving" too.
+  it('says the device was too slow when the read again runs out, after one answer', async () => {
+    const driver = withReach(reachable([0.1, 0.885]))
+    let reads = 0
+    driver.queryUITree = vi.fn(async () => {
+      if (reads++ === 0) return [row]
+      await new Promise((r) => setTimeout(r, 15))
+      throw new TransientQueryError('ui-tree query failed: The operation was aborted due to timeout')
+    })
+    const result = await runFlow(flowOf('steps:\n  - tapOn: "Row 13"\n'), driver, { pollIntervalMs: 1, defaultTimeoutMs: 40 })
+    expect(result.steps[0]!.message).toContain('answered too slowly to confirm the point')
+    expect(result.steps[0]!.message).not.toContain('kept moving')
+    expect(driver.calls).toEqual([])
   })
 
   it('reads again while it is covered, and taps once it is not', async () => {
