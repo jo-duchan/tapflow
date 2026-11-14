@@ -38,6 +38,13 @@ const RUN_RESET_PASTEBOARD_TIMEOUT_MS = 10_000
 // actually took is per device and per app, and `network:state.available` carries that — the split the
 // protocol documents. Added last, after the handler and the boot-time arming, because the string on
 // its own is what puts a control on screen.
+// Pairing the app's touch-down reports with the gestures sent (record-time observation). The report lands within a frame
+// of the touch (one turn of the app's main queue, measured); a tap's end comes 80 ms or more after its start.
+const TOUCH_REPORT_WAIT_MS = 500
+const TOUCH_REPORT_POLL_MS = 50
+const TOUCH_REPORT_KEEP_MS = 5_000
+const TOUCH_REPORT_SKEW_MS = 1_500
+const TOUCH_REPORT_NEAR = 0.03
 const AGENT_CAPABILITIES: AgentCapability[] = ['clipboard', 'full-reset', 'network-control', 'build-download', 'launch-options', 'launch-env', 'touch-cancel', 'field-value', 'keyboard-reset', 'keyboard-state', 'keyboard-set', 'run-reset', 'reach']
 
 // Human prose for each reason. Not in `@tapflowio/protocol`: that package's main entry must stay
@@ -111,7 +118,7 @@ import { PhysicalOrientation, ORIENTATION_DEGREES, turned, type DeviceOrientatio
 import type { GuestOrientation } from './GuestHelper.js'
 import type { IntegratedScreen } from './panels.js'
 import { XCUITreeReader } from './XCUITreeReader.js'
-import { AppObserver, fieldOf, keyboardOf } from './AppObserver.js'
+import { AppObserver, fieldOf, keyboardOf, type AppTouch } from './AppObserver.js'
 import { AppAccessibility } from './AppAccessibility.js'
 import { DeviceChromeLoader, type ChromeData, type ChromePanel } from './DeviceChromeLoader.js'
 import { TypePanels, panelFrame } from './TypePanels.js'
@@ -397,6 +404,9 @@ export class IOSAgent implements DeviceAgent, NetworkControlCapability, Posturab
   // tree runner (AGENTS.md, "App observer").
   private readonly appObserver: AppObserver
   private readonly appAccessibility: AppAccessibility
+  // Devices whose app reports each touch-down, while a person is recorded on a relay that keeps them (record-time
+  // observation): the gestures sent there, newest last, and the reports not yet paired with one.
+  private readonly touchWatch = new Map<string, { starts: Array<{ x: number; y: number; at: number }>; reports: AppTouch[] }>()
   // Holds a macOS power assertion while connected so the host doesn't idle-throttle the
   // simulator capture/encode when the Mac is unattended. No-op off macOS.
   private readonly sleepBlocker: SleepBlocker
@@ -1099,7 +1109,7 @@ export class IOSAgent implements DeviceAgent, NetworkControlCapability, Posturab
   // `requestId` is a parameter, never a field on `state`: `bootSeq` exists because two boots overlap,
   // and a correlator hoisted onto shared state would answer the first request with the second's id.
   // Optional because the relay's idle timer boots nothing — but every *browser* boot carries one.
-  private async handleDeviceBoot(sessionId: string, deviceId: string, fullErase = false, acceptH264 = false, tier?: { secureContext: boolean; external: boolean }, requestId?: string, warmTree = false, serviceTier?: ServiceTier, runReset?: RunResetRequest, recorded = false): Promise<void> {
+  private async handleDeviceBoot(sessionId: string, deviceId: string, fullErase = false, acceptH264 = false, tier?: { secureContext: boolean; external: boolean }, requestId?: string, warmTree = false, serviceTier?: ServiceTier, runReset?: RunResetRequest, recorded = false, touchObservations = false): Promise<void> {
     const state = this.deviceStates.get(sessionId)
     // Split, because the two halves are not the same kind of nothing. No open control channel means the
     // answer itself has nowhere to go, so this is the one abandonment that stays silent — and the caller
@@ -1257,6 +1267,13 @@ export class IOSAgent implements DeviceAgent, NetworkControlCapability, Posturab
       // what an earlier recorded person's boot left. Best-effort: without it a touch is recorded as before, unnamed.
       await (recorded ? this.appAccessibility.enable(deviceId) : this.appAccessibility.restore(deviceId)).catch((e: unknown) => {
         logger.warn(`could not ${recorded ? 'turn on' : 'restore'} app accessibility:`, (e as Error).message)
+      })
+      // What each touch hits, reported by the app while this person is recorded — only to a relay that keeps it.
+      const observeTouches = recorded && touchObservations
+      if (observeTouches) this.touchWatch.set(deviceId, { starts: [], reports: [] })
+      else this.touchWatch.delete(deviceId)
+      await this.appObserver.watchTouches(deviceId, observeTouches).catch((e: unknown) => {
+        logger.warn('could not set the app observer\'s touch reports:', (e as Error).message)
       })
       // **Where it is held, before the first frame says so** (#910). The orientation is the device's, shared with
       // DeviceHub and every viewer, so it is read and reported as it is, and a reload or a second viewer joins it
@@ -1440,6 +1457,33 @@ export class IOSAgent implements DeviceAgent, NetworkControlCapability, Posturab
    * and a udid that no longer exists (the host directory outlives `simctl delete`) is not ours to count.
    */
   /**
+   * Pair the app's report of a touch-down with the gesture `requestId` ended, and give it to the relay's capture. The
+   * agent pairs them, not the relay: it sent the touch and the app reported it on this Mac's clock, where the relay may
+   * run on another. Matched by the point (the same portrait space) and the time; waited for briefly, since the app
+   * writes its report on the next turn of its main queue. A gesture with no report gets nothing, and Capture judges it
+   * as before.
+   */
+  private async reportTouch(sessionId: string, deviceId: string, requestId: string, start: { x: number; y: number; at: number }): Promise<void> {
+    const watch = this.touchWatch.get(deviceId)
+    if (!watch) return
+    const bundle = this.lastBundleIds.get(deviceId)
+    const until = Date.now() + TOUCH_REPORT_WAIT_MS
+    for (;;) {
+      watch.reports.push(...(await this.appObserver.takeTouches(deviceId).catch(() => [] as AppTouch[])))
+      watch.reports = watch.reports.filter((r) => Date.now() - r.at < TOUCH_REPORT_KEEP_MS && (!bundle || r.bundle === bundle))
+      const i = watch.reports.findIndex((r) => Math.abs(r.observation.point.x - start.x) < TOUCH_REPORT_NEAR
+        && Math.abs(r.observation.point.y - start.y) < TOUCH_REPORT_NEAR && Math.abs(r.at - start.at) < TOUCH_REPORT_SKEW_MS)
+      if (i >= 0) {
+        const [report] = watch.reports.splice(i, 1)
+        this.sendMsg({ type: 'capture:touched', sessionId, requestId, observation: report!.observation })
+        return
+      }
+      if (Date.now() >= until || this.touchWatch.get(deviceId) !== watch) return
+      await new Promise((r) => setTimeout(r, TOUCH_REPORT_POLL_MS))
+    }
+  }
+
+  /**
    * App accessibility a recorded boot left on, for a device running now: the agent that marked it died before its
    * shutdown or the next boot. A shut-down device keeps its marker until it next boots.
    */
@@ -1497,6 +1541,7 @@ export class IOSAgent implements DeviceAgent, NetworkControlCapability, Posturab
     // Each device has its own tree runner; stop this one's, never another device's.
     this.uiTreeReader.stopIfDevice(deviceId)
 
+    this.touchWatch.delete(deviceId)
     // While it still runs: the setting is written inside the device. A shutdown that fails leaves it for the next boot.
     await this.appAccessibility.restore(deviceId).catch((e: unknown) => {
       logger.warn('could not restore app accessibility before the shutdown:', (e as Error).message)
@@ -2161,9 +2206,9 @@ export class IOSAgent implements DeviceAgent, NetworkControlCapability, Posturab
     switch (msg.type) {
       case 'device:boot': {
         // `external` and `automation` are added by the relay, never by the browser (see `DeviceBoot`).
-        const { deviceId, resetMode, acceptH264, secureContext, external, automation, serviceTier, runReset, recorded } = msg.payload as { deviceId: string; resetMode?: string; acceptH264?: boolean; secureContext?: boolean; external?: boolean; automation?: boolean; serviceTier?: ServiceTier; runReset?: RunResetRequest; recorded?: boolean }
+        const { deviceId, resetMode, acceptH264, secureContext, external, automation, serviceTier, runReset, recorded, touchObservations } = msg.payload as { deviceId: string; resetMode?: string; acceptH264?: boolean; secureContext?: boolean; external?: boolean; automation?: boolean; serviceTier?: ServiceTier; runReset?: RunResetRequest; recorded?: boolean; touchObservations?: boolean }
         const sessionId = msg.sessionId
-        this.handleDeviceBoot(sessionId, deviceId, resetMode === 'full-erase', acceptH264 === true, { secureContext: !!secureContext, external: !!external }, msg.requestId, automation === true, serviceTier, runReset, recorded === true)
+        this.handleDeviceBoot(sessionId, deviceId, resetMode === 'full-erase', acceptH264 === true, { secureContext: !!secureContext, external: !!external }, msg.requestId, automation === true, serviceTier, runReset, recorded === true, touchObservations === true)
           .catch((e) => logger.error('handleDeviceBoot failed:', e))
         break
       }
@@ -2267,6 +2312,11 @@ export class IOSAgent implements DeviceAgent, NetworkControlCapability, Posturab
         this.ensureTouchHelper(state)
         const { x, y } = msg.payload as { x: number; y: number }
         state.touchHelper?.touchStart(x, y)
+        const watch = this.touchWatch.get(state.deviceId)
+        if (watch) {
+          watch.starts.push({ x, y, at: Date.now() })
+          if (watch.starts.length > 8) watch.starts.shift()
+        }
         break
       }
       case 'input:touch:move': {
@@ -2290,6 +2340,9 @@ export class IOSAgent implements DeviceAgent, NetworkControlCapability, Posturab
         // `no-gesture`, where the stopped one it replaced would say the channel is gone.
         void (helper ? helper.touchEndAfterMinContact() : Promise.resolve(false))
           .then((sent) => this.ackInput(state, sent ? 'delivered' : this.refusalReason(state.touchHelper, 'continuation'), requestId))
+        // The gesture ending is the one that started last.
+        const start = this.touchWatch.get(state.deviceId)?.starts.at(-1)
+        if (start) void this.reportTouch(msg.sessionId, state.deviceId, requestId, start)
         break
       }
       // A client leaving mid-gesture (#1115). No ack: the client is leaving, and the end it sends next is answered.

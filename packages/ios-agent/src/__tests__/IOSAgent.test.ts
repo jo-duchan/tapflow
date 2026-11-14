@@ -927,6 +927,50 @@ describe('IOSAgent', () => {
       browser.close()
     })
 
+    // Record-time observation: the app's report of each touch-down goes to the relay, named by the gesture's id.
+    it('pairs the app\'s report of a touch-down with the gesture and sends it, for a recorded boot on a relay that keeps them', async () => {
+      const watch = vi.spyOn(AppObserver.prototype, 'watchTouches').mockResolvedValue()
+      const now = Date.now()
+      const reports = [
+        { seq: 1, at: now, bundle: 'com.app', observation: { point: { x: 0.9, y: 0.9 }, moving: false } },
+        { seq: 2, at: now, bundle: 'com.app', observation: { point: { x: 0.41, y: 0.52 }, moving: true, element: { label: 'Row 3', traits: 1 } } },
+      ]
+      const take = vi.spyOn(AppObserver.prototype, 'takeTouches').mockImplementation(async () => reports.splice(0))
+      const { agent, browser, internals, sent } = await bootedAgent(mockSimctl(true), false)
+      internals.handleRelayMessage({ type: 'device:boot', sessionId: agent.sessionId!, requestId: 'rq-r', payload: { deviceId: 'dev-1', recorded: true, touchObservations: true } } as never)
+      await vi.waitFor(() => expect(sent.some((m) => m.type === 'device:ready')).toBe(true), { timeout: 3000 })
+      expect(watch).toHaveBeenLastCalledWith('dev-1', true)
+      internals.lastBundleIds.set('dev-1', 'com.app')
+      internals.handleRelayMessage({ type: 'input:touch:start', sessionId: agent.sessionId!, payload: { x: 0.4, y: 0.5 } } as never)
+      internals.handleRelayMessage({ type: 'input:touch:end', sessionId: agent.sessionId!, requestId: 'g1' } as never)
+      await vi.waitFor(() => expect(sent.find((m) => m.type === 'capture:touched')).toBeDefined(), { timeout: 2000 })
+      // The report near the touch, not the one at the corner.
+      expect(sent.filter((m) => m.type === 'capture:touched')).toEqual([{ type: 'capture:touched', sessionId: agent.sessionId, requestId: 'g1',
+        observation: { point: { x: 0.41, y: 0.52 }, moving: true, element: { label: 'Row 3', traits: 1 } } }])
+      watch.mockRestore(); take.mockRestore()
+      agent.disconnect()
+      browser.close()
+    })
+
+    it('sends no touch reports for a boot that is not recorded, or on a relay that did not ask for them', async () => {
+      const watch = vi.spyOn(AppObserver.prototype, 'watchTouches').mockResolvedValue()
+      const take = vi.spyOn(AppObserver.prototype, 'takeTouches').mockResolvedValue([{ seq: 1, at: Date.now(), bundle: 'com.app', observation: { point: { x: 0.4, y: 0.5 }, moving: false } }])
+      const { agent, browser, internals, sent } = await bootedAgent(mockSimctl(true), false)
+      for (const [i, payload] of [{ recorded: true }, { touchObservations: true }].entries()) {
+        internals.handleRelayMessage({ type: 'device:boot', sessionId: agent.sessionId!, requestId: `rq-${i}`, payload: { deviceId: 'dev-1', ...payload } } as never)
+        await vi.waitFor(() => expect(sent.filter((m) => m.type === 'device:ready')).toHaveLength(i + 1), { timeout: 3000 })
+        expect(watch).toHaveBeenLastCalledWith('dev-1', false)
+        internals.handleRelayMessage({ type: 'input:touch:start', sessionId: agent.sessionId!, payload: { x: 0.4, y: 0.5 } } as never)
+        internals.handleRelayMessage({ type: 'input:touch:end', sessionId: agent.sessionId!, requestId: `g${i}` } as never)
+      }
+      await new Promise((r) => setTimeout(r, 300))
+      expect(sent.some((m) => m.type === 'capture:touched')).toBe(false)
+      expect(take).not.toHaveBeenCalled()
+      watch.mockRestore(); take.mockRestore()
+      agent.disconnect()
+      browser.close()
+    })
+
     it('boots anyway when app accessibility cannot be turned on', async () => {
       const enable = vi.spyOn(AppAccessibility.prototype, 'enable').mockRejectedValue(new Error('defaults timed out'))
       const { agent, browser, internals, sent } = await bootedAgent(mockSimctl(true), false)

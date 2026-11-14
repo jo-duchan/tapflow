@@ -334,6 +334,40 @@ describe('Flow Capture through the relay', () => {
     expect(kinds((await snapshot(1))!.entries)).toEqual(['input:touch:start', 'input:touch:end', 'ack'])
   })
 
+  // Record-time observation (P1): what a recorded touch hit, from inside the app, kept beside the gesture it names.
+  describe('what a recorded touch hit, from the agent', () => {
+    const observation = { point: { x: 0.5, y: 0.5 }, moving: false, element: { label: 'Donuts', traits: 1, frame: { x: 0.1, y: 0.3, width: 0.3, height: 0.04 } } }
+
+    it('keeps it for a gesture the capture recorded, from the session\'s own agent', async () => {
+      const alice = await browser(1)
+      await join(alice)
+      await tap(alice, 'r1')
+      agent.send(JSON.stringify({ type: 'capture:touched', sessionId, requestId: 'r1', observation }))
+      await expect.poll(async () => (await snapshot(1))!.entries.find((e) => e.kind === 'touched')).toEqual(expect.objectContaining({ kind: 'touched', requestId: 'r1', touched: observation }))
+    })
+
+    it('keeps nothing for a gesture it never recorded, from another socket, or that it cannot read', async () => {
+      const alice = await browser(1)
+      await join(alice)
+      await tap(alice, 'r1')
+      agent.send(JSON.stringify({ type: 'capture:touched', sessionId, requestId: 'nobody', observation }))
+      const other = await browser(2)
+      other.send(JSON.stringify({ type: 'capture:touched', sessionId, requestId: 'r1', observation }))
+      agent.send(JSON.stringify({ type: 'capture:touched', sessionId, requestId: 'r1', observation: { point: 'here' } }))
+      // Ordered after the three: a tap the agent answers.
+      await tap(alice, 'r2')
+      expect(kinds((await snapshot(1))!.entries)).not.toContain('touched')
+    })
+
+    it('tells the agent it keeps them, on every boot', async () => {
+      const alice = await browser(1)
+      await join(alice)
+      alice.send(JSON.stringify({ type: 'device:boot', sessionId, requestId: 'b1', payload: { deviceId: 'dev-1' } }))
+      const boot = await waitForType<{ type: string; payload: { touchObservations?: boolean } }>(agent, 'device:boot')
+      expect(boot.payload.touchObservations).toBe(true)
+    })
+  })
+
   // 1b-3b: the screen each step began on, sent by the person's own dashboard after the input.
   describe('thumbnails', () => {
     const JPEG = Buffer.concat([Buffer.from([0xff, 0xd8, 0xff, 0xe0]), Buffer.alloc(200, 7)])

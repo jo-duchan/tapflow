@@ -1682,6 +1682,7 @@ export class RelayServer {
       case 'ui:reach:response':  this.handleUIReachResponse(ws, msg); break
       case 'ui:field:response':  this.handleUIFieldResponse(ws, msg); break
       case 'ui:keyboard:response': this.handleUIKeyboardResponse(ws, msg); break
+      case 'capture:touched':    this.handleCaptureTouched(ws, msg); break
       case 'agents:list': {
         this.sendTo(ws, {
           type: 'agents:listed',
@@ -2854,6 +2855,9 @@ export class RelayServer {
     // the field they type into and its ~12 s cold start on the first key would miss the first field. A current one
     // reads the keyboard and the field from inside the app (ios-agent AGENTS.md, "App observer") and warms nothing:
     // an attached runner made a busy app lag.
+    // This relay keeps what an agent observes a recorded touch hit (`capture:touched`): an agent sends them only when
+    // told so, since an older relay logs every message type it does not know.
+    ;(msg.payload as Record<string, unknown>)['touchObservations'] = true
     ;(msg.payload as Record<string, unknown>)['recorded'] = this.captures.isRecording(boot.session.id, captureHolder(boot.session))
       && hasCapability(boot.session.agentCapabilities, 'field-value')
       // A person's join is let past the memory check because their device is up; the runner is not, and costs
@@ -4095,6 +4099,13 @@ export class RelayServer {
       })
       this.sendTo(agentSocket, { type: 'ui:keyboard:request', sessionId, requestId })
     })
+  }
+
+  /** What a recorded touch hit, from inside the app (record-time observation). Only the session's own agent says so. */
+  private handleCaptureTouched(ws: WebSocket, msg: Inbound<'capture:touched'>): void {
+    const session = this.sessions.get(msg.sessionId)
+    if (!session || session.agentSocket !== ws) return
+    this.captures.recordTouched(session.id, captureHolder(session), msg.requestId, msg.observation)
   }
 
   private handleUIKeyboardResponse(ws: WebSocket, msg: Inbound<'ui:keyboard:response'>): void {

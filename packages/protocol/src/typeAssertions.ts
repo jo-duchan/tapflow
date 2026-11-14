@@ -20,7 +20,7 @@ import type {
   ScreenshotError, ScreenshotRequest, SessionAgentAway, SessionChrome, SessionDeviceInfo, SessionEnd,
   SessionJoined, SessionLeave, SessionRebound, SessionStart, SessionTerminated, StreamRegister,
   AgentControlOutbound, StreamToRelay,
-  StreamRegistered, StreamRequestIdr, UiTreeError, UiTreeRequest, UiTreeResponse, UiReachRequest, UiReachResponse, UiFieldRequest, UiFieldResponse, DeviceKeyboardReset,
+  StreamRegistered, StreamRequestIdr, UiTreeError, UiTreeRequest, UiTreeResponse, UiReachRequest, UiReachResponse, UiFieldRequest, UiFieldResponse, CaptureTouched, DeviceKeyboardReset,
   UiKeyboardRequest, UiKeyboardResponse, DeviceKeyboardSet, DeviceKeyboardSetDone, DeviceKeyboardSetError,
   DeviceRunReset, DeviceRunResetDone, DeviceRunResetError,
   NetworkRequestState,
@@ -237,6 +237,7 @@ export const _UiReachRequest: UiReachRequest['type'] = 'ui:reach:request'
 export const _UiReachResponse: UiReachResponse['type'] = 'ui:reach:response'
 export const _UiTreeError: UiTreeError['type'] = 'ui:tree:error'
 export const _UiFieldResponse: UiFieldResponse['type'] = 'ui:field:response'
+export const _CaptureTouched: CaptureTouched['type'] = 'capture:touched'
 export const _WatchStart: WatchStart['type'] = 'watch:start'
 export const _WatchStop: WatchStop['type'] = 'watch:stop'
 export const _WatchStarted: WatchStarted['type'] = 'watch:started'

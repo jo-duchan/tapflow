@@ -166,6 +166,39 @@ describe('asking the app', () => {
   })
 })
 
+// Record-time observation: the app writes a report per touch-down while the agent records a person.
+describe('the app\'s touch reports', () => {
+  it('turns them on and off with the file the app looks for', async () => {
+    const { observer, dir } = setup()
+    await observer.prepare(UDID)
+    await observer.watchTouches(UDID, true)
+    expect(statSync(join(dir, 'touches')).mode & 0o777).toBe(0o600)
+    await observer.watchTouches(UDID, false)
+    expect(existsSync(join(dir, 'touches'))).toBe(false)
+  })
+
+  it('reads each report once, oldest first, and keeps only what the protocol carries', async () => {
+    const { observer, dir } = setup()
+    await observer.prepare(UDID)
+    const write = (seq: number, body: Record<string, unknown>) => writeFileSync(join(dir, `touch-${seq}.json`), JSON.stringify({ seq, at: 1000 + seq, bundle: 'com.app', point: { x: 0.5, y: 0.4 }, moving: false, ...body }))
+    write(2, { element: { label: 'Donuts', identifier: 'd', traits: 1, frame: { x: 0.1, y: 0.2, width: 0.3, height: 0.04 }, extra: 'x' }, windowPoint: { x: 0.5, y: 0.4 } })
+    write(1, { moving: true })
+    // A text input is named by its identifier only, whatever the file says.
+    write(3, { element: { label: 'hunter2', identifier: 'form.password', traits: 262144, input: true } })
+    write(4, { surface: 'keyboard', element: { label: 'q', traits: 1 } })
+    writeFileSync(join(dir, 'touch-5.json'), 'not json')
+    writeFileSync(join(dir, 'touch-6.json'), JSON.stringify({ seq: 6, at: 'soon', bundle: 'com.app', point: { x: 0, y: 0 } }))
+    const touches = await observer.takeTouches(UDID)
+    expect(touches.map((t) => t.seq)).toEqual([1, 2, 3, 4])
+    expect(touches[0]!.observation).toEqual({ point: { x: 0.5, y: 0.4 }, moving: true })
+    expect(touches[1]!.observation.element).toEqual({ label: 'Donuts', identifier: 'd', traits: 1, frame: { x: 0.1, y: 0.2, width: 0.3, height: 0.04 } })
+    expect(touches[2]!.observation.element).toEqual({ identifier: 'form.password', traits: 262144, input: true })
+    expect(touches[3]!.observation).toEqual({ point: { x: 0.5, y: 0.4 }, moving: false, surface: 'keyboard' })
+    expect(readdirSync(dir).filter((f) => f.startsWith('touch-'))).toEqual([])
+    expect(await observer.takeTouches(UDID)).toEqual([])
+  })
+})
+
 describe('preparing a device', () => {
   it('makes the directory private and empties what a previous boot left', async () => {
     const { observer, dir } = setup()

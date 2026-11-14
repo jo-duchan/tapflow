@@ -62,7 +62,7 @@ import type {
   InputPinchEnd, InputPinchMove, InputPinchStart, InputPosture, InputRotate, InputTouchCancel, InputTouchEnd, InputTouchMove,
   InputTouchStart, InputType, InputTypeDone, InputTypeError, KeyboardToggled, OpenUrl, OpenUrlDone,
   OpenUrlError, ScreenshotDone, ScreenshotError, SessionChrome, SessionDeviceInfo, SessionEnd,
-  SessionActivity, SessionLeave, SessionStart, StreamRegister, UiTreeError, UiTreeResponse, UiReachResponse, UiFieldResponse, UiKeyboardResponse, DeviceKeyboardSet, DeviceKeyboardSetDone, DeviceKeyboardSetError,
+  SessionActivity, SessionLeave, SessionStart, StreamRegister, UiTreeError, UiTreeResponse, UiReachResponse, UiFieldResponse, UiKeyboardResponse, CaptureTouched, DeviceKeyboardSet, DeviceKeyboardSetDone, DeviceKeyboardSetError,
   DeviceRunReset, DeviceRunResetDone, DeviceRunResetError,
   WatchStart, WatchStop,
 } from '../index.js'
@@ -108,6 +108,15 @@ const keyboardState = z.object({
   rect: normalizedRect.optional().catch(undefined),
   frameRect: normalizedRect.optional().catch(undefined),
   onHome: z.boolean().optional().catch(undefined),
+})
+// What a touch hit, as the app's accessibility names it (`capture:touched`). A frame the relay cannot read is dropped,
+// not the element: its name still says what the person touched.
+const observedElement = z.object({
+  identifier: z.string().optional(),
+  label: z.string().optional(),
+  traits: z.number(),
+  input: z.boolean().optional(),
+  frame: normalizedRect.optional().catch(undefined),
 })
 
 // ── envelope-tier builders ───────────────────────────────────────────────────
@@ -401,6 +410,17 @@ const AGENT_CONSUMED = {
     reason: z.enum(['no-app', 'no-focus', 'ambiguous', 'secure', 'failed']).optional().catch('failed'),
     keyboard: keyboardState.optional().catch(undefined),
     language: z.string().optional().catch(undefined),
+  }),
+  // A touch the relay cannot read is no observation: dropped, and Capture judges that touch as before.
+  'capture:touched': z.object({
+    type: z.literal('capture:touched'), sessionId, requestId,
+    observation: z.object({
+      point: z.object({ x: z.number(), y: z.number() }),
+      moving: z.boolean(),
+      surface: z.enum(['keyboard', 'web', 'flutter']).optional(),
+      element: observedElement.optional(),
+      button: observedElement.optional(),
+    }),
   }),
   // Unknown, not hidden, when the agent's answer cannot be read: a capture then judges the taps around it as unknown.
   'ui:keyboard:response': z.object({
@@ -706,6 +726,7 @@ type _UiReachResponse = Assert<V<'ui:reach:response', UiReachResponse>>
 type _UiTreeError = Assert<V<'ui:tree:error', UiTreeError>>
 type _UiFieldResponse = Assert<V<'ui:field:response', UiFieldResponse>>
 type _UiKeyboardResponse = Assert<V<'ui:keyboard:response', UiKeyboardResponse>>
+type _CaptureTouched = Assert<V<'capture:touched', CaptureTouched>>
 
 type _StreamRegister = Assert<V<'stream:register', StreamRegister>>
 
