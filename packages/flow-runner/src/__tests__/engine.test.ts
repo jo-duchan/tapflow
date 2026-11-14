@@ -361,6 +361,20 @@ describe('runFlow — where a touch on an element lands', () => {
     expect(driver.calls).toEqual([])
   })
 
+  // CodeRabbit on #1163: the read reported was the whole selector wait, so an element that appeared late after quick
+  // reads read as one slow read. Only the last tree query counts.
+  it('reports the last tree query, not the wait for the element to appear', async () => {
+    const driver = withReach(reachable([0.1, 0.885]))
+    let reads = 0
+    driver.queryUITree = vi.fn(async () => (reads++ < 30 ? [] : [row]))
+    // The element appears after ~0.3 s of quick reads; the first answer lands past the 0.7 s deadline.
+    driver.reach = vi.fn(async () => { await new Promise((r) => setTimeout(r, 600)); return [reachable([0.1, 0.885])] })
+    const result = await runFlow(flowOf('steps:\n  - tapOn: "Row 13"\n'), driver, { pollIntervalMs: 10, defaultTimeoutMs: 700 })
+    const m = /a reach took (\d+\.\d) s, a read of the screen (\d+\.\d) s\)$/.exec(result.steps[0]!.message ?? '')
+    expect(m).not.toBeNull()
+    expect(Number(m![2])).toBe(0)
+  })
+
   it('reads again while it is covered, and taps once it is not', async () => {
     const driver = withReach({ state: 'occluded', by: 'Button Hard' }, reachable([0.5, 0.86]), reachable([0.5, 0.86]))
     const result = await runFlow(flowOf('steps:\n  - tapOn: "Row 13"\n'), driver, { ...OPTS, defaultTimeoutMs: 1000 })

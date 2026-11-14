@@ -390,15 +390,27 @@ async function touchPoint(
   // Truck: a reach 1.7–2.1 s, a read up to 3.4 s), and the message names both.
   let answerMs = 0
   let readMs = 0
+  // The last tree query alone, not the whole selector wait: an element that showed up late after quick reads would
+  // otherwise read as one slow read (CodeRabbit on #1163). A query cut off by the deadline counts as long as it ran.
+  const timed = new Proxy(driver, {
+    get(target, prop, receiver) {
+      if (prop === 'queryUITree') {
+        return async (signal?: AbortSignal) => {
+          const at = Date.now()
+          try { return await target.queryUITree(signal) } finally { readMs = Date.now() - at }
+        }
+      }
+      const v: unknown = Reflect.get(target, prop, receiver)
+      return typeof v === 'function' ? (v as (...a: unknown[]) => unknown).bind(target) : v
+    },
+  })
   const blocked = (r: ReachResult): string => r.state === 'reachable'
     ? moved ? `${describeSelector(sel)} kept moving, so no touch could be placed on it`
       : `${describeSelector(sel)} was reached, but the device answered too slowly to confirm the point before the timeout (a reach took ${(answerMs / 1000).toFixed(1)} s, a read of the screen ${(readMs / 1000).toFixed(1)} s)`
     : r.state === 'occluded' ? `${describeSelector(sel)} is covered${r.by ? ` by ${r.by}` : ''}: a touch on it would land on that instead`
     : r.state === 'offscreen' ? `${describeSelector(sel)} is not on the screen`
     : `${describeSelector(sel)} was not where the screen was read (${r.state === 'missing' ? r.candidates : 0} near it)`
-  const firstRead = Date.now()
-  let el = await resolveOne(driver, sel, timeoutMs, pollIntervalMs, seen)
-  readMs = Date.now() - firstRead
+  let el = await resolveOne(timed, sel, timeoutMs, pollIntervalMs, seen)
   if (!driver.reach) {
     report.reach = 'unchecked'
     report.reachNote = 'this driver cannot ask where a touch lands'
@@ -468,12 +480,9 @@ async function touchPoint(
     }
     if (Date.now() >= deadline) throw new StepFailure(blocked(r))
     await delay(Math.min(pollIntervalMs, Math.max(0, deadline - Date.now())))
-    const reread = Date.now()
     try {
-      el = await resolveOne(driver, { ...sel, timeoutMs: Math.max(1, deadline - Date.now()) }, timeoutMs, pollIntervalMs, seen)
-      readMs = Date.now() - reread
+      el = await resolveOne(timed, { ...sel, timeoutMs: Math.max(1, deadline - Date.now()) }, timeoutMs, pollIntervalMs, seen)
     } catch (e) {
-      readMs = Date.now() - reread
       // The read again can run out of what the waiting left it (iOS E2E: a row under a scrim failed as "no element
       // matched … within 0.149s", and as the environment's, since that read saw no tree of its own). The element still
       // on the last screen read is not missing: what stood in the way is, and that is the product's.
