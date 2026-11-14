@@ -14,6 +14,7 @@ import { Label } from '@/components/ui/label'
 import { TechLabel } from '@/components/ui/tech-label'
 import { CodeBlock, CodeBlockActions, CodeBlockContent, CodeBlockCopyButton, CodeBlockHeader, CodeBlockLine, CodeBlockTitle } from '@/components/ui/code-block'
 import { useHighlightedCode } from '@/hooks/useHighlightedCode'
+import { useFollowBottom } from '@/hooks/useFollowBottom'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
 import { cn } from '@/lib/utils'
@@ -981,6 +982,8 @@ export function VerifyScreen({ state, tap, marks, total, onExport, onBack, prima
 function VerifyTrace({ verify }: { verify: CaptureState['verify'] }) {
   const [toggled, setToggled] = useState<Record<number, boolean>>({})
   const id = useId()
+  // Follows the step running, as Agent activity does: a long flow ran below the dialog's fold and had to be scrolled to.
+  const follow = useFollowBottom<HTMLOListElement>(verify?.result ?? verify?.live)
   if (!verify) return null
   const rows: Array<{
     index: number; name: string; status: 'running' | 'passed' | 'failed' | 'skipped'; durationMs?: number; message?: string
@@ -989,7 +992,7 @@ function VerifyTrace({ verify }: { verify: CaptureState['verify'] }) {
     verify.result ? verify.result.steps : verify.live
   if (rows.length === 0) return null
   return (
-    <ol aria-label={copy.verifyHeading} className="-m-1 flex min-h-0 flex-col gap-2 overflow-y-auto p-1 text-sm">
+    <ol ref={follow} aria-label={copy.verifyHeading} className="-m-1 flex min-h-0 flex-col gap-2 overflow-y-auto p-1 text-sm">
       {rows.map((s) => {
         // A touch the device could not judge opens too, on a passed step: a covered element passes that way (#1125). So
         // does one that changed nothing: an overlay the tree does not show takes the touch and the step still passes.

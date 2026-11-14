@@ -1,4 +1,5 @@
-import { useLayoutEffect, useRef, useState } from 'react'
+import { useState } from 'react'
+import { useFollowBottom } from '@/hooks/useFollowBottom'
 import {
   CornerDownLeft, Download, Eraser, House, Keyboard, Link2, MousePointerClick, MoveHorizontal, MoveVertical, Play, Scaling,
 } from 'lucide-react'
@@ -24,27 +25,13 @@ export function AgentActivity({ actions, driver, live }: { actions: WatchedActio
   const groups = group(actions)
   const latest = groups.at(-1)?.id
   const [opened, setOpened] = useState<Record<number, boolean>>({})
-  const box = useRef<HTMLDivElement>(null)
-  // Follows the newest line while the reader is at the bottom; leaves them where they are once they scroll up.
-  // **Before paint, with scroll anchoring off**: Chrome's anchoring adjusts the box as lines are added and fires a
-  // scroll event from that layout, which read as the reader having left the bottom, so following stopped for good
-  // the first time someone scrolled. Now the only scroll events are the reader's and this one.
-  const pinned = useRef(true)
-  useLayoutEffect(() => {
-    const el = box.current
-    if (el && pinned.current) el.scrollTop = el.scrollHeight
-  }, [actions])
+  const follow = useFollowBottom<HTMLDivElement>(actions)
 
   return (
     <section aria-labelledby="agent-activity-title" className="flex min-h-0 min-w-0 flex-1 flex-col gap-3">
       <h2 id="agent-activity-title" className="text-sm font-medium">Agent activity</h2>
       <div
-        ref={box}
-        onScroll={(e) => {
-          const el = e.currentTarget
-          pinned.current = el.scrollHeight - el.scrollTop - el.clientHeight < 24
-        }}
-        style={{ overflowAnchor: 'none' }}
+        ref={follow}
         className="h-96 overflow-y-auto rounded-xl border bg-background px-5 py-4 lg:h-auto lg:min-h-48 lg:flex-1"
       >
         {groups.length === 0 ? (

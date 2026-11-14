@@ -278,7 +278,10 @@ export async function matchRange(
       continue
     }
     await lease.ensure()
-    let before = await waitForStableScreen(read, { timeoutMs: SETTLE_TIMEOUT_MS })
+    // A launch makes its own screen, so nothing on the one before it is acted on or compared: it is read only when a
+    // touch is waiting for the screen it left. After the reset the app is not running, and that read went unanswered
+    // until its 15 s deadline, every Match (measured, Sample SwiftUI on iOS 26.5).
+    let before = raw.kind === 'launch' && !watching ? undefined : await waitForStableScreen(read, { timeoutMs: SETTLE_TIMEOUT_MS })
     await closeWatch(before)
     // Typing into a field the person focused before the range began: tapped first, and the tap goes into the flow.
     // The tree's frames are the app as drawn, which an iOS tap is not when the app is turned: then it is left as it was.

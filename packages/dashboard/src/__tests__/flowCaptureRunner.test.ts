@@ -11,15 +11,18 @@ const screen: { elements: unknown[] } = { elements: [] }
 const replay = { refuse: false }
 // What each step was matched with: one test reads the device's reach answers off it.
 const matchedWith: unknown[] = []
+// Settle reads and replays in the order they happened: one test needs reads it does not log above.
+const seq: string[] = []
 // The options the engine was last run with.
 const ran: { options?: { observeEffects?: boolean } } = {}
 vi.mock('@tapflowio/flow-runner/browser', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@tapflowio/flow-runner/browser')>()),
   rangeStartOrientation: () => 'landscape',
-  waitForStableScreen: async () => ({ elements: screen.elements }),
+  waitForStableScreen: async () => { seq.push('settle'); return { elements: screen.elements } },
   replayStep: async (_c: unknown, _s: string, raw: RawStep) => {
     if (replay.refuse) throw new Error('channel-unavailable')
     log.push(`replay ${raw.kind}`)
+    seq.push(`replay ${raw.kind}`)
   },
   matchStep: (raw: RawStep, ctx: unknown) => { matchedWith.push(ctx); return { raw, step: null } },
   // The engine as far as the keyboard is concerned: a tap, then typing and a key, through the driver it was given.
@@ -76,6 +79,7 @@ const textStep = { ...base, kind: 'text', text: '안녕', replace: true } as unk
 let pauseOk = true
 beforeEach(() => {
   log.length = 0
+  seq.length = 0
   screen.elements = []
   replay.refuse = false
   pauseOk = true
@@ -290,6 +294,15 @@ describe('matchRange', () => {
     expect(log).toEqual(['pause', 'reset', 'keyboard first', 'orientation landscape', 'pause', 'replay launch', 'pause', 'replay tap'])
     // The turn after the launch, so the flow does not read as starting without one and get a second.
     expect(h.onStep.mock.calls.map(([s]) => s.raw.kind)).toEqual(['launch', 'rotate', 'tap'])
+  })
+
+  // Measured (Sample SwiftUI, iOS 26.5): after the reset the app is not running, and the settle read before the range's
+  // launch went unanswered until its 15 s deadline, every Match.
+  it('reads no screen before a launch that nothing is waiting on, and does before one that ends a touch\'s watch', async () => {
+    const lease = new PauseLease(tap)
+    await matchRange(tap, channel, lease, [launchStep, tapStep, launchStep, tapStep], { start: 0, end: 4 }, null, hooks())
+    await lease.stop()
+    expect(seq).toEqual(['replay launch', 'settle', 'replay tap', 'settle', 'replay launch', 'settle', 'replay tap', 'settle'])
   })
 
   it('does not replay an install, which would uninstall the app it just launched, and still names it', async () => {
