@@ -272,7 +272,7 @@ export async function matchRange(
 
   const read = (signal: AbortSignal) => channel.queryUITreeWithTurn(sessionId, signal)
   // The engine Verify runs, for the taps the app named: found and tapped as `flow run` would.
-  const driver = new AligningDriver(channel, sessionId, tap.buildId, alignment, hooks.onTouch)
+  const driver = new AligningDriver(channel, sessionId, tap.buildId, alignment, hooks.onTouch, hooks.signal)
   const runNamed = async (named: NamedTap): Promise<boolean> => {
     const attempt = async (steps: Step[]): Promise<boolean> => {
       const result = await runFlow({ name: 'match', steps }, driver, { platform: tap.platform })
@@ -283,7 +283,10 @@ export async function matchRange(
     }
     const tapIt: Step = { type: 'tapOn', selector: named.selector }
     if (named.target) return attempt([tapIt])
-    // A fling the replay made longer than the recording's carried the element past: back the other way.
+    // Back the other way only here: this replay sent the recorded swipe, and a fling longer than the recording's
+    // carries the element past. The exported flow needs no such retry — its `scroll { until }` (`toFlowSteps`) takes the
+    // swipe's place, so it starts where the swipe started, which is where the person's direction is right; and Verify
+    // runs that flow before Export, so a wrong direction there fails rather than ships.
     for (const direction of [named.direction!, OPPOSITE[named.direction!]]) {
       if (await attempt([{ type: 'scroll', direction, until: named.selector }, tapIt])) return true
     }
@@ -386,10 +389,12 @@ export async function matchRange(
     // Asked of the screen the step is about to act on, which is the one it is matched against (#1125). A device that
     // cannot answer leaves the step to the tree's frames, as before reach; the next read reports a session that ended.
     // A tap the app named is placed by the engine on its element, not at the recorded point.
-    const questions = named ? [] : reachQuestions(raw, { tree: before?.elements ?? [], ...turns })
-    const reach = questions.length > 0
-      ? await channel.reach(sessionId, questions.map(reachTargetOf), hooks.signal).catch(() => undefined)
-      : undefined
+    const ask = async (on: UIElement[]) => {
+      const qs = reachQuestions(raw, { tree: on, ...turns })
+      const answers = qs.length > 0 ? await channel.reach(sessionId, qs.map(reachTargetOf), hooks.signal).catch(() => undefined) : undefined
+      return { questions: qs, reach: answers }
+    }
+    let { questions, reach } = named ? { questions: [] as UIElement[], reach: undefined } : await ask(before?.elements ?? [])
     // A touch the reads could not place may be a key, typed by the keyboard's language like the others.
     if (TYPES_ON_KEYBOARD.has(raw.kind) || ('keyboard' in raw && raw.keyboard === 'unknown')) await alignment.align()
     // Nothing to type into, and no field to tap: say what to do about it rather than what the device refused.
@@ -403,8 +408,11 @@ export async function matchRange(
         hooks.onStep(step, shot ? URL.createObjectURL(new Blob([shot as BlobPart], { type: 'image/jpeg' })) : undefined)
         continue
       }
-      // Not found either way: the picture is what is left to judge by, and the point is replayed as recorded.
+      // Not found either way: the picture is what is left to judge by, and the point is replayed as recorded — on the
+      // screen the search left, read again, and asked of the device as any other tap is.
+      if (!named.target) before = await waitForStableScreen(read, { timeoutMs: SETTLE_TIMEOUT_MS })
       if (!skipCompare) await compareNow()
+      ;({ questions, reach } = await ask(before?.elements ?? []))
     }
     const mark = markOf(raw)
     if (mark) hooks.onTouch?.(mark)
@@ -474,12 +482,26 @@ class AligningDriver extends SocketFlowDriver {
   constructor(
     channel: DashboardSessionChannel, sessionId: string, buildId: number, private readonly alignment: KeyboardAlignment,
     private readonly onTouch?: (mark: StepMark) => void,
+    /** Match's Stop. The engine takes no signal, but it reads and touches through here on every poll, so a run stops at
+     *  its next one rather than when a 30 s scroll search gives up (review of P2b). */
+    private readonly signal?: AbortSignal,
   ) {
     super(channel, sessionId, buildId)
   }
 
+  override queryUITree(signal?: AbortSignal) {
+    this.signal?.throwIfAborted()
+    return super.queryUITree(signal)
+  }
+
+  override reach(targets: UIElement[], signal?: AbortSignal) {
+    this.signal?.throwIfAborted()
+    return super.reach(targets, signal)
+  }
+
   // The flow's own points, before the driver turns them for the device: the mirror shows the device upright.
   override tap(x: number, y: number): Promise<void> {
+    this.signal?.throwIfAborted()
     this.onTouch?.({ kind: 'tap', x, y })
     return super.tap(x, y)
   }
@@ -490,6 +512,7 @@ class AligningDriver extends SocketFlowDriver {
   }
 
   override swipe(from: [number, number], to: [number, number], durationMs: number) {
+    this.signal?.throwIfAborted()
     this.onTouch?.({ kind: 'swipe', from, to })
     return super.swipe(from, to, durationMs)
   }
