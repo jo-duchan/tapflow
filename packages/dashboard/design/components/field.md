@@ -53,7 +53,7 @@ Use at least 8 characters             line: hint or message, 14px on a 20px line
 | `select` | [Select](./select.md) trigger, 40px | 5 |
 | `slider` | Slider, with its current value at the right end of the label row (below) | 2 |
 | `image` | Image picker: a preview with a 24px round edit button on its corner (below) | 3 |
-| `file` | File drop zone, 96px (below) | 1 |
+| `file` | File drop zone, at least 96px high (below) | 1 |
 | `textarea` | [Textarea](./textarea.md) | 0 |
 
 This table is the list of controls a field may hold, not only the ones in use: `textarea` has no call site yet,
@@ -78,7 +78,7 @@ The edit button sits on the preview's bottom-right corner: 24px circle, `--backg
 `shadow-sm`, a 12px pencil. On hover the fill turns `--accent`. Choosing an image swaps the preview at once; it is
 saved with the form.
 
-**File drop zone** (Upload build). 96px high, full width, `rounded-md`, a 2px dashed `--border`, centered text
+**File drop zone** (Upload build). At least 96px high, full width, `rounded-md`, a 2px dashed `--border`, centered text
 14px `--muted-foreground`: `Click or drag to upload`, replaced by the chosen file's name once one is picked. On hover the border turns
 `--primary`. Click or drop a file on it.
 

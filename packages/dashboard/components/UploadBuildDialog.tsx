@@ -1,4 +1,4 @@
-import { useRef, useState, type FormEvent } from 'react'
+import { useId, useRef, useState, type FormEvent } from 'react'
 import { Button } from '@/components/ui/button'
 import {
   Dialog,
@@ -35,6 +35,8 @@ export function UploadBuildDialog({ onSuccess, appId, canWrite }: Props) {
   const [version, setVersion] = useState('')
   const [buildNumber, setBuildNumber] = useState('')
   const inputRef = useRef<HTMLInputElement>(null)
+  const fileId = useId()
+  const statusId = useId()
 
   function handleUpload(e: FormEvent) {
     e.preventDefault()
@@ -95,26 +97,30 @@ export function UploadBuildDialog({ onSuccess, appId, canWrite }: Props) {
       <DialogTrigger asChild>
         <Button size="sm"><Upload className="mr-2 h-4 w-4" />Upload build</Button>
       </DialogTrigger>
-      <DialogContent size="md">
+      <DialogContent size="md" className="max-h-[calc(100dvh-2rem)] grid-rows-[auto_minmax(0,1fr)]">
         <DialogHeader>
           <DialogTitle>Upload build</DialogTitle>
         </DialogHeader>
-        <form onSubmit={handleUpload} className="flex flex-col gap-4 pt-2">
+        <form onSubmit={handleUpload} className="-mx-1 -mb-1 flex flex-col gap-4 overflow-y-auto px-1 pb-1 pt-2">
           <div className="grid gap-2">
-            <Label>File</Label>
-            <div
-              className="flex h-24 cursor-pointer items-center justify-center rounded-md border-2 border-dashed text-sm text-muted-foreground hover:border-primary"
+            <Label htmlFor={fileId}>File</Label>
+            <Button
+              id={fileId}
+              type="button"
+              variant="outline"
+              aria-describedby={`${fileId}-name`}
+              className="h-auto min-h-24 w-full whitespace-normal break-all border-2 border-dashed font-normal text-muted-foreground hover:border-primary hover:bg-background hover:text-muted-foreground"
               onClick={() => inputRef.current?.click()}
               onDragOver={(e) => e.preventDefault()}
               onDrop={(e) => { e.preventDefault(); const f = e.dataTransfer.files[0]; if (f) setFile(f) }}
             >
-              {file ? file.name : 'Click or drag to upload'}
-            </div>
+              <span id={`${fileId}-name`}>{file ? file.name : 'Click or drag to upload'}</span>
+            </Button>
             <input
               ref={inputRef}
               type="file"
               accept=".zip,.apk,.tgz,.tar.gz,application/gzip,application/x-gzip"
-              className="hidden"
+              hidden
               onChange={(e) => setFile(e.target.files?.[0] ?? null)}
             />
             <p className="text-xs text-muted-foreground">
@@ -123,9 +129,9 @@ export function UploadBuildDialog({ onSuccess, appId, canWrite }: Props) {
             </p>
           </div>
           <div className="grid gap-2">
-            <Label>Status <span className="text-muted-foreground">(optional)</span></Label>
+            <Label htmlFor={statusId}>Status <span className="text-muted-foreground">(optional)</span></Label>
             <Select value={statusLabel} onValueChange={setStatusLabel}>
-              <SelectTrigger><SelectValue /></SelectTrigger>
+              <SelectTrigger id={statusId}><SelectValue /></SelectTrigger>
               <SelectContent>
                 <SelectItem value="none">None</SelectItem>
                 <SelectItem value="Backlog">Backlog</SelectItem>
