@@ -93,6 +93,8 @@ describe('AppAccessibility', () => {
     const enabling = ax.enable('UDID-1')
     await vi.waitFor(() => expect(host.writeAppAccessibility).toHaveBeenCalledTimes(1))
     const restoring = ax.restore('UDID-1')
+    // Room for a restore that does not wait to write first: the race the order prevents.
+    await new Promise((r) => setTimeout(r, 30))
     finish()
     await enabling
     await restoring

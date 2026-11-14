@@ -971,7 +971,8 @@ describe('IOSAgent', () => {
       await new Promise((r) => setTimeout(r, 200))
       const t2 = Date.now()
       internals.handleRelayMessage({ type: 'input:touch:start', sessionId: agent.sessionId!, payload: { x: 0.4, y: 0.5 } } as never)
-      queue.push([report(2, t2, true), report(1, t1, false)])
+      // The first gesture's report first: taking the first report at the point would give it to the second gesture.
+      queue.push([report(1, t1, false), report(2, t2, true)])
       internals.handleRelayMessage({ type: 'input:touch:end', sessionId: agent.sessionId!, requestId: 'g2' } as never)
       await vi.waitFor(() => expect(sent.filter((m) => m.type === 'capture:touched')).toHaveLength(2), { timeout: 2000 })
       const byId = Object.fromEntries(sent.filter((m) => m.type === 'capture:touched').map((m) => [m['requestId'], (m['observation'] as { moving: boolean }).moving]))
@@ -988,6 +989,8 @@ describe('IOSAgent', () => {
       internals.handleRelayMessage({ type: 'device:boot', sessionId: agent.sessionId!, requestId: 'rq-r', payload: { deviceId: 'dev-1', recorded: true, touchObservations: true } } as never)
       await vi.waitFor(() => expect(sent.some((m) => m.type === 'device:ready')).toBe(true), { timeout: 3000 })
       const internal = agent as unknown as { cleanupDeviceState(s: unknown): void; deviceStates: Map<string, unknown> }
+      // The agent's start already stops what an earlier agent left on a running device.
+      stop.mockClear()
       internal.cleanupDeviceState(internal.deviceStates.get(agent.sessionId!))
       expect(stop).toHaveBeenCalledWith('dev-1')
       watch.mockRestore(); stop.mockRestore()
