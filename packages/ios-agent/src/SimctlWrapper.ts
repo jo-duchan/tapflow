@@ -42,6 +42,10 @@ const CLIPBOARD_CMD_TIMEOUT_MS = 5_000
 // A field read waits on this, and a capture snapshot waits 1 s for a field read, so it is bounded below that: a read
 // takes about 0.41 s (measured, 5 of 5). Bounded as a whole too, since the runner retries after restarting the service.
 const KEYBOARD_READ_TIMEOUT_MS = 800
+// `launchctl list`, asked when the app observer gets no answer in its 1.5 s: 0.3 s measured (5 of 5). The relay waits
+// 5 s for the read, and every later read on the device queues behind this one, so it is bounded within that. A timeout
+// reads as running (not judged), never as gone.
+const APP_RUNNING_TIMEOUT_MS = 2_000
 // A run reset's device-wide commands take about a second each (measured: keychain 1.0 s, privacy 0.5 s, location 0.5 s).
 // A command this bound kills does not land later, which is why iOS needs nothing like Android's pending `pm clear` wait:
 // measured on iOS 26.5 by killing `simctl uninstall` and `simctl keychain reset` mid-flight, each either finished before
@@ -640,7 +644,7 @@ export class SimctlWrapper {
 
   /** Whether `bundleId` has a process on the device: its `UIKitApplication:<bundle>[…]` job in `launchctl list`. */
   async appRunning(udid: string, bundleId: string): Promise<boolean> {
-    const out = await this.runner.exec('spawn', udid, 'launchctl', 'list')
+    const out = await this.runner.execWithOpts({ timeoutMs: APP_RUNNING_TIMEOUT_MS }, 'spawn', udid, 'launchctl', 'list')
     return out.split('\n').some((line) => line.includes(`UIKitApplication:${bundleId}[`) && /^\d+\s/.test(line.trim()))
   }
 

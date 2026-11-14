@@ -239,8 +239,10 @@ static void tfo_install(void) {
   [nc addObserverForName:@"UIApplicationDidBecomeActiveNotification" object:nil queue:main
               usingBlock:^(NSNotification *n) { g_coming_up = NO; }];
 
-  // A request: the agent writes a nonce to `request` in the directory, by rename, and the observer, watching the
-  // directory, answers it once. The host's /tmp is the simulator's, so this costs no process on either side; asking
+  // A request: the agent writes a nonce and the bundle it asks about, on two lines, to `request` in the directory, by
+  // rename, and the observer of that bundle, watching the directory, answers it once. Every app observed since the boot
+  // watches here, and one sent behind another can still answer for a few seconds (iOS 27.0): it would answer first, or
+  // over the right answer. The host's /tmp is the simulator's, so this costs no process on either side; asking
   // through a Darwin notification needed a `simctl spawn` per request, 441 ms measured. Answered on the main queue,
   // where UIKit is. An app still coming up (launched, or opened from its icon) is given until it is active, up to a
   // deadline, so the first tap's read is not lost to the transition; an app made inactive by an alert answers at once.
@@ -252,7 +254,9 @@ static void tfo_install(void) {
   NSString *request = [g_dir stringByAppendingPathComponent:@"request"];
   void (^handle)(void) = ^{
     NSString *text = [NSString stringWithContentsOfFile:request encoding:NSUTF8StringEncoding error:nil];
-    uint64_t nonce = strtoull(text.UTF8String ?: "0", NULL, 10);
+    NSArray<NSString *> *lines = [text componentsSeparatedByString:@"\n"];
+    if (lines.count != 2 || ![lines[1] isEqualToString:g_bundle]) return;
+    uint64_t nonce = strtoull(lines[0].UTF8String ?: "0", NULL, 10);
     if (nonce == 0 || nonce == last) return;
     last = nonce;
     __block int waited = 0;

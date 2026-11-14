@@ -12,10 +12,12 @@ import { toFocusedField, toKeyboardState } from './XCUITreeReader.js'
  * running; the observer reads the same things with no accessibility client at all. It answers in the runner's own
  * shapes, so `toKeyboardState` and `toFocusedField` read both. The rules are in AGENTS.md, "App observer".
  *
- * A request is a nonce written by rename to `request` in `/tmp/tapflow-observe-<udid>` (0700): the host's /tmp is the
- * simulator's, so the app sees it with no process started on either side (3-4 ms measured, against 441 ms for a
- * `simctl spawn` per request). The answer is `<nonce>.json` (0600) in the same directory, read and removed here; one
- * whose nonce or bundle is not the one asked is dropped.
+ * A request is a nonce and the bundle asked about, on two lines, written by rename to `request` in
+ * `/tmp/tapflow-observe-<udid>` (0700): the host's /tmp is the simulator's, so the app sees it with no process started
+ * on either side (3-4 ms measured, against 441 ms for a `simctl spawn` per request). Every app observed since the boot
+ * watches the same directory, and one behind the app now asked about can still answer for a few seconds (measured on
+ * iOS 27.0), so only the app named answers. The answer is `<nonce>.json` (0600) in the same directory, read and removed
+ * here; one whose nonce or bundle is not the one asked is dropped.
  */
 export type ObserverRead =
   | { kind: 'answer'; keyboard: unknown; field: unknown }
@@ -115,9 +117,10 @@ export class AppObserver {
     // timeout to be cleared.
     await this.takeBack(dir, '')
     const nonce = this.nonce().toString()
+    const request = `${nonce}\n${bundleId}`
     const answer = join(dir, `${nonce}.json`)
     try {
-      await writeFile(join(dir, 'request.tmp'), nonce, { mode: 0o600 })
+      await writeFile(join(dir, 'request.tmp'), request, { mode: 0o600 })
       await rename(join(dir, 'request.tmp'), join(dir, 'request'))
     } catch {
       return { kind: 'silent' }   // no directory: the device was not prepared (an older boot path)
@@ -128,7 +131,7 @@ export class AppObserver {
       if (text !== undefined) {
         await unlink(answer).catch(() => undefined)
         // The request too: one left behind is answered again by a process started within 2 s, into a file nobody reads.
-        await this.takeBack(dir, nonce)
+        await this.takeBack(dir, request)
         const body = parse(text)
         if (body && body['nonce'] === nonce && body['bundle'] === bundleId) {
           return { kind: 'answer', keyboard: body['keyboard'], field: body['field'] }
@@ -141,16 +144,16 @@ export class AppObserver {
     // Given up on: the request is taken back, so an app that starts later does not answer it into a file nobody reads,
     // and an answer already on its way (an app that read the nonce and waited to become active, up to 1 s) is removed
     // when it lands.
-    await this.takeBack(dir, nonce)
+    await this.takeBack(dir, request)
     setTimeout(() => { void unlink(answer).catch(() => undefined) }, this.lateAnswerMs).unref()
     if (await this.markedAway(dir, bundleId)) return { kind: 'away' }
     return (await this.host.appRunning(udid, bundleId).catch(() => true)) ? { kind: 'silent' } : { kind: 'away' }
   }
 
   /** Remove `request` if it is still ours, and any answer older than a few seconds that nobody came for. */
-  private async takeBack(dir: string, nonce: string): Promise<void> {
+  private async takeBack(dir: string, ours: string): Promise<void> {
     const request = join(dir, 'request')
-    if ((await readFile(request, 'utf8').catch(() => undefined)) === nonce) await unlink(request).catch(() => undefined)
+    if ((await readFile(request, 'utf8').catch(() => undefined)) === ours) await unlink(request).catch(() => undefined)
     for (const name of await readdir(dir).catch(() => [] as string[])) {
       if (!/\.json(\.tmp)?$/.test(name)) continue
       const st = await lstat(join(dir, name)).catch(() => undefined)

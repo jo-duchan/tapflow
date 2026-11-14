@@ -146,6 +146,40 @@ describe('XCUITreeReader', () => {
       reader.stop()
     })
 
+    // `unkeep` while the warm-up was still building found no runner to time out; the runner it then started stayed
+    // attached, and the person's app lagged, until the next read (review finding).
+    it('is let go when the person\'s boot came while the warm-up was still building it', async () => {
+      let finishBuild!: () => void
+      const native = setup({ builtStamp: vi.fn(() => undefined), build: vi.fn(() => new Promise<void>((r) => { finishBuild = r })) })
+      const reader = new XCUITreeReader(native, 30)
+      reader.warm('udid-A')
+      await vi.waitFor(() => expect(native.build).toHaveBeenCalled())
+      reader.unkeep('udid-A')
+      finishBuild()
+      await vi.waitFor(() => expect(native.spawn).toHaveBeenCalled())
+      await vi.waitFor(() => expect(native.terminateRunner).toHaveBeenCalledWith('udid-A'), { timeout: 1000 })
+      reader.stop()
+    })
+
+    // Read, then warm and unkeep: the read's countdown was left pending beside unkeep's, fired first, and the later one
+    // then stopped the runner the next read started (review finding).
+    it('counts down once per device, so an earlier countdown cannot stop a runner a later read is using', async () => {
+      const native = setup()
+      // 150 ms of slack on each side, against a loaded machine's event loop: the read's countdown would end at 400,
+      // unkeep's at 600, and the second read comes at 450.
+      const reader = new XCUITreeReader(native, 400)
+      await reader.read('udid-A', 'com.app')
+      await wait(200)
+      reader.warm('udid-A')
+      reader.unkeep('udid-A')
+      await wait(250)
+      await reader.read('udid-A', 'com.app')
+      await wait(250)
+      expect(native.terminateRunner).not.toHaveBeenCalled()
+      expect(native.spawn).toHaveBeenCalledTimes(1)
+      reader.stop()
+    })
+
     it('is not a runner an automation client\'s boot warmed, which stays for the device\'s life', async () => {
       const native = setup()
       const reader = new XCUITreeReader(native, 30)

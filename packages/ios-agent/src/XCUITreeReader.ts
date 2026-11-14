@@ -165,6 +165,9 @@ export class XCUITreeReader {
     if (left > 0) { this.inFlight.set(udid, left); return }
     this.inFlight.delete(udid)
     if (this.kept.has(udid) || !this.runners.has(udid)) return
+    // One timer per device: a second left pending would delete the newer one's entry when it fired, and stop a runner
+    // started after it before that runner's own idle time ran out.
+    clearTimeout(this.idle.get(udid))
     const timer = setTimeout(() => {
       this.idle.delete(udid)
       if (!this.kept.has(udid) && !this.inFlight.has(udid)) this.stopIfDevice(udid)
@@ -274,7 +277,8 @@ export class XCUITreeReader {
     check.then(() => {
       // The device may have been shut down while the probe was out.
       if (this.generation(udid) !== generation) return
-      return this.ensureRunner(udid)
+      // `unkeep` during the launch found no runner to time out, and nothing else would.
+      return this.ensureRunner(udid).then(() => this.releaseIfIdle(udid))
     }).catch((e: Error) => {
       // Stopped on purpose (the device was shut down mid-start) is not a fault worth sending anyone to Xcode for.
       if (this.generation(udid) !== generation) logger.debug(`tree runner warm-up for ${udid} cancelled: ${e.message}`)
@@ -451,7 +455,12 @@ export class XCUITreeReader {
    */
   unkeep(udid: string): void {
     if (!this.kept.delete(udid)) return
-    if (this.inFlight.has(udid)) return
+    this.releaseIfIdle(udid)
+  }
+
+  // Start the idle countdown for a runner nothing keeps and nothing is asking, as the end of a request would.
+  private releaseIfIdle(udid: string): void {
+    if (this.kept.has(udid) || this.inFlight.has(udid)) return
     this.inFlight.set(udid, 1)
     this.end(udid)
   }

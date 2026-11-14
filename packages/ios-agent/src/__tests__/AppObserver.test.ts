@@ -23,13 +23,17 @@ function setup(opts: { running?: boolean; deadlineMs?: number } = {}) {
   return { observer, dir, asked }
 }
 
-/** Plays the app: answers each request it finds, the way app-observer.m does, with `body` filled in. */
-function app(dir: string, body: (nonce: string) => Record<string, unknown> | undefined) {
+/**
+ * Plays the app: answers each request it finds, the way app-observer.m does, with `body` filled in. Given `bundle`, it
+ * answers only a request naming that bundle, as app-observer.m does; without one it answers any.
+ */
+function app(dir: string, body: (nonce: string) => Record<string, unknown> | undefined, bundle?: string) {
   let last = ''
   const timer = setInterval(() => {
     const req = join(dir, 'request')
     if (!existsSync(req)) return
-    const nonce = readFileSync(req, 'utf8')
+    const [nonce = '', asked] = readFileSync(req, 'utf8').split('\n')
+    if (bundle !== undefined && asked !== bundle) return
     if (nonce === last) return
     last = nonce
     const answer = body(nonce)
@@ -58,6 +62,21 @@ describe('asking the app', () => {
     const read = await observer.read(UDID, 'com.app')
     stop()
     expect(read.kind).toBe('silent')
+  })
+
+  // Every app observed since the boot watches the same directory, and one sent behind the app asked about can still
+  // answer for a few seconds (iOS 27.0): first, so the read was dropped as another app's, or over the right answer.
+  it('names the app it asks about, so only that app answers', async () => {
+    const { observer, dir } = setup()
+    await observer.prepare(UDID)
+    const requests: string[] = []
+    const peek = setInterval(() => { try { requests.push(readFileSync(join(dir, 'request'), 'utf8')) } catch { /* not yet */ } }, 1)
+    const other = app(dir, (nonce) => ({ nonce, bundle: 'com.other', pid: 1, keyboard: {}, field: {} }), 'com.other')
+    const asked = app(dir, (nonce) => ({ nonce, bundle: 'com.app', pid: 2, keyboard: KEYBOARD_UP, field: { reason: 'no-focus' } }), 'com.app')
+    const read = await observer.read(UDID, 'com.app')
+    other(); asked(); clearInterval(peek)
+    expect(read).toEqual({ kind: 'answer', keyboard: KEYBOARD_UP, field: { reason: 'no-focus' } })
+    expect(requests[0]).toBe('101\ncom.app')
   })
 
   // A suspended app cannot answer: the marker it wrote on DidEnterBackground says where it is, without the wait.

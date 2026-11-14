@@ -691,6 +691,21 @@ describe('SimctlWrapper', () => {
     })
   })
 
+  // The app observer asks this when no answer came, and every later read on the device queues behind it: unbounded, a
+  // `launchctl` that never returned held them all (review finding).
+  describe('appRunning', () => {
+    it('reads the app\'s job from launchctl, within a bound', async () => {
+      const runner = mockRunner({ spawn: '123\t0\tUIKitApplication:com.app[1a2b][rb-legacy]\n-\t0\tUIKitApplication:com.gone[3c][rb-legacy]\n' })
+      const simctl = new SimctlWrapper(runner)
+      expect(await simctl.appRunning('device-1', 'com.app')).toBe(true)
+      expect(await simctl.appRunning('device-1', 'com.gone')).toBe(false)
+      const [opts, ...args] = vi.mocked(runner.execWithOpts).mock.calls[0]!
+      expect(args).toEqual(['spawn', 'device-1', 'launchctl', 'list'])
+      expect(opts.timeoutMs).toBeGreaterThan(0)
+      expect(runner.exec).not.toHaveBeenCalled()
+    })
+  })
+
   describe('keyboardLanguage', () => {
     it('reads the keyboard in use', async () => {
       const runner = {

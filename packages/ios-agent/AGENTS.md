@@ -406,9 +406,10 @@ observer answers in the runner's own shapes, so `toKeyboardState` and `toFocused
   constants, rects as four doubles. The gate has network-hook.m's refusals (an embedded NUL in the bundle id, a udid
   that does not fit).
 - **Asked by file, answered by file, in `/tmp/tapflow-observe-<udid>` (0700).** The host's /tmp is the simulator's
-  (measured), so the agent writes a nonce to `request` by rename and the app, watching the directory, answers
-  `<nonce>.json` (0600), which the agent reads and removes; an answer whose nonce or bundle is not the one asked is
-  dropped. 3–4 ms a request, measured; a Darwin notification needed a `simctl spawn` per request, 441 ms. The agent
+  (measured), so the agent writes a nonce and the bundle it asks about to `request` by rename and that app, watching
+  the directory, answers `<nonce>.json` (0600), which the agent reads and removes; an answer whose nonce or bundle is
+  not the one asked is dropped. Only the app named answers: every app observed since the boot watches the same
+  directory, and one sent behind another kept answering for a few seconds (iOS 27.0), first or over the right answer. 3–4 ms a request, measured; a Darwin notification needed a `simctl spawn` per request, 441 ms. The agent
   asks one request at a time per device (a keyboard probe and a field read are often asked together), each answer
   carries both, and a read that waited in that line longer than the relay waits (4 s) is answered unknown without
   asking. `prepare()` makes the directory 0700 (`chmod` too: `mkdir` leaves one that exists as it was) and empties it of
