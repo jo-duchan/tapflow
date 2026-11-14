@@ -896,6 +896,19 @@ describe('IOSAgent', () => {
       browser.close()
     })
 
+    it('stops saying so once an install failed, rather than for the rest of the session', async () => {
+      const read = vi.spyOn(AppObserver.prototype, 'read').mockResolvedValue({ kind: 'silent' })
+      const { agent, browser, internals, sent } = await bootedAgent(mockSimctl(true))
+      ;(agent as unknown as { installBuild: () => Promise<void> }).installBuild = async () => { throw new Error('no space') }
+      internals.handleRelayMessage({ type: 'app:install', sessionId: agent.sessionId!, requestId: 'rq-i', payload: { filePath: '/b.zip', bundleId: 'com.installed' } } as never)
+      await vi.waitFor(() => expect(sent.some((m) => m.type === 'app:install-error')).toBe(true), { timeout: 2000 })
+      internals.handleRelayMessage({ type: 'ui:keyboard:request', sessionId: agent.sessionId!, requestId: 'rq-k' })
+      await vi.waitFor(() => expect(read).toHaveBeenCalled(), { timeout: 2000 })
+      read.mockRestore()
+      agent.disconnect()
+      browser.close()
+    })
+
     it('reads the app an install put on the device, which a person may open from its icon rather than with Launch', async () => {
       const readField = vi.spyOn(AppObserver.prototype, 'read').mockResolvedValue(answer({ reason: 'no-focus' }))
       const simctl = mockSimctl(true)
