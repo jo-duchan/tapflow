@@ -46,6 +46,8 @@ const KEYBOARD_READ_TIMEOUT_MS = 800
 // 5 s for the read, and every later read on the device queues behind this one, so it is bounded within that. A timeout
 // reads as running (not judged), never as gone.
 const APP_RUNNING_TIMEOUT_MS = 2_000
+// One `defaults` call inside the device, 0.3 s measured; bounded since a boot waits on it.
+const APP_ACCESSIBILITY_TIMEOUT_MS = 5_000
 // A run reset's device-wide commands take about a second each (measured: keychain 1.0 s, privacy 0.5 s, location 0.5 s).
 // A command this bound kills does not land later, which is why iOS needs nothing like Android's pending `pm clear` wait:
 // measured on iOS 26.5 by killing `simctl uninstall` and `simctl keychain reset` mid-flight, each either finished before
@@ -640,6 +642,37 @@ export class SimctlWrapper {
       '--wifiMode', 'failed',
       '--cellularMode', 'notSupported',
     )
+  }
+
+  /**
+   * App accessibility (`ApplicationAccessibilityEnabled` in `com.apple.Accessibility`): what makes SwiftUI and React
+   * Native build the accessibility nodes the app observer names a touch by. `null` when the device has never set it.
+   * Takes effect at an app's next launch, not in one already running (measured, iOS 26.5).
+   */
+  async readAppAccessibility(udid: string): Promise<boolean | null> {
+    try {
+      const out = await this.runner.execWithOpts({ timeoutMs: APP_ACCESSIBILITY_TIMEOUT_MS }, 'spawn', udid, 'defaults', 'read', 'com.apple.Accessibility', 'ApplicationAccessibilityEnabled')
+      return out.trim() === '1'
+    } catch (e) {
+      // `defaults read` of a key the domain lacks exits 1 saying so; anything else is a failure to say.
+      if (/does not exist/.test(String((e as { stderr?: string }).stderr ?? (e as Error).message))) return null
+      throw e
+    }
+  }
+
+  /** Set app accessibility, or remove the key (`null`) to leave the device as it was before anything set it. */
+  async writeAppAccessibility(udid: string, value: boolean | null): Promise<void> {
+    const args = value === null
+      ? ['spawn', udid, 'defaults', 'delete', 'com.apple.Accessibility', 'ApplicationAccessibilityEnabled']
+      : ['spawn', udid, 'defaults', 'write', 'com.apple.Accessibility', 'ApplicationAccessibilityEnabled', '-bool', value ? 'true' : 'false']
+    try {
+      await this.runner.execWithOpts({ timeoutMs: APP_ACCESSIBILITY_TIMEOUT_MS }, ...args)
+    } catch (e) {
+      // Removing a key already gone leaves the device as asked. `defaults delete` says so as the domain "not found"
+      // when the key is the one it would have held (measured, iOS 26.5), and as the pair not existing otherwise.
+      if (value === null && /does not exist|not found/.test((e as Error).message)) return
+      throw e
+    }
   }
 
   /**

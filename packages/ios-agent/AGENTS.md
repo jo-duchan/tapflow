@@ -439,11 +439,18 @@ observer answers in the runner's own shapes, so `toKeyboardState` and `toFocused
   field lives in another process (it read `secure: false` on a password input), Flutter, a custom `UITextInput` —
   answers `reason: secure`, which flow-runner turns into a secret step. So does any field read while the app is not
   active: typing then goes elsewhere, a system sign-in alert's password field among them.
-- **What it does not read**: a SwiftUI field's `.accessibilityIdentifier`, which SwiftUI keeps on its accessibility
-  node and creates only with app accessibility on (`ApplicationAccessibilityEnabled`). Left off on purpose (decided
-  2026-11-14): it persists on the device and an agent that dies could not restore it. Such a field is told apart by
-  placeholder and frame, and Match cannot add a focusing tap for it — failures that show as unread or a divergence,
-  never a wrong flow. The home screen is outside the app too, hence the marker.
+- **App accessibility is on for a person Flow Capture records** (`AppAccessibility`, `ApplicationAccessibilityEnabled`).
+  Without it SwiftUI and React Native build no accessibility nodes, so the observer can name neither a SwiftUI field's
+  `.accessibilityIdentifier` nor what a touch hit (measured on iOS 26.5: Food Truck, Sample SwiftUI/UIKit, a React Native
+  app — nothing off, every element named on; scroll smoothness the same either way). It was left off in #1162 because
+  it persists on the device and a dead agent could not restore it, so turning it on writes a host marker with the value
+  it replaces (`/private/var/tmp/tapflow-app-accessibility/<udid>.json`), and the marker puts it back: at a boot that is
+  not recorded, before a shutdown, and for a running device when the agent starts. A value already on is someone
+  else's and is never touched. **A running app keeps what it launched with** (measured), so it is set at the boot, before
+  any app runs; a recorded person who picked up a device with the app already running gets names from its next launch.
+  A relay sends `recorded` false over the memory line (a rule from the runner era); such a boot stays off. Without it a
+  field is told apart by placeholder and frame, failures that show as unread or a divergence, never a wrong flow. The
+  home screen is outside the app too, hence the marker.
 - **Verified with a probe app** on iOS 26.5 (MacBook) and 27.0 (Mac mini, Xcode 27.1): UIKit, SwiftUI `TextField` and
   `SecureField`, React Native fields, a WKWebView's inputs, the soft keyboard in portrait and landscape, a hardware
   keyboard, and the lifecycle above. The probe is not committed; the measurements are here.

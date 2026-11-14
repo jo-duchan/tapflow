@@ -126,6 +126,7 @@ import { LEAN_LABELS } from '../leanLabels'
 import { TouchHelper } from '../TouchHelper'
 import { XCUITreeReader } from '../XCUITreeReader'
 import { AppObserver } from '../AppObserver'
+import { AppAccessibility } from '../AppAccessibility'
 import { PanelState } from '../PanelState'
 import { PhysicalOrientation, type DeviceOrientation } from '../PhysicalOrientation'
 import type { GuestHelperNative } from '../GuestHelper'
@@ -902,6 +903,69 @@ describe('IOSAgent', () => {
       await vi.waitFor(() => expect(warm).toHaveBeenCalledWith('dev-1'), { timeout: 3000 })
       agent.disconnect()
       browser.close()
+    })
+
+    // P1 of the record-time observation plan: SwiftUI names nothing in-app without app accessibility (measured), and a
+    // running app keeps what it started with, so it is on before the ready of a recorded person's boot and put back for
+    // anyone else's.
+    it('turns app accessibility on before a recorded person\'s boot is ready, and puts it back for another boot', async () => {
+      const { agent, browser, internals, sent } = await bootedAgent(mockSimctl(true), false)
+      const readyWhenEnabled: boolean[] = []
+      const enable = vi.spyOn(AppAccessibility.prototype, 'enable').mockImplementation(async () => { readyWhenEnabled.push(sent.some((m) => m.type === 'device:ready')) })
+      const restore = vi.spyOn(AppAccessibility.prototype, 'restore').mockResolvedValue()
+      internals.handleRelayMessage({ type: 'device:boot', sessionId: agent.sessionId!, requestId: 'rq-r', payload: { deviceId: 'dev-1', recorded: true } } as never)
+      await vi.waitFor(() => expect(sent.filter((m) => m.type === 'device:ready')).toHaveLength(1), { timeout: 3000 })
+      expect(enable).toHaveBeenCalledWith('dev-1')
+      expect(readyWhenEnabled).toEqual([false])
+      expect(restore).not.toHaveBeenCalled()
+      internals.handleRelayMessage({ type: 'device:boot', sessionId: agent.sessionId!, requestId: 'rq-a', payload: { deviceId: 'dev-1', automation: true } } as never)
+      await vi.waitFor(() => expect(sent.filter((m) => m.type === 'device:ready')).toHaveLength(2), { timeout: 3000 })
+      expect(restore).toHaveBeenCalledWith('dev-1')
+      expect(enable).toHaveBeenCalledTimes(1)
+      enable.mockRestore(); restore.mockRestore()
+      agent.disconnect()
+      browser.close()
+    })
+
+    it('boots anyway when app accessibility cannot be turned on', async () => {
+      const enable = vi.spyOn(AppAccessibility.prototype, 'enable').mockRejectedValue(new Error('defaults timed out'))
+      const { agent, browser, internals, sent } = await bootedAgent(mockSimctl(true), false)
+      internals.handleRelayMessage({ type: 'device:boot', sessionId: agent.sessionId!, requestId: 'rq-r', payload: { deviceId: 'dev-1', recorded: true } } as never)
+      await vi.waitFor(() => expect(sent.some((m) => m.type === 'device:ready')).toBe(true), { timeout: 3000 })
+      enable.mockRestore()
+      agent.disconnect()
+      browser.close()
+    })
+
+    it('puts app accessibility back before shutting the device down, while it still runs', async () => {
+      const simctl = mockSimctl(true)
+      const { agent, browser } = await bootedAgent(simctl)
+      const order: string[] = []
+      const restore = vi.spyOn(AppAccessibility.prototype, 'restore').mockImplementation(async () => { order.push('restore') })
+      ;(simctl.shutdown as ReturnType<typeof vi.fn>).mockImplementation(async () => { order.push('shutdown') })
+      browser.send(JSON.stringify({ type: 'device:shutdown', requestId: 'rq-off', sessionId: agent.sessionId, payload: { deviceId: 'dev-1' } }))
+      await vi.waitFor(() => expect(order).toEqual(['restore', 'shutdown']), { timeout: 3000 })
+      restore.mockRestore()
+      agent.disconnect()
+      browser.close()
+    })
+
+    // An agent that died left it on: a booted device is put back when the next agent starts; a shut-down one keeps its
+    // marker for its next boot, where the setting can be written.
+    it('puts back app accessibility an earlier agent left on, for the devices running now', async () => {
+      const simctl = mockSimctl(true)
+      ;(simctl.listDevices as ReturnType<typeof vi.fn>).mockResolvedValue([
+        { id: 'dev-1', name: 'iPhone 15', platform: 'ios', status: 'booted', osVersion: 'iOS 18.3' },
+        { id: 'dev-2', name: 'iPhone 16', platform: 'ios', status: 'shutdown', osVersion: 'iOS 18.3' },
+      ])
+      const marked = vi.spyOn(AppAccessibility.prototype, 'markedDevices').mockReturnValue(['dev-1', 'dev-2'])
+      const restore = vi.spyOn(AppAccessibility.prototype, 'restore').mockResolvedValue()
+      const agent = new IOSAgent({ intervalMs: 50 }, simctl)
+      await agent.connect(`ws://localhost:${port}`)
+      await vi.waitFor(() => expect(restore).toHaveBeenCalledWith('dev-1'))
+      expect(restore).not.toHaveBeenCalledWith('dev-2')
+      marked.mockRestore(); restore.mockRestore()
+      agent.disconnect()
     })
 
     it('resets the keyboard of a booted device once its boot\'s keyboard sync is done', async () => {

@@ -112,6 +112,7 @@ import type { GuestOrientation } from './GuestHelper.js'
 import type { IntegratedScreen } from './panels.js'
 import { XCUITreeReader } from './XCUITreeReader.js'
 import { AppObserver, fieldOf, keyboardOf } from './AppObserver.js'
+import { AppAccessibility } from './AppAccessibility.js'
 import { DeviceChromeLoader, type ChromeData, type ChromePanel } from './DeviceChromeLoader.js'
 import { TypePanels, panelFrame } from './TypePanels.js'
 import { KEY_CODE_MAP, MODIFIER_BITS } from './KeyCodeMap.js'
@@ -158,6 +159,9 @@ export interface IOSAgentOptions {
   /** The app observer's host side. Injectable for the same reason as `network`; under vitest the default asks in a
    *  directory under the OS temp folder rather than the simulators' /tmp. */
   appObserver?: AppObserver
+  /** App accessibility for a recorded person's boot, and its markers. Injectable as `appObserver` is; under vitest the
+   *  default keeps its markers in a directory under the OS temp folder. */
+  appAccessibility?: AppAccessibility
   /** Device frame loading. Under vitest the default points at directories that do not exist, so a suite never
    *  reads the developer's Xcode chrome or spends seconds rendering it. */
   chromeLoader?: DeviceChromeLoader
@@ -392,6 +396,7 @@ export class IOSAgent implements DeviceAgent, NetworkControlCapability, Posturab
   // The soft keyboard and the focused field for Flow Capture, from inside the app under test rather than through the
   // tree runner (AGENTS.md, "App observer").
   private readonly appObserver: AppObserver
+  private readonly appAccessibility: AppAccessibility
   // Holds a macOS power assertion while connected so the host doesn't idle-throttle the
   // simulator capture/encode when the Mac is unattended. No-op off macOS.
   private readonly sleepBlocker: SleepBlocker
@@ -466,6 +471,9 @@ export class IOSAgent implements DeviceAgent, NetworkControlCapability, Posturab
       { appRunning: (udid, bundleId) => this.simctl.appRunning(udid, bundleId) },
       process.env.VITEST ? { root: path.join(tmpdir(), 'tapflow-test-observe') } : {},
     )
+    this.appAccessibility = options.appAccessibility ?? new AppAccessibility(
+      this.simctl, process.env.VITEST ? path.join(tmpdir(), 'tapflow-test-app-accessibility') : undefined,
+    )
     this.fps = options.fps ?? 30
     this.intervalMs = options.intervalMs
     this.reconnectDelays = options.reconnectDelays ?? [1000, 2000, 4000, 8000, 16000, 30000]
@@ -510,6 +518,7 @@ export class IOSAgent implements DeviceAgent, NetworkControlCapability, Posturab
     this.relayUrl = relayUrl
     const allDevices = await this.simctl.listDevices(listTimeoutMs)
     this.revertLeftoverLean(allDevices)
+    this.restoreLeftoverAccessibility(allDevices)
     // A `disconnect()` during this await or the one above does not cancel the connect. Every caller
     // today exits the process on the next line (the CLI's SIGINT handlers); one that keeps running
     // needs a generation check here before the socket is built.
@@ -1090,7 +1099,7 @@ export class IOSAgent implements DeviceAgent, NetworkControlCapability, Posturab
   // `requestId` is a parameter, never a field on `state`: `bootSeq` exists because two boots overlap,
   // and a correlator hoisted onto shared state would answer the first request with the second's id.
   // Optional because the relay's idle timer boots nothing — but every *browser* boot carries one.
-  private async handleDeviceBoot(sessionId: string, deviceId: string, fullErase = false, acceptH264 = false, tier?: { secureContext: boolean; external: boolean }, requestId?: string, warmTree = false, serviceTier?: ServiceTier, runReset?: RunResetRequest): Promise<void> {
+  private async handleDeviceBoot(sessionId: string, deviceId: string, fullErase = false, acceptH264 = false, tier?: { secureContext: boolean; external: boolean }, requestId?: string, warmTree = false, serviceTier?: ServiceTier, runReset?: RunResetRequest, recorded = false): Promise<void> {
     const state = this.deviceStates.get(sessionId)
     // Split, because the two halves are not the same kind of nothing. No open control channel means the
     // answer itself has nowhere to go, so this is the one abandonment that stays silent — and the caller
@@ -1242,6 +1251,12 @@ export class IOSAgent implements DeviceAgent, NetworkControlCapability, Posturab
       // so nothing a previous boot left is read as this one's.
       await this.appObserver.prepare(deviceId).catch((e: unknown) => {
         logger.warn('could not prepare the app observer:', (e as Error).message)
+      })
+      // App accessibility, before any app launches (a running app keeps what it started with): on for a person Flow
+      // Capture records, so the observer can name what each touch hit; put back for anyone else, which also undoes
+      // what an earlier recorded person's boot left. Best-effort: without it a touch is recorded as before, unnamed.
+      await (recorded ? this.appAccessibility.enable(deviceId) : this.appAccessibility.restore(deviceId)).catch((e: unknown) => {
+        logger.warn(`could not ${recorded ? 'turn on' : 'restore'} app accessibility:`, (e as Error).message)
       })
       // **Where it is held, before the first frame says so** (#910). The orientation is the device's, shared with
       // DeviceHub and every viewer, so it is read and reported as it is, and a reload or a second viewer joins it
@@ -1424,6 +1439,20 @@ export class IOSAgent implements DeviceAgent, NetworkControlCapability, Posturab
    * mode is on, the next boot through tapflow applies it again. One still running is left alone,
    * and a udid that no longer exists (the host directory outlives `simctl delete`) is not ours to count.
    */
+  /**
+   * App accessibility a recorded boot left on, for a device running now: the agent that marked it died before its
+   * shutdown or the next boot. A shut-down device keeps its marker until it next boots.
+   */
+  private restoreLeftoverAccessibility(devices: Device[]): void {
+    const running = new Set(devices.filter((d) => d.status === 'booted').map((d) => d.id))
+    for (const udid of this.appAccessibility.markedDevices()) {
+      if (!running.has(udid)) continue
+      void this.appAccessibility.restore(udid).catch((e: unknown) => {
+        logger.warn(`could not restore app accessibility left on ${udid}:`, (e as Error).message)
+      })
+    }
+  }
+
   private revertLeftoverLean(devices: Device[]): void {
     let marked: string[]
     try { marked = this.leanStore.applied() } catch { return }
@@ -1468,6 +1497,10 @@ export class IOSAgent implements DeviceAgent, NetworkControlCapability, Posturab
     // Each device has its own tree runner; stop this one's, never another device's.
     this.uiTreeReader.stopIfDevice(deviceId)
 
+    // While it still runs: the setting is written inside the device. A shutdown that fails leaves it for the next boot.
+    await this.appAccessibility.restore(deviceId).catch((e: unknown) => {
+      logger.warn('could not restore app accessibility before the shutdown:', (e as Error).message)
+    })
     try {
       await this.simctl.shutdown(deviceId)
       this.revertLean(deviceId)
@@ -2128,9 +2161,9 @@ export class IOSAgent implements DeviceAgent, NetworkControlCapability, Posturab
     switch (msg.type) {
       case 'device:boot': {
         // `external` and `automation` are added by the relay, never by the browser (see `DeviceBoot`).
-        const { deviceId, resetMode, acceptH264, secureContext, external, automation, serviceTier, runReset } = msg.payload as { deviceId: string; resetMode?: string; acceptH264?: boolean; secureContext?: boolean; external?: boolean; automation?: boolean; serviceTier?: ServiceTier; runReset?: RunResetRequest }
+        const { deviceId, resetMode, acceptH264, secureContext, external, automation, serviceTier, runReset, recorded } = msg.payload as { deviceId: string; resetMode?: string; acceptH264?: boolean; secureContext?: boolean; external?: boolean; automation?: boolean; serviceTier?: ServiceTier; runReset?: RunResetRequest; recorded?: boolean }
         const sessionId = msg.sessionId
-        this.handleDeviceBoot(sessionId, deviceId, resetMode === 'full-erase', acceptH264 === true, { secureContext: !!secureContext, external: !!external }, msg.requestId, automation === true, serviceTier, runReset)
+        this.handleDeviceBoot(sessionId, deviceId, resetMode === 'full-erase', acceptH264 === true, { secureContext: !!secureContext, external: !!external }, msg.requestId, automation === true, serviceTier, runReset, recorded === true)
           .catch((e) => logger.error('handleDeviceBoot failed:', e))
         break
       }

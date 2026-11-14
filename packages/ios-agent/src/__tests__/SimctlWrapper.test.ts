@@ -800,6 +800,50 @@ describe('SimctlWrapper', () => {
     })
   })
 
+  // P1: app accessibility for a recorded person, read and written inside the device.
+  describe('app accessibility', () => {
+    it('reads on, off, and never set', async () => {
+      const runner = mockRunner()
+      const simctl = new SimctlWrapper(runner)
+      vi.mocked(runner.execWithOpts).mockResolvedValueOnce('1\n').mockResolvedValueOnce('0\n')
+        .mockRejectedValueOnce(new Error('The domain/default pair of (com.apple.Accessibility, ApplicationAccessibilityEnabled) does not exist'))
+      expect(await simctl.readAppAccessibility('device-1')).toBe(true)
+      expect(await simctl.readAppAccessibility('device-1')).toBe(false)
+      expect(await simctl.readAppAccessibility('device-1')).toBeNull()
+      const [opts, ...args] = vi.mocked(runner.execWithOpts).mock.calls[0]!
+      expect(args).toEqual(['spawn', 'device-1', 'defaults', 'read', 'com.apple.Accessibility', 'ApplicationAccessibilityEnabled'])
+      expect(opts.timeoutMs).toBeGreaterThan(0)
+    })
+
+    it('fails a read that failed for any other reason, rather than calling it never set', async () => {
+      const runner = mockRunner()
+      vi.mocked(runner.execWithOpts).mockRejectedValueOnce(new Error('simctl spawn timed out'))
+      await expect(new SimctlWrapper(runner).readAppAccessibility('device-1')).rejects.toThrow('timed out')
+    })
+
+    it('writes a value, and removes the key for a device nothing had set, already gone or not; other failures fail', async () => {
+      const runner = mockRunner()
+      const simctl = new SimctlWrapper(runner)
+      await simctl.writeAppAccessibility('device-1', true)
+      await simctl.writeAppAccessibility('device-1', false)
+      vi.mocked(runner.execWithOpts).mockRejectedValueOnce(new Error('Domain (com.apple.Accessibility) not found.\nDefaults have not been changed.')).mockRejectedValueOnce(new Error('The domain/default pair of (com.apple.Accessibility, ApplicationAccessibilityEnabled) does not exist'))
+      await simctl.writeAppAccessibility('device-1', null)
+      await simctl.writeAppAccessibility('device-1', null)
+      vi.mocked(runner.execWithOpts).mockRejectedValueOnce(new Error('simctl spawn timed out'))
+      await expect(simctl.writeAppAccessibility('device-1', null)).rejects.toThrow('timed out')
+      vi.mocked(runner.execWithOpts).mockRejectedValueOnce(new Error('The domain/default pair of (com.apple.Accessibility, ApplicationAccessibilityEnabled) does not exist'))
+      await expect(simctl.writeAppAccessibility('device-1', false)).rejects.toThrow('does not exist')
+      expect(vi.mocked(runner.execWithOpts).mock.calls.map(([, ...a]) => a.slice(3).join(' '))).toEqual([
+        'write com.apple.Accessibility ApplicationAccessibilityEnabled -bool true',
+        'write com.apple.Accessibility ApplicationAccessibilityEnabled -bool false',
+        'delete com.apple.Accessibility ApplicationAccessibilityEnabled',
+        'delete com.apple.Accessibility ApplicationAccessibilityEnabled',
+        'delete com.apple.Accessibility ApplicationAccessibilityEnabled',
+        'write com.apple.Accessibility ApplicationAccessibilityEnabled -bool false',
+      ])
+    })
+  })
+
   describe('keyboardLanguage', () => {
     it('reads the keyboard in use', async () => {
       const runner = {
