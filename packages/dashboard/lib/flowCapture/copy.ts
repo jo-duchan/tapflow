@@ -66,6 +66,18 @@ export const copy = {
   stop: 'Stop',
   restart: 'Start again',
   editWhatMatched: 'Edit what matched',
+  // P2c: Match's end, when some taps the app did not respond to when recorded wait for a review. One line; the list is
+  // opened by those who want it, and Continue alone leaves them out.
+  reviewDone: 'Done',
+  reviewSummary: (left: number, total: number) => left === total
+    ? `${total} ${total === 1 ? 'tap' : 'taps'} the app didn’t respond to will be left out.`
+    : left === 0
+      ? `${total === 1 ? 'The tap' : `All ${total} taps`} the app didn’t respond to will be kept.`
+      : `${left} of ${total} taps the app didn’t respond to will be left out.`,
+  reviewHint: 'Check the ones to keep.',
+  reviewAgain: 'again',
+  reviewPicture: (step: number) => `#${step} as you recorded it`,
+  continueToEdit: 'Continue to Edit',
   matchStopped: 'The replay stopped.',
   // 1b-3b: a step whose screen looked different from its recording. Facts first, then the causes it can have, never one
   // named as the cause: two pictures are what the person judges by.
@@ -76,6 +88,7 @@ export const copy = {
   // Record-time observation: a tap left out before the replay is the first suspect when the step after it differs.
   divergedDropped: (span: string, n: number) =>
     `${span} ${n === 1 ? 'was' : 'were'} not replayed: tapped while a list was still moving, which only stops it.`,
+  droppedShort: 'Not replayed',
   droppedTile: 'Not replayed: tapped while the list was still moving.',
   divergedMatched: (n: number) => `${n} ${n === 1 ? 'step' : 'steps'} before it matched.`,
   divergedCauses: 'Compare the two pictures: a step left out of the range, a prompt or first-run screen the reset brings back, data that changed since you recorded, or a screen caught mid-animation can each do this.',
@@ -115,6 +128,7 @@ export const copy = {
     keyboard: 'The on-screen keyboard toggle is not a flow step.',
     'keyboard-key': 'A key on the on-screen keyboard. What it typed could not be read, so it is not in the flow. Type with your computer’s keyboard for text the flow can replay.',
     'stopped-scroll': 'Tapped while the list was still moving: it stopped the list and pressed nothing, so it is not replayed.',
+    'no-response': 'The app did not respond to this tap when you recorded it.',
   } satisfies Record<SkipReason, string>,
   autoReason: 'Turned into a scroll to the element the next step taps.',
   secretLabel: 'Secret name',

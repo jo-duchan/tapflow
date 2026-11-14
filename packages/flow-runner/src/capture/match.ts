@@ -40,6 +40,9 @@ export type SkipReason =
   | 'keyboard-key'
   /** Went down on a list that was still moving: it stopped the list and pressed nothing (`RawStep.dropped`). */
   | 'stopped-scroll'
+  /** The app did not respond to it when it was recorded (`TouchObservation.acted === false`), and the person left it
+   *  out at the end of Match (`noResponseTaps`, `leaveOut`). */
+  | 'no-response'
 
 export type FragileReason =
   /** Tapped where the tree names no element. */
@@ -412,6 +415,47 @@ function scrollDirection(from: Point, to: Point): ScrollDirection | null {
     return dx < 0 ? 'right' : 'left'
   }
   return null
+}
+
+/** A matched tap the app did not respond to when it was recorded, as Match's review offers it: `index` into the matched
+ *  steps, `repeat` when iOS counted it a quick repeat of the tap before (`tapCount`). */
+export interface NoResponseTap {
+  index: number
+  repeat: boolean
+}
+
+/** Steps that type into whatever is focused: a tap right before one may be what focused the field. */
+const TYPES = new Set<RawStep['kind']>(['text', 'type', 'paste', 'keyboardKey', 'key'])
+
+/**
+ * The matched taps the app did not respond to when they were recorded (record-time observation, P2c): a stray tap on a
+ * title, a retry of a dead button, the second of a doubled tap. Only a verdict of "no" counts — `acted` absent is
+ * unknown (a web view, React Native, an older agent, Android) and the tap stays as it is. A step the replay added has no
+ * report, and a tap already skipped is out of the flow anyway. Two more are kept without asking, since leaving them out
+ * would make Verify run something other than what Match did:
+ * - one Match saw change the screen (`observed`): the record's "no" was wrong, or the replay tapped the element's centre
+ *   where the person had tapped its padding;
+ * - one right before typing: if it focused the field, the flow without it types into nothing.
+ */
+export function noResponseTaps(matched: readonly CapturedStep[]): NoResponseTap[] {
+  const out: NoResponseTap[] = []
+  matched.forEach((m, index) => {
+    if (m.raw.kind !== 'tap' || m.step === null || m.raw.touched?.acted !== false) return
+    if (m.observed && ((m.observed.appear?.length ?? 0) > 0 || (m.observed.gone?.length ?? 0) > 0)) return
+    const next = matched.slice(index + 1).find((s) => s.step !== null)
+    if (next && TYPES.has(next.raw.kind)) return
+    out.push({ index, repeat: (m.raw.touched.tapCount ?? 1) >= 2 })
+  })
+  return out
+}
+
+/**
+ * The matched steps with those at `indices` left out (`no-response`). Before `toFlowSteps`, which reads a tap after a
+ * swipe to turn the swipe into a scroll: a tap that is not in the flow cannot be what the swipe was for.
+ */
+export function leaveOut(matched: readonly CapturedStep[], indices: Iterable<number>): CapturedStep[] {
+  const out = new Set(indices)
+  return matched.map((m, i) => (out.has(i) ? { raw: m.raw, step: null, skipped: 'no-response' as const } : m))
 }
 
 export interface CapturedFlow {

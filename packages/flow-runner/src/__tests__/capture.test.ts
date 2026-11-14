@@ -7,9 +7,10 @@ import type { KeyboardState } from '@tapflowio/protocol'
 import type { CaptureEntry, CapturedMessage } from '@tapflowio/protocol/capture'
 import {
   askedValues, segment, defaultRange, rangeWarnings, stepsBeforeRange, matchStep, reachQuestions, toFlowSteps, flowSteps, flowToYaml, rawStepLabel, capturedStepLabel,
-  recordedTarget, recordedSelector, scrollDirectionOf, replayStep,
-  type MatchContext, type RawStep,
+  recordedTarget, recordedSelector, scrollDirectionOf, replayStep, noResponseTaps, leaveOut,
+  type MatchContext, type RawStep, type CapturedStep,
 } from '../capture/index.js'
+import type { Step } from '../schema.js'
 import type { TouchObservation } from '@tapflowio/protocol'
 import { parseFlow } from '../schema.js'
 
@@ -1259,6 +1260,50 @@ describe('touch reports', () => {
     expect(steps.every((s) => 'touched' in s && s.touched !== undefined)).toBe(true)
     const named = (s: RawStep) => ('touched' in s ? s.touched?.element?.label : undefined)
     expect([named(steps[0]!), named(steps[1]!)]).toEqual(['Donuts', 'Truck'])
+  })
+
+  // P2c: the taps Match's review offers to leave out, and leaving them out before the flow is made.
+  describe('no-response taps', () => {
+    const tapOn = (label: string): Step => ({ type: 'tapOn', selector: { label } })
+    const tapRaw = (touched?: Partial<TouchObservation>): RawStep =>
+      ({ ...new Rec().touch([[0.5, 0.5]]).steps()[0]!, ...(touched ? { touched: { point: { x: 0.5, y: 0.5 }, moving: false, ...touched } } : {}) }) as RawStep
+    it('offers only taps the app said it did not respond to, still in the flow, and marks a repeat', () => {
+      const matched: CapturedStep[] = [
+        { raw: tapRaw({ acted: false }), step: tapOn('Title') },
+        { raw: tapRaw({ acted: true }), step: tapOn('Buy') },
+        { raw: tapRaw(), step: tapOn('Unknown') },
+        { raw: tapRaw({ acted: false, tapCount: 2 }), step: { type: 'tapPoint', at: [0.5, 0.5] } },
+        // Already out of the flow (refused, or stopped a list): nothing to ask.
+        { raw: tapRaw({ acted: false }), step: null, skipped: 'refused' },
+        { raw: { ...new Rec().touch([[0.5, 0.8], [0.5, 0.5], [0.5, 0.3]]).steps()[0]!, touched: { point: { x: 0.5, y: 0.8 }, moving: false, acted: false } } as RawStep, step: { type: 'swipe', from: [0.5, 0.8], to: [0.5, 0.3], durationMs: 300 } },
+      ]
+      expect(noResponseTaps(matched)).toEqual([{ index: 0, repeat: false }, { index: 3, repeat: true }])
+    })
+    it('does not offer one Match saw change the screen, or one right before typing', () => {
+      const typed = { ...tapRaw(), kind: 'text' } as unknown as RawStep
+      const matched: CapturedStep[] = [
+        { raw: tapRaw({ acted: false }), step: tapOn('Menu'), observed: { appear: [{ text: 'Settings' }] } },
+        { raw: tapRaw({ acted: false }), step: tapOn('Empty'), observed: { appear: [], gone: [] } },
+        { raw: tapRaw({ acted: false }), step: tapOn('Email') },
+        { raw: tapRaw({ acted: false }), step: null, skipped: 'keyboard' },
+        { raw: typed, step: { type: 'inputText', text: 'abc' } },
+      ]
+      expect(noResponseTaps(matched).map((t) => t.index)).toEqual([1])
+    })
+    // Design review of P2c: the flow reads the next step it has, so the swipe is for the tap after a left-out one.
+    it('turns a swipe before a left-out tap into a scroll to the tap after it', () => {
+      const swipe: CapturedStep = { raw: new Rec().touch([[0.5, 0.8], [0.5, 0.5], [0.5, 0.2]]).steps()[0]!, step: { type: 'swipe', from: [0.5, 0.8], to: [0.5, 0.2], durationMs: 300 }, tree: [] }
+      const out = toFlowSteps(leaveOut([swipe, { raw: tapRaw({ acted: false }), step: tapOn('Title') }, { raw: tapRaw({ acted: true }), step: tapOn('Row 9') }], [1]))
+      expect(out.steps[0]!.step).toEqual({ type: 'scroll', direction: 'down', until: { label: 'Row 9' } })
+    })
+    it('leaves them out before the flow is made, so a swipe for one alone stays a swipe', () => {
+      // The row was not on the screen the swipe started from: the swipe brought it, so it is a scroll to the row.
+      const swipe: CapturedStep = { raw: new Rec().touch([[0.5, 0.8], [0.5, 0.5], [0.5, 0.2]]).steps()[0]!, step: { type: 'swipe', from: [0.5, 0.8], to: [0.5, 0.2], durationMs: 300 }, tree: [] }
+      const tap: CapturedStep = { raw: tapRaw({ acted: false }), step: tapOn('Row 9') }
+      expect(toFlowSteps([swipe, tap]).steps[0]!.step).toMatchObject({ type: 'scroll' })
+      const out = toFlowSteps(leaveOut([swipe, tap], [1]))
+      expect(out.steps.map((s) => s.step?.type ?? s.skipped)).toEqual(['swipe', 'no-response'])
+    })
   })
 
   // P2a: the agent repeats a gesture's report once the app's verdict is in; the later one is the gesture's.

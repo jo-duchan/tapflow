@@ -1,5 +1,5 @@
 import {
-  askedValues, defaultRange, stepsBeforeRange, type CapturedFlow, type CapturedStep, type FlowResult, type RawStep, type ScreenRect, type Selector,
+  askedValues, defaultRange, leaveOut, noResponseTaps, stepsBeforeRange, toFlowSteps, type CapturedFlow, type CapturedStep, type FlowResult, type RawStep, type ScreenRect, type Selector,
   type StepRange,
 } from '@tapflowio/flow-runner/browser'
 import type { AfterTouch } from './runner'
@@ -79,6 +79,24 @@ export interface CaptureState {
   /** How many of the last matched steps the replay added (a focus tap, a turn): taken to Edit without the step they were
    *  added for, they would be a flow of its own. */
   insertedTail: number
+  /** Match ended with taps the app did not respond to when recorded (P2c): the matched steps, waiting at Match's end for
+   *  the person to keep any before they go to Edit. Nothing is running then. */
+  review?: Review
+  /** Of those taps, the ones the person kept, by index into `steps` — the recording's own, so a choice outlives Start
+   *  again and a range moved around it. The rest are left out. */
+  kept: number[]
+}
+
+/** A tap Match's review offers to leave out: `index` into the matched steps, `step` into the recording's. */
+export interface ReviewTap {
+  index: number
+  step: number
+  repeat: boolean
+}
+
+export interface Review {
+  matched: CapturedStep[]
+  taps: ReviewTap[]
 }
 
 export interface Divergence {
@@ -101,6 +119,10 @@ export type CaptureEvent =
   | { type: 'match-started'; total: number }
   | { type: 'step-matched'; step: CapturedStep; screenshot?: string; inserted?: boolean }
   | { type: 'match-finished'; captured: CapturedFlow }
+  /** Match ended (or was taken as far as it got) with taps to review: it waits at its end instead of going to Edit. */
+  | { type: 'match-reviewed'; review: Review }
+  /** Keep (or leave out again) a reviewed tap, by index into `steps`. */
+  | { type: 'set-kept'; step: number; kept: boolean }
   | { type: 'match-failed'; error: string }
   | ({ type: 'diverged' } & Divergence)
   /** Continue anyway: the step is replayed and the comparison goes on from the next. */
@@ -126,7 +148,7 @@ export type CaptureEvent =
 export const initialState: CaptureState = {
   phase: 'loading', steps: [], range: { start: 0, end: 0 }, name: '', tags: '', progress: { done: 0, total: 0 },
   matched: [], screenshots: [], captured: null, removed: [], renamed: {}, made: {}, after: {}, expected: {}, verify: null, error: null,
-  matchedRange: null, reached: 0, asked: {}, insertedTail: 0,
+  matchedRange: null, reached: 0, asked: {}, insertedTail: 0, kept: [],
 }
 
 /**
@@ -135,7 +157,7 @@ export const initialState: CaptureState = {
  */
 const replayed = {
   matched: [], screenshots: [], captured: null, removed: [], made: {}, after: {}, expected: {}, verify: null, error: null, matchedRange: null, reached: 1, reset: undefined,
-  diverged: undefined, moved: undefined, insertedTail: 0,
+  diverged: undefined, moved: undefined, insertedTail: 0, review: undefined,
 }
 
 const PHASE_AT: Record<number, Phase> = { 0: 'range', 2: 'edit', 3: 'verifying', 4: 'export' }
@@ -145,7 +167,7 @@ const edited = (state: CaptureState) => ({ verify: null, reached: Math.min(state
 
 export function reduce(state: CaptureState, event: CaptureEvent): CaptureState {
   switch (event.type) {
-    case 'loaded': return { ...state, phase: 'range', steps: event.steps, range: event.range, name: event.name, error: null, asked: {} }
+    case 'loaded': return { ...state, phase: 'range', steps: event.steps, range: event.range, name: event.name, error: null, asked: {}, kept: [] }
     case 'load-failed': return { ...state, phase: 'failed', error: event.error }
     case 'set-range': return { ...state, range: event.range, moved: undefined }
     case 'set-name': return { ...state, name: event.name }
@@ -168,7 +190,12 @@ export function reduce(state: CaptureState, event: CaptureEvent): CaptureState {
     // Clears a stop's message: Edit what matched after Stop used to carry "stopped" into Verify, which then began failed.
     case 'match-finished': return {
       ...state, phase: 'edit', captured: event.captured, renamed: joinsThatHold(state.renamed, event.captured.secrets),
-      matchedRange: state.range, reached: 2, error: null, diverged: undefined,
+      matchedRange: state.range, reached: 2, error: null, diverged: undefined, review: undefined,
+    }
+    case 'match-reviewed': return state.phase === 'matching' ? { ...state, review: event.review, error: null, diverged: undefined } : state
+    case 'set-kept': {
+      const kept = state.kept.filter((i) => i !== event.step)
+      return { ...state, kept: event.kept ? [...kept, event.step] : kept }
     }
     // Stays on Match, so what was matched so far can still be taken into Edit or replayed from the start. Only while a
     // run is on screen: a run stopped by Back to Range or Edit what matched answers after the dialog has moved on.
@@ -183,7 +210,7 @@ export function reduce(state: CaptureState, event: CaptureEvent): CaptureState {
       // A range the person chose is theirs: only one still at the default is moved, and the move is said.
       const move = before.length > 0 && state.range.start === defaultRange(state.steps).start
       return {
-        ...state, phase: 'range', error: null, diverged: undefined,
+        ...state, phase: 'range', error: null, diverged: undefined, review: undefined,
         ...(move ? { range: { ...state.range, start: before[0]! }, moved: before } : {}),
       }
     }
@@ -222,7 +249,7 @@ export function reduce(state: CaptureState, event: CaptureEvent): CaptureState {
     }
     case 'go-to': {
       const phase = PHASE_AT[event.step]
-      return phase && canGoTo(state, event.step) ? { ...state, phase, error: null } : state
+      return phase && canGoTo(state, event.step) ? { ...state, phase, error: null, review: undefined } : state
     }
     case 'verify-started': return { ...state, phase: 'verifying', verify: { status: 'running', done: 0, live: [] }, reached: 3, reset: undefined, error: null }
     case 'device-reset': return { ...state, reset: event.report }
@@ -236,8 +263,9 @@ export function reduce(state: CaptureState, event: CaptureEvent): CaptureState {
 
 /** Whether something is running on the device: the replay, or the verification. Nothing is gone back to then. */
 export function isRunning(state: CaptureState): boolean {
-  // An error ends either run: a verification that threw is left `running`, with the reason in `error`.
-  return state.error === null && (state.phase === 'matching' || (state.phase === 'verifying' && state.verify?.status === 'running'))
+  // An error ends either run: a verification that threw is left `running`, with the reason in `error`. So does a Match
+  // waiting at its end for its review.
+  return state.error === null && ((state.phase === 'matching' && !state.review) || (state.phase === 'verifying' && state.verify?.status === 'running'))
 }
 
 const sameRange = (a: StepRange, b: StepRange | null) => b !== null && a.start === b.start && a.end === b.end
@@ -330,4 +358,22 @@ function freeSecretName(state: CaptureState): string {
   let n = 2
   while (names.has(`SECRET_${n}`)) n++
   return `SECRET_${n}`
+}
+
+/**
+ * The taps Match's review offers to leave out (`noResponseTaps`), each with its step in the recording. A matched step
+ * carries the recording's own step object (`withAsked` replaces only typed text), so it is found by identity; one not
+ * found (a step the replay made) is not offered.
+ */
+export function reviewTaps(steps: readonly RawStep[], matched: readonly CapturedStep[]): ReviewTap[] {
+  return noResponseTaps(matched).flatMap((t) => {
+    const step = steps.indexOf(matched[t.index]!.raw)
+    return step < 0 ? [] : [{ index: t.index, step, repeat: t.repeat }]
+  })
+}
+
+/** The flow Match's review makes: the reviewed taps the person did not keep left out, before the flow is made. */
+export function reviewedCapture(review: Review, kept: readonly number[]): CapturedFlow {
+  const keep = new Set(kept)
+  return toFlowSteps(leaveOut(review.matched, review.taps.filter((t) => !keep.has(t.step)).map((t) => t.index)))
 }
