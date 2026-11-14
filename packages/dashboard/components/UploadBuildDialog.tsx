@@ -152,7 +152,8 @@ export function UploadBuildDialog({ onSuccess, appId, canWrite }: Props) {
                 Override version
               </Button>
             </CollapsibleTrigger>
-            <CollapsibleContent id="upload-override">
+            {/* Room past the panel's edges: it clips while it animates, and a field's focus ring is drawn outside it. */}
+            <CollapsibleContent id="upload-override" className="-mx-1 px-1 pb-1">
               <div className="grid gap-3">
                 <p className="text-xs text-muted-foreground">
                   Leave a field empty to use what the build file says. This changes how tapflow shows and groups the build,

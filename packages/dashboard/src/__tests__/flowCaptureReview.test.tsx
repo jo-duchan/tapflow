@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest'
 import { fireEvent, render, screen } from '@testing-library/react'
 import type { CapturedStep, RawStep } from '@tapflowio/flow-runner/browser'
 import { EditScreen, MatchScreen } from '@/components/flow-capture/screens'
+import { ReleaseAccordion } from '@/components/app-center/ReleaseAccordion'
 import { canGoTo, initialState, isRunning, matchEnded, reduce, reviewedCapture, reviewTaps, type CaptureState } from '@/lib/flowCapture/machine'
 
 // P2c: taps the app did not respond to when recorded wait at Match's end, to be kept or (by default) left out.
@@ -123,5 +124,34 @@ describe('putting a left-out tap back in Edit', () => {
     expect(screen.getAllByRole('button', { name: /^Remove / })).toHaveLength(1)
     fireEvent.click(back[1]!)
     expect(dispatch).toHaveBeenCalledWith({ type: 'put-back', step: 2 })
+  })
+})
+
+// Pre-PR review of P2c.
+describe('the review, as reviewed', () => {
+  it('does not offer, from what matched so far, a tap Match saw change the screen', () => {
+    let state = matching
+    for (const m of matched) state = reduce(state, { type: 'step-matched', step: m })
+    state = reduce(state, { type: 'step-observed', index: 0, observed: { appear: [{ text: 'Menu' }] } })
+    const ended = matchEnded(steps, state.matched)
+    expect(ended.type === 'match-reviewed' && ended.review.taps.map((t) => t.step)).toEqual([2])
+  })
+
+  it('keeps no stop message at a review: the stop is what took Match as far as it got', () => {
+    expect(reduce(reviewing, { type: 'match-failed', error: 'The replay stopped.' }).error).toBeNull()
+  })
+
+  it('names the open list by its summary', () => {
+    render(<MatchScreen state={reviewing} tap={{ surface: () => null } as never} marks={{ cursor: null, trails: [] }} onStop={vi.fn()} onRestart={vi.fn()}
+      onTakeWhatMatched={vi.fn()} onBackToRange={vi.fn()} onContinueAnyway={vi.fn()} stopRef={{ current: null }} onContinueToEdit={vi.fn()} onKeep={vi.fn()} thumbnailOf={() => null} />)
+    fireEvent.click(screen.getByRole('button', { name: /will be left out/ }))
+    expect(screen.getByRole('region', { name: /will be left out/ })).toBeInTheDocument()
+  })
+
+  it('draws no region landmark for an open release', () => {
+    render(<ReleaseAccordion versionName="1.0" builds={[]} isOpen onToggle={vi.fn()} onNavigate={vi.fn()} onStatusChange={vi.fn()}
+      onScheduleDeletion={vi.fn()} onCancelDeletion={vi.fn()} onEdit={vi.fn()} canWrite />)
+    expect(screen.getByRole('button', { name: /1\.0/ })).toHaveAttribute('aria-expanded', 'true')
+    expect(screen.queryByRole('region')).not.toBeInTheDocument()
   })
 })

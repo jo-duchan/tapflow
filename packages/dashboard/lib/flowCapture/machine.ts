@@ -1,5 +1,5 @@
 import {
-  askedValues, defaultRange, leaveOut, noResponseTaps, stepsBeforeRange, toFlowSteps, type CapturedFlow, type CapturedStep, type FlowResult, type RawStep, type ScreenRect, type Selector,
+  askedValues, defaultRange, leaveOut, noResponseTaps, stepsBeforeRange, toFlowSteps, type CapturedFlow, type CapturedStep, type FlowResult, type RawStep, type ScreenRect, type Selector, type StepExpect,
   type StepRange,
 } from '@tapflowio/flow-runner/browser'
 import type { AfterTouch } from './runner'
@@ -139,6 +139,8 @@ export type CaptureEvent =
   | { type: 'remove-step'; index: number }
   | { type: 'rename-secret'; from: string; to: string }
   | { type: 'step-after'; index: number; after: AfterTouch }
+  /** What Match saw a touch do, by index into `matched`: on the step, as the run's own result has it. */
+  | { type: 'step-observed'; index: number; observed: StepExpect | null }
   | { type: 'add-expected'; index: number; selector: Selector }
   | { type: 'remove-expected'; index: number; n: number }
   | { type: 'make-secret'; index: number }
@@ -218,7 +220,8 @@ export function reduce(state: CaptureState, event: CaptureEvent): CaptureState {
     }
     // Stays on Match, so what was matched so far can still be taken into Edit or replayed from the start. Only while a
     // run is on screen: a run stopped by Back to Range or Edit what matched answers after the dialog has moved on.
-    case 'match-failed': return state.phase === 'matching' || state.phase === 'verifying' ? { ...state, error: event.error, diverged: undefined } : state
+    // Not at a review: the run it came from was taken as far as it got, and its stop is what said so (review of P2c).
+    case 'match-failed': return (state.phase === 'matching' && !state.review) || state.phase === 'verifying' ? { ...state, error: event.error, diverged: undefined } : state
     case 'diverged': {
       const { type: _, ...divergence } = event
       return state.phase === 'matching' ? { ...state, diverged: divergence } : state
@@ -243,6 +246,13 @@ export function reduce(state: CaptureState, event: CaptureEvent): CaptureState {
       const renamed = { ...state.renamed }
       for (const name of secretNames(state)) if ((renamed[name] ?? name) === current) renamed[name] = event.to
       return { ...state, ...edited(state), renamed: { ...renamed, [event.from]: event.to } }
+    }
+    case 'step-observed': {
+      const step = state.matched[event.index]
+      if (!step) return state
+      const matched = [...state.matched]
+      matched[event.index] = { ...step, observed: event.observed }
+      return { ...state, matched }
     }
     case 'step-after': return { ...state, after: { ...state.after, [event.index]: event.after } }
     case 'add-expected': {

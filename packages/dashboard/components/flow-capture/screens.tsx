@@ -514,12 +514,14 @@ function ReviewView({ state, review, tap, marks, onRestart, onContinue, onKeep, 
             ? <><StepPicture src={picture} step={review.matched[picked.index]!} /><p className="text-xs text-muted-foreground">{copy.reviewPicture(picked.step + 1)}</p></>
             : <DeviceMirror tap={tap} label={copy.steps[1]} marks={marks} />}
         </div>
-        <div className="flex min-h-0 flex-col overflow-y-auto">
+        {/* 4 px in on every side: the column scrolls, and a focus ring on its edge would be cut. */}
+        <div className="flex min-h-0 flex-col overflow-y-auto p-1">
           <p role="status" className="text-sm font-medium">{copy.reviewDone}</p>
           <Accordion type="single" collapsible value={open} onValueChange={setOpen}>
             <AccordionItem value="review" className="border-b-0">
               <AccordionTrigger id={summaryId} aria-controls={open ? `${summaryId}-panel` : undefined}>{copy.reviewSummary(left, total)}</AccordionTrigger>
-              <AccordionContent id={`${summaryId}-panel`}>
+              {/* The trigger's id is ours, so the panel is named by it: Radix would name it by the id it made. */}
+              <AccordionContent id={`${summaryId}-panel`} aria-labelledby={summaryId}>
                 <p className="pb-2 text-xs text-muted-foreground">{copy.reviewHint}</p>
                 <ul className="grid gap-2">
                   {review.taps.map((t) => {
@@ -843,7 +845,8 @@ function EditRow({
         </div>
       )}
       {(secretName || typed) && (
-        <CollapsibleContent id={detailsId} className="relative z-10">
+        // Room past the panel's edges: it clips while it animates, and the field's focus ring is drawn outside it.
+        <CollapsibleContent id={detailsId} className="relative z-10 -mx-1 px-1 pb-1">
         <div ref={details} className="mt-2">
           {secretName
             ? (

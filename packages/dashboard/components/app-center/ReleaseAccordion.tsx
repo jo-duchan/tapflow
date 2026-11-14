@@ -72,7 +72,8 @@ export function ReleaseAccordion({
           ({builds.length} build{builds.length > 1 ? 's' : ''})
         </span>
       </AccordionTrigger>
-      <AccordionContent id={panelId} className="border-t bg-card pb-0">
+      {/* No region landmark: releases open independently, and a landmark for each open one crowds the list of them. */}
+      <AccordionContent id={panelId} role={undefined} className="border-t bg-card pb-0">
           {builds.map((b, idx) => (
             <BuildRow
               key={b.id}

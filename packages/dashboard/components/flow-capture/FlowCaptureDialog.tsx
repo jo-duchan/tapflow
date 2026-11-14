@@ -177,6 +177,7 @@ function CaptureSession({ tap, session, snapshot, bundleId, setBusy, close }: {
         const recorded = thumbnailUrl(tap.sessionId, snapshot, step)
         return recorded ? compareWithRecording(recorded, tap.surface(), masks, signal) : Promise.resolve(null)
       },
+      onObserved: (index, observed) => { if (run.isCurrent(signal)) dispatch({ type: 'step-observed', index, observed }) },
       onAfter: (index, after) => {
         if (!run.isCurrent(signal)) return
         if (after.screenshot) run.keep(after.screenshot)

@@ -164,6 +164,8 @@ export interface MatchHooks {
   /** The screen a touch left, by its index into the matched steps (1b-3c): Edit's "after this tap". Not on the steps,
    *  which have gone to the dialog by then, and which Edit what matched takes as they are. */
   onAfter?: (index: number, after: AfterTouch) => void
+  /** What a touch was seen to do, by its index into the matched steps, as soon as it is known. */
+  onObserved?: (index: number, observed: StepExpect | null) => void
   /** They differ, at `index` into the steps: resolves when the person goes on, rejects when the run is stopped. */
   onDiverged?: (index: number, divergence: ScreenDivergence) => Promise<void>
   signal: AbortSignal
@@ -323,7 +325,11 @@ export async function matchRange(
     const closing = watching
     watching = undefined
     if (!closing || !after) return
-    observed.set(closing.step, effects.observe(closing.before, after.elements, after.elements, closing.touched ? { touched: closing.touched } : {}))
+    const seen = effects.observe(closing.before, after.elements, after.elements, closing.touched ? { touched: closing.touched } : {})
+    observed.set(closing.step, seen)
+    // Told now, not only with the steps the run returns: Edit what matched after a stop takes the steps as they came, and
+    // its review must not offer a tap Match saw change the screen (review of P2c).
+    hooks.onObserved?.(closing.index, seen)
     if (!hooks.onAfter) return
     const shot = await channel.screenshot(sessionId, hooks.signal).catch(() => null)
     hooks.onAfter(closing.index, {
