@@ -97,11 +97,11 @@ export function UploadBuildDialog({ onSuccess, appId, canWrite }: Props) {
       <DialogTrigger asChild>
         <Button size="sm"><Upload className="mr-2 h-4 w-4" />Upload build</Button>
       </DialogTrigger>
-      <DialogContent size="md">
+      <DialogContent size="md" className="max-h-[calc(100dvh-2rem)] grid-rows-[auto_minmax(0,1fr)]">
         <DialogHeader>
           <DialogTitle>Upload build</DialogTitle>
         </DialogHeader>
-        <form onSubmit={handleUpload} className="flex flex-col gap-4 pt-2">
+        <form onSubmit={handleUpload} className="-mx-1 -mb-1 flex flex-col gap-4 overflow-y-auto px-1 pb-1 pt-2">
           <div className="grid gap-2">
             <Label htmlFor={fileId}>File</Label>
             <Button
@@ -109,7 +109,7 @@ export function UploadBuildDialog({ onSuccess, appId, canWrite }: Props) {
               type="button"
               variant="outline"
               aria-describedby={`${fileId}-name`}
-              className="h-auto min-h-24 w-full whitespace-normal break-all border-2 border-dashed font-normal hover:border-primary"
+              className="h-auto min-h-24 w-full whitespace-normal break-all border-2 border-dashed font-normal text-muted-foreground hover:border-primary hover:bg-background hover:text-muted-foreground"
               onClick={() => inputRef.current?.click()}
               onDragOver={(e) => e.preventDefault()}
               onDrop={(e) => { e.preventDefault(); const f = e.dataTransfer.files[0]; if (f) setFile(f) }}
