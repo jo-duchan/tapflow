@@ -452,10 +452,13 @@ describe('matchRange: the screen a touch left', () => {
   const viewer = { ...tap, chrome: () => null } as unknown as Tap
   it('hands over each tap\'s after-screen with its tree, the last one from the read after it', async () => {
     const afters: Array<[number, unknown]> = []
+    const seen: number[] = []
     screen.elements = [{ role: 'text', label: 'Welcome', frame: { x: 0, y: 0, width: 1, height: 0.1 }, enabled: true }]
     await matchRange(viewer, channel, lease, [launchStep, tapStep, textStep, tapStep], { start: 0, end: 4 }, null, {
-      ...hooks(), onAfter: (index, after) => afters.push([index, after.tree]),
+      ...hooks(), onAfter: (index, after) => afters.push([index, after.tree]), onObserved: (index) => seen.push(index),
     })
+    // What each touch did is told as it is known, by the same index (Edit what matched has nothing else to go by).
+    expect(seen).toEqual([2, 4])
     // launch #0, the turn the suite puts in #1, tap #2, text #3, tap #4: the two taps, by their places.
     expect(afters.map(([i]) => i)).toEqual([2, 4])
     expect(afters[0]![1]).toEqual(screen.elements)

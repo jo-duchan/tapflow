@@ -815,9 +815,11 @@ function EditRow({
             </Button>
           </CollapsibleTrigger>
         )}
+        {/* One button in the row's action slot either way (`data-remove` on both, which Remove's focus rule counts by): put
+            back, it stays focused and becomes the row's Remove — a second press removes the step, as on any row. */}
         {onPutBack
           ? (
-            <Button variant="ghost" size="icon" className="relative z-10 size-7 shrink-0" aria-label={copy.putBackStep(label)} title={copy.putBackStep(label)} onClick={onPutBack}>
+            <Button data-remove variant="ghost" size="icon" className="relative z-10 size-7 shrink-0" aria-label={copy.putBackStep(label)} title={copy.putBackStep(label)} onClick={onPutBack}>
               <RotateCcw aria-hidden className="h-4 w-4" />
             </Button>
           )

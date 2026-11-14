@@ -208,6 +208,7 @@ export function reduce(state: CaptureState, event: CaptureEvent): CaptureState {
     }
     // The flow is made again from the review with the tap kept: same steps in the same places, so what Edit holds by a
     // step's place (removed, made, expected, after) still points where it did. Like any edit, it asks for Verify again.
+    // A tap put back and then removed stays kept: the next Match's review shows it checked, where it can be unchecked.
     case 'put-back': {
       if (!state.reviewed || state.kept.includes(event.step)) return state
       const kept = [...state.kept, event.step]
