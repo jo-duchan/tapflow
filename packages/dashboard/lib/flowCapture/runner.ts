@@ -234,7 +234,9 @@ function previousSent(slice: RawStep[], offset: number): RawStep | undefined {
 /** Whether `slice[offset]` is a swipe whose next sent step is a tap the app named: that tap is found by its element,
  *  so how far this swipe carried the list is not compared — a fling's length differs between any two runs. */
 function swipeBeforeNamedTap(slice: RawStep[], offset: number): boolean {
-  if (slice[offset]?.kind !== 'swipe') return false
+  // One `scroll` cannot make (slanted, off the middle) leaves a tap whose element is not on the screen to its point
+  // (`namedTap`), with no search to stand in for the picture.
+  if (slice[offset]?.kind !== 'swipe' || scrollDirectionOf(slice[offset]!, {}) === null) return false
   for (let i = offset + 1; i < slice.length; i++) {
     const s = slice[i]!
     if (s.dropped) continue

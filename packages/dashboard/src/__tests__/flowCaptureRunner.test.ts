@@ -685,6 +685,17 @@ describe('matchRange with the app\'s touch reports', () => {
     expect(compare.mock.calls.map((c) => c[0])).toContain(swipeUp)
   })
 
+  // CodeRabbit on #1167: a slanted swipe gives the search no direction, so the tap after it may go to its point.
+  it('compares a slanted swipe before a named tap', async () => {
+    screen.elements = []
+    const slanted = { ...swipeUp, from: [0.2, 0.8], to: [0.8, 0.3] } as unknown as RawStep
+    const { compare, h } = compareHooks()
+    const lease = new PauseLease(ctap)
+    await matchRange(ctap, channel, lease, [launchStep, tapStep, tapStep, slanted, named], { start: 0, end: 5 }, null, h)
+    await lease.stop()
+    expect(compare.mock.calls.map((c) => c[0])).toEqual([tapStep, slanted, named])
+  })
+
   // CodeRabbit on #1167: an iOS tree keeps rows a list scrolled past, and `tapOn` alone failed such a row as off screen.
   it('searches for an element the tree holds off the screen, as for one it does not hold', async () => {
     screen.elements = [{ ...orders, frame: { ...frame, y: 1.3 } }]
