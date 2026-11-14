@@ -1094,6 +1094,25 @@ describe('IOSAgent', () => {
       browser.close()
     })
 
+    // CodeRabbit on #1166: a teardown during the flag's own write stopped first, and the late write left reports on.
+    it('stops the touch reports again when a shutdown lands while they are being turned on', async () => {
+      let finish!: () => void
+      const watch = vi.spyOn(AppObserver.prototype, 'watchTouches').mockImplementation((_d, on) => on ? new Promise<void>((r) => { finish = r }) : Promise.resolve())
+      const stop = vi.spyOn(AppObserver.prototype, 'stopTouches').mockResolvedValue()
+      const { agent, browser, internals, sent } = await bootedAgent(mockSimctl(true), false)
+      internals.handleRelayMessage({ type: 'device:boot', sessionId: agent.sessionId!, requestId: 'rq-r', payload: { deviceId: 'dev-1', recorded: true, touchObservations: true } } as never)
+      await vi.waitFor(() => expect(watch).toHaveBeenCalledWith('dev-1', true), { timeout: 3000 })
+      internals.handleRelayMessage({ type: 'device:shutdown', sessionId: agent.sessionId!, requestId: 'rq-off', payload: { deviceId: 'dev-1' } } as never)
+      await new Promise((r) => setTimeout(r, 100))
+      stop.mockClear()
+      finish()
+      await vi.waitFor(() => expect(sent.some((m) => m.type === 'device:boot-error' && m['requestId'] === 'rq-r')).toBe(true), { timeout: 3000 })
+      expect(stop).toHaveBeenCalledWith('dev-1')
+      watch.mockRestore(); stop.mockRestore()
+      agent.disconnect()
+      browser.close()
+    })
+
     it('boots anyway when app accessibility cannot be turned on', async () => {
       const enable = vi.spyOn(AppAccessibility.prototype, 'enable').mockRejectedValue(new Error('defaults timed out'))
       const { agent, browser, internals, sent } = await bootedAgent(mockSimctl(true), false)

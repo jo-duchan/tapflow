@@ -1288,6 +1288,12 @@ export class IOSAgent implements DeviceAgent, NetworkControlCapability, Posturab
       await this.appObserver.watchTouches(deviceId, observeTouches).catch((e: unknown) => {
         logger.warn('could not set the app observer\'s touch reports:', (e as Error).message)
       })
+      // A teardown inside that write ran its stop first, and the late flag would leave the app reporting with nobody to
+      // read it. A newer boot is still waiting for its device here, so this stop cannot land on its watch.
+      if (observeTouches && seq !== state.bootSeq) {
+        await this.appObserver.stopTouches(deviceId).catch(() => {})
+        this.abandonBoot(state, seq, sessionId, requestId); return
+      }
       // **Where it is held, before the first frame says so** (#910). The orientation is the device's, shared with
       // DeviceHub and every viewer, so it is read and reported as it is, and a reload or a second viewer joins it
       // there rather than turning it under the first. It is stood up only when there is nothing to report — no
