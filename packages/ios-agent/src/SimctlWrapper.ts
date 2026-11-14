@@ -137,6 +137,10 @@ const defaultPlistReader: PlistReader = async (path) =>
 
 export class SimctlWrapper {
   private readonly kbd = new KeyboardHelperDaemon()
+  // Devices whose keyboard prefs were written and whose daemon restart then failed: their prefs no longer say what the
+  // daemon types with, so a later set restarts whatever they read (CodeRabbit on #1165). This process's own record; an
+  // agent restarted in between does not have it.
+  private readonly kbdUnconfirmed = new Set<string>()
 
   constructor(
     private readonly runner: SimctlRunner = defaultRunner,
@@ -560,9 +564,19 @@ export class SimctlWrapper {
     const target = keyboard ?? keyboards[0]
     if (!target || !keyboards.includes(target)) return false
     const next = keyboards.find((k) => k !== target && !k.startsWith('emoji')) ?? target
+    // Already so: the daemon is not restarted. A restart right after another one (a run reset's, then a replay's
+    // keyboard-set) took 10.3 s, against 0.37 s cold (measured, iOS 26.5), and Match paid it on every run. Both keys must
+    // say so: the daemon writes `KeyboardLastUsed` when a person switches language (Caps Lock), so a device left with it
+    // and the list disagreeing (measured: ko and en, typing in ko) is restarted.
+    // Not when the last restart after a write failed: the daemon is then behind its prefs (`kbdUnconfirmed`).
+    const prefs = await exec('spawn', udid, 'defaults', 'read', 'com.apple.keyboard.preferences').catch(() => '')
+    if (!this.kbdUnconfirmed.has(udid) && keyboardPrefsAre(prefs, [target, target, next])) return true
+    // Unconfirmed from the first write: a second write that fails can leave the prefs matching (the list already was)
+    // with no restart behind them (CodeRabbit on #1165). Cleared only by a restart that succeeded.
+    this.kbdUnconfirmed.add(udid)
     await exec('spawn', udid, 'defaults', 'write', 'com.apple.keyboard.preferences', 'KeyboardLastUsed', target)
     await exec('spawn', udid, 'defaults', 'write', 'com.apple.keyboard.preferences', 'KeyboardsCurrentAndNext', '-array', target, target, next)
-    await this.restartKeyboardDaemon(udid, deadline)
+    if (await this.restartKeyboardDaemon(udid, deadline)) this.kbdUnconfirmed.delete(udid)
     return true
   }
 
@@ -584,13 +598,14 @@ export class SimctlWrapper {
   // domain on iOS 26.4 (measured), where `system/com.apple.kbd`, used until #1134, does not exist and failed in silence.
   // The old name is still tried when the new one fails, for an older runtime nobody has measured. Errors are ignored —
   // changes take effect on the next text field focus if the daemon isn't running yet.
-  private async restartKeyboardDaemon(udid: string, deadline?: number): Promise<void> {
+  private async restartKeyboardDaemon(udid: string, deadline?: number): Promise<boolean> {
     for (const service of ['user/foreground/com.apple.TextInput.kbd', 'system/com.apple.kbd']) {
       try {
         await this.execBy(deadline, 'spawn', udid, 'launchctl', 'kickstart', '-k', service)
-        return
+        return true
       } catch { /* try the next name */ }
     }
+    return false
   }
 
   /** A simctl call that ends by `deadline` (epoch ms), or unbounded without one. */
@@ -659,4 +674,17 @@ export class SimctlWrapper {
   stopKeyboardDaemon(): void {
     this.kbd.stop()
   }
+}
+
+/** Whether `defaults read com.apple.keyboard.preferences` says `list[0]` is the keyboard last used and the
+ *  current-and-next list is `list`, as `setKeyboardLanguage` writes them. Anything unreadable is not. */
+export function keyboardPrefsAre(prefs: string, list: readonly string[]): boolean {
+  // Quoted when it holds `;` or `=`, as every keyboard name does: `"ko_KR@sw=Korean;hw=Automatic"`. The key starts a
+  // line or follows `{`/`;`, so a key that merely ends in the name does not count.
+  const m = /(?:^|[\s{;])KeyboardLastUsed\s*=\s*(?:"([^"]*)"|([^;\s]+));/.exec(prefs)
+  const lastUsed = m?.[1] ?? m?.[2]
+  const body = /(?:^|[\s{;])KeyboardsCurrentAndNext\s*=\s*\(([^)]*)\)/.exec(prefs)?.[1]
+  if (lastUsed !== list[0] || body === undefined) return false
+  const items = [...body.matchAll(/"([^"]*)"|([^\s,]+)/g)].map((x) => x[1] ?? x[2])
+  return items.length === list.length && items.every((k, i) => k === list[i])
 }

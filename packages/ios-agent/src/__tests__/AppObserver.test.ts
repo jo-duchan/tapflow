@@ -30,9 +30,11 @@ function setup(opts: { running?: boolean; deadlineMs?: number } = {}) {
 function app(dir: string, body: (nonce: string) => Record<string, unknown> | undefined, bundle?: string) {
   let last = ''
   const timer = setInterval(() => {
-    const req = join(dir, 'request')
-    if (!existsSync(req)) return
-    const [nonce = '', asked] = readFileSync(req, 'utf8').split('\n')
+    // Read once, not checked first: the agent takes the request back the moment it has an answer, and a read between
+    // a check and the read threw ENOENT out of this timer, an unhandled error that failed the run (CI on #1165).
+    let text: string
+    try { text = readFileSync(join(dir, 'request'), 'utf8') } catch { return }
+    const [nonce = '', asked] = text.split('\n')
     if (bundle !== undefined && asked !== bundle) return
     if (nonce === last) return
     last = nonce
