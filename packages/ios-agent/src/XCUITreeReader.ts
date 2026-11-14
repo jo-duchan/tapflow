@@ -458,9 +458,9 @@ export class XCUITreeReader {
     this.releaseIfIdle(udid)
   }
 
-  // Start the idle countdown for a runner nothing keeps and nothing is asking, as the end of a request would.
+  // Start the idle countdown for a runner nothing is asking, as the end of a request would (`end` leaves a kept one).
   private releaseIfIdle(udid: string): void {
-    if (this.kept.has(udid) || this.inFlight.has(udid)) return
+    if (this.inFlight.has(udid)) return
     this.inFlight.set(udid, 1)
     this.end(udid)
   }
