@@ -1296,7 +1296,9 @@ describe('touch reports', () => {
       const b = el({ label: 'Glaze', frame: at(0.1, 0.7) })
       const cell = el({ label: 'Daytime, Salty', identifier: 'cell.3', frame: at(0.5, 0.5) })
       expect(recordedTarget([a, b], { point: { x: 0, y: 0 }, moving: false, element: { label: 'Glaze', traits: 0, frame: at(0.1, 0.68) } })).toBe(b)
-      expect(recordedTarget([a, cell], { point: { x: 0, y: 0 }, moving: false, element: { label: 'Salty', traits: 0 }, button: { identifier: 'cell.3', traits: 1 } })).toBe(cell)
+      // The cell, not its subtitle, even where the subtitle is in the tree on its own.
+      const subtitle = el({ label: 'Salty', frame: at(0.5, 0.52) })
+      expect(recordedTarget([a, subtitle, cell], { point: { x: 0, y: 0 }, moving: false, element: { label: 'Salty', traits: 0 }, button: { identifier: 'cell.3', traits: 1 } })).toBe(cell)
       // Several with no frame to choose by: none rather than a guess.
       expect(recordedTarget([a, b], { point: { x: 0, y: 0 }, moving: false, element: { label: 'Glaze', traits: 0 } })).toBeNull()
     })
@@ -1305,6 +1307,9 @@ describe('touch reports', () => {
       const obs = (over: Partial<TouchObservation>): TouchObservation => ({ point: { x: 0, y: 0 }, moving: false, ...over })
       expect(recordedTarget([el({ label: 'q' })], obs({ surface: 'keyboard', element: { label: 'q', traits: 0 } }))).toBeNull()
       expect(recordedTarget([field], obs({ element: { label: 'hunter2', traits: 0, input: true } }))).toBeNull()
+      // A field that does not hide its text is not named by it either: its label can be what was typed.
+      const plain = el({ role: 'input', label: 'a@b.co', secure: false })
+      expect(recordedTarget([plain], obs({ element: { label: 'a@b.co', traits: 0, input: true } }))).toBeNull()
       expect(recordedTarget([field], obs({ element: { label: 'hunter2', traits: 0 } }))).toBeNull()
       expect(recordedSelector(obs({ element: { label: 'hunter2', traits: 0, input: true } }))).toBeNull()
       expect(recordedSelector(obs({ element: { label: 'Order#1215', traits: 1 } }))).toEqual({ label: 'Order#1215', exact: true })
