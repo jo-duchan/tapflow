@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from 'vitest'
 import { fireEvent, render, screen } from '@testing-library/react'
 import type { CapturedStep, RawStep } from '@tapflowio/flow-runner/browser'
 import { MatchScreen } from '@/components/flow-capture/screens'
-import { canGoTo, initialState, isRunning, reduce, reviewedCapture, reviewTaps, type CaptureState } from '@/lib/flowCapture/machine'
+import { canGoTo, initialState, isRunning, matchEnded, reduce, reviewedCapture, reviewTaps, type CaptureState } from '@/lib/flowCapture/machine'
 
 // P2c: taps the app did not respond to when recorded wait at Match's end, to be kept or (by default) left out.
 const tap = (label: string, touched?: { acted?: boolean; tapCount?: number }): RawStep => ({
@@ -43,6 +43,11 @@ describe('the review state', () => {
     expect(captured.steps.map((s) => s.skipped ?? s.step?.type)).toEqual(['no-response', 'tapOn', 'tapOn'])
     const unkept = reduce(kept, { type: 'set-kept', step: 2, kept: false })
     expect(reviewedCapture(unkept.review!, unkept.kept).steps.map((s) => s.skipped ?? s.step?.type)).toEqual(['no-response', 'tapOn', 'no-response'])
+  })
+
+  it('waits for the review only when the app ignored some taps', () => {
+    expect(matchEnded(steps, matched).type).toBe('match-reviewed')
+    expect(matchEnded(steps, [matched[1]!])).toMatchObject({ type: 'match-finished' })
   })
 
   it('goes to Edit on match-finished, without the review', () => {

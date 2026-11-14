@@ -377,3 +377,9 @@ export function reviewedCapture(review: Review, kept: readonly number[]): Captur
   const keep = new Set(kept)
   return toFlowSteps(leaveOut(review.matched, review.taps.filter((t) => !keep.has(t.step)).map((t) => t.index)))
 }
+
+/** Where Match goes when it ends, or is taken as far as it got: to its review when the app ignored some taps, else Edit. */
+export function matchEnded(steps: readonly RawStep[], matched: CapturedStep[]): CaptureEvent {
+  const taps = reviewTaps(steps, matched)
+  return taps.length > 0 ? { type: 'match-reviewed', review: { matched, taps } } : { type: 'match-finished', captured: toFlowSteps(matched) }
+}

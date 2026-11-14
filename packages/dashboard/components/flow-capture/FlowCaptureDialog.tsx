@@ -1,6 +1,6 @@
 import { useEffect, useReducer, useRef, useState, type MutableRefObject, type RefObject } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { isSecretName, toFlowSteps, type CapturedStep, type RawStep } from '@tapflowio/flow-runner/browser'
+import { isSecretName, type CapturedStep, type RawStep } from '@tapflowio/flow-runner/browser'
 import type { CaptureSnapshot } from '@tapflowio/protocol/capture'
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Stepper } from '@/components/ui/stepper'
@@ -9,7 +9,7 @@ import { useFocusAfterSwap } from '@/hooks/useFocusAfterSwap'
 import { DashboardSessionChannel } from '@/lib/flowCapture/channel'
 import { copy } from '@/lib/flowCapture/copy'
 import { editedCapture, exportedFlow, flowOf, secretRename } from '@/lib/flowCapture/flow'
-import { canGoTo, initialState, reachedStep, reduce, reviewedCapture, reviewTaps, stepIndex, withAsked, type CaptureState } from '@/lib/flowCapture/machine'
+import { canGoTo, initialState, reachedStep, matchEnded, reduce, reviewedCapture, stepIndex, withAsked, type CaptureState } from '@/lib/flowCapture/machine'
 import { DialogRun, keyboardOf, loadSnapshot, matchRange, PauseLease, stepsOf, verifyFlow } from '@/lib/flowCapture/runner'
 import { compareWithRecording } from '@/lib/flowCapture/screenCompare'
 import type { CaptureTap } from '@/lib/flowCapture/tap'
@@ -154,10 +154,7 @@ function CaptureSession({ tap, session, snapshot, bundleId, setBusy, close }: {
   const keyboard = keyboardOf(snapshot, state.steps, state.range)
 
   // Match's end: to Edit, unless some taps the app did not respond to wait for the person's review there (P2c).
-  const finishMatch = (matched: CapturedStep[]) => {
-    const taps = reviewTaps(state.steps, matched)
-    dispatch(taps.length > 0 ? { type: 'match-reviewed', review: { matched, taps } } : { type: 'match-finished', captured: toFlowSteps(matched) })
-  }
+  const finishMatch = (matched: CapturedStep[]) => dispatch(matchEnded(state.steps, matched))
   const continueToEdit = () => {
     if (state.review) dispatch({ type: 'match-finished', captured: reviewedCapture(state.review, state.kept) })
   }
