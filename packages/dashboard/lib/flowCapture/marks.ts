@@ -21,9 +21,13 @@ export function markOf(raw: RawStep): StepMark | null {
   }
 }
 
-/** The marks after one more touch: the cursor moves to it and it leaves a trail, the last few kept. */
+/**
+ * The marks after one more touch: the cursor moves to it and it leaves a trail — its own only. The MCP watch view keeps
+ * the last few, to show what an agent has been doing; a replay is watched for the step it is on, and earlier strokes
+ * left on the picture read as that swipe made again (user, session ff5d3d3c).
+ */
 export function addMark(marks: WatchMarks, id: number, mark: StepMark): WatchMarks {
   const action = mark.kind === 'tap' ? { kind: 'tap' as const, x: mark.x, y: mark.y } : { kind: 'swipe' as const, from: mark.from, to: mark.to }
   const to = mark.kind === 'tap' ? { x: mark.x, y: mark.y } : { x: mark.to[0], y: mark.to[1] }
-  return { cursor: to, trails: [...marks.trails.slice(-3), trailOf(id, action, marks.cursor)] }
+  return { cursor: to, trails: [trailOf(id, action, marks.cursor)] }
 }
