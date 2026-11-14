@@ -637,6 +637,33 @@ describe('SimctlWrapper', () => {
       expect(runner.exec).toHaveBeenCalledTimes(2)
     })
 
+    // CodeRabbit on #1165: prefs written and the restart failed left the daemon behind them, and the next set with the
+    // same language skipped. It restarts until a restart succeeds.
+    it('restarts again after a failed restart, though the prefs already say so, and skips once one succeeded', async () => {
+      let kickstarts = 0
+      let failing = true
+      const runner = {
+        exec: vi.fn(async (...args: string[]) => {
+          if (args.includes('AppleKeyboards')) return LIST
+          if (args[3] === 'read') return prefs(KO, KO)
+          if (args.includes('kickstart')) { kickstarts++; if (failing) throw new Error('timed out') }
+          return ''
+        }),
+        execBinary: vi.fn().mockResolvedValue(Buffer.alloc(0)),
+        execWithOpts: vi.fn().mockResolvedValue(''),
+      } satisfies SimctlRunner
+      const simctl = new SimctlWrapper(runner)
+      // Prefs that do not match yet: written, and both daemon names fail.
+      runner.exec.mockImplementationOnce(async () => LIST).mockImplementationOnce(async () => '')
+      await simctl.setKeyboardLanguage('device-1', KO)
+      expect(kickstarts).toBe(2)
+      failing = false
+      await simctl.setKeyboardLanguage('device-1', KO)
+      expect(kickstarts).toBe(3)
+      await simctl.setKeyboardLanguage('device-1', KO)
+      expect(kickstarts).toBe(3)
+    })
+
     // Measured: a device left with these disagreeing typed in the one last used, not the list's first.
     it('still sets and restarts when the last used and the list disagree, either way', async () => {
       const otherNext = prefs(KO, KO).replace('"en_US@sw=QWERTY;hw=Automatic"\n', '"ko_KR@sw=Korean;hw=Automatic"\n')

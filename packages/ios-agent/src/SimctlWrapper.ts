@@ -137,6 +137,10 @@ const defaultPlistReader: PlistReader = async (path) =>
 
 export class SimctlWrapper {
   private readonly kbd = new KeyboardHelperDaemon()
+  // Devices whose keyboard prefs were written and whose daemon restart then failed: their prefs no longer say what the
+  // daemon types with, so a later set restarts whatever they read (CodeRabbit on #1165). This process's own record; an
+  // agent restarted in between does not have it.
+  private readonly kbdUnconfirmed = new Set<string>()
 
   constructor(
     private readonly runner: SimctlRunner = defaultRunner,
@@ -564,14 +568,13 @@ export class SimctlWrapper {
     // keyboard-set) took 10.3 s, against 0.37 s cold (measured, iOS 26.5), and Match paid it on every run. Both keys must
     // say so: the daemon writes `KeyboardLastUsed` when a person switches language (Caps Lock), so a device left with it
     // and the list disagreeing (measured: ko and en, typing in ko) is restarted.
-    // Not repaired by this: prefs written and the restart that followed them failed (its errors are swallowed) leave the
-    // daemon behind the prefs, and the next set now skips. Reaching it needs the budget to run out between the writes
-    // and the restart.
+    // Not when the last restart after a write failed: the daemon is then behind its prefs (`kbdUnconfirmed`).
     const prefs = await exec('spawn', udid, 'defaults', 'read', 'com.apple.keyboard.preferences').catch(() => '')
-    if (keyboardPrefsAre(prefs, [target, target, next])) return true
+    if (!this.kbdUnconfirmed.has(udid) && keyboardPrefsAre(prefs, [target, target, next])) return true
     await exec('spawn', udid, 'defaults', 'write', 'com.apple.keyboard.preferences', 'KeyboardLastUsed', target)
     await exec('spawn', udid, 'defaults', 'write', 'com.apple.keyboard.preferences', 'KeyboardsCurrentAndNext', '-array', target, target, next)
-    await this.restartKeyboardDaemon(udid, deadline)
+    if (await this.restartKeyboardDaemon(udid, deadline)) this.kbdUnconfirmed.delete(udid)
+    else this.kbdUnconfirmed.add(udid)
     return true
   }
 
@@ -593,13 +596,14 @@ export class SimctlWrapper {
   // domain on iOS 26.4 (measured), where `system/com.apple.kbd`, used until #1134, does not exist and failed in silence.
   // The old name is still tried when the new one fails, for an older runtime nobody has measured. Errors are ignored —
   // changes take effect on the next text field focus if the daemon isn't running yet.
-  private async restartKeyboardDaemon(udid: string, deadline?: number): Promise<void> {
+  private async restartKeyboardDaemon(udid: string, deadline?: number): Promise<boolean> {
     for (const service of ['user/foreground/com.apple.TextInput.kbd', 'system/com.apple.kbd']) {
       try {
         await this.execBy(deadline, 'spawn', udid, 'launchctl', 'kickstart', '-k', service)
-        return
+        return true
       } catch { /* try the next name */ }
     }
+    return false
   }
 
   /** A simctl call that ends by `deadline` (epoch ms), or unbounded without one. */
