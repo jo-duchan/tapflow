@@ -664,6 +664,36 @@ describe('SimctlWrapper', () => {
       expect(kickstarts).toBe(3)
     })
 
+    // CodeRabbit on #1165, second round: the list already matched, the first write made the last-used match too, and
+    // the second write failed before any restart. A retry must still restart.
+    it('restarts on a retry after a write failed between the two, though the prefs now match', async () => {
+      let kickstarts = 0
+      let writes = 0
+      let current = prefs(EN, KO)
+      const runner = {
+        exec: vi.fn(async (...args: string[]) => {
+          if (args.includes('AppleKeyboards')) return LIST
+          if (args[3] === 'read') return current
+          if (args[3] === 'write') {
+            writes++
+            if (writes === 1) { current = prefs(KO, KO); return '' }
+            if (writes === 2) throw new Error('timed out')
+          }
+          if (args.includes('kickstart')) kickstarts++
+          return ''
+        }),
+        execBinary: vi.fn().mockResolvedValue(Buffer.alloc(0)),
+        execWithOpts: vi.fn().mockResolvedValue(''),
+      } satisfies SimctlRunner
+      const simctl = new SimctlWrapper(runner)
+      await expect(simctl.setKeyboardLanguage('device-1', KO)).rejects.toThrow('timed out')
+      expect(kickstarts).toBe(0)
+      await simctl.setKeyboardLanguage('device-1', KO)
+      expect(kickstarts).toBe(1)
+      await simctl.setKeyboardLanguage('device-1', KO)
+      expect(kickstarts).toBe(1)
+    })
+
     // Measured: a device left with these disagreeing typed in the one last used, not the list's first.
     it('still sets and restarts when the last used and the list disagree, either way', async () => {
       const otherNext = prefs(KO, KO).replace('"en_US@sw=QWERTY;hw=Automatic"\n', '"ko_KR@sw=Korean;hw=Automatic"\n')

@@ -571,10 +571,12 @@ export class SimctlWrapper {
     // Not when the last restart after a write failed: the daemon is then behind its prefs (`kbdUnconfirmed`).
     const prefs = await exec('spawn', udid, 'defaults', 'read', 'com.apple.keyboard.preferences').catch(() => '')
     if (!this.kbdUnconfirmed.has(udid) && keyboardPrefsAre(prefs, [target, target, next])) return true
+    // Unconfirmed from the first write: a second write that fails can leave the prefs matching (the list already was)
+    // with no restart behind them (CodeRabbit on #1165). Cleared only by a restart that succeeded.
+    this.kbdUnconfirmed.add(udid)
     await exec('spawn', udid, 'defaults', 'write', 'com.apple.keyboard.preferences', 'KeyboardLastUsed', target)
     await exec('spawn', udid, 'defaults', 'write', 'com.apple.keyboard.preferences', 'KeyboardsCurrentAndNext', '-array', target, target, next)
     if (await this.restartKeyboardDaemon(udid, deadline)) this.kbdUnconfirmed.delete(udid)
-    else this.kbdUnconfirmed.add(udid)
     return true
   }
 
