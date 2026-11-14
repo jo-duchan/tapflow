@@ -693,8 +693,9 @@ describe('matchRange with the app\'s touch reports', () => {
     await lease.stop()
     expect(flowsAsSteps()).toEqual([['tapOn'], ['scroll down', 'tapOn']])
     expect(log.filter((l) => l.startsWith('replay'))).toEqual(['replay launch', 'replay tap', 'replay tap', 'replay swipe'])
-    // Found after a scroll: its effect is not read against the screen from before it.
-    expect(onAfter.mock.calls.map((c) => c[0])).not.toContain(4)
+    // Found after a scroll: its effect is not read against the screen from before it. Launch #0, the suite's turn #1,
+    // the taps #2 and #3 (watched), the swipe #4 (not a tap), the named tap #5.
+    expect(onAfter.mock.calls.map((c) => c[0])).toEqual([2, 3])
   })
 
   // Review of P2b: the engine takes no signal, and a scroll search ran on for up to 30 s after Stop.
