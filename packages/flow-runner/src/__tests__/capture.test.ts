@@ -7,8 +7,10 @@ import type { KeyboardState } from '@tapflowio/protocol'
 import type { CaptureEntry, CapturedMessage } from '@tapflowio/protocol/capture'
 import {
   askedValues, segment, defaultRange, rangeWarnings, stepsBeforeRange, matchStep, reachQuestions, toFlowSteps, flowSteps, flowToYaml, rawStepLabel, capturedStepLabel,
+  recordedTarget, recordedSelector, scrollDirectionOf, replayStep,
   type MatchContext, type RawStep,
 } from '../capture/index.js'
+import type { TouchObservation } from '@tapflowio/protocol'
 import { parseFlow } from '../schema.js'
 
 // A recording as the relay keeps it: messages stamped with its clock, acks after the inputs they answer.
@@ -52,6 +54,13 @@ class Rec {
   launch(buildId = 7): this { return this.wait(100).msg({ type: 'app:launch', sessionId: 's', requestId: this.id(), buildId }, true) }
   install(buildId = 7): this { return this.wait(100).msg({ type: 'app:install', sessionId: 's', requestId: this.id(), buildId }, true) }
   steps(): RawStep[] { return segment(this.entries) }
+  /** The app's report of the last touch (record-time observation), keyed by its end as the relay keeps it. */
+  touched(touched: Omit<TouchObservation, 'point'>): this {
+    const end = [...this.entries].reverse().find((e) => e.kind === 'input' && e.msg.type === 'input:touch:end')
+    const requestId = end && end.kind === 'input' && 'requestId' in end.msg ? end.msg.requestId! : ''
+    this.entries.push({ at: this.t + 10, kind: 'touched', requestId, touched: { point: { x: 0, y: 0 }, ...touched } })
+    return this
+  }
 }
 
 const el = (over: Partial<UIElement>): UIElement => ({
@@ -1234,5 +1243,88 @@ describe('recorded in the dashboard', () => {
       // Recorded before the relay read fields: no read tried, so neither is marked.
       expect(runs.some((s) => s.fieldRead !== undefined || s.replace)).toBe(false)
     }
+  })
+})
+
+// Record-time observation (P2b): what the app reported of each touch decides what Match replays and how.
+describe('touch reports', () => {
+  const load = (): CaptureEntry[] =>
+    (JSON.parse(readFileSync(join(dirname(fileURLToPath(import.meta.url)), 'fixtures', 'capture-ios-touched.json'), 'utf8')) as { entries: CaptureEntry[] }).entries
+
+  it('leaves out a tap that went down on a moving list, and only that: the user\'s session 76c2ee09', () => {
+    const steps = segment(load())
+    // #33 back, #34 back (same point, other element), #35 swipe, #36 stopped the glide, #37 its retry, #38–39 swipes, #40 a row.
+    expect(steps.map((s) => s.kind)).toEqual(['tap', 'tap', 'swipe', 'tap', 'tap', 'swipe', 'swipe', 'tap'])
+    expect(steps.map((s) => s.dropped ?? null)).toEqual([null, null, null, 'stopped-scroll', null, null, null, null])
+    expect(steps.every((s) => 'touched' in s && s.touched !== undefined)).toBe(true)
+    const named = (s: RawStep) => ('touched' in s ? s.touched?.element?.label : undefined)
+    expect([named(steps[0]!), named(steps[1]!)]).toEqual(['Donuts', 'Truck'])
+  })
+
+  it('does not leave out a moving tap the device refused (already skipped), nor a swipe that began mid-glide', () => {
+    const steps = new Rec().touch([[0.5, 0.5]], { ok: false }).touched({ moving: true })
+      .wait(500).touch([[0.5, 0.8], [0.5, 0.5], [0.5, 0.3]]).touched({ moving: true }).steps()
+    expect(steps.map((s) => s.dropped ?? null)).toEqual([null, null])
+    expect(matchStep(steps[0]!, ctxOf([])).skipped).toBe('refused')
+  })
+
+  it('skips a dropped tap in Match: not replayed, no reach asked, matched as stopped-scroll', async () => {
+    const [tap] = new Rec().touch([[0.3, 0.3]]).touched({ moving: true, element: { label: 'New Orders', traits: 1 } }).steps()
+    const ctx = ctxOf([el({ label: 'New Orders', frame: { x: 0.2, y: 0.2, width: 0.2, height: 0.2 } })])
+    expect(reachQuestions(tap!, ctx)).toEqual([])
+    expect(matchStep(tap!, ctx)).toMatchObject({ step: null, skipped: 'stopped-scroll' })
+    let sent = 0
+    const channel = { replayInputs: async () => { sent++ } } as unknown as Parameters<typeof replayStep>[0]
+    expect(await replayStep(channel, 's', tap!)).toBe('not-replayed')
+    expect(sent).toBe(0)
+  })
+
+  it('never starts the range on a dropped tap, and does not count one before it', () => {
+    const steps = new Rec().install().touch([[0.3, 0.3]]).touched({ moving: true }).touch([[0.3, 0.3]]).touched({ moving: false }).steps()
+    expect(defaultRange(steps).start).toBe(2)
+    // A range the person started on it warns by the first step the replay sends, which the reads place in the app.
+    const withHome = steps.map((s, i) => (i === 2 ? { ...s, onHome: false } : s))
+    expect(rangeWarnings(withHome, { start: 1, end: 3 })).toEqual([])
+    const before = steps.map((s) => ({ ...s, onHome: false }))
+    expect(stepsBeforeRange(before, { start: 3, end: 3 })).toEqual([2])
+    // CodeRabbit on #1167: with no install or launch the fallback chose the first step, dropped or not.
+    const bare = new Rec().touch([[0.3, 0.3]]).touched({ moving: true }).touch([[0.3, 0.3]]).touched({ moving: false }).steps()
+    expect(defaultRange(bare).start).toBe(1)
+  })
+
+  describe('recordedTarget', () => {
+    const at = (x: number, y: number) => ({ x, y, width: 0.2, height: 0.05 })
+    it('finds the button by identifier first, then the element by label, nearest the recorded frame among several', () => {
+      const a = el({ label: 'Glaze', frame: at(0.1, 0.2) })
+      const b = el({ label: 'Glaze', frame: at(0.1, 0.7) })
+      const cell = el({ label: 'Daytime, Salty', identifier: 'cell.3', frame: at(0.5, 0.5) })
+      expect(recordedTarget([a, b], { point: { x: 0, y: 0 }, moving: false, element: { label: 'Glaze', traits: 0, frame: at(0.1, 0.68) } })).toBe(b)
+      // The cell, not its subtitle, even where the subtitle is in the tree on its own.
+      const subtitle = el({ label: 'Salty', frame: at(0.5, 0.52) })
+      expect(recordedTarget([a, subtitle, cell], { point: { x: 0, y: 0 }, moving: false, element: { label: 'Salty', traits: 0 }, button: { identifier: 'cell.3', traits: 1 } })).toBe(cell)
+      // Several with no frame to choose by: none rather than a guess.
+      expect(recordedTarget([a, b], { point: { x: 0, y: 0 }, moving: false, element: { label: 'Glaze', traits: 0 } })).toBeNull()
+    })
+    it('names nothing for the keyboard, a web view or Flutter, a text input by its label, or a secure field', () => {
+      const field = el({ role: 'input', label: 'hunter2', secure: true })
+      const obs = (over: Partial<TouchObservation>): TouchObservation => ({ point: { x: 0, y: 0 }, moving: false, ...over })
+      expect(recordedTarget([el({ label: 'q' })], obs({ surface: 'keyboard', element: { label: 'q', traits: 0 } }))).toBeNull()
+      expect(recordedTarget([field], obs({ element: { label: 'hunter2', traits: 0, input: true } }))).toBeNull()
+      // A field that does not hide its text is not named by it either: its label can be what was typed.
+      const plain = el({ role: 'input', label: 'a@b.co', secure: false })
+      expect(recordedTarget([plain], obs({ element: { label: 'a@b.co', traits: 0, input: true } }))).toBeNull()
+      expect(recordedTarget([field], obs({ element: { label: 'hunter2', traits: 0 } }))).toBeNull()
+      expect(recordedSelector(obs({ element: { label: 'hunter2', traits: 0, input: true } }))).toBeNull()
+      expect(recordedSelector(obs({ element: { label: 'Order#1215', traits: 1 } }))).toEqual({ label: 'Order#1215', exact: true })
+      expect(recordedSelector(obs({ element: { identifier: 'row.7', label: 'x', traits: 1 } }))).toEqual({ id: 'row.7' })
+      // A button named only by its traits leaves the element's name to search by (CodeRabbit on #1167).
+      expect(recordedSelector(obs({ button: { traits: 1 }, element: { label: 'Salty', traits: 0 } }))).toEqual({ label: 'Salty', exact: true })
+    })
+  })
+
+  it('says which way a swipe scrolls, as `scroll` does', () => {
+    const [up, slanted] = new Rec().touch([[0.5, 0.8], [0.5, 0.5], [0.5, 0.3]]).wait(300).touch([[0.2, 0.8], [0.4, 0.6], [0.6, 0.4]]).steps()
+    expect(scrollDirectionOf(up!, {})).toBe('down')
+    expect(scrollDirectionOf(slanted!, {})).toBeNull()
   })
 })

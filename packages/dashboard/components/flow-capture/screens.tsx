@@ -30,9 +30,18 @@ import { typedOnScreenKeyboard, type AfterTouch } from '@/lib/flowCapture/runner
 
 type FlowFile = Omit<Flow, 'file'>
 
-/** Step numbers as the strip shows them: `#4` or `#4–#6`, from indices into the steps. */
-const spanOf = (indices: number[]): string =>
-  indices.length === 1 ? `#${indices[0]! + 1}` : `#${indices[0]! + 1}–#${indices[indices.length - 1]! + 1}`
+/** Step numbers as the strip shows them, from ascending indices into the steps: `#4`, `#4–#6`, or `#2, #4–#6` when they
+ *  are not one run — a span across a gap would name a step that is not among them. */
+const spanOf = (indices: number[]): string => {
+  const runs: string[] = []
+  for (let i = 0; i < indices.length;) {
+    let j = i
+    while (j + 1 < indices.length && indices[j + 1] === indices[j]! + 1) j++
+    runs.push(i === j ? `#${indices[i]! + 1}` : `#${indices[i]! + 1}–#${indices[j]! + 1}`)
+    i = j + 1
+  }
+  return runs.join(', ')
+}
 
 /** The step's buttons, at the bottom of the dialog on every step. As tall as a row of buttons (h-10, its pt-4 and border)
  *  even with none in it (a verification running), so the line above them does not jump when they appear. */
@@ -334,12 +343,13 @@ const typedOnSoftKeyboard = (step: RawStep): boolean =>
 
 /** A name cut short in the tile is shown whole on hover. The list item already holds it whole for a screen reader. */
 function RangeTile({ step, index, inRange, left, picture }: { step: RawStep; index: number; inRange: boolean; left: number; picture: string | null }) {
-  const label = rawStepLabel(step)
+  // A tap left out before the replay is drawn as one outside the range, and says why.
+  const label = step.dropped ? `${rawStepLabel(step)} — ${copy.droppedTile}` : rawStepLabel(step)
   return (
     <Tooltip>
       <TooltipTrigger asChild>
         <li
-          className={cn('absolute flex flex-col gap-1 p-2 text-xs transition-[left,opacity]', SLIDE, !inRange && 'opacity-50')}
+          className={cn('absolute flex flex-col gap-1 p-2 text-xs transition-[left,opacity]', SLIDE, (!inRange || step.dropped) && 'opacity-50')}
           style={{ left, top: FRAME_Y + INNER_Y, width: TILE, height: TILE_H }}
         >
           <span className="h-4 leading-4 text-muted-foreground">#{index + 1}</span>{' '}
@@ -475,7 +485,10 @@ function DivergedView({ state, onTakeWhatMatched, onBackToRange, onContinueAnywa
   const d = state.diverged!
   const done = state.progress.done
   const before = stepsBeforeRange(state.steps, state.range)
+  const dropped: number[] = []
+  for (let i = state.range.start; i < d.index; i++) if (state.steps[i]?.dropped) dropped.push(i)
   const facts = [
+    dropped.length > 0 ? copy.divergedDropped(spanOf(dropped), dropped.length) : null,
     before.length > 0 ? copy.divergedBefore(spanOf(before), before.length, state.range.start === defaultRange(state.steps).start) : null,
     done > 0 ? copy.divergedMatched(done) : null,
   ].filter(Boolean).join(' ')

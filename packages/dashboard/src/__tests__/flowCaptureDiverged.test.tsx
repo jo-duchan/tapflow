@@ -107,6 +107,23 @@ describe('Match stopped at a step that looked different', () => {
     expect(screen.queryByText(/starts it there/)).not.toBeInTheDocument()
   })
 
+  // Record-time observation: a tap left out before the replay is the first suspect for the step after it.
+  it('names a tap left out for stopping a moving list, before the step that differs', () => {
+    const withDrop = [...steps.slice(0, 4), step('tap', { onHome: false, dropped: 'stopped-scroll' }), step('tap', { onHome: false })]
+    const state = reduce(reduce(initialState, { type: 'loaded', steps: withDrop, range: { start: 3, end: 6 }, name: 'f' }), { type: 'match-started', total: 3 })
+    render(<MatchScreen state={reduce(state, { type: 'diverged', ...divergence, index: 5 })} {...handlers()} />)
+    expect(screen.getByText(/#5 was not replayed: tapped while a list was still moving, which only stops it\./)).toBeInTheDocument()
+  })
+
+  // CodeRabbit on #1167: `#4–#6` named the replayed #5 among the taps left out.
+  it('names taps left out apart when a replayed step lies between them', () => {
+    const drop = () => step('tap', { onHome: false, dropped: 'stopped-scroll' })
+    const withDrops = [...steps.slice(0, 3), drop(), step('tap', { onHome: false }), drop(), step('tap', { onHome: false })]
+    const state = reduce(reduce(initialState, { type: 'loaded', steps: withDrops, range: { start: 3, end: 7 }, name: 'f' }), { type: 'match-started', total: 4 })
+    render(<MatchScreen state={reduce(state, { type: 'diverged', ...divergence, index: 6 })} {...handlers()} />)
+    expect(screen.getByText(/#4, #6 were not replayed:/)).toBeInTheDocument()
+  })
+
   it('offers Edit what matched only when something matched, moving nothing else', () => {
     render(<MatchScreen state={stopped(matching)} {...handlers()} />)
     expect(screen.getAllByRole('button').map((b) => b.textContent)).toEqual(['Back to Range', 'Continue anyway'])

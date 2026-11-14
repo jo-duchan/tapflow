@@ -1,11 +1,16 @@
 import type { PointSpace } from '@tapflowio/protocol'
 import type { CaptureEntry, CapturedMessage } from '@tapflowio/protocol/capture'
-import type { FocusedField, KeyboardState } from '@tapflowio/protocol'
+import type { FocusedField, KeyboardState, TouchObservation } from '@tapflowio/protocol'
 import { keyChar } from './keys.js'
 import { judgeTouch, keyboardTimeline, type KeyboardTimeline } from './keyboard.js'
 
 export type Point = [number, number]
 export type Fingers = [Point, Point]
+
+/** Why a step is left out before Match replays it, by what the app reported of the touch (record-time observation):
+ *  `stopped-scroll`, a tap that went down while a list was still gliding, which the OS takes as "stop" on both
+ *  platforms and delivers to nothing — replayed on a settled screen it would press what the person never pressed. */
+export type DropReason = 'stopped-scroll'
 
 /** What the agent said about a step: its ack, or none — a message nothing acks, or an ack the record does not have. */
 export type Outcome = 'landed' | 'refused' | 'unknown'
@@ -38,6 +43,8 @@ interface StepBase {
    *  answered before the step and the first asked after it: right after a field is tapped the one before can still have
    *  the keyboard on its way up, or be missing, and leaving a little more out costs less than a false stop. */
   keyboardRect?: KeyboardRect
+  /** Left out before the replay (`DropReason`): not sent, not compared, not in the flow, and said so in the list. */
+  dropped?: DropReason
 }
 
 type KeyboardRect = NonNullable<KeyboardState['rect']>
@@ -45,7 +52,13 @@ type KeyboardRect = NonNullable<KeyboardState['rect']>
 /** A person's action on the device: the unit the dialog lists, replays and turns into a flow step. */
 /** `keyboard: 'unknown'`: the soft keyboard may have been up around the touch and the reads could not say whether it was on a key
  *  (#1135). Replayed and kept as the person did it, and marked, since a key it was would type in the replay. */
-type Touch = { space?: PointSpace; keyboard?: 'unknown' }
+type Touch = {
+  space?: PointSpace
+  keyboard?: 'unknown'
+  /** What the app reported of this touch's touch-down (`capture:touched`, iOS): whether a list was moving, the element
+   *  and button it hit. Absent where no report came — Android, an older agent, a touch outside the app. */
+  touched?: TouchObservation
+}
 
 export type RawStep = StepBase & (
   | { kind: 'tap'; point: Point } & Touch
@@ -262,7 +275,29 @@ export function segment(entries: readonly CaptureEntry[]): RawStep[] {
     }
   }
   endRun()
-  return withKeyboardRect(withHome(oneAskedSecret(withFieldValues(out, entries)), entries), entries)
+  return withTouches(withKeyboardRect(withHome(oneAskedSecret(withFieldValues(out, entries)), entries), entries), entries)
+}
+
+const TOUCH_KINDS = new Set<RawStep['kind']>(['tap', 'longPress', 'swipe', 'holdDrag'])
+
+/**
+ * Each touch with the app's report of it (`touched`, joined by the gesture's end), and a tap the report says went down
+ * on a moving list dropped (`stopped-scroll`): measured on iOS 26.5, such a tap starts SwiftUI's recogniser and never
+ * ends it, only the scroll's pan does — the list stops and nothing is pressed. The person then taps again, and Match,
+ * replaying on a list that has long since settled, would press with the first tap what the second pressed.
+ */
+function withTouches(steps: RawStep[], entries: readonly CaptureEntry[]): RawStep[] {
+  const reports = new Map<string, TouchObservation>()
+  for (const e of entries) if (e.kind === 'touched') reports.set(e.requestId, e.touched)
+  if (reports.size === 0) return steps
+  return steps.map((s) => {
+    if (!TOUCH_KINDS.has(s.kind)) return s
+    const end = s.messages.find((m) => m.msg.type === 'input:touch:end')?.msg
+    const touched = end && 'requestId' in end && end.requestId ? reports.get(end.requestId) : undefined
+    if (!touched) return s
+    const stopped = s.kind === 'tap' && touched.moving && s.outcome !== 'refused'
+    return { ...s, touched, ...(stopped ? { dropped: 'stopped-scroll' as const } : {}) }
+  })
 }
 
 /** Each step with the keyboard area around its start (`keyboardRect`), from the raw reads as `withHome` takes them. */
