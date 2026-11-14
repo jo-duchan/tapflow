@@ -125,7 +125,7 @@ import type { ServiceTier } from '@tapflowio/protocol'
 import { LEAN_LABELS } from '../leanLabels'
 import { TouchHelper } from '../TouchHelper'
 import { XCUITreeReader } from '../XCUITreeReader'
-import { AppObserver } from '../AppObserver'
+import { AppObserver, type AppTouch } from '../AppObserver'
 import { AppAccessibility } from '../AppAccessibility'
 import { PanelState } from '../PanelState'
 import { PhysicalOrientation, type DeviceOrientation } from '../PhysicalOrientation'
@@ -948,6 +948,49 @@ describe('IOSAgent', () => {
       expect(sent.filter((m) => m.type === 'capture:touched')).toEqual([{ type: 'capture:touched', sessionId: agent.sessionId, requestId: 'g1',
         observation: { point: { x: 0.41, y: 0.52 }, moving: true, element: { label: 'Row 3', traits: 1 } } }])
       watch.mockRestore(); take.mockRestore()
+      agent.disconnect()
+      browser.close()
+    })
+
+    // Correctness review: two pairings in flight lost a report to the list one replaced under the other; and of two
+    // reports at one spot the first, not the nearest in time, was taken.
+    it('pairs overlapping gestures each with its own report, the nearest in time at the same spot', async () => {
+      const watch = vi.spyOn(AppObserver.prototype, 'watchTouches').mockResolvedValue()
+      const queue: AppTouch[][] = []
+      const take = vi.spyOn(AppObserver.prototype, 'takeTouches').mockImplementation(async () => queue.shift() ?? [])
+      const { agent, browser, internals, sent } = await bootedAgent(mockSimctl(true), false)
+      internals.handleRelayMessage({ type: 'device:boot', sessionId: agent.sessionId!, requestId: 'rq-r', payload: { deviceId: 'dev-1', recorded: true, touchObservations: true } } as never)
+      await vi.waitFor(() => expect(sent.some((m) => m.type === 'device:ready')).toBe(true), { timeout: 3000 })
+      internals.lastBundleIds.set('dev-1', 'com.app')
+      const report = (seq: number, at: number, moving: boolean): AppTouch => ({ seq, at, bundle: 'com.app', observation: { point: { x: 0.4, y: 0.5 }, moving } })
+      // The first gesture finds nothing at first and keeps asking; both reports arrive while it does, each at its own
+      // gesture's moment, so whichever pairing runs first takes its own.
+      const t1 = Date.now()
+      internals.handleRelayMessage({ type: 'input:touch:start', sessionId: agent.sessionId!, payload: { x: 0.4, y: 0.5 } } as never)
+      internals.handleRelayMessage({ type: 'input:touch:end', sessionId: agent.sessionId!, requestId: 'g1' } as never)
+      await new Promise((r) => setTimeout(r, 200))
+      const t2 = Date.now()
+      internals.handleRelayMessage({ type: 'input:touch:start', sessionId: agent.sessionId!, payload: { x: 0.4, y: 0.5 } } as never)
+      queue.push([report(2, t2, true), report(1, t1, false)])
+      internals.handleRelayMessage({ type: 'input:touch:end', sessionId: agent.sessionId!, requestId: 'g2' } as never)
+      await vi.waitFor(() => expect(sent.filter((m) => m.type === 'capture:touched')).toHaveLength(2), { timeout: 2000 })
+      const byId = Object.fromEntries(sent.filter((m) => m.type === 'capture:touched').map((m) => [m['requestId'], (m['observation'] as { moving: boolean }).moving]))
+      expect(byId).toEqual({ g1: false, g2: true })
+      watch.mockRestore(); take.mockRestore()
+      agent.disconnect()
+      browser.close()
+    })
+
+    it('stops the app\'s touch reports when the session ends without a shutdown', async () => {
+      const watch = vi.spyOn(AppObserver.prototype, 'watchTouches').mockResolvedValue()
+      const stop = vi.spyOn(AppObserver.prototype, 'stopTouches').mockResolvedValue()
+      const { agent, browser, internals, sent } = await bootedAgent(mockSimctl(true), false)
+      internals.handleRelayMessage({ type: 'device:boot', sessionId: agent.sessionId!, requestId: 'rq-r', payload: { deviceId: 'dev-1', recorded: true, touchObservations: true } } as never)
+      await vi.waitFor(() => expect(sent.some((m) => m.type === 'device:ready')).toBe(true), { timeout: 3000 })
+      const internal = agent as unknown as { cleanupDeviceState(s: unknown): void; deviceStates: Map<string, unknown> }
+      internal.cleanupDeviceState(internal.deviceStates.get(agent.sessionId!))
+      expect(stop).toHaveBeenCalledWith('dev-1')
+      watch.mockRestore(); stop.mockRestore()
       agent.disconnect()
       browser.close()
     })

@@ -177,6 +177,26 @@ describe('the app\'s touch reports', () => {
     expect(existsSync(join(dir, 'touches'))).toBe(false)
   })
 
+  it('stops the reports and removes any left on disk', async () => {
+    const { observer, dir } = setup()
+    await observer.prepare(UDID)
+    await observer.watchTouches(UDID, true)
+    writeFileSync(join(dir, 'touch-1.json'), '{}')
+    writeFileSync(join(dir, 'touch-2.json.tmp'), '{}')
+    writeFileSync(join(dir, 'background'), 'com.app')
+    await observer.stopTouches(UDID)
+    expect(readdirSync(dir).sort()).toEqual(['background'])
+  })
+
+  it('cuts a long label or identifier, which would fill the capture on every tap', async () => {
+    const { observer, dir } = setup()
+    await observer.prepare(UDID)
+    writeFileSync(join(dir, 'touch-1.json'), JSON.stringify({ seq: 1, at: 1, bundle: 'com.app', point: { x: 0, y: 0 }, moving: false, element: { label: 'x'.repeat(5000), identifier: 'y'.repeat(5000), traits: 0 } }))
+    const [t] = await observer.takeTouches(UDID)
+    expect(t!.observation.element!.label).toHaveLength(256)
+    expect(t!.observation.element!.identifier).toHaveLength(256)
+  })
+
   it('reads each report once, oldest first, and keeps only what the protocol carries', async () => {
     const { observer, dir } = setup()
     await observer.prepare(UDID)

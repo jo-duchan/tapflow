@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'fs'
+import { chmodSync, existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'fs'
 import { join } from 'path'
 
 /** The device side: `SimctlWrapper`'s two calls. */
@@ -24,19 +24,34 @@ export class AppAccessibility {
     private readonly root = '/private/var/tmp/tapflow-app-accessibility',
   ) {}
 
+  // One change at a time per device: a restore that ran while an enable's write was still out would read the marker,
+  // put the prior value back and drop the marker, and the late write would leave it on with nothing to undo it.
+  private readonly chains = new Map<string, Promise<unknown>>()
+
+  private serial<T>(udid: string, work: () => Promise<T>): Promise<T> {
+    const next = (this.chains.get(udid) ?? Promise.resolve()).catch(() => undefined).then(work)
+    this.chains.set(udid, next)
+    void next.finally(() => { if (this.chains.get(udid) === next) this.chains.delete(udid) }).catch(() => undefined)
+    return next
+  }
+
   /** On for `udid`, marked so it can be put back. Before an app launches: a running app keeps what it started with. */
-  async enable(udid: string): Promise<void> {
+  enable(udid: string): Promise<void> { return this.serial(udid, () => this.enableNow(udid)) }
+
+  /** Put back what the marker recorded, then drop the marker. Nothing marked is nothing to do. */
+  restore(udid: string): Promise<void> { return this.serial(udid, () => this.restoreNow(udid)) }
+
+  private async enableNow(udid: string): Promise<void> {
     if (!this.marked(udid)) {
       const prior = await this.host.readAppAccessibility(udid)
       if (prior === true) return
-      mkdirSync(this.root, { recursive: true, mode: 0o700 })
+      this.ownRoot()
       atomicWrite(this.markerPath(udid), JSON.stringify({ prior }) + '\n')
     }
     await this.host.writeAppAccessibility(udid, true)
   }
 
-  /** Put back what the marker recorded, then drop the marker. Nothing marked is nothing to do. */
-  async restore(udid: string): Promise<void> {
+  private async restoreNow(udid: string): Promise<void> {
     if (!this.marked(udid)) return
     let prior: boolean | null = null
     try {
@@ -56,6 +71,19 @@ export class AppAccessibility {
     }
   }
 
+  /**
+   * The marker directory, ours and private. `/private/var/tmp` is writable by every user on the Mac: one made there by
+   * someone else, or a symlink, could forge a marker's prior value or point a write elsewhere, so it is refused.
+   */
+  private ownRoot(): void {
+    mkdirSync(this.root, { recursive: true, mode: 0o700 })
+    const st = lstatSync(this.root)
+    if (!st.isDirectory() || st.isSymbolicLink() || (process.getuid && st.uid !== process.getuid())) {
+      throw new Error(`refusing the app accessibility marker directory ${this.root}: not a directory this user owns`)
+    }
+    chmodSync(this.root, 0o700)
+  }
+
   private marked(udid: string): boolean { return existsSync(this.markerPath(udid)) }
   // A udid comes from the relay's payload and names a file here: nothing but a udid's characters gets that far.
   private markerPath(udid: string): string {
@@ -66,6 +94,8 @@ export class AppAccessibility {
 
 function atomicWrite(path: string, body: string): void {
   const tmp = `${path}.tmp`
-  writeFileSync(tmp, body, { mode: 0o600 })
+  // Exclusive, so a file (or symlink) left at the temporary name is never written through.
+  rmSync(tmp, { force: true })
+  writeFileSync(tmp, body, { mode: 0o600, flag: 'wx' })
   renameSync(tmp, path)
 }

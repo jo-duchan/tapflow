@@ -103,6 +103,18 @@ export class AppObserver {
   }
 
   /**
+   * Touch reports off and any left on disk removed: for a device the agent no longer records, or one an earlier agent
+   * left reporting (it stopped while the device ran). The reports name what a person touched; nothing else sweeps them.
+   */
+  async stopTouches(udid: string): Promise<void> {
+    const dir = this.dir(udid)
+    await rm(join(dir, 'touches'), { force: true })
+    for (const name of await readdir(dir).catch(() => [] as string[])) {
+      if (/^touch-\d+\.json(\.tmp)?$/.test(name)) await rm(join(dir, name), { force: true })
+    }
+  }
+
+  /**
    * The touch-downs the app reported since the last call, oldest first. Each file is read once and removed; one that
    * cannot be read is dropped. Stray ones a reader never came for are swept with the answers (5 s), as they name what
    * a person touched.
@@ -200,6 +212,9 @@ export interface AppTouch {
   observation: TouchObservation
 }
 
+/** The longest identifier or label a touch report keeps. */
+const OBSERVED_TEXT_MAX = 256
+
 const num = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v)
 
 /** Only the fields the protocol carries, of the types it carries: the app's file is not trusted to be anything else. */
@@ -225,10 +240,11 @@ function elementOf(v: unknown): ObservedElement | undefined {
   const e = v as Record<string, unknown>
   if (!num(e['traits'])) return undefined
   const out: ObservedElement = { traits: e['traits'] }
-  if (typeof e['identifier'] === 'string') out.identifier = e['identifier']
+  if (typeof e['identifier'] === 'string') out.identifier = e['identifier'].slice(0, OBSERVED_TEXT_MAX)
   if (e['input'] === true) out.input = true
-  // A text input is named by its identifier only, whatever the file says: its label can be what was typed.
-  else if (typeof e['label'] === 'string') out.label = e['label']
+  // A text input is named by its identifier only, whatever the file says: its label can be what was typed. A label is
+  // cut, too: a cell's combined label can be a whole article, on every tap, inside the capture's budget.
+  else if (typeof e['label'] === 'string') out.label = e['label'].slice(0, OBSERVED_TEXT_MAX)
   const f = e['frame'] as Record<string, unknown> | undefined
   if (f && num(f['x']) && num(f['y']) && num(f['width']) && num(f['height'])) out.frame = { x: f['x'], y: f['y'], width: f['width'], height: f['height'] }
   return out

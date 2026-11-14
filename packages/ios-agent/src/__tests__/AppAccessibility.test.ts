@@ -1,5 +1,5 @@
 import { describe, it, expect, afterEach, vi } from 'vitest'
-import { mkdtempSync, rmSync, readFileSync, existsSync, writeFileSync, statSync } from 'node:fs'
+import { mkdtempSync, rmSync, readFileSync, existsSync, writeFileSync, statSync, symlinkSync, mkdirSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { AppAccessibility } from '../AppAccessibility'
@@ -82,6 +82,39 @@ describe('AppAccessibility', () => {
     const { ax, host } = setup(false)
     await expect(ax.enable('../../etc/x')).rejects.toThrow('not a device id')
     expect(host.readAppAccessibility).not.toHaveBeenCalled()
+  })
+
+  // Correctness review: a shutdown's restore ran while the enable's write was still out, then the late write left the
+  // setting on with no marker. One change at a time per device.
+  it('puts a restore that arrives during an enable after it, so nothing is left on unmarked', async () => {
+    const { ax, host, state } = setup(false)
+    let finish!: () => void
+    host.writeAppAccessibility.mockImplementationOnce(async (_u: string, v: boolean | null) => { await new Promise<void>((r) => { finish = r }); state.value = v })
+    const enabling = ax.enable('UDID-1')
+    await vi.waitFor(() => expect(host.writeAppAccessibility).toHaveBeenCalledTimes(1))
+    const restoring = ax.restore('UDID-1')
+    finish()
+    await enabling
+    await restoring
+    expect(state.value).toBe(false)
+    expect(ax.markedDevices()).toEqual([])
+  })
+
+  // Privacy review: /private/var/tmp is everyone's; a directory or temporary file another user planted is refused.
+  it('refuses a marker directory that is a symlink, and never writes through a file left at the temporary name', async () => {
+    const { host } = setup(false)
+    const elsewhere = join(root, 'elsewhere')
+    mkdirSync(elsewhere)
+    symlinkSync(elsewhere, join(root, 'linked'))
+    await expect(new AppAccessibility(host, join(root, 'linked')).enable('UDID-1')).rejects.toThrow('refusing')
+    const markers = join(root, 'markers2')
+    mkdirSync(markers, { mode: 0o700 })
+    const victim = join(root, 'victim')
+    writeFileSync(victim, 'keep')
+    symlinkSync(victim, join(markers, 'UDID-1.json.tmp'))
+    await new AppAccessibility(host, markers).enable('UDID-1')
+    expect(readFileSync(victim, 'utf8')).toBe('keep')
+    expect(JSON.parse(readFileSync(join(markers, 'UDID-1.json'), 'utf8'))).toEqual({ prior: false })
   })
 
   it('lists nothing before any marker was written', () => {

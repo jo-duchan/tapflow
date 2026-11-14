@@ -112,8 +112,9 @@ const keyboardState = z.object({
 // What a touch hit, as the app's accessibility names it (`capture:touched`). A frame the relay cannot read is dropped,
 // not the element: its name still says what the person touched.
 const observedElement = z.object({
-  identifier: z.string().optional(),
-  label: z.string().optional(),
+  // Cut by the agent at 256; past this the observation is refused rather than let fill the capture's budget.
+  identifier: z.string().max(1024).optional(),
+  label: z.string().max(1024).optional(),
   traits: z.number(),
   input: z.boolean().optional(),
   frame: normalizedRect.optional().catch(undefined),

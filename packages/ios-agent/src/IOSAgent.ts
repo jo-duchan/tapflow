@@ -770,6 +770,9 @@ export class IOSAgent implements DeviceAgent, NetworkControlCapability, Posturab
       this.cleanupDeviceState(state)
     }
     this.deviceStates.clear()
+    // Nobody reads the app's touch reports once this agent is gone: off, and what is on disk removed.
+    for (const deviceId of this.touchWatch.keys()) void this.appObserver.stopTouches(deviceId).catch(() => {})
+    this.touchWatch.clear()
     for (const deviceId of [...this.guests.keys()]) this.stopGuest(deviceId)
     this.uiTreeReader.stop()
     // The liveness watcher outlives every device it was started for, so it is stopped here with the
@@ -857,6 +860,8 @@ export class IOSAgent implements DeviceAgent, NetworkControlCapability, Posturab
   }
 
   private cleanupDeviceState(state: DeviceState): void {
+    // Nobody records this device's touches once its session is gone: reports off, and what is on disk removed.
+    if (this.touchWatch.delete(state.deviceId)) void this.appObserver.stopTouches(state.deviceId).catch(() => {})
     // Drop this device out of the filter rule. The rule lives on the host and is keyed only by udid,
     // so a simulator that goes away while offline would otherwise keep its udid named there for the
     // rest of the Mac's uptime — and the next boot of that same device would come up offline with
@@ -1262,6 +1267,8 @@ export class IOSAgent implements DeviceAgent, NetworkControlCapability, Posturab
       await this.appObserver.prepare(deviceId).catch((e: unknown) => {
         logger.warn('could not prepare the app observer:', (e as Error).message)
       })
+      // A boot a shutdown or a newer boot replaced since the prepare must not turn anything on (correctness review).
+      if (seq !== state.bootSeq) { this.abandonBoot(state, seq, sessionId, requestId); return }
       // App accessibility, before any app launches (a running app keeps what it started with): on for a person Flow
       // Capture records, so the observer can name what each touch hit; put back for anyone else, which also undoes
       // what an earlier recorded person's boot left. Best-effort: without it a touch is recorded as before, unnamed.
@@ -1469,10 +1476,22 @@ export class IOSAgent implements DeviceAgent, NetworkControlCapability, Posturab
     const bundle = this.lastBundleIds.get(deviceId)
     const until = Date.now() + TOUCH_REPORT_WAIT_MS
     for (;;) {
-      watch.reports.push(...(await this.appObserver.takeTouches(deviceId).catch(() => [] as AppTouch[])))
-      watch.reports = watch.reports.filter((r) => Date.now() - r.at < TOUCH_REPORT_KEEP_MS && (!bundle || r.bundle === bundle))
-      const i = watch.reports.findIndex((r) => Math.abs(r.observation.point.x - start.x) < TOUCH_REPORT_NEAR
-        && Math.abs(r.observation.point.y - start.y) < TOUCH_REPORT_NEAR && Math.abs(r.at - start.at) < TOUCH_REPORT_SKEW_MS)
+      // Taken before it is added: a concurrent pairing replaces nothing under it (the list is changed in place only).
+      const taken = await this.appObserver.takeTouches(deviceId).catch(() => [] as AppTouch[])
+      watch.reports.push(...taken)
+      // A report is kept while it is recent, or as old as this gesture: a long press's ends past the keep window.
+      for (let k = watch.reports.length - 1; k >= 0; k--) {
+        const r = watch.reports[k]!
+        const stale = Date.now() - r.at >= TOUCH_REPORT_KEEP_MS && r.at < start.at - TOUCH_REPORT_SKEW_MS
+        if (stale || (bundle && r.bundle !== bundle)) watch.reports.splice(k, 1)
+      }
+      // The report nearest in time among those at the point: two quick taps at one spot must not trade reports.
+      let i = -1
+      watch.reports.forEach((r, k) => {
+        if (Math.abs(r.observation.point.x - start.x) >= TOUCH_REPORT_NEAR || Math.abs(r.observation.point.y - start.y) >= TOUCH_REPORT_NEAR) return
+        const d = Math.abs(r.at - start.at)
+        if (d < TOUCH_REPORT_SKEW_MS && (i < 0 || d < Math.abs(watch.reports[i]!.at - start.at))) i = k
+      })
       if (i >= 0) {
         const [report] = watch.reports.splice(i, 1)
         this.sendMsg({ type: 'capture:touched', sessionId, requestId, observation: report!.observation })
@@ -1489,6 +1508,8 @@ export class IOSAgent implements DeviceAgent, NetworkControlCapability, Posturab
    */
   private restoreLeftoverAccessibility(devices: Device[]): void {
     const running = new Set(devices.filter((d) => d.status === 'booted').map((d) => d.id))
+    // Touch reports an agent that died left on: the app would keep writing them with nobody to sweep them.
+    for (const udid of running) void this.appObserver.stopTouches(udid).catch(() => {})
     for (const udid of this.appAccessibility.markedDevices()) {
       if (!running.has(udid)) continue
       void this.appAccessibility.restore(udid).catch((e: unknown) => {
@@ -1542,6 +1563,7 @@ export class IOSAgent implements DeviceAgent, NetworkControlCapability, Posturab
     this.uiTreeReader.stopIfDevice(deviceId)
 
     this.touchWatch.delete(deviceId)
+    void this.appObserver.stopTouches(deviceId).catch(() => { /* swept at the next boot's prepare */ })
     // While it still runs: the setting is written inside the device. A shutdown that fails leaves it for the next boot.
     await this.appAccessibility.restore(deviceId).catch((e: unknown) => {
       logger.warn('could not restore app accessibility before the shutdown:', (e as Error).message)

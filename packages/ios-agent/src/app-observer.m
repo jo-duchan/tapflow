@@ -278,7 +278,11 @@ static void tfo_touch_answer(id window, id view, TFOPoint fixed, TFOPoint inWind
       if (tfo_int(b, "accessibilityTraits") & 1) break;   // UIAccessibilityTraitButton
       b = tfo_send(b, "accessibilityContainer");
     }
-    NSDictionary *button = b && b != e ? tfo_element(b, window) : nil;
+    // Only a container that is a button: a walk that ran out of depth found none.
+    NSDictionary *button = b && b != e && (tfo_int(b, "accessibilityTraits") & 1) ? tfo_element(b, window) : nil;
+    // A container over a text input (a row of a label and a field, combined) can carry the field's text in its label:
+    // named by its identifier only, as the input is.
+    if (button && tfo_text_input(e)) button = button[@"identifier"] ? @{ @"identifier": button[@"identifier"], @"traits": button[@"traits"] } : nil;
     if (button) out[@"button"] = button;
   }
   tfo_write([g_dir stringByAppendingFormat:@"/touch-%llu.json", g_touch_seq], out);
@@ -294,6 +298,8 @@ static void tfo_send_event(id app, SEL cmd, id event) {
   if (g_dir && tfo_touches_on()) {
     for (id t in tfo_send(event, "allTouches")) {
       if (tfo_int(t, "phase") != 0) continue;   // UITouchPhaseBegan
+      // Two at most: a hit test costs up to 14 ms on the main queue, and the agent never sends more than two fingers.
+      if (began.count >= 2) break;
       id window = tfo_send(t, "window"), view = tfo_send(t, "view");
       if (!window) continue;
       TFOPoint p = ((TFOPoint (*)(id, SEL, id))objc_msgSend)(t, sel_registerName("locationInView:"), window);
