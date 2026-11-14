@@ -285,7 +285,28 @@ static void tfo_touch_answer(id window, id view, TFOPoint fixed, TFOPoint inWind
     if (button && tfo_text_input(e)) button = button[@"identifier"] ? @{ @"identifier": button[@"identifier"], @"traits": button[@"traits"] } : nil;
     if (button) out[@"button"] = button;
   }
-  tfo_write([g_dir stringByAppendingFormat:@"/touch-%llu.json", g_touch_seq], out);
+  // Off the main queue: the dictionary is built, nothing UIKit is touched from here (0.3–0.8 ms measured).
+  NSString *path = [g_dir stringByAppendingFormat:@"/touch-%llu.json", g_touch_seq];
+  dispatch_async(dispatch_get_global_queue(QOS_CLASS_UTILITY, 0), ^{ tfo_write(path, out); });
+}
+
+/**
+ * The first accessibility hit test on a screen costs 10–30 ms (SwiftUI builds its nodes then), later ones 3–5 ms
+ * (measured on iOS 26.5, Food Truck). So a hit test is run once the screen has had time to settle — 0.7 s after a touch
+ * lifts, or after the app becomes active — when nothing is moving and nobody sees the main queue busy, and the one at
+ * the next touch-down finds the nodes built: under 5.5 ms per tap measured, against up to 15 ms without. A touch in the
+ * meantime cancels it; that touch warms nothing it needs.
+ */
+static uint64_t g_warm_gen;
+static void tfo_warm_later(id window) {
+  if (!window) return;
+  uint64_t gen = ++g_warm_gen;
+  dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 700 * NSEC_PER_MSEC), dispatch_get_main_queue(), ^{
+    if (gen != g_warm_gen || !tfo_touches_on()) return;
+    TFORect wb = tfo_rect(window, "bounds");
+    SEL hit = sel_registerName("accessibilityHitTest:withEvent:");
+    if ([window respondsToSelector:hit]) (void)((id (*)(id, SEL, TFOPoint, id))objc_msgSend)(window, hit, (TFOPoint){ wb.w / 2, wb.h / 2 }, nil);
+  });
 }
 
 /**
@@ -297,7 +318,10 @@ static void tfo_send_event(id app, SEL cmd, id event) {
   NSMutableArray *began = nil;
   if (g_dir && tfo_touches_on()) {
     for (id t in tfo_send(event, "allTouches")) {
-      if (tfo_int(t, "phase") != 0) continue;   // UITouchPhaseBegan
+      NSInteger phase = tfo_int(t, "phase");
+      if (phase == 3) tfo_warm_later(tfo_send(t, "window"));   // UITouchPhaseEnded: the screen it leaves
+      if (phase != 0) continue;   // UITouchPhaseBegan
+      g_warm_gen++;               // a warm-up still pending would run in this touch's frames
       // Two at most: a hit test costs up to 14 ms on the main queue, and the agent never sends more than two fingers.
       if (began.count >= 2) break;
       id window = tfo_send(t, "window"), view = tfo_send(t, "view");
@@ -383,7 +407,7 @@ static void tfo_install(void) {
   [nc addObserverForName:@"UIApplicationWillEnterForegroundNotification" object:nil queue:main
               usingBlock:^(NSNotification *n) { tfo_mark_background(NO); g_coming_up = YES; }];
   [nc addObserverForName:@"UIApplicationDidBecomeActiveNotification" object:nil queue:main
-              usingBlock:^(NSNotification *n) { g_coming_up = NO; }];
+              usingBlock:^(NSNotification *n) { g_coming_up = NO; tfo_warm_later(tfo_key_window()); }];
 
   // A request: the agent writes a nonce and the bundle it asks about, on two lines, to `request` in the directory, by
   // rename, and the observer of that bundle, watching the directory, answers it once. Every app observed since the boot

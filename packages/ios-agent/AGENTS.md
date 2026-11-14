@@ -439,6 +439,17 @@ observer answers in the runner's own shapes, so `toKeyboardState` and `toFocused
   field lives in another process (it read `secure: false` on a password input), Flutter, a custom `UITextInput` —
   answers `reason: secure`, which flow-runner turns into a secret step. So does any field read while the app is not
   active: typing then goes elsewhere, a system sign-in alert's password field among them.
+- **Touch reports, while a person is recorded** (record-time observation). The observer wraps `-[UIApplication
+  sendEvent:]` (the original IMP kept, so other SDKs' wrappers chain) and, while a `touches` file is in the directory,
+  writes `touch-<seq>.json` per touch-down: whether a list under it was still moving (`isDecelerating`, or the private
+  `_isBouncing` at the end of a list, read **before** the event is delivered, since the touch stops the scroll), and the
+  accessibility element and nearest button it hit (identifier, label — never a text input's — traits, frame), or only
+  the surface for the keyboard, a web view or Flutter. The agent pairs each with the gesture it delivered (point and
+  time, both on this Mac) and sends `capture:touched`, only to a relay that asked (`touchObservations` on the boot).
+  **Cost, measured on Food Truck (iOS 26.5):** the hit test is the cost — 10–30 ms the first time on a screen, 3–5 ms
+  after — so one is run 0.7 s after a touch lifts and after the app becomes active, when nothing moves (a touch cancels
+  it), and the touch-down's own costs under 5.5 ms; the file is written off the main queue. Frame-count comparisons over
+  a run were too noisy to resolve this (one "on" run drew more frames than "off"); time the hook itself instead.
 - **App accessibility is on for a person Flow Capture records** (`AppAccessibility`, `ApplicationAccessibilityEnabled`).
   Without it SwiftUI and React Native build no accessibility nodes, so the observer can name neither a SwiftUI field's
   `.accessibilityIdentifier` nor what a touch hit (measured on iOS 26.5: Food Truck, Sample SwiftUI/UIKit, a React Native
