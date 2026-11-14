@@ -376,9 +376,12 @@ function nearestTo(found: UIElement[], named: ObservedElement): UIElement | null
 /** A selector for what a touch's report names, for an element the screen does not show yet (`scroll { until }`). */
 export function recordedSelector(touched: TouchObservation | undefined): Selector | null {
   if (!touched || touched.surface) return null
-  const named = touched.button ?? touched.element
-  if (named?.identifier) return { id: named.identifier }
-  if (named?.label && !named.input) return { label: named.label, exact: true }
+  // The button first, then the element, as `recordedTarget` looks: a button the report names only by its traits
+  // leaves the element's name to search by.
+  for (const named of [touched.button, touched.element]) {
+    if (named?.identifier) return { id: named.identifier }
+    if (named?.label && !named.input) return { label: named.label, exact: true }
+  }
   return null
 }
 

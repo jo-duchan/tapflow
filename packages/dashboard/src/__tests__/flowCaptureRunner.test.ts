@@ -662,13 +662,39 @@ describe('matchRange with the app\'s touch reports', () => {
 
   // Review of P2b: the fallback matched against the screen read before the search and asked the device nothing.
   it('asks the device about the point it falls back to, on the screen the search left', async () => {
-    screen.elements = [{ role: 'button', label: 'Row 3', enabled: true, frame: { x: 0, y: 0.3, width: 1, height: 0.06 } }]
+    screen.elements = [{ role: 'button', label: 'Row 2', enabled: true, frame: { x: 0, y: 0.2, width: 1, height: 0.06 } }]
+    // The search moves the screen: what it leaves is not what was read before it, so a stale tree fails this.
+    ran.beforeRun = () => { screen.elements = [{ role: 'button', label: 'Row 3', enabled: true, frame: { x: 0, y: 0.3, width: 1, height: 0.06 } }] }
     ran.answers = [{ status: 'failed', failureKind: 'product' }, { status: 'failed', failureKind: 'product' }]
     const lease = new PauseLease(ctap)
     await matchRange(ctap, channel, lease, [launchStep, tapStep, tapStep, swipeUp, named], { start: 0, end: 5 }, null, compareHooks().h)
     await lease.stop()
     expect(log.filter((l) => l.startsWith('reach')).at(-1)).toBe('reach Row 3')
     expect(log.indexOf('reach Row 3')).toBeLessThan(log.lastIndexOf('replay tap'))
+  })
+
+  // CodeRabbit on #1167: an iOS tree keeps rows a list scrolled past, and `tapOn` alone failed such a row as off screen.
+  it('searches for an element the tree holds off the screen, as for one it does not hold', async () => {
+    screen.elements = [{ ...orders, frame: { ...frame, y: 1.3 } }]
+    const lease = new PauseLease(ctap)
+    await matchRange(ctap, channel, lease, [launchStep, tapStep, tapStep, swipeUp, named], { start: 0, end: 5 }, null, compareHooks().h)
+    await lease.stop()
+    expect(flowsAsSteps()).toEqual([['scroll down', 'tapOn']])
+    expect(log.filter((l) => l.startsWith('replay'))).toEqual(['replay launch', 'replay tap', 'replay tap', 'replay swipe'])
+  })
+
+  it('searches the way the swipe went when the element on the screen could not be tapped, before the point', async () => {
+    screen.elements = [orders]
+    ran.answers = [{ status: 'failed', failureKind: 'product' }]
+    const onAfter = vi.fn()
+    const h = { ...compareHooks().h, onAfter }
+    const lease = new PauseLease(ctap)
+    await matchRange(ctap, channel, lease, [launchStep, tapStep, tapStep, swipeUp, named], { start: 0, end: 5 }, null, h)
+    await lease.stop()
+    expect(flowsAsSteps()).toEqual([['tapOn'], ['scroll down', 'tapOn']])
+    expect(log.filter((l) => l.startsWith('replay'))).toEqual(['replay launch', 'replay tap', 'replay tap', 'replay swipe'])
+    // Found after a scroll: its effect is not read against the screen from before it.
+    expect(onAfter.mock.calls.map((c) => c[0])).not.toContain(4)
   })
 
   // Review of P2b: the engine takes no signal, and a scroll search ran on for up to 30 s after Stop.

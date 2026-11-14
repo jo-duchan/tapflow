@@ -207,14 +207,22 @@ const OPPOSITE: Record<ScrollDirection, ScrollDirection> = { up: 'down', down: '
  */
 function namedTap(raw: RawStep, tree: UIElement[], previous: RawStep | undefined, turns: Pick<MatchContext, 'interfaceTurn' | 'frameTurn'>): NamedTap | undefined {
   if (raw.kind !== 'tap' || raw.dropped || raw.outcome === 'refused' || turns.interfaceTurn) return undefined
+  const direction = (previous ? scrollDirectionOf(previous, turns) : null) ?? undefined
+  // An iOS tree keeps rows a list has scrolled past: one whose centre is off the screen is searched for, as one the
+  // tree does not hold is — `tapOn` alone would only fail it as off screen.
   const target = recordedTarget(tree, raw.touched)
-  if (target) {
+  if (target && onScreen(target)) {
     const selector = selectorFor(tree, target)
-    return selector ? { selector, target } : undefined
+    return selector ? { selector, target, ...(direction ? { direction } : {}) } : undefined
   }
   const selector = recordedSelector(raw.touched)
-  const direction = previous ? scrollDirectionOf(previous, turns) : null
   return selector && direction ? { selector, target: null, direction } : undefined
+}
+
+const onScreen = (e: UIElement): boolean => {
+  const x = e.frame.x + e.frame.width / 2
+  const y = e.frame.y + e.frame.height / 2
+  return x >= 0 && x <= 1 && y >= 0 && y <= 1
 }
 
 /** The step the replay sends before `slice[offset]`, past those left out (`dropped`). */
@@ -273,7 +281,8 @@ export async function matchRange(
   const read = (signal: AbortSignal) => channel.queryUITreeWithTurn(sessionId, signal)
   // The engine Verify runs, for the taps the app named: found and tapped as `flow run` would.
   const driver = new AligningDriver(channel, sessionId, tap.buildId, alignment, hooks.onTouch, hooks.signal)
-  const runNamed = async (named: NamedTap): Promise<boolean> => {
+  // Whether the element was tapped, and whether a search scrolled the screen away from the read before it.
+  const runNamed = async (named: NamedTap): Promise<{ tapped: boolean; scrolled: boolean }> => {
     const attempt = async (steps: Step[]): Promise<boolean> => {
       const result = await runFlow({ name: 'match', steps }, driver, { platform: tap.platform })
       hooks.signal.throwIfAborted()
@@ -282,16 +291,19 @@ export async function matchRange(
       return result.status === 'passed'
     }
     const tapIt: Step = { type: 'tapOn', selector: named.selector }
-    if (named.target) return attempt([tapIt])
+    if (named.target && await attempt([tapIt])) return { tapped: true, scrolled: false }
+    // On the screen but not reached (a tab bar over the row): with a swipe before it to say which way, the search
+    // brings it out from under what covers it rather than falling back to the point.
+    if (!named.direction) return { tapped: false, scrolled: false }
     // Back the other way only here: this replay sent the recorded swipe, and a fling longer than the recording's
     // carries the element past. The exported flow needs no such retry: where `toFlowSteps` turns the swipe into
     // `scroll { until }`, the scroll takes the swipe's place and starts where the swipe started, where the person's
     // direction is right; where it does not, the swipe and the tap are exported as they are. Verify runs that flow
     // before Export either way, so a wrong direction fails visibly there.
     for (const direction of [named.direction!, OPPOSITE[named.direction!]]) {
-      if (await attempt([{ type: 'scroll', direction, until: named.selector }, tapIt])) return true
+      if (await attempt([{ type: 'scroll', direction, until: named.selector }, tapIt])) return { tapped: true, scrolled: true }
     }
-    return false
+    return { tapped: false, scrolled: true }
   }
   const matched: CapturedStep[] = []
   // What each touch did, seen from the screen before it to the screen the next step is read on (#1125). Kept beside the
@@ -401,18 +413,19 @@ export async function matchRange(
     // Nothing to type into, and no field to tap: say what to do about it rather than what the device refused.
     const unfocused = raw.kind === 'text' && !focus && !!before && !before.elements.some((e) => e.focused)
     if (named) {
-      if (await runNamed(named)) {
+      const { tapped, scrolled } = await runNamed(named)
+      if (tapped) {
         const step: CapturedStep = { raw, step: { type: 'tapOn', selector: named.selector }, tree: before!.elements }
         matched.push(step)
         // What it did is read against the screen it was tapped on, which a scroll before it has moved from `before`.
-        if (named.target) watching = { step, index: matched.length - 1, before: before!.elements, touched: named.target }
+        if (!scrolled) watching = { step, index: matched.length - 1, before: before!.elements, touched: named.target! }
         hooks.onStep(step, shot ? URL.createObjectURL(new Blob([shot as BlobPart], { type: 'image/jpeg' })) : undefined)
         continue
       }
       // Not found either way: the picture is what is left to judge by, and the point is replayed as recorded — on the
       // screen the search left, read again, and asked of the device as any other tap is.
       // A read that fails keeps the screen from before the search: an older tree is still a tree to match against.
-      if (!named.target) {
+      if (scrolled) {
         before = (await waitForStableScreen(read, { timeoutMs: SETTLE_TIMEOUT_MS })) ?? before
         shot = await shoot()
       }

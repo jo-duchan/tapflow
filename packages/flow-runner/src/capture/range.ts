@@ -40,12 +40,12 @@ export function defaultRange(steps: readonly RawStep[]): StepRange {
   // Nothing after the clean start (the last step was the install or clear): the range would be empty, with no step at
   // either handle. The rest of the rule picks one instead.
   if (start >= steps.length) start = -1
-  // A step left out before the replay replays nothing, so it cannot be where the replay starts.
-  while (start >= 0 && start < steps.length - 1 && steps[start]!.dropped) start++
   if (start < 0) {
     start = 0
     for (let i = 0; i < steps.length; i++) if (steps[i]!.kind === 'launch' && counts(steps[i]!)) start = i
   }
+  // A step left out before the replay replays nothing, so it cannot be where the replay starts — whichever rule chose it.
+  while (start < steps.length - 1 && steps[start]!.dropped) start++
   return { start, end: steps.length }
 }
 

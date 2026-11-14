@@ -1287,6 +1287,9 @@ describe('touch reports', () => {
     expect(rangeWarnings(withHome, { start: 1, end: 3 })).toEqual([])
     const before = steps.map((s) => ({ ...s, onHome: false }))
     expect(stepsBeforeRange(before, { start: 3, end: 3 })).toEqual([2])
+    // CodeRabbit on #1167: with no install or launch the fallback chose the first step, dropped or not.
+    const bare = new Rec().touch([[0.3, 0.3]]).touched({ moving: true }).touch([[0.3, 0.3]]).touched({ moving: false }).steps()
+    expect(defaultRange(bare).start).toBe(1)
   })
 
   describe('recordedTarget', () => {
@@ -1314,6 +1317,8 @@ describe('touch reports', () => {
       expect(recordedSelector(obs({ element: { label: 'hunter2', traits: 0, input: true } }))).toBeNull()
       expect(recordedSelector(obs({ element: { label: 'Order#1215', traits: 1 } }))).toEqual({ label: 'Order#1215', exact: true })
       expect(recordedSelector(obs({ element: { identifier: 'row.7', label: 'x', traits: 1 } }))).toEqual({ id: 'row.7' })
+      // A button named only by its traits leaves the element's name to search by (CodeRabbit on #1167).
+      expect(recordedSelector(obs({ button: { traits: 1 }, element: { label: 'Salty', traits: 0 } }))).toEqual({ label: 'Salty', exact: true })
     })
   })
 
