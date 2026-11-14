@@ -93,6 +93,12 @@ describe('UploadBuildDialog file and status accessibility', () => {
 
       expect(picker).toHaveAccessibleDescription(name)
       expect(picker).toHaveAttribute('title', name)
+      // jsdom draws no ellipsis, so pin the split instead: the end that tells builds apart never shrinks.
+      const [head, tail] = Array.from(picker.querySelectorAll(':scope > [aria-hidden="true"] > span'))
+      expect(head).toHaveClass('truncate')
+      expect(tail).toHaveClass('shrink-0')
+      expect(tail).toHaveTextContent(name.slice(-16))
+      expect(`${head!.textContent}${tail!.textContent}`).toBe(name)
 
       await user.click(screen.getByRole('button', { name: 'Upload' }))
       await waitFor(() => expect(onSuccess).toHaveBeenCalledOnce())
