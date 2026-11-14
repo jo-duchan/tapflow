@@ -639,7 +639,9 @@ describe('SimctlWrapper', () => {
 
     // Measured: a device left with these disagreeing typed in the one last used, not the list's first.
     it('still sets and restarts when the last used and the list disagree, either way', async () => {
-      for (const current of [prefs(KO, EN), prefs(EN, KO), prefs(EN, EN), '']) {
+      const otherNext = prefs(KO, KO).replace('"en_US@sw=QWERTY;hw=Automatic"\n', '"ko_KR@sw=Korean;hw=Automatic"\n')
+      const suffixKey = `{\n    XKeyboardLastUsed = "${KO}";\n    KeyboardLastUsed = "${EN}";\n${prefs(KO, KO).split('\n').slice(3).join('\n')}`
+      for (const current of [prefs(KO, EN), prefs(EN, KO), prefs(EN, EN), '', otherNext, suffixKey]) {
         const runner = runnerWith(current)
         expect(await new SimctlWrapper(runner).setKeyboardLanguage('device-1', KO)).toBe(true)
         expect(runner.exec.mock.calls.at(-1)).toEqual(['spawn', 'device-1', 'launchctl', 'kickstart', '-k', 'user/foreground/com.apple.TextInput.kbd'])

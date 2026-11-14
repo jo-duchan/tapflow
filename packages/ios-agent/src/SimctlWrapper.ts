@@ -564,8 +564,11 @@ export class SimctlWrapper {
     // keyboard-set) took 10.3 s, against 0.37 s cold (measured, iOS 26.5), and Match paid it on every run. Both keys must
     // say so: the daemon writes `KeyboardLastUsed` when a person switches language (Caps Lock), so a device left with it
     // and the list disagreeing (measured: ko and en, typing in ko) is restarted.
+    // Not repaired by this: prefs written and the restart that followed them failed (its errors are swallowed) leave the
+    // daemon behind the prefs, and the next set now skips. Reaching it needs the budget to run out between the writes
+    // and the restart.
     const prefs = await exec('spawn', udid, 'defaults', 'read', 'com.apple.keyboard.preferences').catch(() => '')
-    if (keyboardPrefsAre(prefs, target)) return true
+    if (keyboardPrefsAre(prefs, [target, target, next])) return true
     await exec('spawn', udid, 'defaults', 'write', 'com.apple.keyboard.preferences', 'KeyboardLastUsed', target)
     await exec('spawn', udid, 'defaults', 'write', 'com.apple.keyboard.preferences', 'KeyboardsCurrentAndNext', '-array', target, target, next)
     await this.restartKeyboardDaemon(udid, deadline)
@@ -667,13 +670,15 @@ export class SimctlWrapper {
   }
 }
 
-/** Whether `defaults read com.apple.keyboard.preferences` says `target` is both the keyboard last used and the first of
- *  the current-and-next list, as `setKeyboardLanguage` writes them. Anything unreadable is not. */
-export function keyboardPrefsAre(prefs: string, target: string): boolean {
-  // Quoted when it holds `;` or `=`, as every keyboard name does: `"ko_KR@sw=Korean;hw=Automatic"`.
-  const m = /KeyboardLastUsed\s*=\s*(?:"([^"]*)"|([^;\s]+));/.exec(prefs)
+/** Whether `defaults read com.apple.keyboard.preferences` says `list[0]` is the keyboard last used and the
+ *  current-and-next list is `list`, as `setKeyboardLanguage` writes them. Anything unreadable is not. */
+export function keyboardPrefsAre(prefs: string, list: readonly string[]): boolean {
+  // Quoted when it holds `;` or `=`, as every keyboard name does: `"ko_KR@sw=Korean;hw=Automatic"`. The key starts a
+  // line or follows `{`/`;`, so a key that merely ends in the name does not count.
+  const m = /(?:^|[\s{;])KeyboardLastUsed\s*=\s*(?:"([^"]*)"|([^;\s]+));/.exec(prefs)
   const lastUsed = m?.[1] ?? m?.[2]
-  const list = /KeyboardsCurrentAndNext\s*=\s*\(([^)]*)\)/.exec(prefs)?.[1]
-  const first = list ? /"([^"]+)"|([^\s,]+)/.exec(list.trim()) : null
-  return lastUsed === target && (first?.[1] ?? first?.[2]) === target
+  const body = /(?:^|[\s{;])KeyboardsCurrentAndNext\s*=\s*\(([^)]*)\)/.exec(prefs)?.[1]
+  if (lastUsed !== list[0] || body === undefined) return false
+  const items = [...body.matchAll(/"([^"]*)"|([^\s,]+)/g)].map((x) => x[1] ?? x[2])
+  return items.length === list.length && items.every((k, i) => k === list[i])
 }
