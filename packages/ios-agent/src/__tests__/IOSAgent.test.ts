@@ -125,6 +125,7 @@ import type { ServiceTier } from '@tapflowio/protocol'
 import { LEAN_LABELS } from '../leanLabels'
 import { TouchHelper } from '../TouchHelper'
 import { XCUITreeReader } from '../XCUITreeReader'
+import { AppObserver } from '../AppObserver'
 import { PanelState } from '../PanelState'
 import { PhysicalOrientation, type DeviceOrientation } from '../PhysicalOrientation'
 import type { GuestHelperNative } from '../GuestHelper'
@@ -848,8 +849,12 @@ describe('IOSAgent', () => {
       return { agent, browser, internals, sent, doBoot }
     }
 
-    it('answers a field read with the runner\'s field, for the app last installed or launched', async () => {
-      const readField = vi.spyOn(XCUITreeReader.prototype, 'readField').mockResolvedValue({ field: { identifier: 'form.email', placeholder: 'Email', frame: { x: 0, y: 0, width: 1, height: 1 }, secure: false, value: '안녕' } })
+    // The reads come from the app observer, not the tree runner: an attached runner made a busy SwiftUI app lag.
+    const answer = (field: Record<string, unknown>, keyboard: Record<string, unknown> = { shown: false, orientation: 1 }) =>
+      ({ kind: 'answer' as const, keyboard, field: { keyboard, ...field } })
+
+    it('answers a field read with the observer\'s field, for the app last installed or launched', async () => {
+      const readField = vi.spyOn(AppObserver.prototype, 'read').mockResolvedValue(answer({ identifier: 'form.email', placeholder: 'Email', frame: { x: 0, y: 0, width: 1, height: 1 }, type: 'text', value: '안녕' }))
       const { agent, browser, internals, sent } = await bootedAgent()
       internals.lastBundleIds.set('dev-1', 'com.app')
       internals.handleRelayMessage({ type: 'ui:field:request', sessionId: agent.sessionId!, requestId: 'rq-f' })
@@ -861,7 +866,7 @@ describe('IOSAgent', () => {
     })
 
     it('answers a failed read rather than going silent', async () => {
-      vi.spyOn(XCUITreeReader.prototype, 'readField').mockRejectedValue(new Error('runner gone'))
+      vi.spyOn(AppObserver.prototype, 'read').mockRejectedValue(new Error('observer gone'))
       const { agent, browser, internals, sent } = await bootedAgent()
       internals.handleRelayMessage({ type: 'ui:field:request', sessionId: agent.sessionId!, requestId: 'rq-f' })
       await vi.waitFor(() => expect(sent.find((m) => m.type === 'ui:field:response')).toMatchObject({ field: null, reason: 'failed' }), { timeout: 2000 })
@@ -870,22 +875,30 @@ describe('IOSAgent', () => {
     })
 
     it('reads the app an install put on the device, which a person may open from its icon rather than with Launch', async () => {
-      const readField = vi.spyOn(XCUITreeReader.prototype, 'readField').mockResolvedValue({ field: null, reason: 'no-focus' })
-      const { agent, browser, internals, sent } = await bootedAgent()
+      const readField = vi.spyOn(AppObserver.prototype, 'read').mockResolvedValue(answer({ reason: 'no-focus' }))
+      const simctl = mockSimctl(true)
+      const { agent, browser, internals, sent } = await bootedAgent(simctl)
       ;(agent as unknown as { installBuild: () => Promise<void> }).installBuild = async () => {}
       internals.handleRelayMessage({ type: 'app:install', sessionId: agent.sessionId!, requestId: 'rq-i', payload: { filePath: '/b.zip', bundleId: 'com.installed' } } as never)
       await vi.waitFor(() => expect(sent.some((m) => m.type === 'app:install-done')).toBe(true), { timeout: 2000 })
       internals.handleRelayMessage({ type: 'ui:field:request', sessionId: agent.sessionId!, requestId: 'rq-f' })
       await vi.waitFor(() => expect(readField).toHaveBeenCalledWith('dev-1', 'com.installed'), { timeout: 2000 })
+      // Named for the observer at the install, so an app opened from its icon is observed.
+      expect(simctl.setSimulatorEnv).toHaveBeenCalledWith('dev-1', 'TAPFLOW_OBSERVE_BUNDLE', 'com.installed')
       agent.disconnect()
       browser.close()
     })
 
-    it('warms the tree runner on a boot for a person Flow Capture records, as it does for an automation client', async () => {
-      const { agent, browser, internals } = await bootedAgent(mockSimctl(true), false)
+    // An attached runner made a busy SwiftUI app lag with no query running; a recorded person's reads come from the
+    // observer, so their boot warms nothing. An automation client's still does: its first tree query would wait.
+    it('does not warm the tree runner on a boot for a person Flow Capture records; an automation client\'s still does', async () => {
+      const { agent, browser, internals, sent } = await bootedAgent(mockSimctl(true), false)
       const warm = vi.mocked(XCUITreeReader.prototype.warm)
       warm.mockClear()
       internals.handleRelayMessage({ type: 'device:boot', sessionId: agent.sessionId!, requestId: 'rq-r', payload: { deviceId: 'dev-1', recorded: true } } as never)
+      await vi.waitFor(() => expect(sent.some((m) => m.type === 'device:ready')).toBe(true), { timeout: 3000 })
+      expect(warm).not.toHaveBeenCalled()
+      internals.handleRelayMessage({ type: 'device:boot', sessionId: agent.sessionId!, requestId: 'rq-a', payload: { deviceId: 'dev-1', automation: true } } as never)
       await vi.waitFor(() => expect(warm).toHaveBeenCalledWith('dev-1'), { timeout: 3000 })
       agent.disconnect()
       browser.close()
@@ -906,7 +919,7 @@ describe('IOSAgent', () => {
     })
 
     it('carries the keyboard language beside the field', async () => {
-      vi.spyOn(XCUITreeReader.prototype, 'readField').mockResolvedValue({ field: null, reason: 'no-focus', keyboard: { shown: true } })
+      vi.spyOn(AppObserver.prototype, 'read').mockResolvedValue(answer({ reason: 'no-focus' }, { shown: true, orientation: 1 }))
       const simctl = mockSimctl(true)
       ;(simctl.keyboardLanguage as ReturnType<typeof vi.fn>).mockResolvedValue('ko_KR@sw=Korean;hw=Automatic')
       const { agent, browser, internals, sent } = await bootedAgent(simctl)
@@ -947,8 +960,8 @@ describe('IOSAgent', () => {
       browser.close()
     })
 
-    it('answers ui:keyboard:request from the runner, and unknown when it fails', async () => {
-      const read = vi.spyOn(XCUITreeReader.prototype, 'readKeyboard').mockResolvedValueOnce({ shown: false }).mockRejectedValueOnce(new Error('gone'))
+    it('answers ui:keyboard:request from the observer, and unknown when it fails', async () => {
+      const read = vi.spyOn(AppObserver.prototype, 'read').mockResolvedValueOnce(answer({ reason: 'no-focus' })).mockRejectedValueOnce(new Error('gone'))
       const { agent, browser, internals, sent } = await bootedAgent()
       internals.lastBundleIds.set('dev-1', 'com.app')
       internals.handleRelayMessage({ type: 'ui:keyboard:request', sessionId: agent.sessionId!, requestId: 'rq-k1' })
