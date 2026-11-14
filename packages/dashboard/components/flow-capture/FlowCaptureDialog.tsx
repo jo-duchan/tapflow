@@ -9,7 +9,7 @@ import { useFocusAfterSwap } from '@/hooks/useFocusAfterSwap'
 import { DashboardSessionChannel } from '@/lib/flowCapture/channel'
 import { copy } from '@/lib/flowCapture/copy'
 import { editedCapture, exportedFlow, flowOf, secretRename } from '@/lib/flowCapture/flow'
-import { canGoTo, initialState, reachedStep, matchEnded, reduce, reviewedCapture, stepIndex, withAsked, type CaptureState } from '@/lib/flowCapture/machine'
+import { canGoTo, initialState, reachedStep, matchEnded, reduce, stepIndex, withAsked, type CaptureState } from '@/lib/flowCapture/machine'
 import { DialogRun, keyboardOf, loadSnapshot, matchRange, PauseLease, stepsOf, verifyFlow } from '@/lib/flowCapture/runner'
 import { compareWithRecording } from '@/lib/flowCapture/screenCompare'
 import type { CaptureTap } from '@/lib/flowCapture/tap'
@@ -155,9 +155,7 @@ function CaptureSession({ tap, session, snapshot, bundleId, setBusy, close }: {
 
   // Match's end: to Edit, unless some taps the app did not respond to wait for the person's review there (P2c).
   const finishMatch = (matched: CapturedStep[]) => dispatch(matchEnded(state.steps, matched))
-  const continueToEdit = () => {
-    if (state.review) dispatch({ type: 'match-finished', captured: reviewedCapture(state.review, state.kept) })
-  }
+  const continueToEdit = () => dispatch({ type: 'review-continued' })
 
   const startMatch = () => {
     const opened = session.current

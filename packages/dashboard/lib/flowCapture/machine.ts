@@ -85,6 +85,9 @@ export interface CaptureState {
   /** Of those taps, the ones the person kept, by index into `steps` — the recording's own, so a choice outlives Start
    *  again and a range moved around it. The rest are left out. */
   kept: number[]
+  /** The review the steps in Edit came from: kept so a tap left out there can be put back in Edit (P2c), the flow made
+   *  again with it. Gone with the next replay. */
+  reviewed?: Review
 }
 
 /** A tap Match's review offers to leave out: `index` into the matched steps, `step` into the recording's. */
@@ -123,6 +126,10 @@ export type CaptureEvent =
   | { type: 'match-reviewed'; review: Review }
   /** Keep (or leave out again) a reviewed tap, by index into `steps`. */
   | { type: 'set-kept'; step: number; kept: boolean }
+  /** Continue from Match's review: to Edit, the taps not kept left out. */
+  | { type: 'review-continued' }
+  /** In Edit, put a tap the review left out back into the flow, by index into `steps`. */
+  | { type: 'put-back'; step: number }
   | { type: 'match-failed'; error: string }
   | ({ type: 'diverged' } & Divergence)
   /** Continue anyway: the step is replayed and the comparison goes on from the next. */
@@ -157,7 +164,7 @@ export const initialState: CaptureState = {
  */
 const replayed = {
   matched: [], screenshots: [], captured: null, removed: [], made: {}, after: {}, expected: {}, verify: null, error: null, matchedRange: null, reached: 1, reset: undefined,
-  diverged: undefined, moved: undefined, insertedTail: 0, review: undefined,
+  diverged: undefined, moved: undefined, insertedTail: 0, review: undefined, reviewed: undefined,
 }
 
 const PHASE_AT: Record<number, Phase> = { 0: 'range', 2: 'edit', 3: 'verifying', 4: 'export' }
@@ -193,6 +200,18 @@ export function reduce(state: CaptureState, event: CaptureEvent): CaptureState {
       matchedRange: state.range, reached: 2, error: null, diverged: undefined, review: undefined,
     }
     case 'match-reviewed': return state.phase === 'matching' ? { ...state, review: event.review, error: null, diverged: undefined } : state
+    case 'review-continued': {
+      if (!state.review) return state
+      return { ...reduce(state, { type: 'match-finished', captured: reviewedCapture(state.review, state.kept) }), reviewed: state.review }
+    }
+    // The flow is made again from the review with the tap kept: same steps in the same places, so what Edit holds by a
+    // step's place (removed, made, expected, after) still points where it did. Like any edit, it asks for Verify again.
+    case 'put-back': {
+      if (!state.reviewed || state.kept.includes(event.step)) return state
+      const kept = [...state.kept, event.step]
+      const captured = reviewedCapture(state.reviewed, kept)
+      return { ...state, ...edited(state), kept, captured, renamed: joinsThatHold(state.renamed, captured.secrets) }
+    }
     case 'set-kept': {
       const kept = state.kept.filter((i) => i !== event.step)
       return { ...state, kept: event.kept ? [...kept, event.step] : kept }

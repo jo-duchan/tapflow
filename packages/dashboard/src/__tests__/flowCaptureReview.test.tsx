@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import { fireEvent, render, screen } from '@testing-library/react'
 import type { CapturedStep, RawStep } from '@tapflowio/flow-runner/browser'
-import { MatchScreen } from '@/components/flow-capture/screens'
+import { EditScreen, MatchScreen } from '@/components/flow-capture/screens'
 import { canGoTo, initialState, isRunning, matchEnded, reduce, reviewedCapture, reviewTaps, type CaptureState } from '@/lib/flowCapture/machine'
 
 // P2c: taps the app did not respond to when recorded wait at Match's end, to be kept or (by default) left out.
@@ -95,5 +95,33 @@ describe('the review screen', () => {
     fireEvent.focus(screen.getByRole('checkbox', { name: /#3 tapOn\(label="Plus"\)/ }))
     expect(screen.getByRole('img')).toHaveAttribute('src', 'blob:plus')
     expect(screen.getByText('#3 as you recorded it')).toBeInTheDocument()
+  })
+})
+
+// User decision (2026-11-15): a tap the review left out can be put back in Edit, without another Match.
+describe('putting a left-out tap back in Edit', () => {
+  const edit = reduce(reviewing, { type: 'review-continued' })
+
+  it('continues to Edit with the review kept, and puts a tap back in its place, asking for Verify again', () => {
+    expect(edit.phase).toBe('edit')
+    expect(edit.review).toBeUndefined()
+    expect(edit.captured!.steps.map((s) => s.skipped ?? s.step?.type)).toEqual(['no-response', 'tapOn', 'no-response'])
+    const verified = { ...edit, reached: 4, verify: { status: 'passed' as const, done: 3, live: [] } }
+    const back = reduce(verified, { type: 'put-back', step: 2 })
+    expect(back.captured!.steps.map((s) => s.skipped ?? s.step?.type)).toEqual(['no-response', 'tapOn', 'tapOn'])
+    expect(back.kept).toEqual([2])
+    expect(back.verify).toBeNull()
+    // A replay forgets the review it came from.
+    expect(reduce(back, { type: 'match-started', total: 3 }).reviewed).toBeUndefined()
+  })
+
+  it('offers put back on a left-out row, in place of remove', () => {
+    const dispatch = vi.fn()
+    render(<EditScreen state={edit} dispatch={dispatch} flow={null} renameCheck={() => ({})} onVerify={vi.fn()} onBackToRange={vi.fn()} verifyRef={{ current: null }} />)
+    const back = screen.getAllByRole('button', { name: /back in the flow/ })
+    expect(back).toHaveLength(2)
+    expect(screen.getAllByRole('button', { name: /^Remove / })).toHaveLength(1)
+    fireEvent.click(back[1]!)
+    expect(dispatch).toHaveBeenCalledWith({ type: 'put-back', step: 2 })
   })
 })

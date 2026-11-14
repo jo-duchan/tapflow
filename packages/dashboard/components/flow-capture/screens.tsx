@@ -1,5 +1,5 @@
 import { useEffect, useId, useRef, useState, type Dispatch, type RefObject } from 'react'
-import { ChevronRight, Keyboard, LoaderCircle, Trash2 } from 'lucide-react'
+import { ChevronRight, Keyboard, LoaderCircle, RotateCcw, Trash2 } from 'lucide-react'
 import {
   askedValues, capturedStepLabel, defaultRange, expectedFor, matchSelector, rangeWarnings, rawStepLabel, stepsBeforeRange, type CapturedStep, type Flow,
   type RawStep, type ScreenRect, type Selector, type StepExpect,
@@ -710,6 +710,7 @@ export function EditScreen({ state, dispatch, flow, renameCheck, onVerify, onBac
             {kept.map(({ s, i }, position) => (
               <EditRow key={i} index={i} step={madeSecret(s, state.made[i])} made={state.made[i] !== undefined} selected={selected === i}
                 onSelect={() => select(i)} onRemove={() => remove(i, position)}
+                onPutBack={s.skipped === 'no-response' && state.reviewed ? () => dispatch({ type: 'put-back', step: state.steps.indexOf(s.raw) }) : undefined}
                 expected={state.expected[i] ?? []} leftOut={(sel) => holdsSecret(sel, secrets)} canExpect={selected === i && after !== null} shown={view === 'after' ? shown : null}
                 onAddExpected={() => { setShowYaml(false); setView('after'); setShown(null) }} onShowExpected={(sel) => { setShowYaml(false); setView('after'); setShown(sel) }}
                 onRemoveExpected={(n) => { dispatch({ type: 'remove-expected', index: i, n }); setShown(null); focusOnRow('add') }}
@@ -745,7 +746,7 @@ const madeSecret = (step: CapturedRow, name: string | undefined): CapturedRow =>
 const secretBase = (step: CapturedRow): string | null => (step.step?.type === 'inputSecret' ? step.step.name : null)
 
 function EditRow({
-  index, step, made, selected, onSelect, onRemove, renamedTo, onRename, renameCheck, onMakeSecret, onKeepAsText,
+  index, step, made, selected, onSelect, onRemove, onPutBack, renamedTo, onRename, renameCheck, onMakeSecret, onKeepAsText,
   expected, leftOut, canExpect, shown, onAddExpected, onShowExpected, onRemoveExpected,
 }: {
   index: number
@@ -755,6 +756,8 @@ function EditRow({
   selected: boolean
   onSelect: () => void
   onRemove: () => void
+  /** A tap Match's review left out (P2c): put back rather than removed. */
+  onPutBack?: () => void
   /** What the person expects this tap to bring (1b-3c), shown on the selected tap only; the rest say how many. */
   expected: Selector[]
   canExpect: boolean
@@ -810,9 +813,17 @@ function EditRow({
             </Button>
           </CollapsibleTrigger>
         )}
-        <Button data-remove variant="ghost" size="icon" className="relative z-10 size-7 shrink-0" aria-label={copy.removeStep(label)} onClick={onRemove}>
-          <Trash2 aria-hidden className="h-4 w-4" />
-        </Button>
+        {onPutBack
+          ? (
+            <Button variant="ghost" size="icon" className="relative z-10 size-7 shrink-0" aria-label={copy.putBackStep(label)} title={copy.putBackStep(label)} onClick={onPutBack}>
+              <RotateCcw aria-hidden className="h-4 w-4" />
+            </Button>
+          )
+          : (
+            <Button data-remove variant="ghost" size="icon" className="relative z-10 size-7 shrink-0" aria-label={copy.removeStep(label)} onClick={onRemove}>
+              <Trash2 aria-hidden className="h-4 w-4" />
+            </Button>
+          )}
       </div>
       {reason && <p className="pb-1 pt-2 text-xs text-muted-foreground">{reason}</p>}
       {canExpect && (

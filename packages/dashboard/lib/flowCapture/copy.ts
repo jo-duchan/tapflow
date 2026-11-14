@@ -101,6 +101,7 @@ export const copy = {
 
   editHeading: (n: number) => `${n} steps`,
   removeStep: (label: string) => `Remove ${label}`,
+  putBackStep: (label: string) => `Put ${label} back in the flow`,
   stepDetails: (label: string) => `Details of ${label}`,
   fragile: 'fragile',
   auto: 'auto',
