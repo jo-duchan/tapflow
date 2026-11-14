@@ -13,6 +13,7 @@ import {
 import type { Step } from '../schema.js'
 import type { TouchObservation } from '@tapflowio/protocol'
 import { parseFlow } from '../schema.js'
+import { matchSelector } from '../selector.js'
 
 // A recording as the relay keeps it: messages stamped with its clock, acks after the inputs they answer.
 class Rec {
@@ -1407,7 +1408,11 @@ describe('touch reports', () => {
       expect(recordedTarget([plain], obs({ element: { label: 'a@b.co', traits: 0, input: true } }))).toBeNull()
       expect(recordedTarget([field], obs({ element: { label: 'hunter2', traits: 0 } }))).toBeNull()
       expect(recordedSelector(obs({ element: { label: 'hunter2', traits: 0, input: true } }))).toBeNull()
-      expect(recordedSelector(obs({ element: { label: 'Order#1215', traits: 1 } }))).toEqual({ label: 'Order#1215', exact: true })
+      expect(recordedSelector(obs({ element: { label: 'Order#1215', traits: 1 } }))).toEqual({ label: 'Order#1215', exact: true, role: 'button' })
+      expect(recordedSelector(obs({ element: { label: 'Truck', traits: 0 } }))).toEqual({ label: 'Truck', exact: true })
+      // The user's session ff5d3d3c: a row is a button and a text of one label; the selector finds the row alone.
+      const row = [el({ role: 'button', label: 'Order#1212' }), el({ role: 'text', label: 'Order#1212' })]
+      expect(matchSelector(row, recordedSelector(obs({ element: { label: 'Order#1212', traits: 1 } }))!)).toEqual([row[0]])
       expect(recordedSelector(obs({ element: { identifier: 'row.7', label: 'x', traits: 1 } }))).toEqual({ id: 'row.7' })
       // A button named only by its traits leaves the element's name to search by (CodeRabbit on #1167).
       expect(recordedSelector(obs({ button: { traits: 1 }, element: { label: 'Salty', traits: 0 } }))).toEqual({ label: 'Salty', exact: true })

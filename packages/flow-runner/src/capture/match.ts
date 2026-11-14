@@ -417,7 +417,10 @@ export function recordedSelector(touched: TouchObservation | undefined): Selecto
   // leaves the element's name to search by.
   for (const named of [touched.button, touched.element]) {
     if (named?.identifier) return { id: named.identifier }
-    if (named?.label && !named.input) return { label: named.label, exact: true }
+    // A button's label is usually its text's too, in the tree as a `button` and a `text` of one name (SwiftUI, measured
+    // on Food Truck's order rows): by the label alone the search matched two and never settled, scrolling the list to
+    // its end and back (the user's session ff5d3d3c). The trait says which one was touched.
+    if (named?.label && !named.input) return { label: named.label, exact: true, ...(named.traits & 1 ? { role: 'button' } : {}) }
   }
   return null
 }
