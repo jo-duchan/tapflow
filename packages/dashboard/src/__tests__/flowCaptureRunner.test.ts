@@ -14,7 +14,7 @@ const matchedWith: unknown[] = []
 // Settle reads and replays in the order they happened: one test needs reads it does not log above.
 const seq: string[] = []
 // The options the engine was last run with, the flows it was given, and what it answers next (else a pass).
-const ran: { options?: { observeEffects?: boolean }; flows: Array<{ steps: unknown[] }>; answers: Array<{ status: string; failureKind?: string; failureMessage?: string }>; beforeRun?: () => void } = { flows: [], answers: [] }
+const ran: { options?: { observeEffects?: boolean }; flows: Array<{ steps: unknown[] }>; answers: Array<{ status: string; failureKind?: string; failureMessage?: string }>; beforeRun?: () => void; probe?: Record<string, string> } = { flows: [], answers: [] }
 vi.mock('@tapflowio/flow-runner/browser', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@tapflowio/flow-runner/browser')>()),
   rangeStartOrientation: () => 'landscape',
@@ -30,6 +30,11 @@ vi.mock('@tapflowio/flow-runner/browser', async (importOriginal) => ({
     ran.options = options
     ran.flows.push(_flow as { steps: unknown[] })
     ran.beforeRun?.()
+    if (ran.probe) {
+      const d = driver as unknown as Record<string, (...a: unknown[]) => Promise<unknown>>
+      const calls: Array<[string, unknown[]]> = [['queryUITree', []], ['reach', [[]]], ['swipe', [[0.5, 0.7], [0.5, 0.3], 300]], ['tap', [0.5, 0.5]], ['screenshot', []]]
+      for (const [m, args] of calls) ran.probe[m] = await Promise.resolve().then(() => d[m]!(...args)).then(() => 'sent', (e: unknown) => ((e as Error).name === 'AbortError' ? 'stopped' : 'sent'))
+    }
     const answer = ran.answers.shift()
     if (answer) return answer
     await driver.tap(0.5, 0.5)
@@ -64,7 +69,7 @@ const channel = {
   tap: async () => { log.push('tap') },
   typeText: async () => { log.push('type') },
   pressKey: async (_s: string, code: string) => { log.push(`key ${code}`) },
-  screenshot: async () => { throw new Error('no screenshot here') },
+  screenshot: async () => { if (trackShots.on) seq.push('shot'); throw new Error('no screenshot here') },
   chrome: async () => null,
   reach: async (_s: string, targets: { label: string }[]) => {
     log.push(`reach ${targets.map((t) => t.label).join(',')}`)
@@ -81,6 +86,8 @@ const installStep = { ...base, kind: 'install', buildId: 7 } as unknown as RawSt
 const textStep = { ...base, kind: 'text', text: '안녕', replace: true } as unknown as RawStep
 
 let pauseOk = true
+// One test reads where the pictures were taken among the reads and replays.
+const trackShots = { on: false }
 beforeEach(() => {
   log.length = 0
   seq.length = 0
@@ -94,6 +101,8 @@ beforeEach(() => {
   ran.flows = []
   ran.answers = []
   ran.beforeRun = undefined
+  ran.probe = undefined
+  trackShots.on = false
   vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
     if (url.endsWith('/pause') && init?.method === 'PUT') {
       log.push('pause')
@@ -639,14 +648,16 @@ describe('matchRange with the app\'s touch reports', () => {
     screen.elements = []
     ran.answers = [{ status: 'failed', failureKind: 'product' }, { status: 'failed', failureKind: 'product' }]
     const { compare, h } = compareHooks()
+    trackShots.on = true
     const lease = new PauseLease(ctap)
     await matchRange(ctap, channel, lease, [launchStep, tapStep, tapStep, swipeUp, named], { start: 0, end: 5 }, null, h)
     await lease.stop()
     expect(log.filter((l) => l.startsWith('replay'))).toEqual(['replay launch', 'replay tap', 'replay tap', 'replay swipe', 'replay tap'])
     expect(compare.mock.calls.map((c) => c[0])).toEqual([tapStep, named])
     // The search moved the screen: it is read again before the point is replayed on it.
+    // …and pictured again for the step: the picture taken before the search shows a screen it moved.
     const last = seq.lastIndexOf('replay tap')
-    expect(seq.slice(last - 2, last + 1)).toEqual(['settle', 'settle', 'replay tap'])
+    expect(seq.slice(last - 3, last + 1)).toEqual(['shot', 'settle', 'shot', 'replay tap'])
   })
 
   // Review of P2b: the fallback matched against the screen read before the search and asked the device nothing.
@@ -666,9 +677,12 @@ describe('matchRange with the app\'s touch reports', () => {
     const stop = new AbortController()
     ran.beforeRun = () => stop.abort()
     const lease = new PauseLease(ctap)
+    ran.probe = {}
     await expect(matchRange(ctap, channel, lease, [launchStep, named], { start: 0, end: 2 }, null, { ...hooks(), signal: stop.signal })).rejects.toThrow()
     await lease.stop()
     expect(log).not.toContain('tap')
+    // Every way the engine reaches the device from a scroll search and a tap, its failure picture included.
+    expect(ran.probe).toEqual({ queryUITree: 'stopped', reach: 'stopped', swipe: 'stopped', tap: 'stopped', screenshot: 'stopped' })
   })
 
   it('stops on a session that ended rather than falling back', async () => {

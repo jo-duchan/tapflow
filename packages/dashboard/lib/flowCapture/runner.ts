@@ -284,9 +284,10 @@ export async function matchRange(
     const tapIt: Step = { type: 'tapOn', selector: named.selector }
     if (named.target) return attempt([tapIt])
     // Back the other way only here: this replay sent the recorded swipe, and a fling longer than the recording's
-    // carries the element past. The exported flow needs no such retry — its `scroll { until }` (`toFlowSteps`) takes the
-    // swipe's place, so it starts where the swipe started, which is where the person's direction is right; and Verify
-    // runs that flow before Export, so a wrong direction there fails rather than ships.
+    // carries the element past. The exported flow needs no such retry: where `toFlowSteps` turns the swipe into
+    // `scroll { until }`, the scroll takes the swipe's place and starts where the swipe started, where the person's
+    // direction is right; where it does not, the swipe and the tap are exported as they are. Verify runs that flow
+    // before Export either way, so a wrong direction fails visibly there.
     for (const direction of [named.direction!, OPPOSITE[named.direction!]]) {
       if (await attempt([{ type: 'scroll', direction, until: named.selector }, tapIt])) return true
     }
@@ -410,7 +411,11 @@ export async function matchRange(
       }
       // Not found either way: the picture is what is left to judge by, and the point is replayed as recorded — on the
       // screen the search left, read again, and asked of the device as any other tap is.
-      if (!named.target) before = await waitForStableScreen(read, { timeoutMs: SETTLE_TIMEOUT_MS })
+      // A read that fails keeps the screen from before the search: an older tree is still a tree to match against.
+      if (!named.target) {
+        before = (await waitForStableScreen(read, { timeoutMs: SETTLE_TIMEOUT_MS })) ?? before
+        shot = await shoot()
+      }
       if (!skipCompare) await compareNow()
       ;({ questions, reach } = await ask(before?.elements ?? []))
     }
@@ -491,12 +496,24 @@ class AligningDriver extends SocketFlowDriver {
 
   override queryUITree(signal?: AbortSignal) {
     this.signal?.throwIfAborted()
-    return super.queryUITree(signal)
+    return super.queryUITree(this.either(signal))
   }
 
   override reach(targets: UIElement[], signal?: AbortSignal) {
     this.signal?.throwIfAborted()
-    return super.reach(targets, signal)
+    return super.reach(targets, this.either(signal))
+  }
+
+  // The failure picture the engine takes after a stopped step, too.
+  override screenshot(signal?: AbortSignal) {
+    this.signal?.throwIfAborted()
+    return super.screenshot(this.either(signal))
+  }
+
+  /** A read in flight ends at Stop as well as at the engine's own deadline. */
+  private either(signal: AbortSignal | undefined): AbortSignal | undefined {
+    if (!this.signal || !signal) return signal ?? this.signal
+    return AbortSignal.any([signal, this.signal])
   }
 
   // The flow's own points, before the driver turns them for the device: the mirror shows the device upright.
