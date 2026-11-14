@@ -178,6 +178,9 @@ function frameTurnOf(chrome: ChromePayload | null): 0 | 90 | 180 | 270 | undefin
   return (chrome as AndroidChrome).streamRotation
 }
 
+/** How long Match waits before judging that a replayed tap did nothing (`tapDidNothing`). */
+export const RETRY_LOOK_AGAIN_MS = 1_500
+
 const TYPING = new Set<RawStep['kind']>(['text', 'type', 'paste', 'key'])
 /** Steps whose picture is the screen they left: what typing or a keyboard's action did is the point of looking, and the
  *  screen before it shows a field still empty. A tap keeps the screen before, which shows what it is about to touch. */
@@ -205,7 +208,9 @@ export interface MatchHooks {
    * before it (`shotBefore`) and now (`shotNow`) not a cell different, and the recording's before it and before `next`
    * different. Asked only when the step after it looks different; `true` replays the tap once more before stopping. An
    * app now and then lets a tap go by (a Food Truck menu item, sessions af948002 and ff5d3d3c), as it did the person's
-   * once; a second, on a screen the first did not change, cannot act twice.
+   * once. A second press is made only where the first changed nothing on the screen a moment later
+   * (`RETRY_LOOK_AGAIN_MS`) and nothing in the tree Match watched (`observed`): an effect neither shows — a request
+   * whose answer the screen never draws — could still be made twice, the price of not stopping on a tap that slipped.
    */
   tapDidNothing?: (prev: RawStep, next: RawStep, shotBefore: Uint8Array, shotNow: Uint8Array, masks: ScreenRect[]) => Promise<boolean>
   signal: AbortSignal
@@ -328,14 +333,14 @@ export async function matchRange(
   // Whether the element was tapped, and whether a search ran — taken as having moved the screen away from the read
   // before it, since the engine does not say whether it swiped: a search that found it in place costs that tap's
   // after-screen, never a wrong one.
+  const attempt = async (steps: Step[]): Promise<boolean> => {
+    const result = await runFlow({ name: 'match', steps }, driver, { platform: tap.platform })
+    hooks.signal.throwIfAborted()
+    // A session that ended is the run's to report, not a tap to fall back from.
+    if (result.status === 'failed' && result.failureKind === 'environment') throw new Error(result.failureMessage ?? 'The session ended.')
+    return result.status === 'passed'
+  }
   const runNamed = async (named: NamedTap): Promise<{ tapped: boolean; scrolled: boolean }> => {
-    const attempt = async (steps: Step[]): Promise<boolean> => {
-      const result = await runFlow({ name: 'match', steps }, driver, { platform: tap.platform })
-      hooks.signal.throwIfAborted()
-      // A session that ended is the run's to report, not a tap to fall back from.
-      if (result.status === 'failed' && result.failureKind === 'environment') throw new Error(result.failureMessage ?? 'The session ended.')
-      return result.status === 'passed'
-    }
     const tapIt: Step = { type: 'tapOn', selector: named.selector }
     if (named.target && await attempt([tapIt])) return { tapped: true, scrolled: false }
     // On the screen but not reached (a tab bar over the row): with a swipe before it to say which way, the search
@@ -358,12 +363,15 @@ export async function matchRange(
   const effects = new EffectWatch()
   const observed = new Map<CapturedStep, StepExpect | null>()
   let watching: { step: CapturedStep; index: number; before: UIElement[]; touched?: UIElement } | undefined
+  // The watch closed last, kept so a tap pressed again can be watched again.
+  let lastClosed: typeof watching
   // The screen the touch left, read before anything else happens on it: what Edit shows as "after this tap", where the
   // person picks what the touch should bring (1b-3c). The next step's own picture is not it — a typing step's is the
   // screen after the typing — so it is taken here, once, with the tree it is read with.
   const closeWatch = async (after: { elements: UIElement[]; interfaceTurn?: InterfaceTurn } | null | undefined) => {
     const closing = watching
     watching = undefined
+    lastClosed = closing
     if (!closing || !after) return
     const seen = effects.observe(closing.before, after.elements, after.elements, closing.touched ? { touched: closing.touched } : {})
     observed.set(closing.step, seen)
@@ -387,7 +395,7 @@ export async function matchRange(
   let unlike = false
   // The tap just replayed, with the screen it was replayed on: tapped once more when the next step looks different and
   // it did nothing (`tapDidNothing`). Once per tap.
-  let lastTap: { raw: RawStep; named?: NamedTap; shot: Uint8Array } | undefined
+  let lastTap: { raw: RawStep; step: CapturedStep; named?: NamedTap; shot: Uint8Array } | undefined
   for (const [offset, raw] of slice.entries()) {
     hooks.signal.throwIfAborted()
     let skipCompare = unlike
@@ -434,7 +442,8 @@ export async function matchRange(
       : undefined
     // After the focus tap and its settle: a typed step's picture was taken at its first key, with the field focused.
     // A tap the app named is judged by finding that element, not by the picture: the list under it may sit elsewhere.
-    const prevTap = lastTap
+    // A focus tap went in since: pressed again now, the tap would take the field's focus away.
+    const prevTap = focus ? undefined : lastTap
     lastTap = undefined
     const compareNow = async (): Promise<void> => {
       if (!hooks.compare || !hooks.onDiverged) return
@@ -445,7 +454,14 @@ export async function matchRange(
       hooks.signal.throwIfAborted()
       if (!differs) return
       if (prevTap && await retriedTap(prevTap, masks)) {
+        URL.revokeObjectURL(differs.nowUrl)
         before = (await waitForStableScreen(read, { timeoutMs: SETTLE_TIMEOUT_MS })) ?? before
+        // What the tap did is what the second press did: watched again, so Edit's "after this tap" and the expectations
+        // a flow gets are the screen it made. The current step is still replayed as it was chosen before (named or not).
+        if (lastClosed?.step === prevTap.step) {
+          watching = lastClosed
+          await closeWatch(before)
+        }
         const still = await hooks.compare(raw, masks).catch(() => null)
         hooks.signal.throwIfAborted()
         if (still) await hooks.onDiverged(range.start + offset, still)
@@ -456,12 +472,19 @@ export async function matchRange(
     // The tap before this step, replayed once more when it did nothing on the replay and something when recorded.
     const retriedTap = async (prev: NonNullable<typeof lastTap>, masks: ScreenRect[]): Promise<boolean> => {
       if (!hooks.tapDidNothing) return false
+      // The tree saw it do something (Match's own watch of it): an effect the picture may not show, never pressed again.
+      const seen = observed.get(prev.step)
+      if (seen && ((seen.appear?.length ?? 0) > 0 || (seen.gone?.length ?? 0) > 0)) return false
+      // An effect can come late (a request's answer drawn after the screen read as settled): judged on a picture taken
+      // a moment later, so a tap that did act is not pressed twice. Measured: the open-menu screen holds 0 cells apart
+      // for 5 s, so the wait costs nothing in the case this is for.
+      await new Promise((resolve) => setTimeout(resolve, RETRY_LOOK_AGAIN_MS))
+      hooks.signal.throwIfAborted()
       const now = await channel.screenshot(sessionId, hooks.signal).catch(() => null)
       if (!now || !(await hooks.tapDidNothing(prev.raw, raw, prev.shot, now, masks).catch(() => false))) return false
       hooks.signal.throwIfAborted()
-      if (prev.named) {
-        if ((await runNamed(prev.named)).tapped) return true
-      }
+      // Named: on its element again, or not at all — the point is what a named tap is there not to trust.
+      if (prev.named) return attempt([{ type: 'tapOn', selector: prev.named.selector }])
       const mark = markOf(prev.raw)
       if (mark) hooks.onTouch?.(mark)
       await replayStep(channel, sessionId, prev.raw, hooks.signal)
@@ -499,7 +522,7 @@ export async function matchRange(
         // What it did is read against the screen it was tapped on, which a scroll before it has moved from `before`.
         if (!scrolled) watching = { step, index: matched.length - 1, before: before!.elements, touched: named.target! }
         // Not after a search: the screen it was tapped on is not the one pictured before the search.
-        if (!scrolled && shot) lastTap = { raw, named, shot }
+        if (!scrolled && shot) lastTap = { raw, step, named, shot }
         hooks.onStep(step, shot ? URL.createObjectURL(new Blob([shot as BlobPart], { type: 'image/jpeg' })) : undefined)
         continue
       }
@@ -540,7 +563,7 @@ export async function matchRange(
     if ((raw.kind === 'tap' || raw.kind === 'longPress') && before) {
       watching = { step, index: matched.length - 1, before: before.elements, ...(questions[0] ? { touched: questions[0] } : {}) }
     }
-    if (raw.kind === 'tap' && shot) lastTap = { raw, shot }
+    if (raw.kind === 'tap' && shot) lastTap = { raw, step, shot }
     hooks.onStep(step, shot ? URL.createObjectURL(new Blob([shot as BlobPart], { type: 'image/jpeg' })) : undefined)
   }
   // The last touch has no next step to read after it.

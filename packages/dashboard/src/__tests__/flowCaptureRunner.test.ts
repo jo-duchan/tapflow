@@ -656,16 +656,18 @@ describe('matchRange: a tap that did nothing on the replay', () => {
   const menuItem = { ...tapStep, point: [0.6, 0.51] } as unknown as RawStep
   const back = { ...tapStep, point: [0.1, 0.09] } as unknown as RawStep
   const run = async (didNothing: boolean, stillDiffers = false) => {
-    vi.stubGlobal('URL', Object.assign(URL, { createObjectURL: () => 'blob:x' }))
+    vi.stubGlobal('URL', Object.assign(URL, { createObjectURL: () => 'blob:x', revokeObjectURL: () => {} }))
     let asked = 0
     const compare = vi.fn(async (raw: RawStep) => (raw === back && (asked++ === 0 || stillDiffers) ? { diff: 0.2, nowUrl: 'blob:now', masks: [] } : null))
     const tapDidNothing = vi.fn(async () => didNothing)
     const onDiverged = vi.fn(async () => {})
+    const watched: number[] = []
     const lease = new PauseLease(ctap)
     // A tapStep first: the first step after the launch is never compared here.
-    await matchRange(ctap, shooting, lease, [launchStep, tapStep, menuItem, back], { start: 0, end: 4 }, null, { ...hooks(), compare, onDiverged, tapDidNothing })
+    await matchRange(ctap, shooting, lease, [launchStep, tapStep, menuItem, back], { start: 0, end: 4 }, null,
+      { ...hooks(), compare, onDiverged, tapDidNothing, onObserved: (i) => watched.push(i) })
     await lease.stop()
-    return { tapDidNothing, onDiverged, taps: log.filter((l) => l === 'replay tap').length }
+    return { tapDidNothing, onDiverged, watched, taps: log.filter((l) => l === 'replay tap').length }
   }
 
   it('taps it once more and goes on when the step after it then looks as recorded', async () => {
@@ -674,6 +676,48 @@ describe('matchRange: a tap that did nothing on the replay', () => {
     // tapStep, the menu item, the menu item again, back.
     expect(r.taps).toBe(4)
     expect(r.onDiverged).not.toHaveBeenCalled()
+    // The menu item (launch #0, the suite's turn #1, tapStep #2, the item #3) is watched again after its second press.
+    expect(r.watched.filter((i) => i === 3)).toHaveLength(2)
+  })
+
+  // Review of P2c's second press: never where Match's own watch saw the first press act, never across another step,
+  // and a named tap on its element again or not at all.
+  it('does not press again a tap whose effect the tree showed, or one with a step between', async () => {
+    vi.stubGlobal('URL', Object.assign(URL, { createObjectURL: () => 'blob:x', revokeObjectURL: () => {} }))
+    const tapDidNothing = vi.fn(async () => true)
+    const onDiverged = vi.fn(async () => {})
+    let asked = 0
+    const compare = vi.fn(async (raw: RawStep) => (raw === back && asked++ === 0 ? { diff: 0.2, nowUrl: 'blob:now', masks: [] } : null))
+    const lease = new PauseLease(ctap)
+    screen.elements = [{ role: 'text', label: 'Plain', enabled: true, frame: { x: 0.6, y: 0.8, width: 0.2, height: 0.03 } }]
+    // The menu item's press chose Blueberry in the tree, whatever the picture says.
+    const onStep = (step: { raw: RawStep }) => { if (step.raw === menuItem) screen.elements = [{ role: 'text', label: 'Blueberry Dough', enabled: true, frame: { x: 0.6, y: 0.8, width: 0.3, height: 0.03 } }] }
+    await matchRange(ctap, shooting, lease, [launchStep, tapStep, menuItem, back], { start: 0, end: 4 }, null, { ...hooks(), onStep, compare, onDiverged, tapDidNothing })
+    expect(tapDidNothing).not.toHaveBeenCalled()
+    expect(onDiverged).toHaveBeenCalledTimes(1)
+    const swipe = { ...base, kind: 'swipe', from: [0.5, 0.8], to: [0.5, 0.3], durationMs: 300 } as unknown as RawStep
+    asked = 0
+    await matchRange(ctap, shooting, lease, [launchStep, tapStep, menuItem, swipe, back], { start: 0, end: 5 }, null, { ...hooks(), compare, onDiverged, tapDidNothing })
+    await lease.stop()
+    expect(tapDidNothing).not.toHaveBeenCalled()
+  })
+
+  it('presses a named tap again on its element, through the engine, never at its point', async () => {
+    vi.stubGlobal('URL', Object.assign(URL, { createObjectURL: () => 'blob:x', revokeObjectURL: () => {} }))
+    const frame = { x: 0.3, y: 0.49, width: 0.6, height: 0.046 }
+    screen.elements = [{ role: 'button', label: 'Blueberry Dough', enabled: true, frame }]
+    const named = { ...menuItem, touched: { point: { x: 0.6, y: 0.51 }, moving: false, element: { label: 'Blueberry Dough', traits: 1, frame } } } as unknown as RawStep
+    let asked = 0
+    const compare = vi.fn(async (raw: RawStep) => (raw === back && asked++ === 0 ? { diff: 0.2, nowUrl: 'blob:now', masks: [] } : null))
+    const lease = new PauseLease(ctap)
+    // Pressed again, the engine does not find it: no tap at the recorded point in its place.
+    ran.answers = [{ status: 'passed' }, { status: 'failed', failureKind: 'product' }]
+    await matchRange(ctap, shooting, lease, [launchStep, tapStep, named, back], { start: 0, end: 4 }, null,
+      { ...hooks(), compare, onDiverged: vi.fn(async () => {}), tapDidNothing: vi.fn(async () => true) })
+    await lease.stop()
+    expect(ran.flows.map((f) => (f.steps as Array<{ type: string }>).map((x) => x.type))).toEqual([['tapOn'], ['tapOn']])
+    // tapStep and back at their points; the named tap only through the engine, twice.
+    expect(log.filter((l) => l === 'replay tap')).toHaveLength(2)
   })
 
   it('judges "did nothing" only on both pictures: unchanged on the replay, changed when recorded', async () => {
