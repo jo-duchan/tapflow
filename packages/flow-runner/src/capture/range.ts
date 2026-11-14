@@ -40,6 +40,8 @@ export function defaultRange(steps: readonly RawStep[]): StepRange {
   // Nothing after the clean start (the last step was the install or clear): the range would be empty, with no step at
   // either handle. The rest of the rule picks one instead.
   if (start >= steps.length) start = -1
+  // A step left out before the replay replays nothing, so it cannot be where the replay starts.
+  while (start >= 0 && start < steps.length - 1 && steps[start]!.dropped) start++
   if (start < 0) {
     start = 0
     for (let i = 0; i < steps.length; i++) if (steps[i]!.kind === 'launch' && counts(steps[i]!)) start = i
@@ -55,7 +57,10 @@ const NAVIGATION_BUTTONS = new Set(['home', 'back', 'recent_apps'])
 const findsTheApp = (s: RawStep): boolean => FINDS_THE_APP.has(s.kind) || (s.kind === 'button' && NAVIGATION_BUTTONS.has(s.name))
 
 export function rangeWarnings(steps: readonly RawStep[], range: StepRange): RangeWarning[] {
-  const first = steps[range.start]
+  // The first step the replay sends: one left out before it (`dropped`) launches nothing and is in no app.
+  let at = range.start
+  while (at < range.end - 1 && steps[at]?.dropped) at++
+  const first = steps[at]
   const out: RangeWarning[] = []
   // A step the reads place in the app needs no launch of its own to start from: the replay launches the app first.
   if (first?.kind !== 'launch' && first?.onHome !== false) out.push('no-launch-at-start')
@@ -79,7 +84,7 @@ export function stepsBeforeRange(steps: readonly RawStep[], range: StepRange): n
     if ((s.kind === 'clearState' || s.kind === 'install') && s.outcome !== 'refused') from = i + 1
   }
   const out: number[] = []
-  for (let i = from; i < range.start; i++) if (steps[i]!.onHome === false && steps[i]!.outcome !== 'refused') out.push(i)
+  for (let i = from; i < range.start; i++) if (steps[i]!.onHome === false && steps[i]!.outcome !== 'refused' && !steps[i]!.dropped) out.push(i)
   return out
 }
 

@@ -73,6 +73,10 @@ export const copy = {
   // Back to Range moves only a start still at its default: a start the person chose is told the fact and nothing more.
   divergedBefore: (span: string, n: number, moves: boolean) =>
     `${span} ${n === 1 ? 'comes' : 'come'} before the range${moves ? ': Back to Range starts it there.' : '.'}`,
+  // Record-time observation: a tap left out before the replay is the first suspect when the step after it differs.
+  divergedDropped: (span: string, n: number) =>
+    `${span} ${n === 1 ? 'was' : 'were'} not replayed: tapped while a list was still moving, which only stops it.`,
+  droppedTile: 'Not replayed: tapped while the list was still moving.',
   divergedMatched: (n: number) => `${n} ${n === 1 ? 'step' : 'steps'} before it matched.`,
   divergedCauses: 'Compare the two pictures: a step left out of the range, a prompt or first-run screen the reset brings back, data that changed since you recorded, or a screen caught mid-animation can each do this.',
   divergedRecorded: (step: number) => `When you recorded #${step}`,
@@ -110,6 +114,7 @@ export const copy = {
     cut: 'A flow cannot cut text.',
     keyboard: 'The on-screen keyboard toggle is not a flow step.',
     'keyboard-key': 'A key on the on-screen keyboard. What it typed could not be read, so it is not in the flow. Type with your computer’s keyboard for text the flow can replay.',
+    'stopped-scroll': 'Tapped while the list was still moving: it stopped the list and pressed nothing, so it is not replayed.',
   } satisfies Record<SkipReason, string>,
   autoReason: 'Turned into a scroll to the element the next step taps.',
   secretLabel: 'Secret name',

@@ -1,4 +1,4 @@
-import type { DevicePosture, PointSpace, ReachResult, UIElement } from '@tapflowio/protocol'
+import type { DevicePosture, ObservedElement, PointSpace, ReachResult, TouchObservation, UIElement } from '@tapflowio/protocol'
 import type { InterfaceTurn } from '@tapflowio/protocol/screen'
 import type { ScrollDirection, Selector, Step } from '../schema.js'
 import type { StepExpect } from '../effect.js'
@@ -38,6 +38,8 @@ export type SkipReason =
   | 'network' | 'cut' | 'keyboard'
   /** A key on the soft keyboard whose typing no field read caught (#1135): what it typed is not known. */
   | 'keyboard-key'
+  /** Went down on a list that was still moving: it stopped the list and pressed nothing (`RawStep.dropped`). */
+  | 'stopped-scroll'
 
 export type FragileReason =
   /** Tapped where the tree names no element. */
@@ -175,7 +177,7 @@ const offScreenPart = (e: UIElement): boolean =>
  *   no question.
  */
 export function reachQuestions(raw: RawStep, ctx: Pick<MatchContext, 'tree' | 'interfaceTurn' | 'frameTurn'>): UIElement[] {
-  if (raw.outcome === 'refused') return []
+  if (raw.outcome === 'refused' || raw.dropped) return []
   if (raw.kind === 'swipe') return swipeQuestions(ctx.tree)
   const p = touchedAt(raw, ctx)
   const hit = p ? hitTest(ctx.tree, p) : null
@@ -253,6 +255,7 @@ export function matchStep(raw: RawStep, ctx: MatchContext): CapturedStep {
 
 function matchAction(raw: RawStep, ctx: MatchContext): CapturedStep {
   if (raw.outcome === 'refused') return { raw, step: null, skipped: 'refused' }
+  if (raw.dropped) return { raw, step: null, skipped: raw.dropped }
   // One question for a touch: the element under its point.
   const reach = ctx.reach?.length === 1 ? ctx.reach[0] : undefined
   switch (raw.kind) {
@@ -338,6 +341,52 @@ function matchAction(raw: RawStep, ctx: MatchContext): CapturedStep {
     case 'keyboardKey': return { raw, step: null, skipped: 'keyboard-key' }
     case 'imeAction': return { raw, step: { type: 'imeAction' } }
   }
+}
+
+/**
+ * The element of `tree` that a touch's report names (record-time observation): the button it was in, else the element
+ * itself, found by identifier, else by label, and of several the one whose frame lies nearest the recorded one. `null`
+ * when the report names nothing the tree has — not on this screen, scrolled out of it, or a touch on the keyboard, a
+ * web view or Flutter, which the report does not name.
+ *
+ * Match replays such a tap on this element rather than at the recorded point: a list a fling left at another offset,
+ * or one a tap stopped mid-glide in the recording and not in the replay, puts another row under the point.
+ */
+export function recordedTarget(tree: readonly UIElement[], touched: TouchObservation | undefined): UIElement | null {
+  if (!touched || touched.surface) return null
+  for (const named of [touched.button, touched.element]) {
+    if (!named) continue
+    const found = named.identifier
+      ? tree.filter((e) => e.identifier === named.identifier)
+      : named.label && !named.input ? tree.filter((e) => e.label === named.label && e.secure !== true) : []
+    const nearest = nearestTo(found, named)
+    if (nearest) return nearest
+  }
+  return null
+}
+
+function nearestTo(found: UIElement[], named: ObservedElement): UIElement | null {
+  if (found.length <= 1) return found[0] ?? null
+  if (!named.frame) return null
+  const f = named.frame
+  const d = (e: UIElement) => Math.hypot(e.frame.x + e.frame.width / 2 - (f.x + f.width / 2), e.frame.y + e.frame.height / 2 - (f.y + f.height / 2))
+  return found.reduce((a, b) => (d(b) < d(a) ? b : a))
+}
+
+/** A selector for what a touch's report names, for an element the screen does not show yet (`scroll { until }`). */
+export function recordedSelector(touched: TouchObservation | undefined): Selector | null {
+  if (!touched || touched.surface) return null
+  const named = touched.button ?? touched.element
+  if (named?.identifier) return { id: named.identifier }
+  if (named?.label && !named.input) return { label: named.label, exact: true }
+  return null
+}
+
+/** The way a swipe scrolls, as `scroll` says it, on the screen as the app draws it; `null` for one `scroll` could not
+ *  make (slanted, or off the middle). */
+export function scrollDirectionOf(raw: RawStep, ctx: Pick<MatchContext, 'interfaceTurn' | 'frameTurn'>): ScrollDirection | null {
+  if (raw.kind !== 'swipe') return null
+  return scrollDirection(toScreen(raw.from, raw.space, ctx), toScreen(raw.to, raw.space, ctx))
 }
 
 /** Axis-parallel, and across the middle of the screen where `scroll` makes its own swipe. */

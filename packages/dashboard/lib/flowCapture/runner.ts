@@ -1,8 +1,8 @@
 import {
-  defaultRange, EffectWatch, focusTap, matchStep, rangeStartKeyboard, rangeStartOrientation, reachQuestions, reachTargetOf, replayStep, runFlow,
-  segment, SocketFlowDriver, statusBarRect,
+  defaultRange, EffectWatch, focusTap, matchStep, rangeStartKeyboard, rangeStartOrientation, reachQuestions, reachTargetOf, recordedSelector,
+  recordedTarget, replayStep, runFlow, scrollDirectionOf, segment, selectorFor, SocketFlowDriver, statusBarRect,
   toFlowSteps, waitForStableScreen, type CapturedStep, type Flow, type FlowResult, type KeyModifier, type MatchContext,
-  type RawStep, type ScreenRect, type StepExpect, type StepRange,
+  type RawStep, type ScreenRect, type ScrollDirection, type Selector, type Step, type StepExpect, type StepRange,
 } from '@tapflowio/flow-runner/browser'
 import { chromeOrientation, type InterfaceTurn } from '@tapflowio/protocol/screen'
 import type { AndroidChrome, ChromePayload, UIElement } from '@tapflowio/protocol'
@@ -189,7 +189,51 @@ export interface ScreenDivergence {
  *  (launch, URL, network), a turn and a button make their own screen — except Back, which goes wherever the screen it
  *  is pressed on leads; a key on the soft keyboard is never replayed. */
 const COMPARED = new Set<RawStep['kind']>(['tap', 'longPress', 'swipe', 'holdDrag', 'pinch', 'imeAction', 'text', 'key', 'paste', 'type'])
-const compared = (raw: RawStep): boolean => COMPARED.has(raw.kind) || (raw.kind === 'button' && raw.name === 'back')
+const compared = (raw: RawStep): boolean => !raw.dropped && (COMPARED.has(raw.kind) || (raw.kind === 'button' && raw.name === 'back'))
+
+/**
+ * A tap the app named when it was recorded (record-time observation), as Match replays it: on that element, through the
+ * engine's own `tapOn` — and, when the screen does not show it, after `scroll { until }` the way the swipes before it
+ * went. `target` is the element on the screen now, or `null` when it has to be scrolled to.
+ */
+interface NamedTap { selector: Selector; target: UIElement | null; direction?: ScrollDirection }
+
+const OPPOSITE: Record<ScrollDirection, ScrollDirection> = { up: 'down', down: 'up', left: 'right', right: 'left' }
+
+/**
+ * `undefined` when the tap is replayed at its point as before: no report named it, the app is drawn turned (the
+ * tree's frames are not the touch's), the element cannot be named alone, or it is off the screen with no swipe before
+ * it to say which way it lies.
+ */
+function namedTap(raw: RawStep, tree: UIElement[], previous: RawStep | undefined, turns: Pick<MatchContext, 'interfaceTurn' | 'frameTurn'>): NamedTap | undefined {
+  if (raw.kind !== 'tap' || raw.dropped || raw.outcome === 'refused' || turns.interfaceTurn) return undefined
+  const target = recordedTarget(tree, raw.touched)
+  if (target) {
+    const selector = selectorFor(tree, target)
+    return selector ? { selector, target } : undefined
+  }
+  const selector = recordedSelector(raw.touched)
+  const direction = previous ? scrollDirectionOf(previous, turns) : null
+  return selector && direction ? { selector, target: null, direction } : undefined
+}
+
+/** The step the replay sends before `slice[offset]`, past those left out (`dropped`). */
+function previousSent(slice: RawStep[], offset: number): RawStep | undefined {
+  for (let i = offset - 1; i >= 0; i--) if (!slice[i]!.dropped) return slice[i]
+  return undefined
+}
+
+/** Whether `slice[offset]` is a swipe whose next sent step is a tap the app named: that tap is found by its element,
+ *  so how far this swipe carried the list is not compared — a fling's length differs between any two runs. */
+function swipeBeforeNamedTap(slice: RawStep[], offset: number): boolean {
+  if (slice[offset]?.kind !== 'swipe') return false
+  for (let i = offset + 1; i < slice.length; i++) {
+    const s = slice[i]!
+    if (s.dropped) continue
+    return s.kind === 'tap' && recordedSelector(s.touched) !== null
+  }
+  return false
+}
 
 /**
  * The start `tapflow flow run` gives a flow, on the device the session holds (#1139): the app as freshly installed, the
@@ -227,6 +271,24 @@ export async function matchRange(
   if (slice[0]?.kind !== 'launch') await channel.launchApp(sessionId, tap.buildId)
 
   const read = (signal: AbortSignal) => channel.queryUITreeWithTurn(sessionId, signal)
+  // The engine Verify runs, for the taps the app named: found and tapped as `flow run` would.
+  const driver = new AligningDriver(channel, sessionId, tap.buildId, alignment, hooks.onTouch)
+  const runNamed = async (named: NamedTap): Promise<boolean> => {
+    const attempt = async (steps: Step[]): Promise<boolean> => {
+      const result = await runFlow({ name: 'match', steps }, driver, { platform: tap.platform })
+      hooks.signal.throwIfAborted()
+      // A session that ended is the run's to report, not a tap to fall back from.
+      if (result.status === 'failed' && result.failureKind === 'environment') throw new Error(result.failureMessage ?? 'The session ended.')
+      return result.status === 'passed'
+    }
+    const tapIt: Step = { type: 'tapOn', selector: named.selector }
+    if (named.target) return attempt([tapIt])
+    // A fling the replay made longer than the recording's carried the element past: back the other way.
+    for (const direction of [named.direction!, OPPOSITE[named.direction!]]) {
+      if (await attempt([{ type: 'scroll', direction, until: named.selector }, tapIt])) return true
+    }
+    return false
+  }
   const matched: CapturedStep[] = []
   // What each touch did, seen from the screen before it to the screen the next step is read on (#1125). Kept beside the
   // steps rather than on them, since those went to the dialog already; Export writes only what Verify sees too.
@@ -296,8 +358,14 @@ export async function matchRange(
       hooks.onStep(tapped, focusShot ? URL.createObjectURL(new Blob([focusShot as BlobPart], { type: 'image/jpeg' })) : undefined, true)
       before = await waitForStableScreen(read, { timeoutMs: SETTLE_TIMEOUT_MS })
     }
+    // Only iOS reports touches, and its points are never in the frame's space: the app's turn is all that places them.
+    const named = before
+      ? namedTap(raw, before.elements, previousSent(slice, offset), before.interfaceTurn !== undefined ? { interfaceTurn: before.interfaceTurn } : {})
+      : undefined
     // After the focus tap and its settle: a typed step's picture was taken at its first key, with the field focused.
-    if (hooks.compare && hooks.onDiverged && compared(raw) && !skipCompare) {
+    // A tap the app named is judged by finding that element, not by the picture: the list under it may sit elsewhere.
+    const compareNow = async () => {
+      if (!hooks.compare || !hooks.onDiverged) return
       const turn = before?.interfaceTurn ?? frameTurnOf(tap.chrome())
       const masks = [statusBarRect(tap.platform, turn), raw.keyboardRect].filter((m): m is ScreenRect => m !== undefined)
       // A picture that cannot be read is no reason to stop: the step is replayed as before the comparison existed.
@@ -305,6 +373,7 @@ export async function matchRange(
       hooks.signal.throwIfAborted()
       if (differs) await hooks.onDiverged(range.start + offset, differs)
     }
+    if (compared(raw) && !skipCompare && !named && !swipeBeforeNamedTap(slice, offset)) await compareNow()
     const shoot = () => channel.screenshot(sessionId, hooks.signal).catch(() => null)
     // A password is pictured before it is typed: after, Android shows its last character for a moment.
     const after = SHOWN_AFTER.has(raw.kind) && !(raw.kind === 'text' && (raw.fieldRead === 'secure' || raw.askValue))
@@ -316,7 +385,8 @@ export async function matchRange(
     }
     // Asked of the screen the step is about to act on, which is the one it is matched against (#1125). A device that
     // cannot answer leaves the step to the tree's frames, as before reach; the next read reports a session that ended.
-    const questions = reachQuestions(raw, { tree: before?.elements ?? [], ...turns })
+    // A tap the app named is placed by the engine on its element, not at the recorded point.
+    const questions = named ? [] : reachQuestions(raw, { tree: before?.elements ?? [], ...turns })
     const reach = questions.length > 0
       ? await channel.reach(sessionId, questions.map(reachTargetOf), hooks.signal).catch(() => undefined)
       : undefined
@@ -324,6 +394,18 @@ export async function matchRange(
     if (TYPES_ON_KEYBOARD.has(raw.kind) || ('keyboard' in raw && raw.keyboard === 'unknown')) await alignment.align()
     // Nothing to type into, and no field to tap: say what to do about it rather than what the device refused.
     const unfocused = raw.kind === 'text' && !focus && !!before && !before.elements.some((e) => e.focused)
+    if (named) {
+      if (await runNamed(named)) {
+        const step: CapturedStep = { raw, step: { type: 'tapOn', selector: named.selector }, tree: before!.elements }
+        matched.push(step)
+        // What it did is read against the screen it was tapped on, which a scroll before it has moved from `before`.
+        if (named.target) watching = { step, index: matched.length - 1, before: before!.elements, touched: named.target }
+        hooks.onStep(step, shot ? URL.createObjectURL(new Blob([shot as BlobPart], { type: 'image/jpeg' })) : undefined)
+        continue
+      }
+      // Not found either way: the picture is what is left to judge by, and the point is replayed as recorded.
+      if (!skipCompare) await compareNow()
+    }
     const mark = markOf(raw)
     if (mark) hooks.onTouch?.(mark)
     await replayStep(channel, sessionId, raw, hooks.signal).catch((e: unknown) => {
