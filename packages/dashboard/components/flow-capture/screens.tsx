@@ -126,7 +126,8 @@ export function RangeScreen({ state, dispatch, bundleId, platform, onContinue, o
           <Input id={nameId} value={state.name} onChange={(e) => dispatch({ type: 'set-name', name: e.target.value })} />
         </div>
         <div className="grid content-start gap-2">
-          <Label htmlFor={tagsId}>{copy.tagsLabel}</Label>
+          {/* Optional said in the label, as every form here says it (field.md); the line below is how to fill it in. */}
+          <Label htmlFor={tagsId}>{copy.tagsLabel} <span className="text-xs text-muted-foreground">{copy.optional}</span></Label>
           <Input id={tagsId} aria-describedby={tagsHintId} value={state.tags} onChange={(e) => dispatch({ type: 'set-tags', tags: e.target.value })} />
           <FieldHint id={tagsHintId}>{copy.tagsHint}</FieldHint>
         </div>
