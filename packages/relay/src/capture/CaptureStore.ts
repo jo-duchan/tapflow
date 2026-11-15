@@ -553,7 +553,7 @@ export class CaptureStore {
     if (at < 0) return 'unknown-input'
     // A touch is kept only when the reads say it was off the soft keyboard, before it and after: the screen as a key is
     // pressed shows what was just typed, a password's last character included. A touch with no read to say — an agent
-    // that does not read the keyboard, a Mac over its memory line, iOS with the app not in front — keeps no picture.
+    // that does not read the keyboard, iOS with the app not in front — keeps no picture.
     const touch = capture.touches.get(requestId)
     if (touch) {
       const keys = this.touchOnKeys(capture, touch)
