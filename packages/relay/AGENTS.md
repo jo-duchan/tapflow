@@ -308,7 +308,9 @@ ids it has pictures of; each is read with `GET …/capture/snapshot/thumbnails/:
   memory line no field is read and a recorded boot warms nothing: a person's join is let past the memory check because
   their device is up, and an older iOS agent's runner, which its reads need, is not (`recorded` on `device:boot`). A
   current iOS agent reads from inside the app and starts no runner (ios-agent AGENTS.md, "App observer"); the gate is
-  not relaxed for it, which only leaves those steps unread on a Mac short of memory.
+  not relaxed for it, which only leaves those steps unread on a Mac short of memory. **Watching the person is not
+  gated**: the boot also carries `observed` (recorded, with no capability or memory check), which that agent turns
+  touch observation and app accessibility on by. Off `recorded`, a busy Mac lost every observed touch for the boot.
 - **Another person taking a device resets its keyboard language** (#1134). A device keeps the language a tester
   switched to, so the next person's keys would type in it. `SessionManager` keeps `lastPersonUser` — a signed-in
   person, never an AI client, `anon` or `unidentified:*`, so coming back from one's own MCP or flow run is not someone

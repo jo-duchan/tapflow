@@ -474,9 +474,13 @@ observer answers in the runner's own shapes, so `toKeyboardState` and `toFocused
   not recorded, before a shutdown, and for a running device when the agent starts. A value already on is someone
   else's and is never touched. **A running app keeps what it launched with** (measured), so it is set at the boot, before
   any app runs; a recorded person who picked up a device with the app already running gets names from its next launch.
-  A relay sends `recorded` false over the memory line (a rule from the runner era); such a boot stays off. Without it a
-  field is told apart by placeholder and frame, failures that show as unread or a divergence, never a wrong flow. The
-  home screen is outside the app too, hence the marker.
+  **This and touch reports follow the relay's `observed`, not `recorded`.** `recorded` is false on a Mac over its
+  memory line, a gate for the old runner, and reading it here turned observation off for the whole boot on a busy
+  Mac — every `touched` gone, with nothing saying so. `observed` is the same person recorded, ungated; a relay that
+  predates it sends none, and `recorded` decides. Both are decided at the boot: turning capturing on mid-session, or a
+  boot during a replay's pause, is observed from the next boot. Without it a field is told apart by placeholder and
+  frame, failures that show as unread or a divergence, never a wrong flow. The home screen is outside the app too,
+  hence the marker.
 - **Verified with a probe app** on iOS 26.5 (MacBook) and 27.0 (Mac mini, Xcode 27.1): UIKit, SwiftUI `TextField` and
   `SecureField`, React Native fields, a WKWebView's inputs, the soft keyboard in portrait and landscape, a hardware
   keyboard, and the lifecycle above. The probe is not committed; the measurements are here.

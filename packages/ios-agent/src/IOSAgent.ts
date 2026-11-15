@@ -1125,7 +1125,7 @@ export class IOSAgent implements DeviceAgent, NetworkControlCapability, Posturab
   // `requestId` is a parameter, never a field on `state`: `bootSeq` exists because two boots overlap,
   // and a correlator hoisted onto shared state would answer the first request with the second's id.
   // Optional because the relay's idle timer boots nothing — but every *browser* boot carries one.
-  private async handleDeviceBoot(sessionId: string, deviceId: string, fullErase = false, acceptH264 = false, tier?: { secureContext: boolean; external: boolean }, requestId?: string, warmTree = false, serviceTier?: ServiceTier, runReset?: RunResetRequest, recorded = false, touchObservations = false): Promise<void> {
+  private async handleDeviceBoot(sessionId: string, deviceId: string, fullErase = false, acceptH264 = false, tier?: { secureContext: boolean; external: boolean }, requestId?: string, warmTree = false, serviceTier?: ServiceTier, runReset?: RunResetRequest, observed = false, touchObservations = false): Promise<void> {
     const state = this.deviceStates.get(sessionId)
     // Split, because the two halves are not the same kind of nothing. No open control channel means the
     // answer itself has nowhere to go, so this is the one abandonment that stays silent — and the caller
@@ -1283,14 +1283,16 @@ export class IOSAgent implements DeviceAgent, NetworkControlCapability, Posturab
       // App accessibility, before any app launches (a running app keeps what it started with): on for a person Flow
       // Capture records, so the observer can name what each touch hit; put back for anyone else, which also undoes
       // what an earlier recorded person's boot left. Best-effort: without it a touch is recorded as before, unnamed.
-      await (recorded ? this.appAccessibility.enable(deviceId) : this.appAccessibility.restore(deviceId)).catch((e: unknown) => {
-        logger.warn(`could not ${recorded ? 'turn on' : 'restore'} app accessibility:`, (e as Error).message)
+      // Decided at the boot only: a person who turns capturing on mid-session, or a boot inside a replay's pause, is
+      // observed from their next boot (design review).
+      await (observed ? this.appAccessibility.enable(deviceId) : this.appAccessibility.restore(deviceId)).catch((e: unknown) => {
+        logger.warn(`could not ${observed ? 'turn on' : 'restore'} app accessibility:`, (e as Error).message)
       })
       // The write above can take seconds (`defaults`, up to 5 s): a shutdown or disconnect in it already stopped the
       // reports, and this boot must not turn them back on with nobody left to read them (CodeRabbit, #1166).
       if (seq !== state.bootSeq) { this.abandonBoot(state, seq, sessionId, requestId); return }
       // What each touch hits, reported by the app while this person is recorded — only to a relay that keeps it.
-      const observeTouches = recorded && touchObservations
+      const observeTouches = observed && touchObservations
       if (observeTouches) this.touchWatch.set(deviceId, { since: Date.now(), starts: [], reports: [], ends: new Map() })
       else this.touchWatch.delete(deviceId)
       await this.appObserver.watchTouches(deviceId, observeTouches).catch((e: unknown) => {
@@ -2306,9 +2308,13 @@ export class IOSAgent implements DeviceAgent, NetworkControlCapability, Posturab
     switch (msg.type) {
       case 'device:boot': {
         // `external` and `automation` are added by the relay, never by the browser (see `DeviceBoot`).
-        const { deviceId, resetMode, acceptH264, secureContext, external, automation, serviceTier, runReset, recorded, touchObservations } = msg.payload as { deviceId: string; resetMode?: string; acceptH264?: boolean; secureContext?: boolean; external?: boolean; automation?: boolean; serviceTier?: ServiceTier; runReset?: RunResetRequest; recorded?: boolean; touchObservations?: boolean }
+        const { deviceId, resetMode, acceptH264, secureContext, external, automation, serviceTier, runReset, recorded, observed, touchObservations } = msg.payload as { deviceId: string; resetMode?: string; acceptH264?: boolean; secureContext?: boolean; external?: boolean; automation?: boolean; serviceTier?: ServiceTier; runReset?: RunResetRequest; recorded?: boolean; observed?: boolean; touchObservations?: boolean }
         const sessionId = msg.sessionId
-        this.handleDeviceBoot(sessionId, deviceId, resetMode === 'full-erase', acceptH264 === true, { secureContext: !!secureContext, external: !!external }, msg.requestId, automation === true, serviceTier, runReset, recorded === true, touchObservations === true)
+        // `observed` is the relay's word for watching this person; `recorded` carries a memory gate meant for an older
+        // agent's tree runner and turned observing off on a busy Mac. A relay that predates `observed` sends none, and
+        // `recorded` decides as before — `=== true` here would turn observing off on every older relay.
+        const watched = typeof observed === 'boolean' ? observed : recorded === true
+        this.handleDeviceBoot(sessionId, deviceId, resetMode === 'full-erase', acceptH264 === true, { secureContext: !!secureContext, external: !!external }, msg.requestId, automation === true, serviceTier, runReset, watched, touchObservations === true)
           .catch((e) => logger.error('handleDeviceBoot failed:', e))
         break
       }

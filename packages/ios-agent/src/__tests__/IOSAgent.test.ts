@@ -1242,6 +1242,32 @@ describe('IOSAgent', () => {
       browser.close()
     })
 
+    // A relay's `recorded` is false on a Mac over its memory line (a rule for the old tree runner), and that turned
+    // touch reports and app accessibility off for the whole boot. `observed` is the relay's word for these two; a relay
+    // that predates it sends none, and `recorded` decides as before.
+    it('observes by the relay\'s `observed`, and by `recorded` only from a relay that sends no `observed`', async () => {
+      const watch = vi.spyOn(AppObserver.prototype, 'watchTouches').mockResolvedValue()
+      const enable = vi.spyOn(AppAccessibility.prototype, 'enable').mockResolvedValue()
+      const restore = vi.spyOn(AppAccessibility.prototype, 'restore').mockResolvedValue()
+      const { agent, browser, internals, sent } = await bootedAgent(mockSimctl(true), false)
+      const cases: Array<[Record<string, boolean>, boolean]> = [
+        [{ observed: true, recorded: false }, true],
+        [{ observed: false, recorded: true }, false],
+        [{ recorded: true }, true],
+        [{}, false],
+      ]
+      for (const [i, [payload, on]] of cases.entries()) {
+        enable.mockClear(); restore.mockClear()
+        internals.handleRelayMessage({ type: 'device:boot', sessionId: agent.sessionId!, requestId: `rq-${i}`, payload: { deviceId: 'dev-1', touchObservations: true, ...payload } } as never)
+        await vi.waitFor(() => expect(sent.filter((m) => m.type === 'device:ready')).toHaveLength(i + 1), { timeout: 3000 })
+        expect([i, watch.mock.lastCall]).toEqual([i, ['dev-1', on]])
+        expect([i, enable.mock.calls.length, restore.mock.calls.length]).toEqual([i, on ? 1 : 0, on ? 0 : 1])
+      }
+      watch.mockRestore(); enable.mockRestore(); restore.mockRestore()
+      agent.disconnect()
+      browser.close()
+    })
+
     // CodeRabbit on #1166: a shutdown during the accessibility write stopped the reports, and the abandoned boot turned
     // them back on when the write returned, with nobody left to read them.
     it('does not turn touch reports on for a boot a shutdown abandoned during the accessibility write', async () => {
