@@ -47,7 +47,33 @@ export async function recordedAlike(a: string, b: string, masks: ScreenRect[]): 
   return diff !== null && unchanged(diff)
 }
 
-/** How far two pictures differ outside `masks` (`screenDiff`), or `null` when either cannot be read or laid on the other. */
+/**
+ * Pixels of `b` that differ from `a` by more than `tolerance` in any channel, outside `masks` (fractions of the
+ * picture). Not `screenDiff`'s grid: that averages a 48-wide grid and passes a cell under 24/255, so a counter's digit
+ * changing read as nothing (an outside review of #1171 reproduced it). Measured on the user's recordings: two pictures
+ * of one screen differ by at most 44 (JPEG noise); a changed screen by 255 in thousands of pixels.
+ */
+export function pixelsChanged(a: Pixels, b: Pixels, masks: readonly ScreenRect[], tolerance = PIXEL_TOLERANCE): number {
+  if (a.width !== b.width || a.height !== b.height) return Number.POSITIVE_INFINITY
+  let changed = 0
+  for (let y = 0; y < a.height; y++) {
+    const fy = (y + 0.5) / a.height
+    for (let x = 0; x < a.width; x++) {
+      const fx = (x + 0.5) / a.width
+      if (masks.some((m) => fx >= m.x && fx < m.x + m.width && fy >= m.y && fy < m.y + m.height)) continue
+      const i = (y * a.width + x) * 4
+      const d = Math.max(Math.abs(a.data[i]! - b.data[i]!), Math.abs(a.data[i + 1]! - b.data[i + 1]!), Math.abs(a.data[i + 2]! - b.data[i + 2]!))
+      if (d > tolerance) changed++
+    }
+  }
+  return changed
+}
+
+/** More than JPEG noise between two pictures of one screen (44 measured), less than any drawn change. */
+export const PIXEL_TOLERANCE = 64
+
+/** Pixels changed between two pictures outside `masks` (`pixelsChanged`), or `null` when either cannot be read or laid
+ *  on the other. */
 export async function picturesDiff(a: Blob, b: Blob, masks: ScreenRect[]): Promise<number | null> {
   if (typeof createImageBitmap !== 'function') return null
   const [first, second] = await Promise.all([createImageBitmap(a).catch(() => null), createImageBitmap(b).catch(() => null)])
@@ -56,8 +82,7 @@ export async function picturesDiff(a: Blob, b: Blob, masks: ScreenRect[]): Promi
     const pa = pixelsOf(first, first.width, first.height)
     const pb = pixelsOf(second, first.width, first.height)
     if (!pa || !pb) return null
-    const diff = screenDiff(pa, pb, masks)
-    return diff === 'incomparable' ? null : diff
+    return pixelsChanged(pa, pb, masks)
   } finally {
     first?.close()
     second?.close()
@@ -84,8 +109,8 @@ export async function tapDidNothing(
   return recorded !== null && !unchanged(recorded)
 }
 
-/** `recordedAlike`'s verdict on a `screenDiff`: not one cell different. */
-export const unchanged = (diff: number | 'incomparable'): boolean => diff === 0
+/** The verdict on `picturesDiff`: not one pixel changed. */
+export const unchanged = (changed: number | 'incomparable'): boolean => changed === 0
 
 function pixelsOf(image: ImageBitmap, width: number, height: number): Pixels | null {
   const canvas = document.createElement('canvas')

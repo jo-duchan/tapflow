@@ -630,6 +630,21 @@ describe('loadSnapshot: a tap made again', () => {
     expect(stepsOf(loaded!).steps.map((s) => s.dropped ?? null)).toEqual(['retried', null])
   })
 
+  // An outside review of #1171: the grid read a 14 px counter going 1 to 2 as no change. Pixels, with a tolerance over
+  // JPEG noise (44 measured between two pictures of one screen).
+  it('counts a small digit changing, not JPEG noise, and nothing under a mask', async () => {
+    const { pixelsChanged } = await import('@/lib/flowCapture/screenCompare')
+    const blank = (w: number, h: number) => ({ width: w, height: h, data: new Uint8ClampedArray(w * h * 4).fill(255) })
+    const a = blank(160, 347)
+    const glyph = blank(160, 347)
+    for (let y = 180; y < 186; y++) for (let x = 78; x < 82; x++) { const i = (y * 160 + x) * 4; glyph.data[i] = glyph.data[i + 1] = glyph.data[i + 2] = 40 }
+    expect(pixelsChanged(a, glyph, [])).toBeGreaterThan(0)
+    const noisy = blank(160, 347)
+    for (let i = 0; i < noisy.data.length; i += 4) { noisy.data[i] = 255 - 44 }
+    expect(pixelsChanged(a, noisy, [])).toBe(0)
+    expect(pixelsChanged(a, glyph, [{ x: 0, y: 0.5, width: 1, height: 0.1 }])).toBe(0)
+  })
+
   // Review of P2c: Match's 1% "same screen" read a stepper's digit as alike. Measured on af948002: the pair scores 0.
   it('takes a picture as unchanged only when not a cell differs', async () => {
     const { unchanged } = await import('@/lib/flowCapture/screenCompare')

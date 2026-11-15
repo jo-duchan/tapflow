@@ -392,7 +392,8 @@ export function retryCandidates(steps: readonly RawStep[]): Array<[number, numbe
     if (a.kind !== 'tap' || b.kind !== 'tap' || a.dropped || b.dropped || a.outcome === 'refused' || b.outcome === 'refused') continue
     // A double tap is two taps by design, and iOS says so (`tapCount`). Closer than a second, the second's picture can
     // still be the screen from before the first acted: the viewer draws the stream late (review of P2c).
-    if ((b.touched?.tapCount ?? 1) >= 2 || b.at - a.at < RETRY_MIN_GAP_MS) continue
+    // Either side: a double tap's second, then a later single tap on it, is not its retry (an outside review of #1171).
+    if ((a.touched?.tapCount ?? 1) >= 2 || (b.touched?.tapCount ?? 1) >= 2 || b.at - a.at < RETRY_MIN_GAP_MS) continue
     // A tap into a field may only place the caret: no picture shows that, and the second may then open its menu.
     if (a.touched?.element?.input || b.touched?.element?.input) continue
     const sa = recordedSelector(a.touched), sb = recordedSelector(b.touched)

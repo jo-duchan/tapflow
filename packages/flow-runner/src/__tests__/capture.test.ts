@@ -1302,6 +1302,15 @@ describe('touch reports', () => {
       expect(pair({}, 400)).toEqual([])
       expect(pair({}, 1500, { identifier: 'form.email', traits: 0, input: true } as never)).toEqual([])
     })
+    // An outside review of #1171: a double tap, then a single tap on the same element later.
+    it('does not take a double tap\'s second for the first of a retry', () => {
+      const steps = new Rec()
+        .touch([[0.6, 0.52]]).touched({ moving: false, element: blueberry, tapCount: 1 })
+        .wait(160).touch([[0.6, 0.52]]).touched({ moving: false, element: blueberry, tapCount: 2 })
+        .wait(3500).touch([[0.6, 0.52]]).touched({ moving: false, element: blueberry, tapCount: 1 })
+        .steps()
+      expect(retryCandidates(steps)).toEqual([])
+    })
   })
 
   // P2c: the taps Match's review offers to leave out, and leaving them out before the flow is made.
