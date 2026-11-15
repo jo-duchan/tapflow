@@ -722,7 +722,7 @@ describe('matchRange: a tap that did nothing on the replay', () => {
 
   it('judges "did nothing" only on both pictures: unchanged on the replay, changed when recorded', async () => {
     const { tapDidNothing } = await import('@/lib/flowCapture/screenCompare')
-    vi.spyOn(globalThis, 'fetch').mockImplementation(async () => new Response(new Blob(['x'])))
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async () => new Response('x'))
     const bytes = new Uint8Array([1])
     const judge = (replayed: number | null, recorded: number | null, urls: [string | null, string | null] = ['/a', '/b']) => {
       let n = 0
