@@ -118,8 +118,8 @@ replay launches the app after it; a keyboard not in `AppleKeyboards` is an error
 carries `KeyboardLastUsed` as the language it was typed in. A `flow run` boot resets the keyboard last in its run reset,
 each call bounded by what is left of the reset's budget, and does not report it as an item.
 
-**Where the soft keyboard is** (`ui:keyboard:request`, `keyboard-state`) comes from the runner's `GET /keyboard`, and
-rides on `/field` too: the `Keyboard` element's frame as fractions of the app's window, run to the window's bottom edge
+**Where the soft keyboard is** (`ui:keyboard:request`, `keyboard-state`) is answered by the app observer (below). The
+runner's `GET /keyboard`, kept for an agent's own checks, rides on `/field` too and gives the same shape: the `Keyboard` element's frame as fractions of the app's window, run to the window's bottom edge
 because its globe and dictation row sit below the element (measured), and turned into the portrait framebuffer a touch
 is in by the app's interface orientation, as `/tree`'s turn is. No soft keyboard is shown with a hardware keyboard
 connected. `ImeAction`, a key code tapflow names, presses Return.

@@ -2001,7 +2001,7 @@ export interface UiFieldResponse {
 }
 
 /** Where the soft keyboard is, for Flow Capture to tell a tap on it from a tap on the app (#1135). Cheap: ~30 ms on
- *  Android (`dumpsys window`), one runner read on iOS. Sent only to an agent naming `keyboard-state`. */
+ *  Android (`dumpsys window`), one file round-trip with the app on iOS (the app observer). Sent only to an agent naming `keyboard-state`. */
 export interface UiKeyboardRequest {
   type: 'ui:keyboard:request'
   sessionId: string
