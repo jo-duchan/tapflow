@@ -952,7 +952,7 @@ describe('IOSAgent', () => {
       const { agent, browser, internals, sent } = await bootedAgent(mockSimctl(true), false)
       const warm = vi.mocked(XCUITreeReader.prototype.warm)
       warm.mockClear()
-      internals.handleRelayMessage({ type: 'device:boot', sessionId: agent.sessionId!, requestId: 'rq-r', payload: { deviceId: 'dev-1', recorded: true } } as never)
+      internals.handleRelayMessage({ type: 'device:boot', sessionId: agent.sessionId!, requestId: 'rq-r', payload: { deviceId: 'dev-1', observed: true } } as never)
       await vi.waitFor(() => expect(sent.some((m) => m.type === 'device:ready')).toBe(true), { timeout: 3000 })
       expect(warm).not.toHaveBeenCalled()
       internals.handleRelayMessage({ type: 'device:boot', sessionId: agent.sessionId!, requestId: 'rq-a', payload: { deviceId: 'dev-1', automation: true } } as never)
@@ -969,7 +969,7 @@ describe('IOSAgent', () => {
       const readyWhenEnabled: boolean[] = []
       const enable = vi.spyOn(AppAccessibility.prototype, 'enable').mockImplementation(async () => { readyWhenEnabled.push(sent.some((m) => m.type === 'device:ready')) })
       const restore = vi.spyOn(AppAccessibility.prototype, 'restore').mockResolvedValue()
-      internals.handleRelayMessage({ type: 'device:boot', sessionId: agent.sessionId!, requestId: 'rq-r', payload: { deviceId: 'dev-1', recorded: true } } as never)
+      internals.handleRelayMessage({ type: 'device:boot', sessionId: agent.sessionId!, requestId: 'rq-r', payload: { deviceId: 'dev-1', observed: true } } as never)
       await vi.waitFor(() => expect(sent.filter((m) => m.type === 'device:ready')).toHaveLength(1), { timeout: 3000 })
       expect(enable).toHaveBeenCalledWith('dev-1')
       expect(readyWhenEnabled).toEqual([false])
@@ -994,7 +994,7 @@ describe('IOSAgent', () => {
       // Stamped when taken: a report from before the boot is not the boot's.
       const take = vi.spyOn(AppObserver.prototype, 'takeTouches').mockImplementation(async () => reports.splice(0).map((r) => ({ ...r, at: Date.now() })))
       const { agent, browser, internals, sent } = await bootedAgent(mockSimctl(true), false)
-      internals.handleRelayMessage({ type: 'device:boot', sessionId: agent.sessionId!, requestId: 'rq-r', payload: { deviceId: 'dev-1', recorded: true, touchObservations: true } } as never)
+      internals.handleRelayMessage({ type: 'device:boot', sessionId: agent.sessionId!, requestId: 'rq-r', payload: { deviceId: 'dev-1', observed: true, touchObservations: true } } as never)
       await vi.waitFor(() => expect(sent.some((m) => m.type === 'device:ready')).toBe(true), { timeout: 3000 })
       expect(watch).toHaveBeenLastCalledWith('dev-1', true)
       internals.lastBundleIds.set('dev-1', 'com.app')
@@ -1016,7 +1016,7 @@ describe('IOSAgent', () => {
       const queue: AppTouch[][] = []
       const take = vi.spyOn(AppObserver.prototype, 'takeTouches').mockImplementation(async () => queue.shift() ?? [])
       const { agent, browser, internals, sent } = await bootedAgent(mockSimctl(true), false)
-      internals.handleRelayMessage({ type: 'device:boot', sessionId: agent.sessionId!, requestId: 'rq-r', payload: { deviceId: 'dev-1', recorded: true, touchObservations: true } } as never)
+      internals.handleRelayMessage({ type: 'device:boot', sessionId: agent.sessionId!, requestId: 'rq-r', payload: { deviceId: 'dev-1', observed: true, touchObservations: true } } as never)
       await vi.waitFor(() => expect(sent.some((m) => m.type === 'device:ready')).toBe(true), { timeout: 3000 })
       internals.lastBundleIds.set('dev-1', 'com.app')
       const report = (seq: number, at: number, moving: boolean): AppTouch => ({ seq, at, bundle: 'com.app', observation: { point: { x: 0.4, y: 0.5 }, moving } })
@@ -1045,7 +1045,7 @@ describe('IOSAgent', () => {
       const queue: AppTouchReport[][] = []
       const take = vi.spyOn(AppObserver.prototype, 'takeTouches').mockImplementation(async () => queue.shift() ?? [])
       const { agent, browser, internals, sent } = await bootedAgent(mockSimctl(true), false)
-      internals.handleRelayMessage({ type: 'device:boot', sessionId: agent.sessionId!, requestId: 'rq-r', payload: { deviceId: 'dev-1', recorded: true, touchObservations: true } } as never)
+      internals.handleRelayMessage({ type: 'device:boot', sessionId: agent.sessionId!, requestId: 'rq-r', payload: { deviceId: 'dev-1', observed: true, touchObservations: true } } as never)
       await vi.waitFor(() => expect(sent.some((m) => m.type === 'device:ready')).toBe(true), { timeout: 3000 })
       internals.lastBundleIds.set('dev-1', 'com.app')
       const down = (seq: number, at: number, tapCount: number): AppTouch => ({ seq, at, bundle: 'com.app', observation: { point: { x: 0.4, y: 0.5 }, moving: false, tapCount } })
@@ -1089,7 +1089,7 @@ describe('IOSAgent', () => {
       const { agent, browser, internals, sent } = await bootedAgent(mockSimctl(true), false)
       own.observer = (agent as unknown as { appObserver: AppObserver }).appObserver
       const boot = async (n: number) => {
-        internals.handleRelayMessage({ type: 'device:boot', sessionId: agent.sessionId!, requestId: `rq-${n}`, payload: { deviceId: 'dev-1', recorded: true, touchObservations: true } } as never)
+        internals.handleRelayMessage({ type: 'device:boot', sessionId: agent.sessionId!, requestId: `rq-${n}`, payload: { deviceId: 'dev-1', observed: true, touchObservations: true } } as never)
         await vi.waitFor(() => expect(sent.filter((m) => m.type === 'device:ready')).toHaveLength(n), { timeout: 3000 })
         internals.lastBundleIds.set('dev-1', 'com.app')
       }
@@ -1127,7 +1127,7 @@ describe('IOSAgent', () => {
       const { agent, browser, internals, sent } = await bootedAgent(mockSimctl(true), false)
       own.observer = (agent as unknown as { appObserver: AppObserver }).appObserver
       const boot = async (n: number) => {
-        internals.handleRelayMessage({ type: 'device:boot', sessionId: agent.sessionId!, requestId: `rq-${n}`, payload: { deviceId: 'dev-1', recorded: true, touchObservations: true } } as never)
+        internals.handleRelayMessage({ type: 'device:boot', sessionId: agent.sessionId!, requestId: `rq-${n}`, payload: { deviceId: 'dev-1', observed: true, touchObservations: true } } as never)
         await vi.waitFor(() => expect(sent.filter((m) => m.type === 'device:ready')).toHaveLength(n), { timeout: 3000 })
         internals.lastBundleIds.set('dev-1', 'com.app')
       }
@@ -1162,7 +1162,7 @@ describe('IOSAgent', () => {
       const { agent, browser, internals, sent } = await bootedAgent(mockSimctl(true), false)
       own.observer = (agent as unknown as { appObserver: AppObserver }).appObserver
       const boot = async (n: number) => {
-        internals.handleRelayMessage({ type: 'device:boot', sessionId: agent.sessionId!, requestId: `rq-${n}`, payload: { deviceId: 'dev-1', recorded: true, touchObservations: true } } as never)
+        internals.handleRelayMessage({ type: 'device:boot', sessionId: agent.sessionId!, requestId: `rq-${n}`, payload: { deviceId: 'dev-1', observed: true, touchObservations: true } } as never)
         await vi.waitFor(() => expect(sent.filter((m) => m.type === 'device:ready')).toHaveLength(n), { timeout: 3000 })
         internals.lastBundleIds.set('dev-1', 'com.app')
       }
@@ -1192,7 +1192,7 @@ describe('IOSAgent', () => {
       const queue: AppTouchReport[][] = []
       const take = vi.spyOn(AppObserver.prototype, 'takeTouches').mockImplementation(async () => queue.shift() ?? [])
       const { agent, browser, internals, sent } = await bootedAgent(mockSimctl(true), false)
-      internals.handleRelayMessage({ type: 'device:boot', sessionId: agent.sessionId!, requestId: 'rq-r', payload: { deviceId: 'dev-1', recorded: true, touchObservations: true } } as never)
+      internals.handleRelayMessage({ type: 'device:boot', sessionId: agent.sessionId!, requestId: 'rq-r', payload: { deviceId: 'dev-1', observed: true, touchObservations: true } } as never)
       await vi.waitFor(() => expect(sent.some((m) => m.type === 'device:ready')).toBe(true), { timeout: 3000 })
       internals.lastBundleIds.set('dev-1', 'com.app')
       const t = Date.now()
@@ -1211,7 +1211,7 @@ describe('IOSAgent', () => {
       const watch = vi.spyOn(AppObserver.prototype, 'watchTouches').mockResolvedValue()
       const stop = vi.spyOn(AppObserver.prototype, 'stopTouches').mockResolvedValue()
       const { agent, browser, internals, sent } = await bootedAgent(mockSimctl(true), false)
-      internals.handleRelayMessage({ type: 'device:boot', sessionId: agent.sessionId!, requestId: 'rq-r', payload: { deviceId: 'dev-1', recorded: true, touchObservations: true } } as never)
+      internals.handleRelayMessage({ type: 'device:boot', sessionId: agent.sessionId!, requestId: 'rq-r', payload: { deviceId: 'dev-1', observed: true, touchObservations: true } } as never)
       await vi.waitFor(() => expect(sent.some((m) => m.type === 'device:ready')).toBe(true), { timeout: 3000 })
       const internal = agent as unknown as { cleanupDeviceState(s: unknown): void; deviceStates: Map<string, unknown> }
       // The agent's start already stops what an earlier agent left on a running device.
@@ -1227,7 +1227,7 @@ describe('IOSAgent', () => {
       const watch = vi.spyOn(AppObserver.prototype, 'watchTouches').mockResolvedValue()
       const take = vi.spyOn(AppObserver.prototype, 'takeTouches').mockResolvedValue([{ seq: 1, at: Date.now(), bundle: 'com.app', observation: { point: { x: 0.4, y: 0.5 }, moving: false } }])
       const { agent, browser, internals, sent } = await bootedAgent(mockSimctl(true), false)
-      for (const [i, payload] of [{ recorded: true }, { touchObservations: true }].entries()) {
+      for (const [i, payload] of [{ observed: true }, { touchObservations: true }].entries()) {
         internals.handleRelayMessage({ type: 'device:boot', sessionId: agent.sessionId!, requestId: `rq-${i}`, payload: { deviceId: 'dev-1', ...payload } } as never)
         await vi.waitFor(() => expect(sent.filter((m) => m.type === 'device:ready')).toHaveLength(i + 1), { timeout: 3000 })
         expect(watch).toHaveBeenLastCalledWith('dev-1', false)
@@ -1242,10 +1242,9 @@ describe('IOSAgent', () => {
       browser.close()
     })
 
-    // A relay's `recorded` is false on a Mac over its memory line (a rule for the old tree runner), and that turned
-    // touch reports and app accessibility off for the whole boot. `observed` is the relay's word for these two; a relay
-    // that predates it sends none, and `recorded` decides as before.
-    it('observes by the relay\'s `observed`, and by `recorded` only from a relay that sends no `observed`', async () => {
+    // `observed` alone decides: `recorded`, an unreleased runner hint gated by the Mac's memory, turned touch reports and
+    // app accessibility off for the whole boot on a busy Mac, and is no longer read.
+    it('observes by the relay\'s `observed` alone', async () => {
       const watch = vi.spyOn(AppObserver.prototype, 'watchTouches').mockResolvedValue()
       const enable = vi.spyOn(AppAccessibility.prototype, 'enable').mockResolvedValue()
       const restore = vi.spyOn(AppAccessibility.prototype, 'restore').mockResolvedValue()
@@ -1253,7 +1252,7 @@ describe('IOSAgent', () => {
       const cases: Array<[Record<string, boolean>, boolean]> = [
         [{ observed: true, recorded: false }, true],
         [{ observed: false, recorded: true }, false],
-        [{ recorded: true }, true],
+        [{ recorded: true }, false],
         [{}, false],
       ]
       for (const [i, [payload, on]] of cases.entries()) {
@@ -1277,7 +1276,7 @@ describe('IOSAgent', () => {
       const restore = vi.spyOn(AppAccessibility.prototype, 'restore').mockResolvedValue()
       const { agent, browser, internals, sent } = await bootedAgent(mockSimctl(true), false)
       watch.mockClear()
-      internals.handleRelayMessage({ type: 'device:boot', sessionId: agent.sessionId!, requestId: 'rq-r', payload: { deviceId: 'dev-1', recorded: true, touchObservations: true } } as never)
+      internals.handleRelayMessage({ type: 'device:boot', sessionId: agent.sessionId!, requestId: 'rq-r', payload: { deviceId: 'dev-1', observed: true, touchObservations: true } } as never)
       await vi.waitFor(() => expect(enable).toHaveBeenCalled(), { timeout: 3000 })
       internals.handleRelayMessage({ type: 'device:shutdown', sessionId: agent.sessionId!, requestId: 'rq-off', payload: { deviceId: 'dev-1' } } as never)
       await new Promise((r) => setTimeout(r, 100))
@@ -1295,7 +1294,7 @@ describe('IOSAgent', () => {
       const watch = vi.spyOn(AppObserver.prototype, 'watchTouches').mockImplementation((_d, on) => on ? new Promise<void>((r) => { finish = r }) : Promise.resolve())
       const stop = vi.spyOn(AppObserver.prototype, 'stopTouches').mockResolvedValue()
       const { agent, browser, internals, sent } = await bootedAgent(mockSimctl(true), false)
-      internals.handleRelayMessage({ type: 'device:boot', sessionId: agent.sessionId!, requestId: 'rq-r', payload: { deviceId: 'dev-1', recorded: true, touchObservations: true } } as never)
+      internals.handleRelayMessage({ type: 'device:boot', sessionId: agent.sessionId!, requestId: 'rq-r', payload: { deviceId: 'dev-1', observed: true, touchObservations: true } } as never)
       await vi.waitFor(() => expect(watch).toHaveBeenCalledWith('dev-1', true), { timeout: 3000 })
       internals.handleRelayMessage({ type: 'device:shutdown', sessionId: agent.sessionId!, requestId: 'rq-off', payload: { deviceId: 'dev-1' } } as never)
       await new Promise((r) => setTimeout(r, 100))
@@ -1311,7 +1310,7 @@ describe('IOSAgent', () => {
     it('boots anyway when app accessibility cannot be turned on', async () => {
       const enable = vi.spyOn(AppAccessibility.prototype, 'enable').mockRejectedValue(new Error('defaults timed out'))
       const { agent, browser, internals, sent } = await bootedAgent(mockSimctl(true), false)
-      internals.handleRelayMessage({ type: 'device:boot', sessionId: agent.sessionId!, requestId: 'rq-r', payload: { deviceId: 'dev-1', recorded: true } } as never)
+      internals.handleRelayMessage({ type: 'device:boot', sessionId: agent.sessionId!, requestId: 'rq-r', payload: { deviceId: 'dev-1', observed: true } } as never)
       await vi.waitFor(() => expect(sent.some((m) => m.type === 'device:ready')).toBe(true), { timeout: 3000 })
       enable.mockRestore()
       agent.disconnect()

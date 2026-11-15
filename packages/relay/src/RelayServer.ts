@@ -2848,24 +2848,15 @@ export class RelayServer {
     (msg.payload as Record<string, unknown>)['external'] = this.wsExternal.get(ws) ?? false
     // Whether an automation client (flow runner, MCP) is booting, so the iOS agent can start its UI-tree runner
     // now instead of inside the first selector step's timeout. Only the holder can boot (`dispatchTarget`), so the
-    // holder's kind is the booter's. An older iOS agent also warms a dashboard boot for a person Flow Capture records
-    // (below); a current one warms only for an automation client.
+    // holder's kind is the booter's. A person's boot warms nothing: their keyboard and field reads come from inside the
+    // app (ios-agent AGENTS.md, "App observer"), and an attached runner made a busy app lag.
     ;(msg.payload as Record<string, unknown>)['automation'] = isAiClientKind(boot.session.holderKind)
-    // A person Flow Capture records: an older iOS agent warms its runner for them (#1135), since there the runner reads
-    // the field they type into and its ~12 s cold start on the first key would miss the first field. A current one
-    // reads the keyboard and the field from inside the app (ios-agent AGENTS.md, "App observer") and warms nothing:
-    // an attached runner made a busy app lag.
     // This relay keeps what an agent observes a recorded touch hit (`capture:touched`): an agent sends them only when
     // told so, since an older relay logs every message type it does not know.
     ;(msg.payload as Record<string, unknown>)['touchObservations'] = true
-    ;(msg.payload as Record<string, unknown>)['recorded'] = this.captures.isRecording(boot.session.id, captureHolder(boot.session))
-      && hasCapability(boot.session.agentCapabilities, 'field-value')
-      // A person's join is let past the memory check because their device is up; the runner is not, and costs
-      // 110–360 MB (measured). On a Mac over its memory line the field is not read: the steps say so instead.
-      && !this.resourceLoad(boot.session)?.memOver
-    // Whether the person is recorded, ungated: what a current iOS agent turns record-time observation and app
-    // accessibility on by. Neither starts a runner, and reading them off `recorded` turned every touch observation off
-    // for a boot on a Mac over its memory line. `recorded` keeps its gates for the older agent that warms off it.
+    // Whether Flow Capture records the person: the iOS agent turns record-time observation and app accessibility on by
+    // it. Ungated by memory: neither starts anything on the Mac (app accessibility measured at 13–21 MB an app), and a
+    // gate here turned every touch observation off for a boot on a busy Mac.
     ;(msg.payload as Record<string, unknown>)['observed'] = this.captures.isRecording(boot.session.id, captureHolder(boot.session))
     if (boot.session.keyboardResetOwed && hasCapability(boot.session.agentCapabilities, 'keyboard-reset')) {
       // Ahead of the boot, which the agent then finishes before it resets (it waits for the boot's keyboard sync).
@@ -4055,9 +4046,9 @@ export class RelayServer {
   private readField(sessionId: string): Promise<FieldRead> | null {
     const session = this.sessions.get(sessionId)
     if (!session || !hasCapability(session.agentCapabilities, 'field-value') || session.agentSocket.readyState !== WebSocket.OPEN) return null
-    // Over the memory line a read would start an older iOS agent's runner the boot left cold (see `recorded`): the
-    // step is left unread. A current one reads from inside the app and starts nothing; not told apart here.
-    if (this.resourceLoad(session)?.memOver) return null
+    // Not gated by the Mac's memory: no agent that names `field-value` starts anything on the Mac to answer. iOS reads
+    // from inside the app (plus one short `simctl spawn` for the keyboard language), Android through a server on the
+    // device. The gate was drawn for a runner-backed iOS read that never shipped.
     const agentSocket = session.agentSocket
     const requestId = randomUUID()
     return new Promise((resolve) => {
@@ -4091,8 +4082,7 @@ export class RelayServer {
   private readKeyboard(sessionId: string): Promise<KeyboardState> | null {
     const session = this.sessions.get(sessionId)
     if (!session || !hasCapability(session.agentCapabilities, 'keyboard-state') || session.agentSocket.readyState !== WebSocket.OPEN) return null
-    // An older iOS agent reads through the tree runner, which a Mac over its memory line does not start (see `readField`).
-    if (this.resourceLoad(session)?.memOver) return null
+    // Not gated by the Mac's memory, for the reason `readField` gives.
     const agentSocket = session.agentSocket
     const requestId = randomUUID()
     return new Promise((resolve) => {

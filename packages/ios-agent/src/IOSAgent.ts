@@ -2308,13 +2308,10 @@ export class IOSAgent implements DeviceAgent, NetworkControlCapability, Posturab
     switch (msg.type) {
       case 'device:boot': {
         // `external` and `automation` are added by the relay, never by the browser (see `DeviceBoot`).
-        const { deviceId, resetMode, acceptH264, secureContext, external, automation, serviceTier, runReset, recorded, observed, touchObservations } = msg.payload as { deviceId: string; resetMode?: string; acceptH264?: boolean; secureContext?: boolean; external?: boolean; automation?: boolean; serviceTier?: ServiceTier; runReset?: RunResetRequest; recorded?: boolean; observed?: boolean; touchObservations?: boolean }
+        const { deviceId, resetMode, acceptH264, secureContext, external, automation, serviceTier, runReset, observed, touchObservations } = msg.payload as { deviceId: string; resetMode?: string; acceptH264?: boolean; secureContext?: boolean; external?: boolean; automation?: boolean; serviceTier?: ServiceTier; runReset?: RunResetRequest; observed?: boolean; touchObservations?: boolean }
         const sessionId = msg.sessionId
-        // `observed` is the relay's word for watching this person; `recorded` carries a memory gate meant for an older
-        // agent's tree runner and turned observing off on a busy Mac. A relay that predates `observed` sends none, and
-        // `recorded` decides as before — `=== true` here would turn observing off on every older relay.
-        const watched = typeof observed === 'boolean' ? observed : recorded === true
-        this.handleDeviceBoot(sessionId, deviceId, resetMode === 'full-erase', acceptH264 === true, { secureContext: !!secureContext, external: !!external }, msg.requestId, automation === true, serviceTier, runReset, watched, touchObservations === true)
+        // `observed`: Flow Capture records this person. A relay that predates it sends none, and nobody is observed.
+        this.handleDeviceBoot(sessionId, deviceId, resetMode === 'full-erase', acceptH264 === true, { secureContext: !!secureContext, external: !!external }, msg.requestId, automation === true, serviceTier, runReset, observed === true, touchObservations === true)
           .catch((e) => logger.error('handleDeviceBoot failed:', e))
         break
       }

@@ -2001,7 +2001,7 @@ export interface UiFieldResponse {
 }
 
 /** Where the soft keyboard is, for Flow Capture to tell a tap on it from a tap on the app (#1135). Cheap: ~30 ms on
- *  Android (`dumpsys window`), one runner read on iOS. Sent only to an agent naming `keyboard-state`. */
+ *  Android (`dumpsys window`), one file round-trip with the app on iOS (the app observer). Sent only to an agent naming `keyboard-state`. */
 export interface UiKeyboardRequest {
   type: 'ui:keyboard:request'
   sessionId: string
@@ -2306,11 +2306,10 @@ export interface SessionLeave {
   sessionId: string
 }
 
-// `external`, `automation`, `recorded`, `observed` and `touchObservations` are added by the relay on the way through — the browser never sets them.
+// `external`, `automation`, `observed` and `touchObservations` are added by the relay on the way through — the browser never sets them.
 // Undeclared on purpose: the parser strips them from what a browser sends, and the relay sets them after it.
-// `recorded`: the booting person is one Flow Capture records, on an agent that reads fields (#1135), and not on a Mac over
-// its memory line (an older iOS agent warms its tree runner by it). `observed`: the same person recorded, with neither
-// gate — what a current iOS agent turns touch observation and app accessibility on by.
+// `observed`: the booting person is one Flow Capture records — what the iOS agent turns touch observation and app
+// accessibility on by. Not gated by the Mac's memory: neither starts anything on the Mac.
 export interface DeviceBoot {
   type: 'device:boot'
   sessionId: string

@@ -232,7 +232,7 @@ const knownSecret = (ctx: MatchContext): boolean => focusedIn(ctx.tree)?.secure 
 
 function typed(raw: RawStep, text: string, ctx: MatchContext): CapturedStep {
   // A secret's value is the same guess, so it is marked too. A run with neither a value nor a tried read is one the
-  // relay never read — an agent without `field-value`, or a Mac over its memory line — and the same guess on both
+  // relay never read — an agent without `field-value` — and the same guess on both
   // platforms: the keys went through the device's IME, Gboard on Android, which composes them in its own language.
   const unread = raw.kind === 'text'
     && (raw.fieldRead === 'unread' || (raw.fieldRead === undefined && raw.replace !== true))
