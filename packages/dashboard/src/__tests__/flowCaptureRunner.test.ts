@@ -639,6 +639,10 @@ describe('loadSnapshot: a tap made again', () => {
     const glyph = blank(160, 347)
     for (let y = 180; y < 186; y++) for (let x = 78; x < 82; x++) { const i = (y * 160 + x) * 4; glyph.data[i] = glyph.data[i + 1] = glyph.data[i + 2] = 40 }
     expect(pixelsChanged(a, glyph, [])).toBeGreaterThan(0)
+    // At 160 px wide a thin digit is blurred into grey: 85 off white, still a change.
+    const faint = blank(160, 347)
+    for (let y = 180; y < 186; y++) for (let x = 78; x < 80; x++) { const i = (y * 160 + x) * 4; faint.data[i] = faint.data[i + 1] = faint.data[i + 2] = 170 }
+    expect(pixelsChanged(a, faint, [])).toBeGreaterThan(0)
     const noisy = blank(160, 347)
     for (let i = 0; i < noisy.data.length; i += 4) { noisy.data[i] = 255 - 44 }
     expect(pixelsChanged(a, noisy, [])).toBe(0)
