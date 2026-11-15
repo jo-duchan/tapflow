@@ -916,13 +916,18 @@ function SecretName({ from, current, onRename, renameCheck }: {
  *  and at its own size it shrank the device to a thumbnail when Match's review showed one (P2c). */
 function StepPicture({ src, step, fill = false }: { src: string; step: CapturedStep; fill?: boolean }) {
   const mark = markOf(step.raw)
+  // Filled by height only while the picture is upright: a turned one at a fixed height in a narrow column would be
+  // squeezed, its width capped and its height not (CodeRabbit, #1171).
+  const [upright, setUpright] = useState(true)
+  const filled = fill && upright
   const pct = (n: number) => `${n * 100}%`
   return (
     // The border on the frame, not the image, as on the screen after a tap: on the image it came out of the height cap,
     // and the two pictures of one step differed by its width when the tabs were switched.
     // Not clipped: a tap's mark near the edge is drawn past it.
     <div className={cn('relative max-h-full rounded-lg border', fill ? 'self-center' : 'self-start')}>
-      <img src={src} alt={capturedStepLabel(step)} className={cn('block w-auto max-w-full rounded-md', fill ? 'h-[var(--picture-max,60vh)] bg-muted' : 'max-h-[var(--picture-tap,var(--picture-max,60vh))]')} />
+      <img src={src} alt={capturedStepLabel(step)} onLoad={(e) => setUpright(e.currentTarget.naturalHeight >= e.currentTarget.naturalWidth)}
+        className={cn('block w-auto max-w-full rounded-md', filled ? 'h-[var(--picture-max,60vh)] bg-muted' : fill ? 'h-auto max-h-[var(--picture-max,60vh)]' : 'max-h-[var(--picture-tap,var(--picture-max,60vh))]')} />
       {mark && (
         <svg aria-hidden="true" data-testid="step-mark" className="pointer-events-none absolute inset-0 size-full overflow-visible">
           {mark.kind === 'swipe' ? (

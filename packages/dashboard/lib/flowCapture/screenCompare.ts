@@ -96,13 +96,14 @@ export async function picturesDiff(a: Blob, b: Blob, masks: ScreenRect[]): Promi
  */
 export async function tapDidNothing(
   recordedBefore: string | null, recordedNext: string | null, shotBefore: Uint8Array, shotNow: Uint8Array, masks: ScreenRect[],
-  diff: (a: Blob, b: Blob, masks: ScreenRect[]) => Promise<number | null> = picturesDiff,
+  signal?: AbortSignal, diff: (a: Blob, b: Blob, masks: ScreenRect[]) => Promise<number | null> = picturesDiff,
 ): Promise<boolean> {
   if (!recordedBefore || !recordedNext) return false
   const jpeg = (bytes: Uint8Array) => new Blob([bytes as BlobPart], { type: 'image/jpeg' })
   const replayed = await diff(jpeg(shotBefore), jpeg(shotNow), masks)
   if (replayed === null || !unchanged(replayed)) return false
-  const load = async (url: string) => { const r = await fetch(url, { credentials: 'include' }); return r.ok ? r.blob() : null }
+  // With the run's signal: Stop does not wait for the pictures (CodeRabbit, #1171).
+  const load = async (url: string) => { const r = await fetch(url, { credentials: 'include', ...(signal ? { signal } : {}) }); return r.ok ? r.blob() : null }
   const [a, b] = await Promise.all([load(recordedBefore).catch(() => null), load(recordedNext).catch(() => null)])
   if (!a || !b) return false
   const recorded = await diff(a, b, masks)

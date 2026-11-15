@@ -183,8 +183,8 @@ function CaptureSession({ tap, session, snapshot, bundleId, setBusy, close }: {
         if (after.screenshot) run.keep(after.screenshot)
         dispatch({ type: 'step-after', index, after })
       },
-      tapDidNothing: (prev, next, before, now, masks) =>
-        tapDidNothing(thumbnailUrl(tap.sessionId, snapshot, prev), thumbnailUrl(tap.sessionId, snapshot, next), before, now, masks),
+      tapDidNothing: (prev, next, before, now, masks, stop) =>
+        tapDidNothing(thumbnailUrl(tap.sessionId, snapshot, prev), thumbnailUrl(tap.sessionId, snapshot, next), before, now, masks, stop),
       onDiverged: (index, divergence) => {
         run.keep(divergence.nowUrl)
         const step = state.steps[index]

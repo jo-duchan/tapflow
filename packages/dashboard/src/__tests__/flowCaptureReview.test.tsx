@@ -104,6 +104,22 @@ describe('the review screen', () => {
     expect(screen.getByText('#3 as you recorded it')).toBeInTheDocument()
   })
 
+  // CodeRabbit on #1171: a turned picture at a fixed height in a narrow column was squeezed.
+  it('fills by height only while the picture is upright', () => {
+    let state = matching
+    for (const m of matched) state = reduce(state, { type: 'step-matched', step: m, screenshot: 'blob:wide' })
+    state = reduce(state, { type: 'match-reviewed', review: { matched, taps: reviewTaps(steps, matched) } })
+    render(<MatchScreen {...props(state)} />)
+    fireEvent.click(screen.getByRole('button', { name: /will be left out/ }))
+    const img = screen.getByRole('img')
+    expect(img.className).toContain('h-[var(--picture-max,60vh)]')
+    Object.defineProperty(img, 'naturalWidth', { value: 1600 })
+    Object.defineProperty(img, 'naturalHeight', { value: 900 })
+    fireEvent.load(img)
+    expect(img.className).not.toContain(' h-[var(--picture-max,60vh)]')
+    expect(img.className).toContain('h-auto')
+  })
+
   it('shows the screen a card was tapped on, and counts what is kept', () => {
     const kept = reduce(reviewing, { type: 'set-kept', step: 2, kept: true })
     render(<MatchScreen {...props(kept)} />)

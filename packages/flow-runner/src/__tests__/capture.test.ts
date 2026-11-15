@@ -1341,6 +1341,14 @@ describe('touch reports', () => {
       ]
       expect(noResponseTaps(matched).map((t) => t.index)).toEqual([1])
     })
+    // CodeRabbit on #1171: a typed secret has no step until the flow is made, and still types into the focused field.
+    it('does not offer a tap right before a typed secret', () => {
+      const secret = { ...tapRaw(), kind: 'text' } as unknown as RawStep
+      expect(noResponseTaps([
+        { raw: tapRaw({ acted: false }), step: tapOn('Password') },
+        { raw: secret, step: null, secret: { value: 'hunter2', known: true } },
+      ])).toEqual([])
+    })
     // Design review of P2c: the flow reads the next step it has, so the swipe is for the tap after a left-out one.
     it('turns a swipe before a left-out tap into a scroll to the tap after it', () => {
       const swipe: CapturedStep = { raw: new Rec().touch([[0.5, 0.8], [0.5, 0.5], [0.5, 0.2]]).steps()[0]!, step: { type: 'swipe', from: [0.5, 0.8], to: [0.5, 0.2], durationMs: 300 }, tree: [] }

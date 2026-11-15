@@ -691,7 +691,7 @@ describe('matchRange: a tap that did nothing on the replay', () => {
 
   it('taps it once more and goes on when the step after it then looks as recorded', async () => {
     const r = await run(true)
-    expect(r.tapDidNothing).toHaveBeenCalledWith(menuItem, back, expect.any(Uint8Array), expect.any(Uint8Array), expect.any(Array))
+    expect(r.tapDidNothing).toHaveBeenCalledWith(menuItem, back, expect.any(Uint8Array), expect.any(Uint8Array), expect.any(Array), expect.any(AbortSignal))
     // tapStep, the menu item, the menu item again, back.
     expect(r.taps).toBe(4)
     expect(r.onDiverged).not.toHaveBeenCalled()
@@ -745,7 +745,7 @@ describe('matchRange: a tap that did nothing on the replay', () => {
     const bytes = new Uint8Array([1])
     const judge = (replayed: number | null, recorded: number | null, urls: [string | null, string | null] = ['/a', '/b']) => {
       let n = 0
-      return tapDidNothing(urls[0], urls[1], bytes, bytes, [], async () => (n++ === 0 ? replayed : recorded))
+      return tapDidNothing(urls[0], urls[1], bytes, bytes, [], undefined, async () => (n++ === 0 ? replayed : recorded))
     }
     expect(await judge(0, 0.05)).toBe(true)
     expect(await judge(0.001, 0.05)).toBe(false)
@@ -756,8 +756,13 @@ describe('matchRange: a tap that did nothing on the replay', () => {
     vi.restoreAllMocks()
   })
 
-  it('stops as before when the tap did something, or when once more did not help', async () => {
-    const r = await run(false)
+  // CodeRabbit on #1171: the wait before judging can be when a late effect lands; the step is compared again then.
+  it('goes on without pressing when the screen came right during the wait, stops when it still differs', async () => {
+    const late = await run(false)
+    expect(late.taps).toBe(3)
+    expect(late.onDiverged).not.toHaveBeenCalled()
+    log.length = 0
+    const r = await run(false, true)
     expect(r.taps).toBe(3)
     expect(r.onDiverged).toHaveBeenCalledTimes(1)
     log.length = 0

@@ -480,7 +480,8 @@ export function noResponseTaps(matched: readonly CapturedStep[]): NoResponseTap[
   matched.forEach((m, index) => {
     if (m.raw.kind !== 'tap' || m.step === null || m.raw.touched?.acted !== false) return
     if (m.observed && ((m.observed.appear?.length ?? 0) > 0 || (m.observed.gone?.length ?? 0) > 0)) return
-    const next = matched.slice(index + 1).find((s) => s.step !== null)
+    // A typed secret has no step until `toFlowSteps` names it (CodeRabbit, #1171): it still types into what the tap focused.
+    const next = matched.slice(index + 1).find((s) => s.step !== null || s.secret !== undefined)
     if (next && TYPES.has(next.raw.kind)) return
     out.push({ index, repeat: (m.raw.touched.tapCount ?? 1) >= 2 })
   })

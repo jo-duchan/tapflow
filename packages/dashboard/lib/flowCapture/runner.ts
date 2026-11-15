@@ -212,7 +212,7 @@ export interface MatchHooks {
    * (`RETRY_LOOK_AGAIN_MS`) and nothing in the tree Match watched (`observed`): an effect neither shows — a request
    * whose answer the screen never draws — could still be made twice, the price of not stopping on a tap that slipped.
    */
-  tapDidNothing?: (prev: RawStep, next: RawStep, shotBefore: Uint8Array, shotNow: Uint8Array, masks: ScreenRect[]) => Promise<boolean>
+  tapDidNothing?: (prev: RawStep, next: RawStep, shotBefore: Uint8Array, shotNow: Uint8Array, masks: ScreenRect[], signal: AbortSignal) => Promise<boolean>
   signal: AbortSignal
 }
 
@@ -453,7 +453,16 @@ export async function matchRange(
       const differs = await hooks.compare(raw, masks).catch(() => null)
       hooks.signal.throwIfAborted()
       if (!differs) return
-      if (prevTap && await retriedTap(prevTap, masks)) {
+      const retry = prevTap ? await retriedTap(prevTap, masks) : 'not-asked'
+      // Waited for a late effect without pressing again: the screen may have come right in the meantime.
+      if (retry === 'waited') {
+        const now = await hooks.compare(raw, masks).catch(() => null)
+        hooks.signal.throwIfAborted()
+        URL.revokeObjectURL(differs.nowUrl)
+        if (now) await hooks.onDiverged(range.start + offset, now)
+        return
+      }
+      if (retry === 'pressed' && prevTap) {
         URL.revokeObjectURL(differs.nowUrl)
         before = (await waitForStableScreen(read, { timeoutMs: SETTLE_TIMEOUT_MS })) ?? before
         // What the tap did is what the second press did: watched again, so Edit's "after this tap" and the expectations
@@ -470,25 +479,29 @@ export async function matchRange(
       await hooks.onDiverged(range.start + offset, differs)
     }
     // The tap before this step, replayed once more when it did nothing on the replay and something when recorded.
-    const retriedTap = async (prev: NonNullable<typeof lastTap>, masks: ScreenRect[]): Promise<boolean> => {
-      if (!hooks.tapDidNothing) return false
+    // `pressed`: tapped again; `waited`: looked again a moment later and did not; `not-asked`: neither.
+    const retriedTap = async (prev: NonNullable<typeof lastTap>, masks: ScreenRect[]): Promise<'pressed' | 'waited' | 'not-asked'> => {
+      if (!hooks.tapDidNothing) return 'not-asked'
       // The tree saw it do something (Match's own watch of it): an effect the picture may not show, never pressed again.
       const seen = observed.get(prev.step)
-      if (seen && ((seen.appear?.length ?? 0) > 0 || (seen.gone?.length ?? 0) > 0)) return false
+      if (seen && ((seen.appear?.length ?? 0) > 0 || (seen.gone?.length ?? 0) > 0)) return 'not-asked'
       // An effect can come late (a request's answer drawn after the screen read as settled): judged on a picture taken
       // a moment later, so a tap that did act is not pressed twice. Measured: the open-menu screen holds 0 cells apart
       // for 5 s, so the wait costs nothing in the case this is for.
       await new Promise((resolve) => setTimeout(resolve, RETRY_LOOK_AGAIN_MS))
       hooks.signal.throwIfAborted()
       const now = await channel.screenshot(sessionId, hooks.signal).catch(() => null)
-      if (!now || !(await hooks.tapDidNothing(prev.raw, raw, prev.shot, now, masks).catch(() => false))) return false
+      if (!now || !(await hooks.tapDidNothing(prev.raw, raw, prev.shot, now, masks, hooks.signal).catch(() => false))) {
+        hooks.signal.throwIfAborted()
+        return 'waited'
+      }
       hooks.signal.throwIfAborted()
       // Named: on its element again, or not at all — the point is what a named tap is there not to trust.
-      if (prev.named) return attempt([{ type: 'tapOn', selector: prev.named.selector }])
+      if (prev.named) return (await attempt([{ type: 'tapOn', selector: prev.named.selector }])) ? 'pressed' : 'waited'
       const mark = markOf(prev.raw)
       if (mark) hooks.onTouch?.(mark)
       await replayStep(channel, sessionId, prev.raw, hooks.signal)
-      return true
+      return 'pressed'
     }
     // A turned app replays its taps at their points (`namedTap`), so the swipe before one is compared as any other.
     if (compared(raw) && !skipCompare && !named && (!!before?.interfaceTurn || !swipeBeforeNamedTap(slice, offset))) await compareNow()
