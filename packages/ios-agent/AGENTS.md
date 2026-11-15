@@ -468,7 +468,10 @@ observer answers in the runner's own shapes, so `toKeyboardState` and `toFocused
 - **App accessibility is on for a person Flow Capture records** (`AppAccessibility`, `ApplicationAccessibilityEnabled`).
   Without it SwiftUI and React Native build no accessibility nodes, so the observer can name neither a SwiftUI field's
   `.accessibilityIdentifier` nor what a touch hit (measured on iOS 26.5: Food Truck, Sample SwiftUI/UIKit, a React Native
-  app — nothing off, every element named on; scroll smoothness the same either way). It was left off in #1162 because
+  app — nothing off, every element named on; scroll smoothness the same either way). **It costs the app 13–21 MB**
+  (footprint 10 s after a cold launch, iOS 26.5, 3 runs each, identical within 1 MB: Food Truck 38 → 58, Sample
+  SwiftUI 27 → 44, Sample UIKit 23 → 36, a React Native app 32 → 53), and the simulator's other processes nothing
+  more, against 110–360 MB for the runner the memory line was drawn for. It was left off in #1162 because
   it persists on the device and a dead agent could not restore it, so turning it on writes a host marker with the value
   it replaces (`/private/var/tmp/tapflow-app-accessibility/<udid>.json`), and the marker puts it back: at a boot that is
   not recorded, before a shutdown, and for a running device when the agent starts. A value already on is someone
