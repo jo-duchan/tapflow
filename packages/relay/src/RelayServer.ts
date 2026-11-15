@@ -2863,6 +2863,10 @@ export class RelayServer {
       // A person's join is let past the memory check because their device is up; the runner is not, and costs
       // 110–360 MB (measured). On a Mac over its memory line the field is not read: the steps say so instead.
       && !this.resourceLoad(boot.session)?.memOver
+    // Whether the person is recorded, ungated: what a current iOS agent turns record-time observation and app
+    // accessibility on by. Neither starts a runner, and reading them off `recorded` turned every touch observation off
+    // for a boot on a Mac over its memory line. `recorded` keeps its gates for the older agent that warms off it.
+    ;(msg.payload as Record<string, unknown>)['observed'] = this.captures.isRecording(boot.session.id, captureHolder(boot.session))
     if (boot.session.keyboardResetOwed && hasCapability(boot.session.agentCapabilities, 'keyboard-reset')) {
       // Ahead of the boot, which the agent then finishes before it resets (it waits for the boot's keyboard sync).
       this.sendTo(boot.session.agentSocket, { type: 'device:keyboard-reset', sessionId: boot.session.id })

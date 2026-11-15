@@ -142,26 +142,40 @@ describe('Flow Capture through the relay', () => {
       const alice = await browser(1)
       await join(alice)
       alice.send(JSON.stringify({ type: 'device:boot', sessionId, requestId: 'b1', payload: { deviceId: 'dev-2' } }))
-      const boot = await waitForType<{ type: string; payload: { recorded?: boolean } }>(fieldAgent, 'device:boot')
-      expect(boot.payload.recorded).toBe(true)
+      const boot = await waitForType<{ type: string; payload: { recorded?: boolean; observed?: boolean } }>(fieldAgent, 'device:boot')
+      expect(boot.payload).toMatchObject({ recorded: true, observed: true })
     })
 
-    it('does not warm it for a person who turned capturing off', async () => {
+    it('does not warm it for a person who turned capturing off, whatever their browser claims', async () => {
       getDb().prepare('UPDATE users SET flow_capture = 0 WHERE id = 1').run()
       const fieldAgent = await capableAgent()
       const alice = await browser(1)
       await join(alice)
+      alice.send(JSON.stringify({ type: 'device:boot', sessionId, requestId: 'b1', payload: { deviceId: 'dev-2', recorded: true, observed: true } }))
+      const boot = await waitForType<{ type: string; payload: { recorded?: boolean; observed?: boolean } }>(fieldAgent, 'device:boot')
+      expect(boot.payload).toMatchObject({ recorded: false, observed: false })
+    })
+
+    it('does not observe a boot made while the dialog\'s replay holds the pause', async () => {
+      const fieldAgent = await capableAgent()
+      const alice = await browser(1)
+      await join(alice)
+      // The pause is held over a capture, which the first input starts.
+      alice.send(JSON.stringify({ type: 'input:key', sessionId, requestId: 'k1', payload: { code: 'KeyD', modifiers: 0 } }))
+      await waitForType(fieldAgent, 'input:key')
+      expect((await api('PUT', `/sessions/${sessionId}/capture/pause`, { cookie: cookieFor(1) })).status).toBe(200)
       alice.send(JSON.stringify({ type: 'device:boot', sessionId, requestId: 'b1', payload: { deviceId: 'dev-2' } }))
-      const boot = await waitForType<{ type: string; payload: { recorded?: boolean } }>(fieldAgent, 'device:boot')
-      expect(boot.payload.recorded).toBe(false)
+      const boot = await waitForType<{ type: string; payload: { recorded?: boolean; observed?: boolean } }>(fieldAgent, 'device:boot')
+      expect(boot.payload).toMatchObject({ recorded: false, observed: false })
     })
 
     it('does not warm it on an agent that cannot read fields: the runner would cost memory for nothing', async () => {
       const alice = await browser(1)
       await join(alice)
       alice.send(JSON.stringify({ type: 'device:boot', sessionId, requestId: 'b1', payload: { deviceId: 'dev-1' } }))
-      const boot = await waitForType<{ type: string; payload: { recorded?: boolean } }>(agent, 'device:boot')
-      expect(boot.payload.recorded).toBe(false)
+      const boot = await waitForType<{ type: string; payload: { recorded?: boolean; observed?: boolean } }>(agent, 'device:boot')
+      // Watching the person's touches needs no runner, so it is told whatever the agent reads.
+      expect(boot.payload).toMatchObject({ recorded: false, observed: true })
     })
 
     it('asks nothing of an agent that cannot answer', async () => {
@@ -320,7 +334,9 @@ describe('Flow Capture through the relay', () => {
       fieldAgent.send(JSON.stringify({ type: 'agent:resources', resources: { cpuPercent: 0, memUsedMB: 99, memTotalMB: 100, slotsAvailable: 1, slotsTotal: 1, reportedAt: Date.now() } }))
       await new Promise((r) => setTimeout(r, 100))
       alice.send(JSON.stringify({ type: 'device:boot', sessionId, requestId: 'b1', payload: { deviceId: 'dev-2' } }))
-      expect((await waitForType<{ type: string; payload: { recorded?: boolean } }>(fieldAgent, 'device:boot')).payload.recorded).toBe(false)
+      // `observed` is not gated: the app observer costs no runner, and the gate turned every touch observation off.
+      expect((await waitForType<{ type: string; payload: { recorded?: boolean; observed?: boolean } }>(fieldAgent, 'device:boot')).payload)
+        .toMatchObject({ recorded: false, observed: true })
       alice.send(JSON.stringify({ type: 'input:key', sessionId, requestId: 'k1', payload: { code: 'KeyD', modifiers: 0 } }))
       await new Promise((r) => setTimeout(r, 900))
       expect(asked).toBe(0)
