@@ -40,6 +40,11 @@ export type SkipReason =
   | 'keyboard-key'
   /** Went down on a list that was still moving: it stopped the list and pressed nothing (`RawStep.dropped`). */
   | 'stopped-scroll'
+  /** Tapped again right after on the same element, the screen unchanged: the first tap did nothing (`RawStep.dropped`). */
+  | 'retried'
+  /** The app did not respond to it when it was recorded (`TouchObservation.acted === false`), and the person left it
+   *  out at the end of Match (`noResponseTaps`, `leaveOut`). */
+  | 'no-response'
 
 export type FragileReason =
   /** Tapped where the tree names no element. */
@@ -373,6 +378,39 @@ function nearestTo(found: UIElement[], named: ObservedElement): UIElement | null
   return found.reduce((a, b) => (d(b) < d(a) ? b : a))
 }
 
+/**
+ * Pairs of taps one after the other that the app named as the same element (`recordedSelector`): the first may have
+ * done nothing and the second be its retry — a menu item that took two taps, a button pressed again (P2c, the user's
+ * session af948002). Only candidates: the host confirms one by the recorded pictures, the screen the same before both,
+ * since a stepper's + pressed twice is the same element too and changes the screen each time. Replaying such a first
+ * tap acts where the recording's did not, and the second then lands on the screen the first made.
+ */
+export function retryCandidates(steps: readonly RawStep[]): Array<[number, number]> {
+  const out: Array<[number, number]> = []
+  for (let i = 0; i + 1 < steps.length; i++) {
+    const a = steps[i]!, b = steps[i + 1]!
+    if (a.kind !== 'tap' || b.kind !== 'tap' || a.dropped || b.dropped || a.outcome === 'refused' || b.outcome === 'refused') continue
+    // A double tap is two taps by design, and iOS says so (`tapCount`). Closer than a second, the second's picture can
+    // still be the screen from before the first acted: the viewer draws the stream late (review of P2c).
+    // Either side: a double tap's second, then a later single tap on it, is not its retry (an outside review of #1171).
+    if ((a.touched?.tapCount ?? 1) >= 2 || (b.touched?.tapCount ?? 1) >= 2 || b.at - a.at < RETRY_MIN_GAP_MS) continue
+    // A tap into a field may only place the caret: no picture shows that, and the second may then open its menu.
+    if (a.touched?.element?.input || b.touched?.element?.input) continue
+    const sa = recordedSelector(a.touched), sb = recordedSelector(b.touched)
+    if (sa && sb && JSON.stringify(sa) === JSON.stringify(sb)) out.push([i, i + 1])
+  }
+  return out
+}
+
+/** The least time between two taps for the second's recorded picture to show what the first did. */
+export const RETRY_MIN_GAP_MS = 1_000
+
+/** The steps with those at `indices` left out before the replay as retried (`retryCandidates`, confirmed). */
+export function dropRetried(steps: readonly RawStep[], indices: Iterable<number>): RawStep[] {
+  const out = new Set(indices)
+  return steps.map((s, i) => (out.has(i) && !s.dropped ? { ...s, dropped: 'retried' as const } : s))
+}
+
 /** A selector for what a touch's report names, for an element the screen does not show yet (`scroll { until }`). */
 export function recordedSelector(touched: TouchObservation | undefined): Selector | null {
   if (!touched || touched.surface) return null
@@ -380,7 +418,10 @@ export function recordedSelector(touched: TouchObservation | undefined): Selecto
   // leaves the element's name to search by.
   for (const named of [touched.button, touched.element]) {
     if (named?.identifier) return { id: named.identifier }
-    if (named?.label && !named.input) return { label: named.label, exact: true }
+    // A button's label is usually its text's too, in the tree as a `button` and a `text` of one name (SwiftUI, measured
+    // on Food Truck's order rows): by the label alone the search matched two and never settled, scrolling the list to
+    // its end and back (the user's session ff5d3d3c). The trait says which one was touched.
+    if (named?.label && !named.input) return { label: named.label, exact: true, ...(named.traits & 1 ? { role: 'button' } : {}) }
   }
   return null
 }
@@ -412,6 +453,48 @@ function scrollDirection(from: Point, to: Point): ScrollDirection | null {
     return dx < 0 ? 'right' : 'left'
   }
   return null
+}
+
+/** A matched tap the app did not respond to when it was recorded, as Match's review offers it: `index` into the matched
+ *  steps, `repeat` when iOS counted it a quick repeat of the tap before (`tapCount`). */
+export interface NoResponseTap {
+  index: number
+  repeat: boolean
+}
+
+/** Steps that type into whatever is focused: a tap right before one may be what focused the field. */
+const TYPES = new Set<RawStep['kind']>(['text', 'type', 'paste', 'keyboardKey', 'key'])
+
+/**
+ * The matched taps the app did not respond to when they were recorded (record-time observation, P2c): a stray tap on a
+ * title, a retry of a dead button, the second of a doubled tap. Only a verdict of "no" counts — `acted` absent is
+ * unknown (a web view, React Native, an older agent, Android) and the tap stays as it is. A step the replay added has no
+ * report, and a tap already skipped is out of the flow anyway. Two more are kept without asking, since leaving them out
+ * would make Verify run something other than what Match did:
+ * - one Match saw change the screen (`observed`): the record's "no" was wrong, or the replay tapped the element's centre
+ *   where the person had tapped its padding;
+ * - one right before typing: if it focused the field, the flow without it types into nothing.
+ */
+export function noResponseTaps(matched: readonly CapturedStep[]): NoResponseTap[] {
+  const out: NoResponseTap[] = []
+  matched.forEach((m, index) => {
+    if (m.raw.kind !== 'tap' || m.step === null || m.raw.touched?.acted !== false) return
+    if (m.observed && ((m.observed.appear?.length ?? 0) > 0 || (m.observed.gone?.length ?? 0) > 0)) return
+    // A typed secret has no step until `toFlowSteps` names it (CodeRabbit, #1171): it still types into what the tap focused.
+    const next = matched.slice(index + 1).find((s) => s.step !== null || s.secret !== undefined)
+    if (next && TYPES.has(next.raw.kind)) return
+    out.push({ index, repeat: (m.raw.touched.tapCount ?? 1) >= 2 })
+  })
+  return out
+}
+
+/**
+ * The matched steps with those at `indices` left out (`no-response`). Before `toFlowSteps`, which reads a tap after a
+ * swipe to turn the swipe into a scroll: a tap that is not in the flow cannot be what the swipe was for.
+ */
+export function leaveOut(matched: readonly CapturedStep[], indices: Iterable<number>): CapturedStep[] {
+  const out = new Set(indices)
+  return matched.map((m, i) => (out.has(i) ? { raw: m.raw, step: null, skipped: 'no-response' as const } : m))
 }
 
 export interface CapturedFlow {

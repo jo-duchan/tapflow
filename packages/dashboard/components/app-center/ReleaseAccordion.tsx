@@ -1,5 +1,7 @@
 import { useId } from 'react'
-import { ChevronDown, ChevronRight } from 'lucide-react'
+import { ChevronRight } from 'lucide-react'
+import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from '@/components/ui/accordion'
+import { cn } from '@/lib/utils'
 import { TechLabel } from '@/components/ui/tech-label'
 import { BuildRow } from './BuildRow'
 import type { Build } from '@/lib/types'
@@ -39,7 +41,11 @@ export function ReleaseAccordion({
 }: Props) {
   const panelId = useId()
   return (
-    <div className="rounded-lg shadow-card-2 overflow-hidden">
+    // shadcn's Accordion (Radix), one per release: App Center opens and closes each on its own, so the state stays the
+    // page's (`isOpen`) and the panel grows and shrinks rather than appearing. A closed panel is not in the DOM, as before:
+    // Radix removes it once its closing animation ends.
+    <Accordion type="single" collapsible value={isOpen ? 'release' : ''} onValueChange={() => onToggle()} className="rounded-lg shadow-card-2 overflow-hidden">
+      <AccordionItem value="release" className="border-b-0">
       {/* A disclosure: the chevron is the only visible sign of open or closed, so the state has to be
           said as well. `aria-controls` only while the panel exists — it is not rendered when closed.
 
@@ -52,27 +58,22 @@ export function ReleaseAccordion({
           **Inside an `h2`**, as the APG accordion pattern has it: each header titles a section of
           rows, and the page's only other heading is the `h1` above the list, so without it a screen
           reader user could not move from release to release by heading. */}
-      <h2>
-      <button
-        className="flex w-full items-center gap-2 px-4 py-3 text-left hover:bg-accent/50 bg-card focus-visible:outline-none focus-visible:outline-offset-[-2px] focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
-        onClick={onToggle}
-        aria-expanded={isOpen}
+      <AccordionTrigger
+        headerLevel={2}
+        chevron={false}
+        className="justify-start gap-2 px-4 py-3 font-normal hover:no-underline hover:bg-accent/50 bg-card focus-visible:ring-offset-0 focus-visible:outline-offset-[-2px] focus-visible:ring-inset"
         aria-controls={isOpen ? panelId : undefined}
         aria-describedby={describedBy}
         data-release-header={versionName}
       >
-        {isOpen
-          ? <ChevronDown className="h-4 w-4 shrink-0 text-muted-foreground" />
-          : <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground" />
-        }
+        <ChevronRight aria-hidden="true" className={cn('h-4 w-4 shrink-0 text-muted-foreground transition-transform duration-200 motion-reduce:transition-none', isOpen && 'rotate-90')} />
         <TechLabel className="font-medium text-sm text-foreground">{versionName}</TechLabel>
         <span className="text-xs text-muted-foreground">
           ({builds.length} build{builds.length > 1 ? 's' : ''})
         </span>
-      </button>
-      </h2>
-      {isOpen && (
-        <div id={panelId} className="border-t bg-card">
+      </AccordionTrigger>
+      {/* No region landmark: releases open independently, and a landmark for each open one crowds the list of them. */}
+      <AccordionContent id={panelId} role={undefined} className="border-t bg-card pb-0">
           {builds.map((b, idx) => (
             <BuildRow
               key={b.id}
@@ -87,8 +88,8 @@ export function ReleaseAccordion({
               statusDescribedBy={rowNote?.buildId === b.id ? rowNote.id : undefined}
             />
           ))}
-        </div>
-      )}
-    </div>
+      </AccordionContent>
+      </AccordionItem>
+    </Accordion>
   )
 }

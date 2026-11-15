@@ -44,7 +44,7 @@ vi.mock('@tapflowio/flow-runner/browser', async (importOriginal) => ({
   },
 }))
 
-const { DialogRun, keyboardOf, loadSnapshot: loadSnapshotForTest, matchRange, PauseLease, typedOnScreenKeyboard, verifyFlow } = await import('@/lib/flowCapture/runner')
+const { DialogRun, keyboardOf, loadSnapshot: loadSnapshotForTest, stepsOf, matchRange, PauseLease, typedOnScreenKeyboard, verifyFlow } = await import('@/lib/flowCapture/runner')
 type Tap = ConstructorParameters<typeof PauseLease>[0]
 type Channel = Parameters<typeof matchRange>[1]
 
@@ -452,10 +452,13 @@ describe('matchRange: the screen a touch left', () => {
   const viewer = { ...tap, chrome: () => null } as unknown as Tap
   it('hands over each tap\'s after-screen with its tree, the last one from the read after it', async () => {
     const afters: Array<[number, unknown]> = []
+    const seen: number[] = []
     screen.elements = [{ role: 'text', label: 'Welcome', frame: { x: 0, y: 0, width: 1, height: 0.1 }, enabled: true }]
     await matchRange(viewer, channel, lease, [launchStep, tapStep, textStep, tapStep], { start: 0, end: 4 }, null, {
-      ...hooks(), onAfter: (index, after) => afters.push([index, after.tree]),
+      ...hooks(), onAfter: (index, after) => afters.push([index, after.tree]), onObserved: (index) => seen.push(index),
     })
+    // What each touch did is told as it is known, by the same index (Edit what matched has nothing else to go by).
+    expect(seen).toEqual([2, 4])
     // launch #0, the turn the suite puts in #1, tap #2, text #3, tap #4: the two taps, by their places.
     expect(afters.map(([i]) => i)).toEqual([2, 4])
     expect(afters[0]![1]).toEqual(screen.elements)
@@ -599,6 +602,174 @@ describe('loadSnapshot', () => {
     release()
     await loading
     expect(order).toEqual(['flushed', 'snapshot'])
+  })
+})
+
+// P2c, the user's session af948002: a menu item tapped twice, the first doing nothing. Judged when the snapshot is read.
+describe('loadSnapshot: a tap made again', () => {
+  afterEach(() => vi.restoreAllMocks())
+  const touch = (at: number, id: string, x: number) => [
+    { at, kind: 'input', msg: { type: 'input:touch:start', sessionId: 's', payload: { x, y: 0.5 } } },
+    { at: at + 80, kind: 'input', msg: { type: 'input:touch:end', sessionId: 's', requestId: id } },
+    { at: at + 90, kind: 'ack', requestId: id, ok: true },
+    { at: at + 95, kind: 'touched', requestId: id, touched: { point: { x, y: 0.5 }, moving: false, element: { label: 'Blueberry Dough', traits: 1 } } },
+  ]
+  const chrome = (streamRotation: number) => ({ at: 0, kind: 'chrome', chrome: { framePng: '', streamRotation } })
+  const snapshotOf = (thumbnails: string[], turn = 0) => ({ id: 'x', takenAt: 0, thinned: false, thumbnails, entries: [chrome(turn), ...touch(1000, 'a', 0.6), ...touch(3000, 'b', 0.45)] })
+  const tap = { sessionId: 's', platform: 'ios' } as never
+  const load = (snap: unknown, alike: (a: string, b: string) => Promise<boolean>) => {
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async () => new Response(JSON.stringify(snap), { status: 200 }))
+    return loadSnapshotForTest(tap, alike)
+  }
+
+  it('leaves out the first when the recorded screen did not change between them', async () => {
+    const asked: string[][] = []
+    const loaded = await load(snapshotOf(['a', 'b']), async (a, b) => { asked.push([a, b]); return true })
+    expect(loaded!.retried).toEqual([0])
+    expect(asked).toEqual([['/api/v1/sessions/s/capture/snapshot/thumbnails/a', '/api/v1/sessions/s/capture/snapshot/thumbnails/b']])
+    expect(stepsOf(loaded!).steps.map((s) => s.dropped ?? null)).toEqual(['retried', null])
+  })
+
+  // An outside review of #1171: the grid read a 14 px counter going 1 to 2 as no change. Pixels, with a tolerance over
+  // JPEG noise (44 measured between two pictures of one screen).
+  it('counts a small digit changing, not JPEG noise, and nothing under a mask', async () => {
+    const { pixelsChanged } = await import('@/lib/flowCapture/screenCompare')
+    const blank = (w: number, h: number) => ({ width: w, height: h, data: new Uint8ClampedArray(w * h * 4).fill(255) })
+    const a = blank(160, 347)
+    const glyph = blank(160, 347)
+    for (let y = 180; y < 186; y++) for (let x = 78; x < 82; x++) { const i = (y * 160 + x) * 4; glyph.data[i] = glyph.data[i + 1] = glyph.data[i + 2] = 40 }
+    expect(pixelsChanged(a, glyph, [])).toBeGreaterThan(0)
+    // At 160 px wide a thin digit is blurred into grey: 85 off white, still a change.
+    const faint = blank(160, 347)
+    for (let y = 180; y < 186; y++) for (let x = 78; x < 80; x++) { const i = (y * 160 + x) * 4; faint.data[i] = faint.data[i + 1] = faint.data[i + 2] = 170 }
+    expect(pixelsChanged(a, faint, [])).toBeGreaterThan(0)
+    const noisy = blank(160, 347)
+    for (let i = 0; i < noisy.data.length; i += 4) { noisy.data[i] = 255 - 44 }
+    expect(pixelsChanged(a, noisy, [])).toBe(0)
+    expect(pixelsChanged(a, glyph, [{ x: 0, y: 0.5, width: 1, height: 0.1 }])).toBe(0)
+  })
+
+  // Review of P2c: Match's 1% "same screen" read a stepper's digit as alike. Measured on af948002: the pair scores 0.
+  it('takes a picture as unchanged only when not a cell differs', async () => {
+    const { unchanged } = await import('@/lib/flowCapture/screenCompare')
+    expect(unchanged(0)).toBe(true)
+    expect(unchanged(0.0004)).toBe(false)
+    expect(unchanged('incomparable')).toBe(false)
+  })
+
+  it('keeps both when the screen changed, or a picture is missing', async () => {
+    expect((await load(snapshotOf(['a', 'b']), async () => false))!.retried).toEqual([])
+    const alike = vi.fn(async () => true)
+    expect((await load(snapshotOf(['b']), alike))!.retried).toEqual([])
+    // Turned, the status bar is not where the mask is: not judged.
+    expect((await load(snapshotOf(['a', 'b'], 90), alike))!.retried).toEqual([])
+    expect(alike).not.toHaveBeenCalled()
+  })
+})
+
+// P2c, the user's session ff5d3d3c: a menu item's tap did nothing on the replay, where it chose the item when recorded,
+// and Match stopped at the step after it. Pressed once more, on evidence, before stopping.
+describe('matchRange: a tap that did nothing on the replay', () => {
+  const ctap = { ...(tap as object), chrome: () => null } as unknown as Tap
+  const shooting = { ...channel, screenshot: async () => new Uint8Array([1]) } as unknown as Channel
+  const menuItem = { ...tapStep, point: [0.6, 0.51] } as unknown as RawStep
+  const back = { ...tapStep, point: [0.1, 0.09] } as unknown as RawStep
+  const run = async (didNothing: boolean, stillDiffers = false) => {
+    vi.stubGlobal('URL', Object.assign(URL, { createObjectURL: () => 'blob:x', revokeObjectURL: () => {} }))
+    let asked = 0
+    const compare = vi.fn(async (raw: RawStep) => (raw === back && (asked++ === 0 || stillDiffers) ? { diff: 0.2, nowUrl: 'blob:now', masks: [] } : null))
+    const tapDidNothing = vi.fn(async () => didNothing)
+    const onDiverged = vi.fn(async () => {})
+    const watched: number[] = []
+    const lease = new PauseLease(ctap)
+    // A tapStep first: the first step after the launch is never compared here.
+    await matchRange(ctap, shooting, lease, [launchStep, tapStep, menuItem, back], { start: 0, end: 4 }, null,
+      { ...hooks(), compare, onDiverged, tapDidNothing, onObserved: (i) => watched.push(i) })
+    await lease.stop()
+    return { tapDidNothing, onDiverged, watched, taps: log.filter((l) => l === 'replay tap').length }
+  }
+
+  it('taps it once more and goes on when the step after it then looks as recorded', async () => {
+    const r = await run(true)
+    expect(r.tapDidNothing).toHaveBeenCalledWith(menuItem, back, expect.any(Uint8Array), expect.any(Uint8Array), expect.any(Array), expect.any(AbortSignal))
+    // tapStep, the menu item, the menu item again, back.
+    expect(r.taps).toBe(4)
+    expect(r.onDiverged).not.toHaveBeenCalled()
+    // The menu item (launch #0, the suite's turn #1, tapStep #2, the item #3) is watched again after its second press.
+    expect(r.watched.filter((i) => i === 3)).toHaveLength(2)
+  })
+
+  // Review of P2c's second press: never where Match's own watch saw the first press act, never across another step,
+  // and a named tap on its element again or not at all.
+  it('does not press again a tap whose effect the tree showed, or one with a step between', async () => {
+    vi.stubGlobal('URL', Object.assign(URL, { createObjectURL: () => 'blob:x', revokeObjectURL: () => {} }))
+    const tapDidNothing = vi.fn(async () => true)
+    const onDiverged = vi.fn(async () => {})
+    let asked = 0
+    const compare = vi.fn(async (raw: RawStep) => (raw === back && asked++ === 0 ? { diff: 0.2, nowUrl: 'blob:now', masks: [] } : null))
+    const lease = new PauseLease(ctap)
+    screen.elements = [{ role: 'text', label: 'Plain', enabled: true, frame: { x: 0.6, y: 0.8, width: 0.2, height: 0.03 } }]
+    // The menu item's press chose Blueberry in the tree, whatever the picture says.
+    const onStep = (step: { raw: RawStep }) => { if (step.raw === menuItem) screen.elements = [{ role: 'text', label: 'Blueberry Dough', enabled: true, frame: { x: 0.6, y: 0.8, width: 0.3, height: 0.03 } }] }
+    await matchRange(ctap, shooting, lease, [launchStep, tapStep, menuItem, back], { start: 0, end: 4 }, null, { ...hooks(), onStep, compare, onDiverged, tapDidNothing })
+    expect(tapDidNothing).not.toHaveBeenCalled()
+    expect(onDiverged).toHaveBeenCalledTimes(1)
+    const swipe = { ...base, kind: 'swipe', from: [0.5, 0.8], to: [0.5, 0.3], durationMs: 300 } as unknown as RawStep
+    asked = 0
+    await matchRange(ctap, shooting, lease, [launchStep, tapStep, menuItem, swipe, back], { start: 0, end: 5 }, null, { ...hooks(), compare, onDiverged, tapDidNothing })
+    await lease.stop()
+    expect(tapDidNothing).not.toHaveBeenCalled()
+  })
+
+  it('presses a named tap again on its element, through the engine, never at its point', async () => {
+    vi.stubGlobal('URL', Object.assign(URL, { createObjectURL: () => 'blob:x', revokeObjectURL: () => {} }))
+    const frame = { x: 0.3, y: 0.49, width: 0.6, height: 0.046 }
+    screen.elements = [{ role: 'button', label: 'Blueberry Dough', enabled: true, frame }]
+    const named = { ...menuItem, touched: { point: { x: 0.6, y: 0.51 }, moving: false, element: { label: 'Blueberry Dough', traits: 1, frame } } } as unknown as RawStep
+    let asked = 0
+    const compare = vi.fn(async (raw: RawStep) => (raw === back && asked++ === 0 ? { diff: 0.2, nowUrl: 'blob:now', masks: [] } : null))
+    const lease = new PauseLease(ctap)
+    // Pressed again, the engine does not find it: no tap at the recorded point in its place.
+    ran.answers = [{ status: 'passed' }, { status: 'failed', failureKind: 'product' }]
+    await matchRange(ctap, shooting, lease, [launchStep, tapStep, named, back], { start: 0, end: 4 }, null,
+      { ...hooks(), compare, onDiverged: vi.fn(async () => {}), tapDidNothing: vi.fn(async () => true) })
+    await lease.stop()
+    expect(ran.flows.map((f) => (f.steps as Array<{ type: string }>).map((x) => x.type))).toEqual([['tapOn'], ['tapOn']])
+    // tapStep and back at their points; the named tap only through the engine, twice.
+    expect(log.filter((l) => l === 'replay tap')).toHaveLength(2)
+  })
+
+  it('judges "did nothing" only on both pictures: unchanged on the replay, changed when recorded', async () => {
+    const { tapDidNothing } = await import('@/lib/flowCapture/screenCompare')
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async () => new Response('x'))
+    const bytes = new Uint8Array([1])
+    const judge = (replayed: number | null, recorded: number | null, urls: [string | null, string | null] = ['/a', '/b']) => {
+      let n = 0
+      return tapDidNothing(urls[0], urls[1], bytes, bytes, [], undefined, async () => (n++ === 0 ? replayed : recorded))
+    }
+    expect(await judge(0, 0.05)).toBe(true)
+    expect(await judge(0.001, 0.05)).toBe(false)
+    expect(await judge(0, 0)).toBe(false)
+    expect(await judge(0, null)).toBe(false)
+    expect(await judge(null, 0.05)).toBe(false)
+    expect(await judge(0, 0.05, [null, '/b'])).toBe(false)
+    vi.restoreAllMocks()
+  })
+
+  // CodeRabbit on #1171: the wait before judging can be when a late effect lands; the step is compared again then.
+  it('goes on without pressing when the screen came right during the wait, stops when it still differs', async () => {
+    const late = await run(false)
+    expect(late.taps).toBe(3)
+    expect(late.onDiverged).not.toHaveBeenCalled()
+    log.length = 0
+    const r = await run(false, true)
+    expect(r.taps).toBe(3)
+    expect(r.onDiverged).toHaveBeenCalledTimes(1)
+    log.length = 0
+    const again = await run(true, true)
+    // Once only: pressed again a single time, then the stop.
+    expect(again.taps).toBe(4)
+    expect(again.onDiverged).toHaveBeenCalledTimes(1)
   })
 })
 

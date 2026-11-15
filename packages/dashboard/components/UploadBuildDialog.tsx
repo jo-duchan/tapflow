@@ -17,7 +17,9 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 import { toast } from 'sonner'
-import { ChevronDown, ChevronRight, Upload } from 'lucide-react'
+import { ChevronRight, Upload } from 'lucide-react'
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible'
+import { cn } from '@/lib/utils'
 
 /** The relay's bound on each text field (`MAX_BUILD_TEXT`), so this dialog cannot send what it refuses. The dialog
  *  closes on submit and the answer arrives as a toast; holding a large upload's dialog open for a 400 is not worth it. */
@@ -154,15 +156,19 @@ export function UploadBuildDialog({ onSuccess, appId, canWrite }: Props) {
             <Input id="upload-label" value={label} maxLength={MAX} placeholder="e.g. staging, feature X"
               onChange={(e) => setLabel(e.target.value)} />
           </div>
-          <div className="grid gap-2">
-            <Button type="button" variant="ghost" size="sm" className="w-fit px-0 hover:bg-transparent"
-              aria-expanded={overrideOpen} aria-controls={overrideOpen ? 'upload-override' : undefined}
-              onClick={() => setOverrideOpen((o) => !o)}>
-              {overrideOpen ? <ChevronDown className="mr-1 h-4 w-4" aria-hidden /> : <ChevronRight className="mr-1 h-4 w-4" aria-hidden />}
-              Override version
-            </Button>
-            {overrideOpen && (
-              <div id="upload-override" className="grid gap-3">
+          {/* A Collapsible: the fields grow into place rather than appearing. Closed, they are not in the DOM; what was
+              typed in them is kept by this dialog's state. */}
+          <Collapsible open={overrideOpen} onOpenChange={setOverrideOpen} className="grid gap-2">
+            <CollapsibleTrigger asChild>
+              <Button type="button" variant="ghost" size="sm" className="w-fit px-0 hover:bg-transparent"
+                aria-controls={overrideOpen ? 'upload-override' : undefined}>
+                <ChevronRight className={cn('mr-1 h-4 w-4 transition-transform motion-reduce:transition-none', overrideOpen && 'rotate-90')} aria-hidden />
+                Override version
+              </Button>
+            </CollapsibleTrigger>
+            {/* Room past the panel's edges: it clips while it animates, and a field's focus ring is drawn outside it. */}
+            <CollapsibleContent id="upload-override" className="-mx-1 px-1 pb-1">
+              <div className="grid gap-3">
                 <p className="text-xs text-muted-foreground">
                   Leave a field empty to use what the build file says. This changes how tapflow shows and groups the build,
                   not the app installed on the device.
@@ -176,8 +182,8 @@ export function UploadBuildDialog({ onSuccess, appId, canWrite }: Props) {
                   <Input id="upload-build-number" value={buildNumber} maxLength={MAX} onChange={(e) => setBuildNumber(e.target.value)} />
                 </div>
               </div>
-            )}
-          </div>
+            </CollapsibleContent>
+          </Collapsible>
           <div className="flex justify-end gap-2">
             <Button type="button" variant="outline" className="w-24" onClick={() => setOpen(false)}>Cancel</Button>
             <Button type="submit" className="w-24" disabled={!file}>Upload</Button>

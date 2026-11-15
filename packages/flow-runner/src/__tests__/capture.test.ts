@@ -7,11 +7,13 @@ import type { KeyboardState } from '@tapflowio/protocol'
 import type { CaptureEntry, CapturedMessage } from '@tapflowio/protocol/capture'
 import {
   askedValues, segment, defaultRange, rangeWarnings, stepsBeforeRange, matchStep, reachQuestions, toFlowSteps, flowSteps, flowToYaml, rawStepLabel, capturedStepLabel,
-  recordedTarget, recordedSelector, scrollDirectionOf, replayStep,
-  type MatchContext, type RawStep,
+  recordedTarget, recordedSelector, scrollDirectionOf, replayStep, noResponseTaps, leaveOut, retryCandidates, dropRetried,
+  type MatchContext, type RawStep, type CapturedStep,
 } from '../capture/index.js'
+import type { Step } from '../schema.js'
 import type { TouchObservation } from '@tapflowio/protocol'
 import { parseFlow } from '../schema.js'
+import { matchSelector } from '../selector.js'
 
 // A recording as the relay keeps it: messages stamped with its clock, acks after the inputs they answer.
 class Rec {
@@ -1261,6 +1263,108 @@ describe('touch reports', () => {
     expect([named(steps[0]!), named(steps[1]!)]).toEqual(['Donuts', 'Truck'])
   })
 
+  // P2c, the user's session af948002: a menu item that took two taps; the first, replayed, chose it, and the second
+  // opened the menu again.
+  describe('retried taps', () => {
+    const blueberry = { label: 'Blueberry Dough', traits: 1 }
+    it('pairs taps one after the other on the same named element, and nothing else', () => {
+      const steps = new Rec()
+        .touch([[0.6, 0.52]]).touched({ moving: false, element: blueberry })
+        .wait(1500).touch([[0.45, 0.51]]).touched({ moving: false, element: blueberry })
+        .wait(1500).touch([[0.1, 0.1]]).touched({ moving: false, element: { label: 'Back', traits: 1 } })
+        .touch([[0.5, 0.5]]).touched({ moving: false, element: { label: 'Plus', traits: 1 } })
+        .touch([[0.5, 0.5]])
+        .steps()
+      expect(retryCandidates(steps)).toEqual([[0, 1]])
+      const out = dropRetried(steps, [0])
+      expect(out.map((s) => s.dropped ?? null)).toEqual(['retried', null, null, null, null])
+      expect(matchStep(out[0]!, ctxOf([])).skipped).toBe('retried')
+    })
+    it('does not pair across another step, a refused tap, or one already left out', () => {
+      const steps = new Rec()
+        .touch([[0.6, 0.52]]).touched({ moving: true, element: blueberry })
+        .touch([[0.45, 0.51]]).touched({ moving: false, element: blueberry })
+        .steps()
+      // The first stopped a list: it is out already.
+      expect(retryCandidates(steps)).toEqual([])
+      const refused = new Rec().touch([[0.6, 0.52]], { ok: false }).touched({ moving: false, element: blueberry })
+        .touch([[0.45, 0.51]]).touched({ moving: false, element: blueberry }).steps()
+      expect(retryCandidates(refused)).toEqual([])
+    })
+    // Review of P2c: a double tap is two taps by design; a quick second tap's picture may predate the first's effect;
+    // a field's first tap may only place the caret.
+    it('does not pair a double tap, two taps under a second apart, or taps into a field', () => {
+      const pair = (b: Partial<TouchObservation>, gap = 1500, element = blueberry) => retryCandidates(new Rec()
+        .touch([[0.6, 0.52]]).touched({ moving: false, element })
+        .wait(gap).touch([[0.6, 0.52]]).touched({ moving: false, element, ...b }).steps())
+      expect(pair({})).toEqual([[0, 1]])
+      expect(pair({ tapCount: 2 })).toEqual([])
+      expect(pair({}, 400)).toEqual([])
+      expect(pair({}, 1500, { identifier: 'form.email', traits: 0, input: true } as never)).toEqual([])
+    })
+    // An outside review of #1171: a double tap, then a single tap on the same element later.
+    it('does not take a double tap\'s second for the first of a retry', () => {
+      const steps = new Rec()
+        .touch([[0.6, 0.52]]).touched({ moving: false, element: blueberry, tapCount: 1 })
+        .wait(160).touch([[0.6, 0.52]]).touched({ moving: false, element: blueberry, tapCount: 2 })
+        .wait(3500).touch([[0.6, 0.52]]).touched({ moving: false, element: blueberry, tapCount: 1 })
+        .steps()
+      expect(retryCandidates(steps)).toEqual([])
+    })
+  })
+
+  // P2c: the taps Match's review offers to leave out, and leaving them out before the flow is made.
+  describe('no-response taps', () => {
+    const tapOn = (label: string): Step => ({ type: 'tapOn', selector: { label } })
+    const tapRaw = (touched?: Partial<TouchObservation>): RawStep =>
+      ({ ...new Rec().touch([[0.5, 0.5]]).steps()[0]!, ...(touched ? { touched: { point: { x: 0.5, y: 0.5 }, moving: false, ...touched } } : {}) }) as RawStep
+    it('offers only taps the app said it did not respond to, still in the flow, and marks a repeat', () => {
+      const matched: CapturedStep[] = [
+        { raw: tapRaw({ acted: false }), step: tapOn('Title') },
+        { raw: tapRaw({ acted: true }), step: tapOn('Buy') },
+        { raw: tapRaw(), step: tapOn('Unknown') },
+        { raw: tapRaw({ acted: false, tapCount: 2 }), step: { type: 'tapPoint', at: [0.5, 0.5] } },
+        // Already out of the flow (refused, or stopped a list): nothing to ask.
+        { raw: tapRaw({ acted: false }), step: null, skipped: 'refused' },
+        { raw: { ...new Rec().touch([[0.5, 0.8], [0.5, 0.5], [0.5, 0.3]]).steps()[0]!, touched: { point: { x: 0.5, y: 0.8 }, moving: false, acted: false } } as RawStep, step: { type: 'swipe', from: [0.5, 0.8], to: [0.5, 0.3], durationMs: 300 } },
+      ]
+      expect(noResponseTaps(matched)).toEqual([{ index: 0, repeat: false }, { index: 3, repeat: true }])
+    })
+    it('does not offer one Match saw change the screen, or one right before typing', () => {
+      const typed = { ...tapRaw(), kind: 'text' } as unknown as RawStep
+      const matched: CapturedStep[] = [
+        { raw: tapRaw({ acted: false }), step: tapOn('Menu'), observed: { appear: [{ text: 'Settings' }] } },
+        { raw: tapRaw({ acted: false }), step: tapOn('Empty'), observed: { appear: [], gone: [] } },
+        { raw: tapRaw({ acted: false }), step: tapOn('Email') },
+        { raw: tapRaw({ acted: false }), step: null, skipped: 'keyboard' },
+        { raw: typed, step: { type: 'inputText', text: 'abc' } },
+      ]
+      expect(noResponseTaps(matched).map((t) => t.index)).toEqual([1])
+    })
+    // CodeRabbit on #1171: a typed secret has no step until the flow is made, and still types into the focused field.
+    it('does not offer a tap right before a typed secret', () => {
+      const secret = { ...tapRaw(), kind: 'text' } as unknown as RawStep
+      expect(noResponseTaps([
+        { raw: tapRaw({ acted: false }), step: tapOn('Password') },
+        { raw: secret, step: null, secret: { value: 'hunter2', known: true } },
+      ])).toEqual([])
+    })
+    // Design review of P2c: the flow reads the next step it has, so the swipe is for the tap after a left-out one.
+    it('turns a swipe before a left-out tap into a scroll to the tap after it', () => {
+      const swipe: CapturedStep = { raw: new Rec().touch([[0.5, 0.8], [0.5, 0.5], [0.5, 0.2]]).steps()[0]!, step: { type: 'swipe', from: [0.5, 0.8], to: [0.5, 0.2], durationMs: 300 }, tree: [] }
+      const out = toFlowSteps(leaveOut([swipe, { raw: tapRaw({ acted: false }), step: tapOn('Title') }, { raw: tapRaw({ acted: true }), step: tapOn('Row 9') }], [1]))
+      expect(out.steps[0]!.step).toEqual({ type: 'scroll', direction: 'down', until: { label: 'Row 9' } })
+    })
+    it('leaves them out before the flow is made, so a swipe for one alone stays a swipe', () => {
+      // The row was not on the screen the swipe started from: the swipe brought it, so it is a scroll to the row.
+      const swipe: CapturedStep = { raw: new Rec().touch([[0.5, 0.8], [0.5, 0.5], [0.5, 0.2]]).steps()[0]!, step: { type: 'swipe', from: [0.5, 0.8], to: [0.5, 0.2], durationMs: 300 }, tree: [] }
+      const tap: CapturedStep = { raw: tapRaw({ acted: false }), step: tapOn('Row 9') }
+      expect(toFlowSteps([swipe, tap]).steps[0]!.step).toMatchObject({ type: 'scroll' })
+      const out = toFlowSteps(leaveOut([swipe, tap], [1]))
+      expect(out.steps.map((s) => s.step?.type ?? s.skipped)).toEqual(['swipe', 'no-response'])
+    })
+  })
+
   // P2a: the agent repeats a gesture's report once the app's verdict is in; the later one is the gesture's.
   it('takes the later of two reports for one gesture', () => {
     const [tap] = new Rec().touch([[0.3, 0.3]]).touched({ moving: false, tapCount: 1 }).touched({ moving: false, tapCount: 1, acted: false }).steps()
@@ -1321,7 +1425,11 @@ describe('touch reports', () => {
       expect(recordedTarget([plain], obs({ element: { label: 'a@b.co', traits: 0, input: true } }))).toBeNull()
       expect(recordedTarget([field], obs({ element: { label: 'hunter2', traits: 0 } }))).toBeNull()
       expect(recordedSelector(obs({ element: { label: 'hunter2', traits: 0, input: true } }))).toBeNull()
-      expect(recordedSelector(obs({ element: { label: 'Order#1215', traits: 1 } }))).toEqual({ label: 'Order#1215', exact: true })
+      expect(recordedSelector(obs({ element: { label: 'Order#1215', traits: 1 } }))).toEqual({ label: 'Order#1215', exact: true, role: 'button' })
+      expect(recordedSelector(obs({ element: { label: 'Truck', traits: 0 } }))).toEqual({ label: 'Truck', exact: true })
+      // The user's session ff5d3d3c: a row is a button and a text of one label; the selector finds the row alone.
+      const row = [el({ role: 'button', label: 'Order#1212' }), el({ role: 'text', label: 'Order#1212' })]
+      expect(matchSelector(row, recordedSelector(obs({ element: { label: 'Order#1212', traits: 1 } }))!)).toEqual([row[0]])
       expect(recordedSelector(obs({ element: { identifier: 'row.7', label: 'x', traits: 1 } }))).toEqual({ id: 'row.7' })
       // A button named only by its traits leaves the element's name to search by (CodeRabbit on #1167).
       expect(recordedSelector(obs({ button: { traits: 1 }, element: { label: 'Salty', traits: 0 } }))).toEqual({ label: 'Salty', exact: true })

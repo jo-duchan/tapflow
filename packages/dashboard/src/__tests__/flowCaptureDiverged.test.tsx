@@ -83,7 +83,7 @@ describe('the dialog\'s state at a step that looked different', () => {
 describe('Match stopped at a step that looked different', () => {
   const handlers = () => ({
     tap: { surface: () => null } as never, marks: { cursor: null, trails: [] }, onStop: vi.fn(), onRestart: vi.fn(),
-    onTakeWhatMatched: vi.fn(), onBackToRange: vi.fn(), onContinueAnyway: vi.fn(), stopRef: { current: null },
+    onTakeWhatMatched: vi.fn(), onBackToRange: vi.fn(), onContinueAnyway: vi.fn(), stopRef: { current: null }, onContinueToEdit: vi.fn(), onKeep: vi.fn(), thumbnailOf: () => null,
   })
 
   it('shows both pictures, the facts, and the three buttons in their places', () => {

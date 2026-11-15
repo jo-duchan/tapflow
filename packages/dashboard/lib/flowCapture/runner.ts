@@ -1,5 +1,5 @@
 import {
-  defaultRange, EffectWatch, focusTap, matchStep, rangeStartKeyboard, rangeStartOrientation, reachQuestions, reachTargetOf, recordedSelector,
+  defaultRange, dropRetried, EffectWatch, focusTap, retryCandidates, matchStep, rangeStartKeyboard, rangeStartOrientation, reachQuestions, reachTargetOf, recordedSelector,
   recordedTarget, replayStep, runFlow, scrollDirectionOf, segment, selectorFor, SocketFlowDriver, statusBarRect,
   toFlowSteps, waitForStableScreen, type CapturedStep, type Flow, type FlowResult, type KeyModifier, type MatchContext,
   type RawStep, type ScreenRect, type ScrollDirection, type Selector, type Step, type StepExpect, type StepRange,
@@ -12,6 +12,7 @@ import { markOf, type StepMark } from './marks'
 import type { StepMark as FlowStepMark } from './machine'
 import type { DashboardSessionChannel, HeldResetReport } from './channel'
 import type { CaptureTap } from './tap'
+import { recordedAlike } from './screenCompare'
 
 const base = (tap: CaptureTap) => `/api/v1/sessions/${tap.sessionId}/capture`
 const SETTLE_TIMEOUT_MS = 15_000
@@ -23,17 +24,48 @@ const RENEW_EVERY_MS = 10_000
 export class CaptureGone extends Error {}
 
 /** The person's steps so far, frozen for the dialog. `null` when nothing was captured on this device. */
-export async function loadSnapshot(tap: CaptureTap): Promise<CaptureSnapshot | null> {
+/** The snapshot as the dialog reads it, with the taps found to be retried (P2c) by index into `stepsOf`'s steps. */
+export type LoadedSnapshot = CaptureSnapshot & { retried?: number[] }
+
+export async function loadSnapshot(
+  tap: CaptureTap, alike: (a: string, b: string, masks: ScreenRect[]) => Promise<boolean> = recordedAlike,
+): Promise<LoadedSnapshot | null> {
   // The pictures of the last steps go up after the steps themselves: wait for them, or the newest tiles are blank.
   await tap.flushThumbnails?.()
   const res = await fetch(`${base(tap)}/snapshot`, { method: 'POST', credentials: 'include' })
   if (res.status === 404) return null
   if (!res.ok) throw new Error(`Could not read the captured steps (${res.status})`)
-  return await res.json() as CaptureSnapshot
+  const snapshot = await res.json() as CaptureSnapshot
+  return { ...snapshot, retried: await retriedTaps(tap, snapshot, alike) }
 }
 
-export function stepsOf(snapshot: CaptureSnapshot): { steps: RawStep[]; range: StepRange } {
+/**
+ * The taps made again on the same element whose recorded screen did not change between the two (P2c): the first did
+ * nothing, and replayed it would act where the recording's did not. Judged before Range, so the range and its strip
+ * show them out. The clock in the status bar is not compared. No pictures, no verdict: the tap stays.
+ */
+async function retriedTaps(tap: CaptureTap, snapshot: CaptureSnapshot, alike: (a: string, b: string, masks: ScreenRect[]) => Promise<boolean>): Promise<number[]> {
   const steps = segment(snapshot.entries)
+  const pictured = new Set(snapshot.thumbnails ?? [])
+  const url = (s: RawStep) => (s.thumbnailKey && pictured.has(s.thumbnailKey) ? `${base(tap)}/snapshot/thumbnails/${encodeURIComponent(s.thumbnailKey)}` : null)
+  const masks = [statusBarRect(tap.platform, 0)].filter((m): m is ScreenRect => m !== undefined)
+  const out: number[] = []
+  // The status bar is masked where it is on an upright screen: a turned one is not judged, and the tap stays.
+  const chromes = snapshot.entries.filter((e) => e.kind === 'chrome')
+  const upright = (at: number) => {
+    const last = chromes.filter((e) => e.at <= at).at(-1)
+    return last !== undefined && chromeOrientation((last as { chrome: unknown }).chrome as never) === 'portrait'
+  }
+  for (const [first, again] of retryCandidates(steps)) {
+    if (!upright(steps[first]!.at) || !upright(steps[again]!.at)) continue
+    const a = url(steps[first]!), b = url(steps[again]!)
+    if (a && b && await alike(a, b, masks).catch(() => false)) out.push(first)
+  }
+  return out
+}
+
+export function stepsOf(snapshot: LoadedSnapshot): { steps: RawStep[]; range: StepRange } {
+  const steps = dropRetried(segment(snapshot.entries), snapshot.retried ?? [])
   return { steps, range: defaultRange(steps) }
 }
 
@@ -146,6 +178,9 @@ function frameTurnOf(chrome: ChromePayload | null): 0 | 90 | 180 | 270 | undefin
   return (chrome as AndroidChrome).streamRotation
 }
 
+/** How long Match waits before judging that a replayed tap did nothing (`tapDidNothing`). */
+export const RETRY_LOOK_AGAIN_MS = 1_500
+
 const TYPING = new Set<RawStep['kind']>(['text', 'type', 'paste', 'key'])
 /** Steps whose picture is the screen they left: what typing or a keyboard's action did is the point of looking, and the
  *  screen before it shows a field still empty. A tap keeps the screen before, which shows what it is about to touch. */
@@ -164,8 +199,20 @@ export interface MatchHooks {
   /** The screen a touch left, by its index into the matched steps (1b-3c): Edit's "after this tap". Not on the steps,
    *  which have gone to the dialog by then, and which Edit what matched takes as they are. */
   onAfter?: (index: number, after: AfterTouch) => void
+  /** What a touch was seen to do, by its index into the matched steps, as soon as it is known. */
+  onObserved?: (index: number, observed: StepExpect | null) => void
   /** They differ, at `index` into the steps: resolves when the person goes on, rejects when the run is stopped. */
   onDiverged?: (index: number, divergence: ScreenDivergence) => Promise<void>
+  /**
+   * Whether the tap `prev` did nothing on the replay where it did something when recorded (P2c): the replay's screen
+   * before it (`shotBefore`) and now (`shotNow`) not a cell different, and the recording's before it and before `next`
+   * different. Asked only when the step after it looks different; `true` replays the tap once more before stopping. An
+   * app now and then lets a tap go by (a Food Truck menu item, sessions af948002 and ff5d3d3c), as it did the person's
+   * once. A second press is made only where the first changed nothing on the screen a moment later
+   * (`RETRY_LOOK_AGAIN_MS`) and nothing in the tree Match watched (`observed`): an effect neither shows — a request
+   * whose answer the screen never draws — could still be made twice, the price of not stopping on a tap that slipped.
+   */
+  tapDidNothing?: (prev: RawStep, next: RawStep, shotBefore: Uint8Array, shotNow: Uint8Array, masks: ScreenRect[], signal: AbortSignal) => Promise<boolean>
   signal: AbortSignal
 }
 
@@ -286,14 +333,14 @@ export async function matchRange(
   // Whether the element was tapped, and whether a search ran — taken as having moved the screen away from the read
   // before it, since the engine does not say whether it swiped: a search that found it in place costs that tap's
   // after-screen, never a wrong one.
+  const attempt = async (steps: Step[]): Promise<boolean> => {
+    const result = await runFlow({ name: 'match', steps }, driver, { platform: tap.platform })
+    hooks.signal.throwIfAborted()
+    // A session that ended is the run's to report, not a tap to fall back from.
+    if (result.status === 'failed' && result.failureKind === 'environment') throw new Error(result.failureMessage ?? 'The session ended.')
+    return result.status === 'passed'
+  }
   const runNamed = async (named: NamedTap): Promise<{ tapped: boolean; scrolled: boolean }> => {
-    const attempt = async (steps: Step[]): Promise<boolean> => {
-      const result = await runFlow({ name: 'match', steps }, driver, { platform: tap.platform })
-      hooks.signal.throwIfAborted()
-      // A session that ended is the run's to report, not a tap to fall back from.
-      if (result.status === 'failed' && result.failureKind === 'environment') throw new Error(result.failureMessage ?? 'The session ended.')
-      return result.status === 'passed'
-    }
     const tapIt: Step = { type: 'tapOn', selector: named.selector }
     if (named.target && await attempt([tapIt])) return { tapped: true, scrolled: false }
     // On the screen but not reached (a tab bar over the row): with a swipe before it to say which way, the search
@@ -316,14 +363,21 @@ export async function matchRange(
   const effects = new EffectWatch()
   const observed = new Map<CapturedStep, StepExpect | null>()
   let watching: { step: CapturedStep; index: number; before: UIElement[]; touched?: UIElement } | undefined
+  // The watch closed last, kept so a tap pressed again can be watched again.
+  let lastClosed: typeof watching
   // The screen the touch left, read before anything else happens on it: what Edit shows as "after this tap", where the
   // person picks what the touch should bring (1b-3c). The next step's own picture is not it — a typing step's is the
   // screen after the typing — so it is taken here, once, with the tree it is read with.
   const closeWatch = async (after: { elements: UIElement[]; interfaceTurn?: InterfaceTurn } | null | undefined) => {
     const closing = watching
     watching = undefined
+    lastClosed = closing
     if (!closing || !after) return
-    observed.set(closing.step, effects.observe(closing.before, after.elements, after.elements, closing.touched ? { touched: closing.touched } : {}))
+    const seen = effects.observe(closing.before, after.elements, after.elements, closing.touched ? { touched: closing.touched } : {})
+    observed.set(closing.step, seen)
+    // Told now, not only with the steps the run returns: Edit what matched after a stop takes the steps as they came, and
+    // its review must not offer a tap Match saw change the screen (review of P2c).
+    hooks.onObserved?.(closing.index, seen)
     if (!hooks.onAfter) return
     const shot = await channel.screenshot(sessionId, hooks.signal).catch(() => null)
     hooks.onAfter(closing.index, {
@@ -339,6 +393,9 @@ export async function matchRange(
   // The step after a turn the replay put in, or after an install it left out, begins on a screen the recording did not:
   // not compared.
   let unlike = false
+  // The tap just replayed, with the screen it was replayed on: tapped once more when the next step looks different and
+  // it did nothing (`tapDidNothing`). Once per tap.
+  let lastTap: { raw: RawStep; step: CapturedStep; named?: NamedTap; shot: Uint8Array } | undefined
   for (const [offset, raw] of slice.entries()) {
     hooks.signal.throwIfAborted()
     let skipCompare = unlike
@@ -385,14 +442,66 @@ export async function matchRange(
       : undefined
     // After the focus tap and its settle: a typed step's picture was taken at its first key, with the field focused.
     // A tap the app named is judged by finding that element, not by the picture: the list under it may sit elsewhere.
-    const compareNow = async () => {
+    // A focus tap went in since: pressed again now, the tap would take the field's focus away.
+    const prevTap = focus ? undefined : lastTap
+    lastTap = undefined
+    const compareNow = async (): Promise<void> => {
       if (!hooks.compare || !hooks.onDiverged) return
       const turn = before?.interfaceTurn ?? frameTurnOf(tap.chrome())
       const masks = [statusBarRect(tap.platform, turn), raw.keyboardRect].filter((m): m is ScreenRect => m !== undefined)
       // A picture that cannot be read is no reason to stop: the step is replayed as before the comparison existed.
       const differs = await hooks.compare(raw, masks).catch(() => null)
       hooks.signal.throwIfAborted()
-      if (differs) await hooks.onDiverged(range.start + offset, differs)
+      if (!differs) return
+      const retry = prevTap ? await retriedTap(prevTap, masks) : 'not-asked'
+      // Waited for a late effect without pressing again: the screen may have come right in the meantime.
+      if (retry === 'waited') {
+        const now = await hooks.compare(raw, masks).catch(() => null)
+        hooks.signal.throwIfAborted()
+        URL.revokeObjectURL(differs.nowUrl)
+        if (now) await hooks.onDiverged(range.start + offset, now)
+        return
+      }
+      if (retry === 'pressed' && prevTap) {
+        URL.revokeObjectURL(differs.nowUrl)
+        before = (await waitForStableScreen(read, { timeoutMs: SETTLE_TIMEOUT_MS })) ?? before
+        // What the tap did is what the second press did: watched again, so Edit's "after this tap" and the expectations
+        // a flow gets are the screen it made. The current step is still replayed as it was chosen before (named or not).
+        if (lastClosed?.step === prevTap.step) {
+          watching = lastClosed
+          await closeWatch(before)
+        }
+        const still = await hooks.compare(raw, masks).catch(() => null)
+        hooks.signal.throwIfAborted()
+        if (still) await hooks.onDiverged(range.start + offset, still)
+        return
+      }
+      await hooks.onDiverged(range.start + offset, differs)
+    }
+    // The tap before this step, replayed once more when it did nothing on the replay and something when recorded.
+    // `pressed`: tapped again; `waited`: looked again a moment later and did not; `not-asked`: neither.
+    const retriedTap = async (prev: NonNullable<typeof lastTap>, masks: ScreenRect[]): Promise<'pressed' | 'waited' | 'not-asked'> => {
+      if (!hooks.tapDidNothing) return 'not-asked'
+      // The tree saw it do something (Match's own watch of it): an effect the picture may not show, never pressed again.
+      const seen = observed.get(prev.step)
+      if (seen && ((seen.appear?.length ?? 0) > 0 || (seen.gone?.length ?? 0) > 0)) return 'not-asked'
+      // An effect can come late (a request's answer drawn after the screen read as settled): judged on a picture taken
+      // a moment later, so a tap that did act is not pressed twice. Measured: the open-menu screen holds 0 cells apart
+      // for 5 s, so the wait costs nothing in the case this is for.
+      await new Promise((resolve) => setTimeout(resolve, RETRY_LOOK_AGAIN_MS))
+      hooks.signal.throwIfAborted()
+      const now = await channel.screenshot(sessionId, hooks.signal).catch(() => null)
+      if (!now || !(await hooks.tapDidNothing(prev.raw, raw, prev.shot, now, masks, hooks.signal).catch(() => false))) {
+        hooks.signal.throwIfAborted()
+        return 'waited'
+      }
+      hooks.signal.throwIfAborted()
+      // Named: on its element again, or not at all — the point is what a named tap is there not to trust.
+      if (prev.named) return (await attempt([{ type: 'tapOn', selector: prev.named.selector }])) ? 'pressed' : 'waited'
+      const mark = markOf(prev.raw)
+      if (mark) hooks.onTouch?.(mark)
+      await replayStep(channel, sessionId, prev.raw, hooks.signal)
+      return 'pressed'
     }
     // A turned app replays its taps at their points (`namedTap`), so the swipe before one is compared as any other.
     if (compared(raw) && !skipCompare && !named && (!!before?.interfaceTurn || !swipeBeforeNamedTap(slice, offset))) await compareNow()
@@ -425,6 +534,8 @@ export async function matchRange(
         matched.push(step)
         // What it did is read against the screen it was tapped on, which a scroll before it has moved from `before`.
         if (!scrolled) watching = { step, index: matched.length - 1, before: before!.elements, touched: named.target! }
+        // Not after a search: the screen it was tapped on is not the one pictured before the search.
+        if (!scrolled && shot) lastTap = { raw, step, named, shot }
         hooks.onStep(step, shot ? URL.createObjectURL(new Blob([shot as BlobPart], { type: 'image/jpeg' })) : undefined)
         continue
       }
@@ -465,6 +576,7 @@ export async function matchRange(
     if ((raw.kind === 'tap' || raw.kind === 'longPress') && before) {
       watching = { step, index: matched.length - 1, before: before.elements, ...(questions[0] ? { touched: questions[0] } : {}) }
     }
+    if (raw.kind === 'tap' && shot) lastTap = { raw, step, shot }
     hooks.onStep(step, shot ? URL.createObjectURL(new Blob([shot as BlobPart], { type: 'image/jpeg' })) : undefined)
   }
   // The last touch has no next step to read after it.

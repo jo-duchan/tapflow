@@ -10,7 +10,11 @@ export type Fingers = [Point, Point]
 /** Why a step is left out before Match replays it, by what the app reported of the touch (record-time observation):
  *  `stopped-scroll`, a tap that went down while a list was still gliding, which the OS takes as "stop" on both
  *  platforms and delivers to nothing — replayed on a settled screen it would press what the person never pressed. */
-export type DropReason = 'stopped-scroll'
+export type DropReason =
+  | 'stopped-scroll'
+  /** Tapped again on the same element with the screen unchanged in between: this first tap did nothing, and the one
+   *  after it is the one that acted (`retryCandidates`, confirmed by the recorded pictures). */
+  | 'retried'
 
 /** What the agent said about a step: its ack, or none — a message nothing acks, or an ack the record does not have. */
 export type Outcome = 'landed' | 'refused' | 'unknown'
