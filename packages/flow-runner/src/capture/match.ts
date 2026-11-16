@@ -490,7 +490,8 @@ export function madeMidTransition(raw: RawStep, previous: RawStep | undefined): 
   // iOS counts a repeat only at one spot; a touch it says nothing about must show it was one.
   if (t && (t.tapCount ?? 1) >= 2) return true
   const sameSpot = Math.hypot(raw.point[0] - previous.point[0], raw.point[1] - previous.point[1]) <= SAME_SPOT
-  return sameSpot && (!t || !(t.element?.identifier || t.element?.label))
+  // A name on the button counts as one on the element does: `recordedSelector` finds a tap by either (CodeRabbit, #1176).
+  return sameSpot && (!t || !(t.element?.identifier || t.element?.label || t.button?.identifier || t.button?.label))
 }
 
 /**
