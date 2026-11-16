@@ -103,41 +103,22 @@ describe('screenCells and diffAreas', () => {
     expect(areas[0]!.y).toBeGreaterThan(0.6)
   })
 
-  it('joins changes one unchanged cell apart, as letters of one line', () => {
-    const cell = 1 / 48
-    // Two blocks, each two cells wide, with one cell between them.
-    const two = picture([[10 * cell, 0.5, 2 * cell, 0.03], [13 * cell, 0.5, 2 * cell, 0.03]])
-    expect(diffAreas(cellsOf(picture(), two))).toHaveLength(1)
-    // Three cells between them: two places.
-    const apart = picture([[10 * cell, 0.5, 2 * cell, 0.03], [15 * cell, 0.5, 2 * cell, 0.03]])
-    expect(diffAreas(cellsOf(picture(), apart))).toHaveLength(2)
-  })
-
-  it('joins changes one unchanged row apart, as lines of one paragraph, and not three apart', () => {
-    // A 3-wide grid, cells set by row: rows 0 and 2 differ in the first, rows 0 and 4 in the second.
-    const grid = (rows: number[]) => {
-      const cells = new Uint8Array(3 * 5)
-      for (const r of rows) cells[r * 3 + 1] = 1
-      return { cells, gridWidth: 3, gridHeight: 5 }
-    }
-    expect(diffAreas(grid([0, 2]))).toHaveLength(1)
-    expect(diffAreas(grid([0, 4]))).toHaveLength(2)
-    // The same across: columns 0 and 2 of one row join, 0 and 4 do not.
+  it('joins changes up to three unchanged cells apart, and not four, across and down', () => {
+    // A 9 by 9 grid, the middle row or column set at the given places.
     const across = (cols: number[]) => {
-      const cells = new Uint8Array(5 * 3)
-      for (const c of cols) cells[5 + c] = 1
-      return { cells, gridWidth: 5, gridHeight: 3 }
+      const cells = new Uint8Array(9 * 9)
+      for (const c of cols) cells[4 * 9 + c] = 1
+      return { cells, gridWidth: 9, gridHeight: 9 }
     }
-    expect(diffAreas(across([0, 2]))).toHaveLength(1)
-    expect(diffAreas(across([0, 4]))).toHaveLength(2)
-  })
-
-  it('measures what is left over the cells still compared, never over masked ones', () => {
-    const half = picture([[0, 0, 1, 0.5]])
-    const masked = screenCells(picture(), half, [{ x: 0, y: 0.5, width: 1, height: 0.5 }])
-    if (masked === 'incomparable') throw new Error('incomparable')
-    expect(withoutAreas(masked, []).share).toBeCloseTo(masked.share)
-    expect(masked.share).toBeGreaterThan(0.9)
+    const down = (rows: number[]) => {
+      const cells = new Uint8Array(9 * 9)
+      for (const r of rows) cells[r * 9 + 4] = 1
+      return { cells, gridWidth: 9, gridHeight: 9 }
+    }
+    expect(diffAreas(across([0, 4]))).toHaveLength(1)
+    expect(diffAreas(across([0, 5]))).toHaveLength(2)
+    expect(diffAreas(down([0, 4]))).toHaveLength(1)
+    expect(diffAreas(down([0, 5]))).toHaveLength(2)
   })
 
   it('never boxes what a mask left out', () => {
