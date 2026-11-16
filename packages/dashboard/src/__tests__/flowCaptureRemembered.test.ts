@@ -93,6 +93,18 @@ describe('what Continue anyway remembers', () => {
     expect(asked).toHaveBeenCalledTimes(1)
   })
 
+  // CodeRabbit on #1177: a second stop at the same step is held against the later screen with its own areas set aside.
+  it('asks again for a second stop at the same step, with its own areas', async () => {
+    const ROW = { x: 0, y: 0.5, width: 1, height: 0.1 }
+    const asked = vi.fn(async (_a: string, _b: string, masks: unknown[]) => masks.includes(ROW))
+    const r = new Remembered(asked)
+    r.begin(0)
+    r.accept({ index: 2, recordedUrl: '/t/2', areas: [SKY], mostly: false })
+    expect(await r.carried(5, tap(0.5, 0.9), '/t/5', MASKS, undefined)).toBeNull()
+    r.accept({ index: 2, recordedUrl: '/t/2', areas: [ROW], mostly: false })
+    expect(await r.carried(5, tap(0.5, 0.9), '/t/5', MASKS, undefined)).toEqual({ areas: [ROW], from: 2 })
+  })
+
   it('does not keep an answer Stop cut short', async () => {
     const { r, asked } = made(false)
     r.accept({ index: 2, recordedUrl: '/t/2', areas: [SKY], mostly: false })

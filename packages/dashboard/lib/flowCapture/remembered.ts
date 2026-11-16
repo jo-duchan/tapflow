@@ -70,10 +70,11 @@ export class Remembered {
     return areas.length > 0 && from !== undefined ? { areas, from } : null
   }
 
-  /** Asked once per pair: Match compares a step up to twenty times while it waits for the screen. An answer cut short by
-   *  Stop is not kept as one. */
+  /** Asked once per accepted stop and step: Match compares a step up to twenty times while it waits for the screen. Keyed
+   *  by the stop, not its step, since two stops at one step set different areas aside (CodeRabbit on #1177). An answer
+   *  cut short by Stop is not kept as one. */
   private verdict(e: Accepted, index: number, recordedUrl: string, masks: ScreenRect[], signal?: AbortSignal): Promise<boolean> {
-    const key = `${e.index}:${index}`
+    const key = `${this.accepted.indexOf(e)}:${index}`
     const known = this.verdicts.get(key)
     if (known) return known
     const asked = this.alike(e.recordedUrl, recordedUrl, [...masks, ...e.areas], signal).catch(() => false)

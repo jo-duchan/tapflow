@@ -1015,7 +1015,7 @@ describe('matchRange with the app\'s touch reports', () => {
       const next = { ...tapStep, point: [0.8, 0.2], at: 4_000, endAt: 4_100 } as unknown as RawStep
       screen.elements = []
       let asked = 0
-      const compare = vi.fn(async (s: RawStep) => (s === s2 || (s === next && asked++ === 0) ? { diff: 0.2, nowUrl: 'blob:x', masks: [] } : null))
+      const compare = vi.fn(async (s: RawStep) => (s === s2 || (s === next && asked++ === 0) ? { diff: 0.2, nowUrl: 'blob:x', masks: [], areas: [], mostly: false, cells: NO_CELLS } : null))
       const shot = { ...channel, screenshot: async () => new Uint8Array([1]) } as unknown as Channel
       vi.stubGlobal('URL', Object.assign(URL, { createObjectURL: () => 'blob:x', revokeObjectURL: () => {} }))
       const watched: number[] = []
