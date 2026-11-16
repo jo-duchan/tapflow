@@ -1009,6 +1009,33 @@ describe('matchRange with the app\'s touch reports', () => {
       expect((tapDidNothing.mock.calls[0] as unknown[])[0]).toBe(first)
     })
 
+    // CodeRabbit on #1176: the tap pressed again is watched again, though the unsent one's iteration closed no watch.
+    it('watches the tap before it again when the step after presses it once more', async () => {
+      const s2 = second({ tapCount: 2, element: { label: 'Active', traits: 1 }, acted: false })
+      const next = { ...tapStep, point: [0.8, 0.2], at: 4_000, endAt: 4_100 } as unknown as RawStep
+      screen.elements = []
+      let asked = 0
+      const compare = vi.fn(async (s: RawStep) => (s === s2 || (s === next && asked++ === 0) ? { diff: 0.2, nowUrl: 'blob:x', masks: [] } : null))
+      const shot = { ...channel, screenshot: async () => new Uint8Array([1]) } as unknown as Channel
+      vi.stubGlobal('URL', Object.assign(URL, { createObjectURL: () => 'blob:x', revokeObjectURL: () => {} }))
+      const watched: number[] = []
+      const lease = new PauseLease(ctap)
+      await matchRange(ctap, shot, lease, [launchStep, tapStep, first, s2, next], { start: 0, end: 5 }, null,
+        { ...hooks(), compare, onDiverged: vi.fn(async () => {}), tapDidNothing: vi.fn(async () => true), onObserved: (i) => watched.push(i) })
+      await lease.stop()
+      // Launch #0, the suite's turn #1, tapStep #2, `first` #3: watched after its press and after its second.
+      expect(watched.filter((i) => i === 3)).toHaveLength(2)
+    })
+
+    it('is sent and marked when a keyboard toggle comes between it and typing', async () => {
+      const s2 = second({ tapCount: 2, element: { label: 'Active', traits: 1 }, acted: false })
+      const toggle = { ...tapStep, kind: 'keyboardToggle', at: 2_000, endAt: 2_000 } as unknown as RawStep
+      const typed = { ...textStep, at: 3_000, endAt: 3_000 } as unknown as RawStep
+      const { matched } = await run([launchStep, tapStep, first, s2, toggle, typed], (s) => s === s2)
+      expect(log.filter((l) => l === 'replay tap')).toHaveLength(3)
+      expect(matched.find((m) => m.raw === s2)!.fragile).toBe('mid-transition')
+    })
+
     it('still stops on an unnamed tap a key away, as on a keypad the app names nothing on', async () => {
       const key2 = { ...second({ tapCount: 1 }), point: [0.62, 0.5] } as unknown as RawStep
       const { h } = await run([launchStep, tapStep, first, key2], (s) => s === key2)

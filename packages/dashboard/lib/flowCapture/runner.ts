@@ -421,7 +421,8 @@ export async function matchRange(
   let unlike = false
   // The tap just replayed, with the screen it was replayed on: tapped once more when the next step looks different and
   // it did nothing (`tapDidNothing`). Once per tap.
-  let lastTap: { raw: RawStep; step: CapturedStep; named?: NamedTap; shot: Uint8Array } | undefined
+  // `closed`: its watch, kept when a tap left unsent came between, whose own iteration closed nothing (CodeRabbit, #1176).
+  let lastTap: { raw: RawStep; step: CapturedStep; named?: NamedTap; shot: Uint8Array; closed?: typeof watching } | undefined
   for (const [offset, raw] of slice.entries()) {
     hooks.signal.throwIfAborted()
     let skipCompare = unlike
@@ -488,13 +489,14 @@ export async function matchRange(
     // would stay in the flow for Verify to send where Match did not. Sent, and marked, like one nothing says about.
     const leftUnsent = async (): Promise<boolean> => {
       if (actedWhenRecorded !== false) return false
-      const next = slice.slice(offset + 1).find((s) => !s.dropped)
+      // Past a keyboard toggle, which has no step: the review looks past it too (`noResponseTaps`; CodeRabbit, #1176).
+      const next = slice.slice(offset + 1).find((s) => !s.dropped && s.kind !== 'keyboardToggle')
       if (next && (TYPING.has(next.kind) || next.kind === 'keyboardKey')) return false
       const step = matchStep(raw, { tree: before?.elements ?? [], postures: tap.postures().postures, platform: tap.platform })
       matched.push(step)
       hooks.onStep(step)
       // The tap before it is still the one the next step may press again (`retriedTap`): nothing was sent between.
-      lastTap = prevTap
+      lastTap = prevTap && { ...prevTap, closed: prevTap.closed ?? (closedAtTop?.step === prevTap.step ? closedAtTop : undefined) }
       return true
     }
     // Read again once a late screen has come. The touch before this step was watched to the screen read while it was
@@ -577,8 +579,9 @@ export async function matchRange(
         before = (await waitForStableScreen(read, { timeoutMs: SETTLE_TIMEOUT_MS })) ?? before
         // What the tap did is what the second press did: watched again, so Edit's "after this tap" and the expectations
         // a flow gets are the screen it made. The current step is still replayed as it was chosen before (named or not).
-        if (lastClosed?.step === prevTap.step) {
-          watching = lastClosed
+        const reopen = lastClosed?.step === prevTap.step ? lastClosed : prevTap.closed
+        if (reopen) {
+          watching = reopen
           await closeWatch(before)
         }
         const still = await judged(await hooks.compare(raw, masks).catch(() => null))

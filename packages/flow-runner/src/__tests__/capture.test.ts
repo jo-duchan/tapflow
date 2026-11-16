@@ -1419,7 +1419,9 @@ describe('touch reports', () => {
       expect(madeMidTransition(tapAt(280), first)).toBe(true)
     })
     it('is not a named single touch, however soon', () => {
-      expect(madeMidTransition(tapAt(280, { element: { label: 'OK', traits: 1 }, tapCount: 1 }), first)).toBe(false)
+      expect(madeMidTransition(tapAt(280, { element: { label: 'OK', traits: 1 }, tapCount: 1 }), first)).toBe(false)      // CodeRabbit on #1176: a name on the button alone is a name too, as `recordedSelector` finds it by.
+      expect(madeMidTransition(tapAt(280, { button: { label: 'OK', traits: 1 }, tapCount: 1 }), first)).toBe(false)
+      expect(madeMidTransition(tapAt(280, { button: { identifier: 'ok', traits: 1 }, tapCount: 1 }), first)).toBe(false)
     })
     it('is not one made after the gap, start to start', () => {
       expect(madeMidTransition(tapAt(450, { tapCount: 2 }), first)).toBe(false)
