@@ -470,7 +470,6 @@ export async function matchRange(
       const until = Date.now() + look.forMs
       while (Date.now() < until) {
         await new Promise((resolve) => setTimeout(resolve, look.everyMs))
-        hooks.signal.throwIfAborted()
         const again = await hooks.compare(raw, masks).catch(() => null)
         hooks.signal.throwIfAborted()
         URL.revokeObjectURL(differs.nowUrl)
