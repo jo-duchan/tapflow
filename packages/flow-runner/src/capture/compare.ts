@@ -117,10 +117,16 @@ export function withoutAreas(c: ScreenCells, areas: readonly Rect[]): ScreenCell
 }
 
 /**
- * Where two pictures differ, as boxes a person can look at: the differing cells grouped by touch, cells with one
- * unchanged cell between them counted as touching (a line of text whose letters changed reads as one place, not a box per letter), each group as
- * its bounding box in fractions of the picture. Largest first.
+ * Where two pictures differ, as boxes a person can look at: the differing cells grouped by touch, cells with up to
+ * `JOIN_GAP` unchanged cells between them counted as touching, each group as its bounding box in fractions of the picture.
+ * Largest first.
  */
+/** Measured on Food Truck's Truck screen recorded at different times (an animated scene, order cards the app makes):
+ *  one cell apart drew 9 and 23 boxes for what a person reads as 3 or 4 places; three apart drew 4 and 12, covering 24 %
+ *  of the picture where one apart covered 14 %. Five apart joined the whole scene into one box. How far apart boxes are
+ *  joined did not change whether a later run differed outside them: the cards it differed by were new ones. */
+const JOIN_GAP = 3
+
 export function diffAreas({ cells, gridWidth, gridHeight }: Pick<ScreenCells, 'cells' | 'gridWidth' | 'gridHeight'>): Rect[] {
   const seen = new Uint8Array(cells.length)
   const areas: { rect: Rect; size: number }[] = []
@@ -135,9 +141,8 @@ export function diffAreas({ cells, gridWidth, gridHeight }: Pick<ScreenCells, 'c
       const y = (i - x) / gridWidth
       size++
       minX = Math.min(minX, x); maxX = Math.max(maxX, x); minY = Math.min(minY, y); maxY = Math.max(maxY, y)
-      // Two apart in either direction: a gap of one unchanged cell still joins.
-      for (let dy = -2; dy <= 2; dy++) {
-        for (let dx = -2; dx <= 2; dx++) {
+      for (let dy = -JOIN_GAP - 1; dy <= JOIN_GAP + 1; dy++) {
+        for (let dx = -JOIN_GAP - 1; dx <= JOIN_GAP + 1; dx++) {
           const nx = x + dx
           const ny = y + dy
           if (nx < 0 || ny < 0 || nx >= gridWidth || ny >= gridHeight) continue
