@@ -1,5 +1,10 @@
-import { sameShape, SCREEN_DIFF_THRESHOLD, screenDiff, type Pixels, type ScreenRect } from '@tapflowio/flow-runner/browser'
+import { diffAreas, sameShape, SCREEN_DIFF_THRESHOLD, screenCells, type Pixels, type ScreenRect } from '@tapflowio/flow-runner/browser'
 import type { ScreenDivergence } from './runner'
+
+/** Over this share of the compared cells, a stop says the screen is mostly different (R5) rather than boxing each place:
+ *  the screens measured that were the same screen with something on it moving differed by 30–45 %, and a list the app
+ *  fills with new data by nearly all of it. */
+export const MOSTLY_DIFFERENT = 0.5
 
 /** The replay's picture beside the recording's: twice the 230 px it is shown at. */
 const SHOWN_WIDTH = 460
@@ -24,12 +29,12 @@ export async function compareWithRecording(
     const a = pixelsOf(recorded, recorded.width, recorded.height)
     const b = pixelsOf(now, recorded.width, recorded.height)
     if (!a || !b) throw new Error('The pictures could not be drawn.')
-    const diff = screenDiff(a, b, masks)
-    if (diff === 'incomparable') throw new Error('The two pictures cannot be laid over each other.')
-    if (diff <= SCREEN_DIFF_THRESHOLD) return null
+    const cells = screenCells(a, b, masks)
+    if (cells === 'incomparable') throw new Error('The two pictures cannot be laid over each other.')
+    if (cells.share <= SCREEN_DIFF_THRESHOLD) return null
     const nowUrl = await jpegUrl(now)
     if (!nowUrl) throw new Error('The replay\'s picture could not be kept.')
-    return { diff, nowUrl, masks }
+    return { diff: cells.share, nowUrl, masks, areas: diffAreas(cells), mostly: cells.share > MOSTLY_DIFFERENT, cells }
   } finally {
     recorded.close()
     now.close()
@@ -41,8 +46,8 @@ export async function compareWithRecording(
  * again on the same element (P2c), the screen unchanged between them says the first did nothing. `false` whenever it
  * cannot tell — a picture missing, unreadable or of another shape — since what it decides is leaving a step out.
  */
-export async function recordedAlike(a: string, b: string, masks: ScreenRect[]): Promise<boolean> {
-  const load = async (url: string) => { const r = await fetch(url, { credentials: 'include' }); return r.ok ? r.blob() : null }
+export async function recordedAlike(a: string, b: string, masks: ScreenRect[], signal?: AbortSignal): Promise<boolean> {
+  const load = async (url: string) => { const r = await fetch(url, { credentials: 'include', ...(signal ? { signal } : {}) }); return r.ok ? r.blob() : null }
   const [first, second] = await Promise.all([load(a).catch(() => null), load(b).catch(() => null)])
   if (!first || !second) return false
   const diff = await picturesDiff(first, second, masks)

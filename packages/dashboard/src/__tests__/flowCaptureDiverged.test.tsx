@@ -17,7 +17,8 @@ const steps = [
 ]
 const loaded = reduce(initialState, { type: 'loaded', steps, range: { start: 3, end: 6 }, name: 'f' })
 const matching = reduce(loaded, { type: 'match-started', total: 3 })
-const divergence = { index: 4, diff: 0.2, recordedUrl: '/thumb/r5', nowUrl: 'blob:now', masks: [{ x: 0, y: 0, width: 1, height: 0.055 }] }
+const AREAS = [{ x: 0.1, y: 0.4, width: 0.5, height: 0.1 }, { x: 0.1, y: 0.7, width: 0.2, height: 0.05 }]
+const divergence = { index: 4, diff: 0.2, recordedUrl: '/thumb/r5', nowUrl: 'blob:now', masks: [{ x: 0, y: 0, width: 1, height: 0.055 }], areas: AREAS, mostly: false }
 const stopped = (state: CaptureState) => reduce(state, { type: 'diverged', ...divergence })
 
 describe('the dialog\'s state at a step that looked different', () => {
@@ -86,11 +87,15 @@ describe('Match stopped at a step that looked different', () => {
     onTakeWhatMatched: vi.fn(), onBackToRange: vi.fn(), onContinueAnyway: vi.fn(), stopRef: { current: null }, onContinueToEdit: vi.fn(), onKeep: vi.fn(), thumbnailOf: () => null,
   })
 
-  it('shows both pictures, the facts, and the three buttons in their places', () => {
+  it('shows both pictures, where they differ, the facts, and the three buttons in their places', () => {
     const one = reduce(matching, { type: 'step-matched', step: { raw: steps[3]!, step: null } as never })
     const props = handlers()
-    render(<MatchScreen state={stopped(one)} {...props} />)
-    expect(screen.getByRole('status')).toHaveTextContent('Step 2 of 3 doesn’t look like it did when you recorded it')
+    const { container } = render(<MatchScreen state={stopped(one)} {...props} />)
+    expect(screen.getByRole('status')).toHaveTextContent('Step 2 of 3 looks different in 2 places')
+    // (c): boxes where it differs, and no causes named.
+    expect(container.querySelectorAll('[data-differs]')).toHaveLength(2)
+    expect(screen.queryByText(/Compare the two pictures/)).not.toBeInTheDocument()
+    expect(screen.getByText('If it’s the same screen, continue anyway. The marked areas won’t be compared again on this screen.')).toBeInTheDocument()
     expect(screen.getByText(/#2–#3 come before the range: Back to Range starts it there\. 1 step before it matched\./)).toBeInTheDocument()
     expect(screen.getByRole('img', { name: 'When you recorded #5' })).toHaveAttribute('src', '/thumb/r5')
     expect(screen.getByRole('img', { name: 'Now, on the replay' })).toHaveAttribute('src', 'blob:now')
@@ -103,7 +108,7 @@ describe('Match stopped at a step that looked different', () => {
   it('promises the move only for a start still at its default', () => {
     const chosen = reduce(reduce(loaded, { type: 'set-range', range: { start: 4, end: 6 } }), { type: 'match-started', total: 2 })
     render(<MatchScreen state={reduce(chosen, { type: 'diverged', ...divergence, index: 5 })} {...handlers()} />)
-    expect(screen.getByText(/#2–#3 come before the range\. Compare/)).toBeInTheDocument()
+    expect(screen.getByText(/#2–#3 come before the range\./)).toBeInTheDocument()
     expect(screen.queryByText(/starts it there/)).not.toBeInTheDocument()
   })
 
@@ -127,5 +132,36 @@ describe('Match stopped at a step that looked different', () => {
   it('offers Edit what matched only when something matched, moving nothing else', () => {
     render(<MatchScreen state={stopped(matching)} {...handlers()} />)
     expect(screen.getAllByRole('button').map((b) => b.textContent)).toEqual(['Back to Range', 'Continue anyway'])
+  })
+
+  // R7: past a match, with a start that cannot move, Back to Range would only lose what matched: the stepper goes there.
+  it('keeps Back to Range when only the launch matched', () => {
+    // A clean start before the range: nothing for the start to take in.
+    const cleared = [step('launch', { buildId: 7 }), step('tap', { onHome: false }), step('clearState', { bundleId: 'b' }), step('launch', { buildId: 7 }), step('tap', { onHome: false })]
+    const state = reduce(reduce(initialState, { type: 'loaded', steps: cleared, range: { start: 3, end: 5 }, name: 'f' }), { type: 'match-started', total: 2 })
+    const launched = reduce(state, { type: 'step-matched', step: { raw: cleared[3]!, step: null } as never })
+    render(<MatchScreen state={reduce(launched, { type: 'diverged', ...divergence, index: 4 })} {...handlers()} />)
+    expect(screen.getAllByRole('button').map((b) => b.textContent)).toEqual(['Edit what matched', 'Back to Range', 'Continue anyway'])
+  })
+
+  it('drops Back to Range once something matched and the start cannot take in more', () => {
+    const chosen = reduce(reduce(loaded, { type: 'set-range', range: { start: 4, end: 6 } }), { type: 'match-started', total: 2 })
+    const one = reduce(chosen, { type: 'step-matched', step: { raw: steps[4]!, step: null } as never })
+    render(<MatchScreen state={reduce(one, { type: 'diverged', ...divergence, index: 5 })} {...handlers()} />)
+    expect(screen.getAllByRole('button').map((b) => b.textContent)).toEqual(['Edit what matched', 'Continue anyway'])
+  })
+
+  // R5: most of the screen differs: one outline, no count, and the step (not areas) is what going on stops comparing.
+  it('says a screen that is mostly different as one, without boxes', () => {
+    const { container } = render(<MatchScreen state={reduce(matching, { type: 'diverged', ...divergence, diff: 0.8, mostly: true })} {...handlers()} />)
+    expect(screen.getByRole('status')).toHaveTextContent('Step 2 of 3 is mostly different')
+    expect(container.querySelectorAll('[data-differs]')).toHaveLength(0)
+    expect(screen.getByText(/likely shows something that isn’t the same each time/)).toBeInTheDocument()
+    expect(screen.getByText('If it’s the same screen, continue anyway. This step won’t be compared again.')).toBeInTheDocument()
+  })
+
+  it('says how many areas an earlier stop left out of this screen, and from which step', () => {
+    render(<MatchScreen state={reduce(matching, { type: 'diverged', ...divergence, carried: { count: 3, from: 3 } })} {...handlers()} />)
+    expect(screen.getByText(/3 areas on this screen aren’t compared, from step 1\./)).toBeInTheDocument()
   })
 })

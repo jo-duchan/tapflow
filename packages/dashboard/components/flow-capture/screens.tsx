@@ -19,6 +19,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
 import { cn } from '@/lib/utils'
 import { copy } from '@/lib/flowCapture/copy'
+import { compared } from '@/lib/flowCapture/runner'
 import { asSecret, fileNameOf, holdsSecret, moveEdge, secretValues, yamlOf, type Edge } from '@/lib/flowCapture/flow'
 import { askedReady, type CaptureEvent, type CaptureState, type Review } from '@/lib/flowCapture/machine'
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from '@/components/ui/accordion'
@@ -557,10 +558,10 @@ function ReviewView({ state, review, tap, marks, onRestart, onContinue, onKeep, 
 }
 
 /**
- * Match stopped at a step whose screen looked different from its recording (1b-3b): the two pictures, what is known for
- * certain, and the causes it can have. Never a cause named as the cause — the person judges by the pictures. The buttons
- * keep their places and their emphasis whatever happened, since people press them from habit: going on is the primary,
- * where Continue is on the other steps, and Verify still catches a flow that went on past a real difference.
+ * Match stopped at a step whose screen looked different from its recording (1b-3b): the two pictures with where they
+ * differ boxed on the replay's, and what is known for certain. No cause is named — the boxes are what the person judges
+ * by. The buttons keep their places and their emphasis whatever happened, since people press them from habit: going on is
+ * the primary, where Continue is on the other steps, and Verify still catches a flow that went on past a real difference.
  */
 function DivergedView({ state, onTakeWhatMatched, onBackToRange, onContinueAnyway, continueRef }: {
   state: CaptureState
@@ -572,53 +573,74 @@ function DivergedView({ state, onTakeWhatMatched, onBackToRange, onContinueAnywa
   const d = state.diverged!
   const done = state.progress.done
   const before = stepsBeforeRange(state.steps, state.range)
+  const startMoves = before.length > 0 && state.range.start === defaultRange(state.steps).start
+  const matchedCompared = state.matched.some((m) => compared(m.raw))
   const dropped: number[] = []
   for (let i = state.range.start; i < d.index; i++) if (state.steps[i]?.dropped) dropped.push(i)
+  const stepOf = (index: number) => index - state.range.start + 1
   const facts = [
     dropped.length > 0 ? copy.divergedDropped(spanOf(dropped), dropped.length, dropped.every((i) => state.steps[i]!.dropped === state.steps[dropped[0]!]!.dropped) ? state.steps[dropped[0]!]!.dropped ?? null : null) : null,
-    before.length > 0 ? copy.divergedBefore(spanOf(before), before.length, state.range.start === defaultRange(state.steps).start) : null,
+    before.length > 0 ? copy.divergedBefore(spanOf(before), before.length, startMoves) : null,
     done > 0 ? copy.divergedMatched(done) : null,
+    d.carried ? copy.divergedCarried(d.carried.count, stepOf(d.carried.from)) : null,
   ].filter(Boolean).join(' ')
+  // Boxed place by place unless most of it differs, or nothing could be boxed: then the picture is outlined as a whole.
+  const boxes = d.mostly ? [] : d.areas
   return (
     <div className="grid h-full min-h-0 grid-rows-[minmax(0,1fr)_auto] gap-4">
       <div className="grid min-h-0 gap-6 overflow-y-auto sm:grid-cols-[auto_minmax(0,1fr)]">
         <div className="flex flex-col gap-2">
           <div className="flex gap-4">
             <ComparedPicture title={copy.divergedRecorded(d.index + 1)} src={d.recordedUrl} masks={d.masks} />
-            <ComparedPicture title={copy.divergedNow} src={d.nowUrl} masks={d.masks} differs />
+            <ComparedPicture title={copy.divergedNow} src={d.nowUrl} masks={d.masks} areas={boxes} differs={boxes.length === 0} />
           </div>
           {/* Under both pictures, from the left: "not compared" is true of both, and the order follows the pictures. */}
           <p className="flex items-center gap-3 text-xs text-muted-foreground">
             <span className="flex items-center gap-1.5"><span aria-hidden className="inline-block size-2.5 rounded-sm border border-dashed border-muted-foreground bg-foreground/5" />{copy.notCompared}</span>
-            <span className="flex items-center gap-1.5"><span aria-hidden className="inline-block size-2.5 rounded-sm border-2 border-warning-solid" />{copy.differs}</span>
+            <span className="flex items-center gap-1.5"><span aria-hidden className="inline-block size-2.5 rounded-sm border-2 border-warning-solid" style={DIFFERS_FILL} />{copy.differs}</span>
           </p>
         </div>
-        <div className="flex flex-col gap-2">
-          <p role="status" className="text-sm font-medium">{copy.divergedTitle(d.index - state.range.start + 1, state.progress.total)}</p>
-          <p className="text-sm text-muted-foreground">{facts ? `${facts} ` : ''}{copy.divergedCauses}</p>
+        <div className="flex flex-col gap-3">
+          <p role="status" className="text-sm font-medium">
+            {d.mostly || boxes.length === 0
+              ? copy.divergedMostly(stepOf(d.index), state.progress.total)
+              : copy.divergedPlaces(stepOf(d.index), state.progress.total, boxes.length)}
+          </p>
+          {facts && <p className="text-sm text-muted-foreground">{facts}</p>}
+          {d.mostly && <p className="text-sm text-muted-foreground">{copy.divergedMostlyWhy}</p>}
+          <p className="text-sm text-muted-foreground">{d.mostly ? copy.divergedGoOnStep : copy.divergedGoOnAreas}</p>
         </div>
       </div>
       <Footer>
         {/* At the far left, and only when something matched: its coming and going moves nothing else. */}
         {done > 0 && <Button variant="outline" onClick={onTakeWhatMatched}>{copy.editWhatMatched}</Button>}
-        <Button variant="outline" onClick={onBackToRange}>{copy.backToRange}</Button>
+        {/* Only where it is the way out: nothing matched yet, or the start can still take in the steps before it. Past a
+            match the stepper goes back to Range, and Edit what matched keeps what matched. A launch, which every range
+            matches first, is no match to lose (design review of (c)). */}
+        {(!matchedCompared || startMoves) && <Button variant="outline" onClick={onBackToRange}>{copy.backToRange}</Button>}
         <Button ref={continueRef} onClick={onContinueAnyway}>{copy.continueAnyway}</Button>
       </Footer>
     </div>
   )
 }
 
+/** The `warning-solid` token at a quarter, as an annotation box is filled: the token has no alpha slot for `bg-…/25`. */
+const DIFFERS_FILL = { backgroundColor: 'hsl(var(--warning-solid) / 0.25)' }
+
 /** One of the two pictures, with what the comparison left out drawn over it: a light tint and a dashed edge, so what is
- *  under it still shows. The replay's carries the outline, the whole picture: where a part differs is not measured. */
-function ComparedPicture({ title, src, masks, differs = false }: { title: string; src: string | null; masks: ScreenRect[]; differs?: boolean }) {
+ *  under it still shows. Where they differ is boxed on the replay's; outlined whole when no place could be boxed. */
+function ComparedPicture({ title, src, masks, areas = [], differs = false }: { title: string; src: string | null; masks: ScreenRect[]; areas?: ScreenRect[]; differs?: boolean }) {
+  const at = (r: ScreenRect) => ({ left: `${r.x * 100}%`, top: `${r.y * 100}%`, width: `${r.width * 100}%`, height: `${r.height * 100}%` })
   return (
     <figure className="flex flex-col gap-2">
       <figcaption className="text-xs font-medium">{title}</figcaption>
       <div className={cn('relative w-[230px] overflow-hidden rounded-lg border', differs && 'border-2 border-warning-solid')}>
         {src ? <img src={src} alt={title} className="block w-full" /> : <div aria-hidden className="aspect-[9/19] w-full bg-muted" />}
         {masks.map((m, i) => (
-          <div key={i} aria-hidden className="absolute border border-dashed border-muted-foreground bg-foreground/5"
-            style={{ left: `${m.x * 100}%`, top: `${m.y * 100}%`, width: `${m.width * 100}%`, height: `${m.height * 100}%` }} />
+          <div key={`m${i}`} aria-hidden className="absolute border border-dashed border-muted-foreground bg-foreground/5" style={at(m)} />
+        ))}
+        {areas.map((a, i) => (
+          <div key={`a${i}`} aria-hidden data-differs className="absolute rounded-sm border-2 border-warning-solid" style={{ ...at(a), ...DIFFERS_FILL }} />
         ))}
       </div>
     </figure>

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { screenDiff, statusBarRect, turnRect, sameShape, SCREEN_DIFF_THRESHOLD, type Pixels } from '../capture/index.js'
+import { screenDiff, screenCells, withoutAreas, diffAreas, statusBarRect, turnRect, sameShape, SCREEN_DIFF_THRESHOLD, type Pixels } from '../capture/index.js'
 
 // 1b-3b: Match compares the screen a step is about to act on with the one it was recorded on.
 // The recorded picture's size: the device's frame is drawn at it before the two are compared.
@@ -66,5 +66,69 @@ describe('sameShape', () => {
   it('takes a 160 px thumbnail and its frame as one shape, and a fold\'s other panel as not', () => {
     expect(sameShape({ width: 160, height: 361 }, { width: 1072, height: 2416 })).toBe(true)
     expect(sameShape({ width: 160, height: 361 }, { width: 1800, height: 2000 })).toBe(false)
+  })
+})
+
+// (c): a stop draws where the two differ, from the same grid it measured.
+describe('screenCells and diffAreas', () => {
+  const cellsOf = (a: Pixels, b: Pixels) => {
+    const c = screenCells(a, b, [])
+    if (c === 'incomparable') throw new Error('incomparable')
+    return c
+  }
+
+  it('measures the share screenDiff does', () => {
+    const a = picture([[0.1, 0.2, 0.8, 0.05]])
+    const b = picture([[0.1, 0.5, 0.8, 0.3]])
+    expect(cellsOf(a, b).share).toBe(screenDiff(a, b, []))
+    expect(screenCells(picture(), { ...picture(), width: W + 1 }, [])).toBe('incomparable')
+  })
+
+  it('draws no area where nothing differs', () => {
+    expect(diffAreas(cellsOf(picture(), picture()))).toEqual([])
+  })
+
+  it('draws one box around one change, inside the picture', () => {
+    const [area, ...rest] = diffAreas(cellsOf(picture(), picture([[0.25, 0.4, 0.5, 0.1]])))
+    expect(rest).toEqual([])
+    expect(area!.x).toBeGreaterThanOrEqual(0.2)
+    expect(area!.x + area!.width).toBeLessThanOrEqual(0.8)
+    expect(area!.y).toBeGreaterThanOrEqual(0.35)
+    expect(area!.y + area!.height).toBeLessThanOrEqual(0.55)
+  })
+
+  it('keeps two changes far apart as two boxes, largest first', () => {
+    const areas = diffAreas(cellsOf(picture(), picture([[0.1, 0.1, 0.2, 0.05], [0.1, 0.7, 0.8, 0.2]])))
+    expect(areas).toHaveLength(2)
+    expect(areas[0]!.y).toBeGreaterThan(0.6)
+  })
+
+  it('joins changes one unchanged cell apart, as letters of one line', () => {
+    const cell = 1 / 48
+    // Two blocks, each two cells wide, with one cell between them.
+    const two = picture([[10 * cell, 0.5, 2 * cell, 0.03], [13 * cell, 0.5, 2 * cell, 0.03]])
+    expect(diffAreas(cellsOf(picture(), two))).toHaveLength(1)
+    // Three cells between them: two places.
+    const apart = picture([[10 * cell, 0.5, 2 * cell, 0.03], [15 * cell, 0.5, 2 * cell, 0.03]])
+    expect(diffAreas(cellsOf(picture(), apart))).toHaveLength(2)
+  })
+
+  it('never boxes what a mask left out', () => {
+    const keys = picture([[0, 0.6, 1, 0.4]])
+    const c = screenCells(picture(), keys, [{ x: 0, y: 0.6, width: 1, height: 0.4 }])
+    if (c === 'incomparable') throw new Error('incomparable')
+    expect(diffAreas(c)).toEqual([])
+  })
+
+  it('judges again without the areas a person set aside, over what is left', () => {
+    const both = cellsOf(picture(), picture([[0.1, 0.1, 0.8, 0.2], [0.1, 0.7, 0.3, 0.05]]))
+    const top = { x: 0.05, y: 0.05, width: 0.9, height: 0.3 }
+    const rest = withoutAreas(both, [top])
+    // The lower change is still there, and measured over fewer cells.
+    expect(diffAreas(rest)).toHaveLength(1)
+    expect(rest.share).toBeGreaterThan(0)
+    expect(rest.share).toBeLessThan(both.share)
+    // Set aside where the only change was: alike.
+    expect(withoutAreas(cellsOf(picture(), picture([[0.1, 0.1, 0.8, 0.2]])), [top]).share).toBe(0)
   })
 })

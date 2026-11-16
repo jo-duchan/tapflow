@@ -81,9 +81,16 @@ export const copy = {
   reviewPictureReplayed: (step: number) => `#${step} on the replay`,
   continueToEdit: 'Continue to Edit',
   matchStopped: 'The replay stopped.',
-  // 1b-3b: a step whose screen looked different from its recording. Facts first, then the causes it can have, never one
-  // named as the cause: two pictures are what the person judges by.
-  divergedTitle: (step: number, total: number) => `Step ${step} of ${total} doesn’t look like it did when you recorded it`,
+  // 1b-3b, (c): a step whose screen looked different from its recording. Where it differs is boxed on the pictures, and
+  // only facts are said: never a cause named as the cause.
+  divergedPlaces: (step: number, total: number, places: number) =>
+    `Step ${step} of ${total} looks different in ${places} ${places === 1 ? 'place' : 'places'}`,
+  divergedMostly: (step: number, total: number) => `Step ${step} of ${total} is mostly different`,
+  divergedMostlyWhy: 'Most of this screen changed since you recorded it, so it likely shows something that isn’t the same each time, like data the app makes or loads, or a different start.',
+  divergedGoOnAreas: 'If it’s the same screen, continue anyway. The marked areas won’t be compared again on this screen.',
+  divergedGoOnStep: 'If it’s the same screen, continue anyway. This step won’t be compared again.',
+  divergedCarried: (count: number, from: number) =>
+    `${count} ${count === 1 ? 'area' : 'areas'} on this screen ${count === 1 ? 'isn’t' : 'aren’t'} compared${from >= 1 ? `, from step ${from}` : ''}.`,
   // Back to Range moves only a start still at its default: a start the person chose is told the fact and nothing more.
   divergedBefore: (span: string, n: number, moves: boolean) =>
     `${span} ${n === 1 ? 'comes' : 'come'} before the range${moves ? ': Back to Range starts it there.' : '.'}`,
@@ -98,7 +105,6 @@ export const copy = {
     retried: 'Not replayed: it did nothing, and the next tap on the same element did.',
   } satisfies Record<DropReason, string>,
   divergedMatched: (n: number) => `${n} ${n === 1 ? 'step' : 'steps'} before it matched.`,
-  divergedCauses: 'Compare the two pictures: a step left out of the range, a prompt or first-run screen the reset brings back, data that changed since you recorded, or a screen caught mid-animation can each do this.',
   divergedRecorded: (step: number) => `When you recorded #${step}`,
   divergedNow: 'Now, on the replay',
   notCompared: 'Not compared',

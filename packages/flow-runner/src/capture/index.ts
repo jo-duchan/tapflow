@@ -6,7 +6,7 @@ export { defaultRange, rangeWarnings, askedValues, stepsBeforeRange } from './ra
 export type { StepRange, RangeWarning } from './range.js'
 export { matchStep, toFlowSteps, flowSteps, noResponseTaps, madeMidTransition, MID_TRANSITION_MS, leaveOut, retryCandidates, dropRetried, toScreen, hitTest, reachQuestions, recordedTarget, recordedSelector, scrollDirectionOf } from './match.js'
 export type { MatchContext, CapturedStep, CapturedFlow, SkipReason, FragileReason, NoResponseTap } from './match.js'
-export { screenDiff, statusBarRect, turnRect, sameShape, SCREEN_DIFF_THRESHOLD } from './compare.js'
+export { screenDiff, screenCells, withoutAreas, diffAreas, statusBarRect, turnRect, sameShape, SCREEN_DIFF_THRESHOLD, type ScreenCells } from './compare.js'
 export type { Pixels, Rect as ScreenRect } from './compare.js'
 export { expectedFor, mentionsSecret } from './expected.js'
 export type { ExpectedVerdict, ExpectRefusal, ExpectWarning } from './expected.js'

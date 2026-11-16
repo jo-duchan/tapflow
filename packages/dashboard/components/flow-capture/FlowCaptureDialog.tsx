@@ -11,7 +11,8 @@ import { copy } from '@/lib/flowCapture/copy'
 import { editedCapture, exportedFlow, flowOf, secretRename } from '@/lib/flowCapture/flow'
 import { canGoTo, initialState, reachedStep, matchEnded, reduce, stepIndex, withAsked, type CaptureState } from '@/lib/flowCapture/machine'
 import { DialogRun, keyboardOf, loadSnapshot, matchRange, PauseLease, stepsOf, verifyFlow } from '@/lib/flowCapture/runner'
-import { compareWithRecording, tapDidNothing } from '@/lib/flowCapture/screenCompare'
+import { compareWithRecording, recordedAlike, tapDidNothing } from '@/lib/flowCapture/screenCompare'
+import { Remembered } from '@/lib/flowCapture/remembered'
 import type { CaptureTap } from '@/lib/flowCapture/tap'
 import { addMark, type StepMark } from '@/lib/flowCapture/marks'
 import { chromeOrientation } from '@tapflowio/protocol/screen'
@@ -133,6 +134,8 @@ function CaptureSession({ tap, session, snapshot, bundleId, setBusy, close }: {
   close: () => void
 }) {
   const [state, dispatch] = useReducer(reduce, snapshot, initFrom)
+  // What Continue anyway accepted, for every Match of this capture (R6).
+  const [remembered] = useState(() => new Remembered(recordedAlike))
   const fallback = useRef<HTMLButtonElement>(null)
   // A stop at a step that looked different is a view of its own: its buttons replace Stop, and the focus on Stop with them.
   const swapFocus = useFocusAfterSwap<HTMLDivElement>(state.phase === 'matching' && state.diverged ? 'diverged' : state.phase === 'matching' && state.review ? 'review' : state.phase, fallback)
@@ -162,6 +165,7 @@ function CaptureSession({ tap, session, snapshot, bundleId, setBusy, close }: {
     if (!opened) return
     const { channel, lease, run } = opened
     const signal = run.begin()
+    remembered.begin(state.range.start)
     dispatch({ type: 'match-started', total: state.range.end - state.range.start })
     setMarks(NO_MARKS)
     setBusy(true)
@@ -185,7 +189,8 @@ function CaptureSession({ tap, session, snapshot, bundleId, setBusy, close }: {
       },
       tapDidNothing: (prev, next, before, now, masks, stop) =>
         tapDidNothing(thumbnailUrl(tap.sessionId, snapshot, prev), thumbnailUrl(tap.sessionId, snapshot, next), before, now, masks, stop),
-      onDiverged: (index, divergence) => {
+      carried: (index, step, masks, turn) => remembered.carried(index, step, thumbnailUrl(tap.sessionId, snapshot, step), masks, turn, signal),
+      onDiverged: (index, { cells: _, ...divergence }) => {
         run.keep(divergence.nowUrl)
         const step = state.steps[index]
         dispatch({ type: 'diverged', index, ...divergence, recordedUrl: step ? thumbnailUrl(tap.sessionId, snapshot, step) : null })
@@ -205,6 +210,9 @@ function CaptureSession({ tap, session, snapshot, bundleId, setBusy, close }: {
     finishMatch(state.matched.slice(0, state.matched.length - state.insertedTail))
   }
   const continueAnyway = () => {
+    // Remembered for every Match of this capture: the next one does not stop on what the person said does not matter.
+    const d = state.diverged
+    if (d?.recordedUrl) remembered.accept({ index: d.index, recordedUrl: d.recordedUrl, areas: d.areas, mostly: d.mostly })
     dispatch({ type: 'went-on' })
     session.current?.run.goOn()
   }

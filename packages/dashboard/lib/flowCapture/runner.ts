@@ -1,6 +1,7 @@
 import {
   defaultRange, dropRetried, EffectWatch, focusTap, retryCandidates, matchStep, rangeStartKeyboard, rangeStartOrientation, reachQuestions, reachTargetOf, recordedSelector,
   recordedTarget, replayStep, runFlow, scrollDirectionOf, segment, selectorFor, SocketFlowDriver, statusBarRect,
+  diffAreas, SCREEN_DIFF_THRESHOLD, withoutAreas, type ScreenCells,
   toFlowSteps, waitForStableScreen, madeMidTransition, type CapturedStep, type Flow, type FlowResult, type KeyModifier, type MatchContext,
   type RawStep, type ScreenRect, type ScrollDirection, type Selector, type Step, type StepExpect, type StepRange,
 } from '@tapflowio/flow-runner/browser'
@@ -13,6 +14,7 @@ import type { StepMark as FlowStepMark } from './machine'
 import type { DashboardSessionChannel, HeldResetReport } from './channel'
 import type { CaptureTap } from './tap'
 import { recordedAlike } from './screenCompare'
+import type { Carried } from './remembered'
 
 const base = (tap: CaptureTap) => `/api/v1/sessions/${tap.sessionId}/capture`
 const SETTLE_TIMEOUT_MS = 15_000
@@ -211,6 +213,9 @@ export interface MatchHooks {
   onAfter?: (index: number, after: AfterTouch) => void
   /** What a touch was seen to do, by its index into the matched steps, as soon as it is known. */
   onObserved?: (index: number, observed: StepExpect | null) => void
+  /** What an earlier Continue anyway says about the step at `index` into the steps (`Remembered`): asked only once it
+   *  differs, and applied only to whether Match stops there. `turn` places its touch in the picture. */
+  carried?: (index: number, step: RawStep, masks: ScreenRect[], turn: InterfaceTurn | undefined) => Promise<Carried>
   /** They differ, at `index` into the steps: resolves when the person goes on, rejects when the run is stopped. */
   onDiverged?: (index: number, divergence: ScreenDivergence) => Promise<void>
   /**
@@ -242,13 +247,22 @@ export interface ScreenDivergence {
   /** The device's frame as it was compared, an object URL. */
   nowUrl: string
   masks: ScreenRect[]
+  /** Where they differ (`diffAreas`), as fractions of the picture: drawn as boxes. */
+  areas: ScreenRect[]
+  /** Most of the screen differs (`MOSTLY_DIFFERENT`): said as one, not boxed place by place. Measured before any carried
+   *  area is set aside, which would shrink what it is measured over. */
+  mostly: boolean
+  /** The grid it was measured on: judged again without carried areas. Not for the dialog's state. */
+  cells: ScreenCells
+  /** Areas an earlier Continue anyway set aside here: how many, and the step (into `steps`) first accepted from. */
+  carried?: { count: number; from: number }
 }
 
 /** Steps that act on the screen in front of them: each is compared with its recording before it is replayed. A command
  *  (launch, URL, network), a turn and a button make their own screen — except Back, which goes wherever the screen it
  *  is pressed on leads; a key on the soft keyboard is never replayed. */
 const COMPARED = new Set<RawStep['kind']>(['tap', 'longPress', 'swipe', 'holdDrag', 'pinch', 'imeAction', 'text', 'key', 'paste', 'type'])
-const compared = (raw: RawStep): boolean => !raw.dropped && (COMPARED.has(raw.kind) || (raw.kind === 'button' && raw.name === 'back'))
+export const compared = (raw: RawStep): boolean => !raw.dropped && (COMPARED.has(raw.kind) || (raw.kind === 'button' && raw.name === 'back'))
 
 /**
  * A tap the app named when it was recorded (record-time observation), as Match replays it: on that element, through the
@@ -499,34 +513,52 @@ export async function matchRange(
       const turn = before?.interfaceTurn ?? frameTurnOf(tap.chrome())
       const masks = [statusBarRect(tap.platform, turn), raw.keyboardRect].filter((m): m is ScreenRect => m !== undefined)
       // A picture that cannot be read is no reason to stop: the step is replayed as before the comparison existed.
-      let differs = await hooks.compare(raw, masks).catch(() => null)
+      const first = await hooks.compare(raw, masks).catch(() => null)
       hooks.signal.throwIfAborted()
-      if (!differs) return
+      if (!first) return
       if (madeMidTransition(raw, previousSent(slice, offset))) {
-        URL.revokeObjectURL(differs.nowUrl)
+        URL.revokeObjectURL(first.nowUrl)
         midTransition = true
         return
       }
+      // What Continue anyway set aside, applied to whether it stops and nothing before: the mid-transition rule above and
+      // the press again below judge the screen as compared (review of (c)). Asked once per step.
+      let carry: Carried | undefined
+      const judged = async (d: ScreenDivergence | null): Promise<ScreenDivergence | null> => {
+        if (!d || !hooks.carried) return d
+        carry ??= await hooks.carried(range.start + offset, raw, masks, turn).catch(() => null)
+        hooks.signal.throwIfAborted()
+        if (!carry) return d
+        const rest = carry === 'skip' ? null : withoutAreas(d.cells, carry.areas)
+        if (carry === 'skip' || !rest || rest.share <= SCREEN_DIFF_THRESHOLD) {
+          URL.revokeObjectURL(d.nowUrl)
+          return null
+        }
+        return { ...d, cells: rest, areas: diffAreas(rest), masks: [...d.masks, ...carry.areas], carried: { count: carry.areas.length, from: carry.from } }
+      }
+      let differs = await judged(first)
+      if (!differs) return
       const look = hooks.lookAgain ?? LOOK_AGAIN
       const until = Date.now() + look.forMs
       while (Date.now() < until) {
         await new Promise((resolve) => setTimeout(resolve, look.everyMs))
         // A look that fails is not a match: one failed fetch among twenty would otherwise end a real stop.
-        const again = await hooks.compare(raw, masks).catch(() => undefined)
+        const looked = await hooks.compare(raw, masks).catch(() => undefined)
         if (hooks.signal.aborted) {
           URL.revokeObjectURL(differs.nowUrl)
-          if (again) URL.revokeObjectURL(again.nowUrl)
+          if (looked) URL.revokeObjectURL(looked.nowUrl)
           hooks.signal.throwIfAborted()
         }
-        if (again === undefined) continue
+        if (looked === undefined) continue
         URL.revokeObjectURL(differs.nowUrl)
+        const again = await judged(looked)
         if (!again) { cameLate = true; return }
         differs = again
       }
       const retry = prevTap ? await retriedTap(prevTap, masks, look.forMs > 0) : 'not-asked'
       // Waited for a late effect without pressing again: the screen may have come right in the meantime.
       if (retry === 'waited') {
-        const now = await hooks.compare(raw, masks).catch(() => null)
+        const now = await judged(await hooks.compare(raw, masks).catch(() => null))
         hooks.signal.throwIfAborted()
         URL.revokeObjectURL(differs.nowUrl)
         if (now) await hooks.onDiverged(range.start + offset, now)
@@ -541,7 +573,7 @@ export async function matchRange(
           watching = lastClosed
           await closeWatch(before)
         }
-        const still = await hooks.compare(raw, masks).catch(() => null)
+        const still = await judged(await hooks.compare(raw, masks).catch(() => null))
         hooks.signal.throwIfAborted()
         if (still) await hooks.onDiverged(range.start + offset, still)
         return

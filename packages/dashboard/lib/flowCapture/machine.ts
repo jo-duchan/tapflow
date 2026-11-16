@@ -110,6 +110,13 @@ export interface Divergence {
   nowUrl: string
   /** What was left out of the comparison, as fractions of the picture: drawn as not compared. */
   masks: ScreenRect[]
+  /** Where they differ, as fractions of the picture: drawn as boxes. */
+  areas: ScreenRect[]
+  /** Most of the screen differs: said as one, not boxed place by place. */
+  mostly: boolean
+  /** Areas Continue anyway accepted at an earlier stop, carried to this step's screen and left out of `masks`' compare:
+   *  how many, and the step (into `steps`) first accepted from. */
+  carried?: { count: number; from: number }
 }
 
 export type CaptureEvent =
