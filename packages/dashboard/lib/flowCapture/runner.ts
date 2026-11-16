@@ -181,6 +181,15 @@ function frameTurnOf(chrome: ChromePayload | null): 0 | 90 | 180 | 270 | undefin
 /** How long Match waits before judging that a replayed tap did nothing (`tapDidNothing`). */
 export const RETRY_LOOK_AGAIN_MS = 1_500
 
+/**
+ * How long a screen that does not look like the recording's is looked at again before Match stops on it, and how often.
+ * The screen can still be on its way: a login's answer drawn after its spinner, a splash before the first screen (wdio
+ * native-demo-app, iOS 26.5: the first frame looked at after a stop already matched, within ~1 s, at every such stop).
+ * Polled: the viewer draws into a canvas and says nothing when a frame lands, and a screen that has settled sends none.
+ * Matched against the recording rather than waited until still, which would stop on a splash that holds still.
+ */
+export const LOOK_AGAIN = { forMs: 3_000, everyMs: 150 }
+
 const TYPING = new Set<RawStep['kind']>(['text', 'type', 'paste', 'key'])
 /** Steps whose picture is the screen they left: what typing or a keyboard's action did is the point of looking, and the
  *  screen before it shows a field still empty. A tap keeps the screen before, which shows what it is about to touch. */
@@ -213,6 +222,8 @@ export interface MatchHooks {
    * whose answer the screen never draws — could still be made twice, the price of not stopping on a tap that slipped.
    */
   tapDidNothing?: (prev: RawStep, next: RawStep, shotBefore: Uint8Array, shotNow: Uint8Array, masks: ScreenRect[], signal: AbortSignal) => Promise<boolean>
+  /** `LOOK_AGAIN`, shortened by tests. */
+  lookAgain?: { forMs: number; everyMs: number }
   signal: AbortSignal
 }
 
@@ -437,7 +448,7 @@ export async function matchRange(
       before = await waitForStableScreen(read, { timeoutMs: SETTLE_TIMEOUT_MS })
     }
     // Only iOS reports touches, and its points are never in the frame's space: the app's turn is all that places them.
-    const named = before
+    let named = before
       ? namedTap(raw, before.elements, previousSent(slice, offset), before.interfaceTurn !== undefined ? { interfaceTurn: before.interfaceTurn } : {})
       : undefined
     // After the focus tap and its settle: a typed step's picture was taken at its first key, with the field focused.
@@ -445,14 +456,27 @@ export async function matchRange(
     // A focus tap went in since: pressed again now, the tap would take the field's focus away.
     const prevTap = focus ? undefined : lastTap
     lastTap = undefined
+    // The screen came to match only after it was looked at again: what was read of it before is of a screen since gone.
+    let cameLate = false
     const compareNow = async (): Promise<void> => {
       if (!hooks.compare || !hooks.onDiverged) return
       const turn = before?.interfaceTurn ?? frameTurnOf(tap.chrome())
       const masks = [statusBarRect(tap.platform, turn), raw.keyboardRect].filter((m): m is ScreenRect => m !== undefined)
       // A picture that cannot be read is no reason to stop: the step is replayed as before the comparison existed.
-      const differs = await hooks.compare(raw, masks).catch(() => null)
+      let differs = await hooks.compare(raw, masks).catch(() => null)
       hooks.signal.throwIfAborted()
       if (!differs) return
+      const look = hooks.lookAgain ?? LOOK_AGAIN
+      const until = Date.now() + look.forMs
+      while (Date.now() < until) {
+        await new Promise((resolve) => setTimeout(resolve, look.everyMs))
+        hooks.signal.throwIfAborted()
+        const again = await hooks.compare(raw, masks).catch(() => null)
+        hooks.signal.throwIfAborted()
+        URL.revokeObjectURL(differs.nowUrl)
+        if (!again) { cameLate = true; return }
+        differs = again
+      }
       const retry = prevTap ? await retriedTap(prevTap, masks) : 'not-asked'
       // Waited for a late effect without pressing again: the screen may have come right in the meantime.
       if (retry === 'waited') {
@@ -505,6 +529,15 @@ export async function matchRange(
     }
     // A turned app replays its taps at their points (`namedTap`), so the swipe before one is compared as any other.
     if (compared(raw) && !skipCompare && !named && (!!before?.interfaceTurn || !swipeBeforeNamedTap(slice, offset))) await compareNow()
+    // Read while the screen was late, the tree may not hold what the person tapped (an alert's OK under a spinner): read
+    // again, and named from that, the tap goes to its element rather than to a point on a screen that has moved.
+    if (cameLate) {
+      cameLate = false
+      before = (await waitForStableScreen(read, { timeoutMs: SETTLE_TIMEOUT_MS })) ?? before
+      named = before
+        ? namedTap(raw, before.elements, previousSent(slice, offset), before.interfaceTurn !== undefined ? { interfaceTurn: before.interfaceTurn } : {})
+        : undefined
+    }
     const shoot = () => channel.screenshot(sessionId, hooks.signal).catch(() => null)
     // A password is pictured before it is typed: after, Android shows its last character for a moment.
     const after = SHOWN_AFTER.has(raw.kind) && !(raw.kind === 'text' && (raw.fieldRead === 'secure' || raw.askValue))
@@ -547,6 +580,10 @@ export async function matchRange(
         shot = await shoot()
       }
       if (!skipCompare) await compareNow()
+      if (cameLate) {
+        cameLate = false
+        before = (await waitForStableScreen(read, { timeoutMs: SETTLE_TIMEOUT_MS })) ?? before
+      }
       ;({ questions, reach } = await ask(before?.elements ?? []))
     }
     const mark = markOf(raw)

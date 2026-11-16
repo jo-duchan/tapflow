@@ -114,7 +114,9 @@ beforeEach(() => {
 })
 afterEach(() => { vi.unstubAllGlobals(); vi.useRealTimers() })
 
-const hooks = () => ({ onStep: vi.fn(), signal: new AbortController().signal })
+// A screen that looks different is not looked at again here (`LOOK_AGAIN`): the suites below are about what happens
+// once it stops, and 'a screen that is late' is about the wait.
+const hooks = () => ({ onStep: vi.fn(), signal: new AbortController().signal, lookAgain: { forMs: 0, everyMs: 0 } })
 
 describe('matchRange', () => {
   // #1135: the replay starts in the keyboard language the range was recorded in, before the app launches.
@@ -401,7 +403,7 @@ describe('matchRange: comparing each step with its recording', () => {
   it('replays nothing more when the run is stopped while it waits', async () => {
     const controller = new AbortController()
     const run = matchRange(viewer, channel, lease, [tapStep, tapStep], { start: 0, end: 2 }, null, {
-      onStep: vi.fn(), signal: controller.signal,
+      onStep: vi.fn(), signal: controller.signal, lookAgain: { forMs: 0, everyMs: 0 },
       compare: async () => differs,
       onDiverged: () => new Promise<void>((_resolve, reject) => {
         log.push('stopped')
@@ -801,6 +803,87 @@ describe('matchRange with the app\'s touch reports', () => {
     expect(log.filter((l) => l.startsWith('replay'))).toEqual(['replay launch', 'replay tap', 'replay tap'])
     expect(compare.mock.calls.map((c) => c[0])).toEqual([tapStep])
     expect((h.onStep.mock.calls.at(-1) as unknown as [{ step: unknown }])[0].step).toMatchObject({ type: 'tapOn' })
+  })
+
+  // The screen a step is about to act on can still be on its way (a login's answer drawn ~1 s after the spinner, a
+  // splash before the first screen): looked at again until it matches the recording, and only then judged.
+  describe('a screen that is late', () => {
+    const quick = { forMs: 200, everyMs: 10 }
+    const late = (n: number) => ({ diff: 0.2, nowUrl: `blob:now${n}`, masks: [] })
+
+    it('goes on without stopping when the screen comes to match while it looks again', async () => {
+      screen.elements = []
+      const answers = [late(1), late(2), null]
+      const compare = vi.fn(async () => answers.shift() ?? null)
+      const onDiverged = vi.fn(async () => {})
+      const lease = new PauseLease(ctap)
+      await matchRange(ctap, channel, lease, [launchStep, tapStep, tapStep], { start: 0, end: 3 }, null, { ...hooks(), compare, onDiverged, lookAgain: quick })
+      await lease.stop()
+      expect(onDiverged).not.toHaveBeenCalled()
+      expect(compare).toHaveBeenCalledTimes(3)
+      expect(log.filter((l) => l.startsWith('replay'))).toEqual(['replay launch', 'replay tap', 'replay tap'])
+    })
+
+    it('stops on the last picture when the screen never comes to match in the wait, and lets the others go', async () => {
+      screen.elements = []
+      let n = 0
+      const compare = vi.fn(async () => late(++n))
+      const shown: string[] = []
+      const onDiverged = vi.fn(async (_i: number, d: { nowUrl: string }) => { shown.push(d.nowUrl) })
+      const revoked = vi.spyOn(URL, 'revokeObjectURL')
+      const lease = new PauseLease(ctap)
+      await matchRange(ctap, channel, lease, [launchStep, tapStep, tapStep], { start: 0, end: 3 }, null, { ...hooks(), compare, onDiverged, lookAgain: quick })
+      await lease.stop()
+      expect(onDiverged).toHaveBeenCalledTimes(1)
+      expect(compare.mock.calls.length).toBeGreaterThan(2)
+      expect(shown).toEqual([`blob:now${n}`])
+      // Every picture but the one shown is let go.
+      expect(revoked.mock.calls.map((c) => c[0]).sort()).toEqual(Array.from({ length: n - 1 }, (_v, i) => `blob:now${i + 1}`).sort())
+      revoked.mockRestore()
+    })
+
+    it('reads the screen again once it came to match, and taps the element it now names', async () => {
+      // Read while the spinner turned: the button the person tapped is not there yet.
+      screen.elements = []
+      const answers: Array<ReturnType<typeof late> | null> = [null, late(1)]
+      const compare = vi.fn(async () => {
+        const a = answers.shift()
+        // The answer is drawn: the next read finds the button.
+        if (a === undefined) { screen.elements = [orders]; return null }
+        return a
+      })
+      const h = { ...hooks(), compare, onDiverged: vi.fn(async () => {}), lookAgain: quick }
+      const lease = new PauseLease(ctap)
+      await matchRange(ctap, channel, lease, [launchStep, tapStep, tapStep, named], { start: 0, end: 4 }, null, h)
+      await lease.stop()
+      expect(h.onDiverged).not.toHaveBeenCalled()
+      expect(flowsAsSteps()).toEqual([['tapOn']])
+      expect(log.filter((l) => l.startsWith('replay'))).toEqual(['replay launch', 'replay tap', 'replay tap'])
+    })
+
+    it('replays nothing more when the run is stopped while it looks again', async () => {
+      screen.elements = []
+      const controller = new AbortController()
+      let looks = 0
+      const compare = vi.fn(async () => { if (++looks === 2) controller.abort(); return late(looks) })
+      const onDiverged = vi.fn(async () => {})
+      const run = matchRange(ctap, channel, new PauseLease(ctap), [launchStep, tapStep, tapStep], { start: 0, end: 3 }, null,
+        { onStep: vi.fn(), signal: controller.signal, compare, onDiverged, lookAgain: { forMs: 5_000, everyMs: 10 } })
+      await expect(run).rejects.toThrow()
+      expect(onDiverged).not.toHaveBeenCalled()
+      expect(log.filter((l) => l === 'replay tap')).toHaveLength(1)
+    })
+
+    it('reads nothing again when the screen matched at the first look', async () => {
+      screen.elements = []
+      const { compare, h } = compareHooks()
+      const lease = new PauseLease(ctap)
+      await matchRange(ctap, channel, lease, [launchStep, tapStep, tapStep], { start: 0, end: 3 }, null, { ...h, lookAgain: quick })
+      await lease.stop()
+      expect(compare).toHaveBeenCalledTimes(1)
+      // One read before each tap and the one after the last: none more.
+      expect(seq.filter((s) => s === 'settle')).toHaveLength(3)
+    })
   })
 
   it('scrolls the way the swipe before it went, then back the other way, when the element is off the screen', async () => {
