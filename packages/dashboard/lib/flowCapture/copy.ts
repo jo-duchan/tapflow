@@ -121,6 +121,7 @@ export const copy = {
     swipe: 'A swipe replays its two ends at the speed it was made, not what it brought on screen.',
     'field-unread': 'The field could not be read after typing, so this is the keys as typed on a US keyboard. Check the text.',
     'keyboard-unknown': 'tapflow could not tell whether this touched a key on the on-screen keyboard or the app. Remove it if it was a key.',
+    'mid-transition': 'Tapped while the screen was still changing from the tap before it, so it may now land on the new screen. Remove it if it was a stray second tap.',
   } satisfies Record<FragileReason, string>,
   skipReasons: {
     refused: 'The device refused this input.',

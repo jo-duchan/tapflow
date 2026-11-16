@@ -62,6 +62,9 @@ export type FragileReason =
   /** The soft keyboard may have been up around the touch and its reads could not say whether it was on a key (#1135). Replayed as
    *  a tap: one on a key would type, which a following `replace` overwrites. */
   | 'keyboard-unknown'
+  /** A touch made while the screen the tap before it brought was still coming (`madeMidTransition`), whose effect the
+   *  app did not report: replayed, but it may now land on that screen and do what the person's did not. */
+  | 'mid-transition'
 
 export interface CapturedStep {
   raw: RawStep
@@ -464,6 +467,24 @@ export interface NoResponseTap {
 
 /** Steps that type into whatever is focused: a tap right before one may be what focused the field. */
 const TYPES = new Set<RawStep['kind']>(['text', 'type', 'paste', 'keyboardKey', 'key'])
+
+/** How soon after the tap before it a touch counts as made while that tap's screen was still coming: doubled taps
+ *  measured 166, 191 and 282 ms apart start to start (2026-11-16), a deliberate next tap a second or more. */
+export const MID_TRANSITION_MS = 500
+
+/**
+ * Whether `raw` is a tap made while the screen `previous` brought was still coming — a doubled tap's second touch, or a
+ * touch that landed on a screen between two: iOS counted it a repeat (`tapCount` 2), or the app named nothing under it,
+ * or did not report it at all. Only after a tap the app reported, so that neither is a device that reports none
+ * (Android), where nothing says what either did. Its recorded picture is the screen from before `previous` acted, which
+ * a replay that waits for that tap never sees: Match does not stop on it (part (d) of the Match repair plan).
+ */
+export function madeMidTransition(raw: RawStep, previous: RawStep | undefined): boolean {
+  if (raw.kind !== 'tap' || previous?.kind !== 'tap' || !previous.touched) return false
+  if (raw.at - previous.endAt >= MID_TRANSITION_MS) return false
+  const t = raw.touched
+  return !t || (t.tapCount ?? 1) >= 2 || !(t.element?.identifier || t.element?.label)
+}
 
 /**
  * The matched taps the app did not respond to when they were recorded (record-time observation, P2c): a stray tap on a

@@ -7,7 +7,7 @@ import type { KeyboardState } from '@tapflowio/protocol'
 import type { CaptureEntry, CapturedMessage } from '@tapflowio/protocol/capture'
 import {
   askedValues, segment, defaultRange, rangeWarnings, stepsBeforeRange, matchStep, reachQuestions, toFlowSteps, flowSteps, flowToYaml, rawStepLabel, capturedStepLabel,
-  recordedTarget, recordedSelector, scrollDirectionOf, replayStep, noResponseTaps, leaveOut, retryCandidates, dropRetried,
+  recordedTarget, recordedSelector, scrollDirectionOf, replayStep, noResponseTaps, leaveOut, retryCandidates, dropRetried, madeMidTransition,
   type MatchContext, type RawStep, type CapturedStep,
 } from '../capture/index.js'
 import type { Step } from '../schema.js'
@@ -1400,6 +1400,37 @@ describe('touch reports', () => {
     // CodeRabbit on #1167: with no install or launch the fallback chose the first step, dropped or not.
     const bare = new Rec().touch([[0.3, 0.3]]).touched({ moving: true }).touch([[0.3, 0.3]]).touched({ moving: false }).steps()
     expect(defaultRange(bare).start).toBe(1)
+  })
+
+  // A doubled tap's second touch lands while the first one's screen is still coming (Food Truck 282 ms, wdio 166 and
+  // 191 ms after the first, 2026-11-16): the recording pictured the screen before the first acted, the replay waits
+  // for it, so the two never look alike.
+  describe('madeMidTransition', () => {
+    const tapAt = (at: number, touched?: Partial<TouchObservation>): RawStep => ({
+      kind: 'tap', point: [0.5, 0.5], at, endAt: at + 100, outcome: 'landed', messages: [],
+      ...(touched ? { touched: { point: { x: 0.5, y: 0.5 }, moving: false, ...touched } } : {}),
+    }) as RawStep
+    const first = tapAt(0, { element: { label: 'Active', traits: 1 }, tapCount: 1 })
+    it('is a second touch iOS counted as one', () => {
+      expect(madeMidTransition(tapAt(280, { element: { label: 'Active', traits: 1 }, tapCount: 2 }), first)).toBe(true)
+    })
+    it('is a touch the app named nothing under, or one it did not report', () => {
+      expect(madeMidTransition(tapAt(280, { tapCount: 1 }), first)).toBe(true)
+      expect(madeMidTransition(tapAt(280), first)).toBe(true)
+    })
+    it('is not a named single touch, however soon', () => {
+      expect(madeMidTransition(tapAt(280, { element: { label: 'OK', traits: 1 }, tapCount: 1 }), first)).toBe(false)
+    })
+    it('is not one made after the gap', () => {
+      expect(madeMidTransition(tapAt(700, { tapCount: 2 }), first)).toBe(false)
+    })
+    it('is not one after a touch the device did not report (Android): nothing says what either did', () => {
+      expect(madeMidTransition(tapAt(280), tapAt(0))).toBe(false)
+    })
+    it('is not one after anything but a tap', () => {
+      expect(madeMidTransition(tapAt(280, { tapCount: 2 }), { ...first, kind: 'swipe' } as RawStep)).toBe(false)
+      expect(madeMidTransition(tapAt(280, { tapCount: 2 }), undefined)).toBe(false)
+    })
   })
 
   describe('recordedTarget', () => {
