@@ -470,11 +470,17 @@ export async function matchRange(
     // on the screen the tap before it brought. Matched all the same, so the review of taps the app ignored offers it
     // (`noResponseTaps`), left out by default.
     const actedWhenRecorded = 'touched' in raw ? raw.touched?.acted : undefined
+    // Not before typing: the review never offers a tap right before typing (`noResponseTaps`), so one left unsent there
+    // would stay in the flow for Verify to send where Match did not. Sent, and marked, like one nothing says about.
     const leftUnsent = async (): Promise<boolean> => {
       if (actedWhenRecorded !== false) return false
+      const next = slice.slice(offset + 1).find((s) => !s.dropped)
+      if (next && (TYPING.has(next.kind) || next.kind === 'keyboardKey')) return false
       const step = matchStep(raw, { tree: before?.elements ?? [], postures: tap.postures().postures, platform: tap.platform })
       matched.push(step)
       hooks.onStep(step)
+      // The tap before it is still the one the next step may press again (`retriedTap`): nothing was sent between.
+      lastTap = prevTap
       return true
     }
     // Read again once a late screen has come. The touch before this step was watched to the screen read while it was

@@ -1421,8 +1421,16 @@ describe('touch reports', () => {
     it('is not a named single touch, however soon', () => {
       expect(madeMidTransition(tapAt(280, { element: { label: 'OK', traits: 1 }, tapCount: 1 }), first)).toBe(false)
     })
-    it('is not one made after the gap', () => {
-      expect(madeMidTransition(tapAt(700, { tapCount: 2 }), first)).toBe(false)
+    it('is not one made after the gap, start to start', () => {
+      expect(madeMidTransition(tapAt(450, { tapCount: 2 }), first)).toBe(false)
+    })
+    it('is not an unnamed touch a key away (a keypad the app names nothing on)', () => {
+      const key2 = { ...tapAt(250, { tapCount: 1 }), point: [0.62, 0.5] } as RawStep
+      expect(madeMidTransition(key2, first)).toBe(false)
+      expect(madeMidTransition({ ...tapAt(250), point: [0.62, 0.5] } as RawStep, first)).toBe(false)
+    })
+    it('is a repeat iOS counted, wherever the point read', () => {
+      expect(madeMidTransition({ ...tapAt(250, { tapCount: 2 }), point: [0.62, 0.5] } as RawStep, first)).toBe(true)
     })
     it('is not one after a touch the device did not report (Android): nothing says what either did', () => {
       expect(madeMidTransition(tapAt(280), tapAt(0))).toBe(false)

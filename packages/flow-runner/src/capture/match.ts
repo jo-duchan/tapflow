@@ -5,7 +5,7 @@ import type { StepExpect } from '../effect.js'
 import { matchSelector } from '../selector.js'
 import { selectorFor } from '../suggest.js'
 import { modifierNames } from './keys.js'
-import { LONG_PRESS_MS, type Point, type RawStep } from './segment.js'
+import { LONG_PRESS_MS, TAP_SLOP, type Point, type RawStep } from './segment.js'
 
 /** What the screen was when a step was replayed: the host reads it just before sending the step, and once after. */
 export interface MatchContext {
@@ -468,22 +468,29 @@ export interface NoResponseTap {
 /** Steps that type into whatever is focused: a tap right before one may be what focused the field. */
 const TYPES = new Set<RawStep['kind']>(['text', 'type', 'paste', 'keyboardKey', 'key'])
 
-/** How soon after the tap before it a touch counts as made while that tap's screen was still coming: doubled taps
- *  measured 166, 191 and 282 ms apart start to start (2026-11-16), a deliberate next tap a second or more. */
-export const MID_TRANSITION_MS = 500
+/** How soon after the tap before it, start to start, a touch counts as made while that tap's screen was still coming:
+ *  doubled taps measured 166, 191 and 282 ms apart (2026-11-16), a deliberate next tap a second or more. */
+export const MID_TRANSITION_MS = 400
+
+/** How far a doubled tap's second touch may land from the first: a finger's tremble, twice a tap's own slop. Keys of a
+ *  keypad the app names nothing on are as quick, and land a key apart. */
+const SAME_SPOT = 2 * TAP_SLOP
 
 /**
  * Whether `raw` is a tap made while the screen `previous` brought was still coming — a doubled tap's second touch, or a
- * touch that landed on a screen between two: iOS counted it a repeat (`tapCount` 2), or the app named nothing under it,
- * or did not report it at all. Only after a tap the app reported, so that neither is a device that reports none
+ * touch that landed on a screen between two: iOS counted it a repeat (`tapCount` 2), or, at the same spot, the app named
+ * nothing under it or did not report it at all. Only after a tap the app reported, so that neither is a device that reports none
  * (Android), where nothing says what either did. Its recorded picture is the screen from before `previous` acted, which
  * a replay that waits for that tap never sees: Match does not stop on it (part (d) of the Match repair plan).
  */
 export function madeMidTransition(raw: RawStep, previous: RawStep | undefined): boolean {
   if (raw.kind !== 'tap' || previous?.kind !== 'tap' || !previous.touched) return false
-  if (raw.at - previous.endAt >= MID_TRANSITION_MS) return false
+  if (raw.at - previous.at >= MID_TRANSITION_MS) return false
   const t = raw.touched
-  return !t || (t.tapCount ?? 1) >= 2 || !(t.element?.identifier || t.element?.label)
+  // iOS counts a repeat only at one spot; a touch it says nothing about must show it was one.
+  if (t && (t.tapCount ?? 1) >= 2) return true
+  const sameSpot = Math.hypot(raw.point[0] - previous.point[0], raw.point[1] - previous.point[1]) <= SAME_SPOT
+  return sameSpot && (!t || !(t.element?.identifier || t.element?.label))
 }
 
 /**

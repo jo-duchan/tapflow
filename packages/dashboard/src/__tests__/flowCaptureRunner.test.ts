@@ -877,6 +877,51 @@ describe('matchRange with the app\'s touch reports', () => {
       expect(matched.at(-1)!.fragile).toBeUndefined()
     })
 
+    it('is sent and marked when it comes right before typing, which the review never offers', async () => {
+      const s2 = second({ tapCount: 2, element: { label: 'Active', traits: 1 }, acted: false })
+      const typed = { ...textStep, at: 3_000, endAt: 3_000 } as unknown as RawStep
+      const { h, matched } = await run([launchStep, tapStep, first, s2, typed], (s) => s === s2)
+      expect(h.onDiverged).not.toHaveBeenCalled()
+      expect(log.filter((l) => l === 'replay tap')).toHaveLength(3)
+      expect(matched.find((m) => m.raw === s2)!.fragile).toBe('mid-transition')
+    })
+
+    it('leaves the tap before it to be pressed again by the step after it', async () => {
+      const s2 = second({ tapCount: 2, element: { label: 'Active', traits: 1 }, acted: false })
+      const next = { ...tapStep, point: [0.8, 0.2], at: 4_000, endAt: 4_100 } as unknown as RawStep
+      screen.elements = []
+      const compare = vi.fn(async (s: RawStep) => (s === s2 || s === next ? { diff: 0.2, nowUrl: 'blob:x', masks: [] } : null))
+      const tapDidNothing = vi.fn(async () => false)
+      const shot = { ...channel, screenshot: async () => new Uint8Array([1]) } as unknown as Channel
+      vi.stubGlobal('URL', Object.assign(URL, { createObjectURL: () => 'blob:x', revokeObjectURL: () => {} }))
+      const lease = new PauseLease(ctap)
+      await matchRange(ctap, shot, lease, [launchStep, tapStep, first, s2, next], { start: 0, end: 5 }, null,
+        { ...hooks(), compare, onDiverged: vi.fn(async () => {}), tapDidNothing, lookAgain: { forMs: 0, everyMs: 0 } })
+      await lease.stop()
+      expect(tapDidNothing).toHaveBeenCalledTimes(1)
+      expect((tapDidNothing.mock.calls[0] as unknown[])[0]).toBe(first)
+    })
+
+    it('still stops on an unnamed tap a key away, as on a keypad the app names nothing on', async () => {
+      const key2 = { ...second({ tapCount: 1 }), point: [0.62, 0.5] } as unknown as RawStep
+      const { h } = await run([launchStep, tapStep, first, key2], (s) => s === key2)
+      expect(h.onDiverged).toHaveBeenCalledTimes(1)
+    })
+
+    it('is not sent when it was named but could not be tapped on the new screen, and the app did nothing with it', async () => {
+      const s2 = second({ tapCount: 2, element: { label: 'Active', traits: 1 }, acted: false })
+      screen.elements = [{ role: 'button', label: 'Active', enabled: true, frame: { x: 0.2, y: 0.64, width: 0.3, height: 0.05 } }]
+      ran.answers = [{ status: 'failed', failureKind: 'product' }]
+      const compare = vi.fn(async (s: RawStep) => (s === s2 ? { diff: 0.2, nowUrl: 'blob:x', masks: [] } : null))
+      const h = { ...hooks(), compare, onDiverged: vi.fn(async () => {}), lookAgain: { forMs: 200, everyMs: 10 } }
+      const lease = new PauseLease(ctap)
+      await matchRange(ctap, channel, lease, [launchStep, tapStep, first, s2], { start: 0, end: 4 }, null, h)
+      await lease.stop()
+      expect(h.onDiverged).not.toHaveBeenCalled()
+      // The launch and the two taps before it at their points; the named one tried through the engine only.
+      expect(log.filter((l) => l === 'replay tap')).toHaveLength(2)
+    })
+
     it('still stops on a deliberate tap made a second later', async () => {
       const late = { ...second({ tapCount: 1 }), at: 2_500, endAt: 2_600 } as unknown as RawStep
       const { h } = await run([launchStep, tapStep, first, late], (s) => s === late)
