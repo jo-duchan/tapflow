@@ -483,6 +483,15 @@ describe('matchRange: comparing each step with its recording', () => {
       expect((await runWith({ areas: [LEFT], from: 0 })).stops).toEqual([])
     })
 
+    // Pre-PR review of (c): nothing to say is an answer too, kept for every look again at the step.
+    it('asks once per step, though it says nothing', async () => {
+      const carried = vi.fn(async () => null)
+      await matchRange(viewer, channel, lease, [tapStep, tapStep], { start: 0, end: 2 }, null, {
+        ...hooks(), lookAgain: { forMs: 100, everyMs: 10 }, compare: async () => leftDiffers, carried, onDiverged: async () => {},
+      })
+      expect(carried).toHaveBeenCalledTimes(1)
+    })
+
     // Pre-PR review of (c): an iOS touch is in the portrait framebuffer, the picture's own space; Android's is turned.
     it('places an iOS touch as it is and turns any other', async () => {
       const turns: unknown[] = []
