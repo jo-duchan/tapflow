@@ -203,7 +203,8 @@ export interface MatchHooks {
   /** What the device reset did before the replay, or `null` when its agent could not reset it (`resetDevice`). */
   onReset?: (report: HeldResetReport | null) => void
   /** The screen a step is about to act on against the one it was recorded on (1b-3b), `masks` left out of both: what it
-   *  measured when they differ, `null` when they look alike or cannot be compared. */
+   *  measured when they differ, `null` when they look alike. Rejects when they cannot be compared: no reason to stop at
+   *  the first look, and no match when looking again. */
   compare?: (step: RawStep, masks: ScreenRect[]) => Promise<ScreenDivergence | null>
   /** The screen a touch left, by its index into the matched steps (1b-3c): Edit's "after this tap". Not on the steps,
    *  which have gone to the dialog by then, and which Edit what matched takes as they are. */
@@ -437,17 +438,20 @@ export async function matchRange(
     const closedAtTop = lastClosed
     // Typing into a field the person focused before the range began: tapped first, and the tap goes into the flow.
     // The tree's frames are the app as drawn, which an iOS tap is not when the app is turned: then it is left as it was.
-    const focus = before && !before.interfaceTurn ? focusTap(raw, before.elements) : undefined
-    if (focus) {
+    const focusFirst = async (): Promise<RawStep | undefined> => {
+      const tapIt = before && !before.interfaceTurn ? focusTap(raw, before.elements) : undefined
+      if (!tapIt) return undefined
       const focusShot = await channel.screenshot(sessionId, hooks.signal).catch(() => null)
-      const focusMark = markOf(focus)
+      const focusMark = markOf(tapIt)
       if (focusMark) hooks.onTouch?.(focusMark)
-      await replayStep(channel, sessionId, focus, hooks.signal)
-      const tapped = matchStep(focus, { tree: before!.elements, postures: tap.postures().postures, platform: tap.platform })
+      await replayStep(channel, sessionId, tapIt, hooks.signal)
+      const tapped = matchStep(tapIt, { tree: before!.elements, postures: tap.postures().postures, platform: tap.platform })
       matched.push(tapped)
       hooks.onStep(tapped, focusShot ? URL.createObjectURL(new Blob([focusShot as BlobPart], { type: 'image/jpeg' })) : undefined, true)
       before = await waitForStableScreen(read, { timeoutMs: SETTLE_TIMEOUT_MS })
+      return tapIt
     }
+    let focus = await focusFirst()
     // Only iOS reports touches, and its points are never in the frame's space: the app's turn is all that places them.
     let named = before
       ? namedTap(raw, before.elements, previousSent(slice, offset), before.interfaceTurn !== undefined ? { interfaceTurn: before.interfaceTurn } : {})
@@ -550,6 +554,8 @@ export async function matchRange(
     // again, and named from that, the tap goes to its element rather than to a point on a screen that has moved.
     if (cameLate) {
       await rereadLate()
+      // A field read while the screen was late (a splash before the form) may only now be there to focus.
+      focus ??= await focusFirst()
       named = before
         ? namedTap(raw, before.elements, previousSent(slice, offset), before.interfaceTurn !== undefined ? { interfaceTurn: before.interfaceTurn } : {})
         : undefined

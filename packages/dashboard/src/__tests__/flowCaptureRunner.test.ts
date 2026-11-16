@@ -163,6 +163,26 @@ describe('matchRange', () => {
     expect((steps[1]!.raw as { point: number[] }).point).toEqual([0.5, 0.225])
   })
 
+  // CodeRabbit on #1174: the field read while the screen was late (a splash before the form) is focused once it came.
+  it('taps the field typing went into first when it only came with a late screen', async () => {
+    screen.elements = []
+    const field = { identifier: 'form.email', role: 'input', frame: { x: 0.1, y: 0.2, width: 0.8, height: 0.05 } }
+    const typed = { ...textStep, field: 'form.email' } as unknown as RawStep
+    const answers: Array<{ diff: number; nowUrl: string; masks: never[] } | null> = [null, { diff: 0.2, nowUrl: 'blob:splash', masks: [] }]
+    const compare = vi.fn(async () => {
+      const a = answers.shift()
+      if (a === undefined) { screen.elements = [field]; return null }
+      return a
+    })
+    const viewer = { ...(tap as object), chrome: () => null } as unknown as Tap
+    const lease = new PauseLease(viewer)
+    const steps = await matchRange(viewer, channel, lease, [tapStep, tapStep, typed], { start: 0, end: 3 }, null,
+      { ...hooks(), compare, onDiverged: vi.fn(async () => {}), lookAgain: { forMs: 200, everyMs: 10 } })
+    await lease.stop()
+    expect(log.filter((l) => l.startsWith('replay'))).toEqual(['replay tap', 'replay tap', 'replay tap', 'replay text'])
+    expect(steps.map((s) => s.raw.kind)).toEqual(['rotate', 'tap', 'tap', 'tap', 'text'])
+  })
+
   it('says to move the range when nothing has focus and the field cannot be found', async () => {
     const { copy } = await import('@/lib/flowCapture/copy')
     replay.refuse = true
@@ -1063,5 +1083,13 @@ describe('matchRange with the app\'s touch reports', () => {
     await matchRange(ctap, channel, lease, [launchStep, tapStep, tapStep, dropped, tapStep], { start: 0, end: 5 }, null, h)
     await lease.stop()
     expect(compare.mock.calls.map((c) => c[0])).toEqual([tapStep, tapStep])
+  })
+})
+
+// CodeRabbit on #1174: a picture that cannot be had is not a look-alike, or a look again would take it for a match.
+describe('compareWithRecording', () => {
+  it('rejects when the screen cannot be read, rather than saying it looks alike', async () => {
+    const { compareWithRecording } = await import('@/lib/flowCapture/screenCompare')
+    await expect(compareWithRecording('/r.jpg', null, [], new AbortController().signal)).rejects.toThrow()
   })
 })
