@@ -6,28 +6,30 @@ const SHOWN_WIDTH = 460
 
 /**
  * The step's recorded picture (1b-3b) against the frame the viewer draws now: a `ScreenDivergence` when they differ,
- * `null` when they look alike, or when either picture cannot be had or laid over the other — a picture missing is no
- * reason to stop a replay. The frame is drawn at the recorded picture's size the way `ThumbnailRecorder` drew that one
+ * `null` when they look alike. Throws when either picture cannot be had or laid over the other: the first look takes
+ * that as no reason to stop a replay, and a look again (`LOOK_AGAIN`) as no match, so it keeps looking. The frame is drawn at the recorded picture's size the way `ThumbnailRecorder` drew that one
  * (high-quality smoothing), so the two differ by what is on the screen and not by how each was scaled (`screenDiff`).
  */
 export async function compareWithRecording(
   recordedUrl: string, surface: CanvasImageSource | null, masks: ScreenRect[], signal: AbortSignal,
 ): Promise<ScreenDivergence | null> {
-  if (!surface || typeof createImageBitmap !== 'function') return null
+  if (!surface || typeof createImageBitmap !== 'function') throw new Error('The screen cannot be read here.')
   const response = await fetch(recordedUrl, { credentials: 'include', signal })
-  if (!response.ok) return null
+  if (!response.ok) throw new Error(`The recorded picture could not be had (${response.status}).`)
   const recorded = await createImageBitmap(await response.blob())
   // The frame now, held: the viewer draws the next one into the same surface.
   const now = await createImageBitmap(surface as ImageBitmapSource).catch((e: unknown) => { recorded.close(); throw e })
   try {
-    if (!sameShape(recorded, now)) return null
+    if (!sameShape(recorded, now)) throw new Error('The two pictures are of different shapes.')
     const a = pixelsOf(recorded, recorded.width, recorded.height)
     const b = pixelsOf(now, recorded.width, recorded.height)
-    if (!a || !b) return null
+    if (!a || !b) throw new Error('The pictures could not be drawn.')
     const diff = screenDiff(a, b, masks)
-    if (diff === 'incomparable' || diff <= SCREEN_DIFF_THRESHOLD) return null
+    if (diff === 'incomparable') throw new Error('The two pictures cannot be laid over each other.')
+    if (diff <= SCREEN_DIFF_THRESHOLD) return null
     const nowUrl = await jpegUrl(now)
-    return nowUrl ? { diff, nowUrl, masks } : null
+    if (!nowUrl) throw new Error('The replay\'s picture could not be kept.')
+    return { diff, nowUrl, masks }
   } finally {
     recorded.close()
     now.close()
