@@ -125,7 +125,7 @@ describe('screenCells and diffAreas', () => {
     // The same across: columns 0 and 2 of one row join, 0 and 4 do not.
     const across = (cols: number[]) => {
       const cells = new Uint8Array(5 * 3)
-      for (const c of cols) cells[3 + c] = 1
+      for (const c of cols) cells[5 + c] = 1
       return { cells, gridWidth: 5, gridHeight: 3 }
     }
     expect(diffAreas(across([0, 2]))).toHaveLength(1)
