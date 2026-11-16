@@ -67,22 +67,93 @@ export function sameShape(a: { width: number; height: number }, b: { width: numb
  * different rows, which read 0.06–0.10.
  */
 export function screenDiff(recorded: Pixels, now: Pixels, masks: readonly Rect[]): number | 'incomparable' {
+  const cells = screenCells(recorded, now, masks)
+  return cells === 'incomparable' ? cells : cells.share
+}
+
+/** `screenDiff`'s grid, cell by cell: `cells[y * gridWidth + x]` is `DIFFERS` where that cell differs, `MASKED` where it
+ *  was left out, 0 where it is alike. What a stop draws its boxes from (`diffAreas`). */
+export interface ScreenCells { share: number; cells: Uint8Array; gridWidth: number; gridHeight: number }
+
+const DIFFERS = 1
+const MASKED = 2
+
+export function screenCells(recorded: Pixels, now: Pixels, masks: readonly Rect[]): ScreenCells | 'incomparable' {
   if (recorded.width !== now.width || recorded.height !== now.height) return 'incomparable'
   const gridHeight = Math.max(1, Math.round(GRID_WIDTH * recorded.height / recorded.width))
   const a = shrink(gray(recorded), recorded.width, recorded.height, GRID_WIDTH, gridHeight)
   const b = shrink(gray(now), now.width, now.height, GRID_WIDTH, gridHeight)
+  const cells = new Uint8Array(GRID_WIDTH * gridHeight)
   let compared = 0
   let differing = 0
   for (let y = 0; y < gridHeight; y++) {
     for (let x = 0; x < GRID_WIDTH; x++) {
       const cell = { x: x / GRID_WIDTH, y: y / gridHeight, width: 1 / GRID_WIDTH, height: 1 / gridHeight }
-      if (masks.some((m) => overlaps(cell, m))) continue
-      compared++
       const i = y * GRID_WIDTH + x
-      if (Math.abs(a[i]! - b[i]!) > CELL_DIFF) differing++
+      if (masks.some((m) => overlaps(cell, m))) { cells[i] = MASKED; continue }
+      compared++
+      if (Math.abs(a[i]! - b[i]!) > CELL_DIFF) { differing++; cells[i] = DIFFERS }
     }
   }
-  return compared === 0 ? 'incomparable' : differing / compared
+  return compared === 0 ? 'incomparable' : { share: differing / compared, cells, gridWidth: GRID_WIDTH, gridHeight }
+}
+
+/** The same grid with `areas` left out as well, its share measured over what is left: a difference judged again once a
+ *  person has said those areas are not what matters (Flow Capture's Continue anyway). */
+export function withoutAreas(c: ScreenCells, areas: readonly Rect[]): ScreenCells {
+  const cells = new Uint8Array(c.cells)
+  let compared = 0
+  let differing = 0
+  for (let i = 0; i < cells.length; i++) {
+    if (cells[i] === MASKED) continue
+    const x = i % c.gridWidth
+    const y = (i - x) / c.gridWidth
+    const cell = { x: x / c.gridWidth, y: y / c.gridHeight, width: 1 / c.gridWidth, height: 1 / c.gridHeight }
+    if (areas.some((m) => overlaps(cell, m))) { cells[i] = MASKED; continue }
+    compared++
+    if (cells[i] === DIFFERS) differing++
+  }
+  return { ...c, cells, share: compared === 0 ? 0 : differing / compared }
+}
+
+/**
+ * Where two pictures differ, as boxes a person can look at: the differing cells grouped by touch, cells with up to
+ * `JOIN_GAP` unchanged cells between them counted as touching, each group as its bounding box in fractions of the picture.
+ * Largest first.
+ */
+/** Measured on Food Truck's Truck screen recorded at different times (an animated scene, order cards the app makes):
+ *  one cell apart drew 9 and 23 boxes for what a person reads as 3 or 4 places; three apart drew 4 and 12, covering 24 %
+ *  of the picture where one apart covered 14 %. Five apart joined the whole scene into one box. How far apart boxes are
+ *  joined did not change whether a later run differed outside them: the cards it differed by were new ones. */
+const JOIN_GAP = 3
+
+export function diffAreas({ cells, gridWidth, gridHeight }: Pick<ScreenCells, 'cells' | 'gridWidth' | 'gridHeight'>): Rect[] {
+  const seen = new Uint8Array(cells.length)
+  const areas: { rect: Rect; size: number }[] = []
+  for (let start = 0; start < cells.length; start++) {
+    if (cells[start] !== DIFFERS || seen[start]) continue
+    seen[start] = 1
+    const queue = [start]
+    let [minX, minY, maxX, maxY, size] = [gridWidth, gridHeight, -1, -1, 0]
+    while (queue.length > 0) {
+      const i = queue.pop()!
+      const x = i % gridWidth
+      const y = (i - x) / gridWidth
+      size++
+      minX = Math.min(minX, x); maxX = Math.max(maxX, x); minY = Math.min(minY, y); maxY = Math.max(maxY, y)
+      for (let dy = -JOIN_GAP - 1; dy <= JOIN_GAP + 1; dy++) {
+        for (let dx = -JOIN_GAP - 1; dx <= JOIN_GAP + 1; dx++) {
+          const nx = x + dx
+          const ny = y + dy
+          if (nx < 0 || ny < 0 || nx >= gridWidth || ny >= gridHeight) continue
+          const j = ny * gridWidth + nx
+          if (cells[j] === DIFFERS && !seen[j]) { seen[j] = 1; queue.push(j) }
+        }
+      }
+    }
+    areas.push({ size, rect: { x: minX / gridWidth, y: minY / gridHeight, width: (maxX - minX + 1) / gridWidth, height: (maxY - minY + 1) / gridHeight } })
+  }
+  return areas.sort((a, b) => b.size - a.size).map((a) => a.rect)
 }
 
 const overlaps = (a: Rect, b: Rect): boolean =>

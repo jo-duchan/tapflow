@@ -1,9 +1,13 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import type { RawStep } from '@tapflowio/flow-runner/browser'
+import type { RawStep, ScreenCells } from '@tapflowio/flow-runner/browser'
+import type { ScreenDivergence } from '@/lib/flowCapture/runner'
+import type { Carried } from '@/lib/flowCapture/remembered'
 
 // Flow Capture's replay (#1125): the order the device is put back in before the first step, and the pause on
 // recording that every step is held to. The engine's own matching is flow-runner's and tested there; here it only
 // has to be called, so it is stubbed to say what it was called with.
+/** A grid with one cell, differing: what a stub divergence was measured on. */
+const NO_CELLS: ScreenCells = { share: 1, cells: new Uint8Array([1]), gridWidth: 1, gridHeight: 1 }
 const log: string[] = []
 // What the screen reads as before each step: one test puts a field on it.
 const screen: { elements: unknown[]; interfaceTurn?: number } = { elements: [] }
@@ -168,7 +172,7 @@ describe('matchRange', () => {
     screen.elements = []
     const field = { identifier: 'form.email', role: 'input', frame: { x: 0.1, y: 0.2, width: 0.8, height: 0.05 } }
     const typed = { ...textStep, field: 'form.email' } as unknown as RawStep
-    const answers: Array<{ diff: number; nowUrl: string; masks: never[] } | null> = [null, { diff: 0.2, nowUrl: 'blob:splash', masks: [] }]
+    const answers: Array<ScreenDivergence | null> = [null, { diff: 0.2, nowUrl: 'blob:splash', masks: [], areas: [], mostly: false, cells: NO_CELLS }]
     const compare = vi.fn(async () => {
       const a = answers.shift()
       if (a === undefined) { screen.elements = [field]; return null }
@@ -378,7 +382,7 @@ describe('matchRange: comparing each step with its recording', () => {
   const lease = { start: async () => {}, ensure: async () => {}, stop: async () => {} } as unknown as InstanceType<typeof PauseLease>
   const viewer = { ...tap, chrome: () => null } as unknown as Tap
   const KEYS = { x: 0, y: 0.6, width: 1, height: 0.4 }
-  const differs = { diff: 0.2, nowUrl: 'blob:now', masks: [] }
+  const differs = { diff: 0.2, nowUrl: 'blob:now', masks: [], areas: [], mostly: false, cells: NO_CELLS }
 
   it('compares a step before it is replayed, the status bar and the recorded keyboard left out', async () => {
     const compared: unknown[] = []
@@ -418,6 +422,96 @@ describe('matchRange: comparing each step with its recording', () => {
     await run
     expect(at).toEqual([1])
     expect(log.filter((l) => l === 'replay tap')).toHaveLength(2)
+  })
+
+  // (c), R6: what an earlier Continue anyway set aside is applied where Match decides to stop, by index into `steps`.
+  describe('areas an earlier stop set aside', () => {
+    // Two cells side by side, the left one differing.
+    const leftDiffers = { ...differs, cells: { share: 0.5, cells: new Uint8Array([1, 0]), gridWidth: 2, gridHeight: 1 } }
+    const LEFT = { x: 0, y: 0, width: 0.5, height: 1 }
+    const RIGHT = { x: 0.5, y: 0, width: 0.5, height: 1 }
+    const runWith = async (carried: Carried) => {
+      const asked: number[] = []
+      const stops: ScreenDivergence[] = []
+      await matchRange(viewer, channel, lease, [tapStep, tapStep, tapStep], { start: 1, end: 3 }, null, {
+        ...hooks(),
+        compare: async () => leftDiffers,
+        carried: async (index) => { asked.push(index); return carried },
+        onDiverged: async (_i, d) => { stops.push(d) },
+      })
+      return { asked, stops }
+    }
+
+    it('goes on where they cover every place it differs', async () => {
+      const { asked, stops } = await runWith({ areas: [LEFT], from: 0 })
+      expect(stops).toEqual([])
+      // Into `steps`, not the range: the range starts at 1.
+      expect(asked).toEqual([2])
+    })
+
+    it('stops where they do not, with what was set aside drawn and said', async () => {
+      const { stops } = await runWith({ areas: [RIGHT], from: 0 })
+      expect(stops).toHaveLength(1)
+      expect(stops[0]!.carried).toEqual({ count: 1, from: 0 })
+      expect(stops[0]!.masks).toContainEqual(RIGHT)
+      expect(stops[0]!.areas).toHaveLength(1)
+    })
+
+    // A first look that differs past the set-aside areas, then a look where only they differ: the screen came.
+    it('goes on once a look again differs only where the areas are', async () => {
+      const looks = [{ ...leftDiffers, cells: { ...leftDiffers.cells, cells: new Uint8Array([1, 1]), share: 1 } }, leftDiffers]
+      const stops: ScreenDivergence[] = []
+      await matchRange(viewer, channel, lease, [tapStep, tapStep], { start: 0, end: 2 }, null, {
+        ...hooks(),
+        lookAgain: { forMs: 200, everyMs: 10 },
+        compare: async () => looks.shift() ?? leftDiffers,
+        carried: async () => ({ areas: [LEFT], from: 0 }),
+        onDiverged: async (_i, d) => { stops.push(d) },
+      })
+      expect(stops).toEqual([])
+    })
+
+    // Pre-PR review of (c): areas accepted of one screen do not let a screen mostly different now go by.
+    it('stops on a screen mostly different now whatever was set aside, and goes on with the same areas when it is not', async () => {
+      const mostly = { ...leftDiffers, mostly: true }
+      const stops: ScreenDivergence[] = []
+      await matchRange(viewer, channel, lease, [tapStep, tapStep], { start: 0, end: 2 }, null, {
+        ...hooks(), compare: async () => mostly, carried: async () => ({ areas: [LEFT], from: 1 }),
+        onDiverged: async (_i, d) => { stops.push(d) },
+      })
+      expect(stops).toHaveLength(1)
+      expect((await runWith({ areas: [LEFT], from: 0 })).stops).toEqual([])
+    })
+
+    // Pre-PR review of (c): nothing to say is an answer too, kept for every look again at the step.
+    it('asks once per step, though it says nothing', async () => {
+      const carried = vi.fn(async () => null)
+      await matchRange(viewer, channel, lease, [tapStep, tapStep], { start: 0, end: 2 }, null, {
+        ...hooks(), lookAgain: { forMs: 100, everyMs: 10 }, compare: async () => leftDiffers, carried, onDiverged: async () => {},
+      })
+      expect(carried).toHaveBeenCalledTimes(1)
+    })
+
+    // Pre-PR review of (c): an iOS touch is in the portrait framebuffer, the picture's own space; Android's is turned.
+    it('places an iOS touch as it is and turns any other', async () => {
+      const turns: unknown[] = []
+      const run = (on: Tap) => matchRange(on, channel, lease, [tapStep, tapStep], { start: 0, end: 2 }, null, {
+        ...hooks(), compare: async () => leftDiffers,
+        carried: async (_i, _s, _m, turn) => { turns.push(turn); return null },
+        onDiverged: async () => {},
+      })
+      screen.interfaceTurn = 90
+      try {
+        await run(viewer)
+        await run({ ...(viewer as object), platform: 'android' } as unknown as Tap)
+      } finally { delete screen.interfaceTurn }
+      expect(turns).toEqual([undefined, 90])
+    })
+
+    it('goes on past a step the person said is mostly different, and stops without anything remembered', async () => {
+      expect((await runWith('skip')).stops).toEqual([])
+      expect((await runWith(null)).stops).toHaveLength(1)
+    })
   })
 
   it('replays nothing more when the run is stopped while it waits', async () => {
@@ -699,7 +793,7 @@ describe('matchRange: a tap that did nothing on the replay', () => {
   const run = async (didNothing: boolean, stillDiffers = false) => {
     vi.stubGlobal('URL', Object.assign(URL, { createObjectURL: () => 'blob:x', revokeObjectURL: () => {} }))
     let asked = 0
-    const compare = vi.fn(async (raw: RawStep) => (raw === back && (asked++ === 0 || stillDiffers) ? { diff: 0.2, nowUrl: 'blob:now', masks: [] } : null))
+    const compare = vi.fn(async (raw: RawStep) => (raw === back && (asked++ === 0 || stillDiffers) ? { diff: 0.2, nowUrl: 'blob:now', masks: [], areas: [], mostly: false, cells: NO_CELLS } : null))
     const tapDidNothing = vi.fn(async () => didNothing)
     const onDiverged = vi.fn(async () => {})
     const watched: number[] = []
@@ -728,7 +822,7 @@ describe('matchRange: a tap that did nothing on the replay', () => {
     const tapDidNothing = vi.fn(async () => true)
     const onDiverged = vi.fn(async () => {})
     let asked = 0
-    const compare = vi.fn(async (raw: RawStep) => (raw === back && asked++ === 0 ? { diff: 0.2, nowUrl: 'blob:now', masks: [] } : null))
+    const compare = vi.fn(async (raw: RawStep) => (raw === back && asked++ === 0 ? { diff: 0.2, nowUrl: 'blob:now', masks: [], areas: [], mostly: false, cells: NO_CELLS } : null))
     const lease = new PauseLease(ctap)
     screen.elements = [{ role: 'text', label: 'Plain', enabled: true, frame: { x: 0.6, y: 0.8, width: 0.2, height: 0.03 } }]
     // The menu item's press chose Blueberry in the tree, whatever the picture says.
@@ -751,7 +845,7 @@ describe('matchRange: a tap that did nothing on the replay', () => {
     // A second after the menu item, as a person goes back: not a touch made while its screen was still coming.
     const backLater = { ...back, at: menuItem.at + 1_500, endAt: menuItem.at + 1_600 } as RawStep
     let asked = 0
-    const compare = vi.fn(async (raw: RawStep) => (raw === backLater && asked++ === 0 ? { diff: 0.2, nowUrl: 'blob:now', masks: [] } : null))
+    const compare = vi.fn(async (raw: RawStep) => (raw === backLater && asked++ === 0 ? { diff: 0.2, nowUrl: 'blob:now', masks: [], areas: [], mostly: false, cells: NO_CELLS } : null))
     const lease = new PauseLease(ctap)
     // Pressed again, the engine does not find it: no tap at the recorded point in its place.
     ran.answers = [{ status: 'passed' }, { status: 'failed', failureKind: 'product' }]
@@ -834,7 +928,7 @@ describe('matchRange with the app\'s touch reports', () => {
     const second = (touched?: object) => ({ ...tapStep, at: 1_250, endAt: 1_350, ...(touched ? { touched: { point: { x: 0.3, y: 0.66 }, moving: false, ...touched } } : {}) }) as unknown as RawStep
     const run = async (steps: RawStep[], differs: (s: RawStep) => boolean) => {
       screen.elements = []
-      const compare = vi.fn(async (s: RawStep) => (differs(s) ? { diff: 0.2, nowUrl: 'blob:x', masks: [] } : null))
+      const compare = vi.fn(async (s: RawStep) => (differs(s) ? { diff: 0.2, nowUrl: 'blob:x', masks: [], areas: [], mostly: false, cells: NO_CELLS } : null))
       const h = { ...hooks(), compare, onDiverged: vi.fn(async () => {}), lookAgain: { forMs: 200, everyMs: 10 } }
       const lease = new PauseLease(ctap)
       const matched = await matchRange(ctap, channel, lease, steps, { start: 0, end: steps.length }, null, h)
@@ -852,6 +946,19 @@ describe('matchRange with the app\'s touch reports', () => {
       // Matched, not skipped: the review of taps the app ignored (`noResponseTaps`) offers it, left out by default.
       expect(matched.at(-1)!.raw).toBe(s2)
       expect(matched.at(-1)!.skipped).toBeUndefined()
+    })
+
+    // Design review of (c): what Continue anyway set aside must not turn the rule off, or the tap would be sent.
+    it('is not sent when an earlier stop set its screen aside either', async () => {
+      const s2 = second({ tapCount: 2, element: { label: 'Active', traits: 1 }, acted: false })
+      const carried = vi.fn(async () => 'skip' as const)
+      screen.elements = []
+      const compare = vi.fn(async (s: RawStep) => (s === s2 ? { diff: 0.2, nowUrl: 'blob:x', masks: [], areas: [], mostly: false, cells: NO_CELLS } : null))
+      const lease = new PauseLease(ctap)
+      await matchRange(ctap, channel, lease, [launchStep, tapStep, first, s2], { start: 0, end: 4 }, null, { ...hooks(), compare, carried, onDiverged: vi.fn(async () => {}) })
+      await lease.stop()
+      expect(log.filter((l) => l === 'replay tap')).toHaveLength(2)
+      expect(carried).not.toHaveBeenCalled()
     })
 
     it('is replayed without stopping when the app acted on it', async () => {
@@ -890,7 +997,7 @@ describe('matchRange with the app\'s touch reports', () => {
       const s2 = second({ tapCount: 2, element: { label: 'Active', traits: 1 }, acted: false })
       const next = { ...tapStep, point: [0.8, 0.2], at: 4_000, endAt: 4_100 } as unknown as RawStep
       screen.elements = []
-      const compare = vi.fn(async (s: RawStep) => (s === s2 || s === next ? { diff: 0.2, nowUrl: 'blob:x', masks: [] } : null))
+      const compare = vi.fn(async (s: RawStep) => (s === s2 || s === next ? { diff: 0.2, nowUrl: 'blob:x', masks: [], areas: [], mostly: false, cells: NO_CELLS } : null))
       const tapDidNothing = vi.fn(async () => false)
       const shot = { ...channel, screenshot: async () => new Uint8Array([1]) } as unknown as Channel
       vi.stubGlobal('URL', Object.assign(URL, { createObjectURL: () => 'blob:x', revokeObjectURL: () => {} }))
@@ -908,7 +1015,7 @@ describe('matchRange with the app\'s touch reports', () => {
       const next = { ...tapStep, point: [0.8, 0.2], at: 4_000, endAt: 4_100 } as unknown as RawStep
       screen.elements = []
       let asked = 0
-      const compare = vi.fn(async (s: RawStep) => (s === s2 || (s === next && asked++ === 0) ? { diff: 0.2, nowUrl: 'blob:x', masks: [] } : null))
+      const compare = vi.fn(async (s: RawStep) => (s === s2 || (s === next && asked++ === 0) ? { diff: 0.2, nowUrl: 'blob:x', masks: [], areas: [], mostly: false, cells: NO_CELLS } : null))
       const shot = { ...channel, screenshot: async () => new Uint8Array([1]) } as unknown as Channel
       vi.stubGlobal('URL', Object.assign(URL, { createObjectURL: () => 'blob:x', revokeObjectURL: () => {} }))
       const watched: number[] = []
@@ -939,7 +1046,7 @@ describe('matchRange with the app\'s touch reports', () => {
       const s2 = second({ tapCount: 2, element: { label: 'Active', traits: 1 }, acted: false })
       screen.elements = [{ role: 'button', label: 'Active', enabled: true, frame: { x: 0.2, y: 0.64, width: 0.3, height: 0.05 } }]
       ran.answers = [{ status: 'failed', failureKind: 'product' }]
-      const compare = vi.fn(async (s: RawStep) => (s === s2 ? { diff: 0.2, nowUrl: 'blob:x', masks: [] } : null))
+      const compare = vi.fn(async (s: RawStep) => (s === s2 ? { diff: 0.2, nowUrl: 'blob:x', masks: [], areas: [], mostly: false, cells: NO_CELLS } : null))
       const h = { ...hooks(), compare, onDiverged: vi.fn(async () => {}), lookAgain: { forMs: 200, everyMs: 10 } }
       const lease = new PauseLease(ctap)
       await matchRange(ctap, channel, lease, [launchStep, tapStep, first, s2], { start: 0, end: 4 }, null, h)
@@ -960,7 +1067,7 @@ describe('matchRange with the app\'s touch reports', () => {
   // splash before the first screen): looked at again until it matches the recording, and only then judged.
   describe('a screen that is late', () => {
     const quick = { forMs: 200, everyMs: 10 }
-    const late = (n: number) => ({ diff: 0.2, nowUrl: `blob:now${n}`, masks: [] })
+    const late = (n: number) => ({ diff: 0.2, nowUrl: `blob:now${n}`, masks: [], areas: [], mostly: false, cells: NO_CELLS })
 
     it('goes on without stopping when the screen comes to match while it looks again', async () => {
       screen.elements = []
