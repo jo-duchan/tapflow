@@ -122,6 +122,14 @@ describe('screenCells and diffAreas', () => {
     }
     expect(diffAreas(grid([0, 2]))).toHaveLength(1)
     expect(diffAreas(grid([0, 4]))).toHaveLength(2)
+    // The same across: columns 0 and 2 of one row join, 0 and 4 do not.
+    const across = (cols: number[]) => {
+      const cells = new Uint8Array(5 * 3)
+      for (const c of cols) cells[3 + c] = 1
+      return { cells, gridWidth: 5, gridHeight: 3 }
+    }
+    expect(diffAreas(across([0, 2]))).toHaveLength(1)
+    expect(diffAreas(across([0, 4]))).toHaveLength(2)
   })
 
   it('measures what is left over the cells still compared, never over masked ones', () => {
