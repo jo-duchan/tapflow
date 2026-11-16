@@ -11,9 +11,10 @@ import { defineConfig } from 'vitest/config'
  * 1889-test run for exactly that reason: `ios-agent` stands up a real `RelayServer`, and the relay
  * it stood up was the previous one. It surfaced only when the pre-commit `tsc -b` refreshed `dist`.
  *
- * `ssr.resolve`, not `resolve`: vitest runs in node, so it takes the SSR resolution path. Measured
+ * `ssr.resolve`, not `resolve`: a node-environment test takes the SSR resolution path. Measured
  * — `resolve.conditions`, `NODE_OPTIONS=--conditions=source` and `server.deps.inline` all still
- * loaded `dist`; only this one switched.
+ * loaded `dist`; only this one switched. A jsdom suite resolves on the client side instead and needs
+ * `resolve.conditions` too (the dashboard's config).
  *
  * Why not point the manifests at source instead, which would need no config at all: `pnpm deploy`
  * does not apply `publishConfig`, so the Docker image would ship `node_modules` full of `.ts` and

@@ -194,6 +194,38 @@ describe('and the resolution really lands on source', () => {
     }
   }, 120_000)
 
+  // The dashboard's tests run in jsdom, on vite's client resolution: `sourceFirst`'s `ssr.resolve` does not reach them,
+  // and every flow-runner import there loaded `dist` until its config prepended `source` to `resolve.conditions`
+  // (measured with DEBUG=vite:resolve). The marker is a string statement inside a function's body, read back through
+  // its source text: an `export const` appended to `dist/browser.js` read as absent from the namespace even while
+  // `dist` was what loaded, and a comment would go if a transform ever stripped comments, passing on `dist` again.
+  // Put back only if the file is still as planted: a flow-runner build in another test file (dashboardFirstLoadBudget)
+  // may have written it since, and restoring `before` over that would leave `dist` silently stale.
+  it('the dashboard flow-runner import runs source, not dist', () => {
+    const SCHEMA_DIST = join(PKGS, 'flow-runner', 'dist', 'schema.js')
+    const packageDir = join(PKGS, 'dashboard')
+    const probe = join(packageDir, 'src', '__tests__', 'zz-source-resolution.probe.test.ts')
+    const marker = '__RAN_FLOW_RUNNER_FROM_DIST__'
+    if (!existsSync(SCHEMA_DIST)) throw new Error('packages/flow-runner/dist/schema.js is missing — run `pnpm build` first')
+    const before = readFileSync(SCHEMA_DIST, 'utf8')
+    if (!before.includes('function parseFlow(')) throw new Error('flow-runner/dist/schema.js no longer defines parseFlow — move the marker')
+    const planted = before.replace(/function parseFlow\(([^)]*)\) \{/, `function parseFlow($1) { '${marker}';`)
+    if (planted === before) throw new Error('could not plant the marker in parseFlow — move it')
+    writeFileSync(SCHEMA_DIST, planted)
+    try {
+      writeFileSync(probe, [
+        `import { it, expect } from 'vitest'`,
+        `import { parseFlow } from '@tapflowio/flow-runner/browser'`,
+        `it('resolves to source', () => { expect(parseFlow.toString()).not.toContain('${marker}') })`,
+        '',
+      ].join('\n'))
+      runProbe(packageDir, probe)
+    } finally {
+      rmSync(probe, { force: true })
+      if (readFileSync(SCHEMA_DIST, 'utf8') === planted) writeFileSync(SCHEMA_DIST, before)
+    }
+  }, 120_000)
+
   it('the MCP flow-runner import does not see a symbol that exists only in dist', () => {
     const FLOW_RUNNER_DIST = join(PKGS, 'flow-runner', 'dist', 'index.js')
     const packageDir = join(PKGS, 'mcp-server')
@@ -201,7 +233,8 @@ describe('and the resolution really lands on source', () => {
     const marker = '__LOADED_FLOW_RUNNER_FROM_DIST__'
     if (!existsSync(FLOW_RUNNER_DIST)) throw new Error('packages/flow-runner/dist/index.js is missing — run `pnpm build` first')
     const before = readFileSync(FLOW_RUNNER_DIST, 'utf8')
-    appendFileSync(FLOW_RUNNER_DIST, `\nexport const ${marker} = true;\n`)
+    const planted = `${before}\nexport const ${marker} = true;\n`
+    writeFileSync(FLOW_RUNNER_DIST, planted)
     try {
       writeFileSync(probe, [
         `import { it, expect } from 'vitest'`,
@@ -212,7 +245,8 @@ describe('and the resolution really lands on source', () => {
       runProbe(packageDir, probe)
     } finally {
       rmSync(probe, { force: true })
-      writeFileSync(FLOW_RUNNER_DIST, before)
+      // As above: a build in another file may have written it since.
+      if (readFileSync(FLOW_RUNNER_DIST, 'utf8') === planted) writeFileSync(FLOW_RUNNER_DIST, before)
     }
   }, 120_000)
 })
