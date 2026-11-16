@@ -26,8 +26,8 @@ export const MAX_CARRIED_SHARE = 0.25
  * check made for the grid's blindness to text, #1171) — and never over the point the step touches, so its target is
  * still compared. At the step it was accepted at, the person's own word holds whatever it covers.
  *
- * Applied only where Match decides to stop, never to the comparison itself: whether a tap came mid-transition and
- * whether to press the one before it again are judged on the screen as compared, as before (review of (c)).
+ * Applied only where Match decides to stop, after the mid-transition rule, which judges the screen as compared (design
+ * review of (c)). A step let go on this way is not looked at again, nor is the tap before it pressed again.
  */
 export class Remembered {
   private accepted: Accepted[] = []
@@ -56,11 +56,14 @@ export class Remembered {
     const areas = same.flatMap((e) => e.areas)
     let from = same.length > 0 ? index : undefined
     const point = touchPointOf(step, turn)
+    // Held to the cap together, not entry by entry: three areas of a fifth each leave the same bars to judge by.
+    let others = 0
     for (const e of this.accepted) {
-      if (e.index === index || e.mostly || !recordedUrl || coverage(e.areas) > MAX_CARRIED_SHARE) continue
+      if (e.index === index || e.mostly || !recordedUrl) continue
       const kept = point ? e.areas.filter((a) => !contains(a, point)) : e.areas
-      if (kept.length === 0) continue
+      if (kept.length === 0 || others + coverage(kept) > MAX_CARRIED_SHARE) continue
       if (!(await this.verdict(e, index, recordedUrl, masks, signal))) continue
+      others += coverage(kept)
       areas.push(...kept)
       from = Math.min(from ?? e.index, e.index)
     }
@@ -75,13 +78,13 @@ export class Remembered {
     if (known) return known
     const asked = this.alike(e.recordedUrl, recordedUrl, [...masks, ...e.areas], signal).catch(() => false)
     this.verdicts.set(key, asked)
-    void asked.then(() => { if (signal?.aborted) this.verdicts.delete(key) })
+    void asked.then(() => { if (signal?.aborted && this.verdicts.get(key) === asked) this.verdicts.delete(key) })
     return asked
   }
 }
 
-/** Where the step touches, in the picture's space: a point the screen the device draws is turned into the frame, as the
- *  status bar is, unless it was made in the frame. */
+/** Where the step touches, in the picture's space: turned by `turn` (none for iOS, whose touches are in the portrait
+ *  framebuffer the picture is), unless it was made in the frame. */
 function touchPointOf(step: RawStep, turn: InterfaceTurn | undefined): [number, number] | null {
   if (step.kind !== 'tap' && step.kind !== 'longPress' && step.kind !== 'swipe' && step.kind !== 'holdDrag') return null
   const p = step.kind === 'tap' || step.kind === 'longPress' ? step.point : step.from

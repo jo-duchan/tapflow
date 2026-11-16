@@ -582,7 +582,7 @@ function DivergedView({ state, onTakeWhatMatched, onBackToRange, onContinueAnywa
     dropped.length > 0 ? copy.divergedDropped(spanOf(dropped), dropped.length, dropped.every((i) => state.steps[i]!.dropped === state.steps[dropped[0]!]!.dropped) ? state.steps[dropped[0]!]!.dropped ?? null : null) : null,
     before.length > 0 ? copy.divergedBefore(spanOf(before), before.length, startMoves) : null,
     done > 0 ? copy.divergedMatched(done) : null,
-    d.carried ? copy.divergedCarried(d.carried.count, stepOf(d.carried.from)) : null,
+    d.carried ? copy.divergedCarried(d.carried.count, d.carried.from === d.index ? null : stepOf(d.carried.from)) : null,
   ].filter(Boolean).join(' ')
   // Boxed place by place unless most of it differs, or nothing could be boxed: then the picture is outlined as a whole.
   const boxes = d.mostly ? [] : d.areas

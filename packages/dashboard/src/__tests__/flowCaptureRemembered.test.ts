@@ -65,6 +65,15 @@ describe('what Continue anyway remembers', () => {
     expect(await r.carried(6, tap(0.5, 0.9), '/t/6', MASKS, undefined)).toEqual({ areas: [SKY], from: 3 })
   })
 
+  // Pre-PR review of (c): the cap holds the areas carried together, not each accepted stop alone.
+  it('carries areas from several stops only up to the cap together', async () => {
+    const { r } = made(true)
+    const fifth = (y: number) => ({ x: 0, y, width: 1, height: 0.15 })
+    r.accept({ index: 1, recordedUrl: '/t/1', areas: [fifth(0.1)], mostly: false })
+    r.accept({ index: 2, recordedUrl: '/t/2', areas: [fifth(0.3)], mostly: false })
+    expect(await r.carried(5, tap(0.5, 0.9), '/t/5', MASKS, undefined)).toEqual({ areas: [fifth(0.1)], from: 1 })
+  })
+
   it('skips only the step a mostly different stop was accepted at, and carries nothing from it', async () => {
     const { r, asked } = made(true)
     r.accept({ index: 2, recordedUrl: '/t/2', areas: [SKY], mostly: true })

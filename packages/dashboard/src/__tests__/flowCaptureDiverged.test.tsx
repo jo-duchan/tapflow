@@ -160,6 +160,12 @@ describe('Match stopped at a step that looked different', () => {
     expect(screen.getByText('If it’s the same screen, continue anyway. This step won’t be compared again.')).toBeInTheDocument()
   })
 
+  it('names no step when the areas were set aside at this one', () => {
+    render(<MatchScreen state={reduce(matching, { type: 'diverged', ...divergence, carried: { count: 1, from: 4 } })} {...handlers()} />)
+    expect(screen.getByText(/1 area on this screen isn’t compared\./)).toBeInTheDocument()
+    expect(screen.queryByText(/from step/)).not.toBeInTheDocument()
+  })
+
   it('says how many areas an earlier stop left out of this screen, and from which step', () => {
     render(<MatchScreen state={reduce(matching, { type: 'diverged', ...divergence, carried: { count: 3, from: 3 } })} {...handlers()} />)
     expect(screen.getByText(/3 areas on this screen aren’t compared, from step 1\./)).toBeInTheDocument()

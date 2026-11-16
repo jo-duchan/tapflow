@@ -471,6 +471,34 @@ describe('matchRange: comparing each step with its recording', () => {
       expect(stops).toEqual([])
     })
 
+    // Pre-PR review of (c): areas accepted of one screen do not let a screen mostly different now go by.
+    it('stops on a screen mostly different now whatever was set aside, and goes on with the same areas when it is not', async () => {
+      const mostly = { ...leftDiffers, mostly: true }
+      const stops: ScreenDivergence[] = []
+      await matchRange(viewer, channel, lease, [tapStep, tapStep], { start: 0, end: 2 }, null, {
+        ...hooks(), compare: async () => mostly, carried: async () => ({ areas: [LEFT], from: 1 }),
+        onDiverged: async (_i, d) => { stops.push(d) },
+      })
+      expect(stops).toHaveLength(1)
+      expect((await runWith({ areas: [LEFT], from: 0 })).stops).toEqual([])
+    })
+
+    // Pre-PR review of (c): an iOS touch is in the portrait framebuffer, the picture's own space; Android's is turned.
+    it('places an iOS touch as it is and turns any other', async () => {
+      const turns: unknown[] = []
+      const run = (on: Tap) => matchRange(on, channel, lease, [tapStep, tapStep], { start: 0, end: 2 }, null, {
+        ...hooks(), compare: async () => leftDiffers,
+        carried: async (_i, _s, _m, turn) => { turns.push(turn); return null },
+        onDiverged: async () => {},
+      })
+      screen.interfaceTurn = 90
+      try {
+        await run(viewer)
+        await run({ ...(viewer as object), platform: 'android' } as unknown as Tap)
+      } finally { delete screen.interfaceTurn }
+      expect(turns).toEqual([undefined, 90])
+    })
+
     it('goes on past a step the person said is mostly different, and stops without anything remembered', async () => {
       expect((await runWith('skip')).stops).toEqual([])
       expect((await runWith(null)).stops).toHaveLength(1)

@@ -521,14 +521,22 @@ export async function matchRange(
         midTransition = true
         return
       }
-      // What Continue anyway set aside, applied to whether it stops and nothing before: the mid-transition rule above and
-      // the press again below judge the screen as compared (review of (c)). Asked once per step.
+      // What Continue anyway set aside, applied after the mid-transition rule above, which judges the screen as compared
+      // (design review of (c)). A step it lets go on is not looked at again and its tap before is not pressed again: the
+      // person said those areas do not matter. Asked once per step. An iOS touch is in the portrait framebuffer, the
+      // picture's own space; any other is turned into it as the status bar is.
       let carry: Carried | undefined
       const judged = async (d: ScreenDivergence | null): Promise<ScreenDivergence | null> => {
         if (!d || !hooks.carried) return d
-        carry ??= await hooks.carried(range.start + offset, raw, masks, turn).catch(() => null)
-        hooks.signal.throwIfAborted()
-        if (!carry) return d
+        try {
+          if (carry === undefined) carry = await hooks.carried(range.start + offset, raw, masks, tap.platform === 'ios' ? undefined : turn).catch(() => null)
+          hooks.signal.throwIfAborted()
+        } catch (e) {
+          URL.revokeObjectURL(d.nowUrl)
+          throw e
+        }
+        // A screen mostly different now is not the one the person accepted areas of (pre-PR review of (c)).
+        if (!carry || (d.mostly && carry !== 'skip')) return d
         const rest = carry === 'skip' ? null : withoutAreas(d.cells, carry.areas)
         if (carry === 'skip' || !rest || rest.share <= SCREEN_DIFF_THRESHOLD) {
           URL.revokeObjectURL(d.nowUrl)

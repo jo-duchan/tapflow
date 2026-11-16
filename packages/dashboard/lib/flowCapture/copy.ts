@@ -89,8 +89,9 @@ export const copy = {
   divergedMostlyWhy: 'Most of this screen changed since you recorded it, so it likely shows something that isn’t the same each time, like data the app makes or loads, or a different start.',
   divergedGoOnAreas: 'If it’s the same screen, continue anyway. The marked areas won’t be compared again on this screen.',
   divergedGoOnStep: 'If it’s the same screen, continue anyway. This step won’t be compared again.',
-  divergedCarried: (count: number, from: number) =>
-    `${count} ${count === 1 ? 'area' : 'areas'} on this screen ${count === 1 ? 'isn’t' : 'aren’t'} compared${from >= 1 ? `, from step ${from}` : ''}.`,
+  // `from` is the step they were accepted at, or null for this one.
+  divergedCarried: (count: number, from: number | null) =>
+    `${count} ${count === 1 ? 'area' : 'areas'} on this screen ${count === 1 ? 'isn’t' : 'aren’t'} compared${from !== null ? `, from step ${from}` : ''}.`,
   // Back to Range moves only a start still at its default: a start the person chose is told the fact and nothing more.
   divergedBefore: (span: string, n: number, moves: boolean) =>
     `${span} ${n === 1 ? 'comes' : 'come'} before the range${moves ? ': Back to Range starts it there.' : '.'}`,
