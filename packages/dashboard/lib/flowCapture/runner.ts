@@ -1,7 +1,7 @@
 import {
   defaultRange, dropRetried, EffectWatch, focusTap, retryCandidates, matchStep, rangeStartKeyboard, rangeStartOrientation, reachQuestions, reachTargetOf, recordedSelector,
   recordedTarget, replayStep, runFlow, scrollDirectionOf, segment, selectorFor, SocketFlowDriver, statusBarRect,
-  toFlowSteps, waitForStableScreen, type CapturedStep, type Flow, type FlowResult, type KeyModifier, type MatchContext,
+  toFlowSteps, waitForStableScreen, madeMidTransition, type CapturedStep, type Flow, type FlowResult, type KeyModifier, type MatchContext,
   type RawStep, type ScreenRect, type ScrollDirection, type Selector, type Step, type StepExpect, type StepRange,
 } from '@tapflowio/flow-runner/browser'
 import { chromeOrientation, type InterfaceTurn } from '@tapflowio/protocol/screen'
@@ -407,7 +407,8 @@ export async function matchRange(
   let unlike = false
   // The tap just replayed, with the screen it was replayed on: tapped once more when the next step looks different and
   // it did nothing (`tapDidNothing`). Once per tap.
-  let lastTap: { raw: RawStep; step: CapturedStep; named?: NamedTap; shot: Uint8Array } | undefined
+  // `closed`: its watch, kept when a tap left unsent came between, whose own iteration closed nothing (CodeRabbit, #1176).
+  let lastTap: { raw: RawStep; step: CapturedStep; named?: NamedTap; shot: Uint8Array; closed?: typeof watching } | undefined
   for (const [offset, raw] of slice.entries()) {
     hooks.signal.throwIfAborted()
     let skipCompare = unlike
@@ -463,6 +464,27 @@ export async function matchRange(
     lastTap = undefined
     // The screen came to match only after it was looked at again: what was read of it before is of a screen since gone.
     let cameLate = false
+    // A tap made while the screen the tap before it brought was still coming (`madeMidTransition`), looking unlike its
+    // recording: its picture is of the screen before that tap acted, which the replay never sees. Not a stop.
+    let midTransition = false
+    // The app did nothing with it when it was recorded: not sent, as nothing came of it then — sent now it would land
+    // on the screen the tap before it brought. Matched all the same, so the review of taps the app ignored offers it
+    // (`noResponseTaps`), left out by default.
+    const actedWhenRecorded = 'touched' in raw ? raw.touched?.acted : undefined
+    // Not before typing: the review never offers a tap right before typing (`noResponseTaps`), so one left unsent there
+    // would stay in the flow for Verify to send where Match did not. Sent, and marked, like one nothing says about.
+    const leftUnsent = async (): Promise<boolean> => {
+      if (actedWhenRecorded !== false) return false
+      // Past a keyboard toggle, which has no step: the review looks past it too (`noResponseTaps`; CodeRabbit, #1176).
+      const next = slice.slice(offset + 1).find((s) => !s.dropped && s.kind !== 'keyboardToggle')
+      if (next && (TYPING.has(next.kind) || next.kind === 'keyboardKey')) return false
+      const step = matchStep(raw, { tree: before?.elements ?? [], postures: tap.postures().postures, platform: tap.platform })
+      matched.push(step)
+      hooks.onStep(step)
+      // The tap before it is still the one the next step may press again (`retriedTap`): nothing was sent between.
+      lastTap = prevTap && { ...prevTap, closed: prevTap.closed ?? (closedAtTop?.step === prevTap.step ? closedAtTop : undefined) }
+      return true
+    }
     // Read again once a late screen has come. The touch before this step was watched to the screen read while it was
     // late (a spinner where an alert came): watched again to the one that came, so Edit's "after this tap" and what the
     // tap should bring are the alert. Not past a focus tap, which acted on the screen since.
@@ -482,6 +504,11 @@ export async function matchRange(
       let differs = await hooks.compare(raw, masks).catch(() => null)
       hooks.signal.throwIfAborted()
       if (!differs) return
+      if (madeMidTransition(raw, previousSent(slice, offset))) {
+        URL.revokeObjectURL(differs.nowUrl)
+        midTransition = true
+        return
+      }
       const look = hooks.lookAgain ?? LOOK_AGAIN
       const until = Date.now() + look.forMs
       while (Date.now() < until) {
@@ -512,8 +539,9 @@ export async function matchRange(
         before = (await waitForStableScreen(read, { timeoutMs: SETTLE_TIMEOUT_MS })) ?? before
         // What the tap did is what the second press did: watched again, so Edit's "after this tap" and the expectations
         // a flow gets are the screen it made. The current step is still replayed as it was chosen before (named or not).
-        if (lastClosed?.step === prevTap.step) {
-          watching = lastClosed
+        const reopen = lastClosed?.step === prevTap.step ? lastClosed : prevTap.closed
+        if (reopen) {
+          watching = reopen
           await closeWatch(before)
         }
         const still = await hooks.compare(raw, masks).catch(() => null)
@@ -552,6 +580,7 @@ export async function matchRange(
     if (compared(raw) && !skipCompare && !named && (!!before?.interfaceTurn || !swipeBeforeNamedTap(slice, offset))) await compareNow()
     // Read while the screen was late, the tree may not hold what the person tapped (an alert's OK under a spinner): read
     // again, and named from that, the tap goes to its element rather than to a point on a screen that has moved.
+    if (midTransition && await leftUnsent()) continue
     if (cameLate) {
       await rereadLate()
       // A field read while the screen was late (a splash before the form) may only now be there to focus.
@@ -602,6 +631,7 @@ export async function matchRange(
         shot = await shoot()
       }
       if (!skipCompare) await compareNow()
+      if (midTransition && await leftUnsent()) continue
       if (cameLate) {
         await rereadLate()
         if (!after) shot = await shoot()
@@ -630,7 +660,11 @@ export async function matchRange(
       const o = turned ? chromeOrientation(turned) : undefined
       if (o) ctx.orientationAfter = o
     }
-    const step = matchStep(raw, ctx)
+    const matchedStep = matchStep(raw, ctx)
+    // What it did when it was recorded is not known: kept, and marked for the person to judge in Edit.
+    const step: CapturedStep = midTransition && actedWhenRecorded !== true && !matchedStep.fragile
+      ? { ...matchedStep, fragile: 'mid-transition' }
+      : matchedStep
     matched.push(step)
     if ((raw.kind === 'tap' || raw.kind === 'longPress') && before) {
       watching = { step, index: matched.length - 1, before: before.elements, ...(questions[0] ? { touched: questions[0] } : {}) }

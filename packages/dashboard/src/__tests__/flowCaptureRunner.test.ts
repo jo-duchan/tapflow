@@ -748,12 +748,14 @@ describe('matchRange: a tap that did nothing on the replay', () => {
     const frame = { x: 0.3, y: 0.49, width: 0.6, height: 0.046 }
     screen.elements = [{ role: 'button', label: 'Blueberry Dough', enabled: true, frame }]
     const named = { ...menuItem, touched: { point: { x: 0.6, y: 0.51 }, moving: false, element: { label: 'Blueberry Dough', traits: 1, frame } } } as unknown as RawStep
+    // A second after the menu item, as a person goes back: not a touch made while its screen was still coming.
+    const backLater = { ...back, at: menuItem.at + 1_500, endAt: menuItem.at + 1_600 } as RawStep
     let asked = 0
-    const compare = vi.fn(async (raw: RawStep) => (raw === back && asked++ === 0 ? { diff: 0.2, nowUrl: 'blob:now', masks: [] } : null))
+    const compare = vi.fn(async (raw: RawStep) => (raw === backLater && asked++ === 0 ? { diff: 0.2, nowUrl: 'blob:now', masks: [] } : null))
     const lease = new PauseLease(ctap)
     // Pressed again, the engine does not find it: no tap at the recorded point in its place.
     ran.answers = [{ status: 'passed' }, { status: 'failed', failureKind: 'product' }]
-    await matchRange(ctap, shooting, lease, [launchStep, tapStep, named, back], { start: 0, end: 4 }, null,
+    await matchRange(ctap, shooting, lease, [launchStep, tapStep, named, backLater], { start: 0, end: 4 }, null,
       { ...hooks(), compare, onDiverged: vi.fn(async () => {}), tapDidNothing: vi.fn(async () => true) })
     await lease.stop()
     expect(ran.flows.map((f) => (f.steps as Array<{ type: string }>).map((x) => x.type))).toEqual([['tapOn'], ['tapOn']])
@@ -823,6 +825,135 @@ describe('matchRange with the app\'s touch reports', () => {
     expect(log.filter((l) => l.startsWith('replay'))).toEqual(['replay launch', 'replay tap', 'replay tap'])
     expect(compare.mock.calls.map((c) => c[0])).toEqual([tapStep])
     expect((h.onStep.mock.calls.at(-1) as unknown as [{ step: unknown }])[0].step).toMatchObject({ type: 'tapOn' })
+  })
+
+  // Part (d): a doubled tap's second touch is recorded on the screen before the first acted; the replay waits for that
+  // screen, so they never match. Match does what the recording's touch did instead of stopping.
+  describe('a tap made while the screen was still changing', () => {
+    const first = { ...tapStep, at: 1_000, endAt: 1_100, touched: { point: { x: 0.3, y: 0.66 }, moving: false, element: { label: 'Active', traits: 1 }, tapCount: 1 } } as unknown as RawStep
+    const second = (touched?: object) => ({ ...tapStep, at: 1_250, endAt: 1_350, ...(touched ? { touched: { point: { x: 0.3, y: 0.66 }, moving: false, ...touched } } : {}) }) as unknown as RawStep
+    const run = async (steps: RawStep[], differs: (s: RawStep) => boolean) => {
+      screen.elements = []
+      const compare = vi.fn(async (s: RawStep) => (differs(s) ? { diff: 0.2, nowUrl: 'blob:x', masks: [] } : null))
+      const h = { ...hooks(), compare, onDiverged: vi.fn(async () => {}), lookAgain: { forMs: 200, everyMs: 10 } }
+      const lease = new PauseLease(ctap)
+      const matched = await matchRange(ctap, channel, lease, steps, { start: 0, end: steps.length }, null, h)
+      await lease.stop()
+      return { h, matched, compare }
+    }
+
+    it('is not sent when the app did nothing with it, and goes to the review of taps it ignored', async () => {
+      const s2 = second({ tapCount: 2, element: { label: 'Active', traits: 1 }, acted: false })
+      const { h, matched, compare } = await run([launchStep, tapStep, first, s2], (s) => s === s2)
+      expect(h.onDiverged).not.toHaveBeenCalled()
+      // One look, no waiting: the screen it was recorded on is not coming back.
+      expect(compare.mock.calls.filter((c) => c[0] === s2)).toHaveLength(1)
+      expect(log.filter((l) => l === 'replay tap')).toHaveLength(2)
+      // Matched, not skipped: the review of taps the app ignored (`noResponseTaps`) offers it, left out by default.
+      expect(matched.at(-1)!.raw).toBe(s2)
+      expect(matched.at(-1)!.skipped).toBeUndefined()
+    })
+
+    it('is replayed without stopping when the app acted on it', async () => {
+      const s2 = second({ tapCount: 2, element: { label: 'Active', traits: 1 }, acted: true })
+      const { h, matched } = await run([launchStep, tapStep, first, s2], (s) => s === s2)
+      expect(h.onDiverged).not.toHaveBeenCalled()
+      expect(log.filter((l) => l === 'replay tap')).toHaveLength(3)
+      expect(matched.at(-1)!.fragile).not.toBe('mid-transition')
+    })
+
+    it('is replayed and marked fragile when nothing says what it did (no report, as on React Native)', async () => {
+      const s2 = second()
+      const { h, matched } = await run([launchStep, tapStep, first, s2], (s) => s === s2)
+      expect(h.onDiverged).not.toHaveBeenCalled()
+      expect(log.filter((l) => l === 'replay tap')).toHaveLength(3)
+      expect(matched.at(-1)!.fragile).toBe('mid-transition')
+    })
+
+    it('is left alone when it looks as recorded', async () => {
+      const s2 = second({ tapCount: 2, element: { label: 'Active', traits: 1 }, acted: false })
+      const { matched } = await run([launchStep, tapStep, first, s2], () => false)
+      expect(log.filter((l) => l === 'replay tap')).toHaveLength(3)
+      expect(matched.at(-1)!.fragile).toBeUndefined()
+    })
+
+    it('is sent and marked when it comes right before typing, which the review never offers', async () => {
+      const s2 = second({ tapCount: 2, element: { label: 'Active', traits: 1 }, acted: false })
+      const typed = { ...textStep, at: 3_000, endAt: 3_000 } as unknown as RawStep
+      const { h, matched } = await run([launchStep, tapStep, first, s2, typed], (s) => s === s2)
+      expect(h.onDiverged).not.toHaveBeenCalled()
+      expect(log.filter((l) => l === 'replay tap')).toHaveLength(3)
+      expect(matched.find((m) => m.raw === s2)!.fragile).toBe('mid-transition')
+    })
+
+    it('leaves the tap before it to be pressed again by the step after it', async () => {
+      const s2 = second({ tapCount: 2, element: { label: 'Active', traits: 1 }, acted: false })
+      const next = { ...tapStep, point: [0.8, 0.2], at: 4_000, endAt: 4_100 } as unknown as RawStep
+      screen.elements = []
+      const compare = vi.fn(async (s: RawStep) => (s === s2 || s === next ? { diff: 0.2, nowUrl: 'blob:x', masks: [] } : null))
+      const tapDidNothing = vi.fn(async () => false)
+      const shot = { ...channel, screenshot: async () => new Uint8Array([1]) } as unknown as Channel
+      vi.stubGlobal('URL', Object.assign(URL, { createObjectURL: () => 'blob:x', revokeObjectURL: () => {} }))
+      const lease = new PauseLease(ctap)
+      await matchRange(ctap, shot, lease, [launchStep, tapStep, first, s2, next], { start: 0, end: 5 }, null,
+        { ...hooks(), compare, onDiverged: vi.fn(async () => {}), tapDidNothing, lookAgain: { forMs: 0, everyMs: 0 } })
+      await lease.stop()
+      expect(tapDidNothing).toHaveBeenCalledTimes(1)
+      expect((tapDidNothing.mock.calls[0] as unknown[])[0]).toBe(first)
+    })
+
+    // CodeRabbit on #1176: the tap pressed again is watched again, though the unsent one's iteration closed no watch.
+    it('watches the tap before it again when the step after presses it once more', async () => {
+      const s2 = second({ tapCount: 2, element: { label: 'Active', traits: 1 }, acted: false })
+      const next = { ...tapStep, point: [0.8, 0.2], at: 4_000, endAt: 4_100 } as unknown as RawStep
+      screen.elements = []
+      let asked = 0
+      const compare = vi.fn(async (s: RawStep) => (s === s2 || (s === next && asked++ === 0) ? { diff: 0.2, nowUrl: 'blob:x', masks: [] } : null))
+      const shot = { ...channel, screenshot: async () => new Uint8Array([1]) } as unknown as Channel
+      vi.stubGlobal('URL', Object.assign(URL, { createObjectURL: () => 'blob:x', revokeObjectURL: () => {} }))
+      const watched: number[] = []
+      const lease = new PauseLease(ctap)
+      await matchRange(ctap, shot, lease, [launchStep, tapStep, first, s2, next], { start: 0, end: 5 }, null,
+        { ...hooks(), compare, onDiverged: vi.fn(async () => {}), tapDidNothing: vi.fn(async () => true), onObserved: (i) => watched.push(i) })
+      await lease.stop()
+      // Launch #0, the suite's turn #1, tapStep #2, `first` #3: watched after its press and after its second.
+      expect(watched.filter((i) => i === 3)).toHaveLength(2)
+    })
+
+    it('is sent and marked when a keyboard toggle comes between it and typing', async () => {
+      const s2 = second({ tapCount: 2, element: { label: 'Active', traits: 1 }, acted: false })
+      const toggle = { ...tapStep, kind: 'keyboardToggle', at: 2_000, endAt: 2_000 } as unknown as RawStep
+      const typed = { ...textStep, at: 3_000, endAt: 3_000 } as unknown as RawStep
+      const { matched } = await run([launchStep, tapStep, first, s2, toggle, typed], (s) => s === s2)
+      expect(log.filter((l) => l === 'replay tap')).toHaveLength(3)
+      expect(matched.find((m) => m.raw === s2)!.fragile).toBe('mid-transition')
+    })
+
+    it('still stops on an unnamed tap a key away, as on a keypad the app names nothing on', async () => {
+      const key2 = { ...second({ tapCount: 1 }), point: [0.62, 0.5] } as unknown as RawStep
+      const { h } = await run([launchStep, tapStep, first, key2], (s) => s === key2)
+      expect(h.onDiverged).toHaveBeenCalledTimes(1)
+    })
+
+    it('is not sent when it was named but could not be tapped on the new screen, and the app did nothing with it', async () => {
+      const s2 = second({ tapCount: 2, element: { label: 'Active', traits: 1 }, acted: false })
+      screen.elements = [{ role: 'button', label: 'Active', enabled: true, frame: { x: 0.2, y: 0.64, width: 0.3, height: 0.05 } }]
+      ran.answers = [{ status: 'failed', failureKind: 'product' }]
+      const compare = vi.fn(async (s: RawStep) => (s === s2 ? { diff: 0.2, nowUrl: 'blob:x', masks: [] } : null))
+      const h = { ...hooks(), compare, onDiverged: vi.fn(async () => {}), lookAgain: { forMs: 200, everyMs: 10 } }
+      const lease = new PauseLease(ctap)
+      await matchRange(ctap, channel, lease, [launchStep, tapStep, first, s2], { start: 0, end: 4 }, null, h)
+      await lease.stop()
+      expect(h.onDiverged).not.toHaveBeenCalled()
+      // The launch and the two taps before it at their points; the named one tried through the engine only.
+      expect(log.filter((l) => l === 'replay tap')).toHaveLength(2)
+    })
+
+    it('still stops on a deliberate tap made a second later', async () => {
+      const late = { ...second({ tapCount: 1 }), at: 2_500, endAt: 2_600 } as unknown as RawStep
+      const { h } = await run([launchStep, tapStep, first, late], (s) => s === late)
+      expect(h.onDiverged).toHaveBeenCalledTimes(1)
+    })
   })
 
   // The screen a step is about to act on can still be on its way (a login's answer drawn ~1 s after the spinner, a
