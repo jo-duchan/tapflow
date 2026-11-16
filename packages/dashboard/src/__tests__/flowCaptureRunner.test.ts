@@ -920,12 +920,16 @@ describe('matchRange with the app\'s touch reports', () => {
         if (a === undefined) { screen.elements = [came]; return null }
         return a
       })
+      trackShots.on = true
       const lease = new PauseLease(ctap)
       await matchRange(ctap, channel, lease, [launchStep, tapStep, tapStep, swipeUp, named], { start: 0, end: 5 }, null,
         { ...hooks(), compare, onDiverged: vi.fn(async () => {}), lookAgain: quick })
       await lease.stop()
       expect(log.filter((l) => l.startsWith('replay')).at(-1)).toBe('replay tap')
       expect((matchedWith.at(-1) as { tree: unknown[] }).tree).toEqual([came])
+      // …and pictured again: the picture taken before shows the screen that was late.
+      const lastTap = seq.lastIndexOf('replay tap')
+      expect(seq.slice(seq.lastIndexOf('settle', lastTap), lastTap)).toEqual(['settle', 'shot'])
     })
 
     it('reads nothing again when the screen matched at the first look', async () => {
