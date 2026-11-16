@@ -113,6 +113,25 @@ describe('screenCells and diffAreas', () => {
     expect(diffAreas(cellsOf(picture(), apart))).toHaveLength(2)
   })
 
+  it('joins changes one unchanged row apart, as lines of one paragraph, and not three apart', () => {
+    // A 3-wide grid, cells set by row: rows 0 and 2 differ in the first, rows 0 and 4 in the second.
+    const grid = (rows: number[]) => {
+      const cells = new Uint8Array(3 * 5)
+      for (const r of rows) cells[r * 3 + 1] = 1
+      return { cells, gridWidth: 3, gridHeight: 5 }
+    }
+    expect(diffAreas(grid([0, 2]))).toHaveLength(1)
+    expect(diffAreas(grid([0, 4]))).toHaveLength(2)
+  })
+
+  it('measures what is left over the cells still compared, never over masked ones', () => {
+    const half = picture([[0, 0, 1, 0.5]])
+    const masked = screenCells(picture(), half, [{ x: 0, y: 0.5, width: 1, height: 0.5 }])
+    if (masked === 'incomparable') throw new Error('incomparable')
+    expect(withoutAreas(masked, []).share).toBeCloseTo(masked.share)
+    expect(masked.share).toBeGreaterThan(0.9)
+  })
+
   it('never boxes what a mask left out', () => {
     const keys = picture([[0, 0.6, 1, 0.4]])
     const c = screenCells(picture(), keys, [{ x: 0, y: 0.6, width: 1, height: 0.4 }])

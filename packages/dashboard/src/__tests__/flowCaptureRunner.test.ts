@@ -457,6 +457,20 @@ describe('matchRange: comparing each step with its recording', () => {
       expect(stops[0]!.areas).toHaveLength(1)
     })
 
+    // A first look that differs past the set-aside areas, then a look where only they differ: the screen came.
+    it('goes on once a look again differs only where the areas are', async () => {
+      const looks = [{ ...leftDiffers, cells: { ...leftDiffers.cells, cells: new Uint8Array([1, 1]), share: 1 } }, leftDiffers]
+      const stops: ScreenDivergence[] = []
+      await matchRange(viewer, channel, lease, [tapStep, tapStep], { start: 0, end: 2 }, null, {
+        ...hooks(),
+        lookAgain: { forMs: 200, everyMs: 10 },
+        compare: async () => looks.shift() ?? leftDiffers,
+        carried: async () => ({ areas: [LEFT], from: 0 }),
+        onDiverged: async (_i, d) => { stops.push(d) },
+      })
+      expect(stops).toEqual([])
+    })
+
     it('goes on past a step the person said is mostly different, and stops without anything remembered', async () => {
       expect((await runWith('skip')).stops).toEqual([])
       expect((await runWith(null)).stops).toHaveLength(1)
