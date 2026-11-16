@@ -867,11 +867,65 @@ describe('matchRange with the app\'s touch reports', () => {
       let looks = 0
       const compare = vi.fn(async () => { if (++looks === 2) controller.abort(); return late(looks) })
       const onDiverged = vi.fn(async () => {})
+      const revoked = vi.spyOn(URL, 'revokeObjectURL')
       const run = matchRange(ctap, channel, new PauseLease(ctap), [launchStep, tapStep, tapStep], { start: 0, end: 3 }, null,
         { onStep: vi.fn(), signal: controller.signal, compare, onDiverged, lookAgain: { forMs: 5_000, everyMs: 10 } })
       await expect(run).rejects.toThrow()
       expect(onDiverged).not.toHaveBeenCalled()
       expect(log.filter((l) => l === 'replay tap')).toHaveLength(1)
+      // Both pictures it held when stopped are let go.
+      expect(revoked.mock.calls.map((c) => c[0]).sort()).toEqual(['blob:now1', 'blob:now2'])
+      revoked.mockRestore()
+    })
+
+    it('keeps looking past a look that fails, and stops on the picture it had when none comes to match', async () => {
+      screen.elements = []
+      let n = 0
+      const compare = vi.fn(async () => { if (++n === 1) return late(1); throw new Error('thumbnail 404') })
+      const shown: string[] = []
+      const onDiverged = vi.fn(async (_i: number, d: { nowUrl: string }) => { shown.push(d.nowUrl) })
+      const lease = new PauseLease(ctap)
+      await matchRange(ctap, channel, lease, [launchStep, tapStep, tapStep], { start: 0, end: 3 }, null, { ...hooks(), compare, onDiverged, lookAgain: quick })
+      await lease.stop()
+      expect(shown).toEqual(['blob:now1'])
+    })
+
+    it('watches the tap before it again, to the screen that came', async () => {
+      screen.elements = []
+      const alert = { role: 'button', label: 'OK', enabled: true, frame }
+      const answers: Array<ReturnType<typeof late> | null> = [null, late(1)]
+      const compare = vi.fn(async () => {
+        const a = answers.shift()
+        if (a === undefined) { screen.elements = [alert]; return null }
+        return a
+      })
+      const onAfter = vi.fn()
+      const lease = new PauseLease(ctap)
+      await matchRange(ctap, channel, lease, [launchStep, tapStep, tapStep, tapStep], { start: 0, end: 4 }, null,
+        { ...hooks(), compare, onDiverged: vi.fn(async () => {}), onAfter, lookAgain: quick })
+      await lease.stop()
+      // The second tap's screen: first the one read while it was late, then the one that came.
+      // Index 3: the turn the replay puts in and the launch come first.
+      const second = onAfter.mock.calls.filter((c) => c[0] === 3).map((c) => (c[1] as { tree: unknown[] }).tree)
+      expect(second).toEqual([[], [alert]])
+    })
+
+    it('reads the screen again before replaying at its point a named tap it could not find, once the screen came', async () => {
+      screen.elements = []
+      ran.answers = [{ status: 'failed', failureKind: 'product' }, { status: 'failed', failureKind: 'product' }]
+      const came = { role: 'text', label: 'Signed in', enabled: true, frame }
+      const answers: Array<ReturnType<typeof late> | null> = [null, late(1)]
+      const compare = vi.fn(async () => {
+        const a = answers.shift()
+        if (a === undefined) { screen.elements = [came]; return null }
+        return a
+      })
+      const lease = new PauseLease(ctap)
+      await matchRange(ctap, channel, lease, [launchStep, tapStep, tapStep, swipeUp, named], { start: 0, end: 5 }, null,
+        { ...hooks(), compare, onDiverged: vi.fn(async () => {}), lookAgain: quick })
+      await lease.stop()
+      expect(log.filter((l) => l.startsWith('replay')).at(-1)).toBe('replay tap')
+      expect((matchedWith.at(-1) as { tree: unknown[] }).tree).toEqual([came])
     })
 
     it('reads nothing again when the screen matched at the first look', async () => {

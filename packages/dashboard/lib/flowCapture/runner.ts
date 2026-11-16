@@ -434,6 +434,7 @@ export async function matchRange(
     // until its 15 s deadline, every Match (measured, Sample SwiftUI on iOS 26.5).
     let before = raw.kind === 'launch' && !watching ? undefined : await waitForStableScreen(read, { timeoutMs: SETTLE_TIMEOUT_MS })
     await closeWatch(before)
+    const closedAtTop = lastClosed
     // Typing into a field the person focused before the range began: tapped first, and the tap goes into the flow.
     // The tree's frames are the app as drawn, which an iOS tap is not when the app is turned: then it is left as it was.
     const focus = before && !before.interfaceTurn ? focusTap(raw, before.elements) : undefined
@@ -458,6 +459,17 @@ export async function matchRange(
     lastTap = undefined
     // The screen came to match only after it was looked at again: what was read of it before is of a screen since gone.
     let cameLate = false
+    // Read again once a late screen has come. The touch before this step was watched to the screen read while it was
+    // late (a spinner where an alert came): watched again to the one that came, so Edit's "after this tap" and what the
+    // tap should bring are the alert. Not past a focus tap, which acted on the screen since.
+    const rereadLate = async (): Promise<void> => {
+      cameLate = false
+      before = (await waitForStableScreen(read, { timeoutMs: SETTLE_TIMEOUT_MS })) ?? before
+      if (closedAtTop && !focus) {
+        watching = closedAtTop
+        await closeWatch(before)
+      }
+    }
     const compareNow = async (): Promise<void> => {
       if (!hooks.compare || !hooks.onDiverged) return
       const turn = before?.interfaceTurn ?? frameTurnOf(tap.chrome())
@@ -470,13 +482,19 @@ export async function matchRange(
       const until = Date.now() + look.forMs
       while (Date.now() < until) {
         await new Promise((resolve) => setTimeout(resolve, look.everyMs))
-        const again = await hooks.compare(raw, masks).catch(() => null)
-        hooks.signal.throwIfAborted()
+        // A look that fails is not a match: one failed fetch among twenty would otherwise end a real stop.
+        const again = await hooks.compare(raw, masks).catch(() => undefined)
+        if (hooks.signal.aborted) {
+          URL.revokeObjectURL(differs.nowUrl)
+          if (again) URL.revokeObjectURL(again.nowUrl)
+          hooks.signal.throwIfAborted()
+        }
+        if (again === undefined) continue
         URL.revokeObjectURL(differs.nowUrl)
         if (!again) { cameLate = true; return }
         differs = again
       }
-      const retry = prevTap ? await retriedTap(prevTap, masks) : 'not-asked'
+      const retry = prevTap ? await retriedTap(prevTap, masks, look.forMs > 0) : 'not-asked'
       // Waited for a late effect without pressing again: the screen may have come right in the meantime.
       if (retry === 'waited') {
         const now = await hooks.compare(raw, masks).catch(() => null)
@@ -503,15 +521,15 @@ export async function matchRange(
     }
     // The tap before this step, replayed once more when it did nothing on the replay and something when recorded.
     // `pressed`: tapped again; `waited`: looked again a moment later and did not; `not-asked`: neither.
-    const retriedTap = async (prev: NonNullable<typeof lastTap>, masks: ScreenRect[]): Promise<'pressed' | 'waited' | 'not-asked'> => {
+    const retriedTap = async (prev: NonNullable<typeof lastTap>, masks: ScreenRect[], looked: boolean): Promise<'pressed' | 'waited' | 'not-asked'> => {
       if (!hooks.tapDidNothing) return 'not-asked'
       // The tree saw it do something (Match's own watch of it): an effect the picture may not show, never pressed again.
       const seen = observed.get(prev.step)
       if (seen && ((seen.appear?.length ?? 0) > 0 || (seen.gone?.length ?? 0) > 0)) return 'not-asked'
       // An effect can come late (a request's answer drawn after the screen read as settled): judged on a picture taken
       // a moment later, so a tap that did act is not pressed twice. Measured: the open-menu screen holds 0 cells apart
-      // for 5 s, so the wait costs nothing in the case this is for.
-      await new Promise((resolve) => setTimeout(resolve, RETRY_LOOK_AGAIN_MS))
+      // for 5 s, so the wait costs nothing in the case this is for. Not again after `LOOK_AGAIN`, which already waited.
+      if (!looked) await new Promise((resolve) => setTimeout(resolve, RETRY_LOOK_AGAIN_MS))
       hooks.signal.throwIfAborted()
       const now = await channel.screenshot(sessionId, hooks.signal).catch(() => null)
       if (!now || !(await hooks.tapDidNothing(prev.raw, raw, prev.shot, now, masks, hooks.signal).catch(() => false))) {
@@ -531,8 +549,7 @@ export async function matchRange(
     // Read while the screen was late, the tree may not hold what the person tapped (an alert's OK under a spinner): read
     // again, and named from that, the tap goes to its element rather than to a point on a screen that has moved.
     if (cameLate) {
-      cameLate = false
-      before = (await waitForStableScreen(read, { timeoutMs: SETTLE_TIMEOUT_MS })) ?? before
+      await rereadLate()
       named = before
         ? namedTap(raw, before.elements, previousSent(slice, offset), before.interfaceTurn !== undefined ? { interfaceTurn: before.interfaceTurn } : {})
         : undefined
@@ -580,8 +597,8 @@ export async function matchRange(
       }
       if (!skipCompare) await compareNow()
       if (cameLate) {
-        cameLate = false
-        before = (await waitForStableScreen(read, { timeoutMs: SETTLE_TIMEOUT_MS })) ?? before
+        await rereadLate()
+        if (!after) shot = await shoot()
       }
       ;({ questions, reach } = await ask(before?.elements ?? []))
     }
