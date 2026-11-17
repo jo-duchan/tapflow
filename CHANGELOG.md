@@ -42,6 +42,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Shutdown requests with a valid envelope and malformed payload now receive an error reply, preserving a supplied request ID and allowing lifecycle requests without one.
 - Upload build's file chooser now works with the keyboard, and its File and Status labels name their controls.
 - **The relay package now carries the notice for the video decoder it bundles.** The dashboard inside `@tapflowio/relay` includes tinyh264 (Apache-2.0), which decodes the stream when WebCodecs is not available, and the package shipped neither its license nor a notice. It now ships `NOTICE` and `LICENSE-APACHE-2.0`, as the Android and iOS agents do.
 - **Flow Capture no longer starts a flow on the home screen.** When you open the app from its icon instead of **Launch**, the part Capture flow picks by default now starts at the first step you took in the app; before, it began with the swipe and tap that found the icon, which Match then replayed on top of the launched app. Needs the relay and the iOS or Android agent from this release.

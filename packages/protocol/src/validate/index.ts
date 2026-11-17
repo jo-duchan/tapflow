@@ -504,12 +504,11 @@ const INBOUND = { ...BROWSER_INBOUND, ...AGENT_INBOUND, ...STREAM_INBOUND } as c
 // from a session that has never acked as **success** (#457), so a dropped `input:key` would be
 // reported to an MCP caller as an input that landed.
 //
-// Every browser request that declares a required `requestId` except `device:lease`, which names no
-// session to answer on. The relay maps each to the
-// reply its own waiter reads; `scripts/__tests__/correlatedRequestsGated.test.mjs` derives that set
-// from the protocol and holds all three lists to it.
+// Shutdown's ID is optional; other members require one. device:lease is excluded because it has no session to answer on.
+// The correlation guard checks both policies against the protocol and the relay's replies.
 const ANSWERABLE = {
   'device:boot': envC('device:boot'),
+  'device:shutdown': envCo('device:shutdown'),
   'app:install': envC('app:install'),
   'app:launch': envC('app:launch'),
   'app:clear-state': envC('app:clear-state'),
@@ -550,7 +549,8 @@ export type ParseFailure =
   | { ok: false; reason: 'unknown-type'; type: string }
   | { ok: false; reason: 'bad-shape'; type: InboundType; detail: string }
   /** The payload is wrong but the envelope is not, so the caller can be told. */
-  | { ok: false; reason: 'bad-payload'; type: AnswerableType; sessionId: string; requestId: string; detail: string }
+  | { ok: false; reason: 'bad-payload'; type: Exclude<AnswerableType, 'device:shutdown'>; sessionId: string; requestId: string; detail: string }
+  | { ok: false; reason: 'bad-payload'; type: 'device:shutdown'; sessionId: string; requestId?: string; detail: string }
 
 export type ParseResult =
   | {
@@ -623,10 +623,12 @@ export function parseInbound(raw: unknown): ParseResult {
   const result = INBOUND[known].safeParse(frame)
   if (!result.success) {
     const detail = z.prettifyError(result.error)
-    // Second stage, and only for these. If the envelope stands on its own, the failure is in the
-    // payload and the relay has an address and a correlator to answer with — see `ANSWERABLE`.
-    if (Object.hasOwn(ANSWERABLE, known)) {
-      const answerable = known as AnswerableType
+    // Keep optional shutdown IDs separate so every other failure retains a required correlator.
+    if (known === 'device:shutdown') {
+      const envelope = ANSWERABLE[known].safeParse(frame)
+      if (envelope.success) return { ok: false, reason: 'bad-payload', ...envelope.data, detail }
+    } else if (Object.hasOwn(ANSWERABLE, known)) {
+      const answerable = known as Exclude<AnswerableType, 'device:shutdown'>
       const envelope = ANSWERABLE[answerable].safeParse(frame)
       if (envelope.success) {
         const { sessionId: s, requestId: r } = envelope.data

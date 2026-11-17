@@ -254,4 +254,74 @@ describe('device:shutdown answers reach whoever asked', () => {
 
     agent.close(); holder.close()
   })
+
+  async function barrier(ws: WebSocket): Promise<void> {
+    const listed = waitForType(ws, 'agents:listed')
+    ws.send(JSON.stringify({ type: 'agents:list' }))
+    await listed
+  }
+
+  it.each([{ label: 'no ID', requestId: undefined }, { label: 'supplied ID', requestId: 'rq-malformed' }])('refuses malformed shutdowns ($label) without delivering them', async ({ requestId }) => {
+    const { agent, sessionId } = await registerAgent()
+    const caller = await joinAs(sessionId)
+    const forwarded: string[] = []
+    agent.on('message', (raw) => {
+      const frame = JSON.parse(raw.toString()) as { type: string }
+      if (frame.type === 'device:shutdown') forwarded.push(frame.type)
+    })
+    try {
+      for (const payload of [{}, { deviceId: 7 }, null, undefined]) {
+        caller.send(JSON.stringify({
+          type: 'device:shutdown', sessionId,
+          ...(requestId === undefined ? {} : { requestId }),
+          ...(payload === undefined ? {} : { payload }),
+        }))
+        await barrier(caller)
+        expect(await waitForTypeOrNull<DeviceShutdownError>(caller, 'device:shutdown-error', 0)).toEqual({
+          type: 'device:shutdown-error', sessionId, message: 'malformed device:shutdown payload',
+          ...(requestId === undefined ? {} : { requestId }),
+        })
+        await barrier(agent)
+        expect(forwarded).toHaveLength(0)
+      }
+
+      const delivered = waitForType<DeviceShutdown>(agent, 'device:shutdown')
+      caller.send(JSON.stringify({ type: 'device:shutdown', sessionId, requestId: 'rq-valid-after-refusal', payload: { deviceId: 'devA' } }))
+      expect((await delivered).requestId).toBe('rq-valid-after-refusal')
+      const completed = waitForType<DeviceShutdownDone>(caller, 'device:shutdown-done')
+      agent.send(JSON.stringify({ type: 'device:shutdown-done', sessionId, requestId: 'rq-valid-after-refusal', payload: { deviceId: 'devA' } }))
+      expect((await completed).requestId).toBe('rq-valid-after-refusal')
+      expect(forwarded).toHaveLength(1)
+    } finally {
+      agent.close(); caller.close()
+    }
+  })
+
+  it.each(['', null, 7])('drops malformed shutdown envelopes with invalid requestId %p', async (requestId) => {
+    const { agent, sessionId } = await registerAgent()
+    const caller = await socket()
+    const replies: string[] = []
+    const forwarded: string[] = []
+    caller.on('message', (raw) => {
+      const frame = JSON.parse(raw.toString()) as { type: string }
+      if (['error', 'device:shutdown-error', 'device:shutdown-done'].includes(frame.type)) replies.push(frame.type)
+    })
+    agent.on('message', (raw) => {
+      const frame = JSON.parse(raw.toString()) as { type: string }
+      if (frame.type === 'device:shutdown') forwarded.push(frame.type)
+    })
+    try {
+      caller.send(JSON.stringify({ type: 'device:shutdown', sessionId, requestId, payload: {} }))
+      await barrier(caller)
+      await barrier(agent)
+      expect(replies).toHaveLength(0)
+      expect(forwarded).toHaveLength(0)
+
+      const delivered = waitForType<DeviceShutdown>(agent, 'device:shutdown')
+      caller.send(JSON.stringify({ type: 'device:shutdown', sessionId, requestId: 'rq-after-invalid', payload: { deviceId: 'devA' } }))
+      expect((await delivered).requestId).toBe('rq-after-invalid')
+    } finally {
+      agent.close(); caller.close()
+    }
+  })
 })

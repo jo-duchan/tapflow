@@ -138,6 +138,13 @@ function correlatorOf(sf) {
   const unaddressed = unaddressedTypes(proto, types)
   /** The requests a malformed payload can be answered for: they name the session the answer goes to. */
   const addressed = types.filter((t) => !unaddressed.includes(t))
+  // Lifecycle shutdowns can receive a refusal without a caller-minted ID.
+  const optionallyCorrelated = ['device:shutdown']
+  const answerableRequests = [...addressed, ...optionallyCorrelated]
+
+  it('keeps lifecycle shutdown correlation optional', () => {
+    expect(bodies.get('device:shutdown')?.init).toBe('requestId.optional()')
+  })
 
   it('the requests with no session are the listed ones', () => {
     expect(unaddressed.sort()).toEqual([...UNADDRESSED].sort())
@@ -187,7 +194,7 @@ function correlatorOf(sf) {
   // inputs is worse than it sounds, since `awaitInputAck` reports silence from a never-acked session
   // as **success** (#457). So three lists have to agree, and only one of them is derived:
   //
-  //   1. the correlated request set, from the protocol (above)
+  //   1. the required request set from the protocol plus optional lifecycle shutdown
   //   2. `ANSWERABLE` in `protocol/src/validate/index.ts`, which decides what gets a second parse
   //   3. `refuseMalformed` in the relay, which decides which reply each one gets
   //
@@ -206,7 +213,7 @@ function correlatorOf(sf) {
  * Which reply each answerable request must be refused with.
  *
  * **Listed, where the keys above are derived, and the asymmetry is the point.** The set of answerable
- * requests is a fact about the protocol and derives from it; *which reply answers which request* is a
+ * requests follows required correlation plus the explicit lifecycle exception; *which reply answers which request* is a
  * fact about consumers' waiters and derives from nothing — `mcp-server` and `flow-runner` key on the
  * pair each request declares, and the naming is not uniform enough to compute (`open-url` answers
  * `open-url:error`, not `open-url-error`; both clipboard requests answer one `clipboard:error`; the
@@ -215,6 +222,7 @@ function correlatorOf(sf) {
  */
 const EXPECTED_REPLY = {
   'device:boot': 'device:boot-error',
+  'device:shutdown': 'device:shutdown-error',
   'app:install': 'app:install-error',
   'app:launch': 'app:launch-error',
   'app:clear-state': 'app:clear-state-error',
@@ -262,8 +270,8 @@ describe('every correlated browser request is gated at the relay door', () => {
 
   it('every correlated request can be answered when its payload is refused', () => {
     const answerable = answerableTypes(validateSrc)
-    expect([...addressed].filter((t) => !answerable.has(t)).sort()).toEqual([])
-    expect([...answerable].filter((t) => !addressed.includes(t)).sort()).toEqual([])
+    expect([...answerableRequests].filter((t) => !answerable.has(t)).sort()).toEqual([])
+    expect([...answerable].filter((t) => !answerableRequests.includes(t)).sort()).toEqual([])
   })
 
   it('each request is refused with the reply its own waiter reads', () => {
@@ -271,7 +279,7 @@ describe('every correlated browser request is gated at the relay door', () => {
     // The `default` arm covers whatever has no case of its own; it must be the input reply, since that
     // is the only one shared by more than one request without being named.
     expect(replies.get('*'), 'refuseMalformed has no default arm').toBe('input:error')
-    for (const type of addressed) {
+    for (const type of answerableRequests) {
       expect(replies.get(type) ?? replies.get('*'), `${type} is refused with the wrong reply`)
         .toBe(EXPECTED_REPLY[type])
     }
@@ -281,8 +289,8 @@ describe('every correlated browser request is gated at the relay door', () => {
   })
 
   it('the reply table covers exactly the correlated set', () => {
-    expect([...addressed].filter((t) => !(t in EXPECTED_REPLY)).sort()).toEqual([])
-    expect(Object.keys(EXPECTED_REPLY).filter((t) => !addressed.includes(t)).sort()).toEqual([])
+    expect([...answerableRequests].filter((t) => !(t in EXPECTED_REPLY)).sort()).toEqual([])
+    expect(Object.keys(EXPECTED_REPLY).filter((t) => !answerableRequests.includes(t)).sort()).toEqual([])
   })
 
   it('the shared constants carry the non-empty half', () => {
