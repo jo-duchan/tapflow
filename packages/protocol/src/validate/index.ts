@@ -424,6 +424,7 @@ const AGENT_CONSUMED = {
       // A field the relay cannot read is dropped, not the observation: the rest still says what was touched.
       tapCount: z.number().int().positive().optional().catch(undefined),
       acted: z.boolean().optional().catch(undefined),
+      seq: z.number().int().positive().optional().catch(undefined),
     }),
   }),
   // Unknown, not hidden, when the agent's answer cannot be read: a capture then judges the taps around it as unknown.

@@ -1524,7 +1524,7 @@ export class IOSAgent implements DeviceAgent, NetworkControlCapability, Posturab
       })
       if (i >= 0) {
         const [report] = watch.reports.splice(i, 1)
-        this.sendMsg({ type: 'capture:touched', sessionId, requestId, observation: report!.observation })
+        this.sendMsg({ type: 'capture:touched', sessionId, requestId, observation: { ...report!.observation, seq: report!.seq } })
         await this.reportTouchEnd(sessionId, deviceId, requestId, report!)
         return
       }
@@ -1563,7 +1563,7 @@ export class IOSAgent implements DeviceAgent, NetworkControlCapability, Posturab
       const end = watch.ends.get(touchKey(report))
       if (end) {
         watch.ends.delete(touchKey(report))
-        if (end.acted !== undefined) this.sendMsg({ type: 'capture:touched', sessionId, requestId, observation: { ...report.observation, acted: end.acted } })
+        if (end.acted !== undefined) this.sendMsg({ type: 'capture:touched', sessionId, requestId, observation: { ...report.observation, seq: report.seq, acted: end.acted } })
         return
       }
       if (Date.now() >= until) return

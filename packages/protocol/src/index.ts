@@ -2042,6 +2042,12 @@ export interface TouchObservation {
    * gesture.
    */
   acted?: boolean
+  /**
+   * This touch-down's number in the app's process, from 1, counting only touches made while someone was recorded:
+   * a new process starts again at 1. What says a report is the first touch in an app just opened, which a home-screen
+   * tap before it (the icon's, which no app reports) can be told from. Absent from an older agent.
+   */
+  seq?: number
 }
 
 /** An element as the app's accessibility names it. `label` is absent for a text input, whose label can be its text. */
