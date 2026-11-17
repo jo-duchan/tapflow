@@ -423,6 +423,8 @@ export interface AndroidAgentOptions {
 
 /** One `pm clear` or clipboard write of a run reset. */
 const RUN_RESET_CMD_TIMEOUT_MS = 10_000
+/** A launch slower than this is logged with where it waited (Flow Capture waits 30 s for one). */
+const LAUNCH_SLOW_MS = 10_000
 
 // Everything inside the per-device clipboard section must be bounded, or one stuck call wedges
 // every later copy/paste on that device. gRPC carries its own deadline; adb does not (and a
@@ -3059,9 +3061,15 @@ export class AndroidAgent implements DeviceAgent, NetworkControlCapability {
           break
         }
         const options = compactLaunchOptions({ arguments: args, env })
+        // Flow Capture's Match saw a launch go unanswered for its 30 s in 4 of 28 replays on an emulator (2026-11-17),
+        // with the app on screen and nothing in this log. Where it waits is logged once it is slow, so the next one says.
+        const started = Date.now()
+        let phase = 'waiting for a late pm clear'
+        const slow = setTimeout(() => logger.warn(`app:launch on ${serial} still running after ${LAUNCH_SLOW_MS / 1000}s: ${phase}`), LAUNCH_SLOW_MS)
+        slow.unref?.()
         // Same reason as `app:install`: a launched app writes data a late `pm clear` would take.
         this.awaitPendingClears(state!.deviceId)
-          .then(() => this.adb.launchApp(serial, bundleId, options, defaultsOnly === true))
+          .then(() => { phase = `launching (clears took ${Date.now() - started}ms)`; return this.adb.launchApp(serial, bundleId, options, defaultsOnly === true) })
           // What was delivered, which for the relay's defaults can be less than what was sent, down to nothing.
           .then((applied) => respond(options ? { type: 'app:launch-done', applied: appliedKeys(applied ?? {}) } : { type: 'app:launch-done' }))
           .catch((e: unknown) => {
@@ -3069,6 +3077,11 @@ export class AndroidAgent implements DeviceAgent, NetworkControlCapability {
             // The toast gets the reason alone; the full adb output (the cause) stays in this log.
             console.warn('[tapflow] app:launch failed:', e instanceof Error && e.cause !== undefined ? e.cause : e)
             respond({ type: 'app:launch-error', message })
+          })
+          .finally(() => {
+            clearTimeout(slow)
+            const took = Date.now() - started
+            if (took >= LAUNCH_SLOW_MS) logger.warn(`app:launch on ${serial} answered after ${took}ms (${phase})`)
           })
         break
       }

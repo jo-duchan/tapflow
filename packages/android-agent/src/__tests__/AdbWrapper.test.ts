@@ -308,6 +308,45 @@ describe('AdbWrapper', () => {
       expect(ran(runner, 'monkey')).toHaveLength(0)
     })
 
+    // Measured: `timeout 10 am start -W` returned to the host after 30.3 s, past Flow Capture's 30 s launch wait.
+    it('bounds the resolve and the launch on the host too, and counts a launch the host bound cut as sent', async () => {
+      const killed = Object.assign(new Error('Command failed: adb … (killed)'), { killed: true, stdout: 'Starting: Intent { cmp=com.example.app/.MainActivity }\n' })
+      const runner = launcher({ resolve: RESOLVED, start: STARTED })
+      runner.execBounded = vi.fn(async (_ms: number, ...args: string[]) => {
+        if (args.includes('resolve-activity')) return RESOLVED
+        if (args.includes('am')) throw killed
+        return ''
+      })
+      await new AdbWrapper(runner).launchApp('emulator-5554', PKG)
+      const bounds = vi.mocked(runner.execBounded).mock.calls.map((c) => [c[0], c.includes('am') ? 'am' : 'resolve'])
+      expect(bounds).toEqual([[5_000, 'resolve'], [12_000, 'am']])
+      expect(ran(runner, 'monkey')).toHaveLength(0)
+    })
+
+    // Pre-PR review: the launch with arguments, the monkey fallback and a deep link are bounded on the host the same way.
+    it('bounds a launch with arguments, the monkey fallback and a deep link on the host too', async () => {
+      const bounded = (start: string | Error): AdbRunner => {
+        const runner = launcher({ resolve: RESOLVED, start })
+        runner.execBounded = vi.fn(async (_ms: number, ...args: string[]) => {
+          if (args.includes('resolve-activity')) return RESOLVED
+          if (args.includes('am') && args.includes('android.intent.action.VIEW')) throw Object.assign(new Error('killed'), { stdout: 'Starting: Intent { act=android.intent.action.VIEW }\n' })
+          if (args.includes('am')) { if (start instanceof Error) throw start; return start }
+          return ''
+        })
+        return runner
+      }
+      const boundOf = (runner: AdbRunner, what: string) => vi.mocked(runner.execBounded!).mock.calls.filter((c) => c.includes(what)).map((c) => c[0])
+      const withArgs = bounded(STARTED)
+      await new AdbWrapper(withArgs).launchApp('emulator-5554', PKG, { arguments: { flag: true } })
+      expect(boundOf(withArgs, '-S')).toEqual([12_000])
+      const fellBack = bounded(Object.assign(new Error('killed'), { stdout: '' }))
+      await new AdbWrapper(fellBack).launchApp('emulator-5554', PKG)
+      expect(boundOf(fellBack, 'monkey')).toEqual([12_000])
+      const link = bounded(STARTED)
+      await new AdbWrapper(link).openUrl('emulator-5554', 'app://orders/7')
+      expect(boundOf(link, 'android.intent.action.VIEW')).toEqual([12_000])
+    })
+
     it('counts it launched when the device-side timeout ends the wait after the intent went out', async () => {
       const expired = Object.assign(new Error('Command failed: adb … exit 124'), { stdout: 'Starting: Intent { cmp=com.example.app/.MainActivity }\n' })
       const runner = launcher({ resolve: RESOLVED, start: expired })
