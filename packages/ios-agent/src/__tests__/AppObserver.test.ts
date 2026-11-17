@@ -153,11 +153,12 @@ describe('asking the app', () => {
     expect((await observer.read(UDID, 'com.app')).kind).toBe('answer')
     stop()
     expect(appRunning).not.toHaveBeenCalled()
-    // Running and silent: asked once, and the read waits for the app to the deadline rather than calling it away.
+    // Running and silent: the read waits for the app to the deadline rather than calling it away, and asks again there,
+    // since the app may have quit meanwhile (CodeRabbit on #1182).
     const t0 = Date.now()
     expect(await observer.read(UDID, 'com.app')).toEqual({ kind: 'silent' })
     expect(Date.now() - t0).toBeGreaterThanOrEqual(140)
-    expect(appRunning).toHaveBeenCalledTimes(1)
+    expect(appRunning).toHaveBeenCalledTimes(2)
   })
 
   // A keyboard probe and a field read are asked together after a key on the soft keyboard: a second request written
