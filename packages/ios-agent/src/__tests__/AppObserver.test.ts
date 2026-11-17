@@ -114,6 +114,13 @@ describe('asking the app', () => {
     expect(readdirSync(observer.dir(UDID))).not.toContain('request')
   })
 
+  it('reads a process check that fails as unknown, never as away', async () => {
+    root = mkdtempSync(join(tmpdir(), 'observer-'))
+    const observer = new AppObserver({ appRunning: async () => { throw new Error('simctl') } }, { root, deadlineMs: 80, pollMs: 2, processCheckMs: 10 })
+    await observer.prepare(UDID)
+    expect(await observer.read(UDID, 'com.app')).toEqual({ kind: 'silent' })
+  })
+
   it('does not ask for the process when the app answers at once, and waits on when it has one', async () => {
     root = mkdtempSync(join(tmpdir(), 'observer-'))
     const appRunning = vi.fn(async () => true)
