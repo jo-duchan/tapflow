@@ -56,7 +56,7 @@ import { AdbWrapper } from './AdbWrapper.js'
 import { EmulatorLauncher, findEmulatorPid, probeEmulator, stopEmulatorProcess } from './EmulatorLauncher.js'
 import { ensureHelperApp, launchMuteOnlyTap, isAudioSupported } from '@tapflowio/audiotap-helper'
 import { AndroidTouchHelper } from './AndroidTouchHelper.js'
-import { parseUiAutomatorDump } from './uiTree.js'
+import { dumpRootFloats, parseUiAutomatorDump } from './uiTree.js'
 import { fieldResponseOf, keyboardStateOf } from './keyboard.js'
 import { ScrcpySession } from './scrcpy/ScrcpySession.js'
 import type { ScrcpyFrame } from './scrcpy/ScrcpyVideo.js'
@@ -3730,12 +3730,8 @@ export class AndroidAgent implements DeviceAgent, NetworkControlCapability {
           break
         }
         this.adb.dumpUiHierarchy(serial)
-          .then((xml) => this.sendMsg({
-            type: 'ui:tree:response',
-            sessionId,
-            requestId,
-            elements: parseUiAutomatorDump(xml),
-          }))
+          .then((xml) => this.parseTree(serial, xml))
+          .then((elements) => this.sendMsg({ type: 'ui:tree:response', sessionId, requestId, elements }))
           .catch((e: unknown) => {
             const message = e instanceof Error ? e.message : String(e)
             this.sendMsg({ type: 'ui:tree:error', sessionId, requestId, message })
@@ -3872,6 +3868,12 @@ export class AndroidAgent implements DeviceAgent, NetworkControlCapability {
     throw new PlatformError(result === 'no-focus'
       ? 'No text field has focus, and text other than ASCII cannot be typed without one'
       : 'Text other than ASCII could not be set on this device')
+  }
+
+  /** A dump as elements, normalised by the screen when a dialog's window is its root (`dumpRootFloats`): the screen's
+   *  size is asked only then, so a dump of the app's own window costs nothing more. */
+  private async parseTree(serial: string, xml: string): Promise<UIElement[]> {
+    return parseUiAutomatorDump(xml, dumpRootFloats(xml) ? await this.screenSize(serial) : null)
   }
 
   /** The screen Android draws, in device pixels: what a tree's and a keyboard's bounds are fractions of. */
@@ -4057,7 +4059,8 @@ export class AndroidAgent implements DeviceAgent, NetworkControlCapability {
   }
 
   async queryUITree(): Promise<UIElement[]> {
-    return parseUiAutomatorDump(await this.adb.dumpUiHierarchy(this.soleLive().serial))
+    const serial = this.soleLive().serial
+    return this.parseTree(serial, await this.adb.dumpUiHierarchy(serial))
   }
 
   stream(): ReadableStream<Buffer> {

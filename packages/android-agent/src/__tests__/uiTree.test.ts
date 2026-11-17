@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { parseUiAutomatorDump } from '../uiTree.js'
+import { dumpRootFloats, parseUiAutomatorDump } from '../uiTree.js'
 
 const attrs = (over: Record<string, string> = {}): string => {
   const base: Record<string, string> = {
@@ -54,6 +54,28 @@ describe('parseUiAutomatorDump', () => {
       `</node>\n</hierarchy>`
     const [el] = parseUiAutomatorDump(xml)
     expect(el.frame).toEqual({ x: 0.25, y: 0.25, width: 0.5, height: 0.5 })
+  })
+
+  // Measured on Pixel_9_tapflow (Android 14): with an AlertDialog in front the dump's root is the dialog's window.
+  const dialog =
+    `<?xml version='1.0' encoding='UTF-8' standalone='yes' ?>\n` +
+    `<hierarchy rotation="0">\n` +
+    `<node ${attrs({ class: 'android.widget.FrameLayout', bounds: '[28,955][1052,1469]' })}>\n` +
+    `<node ${attrs({ class: 'android.widget.Button', text: 'OK', clickable: 'true', bounds: '[830,1290][1000,1410]' })} />\n` +
+    `</node>\n</hierarchy>`
+
+  it('places a dialog\'s elements on the screen, by the screen\'s size, when the dialog\'s window is the root', () => {
+    expect(dumpRootFloats(dialog)).toBe(true)
+    const [ok] = parseUiAutomatorDump(dialog, { width: 1080, height: 2424 })
+    expect(round(ok!.frame!.y + ok!.frame!.height / 2)).toBeCloseTo(1350 / 2424, 3)
+    expect(round(ok!.frame!.x + ok!.frame!.width / 2)).toBeCloseTo(915 / 1080, 3)
+  })
+
+  it('keeps the root\'s size for a dump of the screen, whatever size it is given', () => {
+    expect(dumpRootFloats(wrap(''))).toBe(false)
+    const xml = wrap(`<node ${attrs({ class: 'android.widget.Button', text: 'Login', clickable: 'true', bounds: '[270,1200][810,1350]' })} />`)
+    // A size from before a turn must not stretch a dump the root already says the shape of.
+    expect(parseUiAutomatorDump(xml, { width: 2400, height: 1080 })[0]!.frame).toEqual({ x: 0.25, y: 0.5, width: 0.5, height: 0.0625 })
   })
 
   it('keeps text-bearing and interactive nodes, drops inert containers and zero-area nodes', () => {
