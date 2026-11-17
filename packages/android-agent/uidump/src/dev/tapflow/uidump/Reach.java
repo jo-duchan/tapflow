@@ -51,11 +51,16 @@ final class Reach {
     List<AccessibilityWindowInfo> windows = new ArrayList<>(automation.getWindows());
     windows.sort((a, b) -> Integer.compare(b.getLayer(), a.getLayer()));
     if (basis.left > 0 || basis.top > 0) {
-      Rect screen = new Rect();
-      Rect r = new Rect();
-      for (AccessibilityWindowInfo w : windows) {
-        w.getBoundsInScreen(r);
-        screen.union(r);
+      // The display's logical size, as `dumpsys window displays` `cur=` gives the tree: the windows' union only when it
+      // cannot be read, since the bars need not be among the windows (CodeRabbit on #1183).
+      Rect screen = displaySize();
+      if (screen == null) {
+        screen = new Rect();
+        Rect r = new Rect();
+        for (AccessibilityWindowInfo w : windows) {
+          w.getBoundsInScreen(r);
+          screen.union(r);
+        }
       }
       if (screen.left == 0 && screen.top == 0 && screen.contains(basis)) basis = screen;
     }
@@ -215,6 +220,21 @@ final class Reach {
     String label = n.isPassword() || n.isEditable() ? "" : labelOf(n);
     String cls = String.valueOf(n.getClassName());
     return cls.substring(cls.lastIndexOf('.') + 1) + (id != null ? " " + id : "") + (label.isEmpty() ? "" : " '" + label + "'");
+  }
+
+  /** The default display's logical size, turned as it is shown, through the framework uiautomator itself reads it from;
+   *  `null` where that is out of reach. */
+  private static Rect displaySize() {
+    try {
+      Class<?> global = Class.forName("android.hardware.display.DisplayManagerGlobal");
+      Object instance = global.getMethod("getInstance").invoke(null);
+      Object info = global.getMethod("getDisplayInfo", int.class).invoke(instance, 0);
+      int w = info.getClass().getField("logicalWidth").getInt(info);
+      int h = info.getClass().getField("logicalHeight").getInt(info);
+      return w > 0 && h > 0 ? new Rect(0, 0, w, h) : null;
+    } catch (Throwable t) {
+      return null;
+    }
   }
 
   private static double nx(int x, Rect basis) { return (double) (x - basis.left) / basis.width(); }
