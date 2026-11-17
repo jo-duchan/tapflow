@@ -97,7 +97,7 @@ export interface ApiToken {
 export interface TeamMember {
   id: number
   email: string
-  display_name: string
+  display_name: string | null
   role: string
   joined_at: string
 }
