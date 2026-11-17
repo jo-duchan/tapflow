@@ -84,7 +84,9 @@ export function parseUiAutomatorDump(xml: string, screen?: { width: number; heig
   // The root node spans the current display, so dumps normalize correctly in
   // any orientation without a separate `wm size` round-trip — unless a window floats over it (`dumpRootFloats`), when
   // the caller's screen size is used. Fall back to the max extents when the root reports a degenerate frame.
-  const floats = screen && screen.width > 0 && screen.height > 0 && nodes[0].bounds && (nodes[0].bounds.x1 > 0 || nodes[0].bounds.y1 > 0)
+  // Only a size the root fits in: one read across a turn would clip the dump (pre-PR review).
+  const root = nodes[0].bounds
+  const floats = screen && root && (root.x1 > 0 || root.y1 > 0) && root.x2 <= screen.width && root.y2 <= screen.height
   let width = floats ? screen.width : nodes[0].bounds?.x2 ?? 0
   let height = floats ? screen.height : nodes[0].bounds?.y2 ?? 0
   if (width <= 0 || height <= 0) {

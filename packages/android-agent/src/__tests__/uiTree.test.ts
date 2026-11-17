@@ -71,6 +71,13 @@ describe('parseUiAutomatorDump', () => {
     expect(round(ok!.frame!.x + ok!.frame!.width / 2)).toBeCloseTo(915 / 1080, 3)
   })
 
+  // Pre-PR review: a size read across a turn (portrait) for a landscape dialog would clip the dump; the root decides.
+  it('keeps the root\'s size when the dialog does not fit the size it is given', () => {
+    const landscape = dialog.replace('[28,955][1052,1469]', '[600,100][1800,980]').replace('[830,1290][1000,1410]', '[1500,800][1700,950]')
+    const [ok] = parseUiAutomatorDump(landscape, { width: 1080, height: 2424 })
+    expect(round(ok!.frame!.x + ok!.frame!.width / 2)).toBeCloseTo(1600 / 1800, 3)
+  })
+
   it('keeps the root\'s size for a dump of the screen, whatever size it is given', () => {
     expect(dumpRootFloats(wrap(''))).toBe(false)
     const xml = wrap(`<node ${attrs({ class: 'android.widget.Button', text: 'Login', clickable: 'true', bounds: '[270,1200][810,1350]' })} />`)

@@ -43,11 +43,22 @@ final class Reach {
       for (int i = 0; i < targets.length(); i++) results.put(unknown("no window"));
       return new JSONObject().put("results", results).toString();
     }
-    // The tree's basis, as uiTree.ts normalizes against the dump's root.
+    // The tree's basis, as uiTree.ts normalizes: the active window's root when it is the screen, and the screen when the
+    // root floats over it (a dialog: `dumpRootFloats`). The screen is the windows' union, status and navigation bars
+    // included; a dialog's root alone put its OK 0.36 of the screen off (measured, Pixel_9_tapflow Android 14).
     Rect basis = new Rect();
     root.getBoundsInScreen(basis);
     List<AccessibilityWindowInfo> windows = new ArrayList<>(automation.getWindows());
     windows.sort((a, b) -> Integer.compare(b.getLayer(), a.getLayer()));
+    if (basis.left > 0 || basis.top > 0) {
+      Rect screen = new Rect();
+      Rect r = new Rect();
+      for (AccessibilityWindowInfo w : windows) {
+        w.getBoundsInScreen(r);
+        screen.union(r);
+      }
+      if (screen.left == 0 && screen.top == 0 && screen.contains(basis)) basis = screen;
+    }
     List<AccessibilityNodeInfo> all = new ArrayList<>();
     collect(root, all);
     for (int i = 0; i < targets.length(); i++) results.put(one(targets.getJSONObject(i), all, windows, basis));
