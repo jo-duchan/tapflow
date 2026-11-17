@@ -504,7 +504,7 @@ const INBOUND = { ...BROWSER_INBOUND, ...AGENT_INBOUND, ...STREAM_INBOUND } as c
 // from a session that has never acked as **success** (#457), so a dropped `input:key` would be
 // reported to an MCP caller as an input that landed.
 //
-// Shutdown can answer without an ID; every other member requires one.
+// Shutdown's ID is optional; other members require one. device:lease is excluded because it has no session to answer on.
 // The correlation guard checks both policies against the protocol and the relay's replies.
 const ANSWERABLE = {
   'device:boot': envC('device:boot'),
