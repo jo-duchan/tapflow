@@ -64,7 +64,7 @@ What you go on from with **Continue anyway** is remembered until you close the d
 - At that step, the marked areas are left out and the rest is compared.
 - A later step whose recorded picture shows the same screen (the two recorded pictures alike outside the marked areas) leaves those areas out too. An area over the point that step touches is not carried, so what it touches is still compared. The areas carried from other steps cover at most a quarter of the screen together.
 - A step you went on from when it was mostly different is not compared again, and nothing is carried from it to other steps.
-- If the screen still differs outside the remembered areas, Match stops again and says where they came from, as in **2 areas on this screen aren’t compared, from step 3.** A screen mostly different now stops whatever was remembered.
+- If the screen still differs outside the remembered areas, Match stops again and says where they came from, as in **2 areas on this screen aren’t compared, from step 3.** Except at a step you already went on from as mostly different, a screen mostly different now stops whatever was remembered.
 
 On iOS, when some taps the app did not respond to when you recorded them, the end of Match says so, as in **1 tap the app didn’t respond to will be left out.** Open that line to check the taps to keep; hovering or focusing one shows the screen it was tapped on. **Continue to Edit** goes on without the taps left unchecked. A tap right before typing, and one that changed the screen in Match, are kept without asking.
 
