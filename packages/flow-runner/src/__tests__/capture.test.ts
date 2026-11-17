@@ -847,6 +847,17 @@ describe('defaultRange', () => {
       expect(defaultRange(steps)).toEqual({ start: 2, end: 4 })
     })
 
+    // A touch no app reported between them (a permission alert's Allow, SpringBoard's) leaves the first unknown.
+    it('does not take a tap for the icon\'s when another unreported touch comes before the app\'s first', () => {
+      const r = new Rec().install()
+      read(r, IOS_HOME).touch([[0.62, 0.38]])
+      read(r, APP).touch([[0.5, 0.6]])
+      read(r, APP).touch([[0.41, 0.93]]).touched({ moving: false, seq: 1 })
+      const steps = r.steps()
+      expect(steps[1]!.onHome).toBeUndefined()
+      expect(defaultRange(steps)).toEqual({ start: 1, end: 4 })
+    })
+
     it('places a touch the app reported in the app, whatever a read says', () => {
       const r = new Rec().install()
       read(r, IOS_HOME).touch([[0.2, 0.3]]).touched({ moving: false, seq: 1 })
