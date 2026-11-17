@@ -41,15 +41,32 @@ tapflow resets the same device that way, turns it the way it was when the part s
 
 A typing step replaces what the field holds with the value the field really held when you recorded: Korean, Caps Lock, the on-screen keyboard and Backspace all replay as they ended up. If you typed into a field that was focused before the part began, the replay taps that field first, and the tap goes into the flow.
 
-On iOS, a tap whose element the app named when you recorded it is replayed on that element, not at the recorded point. When the screen does not show the element, the replay scrolls the way the swipe before it went, then the other way, until it does, and taps it, as Verify does. A fling stops in a different place every time, so such a tap and the swipe just before it are not compared by picture. A tap made while a list was still moving only stops the list and presses nothing, so it is not replayed. Range shows it dimmed, Edit lists it as not in the flow, and when the step after it differs, Match names it.
+On iOS, a tap whose element the app named when you recorded it is replayed on that element, not at the recorded point. When the screen does not show the element, the replay scrolls the way the swipe before it went, then the other way, until it does, and taps it, as Verify does. A fling stops in a different place every time, so such a tap and the swipe just before it are not compared by picture. A tap made while a list was still moving only stops the list and presses nothing, so it is not replayed. Neither is a tap the app did not respond to when you tapped the same element again right after, on a screen that had not changed. Range shows such taps dimmed, Edit lists them as not in the flow, and when the step after one differs, Match names it.
 
-Just before each step runs, the screen is compared with the one the step began on when you recorded it. When the two differ, the replay stops at that step and shows the recorded picture beside the screen now, and says so if steps you took come before the part. The status bar, and the area the on-screen keyboard covered when you recorded, are not compared, and are marked on the pictures with a light gray tint and a dashed edge. A step with no picture (a key on the on-screen keyboard, a step begun right after typing a password) is not compared.
+On iOS, a tap made while the screen the tap before it opened was still changing is handled apart too: one on the same spot within 400 ms of the tap before it, like the second of a double tap. Its recorded picture is the screen from before the earlier tap acted, and the replay waits for the screen that tap opens, so the two cannot match. Match does not stop on such a tap. If the app did not respond to it when you recorded it, the replay does not send it and asks at the end of Match whether to leave it out (below). If that is not known, the replay sends it and Edit marks it **fragile**.
 
-- **Continue anyway** runs that step and goes on replaying. Verify then runs the flow with selectors only, so a step whose element is not on the screen fails there; it does not compare the screen with the recording.
-- **Back to Range** returns to Range. When the start is still where it began and steps you took in the app come before it, the start moves back to them, and Range says so.
+Just before each step runs, the screen is compared with the one the step began on when you recorded it. The status bar, and the area the on-screen keyboard covered when you recorded, are not compared, and are marked on the pictures with a light gray tint and a dashed edge (**Not compared**). A step with no picture (a key on the on-screen keyboard, a step begun right after typing a password) is not compared. When the two differ, Match does not stop at once: it looks again every 0.15 seconds for up to 3 seconds. A screen that comes late, like the one after a login's spinner, goes on as soon as it matches the recording. If it still differs after 3 seconds, the replay stops at that step and shows the recorded picture beside the screen now.
+
+- Where it differs is boxed in yellow on the picture of now (**Differs**), and the title says in how many places, as in **Step 4 of 8 looks different in 2 places**. Differences close together share one box.
+- When more than half of what was compared differs, the picture is outlined as a whole instead, with **Step 4 of 8 is mostly different**. That happens when the app makes or loads different data each time, or the start is different.
+- It also says how many steps before it matched, and whether steps come before the part or taps were not replayed.
+
+From the stopped screen:
+
+- **Continue anyway** runs that step and goes on replaying. Use it when it is the same screen with parts that change every time, like an animation or new data. The marked areas are not compared again (see below). Verify then runs the flow with selectors only, so a step whose element is not on the screen fails there; it does not compare the screen with the recording.
 - **Edit what matched** appears only when some steps matched, and goes on to Edit with those steps.
-- **Stop** halts the replay. Then **Start again** replays from the beginning, and **Edit what matched** goes on with the steps matched so far.
+- **Back to Range** appears only when no step that acts on the screen (a tap, a swipe, typing) has matched yet, or when the start is still where it began and steps you took in the app come before it. In the second case the start moves back to them, and Range says so. Once a step has matched, go on with **Edit what matched** and return to Range from the stepper at the top.
+- **Stop**, while it replays, halts the replay. Then **Start again** replays from the beginning, and **Edit what matched** goes on with the steps matched so far.
 - Step capturing pauses while it replays, so the replayed steps do not end up in your capture.
+
+What you go on from with **Continue anyway** is remembered until you close the dialog or change the start of the part, and used for the rest of this Match and for any Match again from the same start:
+
+- At that step, the marked areas are left out and the rest is compared.
+- A later step whose recorded picture shows the same screen (the two recorded pictures alike outside the marked areas) leaves those areas out too. An area over the point that step touches is not carried, so what it touches is still compared. The areas carried from other steps cover at most a quarter of the screen together.
+- A step you went on from when it was mostly different is not compared again, and nothing is carried from it to other steps.
+- If the screen still differs outside the remembered areas, Match stops again and says where they came from, as in **2 areas on this screen aren’t compared, from step 3.** Except at a step you already went on from as mostly different, a screen mostly different now stops whatever was remembered.
+
+On iOS, when some taps the app did not respond to when you recorded them, the end of Match says so, as in **1 tap the app didn’t respond to will be left out.** Open that line to check the taps to keep; hovering or focusing one shows the screen it was tapped on. **Continue to Edit** goes on without the taps left unchecked. A tap right before typing, and one that changed the screen in Match, are kept without asking.
 
 ### 5. Edit: tidy up the steps {#edit}
 
@@ -60,7 +77,7 @@ The steps of the flow are listed. Selecting one shows its screenshot on the left
 
 | Badge | Meaning |
 |---|---|
-| **fragile** | A tap that taps a point on the screen because nothing there can be named, or a swipe that replays its two ends at the speed it was made. A different screen size or layout can make it land elsewhere. Also a tap that may have been a key on the on-screen keyboard or the app, and typing whose field could not be read afterwards. |
+| **fragile** | A tap that taps a point on the screen because nothing there can be named, or a swipe that replays its two ends at the speed it was made. A different screen size or layout can make it land elsewhere. Also a tap that may have been a key on the on-screen keyboard or the app, typing whose field could not be read afterwards, and a tap made while the screen the tap before it opened was still changing. |
 | **auto** | A swipe turned into "scroll until the element the next step taps is on screen" (`scroll: { until }`). How far one swipe goes differs from run to run, and this way the result does not. |
 | **not in the flow** | Something a flow cannot express, left out: switching the network, cut, putting the on-screen keyboard up or down, a long press of more than 60 seconds, a key on the on-screen keyboard whose typing could not be read, and so on. The card says why. |
 
@@ -112,6 +129,7 @@ The file name (`flows/<name>.yaml`) and the YAML are shown.
 - On iOS, when a person whose steps are recorded boots a device, the simulator's app accessibility setting (`ApplicationAccessibilityEnabled`) is turned on: the app needs it to say what each tap touched. The name and identifier of what a tap touched (never what a field holds) pass through a file in the simulator's temporary folder that only the agent's user can read, deleted when the agent reads it, and are kept in the capture beside the step. The setting's previous value is kept on the Mac and put back at the next boot that is not recorded, or before the device shuts down; if the agent stopped first, when it next starts while the device is running, otherwise at the device's next boot. A simulator that already had it on is left alone. The setting takes effect when an app launches, so an app already running at the boot gets it from its next launch, and turning off **Capture my steps** during a session leaves it on until the next boot.
 - Replaying a typing step by replacing the field's contents needs Android 13 or later, and `imeAction` Android 11 or later. See [Flows](/automation/flows).
 - An element covered by an overlay with no accessibility information is invisible when the device judges where a touch lands. Suspect one when Verify says a touch changed nothing. See [Where a touch lands](/automation/flows#where-a-touch-lands).
+- A step you go on from with **Continue anyway** when it is mostly different is not compared in later Matches, and nothing in Match or Edit shows that it was not.
 - Every role can use it, Viewer included.
 
 ## Troubleshooting {#troubleshooting}
