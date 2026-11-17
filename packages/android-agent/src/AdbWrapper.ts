@@ -47,7 +47,8 @@ export class StorageFullError extends ValidationError {
 }
 
 // How long `am start -W` may wait for the launched app's first frame, and the resolve call before it: together under
-// MCP's 15 s launch deadline, with room for a monkey fallback.
+// MCP's 15 s launch deadline, with room for a monkey fallback — on the device. The host's backstop (`hostBound`, 5 s and
+// 12 s) is reached only when the device's bound fails to end the call, and then can pass that deadline.
 const AM_START_WAIT_SEC = 10
 const RESOLVE_WAIT_SEC = 3
 /**
@@ -456,12 +457,11 @@ export class AdbWrapper {
     }
     let out: string
     try {
-      out = await this.runner.exec(
-        '-s', serial, 'shell', 'timeout', String(AM_START_WAIT_SEC), 'am', 'start', '-S', '-W',
+      const args = ['-s', serial, 'shell', 'timeout', String(AM_START_WAIT_SEC), 'am', 'start', '-S', '-W',
         '-a', 'android.intent.action.MAIN', '-c', 'android.intent.category.LAUNCHER', '-f', '0x10200000', '-n', component,
         ...androidLaunchExtras(options.arguments),
-        '2>&1',
-      )
+        '2>&1']
+      out = await (this.runner.execBounded?.(hostBound(AM_START_WAIT_SEC), ...args) ?? this.runner.exec(...args))
     } catch (e) {
       out = (e as { stdout?: string }).stdout ?? ''
       // Not `cause: e`: node's message and `cmd` carry the whole argv, argument values included, and the cause is
@@ -522,10 +522,8 @@ export class AdbWrapper {
     // with exit 251 before sending any event, the launch included ("SYS_KEYS has no physical keys
     // but with factor 2.0%"). Options must precede the count: monkey stops parsing at it.
     try {
-      await this.runner.exec(
-        '-s', serial, 'shell', 'monkey', '--pct-syskeys', '0',
-        '-p', packageName, '-c', 'android.intent.category.LAUNCHER', '1',
-      )
+      const args = ['-s', serial, 'shell', 'monkey', '--pct-syskeys', '0', '-p', packageName, '-c', 'android.intent.category.LAUNCHER', '1']
+      await (this.runner.execBounded?.(hostBound(AM_START_WAIT_SEC), ...args) ?? this.runner.exec(...args))
     } catch (e) {
       // The reason reaches a dashboard toast. Node's message leads with the argv — the host's SDK path
       // and the serial — and monkey echoes its own arguments on stderr, so keep only a line that says
@@ -542,7 +540,13 @@ export class AdbWrapper {
   }
 
   async openUrl(serial: string, url: string): Promise<void> {
-    await this.runner.exec('-s', serial, 'shell', 'am', 'start', '-a', 'android.intent.action.VIEW', '-d', url)
+    // Bounded on the host like the launch (`hostBound`): a cut call whose intent went out still opened the link.
+    const args = ['-s', serial, 'shell', 'am', 'start', '-a', 'android.intent.action.VIEW', '-d', url]
+    try {
+      await (this.runner.execBounded?.(hostBound(AM_START_WAIT_SEC), ...args) ?? this.runner.exec(...args))
+    } catch (e) {
+      if (!((e as { stdout?: string }).stdout ?? '').includes('Starting: Intent')) throw e
+    }
   }
 
   async screenshot(serial: string): Promise<Buffer> {
