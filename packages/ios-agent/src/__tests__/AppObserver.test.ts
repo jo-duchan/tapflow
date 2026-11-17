@@ -102,6 +102,65 @@ describe('asking the app', () => {
     expect(await silent.observer.read(UDID, 'com.app')).toEqual({ kind: 'silent' })
   })
 
+  // An app installed and never opened, on the home screen: waiting out the deadline made each read there take ~2 s, and
+  // Capture's default range kept the home-screen taps before the icon tap.
+  it('reads an app with no process as away well before the deadline', async () => {
+    root = mkdtempSync(join(tmpdir(), 'observer-'))
+    const observer = new AppObserver({ appRunning: async () => false }, { root, deadlineMs: 2_000, pollMs: 2, processCheckMs: 20 })
+    await observer.prepare(UDID)
+    const t0 = Date.now()
+    expect(await observer.read(UDID, 'com.app')).toEqual({ kind: 'away' })
+    expect(Date.now() - t0).toBeLessThan(500)
+    expect(readdirSync(observer.dir(UDID))).not.toContain('request')
+  })
+
+  // Pre-PR review: a marker left after the request was written (the app went to the background just then) is read at
+  // the process check, not after the deadline.
+  it('reads a background marker that appears while it waits as away, before the deadline', async () => {
+    root = mkdtempSync(join(tmpdir(), 'observer-'))
+    const observer = new AppObserver({ appRunning: async () => true }, { root, deadlineMs: 2_000, pollMs: 2, processCheckMs: 30 })
+    await observer.prepare(UDID)
+    // Written once the request is there (CodeRabbit on #1182): before it, the check ahead of the request would read it.
+    const dir = observer.dir(UDID)
+    const marker = setInterval(() => { if (existsSync(join(dir, 'request'))) { writeFileSync(join(dir, 'background'), 'com.app'); clearInterval(marker) } }, 1)
+    const t0 = Date.now()
+    expect(await observer.read(UDID, 'com.app')).toEqual({ kind: 'away' })
+    expect(Date.now() - t0).toBeLessThan(500)
+  })
+
+  it('asks for the process again at the deadline, so an app that quit while it waited is away', async () => {
+    root = mkdtempSync(join(tmpdir(), 'observer-'))
+    const answers = [true, false]
+    const observer = new AppObserver({ appRunning: async () => answers.shift() ?? false }, { root, deadlineMs: 80, pollMs: 2, processCheckMs: 10 })
+    await observer.prepare(UDID)
+    expect(await observer.read(UDID, 'com.app')).toEqual({ kind: 'away' })
+    expect(answers).toEqual([])
+  })
+
+  it('reads a process check that fails as unknown, never as away', async () => {
+    root = mkdtempSync(join(tmpdir(), 'observer-'))
+    const observer = new AppObserver({ appRunning: async () => { throw new Error('simctl') } }, { root, deadlineMs: 80, pollMs: 2, processCheckMs: 10 })
+    await observer.prepare(UDID)
+    expect(await observer.read(UDID, 'com.app')).toEqual({ kind: 'silent' })
+  })
+
+  it('does not ask for the process when the app answers at once, and waits on when it has one', async () => {
+    root = mkdtempSync(join(tmpdir(), 'observer-'))
+    const appRunning = vi.fn(async () => true)
+    const observer = new AppObserver({ appRunning }, { root, deadlineMs: 150, pollMs: 2, processCheckMs: 40 })
+    await observer.prepare(UDID)
+    const stop = app(observer.dir(UDID), (nonce) => ({ nonce, bundle: 'com.app', pid: 1, keyboard: KEYBOARD_UP, field: null }))
+    expect((await observer.read(UDID, 'com.app')).kind).toBe('answer')
+    stop()
+    expect(appRunning).not.toHaveBeenCalled()
+    // Running and silent: the read waits for the app to the deadline rather than calling it away, and asks again there,
+    // since the app may have quit meanwhile (CodeRabbit on #1182).
+    const t0 = Date.now()
+    expect(await observer.read(UDID, 'com.app')).toEqual({ kind: 'silent' })
+    expect(Date.now() - t0).toBeGreaterThanOrEqual(140)
+    expect(appRunning).toHaveBeenCalledTimes(2)
+  })
+
   // A keyboard probe and a field read are asked together after a key on the soft keyboard: a second request written
   // before the first is answered would replace it.
   it('asks one request at a time per device, so each gets its own answer', async () => {

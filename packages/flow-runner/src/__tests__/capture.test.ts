@@ -820,6 +820,76 @@ describe('defaultRange', () => {
       expect(defaultRange(steps)).toEqual({ start: 3, end: 4 })
     })
 
+    // iOS reports each touch the app takes, numbered from 1 in its process: the icon's tap is the one no app reported
+    // just before the app's first report. Measured on iOS 26.5 the range otherwise kept the icon's tap.
+    it('leaves out the icon\'s tap when the app reports the next touch as its first', () => {
+      const r = new Rec().install()
+      read(r, IOS_HOME).touch([[0.5, 0.75], [0.5, 0.6]])
+      read(r, IOS_HOME).touch([[0.3, 0.7]])
+      read(r, IOS_HOME).touch([[0.62, 0.38]])
+      read(r, APP).touch([[0.41, 0.93]]).touched({ moving: false, seq: 1 })
+      read(r, APP).touch([[0.58, 0.93]]).touched({ moving: false, seq: 2 })
+      const steps = r.steps()
+      expect(steps.map((s) => s.onHome)).toEqual([undefined, true, true, true, false, false])
+      expect(defaultRange(steps)).toEqual({ start: 4, end: 6 })
+      expect(rangeWarnings(steps, defaultRange(steps))).toEqual([])
+    })
+
+    // Design review: a quick first tap whose report came too late to be paired looks like the icon's tap. Only the app's
+    // first report says which tap opened it.
+    it('keeps a first tap in the app that has no report, when the icon\'s tap was already read as home', () => {
+      const r = new Rec().install()
+      read(r, IOS_HOME).touch([[0.62, 0.38]])
+      read(r, IOS_HOME).touch([[0.41, 0.93]])
+      read(r, APP).touch([[0.58, 0.93]]).touched({ moving: false, seq: 2 })
+      const steps = r.steps()
+      expect(steps.map((s) => s.onHome)).toEqual([undefined, true, undefined, false])
+      expect(defaultRange(steps)).toEqual({ start: 2, end: 4 })
+    })
+
+    // A touch no app reported between them (a permission alert's Allow, SpringBoard's) leaves the first unknown.
+    it('does not take a tap for the icon\'s when another unreported touch comes before the app\'s first', () => {
+      const r = new Rec().install()
+      read(r, IOS_HOME).touch([[0.62, 0.38]])
+      read(r, APP).touch([[0.5, 0.6]])
+      read(r, APP).touch([[0.41, 0.93]]).touched({ moving: false, seq: 1 })
+      const steps = r.steps()
+      expect(steps[1]!.onHome).toBeUndefined()
+      expect(defaultRange(steps)).toEqual({ start: 1, end: 4 })
+    })
+
+    // Pre-PR review: a launch between them is what opened the app, so the tap before it is not the icon's.
+    it('does not take a tap for the icon\'s when a launch comes before the app\'s first touch', () => {
+      const r = new Rec().install()
+      read(r, IOS_HOME).touch([[0.62, 0.38]])
+      read(r, APP).launch()
+      read(r, APP).touch([[0.41, 0.93]]).touched({ moving: false, seq: 1 })
+      const steps = r.steps()
+      expect(steps.map((s) => s.kind)).toEqual(['install', 'tap', 'launch', 'tap'])
+      expect(steps[1]!.onHome).toBeUndefined()
+    })
+
+    it('places a touch the app reported in the app, whatever a read says', () => {
+      const r = new Rec().install()
+      read(r, IOS_HOME).touch([[0.2, 0.3]]).touched({ moving: false, seq: 1 })
+      read(r, IOS_HOME).touch([[0.5, 0.4]]).touched({ moving: false, seq: 2 })
+      const steps = r.steps()
+      expect(steps.map((s) => s.onHome)).toEqual([undefined, false, false])
+      expect(defaultRange(steps)).toEqual({ start: 1, end: 3 })
+    })
+
+    it('does not take a pinch for the icon\'s tap', () => {
+      const r = new Rec().install()
+      read(r, IOS_HOME)
+      r.msg({ type: 'input:pinch:start', sessionId: 's', payload: { f0: { x: 0.45, y: 0.5 }, f1: { x: 0.55, y: 0.5 } } })
+        .wait(16).msg({ type: 'input:pinch:move', sessionId: 's', payload: { f0: { x: 0.4, y: 0.5 }, f1: { x: 0.6, y: 0.5 } } })
+        .wait(300).msg({ type: 'input:pinch:end', sessionId: 's', requestId: r.id() }, true)
+      read(r, APP).touch([[0.5, 0.4]]).touched({ moving: false, seq: 1 })
+      const steps = r.steps()
+      expect(steps[1]!.kind).toBe('pinch')
+      expect(steps[1]!.onHome).toBeUndefined()
+    })
+
     it('keeps an open-url sent from the home screen: it is how the app was opened', () => {
       const r = new Rec().install()
       read(r, HOME).touch([[0.2, 0.3]])

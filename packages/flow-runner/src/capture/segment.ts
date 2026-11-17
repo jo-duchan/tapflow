@@ -279,7 +279,8 @@ export function segment(entries: readonly CaptureEntry[]): RawStep[] {
     }
   }
   endRun()
-  return withTouches(withKeyboardRect(withHome(oneAskedSecret(withFieldValues(out, entries)), entries), entries), entries)
+  // Touches first: `withHome` reads the app's report of a touch as where it went down.
+  return withKeyboardRect(withHome(withTouches(oneAskedSecret(withFieldValues(out, entries)), entries), entries), entries)
 }
 
 const TOUCH_KINDS = new Set<RawStep['kind']>(['tap', 'longPress', 'swipe', 'holdDrag'])
@@ -339,7 +340,8 @@ function union(a: KeyboardRect, b: KeyboardRect): KeyboardRect {
  *
  * Home is also asked of the first read taken after the step: a read before it can be stale, taken just after the icon
  * tap while the app was still coming up, and a person quick to tap in the app would have that tap read as the home
- * screen's and left out. A step home before and the app after is not known, which stops the default range there.
+ * screen's and left out. A step home before and the app after is not known, which stops the default range there —
+ * unless it is the icon's tap by the app's own reports (`openedTheApp`).
  */
 function withHome(steps: RawStep[], entries: readonly CaptureEntry[]): RawStep[] {
   const reads = entries.flatMap((e) => (e.kind === 'keyboard' ? [e] : [])).sort((a, b) => a.at - b.at)
@@ -347,18 +349,35 @@ function withHome(steps: RawStep[], entries: readonly CaptureEntry[]): RawStep[]
   let i = 0
   let lastRead: (typeof reads)[number] | undefined
   let previousEnd = -Infinity
-  return steps.map((s) => {
+  return steps.map((s, n) => {
     while (i < reads.length && reads[i]!.at <= s.at) lastRead = reads[i++]
     const sinceLast = previousEnd
     previousEnd = s.endAt
+    // The app reported this touch (iOS): it went down in the app, whatever a read trailing the icon's tap says. No app
+    // reports a touch on the home screen; the observer runs only in the app under test.
+    if ('touched' in s && s.touched) return { ...s, onHome: false }
     // A read asked for before the step ahead ended, and answered after it, is about the screen that step left: the icon
     // tap's would place the first tap in the app on the home screen.
     const last = lastRead && lastRead.requestedAt >= sinceLast ? lastRead.keyboard.onHome : undefined
     if (last === undefined) return s
     const after = last ? reads.find((r) => r.requestedAt >= s.endAt)?.keyboard.onHome : undefined
-    if (last && after === false) return s
+    if (last && after === false) return openedTheApp(steps, n) ? { ...s, onHome: true } : s
     return { ...s, onHome: last }
   })
+}
+
+/**
+ * Whether the step at `n`, home before it and the app after it, is the tap that opened the app from its icon: a tap no
+ * app reported, followed straight by a touch the app reports as the first in its process (`seq` 1).
+ * A missing report alone cannot say it: an app just started may report its first tap too late to be paired, and that
+ * tap looks the same (design review). Anything else stays unknown, which stops the default range's skip there.
+ */
+function openedTheApp(steps: readonly RawStep[], n: number): boolean {
+  const s = steps[n]!
+  if (s.kind !== 'tap' || s.touched) return false
+  // The very next step: a launch, a link or a button between them would be what opened the app, not this tap.
+  const next = steps[n + 1]
+  return next !== undefined && 'touched' in next && next.touched?.seq === 1
 }
 
 /** A touch as the keyboard reads around it judge it: a key, the action key, the app, or not known. */

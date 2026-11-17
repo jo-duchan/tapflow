@@ -27,7 +27,7 @@ export type ObserverRead =
   | { kind: 'silent' }
 
 export interface ObserverHost {
-  /** Whether the app has a process on the device (`launchctl list`). Asked only when no answer came. */
+  /** Whether the app has a process on the device (`launchctl list`). Asked only when no answer came at once. */
   appRunning(udid: string, bundleId: string): Promise<boolean>
 }
 
@@ -40,6 +40,8 @@ export interface AppObserverOptions {
   lateAnswerMs?: number
   /** How long a read may wait behind others before it is answered unknown without asking. */
   staleQueueMs?: number
+  /** How long an answer is waited for before the device is also asked whether the app has a process at all. */
+  processCheckMs?: number
   nonce?: () => bigint
 }
 
@@ -49,6 +51,14 @@ const STRAY_ANSWER_MS = 5_000
 const LATE_ANSWER_MS = 3_000
 /** A read queued longer than this is one the relay (`FIELD_READ_TIMEOUT_MS`, 5 s) has given up on. */
 const STALE_QUEUE_MS = 4_000
+/**
+ * An app in front answers in 3-4 ms (measured), so one silent this long may have no process: an app installed and not yet
+ * opened, while the person is on the home screen. Asked then rather than after the deadline, since `launchctl list` takes
+ * 0.29-0.36 s (measured, iOS 26.5) and the deadline 1.5 s: a read on the home screen took ~2 s, longer than a person takes
+ * between two taps there, and Capture's default range, which needs a read asked after each step ends to place the next
+ * on the home screen, kept the home-screen taps before the icon tap.
+ */
+const PROCESS_CHECK_MS = 50
 
 const randomNonce = (): bigint => (randomBytes(8).readBigUInt64BE() >> 1n) + 1n
 
@@ -58,6 +68,7 @@ export class AppObserver {
   private readonly pollMs: number
   private readonly lateAnswerMs: number
   private readonly staleQueueMs: number
+  private readonly processCheckMs: number
   private readonly nonce: () => bigint
   // One request at a time per device: the observer answers the request it reads, and a second written before the
   // first is answered would replace it — a keyboard probe and a field read are often asked together.
@@ -70,6 +81,7 @@ export class AppObserver {
     this.pollMs = opts.pollMs ?? 5
     this.lateAnswerMs = opts.lateAnswerMs ?? LATE_ANSWER_MS
     this.staleQueueMs = opts.staleQueueMs ?? STALE_QUEUE_MS
+    this.processCheckMs = opts.processCheckMs ?? PROCESS_CHECK_MS
     this.nonce = opts.nonce ?? randomNonce
   }
 
@@ -175,7 +187,11 @@ export class AppObserver {
     } catch {
       return { kind: 'silent' }   // no directory: the device was not prepared (an older boot path)
     }
-    const deadline = Date.now() + this.deadlineMs
+    const asked = Date.now()
+    const deadline = asked + this.deadlineMs
+    // Whether the app has a process, asked once an answer is late; a failed ask counts as running, so it is not judged away.
+    let running: Promise<boolean> | undefined
+    let runningNow: boolean | undefined
     for (;;) {
       const text = await readFile(answer, 'utf8').catch(() => undefined)
       if (text !== undefined) {
@@ -188,7 +204,14 @@ export class AppObserver {
         }
         return { kind: 'silent' }
       }
+      if (runningNow === false) break
       if (Date.now() >= deadline) break
+      if (!running && Date.now() - asked >= this.processCheckMs) {
+        // An app sent to the background since the check before the request: its marker is as good as no process.
+        if (await this.markedAway(dir, bundleId)) { runningNow = false; break }
+        running = this.host.appRunning(udid, bundleId).catch(() => true)
+        void running.then((r) => { runningNow = r })
+      }
       await new Promise((r) => setTimeout(r, this.pollMs))
     }
     // Given up on: the request is taken back, so an app that starts later does not answer it into a file nobody reads,
@@ -196,7 +219,10 @@ export class AppObserver {
     // when it lands.
     await this.takeBack(dir, request)
     setTimeout(() => { void unlink(answer).catch(() => undefined) }, this.lateAnswerMs).unref()
+    if (runningNow === false) return { kind: 'away' }
     if (await this.markedAway(dir, bundleId)) return { kind: 'away' }
+    // Asked again rather than reusing the early check's yes: the app may have quit since, without a background marker
+    // (CodeRabbit on #1182). Only a no is kept from it, and that one ended the wait above.
     return (await this.host.appRunning(udid, bundleId).catch(() => true)) ? { kind: 'silent' } : { kind: 'away' }
   }
 

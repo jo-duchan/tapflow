@@ -1003,7 +1003,7 @@ describe('IOSAgent', () => {
       await vi.waitFor(() => expect(sent.find((m) => m.type === 'capture:touched')).toBeDefined(), { timeout: 2000 })
       // The report near the touch, not the one at the corner.
       expect(sent.filter((m) => m.type === 'capture:touched')).toEqual([{ type: 'capture:touched', sessionId: agent.sessionId, requestId: 'g1',
-        observation: { point: { x: 0.41, y: 0.52 }, moving: true, element: { label: 'Row 3', traits: 1 } } }])
+        observation: { point: { x: 0.41, y: 0.52 }, moving: true, element: { label: 'Row 3', traits: 1 }, seq: 2 } }])
       watch.mockRestore(); take.mockRestore()
       agent.disconnect()
       browser.close()
@@ -1069,7 +1069,7 @@ describe('IOSAgent', () => {
       await vi.waitFor(() => expect(sent.filter((m) => m.type === 'capture:touched')).toHaveLength(4), { timeout: 2000 })
       const later = sent.filter((m) => m.type === 'capture:touched').slice(2).map((m) => [m['requestId'], (m['observation'] as { acted?: boolean; tapCount?: number })])
       later.sort((a, b) => String(a[0]).localeCompare(String(b[0])))
-      expect(later).toEqual([['g1', { point: { x: 0.4, y: 0.5 }, moving: false, tapCount: 1, acted: false }], ['g2', { point: { x: 0.4, y: 0.5 }, moving: false, tapCount: 2, acted: true }]])
+      expect(later).toEqual([['g1', { point: { x: 0.4, y: 0.5 }, moving: false, tapCount: 1, seq: 1, acted: false }], ['g2', { point: { x: 0.4, y: 0.5 }, moving: false, tapCount: 2, seq: 2, acted: true }]])
       watch.mockRestore(); take.mockRestore()
       agent.disconnect()
       browser.close()
