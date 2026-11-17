@@ -221,7 +221,9 @@ export class AppObserver {
     setTimeout(() => { void unlink(answer).catch(() => undefined) }, this.lateAnswerMs).unref()
     if (runningNow === false) return { kind: 'away' }
     if (await this.markedAway(dir, bundleId)) return { kind: 'away' }
-    return (await (running ?? this.host.appRunning(udid, bundleId).catch(() => true))) ? { kind: 'silent' } : { kind: 'away' }
+    // Asked again rather than reusing the early check's yes: the app may have quit since, without a background marker
+    // (CodeRabbit on #1182). Only a no is kept from it, and that one ended the wait above.
+    return (await this.host.appRunning(udid, bundleId).catch(() => true)) ? { kind: 'silent' } : { kind: 'away' }
   }
 
   /** Remove `request` if it is still ours, and any answer older than a few seconds that nobody came for. */
