@@ -120,10 +120,21 @@ describe('asking the app', () => {
     root = mkdtempSync(join(tmpdir(), 'observer-'))
     const observer = new AppObserver({ appRunning: async () => true }, { root, deadlineMs: 2_000, pollMs: 2, processCheckMs: 30 })
     await observer.prepare(UDID)
-    setTimeout(() => writeFileSync(join(observer.dir(UDID), 'background'), 'com.app'), 10)
+    // Written once the request is there (CodeRabbit on #1182): before it, the check ahead of the request would read it.
+    const dir = observer.dir(UDID)
+    const marker = setInterval(() => { if (existsSync(join(dir, 'request'))) { writeFileSync(join(dir, 'background'), 'com.app'); clearInterval(marker) } }, 1)
     const t0 = Date.now()
     expect(await observer.read(UDID, 'com.app')).toEqual({ kind: 'away' })
     expect(Date.now() - t0).toBeLessThan(500)
+  })
+
+  it('asks for the process again at the deadline, so an app that quit while it waited is away', async () => {
+    root = mkdtempSync(join(tmpdir(), 'observer-'))
+    const answers = [true, false]
+    const observer = new AppObserver({ appRunning: async () => answers.shift() ?? false }, { root, deadlineMs: 80, pollMs: 2, processCheckMs: 10 })
+    await observer.prepare(UDID)
+    expect(await observer.read(UDID, 'com.app')).toEqual({ kind: 'away' })
+    expect(answers).toEqual([])
   })
 
   it('reads a process check that fails as unknown, never as away', async () => {
