@@ -308,6 +308,21 @@ describe('AdbWrapper', () => {
       expect(ran(runner, 'monkey')).toHaveLength(0)
     })
 
+    // Measured: `timeout 10 am start -W` returned to the host after 30.3 s, past Flow Capture's 30 s launch wait.
+    it('bounds the resolve and the launch on the host too, and counts a launch the host bound cut as sent', async () => {
+      const killed = Object.assign(new Error('Command failed: adb … (killed)'), { killed: true, stdout: 'Starting: Intent { cmp=com.example.app/.MainActivity }\n' })
+      const runner = launcher({ resolve: RESOLVED, start: STARTED })
+      runner.execBounded = vi.fn(async (_ms: number, ...args: string[]) => {
+        if (args.includes('resolve-activity')) return RESOLVED
+        if (args.includes('am')) throw killed
+        return ''
+      })
+      await new AdbWrapper(runner).launchApp('emulator-5554', PKG)
+      const bounds = vi.mocked(runner.execBounded).mock.calls.map((c) => [c[0], c.includes('am') ? 'am' : 'resolve'])
+      expect(bounds).toEqual([[5_000, 'resolve'], [12_000, 'am']])
+      expect(ran(runner, 'monkey')).toHaveLength(0)
+    })
+
     it('counts it launched when the device-side timeout ends the wait after the intent went out', async () => {
       const expired = Object.assign(new Error('Command failed: adb … exit 124'), { stdout: 'Starting: Intent { cmp=com.example.app/.MainActivity }\n' })
       const runner = launcher({ resolve: RESOLVED, start: expired })

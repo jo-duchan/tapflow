@@ -50,6 +50,13 @@ export class StorageFullError extends ValidationError {
 // MCP's 15 s launch deadline, with room for a monkey fallback.
 const AM_START_WAIT_SEC = 10
 const RESOLVE_WAIT_SEC = 3
+/**
+ * The host's own bound on a shell command the device bounds with `timeout`: the device's does not always end the adb
+ * session. Measured (Pixel_9_tapflow, Android 14, a launch while the app was being installed): `timeout 10 am start -W`
+ * returned to the host after 30.3 s, just past Flow Capture's 30 s launch wait, which then reported "app launch timed
+ * out" with the app on screen. Killed here, the launch still counts: its output says the intent was sent.
+ */
+const hostBound = (deviceSec: number): number => (deviceSec + 2) * 1000
 
 /** Each adb call of a device list re-read (#1085). `adb devices` answers in about 10 ms and `emu avd name` and `getprop`
  *  in well under a second; this is only there so a wedged emulator cannot hold the re-read for ever. */
@@ -475,10 +482,9 @@ export class AdbWrapper {
   private async launcherComponent(serial: string, packageName: string): Promise<string | undefined> {
     try {
       // Bounded like the launch below, so a busy package manager cannot spend MCP's 15 s launch deadline here.
-      const out = await this.runner.exec(
-        '-s', serial, 'shell', 'timeout', String(RESOLVE_WAIT_SEC), 'cmd', 'package', 'resolve-activity', '--brief',
-        '-c', 'android.intent.category.LAUNCHER', packageName,
-      )
+      const args = ['-s', serial, 'shell', 'timeout', String(RESOLVE_WAIT_SEC), 'cmd', 'package', 'resolve-activity', '--brief',
+        '-c', 'android.intent.category.LAUNCHER', packageName]
+      const out = await (this.runner.execBounded?.(hostBound(RESOLVE_WAIT_SEC), ...args) ?? this.runner.exec(...args))
       const last = out.split('\n').map((l) => l.trim()).filter(Boolean).pop()
       const escaped = packageName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
       return last && new RegExp(`^${escaped}/[\\w.]+$`).test(last) ? last : undefined
@@ -497,13 +503,12 @@ export class AdbWrapper {
   private async startAndWait(serial: string, component: string): Promise<boolean> {
     let out: string
     try {
-      out = await this.runner.exec(
-        '-s', serial, 'shell', 'timeout', String(AM_START_WAIT_SEC), 'am', 'start', '-W',
+      const args = ['-s', serial, 'shell', 'timeout', String(AM_START_WAIT_SEC), 'am', 'start', '-W',
         '-a', 'android.intent.action.MAIN', '-c', 'android.intent.category.LAUNCHER', '-f', '0x10200000', '-n', component,
         // Measured on API 36: errors go to stdout and the exit status is 0. Folded in on the device for an image that
         // writes them to stderr, which this runner does not return.
-        '2>&1',
-      )
+        '2>&1']
+      out = await (this.runner.execBounded?.(hostBound(AM_START_WAIT_SEC), ...args) ?? this.runner.exec(...args))
     } catch (e) {
       out = (e as { stdout?: string }).stdout ?? ''
       if (!out.includes('Starting: Intent')) return false
