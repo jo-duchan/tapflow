@@ -114,6 +114,18 @@ describe('asking the app', () => {
     expect(readdirSync(observer.dir(UDID))).not.toContain('request')
   })
 
+  // Pre-PR review: a marker left after the request was written (the app went to the background just then) is read at
+  // the process check, not after the deadline.
+  it('reads a background marker that appears while it waits as away, before the deadline', async () => {
+    root = mkdtempSync(join(tmpdir(), 'observer-'))
+    const observer = new AppObserver({ appRunning: async () => true }, { root, deadlineMs: 2_000, pollMs: 2, processCheckMs: 30 })
+    await observer.prepare(UDID)
+    setTimeout(() => writeFileSync(join(observer.dir(UDID), 'background'), 'com.app'), 10)
+    const t0 = Date.now()
+    expect(await observer.read(UDID, 'com.app')).toEqual({ kind: 'away' })
+    expect(Date.now() - t0).toBeLessThan(500)
+  })
+
   it('reads a process check that fails as unknown, never as away', async () => {
     root = mkdtempSync(join(tmpdir(), 'observer-'))
     const observer = new AppObserver({ appRunning: async () => { throw new Error('simctl') } }, { root, deadlineMs: 80, pollMs: 2, processCheckMs: 10 })

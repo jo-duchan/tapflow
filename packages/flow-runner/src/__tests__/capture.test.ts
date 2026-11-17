@@ -858,6 +858,17 @@ describe('defaultRange', () => {
       expect(defaultRange(steps)).toEqual({ start: 1, end: 4 })
     })
 
+    // Pre-PR review: a launch between them is what opened the app, so the tap before it is not the icon's.
+    it('does not take a tap for the icon\'s when a launch comes before the app\'s first touch', () => {
+      const r = new Rec().install()
+      read(r, IOS_HOME).touch([[0.62, 0.38]])
+      read(r, APP).launch()
+      read(r, APP).touch([[0.41, 0.93]]).touched({ moving: false, seq: 1 })
+      const steps = r.steps()
+      expect(steps.map((s) => s.kind)).toEqual(['install', 'tap', 'launch', 'tap'])
+      expect(steps[1]!.onHome).toBeUndefined()
+    })
+
     it('places a touch the app reported in the app, whatever a read says', () => {
       const r = new Rec().install()
       read(r, IOS_HOME).touch([[0.2, 0.3]]).touched({ moving: false, seq: 1 })

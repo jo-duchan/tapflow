@@ -207,6 +207,8 @@ export class AppObserver {
       if (runningNow === false) break
       if (Date.now() >= deadline) break
       if (!running && Date.now() - asked >= this.processCheckMs) {
+        // An app sent to the background since the check before the request: its marker is as good as no process.
+        if (await this.markedAway(dir, bundleId)) { runningNow = false; break }
         running = this.host.appRunning(udid, bundleId).catch(() => true)
         void running.then((r) => { runningNow = r })
       }

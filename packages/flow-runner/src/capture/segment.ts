@@ -368,14 +368,15 @@ function withHome(steps: RawStep[], entries: readonly CaptureEntry[]): RawStep[]
 
 /**
  * Whether the step at `n`, home before it and the app after it, is the tap that opened the app from its icon: a tap no
- * app reported, followed by a touch the app reports as the first in its process (`seq` 1) with no other touch between.
+ * app reported, followed straight by a touch the app reports as the first in its process (`seq` 1).
  * A missing report alone cannot say it: an app just started may report its first tap too late to be paired, and that
  * tap looks the same (design review). Anything else stays unknown, which stops the default range's skip there.
  */
 function openedTheApp(steps: readonly RawStep[], n: number): boolean {
   const s = steps[n]!
   if (s.kind !== 'tap' || s.touched) return false
-  const next = steps.slice(n + 1).find((t) => TOUCH_KINDS.has(t.kind) || t.kind === 'pinch')
+  // The very next step: a launch, a link or a button between them would be what opened the app, not this tap.
+  const next = steps[n + 1]
   return next !== undefined && 'touched' in next && next.touched?.seq === 1
 }
 
