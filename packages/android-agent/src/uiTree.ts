@@ -54,7 +54,19 @@ const DECOR_IDS = new Set(['android:id/content', 'android:id/statusBarBackground
 /** Down, for a far edge: `x + width` must not reach past 1 by a rounding step. Same rule as the iOS parser. */
 const floor4 = (n: number): number => Math.max(0, Math.floor(n * 10000 + 1e-9) / 10000)
 
-export function parseUiAutomatorDump(xml: string): UIElement[] {
+/**
+ * Whether the dump's root is a window floating over the screen rather than the screen: a dialog in front (measured,
+ * Pixel_9_tapflow Android 14: an AlertDialog's dump has the dialog's frame `[28,955][1052,1469]` as its root, on a
+ * 1080×2424 screen). Normalised by that root, the dialog's OK read 0.916 high where it was drawn at 0.556, so a flow's
+ * `tapOn "OK"` pressed below the dialog. The caller then passes the screen's size.
+ */
+export function dumpRootFloats(xml: string): boolean {
+  const first = /<node\b[^>]*?\bbounds="([^"]*)"/.exec(xml)
+  const b = parseBounds(first?.[1])
+  return b !== null && (b.x1 > 0 || b.y1 > 0)
+}
+
+export function parseUiAutomatorDump(xml: string, screen?: { width: number; height: number } | null): UIElement[] {
   if (!xml.includes('<hierarchy')) {
     throw new PlatformError(`uiautomator dump did not return a UI hierarchy: ${xml.slice(0, 200).trim() || '(empty output)'}`)
   }
@@ -70,10 +82,13 @@ export function parseUiAutomatorDump(xml: string): UIElement[] {
   if (nodes.length === 0) return []
 
   // The root node spans the current display, so dumps normalize correctly in
-  // any orientation without a separate `wm size` round-trip. Fall back to the
-  // max extents when the root reports a degenerate frame.
-  let width = nodes[0].bounds?.x2 ?? 0
-  let height = nodes[0].bounds?.y2 ?? 0
+  // any orientation without a separate `wm size` round-trip — unless a window floats over it (`dumpRootFloats`), when
+  // the caller's screen size is used. Fall back to the max extents when the root reports a degenerate frame.
+  // Only a size the root fits in: one read across a turn would clip the dump (pre-PR review).
+  const root = nodes[0].bounds
+  const floats = screen && root && (root.x1 > 0 || root.y1 > 0) && root.x2 <= screen.width && root.y2 <= screen.height
+  let width = floats ? screen.width : nodes[0].bounds?.x2 ?? 0
+  let height = floats ? screen.height : nodes[0].bounds?.y2 ?? 0
   if (width <= 0 || height <= 0) {
     for (const n of nodes) {
       if (!n.bounds) continue

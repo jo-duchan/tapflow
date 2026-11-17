@@ -42,6 +42,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **On Android, a flow taps a dialog's buttons where they are.** With a dialog in front, the UI tree placed its elements by the dialog's own window, so `tapOn "OK"` pressed below the dialog and Flow Capture exported the tap as a point. The tree and the reach check now place them on the screen. Needs the Android agent from this release.
 - Upload build's file chooser now works with the keyboard, and its File and Status labels name their controls.
 - **The relay package now carries the notice for the video decoder it bundles.** The dashboard inside `@tapflowio/relay` includes tinyh264 (Apache-2.0), which decodes the stream when WebCodecs is not available, and the package shipped neither its license nor a notice. It now ships `NOTICE` and `LICENSE-APACHE-2.0`, as the Android and iOS agents do.
 - **Flow Capture no longer starts a flow on the home screen.** When you open the app from its icon instead of **Launch**, the part Capture flow picks by default now starts at the first step you took in the app; before, it began with the swipe and tap that found the icon, which Match then replayed on top of the launched app. Needs the relay and the iOS or Android agent from this release.

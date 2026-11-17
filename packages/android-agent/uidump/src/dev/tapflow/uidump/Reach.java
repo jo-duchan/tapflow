@@ -43,11 +43,27 @@ final class Reach {
       for (int i = 0; i < targets.length(); i++) results.put(unknown("no window"));
       return new JSONObject().put("results", results).toString();
     }
-    // The tree's basis, as uiTree.ts normalizes against the dump's root.
+    // The tree's basis, as uiTree.ts normalizes: the active window's root when it is the screen, and the screen when the
+    // root floats over it (a dialog: `dumpRootFloats`). The screen is the windows' union, status and navigation bars
+    // included; a dialog's root alone put its OK 0.36 of the screen off (measured, Pixel_9_tapflow Android 14).
     Rect basis = new Rect();
     root.getBoundsInScreen(basis);
     List<AccessibilityWindowInfo> windows = new ArrayList<>(automation.getWindows());
     windows.sort((a, b) -> Integer.compare(b.getLayer(), a.getLayer()));
+    if (basis.left > 0 || basis.top > 0) {
+      // The display's logical size, as `dumpsys window displays` `cur=` gives the tree: the windows' union only when it
+      // cannot be read, since the bars need not be among the windows (CodeRabbit on #1183).
+      Rect screen = displaySize();
+      if (screen == null) {
+        screen = new Rect();
+        Rect r = new Rect();
+        for (AccessibilityWindowInfo w : windows) {
+          w.getBoundsInScreen(r);
+          screen.union(r);
+        }
+      }
+      if (screen.left == 0 && screen.top == 0 && screen.contains(basis)) basis = screen;
+    }
     List<AccessibilityNodeInfo> all = new ArrayList<>();
     collect(root, all);
     for (int i = 0; i < targets.length(); i++) results.put(one(targets.getJSONObject(i), all, windows, basis));
@@ -204,6 +220,21 @@ final class Reach {
     String label = n.isPassword() || n.isEditable() ? "" : labelOf(n);
     String cls = String.valueOf(n.getClassName());
     return cls.substring(cls.lastIndexOf('.') + 1) + (id != null ? " " + id : "") + (label.isEmpty() ? "" : " '" + label + "'");
+  }
+
+  /** The default display's logical size, turned as it is shown, through the framework uiautomator itself reads it from;
+   *  `null` where that is out of reach. */
+  private static Rect displaySize() {
+    try {
+      Class<?> global = Class.forName("android.hardware.display.DisplayManagerGlobal");
+      Object instance = global.getMethod("getInstance").invoke(null);
+      Object info = global.getMethod("getDisplayInfo", int.class).invoke(instance, 0);
+      int w = info.getClass().getField("logicalWidth").getInt(info);
+      int h = info.getClass().getField("logicalHeight").getInt(info);
+      return w > 0 && h > 0 ? new Rect(0, 0, w, h) : null;
+    } catch (Throwable t) {
+      return null;
+    }
   }
 
   private static double nx(int x, Rect basis) { return (double) (x - basis.left) / basis.width(); }
