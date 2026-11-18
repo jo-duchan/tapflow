@@ -559,6 +559,19 @@ export interface CapturedFlow {
 }
 
 /**
+ * Whether a swipe began inside a scroll container the tree names, and the screen after it still has one there: the view
+ * a touch begins on takes the scroll, wherever the finger ends (a fling into the tab bar). The second half narrows a
+ * screen wrapped whole in a scroll view, where a drag that opens another screen began "inside" one too; a new screen
+ * with a list in the same place is not told apart.
+ */
+function insideList(before: readonly UIElement[], after: readonly UIElement[] | undefined, from: Point): boolean {
+  const holds = (f: UIElement['frame'], p: Point) => p[0] >= f.x && p[0] <= f.x + f.width && p[1] >= f.y && p[1] <= f.y + f.height
+  const same = (a: UIElement['frame'], b: UIElement['frame']) => Math.abs(a.x - b.x) < 0.01 && Math.abs(a.y - b.y) < 0.01
+    && Math.abs(a.width - b.width) < 0.01 && Math.abs(a.height - b.height) < 0.01
+  return before.some((e) => e.role === 'list' && holds(e.frame, from) && !!after?.some((n) => n.role === 'list' && same(n.frame, e.frame)))
+}
+
+/**
  * The matched steps of a range as the flow's steps, with two decisions that need a neighbour:
  *
  * - **A swipe that scrolled a tapped element into view becomes `scroll { until }`** — what the swipe was for, since its
@@ -570,12 +583,6 @@ export interface CapturedFlow {
  * - **Each secret gets a name**: `PASSWORD` for a field that says it hides its text, `SECRET` for one that could not
  *   say, numbered from the second.
  */
-/** Whether both ends of a swipe lie in one scroll container the tree names. */
-function insideList(tree: readonly UIElement[], from: Point, to: Point): boolean {
-  const holds = (f: UIElement['frame'], p: Point) => p[0] >= f.x && p[0] <= f.x + f.width && p[1] >= f.y && p[1] <= f.y + f.height
-  return tree.some((e) => e.role === 'list' && holds(e.frame, from) && holds(e.frame, to))
-}
-
 export function toFlowSteps(matched: readonly CapturedStep[]): CapturedFlow {
   const steps = matched.map((m) => ({ ...m }))
   for (let i = 0; i + 1 < steps.length; i++) {
@@ -589,13 +596,13 @@ export function toFlowSteps(matched: readonly CapturedStep[]): CapturedFlow {
     // Only a swipe that scrolled. A drag-and-drop that completed a puzzle brought a Retry on a new screen, and as a
     // scroll its piece was never dragged and Verify searched the puzzle for Retry (iOS, wdio demo app). Scrolled is what
     // was on screen before it travelling with the finger by the tap after it, or — a fling past a whole screen leaves
-    // nothing in common — the swipe made inside a scroll container (`list`: a table, collection or scroll view on iOS,
+    // nothing in common — the swipe begun inside a scroll container (`list`: a table, collection or scroll view on iOS,
     // a RecyclerView or ScrollView on Android; the puzzle has none). A Compose list is not a `list` in the tree, so a
     // fling past a whole screen of one stays a swipe, replayed as it was made.
     const axis = direction === 'up' || direction === 'down' ? 'y' : 'x'
     const sign = Math.sign(axis === 'y' ? swipe.step.to[1] - swipe.step.from[1] : swipe.step.to[0] - swipe.step.from[0])
     const moved = !!next.tree && progress(swipe.tree, next.tree, axis, sign, []) === 'moved'
-    if (!moved && !insideList(swipe.tree, swipe.step.from, swipe.step.to)) continue
+    if (!moved && !insideList(swipe.tree, next.tree, swipe.step.from)) continue
     steps[i] = { raw: swipe.raw, step: { type: 'scroll', direction, until: next.step.selector }, auto: true }
   }
 

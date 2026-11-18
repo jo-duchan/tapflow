@@ -1159,6 +1159,23 @@ describe('toFlowSteps', () => {
     expect(flow.steps[0]!.step).toMatchObject({ type: 'scroll', direction: 'down' })
   })
 
+  // Review: the view a touch begins on takes the scroll, so a fling that ends in the tab bar is still one.
+  it('takes a swipe begun in a list and ended below it for a scroll', () => {
+    const [swipe, tap] = new Rec().touch([[0.5, 0.6], [0.5, 0.1]]).touch([[0.5, 0.55]]).steps()
+    const table = el({ role: 'list', frame: { x: 0, y: 0.2, width: 1, height: 0.6 } })
+    const flow = toFlowSteps([matchStep(swipe!, ctxOf([table, ...list(8)])), matchStep(tap!, ctxOf([table, item30]))])
+    expect(flow.steps[0]!.step).toMatchObject({ type: 'scroll', direction: 'down' })
+  })
+
+  // Review: a screen wrapped whole in a scroll view, where a drag opened another screen that has none.
+  it('keeps a swipe begun in a scroll view when the next screen has none there', () => {
+    const [swipe, tap] = new Rec().touch([[0.5, 0.8], [0.5, 0.3]]).touch([[0.5, 0.55]]).steps()
+    const page = el({ role: 'list', frame: { x: 0, y: 0, width: 1, height: 1 } })
+    const done = [el({ label: 'Congratulations', frame: { x: 0.2, y: 0.4, width: 0.6, height: 0.05 } }), el({ label: 'Retry', frame: { x: 0.3, y: 0.5, width: 0.4, height: 0.08 } })]
+    const flow = toFlowSteps([matchStep(swipe!, ctxOf([page, el({ role: 'image', identifier: 'drag-c1', frame: { x: 0.4, y: 0.8, width: 0.2, height: 0.1 } })])), matchStep(tap!, ctxOf(done))])
+    expect(flow.steps.map((s) => s.step?.type)).toEqual(['swipe', 'tapOn'])
+  })
+
   it('keeps a swipe whose tapped element was on screen already: a pager, not a scroll', () => {
     const cont = el({ label: 'Continue', frame: { x: 0.3, y: 0.85, width: 0.4, height: 0.08 } })
     const [swipe, tap] = new Rec().touch([[0.8, 0.5], [0.2, 0.5]]).touch([[0.5, 0.89]]).steps()
