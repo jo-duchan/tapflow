@@ -59,7 +59,7 @@ describe('seenAt', () => {
     const password = seenAt(hitOf([node('android.view.View', { d: 'secret', k: 8 })]), APP)
     expect(password).toMatchObject({ observation: {} })
     // Editable whatever its class: its description can be the value.
-    const custom = seenAt(hitOf([node('com.facebook.react.views.textinput.ReactEditText2', { d: 'qa@wdio.dev', k: 4 })]), APP)
+    const custom = seenAt(hitOf([node('com.example.CodeInputView', { d: 'qa@wdio.dev', k: 4 })]), APP)
     expect(JSON.stringify(custom)).not.toContain('qa@wdio.dev')
   })
 

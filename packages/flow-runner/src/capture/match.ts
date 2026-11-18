@@ -379,7 +379,7 @@ export function recordedTarget(tree: readonly UIElement[], touched: TouchObserva
  * left there, not the one tapped. None left (the label changed) is none: the tap goes to its point, and is compared.
  */
 function sameLabel(found: UIElement[], named: ObservedElement): UIElement[] {
-  if (found.length <= 1 || !named.label || named.input) return found
+  if (found.length <= 1 || !named.label) return found
   return found.filter((e) => e.label === named.label)
 }
 

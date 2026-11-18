@@ -153,7 +153,8 @@ describe('TouchWatch', () => {
 
   // Review of P4: a slow drag (a pull to refresh) leaves a spinner drawing every vsync, not a list gliding.
   it('reads a tap after a slow drag as not moving', async () => {
-    const drawing = Array.from({ length: 60 }, (_, i) => 1_000 + i * 16)
+    // Drawing right up to the tap and stopping there, as a gliding list would: only the slow release tells them apart.
+    const drawing = Array.from({ length: 94 }, (_, i) => 1_000 + i * 16)
     const scrolling = [{ c: 'android.widget.TextView', t: 'Row 8', b: [0, 0, 10, 10] }, { c: 'androidx.recyclerview.widget.RecyclerView', k: 16, b: [0, 0, 10, 10] }]
     const { watch, sent, advance } = rig({ answers: [{}, { branch: scrolling }], frames: drawing })
     watch.down(0.5, 0.3, { x: 0.5, y: 0.3 })
@@ -184,6 +185,16 @@ describe('TouchWatch', () => {
     tap(0.5, 0.5)
     await watch.settled()
     expect(sent.map((m) => m.observation.seq)).toEqual([1, undefined, 1])
+  })
+
+  it('leaves seq out in a new process when the touch before it went unreported', async () => {
+    const { watch, sent, tap, advance } = rig({ pid: () => 300, answers: [{ readAfterMs: 500 }, {}] })
+    tap(0.5, 0.5)
+    advance(1_000)
+    tap(0.5, 0.5)
+    await watch.settled()
+    expect(sent).toHaveLength(1)
+    expect(sent[0]!.observation).not.toHaveProperty('seq')
   })
 
   // Review of P4: the frames take up to 3 s to read, and a reboot in that time stops the watch.

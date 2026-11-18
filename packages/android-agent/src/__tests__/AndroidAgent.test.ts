@@ -2835,6 +2835,20 @@ describe('AndroidAgent', () => {
         agent.disconnect()
         expect(hold).toHaveBeenLastCalledWith('emulator-5554', false)
       })
+
+      // Review of P4: the adb fallback plays a gesture only once its end arrives, so its down's time is not the app's.
+      it('does not observe a touch that goes through the adb fallback', async () => {
+        vi.spyOn(adb, 'holdConnection').mockResolvedValue(undefined)
+        const hit = vi.spyOn(adb, 'hitTest').mockResolvedValue(null)
+        vi.spyOn(adb, 'pingFocusedServer').mockResolvedValue(undefined)
+        await bootWith({ observed: true, touchObservations: true })
+        const state = getState()
+        state.videoWidth = 0
+        state.touchHelper = { touchStart: vi.fn(), touchMove: vi.fn(), touchEnd: vi.fn(async () => 'delivered'), touchCancel: vi.fn(), pinchEnd: vi.fn(), pressButton: vi.fn(), stop: vi.fn() } as unknown as TestState['touchHelper']
+        inject({ type: 'input:touch:start', payload: { x: 0.25, y: 0.75 } })
+        expect((state.touchHelper as unknown as { touchStart: ReturnType<typeof vi.fn> }).touchStart).toHaveBeenCalled()
+        expect(hit).not.toHaveBeenCalled()
+      })
     })
 
     describe('input — touch', () => {
