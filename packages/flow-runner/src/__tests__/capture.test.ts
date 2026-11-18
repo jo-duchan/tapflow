@@ -1213,6 +1213,37 @@ describe('toFlowSteps', () => {
       expect(flow.steps.map((s) => s.step?.type)).toEqual(['swipe', 'tapOn'])
     })
 
+    // Review: trees are flat, so a row's label and switch sit beside it; only the rows count. A short list (under half
+    // the screen) read by its frame would have been sideways, and its vertical scroll would have stayed a swipe.
+    it('reads rows by their outermost frames, not the labels and switches inside them', () => {
+      const [swipe, tap] = new Rec().touch([[0.5, 0.75], [0.5, 0.55]]).touch([[0.5, 0.63]]).steps()
+      const sheet = el({ role: 'list', frame: { x: 0, y: 0.5, width: 1, height: 0.4 } })
+      const row = (n: number, y: number) => [
+        el({ role: 'cell', label: `Setting ${n}`, frame: { x: 0, y, width: 1, height: 0.08 } }),
+        el({ role: 'text', label: `Setting ${n}`, frame: { x: 0.05, y: y + 0.02, width: 0.4, height: 0.04 } }),
+        el({ role: 'switch', label: `Setting ${n}`, identifier: `switch.${n}`, frame: { x: 0.8, y: y + 0.02, width: 0.12, height: 0.04 } }),
+      ]
+      const scrollBar = el({ label: 'Vertical scroll bar', frame: { x: 0.99, y: 0.52, width: 0.01, height: 0.3 } })
+      const before = [sheet, ...row(1, 0.52), ...row(2, 0.62), ...row(3, 0.72), scrollBar]
+      const after = [sheet, ...row(3, 0.52), ...row(4, 0.62), ...row(5, 0.72), scrollBar]
+      const flow = toFlowSteps([matchStep(swipe!, ctxOf(before)), matchStep(tap!, ctxOf(after))])
+      expect(flow.steps[0]!.step).toMatchObject({ type: 'scroll', direction: 'down' })
+    })
+
+    // A pager shows one page (pages off screen are dropped from the tree), so its way cannot be read and its frame says
+    // vertical: a sideways swipe on it stays a swipe, which replayed at its points turns the same one page.
+    it('keeps a sideways swipe on a tall pager as a swipe', () => {
+      const [swipe, tap] = new Rec().touch([[0.8, 0.5], [0.2, 0.5]]).touch([[0.5, 0.75]]).steps()
+      const pager = el({ role: 'list', frame: { x: 0, y: 0.1, width: 1, height: 0.8 } })
+      const page = (n: number, x: number) => [
+        el({ label: `Page ${n}`, identifier: `page.${n}`, frame: { x, y: 0.1, width: 1, height: 0.8 } }),
+        el({ role: 'text', label: `Title ${n}`, frame: { x: x + 0.1, y: 0.2, width: 0.8, height: 0.06 } }),
+      ]
+      const next = el({ role: 'button', label: 'Start', frame: { x: 0.3, y: 0.72, width: 0.4, height: 0.06 } })
+      const flow = toFlowSteps([matchStep(swipe!, ctxOf([pager, ...page(1, 0)])), matchStep(tap!, ctxOf([pager, ...page(2, 0), next]))])
+      expect(flow.steps.map((s) => s.step?.type)).toEqual(['swipe', 'tapOn'])
+    })
+
     it('is vertical for one item in a frame wider than tall in parts of the screen but taller in pixels', () => {
       const [swipe, tap] = new Rec().touch([[0.5, 0.6], [0.5, 0.3]]).touch([[0.5, 0.55]]).steps()
       const box = el({ role: 'list', frame: { x: 0, y: 0.2, width: 1, height: 0.6 } })

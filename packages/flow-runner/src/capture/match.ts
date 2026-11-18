@@ -585,7 +585,12 @@ function listAxis(tree: readonly UIElement[], list: UIElement): 'x' | 'y' {
   // Its items: what lies within it, not a container around it whose centre happens to fall inside.
   const within = (g: UIElement['frame']) => g.x >= f.x - 0.01 && g.y >= f.y - 0.01 && g.x + g.width <= f.x + f.width + 0.01
     && g.y + g.height <= f.y + f.height + 0.01
-  const centres = tree.filter((e) => e !== list && e.role !== 'list' && within(e.frame))
+  // Trees are flat: a row's label and switch are its siblings, and counted as items they make every list a grid. Only
+  // the outermost count, and nothing thinner than a fiftieth of the screen (a scroll bar at the list's edge).
+  const inside = (a: UIElement['frame'], b: UIElement['frame']) => a !== b && a.x >= b.x - 0.001 && a.y >= b.y - 0.001
+    && a.x + a.width <= b.x + b.width + 0.001 && a.y + a.height <= b.y + b.height + 0.001
+  const candidates = tree.filter((e) => e !== list && e.role !== 'list' && within(e.frame) && e.frame.width >= 0.02 && e.frame.height >= 0.02)
+  const centres = candidates.filter((e) => !candidates.some((o) => o !== e && inside(e.frame, o.frame)))
     .map((e) => [e.frame.x + e.frame.width / 2, e.frame.y + e.frame.height / 2] as const)
   const spread = (vs: number[]) => Math.max(...vs) - Math.min(...vs)
   if (centres.length >= 2) {
