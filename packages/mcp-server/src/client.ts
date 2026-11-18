@@ -1502,7 +1502,21 @@ export class TapflowClient {
     const httpBase = this.relayUrl.replace(/^wss?/, (p) => (p === 'wss' ? 'https' : 'http'))
     const url = new URL(`/api/v1/sessions/${sessionId}/screenshot`, httpBase)
     if (format === 'jpeg') url.searchParams.set('format', 'jpeg')
-    const res = await fetchWithToken(this.tokens, url.toString(), { ...(signal ? { signal } : {}) })
+    let res: Response
+    try {
+      res = await fetchWithToken(this.tokens, url.toString(), { ...(signal ? { signal } : {}) })
+    } catch (e) {
+      if (signal?.aborted) throw e
+      const cause = e instanceof Error && e.cause instanceof Error ? e.cause : e
+      // Node can aggregate failed addresses into an error with no message but a useful code.
+      const code = cause instanceof Error && 'code' in cause && typeof cause.code === 'string' ? cause.code : undefined
+      const detail = cause instanceof Error ? cause.message || code || String(e) : String(cause)
+      const session = this.lifecycle.get(sessionId)
+      if (session?.terminated || session?.needsReboot) {
+        throw new EnvironmentStepError(this.failed(sessionId, `Screenshot request failed: ${detail}`).message, { cause: e })
+      }
+      throw new TransientQueryError(this.failed(sessionId, `Screenshot request failed: ${detail}`).message, { cause: e })
+    }
     if (!res.ok) {
       // Read text first — res.json() consumes the body, so a later res.text()
       // fallback can never run after a failed JSON parse.
