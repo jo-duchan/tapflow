@@ -572,6 +572,19 @@ describe('TapflowClient', () => {
       spy.mockRestore()
     })
 
+    // CodeRabbit on #1190: a hold has no waiter for disconnectDevice to settle, so it must see the leave itself.
+    it('a leave during the hold stops it: no frame after the leave, and the swipe fails as left', async () => {
+      const swipe = client.swipe('sess-1', 0.5, 0.7, 0.5, 0.3, 40, 2_000).catch((e: unknown) => e)
+      await new Promise((r) => setTimeout(r, 150))
+      client.disconnectDevice('sess-1')
+      const after = relay.sentMessages().length
+      expect(await swipe).toBeInstanceOf(SessionLeftError)
+      await new Promise((r) => setTimeout(r, 60))
+      const late = relay.sentMessages().slice(after).map((m) => m['type'])
+      expect(late).not.toContain('input:touch:move')
+      expect(late).not.toContain('input:touch:end')
+    })
+
     it('refuses a hold that is not a time, before sending anything', async () => {
       const before = relay.sentMessages().length
       await expect(client.swipe('sess-1', 0.5, 0.7, 0.5, 0.3, 40, Number.POSITIVE_INFINITY)).rejects.toThrow(/swipe hold/)
@@ -584,10 +597,10 @@ describe('TapflowClient', () => {
       await waitForMessage(relay, 'input:touch:end')
       const msgs = relay.sentMessages()
       const end = msgs.findIndex((m) => m['type'] === 'input:touch:end')
-      const held = msgs.slice(0, end).filter((m) => m['type'] === 'input:touch:move')
-        .map((m) => m['payload'] as { x: number; y: number }).filter((p) => Math.abs(p.y - 0.3) < 0.001)
-      expect(held.length).toBeGreaterThanOrEqual(4)
-      expect(new Set(held.map((p) => p.y)).size).toBe(2)
+      // Ends on the end point before the lift; the cadence and the wobble are holdStill's own test (flow-runner).
+      const last = msgs[end - 1]!
+      expect(last['type']).toBe('input:touch:move')
+      expect(Math.abs((last['payload'] as { y: number }).y - 0.3)).toBeLessThanOrEqual(0.0005 + 1e-9)
     })
 
     it('sends touch:start, multiple touch:move, and touch:end', async () => {

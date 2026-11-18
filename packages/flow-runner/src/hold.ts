@@ -21,13 +21,18 @@ export async function holdStill(
   holdMs: number,
   move: (point: { x: number; y: number }) => void,
   stillOpen: () => boolean = () => true,
+  now: () => number = () => performance.now(),
 ): Promise<boolean> {
-  const until = Date.now() + holdMs
+  // On a monotonic clock: a wall clock set back mid-hold would hold the finger down until it caught up (CodeRabbit).
+  const until = now() + holdMs
+  // Toward the middle at an edge, so every point stays on the screen.
+  const wobble = to[1] + HOLD_WOBBLE > 1 ? -HOLD_WOBBLE : HOLD_WOBBLE
   let tick = 0
   do {
     if (!stillOpen()) return false
-    move({ x: to[0], y: to[1] + (tick++ % 2 === 0 ? 0 : HOLD_WOBBLE) })
-    await delay(Math.max(0, Math.min(HOLD_FRAME_MS, until - Date.now())))
-  } while (Date.now() < until)
-  return true
+    move({ x: to[0], y: to[1] + (tick++ % 2 === 0 ? 0 : wobble) })
+    await delay(Math.max(0, Math.min(HOLD_FRAME_MS, until - now())))
+  } while (now() < until)
+  // Taken away during the last wait is taken away too.
+  return stillOpen()
 }

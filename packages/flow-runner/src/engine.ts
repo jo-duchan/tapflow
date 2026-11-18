@@ -821,6 +821,26 @@ async function inView(driver: FlowDriver, matches: UIElement[]): Promise<boolean
 }
 
 /** What the end-of-list check compares: the structure and where it is, since one long text scrolls by moving alone. */
+/**
+ * Whether no element both reads hold has moved: elements matched by role and identifier, or role and label where there
+ * is no identifier, so one whose text changed (a clock) drops out instead of reading as movement. Nothing in common is
+ * movement — the screen is another one.
+ */
+function nothingMoved(before: UIElement[], after: UIElement[]): boolean {
+  const key = (e: UIElement) => JSON.stringify([e.role, e.identifier ?? '', e.identifier ? '' : e.label])
+  const at = (e: UIElement) => `${Math.round(e.frame.x * 100)},${Math.round(e.frame.y * 100)}`
+  const was = new Map<string, string>()
+  for (const e of before) was.set(key(e), at(e))
+  let common = 0
+  for (const e of after) {
+    const w = was.get(key(e))
+    if (w === undefined) continue
+    if (w !== at(e)) return false
+    common++
+  }
+  return common > 0
+}
+
 function scrolledShape(tree: UIElement[]): string {
   return JSON.stringify(tree.map((e) => [e.role, e.label, e.identifier ?? '', Math.round(e.frame.x * 100), Math.round(e.frame.y * 100)]))
 }
@@ -852,6 +872,11 @@ async function scrollUntil(driver: FlowDriver, direction: ScrollDirection, sel: 
   // keeps changing (a clock, a spinner) and so keeps the screen from ever reading unchanged.
   let matchShape: string | undefined
   let matchStill = 0
+  // Steps after which nothing on the screen moved, judged by where the elements of both reads are, not by their text:
+  // a countdown on a pager that snaps a held drag back changes the screen and still moves nothing (CodeRabbit).
+  let still = 0
+  let lastTree: UIElement[] | undefined
+  let flung = false
   let swiped = false
   for (;;) {
     const q = await queryOrRetry(driver, deadline)
@@ -868,11 +893,14 @@ async function scrollUntil(driver: FlowDriver, direction: ScrollDirection, sel: 
       if (matches.some((m) => clear(m.frame)) && await inView(driver, matches.filter((m) => clear(m.frame)))) {
         return swiped ? settleMatch(driver, sel, q.tree, deadline, pollIntervalMs) : undefined
       }
+      still = lastTree !== undefined && nothingMoved(lastTree, q.tree) ? still + 1 : 0
+      lastTree = q.tree
       const pinned = matches.filter((m) => !spans(m.frame))
       const at = pinned.length > 0 ? scrolledShape(pinned) : undefined
       matchStill = at !== undefined && at === matchShape ? matchStill + 1 : 0
       matchShape = at
-      if (matchStill >= MATCH_STILL_READS) return
+      // Where nothing else moved either, a pager may have snapped the drags back: the fling comes first (CodeRabbit).
+      if (matchStill >= MATCH_STILL_READS && (still === 0 || flung)) return
       const next = scrolledShape(q.tree)
       unchanged = next === shape ? unchanged + 1 : 0
       shape = next
@@ -888,11 +916,16 @@ async function scrollUntil(driver: FlowDriver, direction: ScrollDirection, sel: 
     // A drag, not a fling: a fling's glide carried the list past the element between two reads, and the search ended
     // at the list's end without it (iOS, measured). Held still, each step moves the content as far as the finger (0.4
     // of the screen up and down, 0.6 across) and no further, on every list measured (SwiftUI, UIKit, Compose,
-    // RecyclerView); a list whose visible part is shorter than that can still be stepped past. A step that moved
-    // nothing twice in a row is followed by a fling: a pager whose page is taller than the drag snaps a held drag back
-    // to where it was. Twice, not once: a drag the device dropped mid-list also moves nothing, and a fling after it
-    // could glide past the element (pre-PR review). The cost is one more read at the end of a search that fails.
-    if (read) { await driver.swipe(gesture.from, gesture.to, 300, unchanged >= FLING_AFTER_STILL_READS ? 0 : SEARCH_HOLD_MS); swiped = true }
+    // RecyclerView). That reduces overshoot rather than ruling it out: a list seen through a region shorter than the
+    // step can still be stepped past, and the search falls back to a fling. A step after which nothing moved twice in a
+    // row is followed by one: a pager whose page is taller than the drag snaps a held drag back to where it was. Twice,
+    // not once: a drag the device dropped mid-list also moves nothing, and a fling after it could glide past the
+    // element (pre-PR review). The cost is one more read at the end of a search that fails.
+    if (read) {
+      flung = still >= FLING_AFTER_STILL_READS
+      await driver.swipe(gesture.from, gesture.to, 300, flung ? 0 : SEARCH_HOLD_MS)
+      swiped = true
+    }
     await waitForNextPoll(deadline, pollIntervalMs, base, lastError, sawTree)
   }
 }

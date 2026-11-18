@@ -1051,7 +1051,8 @@ describe('runFlow', () => {
       vi.mocked(driver.queryUITree).mockImplementation(async () => [row(`Synced ${n++}s ago`, 0.1), cta])
       const result = await runFlow(flowOf('steps:\n  - scroll: { until: { label: "Continue", timeout: 5 } }\n'), driver, OPTS)
       expect(result.status).toBe('passed')
-      expect(swipes(driver)).toHaveLength(2)
+      // Nothing moved either: a fling is tried before the pinned match is taken (a pager may have snapped drags back).
+      expect(swipes(driver).map((c) => c[4])).toEqual([150, 150, 0])
     })
 
     it('does not take a match larger than the screen for one that stays put: clipped, it reads the same anywhere', async () => {
@@ -1077,7 +1078,34 @@ describe('runFlow', () => {
       const driver = fakeDriver([[row('Row 1', 0.3), cut]])
       const result = await runFlow(flowOf('steps:\n  - scroll: { until: "Footer" }\n'), driver, OPTS)
       expect(result.status).toBe('passed')
-      expect(swipes(driver)).toHaveLength(2)
+      expect(swipes(driver).map((c) => c[4])).toEqual([150, 150, 0])
+    })
+
+    // CodeRabbit on #1190: a countdown on a pager that snaps held drags back changes the screen every read, and the
+    // search must still see that nothing moved and fling to the next page.
+    it('flings on a pager whose page snaps back though a countdown on it keeps changing', async () => {
+      const driver = fakeDriver([[]])
+      let n = 0
+      vi.mocked(driver.queryUITree).mockImplementation(async () => {
+        const page = [row('Page 1', 0.3), row(`Ends in ${10 - n}s`, 0.5)]
+        n++
+        return driver.calls.some((c) => c[0] === 'swipe' && c[4] === 0) ? [row('Page 2', 0.3), row('Target', 0.5)] : page
+      })
+      const result = await runFlow(flowOf('steps:\n  - scroll: { until: { label: "Target", timeout: 10 } }\n'), driver, OPTS)
+      expect(result.status).toBe('passed')
+      expect(swipes(driver).map((c) => c[4])).toEqual([150, 150, 0])
+    })
+
+    // CodeRabbit on #1190: on a pager that snaps held drags back, a cut target stays where it is; that is no arrival
+    // until a fling was tried.
+    it('tries a fling before taking a cut match that only a snapped-back pager kept still', async () => {
+      const cut = el({ label: 'Target', frame: { x: 0, y: 0.95, width: 1, height: 0.05 } })
+      const driver = fakeDriver([[]])
+      vi.mocked(driver.queryUITree).mockImplementation(async () => (driver.calls.some((c) => c[0] === 'swipe' && c[4] === 0)
+        ? [row('Page 2', 0.3), row('Target', 0.5)] : [row('Page 1', 0.3), cut]))
+      const result = await runFlow(flowOf('steps:\n  - scroll: { until: { label: "Target", timeout: 10 } }\n'), driver, OPTS)
+      expect(result.status).toBe('passed')
+      expect(swipes(driver).map((c) => c[4])).toEqual([150, 150, 0])
     })
 
     // Rows that share a label scroll by moving, not by changing what the screen holds.

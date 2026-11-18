@@ -268,19 +268,16 @@ describe('RelayClient — the input senders mint a correlator and await the ack'
     for (const m of moves) expect(m).not.toHaveProperty('requestId')
   })
 
-  // The overshoot fix: `scroll { until }` drags, held still and wobbling, so iOS reads no speed at the lift.
-  it('swipe with a hold moves onto the end point, keeps sending it (wobbling) for the hold, then lifts', async () => {
+  // The overshoot fix: a held swipe ends on its end point before the lift (the cadence is holdStill's own test).
+  it('swipe with a hold moves onto the end point before it lifts', async () => {
     const { client, received } = await capture()
-    const started = Date.now()
     await client.swipe('s1', [0.5, 0.7], [0.5, 0.3], 40, 100)
-    expect(Date.now() - started).toBeGreaterThanOrEqual(130)
     const touch = received.filter((m) => String(m['type']).startsWith('input:touch:'))
     const end = touch.findIndex((m) => m['type'] === 'input:touch:end')
-    const held = touch.slice(0, end).filter((m) => m['type'] === 'input:touch:move').map((m) => m['payload'] as { x: number; y: number }).filter((p) => Math.abs(p.y - 0.3) < 0.001)
-    expect(held.length).toBeGreaterThanOrEqual(4)
-    expect(held[0]).toEqual({ x: 0.5, y: 0.3 })
-    expect(new Set(held.map((p) => p.y)).size).toBe(2)
-    for (const p of held) expect(Math.abs(p.y - 0.3)).toBeLessThanOrEqual(0.0005 + 1e-9)
+    const last = touch[end - 1]!
+    expect(last['type']).toBe('input:touch:move')
+    const p = last['payload'] as { x: number; y: number }
+    expect(Math.abs(p.y - 0.3)).toBeLessThanOrEqual(0.0005 + 1e-9)
   })
 
   it('pressKey sends a usable id', async () => {

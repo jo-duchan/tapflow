@@ -215,6 +215,14 @@ const BOOT_REFUSALS: Record<BootRefusalReason, string> = {
 
 export class SessionLeftError extends Error {}
 
+function leftError(sessionId: string): SessionLeftError {
+  return new SessionLeftError(
+    `This client left session ${sessionId} while the request was in flight. Whether it reached the ` +
+    'device is unknown, so check device state rather than assuming it did nothing, and do not repeat ' +
+    'the request blindly. Call connect_device again if you still want this session.',
+  )
+}
+
 /**
  * The relay said this session ended while a request was still in flight (#512, finding 4).
  *
@@ -463,6 +471,8 @@ export class TapflowClient {
   private readonly held = new Set<string>()
   /** Sessions held on a socket a reconnect replaced: the relay released them when that socket closed. */
   private readonly released = new Set<string>()
+  /** Leaves per session, so an input still sending (a swipe's hold) can tell that its session was left mid-way. */
+  private readonly leaves = new Map<string, number>()
 
   constructor(
     private readonly relayUrl: string,
@@ -897,13 +907,10 @@ export class TapflowClient {
    */
   disconnectDevice(sessionId: string): void {
     this.send({ type: 'session:leave', sessionId })
+    this.leaves.set(sessionId, (this.leaves.get(sessionId) ?? 0) + 1)
     this.held.delete(sessionId)
     this.released.delete(sessionId)
-    this.settleSessionWaiters(sessionId, () => new SessionLeftError(
-      `This client left session ${sessionId} while the request was in flight. Whether it reached the ` +
-      'device is unknown, so check device state rather than assuming it did nothing, and do not repeat ' +
-      'the request blindly. Call connect_device again if you still want this session.',
-    ))
+    this.settleSessionWaiters(sessionId, () => leftError(sessionId))
   }
 
   // Correlated by `requestId` when the reply carries one, and by `sessionId` + type when it does not.
@@ -1126,6 +1133,7 @@ export class TapflowClient {
     }
     const STEPS = 8
     const interval = durationMs / STEPS
+    const leaves = this.leaves.get(sessionId) ?? 0
 
     this.send({ type: 'input:touch:start', sessionId, payload: { x: startX, y: startY } })
     for (let i = 1; i < STEPS; i++) {
@@ -1144,7 +1152,12 @@ export class TapflowClient {
     }
     await delay(interval)
     // A drag held still before the lift, as flow-runner's channel does it (`scroll { until }` through `run_flow`).
-    if (holdMs > 0) await holdStill([endX, endY], holdMs, (payload) => this.send({ type: 'input:touch:move', sessionId, payload }))
+    // A leave during the hold stops it: no frame after the leave, no ack waited for, and the caller hears it was left
+    // (a hold has no waiter for disconnectDevice to settle). CodeRabbit on #1190.
+    if (holdMs > 0 && !(await holdStill([endX, endY], holdMs, (payload) => this.send({ type: 'input:touch:move', sessionId, payload }),
+      () => (this.leaves.get(sessionId) ?? 0) === leaves))) {
+      throw leftError(sessionId)
+    }
     const requestId = randomUUID()
     this.send({ type: 'input:touch:end', sessionId, requestId, payload: { x: endX, y: endY } })
     // A swipe that stays put is a hold to Android's adb path, which replays it after the end arrives — as a long press.
