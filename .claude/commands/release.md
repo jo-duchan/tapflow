@@ -13,7 +13,7 @@ model: claude-opus-5
 - `git log v{latest}..HEAD --oneline`(머지 포함/제외 각각) — feat / fix / perf / breaking 분류
 - 열린 PR: `gh pr list`
 - 대기 중인 changeset: `.changeset/*.md`
-- **누락된 changeset 감사**: `pnpm changeset:audit` — 마지막 태그 이후 머지 중 배포 소스를 바꿨는데 changeset이 없는 것을 나열한다. PR 게이트(CI `changeset` job)는 새 PR만 막으므로 **이미 머지된 것은 여기서만 잡힌다.** v0.17.0 준비 때 이 누락(#410~#413)을 수작업으로 발견한 것이 이 감사를 만든 계기다. 나오면 릴리즈 전에 백필하되, **백필 changeset 본문에 `Backfills: #413`을 한 줄로 넣는다** — 감사는 머지 단위로 판정하므로 그 줄이 없으면 원래 머지를 사이클 내내 계속 지목한다
+- **누락된 릴리즈 노트 감사**: `pnpm changeset:audit`는 마지막 태그 이후 배포 소스를 바꾼 머지에서 누락된 changeset과 루트 `CHANGELOG.md` 항목을 따로 보고한다. 릴리즈 전에 각 누락을 백필하고 changeset 본문에 `Backfills: #413`처럼 대상 PR을 새 줄로 선언한다. 루트 항목이 빠졌다면 같은 PR에서 `[Unreleased]`에 항목을 쓴다. 사용자가 볼 변화가 없다면 루트 항목 대신 `<!-- changelog: internal -->`을 표시한 백필 changeset을 쓴다.
 - `.changeset/config.json`의 `fixed` / `ignore` 그룹 재확인
 
 ## 2. bump 레벨 추천 → 사용자 합의

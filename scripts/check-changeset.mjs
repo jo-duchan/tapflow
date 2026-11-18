@@ -410,11 +410,6 @@ function main() {
     const merges = mergeLog.split('\n').filter(Boolean)
     const isChangeset = (f) => /^\.changeset\/.+\.md$/.test(f) && !/^\.changeset\/README\.md$/i.test(f)
 
-    // First pass: which merges does a later changeset claim to cover? Each changeset is read at
-    // the merge that ADDED it — by release time they have been consumed and are gone from HEAD.
-    // A claim is (pr → index of the merge that made it). Index 0 is the newest merge, so a claim
-    // at index i may only clear merges at a LARGER index — ones that landed before it. Without
-    // that a claim written today pre-clears a merge that arrives tomorrow.
     // stderr silenced: `cat-file -e` is a question, not a failure, and git answers "no" by
     // printing `fatal: path does not exist` straight to the console.
     const liveAtHead = (f) => {
@@ -439,11 +434,20 @@ function main() {
       // Added, amended or renamed — never deleted. A release merge lists the changesets it
       // consumed and reading those at that commit fails, they are gone by then. Amendments count:
       // a PR extending an existing entry is still writing release notes, which is what #420 did.
+      const touched = new Map()
+      const entries = git('diff', '--name-status', '--find-renames', '-z', '--diff-filter=AMR', `${sha}^1`, sha).split('\0')
+      for (let i = 0; i < entries.length - 1;) {
+        const status = entries[i++]
+        const previous = entries[i++]
+        const file = status.startsWith('R') ? entries[i++] : previous
+        if (isChangeset(file)) touched.set(file, status === 'A' ? null : previous)
+      }
       return {
         sha, index, files,
         subject: rest.join(' '),
-        touched: changed('AMR').filter(isChangeset),
+        touched,
         consumed: changed('D').filter(isChangeset),
+        changelogWritten: files.includes('CHANGELOG.md') && changed('AM').includes('CHANGELOG.md'),
       }
     })
 
@@ -456,51 +460,71 @@ function main() {
     // a claim at index i may only clear merges at a LARGER index: ones that landed before it.
     // Otherwise a claim written today silently pre-clears a merge that arrives tomorrow.
     const claims = new Map()
-    for (const { sha, index, touched } of perMerge) {
-      for (const f of touched) {
-        // The claim holds only while its changeset is still going to reach a changelog. Written
-        // and then dropped in a follow-up, nothing gets a release note and the audit must say so
-        // again — being consumed by a release is the one legitimate way for it to disappear.
-        if (!liveAtHead(f) && !consumedByRelease.has(f)) continue
-        for (const pr of parseBackfills(git('show', `${sha}:${f}`))) {
-          if (!claims.has(pr)) claims.set(pr, index)
+    const changelogClaims = new Map()
+    for (const { sha, index, touched, changelogWritten } of perMerge) {
+      const rootBackfills = new Map()
+      for (const [f, previous] of touched) {
+        // Root notes and internal exemptions belong to the merge, even if its changeset is renamed later.
+        const changesetCovered = liveAtHead(f) || consumedByRelease.has(f)
+        const note = git('show', `${sha}:${f}`)
+        const backfills = parseBackfills(note)
+        if (backfills.length === 0) continue
+        // Editing or renaming a changeset does not give its existing root claims a new date.
+        const earlier = previous === null ? [] : parseBackfills(git('show', `${sha}^1:${previous}`))
+        const coversRoot = changelogWritten || changelogEntryOwed([f], () => note).length === 0
+        for (const pr of backfills) {
+          if (changesetCovered && !claims.has(pr)) claims.set(pr, index)
+          if (!earlier.includes(pr)) rootBackfills.set(pr, (rootBackfills.get(pr) ?? true) && coversRoot)
         }
+      }
+      for (const [pr, coversRoot] of rootBackfills) {
+        if (coversRoot && !changelogClaims.has(pr)) changelogClaims.set(pr, index)
       }
     }
 
-    const gaps = []
-    for (const { sha, subject, files, touched, consumed, index } of perMerge) {
-      // Same exemption the CI job makes. Without it the audit reports a bot's dependency bump as
-      // a permanent gap: the gate never asked for that changeset, so nobody can ever close it.
-      if (/dependabot|renovate/i.test(subject)) continue
+    const changesetGaps = []
+    const changelogGaps = []
+    for (const { sha, subject, files, touched, consumed, index, changelogWritten } of perMerge) {
       // A release merge bumps every package.json while consuming changesets rather than adding
       // any. Recognised by that signature, so a release whose changesets were consumed in an
       // earlier commit already on main still reports — narrower than the name suggests.
       if (isReleaseBranch(consumed, files)) continue
-      const pr = prNumberOf(subject)
-      const claimedAt = pr === null ? undefined : claims.get(pr)
-      if (claimedAt !== undefined && claimedAt < index) continue
       const shipped = files.filter((f) => shipsBetween(f, `${sha}^1`, sha))
-      if (shipped.length > 0 && touched.length === 0) gaps.push({ subject, shipped })
+      if (shipped.length === 0) continue
+
+      const pr = prNumberOf(subject)
+      const backfilled = (byPr) => pr !== null && (byPr.get(pr) ?? Infinity) < index
+      // Bots are exempt from changesets, but production dependency bumps can still owe a root note.
+      if (touched.size === 0 && !/dependabot|renovate/i.test(subject) && !backfilled(claims)) {
+        changesetGaps.push({ subject, shipped })
+      }
+      if (changelogWritten || backfilled(changelogClaims)) continue
+      if (touched.size === 0 || changelogEntryOwed([...touched.keys()], (f) => git('show', `${sha}:${f}`)).length > 0) {
+        changelogGaps.push({ subject, shipped })
+      }
     }
 
     // stdout carries the verdict, stderr the diagnosis — so `2>/dev/null` leaves a caller with
     // the answer and nothing else. The guidance block below broke that by staying on stdout.
     console.error(`Merges since ${since}: ${merges.length}`)
-    if (gaps.length === 0) {
-      console.log('Every merge that changed published source carries a changeset.')
+    if (changesetGaps.length === 0 && changelogGaps.length === 0) {
+      console.log('No changeset or root CHANGELOG.md gaps found.')
       process.exit(0)
     }
-    console.error(`\n  ${gaps.length} merge(s) changed published source with no changeset:\n`)
-    for (const { subject, shipped } of gaps) {
-      console.error(`    ${subject}`)
-      for (const f of shipped.slice(0, 5)) console.error(`      ${f}`)
-      if (shipped.length > 5) console.error(`      …and ${shipped.length - 5} more`)
+    for (const [gaps, missing] of [[changesetGaps, 'changeset'], [changelogGaps, 'entry in the root CHANGELOG.md']]) {
+      if (gaps.length === 0) continue
+      console.error(`\n  ${gaps.length} merge(s) changed published source with no ${missing}:\n`)
+      for (const { subject, shipped } of gaps) {
+        console.error(`    ${subject}`)
+        for (const f of shipped.slice(0, 5)) console.error(`      ${f}`)
+        if (shipped.length > 5) console.error(`      …and ${shipped.length - 5} more`)
+      }
     }
     console.error(`
-    These will be missing from the changelog. Either confirm the change is not worth a
-    release note, or backfill one — and name what it covers, so a later run stops
-    reporting a gap that has already been filled:
+    Backfill each reported gap. For a root changelog gap, add the note under ## [Unreleased]
+    and add a new Backfills declaration to a changeset in the same PR. A change with no
+    observable effect can use an internal changeset instead of a root note.
+    Name the earlier merge on a line of its own in the changeset:
 
         Backfills: #413
   `)
