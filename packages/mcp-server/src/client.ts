@@ -1148,8 +1148,12 @@ export class TapflowClient {
     if (!Number.isFinite(holdMs) || holdMs < 0 || holdMs > MAX_HOLD_MS) {
       throw this.failed(sessionId, `swipe hold must be a finite number from 0 to ${MAX_HOLD_MS}ms`)
     }
+    // Eight moves, the last on `to`, then the lift one interval later, nine intervals in all. The moves used to
+    // stop at 7/8 of the way, and every agent lifts where the last move was, so every swipe ended an eighth short — a
+    // drag-and-drop piece a replay dropped short of its slot (wdio demo app on
+    // Android: short of the end it failed at 300, 900 and 2000 ms; on the end it passed at 300 and 900).
     const STEPS = 8
-    const interval = durationMs / STEPS
+    const interval = durationMs / (STEPS + 1)
     const leaves = this.leaves.get(sessionId) ?? 0
     const ws = this.ws
     // A leave ends the swipe as left (disconnectDevice lifted the finger); a dropped or replaced socket ends it as
@@ -1174,12 +1178,13 @@ export class TapflowClient {
 
     this.send({ type: 'input:touch:start', sessionId, payload: { x: startX, y: startY } })
     this.openTouches.set(sessionId, touch)
-    for (let i = 1; i < STEPS; i++) {
+    for (let i = 1; i <= STEPS; i++) {
       await delay(interval)
       const t = i / STEPS
       // coordinates here are normalized 0-1 — rounding would snap every
       // intermediate move to a screen edge
-      at({ x: startX + (endX - startX) * t, y: startY + (endY - startY) * t })
+      // The last is the end itself, not 1 × the path, which floating point can leave a hair off.
+      at(i === STEPS ? { x: endX, y: endY } : { x: startX + (endX - startX) * t, y: startY + (endY - startY) * t })
     }
     await delay(interval)
     // A drag held still before the lift, as flow-runner's channel does it (`scroll { until }` through `run_flow`).

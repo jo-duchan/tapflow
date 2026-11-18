@@ -736,7 +736,9 @@ export class AdbWrapper {
       const served = await this.viaServer(serial, jar, 'set', text)
       if (served !== undefined) {
         const result = served === null ? undefined : (parseJsonLine(served) as { result?: string } | null)?.result
-        return SET_TEXT_RESULTS.has(result ?? '') ? result as SetTextResult : 'failed'
+        if (SET_TEXT_RESULTS.has(result ?? '')) return result as SetTextResult
+        if (served !== null) logUnusable(serial, 'set', served)
+        return 'failed'
       }
       const out = await execInput(
         `${Buffer.from(text, 'utf8').toString('base64')}\n`, (UIDUMP_TIMEOUT_SEC + 2) * 1000,
@@ -744,7 +746,9 @@ export class AdbWrapper {
         'timeout', String(UIDUMP_TIMEOUT_SEC), 'app_process', '/system/bin', 'dev.tapflow.uidump.Focused', 'set',
       ).catch(() => '')
       const result = (parseJsonLine(out) as { result?: string } | null)?.result
-      return SET_TEXT_RESULTS.has(result ?? '') ? result as SetTextResult : 'failed'
+      if (SET_TEXT_RESULTS.has(result ?? '')) return result as SetTextResult
+      logUnusable(serial, 'set', out)
+      return 'failed'
     })
   }
 
@@ -759,7 +763,9 @@ export class AdbWrapper {
         'timeout', String(UIDUMP_TIMEOUT_SEC), 'app_process', '/system/bin', 'dev.tapflow.uidump.Focused', 'ime',
       ).catch(() => '')
       const result = (parseJsonLine(out) as { result?: string } | null)?.result
-      return result === 'ok' || result === 'no-focus' || result === 'rejected' || result === 'unsupported' ? result : 'failed'
+      if (result === 'ok' || result === 'no-focus' || result === 'rejected' || result === 'unsupported') return result
+      logUnusable(serial, 'ime', out)
+      return 'failed'
     })
   }
 
@@ -1061,6 +1067,16 @@ export interface FocusedRead {
 
 export type SetTextResult = 'ok' | 'transformed' | 'refused' | 'rejected' | 'no-focus' | 'cannot-append-secure' | 'unavailable' | 'failed'
 const SET_TEXT_RESULTS = new Set<string>(['ok', 'transformed', 'refused', 'rejected', 'no-focus', 'cannot-append-secure'])
+
+/**
+ * Why a set or an IME action came back `failed`, which said nothing (Android 16, wdio demo app: four in one evening,
+ * no reason anywhere). Only the jar's `error` — an exception's class and message, never the text being set, which
+ * goes in on stdin and is not echoed — or that the answer held none.
+ */
+function logUnusable(serial: string, op: 'set' | 'ime', out: string): void {
+  const error = (parseJsonLine(out) as { error?: unknown } | null)?.error
+  logger.warn(`${serial}: field ${op} failed: ${typeof error === 'string' ? error.slice(0, 300) : 'no usable answer'}`)
+}
 
 function parseJsonLine(out: string): unknown {
   const line = out.split('\n').map((l) => l.trim()).find((l) => l.startsWith('{'))

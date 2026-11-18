@@ -700,7 +700,9 @@ describe('TapflowClient', () => {
       expect(msgs[0]).toMatchObject({ type: 'input:touch:start', payload: { x: 0, y: 0 } })
       expect(msgs[msgs.length - 1]).toMatchObject({ type: 'input:touch:end', payload: { x: 100, y: 100 } })
       const moves = msgs.filter((m) => m['type'] === 'input:touch:move')
-      expect(moves.length).toBe(7) // STEPS - 1
+      expect(moves.length).toBe(8)
+      // Every agent lifts where the last move was: it must be the end, or the swipe stops an eighth short.
+      expect(moves[moves.length - 1]).toMatchObject({ payload: { x: 100, y: 100 } })
     })
   })
 
