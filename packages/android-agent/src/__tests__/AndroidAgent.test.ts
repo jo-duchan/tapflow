@@ -2842,10 +2842,28 @@ describe('AndroidAgent', () => {
         const launch = vi.spyOn(adb, 'launchApp').mockResolvedValueOnce(undefined).mockRejectedValueOnce(new Error('not installed'))
         inject({ type: 'app:launch', requestId: 'rq-a', payload: { bundleId: 'dev.tapflow.a' } })
         await vi.waitFor(() => expect(packages().get('avd:Pixel_8_API_34')).toBe('dev.tapflow.a'))
+        const failed = waitForType(browser, 'app:launch-error')
         inject({ type: 'app:launch', requestId: 'rq-b', payload: { bundleId: 'dev.tapflow.b' } })
-        await vi.waitFor(() => expect(launch).toHaveBeenCalledTimes(2))
-        await new Promise((r) => setTimeout(r, 20))
+        await failed
         expect(packages().get('avd:Pixel_8_API_34')).toBe('dev.tapflow.a')
+      })
+
+      // CodeRabbit on #1187: two launches at once, the earlier one answering last.
+      it('does not let a launch overtaken by a later one name the app under test', async () => {
+        const packages = () => (agent as unknown as { appPackages: Map<string, string> }).appPackages
+        let finishA: () => void = () => {}
+        vi.spyOn(adb, 'launchApp')
+          .mockImplementationOnce(() => new Promise((r) => { finishA = () => r(undefined) }))
+          .mockResolvedValueOnce(undefined)
+        const done = waitForType(browser, 'app:launch-done')
+        inject({ type: 'app:launch', requestId: 'rq-a', payload: { bundleId: 'dev.tapflow.a' } })
+        inject({ type: 'app:launch', requestId: 'rq-b', payload: { bundleId: 'dev.tapflow.b' } })
+        await done
+        await vi.waitFor(() => expect(packages().get('avd:Pixel_8_API_34')).toBe('dev.tapflow.b'))
+        const second = waitForType(browser, 'app:launch-done')
+        finishA()
+        await second
+        expect(packages().get('avd:Pixel_8_API_34')).toBe('dev.tapflow.b')
       })
 
       // Review of P4: the adb fallback plays a gesture only once its end arrives, so its down's time is not the app's.

@@ -514,6 +514,8 @@ export class AndroidAgent implements DeviceAgent, NetworkControlCapability {
   /** The app under test per device, as last installed or launched here: the only app whose touches are reported. Kept
    *  across sessions, as iOS's `lastBundleIds`: a person may open the app from its icon. */
   private readonly appPackages = new Map<string, string>()
+  /** The latest launch begun per device: an older one finishing after it does not name the app under test. */
+  private readonly launchSeq = new Map<string, number>()
   /**
    * One queue of rotation commands per device (#910). Each `setRotation` is its own `adb` process, so
    * two sent back to back can land in either order, and a held ⌘⇧O or a boot reset racing the first
@@ -3087,6 +3089,8 @@ export class AndroidAgent implements DeviceAgent, NetworkControlCapability {
           break
         }
         const options = compactLaunchOptions({ arguments: args, env })
+        const launchNo = (this.launchSeq.get(state!.deviceId) ?? 0) + 1
+        this.launchSeq.set(state!.deviceId, launchNo)
         // Flow Capture's Match saw a launch go unanswered for its 30 s in 4 of 28 replays on an emulator (2026-11-17),
         // with the app on screen and nothing in this log. Where it waits is logged once it is slow, so the next one says.
         const started = Date.now()
@@ -3098,8 +3102,9 @@ export class AndroidAgent implements DeviceAgent, NetworkControlCapability {
           .then(() => { phase = `launching (clears took ${Date.now() - started}ms)`; return this.adb.launchApp(serial, bundleId, options, defaultsOnly === true) })
           // What was delivered, which for the relay's defaults can be less than what was sent, down to nothing.
           .then((applied) => {
-            // The app under test once it launched: a launch that failed leaves the one before (CodeRabbit on #1187).
-            this.appPackages.set(state!.deviceId, bundleId)
+            // The app under test once it launched: a launch that failed leaves the one before, and one overtaken by a
+            // later launch does not take it back (CodeRabbit on #1187).
+            if (this.launchSeq.get(state!.deviceId) === launchNo) this.appPackages.set(state!.deviceId, bundleId)
             respond(options ? { type: 'app:launch-done', applied: appliedKeys(applied ?? {}) } : { type: 'app:launch-done' })
           })
           .catch((e: unknown) => {
