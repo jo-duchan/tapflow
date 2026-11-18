@@ -98,9 +98,10 @@ export function makeFlowDriver(client: TapflowClient, sessionId: string, buildId
       const results = await guard(() => client.reach(sessionId, targets.map(reachTargetOf), signal))
       return results.map((r) => (r.state === 'reachable' ? { ...r, point: fromFramePoint(turn, r.point) } : r))
     },
-    swipe: (from, to, durationMs) => {
+    // `holdMs` passed on, for `scroll { until }`'s drags (see `holdStill`).
+    swipe: (from, to, durationMs, holdMs) => {
       const [fx, fy] = at(...from), [tx, ty] = at(...to)
-      return guard(() => client.swipe(sessionId, fx, fy, tx, ty, durationMs))
+      return guard(() => client.swipe(sessionId, fx, fy, tx, ty, durationMs, holdMs))
     },
     inputText: async (text) => guard(() => client.typeText(sessionId, text)),
     // Names the modifiers for the reason `launchApp` names its options below: a function that drops the second

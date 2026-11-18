@@ -61,6 +61,20 @@ describe('SessionChannel without a socket', () => {
     expect(types.filter((t) => t === 'input:touch:move').length).toBeLessThan(7)
   })
 
+  // Pre-PR review of the overshoot fix: a stray move after a leave lands as a fresh tap on iOS's digitizer path.
+  it('a leave during a swipe\'s hold sends no move after it', async () => {
+    vi.useFakeTimers()
+    const ch = new MemoryChannel()
+    const swipe = ch.swipe('s1', [0.5, 0.7], [0.5, 0.3], 400, 150).catch((e: unknown) => e)
+    await vi.advanceTimersByTimeAsync(450)
+    ch.leaveSession('s1')
+    await vi.advanceTimersByTimeAsync(400)
+    expect(await swipe).toBeInstanceOf(SessionLeftError)
+    const types = ch.sent.map((m) => m.type)
+    expect(types.slice(types.indexOf('session:leave') + 1)).not.toContain('input:touch:move')
+    expect(types.slice(-3)).toEqual(['input:touch:cancel', 'input:touch:end', 'session:leave'])
+  })
+
   it('a terminated session settles its own waiters and no other session\'s', async () => {
     const ch = new MemoryChannel()
     const mine = ch.pressKey('s1', 'Enter').catch((e: unknown) => e)

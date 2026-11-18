@@ -36,7 +36,7 @@ vi.mock('@tapflowio/flow-runner/browser', async (importOriginal) => ({
     ran.beforeRun?.()
     if (ran.probe) {
       const d = driver as unknown as Record<string, (...a: unknown[]) => Promise<unknown>>
-      const calls: Array<[string, unknown[]]> = [['queryUITree', []], ['reach', [[]]], ['swipe', [[0.5, 0.7], [0.5, 0.3], 300]], ['tap', [0.5, 0.5]], ['screenshot', []]]
+      const calls: Array<[string, unknown[]]> = [['queryUITree', []], ['reach', [[]]], ['swipe', [[0.5, 0.7], [0.5, 0.3], 300, 150]], ['tap', [0.5, 0.5]], ['screenshot', []]]
       for (const [m, args] of calls) ran.probe[m] = await Promise.resolve().then(() => d[m]!(...args)).then(() => 'sent', (e: unknown) => ((e as Error).name === 'AbortError' ? 'stopped' : 'sent'))
     }
     const answer = ran.answers.shift()
@@ -71,6 +71,9 @@ const channel = {
   launchApp: async () => { log.push('launch') },
   queryUITreeWithTurn: async () => ({ elements: [] }),
   tap: async () => { log.push('tap') },
+  swipe: async (_s: string, from: [number, number], to: [number, number], durationMs: number, holdMs?: number) => {
+    log.push(`swipe ${from} ${to} ${durationMs} ${holdMs}`)
+  },
   typeText: async () => { log.push('type') },
   pressKey: async (_s: string, code: string) => { log.push(`key ${code}`) },
   screenshot: async () => { if (trackShots.on) seq.push('shot'); throw new Error('no screenshot here') },
@@ -1336,6 +1339,18 @@ describe('matchRange with the app\'s touch reports', () => {
     expect(log).not.toContain('tap')
     // Every way the engine reaches the device from a scroll search and a tap, its failure picture included.
     expect(ran.probe).toEqual({ queryUITree: 'stopped', reach: 'stopped', swipe: 'stopped', tap: 'stopped', screenshot: 'stopped' })
+  })
+
+  // Design review of the overshoot fix: Match and Verify drive the engine through this driver, and a swipe that dropped
+  // `holdMs` left their scroll searches flinging past the element.
+  it('passes a search step\'s hold through to the channel', async () => {
+    screen.elements = [orders]
+    ran.answers = [{ status: 'passed' }]
+    ran.probe = {}
+    const lease = new PauseLease(ctap)
+    await matchRange(ctap, channel, lease, [launchStep, named], { start: 0, end: 2 }, null, hooks())
+    await lease.stop()
+    expect(log).toContain('swipe 0.5,0.7 0.5,0.3 300 150')
   })
 
   it('stops on a session that ended rather than falling back', async () => {

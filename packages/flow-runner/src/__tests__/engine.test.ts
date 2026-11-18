@@ -24,8 +24,8 @@ function fakeDriver(trees: UIElement[][]): FlowDriver & { calls: Array<[string, 
     calls,
     queryUITree: vi.fn(async () => trees[Math.min(i++, trees.length - 1)]),
     tap: vi.fn(async (x: number, y: number) => { calls.push(['tap', x, y]) }),
-    swipe: vi.fn(async (from: [number, number], to: [number, number], durationMs: number) => {
-      calls.push(['swipe', from, to, durationMs])
+    swipe: vi.fn(async (from: [number, number], to: [number, number], durationMs: number, holdMs?: number) => {
+      calls.push(['swipe', from, to, durationMs, ...(holdMs !== undefined ? [holdMs] : [])])
     }),
     inputText: vi.fn(async (text: string) => { calls.push(['inputText', text]) }),
     pressKey: vi.fn(async (code: string) => { calls.push(['pressKey', code]) }),
@@ -39,6 +39,19 @@ function fakeDriver(trees: UIElement[][]): FlowDriver & { calls: Array<[string, 
     setOrientation: vi.fn(async (orientation: string, timeoutMs: number) => { calls.push(['setOrientation', orientation, timeoutMs]) }),
     setPosture: vi.fn(async (posture: string, timeoutMs: number) => { calls.push(['setPosture', posture, timeoutMs]) }),
   }
+}
+
+/**
+ * A device whose screen changes only when it is swiped, as a real one does: the `n`th screen after `n` swipes, the last
+ * one after that. A tree read with no gesture before it (`scroll { until }`'s confirming read) sees the same screen.
+ */
+function listDriver(screens: UIElement[][]): ReturnType<typeof fakeDriver> {
+  const driver = fakeDriver([[]])
+  vi.mocked(driver.queryUITree).mockImplementation(async () => {
+    const swiped = driver.calls.filter((c) => c[0] === 'swipe').length
+    return screens[Math.min(swiped, screens.length - 1)]!
+  })
+  return driver
 }
 
 const chromeButton = (name: string, usage: number): ChromeButton => ({
@@ -935,10 +948,27 @@ describe('runFlow', () => {
     })
 
     it('swipes the scroll gesture until it appears, in the given direction', async () => {
-      const driver = fakeDriver([[row('Row 1', 0.3)], [row('Row 8', 0.3)], [row('Row 16', 0.3)]])
+      const driver = listDriver([[row('Row 1', 0.3)], [row('Row 8', 0.3)], [row('Row 16', 0.3)]])
       const result = await runFlow(flowOf('steps:\n  - scroll: { direction: up, until: "Row 16" }\n'), driver, OPTS)
       expect(result.status).toBe('passed')
-      expect(swipes(driver)).toEqual([['swipe', [0.5, 0.3], [0.5, 0.7], 300], ['swipe', [0.5, 0.3], [0.5, 0.7], 300]])
+      // Drags held still before the lift: a fling's glide carried an iOS list past the element (measured).
+      expect(swipes(driver)).toEqual([['swipe', [0.5, 0.3], [0.5, 0.7], 300, 150], ['swipe', [0.5, 0.3], [0.5, 0.7], 300, 150]])
+    })
+
+    // A pager whose page is taller than the drag snaps a held drag back: the step after one that moved nothing flings.
+    it('flings the step after two that left the screen as it was', async () => {
+      const driver = fakeDriver([[row('Row 1', 0.3)], [row('Row 1', 0.3)], [row('Row 1', 0.3)], [row('Row 16', 0.3)]])
+      const result = await runFlow(flowOf('steps:\n  - scroll: { until: "Row 16" }\n'), driver, OPTS)
+      expect(result.status).toBe('passed')
+      expect(swipes(driver).map((c) => c[4])).toEqual([150, 150, 0])
+    })
+
+    // Pre-PR review: a drag the device dropped mid-list reads as "moved nothing" once; a fling after it could glide past.
+    it('drags again after a single step that moved nothing', async () => {
+      const driver = listDriver([[row('Row 1', 0.3)], [row('Row 1', 0.3)], [row('Row 8', 0.3)], [row('Row 16', 0.3)]])
+      const result = await runFlow(flowOf('steps:\n  - scroll: { until: "Row 16" }\n'), driver, OPTS)
+      expect(result.status).toBe('passed')
+      expect(swipes(driver).map((c) => c[4])).toEqual([150, 150, 150])
     })
 
     // #1125: a row under a tab bar is inside the screen, and its centre is the tab. It is not in view until the device
@@ -1018,10 +1048,10 @@ describe('runFlow', () => {
       const at = (x: number) => el({ label: 'Tab', frame: { x, y: 0.1, width: 0.04, height: 0.05 } })
       const right = fakeDriver([[at(0.96)], [at(0.5)]])
       expect((await runFlow(flowOf('steps:\n  - scroll: { direction: right, until: "Tab" }\n'), right, OPTS)).status).toBe('passed')
-      expect(swipes(right)).toEqual([['swipe', [0.8, 0.5], [0.2, 0.5], 300]])
+      expect(swipes(right)).toEqual([['swipe', [0.8, 0.5], [0.2, 0.5], 300, 150]])
       const left = fakeDriver([[at(0)], [at(0.5)]])
       expect((await runFlow(flowOf('steps:\n  - scroll: { direction: left, until: "Tab" }\n'), left, OPTS)).status).toBe('passed')
-      expect(swipes(left)).toEqual([['swipe', [0.2, 0.5], [0.8, 0.5], 300]])
+      expect(swipes(left)).toEqual([['swipe', [0.2, 0.5], [0.8, 0.5], 300, 150]])
       const notCut = fakeDriver([[at(0)]])
       expect((await runFlow(flowOf('steps:\n  - scroll: { direction: right, until: "Tab" }\n'), notCut, OPTS)).status).toBe('passed')
       expect(swipes(notCut)).toEqual([])
@@ -1034,14 +1064,14 @@ describe('runFlow', () => {
       vi.mocked(driver.queryUITree).mockImplementation(async () => [row(`Synced ${n++}s ago`, 0.1), cta])
       const result = await runFlow(flowOf('steps:\n  - scroll: { until: { label: "Continue", timeout: 5 } }\n'), driver, OPTS)
       expect(result.status).toBe('passed')
-      expect(swipes(driver)).toHaveLength(2)
+      // Nothing moved either: a fling is tried before the pinned match is taken (a pager may have snapped drags back).
+      expect(swipes(driver).map((c) => c[4])).toEqual([150, 150, 0])
     })
 
     it('does not take a match larger than the screen for one that stays put: clipped, it reads the same anywhere', async () => {
       const big = el({ label: 'Target', frame: { x: 0, y: 0, width: 1, height: 1 } })
-      const driver = fakeDriver([[]])
-      let n = 0
-      vi.mocked(driver.queryUITree).mockImplementation(async () => (n++ < 5 ? [row(`Synced ${n}s ago`, 0.1), big] : [row('Target', 0.4)]))
+      // A row that moves up with each swipe keeps it from reading as the end, so only the spanning match could stop it.
+      const driver = listDriver([...[0, 1, 2, 3, 4].map((k) => [row('Synced', 0.6 - k * 0.05), big]), [row('Target', 0.4)]])
       const result = await runFlow(flowOf('steps:\n  - scroll: { until: { label: "Target", timeout: 5 } }\n'), driver, OPTS)
       expect(result.status).toBe('passed')
       expect(swipes(driver)).toHaveLength(5)
@@ -1060,7 +1090,227 @@ describe('runFlow', () => {
       const driver = fakeDriver([[row('Row 1', 0.3), cut]])
       const result = await runFlow(flowOf('steps:\n  - scroll: { until: "Footer" }\n'), driver, OPTS)
       expect(result.status).toBe('passed')
-      expect(swipes(driver)).toHaveLength(2)
+      expect(swipes(driver).map((c) => c[4])).toEqual([150, 150, 0])
+    })
+
+    // CodeRabbit on #1190: a countdown on a pager that snaps held drags back changes the screen every read, and the
+    // search must still see that nothing moved and fling to the next page.
+    it('flings on a pager whose page snaps back though a countdown on it keeps changing', async () => {
+      const driver = fakeDriver([[]])
+      let n = 0
+      vi.mocked(driver.queryUITree).mockImplementation(async () => {
+        const page = [row('Page 1', 0.3), row(`Ends in ${10 - n}s`, 0.5)]
+        n++
+        return driver.calls.some((c) => c[0] === 'swipe' && c[4] === 0) ? [row('Page 2', 0.3), row('Target', 0.5)] : page
+      })
+      const result = await runFlow(flowOf('steps:\n  - scroll: { until: { label: "Target", timeout: 10 } }\n'), driver, OPTS)
+      expect(result.status).toBe('passed')
+      expect(swipes(driver).map((c) => c[4])).toEqual([150, 150, 0])
+    })
+
+    // Design review: a countdown that does not tick between every two reads is still learned, and the pager flings.
+    it('flings on a pager whose countdown ticks on a clock, not on every read', async () => {
+      const driver = fakeDriver([[]])
+      // A clock: it ticks every 2 ms, faster than the confirming read's wait (three 1 ms polls) and slower than a read.
+      vi.mocked(driver.queryUITree).mockImplementation(async () => {
+        const tick = Math.floor(Date.now() / 2) % 30
+        return driver.calls.some((c) => c[0] === 'swipe' && c[4] === 0)
+          ? [row('Page 2', 0.3), row('Target', 0.5)] : [row('Page 1', 0.3), row(`Ends in ${30 - tick}s`, 0.5)]
+      })
+      const result = await runFlow(flowOf('steps:\n  - scroll: { until: { label: "Target", timeout: 10 } }\n'), driver, OPTS)
+      expect(result.status).toBe('passed')
+      expect(swipes(driver).at(-1)![4]).toBe(0)
+    })
+
+    // Design review: the read with no gesture before it still looks for the element (a lazy load landed in it), so
+    // the next drag does not carry it away.
+    it('takes the element from the read that confirms, with no drag after it', async () => {
+      const driver = fakeDriver([[]])
+      let afterSwipe = 0
+      vi.mocked(driver.queryUITree).mockImplementation(async () => {
+        if (!driver.calls.some((c) => c[0] === 'swipe')) return [row('Row 1', 0.3)]
+        return afterSwipe++ === 0 ? [row('Loading', 0.3)] : [row('Target', 0.2)]
+      })
+      const result = await runFlow(flowOf('steps:\n  - scroll: { until: { label: "Target", timeout: 10 } }\n'), driver, OPTS)
+      expect(result.status).toBe('passed')
+      expect(swipes(driver)).toHaveLength(1)
+    })
+
+    // CodeRabbit on #1190: a paged list reusing its row ids and places is moving; the search drags on to page 5.
+    it('keeps dragging a paged list that reuses its row ids and places', async () => {
+      const page = (n: number) => [0, 1, 2].map((i) => el({ role: 'cell', label: `Row ${n * 3 + i}`, identifier: `row.${i}`, frame: { x: 0, y: 0.2 + i * 0.2, width: 1, height: 0.05 } }))
+      const driver = listDriver([page(0), page(1), page(2), page(3), [...page(4).slice(0, 2), row('Target', 0.6)]])
+      const result = await runFlow(flowOf('steps:\n  - scroll: { until: { label: "Target", timeout: 10 } }\n'), driver, OPTS)
+      expect(result.status).toBe('passed')
+      expect(swipes(driver).map((c) => c[4])).toEqual([150, 150, 150, 150])
+    })
+
+    // CodeRabbit on #1190: fixed chrome that outnumbers the rows replaced under it does not hide that the list moved.
+    it('keeps dragging when fixed chrome outnumbers the rows replaced under it', async () => {
+      const chrome = [row('Title', 0.02), row('Search', 0.08)]
+      const driver = listDriver([[...chrome, row('Row 1', 0.4)], [...chrome, row('Row 2', 0.4)], [...chrome, row('Row 3', 0.4)], [...chrome, row('Target', 0.4)]])
+      const result = await runFlow(flowOf('steps:\n  - scroll: { until: { label: "Target", timeout: 10 } }\n'), driver, OPTS)
+      expect(result.status).toBe('passed')
+      expect(swipes(driver).map((c) => c[4])).toEqual([150, 150, 150])
+    })
+
+    // The confirming read waits three polls, so a clock ticking once a poll interval or two is seen changing in it.
+    it('waits three polls before the read that confirms', async () => {
+      const page = (n: number) => [0, 1, 2].map((i) => row(`Row ${n * 3 + i}`, 0.2 + i * 0.2))
+      const driver = listDriver([page(0), page(1), [row('Target', 0.4)]])
+      const at: number[] = []
+      const read = vi.mocked(driver.queryUITree).getMockImplementation()!
+      vi.mocked(driver.queryUITree).mockImplementation(async () => { at.push(Date.now()); return read() })
+      const result = await runFlow(flowOf('steps:\n  - scroll: { until: { label: "Target", timeout: 10 } }\n'), driver, { ...OPTS, pollIntervalMs: 20 })
+      expect(result.status).toBe('passed')
+      // Read 1 is ambiguous (rows replaced in place); read 2 confirms it.
+      expect(at[2]! - at[1]!).toBeGreaterThanOrEqual(55)
+    })
+
+    // A cut match held still is an arrival only where the device reaches it at its centre, like any other.
+    it('does not take a cut match held still that the device says is covered', async () => {
+      const cut = el({ label: 'Target', frame: { x: 0, y: 0.95, width: 1, height: 0.05 } })
+      const page = (shift: number) => [0.2, 0.4, 0.6].map((y) => row('Item', y - shift))
+      const driver = listDriver([[...page(0), cut], [...page(0.1), cut], [...page(0.2), cut]])
+      driver.reach = vi.fn(async (els: UIElement[]) => els.map(() => ({ state: 'occluded' as const })))
+      const result = await runFlow(flowOf('steps:\n  - scroll: { until: { label: "Target", timeout: 10 } }\n'), driver, OPTS)
+      expect(result.status).toBe('failed')
+      expect(result.failureMessage).toMatch(/does not reach it at its centre/)
+    })
+
+    // Pre-push review: a page shown as "Loading…" and then filled in changes by itself once; that is the page arriving,
+    // not a clock, and the search must not learn the rows as a region that explains the next page.
+    it('keeps dragging a paged list whose pages arrive as placeholders and fill in', async () => {
+      const page = (n: number) => [0, 1, 2].map((i) => row(`Row ${n * 3 + i}`, 0.2 + i * 0.2))
+      const loading = [0, 1, 2].map((i) => row('Loading', 0.2 + i * 0.2))
+      const driver = fakeDriver([[]])
+      let shown = 0
+      let readsSinceSwipe = 0
+      vi.mocked(driver.queryUITree).mockImplementation(async () => {
+        const swiped = driver.calls.filter((c) => c[0] === 'swipe').length
+        if (swiped !== shown) { shown = swiped; readsSinceSwipe = 0 }
+        if (swiped >= 5) return [row('Target', 0.4)]
+        return swiped > 0 && readsSinceSwipe++ === 0 ? loading : page(swiped)
+      })
+      const result = await runFlow(flowOf('steps:\n  - scroll: { until: { label: "Target", timeout: 10 } }\n'), driver, OPTS)
+      expect(result.status).toBe('passed')
+      expect(swipes(driver).map((c) => c[4])).toEqual([150, 150, 150, 150, 150])
+    })
+
+    // Only what changed in both windows is learned: a clock does, a page that finishes arriving in the second does not.
+    it('learns the clock and not the rows that arrived beside it', async () => {
+      const page = (n: number) => [0, 1, 2].map((i) => row(`Row ${n * 3 + i}`, 0.2 + i * 0.2))
+      const loading = [0, 1, 2].map((i) => row('Loading', 0.2 + i * 0.2))
+      const driver = fakeDriver([[]])
+      let reads = 0
+      let shown = 0
+      let sinceSwipe = 0
+      vi.mocked(driver.queryUITree).mockImplementation(async () => {
+        const clock = row(`${reads++}s`, 0.9)
+        const swiped = driver.calls.filter((c) => c[0] === 'swipe').length
+        if (swiped !== shown) { shown = swiped; sinceSwipe = 0 }
+        if (swiped >= 5) return [row('Target', 0.4), clock]
+        return [...(swiped > 0 && sinceSwipe++ < 2 ? loading : page(swiped)), clock]
+      })
+      const result = await runFlow(flowOf('steps:\n  - scroll: { until: { label: "Target", timeout: 10 } }\n'), driver, OPTS)
+      expect(result.status).toBe('passed')
+      expect(swipes(driver).map((c) => c[4])).toEqual([150, 150, 150, 150, 150])
+    })
+
+    // Pre-push review: a failed read while a read is being confirmed sends no gesture; the next read confirms instead.
+    it('sends no gesture after a failed read while confirming', async () => {
+      const page = (n: number) => [0, 1, 2].map((i) => row(`Row ${n * 3 + i}`, 0.2 + i * 0.2))
+      const driver = fakeDriver([[]])
+      const swipedAtRead: number[] = []
+      vi.mocked(driver.queryUITree).mockImplementation(async () => {
+        const swiped = driver.calls.filter((c) => c[0] === 'swipe').length
+        swipedAtRead.push(swiped)
+        if (swipedAtRead.length === 3) throw new TransientQueryError('agent busy')
+        return swiped >= 2 ? [row('Target', 0.4)] : page(swiped)
+      })
+      const result = await runFlow(flowOf('steps:\n  - scroll: { until: { label: "Target", timeout: 10 } }\n'), driver, OPTS)
+      expect(result.status).toBe('passed')
+      // Read 2 is ambiguous (rows replaced in place), read 3 fails, read 4 confirms it: no drag before either.
+      expect(swipedAtRead.slice(1, 4)).toEqual([1, 1, 1])
+    })
+
+    // CodeRabbit on #1190: at the end, a match is taken only where the device reaches it at its centre.
+    it('fails at the end of the list with a match the device says is covered, naming it', async () => {
+      const big = el({ label: 'Target', frame: { x: 0, y: 0, width: 1, height: 1 } })
+      const driver = listDriver([[row('Row 29', 0.3), big]])
+      driver.reach = vi.fn(async (els: UIElement[]) => els.map(() => ({ state: 'occluded' as const })))
+      const result = await runFlow(flowOf('steps:\n  - scroll: { until: { label: "Target", timeout: 10 } }\n'), driver, OPTS)
+      expect(result.status).toBe('failed')
+      expect(result.failureMessage).toMatch(/on screen but the device does not reach it at its centre/)
+    })
+
+    // The other side of the rule below: rows moved under a fixed button, so no fling is needed before taking it.
+    it('takes a cut match fixed to the bottom without a fling while the rows above it move', async () => {
+      const cut = el({ label: 'Target', frame: { x: 0, y: 0.95, width: 1, height: 0.05 } })
+      const page = (shift: number) => [0.2, 0.4, 0.6].map((y) => row('Item', y - shift))
+      const driver = fakeDriver([[...page(0), cut], [...page(0.1), cut], [...page(0.2), cut]])
+      const result = await runFlow(flowOf('steps:\n  - scroll: { until: { label: "Target", timeout: 10 } }\n'), driver, OPTS)
+      expect(result.status).toBe('passed')
+      expect(swipes(driver).map((c) => c[4])).toEqual([150, 150])
+    })
+
+    // CodeRabbit on #1190 (second round): every position of a shared label is compared, so two still `Item` cells
+    // read as still and the pager gets its fling.
+    it('flings on a still pager whose cells share a label', async () => {
+      // A device need not list the cells in the same order each read.
+      let n = 0
+      const page1 = () => (n++ % 2 === 0 ? [row('Item', 0.2), row('Item', 0.6)] : [row('Item', 0.6), row('Item', 0.2)])
+      const driver = fakeDriver([[]])
+      vi.mocked(driver.queryUITree).mockImplementation(async () => (driver.calls.some((c) => c[0] === 'swipe' && c[4] === 0)
+        ? [row('Item', 0.2), row('Target', 0.6)] : page1()))
+      const result = await runFlow(flowOf('steps:\n  - scroll: { until: { label: "Target", timeout: 10 } }\n'), driver, OPTS)
+      expect(result.status).toBe('passed')
+      expect(swipes(driver).map((c) => c[4])).toEqual([150, 150, 0])
+    })
+
+    // Every position counts, not one per label: rows sharing a label moved while the last of them (a footer) did not.
+    it('keeps dragging while rows that share a label move, though one of them stays', async () => {
+      const page = (shift: number) => [row('Item', 0.2 - shift), row('Item', 0.4 - shift), row('Item', 0.9)]
+      const driver = listDriver([page(0), page(0.05), page(0.1), page(0.15), [...page(0.15), row('Target', 0.6)]])
+      const result = await runFlow(flowOf('steps:\n  - scroll: { until: { label: "Target", timeout: 10 } }\n'), driver, OPTS)
+      expect(result.status).toBe('passed')
+      expect(swipes(driver).map((c) => c[4])).toEqual([150, 150, 150, 150])
+    })
+
+    // CodeRabbit on #1190 (second round): a virtualized list that moved by whole rows under a fixed header is moving;
+    // mostly new elements are new content, not text that changed in place.
+    it('keeps dragging a list whose rows are all replaced under a fixed header', async () => {
+      const page = (n: number) => [row('Header', 0.05), ...[0.3, 0.5, 0.7].map((y, i) => row(`Row ${n * 3 + i}`, y))]
+      const driver = listDriver([page(0), page(1), page(2), page(3), [...page(3), row('Target', 0.9)]])
+      const result = await runFlow(flowOf('steps:\n  - scroll: { until: { label: "Target", timeout: 10 } }\n'), driver, OPTS)
+      expect(result.status).toBe('passed')
+      expect(swipes(driver).map((c) => c[4])).toEqual([150, 150, 150, 150])
+    })
+
+    // CodeRabbit on #1190 (second round): the end of a list is judged by positions too, so a clock on it does not
+    // keep the search flinging until the timeout. A minority of elements whose text changed in place is no progress.
+    it('fails at the end of a list that carries a clock, before the timeout', async () => {
+      const driver = fakeDriver([[]])
+      let n = 0
+      vi.mocked(driver.queryUITree).mockImplementation(async () => [row('Row 28', 0.3), row('Row 29', 0.5), row(`${n++}s ago`, 0.9)])
+      const started = Date.now()
+      const result = await runFlow(flowOf('steps:\n  - scroll: { until: "Row 99" }\n'), driver, OPTS)
+      expect(result.status).toBe('failed')
+      expect(result.failureMessage).toMatch(/scrolled down to the end without "Row 99" coming on screen/)
+      expect(swipes(driver).map((c) => c[4])).toEqual([150, 150, 0])
+      expect(Date.now() - started).toBeLessThan(5_000)
+    })
+
+    // CodeRabbit on #1190: on a pager that snaps held drags back, a cut target stays where it is; that is no arrival
+    // until a fling was tried.
+    it('tries a fling before taking a cut match that only a snapped-back pager kept still', async () => {
+      const cut = el({ label: 'Target', frame: { x: 0, y: 0.95, width: 1, height: 0.05 } })
+      const driver = fakeDriver([[]])
+      vi.mocked(driver.queryUITree).mockImplementation(async () => (driver.calls.some((c) => c[0] === 'swipe' && c[4] === 0)
+        ? [row('Page 2', 0.3), row('Target', 0.5)] : [row('Page 1', 0.3), cut]))
+      const result = await runFlow(flowOf('steps:\n  - scroll: { until: { label: "Target", timeout: 10 } }\n'), driver, OPTS)
+      expect(result.status).toBe('passed')
+      expect(swipes(driver).map((c) => c[4])).toEqual([150, 150, 0])
     })
 
     // Rows that share a label scroll by moving, not by changing what the screen holds.
@@ -1087,7 +1337,8 @@ describe('runFlow', () => {
       expect(result.status).toBe('failed')
       expect(result.failureKind).toBe('product')
       expect(result.failureMessage).toMatch(/scrolled down to the end without "Row 99" coming on screen/)
-      expect(swipes(driver)).toHaveLength(3)
+      // Three unchanged reads end it: two drags, then the fling a pager would need, then the end.
+      expect(swipes(driver).map((c) => c[4])).toEqual([150, 150, 150, 0])
       expect(Date.now() - started).toBeLessThan(5_000)
     })
 
@@ -1106,10 +1357,9 @@ describe('runFlow', () => {
     // A dump takes ~2.5 s on an emulator: the default step wait would allow about three swipes.
     it('waits past the default step timeout when until names none', async () => {
       const driver = fakeDriver([[]])
-      let n = 0
       vi.mocked(driver.queryUITree).mockImplementation(async () => {
         await new Promise((r) => setTimeout(r, 3))
-        return [row(`Row ${n++}`, 0.3)]
+        return [row(`Row ${driver.calls.filter((c) => c[0] === 'swipe').length}`, 0.3)]
       })
       const result = await runFlow(flowOf('steps:\n  - scroll: { until: "Row 15" }\n'), driver, OPTS) // OPTS waits 20 ms
       expect(result.status).toBe('passed')
@@ -1118,8 +1368,7 @@ describe('runFlow', () => {
 
     it('fails at the selector\'s timeout while the screen keeps changing', async () => {
       const driver = fakeDriver([[]])
-      let n = 0
-      vi.mocked(driver.queryUITree).mockImplementation(async () => [row(`Row ${n++}`, 0.3)])
+      vi.mocked(driver.queryUITree).mockImplementation(async () => [row(`Row ${driver.calls.filter((c) => c[0] === 'swipe').length}`, 0.3)])
       const result = await runFlow(flowOf('steps:\n  - scroll: { until: { label: "Row 99999", timeout: 0.05 } }\n'), driver, OPTS)
       expect(result.status).toBe('failed')
       expect(result.failureKind).toBe('product')
