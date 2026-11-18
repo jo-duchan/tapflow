@@ -8,7 +8,7 @@ const logger = createLogger('android-agent:focused-server')
 /** A request to the jar's `Focused`: read the field, set its text, or press its IME action; where touches land
  *  (`reach`), what a touch-down hit (`hit`); keep one UiAutomation connection for every request or let it go
  *  (`hold`, `release`); or nothing but keeping the server up (`ping`). */
-export type FocusedOp = 'read' | 'set' | 'ime' | 'reach' | 'hit' | 'hold' | 'release' | 'ping'
+export type FocusedOp = 'read' | 'set' | 'ime' | 'reach' | 'hit' | 'hold' | 'release' | 'ping' | 'dump'
 
 /**
  * What became of a request. `not-sent`: nothing reached the device, so the one-shot `Focused` may do it instead.
@@ -84,7 +84,7 @@ export class FocusedServers {
    * `startFailed` says the server could not be started on this device: the jar on it may be gone (a wiped emulator on
    * the same serial), so the caller pushes it again.
    */
-  async request(serial: string, jar: string, op: FocusedOp, text?: string): Promise<FocusedOutcome & { startFailed?: true }> {
+  async request(serial: string, jar: string, op: FocusedOp, text?: string, timeoutMs = this.answerTimeoutMs): Promise<FocusedOutcome & { startFailed?: true }> {
     if ((this.failedUntil.get(serial) ?? 0) > this.now()) return { sent: false }
     const server = this.servers.get(serial) ?? this.start(serial, jar)
     if (server.idle) clearTimeout(server.idle)
@@ -104,13 +104,14 @@ export class FocusedServers {
     // On a monotonic clock: what a touch's hit sets the device's clock against (`TouchWatch`).
     const writtenAt = performance.now()
     let timer: ReturnType<typeof setTimeout> | undefined
-    const out = await Promise.race([answer, new Promise<null>((resolve) => { timer = setTimeout(() => resolve(null), this.answerTimeoutMs) })])
+    // A tree dump has its own bound (its quiet wait, then a window to read), longer than every other request's.
+    const out = await Promise.race([answer, new Promise<null>((resolve) => { timer = setTimeout(() => resolve(null), timeoutMs) })])
     clearTimeout(timer)
     server.pending.delete(id)
     // No answer: the server may be stuck inside a connection, which would refuse the next dump's. It goes before the
     // queue moves on, and the next request starts another.
     if (out === null) {
-      logger.warn(`${serial}: no answer from the field server in ${this.answerTimeoutMs} ms; restarting it`)
+      logger.warn(`${serial}: no answer from the field server in ${timeoutMs} ms; restarting it`)
       await this.stop(serial)
     } else if (this.servers.get(serial) === server) {
       server.idle = setTimeout(() => { void this.stop(serial) }, this.idleStopMs)

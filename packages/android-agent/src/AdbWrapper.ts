@@ -572,7 +572,12 @@ export class AdbWrapper {
     clearTimeout(this.reholdTimers.get(serial))
     this.reholdTimers.delete(serial)
     return this.inDumpQueue(serial, async () => {
-      // The dump connects its own UiAutomation, which a held one refuses: let go for it. Held again once dumps stop for
+      // Through the field server first, on its connection, held or not: no app_process to start (one-shot p50 1306 ms,
+      // served ~340 ms, held ~15–300 ms on Pixel_9_tapflow Android 14), and a held connection stays held. The same XML
+      // (TreeDump.answer). Anything it cannot answer goes the one-shot way below, as before.
+      const served = await this.dumpViaServer(serial)
+      if (served !== undefined) return served
+      // The one-shot dump connects its own UiAutomation, which a held one refuses: let go for it. Held again once dumps stop for
       // REHOLD_AFTER_MS, not after each: a Match or Verify replay dumps before every step, and a hold settling the window
       // list each time (up to 400 ms) would be paid by the replay. Left to the 30 s ping instead, the first tap after a
       // Match or a tree read paid that settling itself, past its up, and went unreported (Compose sample, measured).
@@ -588,6 +593,21 @@ export class AdbWrapper {
         if (this.holdWanted.has(serial)) this.scheduleRehold(serial)
       }
     })
+  }
+
+  private async dumpViaServer(serial: string): Promise<string | undefined> {
+    if (!this.focusedServers || this.uidumpUnsupported.has(serial)) return undefined
+    const jar = await this.pushUidump(serial)
+    if (!jar) return undefined
+    const outcome = await this.focusedServers.request(serial, jar, 'dump', String(UIDUMP_IDLE_MS), (UIDUMP_TIMEOUT_SEC + 1) * 1000)
+    this.noteStart(serial, outcome)
+    if (!outcome.sent || outcome.out === null) return undefined
+    const answer = parseJsonLine(outcome.out) as { xml?: unknown; error?: unknown } | null
+    if (typeof answer?.xml !== 'string') {
+      logger.debug(`${serial}: field server dump fell back: ${typeof answer?.error === 'string' ? answer.error.slice(0, 200) : 'no XML'}`)
+      return undefined
+    }
+    return hierarchyXml(Buffer.from(answer.xml, 'base64').toString('utf8'))
   }
 
   /** A server that could not start may be missing its jar (a wiped emulator on the same serial): pushed again next time. */

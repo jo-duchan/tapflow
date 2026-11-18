@@ -63,6 +63,8 @@ public final class Focused {
         // A held connection keeps the node cache across requests, and nothing clears it for a screen Compose changed
         // in place: Compose sends UiAutomation no events, so the cache would answer with the screen before.
         clearCache(held);
+        // The dump turns the windows off and leaves them off (TreeDump.answer); everything else reads them.
+        if (!"dump".equals(mode)) withWindows(held);
         return answer(mode, textLine, held);
       } catch (Exception e) {
         return "{\"error\":" + str(String.valueOf(e)) + "}";
@@ -80,7 +82,7 @@ public final class Focused {
       return "{\"error\":" + str(String.valueOf(e)) + "}";
     }
     try {
-      withWindows(connection.automation);
+      if (!"dump".equals(mode)) withWindows(connection.automation);
       return answer(mode, textLine, connection.automation);
     } catch (Exception e) {
       return "{\"error\":" + str(String.valueOf(e)) + "}";
@@ -89,8 +91,10 @@ public final class Focused {
     }
   }
 
-  private static void withWindows(UiAutomation automation) {
+  /** Ask for the windows, unless already asked: setting the service info again sends events a dump would then wait out. */
+  static void withWindows(UiAutomation automation) {
     AccessibilityServiceInfo info = automation.getServiceInfo();
+    if ((info.flags & AccessibilityServiceInfo.FLAG_RETRIEVE_INTERACTIVE_WINDOWS) != 0) return;
     info.flags |= AccessibilityServiceInfo.FLAG_RETRIEVE_INTERACTIVE_WINDOWS;
     automation.setServiceInfo(info);
   }
@@ -99,6 +103,9 @@ public final class Focused {
     // A touch's hit (P4) reads the windows at a point, not the focused field: asked first, since what it reads must be
     // read before the touch's up changes the screen.
     if ("hit".equals(mode)) return Hit.answer(automation, textLine, receivedNs);
+    // The tree, as TreeDump writes it (FocusedServer only): on this connection, held or not, so a dump no longer
+    // releases a held one and the touches recorded around it keep their hits.
+    if ("dump".equals(mode)) return TreeDump.answer(automation, textLine);
     AccessibilityNodeInfo field = null;
     // Just connected, the root can be missing for a while (up to 200 ms here), and a root can come before its focused
     // field: 3 of 200 reads in one process found none with the field focused (measured), so a miss is asked again.
