@@ -572,17 +572,39 @@ describe('TapflowClient', () => {
       spy.mockRestore()
     })
 
-    // CodeRabbit on #1190: a hold has no waiter for disconnectDevice to settle, so it must see the leave itself.
-    it('a leave during the hold stops it: no frame after the leave, and the swipe fails as left', async () => {
+    // CodeRabbit on #1190: a hold has no waiter for disconnectDevice to settle, so it must see the leave itself, and the
+    // finger it put down is lifted before the leave rather than left on the device.
+    it('a leave during the hold lifts the finger, sends nothing after the leave, and fails the swipe as left', async () => {
       const swipe = client.swipe('sess-1', 0.5, 0.7, 0.5, 0.3, 40, 2_000).catch((e: unknown) => e)
       await new Promise((r) => setTimeout(r, 150))
       client.disconnectDevice('sess-1')
-      const after = relay.sentMessages().length
       expect(await swipe).toBeInstanceOf(SessionLeftError)
-      await new Promise((r) => setTimeout(r, 60))
-      const late = relay.sentMessages().slice(after).map((m) => m['type'])
-      expect(late).not.toContain('input:touch:move')
-      expect(late).not.toContain('input:touch:end')
+      // Flushed by a later request on the same socket rather than by sleeping.
+      await client.tap('sess-2', 0.1, 0.1)
+      const types = relay.sentMessages().map((m) => m['type'])
+      const leave = types.indexOf('session:leave')
+      expect(types.slice(leave - 2, leave)).toEqual(['input:touch:cancel', 'input:touch:end'])
+      const after = types.slice(leave + 1)
+      expect(after.filter((t) => t === 'input:touch:move')).toEqual([])
+      expect(after.filter((t) => t === 'input:touch:end')).toHaveLength(1) // sess-2's tap
+    })
+
+    it('a leave with no swipe open sends the leave alone', async () => {
+      client.disconnectDevice('sess-1')
+      await client.tap('sess-2', 0.1, 0.1)
+      const types = relay.sentMessages().map((m) => m['type'])
+      expect(types[types.indexOf('session:leave') - 1]).not.toBe('input:touch:end')
+    })
+
+    // CodeRabbit on #1190: frames already sent may have reached the device, so a drop mid-swipe is unconfirmed.
+    it('a drop during the hold fails the swipe as unconfirmed, not as a product failure', async () => {
+      const swipe = client.swipe('sess-1', 0.5, 0.7, 0.5, 0.3, 40, 2_000).catch((e: unknown) => e)
+      await new Promise((r) => setTimeout(r, 150))
+      relay.lastClient().close()
+      const err = await swipe as Error
+      expect(err.message).toMatch(/could not confirm/i)
+      expect(err.message).toMatch(/may have landed/i)
+      expect(err.message).toMatch(/do not repeat/i)
     })
 
     it('refuses a hold that is not a time, before sending anything', async () => {

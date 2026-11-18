@@ -822,23 +822,34 @@ async function inView(driver: FlowDriver, matches: UIElement[]): Promise<boolean
 
 /** What the end-of-list check compares: the structure and where it is, since one long text scrolls by moving alone. */
 /**
- * Whether no element both reads hold has moved: elements matched by role and identifier, or role and label where there
- * is no identifier, so one whose text changed (a clock) drops out instead of reading as movement. Nothing in common is
- * movement — the screen is another one.
+ * Whether the screen holds still between two reads: elements are matched by role and identifier, or by role and label
+ * where there is none, and every position of a key must be where it was (all of them: rows share labels). An element
+ * whose text changed (a clock) drops out instead of reading as movement — but only while it is a minority: a screen
+ * whose elements are mostly new is new content, a virtualized list that moved by whole rows under a fixed header.
  */
 function nothingMoved(before: UIElement[], after: UIElement[]): boolean {
+  if (before.length === 0 && after.length === 0) return true
   const key = (e: UIElement) => JSON.stringify([e.role, e.identifier ?? '', e.identifier ? '' : e.label])
-  const at = (e: UIElement) => `${Math.round(e.frame.x * 100)},${Math.round(e.frame.y * 100)}`
-  const was = new Map<string, string>()
-  for (const e of before) was.set(key(e), at(e))
-  let common = 0
-  for (const e of after) {
-    const w = was.get(key(e))
-    if (w === undefined) continue
-    if (w !== at(e)) return false
-    common++
+  const positions = (tree: UIElement[]) => {
+    const out = new Map<string, string[]>()
+    for (const e of tree) {
+      const list = out.get(key(e)) ?? []
+      list.push(`${Math.round(e.frame.x * 100)},${Math.round(e.frame.y * 100)}`)
+      out.set(key(e), list)
+    }
+    for (const list of out.values()) list.sort()
+    return out
   }
-  return common > 0
+  const was = positions(before)
+  let common = 0
+  let fresh = 0
+  for (const [k, now] of positions(after)) {
+    const then = was.get(k)
+    if (then === undefined) { fresh += now.length; continue }
+    if (then.join(';') !== now.join(';')) return false
+    common += now.length
+  }
+  return common > 0 && fresh * 2 <= after.length
 }
 
 function scrolledShape(tree: UIElement[]): string {
@@ -864,16 +875,14 @@ async function scrollUntil(driver: FlowDriver, direction: ScrollDirection, sel: 
   const spans = SPANS_SCROLL_AXIS[direction]
   let lastError: TransientQueryError | undefined
   let sawTree = false
-  let shape: string | undefined
-  // A screen read without the element is followed by one swipe and a failed read by none, so between any two screens
-  // read lies exactly one swipe: a screen equal to the last one is a swipe that moved nothing.
-  let unchanged = 0
   // A match that stays where it is across swipes cannot be brought further in, even while something else on the screen
   // keeps changing (a clock, a spinner) and so keeps the screen from ever reading unchanged.
   let matchShape: string | undefined
   let matchStill = 0
-  // Steps after which nothing on the screen moved, judged by where the elements of both reads are, not by their text:
-  // a countdown on a pager that snaps a held drag back changes the screen and still moves nothing (CodeRabbit).
+  // A screen read without the element is followed by one swipe and a failed read by none, so between any two screens
+  // read lies exactly one swipe: a screen that held still since the last one is a swipe that moved nothing. Judged by
+  // where the elements are, not by their text: a countdown changes the screen and moves nothing, on a pager that snaps
+  // a held drag back and at the end of a list alike (CodeRabbit on #1190).
   let still = 0
   let lastTree: UIElement[] | undefined
   let flung = false
@@ -901,10 +910,7 @@ async function scrollUntil(driver: FlowDriver, direction: ScrollDirection, sel: 
       matchShape = at
       // Where nothing else moved either, a pager may have snapped the drags back: the fling comes first (CodeRabbit).
       if (matchStill >= MATCH_STILL_READS && (still === 0 || flung)) return
-      const next = scrolledShape(q.tree)
-      unchanged = next === shape ? unchanged + 1 : 0
-      shape = next
-      if (unchanged >= SCROLL_END_READS) {
+      if (still >= SCROLL_END_READS) {
         if (matches.length > 0) return
         throw new StepFailure(`scrolled ${direction} to the end without ${describeSelector(sel)} coming on screen`)
       }

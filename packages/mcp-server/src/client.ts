@@ -473,6 +473,8 @@ export class TapflowClient {
   private readonly released = new Set<string>()
   /** Leaves per session, so an input still sending (a swipe's hold) can tell that its session was left mid-way. */
   private readonly leaves = new Map<string, number>()
+  /** Where a swipe this client opened has its finger now, so a leave can lift it instead of leaving it down. */
+  private readonly openTouches = new Map<string, { x: number; y: number }>()
 
   constructor(
     private readonly relayUrl: string,
@@ -906,6 +908,14 @@ export class TapflowClient {
    * call detached, so a model holding both calls open at once is ordinary rather than exotic.
    */
   disconnectDevice(sessionId: string): void {
+    // A finger this client put down is lifted before it leaves, as flow-runner's channel does: the relay stops routing
+    // this session's frames as it processes the leave, so the swipe itself can no longer end it (CodeRabbit on #1190).
+    const touch = this.openTouches.get(sessionId)
+    if (touch) {
+      this.send({ type: 'input:touch:cancel', sessionId })
+      this.send({ type: 'input:touch:end', sessionId, requestId: randomUUID(), payload: touch })
+      this.openTouches.delete(sessionId)
+    }
     this.send({ type: 'session:leave', sessionId })
     this.leaves.set(sessionId, (this.leaves.get(sessionId) ?? 0) + 1)
     this.held.delete(sessionId)
@@ -1134,30 +1144,38 @@ export class TapflowClient {
     const STEPS = 8
     const interval = durationMs / STEPS
     const leaves = this.leaves.get(sessionId) ?? 0
+    const ws = this.ws
+    // A leave ends the swipe as left (disconnectDevice lifted the finger); a dropped or replaced socket ends it as
+    // unconfirmed, since frames already sent may have reached the device (CodeRabbit on #1190).
+    const left = () => (this.leaves.get(sessionId) ?? 0) !== leaves
+    const lost = () => this.ws !== ws || ws?.readyState !== WebSocket.OPEN
+    const stop = (): Error => {
+      if (left()) return leftError(sessionId)
+      this.openTouches.delete(sessionId)
+      return this.failed(sessionId,
+      `Could not confirm the input reached the device: the relay connection dropped during the swipe${this.closeDetail()}. ` +
+        'Do not repeat the input — part of it may have landed. Check the device state (screenshot or ui_tree) before deciding what to do next.')
+    }
+    const at = (point: { x: number; y: number }) => {
+      if (left() || lost()) throw stop()
+      this.send({ type: 'input:touch:move', sessionId, payload: point })
+      this.openTouches.set(sessionId, point)
+    }
 
     this.send({ type: 'input:touch:start', sessionId, payload: { x: startX, y: startY } })
+    this.openTouches.set(sessionId, { x: startX, y: startY })
     for (let i = 1; i < STEPS; i++) {
       await delay(interval)
       const t = i / STEPS
       // coordinates here are normalized 0-1 — rounding would snap every
       // intermediate move to a screen edge
-      this.send({
-        type: 'input:touch:move',
-        sessionId,
-        payload: {
-          x: startX + (endX - startX) * t,
-          y: startY + (endY - startY) * t,
-        },
-      })
+      at({ x: startX + (endX - startX) * t, y: startY + (endY - startY) * t })
     }
     await delay(interval)
     // A drag held still before the lift, as flow-runner's channel does it (`scroll { until }` through `run_flow`).
-    // A leave during the hold stops it: no frame after the leave, no ack waited for, and the caller hears it was left
-    // (a hold has no waiter for disconnectDevice to settle). CodeRabbit on #1190.
-    if (holdMs > 0 && !(await holdStill([endX, endY], holdMs, (payload) => this.send({ type: 'input:touch:move', sessionId, payload }),
-      () => (this.leaves.get(sessionId) ?? 0) === leaves))) {
-      throw leftError(sessionId)
-    }
+    if (holdMs > 0 && !(await holdStill([endX, endY], holdMs, at, () => !left() && !lost()))) throw stop()
+    if (left() || lost()) throw stop()
+    this.openTouches.delete(sessionId)
     const requestId = randomUUID()
     this.send({ type: 'input:touch:end', sessionId, requestId, payload: { x: endX, y: endY } })
     // A swipe that stays put is a hold to Android's adb path, which replays it after the end arrives — as a long press.
