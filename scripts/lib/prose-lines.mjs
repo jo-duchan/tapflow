@@ -31,6 +31,6 @@ export function* proseLines(body, { skipFrontmatter = false } = {}) {
       continue
     }
     if (/^ {4,}|^\t/.test(raw)) continue           // indented code block
-    yield { raw, line }
+    yield { raw, line, index: i }
   }
 }

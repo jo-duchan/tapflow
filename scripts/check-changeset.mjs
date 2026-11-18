@@ -121,25 +121,43 @@ export function prNumberOf(subject) {
  * them up by hand on every run. A backfill now says which merges it answers for.
  */
 export function parseBackfills(body) {
-  const out = []
+  return Array.from(backfillTokens(body), ({ ref }) => ref)
+}
+
+function* backfillTokens(body) {
   const reference = /(?:#(\d+)|([0-9a-f]{40}))\b/iy
   const separator = /(?:\s*,\s*(?:and\s+)?|\s+(?:and\s+)?)/iy
   // Frontmatter skipped: `Backfills:` there is a YAML key, not a claim. Fences and indented
   // blocks skipped for the same reason `extractReason` skips them — the audit's own failure
   // message prints `Backfills: #413` indented, and CONTRIBUTING, AGENTS and /release all carry
   // it verbatim, so a changeset that documents the convention must not clear whatever it names.
-  for (const { line } of proseLines(body, { skipFrontmatter: true })) {
+  for (const { index, raw, line } of proseLines(body, { skipFrontmatter: true })) {
     const m = /^Backfills:\s*(.+?)\s*$/i.exec(line)
     if (!m) continue
+    const offset = raw.indexOf(line) + line.length - m[1].length
     reference.lastIndex = 0
-    for (let ref = reference.exec(m[1]); ref; ref = reference.exec(m[1])) {
-      out.push(ref[1] === undefined ? ref[2].toLowerCase() : Number(ref[1]))
+    for (let token = reference.exec(m[1]); token; token = reference.exec(m[1])) {
+      yield {
+        ref: token[1] === undefined ? token[2].toLowerCase() : Number(token[1]),
+        index,
+        start: offset + token.index,
+        end: offset + reference.lastIndex,
+      }
       separator.lastIndex = reference.lastIndex
       if (!separator.test(m[1])) break
       reference.lastIndex = separator.lastIndex
     }
   }
-  return out
+}
+
+function comparableBackfillNote(note, resolveRef) {
+  const lines = note.split('\n')
+  for (const { ref, index, start, end } of [...backfillTokens(note)].reverse()) {
+    const line = lines[index]
+    const replacement = resolveRef(ref).map((key) => typeof key === 'number' ? `#${key}` : key).join(', ')
+    lines[index] = line.slice(0, start) + replacement + line.slice(end)
+  }
+  return lines.join('\n')
 }
 
 /**
@@ -467,6 +485,21 @@ function main() {
       }
       process.exit(2)
     }
+    const commits = history.map((line) => {
+      const [sha, parents, ...rest] = line.split('\t')
+      const subject = rest.join('\t')
+      const merge = parents.includes(' ')
+      return { sha, subject, merge, pr: merge ? prNumberOf(subject) : null }
+    })
+    const hashesByPr = new Map()
+    for (const { sha, pr } of commits) {
+      if (pr === null) continue
+      if (!hashesByPr.has(pr)) hashesByPr.set(pr, [])
+      hashesByPr.get(pr).push(sha)
+    }
+    // Key by hash so an exact reference cannot cover another merge with the same PR number.
+    const resolveRef = (ref) => hashesByPr.get(ref) ?? [ref]
+    const backfillRefs = (note) => parseBackfills(note).flatMap(resolveRef)
     const isChangeset = (f) => /^\.changeset\/.+\.md$/.test(f) && !/^\.changeset\/README\.md$/i.test(f)
 
     // Collect claims before judging merges. Only surviving or released package notes count.
@@ -479,9 +512,7 @@ function main() {
       }
     }
     const perMerge = []
-    for (const [index, line] of history.entries()) {
-      const [sha, parents, ...rest] = line.split('\t')
-      const merge = parents.includes(' ')
+    for (const [index, { sha, subject, merge, pr }] of commits.entries()) {
       const before = `${sha}^1`
       const files = []
       const touched = new Map()
@@ -505,20 +536,20 @@ function main() {
       }
       const release = merge && isAuditRelease(consumed, written, before, sha)
       const changelogWritten = written.includes('CHANGELOG.md')
-      if (merge) perMerge.push({ sha, index, files, subject: rest.join('\t'), touched, release, changelogWritten })
+      if (merge) perMerge.push({ sha, pr, index, files, subject, touched, release, changelogWritten })
 
       const rootBackfills = new Map()
       const updatedClaims = new Map()
       const priorNote = (file) => {
         const note = git('show', `${before}:${file}`)
-        return { note, refs: new Set(parseBackfills(note)), internal: isInternalChangeset(note), dates: liveClaims.get(file) }
+        return { note, refs: new Set(backfillRefs(note)), internal: isInternalChangeset(note), dates: liveClaims.get(file) }
       }
       let deletedNotes
       let rewrittenNotes
       let copiedFrom
       for (const [f, previous] of touched) {
         const note = git('show', `${sha}:${f}`)
-        const backfills = parseBackfills(note)
+        const backfills = backfillRefs(note)
         const dates = new Map()
         updatedClaims.set(f, dates)
         if (backfills.length === 0) continue
@@ -534,15 +565,16 @@ function main() {
             .filter(([file, from]) => file === from)
             .map(([file]) => {
               const earlier = priorNote(file)
-              const remaining = new Set(parseBackfills(git('show', `${sha}:${file}`)))
+              const remaining = new Set(backfillRefs(git('show', `${sha}:${file}`)))
               return [file, { ...earlier, refs: earlier.refs.difference(remaining) }]
             }).filter(([, entry]) => entry.refs.size > 0))
           const source = rewrittenNotes.size > 0 ? (copiedFrom ??= changesetCopySources(before, sha)).get(f) : undefined
           const moved = rewrittenNotes.get(source)
-          const exact = [...rewrittenNotes.values()].filter((entry) => entry.note === note)
+          const moveText = rewrittenNotes.size > 0 ? comparableBackfillNote(note, resolveRef) : note
+          const exact = [...rewrittenNotes.values()].filter((entry) => comparableBackfillNote(entry.note, resolveRef) === moveText)
           predecessors = deletedNotes.concat(exact)
           // Frontmatter and Backfills lines alone can give unrelated short notes a high copy score.
-          if (moved && moved.note !== note && sharesChangesetProse(moved.note, note)) predecessors.push(moved)
+          if (moved && !exact.includes(moved) && sharesChangesetProse(moved.note, note)) predecessors.push(moved)
         } else {
           predecessors = isChangeset(previous) ? [priorNote(previous)] : []
         }
@@ -571,13 +603,12 @@ function main() {
     const changesetGaps = []
     const changelogGaps = []
     // Keep the report newest first. A later declaration may cover an earlier merge.
-    for (const { sha, subject, files, touched, release, index, changelogWritten } of perMerge.toReversed()) {
+    for (const { sha, pr, subject, files, touched, release, index, changelogWritten } of perMerge.toReversed()) {
       if (release) continue
       const shipped = files.filter((f) => shipsBetween(f, `${sha}^1`, sha))
       if (shipped.length === 0) continue
 
-      const pr = prNumberOf(subject)
-      const backfilled = (byRef) => (byRef.get(pr ?? sha) ?? -1) > index
+      const backfilled = (byRef) => (byRef.get(sha) ?? -1) > index
       // Bots are exempt from changesets, but production dependency bumps can still owe a root note.
       if (touched.size === 0 && !/dependabot|renovate/i.test(subject) && !backfilled(claims)) {
         changesetGaps.push({ sha, pr, subject, shipped })
@@ -613,7 +644,7 @@ function main() {
     appears in a changeset, leave that file in place and add the declaration to a separate changeset.
     A change with no observable effect can use an internal changeset instead of a root note.
     Land the backfill PR on main with a merge commit and rerun the audit before running pnpm changeset version.
-    Name the PR number, or use the full merge hash printed for merges without a PR:
+    Use the PR number or the full merge hash. The audit prints the hash for merges without a PR:
 
         Backfills: #413
   `)

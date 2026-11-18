@@ -238,6 +238,30 @@ describe('audit --audit against real git history', () => {
     expect(before.stderr).toContain(`Backfills: ${sha}`)
   })
 
+  it('clears both gaps when a backfill uses the full hash of a numbered merge', () => {
+    mergePr(101, 'fix-a', { [SHIPPED]: 'export const a = 1\n' })
+    const sha = git('rev-parse', 'HEAD')
+    mergePr(102, 'backfill', {
+      [ROOT_CHANGELOG]: rootNote('Fixes a.'),
+      '.changeset/a.md': CHANGESET(`Fixes a.\n\nBackfills: ${sha}`),
+    })
+    expect(audit()).toMatchObject({ code: 0 })
+  })
+
+  it('credits only the referenced hash when two merge commits use the same PR number', () => {
+    mergePr(101, 'first-fix', { [SHIPPED]: 'export const a = 1\n' })
+    mergePr(101, 'second-fix', { [SHIPPED]: 'export const a = 2\n' })
+    const sha = git('rev-parse', 'HEAD')
+    mergePr(102, 'backfill', {
+      [ROOT_CHANGELOG]: rootNote('Fixes the second merge.'),
+      '.changeset/a.md': CHANGESET(`Fixes the second merge.\n\nBackfills: ${sha}`),
+    })
+    const result = audit()
+    expect(result).toMatchObject({ code: 1, stderr: expect.stringContaining('no changeset:\n\n    Merge pull request #101 from me/first-fix') })
+    expect(result.stderr).toContain('no entry in the root CHANGELOG.md:\n\n    Merge pull request #101 from me/first-fix')
+    expect(result.stderr).not.toContain('from me/second-fix')
+  })
+
   it('classifies a published path that Git would otherwise quote', () => {
     git('config', 'core.quotePath', 'true')
     const path = 'packages/relay/src/café.ts'
@@ -345,13 +369,14 @@ describe('audit --audit against real git history', () => {
     expect(stderr).not.toContain('Merge pull request #101 ')
   })
 
-  it('does not clear a root gap until a later backfill names the PR and writes the root changelog', () => {
+  it.each(['PR number', 'full hash'])('keeps the root gap for an existing reference restated by %s', (format) => {
     mergePr(101, 'fix-a', { [SHIPPED]: 'export const a = 1\n', '.changeset/a.md': CHANGESET('Fixes a.') })
+    const ref = format === 'full hash' ? git('rev-parse', 'HEAD') : '#101'
     mergePr(102, 'claim-without-note', { '.changeset/late.md': CHANGESET('Fixes a.\n\nBackfills: #101') })
 
     mergePr(103, 'note-with-existing-claim', {
       [ROOT_CHANGELOG]: rootNote('An unrelated note.'),
-      '.changeset/late.md': CHANGESET('Clarifies the earlier fix.\n\nBackfills: #101'),
+      '.changeset/late.md': CHANGESET(`Clarifies the earlier fix.\n\nBackfills: ${ref}`),
     })
     expect(audit()).toMatchObject({ code: 1, stderr: expect.stringContaining('Merge pull request #101 ') })
 
@@ -447,11 +472,12 @@ describe('audit --audit against real git history', () => {
     expect(audit().code).toBe(0)
   })
 
-  it('keeps a root gap when backfills for the same PR include a public changeset', () => {
+  it.each(['PR number', 'full hash'])('keeps a root gap when a public backfill uses the %s beside an internal backfill', (format) => {
     mergePr(101, 'fix-a', { [SHIPPED]: 'export const a = 1\n' })
+    const ref = format === 'full hash' ? git('rev-parse', 'HEAD') : '#101'
     mergePr(102, 'mixed-backfill', {
       '.changeset/internal.md': CHANGESET('Typing only.\n\n<!-- changelog: internal -->\n\nBackfills: #101'),
-      '.changeset/public.md': CHANGESET('Fixes a.\n\nBackfills: #101'),
+      '.changeset/public.md': CHANGESET(`Fixes a.\n\nBackfills: ${ref}`),
     })
     expect(audit()).toMatchObject({ code: 1, stderr: expect.stringContaining('no entry in the root CHANGELOG.md') })
   })
@@ -666,6 +692,25 @@ describe('audit --audit against real git history', () => {
     const result = audit()
     expect(result).toMatchObject({ code: 1, stderr: expect.stringContaining('no changeset:\n\n    Merge pull request #101 ') })
     expect(result.stderr).toContain('no entry in the root CHANGELOG.md:\n\n    Merge pull request #101 ')
+  })
+
+  it('keeps a root gap when a reused-path move switches its backfill reference to the full hash', () => {
+    const path = '.changeset/early.md'
+    const moved = '.changeset/moved.md'
+    mergePr(101, 'fix-a', { [SHIPPED]: 'export const a = 1\n', '.changeset/a.md': CHANGESET('Fix a.') })
+    const sha = git('rev-parse', 'HEAD')
+    mergePr(102, 'package-backfill', { [path]: CHANGESET('Fix a.\n\nBackfills: #101') })
+    mergePr(103, 'move-and-reuse', {
+      [path]: CHANGESET('An unrelated note.'),
+      [moved]: CHANGESET(`Fix a.\n\nBackfills: ${sha}`),
+      [ROOT_CHANGELOG]: rootNote('Unrelated note.'),
+    })
+    const entries = git('diff', '--name-status', '--find-renames', 'HEAD^1', 'HEAD', '--', '.changeset').split('\n')
+    expect(entries).toEqual(expect.arrayContaining([`M\t${path}`, `A\t${moved}`]))
+    expect(audit()).toMatchObject({
+      code: 1,
+      stderr: expect.stringContaining('no entry in the root CHANGELOG.md:\n\n    Merge pull request #101 '),
+    })
   })
 
   it('treats a short backfill sharing only boilerplate with the old note as new', () => {
