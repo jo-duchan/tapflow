@@ -42,11 +42,6 @@ public final class Focused {
     System.exit(0);
   }
 
-  /**
-   * One request on its own UiAutomation connection, connected and released here: the one-shot run and FocusedServer
-   * both answer through it (`Connection`, which can connect again in the same process from Android 16), and the
-   * connection is not kept: while one is up, the app under test sees accessibility on.
-   */
   /** When FocusedServer read the request now being answered, in `System.nanoTime` (CLOCK_MONOTONIC, the clock
    *  `dumpsys gfxinfo` stamps frames with): what the agent sets its clock to the device's by. */
   static volatile long receivedNs;
@@ -55,6 +50,11 @@ public final class Focused {
   private static Connection heldConnection;
   private static UiAutomation held;
 
+  /**
+   * One request on its own UiAutomation connection, connected and released here: the one-shot run and FocusedServer
+   * both answer through it (`Connection`, which can connect again in the same process from Android 16), and the
+   * connection is not kept: while one is up, the app under test sees accessibility on.
+   */
   static String handle(String mode, String textLine) {
     if ("hold".equals(mode)) return hold();
     if ("release".equals(mode)) { release(); return "{}"; }
@@ -292,7 +292,8 @@ public final class Focused {
     Thread.sleep(150);
     field.refresh();
     CharSequence now = field.getText();
-    int length = now == null ? 0 : now.length();
+    // Still showing its hint is still empty: a field that said yes and kept nothing is refused, not "transformed".
+    int length = now == null || field.isShowingHintText() ? 0 : now.length();
     if (secure) {
       // A password reads as its bullets, one per character (measured): the length is all there is to check.
       boolean took = length == wanted.length() || length != beforeLength;
