@@ -28,7 +28,8 @@ function mergePr(number, branch, files) {
   git('add', '-A')
   git('commit', '-q', '-m', `work for #${number}`)
   git('checkout', '-q', 'main')
-  git('merge', '--no-ff', '-q', branch, '-m', `Merge pull request #${number} from me/${branch}`)
+  const subject = number === null ? `Merge branch '${branch}'` : `Merge pull request #${number} from me/${branch}`
+  git('merge', '--no-ff', '-q', branch, '-m', subject)
 }
 
 /**
@@ -187,6 +188,39 @@ describe('the PR gate asks for a root CHANGELOG entry', () => {
 })
 
 describe('audit --audit against real git history', () => {
+  it('accepts the full merge hash as a backfill for a merge without a PR number', () => {
+    mergePr(null, 'local-fix', { [SHIPPED]: 'export const a = 1\n' })
+    const sha = git('rev-parse', 'HEAD')
+    const before = audit()
+    expect(before.code).toBe(1)
+    mergePr(102, 'backfill', { [ROOT_CHANGELOG]: rootNote('Fixes a.'), '.changeset/a.md': CHANGESET(`Fixes a.\n\nBackfills: ${sha}`) })
+    expect(audit().code).toBe(0)
+    expect(before.stderr).toContain(`Backfills: ${sha}`)
+  })
+
+  it('classifies a published path that Git would otherwise quote', () => {
+    git('config', 'core.quotePath', 'true')
+    const path = 'packages/relay/src/café.ts'
+    mergePr(101, 'accented-path', { [path]: 'export const a = 1\n', '.changeset/a.md': CHANGESET('Fixes a.') })
+    expect(audit()).toMatchObject({ code: 1, stderr: expect.stringContaining(path) })
+  })
+
+  it('reports a root gap when a source merge deletes a changelog and a changeset', () => {
+    const changelog = 'packages/relay/CHANGELOG.md'
+    mergePr(100, 'old-notes', { [changelog]: rootNote('Earlier fix.'), '.changeset/old.md': CHANGESET('Earlier fix.') })
+    mergePr(101, 'remove-old-notes', { [SHIPPED]: 'export const a = 1\n', [changelog]: null, '.changeset/old.md': null })
+    expect(audit()).toMatchObject({ code: 1, stderr: expect.stringContaining('no entry in the root CHANGELOG.md') })
+  })
+
+  it('recognizes a backfill when a draft first enters the changeset directory', () => {
+    mergePr(101, 'fix-a', { [SHIPPED]: 'export const a = 1\n', '.changeset/a.md': CHANGESET('Fixes a.') })
+    const claim = CHANGESET('Fixes a.\n\nBackfills: #101')
+    mergePr(102, 'draft', { 'notes/late.md': claim })
+    mergePr(103, 'publish-note', { 'notes/late.md': null, '.changeset/late.md': claim, [ROOT_CHANGELOG]: rootNote('Fixes a.') })
+    expect(git('diff', '--name-status', '--find-renames', 'HEAD^1', 'HEAD')).toContain('R100\tnotes/late.md\t.changeset/late.md')
+    expect(audit().code).toBe(0)
+  })
+
   it('reports the merge missing the root changelog even when it has a changeset and a package changelog', () => {
     mergePr(101, 'fix-a', {
       [SHIPPED]: 'export const a = 1\n',
@@ -242,19 +276,36 @@ describe('audit --audit against real git history', () => {
     expect(audit()).toMatchObject({ code: 1, stderr: expect.stringContaining('Merge pull request #101 ') })
   })
 
-  it.each(['amended', 'renamed'])('does not give a predated claim a new date when its changeset is %s', (operation) => {
-    const claim = CHANGESET('Fixes a.\n\nBackfills: #101')
+  it.each(['amended', 'renamed', 'rewritten and renamed'])('does not give a predated claim a new date when its changeset is %s', (operation) => {
+    const claim = CHANGESET('Original package note.\n'.repeat(20) + '\nBackfills: #101')
     mergePr(102, 'early-root-note', {
       [ROOT_CHANGELOG]: rootNote('Fixes a.'),
       '.changeset/early.md': claim,
     })
     mergePr(101, 'fix-a', { [SHIPPED]: 'export const a = 1\n', '.changeset/a.md': CHANGESET('Fixes a.') })
-    const change = operation === 'renamed'
-      ? { '.changeset/early.md': null, '.changeset/renamed.md': claim }
-      : { '.changeset/early.md': claim + '\nClarify the package note.\n' }
+    const rewritten = CHANGESET('Replacement prose about the updated behavior.\n'.repeat(20) + '\nBackfills: #101')
+    const change = operation === 'amended'
+      ? { '.changeset/early.md': claim + '\nClarify the package note.\n' }
+      : { '.changeset/early.md': null, '.changeset/renamed.md': operation === 'renamed' ? claim : rewritten }
     mergePr(103, 'unrelated-root-note', { ...change, [ROOT_CHANGELOG]: rootNote('Unrelated fix.') })
 
+    if (operation === 'rewritten and renamed') {
+      const diff = git('diff', '--name-status', '--find-renames', 'HEAD^1', 'HEAD', '--', '.changeset').split('\n')
+      expect(diff).toEqual(expect.arrayContaining(['D\t.changeset/early.md', 'A\t.changeset/renamed.md']))
+    }
+
     expect(audit()).toMatchObject({ code: 1, stderr: expect.stringContaining('Merge pull request #101 ') })
+  })
+
+  it('accepts a new reference while another changeset is deleted', () => {
+    mergePr(100, 'old-note', { '.changeset/old.md': CHANGESET('Backfills: #100') })
+    mergePr(101, 'fix-a', { [SHIPPED]: 'export const a = 1\n', '.changeset/a.md': CHANGESET('Fixes a.') })
+    mergePr(102, 'backfill', {
+      '.changeset/old.md': null,
+      '.changeset/new.md': CHANGESET('Fixes a.\n\nBackfills: #101'),
+      [ROOT_CHANGELOG]: rootNote('Fixes a.'),
+    })
+    expect(audit().code).toBe(0)
   })
 
   it('accepts an explicit internal backfill without a root note', () => {

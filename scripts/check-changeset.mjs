@@ -112,8 +112,7 @@ export function prNumberOf(subject) {
 }
 
 /**
- * PR numbers a changeset declares it is writing release notes for, from a `Backfills: #1, #2`
- * line. Exported for the tests.
+ * PR numbers or full merge commit IDs a changeset names on a `Backfills:` line.
  *
  * Why this exists: the audit judges each merge on its own, so a changeset added by a LATER PR to
  * cover an earlier one never clears it. During the v0.17.0 cycle four merges were reported as
@@ -129,7 +128,9 @@ export function parseBackfills(body) {
   for (const { line } of proseLines(body, { skipFrontmatter: true })) {
     const m = /^Backfills:\s*(.+?)\s*$/i.exec(line)
     if (!m) continue
-    for (const ref of m[1].matchAll(/#(\d+)/g)) out.push(Number(ref[1]))
+    for (const [ref, pr] of m[1].matchAll(/#(\d+)|\b[0-9a-f]{40}\b/gi)) {
+      out.push(pr === undefined ? ref.toLowerCase() : Number(pr))
+    }
   }
   return out
 }
@@ -424,53 +425,55 @@ function main() {
     // removes one, so nothing can be decided in a single sweep.
     const perMerge = merges.map((line, index) => {
       const [sha, ...rest] = line.split(' ')
-      const changed = (filter) =>
-        git('diff', '--name-only', `--diff-filter=${filter}`, `${sha}^1`, sha)
-          .split('\n').filter(Boolean)
-      // Every status, deletions included. Narrowing this dropped removals from `shipped`, so a
-      // merge that DELETED a shipped file — the highest-consequence change there is — audited
-      // clean. The narrowing belongs on `touched`, not here.
-      const files = git('diff', '--name-only', `${sha}^1`, sha).split('\n').filter(Boolean)
-      // Added, amended or renamed — never deleted. A release merge lists the changesets it
-      // consumed and reading those at that commit fails, they are gone by then. Amendments count:
-      // a PR extending an existing entry is still writing release notes, which is what #420 did.
+      const files = []
       const touched = new Map()
-      const entries = git('diff', '--name-status', '--find-renames', '-z', '--diff-filter=AMR', `${sha}^1`, sha).split('\0')
+      const consumed = []
+      const written = []
+      const entries = git('diff', '--name-status', '--find-renames', '-z', `${sha}^1`, sha).split('\0')
       for (let i = 0; i < entries.length - 1;) {
-        const status = entries[i++]
+        const status = entries[i++][0]
         const previous = entries[i++]
-        const file = status.startsWith('R') ? entries[i++] : previous
-        if (isChangeset(file)) touched.set(file, status === 'A' ? null : previous)
+        const file = status === 'R' || status === 'C' ? entries[i++] : previous
+        files.push(file) // Deletions also affect what ships.
+        if (status === 'A' || status === 'M') written.push(file)
+        if (!isChangeset(file)) continue
+        if (status === 'D') consumed.push(file)
+        if (status === 'A' || status === 'M' || status === 'R') touched.set(file, status === 'A' ? null : previous)
       }
       return {
         sha, index, files,
         subject: rest.join(' '),
         touched,
-        consumed: changed('D').filter(isChangeset),
-        changelogWritten: files.includes('CHANGELOG.md') && changed('AM').includes('CHANGELOG.md'),
+        consumed,
+        release: isReleaseBranch(consumed, written),
+        changelogWritten: written.includes('CHANGELOG.md'),
       }
     })
 
     // A changeset removed by the release merge was consumed, not abandoned.
     const consumedByRelease = new Set(
-      perMerge.filter((m) => isReleaseBranch(m.consumed, m.files)).flatMap((m) => m.consumed),
+      perMerge.filter((m) => m.release).flatMap((m) => m.consumed),
     )
 
-    // Pass 2 — coverage claims. Keyed pr → index of the claiming merge. Index 0 is the newest, so
+    // Pass 2 — coverage claims. Keyed by PR number or merge hash. Index 0 is the newest, so
     // a claim at index i may only clear merges at a LARGER index: ones that landed before it.
     // Otherwise a claim written today silently pre-clears a merge that arrives tomorrow.
     const claims = new Map()
     const changelogClaims = new Map()
-    for (const { sha, index, touched, changelogWritten } of perMerge) {
+    for (const { sha, index, touched, consumed, changelogWritten } of perMerge) {
       const rootBackfills = new Map()
+      const priorRefs = (file) => parseBackfills(git('show', `${sha}^1:${file}`))
+      let removedRefs
       for (const [f, previous] of touched) {
         // Root notes and internal exemptions belong to the merge, even if its changeset is renamed later.
         const changesetCovered = liveAtHead(f) || consumedByRelease.has(f)
         const note = git('show', `${sha}:${f}`)
         const backfills = parseBackfills(note)
         if (backfills.length === 0) continue
-        // Editing or renaming a changeset does not give its existing root claims a new date.
-        const earlier = previous === null ? [] : parseBackfills(git('show', `${sha}^1:${previous}`))
+        // A rewrite can appear as a deletion and addition. Preserve any carried claim in that case too.
+        const earlier = previous === null
+          ? (removedRefs ??= consumed.flatMap(priorRefs))
+          : isChangeset(previous) ? priorRefs(previous) : []
         const coversRoot = changelogWritten || changelogEntryOwed([f], () => note).length === 0
         for (const pr of backfills) {
           if (changesetCovered && !claims.has(pr)) claims.set(pr, index)
@@ -484,23 +487,20 @@ function main() {
 
     const changesetGaps = []
     const changelogGaps = []
-    for (const { sha, subject, files, touched, consumed, index, changelogWritten } of perMerge) {
-      // A release merge bumps every package.json while consuming changesets rather than adding
-      // any. Recognised by that signature, so a release whose changesets were consumed in an
-      // earlier commit already on main still reports — narrower than the name suggests.
-      if (isReleaseBranch(consumed, files)) continue
+    for (const { sha, subject, files, touched, release, index, changelogWritten } of perMerge) {
+      if (release) continue
       const shipped = files.filter((f) => shipsBetween(f, `${sha}^1`, sha))
       if (shipped.length === 0) continue
 
       const pr = prNumberOf(subject)
-      const backfilled = (byPr) => pr !== null && (byPr.get(pr) ?? Infinity) < index
+      const backfilled = (byRef) => (byRef.get(pr ?? sha) ?? Infinity) < index
       // Bots are exempt from changesets, but production dependency bumps can still owe a root note.
       if (touched.size === 0 && !/dependabot|renovate/i.test(subject) && !backfilled(claims)) {
-        changesetGaps.push({ subject, shipped })
+        changesetGaps.push({ sha, pr, subject, shipped })
       }
       if (changelogWritten || backfilled(changelogClaims)) continue
       if (touched.size === 0 || changelogEntryOwed([...touched.keys()], (f) => git('show', `${sha}:${f}`)).length > 0) {
-        changelogGaps.push({ subject, shipped })
+        changelogGaps.push({ sha, pr, subject, shipped })
       }
     }
 
@@ -514,8 +514,9 @@ function main() {
     for (const [gaps, missing] of [[changesetGaps, 'changeset'], [changelogGaps, 'entry in the root CHANGELOG.md']]) {
       if (gaps.length === 0) continue
       console.error(`\n  ${gaps.length} merge(s) changed published source with no ${missing}:\n`)
-      for (const { subject, shipped } of gaps) {
+      for (const { sha, pr, subject, shipped } of gaps) {
         console.error(`    ${subject}`)
+        if (pr === null) console.error(`      Backfills: ${sha}`)
         for (const f of shipped.slice(0, 5)) console.error(`      ${f}`)
         if (shipped.length > 5) console.error(`      …and ${shipped.length - 5} more`)
       }
@@ -524,7 +525,7 @@ function main() {
     Backfill each reported gap. For a root changelog gap, add the note under ## [Unreleased]
     and add a new Backfills declaration to a changeset in the same PR. A change with no
     observable effect can use an internal changeset instead of a root note.
-    Name the earlier merge on a line of its own in the changeset:
+    Name the PR number, or use the full merge hash printed for merges without a PR:
 
         Backfills: #413
   `)
