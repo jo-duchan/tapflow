@@ -68,6 +68,12 @@ describe('progress — what one drag did to the list', () => {
     expect(down([slide(0), el('Row 1', 0.6)], [slide(-0.3), el('Row 1', 0.6)])).toBe('ambiguous')
   })
 
+  // A slide moving diagonally (a carousel's transition read while it also shifted) is not the list following the finger.
+  it('ambiguous, not moved: an element that travelled the finger\'s way and sideways too', () => {
+    const card = (x: number, y: number) => el('Card', y, { frame: { x, y, width: 0.5, height: 0.2 } })
+    expect(down([card(0.2, 0.5)], [card(-0.1, 0.4)])).toBe('ambiguous')
+  })
+
   it('moved, horizontally: a search to the right reads x', () => {
     const card = (label: string, x: number) => el(label, 0.5, { frame: { x, y: 0.5, width: 0.3, height: 0.2 } })
     expect(progress([card('A', 0.4), card('B', 0.8)], [card('B', 0.2), card('C', 0.6)], 'x', -1, [])).toBe('moved')

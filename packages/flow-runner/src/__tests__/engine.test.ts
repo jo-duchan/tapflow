@@ -1154,6 +1154,30 @@ describe('runFlow', () => {
       expect(swipes(driver).map((c) => c[4])).toEqual([150, 150, 150])
     })
 
+    // The confirming read waits three polls, so a clock ticking once a poll interval or two is seen changing in it.
+    it('waits three polls before the read that confirms', async () => {
+      const page = (n: number) => [0, 1, 2].map((i) => row(`Row ${n * 3 + i}`, 0.2 + i * 0.2))
+      const driver = listDriver([page(0), page(1), [row('Target', 0.4)]])
+      const at: number[] = []
+      const read = vi.mocked(driver.queryUITree).getMockImplementation()!
+      vi.mocked(driver.queryUITree).mockImplementation(async () => { at.push(Date.now()); return read() })
+      const result = await runFlow(flowOf('steps:\n  - scroll: { until: { label: "Target", timeout: 10 } }\n'), driver, { ...OPTS, pollIntervalMs: 20 })
+      expect(result.status).toBe('passed')
+      // Read 1 is ambiguous (rows replaced in place); read 2 confirms it.
+      expect(at[2]! - at[1]!).toBeGreaterThanOrEqual(55)
+    })
+
+    // A cut match held still is an arrival only where the device reaches it at its centre, like any other.
+    it('does not take a cut match held still that the device says is covered', async () => {
+      const cut = el({ label: 'Target', frame: { x: 0, y: 0.95, width: 1, height: 0.05 } })
+      const page = (shift: number) => [0.2, 0.4, 0.6].map((y) => row('Item', y - shift))
+      const driver = listDriver([[...page(0), cut], [...page(0.1), cut], [...page(0.2), cut]])
+      driver.reach = vi.fn(async (els: UIElement[]) => els.map(() => ({ state: 'occluded' as const })))
+      const result = await runFlow(flowOf('steps:\n  - scroll: { until: { label: "Target", timeout: 10 } }\n'), driver, OPTS)
+      expect(result.status).toBe('failed')
+      expect(result.failureMessage).toMatch(/does not reach it at its centre/)
+    })
+
     // CodeRabbit on #1190: at the end, a match is taken only where the device reaches it at its centre.
     it('fails at the end of the list with a match the device says is covered, naming it', async () => {
       const big = el({ label: 'Target', frame: { x: 0, y: 0, width: 1, height: 1 } })
