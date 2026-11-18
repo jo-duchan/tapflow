@@ -572,6 +572,13 @@ describe('TapflowClient', () => {
       spy.mockRestore()
     })
 
+    it('refuses a hold that is not a time, before sending anything', async () => {
+      const before = relay.sentMessages().length
+      await expect(client.swipe('sess-1', 0.5, 0.7, 0.5, 0.3, 40, Number.POSITIVE_INFINITY)).rejects.toThrow(/swipe hold/)
+      await expect(client.swipe('sess-1', 0.5, 0.7, 0.5, 0.3, 40, -1)).rejects.toThrow(/swipe hold/)
+      expect(relay.sentMessages().length).toBe(before)
+    })
+
     it('holds still at the end point before the lift when asked to', async () => {
       await client.swipe('sess-1', 0.5, 0.7, 0.5, 0.3, 40, 100)
       await waitForMessage(relay, 'input:touch:end')

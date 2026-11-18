@@ -360,6 +360,25 @@ describe('RelayClient — the input senders mint a correlator and await the ack'
     expect(timeouts).toContain(10_000 + 80)
   })
 
+  it('a held swipe waits for its ack its hold longer too, and a hold that is not a time is none', async () => {
+    const { client, received } = await capture()
+    const timeouts: number[] = []
+    const real = globalThis.setTimeout
+    const spy = vi.spyOn(globalThis, 'setTimeout').mockImplementation(((fn: () => void, ms?: number) => {
+      timeouts.push(ms ?? 0)
+      return real(fn, ms)
+    }) as typeof setTimeout)
+    try {
+      await client.swipe('s1', [0.5, 0.7], [0.5, 0.3], 40, 50)
+      await client.swipe('s1', [0.5, 0.7], [0.5, 0.3], 40, Number.NaN)
+    } finally {
+      spy.mockRestore()
+    }
+    expect(timeouts).toContain(10_000 + 40 + 50)
+    expect(timeouts).toContain(10_000 + 40)
+    expect(received.filter((m) => m['type'] === 'input:touch:end')).toHaveLength(2)
+  })
+
   // Both agents inject a move the moment it arrives, so a pinch sent at once is a jump. `pinch:end` carries no
   // position, so the last move has to be the end.
   it('pinch paces its moves over the duration, ends on the end position, and acks on pinch:end', async () => {

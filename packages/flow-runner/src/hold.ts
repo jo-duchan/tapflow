@@ -4,6 +4,8 @@ export const HOLD_FRAME_MS = 16
  *  content still glided on at the lift as after a fling (measured, SwiftUI List). 0.0005 of the screen, ~75 px/s on a
  *  phone, under Android's minimum fling velocity too. */
 export const HOLD_WOBBLE = 0.0005
+/** The longest hold a swipe takes: a drag that has to stop needs a fraction of a second. */
+export const MAX_HOLD_MS = 60_000
 
 const delay = (ms: number) => new Promise<void>((r) => setTimeout(r, ms))
 

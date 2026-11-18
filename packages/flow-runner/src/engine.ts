@@ -885,6 +885,9 @@ async function scrollUntil(driver: FlowDriver, direction: ScrollDirection, sel: 
     // of the screen up and down, 0.6 across) and no further, on every list measured (SwiftUI, UIKit, Compose,
     // RecyclerView); a list whose visible part is shorter than that can still be stepped past. A step that moved
     // nothing is followed by a fling: a pager whose page is taller than the drag snaps a held drag back to where it was.
+    // The trade: a drag the device dropped mid-list also reads as "moved nothing", and the fling after it can glide past
+    // the element once; a read in that glide sees a changed screen and the search drags again. Closing it would cost
+    // every failed search one more read at the end (SCROLL_END_READS 3).
     if (read) { await driver.swipe(gesture.from, gesture.to, 300, unchanged > 0 ? 0 : SEARCH_HOLD_MS); swiped = true }
     await waitForNextPoll(deadline, pollIntervalMs, base, lastError, sawTree)
   }

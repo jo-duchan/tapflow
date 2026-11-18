@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto'
 import type {
   BootRefusalReason, BrowserToRelay, ChromePayload, DeviceSummary, PosturesPayload, InputErrorReason, LaunchApplied, LaunchOptions, ReachResult, ReachTarget, SessionTerminatedReason, UIElement,
 } from '@tapflowio/protocol'
-import { AdmissionRefusedError, DeviceLacksError, EnvironmentStepError, TransientQueryError, markEnvironmentFailure, authHeader, fetchWithToken, fixedToken, lookupBuild, reachRequest, readReachResults, tokenRefusal, keyModifierBits, holdStill, type BuildLookup, type KeyModifier, type TokenSource } from '@tapflowio/flow-runner'
+import { AdmissionRefusedError, DeviceLacksError, EnvironmentStepError, TransientQueryError, markEnvironmentFailure, authHeader, fetchWithToken, fixedToken, lookupBuild, reachRequest, readReachResults, tokenRefusal, keyModifierBits, holdStill, MAX_HOLD_MS, type BuildLookup, type KeyModifier, type TokenSource } from '@tapflowio/flow-runner'
 
 // Protocol owns the wire shape; this file used to declare an identical copy under a name the
 // relay uses for a *different* shape. Kept exported as `DeviceInfo` because that is this
@@ -1120,6 +1120,9 @@ export class TapflowClient {
     // routed through failed() so a session-scoped failure carries the session note.
     if (!Number.isFinite(durationMs) || !(durationMs > 0) || durationMs > MAX_TIMER_MS) {
       throw this.failed(sessionId, `swipe duration must be a positive finite number no greater than ${MAX_TIMER_MS}ms`)
+    }
+    if (!Number.isFinite(holdMs) || holdMs < 0 || holdMs > MAX_HOLD_MS) {
+      throw this.failed(sessionId, `swipe hold must be a finite number from 0 to ${MAX_HOLD_MS}ms`)
     }
     const STEPS = 8
     const interval = durationMs / STEPS
