@@ -625,6 +625,17 @@ describe('TapflowClient', () => {
       expect(types.slice(leave - 2, leave)).toEqual(['input:touch:cancel', 'input:touch:end'])
     })
 
+    // CodeRabbit on #1190: an old socket's close that lands after a reconnect must not drop the socket that replaced it.
+    it('an old socket closing after a reconnect leaves the new one in use', async () => {
+      const old = client['ws']!
+      await client.connect()
+      const closed = new Promise((r) => old.once('close', r))
+      old.close()
+      await closed
+      expect(client['ws']).not.toBeNull()
+      await expect(client.tap('sess-2', 0.1, 0.1)).resolves.toBeUndefined()
+    })
+
     it('a leave with no swipe open sends the leave alone', async () => {
       client.disconnectDevice('sess-1')
       await client.tap('sess-2', 0.1, 0.1)
