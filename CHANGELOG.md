@@ -42,6 +42,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- MCP screenshot connection failures now report the network error and session recovery advice instead of only `fetch failed`.
 - **An Android app launch no longer hangs for 30 seconds.** The device-side bound on the launch did not always end the call, so a launch could take 30 s to answer, and Flow Capture's Match failed with "app launch timed out" with the app already on screen. Each launch command now answers within 12 s on the host, and counts as launched when the intent went out; the launcher lookup and any fallback run in sequence, so a whole launch can take longer. Needs the Android agent from this release.
 - **On Android, a flow taps a dialog's buttons where they are.** With a dialog in front, the UI tree placed its elements by the dialog's own window, so `tapOn "OK"` pressed below the dialog and Flow Capture exported the tap as a point. The tree and the reach check now place them on the screen. Needs the Android agent from this release.
 - Upload build's file chooser now works with the keyboard, and its File and Status labels name their controls.
