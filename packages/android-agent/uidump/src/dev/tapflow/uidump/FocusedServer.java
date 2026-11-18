@@ -11,10 +11,10 @@ import java.io.PrintStream;
  *
  *   ... app_process /system/bin dev.tapflow.uidump.FocusedServer <nonce>
  *
- * It prints READY, then answers each line `<id> <read|set|ime|reach|hit|hold|release|ping> [base64 argument]` with `<id> <json>`, the JSON Focused
+ * It prints READY, then answers each line `<id> <read|set|ime|reach|hit|dump|hold|release|ping> [base64 argument]` with `<id> <json>`, the JSON Focused
  * prints. Each request connects UiAutomation and releases it (Focused.handle), so between requests the app sees what it
  * sees today and a tree dump can connect — except between `hold` and `release`, while a person is recorded (P4), when
- * one connection serves every request and the agent releases it around a tree dump. No socket: stdin and stdout are the adb shell's, so only the agent that
+ * one connection serves every request, the tree dump (`dump`) included. No socket: stdin and stdout are the adb shell's, so only the agent that
  * started it can talk to it, and the text to set — a password, maybe — is never in argv. It ends when stdin closes (the
  * agent went away) or after a minute with no request; the agent starts it again when it next needs it. The nonce is
  * only there for the agent to find this process again to kill it.

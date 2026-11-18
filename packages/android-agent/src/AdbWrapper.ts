@@ -575,8 +575,11 @@ export class AdbWrapper {
       // Through the field server first, on its connection, held or not: no app_process to start (one-shot p50 1306 ms,
       // served ~340 ms, held ~15–300 ms on Pixel_9_tapflow Android 14), and a held connection stays held. The same XML
       // (TreeDump.answer). Anything it cannot answer goes the one-shot way below, as before.
+      const started = Date.now()
       const served = await this.dumpViaServer(serial)
       if (served !== undefined) return served
+      // What the server spent comes off the one-shot's budget: together they must fit the relay's 15 s tree deadline.
+      timeoutSec = Math.max(1, timeoutSec - Math.ceil((Date.now() - started) / 1000))
       // The one-shot dump connects its own UiAutomation, which a held one refuses: let go for it. Held again once dumps stop for
       // REHOLD_AFTER_MS, not after each: a Match or Verify replay dumps before every step, and a hold settling the window
       // list each time (up to 400 ms) would be paid by the replay. Left to the 30 s ping instead, the first tap after a
@@ -628,7 +631,8 @@ export class AdbWrapper {
   /**
    * Keep the field server's UiAutomation connection for as long as a person is recorded on the device (P4), or let it
    * go: a touch's hit through a held connection costs its walk and a cleared cache (30–45 ms), against p50 140 ms
-   * connecting per request, which outlasts a tap. A tree dump lets go of it, and the next hit or ping holds it again.
+   * connecting per request, which outlasts a tap. A tree dump through the server keeps it; one the server cannot answer
+   * lets go of it for the one-shot dump, and the next hit or ping holds it again.
    */
   async holdConnection(serial: string, on: boolean): Promise<void> {
     if (on) this.holdWanted.add(serial)

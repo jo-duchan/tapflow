@@ -131,7 +131,7 @@ public final class TreeDump {
       }
       return "{\"xml\":\"" + Base64.encodeToString(xml, Base64.NO_WRAP) + "\"}";
     } catch (InvocationTargetException e) {
-      return "{\"error\":\"" + String.valueOf(e.getCause()).replace("\\", "\\\\").replace("\"", "\\\"") + "\"}";
+      return "{\"error\":" + Focused.str(String.valueOf(e.getCause())) + "}";
     } finally {
       file.delete();
     }

@@ -619,10 +619,21 @@ describe('runFlow', () => {
       expect(hanging.swipeAt).toBe(3000)
     })
 
-    it('goes on at once when the screen cannot be read', async () => {
-      const { result, swipeAt } = await swipeAfter(() => { throw new TransientQueryError('agent busy') })
-      expect(result.status).toBe('passed')
-      expect(swipeAt).toBe(0)
+    // Review: "not up yet" is a screen mid-transition, when waiting matters most; anything else is no reason to wait.
+    it('reads again after a read that says try again, and goes on at once after one that cannot be made', async () => {
+      const busy = await swipeAfter((n) => { if (n < 3) throw new TransientQueryError('agent busy'); return piece(0.8) })
+      expect(busy.result.status).toBe('passed')
+      expect(busy.queries.length).toBeGreaterThan(4)
+      expect(busy.swipeAt).toBeGreaterThan(300)
+      const gone = await swipeAfter(() => { throw new Error('session not found') })
+      expect(gone.result.status).toBe('passed')
+      expect(gone.swipeAt).toBe(0)
+    })
+
+    // Review: a clock or a progress label changes without moving; it is no reason to wait out the cap.
+    it('takes a screen whose only change is a label for still', async () => {
+      const { swipeAt } = await swipeAfter((n) => [el({ label: `${n}s`, frame: { x: 0.1, y: 0.1, width: 0.2, height: 0.05 } })])
+      expect(swipeAt).toBeLessThan(1000)
     })
 
     it('waits before a point tap too', async () => {

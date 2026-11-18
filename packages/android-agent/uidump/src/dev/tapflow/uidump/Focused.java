@@ -22,6 +22,7 @@ import java.lang.reflect.InvocationTargetException;
  *   ... dev.tapflow.uidump.Focused reach           → stdin's first line (base64 JSON targets): where a touch meant for
  *                                                     each lands (#1125), see Reach
  *   (FocusedServer only) hit `x y`                  → what a touch-down at that point hit (P4), see Hit
+ *   (FocusedServer only) dump `idle ms`             → the UI tree as TreeDump writes it, see TreeDump.answer
  *
  * No idle wait, unlike TreeDump: the field is read as it is the moment it is asked (measured: the read itself takes
  * 2-16 ms; the rest of the ~1 s is starting app_process). The text to set comes on stdin, never in argv, where `ps`
@@ -127,8 +128,9 @@ public final class Focused {
   /**
    * Keep one connection for every request until `release` (P4): connecting per request leaves the window list empty or
    * partial for 25–250 ms (p50 140 ms, measured 2026-11-18 on Pixel_9_tapflow Android 14), and a touch's hit has to be
-   * read before its up — a tap is held 80–150 ms. Held, a hit costs its walk (m1: 2–25 ms). The agent releases it
-   * before anything else connects (a tree dump), since a device takes one UiAutomation at a time, and holds it again
+   * read before its up — a tap is held 80–150 ms. Held, a hit costs its walk (m1: 2–25 ms). The tree dump goes
+   * through it too (`dump`); only a one-shot dump, when the server cannot answer, needs it released, since a device
+   * takes one UiAutomation at a time, and the agent holds it again
    * after. While it is held, Views apps see accessibility on (m1: no frame cost; Compose ignores UiAutomation).
    */
   private static String hold() {

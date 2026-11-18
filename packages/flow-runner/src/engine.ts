@@ -496,7 +496,6 @@ async function touchPoint(
   }
 }
 
-/** One read of the screen within `timeoutMs`, or `undefined`: the effect of a touch is then judged without it. */
 /** Steps that touch where the flow says rather than where an element is. */
 function touchesAPoint(step: Step): boolean {
   return step.type === 'swipe' || step.type === 'tapPoint' || step.type === 'longPressPoint'
@@ -507,15 +506,18 @@ const STILL_CAP_MS = 3000
 const STILL_SPAN_MS = 250
 const STILL_GAP_MS = 100
 
-/** Where everything on the screen is, to a thousandth of it: a hundredth let a spring's slow tail read as still. */
+/**
+ * Where everything on the screen is, to a thousandth of it: a hundredth let a spring's slow tail read as still. Not what
+ * it says: a clock or a progress label changes without moving, and would make every point step wait out the cap.
+ */
 function stillShape(tree: UIElement[]): string {
   const k = (n: number) => Math.round(n * 1000)
-  return JSON.stringify(tree.map((e) => [e.role, e.label, e.identifier ?? '', k(e.frame.x), k(e.frame.y), k(e.frame.width), k(e.frame.height)]))
+  return JSON.stringify(tree.map((e) => [e.role, e.identifier ?? '', k(e.frame.x), k(e.frame.y), k(e.frame.width), k(e.frame.height)]))
 }
 
 /**
  * Read until two reads at least a quarter of a second apart (a span from the first's start to the second's end) find
- * everything where it was, and answer the last read — or answer nothing after 3 s, or on a read that fails, and let the
+ * everything where it was, and answer the last read — or answer nothing after 3 s, or on a read that cannot be made, and let the
  * step go on as it always did: this is never why a step fails. The span, because two reads close together can both
  * land on a spring's turning point; Android's own quiet wait does not cover it, since a native-driver animation sends
  * no accessibility events. A screen that never stops (a carousel) costs the cap.
@@ -536,8 +538,13 @@ async function waitForStill(driver: FlowDriver, pollIntervalMs: number): Promise
         driver.queryUITree(AbortSignal.timeout(Math.max(1, deadline - started))),
         delay(Math.max(1, deadline - started)).then(() => { throw new Error('still: read took the whole wait') }),
       ])
-    } catch {
-      return undefined
+    } catch (e) {
+      // "Not up yet" (a screen mid-transition) is when the wait matters most: read again, from scratch, to the cap.
+      // Anything else — a session gone, a device that cannot read its tree — leaves the step to go on as it did.
+      if (!(e instanceof TransientQueryError)) return undefined
+      shape = undefined
+      await delay(Math.min(pollIntervalMs, STILL_GAP_MS))
+      continue
     }
     const next = stillShape(tree)
     if (next === shape && Date.now() - since >= span) return tree
@@ -546,6 +553,7 @@ async function waitForStill(driver: FlowDriver, pollIntervalMs: number): Promise
   }
 }
 
+/** One read of the screen within `timeoutMs`, or `undefined`: the effect of a touch is then judged without it. */
 async function readScreen(driver: FlowDriver, timeoutMs: number): Promise<UIElement[] | undefined> {
   const deadline = Date.now() + timeoutMs
   for (;;) {

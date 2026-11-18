@@ -202,6 +202,26 @@ describe('AdbWrapper through the field server', () => {
     expect(vi.mocked(r.exec).mock.calls.some((c) => c.includes('dev.tapflow.uidump.TreeDump'))).toBe(false)
   })
 
+  // Review: the server's time comes off the one-shot's, or a stuck server plus both one-shot dumps outlasts the
+  // relay's 15 s tree deadline.
+  it('gives the one-shot dumps only what the server left of the budget', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] })
+    try {
+      const server = fakeServer(() => undefined)
+      const r = runner(server)
+      const dump = new AdbWrapper(r).dumpUiHierarchy('emulator-5554', 10).catch(() => {})
+      await vi.advanceTimersByTimeAsync(6_000)
+      await dump
+      const fallback = vi.mocked(r.exec).mock.calls.find((c) => c.includes('uiautomator') && c.includes('dump'))!
+      // 10 s less the server's 5 s and a little, rounded up so the two never outlast the budget.
+      const left = Number(fallback[fallback.indexOf('timeout') + 1])
+      expect(left).toBeGreaterThanOrEqual(1)
+      expect(left).toBeLessThanOrEqual(5)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
   it('falls back to the one-shot dump when the server answers with an error', async () => {
     const server = fakeServer((op) => (op === 'dump' ? '{"error":"no active window to read"}' : '{}'))
     const r = runner(server)
