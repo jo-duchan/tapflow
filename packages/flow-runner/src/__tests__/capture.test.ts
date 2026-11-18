@@ -1128,15 +1128,35 @@ describe('matchStep: the soft keyboard (#1135)', () => {
 describe('toFlowSteps', () => {
   const list = (n: number) => Array.from({ length: n }, (_, i) => el({ role: 'cell', label: `Item ${i}`, frame: { x: 0, y: i * 0.1, width: 1, height: 0.1 } }))
   const item30 = el({ role: 'cell', label: 'Item 30', frame: { x: 0, y: 0.5, width: 1, height: 0.1 } })
+  // The same list after the swipe: its rows moved up with the finger, and Item 30 came on. A scroll, as a device shows it.
+  const scrolledTo30 = [...list(8).map((e) => ({ ...e, frame: { ...e.frame, y: e.frame.y - 0.3 } })).filter((e) => e.frame.y >= 0), item30]
 
   it('turns a swipe that brought the tapped element on screen into scroll until it', () => {
     const [swipe, tap] = new Rec().touch([[0.5, 0.8], [0.5, 0.3]]).touch([[0.5, 0.55]]).steps()
-    const flow = toFlowSteps([matchStep(swipe!, ctxOf(list(8))), matchStep(tap!, ctxOf([item30]))])
+    const flow = toFlowSteps([matchStep(swipe!, ctxOf(list(8))), matchStep(tap!, ctxOf(scrolledTo30))])
     expect(flow.steps.map((s) => s.step)).toEqual([
       { type: 'scroll', direction: 'down', until: { text: 'Item 30' } },
       { type: 'tapOn', selector: { text: 'Item 30' } },
     ])
     expect(flow.steps[0]!.auto).toBe(true)
+  })
+
+  // A drag-and-drop that completed a puzzle brought Retry on a new screen (iOS, wdio demo app). As a scroll, Verify never
+  // dragged the last piece and searched for Retry on the puzzle.
+  it('keeps a swipe after which the screen was replaced, not scrolled', () => {
+    const [swipe, tap] = new Rec().touch([[0.5, 0.8], [0.5, 0.3]]).touch([[0.5, 0.55]]).steps()
+    const puzzle = [el({ label: 'Drag and Drop', frame: { x: 0.2, y: 0.1, width: 0.6, height: 0.05 } }), el({ role: 'image', identifier: 'drag-c1', frame: { x: 0.4, y: 0.8, width: 0.2, height: 0.1 } })]
+    const done = [el({ label: 'Congratulations', frame: { x: 0.2, y: 0.4, width: 0.6, height: 0.05 } }), el({ label: 'Retry', frame: { x: 0.3, y: 0.5, width: 0.4, height: 0.08 } })]
+    const flow = toFlowSteps([matchStep(swipe!, ctxOf(puzzle)), matchStep(tap!, ctxOf(done))])
+    expect(flow.steps.map((s) => s.step?.type)).toEqual(['swipe', 'tapOn'])
+  })
+
+  // A fling past a whole screen leaves nothing in common; inside a scroll container it is still a scroll.
+  it('turns a swipe inside a list into a scroll even when nothing on screen stayed', () => {
+    const [swipe, tap] = new Rec().touch([[0.5, 0.8], [0.5, 0.3]]).touch([[0.5, 0.55]]).steps()
+    const table = el({ role: 'list', frame: { x: 0, y: 0.1, width: 1, height: 0.9 } })
+    const flow = toFlowSteps([matchStep(swipe!, ctxOf([table, ...list(8)])), matchStep(tap!, ctxOf([table, item30]))])
+    expect(flow.steps[0]!.step).toMatchObject({ type: 'scroll', direction: 'down' })
   })
 
   it('keeps a swipe whose tapped element was on screen already: a pager, not a scroll', () => {
@@ -1149,7 +1169,7 @@ describe('toFlowSteps', () => {
   // iOS E2E: a scroll made with a mouse leans; at 4:1 it stayed a swipe and the tap after it failed in Verify.
   it('takes a swipe that leans, as one made with a mouse does, as the scroll it was', () => {
     const [swipe, tap] = new Rec().touch([[0.225, 0.724], [0.41, 0.286]]).touch([[0.5, 0.55]]).steps()
-    const flow = toFlowSteps([matchStep(swipe!, ctxOf(list(8))), matchStep(tap!, ctxOf([item30]))])
+    const flow = toFlowSteps([matchStep(swipe!, ctxOf(list(8))), matchStep(tap!, ctxOf(scrolledTo30))])
     expect(flow.steps[0]!.step).toEqual({ type: 'scroll', direction: 'down', until: { text: 'Item 30' } })
   })
 
@@ -1193,7 +1213,7 @@ describe('toFlowSteps', () => {
 
   it('keeps a diagonal swipe a swipe', () => {
     const [swipe, tap] = new Rec().touch([[0.2, 0.8], [0.7, 0.3]]).touch([[0.5, 0.55]]).steps()
-    const flow = toFlowSteps([matchStep(swipe!, ctxOf(list(3))), matchStep(tap!, ctxOf([item30]))])
+    const flow = toFlowSteps([matchStep(swipe!, ctxOf(list(3))), matchStep(tap!, ctxOf(scrolledTo30))])
     expect(flow.steps[0]!.step?.type).toBe('swipe')
   })
 
@@ -1420,15 +1440,19 @@ describe('touch reports', () => {
       ])).toEqual([])
     })
     // Design review of P2c: the flow reads the next step it has, so the swipe is for the tap after a left-out one.
+    // Rows 1–5 before the swipe; after it Rows 4 and 5 have moved up with the finger and Row 9 has come on: a scroll.
+    const rows = (labels: number[], top: number) => labels.map((n, i) => el({ role: 'cell', label: `Row ${n}`, frame: { x: 0, y: top + i * 0.15, width: 1, height: 0.1 } }))
+    const before = rows([1, 2, 3, 4, 5], 0.1)
+    const after = [...rows([4, 5, 6, 7, 8, 9], 0.0), el({ label: 'Title', frame: { x: 0, y: 0.92, width: 1, height: 0.05 } })]
     it('turns a swipe before a left-out tap into a scroll to the tap after it', () => {
-      const swipe: CapturedStep = { raw: new Rec().touch([[0.5, 0.8], [0.5, 0.5], [0.5, 0.2]]).steps()[0]!, step: { type: 'swipe', from: [0.5, 0.8], to: [0.5, 0.2], durationMs: 300 }, tree: [] }
-      const out = toFlowSteps(leaveOut([swipe, { raw: tapRaw({ acted: false }), step: tapOn('Title') }, { raw: tapRaw({ acted: true }), step: tapOn('Row 9') }], [1]))
+      const swipe: CapturedStep = { raw: new Rec().touch([[0.5, 0.8], [0.5, 0.5], [0.5, 0.2]]).steps()[0]!, step: { type: 'swipe', from: [0.5, 0.8], to: [0.5, 0.2], durationMs: 300 }, tree: before }
+      const out = toFlowSteps(leaveOut([swipe, { raw: tapRaw({ acted: false }), step: tapOn('Title'), tree: after }, { raw: tapRaw({ acted: true }), step: tapOn('Row 9'), tree: after }], [1]))
       expect(out.steps[0]!.step).toEqual({ type: 'scroll', direction: 'down', until: { label: 'Row 9' } })
     })
     it('leaves them out before the flow is made, so a swipe for one alone stays a swipe', () => {
       // The row was not on the screen the swipe started from: the swipe brought it, so it is a scroll to the row.
-      const swipe: CapturedStep = { raw: new Rec().touch([[0.5, 0.8], [0.5, 0.5], [0.5, 0.2]]).steps()[0]!, step: { type: 'swipe', from: [0.5, 0.8], to: [0.5, 0.2], durationMs: 300 }, tree: [] }
-      const tap: CapturedStep = { raw: tapRaw({ acted: false }), step: tapOn('Row 9') }
+      const swipe: CapturedStep = { raw: new Rec().touch([[0.5, 0.8], [0.5, 0.5], [0.5, 0.2]]).steps()[0]!, step: { type: 'swipe', from: [0.5, 0.8], to: [0.5, 0.2], durationMs: 300 }, tree: before }
+      const tap: CapturedStep = { raw: tapRaw({ acted: false }), step: tapOn('Row 9'), tree: after }
       expect(toFlowSteps([swipe, tap]).steps[0]!.step).toMatchObject({ type: 'scroll' })
       const out = toFlowSteps(leaveOut([swipe, tap], [1]))
       expect(out.steps.map((s) => s.step?.type ?? s.skipped)).toEqual(['swipe', 'no-response'])

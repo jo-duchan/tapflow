@@ -47,6 +47,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Flow Capture keeps a drag that changed the screen as a drag.** A swipe is turned into "scroll until the next tapped element" only when it actually scrolled. A drag-and-drop that finished a puzzle and opened a new screen was turned into a scroll, and Verify failed on it.
+
 - **Android 16: typing, field reads and touch checks work after the first one.** On Android 16 the agent's field server answered only its first request and failed every later one, so typing that replaces a field's text, Flow Capture's field reads, the check of where a tap lands, and the recording of what each tap touched all stopped working after one use. Typing into an empty password field showing its hint is no longer refused as adding to a password (any Android version).
 - **A swipe ends where it was asked to.** A flow's `swipe` and `scroll`, and MCP's `swipe`, stopped an eighth of the way short of their end point, so Flow Capture's Verify dropped drag-and-drop pieces short of their slots. A plain `scroll` or `swipe` now goes further in the same time, and a fling is released a little faster.
 
