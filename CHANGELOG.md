@@ -37,6 +37,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **A point step waits for the screen to stop moving.** A `swipe`, a plain `scroll`, and a tap, long press or pinch on a point now wait (at most 3 seconds) until nothing on the screen is moving, so a flow does not grab at something still animating. A flow with many such steps takes a little longer.
+
 - **Android reads the screen about four times faster.** A UI tree read on an Android emulator takes about 0.3 s instead of 1.3 s, so flows, Flow Capture's Match and Verify, and MCP's `query_ui_tree` wait less on Android.
 
 - **Android `inputText` and MCP `type_text` set the text into the focused field instead of typing it key by key.** The text arrives as written whatever the keyboard's language: before, `input text` went through the on-screen keyboard, which turned `dkssud` into `안녕` on a Korean keyboard, and text other than ASCII could not be typed at all. It now takes any text, and lands at the cursor, over a selection, as typing would. A field that reacts to each character, such as a one-time-code field that moves focus per digit, sees the text arrive at once. A field that changes the text as it takes it (a mask, a length limit) passes; one that keeps what it had fails the step. With no field focused, ASCII is still typed key by key.
