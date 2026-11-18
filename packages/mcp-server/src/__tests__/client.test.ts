@@ -636,17 +636,25 @@ describe('TapflowClient', () => {
       await expect(client.tap('sess-2', 0.1, 0.1)).resolves.toBeUndefined()
     })
 
-    // CodeRabbit on #1190: the old socket's close settles only its own waiters; a tap waiting on the new one keeps
-    // waiting, and here resolves on the optimistic path a session that never acked takes, not as "could not confirm".
-    it('an old socket closing after a reconnect does not fail a request waiting on the new one', async () => {
+    // CodeRabbit on #1190: the old socket's close settles only its own waiters; a tap waiting on the new one stays
+    // pending through it and settles on its own ack, delivered after the close.
+    it('an old socket closing after a reconnect leaves a request on the new one waiting for its ack', async () => {
       relay.setInputAck('none')
       const old = client['ws']!
       await client.connect()
-      const tap = client.tap('sess-NEW', 0.1, 0.1)
+      let settled = false
+      const tap = client.tap('sess-1', 0.1, 0.1).finally(() => { settled = true })
+      const end = await waitForMessage(relay, 'input:touch:end')
       const closed = new Promise((r) => old.once('close', r))
       old.close()
       await closed
+      await new Promise((r) => setTimeout(r, 20))
+      expect(settled).toBe(false)
+      const started = Date.now()
+      relay.send({ type: 'input:done', sessionId: 'sess-1', requestId: end['requestId'] })
       await expect(tap).resolves.toBeUndefined()
+      // Its ack settled it, not the deadline.
+      expect(Date.now() - started).toBeLessThan(500)
     })
 
     it('a leave with no swipe open sends the leave alone', async () => {
