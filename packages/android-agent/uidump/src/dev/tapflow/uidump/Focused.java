@@ -22,6 +22,7 @@ import java.lang.reflect.InvocationTargetException;
  *   ... dev.tapflow.uidump.Focused reach           → stdin's first line (base64 JSON targets): where a touch meant for
  *                                                     each lands (#1125), see Reach
  *   (FocusedServer only) hit `x y`                  → what a touch-down at that point hit (P4), see Hit
+ *   (FocusedServer only) dump `idle ms`             → the UI tree as TreeDump writes it, see TreeDump.answer
  *
  * No idle wait, unlike TreeDump: the field is read as it is the moment it is asked (measured: the read itself takes
  * 2-16 ms; the rest of the ~1 s is starting app_process). The text to set comes on stdin, never in argv, where `ps`
@@ -63,6 +64,8 @@ public final class Focused {
         // A held connection keeps the node cache across requests, and nothing clears it for a screen Compose changed
         // in place: Compose sends UiAutomation no events, so the cache would answer with the screen before.
         clearCache(held);
+        // The dump turns the windows off and leaves them off (TreeDump.answer); everything else reads them.
+        if (!"dump".equals(mode)) withWindows(held);
         return answer(mode, textLine, held);
       } catch (Exception e) {
         return "{\"error\":" + str(String.valueOf(e)) + "}";
@@ -80,7 +83,7 @@ public final class Focused {
       return "{\"error\":" + str(String.valueOf(e)) + "}";
     }
     try {
-      withWindows(connection.automation);
+      if (!"dump".equals(mode)) withWindows(connection.automation);
       return answer(mode, textLine, connection.automation);
     } catch (Exception e) {
       return "{\"error\":" + str(String.valueOf(e)) + "}";
@@ -89,8 +92,10 @@ public final class Focused {
     }
   }
 
-  private static void withWindows(UiAutomation automation) {
+  /** Ask for the windows, unless already asked: setting the service info again sends events a dump would then wait out. */
+  static void withWindows(UiAutomation automation) {
     AccessibilityServiceInfo info = automation.getServiceInfo();
+    if ((info.flags & AccessibilityServiceInfo.FLAG_RETRIEVE_INTERACTIVE_WINDOWS) != 0) return;
     info.flags |= AccessibilityServiceInfo.FLAG_RETRIEVE_INTERACTIVE_WINDOWS;
     automation.setServiceInfo(info);
   }
@@ -99,6 +104,9 @@ public final class Focused {
     // A touch's hit (P4) reads the windows at a point, not the focused field: asked first, since what it reads must be
     // read before the touch's up changes the screen.
     if ("hit".equals(mode)) return Hit.answer(automation, textLine, receivedNs);
+    // The tree, as TreeDump writes it (FocusedServer only): on this connection, held or not, so a dump no longer
+    // releases a held one and the touches recorded around it keep their hits.
+    if ("dump".equals(mode)) return TreeDump.answer(automation, textLine);
     AccessibilityNodeInfo field = null;
     // Just connected, the root can be missing for a while (up to 200 ms here), and a root can come before its focused
     // field: 3 of 200 reads in one process found none with the field focused (measured), so a miss is asked again.
@@ -120,8 +128,9 @@ public final class Focused {
   /**
    * Keep one connection for every request until `release` (P4): connecting per request leaves the window list empty or
    * partial for 25–250 ms (p50 140 ms, measured 2026-11-18 on Pixel_9_tapflow Android 14), and a touch's hit has to be
-   * read before its up — a tap is held 80–150 ms. Held, a hit costs its walk (m1: 2–25 ms). The agent releases it
-   * before anything else connects (a tree dump), since a device takes one UiAutomation at a time, and holds it again
+   * read before its up — a tap is held 80–150 ms. Held, a hit costs its walk (m1: 2–25 ms). The tree dump goes
+   * through it too (`dump`); only a one-shot dump, when the server cannot answer, needs it released, since a device
+   * takes one UiAutomation at a time, and the agent holds it again
    * after. While it is held, Views apps see accessibility on (m1: no frame cost; Compose ignores UiAutomation).
    */
   private static String hold() {

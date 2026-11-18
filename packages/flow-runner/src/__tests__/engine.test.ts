@@ -108,7 +108,9 @@ describe('runFlow — what a touch is expected to bring', () => {
   })
 
   it('reads the screen before a point, which is touched without one', async () => {
-    const driver = fakeDriver([[save], [saved]])
+    // The screen changes when the point is tapped, as a device's does: the still screen before it is the baseline.
+    const driver = fakeDriver([[]])
+    vi.mocked(driver.queryUITree).mockImplementation(async () => (driver.calls.some((c) => c[0] === 'tap') ? [saved] : [save]))
     const flow = flowOf('steps:\n  - tapOn: [0.2, 0.52]\n    expect:\n      appear: [{ text: "Saved" }]\n')
     const result = await runFlow(flow, driver, { pollIntervalMs: 1, defaultTimeoutMs: 200 })
     expect(result.status).toBe('passed')
@@ -545,6 +547,113 @@ describe('runFlow', () => {
     expect(result.steps[0]).not.toHaveProperty('suggestions')
   })
 
+  // Verify on Android 16: a piece dropped in the wrong slot springs back, and the next swipe on it grabbed empty space
+  // while it was still travelling home. A point names no element to wait for, so it waits for the screen to stop.
+  describe('a point waits for the screen to stop moving', () => {
+    const SLOW = { pollIntervalMs: 500, defaultTimeoutMs: 10_000 }
+    const piece = (y: number) => [el({ label: 'Piece', frame: { x: 0.7, y, width: 0.1, height: 0.05 } })]
+    async function swipeAfter(read: (n: number) => UIElement[] | Promise<UIElement[]>) {
+      vi.useFakeTimers()
+      try {
+        const t0 = Date.now()
+        const queries: number[] = []
+        let swipeAt = -1
+        const driver = fakeDriver([])
+        driver.queryUITree = vi.fn(async () => { queries.push(Date.now() - t0); return read(queries.length - 1) })
+        driver.swipe = vi.fn(async () => { swipeAt = Date.now() - t0 })
+        const run = runFlow(flowOf('steps:\n  - swipe: { from: [0.75, 0.8], to: [0.5, 0.3] }\n'), driver, SLOW)
+        await vi.advanceTimersByTimeAsync(10_000)
+        return { result: await run, queries, swipeAt }
+      } finally {
+        vi.useRealTimers()
+      }
+    }
+
+    it('swipes once two reads a quarter of a second apart find everything where it was', async () => {
+      // Travelling home for three reads, then still.
+      const { result, queries, swipeAt } = await swipeAfter((n) => piece(n < 3 ? 0.5 + n * 0.1 : 0.8))
+      expect(result.status).toBe('passed')
+      expect(queries).toEqual([0, 100, 200, 300, 400, 500, 600])
+      expect(swipeAt).toBe(600)
+    })
+
+    // A spring stops for a moment at its turning point: two reads close together there are not a still screen.
+    it('does not take two close reads at a spring\'s turning point for still', async () => {
+      const ys = [0.5, 0.5, 0.6, 0.8]
+      const { swipeAt } = await swipeAfter((n) => piece(ys[Math.min(n, ys.length - 1)]!))
+      expect(swipeAt).toBeGreaterThan(300)
+    })
+
+    // A spring's slow tail moves less than a hundredth of the screen between reads; it is still moving.
+    it('sees movement smaller than a hundredth of the screen', async () => {
+      const ys = [0.5, 0.504, 0.508, 0.512, 0.516, 0.52]
+      const { swipeAt } = await swipeAfter((n) => piece(ys[Math.min(n, ys.length - 1)]!))
+      expect(swipeAt).toBeGreaterThanOrEqual(800)
+    })
+
+    it('waits before a plain scroll as before a swipe', async () => {
+      vi.useFakeTimers()
+      try {
+        const t0 = Date.now()
+        let n = 0
+        let swipeAt = -1
+        const driver = fakeDriver([])
+        driver.queryUITree = vi.fn(async () => piece(n++ < 3 ? 0.5 + n * 0.1 : 0.8))
+        driver.swipe = vi.fn(async () => { swipeAt = Date.now() - t0 })
+        const run = runFlow(flowOf('steps:\n  - scroll: down\n'), driver, SLOW)
+        await vi.advanceTimersByTimeAsync(10_000)
+        await run
+        expect(swipeAt).toBeGreaterThanOrEqual(500)
+      } finally {
+        vi.useRealTimers()
+      }
+    })
+
+    // CodeRabbit on #1193: a slow first read does not count towards the span; the observations must be apart.
+    it('measures the span from the first read\'s answer, not its asking', async () => {
+      const { swipeAt, queries } = await swipeAfter(async (n) => {
+        if (n === 0) await new Promise((r) => setTimeout(r, 200))
+        return piece(0.8)
+      })
+      // Answered at 200; the next read asked at 300 is only 100 ms after it, so it takes reads until 450 or later.
+      expect(queries[1]).toBe(300)
+      expect(swipeAt).toBeGreaterThanOrEqual(450)
+    })
+
+    it('goes on after 3 s on a screen that never stops, and on a read that never answers', async () => {
+      const moving = await swipeAfter((n) => piece(0.1 + (n % 50) * 0.01))
+      expect(moving.result.status).toBe('passed')
+      expect(moving.swipeAt).toBeGreaterThanOrEqual(3000)
+      expect(moving.swipeAt).toBeLessThan(3200)
+      const hanging = await swipeAfter(() => new Promise<UIElement[]>(() => {}))
+      expect(hanging.result.status).toBe('passed')
+      expect(hanging.swipeAt).toBe(3000)
+    })
+
+    // Review: "not up yet" is a screen mid-transition, when waiting matters most; anything else is no reason to wait.
+    it('reads again after a read that says try again, and goes on at once after one that cannot be made', async () => {
+      const busy = await swipeAfter((n) => { if (n < 3) throw new TransientQueryError('agent busy'); return piece(0.8) })
+      expect(busy.result.status).toBe('passed')
+      expect(busy.queries.length).toBeGreaterThan(4)
+      expect(busy.swipeAt).toBeGreaterThan(300)
+      const gone = await swipeAfter(() => { throw new Error('session not found') })
+      expect(gone.result.status).toBe('passed')
+      expect(gone.swipeAt).toBe(0)
+    })
+
+    // Review: a clock or a progress label changes without moving; it is no reason to wait out the cap.
+    it('takes a screen whose only change is a label for still', async () => {
+      const { swipeAt } = await swipeAfter((n) => [el({ label: `${n}s`, frame: { x: 0.1, y: 0.1, width: 0.2, height: 0.05 } })])
+      expect(swipeAt).toBeLessThan(1000)
+    })
+
+    it('waits before a point tap too', async () => {
+      const driver = fakeDriver([[el({ label: 'Save' })]])
+      await runFlow(flowOf('steps:\n  - tapOn: [0.2, 0.5]\n'), driver, OPTS)
+      expect(vi.mocked(driver.queryUITree).mock.calls.length).toBeGreaterThanOrEqual(2)
+    })
+  })
+
   describe('launchApp waits for the app\'s screen to hold still', () => {
     const SLOW = { pollIntervalMs: 500, defaultTimeoutMs: 10_000 }
     // Runs a flow under fake timers. `reads` answers each tree query in turn (the last repeats); a function is
@@ -562,8 +671,9 @@ describe('runFlow', () => {
           const r = reads[Math.min(i++, reads.length - 1)]!
           return typeof r === 'function' ? r() : r
         })
-        driver.swipe = vi.fn(async () => { swipeAt = Date.now() - t0 })
-        const run = runFlow(flowOf('steps:\n  - launchApp\n  - scroll: down\n'), driver, SLOW)
+        // A key press reads nothing itself (a scroll now waits for a still screen of its own), so the reads are launchApp's.
+        driver.pressKey = vi.fn(async () => { swipeAt = Date.now() - t0 })
+        const run = runFlow(flowOf('steps:\n  - launchApp\n  - pressKey: Enter\n'), driver, SLOW)
         await vi.advanceTimersByTimeAsync(20_000)
         const result = await run
         return { result, queries, swipeAt }

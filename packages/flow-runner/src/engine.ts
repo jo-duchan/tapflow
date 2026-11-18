@@ -496,6 +496,65 @@ async function touchPoint(
   }
 }
 
+/** Steps that touch where the flow says rather than where an element is. */
+function touchesAPoint(step: Step): boolean {
+  return step.type === 'swipe' || step.type === 'tapPoint' || step.type === 'longPressPoint'
+    || (step.type === 'pinch' && Array.isArray(step.on)) || (step.type === 'scroll' && !step.until)
+}
+
+const STILL_CAP_MS = 3000
+const STILL_SPAN_MS = 250
+const STILL_GAP_MS = 100
+
+/**
+ * Where everything on the screen is, to a thousandth of it: a hundredth let a spring's slow tail read as still. Not what
+ * it says: a clock or a progress label changes without moving, and would make every point step wait out the cap.
+ */
+function stillShape(tree: UIElement[]): string {
+  const k = (n: number) => Math.round(n * 1000)
+  return JSON.stringify(tree.map((e) => [e.role, e.identifier ?? '', k(e.frame.x), k(e.frame.y), k(e.frame.width), k(e.frame.height)]))
+}
+
+/**
+ * Read until two reads at least a quarter of a second apart (from the first's answer to the second's asking) find
+ * everything where it was, and answer the last read — or answer nothing after 3 s, or on a read that cannot be made, and let the
+ * step go on as it always did: this is never why a step fails. The span, because two reads close together can both
+ * land on a spring's turning point; Android's own quiet wait does not cover it, since a native-driver animation sends
+ * no accessibility events. A screen that never stops (a carousel) costs the cap.
+ */
+async function waitForStill(driver: FlowDriver, pollIntervalMs: number): Promise<UIElement[] | undefined> {
+  const deadline = Date.now() + STILL_CAP_MS
+  // Scaled down with the poll interval, so a test's fast poll is not a quarter-second wait; at the default 500 ms, 250.
+  const span = Math.min(STILL_SPAN_MS, pollIntervalMs / 2)
+  let shape: string | undefined
+  let since = 0
+  for (;;) {
+    const started = Date.now()
+    if (started >= deadline) return undefined
+    let tree: UIElement[]
+    try {
+      // Bounded: a read that never returns (a driver that ignores the signal) must not hold the run.
+      tree = await Promise.race([
+        driver.queryUITree(AbortSignal.timeout(Math.max(1, deadline - started))),
+        delay(Math.max(1, deadline - started)).then(() => { throw new Error('still: read took the whole wait') }),
+      ])
+    } catch (e) {
+      // "Not up yet" (a screen mid-transition) is when the wait matters most: read again, from scratch, to the cap.
+      // Anything else — a session gone, a device that cannot read its tree — leaves the step to go on as it did.
+      if (!(e instanceof TransientQueryError)) return undefined
+      shape = undefined
+      await delay(Math.min(pollIntervalMs, STILL_GAP_MS))
+      continue
+    }
+    const next = stillShape(tree)
+    // From when the first matching read came back to when this one was asked: a slow first read must not count
+    // towards the span, or two observations 100 ms apart would pass it (CodeRabbit on #1193).
+    if (next === shape && started - since >= span) return tree
+    if (next !== shape) { shape = next; since = Date.now() }
+    await delay(Math.min(pollIntervalMs, STILL_GAP_MS))
+  }
+}
+
 /** One read of the screen within `timeoutMs`, or `undefined`: the effect of a touch is then judged without it. */
 async function readScreen(driver: FlowDriver, timeoutMs: number): Promise<UIElement[] | undefined> {
   const deadline = Date.now() + timeoutMs
@@ -1202,8 +1261,11 @@ export async function runFlow(flow: Flow, driver: FlowDriver, options: EngineOpt
     const expect = EXPECTING_STEPS.has(step.type) ? (step as { expect?: StepExpect }).expect : undefined
     const watch = EXPECTING_STEPS.has(step.type) && (expect !== undefined || options.observeEffects === true)
     try {
-      // A point is touched without reading the screen, so its effect needs a read of its own first.
-      if (watch && (step.type === 'tapPoint' || step.type === 'longPressPoint')) report.screen = await readScreen(driver, timeoutMs)
+      // A point names no element to wait for, so it waits for the screen to stop moving (a piece springing back from a
+      // missed drop was still travelling home when the next swipe grabbed at it; Verify, Android 16).
+      const still = touchesAPoint(step) ? await waitForStill(driver, pollIntervalMs) : undefined
+      // A point is touched without reading the screen, so its effect needs a read of its own first: the still one.
+      if (watch && (step.type === 'tapPoint' || step.type === 'longPressPoint')) report.screen = still ?? await readScreen(driver, timeoutMs)
       const applied = await executeStep(step, flow, driver, timeoutMs, pollIntervalMs, options.secrets, report)
       if (expect) await confirmEffect(driver, expect, report, timeoutMs, pollIntervalMs)
       if (watch && options.observeEffects) {

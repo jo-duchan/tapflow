@@ -186,6 +186,69 @@ describe('AdbWrapper through the field server', () => {
     }
   })
 
+  // The server is asked for the dump first; these tests are about a server that cannot answer one (it says '{}'), so the
+  // dump goes the one-shot way and the hold is let go of for it.
+  const opsBut = (server: ReturnType<typeof fakeServer>) => server.lines.map((l) => l.split(' ')[1]).filter((op) => op !== 'dump')
+
+  // A tree read through the server (no app_process to start) keeps a held connection held, and runs no one-shot dump.
+  it('dumps the tree through the server when it answers, without letting go of a held connection', async () => {
+    const xml = '<?xml version="1.0"?><hierarchy rotation="0"><node bounds="[0,0][10,10]" /></hierarchy>'
+    const server = fakeServer((op) => (op === 'hold' ? '{"held":true}' : op === 'dump' ? `{"xml":"${Buffer.from(xml).toString('base64')}"}` : '{}'))
+    const r = runner(server)
+    const adb = new AdbWrapper(r)
+    await adb.holdConnection('emulator-5554', true)
+    expect(await adb.dumpUiHierarchy('emulator-5554')).toBe(xml)
+    expect(server.lines.map((l) => l.split(' ')[1])).toEqual(['hold', 'dump'])
+    expect(vi.mocked(r.exec).mock.calls.some((c) => c.includes('dev.tapflow.uidump.TreeDump'))).toBe(false)
+  })
+
+  // Review: the server's time comes off the one-shot's, or a stuck server plus both one-shot dumps outlasts the
+  // relay's 15 s tree deadline.
+  it('gives the one-shot dumps only what the server left of the budget', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] })
+    try {
+      const server = fakeServer(() => undefined)
+      const r = runner(server)
+      const dump = new AdbWrapper(r).dumpUiHierarchy('emulator-5554', 10).catch(() => {})
+      await vi.advanceTimersByTimeAsync(6_000)
+      await dump
+      const fallback = vi.mocked(r.exec).mock.calls.find((c) => c.includes('uiautomator') && c.includes('dump'))!
+      // 10 s less the server's 5 s and a little, rounded up so the two never outlast the budget.
+      const left = Number(fallback[fallback.indexOf('timeout') + 1])
+      expect(left).toBeGreaterThanOrEqual(1)
+      expect(left).toBeLessThanOrEqual(5)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  // CodeRabbit on #1193: a served dump right after a one-shot one keeps the re-hold the one-shot set.
+  it('holds again after a served dump that followed a one-shot one', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
+    try {
+      const xml = '<?xml version="1.0"?><hierarchy rotation="0"><node bounds="[0,0][10,10]" /></hierarchy>'
+      let serve = false
+      const server = fakeServer((op) => (op === 'hold' ? '{"held":true}' : op === 'dump' && serve ? `{"xml":"${Buffer.from(xml).toString('base64')}"}` : '{}'))
+      const adb = new AdbWrapper(runner(server))
+      await adb.holdConnection('emulator-5554', true)
+      await adb.dumpUiHierarchy('emulator-5554').catch(() => {})
+      serve = true
+      await vi.advanceTimersByTimeAsync(1_000)
+      expect(await adb.dumpUiHierarchy('emulator-5554')).toBe(xml)
+      await vi.advanceTimersByTimeAsync(4_000)
+      await vi.waitFor(() => expect(opsBut(server)).toEqual(['hold', 'release', 'hold']))
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('falls back to the one-shot dump when the server answers with an error', async () => {
+    const server = fakeServer((op) => (op === 'dump' ? '{"error":"no active window to read"}' : '{}'))
+    const r = runner(server)
+    await new AdbWrapper(r).dumpUiHierarchy('emulator-5554').catch(() => {})
+    expect(vi.mocked(r.exec).mock.calls.some((c) => c.includes('dev.tapflow.uidump.TreeDump'))).toBe(true)
+  })
+
   // P4: a held connection refuses the tree dump's own, so the dump lets go of it; the next ping or hit holds it again,
   // not the dump, which a replay runs before every step.
   it('lets go of a held connection for a tree dump, and a ping holds it again while a person is recorded', async () => {
@@ -194,13 +257,13 @@ describe('AdbWrapper through the field server', () => {
     const adb = new AdbWrapper(r)
     await adb.holdConnection('emulator-5554', true)
     await adb.dumpUiHierarchy('emulator-5554').catch(() => {})
-    expect(server.lines.map((l) => l.split(' ')[1])).toEqual(['hold', 'release'])
+    expect(opsBut(server)).toEqual(['hold', 'release'])
     await adb.pingFocusedServer('emulator-5554')
     await adb.pingFocusedServer('emulator-5554')
-    expect(server.lines.map((l) => l.split(' ')[1])).toEqual(['hold', 'release', 'hold', 'ping'])
+    expect(opsBut(server)).toEqual(['hold', 'release', 'hold', 'ping'])
     await adb.holdConnection('emulator-5554', false)
     await adb.pingFocusedServer('emulator-5554')
-    expect(server.lines.map((l) => l.split(' ')[1])).toEqual(['hold', 'release', 'hold', 'ping', 'release', 'ping'])
+    expect(opsBut(server)).toEqual(['hold', 'release', 'hold', 'ping', 'release', 'ping'])
   })
 
   // Measured on the Compose sample: left to the 30 s ping, the first tap after a tree read paid the hold's settling and
@@ -214,13 +277,13 @@ describe('AdbWrapper through the field server', () => {
     await vi.advanceTimersByTimeAsync(1_000)
     await adb.dumpUiHierarchy('emulator-5554').catch(() => {})
     await vi.advanceTimersByTimeAsync(2_000)
-    expect(server.lines.map((l) => l.split(' ')[1])).toEqual(['hold', 'release'])
+    expect(opsBut(server)).toEqual(['hold', 'release'])
     await vi.advanceTimersByTimeAsync(1_500)
-    await vi.waitFor(() => expect(server.lines.map((l) => l.split(' ')[1])).toEqual(['hold', 'release', 'hold']))
+    await vi.waitFor(() => expect(opsBut(server)).toEqual(['hold', 'release', 'hold']))
     await adb.holdConnection('emulator-5554', false)
     await adb.dumpUiHierarchy('emulator-5554').catch(() => {})
     await vi.advanceTimersByTimeAsync(5_000)
-    expect(server.lines.map((l) => l.split(' ')[1])).toEqual(['hold', 'release', 'hold', 'release'])
+    expect(opsBut(server)).toEqual(['hold', 'release', 'hold', 'release'])
   })
 
   // CodeRabbit on #1187: a re-hold falling due during a long dump ran right after it, between two dumps.
@@ -239,9 +302,9 @@ describe('AdbWrapper through the field server', () => {
     finish('')
     await slow
     await vi.advanceTimersByTimeAsync(1_000)
-    expect(server.lines.map((l) => l.split(' ')[1])).toEqual(['hold', 'release'])
+    expect(opsBut(server)).toEqual(['hold', 'release'])
     await vi.advanceTimersByTimeAsync(2_500)
-    await vi.waitFor(() => expect(server.lines.map((l) => l.split(' ')[1])).toEqual(['hold', 'release', 'hold']))
+    await vi.waitFor(() => expect(opsBut(server)).toEqual(['hold', 'release', 'hold']))
   })
 
   // Review of #1187: a device whose cache cannot be cleared refuses the hold, and asking again before every hit would
@@ -252,7 +315,7 @@ describe('AdbWrapper through the field server', () => {
     await adb.holdConnection('emulator-5554', true)
     await adb.hitTest('emulator-5554', 0.5, 0.5)
     await adb.pingFocusedServer('emulator-5554')
-    expect(server.lines.map((l) => l.split(' ')[1])).toEqual(['hold', 'hit', 'ping'])
+    expect(opsBut(server)).toEqual(['hold', 'hit', 'ping'])
   })
 
   // Review of #1187: a re-hold falling due while a dump waits behind another request was queued ahead of that dump.
@@ -278,7 +341,7 @@ describe('AdbWrapper through the field server', () => {
     // Anything queued behind the dump has run by now.
     await vi.advanceTimersByTimeAsync(100)
     await adb.readFocused('emulator-5554').catch(() => null)
-    expect(server.lines.map((l) => l.split(' ')[1]).slice(0, 4)).toEqual(['hold', 'release', 'read', 'read'])
+    expect(opsBut(server).slice(0, 4)).toEqual(['hold', 'release', 'read', 'read'])
   })
 
   it('pushes the jar again when a hold or a ping could not start the server', async () => {
@@ -299,7 +362,7 @@ describe('AdbWrapper through the field server', () => {
     ;(adb as unknown as { holdWanted: Set<string> }).holdWanted.add('emulator-5554')
     const hit = await adb.hitTest('emulator-5554', 0.25, 0.5)
     expect(hit).toEqual({ answer: '{"rx":1,"w":1,"h":1,"echo":"0.25000 0.50000"}', writtenAt: expect.any(Number) })
-    expect(server.lines.map((l) => l.split(' ')[1])).toEqual(['hold', 'hit'])
+    expect(opsBut(server)).toEqual(['hold', 'hit'])
     expect(await new AdbWrapper(runner(null)).hitTest('emulator-5554', 0.5, 0.5)).toBeNull()
   })
 
