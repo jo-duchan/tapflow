@@ -1110,13 +1110,24 @@ describe('runFlow', () => {
     // CodeRabbit on #1190 (second round): every position of a shared label is compared, so two still `Item` cells
     // read as still and the pager gets its fling.
     it('flings on a still pager whose cells share a label', async () => {
-      const page1 = [row('Item', 0.2), row('Item', 0.6)]
+      // A device need not list the cells in the same order each read.
+      let n = 0
+      const page1 = () => (n++ % 2 === 0 ? [row('Item', 0.2), row('Item', 0.6)] : [row('Item', 0.6), row('Item', 0.2)])
       const driver = fakeDriver([[]])
       vi.mocked(driver.queryUITree).mockImplementation(async () => (driver.calls.some((c) => c[0] === 'swipe' && c[4] === 0)
-        ? [row('Item', 0.2), row('Target', 0.6)] : page1))
+        ? [row('Item', 0.2), row('Target', 0.6)] : page1()))
       const result = await runFlow(flowOf('steps:\n  - scroll: { until: { label: "Target", timeout: 10 } }\n'), driver, OPTS)
       expect(result.status).toBe('passed')
       expect(swipes(driver).map((c) => c[4])).toEqual([150, 150, 0])
+    })
+
+    // Every position counts, not one per label: rows sharing a label moved while the last of them (a footer) did not.
+    it('keeps dragging while rows that share a label move, though one of them stays', async () => {
+      const page = (shift: number) => [row('Item', 0.2 - shift), row('Item', 0.4 - shift), row('Item', 0.9)]
+      const driver = fakeDriver([page(0), page(0.05), page(0.1), page(0.15), [...page(0.15), row('Target', 0.6)]])
+      const result = await runFlow(flowOf('steps:\n  - scroll: { until: { label: "Target", timeout: 10 } }\n'), driver, OPTS)
+      expect(result.status).toBe('passed')
+      expect(swipes(driver).map((c) => c[4])).toEqual([150, 150, 150, 150])
     })
 
     // CodeRabbit on #1190 (second round): a virtualized list that moved by whole rows under a fixed header is moving;

@@ -589,6 +589,18 @@ describe('TapflowClient', () => {
       expect(after.filter((t) => t === 'input:touch:end')).toHaveLength(1) // sess-2's tap
     })
 
+    // The window between the last move and the lift: the swipe must not send an end of its own after the leave lifted it.
+    it('a leave after the last move sends no second end', async () => {
+      const swipe = client.swipe('sess-1', 0.5, 0.7, 0.5, 0.3, 1_600).catch((e: unknown) => e)
+      await new Promise((r) => setTimeout(r, 1_500))
+      client.disconnectDevice('sess-1')
+      expect(await swipe).toBeInstanceOf(SessionLeftError)
+      await client.tap('sess-2', 0.1, 0.1)
+      const mine = relay.sentMessages().filter((m) => m['sessionId'] === 'sess-1').map((m) => m['type'])
+      expect(mine.filter((t) => t === 'input:touch:end')).toHaveLength(1)
+      expect(mine[mine.length - 1]).toBe('session:leave')
+    })
+
     it('a leave with no swipe open sends the leave alone', async () => {
       client.disconnectDevice('sess-1')
       await client.tap('sess-2', 0.1, 0.1)
