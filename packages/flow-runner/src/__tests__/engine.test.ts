@@ -1197,6 +1197,26 @@ describe('runFlow', () => {
       expect(swipes(driver).map((c) => c[4])).toEqual([150, 150, 150, 150, 150])
     })
 
+    // Only what changed in both windows is learned: a clock does, a page that finishes arriving in the second does not.
+    it('learns the clock and not the rows that arrived beside it', async () => {
+      const page = (n: number) => [0, 1, 2].map((i) => row(`Row ${n * 3 + i}`, 0.2 + i * 0.2))
+      const loading = [0, 1, 2].map((i) => row('Loading', 0.2 + i * 0.2))
+      const driver = fakeDriver([[]])
+      let reads = 0
+      let shown = 0
+      let sinceSwipe = 0
+      vi.mocked(driver.queryUITree).mockImplementation(async () => {
+        const clock = row(`${reads++}s`, 0.9)
+        const swiped = driver.calls.filter((c) => c[0] === 'swipe').length
+        if (swiped !== shown) { shown = swiped; sinceSwipe = 0 }
+        if (swiped >= 5) return [row('Target', 0.4), clock]
+        return [...(swiped > 0 && sinceSwipe++ < 2 ? loading : page(swiped)), clock]
+      })
+      const result = await runFlow(flowOf('steps:\n  - scroll: { until: { label: "Target", timeout: 10 } }\n'), driver, OPTS)
+      expect(result.status).toBe('passed')
+      expect(swipes(driver).map((c) => c[4])).toEqual([150, 150, 150, 150, 150])
+    })
+
     // Pre-push review: a failed read while a read is being confirmed sends no gesture; the next read confirms instead.
     it('sends no gesture after a failed read while confirming', async () => {
       const page = (n: number) => [0, 1, 2].map((i) => row(`Row ${n * 3 + i}`, 0.2 + i * 0.2))

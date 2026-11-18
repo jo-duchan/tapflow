@@ -887,8 +887,9 @@ async function scrollUntil(driver: FlowDriver, direction: ScrollDirection, sel: 
       const settled = (p: Progress): Progress => (p === 'ambiguous' ? 'moved' : p)
       if (confirming) {
         const self = selfChange(confirming.post, q.tree)
-        // Still travelling, or changed once and stopped (content arriving): the gesture's change was the gesture's.
-        if (self === undefined || (self.length === 0 && confirming.seen)) judged = 'moved'
+        // Still travelling: the gesture's change was the gesture's. Nothing changing by itself (any more): judged with
+        // what is already learned, and still ambiguous is moved — content that changed once and stopped arrived.
+        if (self === undefined) judged = 'moved'
         else if (self.length === 0) judged = settled(progress(before!, q.tree, axis, sign, volatile))
         else if (!confirming.seen) { confirming = { post: q.tree, seen: self }; confirm = true }
         else {
