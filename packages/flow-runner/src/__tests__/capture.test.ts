@@ -1191,6 +1191,35 @@ describe('toFlowSteps', () => {
     expect(flow.steps[0]!.step).toMatchObject({ type: 'scroll', direction: 'right' })
   })
 
+  // The list's axis from its items where its frame would say otherwise, and from its frame (height counted twice) where
+  // the items cannot say.
+  describe('the way a list scrolls', () => {
+    it('is sideways for items side by side, though the frame is tall: a pager of cards', () => {
+      const [swipe, tap] = new Rec().touch([[0.8, 0.5], [0.2, 0.5]]).touch([[0.5, 0.5]]).steps()
+      const pager = el({ role: 'list', frame: { x: 0, y: 0.1, width: 1, height: 0.8 } })
+      const card = (n: number, x: number) => el({ role: 'cell', label: `Card ${n}`, frame: { x, y: 0.2, width: 0.4, height: 0.6 } })
+      const flow = toFlowSteps([matchStep(swipe!, ctxOf([pager, card(1, 0.05), card(2, 0.55)])), matchStep(tap!, ctxOf([pager, card(2, -0.05), card(3, 0.45)]))])
+      expect(flow.steps[0]!.step).toMatchObject({ type: 'scroll', direction: 'right' })
+    })
+
+    it('is vertical for items stacked, though the frame is wide: a sideways swipe on a short list\'s row stays a swipe', () => {
+      const [swipe, tap] = new Rec().touch([[0.8, 0.35], [0.4, 0.35]]).touch([[0.9, 0.35]]).steps()
+      const short = el({ role: 'list', frame: { x: 0, y: 0.2, width: 1, height: 0.4 } })
+      const rows = (shift: number) => [0.25, 0.35, 0.45].map((y, i) => el({ role: 'cell', label: `Mail ${i}`, frame: { x: i === 1 ? shift : 0, y, width: 1, height: 0.08 } }))
+      const del = el({ role: 'button', label: 'Delete', frame: { x: 0.8, y: 0.35, width: 0.2, height: 0.08 } })
+      const flow = toFlowSteps([matchStep(swipe!, ctxOf([short, ...rows(0)])), matchStep(tap!, ctxOf([short, ...rows(-0.2), del]))])
+      expect(flow.steps.map((s) => s.step?.type)).toEqual(['swipe', 'tapOn'])
+    })
+
+    it('is vertical for one item in a frame wider than tall in parts of the screen but taller in pixels', () => {
+      const [swipe, tap] = new Rec().touch([[0.5, 0.6], [0.5, 0.3]]).touch([[0.5, 0.55]]).steps()
+      const box = el({ role: 'list', frame: { x: 0, y: 0.2, width: 1, height: 0.6 } })
+      const item = (y: number) => el({ role: 'cell', label: 'Item 1', frame: { x: 0, y, width: 1, height: 0.1 } })
+      const flow = toFlowSteps([matchStep(swipe!, ctxOf([box, item(0.5)])), matchStep(tap!, ctxOf([box, item(0.2), item30]))])
+      expect(flow.steps[0]!.step).toMatchObject({ type: 'scroll', direction: 'down' })
+    })
+  })
+
   // Review: a screen wrapped whole in a scroll view, where a drag opened another screen that has none.
   it('keeps a swipe begun in a scroll view when the next screen has none there', () => {
     const [swipe, tap] = new Rec().touch([[0.5, 0.8], [0.5, 0.3]]).touch([[0.5, 0.55]]).steps()
