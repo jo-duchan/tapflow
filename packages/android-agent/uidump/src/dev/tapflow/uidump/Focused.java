@@ -37,22 +37,22 @@ public final class Focused {
     String line = "set".equals(mode) || "reach".equals(mode)
         ? new BufferedReader(new InputStreamReader(System.in, "UTF-8")).readLine() : null;
     out(handle(mode, line));
-    // A wrapper that failed to connect leaves its handler thread running, and app_process waits for it: the one-shot
+    // A connection's handler thread outlives a failed connect long enough for app_process to wait on it: the one-shot
     // run would then end only at its `timeout`.
     System.exit(0);
   }
 
   /**
    * One request on its own UiAutomation connection, connected and released here: the one-shot run and FocusedServer
-   * both answer through it. A wrapper is not reused across connections (its handler thread ends with `disconnect`), and
-   * the connection is not kept: while one is up, the app under test sees accessibility on.
+   * both answer through it (`Connection`, which can connect again in the same process from Android 16), and the
+   * connection is not kept: while one is up, the app under test sees accessibility on.
    */
   /** When FocusedServer read the request now being answered, in `System.nanoTime` (CLOCK_MONOTONIC, the clock
    *  `dumpsys gfxinfo` stamps frames with): what the agent sets its clock to the device's by. */
   static volatile long receivedNs;
 
   /** The connection held while a person is recorded (`hold`), which every request then uses: FocusedServer only. */
-  private static Object heldWrapper;
+  private static Connection heldConnection;
   private static UiAutomation held;
 
   static String handle(String mode, String textLine) {
@@ -68,32 +68,24 @@ public final class Focused {
         return "{\"error\":" + str(String.valueOf(e)) + "}";
       }
     }
-    Class<?> wrapperClass;
-    Object wrapper = null;
+    Connection connection;
     try {
-      wrapperClass = Class.forName("com.android.uiautomator.core.UiAutomationShellWrapper");
-      wrapper = wrapperClass.getConstructor().newInstance();
-      wrapperClass.getMethod("connect").invoke(wrapper);
+      connection = Connection.open();
     } catch (InvocationTargetException e) {
-      // Another UiAutomation is connected (the tree dump, or a test framework): this read fails, the next may not. The
-      // wrapper started its handler thread before failing; a server would gather one per refused request.
-      quitHandlerThread(wrapper);
+      // Another UiAutomation is connected (the tree dump, or a test framework): this read fails, the next may not.
       return "{\"error\":" + str(String.valueOf(e.getCause())) + "}";
     } catch (ReflectiveOperationException e) {
       return "{\"error\":\"unsupported\"}";
+    } catch (RuntimeException e) {
+      return "{\"error\":" + str(String.valueOf(e)) + "}";
     }
     try {
-      UiAutomation automation = (UiAutomation) wrapperClass.getMethod("getUiAutomation").invoke(wrapper);
-      withWindows(automation);
-      return answer(mode, textLine, automation);
+      withWindows(connection.automation);
+      return answer(mode, textLine, connection.automation);
     } catch (Exception e) {
       return "{\"error\":" + str(String.valueOf(e)) + "}";
     } finally {
-      try {
-        wrapperClass.getMethod("disconnect").invoke(wrapper);
-      } catch (ReflectiveOperationException e) {
-        // A one-shot run ends here anyway; the server's next request makes a new wrapper.
-      }
+      connection.close();
     }
   }
 
@@ -134,41 +126,28 @@ public final class Focused {
    */
   private static String hold() {
     if (held != null) return "{\"held\":true}";
-    Object wrapper = null;
-    boolean connected = false;
+    Connection connection = null;
     try {
-      Class<?> wrapperClass = Class.forName("com.android.uiautomator.core.UiAutomationShellWrapper");
-      wrapper = wrapperClass.getConstructor().newInstance();
-      wrapperClass.getMethod("connect").invoke(wrapper);
-      connected = true;
-      UiAutomation automation = (UiAutomation) wrapperClass.getMethod("getUiAutomation").invoke(wrapper);
+      connection = Connection.open();
+      UiAutomation automation = connection.automation;
       withWindows(automation);
       // A connection whose node cache cannot be cleared answers with the screen before (Compose sends it no events), so
       // it is not held: requests connect each time, slower, and a touch whose hit comes late gets no report.
       if (!clearCache(automation)) {
-        disconnect(wrapper);
+        connection.close();
         return "{\"error\":\"cache cannot be cleared\"}";
       }
       // Paid here rather than by the next touch's hit: the window list fills over a few reads after connecting (Hit).
       settleWindows(automation);
-      heldWrapper = wrapper;
+      heldConnection = connection;
       held = automation;
       return "{\"held\":true}";
     } catch (InvocationTargetException e) {
-      if (connected) disconnect(wrapper); else quitHandlerThread(wrapper);
       return "{\"error\":" + str(String.valueOf(e.getCause())) + "}";
     } catch (Exception e) {
       // Set up after connecting failed (a null service info): let go of the connection, or it outlives the answer.
-      if (connected) disconnect(wrapper); else quitHandlerThread(wrapper);
+      if (connection != null) connection.close();
       return "{\"error\":" + str(String.valueOf(e)) + "}";
-    }
-  }
-
-  private static void disconnect(Object wrapper) {
-    try {
-      wrapper.getClass().getMethod("disconnect").invoke(wrapper);
-    } catch (ReflectiveOperationException | RuntimeException e) {
-      quitHandlerThread(wrapper);
     }
   }
 
@@ -219,26 +198,10 @@ public final class Focused {
   }
 
   private static void release() {
-    if (heldWrapper == null) return;
-    try {
-      heldWrapper.getClass().getMethod("disconnect").invoke(heldWrapper);
-    } catch (ReflectiveOperationException e) {
-      // Gone with the process at worst.
-    }
-    heldWrapper = null;
+    if (heldConnection == null) return;
+    heldConnection.close();
+    heldConnection = null;
     held = null;
-  }
-
-  private static void quitHandlerThread(Object wrapper) {
-    if (wrapper == null) return;
-    try {
-      java.lang.reflect.Field f = wrapper.getClass().getDeclaredField("mHandlerThread");
-      f.setAccessible(true);
-      Object thread = f.get(wrapper);
-      if (thread instanceof android.os.HandlerThread) ((android.os.HandlerThread) thread).quitSafely();
-    } catch (ReflectiveOperationException | RuntimeException e) {
-      // Another shape of the class: the thread stays, as it did.
-    }
   }
 
   private static AccessibilityNodeInfo focusedField(AccessibilityNodeInfo node) {
