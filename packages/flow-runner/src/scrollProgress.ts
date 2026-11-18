@@ -38,7 +38,12 @@ interface Shift { dx: number; dy: number }
 function compare(before: UIElement[], after: UIElement[]): { shifts: Shift[]; changed: Frame[] } {
   const group = (tree: UIElement[]) => {
     const out = new Map<string, UIElement[]>()
-    for (const e of tree) out.set(identity(e), [...(out.get(identity(e)) ?? []), e])
+    for (const e of tree) {
+      const k = identity(e)
+      const bucket = out.get(k)
+      if (bucket) bucket.push(e)
+      else out.set(k, [e])
+    }
     return out
   }
   const was = group(before)

@@ -1221,18 +1221,17 @@ describe('runFlow', () => {
     it('sends no gesture after a failed read while confirming', async () => {
       const page = (n: number) => [0, 1, 2].map((i) => row(`Row ${n * 3 + i}`, 0.2 + i * 0.2))
       const driver = fakeDriver([[]])
-      let reads = 0
+      const swipedAtRead: number[] = []
       vi.mocked(driver.queryUITree).mockImplementation(async () => {
-        reads++
-        if (reads === 3) throw new TransientQueryError('agent busy')
         const swiped = driver.calls.filter((c) => c[0] === 'swipe').length
+        swipedAtRead.push(swiped)
+        if (swipedAtRead.length === 3) throw new TransientQueryError('agent busy')
         return swiped >= 2 ? [row('Target', 0.4)] : page(swiped)
       })
       const result = await runFlow(flowOf('steps:\n  - scroll: { until: { label: "Target", timeout: 10 } }\n'), driver, OPTS)
       expect(result.status).toBe('passed')
-      // Read 2 is ambiguous (rows replaced in place), read 3 fails, read 4 confirms it; only then the second drag.
-      expect(vi.mocked(driver.queryUITree).mock.calls.length).toBeGreaterThanOrEqual(5)
-      expect(swipes(driver)).toHaveLength(2)
+      // Read 2 is ambiguous (rows replaced in place), read 3 fails, read 4 confirms it: no drag before either.
+      expect(swipedAtRead.slice(1, 4)).toEqual([1, 1, 1])
     })
 
     // CodeRabbit on #1190: at the end, a match is taken only where the device reaches it at its centre.

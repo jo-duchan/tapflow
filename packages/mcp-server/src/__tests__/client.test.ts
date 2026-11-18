@@ -604,12 +604,17 @@ describe('TapflowClient', () => {
     // CodeRabbit on #1190: a swipe stopped by a replaced socket clears only its own record, so a newer swipe's finger
     // is still lifted by a leave.
     it('a stale swipe does not clear a newer swipe\'s touch, so the leave still lifts it', async () => {
-      // Moves 400 ms apart: the stale swipe sleeps through the drop and the reconnect and wakes after the fresh one began.
-      const stale = client.swipe('sess-1', 0.5, 0.7, 0.5, 0.3, 3_200).catch((e: unknown) => e)
+      // Moves a second apart: the stale swipe sleeps through the drop and the reconnect, and wakes after the fresh one
+      // began — asserted, not assumed, so a slow reconnect fails here rather than passing for the wrong reason.
+      let staleSettled = false
+      const stale = client.swipe('sess-1', 0.5, 0.7, 0.5, 0.3, 8_000).catch((e: unknown) => e).finally(() => { staleSettled = true })
       await new Promise((r) => setTimeout(r, 50))
       relay.lastClient().close()
+      // The old socket's close lands first, so the reconnect below is not raced by it.
+      await vi.waitFor(() => expect(client['ws']).toBeNull())
       await client.connect()
       const fresh = client.swipe('sess-1', 0.5, 0.7, 0.5, 0.2, 40, 2_000).catch((e: unknown) => e)
+      expect(staleSettled).toBe(false)
       expect(String(await stale)).toMatch(/could not confirm/i)
       await new Promise((r) => setTimeout(r, 100))
       client.disconnectDevice('sess-1')

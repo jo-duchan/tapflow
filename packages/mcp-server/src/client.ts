@@ -558,7 +558,8 @@ export class TapflowClient {
       ws.on('close', (code: number, reason: Buffer) => {
         // `disconnect()` lets go of the socket first, so a close this client asked for is not recorded.
         if (this.ws === ws) this.lastClose = { code, reason: reason.toString() }
-        this.ws = null
+        // An old socket's close can land after a reconnect opened its replacement: it must not let go of that one.
+        if (this.ws === ws) this.ws = null
         const detail = this.closeDetail()
         const closed = `WebSocket closed${detail}`
         const pending = this.waiters.splice(0)
