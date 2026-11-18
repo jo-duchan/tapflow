@@ -16,7 +16,7 @@ const SESSION_FAILURES = [
 ]
 import { buttonAvailability } from '@tapflowio/protocol/buttons'
 import { IME_ACTION, SELECT_ALL, SELECT_ALL_REFUSED, unavailableButton, unavailableButtonMessage } from './platformCheck.js'
-import { learnVolatile, progress, type Progress } from './scrollProgress.js'
+import { changedTwice, progress, selfChange, type Progress } from './scrollProgress.js'
 
 /** Two fingers, each `[x, y]` normalized 0-1. */
 export type PinchFingers = [[number, number], [number, number]]
@@ -833,8 +833,8 @@ function scrolledShape(tree: UIElement[]): string {
  * run (its length depends on its speed and the platform), so a flow that means "the row is now in view" says that
  * rather than a number of swipes; and the search steps are drags, held still before the lift, so none carries the
  * list past the element between two reads. Reads before the first swipe, so an element already in view costs none. At the
- * end of the list — the screen stops changing — any match on screen is taken, cut or not; none fails as the product's,
- * as does the selector's timeout.
+ * end of the list — three gestures that moved nothing (`progress`) — a match on screen is taken, cut or not, where the
+ * device reaches it at its centre; none, or a covered one, fails as the product's, as does the selector's timeout.
  *
  * No selector suggestions on failure, for `assertVisible`'s reason (see `suggest.ts`): a `tapOn` line offered in place
  * of a check that something is there would turn a regression green.
@@ -847,18 +847,21 @@ async function scrollUntil(driver: FlowDriver, direction: ScrollDirection, sel: 
   const spans = SPANS_SCROLL_AXIS[direction]
   let lastError: TransientQueryError | undefined
   let sawTree = false
-  // A match that stays where it is across swipes cannot be brought further in, even while something else on the screen
-  // keeps changing (a clock, a spinner) and so keeps the screen from ever reading unchanged.
+  // A match that stays where it is across swipes cannot be brought further in (a button fixed to the bottom), once a
+  // fling was tried where nothing else moved either.
   let matchShape: string | undefined
   let matchStill = 0
   // Gestures in a row that moved nothing (`progress`, scrollProgress.ts). A read without the element is followed by one
   // swipe and a failed read by none, so `before` — the last read a gesture was judged from — and the next read have
-  // exactly one gesture between them. A read that cannot tell is followed by one more with no gesture (`confirming`),
-  // which learns what changes by itself (`volatile`) and counts nothing of its own.
+  // exactly one gesture between them. A read that cannot tell is followed by reads with no gesture (`confirming`), which
+  // learn what changes by itself (`volatile`: a region seen changing in two windows running) and count nothing of their
+  // own. A learned region stays where it is on the screen for the rest of the search; it explains a change only by
+  // containing all of it, so a row it was learned from that scrolled away explains nothing larger than itself.
   let still = 0
   let before: UIElement[] | undefined
   let gestured = false
-  let confirming: UIElement[] | undefined
+  // The read being confirmed, and what changed by itself in the first window after it.
+  let confirming: { post: UIElement[]; seen?: UIElement['frame'][] } | undefined
   const volatile: UIElement['frame'][] = []
   const axis = gesture.from[0] === gesture.to[0] ? 'y' : 'x'
   const sign = Math.sign(axis === 'y' ? gesture.to[1] - gesture.from[1] : gesture.to[0] - gesture.from[0])
@@ -881,13 +884,21 @@ async function scrollUntil(driver: FlowDriver, direction: ScrollDirection, sel: 
         return swiped ? settleMatch(driver, sel, q.tree, deadline, pollIntervalMs) : undefined
       }
       let judged: Progress | undefined
+      const settled = (p: Progress): Progress => (p === 'ambiguous' ? 'moved' : p)
       if (confirming) {
-        judged = learnVolatile(confirming, q.tree, volatile) ? progress(before!, q.tree, axis, sign, volatile) : 'moved'
-        if (judged === 'ambiguous') judged = 'moved'
-        confirming = undefined
+        const self = selfChange(confirming.post, q.tree)
+        // Still travelling, or changed once and stopped (content arriving): the gesture's change was the gesture's.
+        if (self === undefined || (self.length === 0 && confirming.seen)) judged = 'moved'
+        else if (self.length === 0) judged = settled(progress(before!, q.tree, axis, sign, volatile))
+        else if (!confirming.seen) { confirming = { post: q.tree, seen: self }; confirm = true }
+        else {
+          volatile.push(...changedTwice(confirming.seen, self))
+          judged = settled(progress(before!, q.tree, axis, sign, volatile))
+        }
+        if (judged !== undefined) confirming = undefined
       } else if (gestured && before) {
         judged = progress(before, q.tree, axis, sign, volatile)
-        if (judged === 'ambiguous') { confirming = q.tree; confirm = true; judged = undefined }
+        if (judged === 'ambiguous') { confirming = { post: q.tree }; confirm = true; judged = undefined }
       }
       // The first read is judged against nothing, and counts as a screen of its own.
       const counted = judged !== undefined || before === undefined

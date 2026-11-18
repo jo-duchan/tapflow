@@ -1178,6 +1178,43 @@ describe('runFlow', () => {
       expect(result.failureMessage).toMatch(/does not reach it at its centre/)
     })
 
+    // Pre-push review: a page shown as "Loading…" and then filled in changes by itself once; that is the page arriving,
+    // not a clock, and the search must not learn the rows as a region that explains the next page.
+    it('keeps dragging a paged list whose pages arrive as placeholders and fill in', async () => {
+      const page = (n: number) => [0, 1, 2].map((i) => row(`Row ${n * 3 + i}`, 0.2 + i * 0.2))
+      const loading = [0, 1, 2].map((i) => row('Loading', 0.2 + i * 0.2))
+      const driver = fakeDriver([[]])
+      let shown = 0
+      let readsSinceSwipe = 0
+      vi.mocked(driver.queryUITree).mockImplementation(async () => {
+        const swiped = driver.calls.filter((c) => c[0] === 'swipe').length
+        if (swiped !== shown) { shown = swiped; readsSinceSwipe = 0 }
+        if (swiped >= 5) return [row('Target', 0.4)]
+        return swiped > 0 && readsSinceSwipe++ === 0 ? loading : page(swiped)
+      })
+      const result = await runFlow(flowOf('steps:\n  - scroll: { until: { label: "Target", timeout: 10 } }\n'), driver, OPTS)
+      expect(result.status).toBe('passed')
+      expect(swipes(driver).map((c) => c[4])).toEqual([150, 150, 150, 150, 150])
+    })
+
+    // Pre-push review: a failed read while a read is being confirmed sends no gesture; the next read confirms instead.
+    it('sends no gesture after a failed read while confirming', async () => {
+      const page = (n: number) => [0, 1, 2].map((i) => row(`Row ${n * 3 + i}`, 0.2 + i * 0.2))
+      const driver = fakeDriver([[]])
+      let reads = 0
+      vi.mocked(driver.queryUITree).mockImplementation(async () => {
+        reads++
+        if (reads === 3) throw new TransientQueryError('agent busy')
+        const swiped = driver.calls.filter((c) => c[0] === 'swipe').length
+        return swiped >= 2 ? [row('Target', 0.4)] : page(swiped)
+      })
+      const result = await runFlow(flowOf('steps:\n  - scroll: { until: { label: "Target", timeout: 10 } }\n'), driver, OPTS)
+      expect(result.status).toBe('passed')
+      // Read 2 is ambiguous (rows replaced in place), read 3 fails, read 4 confirms it; only then the second drag.
+      expect(vi.mocked(driver.queryUITree).mock.calls.length).toBeGreaterThanOrEqual(5)
+      expect(swipes(driver)).toHaveLength(2)
+    })
+
     // CodeRabbit on #1190: at the end, a match is taken only where the device reaches it at its centre.
     it('fails at the end of the list with a match the device says is covered, naming it', async () => {
       const big = el({ label: 'Target', frame: { x: 0, y: 0, width: 1, height: 1 } })

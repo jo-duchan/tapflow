@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { UIElement } from '@tapflowio/agent-core'
-import { learnVolatile, progress } from '../scrollProgress.js'
+import { changedTwice, progress, selfChange } from '../scrollProgress.js'
 
 const el = (label: string, y: number, over: Partial<UIElement> = {}): UIElement =>
   ({ role: 'cell', label, enabled: true, frame: { x: 0, y, width: 1, height: 0.05 }, ...over })
@@ -80,16 +80,20 @@ describe('progress — what one drag did to the list', () => {
   })
 })
 
-describe('learnVolatile — what changes with no gesture', () => {
-  it('learns the frames that changed by themselves', () => {
-    const volatile: UIElement['frame'][] = []
-    expect(learnVolatile([el('Page 1', 0.3), el('9s', 0.5)], [el('Page 1', 0.3), el('8s', 0.5)], volatile)).toBe(true)
-    expect(volatile).toEqual([{ x: 0, y: 0.5, width: 1, height: 0.05 }, { x: 0, y: 0.5, width: 1, height: 0.05 }])
+describe('selfChange and changedTwice — what changes with no gesture', () => {
+  it('names the frames that changed by themselves', () => {
+    expect(selfChange([el('Page 1', 0.3), el('9s', 0.5)], [el('Page 1', 0.3), el('8s', 0.5)]))
+      .toEqual([{ x: 0, y: 0.5, width: 1, height: 0.05 }, { x: 0, y: 0.5, width: 1, height: 0.05 }])
   })
 
-  it('learns nothing from a screen still in motion', () => {
-    const volatile: UIElement['frame'][] = []
-    expect(learnVolatile([el('Row 1', 0.5), el('9s', 0.9)], [el('Row 1', 0.45), el('8s', 0.9)], volatile)).toBe(false)
-    expect(volatile).toEqual([])
+  it('names nothing on a screen still in motion', () => {
+    expect(selfChange([el('Row 1', 0.5), el('9s', 0.9)], [el('Row 1', 0.45), el('8s', 0.9)])).toBeUndefined()
+  })
+
+  it('keeps only what changed in the same place both times', () => {
+    const clock = { x: 0, y: 0.5, width: 1, height: 0.05 }
+    const row = { x: 0, y: 0.7, width: 1, height: 0.05 }
+    expect(changedTwice([clock, row], [clock])).toEqual([clock])
+    expect(changedTwice([row], [clock])).toEqual([])
   })
 })

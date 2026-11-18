@@ -87,12 +87,21 @@ export function progress(before: UIElement[], after: UIElement[], axis: Axis, si
 }
 
 /**
- * Learn what changes by itself from two reads with no gesture between them, into `volatile`. A screen still in motion
- * (anything travelled) teaches nothing and answers false: what moved there is the last gesture settling, not a clock.
+ * What changed between two reads with no gesture between them: the frames, or undefined when anything travelled (the
+ * screen is still settling, and what moved there is the last gesture, not a clock).
  */
-export function learnVolatile(before: UIElement[], after: UIElement[], volatile: Frame[]): boolean {
+export function selfChange(before: UIElement[], after: UIElement[]): Frame[] | undefined {
   const { shifts, changed } = compare(before, after)
-  if (shifts.some((s) => Math.abs(s.dx) >= TOL || Math.abs(s.dy) >= TOL)) return false
-  volatile.push(...changed)
-  return true
+  return shifts.some((s) => Math.abs(s.dx) >= TOL || Math.abs(s.dy) >= TOL) ? undefined : changed
+}
+
+/**
+ * The frames of `second` that also changed in `first`, in the same place: what changes by itself. Once is not enough,
+ * since content a gesture brought finishes arriving by itself too (a page shown as "Loading…" and then filled in, a
+ * cross-fade, a description set after an image loads); it changes once and stops. A clock changes again (#1190).
+ */
+export function changedTwice(first: readonly Frame[], second: readonly Frame[]): Frame[] {
+  const same = (a: Frame, b: Frame) => Math.abs(a.x - b.x) < TOL && Math.abs(a.y - b.y) < TOL
+    && Math.abs(a.width - b.width) < TOL && Math.abs(a.height - b.height) < TOL
+  return second.filter((f) => first.some((g) => same(f, g)))
 }
