@@ -516,7 +516,7 @@ function stillShape(tree: UIElement[]): string {
 }
 
 /**
- * Read until two reads at least a quarter of a second apart (a span from the first's start to the second's end) find
+ * Read until two reads at least a quarter of a second apart (from the first's answer to the second's asking) find
  * everything where it was, and answer the last read — or answer nothing after 3 s, or on a read that cannot be made, and let the
  * step go on as it always did: this is never why a step fails. The span, because two reads close together can both
  * land on a spring's turning point; Android's own quiet wait does not cover it, since a native-driver animation sends
@@ -547,8 +547,10 @@ async function waitForStill(driver: FlowDriver, pollIntervalMs: number): Promise
       continue
     }
     const next = stillShape(tree)
-    if (next === shape && Date.now() - since >= span) return tree
-    if (next !== shape) { shape = next; since = started }
+    // From when the first matching read came back to when this one was asked: a slow first read must not count
+    // towards the span, or two observations 100 ms apart would pass it (CodeRabbit on #1193).
+    if (next === shape && started - since >= span) return tree
+    if (next !== shape) { shape = next; since = Date.now() }
     await delay(Math.min(pollIntervalMs, STILL_GAP_MS))
   }
 }

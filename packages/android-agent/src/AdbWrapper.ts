@@ -577,7 +577,12 @@ export class AdbWrapper {
       // (TreeDump.answer). Anything it cannot answer goes the one-shot way below, as before.
       const started = Date.now()
       const served = await this.dumpViaServer(serial)
-      if (served !== undefined) return served
+      if (served !== undefined) {
+        // A one-shot dump just before this one let the hold go and set a re-hold, which this dump's queueing cleared:
+        // set it again, or a recording would stay unheld and its next touch pay the hold (CodeRabbit on #1193).
+        if (this.holdWanted.has(serial) && !this.focusedServers?.isHeld(serial)) this.scheduleRehold(serial)
+        return served
+      }
       // What the server spent comes off the one-shot's budget: together they must fit the relay's 15 s tree deadline.
       timeoutSec = Math.max(1, timeoutSec - Math.ceil((Date.now() - started) / 1000))
       // The one-shot dump connects its own UiAutomation, which a held one refuses: let go for it. Held again once dumps stop for

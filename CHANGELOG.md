@@ -37,7 +37,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- **A point step waits for the screen to stop moving.** A `swipe`, a plain `scroll`, and a tap, long press or pinch on a point now wait (at most 3 seconds) until nothing on the screen is moving, so a flow does not grab at something still animating. A flow with many such steps takes a little longer.
+- **A point step waits for the screen to stop moving.** A `swipe`, a plain `scroll`, and a tap, long press or pinch on a point now wait (at most 3 seconds) until the elements in the UI tree hold their positions, so a flow does not grab at something still animating. Motion drawn inside one element, such as a game's, is not seen. A flow with many such steps takes a little longer.
 
 - **Android reads the screen about four times faster.** A UI tree read on an Android emulator takes about 0.3 s instead of 1.3 s, so flows, Flow Capture's Match and Verify, and MCP's `query_ui_tree` wait less on Android.
 

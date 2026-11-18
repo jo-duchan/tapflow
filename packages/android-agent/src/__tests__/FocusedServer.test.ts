@@ -222,6 +222,26 @@ describe('AdbWrapper through the field server', () => {
     }
   })
 
+  // CodeRabbit on #1193: a served dump right after a one-shot one keeps the re-hold the one-shot set.
+  it('holds again after a served dump that followed a one-shot one', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
+    try {
+      const xml = '<?xml version="1.0"?><hierarchy rotation="0"><node bounds="[0,0][10,10]" /></hierarchy>'
+      let serve = false
+      const server = fakeServer((op) => (op === 'hold' ? '{"held":true}' : op === 'dump' && serve ? `{"xml":"${Buffer.from(xml).toString('base64')}"}` : '{}'))
+      const adb = new AdbWrapper(runner(server))
+      await adb.holdConnection('emulator-5554', true)
+      await adb.dumpUiHierarchy('emulator-5554').catch(() => {})
+      serve = true
+      await vi.advanceTimersByTimeAsync(1_000)
+      expect(await adb.dumpUiHierarchy('emulator-5554')).toBe(xml)
+      await vi.advanceTimersByTimeAsync(4_000)
+      await vi.waitFor(() => expect(opsBut(server)).toEqual(['hold', 'release', 'hold']))
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
   it('falls back to the one-shot dump when the server answers with an error', async () => {
     const server = fakeServer((op) => (op === 'dump' ? '{"error":"no active window to read"}' : '{}'))
     const r = runner(server)

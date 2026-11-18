@@ -152,7 +152,7 @@ A place the UI tree has no name for (a game, a map, a canvas) cannot be reached 
 - longPressOn: { on: [0.5, 0.5], durationMs: 1500 }
 ```
 
-A point is the last resort. It does not wait for anything to appear, only for the screen to stop moving (at most 3 seconds), and a different screen size or layout puts it somewhere else. The same wait comes before every `swipe`, a plain `scroll`, and a `longPressOn` or `pinch` on a point. A tap meant to stop a moving list therefore lands after the list has stopped. Use a selector wherever one reaches the element, and put an `assertVisible` before a point tap to check the screen is the one you expect.
+A point is the last resort. It does not wait for anything to appear, only for the elements on the screen to stop moving as the UI tree reports them (at most 3 seconds; motion drawn inside one element, such as a game's, is not seen), and a different screen size or layout puts it somewhere else. The same wait comes before every `swipe`, a plain `scroll`, and a `longPressOn` or `pinch` on a point. A tap meant to stop a moving list therefore lands after the list has stopped. Use a selector wherever one reaches the element, and put an `assertVisible` before a point tap to check the screen is the one you expect.
 
 Nothing can check what is under a point, so its step is recorded as `delivered`. With a top-level `viewport`, a device of another size is refused before the first step as an environment failure (exit code `2`). A device held either way counts as the same size. Flow Capture writes the size of the device Verify ran on into a flow that has point steps.
 

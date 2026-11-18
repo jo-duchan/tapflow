@@ -609,6 +609,17 @@ describe('runFlow', () => {
       }
     })
 
+    // CodeRabbit on #1193: a slow first read does not count towards the span; the observations must be apart.
+    it('measures the span from the first read\'s answer, not its asking', async () => {
+      const { swipeAt, queries } = await swipeAfter(async (n) => {
+        if (n === 0) await new Promise((r) => setTimeout(r, 200))
+        return piece(0.8)
+      })
+      // Answered at 200; the next read asked at 300 is only 100 ms after it, so it takes reads until 450 or later.
+      expect(queries[1]).toBe(300)
+      expect(swipeAt).toBeGreaterThanOrEqual(450)
+    })
+
     it('goes on after 3 s on a screen that never stops, and on a read that never answers', async () => {
       const moving = await swipeAfter((n) => piece(0.1 + (n % 50) * 0.01))
       expect(moving.result.status).toBe('passed')
