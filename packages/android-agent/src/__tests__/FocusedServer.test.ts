@@ -241,6 +241,32 @@ describe('AdbWrapper through the field server', () => {
     expect(server.lines.map((l) => l.split(' ')[1])).toEqual(['hold', 'hit', 'ping'])
   })
 
+  // Review of #1187: a re-hold falling due while a dump waits behind another request was queued ahead of that dump.
+  it('does not hold again between a dump and the request it waited behind', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
+    let reads = 0
+    const server = fakeServer((op) => (op === 'hold' ? '{"held":true}' : op === 'read' ? (reads++ === 0 ? undefined : '{}') : '{}'))
+    const adb = new AdbWrapper(runner(server))
+    ;(adb as unknown as { focusedServers: FocusedServers }).focusedServers = new FocusedServers({
+      spawn: runner(server).spawnPiped!.bind(null), kill: async () => {}, answerTimeoutMs: 60_000,
+    })
+    await adb.holdConnection('emulator-5554', true)
+    await adb.dumpUiHierarchy('emulator-5554').catch(() => {})
+    await vi.advanceTimersByTimeAsync(2_000)
+    const read = adb.readFocused('emulator-5554')
+    await vi.waitFor(() => expect(server.lines.some((l) => l.split(' ')[1] === 'read')).toBe(true))
+    const dump = adb.dumpUiHierarchy('emulator-5554').catch(() => {})
+    await vi.advanceTimersByTimeAsync(2_000)
+    const id = server.lines.find((l) => l.split(' ')[1] === 'read')!.split(' ')[0]
+    ;(server.child.stdout as PassThrough).write(`${id} {}\n`)
+    await read
+    await dump
+    // Anything queued behind the dump has run by now.
+    await vi.advanceTimersByTimeAsync(100)
+    await adb.readFocused('emulator-5554').catch(() => null)
+    expect(server.lines.map((l) => l.split(' ')[1]).slice(0, 4)).toEqual(['hold', 'release', 'read', 'read'])
+  })
+
   it('pushes the jar again when a hold or a ping could not start the server', async () => {
     const r = runner(fakeServer(() => '{}', { ready: false }))
     const adb = new AdbWrapper(r)
