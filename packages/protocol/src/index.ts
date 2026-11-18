@@ -2016,9 +2016,10 @@ export interface UiKeyboardResponse {
 }
 
 /**
- * What one touch-down hit, seen from inside the app while a person was recorded (record-time observation, the `.work`
- * plan's P1): the agent pairs the app observer's report with the gesture it delivered and names it by that gesture's
- * `requestId` (its `input:touch:end`'s). Facts only — what Capture makes of them is flow-runner's.
+ * What one touch-down hit while a person was recorded (record-time observation): on iOS the app observer reports it from
+ * inside the app; on Android the agent reads it from outside (the accessibility tree at the point, the app's frames;
+ * android-agent AGENTS.md). Named by the gesture's `requestId` (its `input:touch:end`'s). Facts only — what Capture
+ * makes of them is flow-runner's. Only touches on the app under test are reported.
  */
 export interface TouchObservation {
   /** Where the touch went down, normalised, in the device's portrait space (the touch path's). */
@@ -2032,14 +2033,15 @@ export interface TouchObservation {
    *  subtitle). Absent when the app built none there (app accessibility off, a touch mid-scroll). */
   element?: ObservedElement
   button?: ObservedElement
-  /** iOS's own count for a quick repeat at one spot (`UITouch.tapCount`): 2 for a double tap's second touch. */
+  /** The platform's count for a quick repeat at one spot — iOS's `UITouch.tapCount`, Android's double-tap timeout
+   *  counted by the agent: 2 for a double tap's second touch. Android leaves it out on a drag. */
   tapCount?: number
   /**
    * Whether the app acted on this touch: a control it listens to fired, an action was sent, a list selected a row, or
    * a gesture of the app's own was recognised, from the touch-down until shortly after the lift. Absent is unknown —
-   * never "no": an older agent, a touch on a `surface`, a drag, a view that handles touches itself, React Native, or a
-   * verdict that could not be reached in time. Arrives later than the rest, as a second `capture:touched` for the same
-   * gesture.
+   * never "no": an older agent, a touch on a `surface`, a drag, on iOS a view that handles touches itself or React
+   * Native, or a verdict that could not be reached in time (Android's own unknowns: android-agent AGENTS.md). On iOS it
+   * arrives later than the rest, as a second `capture:touched` for the same gesture; Android sends one report with it.
    */
   acted?: boolean
   /**
@@ -2054,6 +2056,7 @@ export interface TouchObservation {
 export interface ObservedElement {
   identifier?: string
   label?: string
+  /** `UIAccessibilityTraits` on iOS; Android sets only the button bit (1), where the UI tree's role is `button`. */
   traits: number
   /** A text input: named by its identifier only. */
   input?: boolean

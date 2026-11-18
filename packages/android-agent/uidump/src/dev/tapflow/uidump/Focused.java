@@ -21,6 +21,7 @@ import java.lang.reflect.InvocationTargetException;
  *   ... dev.tapflow.uidump.Focused ime             → the field's IME action (Done, Next, Search, …), API 30+
  *   ... dev.tapflow.uidump.Focused reach           → stdin's first line (base64 JSON targets): where a touch meant for
  *                                                     each lands (#1125), see Reach
+ *   (FocusedServer only) hit `x y`                  → what a touch-down at that point hit (P4), see Hit
  *
  * No idle wait, unlike TreeDump: the field is read as it is the moment it is asked (measured: the read itself takes
  * 2-16 ms; the rest of the ~1 s is starting app_process). The text to set comes on stdin, never in argv, where `ps`
@@ -46,7 +47,27 @@ public final class Focused {
    * both answer through it. A wrapper is not reused across connections (its handler thread ends with `disconnect`), and
    * the connection is not kept: while one is up, the app under test sees accessibility on.
    */
+  /** When FocusedServer read the request now being answered, in `System.nanoTime` (CLOCK_MONOTONIC, the clock
+   *  `dumpsys gfxinfo` stamps frames with): what the agent sets its clock to the device's by. */
+  static volatile long receivedNs;
+
+  /** The connection held while a person is recorded (`hold`), which every request then uses: FocusedServer only. */
+  private static Object heldWrapper;
+  private static UiAutomation held;
+
   static String handle(String mode, String textLine) {
+    if ("hold".equals(mode)) return hold();
+    if ("release".equals(mode)) { release(); return "{}"; }
+    if (held != null) {
+      try {
+        // A held connection keeps the node cache across requests, and nothing clears it for a screen Compose changed
+        // in place: Compose sends UiAutomation no events, so the cache would answer with the screen before.
+        clearCache(held);
+        return answer(mode, textLine, held);
+      } catch (Exception e) {
+        return "{\"error\":" + str(String.valueOf(e)) + "}";
+      }
+    }
     Class<?> wrapperClass;
     Object wrapper = null;
     try {
@@ -63,25 +84,8 @@ public final class Focused {
     }
     try {
       UiAutomation automation = (UiAutomation) wrapperClass.getMethod("getUiAutomation").invoke(wrapper);
-      AccessibilityServiceInfo info = automation.getServiceInfo();
-      info.flags |= AccessibilityServiceInfo.FLAG_RETRIEVE_INTERACTIVE_WINDOWS;
-      automation.setServiceInfo(info);
-      AccessibilityNodeInfo field = null;
-      // Just connected, the root can be missing for a while (up to 200 ms here), and a root can come before its focused
-      // field: 3 of 200 reads in one process found none with the field focused (measured), so a miss is asked again.
-      int misses = 0;
-      for (int i = 0; i < 40; i++) {
-        AccessibilityNodeInfo root = automation.getRootInActiveWindow();
-        if (root == null) { Thread.sleep(5); continue; }
-        field = focusedField(root);
-        if (field != null || ++misses > 3) break;
-        Thread.sleep(10);
-      }
-      if ("set".equals(mode)) return set(field, textLine);
-      if ("ime".equals(mode)) return ime(field);
-      if ("read".equals(mode)) return read(automation, field);
-      if ("reach".equals(mode)) return Reach.answer(automation, textLine);
-      return "{\"error\":\"unknown request\"}";
+      withWindows(automation);
+      return answer(mode, textLine, automation);
     } catch (Exception e) {
       return "{\"error\":" + str(String.valueOf(e)) + "}";
     } finally {
@@ -91,6 +95,138 @@ public final class Focused {
         // A one-shot run ends here anyway; the server's next request makes a new wrapper.
       }
     }
+  }
+
+  private static void withWindows(UiAutomation automation) {
+    AccessibilityServiceInfo info = automation.getServiceInfo();
+    info.flags |= AccessibilityServiceInfo.FLAG_RETRIEVE_INTERACTIVE_WINDOWS;
+    automation.setServiceInfo(info);
+  }
+
+  private static String answer(String mode, String textLine, UiAutomation automation) throws Exception {
+    // A touch's hit (P4) reads the windows at a point, not the focused field: asked first, since what it reads must be
+    // read before the touch's up changes the screen.
+    if ("hit".equals(mode)) return Hit.answer(automation, textLine, receivedNs);
+    AccessibilityNodeInfo field = null;
+    // Just connected, the root can be missing for a while (up to 200 ms here), and a root can come before its focused
+    // field: 3 of 200 reads in one process found none with the field focused (measured), so a miss is asked again.
+    int misses = 0;
+    for (int i = 0; i < 40; i++) {
+      AccessibilityNodeInfo root = automation.getRootInActiveWindow();
+      if (root == null) { Thread.sleep(5); continue; }
+      field = focusedField(root);
+      if (field != null || ++misses > 3) break;
+      Thread.sleep(10);
+    }
+    if ("set".equals(mode)) return set(field, textLine);
+    if ("ime".equals(mode)) return ime(field);
+    if ("read".equals(mode)) return read(automation, field);
+    if ("reach".equals(mode)) return Reach.answer(automation, textLine);
+    return "{\"error\":\"unknown request\"}";
+  }
+
+  /**
+   * Keep one connection for every request until `release` (P4): connecting per request leaves the window list empty or
+   * partial for 25–250 ms (p50 140 ms, measured 2026-11-18 on Pixel_9_tapflow Android 14), and a touch's hit has to be
+   * read before its up — a tap is held 80–150 ms. Held, a hit costs its walk (m1: 2–25 ms). The agent releases it
+   * before anything else connects (a tree dump), since a device takes one UiAutomation at a time, and holds it again
+   * after. While it is held, Views apps see accessibility on (m1: no frame cost; Compose ignores UiAutomation).
+   */
+  private static String hold() {
+    if (held != null) return "{\"held\":true}";
+    Object wrapper = null;
+    boolean connected = false;
+    try {
+      Class<?> wrapperClass = Class.forName("com.android.uiautomator.core.UiAutomationShellWrapper");
+      wrapper = wrapperClass.getConstructor().newInstance();
+      wrapperClass.getMethod("connect").invoke(wrapper);
+      connected = true;
+      UiAutomation automation = (UiAutomation) wrapperClass.getMethod("getUiAutomation").invoke(wrapper);
+      withWindows(automation);
+      // A connection whose node cache cannot be cleared answers with the screen before (Compose sends it no events), so
+      // it is not held: requests connect each time, slower, and a touch whose hit comes late gets no report.
+      if (!clearCache(automation)) {
+        disconnect(wrapper);
+        return "{\"error\":\"cache cannot be cleared\"}";
+      }
+      // Paid here rather than by the next touch's hit: the window list fills over a few reads after connecting (Hit).
+      settleWindows(automation);
+      heldWrapper = wrapper;
+      held = automation;
+      return "{\"held\":true}";
+    } catch (InvocationTargetException e) {
+      if (connected) disconnect(wrapper); else quitHandlerThread(wrapper);
+      return "{\"error\":" + str(String.valueOf(e.getCause())) + "}";
+    } catch (Exception e) {
+      // Set up after connecting failed (a null service info): let go of the connection, or it outlives the answer.
+      if (connected) disconnect(wrapper); else quitHandlerThread(wrapper);
+      return "{\"error\":" + str(String.valueOf(e)) + "}";
+    }
+  }
+
+  private static void disconnect(Object wrapper) {
+    try {
+      wrapper.getClass().getMethod("disconnect").invoke(wrapper);
+    } catch (ReflectiveOperationException | RuntimeException e) {
+      quitHandlerThread(wrapper);
+    }
+  }
+
+  /**
+   * Clear the connection's node cache: `UiAutomation.clearCache()` from API 34; before it the interaction client's,
+   * per connection (`clearCache(int)`, Android 13) or for the process (`clearCache()`, older). `false` when none
+   * could be reached.
+   */
+  private static boolean clearCache(UiAutomation automation) {
+    try {
+      automation.getClass().getMethod("clearCache").invoke(automation);
+      return true;
+    } catch (ReflectiveOperationException | RuntimeException e) {
+      // Before API 34: the client below.
+    }
+    try {
+      Class<?> client = Class.forName("android.view.accessibility.AccessibilityInteractionClient");
+      Object instance = client.getMethod("getInstance").invoke(null);
+      try {
+        java.lang.reflect.Field id = UiAutomation.class.getDeclaredField("mConnectionId");
+        id.setAccessible(true);
+        client.getMethod("clearCache", int.class).invoke(instance, id.getInt(automation));
+        return true;
+      } catch (ReflectiveOperationException | RuntimeException e) {
+        // From Android 13 the cache is per connection: the process-wide clear may leave this one's, so it is no answer.
+        if (android.os.Build.VERSION.SDK_INT >= 33) return false;
+        client.getMethod("clearCache").invoke(instance);
+        return true;
+      }
+    } catch (ReflectiveOperationException | RuntimeException e) {
+      return false;
+    }
+  }
+
+  /** Until the window list holds an app window and has not changed for 120 ms, at most 400 ms. */
+  private static void settleWindows(UiAutomation automation) throws InterruptedException {
+    long end = System.nanoTime() + 400_000_000L;
+    int seen = -1;
+    long since = System.nanoTime();
+    while (System.nanoTime() < end) {
+      java.util.List<AccessibilityWindowInfo> windows = automation.getWindows();
+      boolean app = false;
+      for (AccessibilityWindowInfo w : windows) app |= w.getType() == AccessibilityWindowInfo.TYPE_APPLICATION;
+      if (!app || windows.size() != seen) { seen = app ? windows.size() : -1; since = System.nanoTime(); }
+      else if (System.nanoTime() - since >= 120_000_000L) return;
+      Thread.sleep(10);
+    }
+  }
+
+  private static void release() {
+    if (heldWrapper == null) return;
+    try {
+      heldWrapper.getClass().getMethod("disconnect").invoke(heldWrapper);
+    } catch (ReflectiveOperationException e) {
+      // Gone with the process at worst.
+    }
+    heldWrapper = null;
+    held = null;
   }
 
   private static void quitHandlerThread(Object wrapper) {

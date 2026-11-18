@@ -2802,6 +2802,85 @@ describe('AndroidAgent', () => {
       scrcpyStreamController = null
     })
 
+    // Flow Capture P4: what a recorded person's touches hit, asked off the touch's path, only for a boot the relay
+    // marked as theirs and that keeps observations.
+    describe('record-time observation', () => {
+      const bootWith = async (payload: Record<string, unknown>) => {
+        const ready = waitForType(browser, 'device:ready')
+        inject({ type: 'device:boot', requestId: `rq-${Object.keys(payload).join('-')}`, payload: { deviceId: 'avd:Pixel_8_API_34', ...payload } })
+        await ready
+        await vi.waitFor(() => expect(getState().scrcpySession).not.toBeNull(), { timeout: 1000 })
+      }
+
+      it('is off for a boot that is not a recorded person\'s, or a relay that keeps no observations', async () => {
+        const hold = vi.spyOn(adb, 'holdConnection').mockResolvedValue(undefined)
+        const hit = vi.spyOn(adb, 'hitTest').mockResolvedValue(null)
+        inject({ type: 'input:touch:start', payload: { x: 0.25, y: 0.75 } })
+        inject({ type: 'input:touch:end', requestId: 'rq-off' })
+        await bootWith({ observed: true })
+        inject({ type: 'input:touch:start', payload: { x: 0.25, y: 0.75 } })
+        inject({ type: 'input:touch:end', requestId: 'rq-off-2' })
+        expect(hold).not.toHaveBeenCalled()
+        expect(hit).not.toHaveBeenCalled()
+      })
+
+      it('asks what each touch hit on a recorded boot, and lets go of the connection when the device goes', async () => {
+        const hold = vi.spyOn(adb, 'holdConnection').mockResolvedValue(undefined)
+        const hit = vi.spyOn(adb, 'hitTest').mockResolvedValue(null)
+        vi.spyOn(adb, 'pingFocusedServer').mockResolvedValue(undefined)
+        await bootWith({ observed: true, touchObservations: true })
+        expect(hold).toHaveBeenCalledWith('emulator-5554', true)
+        inject({ type: 'input:touch:start', payload: { x: 0.25, y: 0.75 } })
+        expect(hit).toHaveBeenCalledWith('emulator-5554', 0.25, 0.75)
+        agent.disconnect()
+        expect(hold).toHaveBeenLastCalledWith('emulator-5554', false)
+      })
+
+      // CodeRabbit on #1187: the app under test is the one that launched, not the one a failed launch named.
+      it('takes the app under test from a launch that succeeded, and keeps the one before when it fails', async () => {
+        const packages = () => (agent as unknown as { appPackages: Map<string, string> }).appPackages
+        const launch = vi.spyOn(adb, 'launchApp').mockResolvedValueOnce(undefined).mockRejectedValueOnce(new Error('not installed'))
+        inject({ type: 'app:launch', requestId: 'rq-a', payload: { bundleId: 'dev.tapflow.a' } })
+        await vi.waitFor(() => expect(packages().get('avd:Pixel_8_API_34')).toBe('dev.tapflow.a'))
+        const failed = waitForType(browser, 'app:launch-error')
+        inject({ type: 'app:launch', requestId: 'rq-b', payload: { bundleId: 'dev.tapflow.b' } })
+        await failed
+        expect(packages().get('avd:Pixel_8_API_34')).toBe('dev.tapflow.a')
+      })
+
+      // CodeRabbit on #1187: two launches at once, the earlier one answering last.
+      it('does not let a launch overtaken by a later one name the app under test', async () => {
+        const packages = () => (agent as unknown as { appPackages: Map<string, string> }).appPackages
+        let finishA: () => void = () => {}
+        vi.spyOn(adb, 'launchApp')
+          .mockImplementationOnce(() => new Promise((r) => { finishA = () => r(undefined) }))
+          .mockResolvedValueOnce(undefined)
+        const done = waitForType(browser, 'app:launch-done')
+        inject({ type: 'app:launch', requestId: 'rq-a', payload: { bundleId: 'dev.tapflow.a' } })
+        inject({ type: 'app:launch', requestId: 'rq-b', payload: { bundleId: 'dev.tapflow.b' } })
+        await done
+        await vi.waitFor(() => expect(packages().get('avd:Pixel_8_API_34')).toBe('dev.tapflow.b'))
+        const second = waitForType(browser, 'app:launch-done')
+        finishA()
+        await second
+        expect(packages().get('avd:Pixel_8_API_34')).toBe('dev.tapflow.b')
+      })
+
+      // Review of P4: the adb fallback plays a gesture only once its end arrives, so its down's time is not the app's.
+      it('does not observe a touch that goes through the adb fallback', async () => {
+        vi.spyOn(adb, 'holdConnection').mockResolvedValue(undefined)
+        const hit = vi.spyOn(adb, 'hitTest').mockResolvedValue(null)
+        vi.spyOn(adb, 'pingFocusedServer').mockResolvedValue(undefined)
+        await bootWith({ observed: true, touchObservations: true })
+        const state = getState()
+        state.videoWidth = 0
+        state.touchHelper = { touchStart: vi.fn(), touchMove: vi.fn(), touchEnd: vi.fn(async () => 'delivered'), touchCancel: vi.fn(), pinchEnd: vi.fn(), pressButton: vi.fn(), stop: vi.fn() } as unknown as TestState['touchHelper']
+        inject({ type: 'input:touch:start', payload: { x: 0.25, y: 0.75 } })
+        expect((state.touchHelper as unknown as { touchStart: ReturnType<typeof vi.fn> }).touchStart).toHaveBeenCalled()
+        expect(hit).not.toHaveBeenCalled()
+      })
+    })
+
     describe('input — touch', () => {
       it('maps normalized touch:start to device px via scrcpy control', () => {
         const control = getState().scrcpySession!.control

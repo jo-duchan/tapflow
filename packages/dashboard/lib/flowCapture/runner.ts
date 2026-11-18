@@ -306,10 +306,11 @@ function previousSent(slice: RawStep[], offset: number): RawStep | undefined {
 
 /** Whether `slice[offset]` is a swipe whose next sent step is a tap the app named: that tap is found by its element,
  *  so how far this swipe carried the list is not compared — a fling's length differs between any two runs. */
-function swipeBeforeNamedTap(slice: RawStep[], offset: number): boolean {
+function swipeBeforeNamedTap(slice: RawStep[], offset: number, frameTurn?: 0 | 90 | 180 | 270): boolean {
   // One `scroll` cannot make (slanted, off the middle) leaves a tap whose element is not on the screen to its point
   // (`namedTap`), with no search to stand in for the picture.
-  if (slice[offset]?.kind !== 'swipe' || scrollDirectionOf(slice[offset]!, {}) === null) return false
+  // On the screen, as `namedTap` reads it: an Android body mode swipe is in the frame's space (`frameTurnOf`).
+  if (slice[offset]?.kind !== 'swipe' || scrollDirectionOf(slice[offset]!, frameTurn !== undefined ? { frameTurn } : {}) === null) return false
   for (let i = offset + 1; i < slice.length; i++) {
     const s = slice[i]!
     if (s.dropped) continue
@@ -467,10 +468,15 @@ export async function matchRange(
       return tapIt
     }
     let focus = await focusFirst()
-    // Only iOS reports touches, and its points are never in the frame's space: the app's turn is all that places them.
-    let named = before
-      ? namedTap(raw, before.elements, previousSent(slice, offset), before.interfaceTurn !== undefined ? { interfaceTurn: before.interfaceTurn } : {})
-      : undefined
+    // The swipe before a named tap says which way to scroll for it: an iOS point is in the app's turn, an Android body
+    // mode one in the frame's (`frameTurnOf`), which went unread until Android reported touches (P4).
+    // The chrome the channel holds, not the viewer's last render: a turn reported since is not drawn yet (CodeRabbit).
+    const namedTurns = async (b: NonNullable<typeof before>) => {
+      const previous = previousSent(slice, offset)
+      const frameTurn = previous?.kind === 'swipe' && previous.space === 'frame' ? frameTurnOf(await chromeNow(channel, tap)) : undefined
+      return { ...(b.interfaceTurn !== undefined ? { interfaceTurn: b.interfaceTurn } : {}), ...(frameTurn !== undefined ? { frameTurn } : {}) }
+    }
+    let named = before ? namedTap(raw, before.elements, previousSent(slice, offset), await namedTurns(before)) : undefined
     // After the focus tap and its settle: a typed step's picture was taken at its first key, with the field focused.
     // A tap the app named is judged by finding that element, not by the picture: the list under it may sit elsewhere.
     // A focus tap went in since: pressed again now, the tap would take the field's focus away.
@@ -617,7 +623,8 @@ export async function matchRange(
       return 'pressed'
     }
     // A turned app replays its taps at their points (`namedTap`), so the swipe before one is compared as any other.
-    if (compared(raw) && !skipCompare && !named && (!!before?.interfaceTurn || !swipeBeforeNamedTap(slice, offset))) await compareNow()
+    const swipeTurn = raw.kind === 'swipe' && raw.space === 'frame' ? frameTurnOf(await chromeNow(channel, tap)) : undefined
+    if (compared(raw) && !skipCompare && !named && (!!before?.interfaceTurn || !swipeBeforeNamedTap(slice, offset, swipeTurn))) await compareNow()
     // Read while the screen was late, the tree may not hold what the person tapped (an alert's OK under a spinner): read
     // again, and named from that, the tap goes to its element rather than to a point on a screen that has moved.
     if (midTransition && await leftUnsent()) continue
@@ -625,9 +632,7 @@ export async function matchRange(
       await rereadLate()
       // A field read while the screen was late (a splash before the form) may only now be there to focus.
       focus ??= await focusFirst()
-      named = before
-        ? namedTap(raw, before.elements, previousSent(slice, offset), before.interfaceTurn !== undefined ? { interfaceTurn: before.interfaceTurn } : {})
-        : undefined
+      named = before ? namedTap(raw, before.elements, previousSent(slice, offset), await namedTurns(before)) : undefined
     }
     const shoot = () => channel.screenshot(sessionId, hooks.signal).catch(() => null)
     // A password is pictured before it is typed: after, Android shows its last character for a moment.

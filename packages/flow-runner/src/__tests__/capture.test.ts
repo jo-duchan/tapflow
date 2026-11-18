@@ -1526,6 +1526,24 @@ describe('touch reports', () => {
       // Several with no frame to choose by: none rather than a guess.
       expect(recordedTarget([a, b], { point: { x: 0, y: 0 }, moving: false, element: { label: 'Glaze', traits: 0 } })).toBeNull()
     })
+    // Review of P4: an Android list's rows share a resource id, and a fling leaves another row where the tapped one was.
+    it('tells rows that share an identifier apart by label, and names none when the label is gone', () => {
+      const row = (label: string, y: number) => el({ label, identifier: 'com.app:id/title', frame: at(0, y) })
+      const rows = [row('Item 30', 0.3), row('Item 31', 0.4), row('Item 37', 0.9)]
+      const tapped: TouchObservation = { point: { x: 0, y: 0 }, moving: false, element: { identifier: 'com.app:id/title', label: 'Item 37', traits: 0, frame: at(0, 0.4) } }
+      expect(recordedTarget(rows, tapped)).toBe(rows[2])
+      expect(recordedTarget(rows.slice(0, 2), tapped)).toBeNull()
+      // One row of that id left on the screen is not the tapped one either.
+      expect(recordedTarget([rows[0]!], tapped)).toBeNull()
+      expect(recordedTarget([rows[2]!], tapped)).toBe(rows[2])
+      expect(matchSelector(rows, recordedSelector(tapped)!)).toEqual([rows[2]])
+    })
+    // Review of #1187: an identifier only one element has (iOS, a Compose test tag) names it whatever its label says now.
+    it('keeps an element alone with an identifier no list shares, though its label changed', () => {
+      const counter = el({ label: 'Count: 4', identifier: 'counter', frame: at(0.4, 0.5) })
+      const recorded: TouchObservation = { point: { x: 0, y: 0 }, moving: false, element: { identifier: 'counter', label: 'Count: 3', traits: 1 } }
+      expect(recordedTarget([counter], recorded)).toBe(counter)
+    })
     it('names nothing for the keyboard, a web view or Flutter, a text input by its label, or a secure field', () => {
       const field = el({ role: 'input', label: 'hunter2', secure: true })
       const obs = (over: Partial<TouchObservation>): TouchObservation => ({ point: { x: 0, y: 0 }, moving: false, ...over })
@@ -1542,6 +1560,8 @@ describe('touch reports', () => {
       const row = [el({ role: 'button', label: 'Order#1212' }), el({ role: 'text', label: 'Order#1212' })]
       expect(matchSelector(row, recordedSelector(obs({ element: { label: 'Order#1212', traits: 1 } }))!)).toEqual([row[0]])
       expect(recordedSelector(obs({ element: { identifier: 'row.7', label: 'x', traits: 1 } }))).toEqual({ id: 'row.7' })
+      expect(recordedSelector(obs({ element: { identifier: 'com.app:id/title', label: 'Item 37', traits: 0 } }))).toEqual({ id: 'com.app:id/title', label: 'Item 37', exact: true })
+      expect(recordedSelector(obs({ element: { identifier: 'form.email', traits: 0, input: true } }))).toEqual({ id: 'form.email' })
       // A button named only by its traits leaves the element's name to search by (CodeRabbit on #1167).
       expect(recordedSelector(obs({ button: { traits: 1 }, element: { label: 'Salty', traits: 0 } }))).toEqual({ label: 'Salty', exact: true })
     })

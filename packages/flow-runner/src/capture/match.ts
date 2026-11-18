@@ -365,13 +365,29 @@ export function recordedTarget(tree: readonly UIElement[], touched: TouchObserva
   for (const named of [touched.button, touched.element]) {
     if (!named) continue
     const found = named.identifier
-      ? tree.filter((e) => e.identifier === named.identifier)
+      ? sameLabel(tree.filter((e) => e.identifier === named.identifier), named)
       : named.label && !named.input ? tree.filter((e) => e.label === named.label && e.secure !== true) : []
     const nearest = nearestTo(found, named)
     if (nearest) return nearest
   }
   return null
 }
+
+/**
+ * Of the elements one identifier names, those with the reported label too. An Android list gives every row's text the
+ * same resource id (`com.app:id/title`), and the nearest of them to the recorded frame is whichever row a fling left
+ * there, not the one tapped — and with the others scrolled away the one left is not it either (CodeRabbit on #1187).
+ * None left (the label changed) is none: the tap goes to its point, and is compared.
+ */
+function sameLabel(found: UIElement[], named: ObservedElement): UIElement[] {
+  if (!named.label) return found
+  // One element with an identifier no list shares is the one, whatever its label says now (a counter, a cart): only
+  // an Android resource id (`pkg:id/name`) is one that rows share, and needs the label even alone (review of #1187).
+  if (found.length === 1 && !RESOURCE_ID.test(named.identifier ?? '')) return found
+  return found.filter((e) => e.label === named.label)
+}
+
+const RESOURCE_ID = /^[\w.]+:id\//
 
 function nearestTo(found: UIElement[], named: ObservedElement): UIElement | null {
   if (found.length <= 1) return found[0] ?? null
@@ -420,7 +436,12 @@ export function recordedSelector(touched: TouchObservation | undefined): Selecto
   // The button first, then the element, as `recordedTarget` looks: a button the report names only by its traits
   // leaves the element's name to search by.
   for (const named of [touched.button, touched.element]) {
-    if (named?.identifier) return { id: named.identifier }
+    // With its label where rows share the identifier (an Android resource id): by the id alone the search stops at the
+    // first row it scrolls to. Anywhere else the id is the one element's, whose label may have changed (a counter).
+    if (named?.identifier) {
+      return named.label && !named.input && RESOURCE_ID.test(named.identifier)
+        ? { id: named.identifier, label: named.label, exact: true } : { id: named.identifier }
+    }
     // A button's label is usually its text's too, in the tree as a `button` and a `text` of one name (SwiftUI, measured
     // on Food Truck's order rows): by the label alone the search matched two and never settled, scrolling the list to
     // its end and back (the user's session ff5d3d3c). The trait says which one was touched.
@@ -478,9 +499,9 @@ const SAME_SPOT = 2 * TAP_SLOP
 
 /**
  * Whether `raw` is a tap made while the screen `previous` brought was still coming — a doubled tap's second touch, or a
- * touch that landed on a screen between two: iOS counted it a repeat (`tapCount` 2), or, at the same spot, the app named
+ * touch that landed on a screen between two: the agent counted it a repeat (`tapCount` 2), or, at the same spot, the app named
  * nothing under it or did not report it at all. Only after a tap the app reported, so that neither is a device that reports none
- * (Android), where nothing says what either did. Its recorded picture is the screen from before `previous` acted, which
+ * (an older agent), where nothing says what either did. Its recorded picture is the screen from before `previous` acted, which
  * a replay that waits for that tap never sees: Match does not stop on it (part (d) of the Match repair plan).
  */
 export function madeMidTransition(raw: RawStep, previous: RawStep | undefined): boolean {
@@ -497,7 +518,8 @@ export function madeMidTransition(raw: RawStep, previous: RawStep | undefined): 
 /**
  * The matched taps the app did not respond to when they were recorded (record-time observation, P2c): a stray tap on a
  * title, a retry of a dead button, the second of a doubled tap. Only a verdict of "no" counts — `acted` absent is
- * unknown (a web view, React Native, an older agent, Android) and the tap stays as it is. A step the replay added has no
+ * unknown (a web view, React Native on iOS, an older agent, an Android tap whose frames could be someone else's) and
+ * the tap stays as it is. A step the replay added has no
  * report, and a tap already skipped is out of the flow anyway. Two more are kept without asking, since leaving them out
  * would make Verify run something other than what Match did:
  * - one Match saw change the screen (`observed`): the record's "no" was wrong, or the replay tapped the element's centre

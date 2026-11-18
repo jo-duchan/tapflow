@@ -16,7 +16,7 @@ const ROLE_RULES: Array<[RegExp, UIElementRole]> = [
   [/TextView/, 'text'],
 ]
 
-function toRole(className: string): UIElementRole {
+export function toRole(className: string): UIElementRole {
   for (const [re, role] of ROLE_RULES) {
     if (re.test(className)) return role
   }
@@ -50,7 +50,7 @@ const round4 = (n: number): number => Math.round(n * 10000) / 10000
 // The window's own decor. Android gives almost every view an id, the framework's included, so "an id keeps a
 // node" would otherwise put these full-width layers in every tree — noise for an agent reading it, and nothing a
 // flow selects. Only these: `android:id/` as a whole also covers real targets such as `android:id/progress`.
-const DECOR_IDS = new Set(['android:id/content', 'android:id/statusBarBackground', 'android:id/navigationBarBackground'])
+export const DECOR_IDS = new Set(['android:id/content', 'android:id/statusBarBackground', 'android:id/navigationBarBackground'])
 /** Down, for a far edge: `x + width` must not reach past 1 by a rounding step. Same rule as the iOS parser. */
 const floor4 = (n: number): number => Math.max(0, Math.floor(n * 10000 + 1e-9) / 10000)
 

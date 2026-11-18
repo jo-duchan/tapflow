@@ -59,8 +59,8 @@ type KeyboardRect = NonNullable<KeyboardState['rect']>
 type Touch = {
   space?: PointSpace
   keyboard?: 'unknown'
-  /** What the app reported of this touch's touch-down (`capture:touched`, iOS): whether a list was moving, the element
-   *  and button it hit. Absent where no report came — Android, an older agent, a touch outside the app. */
+  /** What the agent reported of this touch's touch-down (`capture:touched`): whether a list was moving, the element
+   *  and button it hit. Absent where no report came — an older agent, a touch outside the app, a hit read too late. */
   touched?: TouchObservation
 }
 
@@ -353,8 +353,9 @@ function withHome(steps: RawStep[], entries: readonly CaptureEntry[]): RawStep[]
     while (i < reads.length && reads[i]!.at <= s.at) lastRead = reads[i++]
     const sinceLast = previousEnd
     previousEnd = s.endAt
-    // The app reported this touch (iOS): it went down in the app, whatever a read trailing the icon's tap says. No app
-    // reports a touch on the home screen; the observer runs only in the app under test.
+    // A report says this touch went down in the app, whatever a read trailing the icon's tap says. No touch on the home
+    // screen is reported: iOS's observer runs only in the app under test, and Android's agent reports only a touch whose
+    // topmost window is that app's.
     if ('touched' in s && s.touched) return { ...s, onHome: false }
     // A read asked for before the step ahead ended, and answered after it, is about the screen that step left: the icon
     // tap's would place the first tap in the app on the home screen.
