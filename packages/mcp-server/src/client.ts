@@ -473,7 +473,9 @@ export class TapflowClient {
   private readonly released = new Set<string>()
   /** Leaves per session, so an input still sending (a swipe's hold) can tell that its session was left mid-way. */
   private readonly leaves = new Map<string, number>()
-  /** Where a swipe this client opened has its finger now, so a leave can lift it instead of leaving it down. */
+  /** Where a swipe this client opened has its finger now, so a leave can lift it instead of leaving it down. Each
+   *  swipe owns its record and clears only that one, so a swipe left behind by a replaced socket cannot clear the
+   *  record of a newer swipe on the same session (CodeRabbit on #1190). */
   private readonly openTouches = new Map<string, { x: number; y: number }>()
 
   constructor(
@@ -1147,11 +1149,13 @@ export class TapflowClient {
     const ws = this.ws
     // A leave ends the swipe as left (disconnectDevice lifted the finger); a dropped or replaced socket ends it as
     // unconfirmed, since frames already sent may have reached the device (CodeRabbit on #1190).
+    const touch = { x: startX, y: startY }
+    const release = () => { if (this.openTouches.get(sessionId) === touch) this.openTouches.delete(sessionId) }
     const left = () => (this.leaves.get(sessionId) ?? 0) !== leaves
     const lost = () => this.ws !== ws || ws?.readyState !== WebSocket.OPEN
     const stop = (): Error => {
       if (left()) return leftError(sessionId)
-      this.openTouches.delete(sessionId)
+      release()
       return this.failed(sessionId,
       `Could not confirm the input reached the device: the relay connection dropped during the swipe${this.closeDetail()}. ` +
         'Do not repeat the input — part of it may have landed. Check the device state (screenshot or ui_tree) before deciding what to do next.')
@@ -1159,11 +1163,12 @@ export class TapflowClient {
     const at = (point: { x: number; y: number }) => {
       if (left() || lost()) throw stop()
       this.send({ type: 'input:touch:move', sessionId, payload: point })
-      this.openTouches.set(sessionId, point)
+      touch.x = point.x
+      touch.y = point.y
     }
 
     this.send({ type: 'input:touch:start', sessionId, payload: { x: startX, y: startY } })
-    this.openTouches.set(sessionId, { x: startX, y: startY })
+    this.openTouches.set(sessionId, touch)
     for (let i = 1; i < STEPS; i++) {
       await delay(interval)
       const t = i / STEPS
@@ -1175,7 +1180,7 @@ export class TapflowClient {
     // A drag held still before the lift, as flow-runner's channel does it (`scroll { until }` through `run_flow`).
     if (holdMs > 0 && !(await holdStill([endX, endY], holdMs, at, () => !left() && !lost()))) throw stop()
     if (left() || lost()) throw stop()
-    this.openTouches.delete(sessionId)
+    release()
     const requestId = randomUUID()
     this.send({ type: 'input:touch:end', sessionId, requestId, payload: { x: endX, y: endY } })
     // A swipe that stays put is a hold to Android's adb path, which replays it after the end arrives — as a long press.

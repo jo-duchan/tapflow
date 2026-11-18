@@ -601,11 +601,30 @@ describe('TapflowClient', () => {
       expect(mine[mine.length - 1]).toBe('session:leave')
     })
 
+    // CodeRabbit on #1190: a swipe stopped by a replaced socket clears only its own record, so a newer swipe's finger
+    // is still lifted by a leave.
+    it('a stale swipe does not clear a newer swipe\'s touch, so the leave still lifts it', async () => {
+      // Moves 400 ms apart: the stale swipe sleeps through the drop and the reconnect and wakes after the fresh one began.
+      const stale = client.swipe('sess-1', 0.5, 0.7, 0.5, 0.3, 3_200).catch((e: unknown) => e)
+      await new Promise((r) => setTimeout(r, 50))
+      relay.lastClient().close()
+      await client.connect()
+      const fresh = client.swipe('sess-1', 0.5, 0.7, 0.5, 0.2, 40, 2_000).catch((e: unknown) => e)
+      expect(String(await stale)).toMatch(/could not confirm/i)
+      await new Promise((r) => setTimeout(r, 100))
+      client.disconnectDevice('sess-1')
+      expect(await fresh).toBeInstanceOf(SessionLeftError)
+      await client.tap('sess-2', 0.1, 0.1)
+      const types = relay.sentMessages().map((m) => m['type'])
+      const leave = types.lastIndexOf('session:leave')
+      expect(types.slice(leave - 2, leave)).toEqual(['input:touch:cancel', 'input:touch:end'])
+    })
+
     it('a leave with no swipe open sends the leave alone', async () => {
       client.disconnectDevice('sess-1')
       await client.tap('sess-2', 0.1, 0.1)
-      const types = relay.sentMessages().map((m) => m['type'])
-      expect(types[types.indexOf('session:leave') - 1]).not.toBe('input:touch:end')
+      // Exactly the leave: an assertion on what precedes it would pass on a leave that was never sent.
+      expect(relay.sentMessages().filter((m) => m['sessionId'] === 'sess-1').map((m) => m['type'])).toEqual(['session:leave'])
     })
 
     // CodeRabbit on #1190: frames already sent may have reached the device, so a drop mid-swipe is unconfirmed.
