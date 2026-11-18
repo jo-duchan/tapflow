@@ -662,22 +662,27 @@ export abstract class SessionChannel {
     // non-positive and over-limit durations, including fractional 250.5 which
     // stays valid for 0.23.0 compatibility), and a construction here breaks
     // the sessionNoteCoverage gate with no session note in reach.
+    // Eight moves, the last on `to`, then the lift one interval later, nine intervals in all. The moves used to
+    // stop at 7/8 of the way, and every agent lifts where the last move was, so every swipe ended an eighth short — a
+    // drag-and-drop piece Verify dropped short of its slot (wdio demo app on
+    // Android: short of the end it failed at 300, 900 and 2000 ms; on the end it passed at 300 and 900).
     const STEPS = 8
-    const interval = durationMs / STEPS
+    const interval = durationMs / (STEPS + 1)
     // Clamped rather than refused, for the reason above: no hold for a value that is not a time, at most a minute.
     const hold = Number.isFinite(holdMs) && holdMs > 0 ? Math.min(holdMs, MAX_HOLD_MS) : 0
     const requestId = newRequestId()
     this.send({ type: 'input:touch:start', sessionId, payload: { x: from[0], y: from[1] } })
     const gesture: OpenGesture = { kind: 'touch', at: { x: from[0], y: from[1] } }
     this.openGestures.set(sessionId, gesture)
-    for (let i = 1; i < STEPS; i++) {
+    for (let i = 1; i <= STEPS; i++) {
       await delay(interval)
       if (this.openGestures.get(sessionId) !== gesture) return this.leftMidGesture(sessionId, 'swipe')
       const t = i / STEPS
       this.send({
         type: 'input:touch:move',
         sessionId,
-        payload: { x: from[0] + (to[0] - from[0]) * t, y: from[1] + (to[1] - from[1]) * t },
+        // The last is `to` itself, not 1 × the path, which floating point can leave a hair off.
+        payload: i === STEPS ? { x: to[0], y: to[1] } : { x: from[0] + (to[0] - from[0]) * t, y: from[1] + (to[1] - from[1]) * t },
       })
     }
     await delay(interval)

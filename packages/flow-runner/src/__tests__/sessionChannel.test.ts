@@ -39,6 +39,35 @@ afterEach(() => {
 })
 
 describe('SessionChannel without a socket', () => {
+  // Every agent lifts where the last move was, so the last move is the end, or every swipe stops an eighth short (a
+  // drag-and-drop piece Verify dropped short of its slot).
+  it('a swipe\'s last move is its end point, within its duration', async () => {
+    vi.useFakeTimers()
+    const ch = new MemoryChannel()
+    void ch.swipe('s1', [0.6, 0.8], [0.5, 0.2], 900).catch(() => undefined)
+    // The last move at eight ninths, the lift a ninth after it: not in the same tick.
+    await vi.advanceTimersByTimeAsync(850)
+    const moves = ch.sent.filter((m) => m.type === 'input:touch:move')
+    expect(moves).toHaveLength(8)
+    expect(moves.at(-1)).toMatchObject({ payload: { x: 0.5, y: 0.2 } })
+    expect(ch.sent.some((m) => m.type === 'input:touch:end')).toBe(false)
+    await vi.advanceTimersByTimeAsync(50)
+    expect(ch.sent.at(-1)!.type).toBe('input:touch:end')
+    vi.useRealTimers()
+  })
+
+  // A hold starts on the end point, so it would hide a path that stopped short: the moves before it are counted.
+  it('a held swipe makes all eight moves before it holds', async () => {
+    vi.useFakeTimers()
+    const ch = new MemoryChannel()
+    void ch.swipe('s1', [0.6, 0.8], [0.5, 0.2], 900, 150).catch(() => undefined)
+    await vi.advanceTimersByTimeAsync(850)
+    const moves = ch.sent.filter((m) => m.type === 'input:touch:move')
+    expect(moves).toHaveLength(8)
+    expect(moves.at(-1)).toMatchObject({ payload: { x: 0.5, y: 0.2 } })
+    vi.useRealTimers()
+  })
+
   it('a tap sends start and end, and resolves on the ack addressed to its end', async () => {
     const ch = new MemoryChannel()
     const done = ch.tap('s1', 0.25, 0.75)

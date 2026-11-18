@@ -1139,6 +1139,21 @@ describe('AdbWrapper focused field', () => {
     expect(await new AdbWrapper(runnerWith('')).setFocusedText('emulator-5554', 'x')).toBe('unavailable')
   })
 
+  // A failed set used to say nothing about why (Android 16, four in one evening): the jar's exception is logged, and
+  // never the text, which can be a password.
+  it('logs the jar\'s error when a set fails, and never the text', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    try {
+      const runner = runnerWith('', async () => '{"error":"java.lang.IllegalStateException: no window"}\n')
+      expect(await new AdbWrapper(runner).setFocusedText('emulator-5554', 'hunter2')).toBe('failed')
+      const logged = warn.mock.calls.map((c) => c.join(' ')).join('\n')
+      expect(logged).toMatch(/field set failed: java\.lang\.IllegalStateException: no window/)
+      expect(logged).not.toMatch(/hunter2/)
+    } finally {
+      warn.mockRestore()
+    }
+  })
+
   it('reads the keyboard window from dumpsys', async () => {
     const runner: AdbRunner = {
       exec: vi.fn(async () => '  Window #3 Window{a InputMethod}:\n    touchable region=SkRegion((0,1517,1080,2400))\n    isVisible=true\n'),
