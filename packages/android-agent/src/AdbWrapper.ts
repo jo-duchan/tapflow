@@ -567,22 +567,20 @@ export class AdbWrapper {
    */
   async dumpUiHierarchy(serial: string, timeoutSec = 10): Promise<string> {
     return this.inDumpQueue(serial, async () => {
-      // The dump connects its own UiAutomation, which a held one refuses: let go for it, and hold again after.
+      // The dump connects its own UiAutomation, which a held one refuses: let go for it. Held again by the next hit or
+      // ping, not here: a Match or Verify replay dumps before every step, and a hold settling the window list each time
+      // (up to 400 ms) would be paid by the replay.
       const servers = this.focusedServers
       const jar = this.uidumpDevicePath
       if (servers?.isHeld(serial) && jar) await servers.request(serial, jar, 'release')
-      try {
-        return await this.dumpNow(serial, timeoutSec)
-      } finally {
-        if (servers && jar && this.holdWanted.has(serial)) await servers.request(serial, jar, 'hold').catch(() => undefined)
-      }
+      return this.dumpNow(serial, timeoutSec)
     })
   }
 
   /**
    * Keep the field server's UiAutomation connection for as long as a person is recorded on the device (P4), or let it
-   * go: a touch's hit through a held connection costs its walk (p50 14 ms), against p50 140 ms connecting per request,
-   * which outlasts a tap. Tree dumps let go of it around themselves (`dumpUiHierarchy`).
+   * go: a touch's hit through a held connection costs its walk and a cleared cache (30–45 ms), against p50 140 ms
+   * connecting per request, which outlasts a tap. A tree dump lets go of it, and the next hit or ping holds it again.
    */
   async holdConnection(serial: string, on: boolean): Promise<void> {
     if (on) this.holdWanted.add(serial)
@@ -681,7 +679,9 @@ export class AdbWrapper {
     const servers = this.focusedServers
     await this.inDumpQueue(serial, async () => {
       const jar = await this.pushUidump(serial)
-      if (jar) await servers.request(serial, jar, 'ping')
+      if (!jar) return
+      // A hold a dump let go of, or a restarted server lost, comes back here before a touch has to wait for it.
+      await servers.request(serial, jar, this.holdWanted.has(serial) && !servers.isHeld(serial) ? 'hold' : 'ping')
     })
   }
 

@@ -306,10 +306,11 @@ function previousSent(slice: RawStep[], offset: number): RawStep | undefined {
 
 /** Whether `slice[offset]` is a swipe whose next sent step is a tap the app named: that tap is found by its element,
  *  so how far this swipe carried the list is not compared — a fling's length differs between any two runs. */
-function swipeBeforeNamedTap(slice: RawStep[], offset: number): boolean {
+function swipeBeforeNamedTap(slice: RawStep[], offset: number, frameTurn?: 0 | 90 | 180 | 270): boolean {
   // One `scroll` cannot make (slanted, off the middle) leaves a tap whose element is not on the screen to its point
   // (`namedTap`), with no search to stand in for the picture.
-  if (slice[offset]?.kind !== 'swipe' || scrollDirectionOf(slice[offset]!, {}) === null) return false
+  // On the screen, as `namedTap` reads it: an Android body mode swipe is in the frame's space (`frameTurnOf`).
+  if (slice[offset]?.kind !== 'swipe' || scrollDirectionOf(slice[offset]!, frameTurn !== undefined ? { frameTurn } : {}) === null) return false
   for (let i = offset + 1; i < slice.length; i++) {
     const s = slice[i]!
     if (s.dropped) continue
@@ -621,7 +622,8 @@ export async function matchRange(
       return 'pressed'
     }
     // A turned app replays its taps at their points (`namedTap`), so the swipe before one is compared as any other.
-    if (compared(raw) && !skipCompare && !named && (!!before?.interfaceTurn || !swipeBeforeNamedTap(slice, offset))) await compareNow()
+    const swipeTurn = raw.kind === 'swipe' && raw.space === 'frame' ? frameTurnOf(tap.chrome()) : undefined
+    if (compared(raw) && !skipCompare && !named && (!!before?.interfaceTurn || !swipeBeforeNamedTap(slice, offset, swipeTurn))) await compareNow()
     // Read while the screen was late, the tree may not hold what the person tapped (an alert's OK under a spinner): read
     // again, and named from that, the tap goes to its element rather than to a point on a screen that has moved.
     if (midTransition && await leftUnsent()) continue

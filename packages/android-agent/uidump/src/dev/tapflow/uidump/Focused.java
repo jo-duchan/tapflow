@@ -60,6 +60,9 @@ public final class Focused {
     if ("release".equals(mode)) { release(); return "{}"; }
     if (held != null) {
       try {
+        // A held connection keeps the node cache across requests, and nothing clears it for a screen Compose changed
+        // in place: Compose sends UiAutomation no events, so the cache would answer with the screen before.
+        clearCache(held);
         return answer(mode, textLine, held);
       } catch (Exception e) {
         return "{\"error\":" + str(String.valueOf(e)) + "}";
@@ -140,12 +143,46 @@ public final class Focused {
       withWindows(automation);
       heldWrapper = wrapper;
       held = automation;
+      // Paid here rather than by the next touch's hit: the window list fills over a few reads after connecting (Hit).
+      settleWindows(automation);
       return "{\"held\":true}";
     } catch (InvocationTargetException e) {
       quitHandlerThread(wrapper);
       return "{\"error\":" + str(String.valueOf(e.getCause())) + "}";
     } catch (Exception e) {
       return "{\"error\":" + str(String.valueOf(e)) + "}";
+    }
+  }
+
+  /** `UiAutomation.clearCache()` from API 34, the process-wide interaction client's before it. */
+  private static void clearCache(UiAutomation automation) {
+    try {
+      automation.getClass().getMethod("clearCache").invoke(automation);
+      return;
+    } catch (ReflectiveOperationException | RuntimeException e) {
+      // Older: the client below.
+    }
+    try {
+      Class<?> client = Class.forName("android.view.accessibility.AccessibilityInteractionClient");
+      Object instance = client.getMethod("getInstance").invoke(null);
+      client.getMethod("clearCache").invoke(instance);
+    } catch (ReflectiveOperationException | RuntimeException e) {
+      // Nothing to clear with: the answer may be the cache's.
+    }
+  }
+
+  /** Until the window list holds an app window and has not changed for 120 ms, at most 400 ms. */
+  private static void settleWindows(UiAutomation automation) throws InterruptedException {
+    long end = System.nanoTime() + 400_000_000L;
+    int seen = -1;
+    long since = System.nanoTime();
+    while (System.nanoTime() < end) {
+      java.util.List<AccessibilityWindowInfo> windows = automation.getWindows();
+      boolean app = false;
+      for (AccessibilityWindowInfo w : windows) app |= w.getType() == AccessibilityWindowInfo.TYPE_APPLICATION;
+      if (!app || windows.size() != seen) { seen = app ? windows.size() : -1; since = System.nanoTime(); }
+      else if (System.nanoTime() - since >= 120_000_000L) return;
+      Thread.sleep(10);
     }
   }
 

@@ -151,6 +151,50 @@ describe('TouchWatch', () => {
     expect(sent[1]!.observation).not.toHaveProperty('acted')
   })
 
+  // Review of P4: a slow drag (a pull to refresh) leaves a spinner drawing every vsync, not a list gliding.
+  it('reads a tap after a slow drag as not moving', async () => {
+    const drawing = Array.from({ length: 60 }, (_, i) => 1_000 + i * 16)
+    const scrolling = [{ c: 'android.widget.TextView', t: 'Row 8', b: [0, 0, 10, 10] }, { c: 'androidx.recyclerview.widget.RecyclerView', k: 16, b: [0, 0, 10, 10] }]
+    const { watch, sent, advance } = rig({ answers: [{}, { branch: scrolling }], frames: drawing })
+    watch.down(0.5, 0.3, { x: 0.5, y: 0.3 })
+    for (let i = 1; i <= 10; i++) { advance(100); watch.move(0.5, 0.3 + i * 0.02) }
+    advance(100)
+    watch.up('s1', 'pull')
+    advance(400)
+    watch.down(0.5, 0.5, { x: 0.5, y: 0.5 })
+    advance(80)
+    watch.up('s1', 'tap')
+    await watch.settled()
+    expect(sent[1]!.observation).toMatchObject({ moving: false, element: { label: 'Row 8' } })
+  })
+
+  // Review of P4: iOS counts every touch-down; a first tap in the app that went unreported must not leave the second
+  // reading as the first, which says it opened the app.
+  it('leaves seq out for the rest of a process once a touch in it may have gone uncounted', async () => {
+    let pid = 100
+    const { watch, sent, tap, advance } = rig({ pid: () => pid, answers: [{}, { readAfterMs: 500 }, {}, {}] })
+    tap(0.5, 0.5)
+    advance(1_000)
+    tap(0.5, 0.5)
+    advance(1_000)
+    tap(0.5, 0.5)
+    await watch.settled()
+    pid = 200
+    advance(1_000)
+    tap(0.5, 0.5)
+    await watch.settled()
+    expect(sent.map((m) => m.observation.seq)).toEqual([1, undefined, 1])
+  })
+
+  // Review of P4: the frames take up to 3 s to read, and a reboot in that time stops the watch.
+  it('sends nothing for a touch whose frames came back after the watch stopped', async () => {
+    const { watch, sent, tap, deps } = rig()
+    deps.framestats.mockImplementation(async () => { watch.stop(); return '' })
+    tap(0.5, 0.5)
+    await watch.settled()
+    expect(sent).toEqual([])
+  })
+
   it('reports nothing for a cancelled gesture, or once stopped', async () => {
     const { watch, sent, tap } = rig()
     watch.down(0.5, 0.5, { x: 0.5, y: 0.5 })

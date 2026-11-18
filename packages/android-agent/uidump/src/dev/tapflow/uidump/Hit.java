@@ -51,7 +51,8 @@ final class Hit {
       if (app && windows.size() == seen) break;
       seen = app ? windows.size() : -1;
       Thread.sleep(5);
-    }    windows.sort((a, b) -> Integer.compare(b.getLayer(), a.getLayer()));
+    }
+    windows.sort((a, b) -> Integer.compare(b.getLayer(), a.getLayer()));
     if (screen == null) {
       screen = new Rect();
       Rect r = new Rect();

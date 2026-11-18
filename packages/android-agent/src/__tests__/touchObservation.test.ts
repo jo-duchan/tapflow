@@ -58,6 +58,9 @@ describe('seenAt', () => {
     expect(JSON.stringify(seen)).not.toContain('qa@wdio.dev')
     const password = seenAt(hitOf([node('android.view.View', { d: 'secret', k: 8 })]), APP)
     expect(password).toMatchObject({ observation: {} })
+    // Editable whatever its class: its description can be the value.
+    const custom = seenAt(hitOf([node('com.facebook.react.views.textinput.ReactEditText2', { d: 'qa@wdio.dev', k: 4 })]), APP)
+    expect(JSON.stringify(custom)).not.toContain('qa@wdio.dev')
   })
 
   it('leaves out the window decor ids, and cuts a long name', () => {
@@ -157,5 +160,12 @@ describe('judgeTouch', () => {
     expect(judgeTouch(facts({ frames: gliding, swipeEndNs: DOWN - 4_000 * ms, seen: seen({ scrollable: true }) })).moving).toBe(false)
     expect(judgeTouch(facts({ frames: gliding, swipeEndNs: DOWN - 1_000 * ms })).moving).toBe(false)
     expect(judgeTouch(facts({ frames: frames(-150, -100, -50, -17), swipeEndNs: DOWN - 1_000 * ms, seen: seen({ scrollable: true }) })).moving).toBe(false)
+  })
+
+  // Review of P4: a list the touch stopped stops drawing (measured: no frame after the down, Compose LazyColumn); a
+  // spinner or a shimmer draws on through it, and is no list to stop.
+  it('is not moving where the app goes on drawing through the touch', () => {
+    const through = frames(-150, -133, -117, -100, -83, -67, -50, -33, -17, 0, 17, 33, 50, 67, 83, 100, 117, 133)
+    expect(judgeTouch(facts({ frames: through, swipeEndNs: DOWN - 1_000 * ms, seen: seen({ scrollable: true }) })).moving).toBe(false)
   })
 })

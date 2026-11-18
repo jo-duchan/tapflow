@@ -26,6 +26,11 @@ const TAP_SLOP = 0.02
 /** A tap this soon after a tap at about the same spot is its repeat (ViewConfiguration's double-tap timeout). */
 const DOUBLE_TAP_MS = 300
 const DOUBLE_TAP_SLOP = 0.1
+/** A release faster than this (fractions of the screen a second, over its last 100 ms) is a fling, which can leave a
+ *  list gliding; a slower one (a drag, a pull to refresh) leaves nothing that a tap would stop. ~1200 px/s on a phone. */
+const FLING_SPEED = 0.5
+const FLING_WINDOW_MS = 100
+const OFFSET_SAMPLES = 16
 /** Under the field server's 60 s idle exit. */
 const KEEP_ALIVE_MS = 30_000
 /** After the verdict window, before the frames are read: a frame completing at its edge is in the dump. */
@@ -39,6 +44,8 @@ interface Gesture {
   y: number
   point: { x: number; y: number }
   moved: number
+  /** The down and the latest moves, for the release's speed. */
+  moves: Array<{ x: number; y: number; at: number }>
   hit: Promise<{ answer: string; writtenAt: number } | null>
   tapCount: number
   previousTapUpAt?: number
@@ -54,11 +61,17 @@ interface Gesture {
  */
 export class TouchWatch {
   private current: Gesture | null = null
-  private last: { tap: boolean; upAt: number; x: number; y: number; tapCount: number } | null = null
-  /** Device CLOCK_MONOTONIC ns minus `now`'s ns, the smallest seen: the one-way delay at its least. */
-  private offsetNs: number | undefined
+  private last: { tap: boolean; fling: boolean; upAt: number; x: number; y: number; tapCount: number } | null = null
+  /** Device CLOCK_MONOTONIC ns minus `now`'s ns, the smallest of the last few: the one-way delay at its least. Recent
+   *  ones only, so a device clock that drifts ahead of the host's (a real device's crystal, 20–50 ppm) is followed. */
+  private readonly offsets: number[] = []
   private pid: number | undefined
   private seq = 0
+  /** A touch in the app may have gone uncounted (its hit late, its frames unread): `seq` is unknown until a new process.
+   *  iOS counts every touch-down, reported or not, and a first tap counted as second reads as the one that opened the
+   *  app (`openedTheApp`). */
+  private lost = false
+  private seqUnknown = false
   private tail: Promise<void> = Promise.resolve()
   private stopped = false
   private readonly keepAlive: ReturnType<typeof setInterval>
@@ -84,18 +97,22 @@ export class TouchWatch {
     const last = this.last
     const repeat = last?.tap && downAt - last.upAt <= DOUBLE_TAP_MS && Math.hypot(x - last.x, y - last.y) <= DOUBLE_TAP_SLOP
     this.current = {
-      downAt, x, y, point, moved: 0,
+      downAt, x, y, point, moved: 0, moves: [{ x, y, at: downAt }],
       // Asked after the down was sent, never on its path; queued with the device's other UiAutomation requests.
       hit: this.deps.hit(this.serial, x, y).catch(() => null),
       tapCount: repeat ? last.tapCount + 1 : 1,
       ...(last?.tap ? { previousTapUpAt: last.upAt } : {}),
-      ...(last && !last.tap ? { swipeEndAt: last.upAt } : {}),
+      ...(last?.fling ? { swipeEndAt: last.upAt } : {}),
     }
   }
 
   move(x: number, y: number): void {
     const g = this.current
-    if (g) g.moved = Math.max(g.moved, Math.hypot(x - g.x, y - g.y))
+    if (!g) return
+    g.moved = Math.max(g.moved, Math.hypot(x - g.x, y - g.y))
+    const at = this.now()
+    g.moves.push({ x, y, at })
+    while (g.moves.length > 2 && g.moves[1]!.at <= at - FLING_WINDOW_MS) g.moves.shift()
   }
 
   up(sessionId: string, requestId: string): void {
@@ -104,7 +121,10 @@ export class TouchWatch {
     if (!g || this.stopped) return
     g.upAt = this.now()
     const tap = g.moved <= TAP_SLOP
-    this.last = { tap, upAt: g.upAt, x: g.x, y: g.y, tapCount: tap ? g.tapCount : 0 }
+    const first = g.moves[0], end = g.moves.at(-1)
+    const span = first && end ? Math.max(g.upAt - first.at, 1) : 0
+    const fling = !tap && span > 0 && Math.hypot(end!.x - first!.x, end!.y - first!.y) / (span / 1000) >= FLING_SPEED
+    this.last = { tap, fling, upAt: g.upAt, x: g.x, y: g.y, tapCount: tap ? g.tapCount : 0 }
     // One at a time, in the order the touches ended: a touch's `seq` is its place among them.
     this.tail = this.tail.then(() => this.report(sessionId, requestId, g, !tap)).catch(() => {})
   }
@@ -129,20 +149,26 @@ export class TouchWatch {
   private async report(sessionId: string, requestId: string, g: Gesture, moved: boolean): Promise<void> {
     const res = await g.hit
     const hit = parseHit(res?.answer)
-    if (!res || !hit || this.stopped) return
-    const sample = hit.rx - res.writtenAt * MS
-    this.offsetNs = this.offsetNs === undefined ? sample : Math.min(this.offsetNs, sample)
-    const device = (ms: number) => Math.round(ms * MS + this.offsetNs!)
+    if (this.stopped) return
+    if (!res || !hit) { this.lost = true; return }
+    this.offsets.push(hit.rx - res.writtenAt * MS)
+    if (this.offsets.length > OFFSET_SAMPLES) this.offsets.shift()
+    const offsetNs = Math.min(...this.offsets)
+    const device = (ms: number) => Math.round(ms * MS + offsetNs)
     const downNs = device(g.downAt), upNs = device(g.upAt!)
-    if (hit.done === undefined || hit.done > Math.min(downNs + LONG_PRESS_MS * MS, upNs)) return
+    if (hit.done === undefined || hit.done > Math.min(downNs + LONG_PRESS_MS * MS, upNs)) { this.lost = true; return }
     const pkg = this.appPackage()
     if (!pkg) return
     const seen = seenAt(hit, pkg)
-    if (!seen || seen.kind !== 'app') return
+    // Known to be elsewhere (the launcher, another app): not the app's touch, so nothing is lost by it.
+    if (seen?.kind === 'elsewhere') return
+    if (!seen) { this.lost = true; return }
     const wait = g.upAt! + AFTER_NS / MS + SETTLE_MS - this.now()
     if (wait > 0) await this.sleep(wait)
     if (this.stopped) return
     const frames = parseFramestats(await this.deps.framestats(this.serial, pkg).catch(() => ''))
+    // Up to 3 s for the read: a reboot or a relay loss in it stopped this watch.
+    if (this.stopped) return
     const { moving, acted } = judgeTouch({
       frames, downNs, upNs, moved, seen,
       ...(g.swipeEndAt !== undefined ? { swipeEndNs: device(g.swipeEndAt) } : {}),
@@ -150,9 +176,14 @@ export class TouchWatch {
     })
     // Counted in the app's process, as iOS counts: a new process starts again at 1.
     let seq: number | undefined
-    if (frames) {
-      if (frames.pid !== this.pid) { this.pid = frames.pid; this.seq = 0 }
-      seq = ++this.seq
+    if (!frames) this.lost = true
+    else {
+      // A touch lost before this one may have been this process's first: its count starts unknown.
+      if (frames.pid !== this.pid) { this.pid = frames.pid; this.seq = 0; this.seqUnknown = this.lost }
+      else if (this.lost) this.seqUnknown = true
+      this.lost = false
+      this.seq++
+      if (!this.seqUnknown) seq = this.seq
     }
     const observation: TouchObservation = {
       point: g.point,

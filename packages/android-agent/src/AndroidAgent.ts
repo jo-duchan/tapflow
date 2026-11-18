@@ -3125,8 +3125,9 @@ export class AndroidAgent implements DeviceAgent, NetworkControlCapability {
           state.lastTouchPx = { x: px, y: py }
           this.fire(g.owner.touchDown(0, px, py))
         }
-        // After the down is sent: what it hit is asked off the touch's path.
-        if (g) this.touchWatches.get(state.deviceId)?.down(x, y, state.rotation ? toNaturalPoint(state.rotation, x, y) : { x, y })
+        // After the down is sent: what it hit is asked off the touch's path. Not on the adb fallback (`helper`), which
+        // plays the whole gesture once its end arrives, so the down's time is not when the app saw it.
+        if (g?.via === 'channel') this.touchWatches.get(state.deviceId)?.down(x, y, state.rotation ? toNaturalPoint(state.rotation, x, y) : { x, y })
         break
       }
       case 'input:touch:move': {

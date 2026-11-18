@@ -136,7 +136,8 @@ export function seenAt(hit: HitAnswer, appPackage: string): Seen | null {
 /** A node as an `ObservedElement`, or `null` for one the tree would not let a selector find by name. */
 function observedOf(n: HitNode, hit: HitAnswer): ObservedElement | null {
   const role = toRole(n.c ?? '')
-  const input = role === 'input' || ((n.k ?? 0) & K_PASSWORD) !== 0
+  // Editable whatever its class (a custom view, React Native): a content description there can hold the value.
+  const input = role === 'input' || ((n.k ?? 0) & (K_EDITABLE | K_PASSWORD)) !== 0
   const identifier = n.id && !DECOR_IDS.has(n.id) ? n.id.slice(0, OBSERVED_TEXT_MAX) : undefined
   const label = input ? undefined : (n.t || n.d || '').slice(0, OBSERVED_TEXT_MAX) || undefined
   if (!identifier && !label) return null
@@ -208,6 +209,9 @@ const BEFORE_NS = 150 * MS
 export const AFTER_NS = 800 * MS
 /** A list still gliding draws every vsync: at least this many in [down−150, down−10] ms (60 Hz gives ~8). */
 const GLIDING_FRAMES = 6
+/** …and stops when the touch stops it: no more than this many from 50 ms after the down to the end of the verdict
+ *  window. A spinner or a shimmer goes on drawing through the touch, and is not a list the touch stopped. */
+const STOPPED_FRAMES = 3
 /** A fling that left a list gliding ended this recently. */
 export const GLIDE_AFTER_SWIPE_NS = 3_000 * MS
 /** More frames than a View row's one redraw: a control that answered (m3: 6–53 on Compose and React Native). */
@@ -241,6 +245,7 @@ export function judgeTouch(f: TouchFacts): { moving: boolean; acted?: boolean } 
     && f.swipeEndNs !== undefined && f.downNs - f.swipeEndNs <= GLIDE_AFTER_SWIPE_NS
     && f.seen.scrollable
     && count(f.downNs - BEFORE_NS, f.downNs - 10 * MS) >= GLIDING_FRAMES
+    && count(f.downNs + 50 * MS, f.upNs + AFTER_NS) <= STOPPED_FRAMES
   if (!covered || f.moved || f.seen.opaque || f.seen.observation.surface) return { moving }
   if (f.previousTapUpNs !== undefined && f.downNs - f.previousTapUpNs < AFTER_NS) return { moving }
   if (count(f.downNs - BEFORE_NS, f.downNs) > 0) return { moving }

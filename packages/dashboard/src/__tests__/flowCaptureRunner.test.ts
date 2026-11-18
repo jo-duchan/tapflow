@@ -1229,6 +1229,19 @@ describe('matchRange with the app\'s touch reports', () => {
     expect(flowsAsSteps()).toEqual([['scroll down', 'tapOn'], ['scroll up', 'tapOn']])
   })
 
+  // Review of P4: off the frame's middle, an unturned point falls outside the band `scroll` takes, and the swipe was
+  // compared by its picture, which a fling's length makes differ.
+  it('does not compare an Android swipe before a named tap by the frame it was sent in', async () => {
+    screen.elements = [orders]
+    const sideways = { ...(tap as object), platform: 'android', chrome: () => ({ streamRotation: 90 }) } as unknown as Tap
+    const swipe = { ...base, kind: 'swipe', from: [0.8, 0.75], to: [0.3, 0.75], space: 'frame', durationMs: 300 } as unknown as RawStep
+    const { compare, h } = compareHooks()
+    const lease = new PauseLease(sideways)
+    await matchRange(sideways, channel, lease, [launchStep, tapStep, tapStep, swipe, named], { start: 0, end: 5 }, null, h)
+    await lease.stop()
+    expect(compare.mock.calls.map((c) => c[0])).not.toContain(swipe)
+  })
+
   it('falls back to the picture and the recorded point when the element is found neither way', async () => {
     screen.elements = []
     ran.answers = [{ status: 'failed', failureKind: 'product' }, { status: 'failed', failureKind: 'product' }]

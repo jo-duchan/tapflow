@@ -172,19 +172,21 @@ describe('AdbWrapper through the field server', () => {
     expect(r.execInput).not.toHaveBeenCalled()
   })
 
-  // P4: a held connection refuses the tree dump's own, so the dump lets go of it and the hold comes back after.
-  it('lets go of a held connection around a tree dump, and holds it again while a person is recorded', async () => {
+  // P4: a held connection refuses the tree dump's own, so the dump lets go of it; the next ping or hit holds it again,
+  // not the dump, which a replay runs before every step.
+  it('lets go of a held connection for a tree dump, and a ping holds it again while a person is recorded', async () => {
     const server = fakeServer((op) => (op === 'hold' ? '{"held":true}' : '{}'))
     const r = runner(server)
     const adb = new AdbWrapper(r)
     await adb.holdConnection('emulator-5554', true)
     await adb.dumpUiHierarchy('emulator-5554').catch(() => {})
-    expect(server.lines.map((l) => l.split(' ')[1])).toEqual(['hold', 'release', 'hold'])
-    const dumpAt = vi.mocked(r.exec).mock.invocationCallOrder.at(-1)!
-    expect(dumpAt).toBeGreaterThan(0)
+    expect(server.lines.map((l) => l.split(' ')[1])).toEqual(['hold', 'release'])
+    await adb.pingFocusedServer('emulator-5554')
+    await adb.pingFocusedServer('emulator-5554')
+    expect(server.lines.map((l) => l.split(' ')[1])).toEqual(['hold', 'release', 'hold', 'ping'])
     await adb.holdConnection('emulator-5554', false)
-    await adb.dumpUiHierarchy('emulator-5554').catch(() => {})
-    expect(server.lines.map((l) => l.split(' ')[1])).toEqual(['hold', 'release', 'hold', 'release'])
+    await adb.pingFocusedServer('emulator-5554')
+    expect(server.lines.map((l) => l.split(' ')[1])).toEqual(['hold', 'release', 'hold', 'ping', 'release', 'ping'])
   })
 
   it('holds again before a hit when the server lost its hold, and says when the hit went out', async () => {
