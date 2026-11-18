@@ -187,6 +187,9 @@ interface Waiter {
    *  keying per session "is not available"; it is available now, by putting the id on the record rather than
    *  by guessing it. */
   sessionId?: string
+  /** The socket the request went out on: a socket's close settles its own waiters, not those of the socket that
+   *  replaced it, whose answers can still arrive (CodeRabbit on #1190). Null when none was open. */
+  socket: WebSocket | null
 }
 
 /** What a refused boot tells the calling agent, per `BootRefusalReason`: a reason added to the union is a compile
@@ -562,7 +565,8 @@ export class TapflowClient {
         if (this.ws === ws) this.ws = null
         const detail = this.closeDetail()
         const closed = `WebSocket closed${detail}`
-        const pending = this.waiters.splice(0)
+        const pending = this.waiters.filter((w) => w.socket === ws || w.socket === null)
+        this.waiters = this.waiters.filter((w) => !pending.includes(w))
         for (const w of pending) {
           clearTimeout(w.timer)
           // The other place a waiter is settled without an answer, so the other place the note belongs. A
@@ -815,7 +819,7 @@ export class TapflowClient {
         const note = sessionId ? this.sessionNote(sessionId) : undefined
         reject(new RequestTimeoutError(note ? `Request timed out — ${note}` : 'Request timed out'))
       }, timeoutMs)
-      this.waiters.push({ predicate, resolve, reject, timer, sessionId })
+      this.waiters.push({ predicate, resolve, reject, timer, sessionId, socket: this.ws })
     })
   }
 

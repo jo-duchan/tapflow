@@ -636,6 +636,19 @@ describe('TapflowClient', () => {
       await expect(client.tap('sess-2', 0.1, 0.1)).resolves.toBeUndefined()
     })
 
+    // CodeRabbit on #1190: the old socket's close settles only its own waiters; a tap waiting on the new one keeps
+    // waiting, and here resolves on the optimistic path a session that never acked takes, not as "could not confirm".
+    it('an old socket closing after a reconnect does not fail a request waiting on the new one', async () => {
+      relay.setInputAck('none')
+      const old = client['ws']!
+      await client.connect()
+      const tap = client.tap('sess-NEW', 0.1, 0.1)
+      const closed = new Promise((r) => old.once('close', r))
+      old.close()
+      await closed
+      await expect(tap).resolves.toBeUndefined()
+    })
+
     it('a leave with no swipe open sends the leave alone', async () => {
       client.disconnectDevice('sess-1')
       await client.tap('sess-2', 0.1, 0.1)
