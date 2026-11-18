@@ -1167,6 +1167,30 @@ describe('toFlowSteps', () => {
     expect(flow.steps[0]!.step).toMatchObject({ type: 'scroll', direction: 'down' })
   })
 
+  // A sideways swipe on a row of a vertical list reveals its Delete; as a scroll, the engine's swipe across the middle
+  // of the screen would reveal another row's, or none.
+  it('keeps a sideways swipe in a vertical list as a swipe', () => {
+    const [swipe, tap] = new Rec().touch([[0.8, 0.35], [0.4, 0.35]]).touch([[0.9, 0.35]]).steps()
+    const table = el({ role: 'list', frame: { x: 0, y: 0.1, width: 1, height: 0.8 } })
+    const row = (x: number) => el({ role: 'cell', label: 'Mail from Ann', frame: { x, y: 0.3, width: 1, height: 0.1 } })
+    const del = el({ role: 'button', label: 'Delete', frame: { x: 0.8, y: 0.3, width: 0.2, height: 0.1 } })
+    const flow = toFlowSteps([matchStep(swipe!, ctxOf([table, row(0), ...list(3)])), matchStep(tap!, ctxOf([table, row(-0.2), del, ...list(3)]))])
+    expect(flow.steps.map((s) => s.step?.type)).toEqual(['swipe', 'tapOn'])
+  })
+
+  // A carousel inside a vertical list scrolls sideways: the innermost list decides.
+  it('takes a sideways swipe in a carousel inside a vertical list for a scroll', () => {
+    const [swipe, tap] = new Rec().touch([[0.8, 0.35], [0.2, 0.35]]).touch([[0.5, 0.35]]).steps()
+    const table = el({ role: 'list', frame: { x: 0, y: 0, width: 1, height: 1 } })
+    const carousel = el({ role: 'list', frame: { x: 0, y: 0.25, width: 1, height: 0.2 } })
+    const card = (n: number, x: number) => el({ role: 'cell', label: `Card ${n}`, frame: { x, y: 0.27, width: 0.4, height: 0.16 } })
+    const flow = toFlowSteps([
+      matchStep(swipe!, ctxOf([table, carousel, card(1, 0.05), card(2, 0.55)])),
+      matchStep(tap!, ctxOf([table, carousel, card(2, -0.05), card(3, 0.45)])),
+    ])
+    expect(flow.steps[0]!.step).toMatchObject({ type: 'scroll', direction: 'right' })
+  })
+
   // Review: a screen wrapped whole in a scroll view, where a drag opened another screen that has none.
   it('keeps a swipe begun in a scroll view when the next screen has none there', () => {
     const [swipe, tap] = new Rec().touch([[0.5, 0.8], [0.5, 0.3]]).touch([[0.5, 0.55]]).steps()

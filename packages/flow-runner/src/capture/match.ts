@@ -564,6 +564,36 @@ export interface CapturedFlow {
  * screen wrapped whole in a scroll view, where a drag that opens another screen began "inside" one too; a new screen
  * with a list in the same place is not told apart.
  */
+/** The smallest scroll container the tree names at a point: a carousel inside a vertical list is the carousel. */
+function innermostList(tree: readonly UIElement[], point: Point): UIElement | undefined {
+  const holds = (f: UIElement['frame']) => point[0] >= f.x && point[0] <= f.x + f.width && point[1] >= f.y && point[1] <= f.y + f.height
+  let best: UIElement | undefined
+  for (const e of tree) {
+    if (e.role !== 'list' || !holds(e.frame)) continue
+    if (!best || e.frame.width * e.frame.height < best.frame.width * best.frame.height) best = e
+  }
+  return best
+}
+
+/**
+ * The way a list scrolls, which the tree does not say: the way its items are laid out — stacked (one column) is
+ * vertical, side by side (one row) horizontal. A grid, or a list with one item, by its frame, with the height counted
+ * twice: frames are in parts of the screen, and a phone held upright is about twice as tall as it is wide.
+ */
+function listAxis(tree: readonly UIElement[], list: UIElement): 'x' | 'y' {
+  const f = list.frame
+  const centres = tree.filter((e) => e !== list && e.role !== 'list').map((e) => [e.frame.x + e.frame.width / 2, e.frame.y + e.frame.height / 2] as const)
+    .filter(([x, y]) => x >= f.x && x <= f.x + f.width && y >= f.y && y <= f.y + f.height)
+  const spread = (vs: number[]) => Math.max(...vs) - Math.min(...vs)
+  if (centres.length >= 2) {
+    const sx = spread(centres.map((c) => c[0]))
+    const sy = spread(centres.map((c) => c[1]))
+    if (sx < 0.02 && sy >= 0.02) return 'y'
+    if (sy < 0.02 && sx >= 0.02) return 'x'
+  }
+  return f.height * 2 >= f.width ? 'y' : 'x'
+}
+
 function insideList(before: readonly UIElement[], after: readonly UIElement[] | undefined, from: Point): boolean {
   const holds = (f: UIElement['frame'], p: Point) => p[0] >= f.x && p[0] <= f.x + f.width && p[1] >= f.y && p[1] <= f.y + f.height
   const same = (a: UIElement['frame'], b: UIElement['frame']) => Math.abs(a.x - b.x) < 0.01 && Math.abs(a.y - b.y) < 0.01
@@ -601,6 +631,10 @@ export function toFlowSteps(matched: readonly CapturedStep[]): CapturedFlow {
     // fling past a whole screen of one stays a swipe, replayed as it was made.
     const axis = direction === 'up' || direction === 'down' ? 'y' : 'x'
     const sign = Math.sign(axis === 'y' ? swipe.step.to[1] - swipe.step.from[1] : swipe.step.to[0] - swipe.step.from[0])
+    // Across the list it began in (sideways in a vertical list) is a row's own gesture — revealing its Delete — which the
+    // engine's swipe across the middle of the screen would make on another row, or none: it stays a swipe.
+    const list = innermostList(swipe.tree, swipe.step.from)
+    if (list && listAxis(swipe.tree, list) !== axis) continue
     const moved = !!next.tree && progress(swipe.tree, next.tree, axis, sign, []) === 'moved'
     if (!moved && !insideList(swipe.tree, next.tree, swipe.step.from)) continue
     steps[i] = { raw: swipe.raw, step: { type: 'scroll', direction, until: next.step.selector }, auto: true }
