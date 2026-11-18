@@ -63,6 +63,12 @@ describe('parseBackfills', () => {
     expect(parseBackfills(body('Backfills: #413 — the shortcuts never worked before it'))).toEqual([413])
   })
 
+  it('reads full hashes in the list but ignores references in the explanation', () => {
+    const sha = '1234567890abcdef'.repeat(2) + '12345678'
+    expect(parseBackfills(body(`Backfills: #202 — compare with ${sha} and #413`))).toEqual([202])
+    expect(parseBackfills(body(`Backfills: ${sha.toUpperCase()}, and #202`))).toEqual([sha, 202])
+  })
+
   it.each([
     ['a shorter fence nested inside a longer one', '````md', '```md', 'Backfills: #413', '```', '````', 'Backfills: #414'],
     ['a closing fence with an info string', '```md', '``` not-a-close', 'Backfills: #413', '```', 'Backfills: #414'],

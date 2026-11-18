@@ -14,6 +14,7 @@
 import { execFileSync } from 'child_process'
 import { pathToFileURL } from 'url'
 import { readFileSync, realpathSync } from 'fs'
+import { inspect } from 'node:util'
 import {
   changedOverrideKeys,
   overrideKeyName,
@@ -121,6 +122,8 @@ export function prNumberOf(subject) {
  */
 export function parseBackfills(body) {
   const out = []
+  const reference = /(?:#(\d+)|([0-9a-f]{40}))\b/iy
+  const separator = /(?:\s*,\s*(?:and\s+)?|\s+(?:and\s+)?)/iy
   // Frontmatter skipped: `Backfills:` there is a YAML key, not a claim. Fences and indented
   // blocks skipped for the same reason `extractReason` skips them — the audit's own failure
   // message prints `Backfills: #413` indented, and CONTRIBUTING, AGENTS and /release all carry
@@ -128,8 +131,12 @@ export function parseBackfills(body) {
   for (const { line } of proseLines(body, { skipFrontmatter: true })) {
     const m = /^Backfills:\s*(.+?)\s*$/i.exec(line)
     if (!m) continue
-    for (const [ref, pr] of m[1].matchAll(/#(\d+)|\b[0-9a-f]{40}\b/gi)) {
-      out.push(pr === undefined ? ref.toLowerCase() : Number(pr))
+    reference.lastIndex = 0
+    for (let ref = reference.exec(m[1]); ref; ref = reference.exec(m[1])) {
+      out.push(ref[1] === undefined ? ref[2].toLowerCase() : Number(ref[1]))
+      separator.lastIndex = reference.lastIndex
+      if (!separator.test(m[1])) break
+      reference.lastIndex = separator.lastIndex
     }
   }
   return out
@@ -144,6 +151,31 @@ export function parseBackfills(body) {
 export function isReleaseBranch(consumedChangesets, changedFiles) {
   if (consumedChangesets.length === 0) return false
   return changedFiles.some((f) => /(^|\/)CHANGELOG\.md$/.test(f))
+}
+
+function isAuditRelease(consumed, written, before, after) {
+  if (!isReleaseBranch(consumed, written)) return false
+  // A changelog edit can accompany ordinary cleanup. Changesets also writes a new version
+  // heading in the changelog of a package it bumps.
+  return written.some((file) => {
+    if (!/^packages\/[^/]+\/package\.json$/.test(file)) return false
+    const changelog = file.replace(/package\.json$/, 'CHANGELOG.md')
+    if (!written.includes(changelog)) return false
+    const previous = packageVersionAt(before, file)
+    const next = packageVersionAt(after, file)
+    return previous !== null && next !== null && previous !== next
+      && blobAt(after, changelog)?.split('\n').some((line) => line.trim() === `## ${next}`)
+  })
+}
+
+function packageVersionAt(rev, file) {
+  const body = blobAt(rev, file)
+  try {
+    const manifest = JSON.parse(body)
+    return typeof manifest?.version === 'string' ? manifest.version : null
+  } catch {
+    return null
+  }
 }
 
 /** Would a user of a released tapflow notice this file changing? Exported for the tests. */
@@ -368,12 +400,14 @@ export function ignoredOnlyChangesets(files, ignored, read) {
  * can need it for one of them.
  */
 export function changelogEntryOwed(files, read) {
-  return files.filter((f) => {
-    for (const { line } of proseLines(read(f), { skipFrontmatter: true })) {
-      if (/^<!--\s*changelog:\s*internal\b.*-->$/.test(line)) return false
-    }
-    return true
-  })
+  return files.filter((f) => !isInternalChangeset(read(f)))
+}
+
+function isInternalChangeset(note) {
+  for (const { line } of proseLines(note, { skipFrontmatter: true })) {
+    if (/^<!--\s*changelog:\s*internal\b.*-->$/.test(line)) return true
+  }
+  return false
 }
 
 function main() {
@@ -434,7 +468,8 @@ function main() {
         const status = entries[i++][0]
         const previous = entries[i++]
         const file = status === 'R' || status === 'C' ? entries[i++] : previous
-        files.push(file) // Deletions also affect what ships.
+        files.push(file)
+        if (status === 'R') files.push(previous)
         if (status === 'A' || status === 'M') written.push(file)
         if (!isChangeset(file)) continue
         if (status === 'D') consumed.push(file)
@@ -445,7 +480,7 @@ function main() {
         subject: rest.join(' '),
         touched,
         consumed,
-        release: isReleaseBranch(consumed, written),
+        release: isAuditRelease(consumed, written, `${sha}^1`, sha),
         changelogWritten: written.includes('CHANGELOG.md'),
       }
     })
@@ -462,19 +497,28 @@ function main() {
     const changelogClaims = new Map()
     for (const { sha, index, touched, consumed, changelogWritten } of perMerge) {
       const rootBackfills = new Map()
-      const priorRefs = (file) => parseBackfills(git('show', `${sha}^1:${file}`))
-      let removedRefs
+      const priorNote = (file) => git('show', `${sha}^1:${file}`)
+      let removed
       for (const [f, previous] of touched) {
         // Root notes and internal exemptions belong to the merge, even if its changeset is renamed later.
         const changesetCovered = liveAtHead(f) || consumedByRelease.has(f)
         const note = git('show', `${sha}:${f}`)
         const backfills = parseBackfills(note)
         if (backfills.length === 0) continue
-        // A rewrite can appear as a deletion and addition. Preserve any carried claim in that case too.
-        const earlier = previous === null
-          ? (removedRefs ??= consumed.flatMap(priorRefs))
-          : isChangeset(previous) ? priorRefs(previous) : []
-        const coversRoot = changelogWritten || changelogEntryOwed([f], () => note).length === 0
+        const internal = isInternalChangeset(note)
+        const coversRoot = changelogWritten || internal
+        let earlier = []
+        if (previous === null) {
+          // Git cannot establish a predecessor for a rewrite it reports as D/A. Keep the
+          // old claim date unless the new file makes an explicit internal exemption.
+          removed ??= consumed.map((file) => {
+            const body = priorNote(file)
+            return { refs: parseBackfills(body), internal: isInternalChangeset(body) }
+          })
+          earlier = removed.flatMap((entry) => !internal || entry.internal ? entry.refs : [])
+        } else if (isChangeset(previous)) {
+          earlier = parseBackfills(priorNote(previous))
+        }
         for (const pr of backfills) {
           if (changesetCovered && !claims.has(pr)) claims.set(pr, index)
           if (!earlier.includes(pr)) rootBackfills.set(pr, (rootBackfills.get(pr) ?? true) && coversRoot)
@@ -517,14 +561,17 @@ function main() {
       for (const { sha, pr, subject, shipped } of gaps) {
         console.error(`    ${subject}`)
         if (pr === null) console.error(`      Backfills: ${sha}`)
-        for (const f of shipped.slice(0, 5)) console.error(`      ${f}`)
+        for (const f of shipped.slice(0, 5)) {
+          console.error(`      ${/\p{Cc}/u.test(f) ? inspect(f, { breakLength: Infinity }) : f}`)
+        }
         if (shipped.length > 5) console.error(`      …and ${shipped.length - 5} more`)
       }
     }
     console.error(`
     Backfill each reported gap. For a root changelog gap, add the note under ## [Unreleased]
-    and add a new Backfills declaration to a changeset in the same PR. A change with no
-    observable effect can use an internal changeset instead of a root note.
+    and add a new Backfills declaration to a changeset in the same PR. If the reference already
+    appears in a changeset, leave that file in place and add the declaration to a separate changeset.
+    A change with no observable effect can use an internal changeset instead of a root note.
     Name the PR number, or use the full merge hash printed for merges without a PR:
 
         Backfills: #413

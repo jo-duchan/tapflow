@@ -193,6 +193,8 @@ describe('audit --audit against real git history', () => {
     const sha = git('rev-parse', 'HEAD')
     const before = audit()
     expect(before.code).toBe(1)
+    expect(before.stderr).toContain('no changeset:')
+    expect(before.stderr).toContain('no entry in the root CHANGELOG.md')
     mergePr(102, 'backfill', { [ROOT_CHANGELOG]: rootNote('Fixes a.'), '.changeset/a.md': CHANGESET(`Fixes a.\n\nBackfills: ${sha}`) })
     expect(audit().code).toBe(0)
     expect(before.stderr).toContain(`Backfills: ${sha}`)
@@ -205,11 +207,50 @@ describe('audit --audit against real git history', () => {
     expect(audit()).toMatchObject({ code: 1, stderr: expect.stringContaining(path) })
   })
 
+  it('prints a shipped filename containing a newline on one diagnostic line', () => {
+    const path = 'packages/relay/src/first\nsecond.ts'
+    mergePr(101, 'newline-path', { [path]: 'export const a = 1\n', '.changeset/a.md': CHANGESET('Fixes a.') })
+    expect(audit()).toMatchObject({
+      code: 1,
+      stderr: expect.stringContaining("      'packages/relay/src/first\\nsecond.ts'\n"),
+    })
+  })
+
+  it('reports both gaps when a published file moves outside the published tree', () => {
+    const source = 'export const a = 1\n'
+    mergePr(101, 'add-a', { [SHIPPED]: source, [ROOT_CHANGELOG]: rootNote('Adds a.'), '.changeset/a.md': CHANGESET('Adds a.') })
+    const destination = 'notes/thing.ts'
+    mergePr(102, 'move-a', { [SHIPPED]: null, [destination]: source })
+    expect(git('diff', '--name-status', '--find-renames', 'HEAD^1', 'HEAD')).toContain(`R100\t${SHIPPED}\t${destination}`)
+    const { code, stderr } = audit()
+    expect(code).toBe(1)
+    expect(stderr).toContain(`no changeset:\n\n    Merge pull request #102 from me/move-a\n      ${SHIPPED}`)
+    expect(stderr).toContain(`no entry in the root CHANGELOG.md:\n\n    Merge pull request #102 from me/move-a\n      ${SHIPPED}`)
+  })
+
   it('reports a root gap when a source merge deletes a changelog and a changeset', () => {
     const changelog = 'packages/relay/CHANGELOG.md'
     mergePr(100, 'old-notes', { [changelog]: rootNote('Earlier fix.'), '.changeset/old.md': CHANGESET('Earlier fix.') })
     mergePr(101, 'remove-old-notes', { [SHIPPED]: 'export const a = 1\n', [changelog]: null, '.changeset/old.md': null })
     expect(audit()).toMatchObject({ code: 1, stderr: expect.stringContaining('no entry in the root CHANGELOG.md') })
+  })
+
+  it('reports a source merge that updates a package changelog while dropping an obsolete changeset', () => {
+    mergePr(100, 'old-notes', {
+      'packages/relay/package.json': '{"version":"0.2.0"}\n',
+      'packages/relay/CHANGELOG.md': '## 0.2.0\n\nEarlier fix.\n',
+      [ROOT_CHANGELOG]: rootNote('Earlier fix.'),
+      '.changeset/old.md': CHANGESET('Earlier fix.'),
+    })
+    mergePr(101, 'source-and-cleanup', {
+      [SHIPPED]: 'export const a = 1\n',
+      'packages/relay/CHANGELOG.md': '## 0.2.0\n\nCorrected release notes.\n',
+      '.changeset/old.md': null,
+    })
+    const { code, stderr } = audit()
+    expect(code).toBe(1)
+    expect(stderr).toContain('no changeset:\n\n    Merge pull request #101 ')
+    expect(stderr).toContain('no entry in the root CHANGELOG.md:\n\n    Merge pull request #101 ')
   })
 
   it('recognizes a backfill when a draft first enters the changeset directory', () => {
@@ -255,10 +296,12 @@ describe('audit --audit against real git history', () => {
   it('does not clear a root gap until a later backfill names the PR and writes the root changelog', () => {
     mergePr(101, 'fix-a', { [SHIPPED]: 'export const a = 1\n', '.changeset/a.md': CHANGESET('Fixes a.') })
     mergePr(102, 'claim-without-note', { '.changeset/late.md': CHANGESET('Fixes a.\n\nBackfills: #101') })
-    expect(audit()).toMatchObject({ code: 1, stderr: expect.stringContaining('Merge pull request #101 ') })
 
-    mergePr(103, 'note-without-claim', { [ROOT_CHANGELOG]: rootNote('An unrelated note.') })
-    expect(audit().code).toBe(1)
+    mergePr(103, 'note-with-existing-claim', {
+      [ROOT_CHANGELOG]: rootNote('An unrelated note.'),
+      '.changeset/late.md': CHANGESET('Clarifies the earlier fix.\n\nBackfills: #101'),
+    })
+    expect(audit()).toMatchObject({ code: 1, stderr: expect.stringContaining('Merge pull request #101 ') })
 
     mergePr(104, 'root-backfill', {
       [ROOT_CHANGELOG]: rootNote('Fixes a.\n- An unrelated note.'),
@@ -305,6 +348,21 @@ describe('audit --audit against real git history', () => {
       '.changeset/new.md': CHANGESET('Fixes a.\n\nBackfills: #101'),
       [ROOT_CHANGELOG]: rootNote('Fixes a.'),
     })
+    expect(audit().code).toBe(0)
+  })
+
+  it('accepts a new internal exemption while deleting a public backfill for the same merge', () => {
+    mergePr(101, 'typing', { [SHIPPED]: 'export const a = 1\n' })
+    mergePr(102, 'public-backfill', {
+      '.changeset/public.md': CHANGESET('Public note pending more details.\n'.repeat(12) + '\nBackfills: #101'),
+    })
+    expect(audit()).toMatchObject({ code: 1, stderr: expect.stringContaining('no entry in the root CHANGELOG.md') })
+    mergePr(103, 'internal-backfill', {
+      '.changeset/public.md': null,
+      '.changeset/internal.md': CHANGESET('Only a type was affected.\n\n<!-- changelog: internal -->\n\nBackfills: #101'),
+    })
+    const diff = git('diff', '--name-status', '--find-renames', 'HEAD^1', 'HEAD', '--', '.changeset').split('\n')
+    expect(diff).toEqual(expect.arrayContaining(['D\t.changeset/public.md', 'A\t.changeset/internal.md']))
     expect(audit().code).toBe(0)
   })
 
@@ -426,6 +484,7 @@ describe('audit --audit against real git history', () => {
   it('does not choke on the release merge, which deletes changesets', () => {
     mergePr(101, 'fix-a', {
       'packages/relay/src/a.ts': 'export const a = 1\n',
+      'packages/relay/package.json': '{"version":"0.1.0"}\n',
       '.changeset/entry.md': CHANGESET('Fixes a.'),
       [ROOT_CHANGELOG]: rootNote('Fixes a.'),
     })
