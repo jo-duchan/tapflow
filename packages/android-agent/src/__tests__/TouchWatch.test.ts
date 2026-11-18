@@ -120,7 +120,8 @@ describe('TouchWatch', () => {
 
   it('numbers touches in the app\'s process, from 1 again in a new one', async () => {
     let pid = 100
-    const { watch, sent, tap, advance } = rig({ pid: () => pid })
+    // Each process drew before the downs: it was there for them.
+    const { watch, sent, tap, advance } = rig({ pid: () => pid, frames: [500] })
     tap(0.5, 0.5)
     advance(1_000)
     tap(0.5, 0.5)
@@ -174,7 +175,7 @@ describe('TouchWatch', () => {
   // reading as the first, which says it opened the app.
   it('leaves seq out for the rest of a process once a touch in it may have gone uncounted', async () => {
     let pid = 100
-    const { watch, sent, tap, advance } = rig({ pid: () => pid, answers: [{}, { readAfterMs: 500 }, {}, {}] })
+    const { watch, sent, tap, advance } = rig({ pid: () => pid, answers: [{}, { readAfterMs: 500 }, {}, {}], frames: [500] })
     tap(0.5, 0.5)
     advance(1_000)
     tap(0.5, 0.5)
@@ -256,6 +257,56 @@ describe('TouchWatch', () => {
     tap(0.5, 0.5)
     await watch.settled()
     expect(sent[2]!.observation.seq).toBe(1)
+  })
+
+  // Review of #1187: a new process that has drawn nothing has not shown the screen this touch was on.
+  it('counts no touch for a new process that has drawn nothing yet', async () => {
+    let pid = 100
+    let drawn: number[] = [500]
+    const { watch, sent, tap, advance } = rig({ pid: () => pid, frames: () => drawn })
+    tap(0.5, 0.5)
+    await watch.settled()
+    pid = 200
+    drawn = []
+    advance(1_000)
+    tap(0.5, 0.5)
+    await watch.settled()
+    drawn = [500]
+    advance(1_000)
+    tap(0.5, 0.5)
+    await watch.settled()
+    expect(sent.map((m) => m.observation.seq)).toEqual([1, undefined, 1])
+  })
+
+  // Review of #1187: a full ring's oldest frame is not the process's first, so a new pid there cannot be placed.
+  it('loses the count when a new process\'s ring is too full to say whether it was there for the touch', async () => {
+    let pid = 100
+    let drawn: number[] = [500]
+    const { watch, sent, tap, advance, clock } = rig({ pid: () => pid, frames: () => drawn })
+    tap(0.5, 0.5)
+    await watch.settled()
+    pid = 200
+    advance(1_000)
+    drawn = Array.from({ length: 120 }, (_, i) => clock() + 20 + i * 8)
+    tap(0.5, 0.5)
+    await watch.settled()
+    advance(1_000)
+    tap(0.5, 0.5)
+    await watch.settled()
+    expect(sent.map((m) => m.observation.seq)).toEqual([1, undefined, undefined])
+  })
+
+  // Review of #1187: a gesture cancelled on the launcher is no touch the app saw.
+  it('keeps the count across a gesture cancelled outside the app', async () => {
+    const { watch, sent, tap, advance } = rig({ answers: [{}, { pkg: 'com.google.android.apps.nexuslauncher' }, {}], frames: [500] })
+    tap(0.5, 0.5)
+    advance(1_000)
+    watch.down(0.5, 0.5, { x: 0.5, y: 0.5 })
+    watch.cancel()
+    advance(1_000)
+    tap(0.5, 0.5)
+    await watch.settled()
+    expect(sent.map((m) => m.observation.seq)).toEqual([1, 2])
   })
 
   it('reports nothing for a cancelled gesture, or once stopped', async () => {

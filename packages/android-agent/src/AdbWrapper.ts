@@ -568,6 +568,9 @@ export class AdbWrapper {
    * cannot be pushed or produced no XML. A dump with no XML is an explicit `PlatformError`, never a silent empty tree.
    */
   async dumpUiHierarchy(serial: string, timeoutSec = 10): Promise<string> {
+    // Before queueing as well: a re-hold due while this dump waits its turn would be queued ahead of it.
+    clearTimeout(this.reholdTimers.get(serial))
+    this.reholdTimers.delete(serial)
     return this.inDumpQueue(serial, async () => {
       // The dump connects its own UiAutomation, which a held one refuses: let go for it. Held again once dumps stop for
       // REHOLD_AFTER_MS, not after each: a Match or Verify replay dumps before every step, and a hold settling the window
@@ -690,7 +693,7 @@ export class AdbWrapper {
       const jar = await this.pushUidump(serial)
       if (!jar) return null
       // A server restarted since (an answer it missed, its idle exit) holds nothing: held again first.
-      if (this.holdWanted.has(serial) && !servers.isHeld(serial)) this.noteStart(serial, await servers.request(serial, jar, 'hold'))
+      if (this.holdWanted.has(serial) && !servers.isHeld(serial) && servers.mayHold(serial)) this.noteStart(serial, await servers.request(serial, jar, 'hold'))
       const outcome = await servers.request(serial, jar, 'hit', `${x.toFixed(5)} ${y.toFixed(5)}`)
       if (outcome.startFailed) this.uidumpPushed.delete(serial)
       return outcome.sent && outcome.out !== null ? { answer: outcome.out, writtenAt: outcome.writtenAt } : null
@@ -706,7 +709,7 @@ export class AdbWrapper {
       const jar = await this.pushUidump(serial)
       if (!jar) return
       // A hold a dump let go of, or a restarted server lost, comes back here before a touch has to wait for it.
-      this.noteStart(serial, await servers.request(serial, jar, this.holdWanted.has(serial) && !servers.isHeld(serial) ? 'hold' : 'ping'))
+      this.noteStart(serial, await servers.request(serial, jar, this.holdWanted.has(serial) && !servers.isHeld(serial) && servers.mayHold(serial) ? 'hold' : 'ping'))
     })
   }
 

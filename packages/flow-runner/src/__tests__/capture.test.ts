@@ -1538,6 +1538,12 @@ describe('touch reports', () => {
       expect(recordedTarget([rows[2]!], tapped)).toBe(rows[2])
       expect(matchSelector(rows, recordedSelector(tapped)!)).toEqual([rows[2]])
     })
+    // Review of #1187: an identifier only one element has (iOS, a Compose test tag) names it whatever its label says now.
+    it('keeps an element alone with an identifier no list shares, though its label changed', () => {
+      const counter = el({ label: 'Count: 4', identifier: 'counter', frame: at(0.4, 0.5) })
+      const recorded: TouchObservation = { point: { x: 0, y: 0 }, moving: false, element: { identifier: 'counter', label: 'Count: 3', traits: 1 } }
+      expect(recordedTarget([counter], recorded)).toBe(counter)
+    })
     it('names nothing for the keyboard, a web view or Flutter, a text input by its label, or a secure field', () => {
       const field = el({ role: 'input', label: 'hunter2', secure: true })
       const obs = (over: Partial<TouchObservation>): TouchObservation => ({ point: { x: 0, y: 0 }, moving: false, ...over })
@@ -1553,7 +1559,8 @@ describe('touch reports', () => {
       // The user's session ff5d3d3c: a row is a button and a text of one label; the selector finds the row alone.
       const row = [el({ role: 'button', label: 'Order#1212' }), el({ role: 'text', label: 'Order#1212' })]
       expect(matchSelector(row, recordedSelector(obs({ element: { label: 'Order#1212', traits: 1 } }))!)).toEqual([row[0]])
-      expect(recordedSelector(obs({ element: { identifier: 'row.7', label: 'x', traits: 1 } }))).toEqual({ id: 'row.7', label: 'x', exact: true })
+      expect(recordedSelector(obs({ element: { identifier: 'row.7', label: 'x', traits: 1 } }))).toEqual({ id: 'row.7' })
+      expect(recordedSelector(obs({ element: { identifier: 'com.app:id/title', label: 'Item 37', traits: 0 } }))).toEqual({ id: 'com.app:id/title', label: 'Item 37', exact: true })
       expect(recordedSelector(obs({ element: { identifier: 'form.email', traits: 0, input: true } }))).toEqual({ id: 'form.email' })
       // A button named only by its traits leaves the element's name to search by (CodeRabbit on #1167).
       expect(recordedSelector(obs({ button: { traits: 1 }, element: { label: 'Salty', traits: 0 } }))).toEqual({ label: 'Salty', exact: true })

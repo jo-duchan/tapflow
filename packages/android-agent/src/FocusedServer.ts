@@ -40,6 +40,8 @@ interface Server {
   stopping: boolean
   /** It holds a UiAutomation connection (`hold`): nothing else on the device can connect until it is released. */
   held: boolean
+  /** It answered a hold with an error (its cache cannot be cleared): not asked again until it restarts. */
+  holdRefused: boolean
   idle: ReturnType<typeof setTimeout> | undefined
 }
 
@@ -114,10 +116,18 @@ export class FocusedServers {
       server.idle = setTimeout(() => { void this.stop(serial) }, this.idleStopMs)
       server.idle.unref?.()
     }
-    if (op === 'hold' && out !== null && out.includes('"held":true')) server.held = true
+    if (op === 'hold' && out !== null) {
+      if (out.includes('"held":true')) server.held = true
+      else if (out.includes('"error"')) server.holdRefused = true
+    }
     // A release with no answer leaves the server restarted above, which lets go of the connection with the process.
     if (op === 'release') server.held = false
     return { sent: true, out, writtenAt }
+  }
+
+  /** Whether a hold would be worth asking for: the server has not refused one (a restarted server is asked again). */
+  mayHold(serial: string): boolean {
+    return this.servers.get(serial)?.holdRefused !== true
   }
 
   /** Whether the device's server holds its UiAutomation connection now. A server that died or was restarted does not. */
@@ -188,7 +198,7 @@ export class FocusedServers {
         resolveOne?.(line.slice(space + 1))
       }
     })
-    const server: Server = { child, nonce, ready, pending, exited, stopping: false, held: false, idle: undefined }
+    const server: Server = { child, nonce, ready, pending, exited, stopping: false, held: false, holdRefused: false, idle: undefined }
     this.servers.set(serial, server)
     return server
   }

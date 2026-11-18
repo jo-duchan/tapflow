@@ -230,6 +230,17 @@ describe('AdbWrapper through the field server', () => {
     await vi.waitFor(() => expect(server.lines.map((l) => l.split(' ')[1])).toEqual(['hold', 'release', 'hold']))
   })
 
+  // Review of #1187: a device whose cache cannot be cleared refuses the hold, and asking again before every hit would
+  // make every hit pay a connection twice.
+  it('does not ask a server that refused a hold for one again', async () => {
+    const server = fakeServer((op) => (op === 'hold' ? '{"error":"cache cannot be cleared"}' : '{"rx":1,"w":1,"h":1}'))
+    const adb = new AdbWrapper(runner(server))
+    await adb.holdConnection('emulator-5554', true)
+    await adb.hitTest('emulator-5554', 0.5, 0.5)
+    await adb.pingFocusedServer('emulator-5554')
+    expect(server.lines.map((l) => l.split(' ')[1])).toEqual(['hold', 'hit', 'ping'])
+  })
+
   it('pushes the jar again when a hold or a ping could not start the server', async () => {
     const r = runner(fakeServer(() => '{}', { ready: false }))
     const adb = new AdbWrapper(r)

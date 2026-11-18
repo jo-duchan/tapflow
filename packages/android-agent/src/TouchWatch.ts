@@ -139,9 +139,16 @@ export class TouchWatch {
 
   /** A gesture the client abandoned (#1115): no report, but the app saw its down, which iOS counts (`seq`). */
   cancel(): void {
-    // In turn with the reports before it, whose counts it must not touch.
-    if (this.current) this.tail = this.tail.then(() => { this.lost = true })
+    // In turn with the reports before it, whose counts it must not touch; and only for a down the app saw, not one on
+    // the launcher before the app was opened.
+    const g = this.current
     this.current = null
+    if (!g) return
+    this.tail = this.tail.then(async () => {
+      const hit = parseHit((await g.hit)?.answer)
+      const seen = hit && g.pkg ? seenAt(hit, g.pkg) : null
+      if (seen?.kind !== 'elsewhere') this.lost = true
+    })
   }
 
   stop(): void {
@@ -180,9 +187,12 @@ export class TouchWatch {
     // Up to 3 s for the read: a reboot or a relay loss in it stopped this watch.
     if (this.stopped) return
     // A process that drew nothing before the down started after it: the touch was the one before's (the app restarted
-    // in between), so its frames, its verdicts and its count are not this touch's (CodeRabbit on #1187).
-    const replaced = read !== null && this.pid !== undefined && read.pid !== this.pid && read.completed.length > 0 && read.completed[0]! > downNs
-    const frames = replaced ? null : read
+    // in between), so its frames, its verdicts and its count are not this touch's (CodeRabbit on #1187). Nothing drawn
+    // at all is that too. A full ring cannot say, since its oldest frame is not the process's first: the count is lost.
+    const startedAfter = read !== null && this.pid !== undefined && read.pid !== this.pid && (read.completed[0] ?? Infinity) > downNs
+    const replaced = startedAfter && read.since === 0
+    if (startedAfter && !replaced) this.lost = true
+    const frames = startedAfter ? null : read
     const { moving, acted } = judgeTouch({
       frames, downNs, upNs, moved, seen,
       ...(g.swipeEndAt !== undefined ? { swipeEndNs: device(g.swipeEndAt) } : {}),
@@ -197,7 +207,7 @@ export class TouchWatch {
     }
     // Counted in the app's process, as iOS counts: a new process starts again at 1.
     let seq: number | undefined
-    if (replaced) { /* neither process's count */ }
+    if (startedAfter) { /* neither process's count */ }
     else if (!frames) this.lost = true
     else {
       // A touch lost before this one may have been this process's first: its count starts unknown.

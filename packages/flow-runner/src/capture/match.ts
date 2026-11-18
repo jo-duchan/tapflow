@@ -381,8 +381,13 @@ export function recordedTarget(tree: readonly UIElement[], touched: TouchObserva
  */
 function sameLabel(found: UIElement[], named: ObservedElement): UIElement[] {
   if (!named.label) return found
+  // One element with an identifier no list shares is the one, whatever its label says now (a counter, a cart): only
+  // an Android resource id (`pkg:id/name`) is one that rows share, and needs the label even alone (review of #1187).
+  if (found.length === 1 && !RESOURCE_ID.test(named.identifier ?? '')) return found
   return found.filter((e) => e.label === named.label)
 }
+
+const RESOURCE_ID = /^[\w.]+:id\//
 
 function nearestTo(found: UIElement[], named: ObservedElement): UIElement | null {
   if (found.length <= 1) return found[0] ?? null
@@ -431,8 +436,12 @@ export function recordedSelector(touched: TouchObservation | undefined): Selecto
   // The button first, then the element, as `recordedTarget` looks: a button the report names only by its traits
   // leaves the element's name to search by.
   for (const named of [touched.button, touched.element]) {
-    // With its label, where it has one: an identifier a list's rows share finds the first row the search scrolls to.
-    if (named?.identifier) return named.label && !named.input ? { id: named.identifier, label: named.label, exact: true } : { id: named.identifier }
+    // With its label where rows share the identifier (an Android resource id): by the id alone the search stops at the
+    // first row it scrolls to. Anywhere else the id is the one element's, whose label may have changed (a counter).
+    if (named?.identifier) {
+      return named.label && !named.input && RESOURCE_ID.test(named.identifier)
+        ? { id: named.identifier, label: named.label, exact: true } : { id: named.identifier }
+    }
     // A button's label is usually its text's too, in the tree as a `button` and a `text` of one name (SwiftUI, measured
     // on Food Truck's order rows): by the label alone the search matched two and never settled, scrolling the list to
     // its end and back (the user's session ff5d3d3c). The trait says which one was touched.

@@ -193,6 +193,8 @@ public final class Focused {
         client.getMethod("clearCache", int.class).invoke(instance, id.getInt(automation));
         return true;
       } catch (ReflectiveOperationException | RuntimeException e) {
+        // From Android 13 the cache is per connection: the process-wide clear may leave this one's, so it is no answer.
+        if (android.os.Build.VERSION.SDK_INT >= 33) return false;
         client.getMethod("clearCache").invoke(instance);
         return true;
       }
