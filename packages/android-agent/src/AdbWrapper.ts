@@ -81,6 +81,8 @@ export class AdbWrapper {
 
   // The resident field server per device (#1135), when the runner can keep a child; the one-shot run otherwise.
   private readonly focusedServers: FocusedServers | null
+  // Devices whose field server should hold its UiAutomation connection: a recorded person's (P4, `holdConnection`).
+  private readonly holdWanted = new Set<string>()
 
   constructor(private readonly runner: AdbRunner = defaultRunner) {
     this.focusedServers = runner.spawnPiped
@@ -564,7 +566,34 @@ export class AdbWrapper {
    * cannot be pushed or produced no XML. A dump with no XML is an explicit `PlatformError`, never a silent empty tree.
    */
   async dumpUiHierarchy(serial: string, timeoutSec = 10): Promise<string> {
-    return this.inDumpQueue(serial, () => this.dumpNow(serial, timeoutSec))
+    return this.inDumpQueue(serial, async () => {
+      // The dump connects its own UiAutomation, which a held one refuses: let go for it, and hold again after.
+      const servers = this.focusedServers
+      const jar = this.uidumpDevicePath
+      if (servers?.isHeld(serial) && jar) await servers.request(serial, jar, 'release')
+      try {
+        return await this.dumpNow(serial, timeoutSec)
+      } finally {
+        if (servers && jar && this.holdWanted.has(serial)) await servers.request(serial, jar, 'hold').catch(() => undefined)
+      }
+    })
+  }
+
+  /**
+   * Keep the field server's UiAutomation connection for as long as a person is recorded on the device (P4), or let it
+   * go: a touch's hit through a held connection costs its walk (p50 14 ms), against p50 140 ms connecting per request,
+   * which outlasts a tap. Tree dumps let go of it around themselves (`dumpUiHierarchy`).
+   */
+  async holdConnection(serial: string, on: boolean): Promise<void> {
+    if (on) this.holdWanted.add(serial)
+    else this.holdWanted.delete(serial)
+    const servers = this.focusedServers
+    if (!servers) return
+    await this.inDumpQueue(serial, async () => {
+      if (!on && !servers.isHeld(serial)) return
+      const jar = await this.pushUidump(serial)
+      if (jar) await servers.request(serial, jar, on ? 'hold' : 'release')
+    })
   }
 
   // One UiAutomation connection per device at a time: every jar run, and the dump fallback, waits its turn.
@@ -623,6 +652,45 @@ export class AdbWrapper {
       ).catch(() => '')
       return read(out)
     })
+  }
+
+  /**
+   * What a touch-down at a point hit, through the field server's `hit` (Flow Capture P4, `Hit.java`): the point as a
+   * fraction of the screen as drawn. Only through the server — the one-shot run's ~1 s start would answer after the
+   * touch changed the screen. `null` when there is no server or no answer; `writtenAt` is when the request went out,
+   * on `performance.now()`, which the answer's device times are set against.
+   */
+  async hitTest(serial: string, x: number, y: number): Promise<{ answer: string; writtenAt: number } | null> {
+    if (!this.focusedServers) return null
+    const servers = this.focusedServers
+    return this.inDumpQueue(serial, async () => {
+      const jar = await this.pushUidump(serial)
+      if (!jar) return null
+      // A server restarted since (an answer it missed, its idle exit) holds nothing: held again first.
+      if (this.holdWanted.has(serial) && !servers.isHeld(serial)) await servers.request(serial, jar, 'hold')
+      const outcome = await servers.request(serial, jar, 'hit', `${x.toFixed(5)} ${y.toFixed(5)}`)
+      if (outcome.startFailed) this.uidumpPushed.delete(serial)
+      return outcome.sent && outcome.out !== null ? { answer: outcome.out, writtenAt: outcome.writtenAt } : null
+    })
+  }
+
+  /** Start the device's field server, or keep it from its idle exit, without a UiAutomation connection: while a person
+   *  is recorded, so a touch after a pause is not the one that waits ~1 s for app_process. */
+  async pingFocusedServer(serial: string): Promise<void> {
+    if (!this.focusedServers) return
+    const servers = this.focusedServers
+    await this.inDumpQueue(serial, async () => {
+      const jar = await this.pushUidump(serial)
+      if (jar) await servers.request(serial, jar, 'ping')
+    })
+  }
+
+  /** `dumpsys gfxinfo <pkg> framestats`: the app's recent frames (P4). Read on a binder thread of the app, not its UI
+   *  thread; ~40 ms (measured). '' when it cannot be read. */
+  async framestats(serial: string, pkg: string): Promise<string> {
+    if (!PACKAGE_NAME.test(pkg)) return ''
+    const args = ['-s', serial, 'shell', 'dumpsys', 'gfxinfo', pkg, 'framestats']
+    return (this.runner.execBounded?.(FRAMESTATS_TIMEOUT_MS, ...args) ?? this.runner.exec(...args)).catch(() => '')
   }
 
   /**
@@ -948,6 +1016,10 @@ function deliverableDefaults(packageName: string, options: LaunchOptions, compon
 }
 
 /** What the jar's `Focused read` prints: device pixels, in the display's space. */
+/** An Android package name: nothing a device shell would read as more than one word. */
+const PACKAGE_NAME = /^[A-Za-z][A-Za-z0-9_]*(\.[A-Za-z0-9_]+)+$/
+const FRAMESTATS_TIMEOUT_MS = 3_000
+
 export interface FocusedRead {
   identifier?: string
   frame?: { x: number; y: number; width: number; height: number }

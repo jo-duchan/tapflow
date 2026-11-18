@@ -68,6 +68,7 @@ import { bootPostureId, parseCurrentPosture, parsePostures } from './postures.js
 import { EmulatorVideo } from './emulator/EmulatorVideo.js'
 import { LEAN_MARKER_PATH, reconcileLean, type LeanDevice } from './LeanPackages.js'
 import { BootSupersededError, installReclaimingStorage, type ReclaimDevice } from './StorageReclaim.js'
+import { TouchWatch } from './TouchWatch.js'
 
 const logger = createLogger('android-agent')
 
@@ -507,6 +508,12 @@ export class AndroidAgent implements DeviceAgent, NetworkControlCapability {
     ws.send(JSON.stringify(msg))
   }
   private deviceStates = new Map<string, DeviceState>()
+  /** A recorded person's touches, per device (Flow Capture P4): only for a boot the relay marked `observed` and that
+   *  keeps observations (`touchObservations`), as iOS. */
+  private readonly touchWatches = new Map<string, TouchWatch>()
+  /** The app under test per device, as last installed or launched here: the only app whose touches are reported. Kept
+   *  across sessions, as iOS's `lastBundleIds`: a person may open the app from its icon. */
+  private readonly appPackages = new Map<string, string>()
   /**
    * One queue of rotation commands per device (#910). Each `setRotation` is its own `adb` process, so
    * two sent back to back can land in either order, and a held ⌘⇧O or a boot reset racing the first
@@ -880,6 +887,8 @@ export class AndroidAgent implements DeviceAgent, NetworkControlCapability {
   }
 
   private cleanupDeviceState(state: DeviceState): void {
+    this.touchWatches.get(state.deviceId)?.stop()
+    this.touchWatches.delete(state.deviceId)
     if (state.screenWatch) clearInterval(state.screenWatch)
     state.screenWatch = null
     const serial = this.adb.getSerial(state.deviceId)
@@ -2189,7 +2198,7 @@ export class AndroidAgent implements DeviceAgent, NetworkControlCapability {
     }
   }
 
-  private async handleDeviceBoot(sessionId: string, avdId: string, fullErase = false, tier?: { secureContext: boolean; external: boolean }, requestId?: string, runReset?: RunResetRequest): Promise<void> {
+  private async handleDeviceBoot(sessionId: string, avdId: string, fullErase = false, tier?: { secureContext: boolean; external: boolean }, requestId?: string, runReset?: RunResetRequest, observeTouches = false): Promise<void> {
     const state = this.deviceStates.get(sessionId)
     // Split, because the two halves are not the same kind of nothing. No open control channel means the
     // answer itself has nowhere to go, so this is the one abandonment that stays silent — and the caller
@@ -2327,6 +2336,20 @@ export class AndroidAgent implements DeviceAgent, NetworkControlCapability {
       this.sendChrome(state)
       void this.sendPostures(state)
       state.booted = true
+      // What each touch hits, while this person is recorded — decided at the boot, as iOS: turning capturing on
+      // mid-session is observed from the next boot. The stream's teardown (`cleanupDeviceState`) ends it.
+      this.touchWatches.get(avdId)?.stop()
+      this.touchWatches.delete(avdId)
+      const serial = this.adb.getSerial(avdId)
+      if (observeTouches && serial) {
+        this.touchWatches.set(avdId, new TouchWatch({
+          hit: (sr, x, y) => this.adb.hitTest(sr, x, y),
+          framestats: (sr, pkg) => this.adb.framestats(sr, pkg),
+          ping: (sr) => this.adb.pingFocusedServer(sr),
+          hold: (sr, on) => this.adb.holdConnection(sr, on),
+          send: (m) => this.sendMsg(m),
+        }, serial, () => this.appPackages.get(avdId)))
+      }
       this.sendMsg({ type: 'device:ready', sessionId, requestId, payload: { deviceId: avdId, cold: launched, ...(runResetReport ? { runReset: runResetReport } : {}) } })
       // Clear a network condition the last session left behind, then report (#607).
       //
@@ -2958,8 +2981,8 @@ export class AndroidAgent implements DeviceAgent, NetworkControlCapability {
   private handleRelayMessage(msg: { type: string; sessionId: string; requestId?: string; payload?: unknown }): void {
     switch (msg.type) {
       case 'device:boot': {
-        const { deviceId, resetMode, secureContext, external, runReset } = msg.payload as { deviceId: string; resetMode?: 'app-only' | 'full-erase'; secureContext?: boolean; external?: boolean; runReset?: RunResetRequest }
-        this.handleDeviceBoot(msg.sessionId, deviceId, resetMode === 'full-erase', { secureContext: !!secureContext, external: !!external }, msg.requestId, runReset)
+        const { deviceId, resetMode, secureContext, external, runReset, observed, touchObservations } = msg.payload as { deviceId: string; resetMode?: 'app-only' | 'full-erase'; secureContext?: boolean; external?: boolean; runReset?: RunResetRequest; observed?: boolean; touchObservations?: boolean }
+        this.handleDeviceBoot(msg.sessionId, deviceId, resetMode === 'full-erase', { secureContext: !!secureContext, external: !!external }, msg.requestId, runReset, observed === true && touchObservations === true)
           .catch((e) => logger.error('handleDeviceBoot failed:', e))
         break
       }
@@ -3030,7 +3053,10 @@ export class AndroidAgent implements DeviceAgent, NetworkControlCapability {
           }
         }
         doInstall()
-          .then(() => respond({ type: 'app:install-done' }))
+          .then(() => {
+            if (bundleId) this.appPackages.set(state.deviceId, bundleId)
+            respond({ type: 'app:install-done' })
+          })
           .catch((e: unknown) => {
             const message = e instanceof Error ? e.message : String(e)
             respond({ type: 'app:install-error', message })
@@ -3061,6 +3087,7 @@ export class AndroidAgent implements DeviceAgent, NetworkControlCapability {
           break
         }
         const options = compactLaunchOptions({ arguments: args, env })
+        this.appPackages.set(state!.deviceId, bundleId)
         // Flow Capture's Match saw a launch go unanswered for its 30 s in 4 of 28 replays on an emulator (2026-11-17),
         // with the app on screen and nothing in this log. Where it waits is logged once it is slow, so the next one says.
         const started = Date.now()
@@ -3098,6 +3125,8 @@ export class AndroidAgent implements DeviceAgent, NetworkControlCapability {
           state.lastTouchPx = { x: px, y: py }
           this.fire(g.owner.touchDown(0, px, py))
         }
+        // After the down is sent: what it hit is asked off the touch's path.
+        if (g) this.touchWatches.get(state.deviceId)?.down(x, y, state.rotation ? toNaturalPoint(state.rotation, x, y) : { x, y })
         break
       }
       case 'input:touch:move': {
@@ -3108,6 +3137,7 @@ export class AndroidAgent implements DeviceAgent, NetworkControlCapability {
         // A move with no gesture behind it — or one whose backend has since been replaced — is not the
         // gesture the tester made. Dropped, as iOS drops it.
         const g = this.gestureOwner(state, 'touch')
+        if (g) this.touchWatches.get(state.deviceId)?.move(x, y)
         if (g?.via === 'helper') {
           g.owner.touchMove(x, y)
         } else if (g?.via === 'channel') {
@@ -3123,6 +3153,9 @@ export class AndroidAgent implements DeviceAgent, NetworkControlCapability {
         const state = this.deviceStates.get(msg.sessionId)
         if (!state) { this.ackNoSession(msg.sessionId, requestId); break }
         const closed = this.closeGesture(state, 'touch')
+        const watch = this.touchWatches.get(state.deviceId)
+        if (closed.via === 'none') watch?.cancel()
+        else watch?.up(msg.sessionId, requestId)
         const seq = state.bootSeq
         const { x: upX, y: upY } = state.lastTouchPx
         // terminal of a tap/swipe → ack the gesture, on what the dispatch actually reported
@@ -3141,6 +3174,7 @@ export class AndroidAgent implements DeviceAgent, NetworkControlCapability {
         const state = this.deviceStates.get(msg.sessionId)
         if (!state) break
         const { x, y } = state.lastTouchPx
+        this.touchWatches.get(state.deviceId)?.cancel()
         const closed = this.closeGesture(state, 'touch', (pc) => pc.touchCancel(0, x, y))
         if (closed.via === 'helper') closed.owner.touchCancel()
         else if (closed.via === 'channel') {

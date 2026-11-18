@@ -1215,6 +1215,20 @@ describe('matchRange with the app\'s touch reports', () => {
     expect(compare.mock.calls.map((c) => c[0])).toEqual([tapStep])
   })
 
+  // P4: Android reports touches too, and in body mode a sideways device's points are the frame's; scrolled in the frame's
+  // own directions, the search went across the list.
+  it('scrolls the way an Android swipe went on the screen, not in the frame it was sent in', async () => {
+    screen.elements = []
+    ran.answers = [{ status: 'failed', failureKind: 'product' }]
+    const sideways = { ...(tap as object), platform: 'android', chrome: () => ({ streamRotation: 90 }) } as unknown as Tap
+    // Leftward in a frame turned a quarter from the screen: up the screen.
+    const swipe = { ...base, kind: 'swipe', from: [0.8, 0.5], to: [0.3, 0.5], space: 'frame', durationMs: 300 } as unknown as RawStep
+    const lease = new PauseLease(sideways)
+    await matchRange(sideways, channel, lease, [launchStep, tapStep, tapStep, swipe, named], { start: 0, end: 5 }, null, compareHooks().h)
+    await lease.stop()
+    expect(flowsAsSteps()).toEqual([['scroll down', 'tapOn'], ['scroll up', 'tapOn']])
+  })
+
   it('falls back to the picture and the recorded point when the element is found neither way', async () => {
     screen.elements = []
     ran.answers = [{ status: 'failed', failureKind: 'product' }, { status: 'failed', failureKind: 'product' }]

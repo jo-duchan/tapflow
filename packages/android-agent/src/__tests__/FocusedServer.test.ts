@@ -33,8 +33,8 @@ describe('FocusedServers', () => {
     const server = fakeServer(() => '{"identifier":"a"}')
     const spawn = vi.fn(() => server.child)
     const servers = new FocusedServers({ spawn, kill: vi.fn(async () => {}) })
-    expect(await servers.request('emulator-5554', '/j.jar', 'read')).toEqual({ sent: true, out: '{"identifier":"a"}' })
-    expect(await servers.request('emulator-5554', '/j.jar', 'read')).toEqual({ sent: true, out: '{"identifier":"a"}' })
+    expect(await servers.request('emulator-5554', '/j.jar', 'read')).toEqual({ sent: true, out: '{"identifier":"a"}', writtenAt: expect.any(Number) })
+    expect(await servers.request('emulator-5554', '/j.jar', 'read')).toEqual({ sent: true, out: '{"identifier":"a"}', writtenAt: expect.any(Number) })
     expect(spawn).toHaveBeenCalledTimes(1)
     const args = spawn.mock.calls[0] as unknown as string[]
     expect(args.slice(0, 3)).toEqual(['-s', 'emulator-5554', 'shell'])
@@ -45,7 +45,7 @@ describe('FocusedServers', () => {
     const server = fakeServer((_op, text) => `{"result":"${text === '비밀 pass\nword' ? 'ok' : 'wrong'}"}`)
     const spawn = vi.fn(() => server.child)
     const servers = new FocusedServers({ spawn, kill: vi.fn(async () => {}) })
-    expect(await servers.request('emulator-5554', '/j.jar', 'set', '비밀 pass\nword')).toEqual({ sent: true, out: '{"result":"ok"}' })
+    expect(await servers.request('emulator-5554', '/j.jar', 'set', '비밀 pass\nword')).toEqual({ sent: true, out: '{"result":"ok"}', writtenAt: expect.any(Number) })
     expect((spawn.mock.calls[0] as unknown as string[]).join(' ')).not.toMatch(/비밀|pass|word/)
   })
 
@@ -56,10 +56,10 @@ describe('FocusedServers', () => {
     const spawn = vi.fn().mockReturnValueOnce(stuck.child).mockReturnValueOnce(fresh.child)
     const kill = vi.fn(async () => {})
     const servers = new FocusedServers({ spawn, kill, answerTimeoutMs: 20 })
-    expect(await servers.request('emulator-5554', '/j.jar', 'set', 'x')).toEqual({ sent: true, out: null })
+    expect(await servers.request('emulator-5554', '/j.jar', 'set', 'x')).toEqual({ sent: true, out: null, writtenAt: expect.any(Number) })
     expect(stuck.child.kill).toHaveBeenCalled()
     expect(kill).toHaveBeenCalledWith('emulator-5554', expect.stringMatching(/^FocusedServer [0-9a-f]{12}$/))
-    expect(await servers.request('emulator-5554', '/j.jar', 'set', 'x')).toEqual({ sent: true, out: '{"result":"ok"}' })
+    expect(await servers.request('emulator-5554', '/j.jar', 'set', 'x')).toEqual({ sent: true, out: '{"result":"ok"}', writtenAt: expect.any(Number) })
     expect(spawn).toHaveBeenCalledTimes(2)
   })
 
@@ -67,7 +67,7 @@ describe('FocusedServers', () => {
     const dying = fakeServer(() => undefined)
     dying.child.stdin.on('data', () => setImmediate(() => dying.child.emit('exit', 1, null)))
     const servers = new FocusedServers({ spawn: vi.fn(() => dying.child), kill: vi.fn(async () => {}) })
-    expect(await servers.request('emulator-5554', '/j.jar', 'ime')).toEqual({ sent: true, out: null })
+    expect(await servers.request('emulator-5554', '/j.jar', 'ime')).toEqual({ sent: true, out: null, writtenAt: expect.any(Number) })
   })
 
   // Review F4: a start that failed is retried later, never given up on for the agent's life.
@@ -84,6 +84,36 @@ describe('FocusedServers', () => {
   })
 })
 
+describe('FocusedServers, holding the connection (P4)', () => {
+  it('knows its server holds the connection once it says so, and not after a release or a restart', async () => {
+    const first = fakeServer((op) => (op === 'hold' ? '{"held":true}' : '{}'))
+    const second = fakeServer(() => undefined)
+    const third = fakeServer(() => '{}')
+    const spawn = vi.fn().mockReturnValueOnce(first.child).mockReturnValueOnce(second.child).mockReturnValueOnce(third.child)
+    const servers = new FocusedServers({ spawn, kill: vi.fn(async () => {}), answerTimeoutMs: 20 })
+    expect(servers.isHeld('emulator-5554')).toBe(false)
+    await servers.request('emulator-5554', '/j.jar', 'hold')
+    expect(servers.isHeld('emulator-5554')).toBe(true)
+    await servers.request('emulator-5554', '/j.jar', 'release')
+    expect(servers.isHeld('emulator-5554')).toBe(false)
+    await servers.request('emulator-5554', '/j.jar', 'hold')
+    expect(servers.isHeld('emulator-5554')).toBe(true)
+    // A server that stops answering is restarted, and the new one holds nothing.
+    await servers.stop('emulator-5554')
+    await servers.request('emulator-5554', '/j.jar', 'hold')
+    expect(servers.isHeld('emulator-5554')).toBe(false)
+    await servers.request('emulator-5554', '/j.jar', 'read')
+    expect(servers.isHeld('emulator-5554')).toBe(false)
+  })
+
+  it('does not take an error for a hold', async () => {
+    const server = fakeServer(() => '{"error":"java.lang.IllegalStateException: already registered"}')
+    const servers = new FocusedServers({ spawn: vi.fn(() => server.child), kill: vi.fn(async () => {}) })
+    await servers.request('emulator-5554', '/j.jar', 'hold')
+    expect(servers.isHeld('emulator-5554')).toBe(false)
+  })
+})
+
 describe('FocusedServers, ended on purpose', () => {
   // Review F5: a relay reconnect stopping a server that was starting is not a start that failed.
   it('does not count a server stopped while it started as one that failed to start', async () => {
@@ -95,7 +125,7 @@ describe('FocusedServers, ended on purpose', () => {
     await new Promise((r) => setImmediate(r))
     await servers.stop('emulator-5554')
     expect(await waiting).toEqual({ sent: false })
-    expect(await servers.request('emulator-5554', '/j.jar', 'read')).toEqual({ sent: true, out: '{"identifier":"a"}' })
+    expect(await servers.request('emulator-5554', '/j.jar', 'read')).toEqual({ sent: true, out: '{"identifier":"a"}', writtenAt: expect.any(Number) })
   })
 
   // Review F2: ended from here before the server's own idle exit, so nothing is written to one choosing to exit.
@@ -140,6 +170,41 @@ describe('AdbWrapper through the field server', () => {
     })
     expect(await adb.setFocusedText('emulator-5554', 'x')).toBe('failed')
     expect(r.execInput).not.toHaveBeenCalled()
+  })
+
+  // P4: a held connection refuses the tree dump's own, so the dump lets go of it and the hold comes back after.
+  it('lets go of a held connection around a tree dump, and holds it again while a person is recorded', async () => {
+    const server = fakeServer((op) => (op === 'hold' ? '{"held":true}' : '{}'))
+    const r = runner(server)
+    const adb = new AdbWrapper(r)
+    await adb.holdConnection('emulator-5554', true)
+    await adb.dumpUiHierarchy('emulator-5554').catch(() => {})
+    expect(server.lines.map((l) => l.split(' ')[1])).toEqual(['hold', 'release', 'hold'])
+    const dumpAt = vi.mocked(r.exec).mock.invocationCallOrder.at(-1)!
+    expect(dumpAt).toBeGreaterThan(0)
+    await adb.holdConnection('emulator-5554', false)
+    await adb.dumpUiHierarchy('emulator-5554').catch(() => {})
+    expect(server.lines.map((l) => l.split(' ')[1])).toEqual(['hold', 'release', 'hold', 'release'])
+  })
+
+  it('holds again before a hit when the server lost its hold, and says when the hit went out', async () => {
+    const server = fakeServer((op, text) => (op === 'hold' ? '{"held":true}' : `{"rx":1,"w":1,"h":1,"echo":"${text}"}`))
+    const r = runner(server)
+    const adb = new AdbWrapper(r)
+    ;(adb as unknown as { holdWanted: Set<string> }).holdWanted.add('emulator-5554')
+    const hit = await adb.hitTest('emulator-5554', 0.25, 0.5)
+    expect(hit).toEqual({ answer: '{"rx":1,"w":1,"h":1,"echo":"0.25000 0.50000"}', writtenAt: expect.any(Number) })
+    expect(server.lines.map((l) => l.split(' ')[1])).toEqual(['hold', 'hit'])
+    expect(await new AdbWrapper(runner(null)).hitTest('emulator-5554', 0.5, 0.5)).toBeNull()
+  })
+
+  it('reads framestats for a package name only', async () => {
+    const r = runner(null)
+    const adb = new AdbWrapper(r)
+    expect(await adb.framestats('emulator-5554', 'x; reboot')).toBe('')
+    expect(r.exec).not.toHaveBeenCalled()
+    await adb.framestats('emulator-5554', 'dev.tapflow.sample.compose')
+    expect(vi.mocked(r.exec).mock.calls[0]).toEqual(['-s', 'emulator-5554', 'shell', 'dumpsys', 'gfxinfo', 'dev.tapflow.sample.compose', 'framestats'])
   })
 
   it('reads the slow way when the server cannot start, and pushes the jar again', async () => {

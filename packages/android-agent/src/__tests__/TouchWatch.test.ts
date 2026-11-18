@@ -1,0 +1,164 @@
+import type { CaptureTouched } from '@tapflowio/protocol'
+import { describe, expect, it, vi } from 'vitest'
+import { TouchWatch } from '../TouchWatch.js'
+
+const APP = 'dev.tapflow.sample.compose'
+const MS = 1_000_000
+/** The device's clock runs this far ahead of the host's (ns). */
+const OFFSET = 5_000_000 * MS
+
+const HEADER = 'Flags,FrameTimelineVsyncId,IntendedVsync,Vsync,FrameCompleted'
+const framestats = (pid: number, completedHostMs: number[]) =>
+  `** Graphics info for pid ${pid} [${APP}] **\n\n---PROFILEDATA---\n${HEADER}\n`
+  + completedHostMs.map((t) => `0,0,${t * MS + OFFSET - 20 * MS},0,${t * MS + OFFSET}`).join('\n') + '\n---PROFILEDATA---\n'
+
+interface Answer { pkg?: string; type?: number; branch?: unknown[]; readAfterMs?: number; none?: boolean }
+
+/**
+ * A watch on a fake clock: `hit` answers as the jar would, its branch read `readAfterMs` after the request (on the
+ * device's clock); `sleep` moves the clock. `frames` is what the app drew, in host ms.
+ */
+function rig(opts: { answers?: Answer[]; frames?: number[]; pid?: () => number; pkg?: string | undefined } = {}) {
+  let now = 1_000
+  const sent: CaptureTouched[] = []
+  const holds: boolean[] = []
+  const answers = [...(opts.answers ?? [])]
+  const deps = {
+    now: () => now,
+    sleep: async (ms: number) => { now += ms },
+    hit: vi.fn(async () => {
+      const a = answers.shift() ?? {}
+      if (a.none) return null
+      const rx = now * MS + OFFSET
+      return {
+        writtenAt: now,
+        answer: JSON.stringify({
+          rx, done: rx + (a.readAfterMs ?? 14) * MS, w: 1000, h: 2000, type: a.type ?? 1, pkg: a.pkg ?? APP, under: APP,
+          branch: a.branch ?? [{ c: 'android.widget.Button', id: 'form.submit', t: 'Submit', k: 1, b: [100, 200, 300, 400] }],
+        }),
+      }
+    }),
+    framestats: vi.fn(async () => framestats(opts.pid?.() ?? 4495, opts.frames ?? [])),
+    ping: vi.fn(async () => {}),
+    hold: vi.fn(async (_serial: string, on: boolean) => { holds.push(on) }),
+    send: (m: CaptureTouched) => { sent.push(m) },
+  }
+  const pkg = 'pkg' in opts ? opts.pkg : APP
+  const watch = new TouchWatch(deps, 'emulator-5554', () => pkg)
+  const tap = (x: number, y: number, holdMs = 100, id = `rq-${sent.length}-${now}`) => {
+    watch.down(x, y, { x, y })
+    now += holdMs
+    watch.up('s1', id)
+    return id
+  }
+  const advance = (ms: number) => { now += ms }
+  return { watch, sent, holds, deps, tap, advance, clock: () => now }
+}
+
+describe('TouchWatch', () => {
+  it('holds the connection while it lives and lets go when stopped', () => {
+    const { watch, holds } = rig()
+    watch.stop()
+    expect(holds).toEqual([true, false])
+  })
+
+  it('reports a tap on the app: what it hit, its count and seq, and that the app drew after it', async () => {
+    const { watch, sent, tap, clock } = rig({ frames: [1_200, 1_250, 1_300] })
+    tap(0.2, 0.15)
+    await watch.settled()
+    expect(sent).toEqual([{
+      type: 'capture:touched', sessionId: 's1', requestId: expect.any(String),
+      observation: {
+        point: { x: 0.2, y: 0.15 }, moving: false, tapCount: 1, seq: 1, acted: true,
+        element: { identifier: 'form.submit', label: 'Submit', traits: 1, frame: { x: 0.1, y: 0.1, width: 0.2, height: 0.1 } },
+        button: { identifier: 'form.submit', label: 'Submit', traits: 1, frame: { x: 0.1, y: 0.1, width: 0.2, height: 0.1 } },
+      },
+    }])
+    // Read once the app had its 0.8 s after the lift.
+    expect(clock()).toBeGreaterThanOrEqual(1_000 + 100 + 800)
+  })
+
+  it('reports nothing for a hit read after the up: the screen may already be the one the tap made', async () => {
+    const { watch, sent, tap } = rig({ answers: [{ readAfterMs: 120 }] })
+    tap(0.2, 0.15, 100)
+    await watch.settled()
+    expect(sent).toEqual([])
+  })
+
+  it('takes a hit read during a long press, until a long press could fire', async () => {
+    const { watch, sent, tap } = rig({ answers: [{ readAfterMs: 300 }, { readAfterMs: 450 }] })
+    tap(0.2, 0.15, 600)
+    tap(0.6, 0.6, 600)
+    await watch.settled()
+    expect(sent).toHaveLength(1)
+  })
+
+  it('reports nothing for another app, no answer, or no app under test', async () => {
+    const a = rig({ answers: [{ pkg: 'com.google.android.apps.nexuslauncher' }, { none: true }] })
+    a.tap(0.5, 0.5)
+    a.tap(0.5, 0.5)
+    await a.watch.settled()
+    expect(a.sent).toEqual([])
+    const b = rig({ pkg: undefined })
+    b.tap(0.5, 0.5)
+    await b.watch.settled()
+    expect(b.sent).toEqual([])
+  })
+
+  it('counts a quick repeat at one spot as iOS does, and not a tap elsewhere or later', async () => {
+    const { watch, sent, tap, advance } = rig()
+    tap(0.5, 0.5, 60)
+    advance(150)
+    tap(0.52, 0.5, 60)
+    advance(150)
+    tap(0.9, 0.9, 60)
+    advance(500)
+    tap(0.9, 0.9, 60)
+    await watch.settled()
+    expect(sent.map((m) => m.observation.tapCount)).toEqual([1, 2, 1, 1])
+  })
+
+  it('numbers touches in the app\'s process, from 1 again in a new one', async () => {
+    let pid = 100
+    const { watch, sent, tap, advance } = rig({ pid: () => pid })
+    tap(0.5, 0.5)
+    advance(1_000)
+    tap(0.5, 0.5)
+    await watch.settled()
+    pid = 200
+    advance(1_000)
+    tap(0.5, 0.5)
+    await watch.settled()
+    expect(sent.map((m) => m.observation.seq)).toEqual([1, 2, 1])
+  })
+
+  it('a swipe gets no count and no verdict, and the tap after it on a gliding list reads moving', async () => {
+    const glide = Array.from({ length: 30 }, (_, i) => 1_200 + i * 16)
+    const { watch, sent, advance } = rig({ answers: [{}, { branch: [{ c: 'android.widget.TextView', t: 'Row 8', b: [0, 0, 10, 10] }, { c: 'androidx.recyclerview.widget.RecyclerView', k: 16, b: [0, 0, 10, 10] }] }], frames: glide })
+    watch.down(0.5, 0.8, { x: 0.5, y: 0.8 })
+    advance(50)
+    watch.move(0.5, 0.5)
+    advance(50)
+    watch.up('s1', 'swipe')
+    advance(500)
+    watch.down(0.5, 0.5, { x: 0.5, y: 0.5 })
+    advance(80)
+    watch.up('s1', 'tap')
+    await watch.settled()
+    expect(sent[0]!.observation).not.toHaveProperty('tapCount')
+    expect(sent[0]!.observation).not.toHaveProperty('acted')
+    expect(sent[1]!.observation).toMatchObject({ moving: true, element: { label: 'Row 8' } })
+    expect(sent[1]!.observation).not.toHaveProperty('acted')
+  })
+
+  it('reports nothing for a cancelled gesture, or once stopped', async () => {
+    const { watch, sent, tap } = rig()
+    watch.down(0.5, 0.5, { x: 0.5, y: 0.5 })
+    watch.cancel()
+    watch.up('s1', 'after-cancel')
+    tap(0.5, 0.5)
+    watch.stop()
+    await watch.settled()
+    expect(sent).toEqual([])
+  })
+})

@@ -467,10 +467,14 @@ export async function matchRange(
       return tapIt
     }
     let focus = await focusFirst()
-    // Only iOS reports touches, and its points are never in the frame's space: the app's turn is all that places them.
-    let named = before
-      ? namedTap(raw, before.elements, previousSent(slice, offset), before.interfaceTurn !== undefined ? { interfaceTurn: before.interfaceTurn } : {})
-      : undefined
+    // The swipe before a named tap says which way to scroll for it: an iOS point is in the app's turn, an Android body
+    // mode one in the frame's (`frameTurnOf`), which went unread until Android reported touches (P4).
+    const namedTurns = (b: NonNullable<typeof before>) => {
+      const previous = previousSent(slice, offset)
+      const frameTurn = previous?.kind === 'swipe' && previous.space === 'frame' ? frameTurnOf(tap.chrome()) : undefined
+      return { ...(b.interfaceTurn !== undefined ? { interfaceTurn: b.interfaceTurn } : {}), ...(frameTurn !== undefined ? { frameTurn } : {}) }
+    }
+    let named = before ? namedTap(raw, before.elements, previousSent(slice, offset), namedTurns(before)) : undefined
     // After the focus tap and its settle: a typed step's picture was taken at its first key, with the field focused.
     // A tap the app named is judged by finding that element, not by the picture: the list under it may sit elsewhere.
     // A focus tap went in since: pressed again now, the tap would take the field's focus away.
@@ -625,9 +629,7 @@ export async function matchRange(
       await rereadLate()
       // A field read while the screen was late (a splash before the form) may only now be there to focus.
       focus ??= await focusFirst()
-      named = before
-        ? namedTap(raw, before.elements, previousSent(slice, offset), before.interfaceTurn !== undefined ? { interfaceTurn: before.interfaceTurn } : {})
-        : undefined
+      named = before ? namedTap(raw, before.elements, previousSent(slice, offset), namedTurns(before)) : undefined
     }
     const shoot = () => channel.screenshot(sessionId, hooks.signal).catch(() => null)
     // A password is pictured before it is typed: after, Android shows its last character for a moment.

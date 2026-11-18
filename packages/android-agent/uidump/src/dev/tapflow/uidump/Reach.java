@@ -224,7 +224,7 @@ final class Reach {
 
   /** The default display's logical size, turned as it is shown, through the framework uiautomator itself reads it from;
    *  `null` where that is out of reach. */
-  private static Rect displaySize() {
+  static Rect displaySize() {
     try {
       Class<?> global = Class.forName("android.hardware.display.DisplayManagerGlobal");
       Object instance = global.getMethod("getInstance").invoke(null);

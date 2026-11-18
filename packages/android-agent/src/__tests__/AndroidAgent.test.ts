@@ -2802,6 +2802,41 @@ describe('AndroidAgent', () => {
       scrcpyStreamController = null
     })
 
+    // Flow Capture P4: what a recorded person's touches hit, asked off the touch's path, only for a boot the relay
+    // marked as theirs and that keeps observations.
+    describe('record-time observation', () => {
+      const bootWith = async (payload: Record<string, unknown>) => {
+        const ready = waitForType(browser, 'device:ready')
+        inject({ type: 'device:boot', requestId: `rq-${Object.keys(payload).join('-')}`, payload: { deviceId: 'avd:Pixel_8_API_34', ...payload } })
+        await ready
+        await vi.waitFor(() => expect(getState().scrcpySession).not.toBeNull(), { timeout: 1000 })
+      }
+
+      it('is off for a boot that is not a recorded person\'s, or a relay that keeps no observations', async () => {
+        const hold = vi.spyOn(adb, 'holdConnection').mockResolvedValue(undefined)
+        const hit = vi.spyOn(adb, 'hitTest').mockResolvedValue(null)
+        inject({ type: 'input:touch:start', payload: { x: 0.25, y: 0.75 } })
+        inject({ type: 'input:touch:end', requestId: 'rq-off' })
+        await bootWith({ observed: true })
+        inject({ type: 'input:touch:start', payload: { x: 0.25, y: 0.75 } })
+        inject({ type: 'input:touch:end', requestId: 'rq-off-2' })
+        expect(hold).not.toHaveBeenCalled()
+        expect(hit).not.toHaveBeenCalled()
+      })
+
+      it('asks what each touch hit on a recorded boot, and lets go of the connection when the device goes', async () => {
+        const hold = vi.spyOn(adb, 'holdConnection').mockResolvedValue(undefined)
+        const hit = vi.spyOn(adb, 'hitTest').mockResolvedValue(null)
+        vi.spyOn(adb, 'pingFocusedServer').mockResolvedValue(undefined)
+        await bootWith({ observed: true, touchObservations: true })
+        expect(hold).toHaveBeenCalledWith('emulator-5554', true)
+        inject({ type: 'input:touch:start', payload: { x: 0.25, y: 0.75 } })
+        expect(hit).toHaveBeenCalledWith('emulator-5554', 0.25, 0.75)
+        agent.disconnect()
+        expect(hold).toHaveBeenLastCalledWith('emulator-5554', false)
+      })
+    })
+
     describe('input — touch', () => {
       it('maps normalized touch:start to device px via scrcpy control', () => {
         const control = getState().scrcpySession!.control
