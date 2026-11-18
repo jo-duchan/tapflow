@@ -158,7 +158,8 @@ describe('TouchWatch', () => {
     const scrolling = [{ c: 'android.widget.TextView', t: 'Row 8', b: [0, 0, 10, 10] }, { c: 'androidx.recyclerview.widget.RecyclerView', k: 16, b: [0, 0, 10, 10] }]
     const { watch, sent, advance } = rig({ answers: [{}, { branch: scrolling }], frames: drawing })
     watch.down(0.5, 0.3, { x: 0.5, y: 0.3 })
-    for (let i = 1; i <= 10; i++) { advance(100); watch.move(0.5, 0.3 + i * 0.02) }
+    // Slower at the lift than Android flings: 0.002 of the screen in the last 100 ms.
+    for (let i = 1; i <= 10; i++) { advance(100); watch.move(0.5, i < 10 ? 0.3 + i * 0.02 : 0.482) }
     advance(100)
     watch.up('s1', 'pull')
     advance(400)

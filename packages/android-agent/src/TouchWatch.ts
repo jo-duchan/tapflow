@@ -27,8 +27,10 @@ const TAP_SLOP = 0.02
 const DOUBLE_TAP_MS = 300
 const DOUBLE_TAP_SLOP = 0.1
 /** A release faster than this (fractions of the screen a second, over its last 100 ms) is a fling, which can leave a
- *  list gliding; a slower one (a drag, a pull to refresh) leaves nothing that a tap would stop. ~1200 px/s on a phone. */
-const FLING_SPEED = 0.5
+ *  list gliding: ViewConfiguration's minimum fling velocity, 50 dp/s, ~130 px/s on a phone. A person's swipe in the
+ *  dashboard slows before the lift (0.23–0.33 measured on three that left the Compose list gliding), so a stricter bar
+ *  missed every one. A spinner after a pull to refresh is told apart by the frames instead (`judgeTouch`). */
+const FLING_SPEED = 0.05
 const FLING_WINDOW_MS = 100
 const OFFSET_SAMPLES = 16
 /** Under the field server's 60 s idle exit. */
