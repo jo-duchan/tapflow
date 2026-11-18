@@ -1207,7 +1207,9 @@ describe('toFlowSteps', () => {
       const short = el({ role: 'list', frame: { x: 0, y: 0.2, width: 1, height: 0.4 } })
       const rows = (shift: number) => [0.25, 0.35, 0.45].map((y, i) => el({ role: 'cell', label: `Mail ${i}`, frame: { x: i === 1 ? shift : 0, y, width: 1, height: 0.08 } }))
       const del = el({ role: 'button', label: 'Delete', frame: { x: 0.8, y: 0.35, width: 0.2, height: 0.08 } })
-      const flow = toFlowSteps([matchStep(swipe!, ctxOf([short, ...rows(0)])), matchStep(tap!, ctxOf([short, ...rows(-0.2), del]))])
+      // A tab outside the list is not one of its items: counted, the layout would read as a grid.
+      const tab = el({ role: 'tab', label: 'Inbox', frame: { x: 0.05, y: 0.92, width: 0.2, height: 0.06 } })
+      const flow = toFlowSteps([matchStep(swipe!, ctxOf([short, ...rows(0), tab])), matchStep(tap!, ctxOf([short, ...rows(-0.2), del, tab]))])
       expect(flow.steps.map((s) => s.step?.type)).toEqual(['swipe', 'tapOn'])
     })
 
