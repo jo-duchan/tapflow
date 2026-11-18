@@ -1,5 +1,6 @@
 import type { CaptureTouched, TouchObservation } from '@tapflowio/protocol'
 import { performance } from 'perf_hooks'
+import { createLogger } from '@tapflowio/agent-core'
 import { AFTER_NS, judgeTouch, parseFramestats, parseHit, seenAt } from './touchObservation.js'
 
 export interface TouchWatchDeps {
@@ -16,6 +17,7 @@ export interface TouchWatchDeps {
   keepAliveMs?: number
 }
 
+const logger = createLogger('android-agent:touch-watch')
 const MS = 1_000_000
 /** A hit read after the up reached the app, or after a long press could have fired (ViewConfiguration's 400 ms), may
  *  have read the screen the touch changed (design review, Revision 1 §5): such a touch gets no report. Through a held
@@ -176,6 +178,13 @@ export class TouchWatch {
       ...(g.swipeEndAt !== undefined ? { swipeEndNs: device(g.swipeEndAt) } : {}),
       ...(g.previousTapUpAt !== undefined ? { previousTapUpNs: device(g.previousTapUpAt) } : {}),
     })
+    // `TAPFLOW_TOUCH_DEBUG=1`: what each verdict was read from, in ms around the down, never what was touched.
+    if (process.env.TAPFLOW_TOUCH_DEBUG === '1' && frames) {
+      const rel = frames.completed.map((t) => Math.round((t - downNs) / MS)).filter((t) => t > -400 && t < 1_500)
+      logger.info(`touch ${requestId}: moving=${moving} acted=${acted} moved=${moved} scrollable=${seen.scrollable} takes=${seen.takes}`
+        + ` sinceFling=${g.swipeEndAt !== undefined ? Math.round(g.downAt - g.swipeEndAt) : '-'}ms held=${Math.round(g.upAt! - g.downAt)}ms`
+        + ` ring=${Math.round((frames.since - downNs) / MS)}ms frames=${rel.join(',')}`)
+    }
     // Counted in the app's process, as iOS counts: a new process starts again at 1.
     let seq: number | undefined
     if (!frames) this.lost = true
