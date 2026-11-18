@@ -187,6 +187,22 @@ export function shipsToUsers(f) {
 
 const git = (...args) => execFileSync('git', args, { encoding: 'utf8' }).trim()
 
+function changesetCopySources(before, after) {
+  const sources = new Map()
+  const entries = git('diff', '--name-status', '--find-copies', '--diff-filter=C', '-z', before, after, '--', '.changeset').split('\0')
+  for (let i = 0; i < entries.length - 1; i += 3) {
+    sources.set(entries[i + 2], entries[i + 1])
+  }
+  return sources
+}
+
+function sharesChangesetProse(before, after) {
+  const lines = (note) => Array.from(proseLines(note, { skipFrontmatter: true }), ({ line }) => line)
+    .filter((line) => line && !/^(?:Backfills:|<!--)/i.test(line))
+  const previous = new Set(lines(before))
+  return lines(after).some((line) => previous.has(line))
+}
+
 /** File content at a revision, or null when it does not exist there. */
 const blobAt = (rev, file) => {
   // stderr silenced: "exists on disk, but not in <rev>" is the answer to a question, not a
@@ -420,22 +436,35 @@ function main() {
     let since = after && !after.startsWith('-') ? after : null
     if (!since) {
       try {
-        since = git('describe', '--tags', '--abbrev=0')
+        since = git('describe', '--tags', '--first-parent', '--abbrev=0')
       } catch {
         console.error('No tags here — pass an explicit revision: pnpm changeset:audit <ref>')
         process.exit(2)
       }
     }
 
+    let base
     let commitLog
     try {
+      base = execFileSync('git', ['rev-parse', '--verify', '--end-of-options', `${since}^{commit}`],
+        { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim()
       // Follow the branch that received the merges. Direct commits can drop or move a note
       // between merges, so read them for continuity even though only merges can claim coverage.
-      commitLog = execFileSync('git', ['log', `${since}..HEAD`, '--first-parent', '--reverse', '--format=%H%x09%P%x09%s'],
+      commitLog = execFileSync('git', ['log', `${base}..HEAD`, '--first-parent', '--reverse', '--format=%H%x09%P%x09%s'],
         { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim()
     } catch {
       // Exit 2, not 1: a typo'd revision must not look like a finding.
       console.error(`Not a revision in this repository: ${since}`)
+      process.exit(2)
+    }
+    const history = commitLog ? commitLog.split('\n') : []
+    const oldestParents = history[0]?.split('\t')[1]
+    const reachedBase = history.length === 0 ? base === git('rev-parse', 'HEAD') : oldestParents?.split(' ')[0] === base
+    if (!reachedBase) {
+      console.error(`Cannot audit from ${since}: HEAD's first-parent history does not reach it.`)
+      if (git('rev-parse', '--is-shallow-repository') === 'true') {
+        console.error('Fetch complete history (fetch-depth: 0) and rerun the audit.')
+      }
       process.exit(2)
     }
     const isChangeset = (f) => /^\.changeset\/.+\.md$/.test(f) && !/^\.changeset\/README\.md$/i.test(f)
@@ -450,9 +479,8 @@ function main() {
       }
     }
     const perMerge = []
-    for (const [index, line] of commitLog.split('\n').entries()) {
+    for (const [index, line] of history.entries()) {
       const [sha, parents, ...rest] = line.split('\t')
-      if (!parents) continue
       const merge = parents.includes(' ')
       const before = `${sha}^1`
       const files = []
@@ -487,6 +515,7 @@ function main() {
       }
       let deletedNotes
       let rewrittenNotes
+      let copiedFrom
       for (const [f, previous] of touched) {
         const note = git('show', `${sha}:${f}`)
         const backfills = parseBackfills(note)
@@ -500,15 +529,20 @@ function main() {
         let predecessors
         if (previous === null) {
           deletedNotes ??= consumed.map(priorNote)
-          // Git can report a move as an edit and an addition when the old path gets new content.
-          rewrittenNotes ??= [...touched]
+          // A reused source path can look like a copy to Git. Carry only references it dropped.
+          rewrittenNotes ??= new Map([...touched]
             .filter(([file, from]) => file === from)
             .map(([file]) => {
               const earlier = priorNote(file)
               const remaining = new Set(parseBackfills(git('show', `${sha}:${file}`)))
-              return { ...earlier, refs: earlier.refs.difference(remaining) }
-            })
-          predecessors = deletedNotes.concat(rewrittenNotes.filter((entry) => entry.note === note))
+              return [file, { ...earlier, refs: earlier.refs.difference(remaining) }]
+            }).filter(([, entry]) => entry.refs.size > 0))
+          const source = rewrittenNotes.size > 0 ? (copiedFrom ??= changesetCopySources(before, sha)).get(f) : undefined
+          const moved = rewrittenNotes.get(source)
+          const exact = [...rewrittenNotes.values()].filter((entry) => entry.note === note)
+          predecessors = deletedNotes.concat(exact)
+          // Frontmatter and Backfills lines alone can give unrelated short notes a high copy score.
+          if (moved && moved.note !== note && sharesChangesetProse(moved.note, note)) predecessors.push(moved)
         } else {
           predecessors = isChangeset(previous) ? [priorNote(previous)] : []
         }
@@ -578,7 +612,7 @@ function main() {
     and add a new Backfills declaration to a changeset in the same PR. If the reference already
     appears in a changeset, leave that file in place and add the declaration to a separate changeset.
     A change with no observable effect can use an internal changeset instead of a root note.
-    Merge the backfill PR into main and rerun the audit before running pnpm changeset version.
+    Land the backfill PR on main with a merge commit and rerun the audit before running pnpm changeset version.
     Name the PR number, or use the full merge hash printed for merges without a PR:
 
         Backfills: #413

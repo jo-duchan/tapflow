@@ -7,7 +7,7 @@ import { execFileSync } from 'child_process'
 import { mkdtempSync, rmSync, mkdirSync, writeFileSync } from 'fs'
 import { tmpdir } from 'os'
 import { join, dirname } from 'path'
-import { fileURLToPath } from 'url'
+import { fileURLToPath, pathToFileURL } from 'url'
 
 const SCRIPT = join(dirname(fileURLToPath(import.meta.url)), '..', 'check-changeset.mjs')
 
@@ -36,10 +36,11 @@ function mergePr(number, branch, files) {
  * Runs the audit; returns {code, out, stdout, stderr} rather than throwing, since a gap exits 1.
  * `out` is both streams joined — most assertions only care that a number was mentioned.
  */
-function audit(since = 'v0') {
-  const opts = { cwd: repo, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }
+function audit(since = 'v0', cwd = repo) {
+  const opts = { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }
   try {
-    const stdout = execFileSync('node', [SCRIPT, '--audit', since], opts)
+    const args = since === null ? [SCRIPT, '--audit'] : [SCRIPT, '--audit', since]
+    const stdout = execFileSync('node', args, opts)
     return { code: 0, stdout, stderr: '', out: stdout }
   } catch (e) {
     const stdout = e.stdout ?? '', stderr = e.stderr ?? ''
@@ -188,6 +189,43 @@ describe('the PR gate asks for a root CHANGELOG entry', () => {
 })
 
 describe('audit --audit against real git history', () => {
+  it('rejects a shallow first-parent walk even when the requested tag is present', () => {
+    mergePr(101, 'fix-a', { [SHIPPED]: 'export const a = 1\n' })
+    const shallow = join(repo, 'shallow')
+    git('clone', '-q', '--depth=1', '--branch', 'main', pathToFileURL(repo).href, shallow)
+    git('-C', shallow, 'fetch', '-q', '--depth=1', 'origin', 'tag', 'v0')
+    expect(git('-C', shallow, 'rev-parse', 'v0')).toBe(git('rev-parse', 'v0'))
+    const result = audit('v0', shallow)
+    expect(result).toMatchObject({ code: 2, stdout: '', stderr: expect.stringContaining('fetch-depth: 0') })
+  })
+
+  it('accepts a shallow checkout when the first-parent history reaches the tag', () => {
+    mergePr(101, 'fix-a', { [SHIPPED]: 'export const a = 1\n' })
+    const shallow = join(repo, 'shallow')
+    git('clone', '-q', '--depth=2', '--branch', 'main', pathToFileURL(repo).href, shallow)
+    expect(git('-C', shallow, 'rev-parse', '--is-shallow-repository')).toBe('true')
+    expect(audit('v0', shallow)).toMatchObject({ code: 1, stderr: expect.stringContaining('Merge pull request #101 ') })
+  })
+
+  it('rejects a base reached only through the second parent of a merge', () => {
+    mergePr(101, 'fix-a', { [SHIPPED]: 'export const a = 1\n' })
+    const base = git('rev-parse', 'HEAD^2')
+    expect(audit(base)).toMatchObject({ code: 2, stdout: '', stderr: expect.stringContaining('first-parent') })
+  })
+
+  it('accepts an empty range when the base is HEAD', () => {
+    expect(audit('HEAD')).toMatchObject({ code: 0 })
+  })
+
+  it('selects the latest first-parent tag when no base is supplied', () => {
+    git('commit', '--allow-empty', '-qm', 'Prepare next release')
+    mergePr(101, 'fix-a', { [SHIPPED]: 'export const a = 1\n' })
+    git('tag', 'side-tag', 'HEAD^2')
+    const result = audit(null)
+    expect(result).toMatchObject({ code: 1, stderr: expect.stringContaining('Merges since v0: 1') })
+    expect(result.stderr).toContain('Merge pull request #101 ')
+  })
+
   it('accepts the full merge hash as a backfill for a merge without a PR number', () => {
     mergePr(null, 'local-fix', { [SHIPPED]: 'export const a = 1\n' })
     const sha = git('rev-parse', 'HEAD')
@@ -584,22 +622,65 @@ describe('audit --audit against real git history', () => {
     })
   })
 
-  it('keeps the original claim date when a note moves and its old path is reused in the same merge', () => {
+  it.each(['unchanged', 'edited', 'separately authored'])('dates a %s backfill when the old path is reused', (kind) => {
     const path = '.changeset/early.md'
     const moved = '.changeset/renamed.md'
     const claim = CHANGESET('Early reference.\n'.repeat(12) + '\nBackfills: #101')
     mergePr(100, 'early-claim', { [path]: claim })
-    mergePr(101, 'fix-a', { [SHIPPED]: 'export const a = 1\n', [ROOT_CHANGELOG]: rootNote('Fixes a.') })
+    mergePr(101, 'fix-a', { [SHIPPED]: 'export const a = 1\n' })
+    const fresh = kind === 'separately authored'
+    const note = fresh
+      ? CHANGESET('A new note about the shipped fix.\n'.repeat(12) + '\nBackfills: #101')
+      : kind === 'edited' ? claim.replace('Early reference.', 'Clarified reference.') : claim
     mergePr(102, 'move-and-reuse', {
       [path]: CHANGESET('Unrelated package release note.\n'.repeat(12)),
-      [moved]: claim,
+      [moved]: note,
+      [ROOT_CHANGELOG]: rootNote(fresh ? 'Fixes a.' : 'Unrelated note.'),
     })
     const entries = git('diff', '--name-status', '--find-renames', 'HEAD^1', 'HEAD', '--', '.changeset').split('\n')
     expect(entries).toEqual(expect.arrayContaining([`M\t${path}`, `A\t${moved}`]))
-    expect(audit()).toMatchObject({
-      code: 1,
-      stderr: expect.stringContaining('no changeset:\n\n    Merge pull request #101 '),
+    if (fresh) {
+      expect(audit()).toMatchObject({ code: 0 })
+    } else {
+      const result = audit()
+      expect(result).toMatchObject({ code: 1, stderr: expect.stringContaining('no changeset:\n\n    Merge pull request #101 ') })
+      expect(result.stderr).toContain('no entry in the root CHANGELOG.md:\n\n    Merge pull request #101 ')
+    }
+  })
+
+  it('keeps an exact predecessor when Git points to a different source that kept the reference', () => {
+    const kept = '.changeset/a.md'
+    const replaced = '.changeset/z.md'
+    const moved = '.changeset/new.md'
+    const claim = CHANGESET('Early reference.\n'.repeat(12) + '\nBackfills: #101')
+    mergePr(100, 'early-claims', { [kept]: claim, [replaced]: claim })
+    mergePr(101, 'fix-a', { [SHIPPED]: 'export const a = 1\n' })
+    mergePr(102, 'move-and-reuse', {
+      [kept]: claim + '\nClarify the old note.\n',
+      [replaced]: CHANGESET('Unrelated release note.'),
+      [moved]: claim,
+      [ROOT_CHANGELOG]: rootNote('Unrelated note.'),
     })
+    const copies = git('diff', '--name-status', '--find-copies', '--diff-filter=C', 'HEAD^1', 'HEAD', '--', '.changeset')
+    expect(copies).toContain(`C100\t${kept}\t${moved}`)
+    const result = audit()
+    expect(result).toMatchObject({ code: 1, stderr: expect.stringContaining('no changeset:\n\n    Merge pull request #101 ') })
+    expect(result.stderr).toContain('no entry in the root CHANGELOG.md:\n\n    Merge pull request #101 ')
+  })
+
+  it('treats a short backfill sharing only boilerplate with the old note as new', () => {
+    const path = '.changeset/early.md'
+    const newPath = '.changeset/new.md'
+    mergePr(100, 'early-claim', { [path]: CHANGESET('Improve streaming.\n\nBackfills: #101') })
+    mergePr(101, 'fix-a', { [SHIPPED]: 'export const a = 1\n' })
+    mergePr(102, 'backfill', {
+      [path]: CHANGESET('An unrelated change.'),
+      [newPath]: CHANGESET('Fix a startup crash.\n\nBackfills: #101'),
+      [ROOT_CHANGELOG]: rootNote('Fixes a startup crash.'),
+    })
+    const copies = git('diff', '--name-status', '--find-copies', '--diff-filter=C', 'HEAD^1', 'HEAD', '--', '.changeset')
+    expect(copies).toMatch(/^C\d+\t\.changeset\/early\.md\t\.changeset\/new\.md$/m)
+    expect(audit()).toMatchObject({ code: 0 })
   })
 
   it.each(['merge', 'direct commit'])('does not resurrect a package claim after a %s deletes it', (operation) => {
