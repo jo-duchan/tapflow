@@ -83,6 +83,8 @@ export class AdbWrapper {
   private readonly focusedServers: FocusedServers | null
   // Devices whose field server should hold its UiAutomation connection: a recorded person's (P4, `holdConnection`).
   private readonly holdWanted = new Set<string>()
+  // A hold a dump let go of comes back once dumps have stopped for this long (`dumpUiHierarchy`).
+  private readonly reholdTimers = new Map<string, ReturnType<typeof setTimeout>>()
 
   constructor(private readonly runner: AdbRunner = defaultRunner) {
     this.focusedServers = runner.spawnPiped
@@ -567,14 +569,29 @@ export class AdbWrapper {
    */
   async dumpUiHierarchy(serial: string, timeoutSec = 10): Promise<string> {
     return this.inDumpQueue(serial, async () => {
-      // The dump connects its own UiAutomation, which a held one refuses: let go for it. Held again by the next hit or
-      // ping, not here: a Match or Verify replay dumps before every step, and a hold settling the window list each time
-      // (up to 400 ms) would be paid by the replay.
+      // The dump connects its own UiAutomation, which a held one refuses: let go for it. Held again once dumps stop for
+      // REHOLD_AFTER_MS, not after each: a Match or Verify replay dumps before every step, and a hold settling the window
+      // list each time (up to 400 ms) would be paid by the replay. Left to the 30 s ping instead, the first tap after a
+      // Match or a tree read paid that settling itself, past its up, and went unreported (Compose sample, measured).
       const servers = this.focusedServers
       const jar = this.uidumpDevicePath
       if (servers?.isHeld(serial) && jar) await servers.request(serial, jar, 'release')
-      return this.dumpNow(serial, timeoutSec)
+      try {
+        return await this.dumpNow(serial, timeoutSec)
+      } finally {
+        if (this.holdWanted.has(serial)) this.scheduleRehold(serial)
+      }
     })
+  }
+
+  private scheduleRehold(serial: string): void {
+    clearTimeout(this.reholdTimers.get(serial))
+    const timer = setTimeout(() => {
+      this.reholdTimers.delete(serial)
+      void this.pingFocusedServer(serial).catch(() => {})
+    }, REHOLD_AFTER_MS)
+    timer.unref?.()
+    this.reholdTimers.set(serial, timer)
   }
 
   /**
@@ -584,7 +601,7 @@ export class AdbWrapper {
    */
   async holdConnection(serial: string, on: boolean): Promise<void> {
     if (on) this.holdWanted.add(serial)
-    else this.holdWanted.delete(serial)
+    else { this.holdWanted.delete(serial); clearTimeout(this.reholdTimers.get(serial)); this.reholdTimers.delete(serial) }
     const servers = this.focusedServers
     if (!servers) return
     await this.inDumpQueue(serial, async () => {
@@ -1019,6 +1036,7 @@ function deliverableDefaults(packageName: string, options: LaunchOptions, compon
 /** An Android package name: nothing a device shell would read as more than one word. */
 const PACKAGE_NAME = /^[A-Za-z][A-Za-z0-9_]*(\.[A-Za-z0-9_]+)+$/
 const FRAMESTATS_TIMEOUT_MS = 3_000
+const REHOLD_AFTER_MS = 3_000
 
 export interface FocusedRead {
   identifier?: string

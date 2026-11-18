@@ -189,6 +189,26 @@ describe('AdbWrapper through the field server', () => {
     expect(server.lines.map((l) => l.split(' ')[1])).toEqual(['hold', 'release', 'hold', 'ping', 'release', 'ping'])
   })
 
+  // Measured on the Compose sample: left to the 30 s ping, the first tap after a tree read paid the hold's settling and
+  // went unreported. Dumps one after another (a replay's) hold again only once they stop.
+  it('holds again once tree dumps have stopped for a while, not after each', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
+    const server = fakeServer((op) => (op === 'hold' ? '{"held":true}' : '{}'))
+    const adb = new AdbWrapper(runner(server))
+    await adb.holdConnection('emulator-5554', true)
+    await adb.dumpUiHierarchy('emulator-5554').catch(() => {})
+    await vi.advanceTimersByTimeAsync(1_000)
+    await adb.dumpUiHierarchy('emulator-5554').catch(() => {})
+    await vi.advanceTimersByTimeAsync(2_000)
+    expect(server.lines.map((l) => l.split(' ')[1])).toEqual(['hold', 'release'])
+    await vi.advanceTimersByTimeAsync(1_500)
+    await vi.waitFor(() => expect(server.lines.map((l) => l.split(' ')[1])).toEqual(['hold', 'release', 'hold']))
+    await adb.holdConnection('emulator-5554', false)
+    await adb.dumpUiHierarchy('emulator-5554').catch(() => {})
+    await vi.advanceTimersByTimeAsync(5_000)
+    expect(server.lines.map((l) => l.split(' ')[1])).toEqual(['hold', 'release', 'hold', 'release'])
+  })
+
   it('holds again before a hit when the server lost its hold, and says when the hit went out', async () => {
     const server = fakeServer((op, text) => (op === 'hold' ? '{"held":true}' : `{"rx":1,"w":1,"h":1,"echo":"${text}"}`))
     const r = runner(server)
