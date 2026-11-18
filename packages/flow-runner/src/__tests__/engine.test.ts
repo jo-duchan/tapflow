@@ -584,6 +584,31 @@ describe('runFlow', () => {
       expect(swipeAt).toBeGreaterThan(300)
     })
 
+    // A spring's slow tail moves less than a hundredth of the screen between reads; it is still moving.
+    it('sees movement smaller than a hundredth of the screen', async () => {
+      const ys = [0.5, 0.504, 0.508, 0.512, 0.516, 0.52]
+      const { swipeAt } = await swipeAfter((n) => piece(ys[Math.min(n, ys.length - 1)]!))
+      expect(swipeAt).toBeGreaterThanOrEqual(800)
+    })
+
+    it('waits before a plain scroll as before a swipe', async () => {
+      vi.useFakeTimers()
+      try {
+        const t0 = Date.now()
+        let n = 0
+        let swipeAt = -1
+        const driver = fakeDriver([])
+        driver.queryUITree = vi.fn(async () => piece(n++ < 3 ? 0.5 + n * 0.1 : 0.8))
+        driver.swipe = vi.fn(async () => { swipeAt = Date.now() - t0 })
+        const run = runFlow(flowOf('steps:\n  - scroll: down\n'), driver, SLOW)
+        await vi.advanceTimersByTimeAsync(10_000)
+        await run
+        expect(swipeAt).toBeGreaterThanOrEqual(500)
+      } finally {
+        vi.useRealTimers()
+      }
+    })
+
     it('goes on after 3 s on a screen that never stops, and on a read that never answers', async () => {
       const moving = await swipeAfter((n) => piece(0.1 + (n % 50) * 0.01))
       expect(moving.result.status).toBe('passed')
