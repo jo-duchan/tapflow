@@ -582,8 +582,11 @@ function innermostList(tree: readonly UIElement[], point: Point): UIElement | un
  */
 function listAxis(tree: readonly UIElement[], list: UIElement): 'x' | 'y' {
   const f = list.frame
-  const centres = tree.filter((e) => e !== list && e.role !== 'list').map((e) => [e.frame.x + e.frame.width / 2, e.frame.y + e.frame.height / 2] as const)
-    .filter(([x, y]) => x >= f.x && x <= f.x + f.width && y >= f.y && y <= f.y + f.height)
+  // Its items: what lies within it, not a container around it whose centre happens to fall inside.
+  const within = (g: UIElement['frame']) => g.x >= f.x - 0.01 && g.y >= f.y - 0.01 && g.x + g.width <= f.x + f.width + 0.01
+    && g.y + g.height <= f.y + f.height + 0.01
+  const centres = tree.filter((e) => e !== list && e.role !== 'list' && within(e.frame))
+    .map((e) => [e.frame.x + e.frame.width / 2, e.frame.y + e.frame.height / 2] as const)
   const spread = (vs: number[]) => Math.max(...vs) - Math.min(...vs)
   if (centres.length >= 2) {
     const sx = spread(centres.map((c) => c[0]))
