@@ -207,7 +207,7 @@ describe('audit --audit against real git history', () => {
     expect(audit()).toMatchObject({ code: 1, stderr: expect.stringContaining(path) })
   })
 
-  it('prints a shipped filename containing a newline on one diagnostic line', () => {
+  it.skipIf(process.platform === 'win32')('prints a shipped filename containing a newline on one diagnostic line', () => {
     const path = 'packages/relay/src/first\nsecond.ts'
     mergePr(101, 'newline-path', { [path]: 'export const a = 1\n', '.changeset/a.md': CHANGESET('Fixes a.') })
     expect(audit()).toMatchObject({
@@ -233,6 +233,20 @@ describe('audit --audit against real git history', () => {
     mergePr(100, 'old-notes', { [changelog]: rootNote('Earlier fix.'), '.changeset/old.md': CHANGESET('Earlier fix.') })
     mergePr(101, 'remove-old-notes', { [SHIPPED]: 'export const a = 1\n', [changelog]: null, '.changeset/old.md': null })
     expect(audit()).toMatchObject({ code: 1, stderr: expect.stringContaining('no entry in the root CHANGELOG.md') })
+  })
+
+  it('counts a new root changelog entry when Git records the file as renamed', () => {
+    const draft = 'notes/release.md'
+    const previous = rootNote('Earlier fix.\n' + '- Archived item.\n'.repeat(12))
+    mergePr(100, 'draft-changelog', { [draft]: previous })
+    mergePr(101, 'publish-changelog', {
+      [draft]: null,
+      [ROOT_CHANGELOG]: previous + '- Fixes a.\n',
+      [SHIPPED]: 'export const a = 1\n',
+      '.changeset/a.md': CHANGESET('Fixes a.'),
+    })
+    expect(git('diff', '--name-status', '--find-renames', 'HEAD^1', 'HEAD')).toMatch(/R\d+\tnotes\/release\.md\tCHANGELOG\.md/)
+    expect(audit().code).toBe(0)
   })
 
   it('reports a source merge that updates a package changelog while dropping an obsolete changeset', () => {
@@ -363,6 +377,19 @@ describe('audit --audit against real git history', () => {
     })
     const diff = git('diff', '--name-status', '--find-renames', 'HEAD^1', 'HEAD', '--', '.changeset').split('\n')
     expect(diff).toEqual(expect.arrayContaining(['D\t.changeset/public.md', 'A\t.changeset/internal.md']))
+    expect(audit().code).toBe(0)
+  })
+
+  it.each(['amended', 'renamed'])('accepts a new internal exemption when a public backfill is %s', (operation) => {
+    mergePr(101, 'typing', { [SHIPPED]: 'export const a = 1\n' })
+    const path = '.changeset/public.md'
+    const claim = CHANGESET('Only a type was affected.\n'.repeat(12) + '\nBackfills: #101')
+    mergePr(102, 'public-backfill', { [path]: claim })
+    const internal = claim + '\n<!-- changelog: internal -->\n'
+    const changes = operation === 'amended' ? { [path]: internal } : { [path]: null, '.changeset/internal.md': internal }
+    mergePr(103, 'internal-backfill', changes)
+    const diff = git('diff', '--name-status', '--find-renames', 'HEAD^1', 'HEAD')
+    expect(diff).toMatch(operation === 'amended' ? /^M\t/ : /^R\d+\t/)
     expect(audit().code).toBe(0)
   })
 
@@ -543,6 +570,71 @@ describe('audit --audit against real git history', () => {
     expect(code).toBe(1)
     expect(out).toContain('no changeset:')
     expect(out).toContain('#101')
+  })
+
+  it('keeps a package gap when a predated claim receives a prose-only edit', () => {
+    const path = '.changeset/early.md'
+    const claim = CHANGESET('Fixes a.\n\nBackfills: #101')
+    mergePr(100, 'early-claim', { [path]: claim })
+    mergePr(101, 'fix-a', { [SHIPPED]: 'export const a = 1\n', [ROOT_CHANGELOG]: rootNote('Fixes a.') })
+    mergePr(102, 'edit-claim', { [path]: claim + '\nMore context.\n' })
+    expect(audit()).toMatchObject({
+      code: 1,
+      stderr: expect.stringContaining('no changeset:\n\n    Merge pull request #101 '),
+    })
+  })
+
+  it('keeps the original claim date when a note moves and its old path is reused in the same merge', () => {
+    const path = '.changeset/early.md'
+    const moved = '.changeset/renamed.md'
+    const claim = CHANGESET('Early reference.\n'.repeat(12) + '\nBackfills: #101')
+    mergePr(100, 'early-claim', { [path]: claim })
+    mergePr(101, 'fix-a', { [SHIPPED]: 'export const a = 1\n', [ROOT_CHANGELOG]: rootNote('Fixes a.') })
+    mergePr(102, 'move-and-reuse', {
+      [path]: CHANGESET('Unrelated package release note.\n'.repeat(12)),
+      [moved]: claim,
+    })
+    const entries = git('diff', '--name-status', '--find-renames', 'HEAD^1', 'HEAD', '--', '.changeset').split('\n')
+    expect(entries).toEqual(expect.arrayContaining([`M\t${path}`, `A\t${moved}`]))
+    expect(audit()).toMatchObject({
+      code: 1,
+      stderr: expect.stringContaining('no changeset:\n\n    Merge pull request #101 '),
+    })
+  })
+
+  it.each(['merge', 'direct commit'])('does not resurrect a package claim after a %s deletes it', (operation) => {
+    const path = '.changeset/late.md'
+    mergePr(101, 'fix-a', { [SHIPPED]: 'export const a = 1\n', [ROOT_CHANGELOG]: rootNote('Fixes a.') })
+    mergePr(102, 'backfill', { [path]: CHANGESET('Fixes a.\n\nBackfills: #101') })
+    if (operation === 'merge') {
+      mergePr(103, 'drop-backfill', { [path]: null })
+    } else {
+      git('rm', path)
+      git('commit', '-q', '-m', 'drop backfill')
+    }
+    mergePr(104, 'reuse-path', { [path]: CHANGESET('Unrelated release note.') })
+    expect(audit()).toMatchObject({
+      code: 1,
+      stderr: expect.stringContaining('no changeset:\n\n    Merge pull request #101 '),
+    })
+  })
+
+  it('keeps a late package claim through a rename and release consumption', () => {
+    const manifest = 'packages/relay/package.json'
+    mergePr(101, 'fix-a', {
+      [manifest]: '{"version":"0.1.0"}\n',
+      [SHIPPED]: 'export const a = 1\n',
+      [ROOT_CHANGELOG]: rootNote('Fixes a.'),
+    })
+    const claim = CHANGESET('Fixes a.\n\nBackfills: #101')
+    mergePr(102, 'backfill', { '.changeset/late.md': claim })
+    mergePr(103, 'rename-backfill', { '.changeset/late.md': null, '.changeset/renamed.md': claim })
+    mergePr(104, 'release', {
+      '.changeset/renamed.md': null,
+      [manifest]: '{"version":"0.2.0"}\n',
+      'packages/relay/CHANGELOG.md': '## 0.2.0\n\nFixes a.\n',
+    })
+    expect(audit()).toMatchObject({ code: 0 })
   })
 
   // Claim it, then think better of it: nothing reaches the changelog, so the gap is real again.

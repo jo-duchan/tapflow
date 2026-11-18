@@ -15,6 +15,7 @@ model: claude-opus-5
 - 대기 중인 changeset: `.changeset/*.md`
 - **누락된 릴리즈 노트 감사**: `pnpm changeset:audit`는 마지막 태그 이후 배포 소스를 바꾼 머지에서 누락된 changeset과 루트 `CHANGELOG.md` 항목을 따로 보고한다. 릴리즈 전에 각 누락을 백필하고 changeset 본문에 `Backfills: #413`처럼 대상 PR을 새 줄로 선언한다. PR 번호가 없는 머지는 감사 결과의 `Backfills: <전체 머지 해시>` 줄을 쓴다. 루트 항목이 빠졌다면 같은 PR에서 `[Unreleased]`에 항목을 쓴다. 사용자가 볼 변화가 없다면 루트 항목 대신 `<!-- changelog: internal -->`을 표시한 백필 changeset을 쓴다.
   - 루트 항목을 뒤늦게 추가하는 PR에서는 기존 `Backfills:` 선언이 있는 changeset을 그대로 두고, 같은 대상을 새 changeset에 선언한다.
+  - 백필 PR을 `main`에 먼저 머지하고, 갱신한 `main`에서 감사를 다시 실행해 누락이 해소됐는지 확인한 뒤 `pnpm changeset version`을 실행한다.
 - `.changeset/config.json`의 `fixed` / `ignore` 그룹 재확인
 
 ## 2. bump 레벨 추천 → 사용자 합의

@@ -427,117 +427,123 @@ function main() {
       }
     }
 
-    let mergeLog
+    let commitLog
     try {
-      // stderr silenced so git's own "ambiguous argument" dump does not precede our message.
-      // `--first-parent`: only merges that landed ONTO main. Without it, a `Merge remote-tracking
-      // branch 'origin/main' into <feature>` — someone refreshing their branch — is counted as a
-      // merge of its own, and it is diffed `^1..sha` where `^1` is the branch tip and `^2` is
-      // main. That diff is everything main did since the branch forked, each part of which
-      // already had its own changeset. One such commit reported 32 files at v0.18.0.
-      mergeLog = execFileSync('git', ['log', `${since}..HEAD`, '--first-parent', '--merges', '--format=%H %s'],
+      // Follow the branch that received the merges. Direct commits can drop or move a note
+      // between merges, so read them for continuity even though only merges can claim coverage.
+      commitLog = execFileSync('git', ['log', `${since}..HEAD`, '--first-parent', '--reverse', '--format=%H%x09%P%x09%s'],
         { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim()
     } catch {
       // Exit 2, not 1: a typo'd revision must not look like a finding.
       console.error(`Not a revision in this repository: ${since}`)
       process.exit(2)
     }
-    const merges = mergeLog.split('\n').filter(Boolean)
     const isChangeset = (f) => /^\.changeset\/.+\.md$/.test(f) && !/^\.changeset\/README\.md$/i.test(f)
 
-    // stderr silenced: `cat-file -e` is a question, not a failure, and git answers "no" by
-    // printing `fatal: path does not exist` straight to the console.
-    const liveAtHead = (f) => {
-      try {
-        execFileSync('git', ['cat-file', '-e', `HEAD:${f}`], { stdio: 'ignore' })
-        return true
-      } catch { return false }
+    // Collect claims before judging merges. Only surviving or released package notes count.
+    const liveClaims = new Map()
+    const claims = new Map()
+    const changelogClaims = new Map()
+    const creditPackageClaims = (references) => {
+      for (const [ref, index] of references) {
+        claims.set(ref, Math.max(claims.get(ref) ?? -1, index))
+      }
     }
-
-    // Pass 1 — what each merge touched. No judgement yet: whether a claim counts depends on
-    // whether its changeset survived, and a release merge later in the list is what legitimately
-    // removes one, so nothing can be decided in a single sweep.
-    const perMerge = merges.map((line, index) => {
-      const [sha, ...rest] = line.split(' ')
+    const perMerge = []
+    for (const [index, line] of commitLog.split('\n').entries()) {
+      const [sha, parents, ...rest] = line.split('\t')
+      if (!parents) continue
+      const merge = parents.includes(' ')
+      const before = `${sha}^1`
       const files = []
       const touched = new Map()
       const consumed = []
+      const renamedFrom = []
       const written = []
-      const entries = git('diff', '--name-status', '--find-renames', '-z', `${sha}^1`, sha).split('\0')
+      const entries = git('diff', '--name-status', '--find-renames', '-z', before, sha).split('\0')
       for (let i = 0; i < entries.length - 1;) {
         const status = entries[i++][0]
         const previous = entries[i++]
         const file = status === 'R' || status === 'C' ? entries[i++] : previous
         files.push(file)
-        if (status === 'R') files.push(previous)
-        if (status === 'A' || status === 'M') written.push(file)
+        if (status === 'R') {
+          files.push(previous)
+          if (isChangeset(previous)) renamedFrom.push(previous)
+        }
+        if (status === 'A' || status === 'M' || (status === 'R' && file === 'CHANGELOG.md')) written.push(file)
         if (!isChangeset(file)) continue
         if (status === 'D') consumed.push(file)
         if (status === 'A' || status === 'M' || status === 'R') touched.set(file, status === 'A' ? null : previous)
       }
-      return {
-        sha, index, files,
-        subject: rest.join(' '),
-        touched,
-        consumed,
-        release: isAuditRelease(consumed, written, `${sha}^1`, sha),
-        changelogWritten: written.includes('CHANGELOG.md'),
-      }
-    })
+      const release = merge && isAuditRelease(consumed, written, before, sha)
+      const changelogWritten = written.includes('CHANGELOG.md')
+      if (merge) perMerge.push({ sha, index, files, subject: rest.join('\t'), touched, release, changelogWritten })
 
-    // A changeset removed by the release merge was consumed, not abandoned.
-    const consumedByRelease = new Set(
-      perMerge.filter((m) => m.release).flatMap((m) => m.consumed),
-    )
-
-    // Pass 2 — coverage claims. Keyed by PR number or merge hash. Index 0 is the newest, so
-    // a claim at index i may only clear merges at a LARGER index: ones that landed before it.
-    // Otherwise a claim written today silently pre-clears a merge that arrives tomorrow.
-    const claims = new Map()
-    const changelogClaims = new Map()
-    for (const { sha, index, touched, consumed, changelogWritten } of perMerge) {
       const rootBackfills = new Map()
-      const priorNote = (file) => git('show', `${sha}^1:${file}`)
-      let removed
+      const updatedClaims = new Map()
+      const priorNote = (file) => {
+        const note = git('show', `${before}:${file}`)
+        return { note, refs: new Set(parseBackfills(note)), internal: isInternalChangeset(note), dates: liveClaims.get(file) }
+      }
+      let deletedNotes
+      let rewrittenNotes
       for (const [f, previous] of touched) {
-        // Root notes and internal exemptions belong to the merge, even if its changeset is renamed later.
-        const changesetCovered = liveAtHead(f) || consumedByRelease.has(f)
         const note = git('show', `${sha}:${f}`)
         const backfills = parseBackfills(note)
+        const dates = new Map()
+        updatedClaims.set(f, dates)
         if (backfills.length === 0) continue
         const internal = isInternalChangeset(note)
         const coversRoot = changelogWritten || internal
-        let earlier = []
+        // Git can report a substantial rewrite as delete/add. Keep carried references dated
+        // to their original introduction. A new internal marker can cover the root separately.
+        let predecessors
         if (previous === null) {
-          // Git cannot establish a predecessor for a rewrite it reports as D/A. Keep the
-          // old claim date unless the new file makes an explicit internal exemption.
-          removed ??= consumed.map((file) => {
-            const body = priorNote(file)
-            return { refs: parseBackfills(body), internal: isInternalChangeset(body) }
-          })
-          earlier = removed.flatMap((entry) => !internal || entry.internal ? entry.refs : [])
-        } else if (isChangeset(previous)) {
-          earlier = parseBackfills(priorNote(previous))
+          deletedNotes ??= consumed.map(priorNote)
+          // Git can report a move as an edit and an addition when the old path gets new content.
+          rewrittenNotes ??= [...touched]
+            .filter(([file, from]) => file === from)
+            .map(([file]) => {
+              const earlier = priorNote(file)
+              const remaining = new Set(parseBackfills(git('show', `${sha}:${file}`)))
+              return { ...earlier, refs: earlier.refs.difference(remaining) }
+            })
+          predecessors = deletedNotes.concat(rewrittenNotes.filter((entry) => entry.note === note))
+        } else {
+          predecessors = isChangeset(previous) ? [priorNote(previous)] : []
         }
-        for (const pr of backfills) {
-          if (changesetCovered && !claims.has(pr)) claims.set(pr, index)
-          if (!earlier.includes(pr)) rootBackfills.set(pr, (rootBackfills.get(pr) ?? true) && coversRoot)
+        for (const ref of backfills) {
+          const carried = predecessors.filter((entry) => entry.refs.has(ref))
+          const introduced = carried.length === 0 && merge
+            ? index
+            : Math.max(-1, ...carried.map((entry) => entry.dates?.get(ref) ?? -1))
+          dates.set(ref, introduced)
+          if (merge && !carried.some((entry) => !internal || entry.internal)) {
+            rootBackfills.set(ref, (rootBackfills.get(ref) ?? true) && coversRoot)
+          }
         }
       }
-      for (const [pr, coversRoot] of rootBackfills) {
-        if (coversRoot && !changelogClaims.has(pr)) changelogClaims.set(pr, index)
+      for (const [ref, coversRoot] of rootBackfills) {
+        if (coversRoot) changelogClaims.set(ref, index)
       }
+      if (release) {
+        for (const file of consumed) creditPackageClaims(liveClaims.get(file) ?? [])
+      }
+      for (const file of [...consumed, ...renamedFrom]) liveClaims.delete(file)
+      for (const [file, dates] of updatedClaims) liveClaims.set(file, dates)
     }
+    for (const dates of liveClaims.values()) creditPackageClaims(dates)
 
     const changesetGaps = []
     const changelogGaps = []
-    for (const { sha, subject, files, touched, release, index, changelogWritten } of perMerge) {
+    // Keep the report newest first. A later declaration may cover an earlier merge.
+    for (const { sha, subject, files, touched, release, index, changelogWritten } of perMerge.toReversed()) {
       if (release) continue
       const shipped = files.filter((f) => shipsBetween(f, `${sha}^1`, sha))
       if (shipped.length === 0) continue
 
       const pr = prNumberOf(subject)
-      const backfilled = (byRef) => (byRef.get(pr ?? sha) ?? Infinity) < index
+      const backfilled = (byRef) => (byRef.get(pr ?? sha) ?? -1) > index
       // Bots are exempt from changesets, but production dependency bumps can still owe a root note.
       if (touched.size === 0 && !/dependabot|renovate/i.test(subject) && !backfilled(claims)) {
         changesetGaps.push({ sha, pr, subject, shipped })
@@ -550,7 +556,7 @@ function main() {
 
     // stdout carries the verdict, stderr the diagnosis — so `2>/dev/null` leaves a caller with
     // the answer and nothing else. The guidance block below broke that by staying on stdout.
-    console.error(`Merges since ${since}: ${merges.length}`)
+    console.error(`Merges since ${since}: ${perMerge.length}`)
     if (changesetGaps.length === 0 && changelogGaps.length === 0) {
       console.log('No changeset or root CHANGELOG.md gaps found.')
       process.exit(0)
@@ -572,6 +578,7 @@ function main() {
     and add a new Backfills declaration to a changeset in the same PR. If the reference already
     appears in a changeset, leave that file in place and add the declaration to a separate changeset.
     A change with no observable effect can use an internal changeset instead of a root note.
+    Merge the backfill PR into main and rerun the audit before running pnpm changeset version.
     Name the PR number, or use the full merge hash printed for merges without a PR:
 
         Backfills: #413
