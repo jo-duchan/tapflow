@@ -272,8 +272,10 @@ public final class Focused {
     boolean secure = field.isPassword();
     CharSequence was = field.getText();
     // An empty field showing its hint reports the hint as its text: the length is the value's, the bullets' only for a
-    // password, which has no value to read.
-    int beforeLength = before != null ? before.length() : (was == null ? 0 : was.length());
+    // password, which has no value to read — and none at all for a password showing its hint. Counted, an empty React
+    // Native password field (hint "Password") read as one holding eight characters, and typing into it was refused as
+    // appending to a password (wdio demo app, Android 14 and 16).
+    int beforeLength = before != null ? before.length() : (was == null || field.isShowingHintText() ? 0 : was.length());
     // No selection reported (-1) is a caret at the end, where a field that was just tapped puts it.
     int start = field.getTextSelectionStart();
     int end = field.getTextSelectionEnd();

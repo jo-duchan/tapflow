@@ -43,7 +43,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- **Android 16: typing, field reads and touch checks work after the first one.** On Android 16 the agent's field server answered only its first request and failed every later one, so typing that replaces a field's text, Flow Capture's field reads, the check of where a tap lands, and the recording of what each tap touched all stopped working after one use.
+- **Android 16: typing, field reads and touch checks work after the first one.** On Android 16 the agent's field server answered only its first request and failed every later one, so typing that replaces a field's text, Flow Capture's field reads, the check of where a tap lands, and the recording of what each tap touched all stopped working after one use. Typing into an empty password field showing its hint is no longer refused as adding to a password (any Android version).
 - **A swipe ends where it was asked to.** A flow's `swipe` and `scroll`, and MCP's `swipe`, stopped an eighth of the way short of their end point, so Flow Capture's Verify dropped drag-and-drop pieces short of their slots. A plain `scroll` or `swipe` now goes further in the same time, and a fling is released a little faster.
 
 - **An Android app launch no longer hangs for 30 seconds.** The device-side bound on the launch did not always end the call, so a launch could take 30 s to answer, and Flow Capture's Match failed with "app launch timed out" with the app already on screen. Each launch command now answers within 12 s on the host, and counts as launched when the intent went out; the launcher lookup and any fallback run in sequence, so a whole launch can take longer. Needs the Android agent from this release.
