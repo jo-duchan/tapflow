@@ -135,39 +135,69 @@ public final class Focused {
   private static String hold() {
     if (held != null) return "{\"held\":true}";
     Object wrapper = null;
+    boolean connected = false;
     try {
       Class<?> wrapperClass = Class.forName("com.android.uiautomator.core.UiAutomationShellWrapper");
       wrapper = wrapperClass.getConstructor().newInstance();
       wrapperClass.getMethod("connect").invoke(wrapper);
+      connected = true;
       UiAutomation automation = (UiAutomation) wrapperClass.getMethod("getUiAutomation").invoke(wrapper);
       withWindows(automation);
-      heldWrapper = wrapper;
-      held = automation;
+      // A connection whose node cache cannot be cleared answers with the screen before (Compose sends it no events), so
+      // it is not held: requests connect each time, slower, and a touch whose hit comes late gets no report.
+      if (!clearCache(automation)) {
+        disconnect(wrapper);
+        return "{\"error\":\"cache cannot be cleared\"}";
+      }
       // Paid here rather than by the next touch's hit: the window list fills over a few reads after connecting (Hit).
       settleWindows(automation);
+      heldWrapper = wrapper;
+      held = automation;
       return "{\"held\":true}";
     } catch (InvocationTargetException e) {
-      quitHandlerThread(wrapper);
+      if (connected) disconnect(wrapper); else quitHandlerThread(wrapper);
       return "{\"error\":" + str(String.valueOf(e.getCause())) + "}";
     } catch (Exception e) {
+      // Set up after connecting failed (a null service info): let go of the connection, or it outlives the answer.
+      if (connected) disconnect(wrapper); else quitHandlerThread(wrapper);
       return "{\"error\":" + str(String.valueOf(e)) + "}";
     }
   }
 
-  /** `UiAutomation.clearCache()` from API 34, the process-wide interaction client's before it. */
-  private static void clearCache(UiAutomation automation) {
+  private static void disconnect(Object wrapper) {
+    try {
+      wrapper.getClass().getMethod("disconnect").invoke(wrapper);
+    } catch (ReflectiveOperationException | RuntimeException e) {
+      quitHandlerThread(wrapper);
+    }
+  }
+
+  /**
+   * Clear the connection's node cache: `UiAutomation.clearCache()` from API 34; before it the interaction client's,
+   * per connection (`clearCache(int)`, Android 13) or for the process (`clearCache()`, older). `false` when none
+   * could be reached.
+   */
+  private static boolean clearCache(UiAutomation automation) {
     try {
       automation.getClass().getMethod("clearCache").invoke(automation);
-      return;
+      return true;
     } catch (ReflectiveOperationException | RuntimeException e) {
-      // Older: the client below.
+      // Before API 34: the client below.
     }
     try {
       Class<?> client = Class.forName("android.view.accessibility.AccessibilityInteractionClient");
       Object instance = client.getMethod("getInstance").invoke(null);
-      client.getMethod("clearCache").invoke(instance);
+      try {
+        java.lang.reflect.Field id = UiAutomation.class.getDeclaredField("mConnectionId");
+        id.setAccessible(true);
+        client.getMethod("clearCache", int.class).invoke(instance, id.getInt(automation));
+        return true;
+      } catch (ReflectiveOperationException | RuntimeException e) {
+        client.getMethod("clearCache").invoke(instance);
+        return true;
+      }
     } catch (ReflectiveOperationException | RuntimeException e) {
-      // Nothing to clear with: the answer may be the cache's.
+      return false;
     }
   }
 

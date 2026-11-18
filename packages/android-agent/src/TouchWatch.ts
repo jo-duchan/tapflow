@@ -29,10 +29,11 @@ const TAP_SLOP = 0.02
 const DOUBLE_TAP_MS = 300
 const DOUBLE_TAP_SLOP = 0.1
 /** A release faster than this (fractions of the screen a second, over its last 100 ms) is a fling, which can leave a
- *  list gliding: ViewConfiguration's minimum fling velocity, 50 dp/s, ~130 px/s on a phone. A person's swipe in the
- *  dashboard slows before the lift (0.23–0.33 measured on three that left the Compose list gliding), so a stricter bar
- *  missed every one. A spinner after a pull to refresh is told apart by the frames instead (`judgeTouch`). */
-const FLING_SPEED = 0.05
+ *  list gliding: ViewConfiguration's minimum fling velocity, 50 dp/s, about 0.12 of a phone's width a second (411 dp).
+ *  A person's swipe in the dashboard slows before the lift (0.23–0.33 measured on three that left the Compose list
+ *  gliding), so a stricter bar missed every one. A spinner after a pull to refresh is told apart by the frames instead
+ *  (`judgeTouch`). */
+const FLING_SPEED = 0.12
 const FLING_WINDOW_MS = 100
 const OFFSET_SAMPLES = 16
 /** Under the field server's 60 s idle exit. */
@@ -52,6 +53,8 @@ interface Gesture {
   moves: Array<{ x: number; y: number; at: number }>
   hit: Promise<{ answer: string; writtenAt: number } | null>
   tapCount: number
+  /** The app under test when the finger went down: a launch while its report waits does not make it another app's. */
+  pkg: string | undefined
   previousTapUpAt?: number
   swipeEndAt?: number
 }
@@ -105,6 +108,7 @@ export class TouchWatch {
       // Asked after the down was sent, never on its path; queued with the device's other UiAutomation requests.
       hit: this.deps.hit(this.serial, x, y).catch(() => null),
       tapCount: repeat ? last.tapCount + 1 : 1,
+      pkg: this.appPackage(),
       ...(last?.tap ? { previousTapUpAt: last.upAt } : {}),
       ...(last?.fling ? { swipeEndAt: last.upAt } : {}),
     }
@@ -133,8 +137,10 @@ export class TouchWatch {
     this.tail = this.tail.then(() => this.report(sessionId, requestId, g, !tap)).catch(() => {})
   }
 
-  /** A gesture the client abandoned (#1115): nothing was touched. */
+  /** A gesture the client abandoned (#1115): no report, but the app saw its down, which iOS counts (`seq`). */
   cancel(): void {
+    // In turn with the reports before it, whose counts it must not touch.
+    if (this.current) this.tail = this.tail.then(() => { this.lost = true })
     this.current = null
   }
 
@@ -161,7 +167,7 @@ export class TouchWatch {
     const device = (ms: number) => Math.round(ms * MS + offsetNs)
     const downNs = device(g.downAt), upNs = device(g.upAt!)
     if (hit.done === undefined || hit.done > Math.min(downNs + LONG_PRESS_MS * MS, upNs)) { this.lost = true; return }
-    const pkg = this.appPackage()
+    const pkg = g.pkg
     if (!pkg) return
     const seen = seenAt(hit, pkg)
     // Known to be elsewhere (the launcher, another app): not the app's touch, so nothing is lost by it.
@@ -170,9 +176,13 @@ export class TouchWatch {
     const wait = g.upAt! + AFTER_NS / MS + SETTLE_MS - this.now()
     if (wait > 0) await this.sleep(wait)
     if (this.stopped) return
-    const frames = parseFramestats(await this.deps.framestats(this.serial, pkg).catch(() => ''))
+    const read = parseFramestats(await this.deps.framestats(this.serial, pkg).catch(() => ''))
     // Up to 3 s for the read: a reboot or a relay loss in it stopped this watch.
     if (this.stopped) return
+    // A process that drew nothing before the down started after it: the touch was the one before's (the app restarted
+    // in between), so its frames, its verdicts and its count are not this touch's (CodeRabbit on #1187).
+    const replaced = read !== null && this.pid !== undefined && read.pid !== this.pid && read.completed.length > 0 && read.completed[0]! > downNs
+    const frames = replaced ? null : read
     const { moving, acted } = judgeTouch({
       frames, downNs, upNs, moved, seen,
       ...(g.swipeEndAt !== undefined ? { swipeEndNs: device(g.swipeEndAt) } : {}),
@@ -187,7 +197,8 @@ export class TouchWatch {
     }
     // Counted in the app's process, as iOS counts: a new process starts again at 1.
     let seq: number | undefined
-    if (!frames) this.lost = true
+    if (replaced) { /* neither process's count */ }
+    else if (!frames) this.lost = true
     else {
       // A touch lost before this one may have been this process's first: its count starts unknown.
       if (frames.pid !== this.pid) { this.pid = frames.pid; this.seq = 0; this.seqUnknown = this.lost }

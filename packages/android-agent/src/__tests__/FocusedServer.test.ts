@@ -209,6 +209,38 @@ describe('AdbWrapper through the field server', () => {
     expect(server.lines.map((l) => l.split(' ')[1])).toEqual(['hold', 'release', 'hold', 'release'])
   })
 
+  // CodeRabbit on #1187: a re-hold falling due during a long dump ran right after it, between two dumps.
+  it('does not hold again during, or right after, a dump that outlasts the last one\'s wait', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
+    const server = fakeServer((op) => (op === 'hold' ? '{"held":true}' : '{}'))
+    const r = runner(server)
+    const adb = new AdbWrapper(r)
+    await adb.holdConnection('emulator-5554', true)
+    await adb.dumpUiHierarchy('emulator-5554').catch(() => {})
+    await vi.advanceTimersByTimeAsync(2_000)
+    let finish: (out: string) => void = () => {}
+    vi.mocked(r.exec).mockImplementationOnce(() => new Promise<string>((res) => { finish = res }))
+    const slow = adb.dumpUiHierarchy('emulator-5554').catch(() => {})
+    await vi.advanceTimersByTimeAsync(2_000)
+    finish('')
+    await slow
+    await vi.advanceTimersByTimeAsync(1_000)
+    expect(server.lines.map((l) => l.split(' ')[1])).toEqual(['hold', 'release'])
+    await vi.advanceTimersByTimeAsync(2_500)
+    await vi.waitFor(() => expect(server.lines.map((l) => l.split(' ')[1])).toEqual(['hold', 'release', 'hold']))
+  })
+
+  it('pushes the jar again when a hold or a ping could not start the server', async () => {
+    const r = runner(fakeServer(() => '{}', { ready: false }))
+    const adb = new AdbWrapper(r)
+    ;(adb as unknown as { focusedServers: FocusedServers }).focusedServers = new FocusedServers({
+      spawn: r.spawnPiped!.bind(r), kill: async () => {}, readyTimeoutMs: 10, retryAfterMs: 0,
+    })
+    await adb.holdConnection('emulator-5554', true)
+    await adb.pingFocusedServer('emulator-5554')
+    expect(vi.mocked(r.exec).mock.calls.filter((c) => c.includes('push'))).toHaveLength(2)
+  })
+
   it('holds again before a hit when the server lost its hold, and says when the hit went out', async () => {
     const server = fakeServer((op, text) => (op === 'hold' ? '{"held":true}' : `{"rx":1,"w":1,"h":1,"echo":"${text}"}`))
     const r = runner(server)

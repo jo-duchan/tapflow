@@ -18,7 +18,7 @@ interface Answer { pkg?: string; type?: number; branch?: unknown[]; readAfterMs?
  * A watch on a fake clock: `hit` answers as the jar would, its branch read `readAfterMs` after the request (on the
  * device's clock); `sleep` moves the clock. `frames` is what the app drew, in host ms.
  */
-function rig(opts: { answers?: Answer[]; frames?: number[]; pid?: () => number; pkg?: string | undefined } = {}) {
+function rig(opts: { answers?: Answer[]; frames?: number[] | (() => number[]); pid?: () => number; pkg?: string | undefined; pkgNow?: () => string | undefined } = {}) {
   let now = 1_000
   const sent: CaptureTouched[] = []
   const holds: boolean[] = []
@@ -38,13 +38,13 @@ function rig(opts: { answers?: Answer[]; frames?: number[]; pid?: () => number; 
         }),
       }
     }),
-    framestats: vi.fn(async () => framestats(opts.pid?.() ?? 4495, opts.frames ?? [])),
+    framestats: vi.fn(async () => framestats(opts.pid?.() ?? 4495, typeof opts.frames === 'function' ? opts.frames() : opts.frames ?? [])),
     ping: vi.fn(async () => {}),
     hold: vi.fn(async (_serial: string, on: boolean) => { holds.push(on) }),
     send: (m: CaptureTouched) => { sent.push(m) },
   }
   const pkg = 'pkg' in opts ? opts.pkg : APP
-  const watch = new TouchWatch(deps, 'emulator-5554', () => pkg)
+  const watch = new TouchWatch(deps, 'emulator-5554', opts.pkgNow ?? (() => pkg))
   const tap = (x: number, y: number, holdMs = 100, id = `rq-${sent.length}-${now}`) => {
     watch.down(x, y, { x, y })
     now += holdMs
@@ -205,6 +205,56 @@ describe('TouchWatch', () => {
     tap(0.5, 0.5)
     await watch.settled()
     expect(sent).toEqual([])
+  })
+
+  // CodeRabbit on #1187: a report waits behind the one before it, and a launch in that time is not the touch's app.
+  it('judges a touch by the app it went down in, not one launched while its report waited', async () => {
+    let pkgNow: string = APP
+    const { watch, sent, deps, advance } = rig({ pkgNow: () => pkgNow })
+    watch.down(0.5, 0.5, { x: 0.5, y: 0.5 })
+    pkgNow = 'com.other.app'
+    advance(100)
+    watch.up('s1', 'rq')
+    await watch.settled()
+    expect(sent).toHaveLength(1)
+    expect(deps.framestats).toHaveBeenCalledWith('emulator-5554', APP)
+  })
+
+  // CodeRabbit on #1187: the app saw a cancelled gesture's down, which iOS counts.
+  it('leaves seq out after a cancelled gesture, as one the app saw and nobody reported', async () => {
+    const { watch, sent, tap, advance } = rig()
+    tap(0.5, 0.5)
+    advance(1_000)
+    watch.down(0.5, 0.5, { x: 0.5, y: 0.5 })
+    watch.cancel()
+    advance(1_000)
+    tap(0.5, 0.5)
+    await watch.settled()
+    expect(sent.map((m) => m.observation.seq)).toEqual([1, undefined])
+  })
+
+  // CodeRabbit on #1187: the app restarted between the down and the frames read.
+  it('gives no count and no verdict to a touch whose frames belong to a process started after it', async () => {
+    let pid = 100
+    let drawn: number[] = [900]
+    const { watch, sent, tap, advance, clock } = rig({ pid: () => pid, frames: () => drawn })
+    tap(0.5, 0.5)
+    await watch.settled()
+    advance(1_000)
+    pid = 200
+    drawn = [1_000_000]
+    const at = tap(0.5, 0.5)
+    await watch.settled()
+    expect(at).toBeDefined()
+    expect(sent[1]!.observation).not.toHaveProperty('seq')
+    expect(sent[1]!.observation).not.toHaveProperty('acted')
+    // The new process's own first touch is still its first.
+    // Drawn before its next down: the process was there for it.
+    advance(1_000)
+    drawn = [clock() - 300]
+    tap(0.5, 0.5)
+    await watch.settled()
+    expect(sent[2]!.observation.seq).toBe(1)
   })
 
   it('reports nothing for a cancelled gesture, or once stopped', async () => {

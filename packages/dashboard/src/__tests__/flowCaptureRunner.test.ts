@@ -1220,12 +1220,15 @@ describe('matchRange with the app\'s touch reports', () => {
   it('scrolls the way an Android swipe went on the screen, not in the frame it was sent in', async () => {
     screen.elements = []
     ran.answers = [{ status: 'failed', failureKind: 'product' }]
-    const sideways = { ...(tap as object), platform: 'android', chrome: () => ({ streamRotation: 90 }) } as unknown as Tap
+    // The channel's chrome, which follows the relay; the viewer's (a render behind) still says upright.
+    const chromeSpy = vi.spyOn(channel, 'chrome').mockResolvedValue({ streamRotation: 90 } as never)
+    const sideways = { ...(tap as object), platform: 'android', chrome: () => null } as unknown as Tap
     // Leftward in a frame turned a quarter from the screen: up the screen.
     const swipe = { ...base, kind: 'swipe', from: [0.8, 0.5], to: [0.3, 0.5], space: 'frame', durationMs: 300 } as unknown as RawStep
     const lease = new PauseLease(sideways)
     await matchRange(sideways, channel, lease, [launchStep, tapStep, tapStep, swipe, named], { start: 0, end: 5 }, null, compareHooks().h)
     await lease.stop()
+    chromeSpy.mockRestore()
     expect(flowsAsSteps()).toEqual([['scroll down', 'tapOn'], ['scroll up', 'tapOn']])
   })
 
@@ -1233,12 +1236,15 @@ describe('matchRange with the app\'s touch reports', () => {
   // compared by its picture, which a fling's length makes differ.
   it('does not compare an Android swipe before a named tap by the frame it was sent in', async () => {
     screen.elements = [orders]
-    const sideways = { ...(tap as object), platform: 'android', chrome: () => ({ streamRotation: 90 }) } as unknown as Tap
+    // The channel's chrome, which follows the relay; the viewer's (a render behind) still says upright.
+    const chromeSpy = vi.spyOn(channel, 'chrome').mockResolvedValue({ streamRotation: 90 } as never)
+    const sideways = { ...(tap as object), platform: 'android', chrome: () => null } as unknown as Tap
     const swipe = { ...base, kind: 'swipe', from: [0.8, 0.75], to: [0.3, 0.75], space: 'frame', durationMs: 300 } as unknown as RawStep
     const { compare, h } = compareHooks()
     const lease = new PauseLease(sideways)
     await matchRange(sideways, channel, lease, [launchStep, tapStep, tapStep, swipe, named], { start: 0, end: 5 }, null, h)
     await lease.stop()
+    chromeSpy.mockRestore()
     expect(compare.mock.calls.map((c) => c[0])).not.toContain(swipe)
   })
 

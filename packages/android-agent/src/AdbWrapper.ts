@@ -575,6 +575,9 @@ export class AdbWrapper {
       // Match or a tree read paid that settling itself, past its up, and went unreported (Compose sample, measured).
       const servers = this.focusedServers
       const jar = this.uidumpDevicePath
+      // A re-hold due during a long dump would run right after it and take the connection back between two dumps.
+      clearTimeout(this.reholdTimers.get(serial))
+      this.reholdTimers.delete(serial)
       if (servers?.isHeld(serial) && jar) await servers.request(serial, jar, 'release')
       try {
         return await this.dumpNow(serial, timeoutSec)
@@ -582,6 +585,11 @@ export class AdbWrapper {
         if (this.holdWanted.has(serial)) this.scheduleRehold(serial)
       }
     })
+  }
+
+  /** A server that could not start may be missing its jar (a wiped emulator on the same serial): pushed again next time. */
+  private noteStart(serial: string, outcome: { startFailed?: true }): void {
+    if (outcome.startFailed) this.uidumpPushed.delete(serial)
   }
 
   private scheduleRehold(serial: string): void {
@@ -607,7 +615,7 @@ export class AdbWrapper {
     await this.inDumpQueue(serial, async () => {
       if (!on && !servers.isHeld(serial)) return
       const jar = await this.pushUidump(serial)
-      if (jar) await servers.request(serial, jar, on ? 'hold' : 'release')
+      if (jar) this.noteStart(serial, await servers.request(serial, jar, on ? 'hold' : 'release'))
     })
   }
 
@@ -682,7 +690,7 @@ export class AdbWrapper {
       const jar = await this.pushUidump(serial)
       if (!jar) return null
       // A server restarted since (an answer it missed, its idle exit) holds nothing: held again first.
-      if (this.holdWanted.has(serial) && !servers.isHeld(serial)) await servers.request(serial, jar, 'hold')
+      if (this.holdWanted.has(serial) && !servers.isHeld(serial)) this.noteStart(serial, await servers.request(serial, jar, 'hold'))
       const outcome = await servers.request(serial, jar, 'hit', `${x.toFixed(5)} ${y.toFixed(5)}`)
       if (outcome.startFailed) this.uidumpPushed.delete(serial)
       return outcome.sent && outcome.out !== null ? { answer: outcome.out, writtenAt: outcome.writtenAt } : null
@@ -698,7 +706,7 @@ export class AdbWrapper {
       const jar = await this.pushUidump(serial)
       if (!jar) return
       // A hold a dump let go of, or a restarted server lost, comes back here before a touch has to wait for it.
-      await servers.request(serial, jar, this.holdWanted.has(serial) && !servers.isHeld(serial) ? 'hold' : 'ping')
+      this.noteStart(serial, await servers.request(serial, jar, this.holdWanted.has(serial) && !servers.isHeld(serial) ? 'hold' : 'ping'))
     })
   }
 

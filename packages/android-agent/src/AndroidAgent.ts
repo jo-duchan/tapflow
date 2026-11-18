@@ -3087,7 +3087,6 @@ export class AndroidAgent implements DeviceAgent, NetworkControlCapability {
           break
         }
         const options = compactLaunchOptions({ arguments: args, env })
-        this.appPackages.set(state!.deviceId, bundleId)
         // Flow Capture's Match saw a launch go unanswered for its 30 s in 4 of 28 replays on an emulator (2026-11-17),
         // with the app on screen and nothing in this log. Where it waits is logged once it is slow, so the next one says.
         const started = Date.now()
@@ -3098,7 +3097,11 @@ export class AndroidAgent implements DeviceAgent, NetworkControlCapability {
         this.awaitPendingClears(state!.deviceId)
           .then(() => { phase = `launching (clears took ${Date.now() - started}ms)`; return this.adb.launchApp(serial, bundleId, options, defaultsOnly === true) })
           // What was delivered, which for the relay's defaults can be less than what was sent, down to nothing.
-          .then((applied) => respond(options ? { type: 'app:launch-done', applied: appliedKeys(applied ?? {}) } : { type: 'app:launch-done' }))
+          .then((applied) => {
+            // The app under test once it launched: a launch that failed leaves the one before (CodeRabbit on #1187).
+            this.appPackages.set(state!.deviceId, bundleId)
+            respond(options ? { type: 'app:launch-done', applied: appliedKeys(applied ?? {}) } : { type: 'app:launch-done' })
+          })
           .catch((e: unknown) => {
             const message = e instanceof Error ? e.message : String(e)
             // The toast gets the reason alone; the full adb output (the cause) stays in this log.

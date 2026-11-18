@@ -112,9 +112,10 @@ final class Hit {
     if (n.getClassName() != null) o.put("c", n.getClassName().toString());
     if (n.getViewIdResourceName() != null) o.put("id", n.getViewIdResourceName());
     boolean secret = n.isEditable() || n.isPassword();
-    // What a person typed, and a password's dots, stay on the device: an input is named by its id only.
+    // What a person typed, and a password's dots, stay on the device, from its text or its description (an app can put
+    // the value there): an input is named by its id only.
     if (!secret && n.getText() != null && n.getText().length() > 0) o.put("t", n.getText().toString());
-    if (n.getContentDescription() != null && n.getContentDescription().length() > 0) o.put("d", n.getContentDescription().toString());
+    if (!secret && n.getContentDescription() != null && n.getContentDescription().length() > 0) o.put("d", n.getContentDescription().toString());
     int k = (n.isClickable() ? 1 : 0) | (n.isLongClickable() ? 2 : 0) | (n.isEditable() ? 4 : 0)
         | (n.isPassword() ? 8 : 0) | (n.isScrollable() ? 16 : 0) | (n.isCheckable() ? 32 : 0);
     if (k != 0) o.put("k", k);

@@ -2836,6 +2836,18 @@ describe('AndroidAgent', () => {
         expect(hold).toHaveBeenLastCalledWith('emulator-5554', false)
       })
 
+      // CodeRabbit on #1187: the app under test is the one that launched, not the one a failed launch named.
+      it('takes the app under test from a launch that succeeded, and keeps the one before when it fails', async () => {
+        const packages = () => (agent as unknown as { appPackages: Map<string, string> }).appPackages
+        const launch = vi.spyOn(adb, 'launchApp').mockResolvedValueOnce(undefined).mockRejectedValueOnce(new Error('not installed'))
+        inject({ type: 'app:launch', requestId: 'rq-a', payload: { bundleId: 'dev.tapflow.a' } })
+        await vi.waitFor(() => expect(packages().get('avd:Pixel_8_API_34')).toBe('dev.tapflow.a'))
+        inject({ type: 'app:launch', requestId: 'rq-b', payload: { bundleId: 'dev.tapflow.b' } })
+        await vi.waitFor(() => expect(launch).toHaveBeenCalledTimes(2))
+        await new Promise((r) => setTimeout(r, 20))
+        expect(packages().get('avd:Pixel_8_API_34')).toBe('dev.tapflow.a')
+      })
+
       // Review of P4: the adb fallback plays a gesture only once its end arrives, so its down's time is not the app's.
       it('does not observe a touch that goes through the adb fallback', async () => {
         vi.spyOn(adb, 'holdConnection').mockResolvedValue(undefined)

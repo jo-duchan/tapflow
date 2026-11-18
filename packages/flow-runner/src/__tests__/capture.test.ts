@@ -1533,6 +1533,9 @@ describe('touch reports', () => {
       const tapped: TouchObservation = { point: { x: 0, y: 0 }, moving: false, element: { identifier: 'com.app:id/title', label: 'Item 37', traits: 0, frame: at(0, 0.4) } }
       expect(recordedTarget(rows, tapped)).toBe(rows[2])
       expect(recordedTarget(rows.slice(0, 2), tapped)).toBeNull()
+      // One row of that id left on the screen is not the tapped one either.
+      expect(recordedTarget([rows[0]!], tapped)).toBeNull()
+      expect(recordedTarget([rows[2]!], tapped)).toBe(rows[2])
       expect(matchSelector(rows, recordedSelector(tapped)!)).toEqual([rows[2]])
     })
     it('names nothing for the keyboard, a web view or Flutter, a text input by its label, or a secure field', () => {

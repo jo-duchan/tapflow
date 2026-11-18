@@ -374,12 +374,13 @@ export function recordedTarget(tree: readonly UIElement[], touched: TouchObserva
 }
 
 /**
- * Of several elements one identifier names, those with the reported label too. An Android list gives every row's text
- * the same resource id (`com.app:id/title`), and the nearest of them to the recorded frame is whichever row a fling
- * left there, not the one tapped. None left (the label changed) is none: the tap goes to its point, and is compared.
+ * Of the elements one identifier names, those with the reported label too. An Android list gives every row's text the
+ * same resource id (`com.app:id/title`), and the nearest of them to the recorded frame is whichever row a fling left
+ * there, not the one tapped — and with the others scrolled away the one left is not it either (CodeRabbit on #1187).
+ * None left (the label changed) is none: the tap goes to its point, and is compared.
  */
 function sameLabel(found: UIElement[], named: ObservedElement): UIElement[] {
-  if (found.length <= 1 || !named.label) return found
+  if (!named.label) return found
   return found.filter((e) => e.label === named.label)
 }
 
