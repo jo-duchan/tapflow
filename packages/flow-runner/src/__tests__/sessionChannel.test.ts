@@ -45,11 +45,26 @@ describe('SessionChannel without a socket', () => {
     vi.useFakeTimers()
     const ch = new MemoryChannel()
     void ch.swipe('s1', [0.6, 0.8], [0.5, 0.2], 900).catch(() => undefined)
-    await vi.advanceTimersByTimeAsync(900)
+    // The last move at eight ninths, the lift a ninth after it: not in the same tick.
+    await vi.advanceTimersByTimeAsync(850)
     const moves = ch.sent.filter((m) => m.type === 'input:touch:move')
     expect(moves).toHaveLength(8)
     expect(moves.at(-1)).toMatchObject({ payload: { x: 0.5, y: 0.2 } })
+    expect(ch.sent.some((m) => m.type === 'input:touch:end')).toBe(false)
+    await vi.advanceTimersByTimeAsync(50)
     expect(ch.sent.at(-1)!.type).toBe('input:touch:end')
+    vi.useRealTimers()
+  })
+
+  // A hold starts on the end point, so it would hide a path that stopped short: the moves before it are counted.
+  it('a held swipe makes all eight moves before it holds', async () => {
+    vi.useFakeTimers()
+    const ch = new MemoryChannel()
+    void ch.swipe('s1', [0.6, 0.8], [0.5, 0.2], 900, 150).catch(() => undefined)
+    await vi.advanceTimersByTimeAsync(850)
+    const moves = ch.sent.filter((m) => m.type === 'input:touch:move')
+    expect(moves).toHaveLength(8)
+    expect(moves.at(-1)).toMatchObject({ payload: { x: 0.5, y: 0.2 } })
     vi.useRealTimers()
   })
 
