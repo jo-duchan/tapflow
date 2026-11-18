@@ -1096,6 +1096,16 @@ describe('runFlow', () => {
       expect(swipes(driver).map((c) => c[4])).toEqual([150, 150, 0])
     })
 
+    // The other side of the rule below: rows moved under a fixed button, so no fling is needed before taking it.
+    it('takes a cut match fixed to the bottom without a fling while the rows above it move', async () => {
+      const cut = el({ label: 'Target', frame: { x: 0, y: 0.95, width: 1, height: 0.05 } })
+      const page = (shift: number) => [0.2, 0.4, 0.6].map((y) => row('Item', y - shift))
+      const driver = fakeDriver([[...page(0), cut], [...page(0.1), cut], [...page(0.2), cut]])
+      const result = await runFlow(flowOf('steps:\n  - scroll: { until: { label: "Target", timeout: 10 } }\n'), driver, OPTS)
+      expect(result.status).toBe('passed')
+      expect(swipes(driver).map((c) => c[4])).toEqual([150, 150])
+    })
+
     // CodeRabbit on #1190: on a pager that snaps held drags back, a cut target stays where it is; that is no arrival
     // until a fling was tried.
     it('tries a fling before taking a cut match that only a snapped-back pager kept still', async () => {
