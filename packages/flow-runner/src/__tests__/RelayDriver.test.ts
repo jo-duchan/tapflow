@@ -200,7 +200,9 @@ describe('RelayDriver — points turned by the app\'s interface turn', () => {
     await driver.pinch([[0.25, 0.1], [0.75, 0.1]], [[0.1, 0.1], [0.9, 0.1]], 500)
     expect(tap).toHaveBeenCalledWith('s1', 0.9, 0.25)
     expect(longPress).toHaveBeenCalledWith('s1', 0.9, 0.25, 1000)
-    expect(swipe).toHaveBeenCalledWith('s1', [0.9, 0.25], [0.5, 0.5], 300)
+    expect(swipe).toHaveBeenCalledWith('s1', [0.9, 0.25], [0.5, 0.5], 300, undefined)
+    await driver.swipe([0.25, 0.1], [0.5, 0.5], 300, 150)
+    expect(swipe).toHaveBeenLastCalledWith('s1', [0.9, 0.25], [0.5, 0.5], 300, 150)
     expect(pinch).toHaveBeenCalledWith('s1', [[0.9, 0.25], [0.9, 0.75]], [[0.9, 0.1], [0.9, 0.9]], 500)
   })
 

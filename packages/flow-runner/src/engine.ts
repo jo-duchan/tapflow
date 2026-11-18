@@ -27,7 +27,9 @@ export interface FlowDriver {
   // Optional AbortSignal so a stalled query can't block the poll loop past the step deadline.
   queryUITree(signal?: AbortSignal): Promise<UIElement[]>
   tap(x: number, y: number): Promise<void>
-  swipe(from: [number, number], to: [number, number], durationMs: number): Promise<void>
+  /** `holdMs`: the finger stays at `to` before it lifts, so the content stops there instead of gliding on (a drag).
+   *  A driver that ignores it swipes as before. */
+  swipe(from: [number, number], to: [number, number], durationMs: number, holdMs?: number): Promise<void>
   inputText(text: string): Promise<void>
   /** `modifiers` are held while the key is pressed; absent for a plain press. */
   pressKey(code: string, modifiers?: KeyModifier[]): Promise<void>
@@ -727,7 +729,12 @@ export async function waitForStableScreen<T extends { elements: UIElement[] }>(
 
 // A dump takes ~2.5 s on an emulator, so the default step timeout would allow about three swipes; a list is longer than
 // that. The end of the list stops it sooner (below), so the wider default costs time only when the element is missing.
-const SCROLL_UNTIL_MS = 30_000
+/** A search step moves the content a bounded distance (a drag, below), so a long list takes more steps than the
+ *  flings it took before (45 rows on iOS: 9.6 → 13.3 s). The list's end stops a search sooner, so the longer wait is
+ *  spent only on a list that is long and holds the element far down. */
+const SCROLL_UNTIL_MS = 60_000
+/** How long a search step holds still before it lifts: from 100 ms no list measured glided on (150 for a margin). */
+const SEARCH_HOLD_MS = 150
 // Two, not one: a swipe sent while the screen is still changing can be acknowledged and dropped (see `waitForScreen`),
 // and one unchanged read after it would end the step at the top of a list that scrolls fine.
 const SCROLL_END_READS = 2
@@ -767,8 +774,9 @@ const REACH_FLOOR_MS = 2_000
 const MAX_REACH_TARGETS = 64
 
 /**
- * The element `scrollUntil` found, read again until it is where it was the read before: the last swipe's fling is
- * still carrying the list when it comes into view. A tap read off a moving list lands a row further on, and on iOS a
+ * The element `scrollUntil` found, read again until it is where it was the read before: a list can still be moving
+ * when it comes into view — bouncing at an end, snapping to a page, or carried by the fling a still step is followed
+ * by. A tap read off a moving list lands a row further on, and on iOS a
  * tap on a scrolling list only stops it — the step after passed with nothing tapped (iOS E2E, `tapOn("Row 17")`).
  * Bounded; past the bound, or on a failed read, the step goes on as before.
  */
@@ -813,9 +821,10 @@ function scrolledShape(tree: UIElement[]): string {
 }
 
 /**
- * Swipe the way `scroll` does until an element matching `sel` is on screen. How far one swipe goes differs from run to
- * run (a fling's length depends on its speed and the platform), so a flow that means "the row is now in view" says
- * that rather than a number of swipes. Reads before the first swipe, so an element already in view costs none. At the
+ * Drag the way `scroll` swipes until an element matching `sel` is on screen. How far a fling goes differs from run to
+ * run (its length depends on its speed and the platform), so a flow that means "the row is now in view" says that
+ * rather than a number of swipes; and the search steps are drags, held still before the lift, so none carries the
+ * list past the element between two reads. Reads before the first swipe, so an element already in view costs none. At the
  * end of the list — the screen stops changing — any match on screen is taken, cut or not; none fails as the product's,
  * as does the selector's timeout.
  *
@@ -871,7 +880,12 @@ async function scrollUntil(driver: FlowDriver, direction: ScrollDirection, sel: 
     }
     const base = `no element matched ${describeSelector(sel)} on screen after scrolling ${direction} for ${waitMs / 1000}s`
     if (Date.now() >= deadline) throw deadlineError(base, lastError, sawTree)
-    if (read) { await driver.swipe(gesture.from, gesture.to, 300); swiped = true }
+    // A drag, not a fling: a fling's glide carried the list past the element between two reads, and the search ended
+    // at the list's end without it (iOS, measured). Held still, each step moves the content as far as the finger (0.4
+    // of the screen up and down, 0.6 across) and no further, on every list measured (SwiftUI, UIKit, Compose,
+    // RecyclerView); a list whose visible part is shorter than that can still be stepped past. A step that moved
+    // nothing is followed by a fling: a pager whose page is taller than the drag snaps a held drag back to where it was.
+    if (read) { await driver.swipe(gesture.from, gesture.to, 300, unchanged > 0 ? 0 : SEARCH_HOLD_MS); swiped = true }
     await waitForNextPoll(deadline, pollIntervalMs, base, lastError, sawTree)
   }
 }

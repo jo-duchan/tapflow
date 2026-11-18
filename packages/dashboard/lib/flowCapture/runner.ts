@@ -797,10 +797,12 @@ class AligningDriver extends SocketFlowDriver {
     return super.longPress(x, y, durationMs)
   }
 
-  override swipe(from: [number, number], to: [number, number], durationMs: number) {
+  // `holdMs` passed on: `scroll { until }`'s search drags through here in Match and Verify, and a swipe that dropped it
+  // flung the list past the element as before.
+  override swipe(from: [number, number], to: [number, number], durationMs: number, holdMs?: number) {
     this.signal?.throwIfAborted()
     this.onTouch?.({ kind: 'swipe', from, to })
-    return super.swipe(from, to, durationMs)
+    return super.swipe(from, to, durationMs, holdMs)
   }
 
   override async inputText(text: string): Promise<void> {

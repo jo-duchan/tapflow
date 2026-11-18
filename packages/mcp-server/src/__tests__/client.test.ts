@@ -564,6 +564,25 @@ describe('TapflowClient', () => {
   })
 
   describe('swipe', () => {
+    // `scroll { until }` through `run_flow` drags: held still at the end, wobbling, then lifted (flow-runner's holdStill).
+    it('passes a hold from run_flow\'s driver to the swipe', async () => {
+      const spy = vi.spyOn(client, 'swipe').mockResolvedValue(undefined)
+      await makeFlowDriver(client, 'sess-1').swipe([0.5, 0.7], [0.5, 0.3], 300, 150)
+      expect(spy).toHaveBeenCalledWith('sess-1', expect.any(Number), expect.any(Number), expect.any(Number), expect.any(Number), 300, 150)
+      spy.mockRestore()
+    })
+
+    it('holds still at the end point before the lift when asked to', async () => {
+      await client.swipe('sess-1', 0.5, 0.7, 0.5, 0.3, 40, 100)
+      await waitForMessage(relay, 'input:touch:end')
+      const msgs = relay.sentMessages()
+      const end = msgs.findIndex((m) => m['type'] === 'input:touch:end')
+      const held = msgs.slice(0, end).filter((m) => m['type'] === 'input:touch:move')
+        .map((m) => m['payload'] as { x: number; y: number }).filter((p) => Math.abs(p.y - 0.3) < 0.001)
+      expect(held.length).toBeGreaterThanOrEqual(4)
+      expect(new Set(held.map((p) => p.y)).size).toBe(2)
+    })
+
     it('sends touch:start, multiple touch:move, and touch:end', async () => {
       await client.swipe('sess-1', 0, 0, 100, 100, 80)
       await waitForMessage(relay, 'input:touch:end')

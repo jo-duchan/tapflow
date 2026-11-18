@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto'
 import type {
   BootRefusalReason, BrowserToRelay, ChromePayload, DeviceSummary, PosturesPayload, InputErrorReason, LaunchApplied, LaunchOptions, ReachResult, ReachTarget, SessionTerminatedReason, UIElement,
 } from '@tapflowio/protocol'
-import { AdmissionRefusedError, DeviceLacksError, EnvironmentStepError, TransientQueryError, markEnvironmentFailure, authHeader, fetchWithToken, fixedToken, lookupBuild, reachRequest, readReachResults, tokenRefusal, keyModifierBits, type BuildLookup, type KeyModifier, type TokenSource } from '@tapflowio/flow-runner'
+import { AdmissionRefusedError, DeviceLacksError, EnvironmentStepError, TransientQueryError, markEnvironmentFailure, authHeader, fetchWithToken, fixedToken, lookupBuild, reachRequest, readReachResults, tokenRefusal, keyModifierBits, holdStill, type BuildLookup, type KeyModifier, type TokenSource } from '@tapflowio/flow-runner'
 
 // Protocol owns the wire shape; this file used to declare an identical copy under a name the
 // relay uses for a *different* shape. Kept exported as `DeviceInfo` because that is this
@@ -1114,6 +1114,7 @@ export class TapflowClient {
     endX: number,
     endY: number,
     durationMs = 300,
+    holdMs = 0,
   ): Promise<void> {
     // Fractional durations (e.g. 250.5) stay valid for 0.23.0 compatibility;
     // routed through failed() so a session-scoped failure carries the session note.
@@ -1139,10 +1140,12 @@ export class TapflowClient {
       })
     }
     await delay(interval)
+    // A drag held still before the lift, as flow-runner's channel does it (`scroll { until }` through `run_flow`).
+    if (holdMs > 0) await holdStill([endX, endY], holdMs, (payload) => this.send({ type: 'input:touch:move', sessionId, payload }))
     const requestId = randomUUID()
     this.send({ type: 'input:touch:end', sessionId, requestId, payload: { x: endX, y: endY } })
     // A swipe that stays put is a hold to Android's adb path, which replays it after the end arrives — as a long press.
-    await this.awaitInputAck(sessionId, requestId, durationMs)
+    await this.awaitInputAck(sessionId, requestId, durationMs + holdMs)
   }
 
   // Awaits the agent's ack so a following input (e.g. pressKey Enter) is sent

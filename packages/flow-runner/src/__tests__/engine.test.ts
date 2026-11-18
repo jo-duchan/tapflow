@@ -24,8 +24,8 @@ function fakeDriver(trees: UIElement[][]): FlowDriver & { calls: Array<[string, 
     calls,
     queryUITree: vi.fn(async () => trees[Math.min(i++, trees.length - 1)]),
     tap: vi.fn(async (x: number, y: number) => { calls.push(['tap', x, y]) }),
-    swipe: vi.fn(async (from: [number, number], to: [number, number], durationMs: number) => {
-      calls.push(['swipe', from, to, durationMs])
+    swipe: vi.fn(async (from: [number, number], to: [number, number], durationMs: number, holdMs?: number) => {
+      calls.push(['swipe', from, to, durationMs, ...(holdMs !== undefined ? [holdMs] : [])])
     }),
     inputText: vi.fn(async (text: string) => { calls.push(['inputText', text]) }),
     pressKey: vi.fn(async (code: string) => { calls.push(['pressKey', code]) }),
@@ -938,7 +938,16 @@ describe('runFlow', () => {
       const driver = fakeDriver([[row('Row 1', 0.3)], [row('Row 8', 0.3)], [row('Row 16', 0.3)]])
       const result = await runFlow(flowOf('steps:\n  - scroll: { direction: up, until: "Row 16" }\n'), driver, OPTS)
       expect(result.status).toBe('passed')
-      expect(swipes(driver)).toEqual([['swipe', [0.5, 0.3], [0.5, 0.7], 300], ['swipe', [0.5, 0.3], [0.5, 0.7], 300]])
+      // Drags held still before the lift: a fling's glide carried an iOS list past the element (measured).
+      expect(swipes(driver)).toEqual([['swipe', [0.5, 0.3], [0.5, 0.7], 300, 150], ['swipe', [0.5, 0.3], [0.5, 0.7], 300, 150]])
+    })
+
+    // A pager whose page is taller than the drag snaps a held drag back: the step after one that moved nothing flings.
+    it('flings the step after one that left the screen as it was', async () => {
+      const driver = fakeDriver([[row('Row 1', 0.3)], [row('Row 1', 0.3)], [row('Row 16', 0.3)]])
+      const result = await runFlow(flowOf('steps:\n  - scroll: { until: "Row 16" }\n'), driver, OPTS)
+      expect(result.status).toBe('passed')
+      expect(swipes(driver).map((c) => c[4])).toEqual([150, 0])
     })
 
     // #1125: a row under a tab bar is inside the screen, and its centre is the tab. It is not in view until the device
@@ -1018,10 +1027,10 @@ describe('runFlow', () => {
       const at = (x: number) => el({ label: 'Tab', frame: { x, y: 0.1, width: 0.04, height: 0.05 } })
       const right = fakeDriver([[at(0.96)], [at(0.5)]])
       expect((await runFlow(flowOf('steps:\n  - scroll: { direction: right, until: "Tab" }\n'), right, OPTS)).status).toBe('passed')
-      expect(swipes(right)).toEqual([['swipe', [0.8, 0.5], [0.2, 0.5], 300]])
+      expect(swipes(right)).toEqual([['swipe', [0.8, 0.5], [0.2, 0.5], 300, 150]])
       const left = fakeDriver([[at(0)], [at(0.5)]])
       expect((await runFlow(flowOf('steps:\n  - scroll: { direction: left, until: "Tab" }\n'), left, OPTS)).status).toBe('passed')
-      expect(swipes(left)).toEqual([['swipe', [0.2, 0.5], [0.8, 0.5], 300]])
+      expect(swipes(left)).toEqual([['swipe', [0.2, 0.5], [0.8, 0.5], 300, 150]])
       const notCut = fakeDriver([[at(0)]])
       expect((await runFlow(flowOf('steps:\n  - scroll: { direction: right, until: "Tab" }\n'), notCut, OPTS)).status).toBe('passed')
       expect(swipes(notCut)).toEqual([])
