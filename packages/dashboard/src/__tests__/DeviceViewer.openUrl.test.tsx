@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { render, screen, act, fireEvent } from '@testing-library/react'
+import { render, screen, act, fireEvent, waitFor } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
 import type { BrowserInbound } from '@/lib/types'
 
 // A reply does not go to whoever asked — the relay forwards it to whichever socket holds the session — so
@@ -53,11 +54,13 @@ function sendDeeplink(url: string): string {
 
 /** Brings a viewer to a state where the deeplink dialog is reachable. The chrome matters: the ⌘K handler
  *  lives in `IOSViewer`, which `DeviceViewer` renders only once `session:chrome` has arrived. */
-function live(sessionId = 'mine') {
-  render(<DeviceViewer sessionId={sessionId} deviceId="dev-1" />)
+function live(platform: 'ios' | 'android' = 'ios') {
+  const sessionId = 'mine'
+  render(<><button>Previous control</button><DeviceViewer sessionId={sessionId} deviceId="dev-1" /></>)
   act(() => { deliver!({ type: 'session:joined', sessionId, capabilities: [] }) })
+  const payload = platform === 'ios' ? CHROME : { buttons: [], streamType: 'h264' as const }
+  act(() => { deliver!({ type: 'session:chrome', sessionId, payload }) })
   act(() => { deliver!({ type: 'device:ready', sessionId, payload: { deviceId: 'dev-1' } }) })
-  act(() => { deliver!({ type: 'session:chrome', sessionId, payload: CHROME }) })
 }
 
 describe('DeviceViewer only toasts the deeplink replies it asked for', () => {
@@ -126,4 +129,81 @@ describe('DeviceViewer only toasts the deeplink replies it asked for', () => {
     expect(toast.success).toHaveBeenCalledTimes(1)
     expect(toast.error).toHaveBeenCalledWith('nope')
   })
+})
+
+describe.each(['ios', 'android'] as const)('DeepLinkDialog focus on %s', (platform) => {
+  it.each([
+    ['toolbar', 'Escape'], ['toolbar', 'Enter'], ['toolbar', 'Open'],
+    ['shortcut', 'Escape'], ['shortcut', 'Enter'], ['shortcut', 'Open'],
+  ])('restores focus after opening from %s and closing with %s', async (opening, closing) => {
+    const user = userEvent.setup()
+    send.mockClear()
+    live(platform)
+    const previous = screen.getByRole('button', { name: 'Previous control' })
+    const toolbar = screen.getByRole('button', { name: 'Open a deeplink' })
+    previous.focus()
+    expect(previous).toHaveFocus()
+
+    // A pointer click need not focus the button (Safari), so the opener must come from the event.
+    if (opening === 'toolbar') fireEvent.click(toolbar)
+    else await user.keyboard('{Meta>}k{/Meta}')
+
+    const input = screen.getByRole('textbox', { name: 'Deeplink URL' })
+    await waitFor(() => expect(input).toHaveFocus())
+    if (closing === 'Escape') await user.keyboard('{Escape}')
+    else {
+      await user.type(input, 'myapp://home')
+      if (closing === 'Enter') await user.keyboard('{Enter}')
+      else await user.click(screen.getByRole('button', { name: 'Open' }))
+      const requests = send.mock.calls.map(([message]) => message).filter(({ type }) => type === 'open-url')
+      expect(requests).toEqual([expect.objectContaining({ payload: { url: 'myapp://home' } })])
+    }
+
+    await waitFor(() => expect(opening === 'toolbar' ? toolbar : previous).toHaveFocus())
+  })
+})
+
+it('keeps the toolbar opener when Cmd+K reopens the dialog during its exit animation', async () => {
+  const real = window.getComputedStyle.bind(window)
+  const styles = vi.spyOn(window, 'getComputedStyle').mockImplementation((element, pseudo) => {
+    const style = real(element, pseudo)
+    if (!(element instanceof HTMLElement) || element.getAttribute('role') !== 'dialog') return style
+    // Radix rereads the animation name on close from the style object it saved on mount.
+    return new Proxy(style, {
+      get(target, prop) {
+        if (prop === 'animationName') return element.dataset.state === 'closed' ? 'exit' : 'enter'
+        const value = Reflect.get(target, prop)
+        return typeof value === 'function' ? value.bind(target) : value
+      },
+    })
+  })
+  try {
+    const user = userEvent.setup()
+    live()
+    const toolbar = screen.getByRole('button', { name: 'Open a deeplink' })
+    await user.click(toolbar)
+    const dialog = screen.getByRole('dialog', { name: 'Open Deeplink' })
+    const input = screen.getByRole('textbox', { name: 'Deeplink URL' })
+    await user.type(input, 'myapp://home')
+    await user.tab()
+    const submit = screen.getByRole('button', { name: 'Open' })
+    expect(submit).toHaveFocus()
+
+    await user.keyboard('{Escape}')
+    expect(dialog).toHaveAttribute('data-state', 'closed')
+    expect(submit).toHaveFocus()
+    await user.keyboard('{Meta>}k{/Meta}')
+    expect(dialog).toHaveAttribute('data-state', 'open')
+    const reopenedInput = screen.getByRole('textbox', { name: 'Deeplink URL' })
+    await waitFor(() => expect(reopenedInput).toHaveFocus())
+    expect(reopenedInput).toHaveValue('')
+
+    await user.keyboard('{Escape}')
+    const end = new Event('animationend', { bubbles: true })
+    Object.defineProperty(end, 'animationName', { value: 'exit' })
+    fireEvent(dialog, end)
+    await waitFor(() => expect(toolbar).toHaveFocus())
+  } finally {
+    styles.mockRestore()
+  }
 })
