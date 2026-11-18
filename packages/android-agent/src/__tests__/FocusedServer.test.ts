@@ -172,6 +172,20 @@ describe('AdbWrapper through the field server', () => {
     expect(r.execInput).not.toHaveBeenCalled()
   })
 
+  // A set the server answered with an exception said nothing about why (Android 16, four in one evening).
+  it('logs the error the server answered a set with, and never the text', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    try {
+      const r = runner(fakeServer(() => '{"error":"java.lang.NullPointerException: field"}'))
+      expect(await new AdbWrapper(r).setFocusedText('emulator-5554', 'hunter2')).toBe('failed')
+      const logged = warn.mock.calls.map((c) => c.join(' ')).join('\n')
+      expect(logged).toMatch(/field set failed: java\.lang\.NullPointerException: field/)
+      expect(logged).not.toMatch(/hunter2/)
+    } finally {
+      warn.mockRestore()
+    }
+  })
+
   // P4: a held connection refuses the tree dump's own, so the dump lets go of it; the next ping or hit holds it again,
   // not the dump, which a replay runs before every step.
   it('lets go of a held connection for a tree dump, and a ping holds it again while a person is recorded', async () => {

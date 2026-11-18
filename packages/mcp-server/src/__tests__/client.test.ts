@@ -704,6 +704,14 @@ describe('TapflowClient', () => {
       // Every agent lifts where the last move was: it must be the end, or the swipe stops an eighth short.
       expect(moves[moves.length - 1]).toMatchObject({ payload: { x: 100, y: 100 } })
     })
+
+    // Exactly the end, not 1 × the path: 0.6 + (0.5 − 0.6) × 1 is 0.5000000000000001.
+    it('ends its moves on the end point exactly', async () => {
+      await client.swipe('sess-1', 0.6, 0.8, 0.5, 0.2, 80)
+      await waitForMessage(relay, 'input:touch:end')
+      const moves = relay.sentMessages().filter((m) => m['type'] === 'input:touch:move')
+      expect(moves[moves.length - 1]!['payload']).toEqual({ x: 0.5, y: 0.2 })
+    })
   })
 
   describe('typeText', () => {
