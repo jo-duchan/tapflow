@@ -943,11 +943,19 @@ describe('runFlow', () => {
     })
 
     // A pager whose page is taller than the drag snaps a held drag back: the step after one that moved nothing flings.
-    it('flings the step after one that left the screen as it was', async () => {
-      const driver = fakeDriver([[row('Row 1', 0.3)], [row('Row 1', 0.3)], [row('Row 16', 0.3)]])
+    it('flings the step after two that left the screen as it was', async () => {
+      const driver = fakeDriver([[row('Row 1', 0.3)], [row('Row 1', 0.3)], [row('Row 1', 0.3)], [row('Row 16', 0.3)]])
       const result = await runFlow(flowOf('steps:\n  - scroll: { until: "Row 16" }\n'), driver, OPTS)
       expect(result.status).toBe('passed')
-      expect(swipes(driver).map((c) => c[4])).toEqual([150, 0])
+      expect(swipes(driver).map((c) => c[4])).toEqual([150, 150, 0])
+    })
+
+    // Pre-PR review: a drag the device dropped mid-list reads as "moved nothing" once; a fling after it could glide past.
+    it('drags again after a single step that moved nothing', async () => {
+      const driver = fakeDriver([[row('Row 1', 0.3)], [row('Row 1', 0.3)], [row('Row 8', 0.3)], [row('Row 16', 0.3)]])
+      const result = await runFlow(flowOf('steps:\n  - scroll: { until: "Row 16" }\n'), driver, OPTS)
+      expect(result.status).toBe('passed')
+      expect(swipes(driver).map((c) => c[4])).toEqual([150, 150, 150])
     })
 
     // #1125: a row under a tab bar is inside the screen, and its centre is the tab. It is not in view until the device
@@ -1096,7 +1104,8 @@ describe('runFlow', () => {
       expect(result.status).toBe('failed')
       expect(result.failureKind).toBe('product')
       expect(result.failureMessage).toMatch(/scrolled down to the end without "Row 99" coming on screen/)
-      expect(swipes(driver)).toHaveLength(3)
+      // Three unchanged reads end it: two drags, then the fling a pager would need, then the end.
+      expect(swipes(driver).map((c) => c[4])).toEqual([150, 150, 150, 0])
       expect(Date.now() - started).toBeLessThan(5_000)
     })
 

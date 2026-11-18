@@ -735,9 +735,14 @@ export async function waitForStableScreen<T extends { elements: UIElement[] }>(
 const SCROLL_UNTIL_MS = 60_000
 /** How long a search step holds still before it lifts: from 100 ms no list measured glided on (150 for a margin). */
 const SEARCH_HOLD_MS = 150
-// Two, not one: a swipe sent while the screen is still changing can be acknowledged and dropped (see `waitForScreen`),
-// and one unchanged read after it would end the step at the top of a list that scrolls fine.
-const SCROLL_END_READS = 2
+// A swipe sent while the screen is still changing can be acknowledged and dropped (see `waitForScreen`), so one
+// unchanged read is no end. Search steps are drags, and only two unchanged reads in a row make the next one a fling
+// (for a pager that snaps a held drag back): after a single dropped drag the search drags again, and a fling's glide
+// cannot carry the list past the element. The end is the read after that fling, unchanged too.
+const FLING_AFTER_STILL_READS = 2
+const SCROLL_END_READS = 3
+// A match that holds its place across swipes cannot be brought further in (a button fixed to the bottom).
+const MATCH_STILL_READS = 2
 
 // Both agents clip a frame to the screen and drop what is wholly off it, so an element cut by the edge the list
 // scrolls in from reaches that edge exactly. Such a sliver is not arrived: under a translucent bar its center is the
@@ -867,7 +872,7 @@ async function scrollUntil(driver: FlowDriver, direction: ScrollDirection, sel: 
       const at = pinned.length > 0 ? scrolledShape(pinned) : undefined
       matchStill = at !== undefined && at === matchShape ? matchStill + 1 : 0
       matchShape = at
-      if (matchStill >= SCROLL_END_READS) return
+      if (matchStill >= MATCH_STILL_READS) return
       const next = scrolledShape(q.tree)
       unchanged = next === shape ? unchanged + 1 : 0
       shape = next
@@ -884,11 +889,10 @@ async function scrollUntil(driver: FlowDriver, direction: ScrollDirection, sel: 
     // at the list's end without it (iOS, measured). Held still, each step moves the content as far as the finger (0.4
     // of the screen up and down, 0.6 across) and no further, on every list measured (SwiftUI, UIKit, Compose,
     // RecyclerView); a list whose visible part is shorter than that can still be stepped past. A step that moved
-    // nothing is followed by a fling: a pager whose page is taller than the drag snaps a held drag back to where it was.
-    // The trade: a drag the device dropped mid-list also reads as "moved nothing", and the fling after it can glide past
-    // the element once; a read in that glide sees a changed screen and the search drags again. Closing it would cost
-    // every failed search one more read at the end (SCROLL_END_READS 3).
-    if (read) { await driver.swipe(gesture.from, gesture.to, 300, unchanged > 0 ? 0 : SEARCH_HOLD_MS); swiped = true }
+    // nothing twice in a row is followed by a fling: a pager whose page is taller than the drag snaps a held drag back
+    // to where it was. Twice, not once: a drag the device dropped mid-list also moves nothing, and a fling after it
+    // could glide past the element (pre-PR review). The cost is one more read at the end of a search that fails.
+    if (read) { await driver.swipe(gesture.from, gesture.to, 300, unchanged >= FLING_AFTER_STILL_READS ? 0 : SEARCH_HOLD_MS); swiped = true }
     await waitForNextPoll(deadline, pollIntervalMs, base, lastError, sawTree)
   }
 }
