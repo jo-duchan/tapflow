@@ -10,7 +10,7 @@ import type { RunResetStep } from '@tapflowio/agent-core/utils'
 import { createLogger, PlatformError, ValidationError, bootAbandonMessage, BOOT_NO_SESSION_STATE, SHUTDOWN_NO_SESSION_STATE, downloadBuild } from '@tapflowio/agent-core'
 import type {
   AgentControlOutbound, AgentDevicesApplied, DeviceReport, InputErrorReason, ClipboardReplyBody, OpenUrlReplyBody,
-  AppInstallReplyBody, AppLaunchReplyBody, AppLaunchToAgent, LaunchOptions, AppClearStateReplyBody, DeviceKeyboardSetReplyBody, DeviceRunResetReplyBody, FormFactor, ServiceTier, RunResetReport, RunResetRequest, ReachResult, ReachTarget,
+  AppInstallReplyBody, AppLaunchReplyBody, AppLaunchToAgent, LaunchOptions, AppClearStateReplyBody, DeviceKeyboardSetReplyBody, DeviceRunResetReplyBody, FormFactor, ServiceTier, RunResetReport, RunResetRequest, ReachResult, ReachTarget, RelayAgentFeature,
 } from '@tapflowio/protocol'
 import { appliedKeys, compactLaunchOptions, launchOptionsProblem } from '@tapflowio/protocol/launch'
 // Cross-platform button name → iOS device-chrome button name. Chrome uses hyphens and "power" (not "lock"); MCP's
@@ -53,7 +53,7 @@ const TOUCH_REPORT_POLL_MS = 50
 const TOUCH_REPORT_KEEP_MS = 5_000
 const TOUCH_REPORT_SKEW_MS = 1_500
 const TOUCH_REPORT_NEAR = 0.03
-const AGENT_CAPABILITIES: AgentCapability[] = ['clipboard', 'full-reset', 'network-control', 'build-download', 'launch-options', 'launch-env', 'touch-cancel', 'field-value', 'keyboard-reset', 'keyboard-state', 'keyboard-set', 'run-reset', 'reach']
+const AGENT_CAPABILITIES: AgentCapability[] = ['clipboard', 'full-reset', 'network-control', 'build-download', 'launch-options', 'launch-env', 'touch-cancel', 'field-value', 'keyboard-reset', 'keyboard-state', 'keyboard-set', 'run-reset', 'reach', 'app-logs']
 
 // Human prose for each reason. Not in `@tapflowio/protocol`: that package's main entry must stay
 // runtime-free so it erases under `import type` and never reaches the dashboard bundle — a lookup
@@ -113,6 +113,7 @@ import {
   type AgentCapability,
 } from '@tapflowio/agent-core'
 import { ScreenCaptureStreamer, type StreamFrame } from './ScreenCaptureStreamer.js'
+import { AppLogStream, APP_LOG_SOCKET_BUFFER_LIMIT } from './AppLogStream.js'
 import { AudioCaptureStreamer, readSimVolume, applyGain } from './AudioCaptureStreamer.js'
 import { ensureHelperApp, launchAudioHelper, isAudioSupported } from '@tapflowio/audiotap-helper'
 import { enumerateSimPids } from './SimProcessTree.js'
@@ -261,6 +262,8 @@ interface DeviceState {
   // Device-booted flag for truthful input acks — set on device:boot, cleared on shutdown; false after a reconnect until the ack path re-verifies once via simctl.
   booted: boolean
   streamWs: WebSocket | null
+  appLogStream: AppLogStream | null
+  appLogGeneration: number
   streamReader: ReadableStreamDefaultReader<StreamFrame> | null
   // Current capture streamer (ScreenCaptureStreamer path only) — lets the relay
   // request an on-demand IDR for drop-to-keyframe recovery. null on the MjpegStreamer path.
@@ -308,6 +311,7 @@ export class IOSAgent implements DeviceAgent, NetworkControlCapability, Posturab
   private readonly token?: string
   private readonly handshakeTimeoutMs: number
   private ws: WebSocket | null = null
+  private relayFeatures: RelayAgentFeature[] = []
 
   /** Send on the control socket, if there is one. The `?.` is the point: 66 call sites relied on a send
    *  being a no-op between reconnects, and this preserves that exactly.
@@ -582,6 +586,12 @@ export class IOSAgent implements DeviceAgent, NetworkControlCapability, Posturab
         }
         if (msg.type === 'agent:registered') {
           registered = true
+          this.relayFeatures = Array.isArray(msg.features)
+            ? msg.features.filter(
+                (feature: unknown): feature is RelayAgentFeature =>
+                  feature === 'device-updates' || feature === 'app-logs'
+              )
+            : []
           clearTimeout(timer)
           this.ws = ws
           this.sleepBlocker.acquire() // idempotent across reconnects
@@ -748,6 +758,8 @@ export class IOSAgent implements DeviceAgent, NetworkControlCapability, Posturab
         touchHelper: null,
         booted: false,
         streamWs: null,
+        appLogStream: null,
+        appLogGeneration: 0,
         streamReader: null,
         captureStreamer: null,
         bootSeq: 0,
@@ -772,6 +784,7 @@ export class IOSAgent implements DeviceAgent, NetworkControlCapability, Posturab
 
 
   disconnect(): void {
+    this.relayFeatures = []
     this._stopping = true
     if (this._reconnectTimer) { clearTimeout(this._reconnectTimer); this._reconnectTimer = null }
     if (this.resourcesTimer) { clearInterval(this.resourcesTimer); this.resourcesTimer = null }
@@ -871,6 +884,7 @@ export class IOSAgent implements DeviceAgent, NetworkControlCapability, Posturab
   }
 
   private cleanupDeviceState(state: DeviceState): void {
+    this.stopAppLogStream(state)
     // Nobody records this device's touches once its session is gone: reports off, and what is on disk removed.
     if (this.touchWatch.delete(state.deviceId)) void this.appObserver.stopTouches(state.deviceId).catch(() => {})
     // Drop this device out of the filter rule. The rule lives on the host and is keyed only by udid,
@@ -889,6 +903,13 @@ export class IOSAgent implements DeviceAgent, NetworkControlCapability, Posturab
     state.booted = false
     state.streamWs?.close()
     state.streamWs = null
+  }
+
+  private stopAppLogStream(state: DeviceState): number {
+    const generation = ++state.appLogGeneration
+    state.appLogStream?.stop()
+    state.appLogStream = null
+    return generation
   }
 
   private stopAudioCapture(state: DeviceState): void {
@@ -1141,6 +1162,7 @@ export class IOSAgent implements DeviceAgent, NetworkControlCapability, Posturab
     state.acceptH264 = acceptH264
     if (tier) { state.secureContext = tier.secureContext; state.external = tier.external }
     const seq = this.bumpBootSeq(state, 'superseded')
+    this.stopAppLogStream(state)
     state.bootsInFlight.add(seq)
 
     // **The teardown runs inside the try, and that is a fix rather than tidying.** It ran before it, so a
@@ -1618,6 +1640,7 @@ export class IOSAgent implements DeviceAgent, NetworkControlCapability, Posturab
     }
 
     this.bumpBootSeq(state, 'shut-down')
+    this.stopAppLogStream(state)
     // **Said here as well as in `cleanupDeviceState`, because this path does not go through it.**
     // The teardown below is a copy of that method's, and the copy is older than the network rule —
     // so a device shut down from the dashboard while offline kept its udid in the host filter for
@@ -2341,6 +2364,7 @@ export class IOSAgent implements DeviceAgent, NetworkControlCapability, Posturab
           respond({ type: 'app:install-error', message: 'No booted device' })
           break
         }
+        this.stopAppLogStream(installState)
         const installingHere = this.installing.get(installState.deviceId) ?? new Map<string, number>()
         if (bundleId) {
           installingHere.set(bundleId, (installingHere.get(bundleId) ?? 0) + 1)
@@ -2395,6 +2419,7 @@ export class IOSAgent implements DeviceAgent, NetworkControlCapability, Posturab
           break
         }
         const options = compactLaunchOptions({ arguments: args, env })
+        const appLogGeneration = this.stopAppLogStream(launchState)
         // The target is named BEFORE the launch, and the order is the whole point: dyld reads the
         // environment when the process starts, so naming it afterwards arms the next launch and leaves
         // this one unhooked while `available` would still say true.
@@ -2410,6 +2435,48 @@ export class IOSAgent implements DeviceAgent, NetworkControlCapability, Posturab
             this.network.markLaunched(launchState.deviceId, pid)
             // Track the foreground app so ui:tree:request can query it via XCUITest.
             this.lastBundleIds.set(launchState.deviceId, bundleId)
+            if (
+              this.relayFeatures.includes('app-logs') &&
+              typeof pid === 'number' &&
+              Number.isSafeInteger(pid) &&
+              pid > 0 &&
+              launchState.appLogGeneration === appLogGeneration &&
+              this.deviceStates.get(sessionId!) === launchState
+            ) {
+              // This setup is optional and must not turn a successful launch into an error. Starting
+              // with Promise.resolve also captures a synchronous throw from an older/test SimctlWrapper.
+              void Promise.resolve()
+                .then(() => this.simctl.getAppExecutablePath(launchState.deviceId, bundleId))
+                .then((processImagePath) => {
+                  if (
+                    launchState.appLogGeneration !== appLogGeneration ||
+                    this.deviceStates.get(sessionId!) !== launchState
+                  ) return
+                  launchState.appLogStream?.stop()
+                  launchState.appLogStream = new AppLogStream(
+                    launchState.deviceId,
+                    pid,
+                    processImagePath,
+                    (text) => {
+                      if (
+                        launchState.appLogGeneration !== appLogGeneration ||
+                        this.deviceStates.get(sessionId!) !== launchState
+                      )
+                        return true
+                      if (
+                        !this.ws ||
+                        this.ws.readyState !== WebSocket.OPEN ||
+                        this.ws.bufferedAmount >= APP_LOG_SOCKET_BUFFER_LIMIT
+                      )
+                        return false
+                      this.sendMsg({ type: 'app:log', sessionId: sessionId!, launchId: requestId, text })
+                      return true
+                    },
+                    (error) => logger.warn('app log stream failed:', error.message)
+                  )
+                })
+                .catch((error: unknown) => logger.warn('could not resolve app log process image:', (error as Error).message))
+            }
             // Audio: the whole-sim tap's poll picks up the launched app process within one interval;
             // no per-launch helper needed.
             respond(options ? { type: 'app:launch-done', applied: appliedKeys(options) } : { type: 'app:launch-done' })

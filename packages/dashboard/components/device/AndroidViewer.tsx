@@ -39,6 +39,8 @@ interface AndroidViewerProps {
   launchApp: () => void;
   connected: boolean;
   joined: boolean;
+  appLogText: string;
+  appLogsSupported: boolean;
   deviceReady: boolean;
   installing: boolean;
   installed: boolean;
@@ -90,6 +92,7 @@ interface AndroidViewerProps {
 
 export function AndroidViewer({
   sessionId, buildId, send, openUrl, launchApp, connected, joined,
+  appLogText, appLogsSupported,
   deviceReady, installing, installed, installError, bootError, bootWaiting, servicesOff,
   launching, androidButtons,
   binaryFrameHandlerRef, clipboardHandlerRef, clipboardSupported, networkHandlerRef, networkSupported, onRecordingUploaded,
@@ -704,7 +707,10 @@ export function AndroidViewer({
         />
 
         <SimulatorInfoCard
-          joined={joined} fps={fps} connected={connected}
+          joined={joined} fps={fps}
+          appLogText={appLogText}
+          appLogsSupported={appLogsSupported}
+          connected={connected}
           deviceReady={deviceReady} bootError={bootError} bootWaiting={bootWaiting} servicesOff={servicesOff}
           installing={installing} installError={installError}
           decoderUnsupported={decoderUnsupported}

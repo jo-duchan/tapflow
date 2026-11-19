@@ -1939,6 +1939,14 @@ export class RelayServer {
         this.forwardToWatchers(session.id, raw)
         break
       }
+      case 'app:log': {
+        const session = this.sessions.get(msg.sessionId)
+        if (session?.agentSocket !== ws) break
+        if (session.browserSocket?.readyState === WebSocket.OPEN) {
+          session.browserSocket.send(JSON.stringify(raw))
+        }
+        break
+      }
       case 'app:install-done':
       case 'app:install-error':
       case 'app:launch-done':
@@ -2754,7 +2762,7 @@ export class RelayServer {
     // which only held while every device got a session — now that some are rebound, the arrays have
     // different lengths and index alignment would hand the agent someone else's session id.
     const registeredSessions = devices.map((d) => ({ deviceId: d.id, sessionId: byDeviceId.get(d.id)! }))
-    this.sendTo(ws, { type: 'agent:registered', registeredSessions, features: ['device-updates'] })
+    this.sendTo(ws, { type: 'agent:registered', registeredSessions, features: ['device-updates', 'app-logs'] })
 
     // After the state is final: the browser answers this with `device:boot` on the same session id.
     for (const sessionId of rebound.values()) {
