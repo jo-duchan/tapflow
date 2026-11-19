@@ -51,6 +51,29 @@ function canonical(v: unknown): string {
 }
 
 /**
+ * Characters a person reading the file cannot see: an icon font's glyph (the Private Use Area, a box in any other
+ * font), a format character (a zero-width space, a direction mark), a control, a code point with no character. The
+ * `yaml` library writes all but the controls as they are, so a string holding one is written double-quoted with each
+ * of them escaped (`"\U000F01F0"`): the file then says which character it is, and reads back as the same string. Not
+ * the zero-width joiner and non-joiner: they are part of the text, in an emoji sequence or a Persian or Indic word.
+ */
+const UNSEEN = /(?![\u200C\u200D])[\p{Co}\p{Cf}\p{Cc}\p{Cn}]/u
+const SHORT: Readonly<Record<string, string>> = { '\n': '\\n', '\t': '\\t', '\r': '\\r', '"': '\\"', '\\': '\\\\' }
+
+function doubleQuoted(value: string): string {
+  let out = ''
+  for (const ch of value) {
+    const cp = ch.codePointAt(0)!
+    out += SHORT[ch] ?? (UNSEEN.test(ch)
+      ? cp <= 0xff ? `\\x${hex(cp, 2)}` : cp <= 0xffff ? `\\u${hex(cp, 4)}` : `\\U${hex(cp, 8)}`
+      : ch)
+  }
+  return `"${out}"`
+}
+
+const hex = (n: number, width: number): string => n.toString(16).toUpperCase().padStart(width, '0')
+
+/**
  * A flow as a YAML file, **read back through `parseFlow` before it is returned**: a captured flow that would not load,
  * or would load as different steps, fails here instead of in the person's CI. Points and modifier lists are written
  * inline (`[0.4, 0.6]`), as a person writes them.
@@ -63,12 +86,25 @@ export function flowToYaml(flow: Omit<Flow, 'file'>): string {
     ...(flow.viewport ? { viewport: flow.viewport } : {}),
     steps: flow.steps.map(stepValue),
   })
+  // Stands in for an escaped string while the library lays the file out: letters only, so it is written as it is, and
+  // found in no string of the flow, so only it is replaced.
+  const values = JSON.stringify(flow)
+  let stem = 'tapflowEscaped'
+  while (values.includes(stem)) stem += 'X'
+  const placeholder = (i: number): string => `${stem}${i}x`
+  const escaped: string[] = []
   visit(doc, {
     Seq(_, node) {
       if (node.items.every((i) => isScalar(i))) node.flow = true
     },
+    Scalar(_, node) {
+      if (typeof node.value !== 'string' || !UNSEEN.test(node.value)) return
+      escaped.push(doubleQuoted(node.value))
+      node.value = placeholder(escaped.length - 1)
+    },
   })
-  const text = doc.toString({ lineWidth: 0 })
+  let text = doc.toString({ lineWidth: 0 })
+  escaped.forEach((q, i) => { text = text.replace(placeholder(i), () => q) })
   const back = parseFlow(text, 'captured.yaml')
   if (canonical(back.steps) !== canonical(flow.steps) || canonical(back.viewport) !== canonical(flow.viewport)) {
     throw new Error('the captured flow does not read back as the same steps — this is a bug in Flow Capture')
