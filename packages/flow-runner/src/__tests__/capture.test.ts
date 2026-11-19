@@ -1202,6 +1202,20 @@ describe('toFlowSteps', () => {
       expect(flow.steps[0]!.step).toMatchObject({ type: 'scroll', direction: 'right' })
     })
 
+    // Review: a container around a full-screen list (a window) lies within its frame too, and as the outermost element
+    // it hid the cards; the frame then said vertical.
+    it('is sideways for a full-screen row of cards inside a window of the same size', () => {
+      const [swipe, tap] = new Rec().touch([[0.8, 0.5], [0.2, 0.5]]).touch([[0.5, 0.5]]).steps()
+      const window = el({ role: 'other', label: 'Window', frame: { x: 0, y: 0, width: 1, height: 1 } })
+      const pager = el({ role: 'list', frame: { x: 0, y: 0, width: 1, height: 1 } })
+      const card = (n: number, x: number) => el({ role: 'cell', label: `Card ${n}`, frame: { x, y: 0.2, width: 0.4, height: 0.6 } })
+      const flow = toFlowSteps([
+        matchStep(swipe!, ctxOf([window, pager, card(1, 0.05), card(2, 0.55)])),
+        matchStep(tap!, ctxOf([window, pager, card(2, -0.05), card(3, 0.45)])),
+      ])
+      expect(flow.steps[0]!.step).toMatchObject({ type: 'scroll', direction: 'right' })
+    })
+
     it('is vertical for items stacked, though the frame is wide: a sideways swipe on a short list\'s row stays a swipe', () => {
       const [swipe, tap] = new Rec().touch([[0.8, 0.35], [0.4, 0.35]]).touch([[0.9, 0.35]]).steps()
       const short = el({ role: 'list', frame: { x: 0, y: 0.2, width: 1, height: 0.4 } })

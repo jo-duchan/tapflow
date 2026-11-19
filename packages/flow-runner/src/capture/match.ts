@@ -589,7 +589,10 @@ function listAxis(tree: readonly UIElement[], list: UIElement): 'x' | 'y' {
   // the outermost count, and nothing thinner than a fiftieth of the screen (a scroll bar at the list's edge).
   const inside = (a: UIElement['frame'], b: UIElement['frame']) => a !== b && a.x >= b.x - 0.001 && a.y >= b.y - 0.001
     && a.x + a.width <= b.x + b.width + 0.001 && a.y + a.height <= b.y + b.height + 0.001
-  const candidates = tree.filter((e) => e !== list && e.role !== 'list' && within(e.frame) && e.frame.width >= 0.02 && e.frame.height >= 0.02)
+  // Nothing that holds the list is one of its items: a window around a full-screen list lies within its frame too, and
+  // as the outermost element it would hide every card.
+  const candidates = tree.filter((e) => e !== list && e.role !== 'list' && !inside(f, e.frame) && within(e.frame)
+    && e.frame.width >= 0.02 && e.frame.height >= 0.02)
   const centres = candidates.filter((e) => !candidates.some((o) => o !== e && inside(e.frame, o.frame)))
     .map((e) => [e.frame.x + e.frame.width / 2, e.frame.y + e.frame.height / 2] as const)
   const spread = (vs: number[]) => Math.max(...vs) - Math.min(...vs)
