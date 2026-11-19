@@ -43,6 +43,36 @@ describe('observeEffect', () => {
     expect(observeEffect([], after, after, { hidden: ['swordfish'] })).toBeNull()
   })
 
+  // Sample app (wdio, iOS): the login screen's tab icons are an icon font's glyphs, and `gone` listed two boxes no one
+  // reading the flow could tell apart. Any text that shows nothing, whatever its characters, is not a name.
+  it('anchors no text that shows nothing: an icon glyph, a zero-width space, a space', () => {
+    const before = [
+      el({ label: '\u{F01F0}', frame: at(0.9) }),
+      el({ role: 'button', label: '\uE5CD', frame: at(0.05) }),
+      el({ label: '\u200B', frame: at(0.15) }),
+      el({ label: '\u200D', frame: at(0.25) }),
+      el({ label: '  ', frame: at(0.3) }),
+      // Letters by their category that draw nothing: apps put them where a label may not be empty.
+      el({ label: '\u3164', frame: at(0.35) }),
+      el({ label: '\u2800', frame: at(0.4) }),
+      el({ label: 'Login', frame: at(0.2) }),
+    ]
+    expect(observeEffect(before, [], [])).toEqual({ gone: [{ text: 'Login', role: 'text' }] })
+  })
+
+  // A symbol a person reads is an effect worth checking: a like that fills its heart.
+  it('anchors a symbol a person can read', () => {
+    const before = [el({ role: 'button', label: '♡', frame: at(0.2) })]
+    const after = [el({ role: 'button', label: '❤️', frame: at(0.2) })]
+    expect(observeEffect(before, after, after)).toEqual({ appear: [{ text: '❤️', role: 'button' }], gone: [{ text: '♡', role: 'button' }] })
+  })
+
+  it('anchors an icon glyph by its identifier alone, and keeps a label that has a word beside a glyph', () => {
+    const icon = el({ role: 'button', identifier: 'tab.login', label: '\u{F01F0}', frame: at(0.9) })
+    const tab = el({ role: 'tab', label: '\u{F01F0} Login', frame: at(0.8) })
+    expect(observeEffect([icon, tab], [], [])).toEqual({ gone: [{ id: 'tab.login' }, { text: '\u{F01F0} Login', role: 'tab' }] })
+  })
+
   // Sample app E2E: a row tap changed only the status label's text, `tapped:list.row.2`, and an id-only key saw nothing.
   it('anchors on an identifier and its label, so a label that changed on an element that kept its id is seen', () => {
     const before = el({ identifier: 'status', label: 'tapped:none' })

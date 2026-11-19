@@ -792,6 +792,47 @@ describe('defaultRange', () => {
       expect(defaultRange(r.steps())).toEqual({ start: 2, end: 3 })
     })
 
+    // Measured on iOS 26.5: a read takes about half a second, and home-screen pages turned faster than that left the
+    // second swipe with no read answered before it began. The one asked after the first ended answered before the second
+    // lifted, and a touch changes what is in front only as it lifts.
+    it('places a quick home-screen swipe by a read answered before it lifted', () => {
+      const r = new Rec().install()
+      read(r, IOS_HOME).touch([[0.9, 0.5], [0.2, 0.5]])
+      const asked = r.t
+      r.wait(60).touch([[0.9, 0.5], [0.2, 0.5]], { stepMs: 120 })
+      r.entries.push({ at: r.t - 20, kind: 'keyboard', requestedAt: asked, keyboard: IOS_HOME, settled: false })
+      read(r, IOS_HOME).touch([[0.62, 0.38]])
+      read(r, APP).touch([[0.5, 0.4]]).touched({ moving: false, seq: 1 })
+      const steps = r.steps()
+      expect(steps.map((s) => s.onHome)).toEqual([undefined, true, true, true, false])
+      expect(defaultRange(steps)).toEqual({ start: 4, end: 5 })
+    })
+
+    // Review: the relay keeps reading while the home screen is in front, so a read can be asked while a touch is held.
+    // Asked about a screen the touch is already on, it does not say where the touch began.
+    it('does not place a touch by a read asked after it began', () => {
+      const r = new Rec().install()
+      read(r, HOME).touch([[0.2, 0.3]])
+      const start = r.t + 50
+      r.wait(50).touch([[0.5, 0.5]], { holdMs: 1000 })
+      r.entries.push({ at: start + 400, kind: 'keyboard', requestedAt: start + 100, keyboard: HOME, settled: false })
+      const steps = r.steps()
+      expect(steps.map((s) => s.onHome)).toEqual([undefined, true, undefined])
+    })
+
+    // A button acts as it goes down: a read answered while it was held says what the press did.
+    it('places a button only by a read answered before it went down', () => {
+      const r = new Rec().install()
+      read(r, APP)
+      const asked = r.t
+      r.msg({ type: 'input:button', sessionId: 's', requestId: 'd', payload: { name: 'home', phase: 'down' } }, true)
+      r.entries.push({ at: r.t + 60, kind: 'keyboard', requestedAt: asked, keyboard: HOME, settled: false })
+      r.wait(120).msg({ type: 'input:button', sessionId: 's', requestId: 'u', payload: { name: 'home', phase: 'up' } }, true)
+      const steps = r.steps()
+      expect(steps.map((s) => s.kind)).toEqual(['install', 'button'])
+      expect(steps[1]!.onHome).toBe(false)
+    })
+
     // A tap made before the next read answered: the read before it is the one the icon's tap started, still home.
     it('keeps a quick first tap in the app, which only the read after it places', () => {
       const r = new Rec().install()
@@ -1399,6 +1440,37 @@ describe('flowToYaml', () => {
     expect(parseFlow(yaml, 'x.yaml').steps).toEqual(steps)
     expect(yaml).toContain('tapOn: [ 0.4, 0.6 ]')
     expect(yaml).toContain('inputText:\n      secret: PASSWORD')
+  })
+
+  // A character a person cannot see is written as its escape, so the file says what it is, and reads back the same.
+  it('writes an icon glyph, a zero-width space and a control as escapes, and keeps a joiner and plain text as they are', () => {
+    const steps = [
+      // First, so a stand-in named the same would be found here before the escaped string it stands for.
+      { type: 'tapOn', selector: { text: 'tapflowEscaped0x' } },
+      { type: 'tapOn', selector: { text: '\u{F01F0}' } },
+      { type: 'tapOn', selector: { label: 'Save\u200B', role: 'button' } },
+      { type: 'inputText', text: 'a\u0007"b"\\' },
+      { type: 'tapOn', selector: { text: '👩\u200D💻 Dev' } },
+      { type: 'tapOn', selector: { text: 'Sign in' }, expect: { gone: [{ text: '\uE5CD', role: 'button' }] } },
+      { type: 'tapOn', selector: { text: 'a\u2028b' } },
+      // Review (CodeRabbit): a joiner is text only beside text; alone it shows nothing.
+      { type: 'tapOn', selector: { text: '\u200D' } },
+      { type: 'tapOn', selector: { text: ' \u3000' } },
+    ] as const
+    const yaml = flowToYaml({ name: 'Login\u200B', tags: ['\u3164'], steps: steps as never })
+    expect(parseFlow(yaml, 'x.yaml').name).toBe('Login\u200B')
+    expect(yaml).toContain('name: "Login\\u200B"')
+    expect(yaml).toContain('tapOn: "a\\u2028b"')
+    expect(yaml).toContain('tapOn: "\\u200D"')
+    expect(yaml).toContain('tapOn: " \\u3000"')
+    expect(yaml).toContain('tags: [ "\\u3164" ]')
+    expect(parseFlow(yaml, 'x.yaml').steps).toEqual(steps)
+    expect(yaml).toContain('tapOn: "\\U000F01F0"')
+    expect(yaml).toContain('label: "Save\\u200B"')
+    expect(yaml).toContain('inputText: "a\\x07\\"b\\"\\\\"')
+    expect(yaml).toContain('tapOn: 👩\u200D💻 Dev')
+    expect(yaml).toContain('tapOn: tapflowEscaped0x')
+    expect(yaml).toContain('text: "\\uE5CD"')
   })
 
   // #1125: what a touch brings rides beside its action, in the same file.
