@@ -297,6 +297,16 @@ describe('AdbWrapper', () => {
         '-s', 'emulator-5554', 'shell', 'cmd', 'package', 'list', 'packages', '-U', 'com.example.app'
       )
     })
+
+    it('resolves the UID for the current user when multiple are returned', async () => {
+      const runner = mockRunner()
+      ;(runner.exec as ReturnType<typeof vi.fn>)
+        .mockResolvedValueOnce('package:com.example.app uid:10123,1010123\n') // First call: package list
+        .mockResolvedValueOnce('10\n') // Second call: get-current-user
+      const wrapper = new AdbWrapper(runner)
+
+      await expect(wrapper.getAppUid('emulator-5554', 'com.example.app')).resolves.toBe(1010123)
+    })
   })
 
   describe('getPackagesForUid', () => {
