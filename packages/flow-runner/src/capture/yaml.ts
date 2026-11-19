@@ -1,5 +1,6 @@
 import { Document, isScalar, visit } from 'yaml'
 import { parseFlow, type Flow, type Selector, type Step } from '../schema.js'
+import { UNSEEN } from '../unseen.js'
 
 function selectorValue(s: Selector): unknown {
   if (s.text !== undefined) return s.text
@@ -51,13 +52,10 @@ function canonical(v: unknown): string {
 }
 
 /**
- * Characters a person reading the file cannot see: an icon font's glyph (the Private Use Area, a box in any other
- * font), a format character (a zero-width space, a direction mark), a control, a code point with no character. The
- * `yaml` library writes all but the controls as they are, so a string holding one is written double-quoted with each
- * of them escaped (`"\U000F01F0"`): the file then says which character it is, and reads back as the same string. Not
- * the zero-width joiner and non-joiner: they are part of the text, in an emoji sequence or a Persian or Indic word.
+ * The `yaml` library writes a character no one can see (`UNSEEN`) as it is, but for the controls, so a string holding
+ * one is written double-quoted with each of them escaped (`"\U000F01F0"`): the file then says which character it is,
+ * and reads back as the same string.
  */
-const UNSEEN = /(?![\u200C\u200D])[\p{Co}\p{Cf}\p{Cc}\p{Cn}]/u
 const SHORT: Readonly<Record<string, string>> = { '\n': '\\n', '\t': '\\t', '\r': '\\r', '"': '\\"', '\\': '\\\\' }
 
 function doubleQuoted(value: string): string {

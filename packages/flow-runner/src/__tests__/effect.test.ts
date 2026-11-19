@@ -44,16 +44,24 @@ describe('observeEffect', () => {
   })
 
   // Sample app (wdio, iOS): the login screen's tab icons are an icon font's glyphs, and `gone` listed two boxes no one
-  // reading the flow could tell apart. Any text with no letter or digit, whatever its characters, is not a name.
-  it('anchors no text a person cannot read: an icon glyph, a lone symbol, a zero-width space', () => {
+  // reading the flow could tell apart. Any text that shows nothing, whatever its characters, is not a name.
+  it('anchors no text that shows nothing: an icon glyph, a zero-width space, a space', () => {
     const before = [
       el({ label: '\u{F01F0}', frame: at(0.9) }),
       el({ role: 'button', label: '\uE5CD', frame: at(0.05) }),
-      el({ role: 'button', label: '×', frame: at(0.1) }),
       el({ label: '\u200B', frame: at(0.15) }),
+      el({ label: '\u200D', frame: at(0.25) }),
+      el({ label: '  ', frame: at(0.3) }),
       el({ label: 'Login', frame: at(0.2) }),
     ]
     expect(observeEffect(before, [], [])).toEqual({ gone: [{ text: 'Login', role: 'text' }] })
+  })
+
+  // A symbol a person reads is an effect worth checking: a like that fills its heart.
+  it('anchors a symbol a person can read', () => {
+    const before = [el({ role: 'button', label: '♡', frame: at(0.2) })]
+    const after = [el({ role: 'button', label: '❤️', frame: at(0.2) })]
+    expect(observeEffect(before, after, after)).toEqual({ appear: [{ text: '❤️', role: 'button' }], gone: [{ text: '♡', role: 'button' }] })
   })
 
   it('anchors an icon glyph by its identifier alone, and keeps a label that has a word beside a glyph', () => {

@@ -1,4 +1,5 @@
 import type { UIElement } from '@tapflowio/agent-core'
+import { visible } from './unseen.js'
 
 /**
  * What a touch was seen to do, and what a replay must see it do again (#1125). A tap that landed on the wrong element,
@@ -57,12 +58,6 @@ const VOLATILE = [
   /\b(?=[A-Za-z0-9_-]*\d)(?=[A-Za-z0-9_-]*[A-Za-z])[A-Za-z0-9_-]{12,}\b/,
 ]
 const volatile = (text: string): boolean => VOLATILE.some((re) => re.test(text))
-/**
- * Text a person reading the flow can tell apart: a letter or a digit in any script. An icon font draws its glyphs from
- * the Private Use Area, which shows as a box in any other font, and a lone `×` or `›` names nothing; an element with
- * only that is anchored by its identifier, or not at all, and a readable one takes its place.
- */
-const readable = (text: string): boolean => /[\p{L}\p{N}]/u.test(text)
 /** iOS keyboard keys and the keyboard itself (Android's keyboard is another window and not in the app's tree). */
 const KEYBOARD_ROLES = new Set(['Key', 'Keyboard'])
 /** The clock, a date and a time ago of `VOLATILE` — not its long numbers, which are also the values a person checks
@@ -139,7 +134,9 @@ function identity(e: UIElement, hidden: readonly string[], drifting: ReadonlySet
   // A bare number with no id to name it is a badge or a tally (e2e's rule); with one, the id says what it counts.
   const id = lastingId(e)
   const bareNumber = /^\d+$/.test(e.label) && !id
-  const text = e.label.length > 0 && e.label.length <= MAX_TEXT && readable(e.label) && !volatile(e.label) && !bareNumber
+  // A label that shows nothing (an icon font's glyph, a box in any other font) is not a name a person can check: the
+  // element is anchored by its identifier, or not at all, and one a person can read takes its place.
+  const text = e.label.length > 0 && e.label.length <= MAX_TEXT && visible(e.label) && !volatile(e.label) && !bareNumber
     && !drifting.has(shapeOf(e.label))
     ? e.label : undefined
   if (id) return text !== undefined ? { id, text } : { id }
