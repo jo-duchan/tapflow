@@ -23,11 +23,12 @@ export function AppLogViewer({ text, supported }: AppLogViewerProps) {
         role="log"
         aria-label="App log output"
         aria-live="polite"
+        tabIndex={0}
         onScroll={(event) => {
           const element = event.currentTarget
           atBottomRef.current = element.scrollHeight - element.scrollTop - element.clientHeight < 12
         }}
-        className="max-h-40 min-h-16 overflow-auto rounded-md border bg-muted/30 p-2"
+        className="max-h-40 min-h-16 overflow-auto rounded-md border bg-muted/30 p-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2"
       >
         <pre className="whitespace-pre-wrap break-all font-mono text-[10px] leading-relaxed text-foreground/80">
           {!supported ? 'Update the device agent to view app logs.' : (text || 'Waiting for app logs…')}
