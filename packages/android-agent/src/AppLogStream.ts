@@ -61,6 +61,8 @@ export class AppLogStream {
       if (code !== null && code !== 0 && !this.stopped) {
         this.stop()
         onError(new Error(`Android app logcat exited with code ${code}`))
+      } else if (!this.stopped) {
+        this.stop(true) // Natural exit: drain the queue
       }
     })
 
@@ -73,15 +75,21 @@ export class AppLogStream {
     }
   }
 
-  stop(): void {
+  stop(drain = false): void {
     if (this.stopped) return
     this.stopped = true
-    if (this.drainTimer) clearInterval(this.drainTimer)
-    this.drainTimer = null
     this.clearTargetCheck()
-    this.queue.length = 0
+
     if (!this.processClosed && this.process.exitCode === null && !this.process.killed) {
       this.process.kill('SIGTERM')
+    }
+
+    if (drain) {
+      this.flush()
+    } else {
+      if (this.drainTimer) clearInterval(this.drainTimer)
+      this.drainTimer = null
+      this.queue.length = 0
     }
   }
 
@@ -89,7 +97,7 @@ export class AppLogStream {
     if (this.stopped || this.processClosed || this.targetCheckInFlight) return
     this.targetCheckInFlight = true
     try {
-      if (!(await isTargetAlive())) this.stop()
+      if (!(await isTargetAlive())) this.stop(true)
     } catch (error) {
       onError(error instanceof Error ? error : new Error(String(error)))
       this.stop()
