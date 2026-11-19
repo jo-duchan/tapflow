@@ -26,4 +26,10 @@ describe('AppLogViewer', () => {
     rerender(<AppLogViewer text="new launch output" supported />)
     expect(log.scrollTop).toBe(300)
   })
+
+  it('is focusable for keyboard users', () => {
+    render(<AppLogViewer text="Test log" supported={true} />)
+    const logRegion = screen.getByRole('log')
+    expect(logRegion).toHaveAttribute('tabindex', '0')
+  })
 })
