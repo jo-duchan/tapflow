@@ -1,5 +1,63 @@
 # @tapflowio/mcp-server
 
+## 0.33.0
+
+### Minor Changes
+
+- 3b600c8: Flow Capture reads typing on Android and tells soft-keyboard taps from app taps (#1135). The Android agent reads the focused field through the uidump jar's new `Focused` class (`field-value`), sets typed text with `ACTION_SET_TEXT` at the caret (`input:type`, so `inputText` and MCP `type_text` take any text; ASCII still goes through `input text` with no field focused), holds Ctrl+A for select-all and Shift+Space for Caps Lock (Android 13+), and presses a field's IME action for the new `ImeAction` key code (Android 11+). Both agents answer `ui:keyboard:request` with where the soft keyboard is (`keyboard-state`; iOS through the tree runner's new `GET /keyboard`, carried into the touch space by the app's turn) and take `device:keyboard-set` with a done or error reply (`keyboard-set`): iOS writes the keyboard and restarts its daemon, Android switches Gboard with Shift+Space until its title matches, and only while it is up. `ui:field:response` carries the keyboard and its language. The relay reads the keyboard after each recorded input, one read at a time, and records it as `keyboard` entries, with a settled read once the person pauses; a tap that starts on the keyboard continues a run of typing. flow-runner judges each touch by those reads (`keyboardKey`, `imeAction`, `keyboard-unknown`), adds the `imeAction` step, and no longer refuses `replace` on Android before a run: a device that cannot select fails the step. The `paste-not-typeable` skip is gone. An iOS `flow run` boot resets the keyboard to its first language with its run reset.
+- ae37d23: Flow Capture, first part (#1125). The relay remembers, in memory and for the length of the session, the steps a person takes on a device in the dashboard, so Flow Capture can save them as a flow. Each person turns it on or off with **Capture my steps** in the **Flow Capture** card in Settings → Default (`PATCH /api/v1/me/preferences`, on by default), and the device's info card says whether it is on. UI tree elements gain `secure` on every text field and `focused` on the one taking typing.
+- fcc3c9b: Flows can press hardware buttons (`pressButton`), hold an element (`longPressOn`) and pinch (`pinch`). A flow pressing a button the device lacks fails before its first step, as an environment failure. A button the platform never has (`back` on iOS) fails before a device is chosen when `--build` or `--parallel --platform` names the platform; one that depends on the device (`lock` on iOS) is checked against the device before the first step. `@tapflowio/protocol/buttons` holds which buttons each platform can press, read by both agents and by flow-runner. MCP `tap` takes `holdMs` for a long press. On Android's adb fallback a held touch is now a long press rather than a tap, and `flow run` ends a gesture in progress when it leaves a session.
+- e741247: Flows can turn the device (`setOrientation: portrait|landscape`) and fold it (`setPosture: folded|unfolded`). Both wait until the device reports the new state; a step the device cannot do ends as an environment failure, and a `--parallel` worker keeps the device. android-agent takes down the "Swipe up to continue" lock screen a fold puts up, unless the device was locked before or has a secure lock. The UI tree response carries `interfaceTurn` on iOS, read from the app by the tree runner, and `@tapflowio/protocol/screen` turns a point from the app's interface onto the device's portrait screen, so flow steps on an iOS app drawn in landscape land where the tree says.
+- 347f4c9: Flows can scroll until an element is on screen, `scroll: { direction, until: <selector> }`, and press a key with modifiers held, `pressKey: { code, modifiers: [shift|ctrl|alt|meta] }`. The existing forms are unchanged. MCP `run_flow` accepts both.
+- 843b720: MCP `tap` takes an `element` (`id`, `label`, `role`, `index`, as `query_ui_tree` reports them) instead of a pixel coordinate, and taps it the way `run_flow`'s `tapOn` does: it waits up to 5 s for the element, taps where the device says it reaches it, fails naming what covers it, and taps the centre marked `unchecked` where the device cannot judge (#1147). With `holdMs` it holds the element. `query_ui_tree`'s description and the server instructions no longer tell an agent to tap a frame's centre, which a tab bar or a sheet can cover; a coordinate tap stays for a place the tree names nothing at.
+
+  The engine bounds each reach it asks before a touch by the selector's deadline, never under 2 s: an agent that never answered held a `tapOn` for the relay's whole reach deadline (15 s and more) after the selector's had run out, in `flow run` and Verify as well as in MCP. It then taps the centre marked `unchecked`, as for any reach the device could not answer. A device that answered the element is covered, off the screen, not where it was read or reached only away from its centre, and then could not answer, no longer has the centre it said was covered tapped: the step fails at its deadline on that answer. A reach body cut off by the deadline is a transient failure, not invalid JSON.
+
+- bee37cc: A touch lands where the device says it reaches its element, and a flow checks what the touch brings (#1125). protocol: `ui:reach:request`/`ui:reach:response`, `ReachTarget`, `ReachResult`, `UIElement.checked`/`selected`, `fromFramePoint`. agent-core: the `reach` capability. ios-agent: the UI-tree runner's `/reach` (`isHittable` and the hit point), and switch and selection state in the tree. android-agent: the uidump jar's `reach` mode (window layer and drawing order), and `checked`/`selected`. relay: `POST /api/v1/sessions/:sessionId/reach`, run records keep a step's `reach`, `reachNote` and `effect`, and the dashboard's Verify and Flow Runs show unchecked touches and touches that changed nothing. flow-runner: `tapOn`, `longPressOn` and `pinch` press the reached point, `scroll { until }` stops only at a reachable center, steps take `expect` and flows `viewport` (a flow carrying either cannot be read by an older flow-runner), `observeEffects`, and Flow Capture's swipe and point rules use reach. mcp-server: `run_flow` presses the reached point. cli: `flow run` says which touches were not checked.
+
+### Patch Changes
+
+- 61560fd: Flow Capture, second part (#1125). Flows gain `tapOn: [x, y]`, `longPressOn` with a point, and `inputText: { secret: NAME }`, typed from a value `tapflow flow run --secret NAME` reads from the environment and never logged. `@tapflowio/flow-runner/browser` adds the capture module the dashboard uses to turn a person's recorded steps into a flow, and `SessionChannel` gains `replayInputs` and `pasteText` for replaying them. `@tapflowio/protocol/capture` holds the record's types, and the relay keeps each gesture's last move when it thins a long record. A run missing a secret stops before a device is chosen (`run_flow` before its install), and Android's `inputText` no longer puts the typed text in an error.
+- 562a193: `scroll { until }` searches with drags held still before the lift instead of flings, so the list stops where the finger left it instead of gliding on past the element. On iOS a fling's glide (10 rows on a SwiftUI List and a UIKit table, measured) skipped the element between two reads, and the search ended at the list's end without it; Flow Capture's Match stopped on the tap that followed. A held finger sends its point every frame with a tiny wobble, since iOS takes neither silence nor the same point repeated as a new sample (`holdStill`, exported). The step after two that moved nothing flings, for a pager that snaps a held drag back (after one, it drags again: a drag the device dropped also moves nothing), and the end of the list is three. Whether a step moved the list is read from rows that travelled with the finger; when the screen changed and nothing travelled, the step reads once more without a gesture to learn what changes by itself (a clock, a countdown). A match at the end is taken only where the device reaches its centre. Each step moves the content as far as the finger, so a long list takes more steps (45 rows on iOS: 9.6 → 13.3 s), and the search's default wait is 60 s. `FlowDriver.swipe` takes an optional `holdMs`; MCP `run_flow` and the dashboard's Match and Verify pass it on.
+
+  The MCP client lifts a swipe's finger before it leaves the session, reports a connection lost mid-swipe as unconfirmed input, and no longer lets an old socket's late close drop the connection that replaced it.
+
+- c3b3092: A swipe now ends where it was asked to. Its eight moves stopped at 7/8 of the way, and every agent lifts the finger where the last move was, so every swipe without a hold (a flow's `swipe` and plain `scroll`, MCP's `swipe`) stopped an eighth short of its end point; `scroll { until }`'s held drags already reached it. Flow Capture's Verify dropped drag-and-drop pieces short of their slots while Match, which replays the recorded moves, placed them (WebdriverIO demo app on Android). The last move is now the end point, and the lift comes one interval after it, all within the duration. A plain `scroll` or `swipe` now moves the finger a seventh further in the same time, so it moves the content further and a fling is released a little faster. On Android 16 the agent's field server answered only its first request: from that version uiautomator's connection helper prepares the main Looper on every connect, which a process can do once, so every later field read or set, reach check and recording hold failed ("Only one Looper may be created per thread"), and typing replaced text failed in Flow Capture's Verify. The server now makes its connections itself. Typing into an empty password field whose hint shows (a React Native field) was refused as adding to a password that holds text, on every Android version: the hint was counted as its contents. A field set or IME action the device could not carry out now logs the error it reported, never the text.
+- Updated dependencies [d5b62f1]
+- Updated dependencies [d015a87]
+- Updated dependencies [864f0dd]
+- Updated dependencies [3eff705]
+- Updated dependencies [7f3b9f6]
+- Updated dependencies [63c4d83]
+- Updated dependencies [9a0ac35]
+- Updated dependencies [62aed39]
+- Updated dependencies [0d0b9c5]
+- Updated dependencies [4f315a8]
+- Updated dependencies [3b600c8]
+- Updated dependencies [ee33923]
+- Updated dependencies [9dc02e5]
+- Updated dependencies [f4f59a5]
+- Updated dependencies [41b8494]
+- Updated dependencies [563aac1]
+- Updated dependencies [37e6c44]
+- Updated dependencies [61560fd]
+- Updated dependencies [ae37d23]
+- Updated dependencies [6b8bb08]
+- Updated dependencies [5bb81f5]
+- Updated dependencies [fcc3c9b]
+- Updated dependencies [e741247]
+- Updated dependencies [347f4c9]
+- Updated dependencies [dca8ae8]
+- Updated dependencies [843b720]
+- Updated dependencies [bee37cc]
+- Updated dependencies [34d060d]
+- Updated dependencies [dc61724]
+- Updated dependencies [562a193]
+- Updated dependencies [c3b3092]
+- Updated dependencies [24a5629]
+  - @tapflowio/flow-runner@0.33.0
+  - @tapflowio/protocol@0.33.0
+
 ## 0.32.0
 
 ### Minor Changes
