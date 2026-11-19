@@ -7,7 +7,7 @@ import { randomUUID } from 'crypto'
 import { getDb, isDbOpen } from '../db.js'
 import { assertCanWrite, requireBuildAuth, requireViewAuth } from '../middleware/auth.js'
 import { json, readBodyLimited } from '../router.js'
-import { unlinkSafe } from '../lib/uploads.js'
+import { unlinkSafe, assertDiskRoom, StorageFullError } from '../lib/uploads.js'
 
 // Flow run records: what `tapflow flow run` did, for the runs page. The CLI writes them over REST with the
 // token it already runs with, and nothing here may ever make that run slower or fail it — the caps below
@@ -515,6 +515,12 @@ export async function handleUploadFlowScreenshot(
   if (!kind) return json(res, 415, { error: 'Screenshot must be PNG or JPEG' })
 
   fs.mkdirSync(screenshotsDir, { recursive: true })
+  try {
+    assertDiskRoom(screenshotsDir, buf.length)
+  } catch (err) {
+    if (err instanceof StorageFullError) return json(res, 507, { error: err.message })
+    throw err
+  }
   const filename = `${randomUUID()}${kind.ext}`
   await fs.promises.writeFile(path.join(screenshotsDir, filename), buf)
   // **Re-read after the awaits, with nothing awaited between the read and the update.** Two uploads for one

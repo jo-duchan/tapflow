@@ -528,6 +528,19 @@ describe('flow run records', () => {
     expect(fs.existsSync(shotsDir) ? fs.readdirSync(shotsDir) : []).toHaveLength(0)
   })
 
+  it('refuses a screenshot with 507 when it would leave the disk below the free-space floor', async () => {
+    const id = await create()
+    await call('POST', `/api/v1/runs/${id}/flows/0`, bearer(PAT_CI), passed)
+    process.env.TAPFLOW_MIN_FREE_DISK_BYTES = String(Number.MAX_SAFE_INTEGER)
+    try {
+      expect((await call('POST', `/api/v1/runs/${id}/flows/0/screenshot`, bearer(PAT_CI), PNG)).status).toBe(507)
+    } finally {
+      delete process.env.TAPFLOW_MIN_FREE_DISK_BYTES
+    }
+    expect(fs.existsSync(shotsDir) ? fs.readdirSync(shotsDir) : []).toHaveLength(0)
+    expect((await call('POST', `/api/v1/runs/${id}/flows/0/screenshot`, bearer(PAT_CI), PNG)).status).toBe(200)
+  })
+
   // ── liveness ──────────────────────────────────────────────────────────────
 
   it('aborts a running run when its runner socket closes, and not while one is still open', async () => {

@@ -6,7 +6,7 @@ import { randomUUID } from 'crypto'
 import { getDb } from '../db.js'
 import { requireRole, requireAuth } from '../middleware/auth.js'
 import { json } from '../router.js'
-import { pipeUpload, unlinkSafe } from '../lib/uploads.js'
+import { pipeUpload, unlinkSafe, StorageFullError } from '../lib/uploads.js'
 import { diskRoomFor, videoSettings, videoUsageBytes } from './runVideos.js'
 
 /** Bounds for the video policy fields: 0 days keeps no passed video; the cap is at least 100 MB. */
@@ -97,8 +97,9 @@ export function handleUpdateSettings(
       try {
         await written
         fs.renameSync(stagedPath, logoPath)
-      } catch {
+      } catch (err) {
         unlinkSafe(stagedPath, 'staged team logo')
+        if (err instanceof StorageFullError) return json(res, 507, { error: err.message })
         return json(res, 500, { error: 'Update failed' })
       }
     }

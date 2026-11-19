@@ -6,7 +6,7 @@ import { randomUUID } from 'crypto'
 import { getDb } from '../db.js'
 import { requireAuth } from '../middleware/auth.js'
 import { json } from '../router.js'
-import { pipeUpload, unlinkSafe } from '../lib/uploads.js'
+import { pipeUpload, unlinkSafe, StorageFullError } from '../lib/uploads.js'
 
 export function handleUpdateProfile(
   req: http.IncomingMessage,
@@ -52,8 +52,9 @@ export function handleUpdateProfile(
       try {
         await written
         fs.renameSync(stagedPath, avatarPath)
-      } catch {
+      } catch (err) {
         unlinkSafe(stagedPath, 'staged avatar')
+        if (err instanceof StorageFullError) return json(res, 507, { error: err.message })
         return json(res, 500, { error: 'Update failed' })
       }
     }
